@@ -1,0 +1,106 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [
+		{"id": "param1", "name": "参数A"}
+	],
+	"sources": [
+		{"id": "model1", "modelType": "dwtable", "path": "data/table1.tbl"},
+		{"id": "model2", "modelType": "dwtable", "path": "data/table2.tbl"}
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "input1",
+				"type": "input",
+				"submitField": "model1.name",
+				"value": "test"
+			},
+			{
+				"id": "input2",
+				"type": "input",
+				"submitField": "model1.age",
+				"value": "test"
+			},
+			{
+				"id": "button1",
+				"type": "button",
+				"value": "提交",
+				"actions": [
+					{
+						"id": "action1",
+						"actionType": "submitData",
+						"triggerType": "click",
+						"submitRange": "component",
+						"submitComponent": ["input1"]
+					}
+				]
+			},
+			{
+				"id": "button2",
+				"type": "button",
+				"value": "更新",
+				"actions": [
+					{
+						"id": "action2",
+						"actionType": "updateData",
+						"triggerType": "click",
+						"dataSet": "model2",
+						"dataRange": "resultset",
+						"fieldValues": [
+							{"name": "status", "valueType": "exp", "value": "input1.value"},
+							{"name": "updatedAt", "valueType": "exp", "value": "TODAY()"}
+						]
+					}
+				]
+			},
+			{
+				"id": "button3",
+				"type": "button",
+				"value": "插入",
+				"actions": [
+					{
+						"id": "action3",
+						"actionType": "insertData",
+						"triggerType": "click",
+						"dataSet": ["model1"],
+						"fieldValues": [
+							{"name": "id", "valueType": "exp", "value": "UUID()"}
+						]
+					}
+				]
+			},
+			{
+				"id": "button4",
+				"type": "button",
+				"value": "删除",
+				"actions": [
+					{
+						"id": "action4",
+						"actionType": "deleteData",
+						"triggerType": "click",
+						"dataSet": "model2",
+						"dataRange": "resultset",
+						"fieldValues": [
+							{"name": "deletedFlag", "valueType": "exp", "value": "1"}
+						]
+					}
+				]
+			},
+			{
+				"id": "button5",
+				"type": "button",
+				"value": "全局提交",
+				"actions": [
+					{
+						"id": "action5",
+						"actionType": "submitData",
+						"triggerType": "click"
+					}
+				]
+			}
+		]
+	}
+}

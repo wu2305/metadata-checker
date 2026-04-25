@@ -1,0 +1,26 @@
+{
+	"version": "1.0",
+	"properties": {
+		"name": "每日生成工单"
+	},
+	"dimensions": [
+		{"name": "工单号", "dbfield": "workNo", "dataType": "C", "length": 50, "isDimension": true},
+		{"name": "预约单号", "dbfield": "appointmentNo", "dataType": "C", "length": 50, "isDimension": true}
+	],
+	"dataFlow": {
+		"nodes": {
+			"node1": {
+				"id": "node1",
+				"alias": "服务预约",
+				"type": "ModelTable",
+				"moduleTablePath": "$DATA:/售后/fact_serviceappointments.tbl"
+			},
+			"node2": {
+				"id": "node2",
+				"alias": "客户信息",
+				"type": "ModelTable",
+				"moduleTablePath": "$DATA:/客户/customer_info.tbl"
+			}
+		}
+	}
+}
