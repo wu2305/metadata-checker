@@ -6,10 +6,12 @@ use serde_json::{json, Value};
 use std::io::{self, Write};
 
 pub fn print_human(meta: &PageMetadata) -> Result<()> {
-    let mut out = io::stdout();
+    print_human_to(meta, &mut io::stdout())
+}
 
+pub fn print_human_to(meta: &PageMetadata, out: &mut dyn Write) -> Result<()> {
     if let Some(spg) = &meta.superpage {
-        print_superpage_human(spg, &mut out)?;
+        print_superpage_human(spg, out)?;
         return Ok(());
     }
 
@@ -46,7 +48,7 @@ pub fn print_human(meta: &PageMetadata) -> Result<()> {
     Ok(())
 }
 
-fn print_superpage_human(spg: &SuperPageMetadata, out: &mut io::Stdout) -> Result<()> {
+fn print_superpage_human(spg: &SuperPageMetadata, out: &mut dyn Write) -> Result<()> {
     writeln!(out, "=== SuperPage Metadata Report ===")?;
     writeln!(out, "Version      : {}", spg.version.as_deref().unwrap_or("N/A"))?;
     writeln!(out, "Theme        : {}", spg.theme.as_deref().unwrap_or("N/A"))?;
@@ -127,6 +129,10 @@ fn print_superpage_human(spg: &SuperPageMetadata, out: &mut io::Stdout) -> Resul
 }
 
 pub fn print_non_human(meta: &PageMetadata) -> Result<()> {
+    print_non_human_to(meta, &mut io::stdout())
+}
+
+pub fn print_non_human_to(meta: &PageMetadata, out: &mut dyn Write) -> Result<()> {
     if let Some(spg) = &meta.superpage {
         let graph = DependencyGraph::new(spg);
         let topo = graph.topological_sort();
@@ -169,7 +175,7 @@ pub fn print_non_human(meta: &PageMetadata) -> Result<()> {
             "dependency_order": topo,
             "cycles": cycles,
         });
-        println!("{}", serde_json::to_string_pretty(&summary)?);
+        writeln!(out, "{}", serde_json::to_string_pretty(&summary)?)?;
         return Ok(());
     }
 
@@ -189,7 +195,8 @@ pub fn print_non_human(meta: &PageMetadata) -> Result<()> {
         })).collect::<Vec<Value>>(),
         "settings": meta.settings,
     });
-    println!("{}", serde_json::to_string_pretty(&summary)?);
+    writeln!(out, "{}", serde_json::to_string_pretty(&summary)?)?;
+    out.flush()?;
     Ok(())
 }
 
@@ -237,7 +244,16 @@ pub fn print_component_query_human(
     target_id: &str,
     show_priority: bool,
 ) -> Result<()> {
-    let mut out = io::stdout();
+    print_component_query_human_to(spg, graph, target_id, show_priority, &mut io::stdout())
+}
+
+pub fn print_component_query_human_to(
+    spg: &SuperPageMetadata,
+    graph: &DependencyGraph,
+    target_id: &str,
+    show_priority: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
 
     let comp = spg.components.iter().find(|c| c.id == target_id)
         .ok_or_else(|| anyhow::anyhow!("Component '{}' not found", target_id))?;
@@ -369,6 +385,16 @@ pub fn print_component_query_json(
     target_id: &str,
     show_priority: bool,
 ) -> Result<()> {
+    print_component_query_json_to(spg, graph, target_id, show_priority, &mut io::stdout())
+}
+
+pub fn print_component_query_json_to(
+    spg: &SuperPageMetadata,
+    graph: &DependencyGraph,
+    target_id: &str,
+    show_priority: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
     let comp = spg.components.iter().find(|c| c.id == target_id)
         .ok_or_else(|| anyhow::anyhow!("Component '{}' not found", target_id))?;
 
@@ -469,6 +495,7 @@ pub fn print_component_query_json(
         "priority": priority,
     });
 
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    writeln!(out, "{}", serde_json::to_string_pretty(&result)?)?;
+    out.flush()?;
     Ok(())
 }
