@@ -18,6 +18,8 @@ struct RawSuperPage {
     params: Vec<RawParam>,
     #[serde(default)]
     sources: Vec<RawSource>,
+    #[serde(rename = "referenceResources", default)]
+    reference_resources: Vec<String>,
     #[serde(default)]
     canvas: Option<RawComponent>,
 }
@@ -64,6 +66,16 @@ struct RawAction {
     data_range: Option<String>,
     #[serde(rename = "fieldValues", default)]
     field_values: Vec<RawFieldValue>,
+    #[serde(default)]
+    path: Option<serde_json::Value>,
+    #[serde(rename = "shortUrl", default)]
+    short_url: Option<String>,
+    #[serde(default)]
+    data: Vec<RawLinkParam>,
+    #[serde(default)]
+    params: Vec<RawSetParam>,
+    #[serde(rename = "targetType", default)]
+    target_type: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -77,11 +89,29 @@ struct RawFieldValue {
 }
 
 #[derive(Debug, Deserialize, Default)]
+struct RawLinkParam {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    value: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawSetParam {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    value: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
 struct RawComponent {
     #[serde(default)]
     id: String,
     #[serde(rename = "type", default)]
     component_type: String,
+    #[serde(rename = "resPath", default)]
+    res_path: Option<serde_json::Value>,
     #[serde(default)]
     value: Option<serde_json::Value>,
     #[serde(rename = "defaultValue", default)]
@@ -126,6 +156,7 @@ pub struct SpgComponent {
     pub properties: HashMap<String, String>,
     pub actions: Vec<SpgAction>,
     pub submit_data: Option<bool>,
+    pub res_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -149,6 +180,11 @@ pub struct SpgAction {
     pub data_range: Option<String>,
     pub field_values: Vec<(String, String, String)>,
     pub submit_component: Vec<String>,
+    pub path: Option<String>,
+    pub short_url: Option<String>,
+    pub data: Vec<(String, String)>,
+    pub params: Vec<(String, String)>,
+    pub target_type: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -167,6 +203,7 @@ pub struct SuperPageMetadata {
     pub sources: Vec<SpgSource>,
     pub components: Vec<SpgComponent>,
     pub expressions: Vec<ComponentExpr>,
+    pub reference_resources: Vec<String>,
     pub raw: serde_json::Value,
 }
 
@@ -210,6 +247,8 @@ pub fn parse_superpage(path: &Path) -> Result<SuperPageMetadata> {
         desc: p.desc,
         default_value: p.value,
     }).collect();
+
+    meta.reference_resources = raw.reference_resources;
 
     meta.sources = raw.sources.into_iter().map(|s| SpgSource {
         id: s.id,
@@ -255,6 +294,15 @@ fn extract_components(
         properties: HashMap::new(),
         actions: Vec::new(),
         submit_data: raw.submit_data,
+        res_path: raw.res_path.as_ref().and_then(|v| {
+            if let Some(s) = v.as_str() {
+                Some(s.to_string())
+            } else if let Some(n) = v.as_i64() {
+                Some(n.to_string())
+            } else {
+                None
+            }
+        }),
     };
 
     // 总是表达式字段：所有非空值都视为表达式
@@ -342,6 +390,19 @@ fn extract_components(
             fv.value_type.clone(),
         )).collect(),
         submit_component: a.submit_component.clone(),
+        path: a.path.as_ref().and_then(|v| {
+            if let Some(s) = v.as_str() {
+                Some(s.to_string())
+            } else if let Some(n) = v.as_i64() {
+                Some(n.to_string())
+            } else {
+                None
+            }
+        }),
+        short_url: a.short_url.clone(),
+        data: a.data.iter().map(|d| (d.name.clone(), d.value.clone())).collect(),
+        params: a.params.iter().map(|p| (p.name.clone(), p.value.clone())).collect(),
+        target_type: a.target_type.clone(),
     }).collect();
 
     components.push(comp);

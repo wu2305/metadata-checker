@@ -1,0 +1,61 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [
+		{"id": "param1", "name": "参数A"},
+		{"id": "param2", "name": "参数B"}
+	],
+	"referenceResources": [
+		"../目标页面/目标详情.spg",
+		"../其他页面/其他详情.spg"
+	],
+	"sources": [
+		{"id": "model1", "modelType": "dwtable", "path": "data/table1.tbl"}
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "embed1",
+				"type": "embedsuperpage",
+				"resPath": 0,
+				"width": "100%",
+				"height": "100%"
+			},
+			{
+				"id": "button1",
+				"type": "button",
+				"value": "打开页面",
+				"actions": [
+					{
+						"id": "action1",
+						"actionType": "link",
+						"triggerType": "click",
+						"targetType": "app",
+						"path": 0,
+						"data": [
+							{"name": "param1", "value": "=model1.fieldA"},
+							{"name": "param2", "value": "'staticValue'"}
+						]
+					}
+				]
+			},
+			{
+				"id": "button2",
+				"type": "button",
+				"value": "设置参数",
+				"actions": [
+					{
+						"id": "action2",
+						"actionType": "setParamValue",
+						"triggerType": "click",
+						"params": [
+							{"name": "param1", "value": "=model1.fieldB"}
+						]
+					}
+				]
+			}
+		]
+	}
+}

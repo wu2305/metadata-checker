@@ -337,3 +337,192 @@ fn test_scanner_dataflow_embedded_parsing() {
 
     let _ = std::fs::remove_file(&db_path);
 }
+
+// ============================================================
+// 六、SPG-SPG 关系识别测试
+// ============================================================
+
+#[test]
+fn test_scanner_embedsuperpage_relation() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-embed.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // Verify embedsuperpage creates EmbedsPage edge
+    let embed_comp = graph.node_indices.get("comp:page_relations/embed1");
+    assert!(embed_comp.is_some(), "embed1 component should exist");
+
+    let outgoing: Vec<_> = graph.graph
+        .edges_directed(*embed_comp.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::EmbedsPage))
+        .collect();
+
+    assert!(!outgoing.is_empty(), "embedsuperpage should create EmbedsPage edge");
+
+    let target = graph.graph.node_weight(outgoing[0].target());
+    assert!(target.is_some(), "Target page should exist");
+    assert_eq!(target.unwrap().name, "目标详情", "Should resolve to 目标详情.spg");
+
+    let _ = std::fs::remove_file(&db_path);
+}
+
+#[test]
+fn test_scanner_link_opens_page_relation() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-link.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // Debug: print action node outgoing edges
+    let action_node = graph.node_indices.get("action:page_relations/button1/action1");
+    if let Some(&idx) = action_node {
+        for e in graph.graph.edges_directed(idx, petgraph::Direction::Outgoing) {
+            let target = graph.graph.node_weight(e.target());
+            eprintln!("DEBUG edge: {:?} -> {} ({:?})", e.weight().edge_type, target.map(|n| n.id.clone()).unwrap_or_default(), e.weight().field_path);
+        }
+    }
+    assert!(action_node.is_some(), "link action should exist");
+
+    let outgoing: Vec<_> = graph.graph
+        .edges_directed(*action_node.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::OpensPage))
+        .collect();
+
+    assert!(!outgoing.is_empty(), "link action should create OpensPage edge");
+
+    let target = graph.graph.node_weight(outgoing[0].target());
+    assert!(target.is_some(), "Target page should exist");
+    assert_eq!(target.unwrap().name, "目标详情", "Should resolve to 目标详情.spg");
+
+    let _ = std::fs::remove_file(&db_path);
+}
+
+#[test]
+fn test_scanner_link_passes_param() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-link-param.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // Verify link action creates PassesParam edges
+    let action_node = graph.node_indices.get("action:page_relations/button1/action1");
+    assert!(action_node.is_some(), "link action should exist");
+
+    let param_edges: Vec<_> = graph.graph
+        .edges_directed(*action_node.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::PassesParam))
+        .collect();
+
+    assert_eq!(param_edges.len(), 2, "Should pass 2 parameters");
+
+    // Verify Reads edges from param expressions (=model1.fieldA)
+    let reads_edges: Vec<_> = graph.graph
+        .edges_directed(*action_node.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::Reads))
+        .collect();
+
+    assert!(!reads_edges.is_empty(), "Should create Reads edges for expression params");
+
+    let _ = std::fs::remove_file(&db_path);
+}
+
+#[test]
+fn test_scanner_set_param_value() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-setparam.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // Verify setParamValue creates SetsParam edge
+    let action_node = graph.node_indices.get("action:page_relations/button2/action2");
+    assert!(action_node.is_some(), "setParamValue action should exist");
+
+    let param_edges: Vec<_> = graph.graph
+        .edges_directed(*action_node.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::SetsParam))
+        .collect();
+
+    assert!(!param_edges.is_empty(), "setParamValue should create SetsParam edge");
+
+    // Verify Reads edges from param expression (=model1.fieldB)
+    let reads_edges: Vec<_> = graph.graph
+        .edges_directed(*action_node.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::Reads))
+        .collect();
+
+    assert!(!reads_edges.is_empty(), "Should create Reads edges for expression param values");
+
+    let _ = std::fs::remove_file(&db_path);
+}
+
+// ============================================================
+// 七、DataFlow 物理表输出测试
+// ============================================================
+
+#[test]
+fn test_scanner_dataflow_outputs_to_physical_table() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-dataflow-output.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    let model_id = "model:dataflow_output";
+    let model_idx = graph.node_indices.get(model_id);
+    assert!(model_idx.is_some(), "DataFlow model node should exist");
+
+    // Verify OutputsTo edge to physical table
+    let outgoing: Vec<_> = graph.graph
+        .edges_directed(*model_idx.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::OutputsTo))
+        .collect();
+
+    assert!(!outgoing.is_empty(), "DataFlow should have OutputsTo edge");
+
+    let target = graph.graph.node_weight(outgoing[0].target());
+    assert!(target.is_some(), "Target physical table should exist");
+    assert_eq!(target.unwrap().name, "fact_dailyworkorders", "Should output to fact_dailyworkorders");
+
+    let _ = std::fs::remove_file(&db_path);
+}
+
+#[test]
+fn test_scanner_dataflow_internal_deps() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-dataflow-internal.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    let model_id = "model:dataflow_output";
+    let model_idx = graph.node_indices.get(model_id);
+    assert!(model_idx.is_some(), "DataFlow model node should exist");
+
+    // Verify internalDeps are stored in model metadata
+    let model = graph.graph.node_weight(*model_idx.unwrap());
+    assert!(model.is_some(), "Model should exist");
+
+    let internal_deps = model.unwrap().meta
+        .as_ref()
+        .and_then(|m| m.get("internalDeps"));
+    assert!(internal_deps.is_some(), "Should store internalDeps in metadata");
+
+    let _ = std::fs::remove_file(&db_path);
+}

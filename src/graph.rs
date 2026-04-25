@@ -23,6 +23,12 @@ pub enum EdgeType {
     Contains,
     DataflowInput,
     ActionWrites,
+    EmbedsPage,
+    OpensPage,
+    PassesParam,
+    SetsParam,
+    OutputsTo,
+    DataflowInternal,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

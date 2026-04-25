@@ -118,6 +118,22 @@ fn collect_files(dir: &Path, base: &Path, files: &mut Vec<PathBuf>) -> Result<()
     Ok(())
 }
 
+/// Resolve a reference path from referenceResources to an absolute path.
+/// Handles relative paths (../, ./) and $TAPP: prefix.
+fn resolve_reference_path(rel_path: &str, ref_idx: usize, reference_resources: &[String]) -> Option<String> {
+    let ref_path = reference_resources.get(ref_idx)?;
+    if ref_path.starts_with("$TAPP:") {
+        // $TAPP:/path/to/page.spg → resolve relative to project root
+        let path = ref_path.strip_prefix("$TAPP:").unwrap_or(ref_path);
+        Some(path.trim_start_matches('/').to_string())
+    } else {
+        // Relative path: resolve based on current .spg directory
+        let current_dir = Path::new(rel_path).parent()?;
+        let resolved = current_dir.join(ref_path);
+        Some(resolved.to_string_lossy().to_string().replace('\\', "/"))
+    }
+}
+
 fn process_spg_file(
     graph: &mut GraphDB,
     rel_path: &str,
@@ -294,6 +310,35 @@ fn process_spg_file(
         }
     }
 
+    // Process embedsuperpage components (page embedding)
+    for comp in &meta.components {
+        if comp.component_type != "embedsuperpage" {
+            continue;
+        }
+        let comp_id = format!("comp:{}/{}", page_name, comp.id);
+        
+        // Try to resolve resPath as integer index into referenceResources
+        if let Some(ref res_path_str) = comp.res_path {
+            if let Ok(ref_idx) = res_path_str.parse::<usize>() {
+                if let Some(target_rel) = resolve_reference_path(rel_path, ref_idx, &meta.reference_resources) {
+                    let target_name = Path::new(&target_rel)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| target_rel.clone());
+                    let target_page_id = format!("page:{}", target_name);
+                    graph.add_node(
+                        target_page_id.clone(),
+                        NodeType::Page,
+                        target_rel.clone(),
+                        target_name.clone(),
+                        None,
+                    );
+                    graph.add_edge(&comp_id, &target_page_id, EdgeType::EmbedsPage, Some(target_rel.clone()));
+                }
+            }
+        }
+    }
+
     // Process actions (explicit writes from interactions)
     for comp in &meta.components {
         let comp_id = format!("comp:{}/{}", page_name, comp.id);
@@ -371,6 +416,83 @@ fn process_spg_file(
                         }
                     }
                 }
+                "link" => {
+                    match action.target_type.as_str() {
+                        "app" => {
+                            // Try to resolve path as integer index into referenceResources
+                            if let Some(ref path_str) = action.path {
+                                if let Ok(ref_idx) = path_str.parse::<usize>() {
+                                    if let Some(target_rel) = resolve_reference_path(rel_path, ref_idx, &meta.reference_resources) {
+                                        let target_name = Path::new(&target_rel)
+                                            .file_stem()
+                                            .map(|s| s.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| target_rel.clone());
+                                        let target_page_id = format!("page:{}", target_name);
+                                        graph.add_node(
+                                            target_page_id.clone(),
+                                            NodeType::Page,
+                                            target_rel.clone(),
+                                            target_name.clone(),
+                                            None,
+                                        );
+                                        graph.add_edge(&action_id, &target_page_id, EdgeType::OpensPage, Some(target_rel.clone()));
+                                        
+                                        // Process parameter passing via data array
+                                        for (param_name, param_value) in &action.data {
+                                            let param_id = format!("param:{}/{}", target_name, param_name);
+                                            graph.add_node(
+                                                param_id.clone(),
+                                                NodeType::Field,
+                                                target_rel.clone(),
+                                                param_name.clone(),
+                                                None,
+                                            );
+                                            graph.add_edge(&action_id, &param_id, EdgeType::PassesParam, Some(param_value.clone()));
+                                            // Parse expression refs from param_value for dependency analysis
+                                            let refs = crate::superpage::parse_expression_refs(param_value);
+                                            for ref_type in refs {
+                                                if let crate::superpage::RefType::ModelField(model, field) = ref_type {
+                                                    let ref_model_id = format!("model:{}", model);
+                                                    let ref_field_id = format!("field:{}.{}", model, field);
+                                                    graph.add_node(ref_model_id.clone(), NodeType::Model, format!("{}.tbl", model), model.clone(), None);
+                                                    graph.add_node(ref_field_id.clone(), NodeType::Field, format!("{}.tbl", model), field.clone(), None);
+                                                    graph.add_edge(&action_id, &ref_model_id, EdgeType::Reads, Some(format!("{}.{}", model, field)));
+                                                    graph.add_edge(&ref_model_id, &ref_field_id, EdgeType::Contains, None);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                "setParamValue" => {
+                    for (param_name, param_value) in &action.params {
+                        let param_id = format!("param:{}/{}", page_name, param_name);
+                        graph.add_node(
+                            param_id.clone(),
+                            NodeType::Field,
+                            rel_path.to_string(),
+                            param_name.clone(),
+                            None,
+                        );
+                        graph.add_edge(&action_id, &param_id, EdgeType::SetsParam, Some(param_value.clone()));
+                        // Parse expression refs from param_value for dependency analysis
+                        let refs = crate::superpage::parse_expression_refs(param_value);
+                        for ref_type in refs {
+                            if let crate::superpage::RefType::ModelField(model, field) = ref_type {
+                                let ref_model_id = format!("model:{}", model);
+                                let ref_field_id = format!("field:{}.{}", model, field);
+                                graph.add_node(ref_model_id.clone(), NodeType::Model, format!("{}.tbl", model), model.clone(), None);
+                                graph.add_node(ref_field_id.clone(), NodeType::Field, format!("{}.tbl", model), field.clone(), None);
+                                graph.add_edge(&action_id, &ref_model_id, EdgeType::Reads, Some(format!("{}.{}", model, field)));
+                                graph.add_edge(&ref_model_id, &ref_field_id, EdgeType::Contains, None);
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -433,9 +555,45 @@ fn process_tbl_file(
         }
     }
 
+    // For DataFlow type: process output physical table (dbTableName)
+    if is_dataflow {
+        if let Some(db_table_name) = value.get("properties").and_then(|p| p.get("dbTableName")).and_then(|v| v.as_str()) {
+            let output_model_id = format!("model:{}", db_table_name);
+            graph.add_node(
+                output_model_id.clone(),
+                NodeType::Model,
+                format!("{}.tbl", db_table_name),
+                db_table_name.to_string(),
+                Some(serde_json::json!({"modelType": "PhysicalTable"})),
+            );
+            graph.add_edge(&model_id, &output_model_id, EdgeType::OutputsTo, Some(db_table_name.to_string()));
+        }
+    }
+
     // For DataFlow type: process input sources (nodes referencing external tables)
     if is_dataflow {
         if let Some(nodes) = value.get("dataFlow").and_then(|d| d.get("nodes")).and_then(|n| n.as_object()) {
+            // First pass: create internal node entries and record inputNodes for subGraph expansion
+            let mut internal_deps: HashMap<String, Vec<String>> = HashMap::new();
+            for (node_id, node) in nodes {
+                if let Some(input_nodes) = node.get("inputNodes").and_then(|v| v.as_array()) {
+                    let deps: Vec<String> = input_nodes.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                    if !deps.is_empty() {
+                        internal_deps.insert(node_id.clone(), deps);
+                    }
+                }
+            }
+            // Store internal deps in model metadata for subGraph expansion
+            if let Some(model_node) = graph.graph.node_weight_mut(*graph.node_indices.get(&model_id).unwrap()) {
+                let mut meta = model_node.meta.clone().unwrap_or(serde_json::Value::Null);
+                if let Some(obj) = meta.as_object_mut() {
+                    obj.insert("internalDeps".to_string(), serde_json::to_value(&internal_deps).unwrap_or(serde_json::Value::Null));
+                }
+                model_node.meta = Some(meta);
+            }
+            // Second pass: create DataflowInput edges for ModelTable nodes
             for (_, node) in nodes {
                 if let Some(module_table_path) = node.get("moduleTablePath").and_then(|p| p.as_str()) {
                     // Extract referenced model name from path like "$DATA:/售后/fact_serviceappointments.tbl"
