@@ -1,0 +1,55 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [
+		{"id": "param1", "name": "参数A"}
+	],
+	"sources": [
+		{"id": "model1", "modelType": "dwtable", "path": "data/table1.tbl"},
+		{
+			"id": "model2",
+			"modelType": "dataflow",
+			"name": "内嵌加工模型",
+			"content": {
+				"version": "1.0",
+				"properties": {"name": "内嵌加工模型"},
+				"dimensions": [
+					{"name": "订单号", "dbfield": "订单号", "dataType": "C", "length": 50},
+					{"name": "金额", "dbfield": "金额", "dataType": "N", "length": 18}
+				],
+				"dataFlow": {
+					"nodes": {
+						"node1": {
+							"id": "node1",
+							"alias": "originalOrders",
+							"type": "ModelTable",
+							"moduleTablePath": "$DATA:/销售/fact_orders.tbl"
+						},
+						"node2": {
+							"id": "node2",
+							"alias": "columnProcess",
+							"type": "Select"
+						},
+						"node3": {
+							"id": "node3",
+							"alias": "customerInfo",
+							"type": "ModelTable",
+							"moduleTablePath": "$DATA:/客户/customer_info.tbl"
+						}
+					}
+				}
+			}
+		}
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "input1",
+				"type": "input",
+				"value": "=model2.orderNo"
+			}
+		]
+	}
+}

@@ -181,7 +181,7 @@ fn test_scanner_tbl_app_parsing() {
         })
         .collect();
 
-    assert!(field_names.contains(&"订单号".to_string()), "Should have field 订单号");
+    assert!(field_names.contains(&"订单号".to_string()), "Should have field orderNo");
     assert!(field_names.contains(&"客户名称".to_string()), "Should have field 客户名称");
     assert!(field_names.contains(&"金额".to_string()), "Should have field 金额");
     assert!(field_names.contains(&"创建时间".to_string()), "Should have field 创建时间");
@@ -250,6 +250,90 @@ fn test_scanner_tbl_dataflow_parsing() {
         "Should reference fact_serviceappointments table");
     assert!(target_names.contains(&"customer_info".to_string()),
         "Should reference customer_info table");
+
+    let _ = std::fs::remove_file(&db_path);
+}
+
+// ============================================================
+// 五、DataFlow 内嵌模型解析测试
+// ============================================================
+
+#[test]
+fn test_parse_dataflow_source_content() {
+    let path = PathBuf::from("tests/fixtures/dataflow_embedded.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse dataflow_embedded.spg");
+
+    let source = meta.sources.iter().find(|s| s.id == "model2").expect("model2 source should exist");
+    assert_eq!(source.model_type, Some("dataflow".to_string()));
+    assert!(source.content.is_some(), "DataFlow source should have content");
+
+    let content = source.content.as_ref().unwrap();
+    assert!(content.get("dimensions").is_some(), "content should have dimensions");
+    assert!(content.get("dataFlow").is_some(), "content should have dataFlow");
+}
+
+#[test]
+fn test_scanner_dataflow_embedded_parsing() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-dataflow-embedded.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // Verify embedded DataFlow model node exists
+    let model_id = "model:model2";
+    let model_idx = graph.node_indices.get(model_id);
+    assert!(model_idx.is_some(), "Embedded DataFlow model node should exist");
+
+    // Verify model is marked as DataFlow
+    if let Some(node) = graph.graph.node_weight(*model_idx.unwrap()) {
+        let model_type = node.meta.as_ref().and_then(|m| m.get("modelType")).and_then(|v| v.as_str());
+        assert_eq!(model_type, Some("DataFlow"), "Embedded model should have modelType=DataFlow");
+        let embedded = node.meta.as_ref().and_then(|m| m.get("embeddedIn")).and_then(|v| v.as_str());
+        assert_eq!(embedded, Some("dataflow_embedded"), "Should record embeddedIn page");
+    }
+
+    // Verify field nodes from dimensions
+    let field_names: Vec<String> = graph.graph
+        .edges_directed(*model_idx.unwrap(), petgraph::Direction::Outgoing)
+        .filter_map(|e| {
+            if matches!(e.weight().edge_type, EdgeType::Contains) {
+                graph.graph.node_weight(e.target()).map(|n| n.name.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(field_names.contains(&"订单号".to_string()), "Should have field orderNo");
+    assert!(field_names.contains(&"金额".to_string()), "Should have field processedAmount");
+
+    // Verify DataflowInput edges from moduleTablePath nodes
+    let outgoing_edges: Vec<_> = graph.graph
+        .edges_directed(*model_idx.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::DataflowInput))
+        .collect();
+
+    assert!(!outgoing_edges.is_empty(), "Embedded DataFlow should have DataflowInput edges");
+
+    let target_names: Vec<String> = outgoing_edges.iter()
+        .filter_map(|e| graph.graph.node_weight(e.target()).map(|n| n.name.clone()))
+        .collect();
+
+    assert!(target_names.contains(&"fact_orders".to_string()),
+        "Should reference fact_orders table via moduleTablePath");
+    assert!(target_names.contains(&"customer_info".to_string()),
+        "Should reference customer_info table via moduleTablePath");
+
+    // Verify component reads from embedded DataFlow model
+    let comp_reads: Vec<_> = graph.graph
+        .edges_directed(*model_idx.unwrap(), petgraph::Direction::Incoming)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::Reads))
+        .collect();
+    
+    assert!(!comp_reads.is_empty(), "Component should read from embedded DataFlow model");
 
     let _ = std::fs::remove_file(&db_path);
 }

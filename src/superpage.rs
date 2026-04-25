@@ -42,6 +42,8 @@ struct RawSource {
     model_type: Option<String>,
     #[serde(default)]
     path: Option<String>,
+    #[serde(default)]
+    content: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -179,6 +181,7 @@ pub struct SpgSource {
     pub id: String,
     pub model_type: Option<String>,
     pub path: Option<String>,
+    pub content: Option<serde_json::Value>,
 }
 
 // ============================================================
@@ -210,6 +213,7 @@ pub fn parse_superpage(path: &Path) -> Result<SuperPageMetadata> {
         id: s.id,
         model_type: s.model_type,
         path: s.path,
+        content: s.content,
     }).collect();
 
     if let Some(canvas) = raw.canvas {

@@ -4,7 +4,7 @@
 		"name": "测试订单表"
 	},
 	"dimensions": [
-		{"name": "订单号", "dbfield": "orderNo", "dataType": "C", "length": 50, "isDimension": true},
+		{"name": "订单号", "dbfield": "订单号", "dataType": "C", "length": 50, "isDimension": true},
 		{"name": "客户名称", "dbfield": "customerName", "dataType": "C", "length": 100, "isDimension": true},
 		{"name": "金额", "dbfield": "amount", "dataType": "N", "length": 18, "isDimension": false},
 		{"name": "创建时间", "dbfield": "createTime", "dataType": "D", "isDimension": true}

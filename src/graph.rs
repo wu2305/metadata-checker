@@ -118,6 +118,15 @@ impl GraphDB {
         meta: Option<serde_json::Value>,
     ) -> NodeIndex {
         if let Some(&idx) = self.node_indices.get(&id) {
+            // Update existing node meta if new meta is provided
+            if let Some(existing) = self.graph.node_weight_mut(idx) {
+                if meta.is_some() {
+                    existing.meta = meta;
+                }
+                existing.node_type = node_type;
+                existing.path = path;
+                existing.name = name;
+            }
             return idx;
         }
         let node = Node {

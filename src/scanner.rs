@@ -141,6 +141,69 @@ fn process_spg_file(
     );
     node_ids.push(page_id.clone());
 
+    // Process embedded DataFlow models in sources
+    for source in &meta.sources {
+        if source.model_type.as_deref() != Some("dataflow") {
+            continue;
+        }
+        let Some(content) = &source.content else { continue; };
+        let model_name = &source.id;
+        let model_id = format!("model:{}", model_name);
+        
+        graph.add_node(
+            model_id.clone(),
+            NodeType::Model,
+            rel_path.to_string(),
+            model_name.clone(),
+            Some(serde_json::json!({"modelType": "DataFlow", "embeddedIn": page_name})),
+        );
+        if !node_ids.contains(&model_id) {
+            node_ids.push(model_id.clone());
+        }
+
+        // Extract dimensions as fields
+        if let Some(dimensions) = content.get("dimensions").and_then(|d| d.as_array()) {
+            for dim in dimensions {
+                if let Some(name) = dim.get("name").and_then(|n| n.as_str()) {
+                    let field_id = format!("field:{}.{}", model_name, name);
+                    graph.add_node(
+                        field_id.clone(),
+                        NodeType::Field,
+                        rel_path.to_string(),
+                        name.to_string(),
+                        Some(dim.clone()),
+                    );
+                    if !node_ids.contains(&field_id) {
+                        node_ids.push(field_id.clone());
+                    }
+                    graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+                }
+            }
+        }
+
+        // Extract dataFlow input sources (external tables referenced by ModelTable nodes)
+        if let Some(nodes) = content.get("dataFlow").and_then(|d| d.get("nodes")).and_then(|n| n.as_object()) {
+            for (_, node) in nodes {
+                if let Some(module_table_path) = node.get("moduleTablePath").and_then(|p| p.as_str()) {
+                    let ref_model = Path::new(module_table_path)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| module_table_path.to_string());
+                    let ref_model_id = format!("model:{}", ref_model);
+                    graph.add_node(
+                        ref_model_id.clone(),
+                        NodeType::Model,
+                        module_table_path.to_string(),
+                        ref_model.clone(),
+                        None,
+                    );
+                    graph.add_edge(&model_id, &ref_model_id, EdgeType::DataflowInput, Some(module_table_path.to_string()));
+                }
+            }
+        }
+    }
+
+
     // Build a map of component id -> submitField for action processing
     let mut submit_field_map: HashMap<String, String> = HashMap::new();
     for comp in &meta.components {
@@ -282,6 +345,7 @@ fn process_spg_file(
             }
         }
     }
+
 
     Ok(node_ids)
 }
