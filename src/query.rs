@@ -10,13 +10,13 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
         let readers = graph.find_readers(model_id);
         writeln!(out, "\n--- Read By ({} pages) ---", readers.len())?;
         for (node, edge) in readers {
-            writeln!(out, "  {} [{}] via {:?}", node.name, node.path, edge.field_path)?;
+            writeln!(out, "  {} [{}] via {}", node.name, node.path, edge.field_path.as_deref().unwrap_or("-"))?;
         }
 
         let writers = graph.find_writers(model_id);
         writeln!(out, "\n--- Written By ({} pages) ---", writers.len())?;
         for (node, edge) in writers {
-            writeln!(out, "  {} [{}] via {:?}", node.name, node.path, edge.field_path)?;
+            writeln!(out, "  {} [{}] via {}", node.name, node.path, edge.field_path.as_deref().unwrap_or("-"))?;
         }
     } else {
         let readers: Vec<_> = graph.find_readers(model_id)
@@ -44,11 +44,11 @@ pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
             writeln!(out, "=== Page: {} ===", page_id)?;
             writeln!(out, "\n--- Outgoing Edges ({}): ---", outgoing.len())?;
             for (node, edge) in outgoing {
-                writeln!(out, "  -> {} ({:?})", node.name, edge.edge_type)?;
+                writeln!(out, "  -> {} ({})", node.name, format!("{:?}", edge.edge_type))?;
             }
             writeln!(out, "\n--- Incoming Edges ({}): ---", incoming.len())?;
             for (node, edge) in incoming {
-                writeln!(out, "  <- {} ({:?})", node.name, edge.edge_type)?;
+                writeln!(out, "  <- {} ({})", node.name, format!("{:?}", edge.edge_type))?;
             }
         } else {
             let result = serde_json::json!({
@@ -102,7 +102,6 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
     }
     let node = node.unwrap();
 
-    // Extract internal dependencies from metadata
     let internal_deps = node.meta.as_ref()
         .and_then(|m| m.get("internalDeps"))
         .and_then(|v| v.as_object())
@@ -122,7 +121,6 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
         })
         .unwrap_or_default();
 
-    // Get outgoing edges: DataflowInput (sources) and OutputsTo (targets)
     let outgoing = graph.get_node_edges(dataflow_id)
         .map(|(out, _)| out)
         .unwrap_or_default();
@@ -143,20 +141,17 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
         writeln!(out, "Name: {} | Path: {}", node.name, node.path)?;
         writeln!(out, "Model Type: {}", node.meta.as_ref().and_then(|m| m.get("modelType")).and_then(|v| v.as_str()).unwrap_or("Unknown"))?;
 
-        writeln!(out, "
---- Input Sources ({}): ---", inputs.len())?;
+        writeln!(out, "\n--- Input Sources ({}): ---", inputs.len())?;
         for (n, e) in &inputs {
-            writeln!(out, "  <- {} [{}] via {:?}", n.name, n.path, e.field_path)?;
+            writeln!(out, "  <- {} [{}] via {}", n.name, n.path, e.field_path.as_deref().unwrap_or("-"))?;
         }
 
-        writeln!(out, "
---- Output Targets ({}): ---", outputs.len())?;
+        writeln!(out, "\n--- Output Targets ({}): ---", outputs.len())?;
         for (n, e) in &outputs {
-            writeln!(out, "  -> {} [{}] via {:?}", n.name, n.path, e.field_path)?;
+            writeln!(out, "  -> {} [{}] via {}", n.name, n.path, e.field_path.as_deref().unwrap_or("-"))?;
         }
 
-        writeln!(out, "
---- Internal Node Dependencies ({}): ---", internal_deps.len())?;
+        writeln!(out, "\n--- Internal Node Dependencies ({}): ---", internal_deps.len())?;
         if internal_deps.is_empty() {
             writeln!(out, "  (No internal dependency information recorded)")?;
         } else {
