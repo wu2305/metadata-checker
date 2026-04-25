@@ -1,5 +1,14 @@
 use crate::superpage::{ComponentExpr, RefType, SuperPageMetadata};
 
+/// 组件计算优先级分析模块
+///
+/// 分析 SuperPage 组件中多个表达式字段的优先级关系：
+/// - defaultValue：初始默认值
+/// - exp：表达式计算值
+/// - calcCondition：条件计算值
+///
+/// 当多个字段同时存在时，按平台规则确定最终生效的值。
+
 /// 组件计算优先级分析结果
 #[derive(Debug, Clone)]
 pub struct PriorityAnalysis {
@@ -68,6 +77,7 @@ pub fn analyze_priority(meta: &SuperPageMetadata) -> Vec<PriorityAnalysis> {
     results
 }
 
+/// 根据字段存在情况判定最终优先级
 fn determine_priority(
     default_value: &Option<ComponentExpr>,
     calc_exp: &Option<ComponentExpr>,

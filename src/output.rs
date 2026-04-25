@@ -5,10 +5,20 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::{self, Write};
 
+/// 输出格式化模块
+///
+/// 将解析结果输出为：
+/// - human 模式：面向人类的可读文本（支持交互式组件查询）
+/// - JSON 模式：结构化数据供下游工具消费
+///
+/// 同时处理 --query 参数，支持按组件 ID 精确查询。
+
 pub fn print_human(meta: &PageMetadata) -> Result<()> {
     print_human_to(meta, &mut io::stdout())
 }
 
+/// human 模式输出：组件树 + 表达式 + 依赖 + 优先级
+/// human 模式输出：组件树 + 表达式 + 依赖 + 优先级
 pub fn print_human_to(meta: &PageMetadata, out: &mut dyn Write) -> Result<()> {
     if let Some(spg) = &meta.superpage {
         print_superpage_human(spg, out)?;

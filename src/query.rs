@@ -3,6 +3,14 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::io::{self, Write};
 
+/// 图查询模块
+///
+/// 提供面向用户的查询接口，支持 human 可读格式和 JSON 格式：
+/// - query_model：查询某个模型被哪些页面读取/写入
+/// - query_page：查询某个页面的出边/入边关系
+/// - query_cross：查询两个页面之间的跨文件关系
+/// - query_dataflow：展开 DataFlow 的子图，做字段级来源追溯
+
 pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
     if human {
         let mut out = io::stdout();
@@ -38,6 +46,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
     Ok(())
 }
 
+/// 查询页面的跨文件依赖关系
 pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
     if let Some((outgoing, incoming)) = graph.get_node_edges(page_id) {
         if human {
@@ -65,6 +74,7 @@ pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
     Ok(())
 }
 
+/// 查询两个页面之间的直接或间接关系
 pub fn query_cross(graph: &GraphDB, page_a: &str, page_b: &str, human: bool) -> Result<()> {
     let paths = graph.find_cross_relations(page_a, page_b);
     if human {
@@ -109,6 +119,7 @@ struct FieldRecord {
 }
 
 #[derive(Debug, Clone)]
+/// 字段追溯链中的单步信息
 struct TraceStep {
     node_alias: String,
     node_type: String,
@@ -117,6 +128,7 @@ struct TraceStep {
     exp: Option<String>,
 }
 
+/// 从节点字段映射中加载字段记录
 fn load_field_records(node_fields: &HashMap<String, Vec<serde_json::Value>>, node_id: &str) -> HashMap<String, FieldRecord> {
     let mut result = HashMap::new();
     if let Some(fields) = node_fields.get(node_id) {
@@ -138,6 +150,7 @@ fn load_field_records(node_fields: &HashMap<String, Vec<serde_json::Value>>, nod
     result
 }
 
+/// 递归追溯字段的数据来源链
 fn trace_field_source(
     output_field_name: &str,
     output_field: &FieldRecord,
@@ -228,6 +241,7 @@ fn trace_field_source(
     steps
 }
 
+/// 展开 DataFlow 子图，追溯字段来源
 pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result<()> {
     let node = graph.get_node(dataflow_id);
     if node.is_none() {

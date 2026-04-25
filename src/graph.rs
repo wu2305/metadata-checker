@@ -6,6 +6,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// 项目级图数据库模块
+///
+/// 使用 petgraph 构建内存中的有向图，并通过 redb 持久化到磁盘：
+/// - 节点：Page、Component、Model、Field、Action
+/// - 边：Reads、Writes、Triggers、Contains、EmbedsPage、OpensPage 等
+///
+/// 支持增量更新：基于文件 mtime+size+hash 检测变更，只处理脏文件。
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum NodeType {
     Page,
@@ -15,6 +23,7 @@ pub enum NodeType {
     Action,
 }
 
+/// 图中边类型（关系语义）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum EdgeType {
     Reads,
@@ -32,6 +41,7 @@ pub enum EdgeType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// 图节点
 pub struct Node {
     pub id: String,
     pub node_type: NodeType,
@@ -41,6 +51,7 @@ pub struct Node {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// 图边
 pub struct Edge {
     pub from: String,
     pub to: String,
@@ -49,6 +60,7 @@ pub struct Edge {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// 文件状态（用于增量更新）
 pub struct FileState {
     pub file_path: String,
     pub file_hash: String,
@@ -62,6 +74,7 @@ const EDGES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("edges"
 const FILE_STATES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("file_states");
 const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
 
+/// 图数据库（内存图 + redb 持久化）
 pub struct GraphDB {
     pub graph: DiGraph<Node, Edge>,
     pub node_indices: HashMap<String, NodeIndex>,
@@ -69,6 +82,7 @@ pub struct GraphDB {
 }
 
 impl GraphDB {
+/// 打开或创建图数据库
     pub fn open(db_path: &Path) -> Result<Self> {
         let db = Database::create(db_path)
             .with_context(|| format!("Failed to create/open database at {:?}", db_path))?;
@@ -115,6 +129,7 @@ impl GraphDB {
             db_path: db_path.to_string_lossy().to_string(),
         })
     }
+/// 添加节点（如已存在则更新）
     pub fn add_node(
         &mut self,
         id: String,
@@ -147,6 +162,7 @@ impl GraphDB {
         idx
     }
 
+/// 添加有向边
     pub fn add_edge(
         &mut self,
         from: &str,
@@ -211,6 +227,7 @@ impl GraphDB {
         Ok(())
     }
 
+/// 从 redb 加载图到内存
     pub fn load_file_states(&self) -> Result<HashMap<String, FileState>> {
         let db = Database::create(&self.db_path)?;
         let read_txn = db.begin_read()?;
@@ -224,6 +241,7 @@ impl GraphDB {
         }
         Ok(states)
     }
+/// 查找读取指定模型的所有节点
     pub fn find_readers<'a>(&'a self, model_id: &str) -> Vec<(&'a Node, &'a Edge)> {
         let mut results = Vec::new();
         if let Some(&model_idx) = self.node_indices.get(model_id) {
@@ -239,6 +257,7 @@ impl GraphDB {
         results
     }
 
+/// 查找写入指定模型的所有节点
     pub fn find_writers<'a>(&'a self, model_id: &str) -> Vec<(&'a Node, &'a Edge)> {
         let mut results = Vec::new();
         if let Some(&model_idx) = self.node_indices.get(model_id) {
@@ -254,6 +273,7 @@ impl GraphDB {
         results
     }
 
+/// 查找两个页面之间的共同依赖路径
     pub fn find_cross_relations<'a>(&'a self, page_a: &str, page_b: &str) -> Vec<Vec<(&'a Node, &'a Edge)>> {
         let mut paths = Vec::new();
         if let (Some(&a_idx), Some(&b_idx)) = (
@@ -288,12 +308,14 @@ impl GraphDB {
         paths
     }
 
+/// 按 ID 获取节点
     pub fn get_node(&self, node_id: &str) -> Option<Node> {
         self.node_indices.get(node_id)
             .and_then(|&idx| self.graph.node_weight(idx))
             .cloned()
     }
 
+/// 按 ID 获取节点
     pub fn get_node_edges<'a>(&'a self, node_id: &str) -> Option<(Vec<(&'a Node, &'a Edge)>, Vec<(&'a Node, &'a Edge)>)> {
         let idx = self.node_indices.get(node_id)?;
 

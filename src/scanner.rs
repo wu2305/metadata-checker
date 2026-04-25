@@ -7,6 +7,14 @@ use std::time::SystemTime;
 use crate::graph::{EdgeType, FileState, GraphDB, NodeType};
 use crate::superpage::parse_superpage;
 
+/// 项目目录扫描模块
+///
+/// 递归扫描项目目录下的所有 .spg 和 .tbl 文件：
+/// - .spg：解析组件、表达式、动作，构建 Page/Component/Model/Field 节点
+/// - .tbl：解析 App 类型（可写）和 DataFlow 类型（只读加工流程）
+///
+/// 支持增量更新：对比文件 mtime/size/hash，只重新处理变更文件。
+
 /// Scan a project directory and build/update the graph database.
 pub fn scan_project(
     project_dir: &Path,
@@ -104,6 +112,7 @@ pub fn scan_project(
     Ok(())
 }
 
+/// 递归收集目录下所有 .spg 和 .tbl 文件
 fn collect_files(dir: &Path, base: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -134,6 +143,7 @@ fn resolve_reference_path(rel_path: &str, ref_idx: usize, reference_resources: &
     }
 }
 
+/// 解析单个 .spg 文件并写入图
 fn process_spg_file(
     graph: &mut GraphDB,
     rel_path: &str,
@@ -509,6 +519,7 @@ fn process_spg_file(
     Ok(node_ids)
 }
 
+/// 解析单个 .tbl 文件并写入图
 fn process_tbl_file(
     graph: &mut GraphDB,
     rel_path: &str,

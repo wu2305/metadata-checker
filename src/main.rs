@@ -11,6 +11,15 @@ use anyhow::Result;
 use clap::Parser;
 use std::io::{self, Write};
 
+/// CLI 入口
+///
+/// 命令行参数解析后，根据子命令执行：
+/// - parse：解析单个 .spg 文件
+/// - build-graph：扫描项目目录并构建/更新图数据库
+/// - query-model / query-page / query-cross / query-dataflow：图查询
+///
+/// human 模式支持交互式组件查询（--human 不带 --query 时进入交互）。
+
 fn main() -> Result<()> {
     let args = cli::Cli::parse();
 

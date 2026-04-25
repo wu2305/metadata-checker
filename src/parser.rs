@@ -6,6 +6,14 @@ use std::path::Path;
 
 use crate::superpage;
 
+/// 文件解析入口模块
+///
+/// 自动识别文件类型（SuperPage / 旧版 Table）并调用对应解析器：
+/// - .spg 结尾 → SuperPage 解析
+/// - 其他 → 尝试旧版 Table 解析
+///
+/// 同时提供统一的 PageMetadata 结构，兼容两种输入格式。
+
 /// Parsed metadata summary extracted from the low-code platform JSON.
 #[derive(Debug, Default)]
 pub struct PageMetadata {
@@ -35,6 +43,7 @@ pub struct DataBinding {
     pub filter: Option<String>,
 }
 
+/// 根据文件类型自动选择解析器
 pub fn parse_file(path: &Path) -> Result<PageMetadata> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read file: {}", path.display()))?;

@@ -1,6 +1,14 @@
 use crate::superpage::{ComponentExpr, RefType, SuperPageMetadata};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// 组件依赖关系分析模块
+///
+/// 基于 SuperPage 的表达式引用构建有向依赖图：
+/// - 节点：组件 ID
+/// - 边：组件 A 的表达式引用了组件 B 的值/属性
+///
+/// 提供拓扑排序（计算先后顺序）和循环检测功能。
+
 /// 组件间依赖关系
 #[derive(Debug, Clone)]
 pub struct DependencyGraph {
@@ -13,6 +21,7 @@ pub struct DependencyGraph {
 }
 
 impl DependencyGraph {
+/// 从 SuperPage 元数据构建依赖图
     pub fn new(meta: &SuperPageMetadata) -> Self {
         let mut deps = HashMap::new();
         let mut reverse = HashMap::new();
@@ -177,6 +186,7 @@ pub struct ValueTrace {
     pub source_type: SourceType,
 }
 
+/// 值的来源类型
 #[derive(Debug, Clone)]
 pub enum SourceType {
     /// 页面参数输入

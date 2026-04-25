@@ -1,6 +1,10 @@
 use clap::Parser;
 use std::path::PathBuf;
 
+/// 命令行参数定义
+///
+/// 使用 clap 派生宏定义所有 CLI 参数和子命令。
+
 #[derive(Parser, Debug)]
 #[command(
     name = "metadata-checker",
@@ -8,6 +12,7 @@ use std::path::PathBuf;
     long_about = "metadata-checker reads a JSON file containing low-code platform page metadata, validates and extracts structured information, and prints results in either human-readable or machine-friendly (non-human) format. It is intended for integration with AI/LLM toolchains.",
     version
 )]
+/// 根命令参数
 pub struct Cli {
     #[arg(value_name = "FILE", help = "Path to the page metadata JSON file")]
     pub input: Option<PathBuf>,

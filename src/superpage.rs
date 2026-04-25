@@ -4,6 +4,16 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+/// SuperPage 元数据解析模块
+///
+/// 负责解析 .spg 文件的 JSON 结构，提取：
+/// - 组件树（支持递归嵌套：components/panels/steps/comps）
+/// - 表达式字段（exp、value、defaultValue、visible、enable 等）
+/// - 动作列表（actions）及其参数
+/// - 页面参数（params）和数据源（sources）
+///
+/// 表达式引用解析：识别组件值引用、模型字段引用、页面参数引用等。
+
 // ============================================================
 // JSON 反序列化结构体
 // ============================================================
@@ -159,6 +169,7 @@ pub struct SpgComponent {
     pub res_path: Option<String>,
 }
 
+/// 表达式中引用的对象类型
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RefType {
     ComponentValue(String),
@@ -170,6 +181,7 @@ pub enum RefType {
     Other(String),
 }
 
+/// 组件动作（交互行为）
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpgAction {
     pub id: String,
@@ -187,6 +199,7 @@ pub struct SpgAction {
     pub target_type: String,
 }
 
+/// 组件上的表达式及其解析出的引用列表
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComponentExpr {
     pub component_id: String,
@@ -195,6 +208,7 @@ pub struct ComponentExpr {
     pub refs: Vec<RefType>,
 }
 
+/// 解析后的 SuperPage 完整元数据
 #[derive(Debug, Default, Clone)]
 pub struct SuperPageMetadata {
     pub version: Option<String>,
@@ -207,6 +221,7 @@ pub struct SuperPageMetadata {
     pub raw: serde_json::Value,
 }
 
+/// 页面级参数
 #[derive(Debug, Clone)]
 pub struct SpgParam {
     pub id: String,
@@ -215,6 +230,7 @@ pub struct SpgParam {
     pub default_value: Option<String>,
 }
 
+/// 页面数据源（模型引用）
 #[derive(Debug, Clone)]
 pub struct SpgSource {
     pub id: String,
@@ -453,6 +469,7 @@ pub fn parse_expression_refs(expr: &str) -> Vec<RefType> {
     refs
 }
 
+/// 判断 token 是否位于字符串字面量内部
 fn is_in_string_literal(expr: &str, pos: usize) -> bool {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
@@ -471,6 +488,7 @@ fn is_in_string_literal(expr: &str, pos: usize) -> bool {
     in_single_quote || in_double_quote
 }
 
+/// 根据 token 特征分类引用类型
 fn classify_ref(token: &str) -> RefType {
     let token = token.trim();
 
