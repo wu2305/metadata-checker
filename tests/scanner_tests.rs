@@ -25,8 +25,8 @@ fn test_parse_actions_basic() {
     assert_eq!(button2.actions[0].data_set.as_ref().unwrap(), "model2");
     assert_eq!(button2.actions[0].data_range.as_ref().unwrap(), "resultset");
     assert_eq!(button2.actions[0].field_values.len(), 2);
-    assert_eq!(button2.actions[0].field_values[0], ("status".to_string(), "input1.value".to_string()));
-    assert_eq!(button2.actions[0].field_values[1], ("updatedAt".to_string(), "TODAY()".to_string()));
+    assert_eq!(button2.actions[0].field_values[0], ("status".to_string(), "input1.value".to_string(), "exp".to_string()));
+    assert_eq!(button2.actions[0].field_values[1], ("updatedAt".to_string(), "TODAY()".to_string(), "exp".to_string()));
 
     let button4 = meta.components.iter().find(|c| c.id == "button4").expect("button4 should exist");
     assert_eq!(button4.actions.len(), 1);

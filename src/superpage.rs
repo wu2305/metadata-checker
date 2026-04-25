@@ -125,6 +125,7 @@ pub struct SpgComponent {
     pub parent_id: Option<String>,
     pub properties: HashMap<String, String>,
     pub actions: Vec<SpgAction>,
+    pub submit_data: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -143,9 +144,10 @@ pub struct SpgAction {
     pub id: String,
     pub action_type: String,
     pub trigger_type: String,
+    pub submit_range: Option<String>,
     pub data_set: Option<String>,
     pub data_range: Option<String>,
-    pub field_values: Vec<(String, String)>,
+    pub field_values: Vec<(String, String, String)>,
     pub submit_component: Vec<String>,
 }
 
@@ -252,6 +254,7 @@ fn extract_components(
         parent_id: parent_id.clone(),
         properties: HashMap::new(),
         actions: Vec::new(),
+        submit_data: raw.submit_data,
     };
 
     // 总是表达式字段：所有非空值都视为表达式
@@ -322,6 +325,7 @@ fn extract_components(
         id: a.id.clone(),
         action_type: a.action_type.clone(),
         trigger_type: a.trigger_type.clone(),
+        submit_range: a.submit_range.clone(),
         data_set: a.data_set.as_ref().and_then(|v| {
             if let Some(s) = v.as_str() {
                 Some(s.to_string())
@@ -332,7 +336,11 @@ fn extract_components(
             }
         }),
         data_range: a.data_range.clone(),
-        field_values: a.field_values.iter().map(|fv| (fv.name.clone(), fv.value.as_str().unwrap_or("").to_string())).collect(),
+        field_values: a.field_values.iter().map(|fv| (
+            fv.name.clone(),
+            fv.value.as_str().unwrap_or("").to_string(),
+            fv.value_type.clone(),
+        )).collect(),
         submit_component: a.submit_component.clone(),
     }).collect();
 

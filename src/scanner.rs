@@ -207,6 +207,10 @@ fn process_spg_file(
     // Build a map of component id -> submitField for action processing
     let mut submit_field_map: HashMap<String, String> = HashMap::new();
     for comp in &meta.components {
+        // Skip components explicitly marked as not submitting data
+        if comp.submit_data == Some(false) {
+            continue;
+        }
         if let Some(sf) = comp.properties.get("submitField") {
             submit_field_map.insert(comp.id.clone(), sf.clone());
         }
@@ -307,11 +311,23 @@ fn process_spg_file(
 
             match action.action_type.as_str() {
                 "submitData" => {
-                    let target_comps: Vec<String> = if action.submit_component.is_empty() {
-                        // No explicit submitComponent: collect ALL components with submitField
-                        submit_field_map.keys().cloned().collect()
-                    } else {
-                        action.submit_component.clone()
+                    let target_comps: Vec<String> = match action.submit_range.as_deref() {
+                        Some("page") | Some("dataset") => {
+                            // Submit ALL components with submitField
+                            submit_field_map.keys().cloned().collect()
+                        }
+                        Some("component") | Some("dialog") => {
+                            // Only submit explicitly specified components
+                            action.submit_component.clone()
+                        }
+                        _ => {
+                            // Default: if submitComponent specified, use it; otherwise collect all
+                            if action.submit_component.is_empty() {
+                                submit_field_map.keys().cloned().collect()
+                            } else {
+                                action.submit_component.clone()
+                            }
+                        }
                     };
                     for target_comp_id in target_comps {
                         if let Some(submit_field) = submit_field_map.get(&target_comp_id) {
@@ -333,11 +349,25 @@ fn process_spg_file(
                     if let Some(ref data_set) = action.data_set {
                         let model_id = format!("model:{}", data_set);
                         graph.add_node(model_id.clone(), NodeType::Model, format!("{}.tbl", data_set), data_set.clone(), None);
-                        for (field_name, _value) in &action.field_values {
+                        for (field_name, field_value, value_type) in &action.field_values {
                             let field_id = format!("field:{}.{}", data_set, field_name);
                             graph.add_node(field_id.clone(), NodeType::Field, format!("{}.tbl", data_set), field_name.clone(), None);
                             graph.add_edge(&action_id, &model_id, EdgeType::ActionWrites, Some(format!("{}.{}", data_set, field_name)));
                             graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+                            // If value_type is "exp", parse expression refs for dependency analysis
+                            if value_type == "exp" {
+                                let refs = crate::superpage::parse_expression_refs(field_value);
+                                for ref_type in refs {
+                                    if let crate::superpage::RefType::ModelField(model, field) = ref_type {
+                                        let ref_model_id = format!("model:{}", model);
+                                        let ref_field_id = format!("field:{}.{}", model, field);
+                                        graph.add_node(ref_model_id.clone(), NodeType::Model, format!("{}.tbl", model), model.clone(), None);
+                                        graph.add_node(ref_field_id.clone(), NodeType::Field, format!("{}.tbl", model), field.clone(), None);
+                                        graph.add_edge(&action_id, &ref_model_id, EdgeType::Reads, Some(format!("{}.{}", model, field)));
+                                        graph.add_edge(&ref_model_id, &ref_field_id, EdgeType::Contains, None);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
