@@ -117,6 +117,7 @@ fn collect_files(dir: &Path, base: &Path, files: &mut Vec<PathBuf>) -> Result<()
     }
     Ok(())
 }
+
 fn process_spg_file(
     graph: &mut GraphDB,
     rel_path: &str,
@@ -140,6 +141,14 @@ fn process_spg_file(
     );
     node_ids.push(page_id.clone());
 
+    // Build a map of component id -> submitField for action processing
+    let mut submit_field_map: HashMap<String, String> = HashMap::new();
+    for comp in &meta.components {
+        if let Some(sf) = comp.properties.get("submitField") {
+            submit_field_map.insert(comp.id.clone(), sf.clone());
+        }
+    }
+
     // Process components and their expressions
     for comp in &meta.components {
         let comp_id = format!("comp:{}/{}", page_name, comp.id);
@@ -162,7 +171,7 @@ fn process_spg_file(
                 match ref_type {
                     crate::superpage::RefType::ModelField(model, field) => {
                         let model_id = format!("model:{}", model);
-                        let field_id = format!("field:{}.{})", model, field);
+                        let field_id = format!("field:{}.{}", model, field);
                         graph.add_node(
                             model_id.clone(),
                             NodeType::Model,
@@ -177,7 +186,7 @@ fn process_spg_file(
                             format!("{}", field),
                             None,
                         );
-                        graph.add_edge(&comp_id, &model_id, EdgeType::Reads, Some(format!("{}.{})", model, field)));
+                        graph.add_edge(&comp_id, &model_id, EdgeType::Reads, Some(format!("{}.{}", model, field)));
                         graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
                     }
                     _ => {}
@@ -186,7 +195,7 @@ fn process_spg_file(
         }
     }
 
-    // Process submitField writes
+    // Process submitField writes (implicit writes from component bindings)
     for comp in &meta.components {
         let comp_id = format!("comp:{}/{}", page_name, comp.id);
         
@@ -196,7 +205,7 @@ fn process_spg_file(
                 let model = parts[0];
                 let field = parts[1..].join(".");
                 let model_id = format!("model:{}", model);
-                let field_id = format!("field:{}.{})", model, field);
+                let field_id = format!("field:{}.{}", model, field);
                 
                 graph.add_node(
                     model_id.clone(),
@@ -212,8 +221,64 @@ fn process_spg_file(
                     field.clone(),
                     None,
                 );
-                graph.add_edge(&comp_id, &model_id, EdgeType::Writes, Some(format!("{}.{})", model, field)));
+                graph.add_edge(&comp_id, &model_id, EdgeType::Writes, Some(format!("{}.{}", model, field)));
                 graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+            }
+        }
+    }
+
+    // Process actions (explicit writes from interactions)
+    for comp in &meta.components {
+        let comp_id = format!("comp:{}/{}", page_name, comp.id);
+        for action in &comp.actions {
+            let action_id = format!("action:{}/{}/{}", page_name, comp.id, action.id);
+            graph.add_node(
+                action_id.clone(),
+                NodeType::Action,
+                rel_path.to_string(),
+                format!("{}:{}", action.action_type, action.id),
+                None,
+            );
+            node_ids.push(action_id.clone());
+            graph.add_edge(&comp_id, &action_id, EdgeType::Triggers, None);
+
+            match action.action_type.as_str() {
+                "submitData" => {
+                    let target_comps: Vec<String> = if action.submit_component.is_empty() {
+                        // No explicit submitComponent: collect ALL components with submitField
+                        submit_field_map.keys().cloned().collect()
+                    } else {
+                        action.submit_component.clone()
+                    };
+                    for target_comp_id in target_comps {
+                        if let Some(submit_field) = submit_field_map.get(&target_comp_id) {
+                            let parts: Vec<&str> = submit_field.split('.').collect();
+                            if parts.len() >= 2 {
+                                let model = parts[0];
+                                let field = parts[1..].join(".");
+                                let model_id = format!("model:{}", model);
+                                let field_id = format!("field:{}.{}", model, field);
+                                graph.add_node(model_id.clone(), NodeType::Model, format!("{}.tbl", model), model.to_string(), None);
+                                graph.add_node(field_id.clone(), NodeType::Field, format!("{}.tbl", model), field.clone(), None);
+                                graph.add_edge(&action_id, &model_id, EdgeType::ActionWrites, Some(format!("{}.{}", model, field)));
+                                graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+                            }
+                        }
+                    }
+                }
+                "updateData" | "insertData" | "deleteData" => {
+                    if let Some(ref data_set) = action.data_set {
+                        let model_id = format!("model:{}", data_set);
+                        graph.add_node(model_id.clone(), NodeType::Model, format!("{}.tbl", data_set), data_set.clone(), None);
+                        for (field_name, _value) in &action.field_values {
+                            let field_id = format!("field:{}.{}", data_set, field_name);
+                            graph.add_node(field_id.clone(), NodeType::Field, format!("{}.tbl", data_set), field_name.clone(), None);
+                            graph.add_edge(&action_id, &model_id, EdgeType::ActionWrites, Some(format!("{}.{}", data_set, field_name)));
+                            graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -222,10 +287,82 @@ fn process_spg_file(
 }
 
 fn process_tbl_file(
-    _graph: &mut GraphDB,
-    _rel_path: &str,
-    _path: &Path,
+    graph: &mut GraphDB,
+    rel_path: &str,
+    path: &Path,
 ) -> Result<Vec<String>> {
-    // TODO: Parse .tbl file to extract model fields and DataFlow inputs
-    Ok(Vec::new())
+    let mut node_ids = Vec::new();
+    let content = fs::read_to_string(path).ok().unwrap_or_default();
+    if content.is_empty() {
+        return Ok(node_ids);
+    }
+
+    let value: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return Ok(node_ids),
+    };
+
+    // Use file stem as model identifier
+    let model_name = Path::new(rel_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let model_id = format!("model:{}", model_name);
+    let is_dataflow = value.get("dataFlow").is_some();
+    let model_type = if is_dataflow { "DataFlow" } else { "App" };
+
+    graph.add_node(
+        model_id.clone(),
+        NodeType::Model,
+        rel_path.to_string(),
+        model_name.clone(),
+        Some(serde_json::json!({"modelType": model_type})),
+    );
+    node_ids.push(model_id.clone());
+
+    // Process dimensions (fields)
+    if let Some(dimensions) = value.get("dimensions").and_then(|d| d.as_array()) {
+        for dim in dimensions {
+            if let Some(name) = dim.get("name").and_then(|n| n.as_str()) {
+                let field_id = format!("field:{}.{}", model_name, name);
+                graph.add_node(
+                    field_id.clone(),
+                    NodeType::Field,
+                    rel_path.to_string(),
+                    name.to_string(),
+                    Some(dim.clone()),
+                );
+                node_ids.push(field_id.clone());
+                graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+            }
+        }
+    }
+
+    // For DataFlow type: process input sources (nodes referencing external tables)
+    if is_dataflow {
+        if let Some(nodes) = value.get("dataFlow").and_then(|d| d.get("nodes")).and_then(|n| n.as_object()) {
+            for (_, node) in nodes {
+                if let Some(module_table_path) = node.get("moduleTablePath").and_then(|p| p.as_str()) {
+                    // Extract referenced model name from path like "$DATA:/售后/fact_serviceappointments.tbl"
+                    let ref_model = Path::new(module_table_path)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| module_table_path.to_string());
+                    let ref_model_id = format!("model:{}", ref_model);
+                    graph.add_node(
+                        ref_model_id.clone(),
+                        NodeType::Model,
+                        module_table_path.to_string(),
+                        ref_model.clone(),
+                        None,
+                    );
+                    // DataflowInput edge: this DataFlow reads from ref_model
+                    graph.add_edge(&model_id, &ref_model_id, EdgeType::DataflowInput, Some(module_table_path.to_string()));
+                }
+            }
+        }
+    }
+
+    Ok(node_ids)
 }

@@ -56,6 +56,22 @@ struct RawAction {
     submit_range: Option<String>,
     #[serde(rename = "submitComponent", default)]
     submit_component: Vec<String>,
+    #[serde(rename = "dataSet", default)]
+    data_set: Option<serde_json::Value>,
+    #[serde(rename = "dataRange", default)]
+    data_range: Option<String>,
+    #[serde(rename = "fieldValues", default)]
+    field_values: Vec<RawFieldValue>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawFieldValue {
+    #[serde(default)]
+    name: String,
+    #[serde(rename = "valueType", default)]
+    value_type: String,
+    #[serde(default)]
+    value: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -106,6 +122,7 @@ pub struct SpgComponent {
     pub component_type: String,
     pub parent_id: Option<String>,
     pub properties: HashMap<String, String>,
+    pub actions: Vec<SpgAction>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -117,6 +134,17 @@ pub enum RefType {
     UserProperty(String),
     SystemVar(String),
     Other(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpgAction {
+    pub id: String,
+    pub action_type: String,
+    pub trigger_type: String,
+    pub data_set: Option<String>,
+    pub data_range: Option<String>,
+    pub field_values: Vec<(String, String)>,
+    pub submit_component: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -219,6 +247,7 @@ fn extract_components(
         component_type: raw.component_type.clone(),
         parent_id: parent_id.clone(),
         properties: HashMap::new(),
+        actions: Vec::new(),
     };
 
     // 总是表达式字段：所有非空值都视为表达式
@@ -283,6 +312,25 @@ fn extract_components(
     if let Some(ref submit_field) = raw.submit_field {
         comp.properties.insert("submitField".to_string(), submit_field.clone());
     }
+
+    // Populate actions
+    comp.actions = raw.actions.iter().map(|a| SpgAction {
+        id: a.id.clone(),
+        action_type: a.action_type.clone(),
+        trigger_type: a.trigger_type.clone(),
+        data_set: a.data_set.as_ref().and_then(|v| {
+            if let Some(s) = v.as_str() {
+                Some(s.to_string())
+            } else if let Some(arr) = v.as_array() {
+                arr.first().and_then(|item| item.as_str()).map(|s| s.to_string())
+            } else {
+                None
+            }
+        }),
+        data_range: a.data_range.clone(),
+        field_values: a.field_values.iter().map(|fv| (fv.name.clone(), fv.value.as_str().unwrap_or("").to_string())).collect(),
+        submit_component: a.submit_component.clone(),
+    }).collect();
 
     components.push(comp);
 

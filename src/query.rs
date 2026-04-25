@@ -1,4 +1,4 @@
-use crate::graph::{GraphDB, EdgeType};
+use crate::graph::GraphDB;
 use anyhow::Result;
 use std::io::{self, Write};
 
