@@ -278,12 +278,12 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
 
     let inputs: Vec<_> = outgoing.iter()
         .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::DataflowInput))
-        .map(|(n, e)| (n.clone(), e.clone()))
+        .map(|&(n, e)| (n, e))
         .collect();
 
     let outputs: Vec<_> = outgoing.iter()
         .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::OutputsTo))
-        .map(|(n, e)| (n.clone(), e.clone()))
+        .map(|&(n, e)| (n, e))
         .collect();
 
     if human {

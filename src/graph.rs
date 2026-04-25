@@ -91,7 +91,7 @@ impl GraphDB {
             let (key, value) = item?;
             let id = key.value();
             if let Ok(node) = serde_json::from_slice::<Node>(value.value().as_slice()) {
-                let idx = graph.add_node(node.clone());
+                let idx = graph.add_node(node);
                 node_indices.insert(id.to_string(), idx);
             }
         }
@@ -142,7 +142,7 @@ impl GraphDB {
             name,
             meta,
         };
-        let idx = self.graph.add_node(node.clone());
+        let idx = self.graph.add_node(node);
         self.node_indices.insert(id, idx);
         idx
     }
@@ -224,14 +224,14 @@ impl GraphDB {
         }
         Ok(states)
     }
-    pub fn find_readers(&self, model_id: &str) -> Vec<(Node, Edge)> {
+    pub fn find_readers<'a>(&'a self, model_id: &str) -> Vec<(&'a Node, &'a Edge)> {
         let mut results = Vec::new();
         if let Some(&model_idx) = self.node_indices.get(model_id) {
             for edge_ref in self.graph.edges_directed(model_idx, petgraph::Direction::Incoming) {
                 let edge = edge_ref.weight();
                 if matches!(edge.edge_type, EdgeType::Reads) {
                     if let Some(node) = self.graph.node_weight(edge_ref.source()) {
-                        results.push((node.clone(), edge.clone()));
+                        results.push((node, edge));
                     }
                 }
             }
@@ -239,14 +239,14 @@ impl GraphDB {
         results
     }
 
-    pub fn find_writers(&self, model_id: &str) -> Vec<(Node, Edge)> {
+    pub fn find_writers<'a>(&'a self, model_id: &str) -> Vec<(&'a Node, &'a Edge)> {
         let mut results = Vec::new();
         if let Some(&model_idx) = self.node_indices.get(model_id) {
             for edge_ref in self.graph.edges_directed(model_idx, petgraph::Direction::Incoming) {
                 let edge = edge_ref.weight();
                 if matches!(edge.edge_type, EdgeType::Writes | EdgeType::ActionWrites) {
                     if let Some(node) = self.graph.node_weight(edge_ref.source()) {
-                        results.push((node.clone(), edge.clone()));
+                        results.push((node, edge));
                     }
                 }
             }
@@ -254,7 +254,7 @@ impl GraphDB {
         results
     }
 
-    pub fn find_cross_relations(&self, page_a: &str, page_b: &str) -> Vec<Vec<(Node, Edge)>> {
+    pub fn find_cross_relations<'a>(&'a self, page_a: &str, page_b: &str) -> Vec<Vec<(&'a Node, &'a Edge)>> {
         let mut paths = Vec::new();
         if let (Some(&a_idx), Some(&b_idx)) = (
             self.node_indices.get(page_a),
@@ -276,8 +276,8 @@ impl GraphDB {
                         if let Some(edge_a) = self.graph.edges_connecting(a_idx, *a_n).next() {
                             if let Some(edge_b) = self.graph.edges_connecting(b_idx, *a_n).next() {
                                 paths.push(vec![
-                                    (a_node.clone(), edge_a.weight().clone()),
-                                    (mid_node.clone(), edge_b.weight().clone()),
+                                    (a_node, edge_a.weight()),
+                                    (mid_node, edge_b.weight()),
                                 ]);
                             }
                         }
@@ -294,22 +294,22 @@ impl GraphDB {
             .cloned()
     }
 
-    pub fn get_node_edges(&self, node_id: &str) -> Option<(Vec<(Node, Edge)>, Vec<(Node, Edge)>)> {
+    pub fn get_node_edges<'a>(&'a self, node_id: &str) -> Option<(Vec<(&'a Node, &'a Edge)>, Vec<(&'a Node, &'a Edge)>)> {
         let idx = self.node_indices.get(node_id)?;
 
-        let outgoing: Vec<(Node, Edge)> = self.graph
+        let outgoing: Vec<(&'a Node, &'a Edge)> = self.graph
             .edges_directed(*idx, petgraph::Direction::Outgoing)
             .filter_map(|e| {
                 self.graph.node_weight(e.target())
-                    .map(|n| (n.clone(), e.weight().clone()))
+                    .map(|n| (n, e.weight()))
             })
             .collect();
 
-        let incoming: Vec<(Node, Edge)> = self.graph
+        let incoming: Vec<(&'a Node, &'a Edge)> = self.graph
             .edges_directed(*idx, petgraph::Direction::Incoming)
             .filter_map(|e| {
                 self.graph.node_weight(e.source())
-                    .map(|n| (n.clone(), e.weight().clone()))
+                    .map(|n| (n, e.weight()))
             })
             .collect();
 

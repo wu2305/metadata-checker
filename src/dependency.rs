@@ -68,13 +68,15 @@ impl DependencyGraph {
         // 初始化入度
         for (comp_id, refs) in &self.dependencies {
             in_degree.entry(comp_id.clone()).or_insert(0);
+            if refs.is_empty() { continue; }
+            let comp_id_owned = comp_id.clone();
             for ref_type in refs {
                 if let RefType::ComponentValue(dep_id) | RefType::ComponentProperty(dep_id, _) = ref_type {
                     if self.dependencies.contains_key(dep_id) {
-                        *in_degree.entry(comp_id.clone()).or_insert(0) += 1;
+                        *in_degree.entry(comp_id_owned.clone()).or_insert(0) += 1;
                         adj.entry(dep_id.clone())
                             .or_insert_with(Vec::new)
-                            .push(comp_id.clone());
+                            .push(comp_id_owned.clone());
                     }
                 }
             }

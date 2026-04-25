@@ -42,7 +42,6 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
         .with_context(|| format!("Failed to parse JSON from: {}", path.display()))?;
 
     let mut meta = PageMetadata::default();
-    meta.raw = raw.clone();
 
     // Detect if it's a SuperPage by checking for "canvas" field
     let is_superpage = raw.get("canvas").is_some();
@@ -117,6 +116,7 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
         }
     }
 
+    meta.raw = raw;
     Ok(meta)
 }
 
