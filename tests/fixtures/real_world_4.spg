@@ -1,0 +1,2400 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"images": [
+		{
+			"name": "72350c8286717922b0e9e4d3d6a8428b.png",
+			"category": "componentBackground",
+			"width": 1920,
+			"height": 1081,
+			"pictureFillInfo": {
+				"type": "contain"
+			}
+		}
+	],
+	"displayFormats": [
+		{
+			"name": "displayFormat1",
+			"caption": "格式1",
+			"desc": "1970-01-01 08:00",
+			"format": "yyyy-mm-dd hh:mm"
+		}
+	],
+	"sources": [
+		{
+			"id": "model1",
+			"modelType": "dwtable",
+			"path": "$DATA:/销售/fact_newsaleContract.tbl",
+			"customFields": [
+				{
+					"name": "待签署文件",
+					"exp": "IF(notSigned is NOT NULL, CONCAT('销售合同-',fileName),NULL)",
+					"dbfield": "CALCULATOR_1",
+					"isDimension": true
+				},
+				{
+					"name": "已签署文件",
+					"exp": "IF(signed is NOT NULL, CONCAT('销售合同-',fileName),NULL)",
+					"dbfield": "CALCULATOR_2",
+					"isDimension": true
+				}
+			],
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "IF(USER_INGROUP('Store_General_Manager') OR USER_INGROUP('Store_Sales_Manager'),model1.dimDepart = $user.dept_id,IF(USER_INGROUP('Store_Sales_Consultant'),model1.dimDepart = $user.dept_id AND model1.createName.USER_ID = $user.id,model1.dimDepart = $user.dept_id))"
+					},
+					{
+						"exp": "model1.notSigned IS NOT NULL"
+					}
+				]
+			}
+		}
+	],
+	"refComponentTypes": [
+		"canvas",
+		"panel",
+		"text",
+		"fieldsFilter",
+		"list",
+		"button"
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "panel6",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "80px",
+				"minHeight": "26px",
+				"display": "inlineflexRow",
+				"flexDirection": "row",
+				"templateName": "panel_row",
+				"compStyle": "style2",
+				"components": [
+					{
+						"id": "text1",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "16px",
+						"templateName": "text",
+						"compStyle": "style7",
+						"value": "销售合同",
+						"font": {
+							"size": 24
+						}
+					}
+				]
+			},
+			{
+				"id": "panel7",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "auto",
+				"minHeight": "26px",
+				"display": "inlineflexRow",
+				"flexDirection": "row",
+				"templateName": "panel_row",
+				"compStyle": "style3",
+				"components": [
+					{
+						"id": "fieldsFilter1",
+						"type": "fieldsFilter",
+						"width": "auto",
+						"minWidth": "300px",
+						"height": "auto",
+						"minHeight": "42px",
+						"templateName": "fieldsFilter",
+						"dataSet": "model1",
+						"autoFilter": true,
+						"submitData": false,
+						"compStyle": "style",
+						"comps": [
+							{
+								"id": "comp1",
+								"type": "fieldsFilter.comp",
+								"field": "model1.name"
+							},
+							{
+								"id": "comp2",
+								"type": "fieldsFilter.comp",
+								"field": "model1.entityType"
+							},
+							{
+								"id": "comp3",
+								"type": "fieldsFilter.comp",
+								"field": "model1.dimDepart"
+							},
+							{
+								"id": "comp4",
+								"type": "fieldsFilter.comp",
+								"field": "model1.ownerId"
+							},
+							{
+								"id": "comp5",
+								"type": "fieldsFilter.comp",
+								"field": "model1.city"
+							},
+							{
+								"id": "comp6",
+								"type": "fieldsFilter.comp",
+								"field": "model1.district"
+							},
+							{
+								"id": "comp7",
+								"type": "fieldsFilter.comp",
+								"field": "model1.sellerName"
+							},
+							{
+								"id": "comp8",
+								"type": "fieldsFilter.comp",
+								"field": "model1.phone"
+							},
+							{
+								"id": "comp9",
+								"type": "fieldsFilter.comp",
+								"field": "model1.address"
+							},
+							{
+								"id": "comp10",
+								"type": "fieldsFilter.comp",
+								"field": "model1.salesConsultant"
+							},
+							{
+								"id": "comp11",
+								"type": "fieldsFilter.comp",
+								"field": "model1.contact"
+							},
+							{
+								"id": "comp12",
+								"type": "fieldsFilter.comp",
+								"field": "model1.buyerName",
+								"caption": "客户",
+								"defaultVisible": true,
+								"operator": "contains"
+							},
+							{
+								"id": "comp13",
+								"type": "fieldsFilter.comp",
+								"field": "model1.buyerContact"
+							},
+							{
+								"id": "comp14",
+								"type": "fieldsFilter.comp",
+								"field": "model1.buyerAddress"
+							},
+							{
+								"id": "comp15",
+								"type": "fieldsFilter.comp",
+								"field": "model1.idNumber"
+							},
+							{
+								"id": "comp16",
+								"type": "fieldsFilter.comp",
+								"field": "model1.carBrand",
+								"defaultVisible": true,
+								"itemType": "combobox"
+							},
+							{
+								"id": "comp17",
+								"type": "fieldsFilter.comp",
+								"field": "model1.carModel"
+							},
+							{
+								"id": "comp18",
+								"type": "fieldsFilter.comp",
+								"field": "model1.color"
+							},
+							{
+								"id": "comp19",
+								"type": "fieldsFilter.comp",
+								"field": "model1.quantity"
+							},
+							{
+								"id": "comp20",
+								"type": "fieldsFilter.comp",
+								"field": "model1.vehiclePrice"
+							},
+							{
+								"id": "comp21",
+								"type": "fieldsFilter.comp",
+								"field": "model1.vehiclePriceB"
+							},
+							{
+								"id": "comp22",
+								"type": "fieldsFilter.comp",
+								"field": "model1.pricesExcludingTax"
+							},
+							{
+								"id": "comp23",
+								"type": "fieldsFilter.comp",
+								"field": "model1.vatAmount"
+							},
+							{
+								"id": "comp24",
+								"type": "fieldsFilter.comp",
+								"field": "model1.advance"
+							},
+							{
+								"id": "comp25",
+								"type": "fieldsFilter.comp",
+								"field": "model1.advanceB"
+							},
+							{
+								"id": "comp26",
+								"type": "fieldsFilter.comp",
+								"field": "model1.remainingPrice"
+							},
+							{
+								"id": "comp27",
+								"type": "fieldsFilter.comp",
+								"field": "model1.remainingPriceB"
+							},
+							{
+								"id": "comp28",
+								"type": "fieldsFilter.comp",
+								"field": "model1.accountName"
+							},
+							{
+								"id": "comp29",
+								"type": "fieldsFilter.comp",
+								"field": "model1.bank"
+							},
+							{
+								"id": "comp30",
+								"type": "fieldsFilter.comp",
+								"field": "model1.account"
+							},
+							{
+								"id": "comp31",
+								"type": "fieldsFilter.comp",
+								"field": "model1.buyer"
+							},
+							{
+								"id": "comp32",
+								"type": "fieldsFilter.comp",
+								"field": "model1.sign"
+							},
+							{
+								"id": "comp33",
+								"type": "fieldsFilter.comp",
+								"field": "model1.dateBuyerSignature"
+							},
+							{
+								"id": "comp34",
+								"type": "fieldsFilter.comp",
+								"field": "model1.seller"
+							},
+							{
+								"id": "comp35",
+								"type": "fieldsFilter.comp",
+								"field": "model1.authorizedSignature"
+							},
+							{
+								"id": "comp36",
+								"type": "fieldsFilter.comp",
+								"field": "model1.dateSellerSignature"
+							},
+							{
+								"id": "comp37",
+								"type": "fieldsFilter.comp",
+								"field": "model1.creattime"
+							},
+							{
+								"id": "comp38",
+								"type": "fieldsFilter.comp",
+								"field": "model1.send"
+							},
+							{
+								"id": "comp39",
+								"type": "fieldsFilter.comp",
+								"field": "model1.ISRED"
+							},
+							{
+								"id": "comp40",
+								"type": "fieldsFilter.comp",
+								"field": "model1.OLDORDERNO"
+							},
+							{
+								"id": "comp41",
+								"type": "fieldsFilter.comp",
+								"field": "model1.contractNumber"
+							},
+							{
+								"id": "comp42",
+								"type": "fieldsFilter.comp",
+								"field": "model1.time"
+							},
+							{
+								"id": "comp43",
+								"type": "fieldsFilter.comp",
+								"field": "model1.signFlowId"
+							},
+							{
+								"id": "comp44",
+								"type": "fieldsFilter.comp",
+								"field": "model1.notSigned"
+							},
+							{
+								"id": "comp45",
+								"type": "fieldsFilter.comp",
+								"field": "model1.signed"
+							},
+							{
+								"id": "comp46",
+								"type": "fieldsFilter.comp",
+								"field": "model1.status"
+							},
+							{
+								"id": "comp47",
+								"type": "fieldsFilter.comp",
+								"field": "model1.BuyerSignature"
+							},
+							{
+								"id": "comp48",
+								"type": "fieldsFilter.comp",
+								"field": "model1.externalUserId"
+							},
+							{
+								"id": "comp49",
+								"type": "fieldsFilter.comp",
+								"field": "model1.qwContactId"
+							},
+							{
+								"id": "comp50",
+								"type": "fieldsFilter.comp",
+								"field": "model1.isFill"
+							},
+							{
+								"id": "comp51",
+								"type": "fieldsFilter.comp",
+								"field": "model1.vin"
+							},
+							{
+								"id": "comp52",
+								"type": "fieldsFilter.comp",
+								"field": "model1.billingDate"
+							},
+							{
+								"id": "comp53",
+								"type": "fieldsFilter.comp",
+								"field": "model1.outboundDate"
+							},
+							{
+								"id": "comp54",
+								"type": "fieldsFilter.comp",
+								"field": "model1.carSeries"
+							},
+							{
+								"id": "comp55",
+								"type": "fieldsFilter.comp",
+								"field": "model1.soCarSubTypeId"
+							},
+							{
+								"id": "comp56",
+								"type": "fieldsFilter.comp",
+								"field": "model1.orderDate"
+							},
+							{
+								"id": "comp57",
+								"type": "fieldsFilter.comp",
+								"field": "model1.soCarFcstDeliveryDate"
+							},
+							{
+								"id": "comp58",
+								"type": "fieldsFilter.comp",
+								"field": "model1.carsaletype"
+							}
+						],
+						"operatorChangable": false
+					}
+				]
+			},
+			{
+				"id": "panel5",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "auto",
+				"minHeight": "26px",
+				"display": "inlineflexColumn",
+				"flexDirection": "column",
+				"templateName": "panel_column",
+				"compStyle": "style4",
+				"flexible": "true",
+				"components": [
+					{
+						"id": "list1",
+						"type": "list",
+						"width": "100%",
+						"height": "auto",
+						"minHeight": "200px",
+						"flexible": "true",
+						"templateName": "list",
+						"dataSet": "model1",
+						"columns": [
+							{
+								"id": "column41",
+								"type": "list.column",
+								"field": "model1.contractNumber",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								}
+							},
+							{
+								"id": "column3",
+								"type": "list.column",
+								"field": "model1.dimDepart",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"visible": "true"
+							},
+							{
+								"id": "column1",
+								"type": "list.column",
+								"field": "model1.name",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								}
+							},
+							{
+								"id": "column12",
+								"type": "list.column",
+								"field": "model1.buyerName",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"caption": "客户"
+							},
+							{
+								"id": "column13",
+								"type": "list.column",
+								"field": "model1.buyerContact",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"caption": "手机号"
+							},
+							{
+								"id": "column15",
+								"type": "list.column",
+								"field": "model1.idNumber",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								}
+							},
+							{
+								"id": "column51",
+								"type": "list.column",
+								"field": "model1.vin",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								}
+							},
+							{
+								"id": "column16",
+								"type": "list.column",
+								"field": "model1.carBrand",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								}
+							},
+							{
+								"id": "column54",
+								"type": "list.column",
+								"field": "model1.carSeries",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column17",
+								"type": "list.column",
+								"field": "model1.carModel",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								}
+							},
+							{
+								"id": "column18",
+								"type": "list.column",
+								"field": "model1.color",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								}
+							},
+							{
+								"id": "column20",
+								"type": "list.column",
+								"field": "model1.vehiclePrice",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"caption": "车辆价格"
+							},
+							{
+								"id": "column24",
+								"type": "list.column",
+								"field": "model1.advance",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								}
+							},
+							{
+								"id": "column26",
+								"type": "list.column",
+								"field": "model1.remainingPrice",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"visible": "true"
+							},
+							{
+								"id": "column63",
+								"type": "list.column",
+								"caption": "待签署文件",
+								"captionRow": {
+									"align": "center",
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"align": "center",
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"components": [
+									{
+										"id": "button1",
+										"type": "button",
+										"width": "auto",
+										"value": "查看",
+										"templateName": "button",
+										"font": {
+											"color": "bg1",
+											"size": 13
+										},
+										"fill": "color1 65",
+										"visible": "condition",
+										"visibleCondition": "list1.column59.value IS NOT NULL",
+										"disable": "condition",
+										"disableCondition": "list1.column60.value IS NOT NULL",
+										"actions": [
+											{
+												"id": "action1",
+												"actionType": "showFilesGallary",
+												"triggerType": "click",
+												"dataSet": "model1",
+												"attachmentField": "model1.notSigned"
+											}
+										]
+									}
+								]
+							},
+							{
+								"id": "column64",
+								"type": "list.column",
+								"caption": "已签署文件",
+								"captionRow": {
+									"align": "center",
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"align": "center",
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"components": [
+									{
+										"id": "button2",
+										"type": "button",
+										"width": "auto",
+										"value": "查看",
+										"templateName": "button",
+										"font": {
+											"color": "bg1",
+											"size": 13
+										},
+										"fill": "color1 65",
+										"actions": [
+											{
+												"id": "action1",
+												"actionType": "showFilesGallary",
+												"triggerType": "click",
+												"dataSet": "model1",
+												"attachmentField": "model1.signed"
+											}
+										],
+										"visible": "condition",
+										"visibleCondition": "list1.column60.value IS NOT NULL"
+									}
+								]
+							},
+							{
+								"id": "column59",
+								"type": "list.column",
+								"field": "model1.CALCULATOR_1",
+								"caption": "未签字协议",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "showFilesGallary",
+										"triggerType": "click",
+										"dataSet": "model1",
+										"attachmentField": "model1.notSigned"
+									}
+								],
+								"visible": "false"
+							},
+							{
+								"id": "column60",
+								"type": "list.column",
+								"field": "model1.CALCULATOR_2",
+								"caption": "已签字协议",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "showFilesGallary",
+										"triggerType": "click",
+										"dataSet": "model1",
+										"attachmentField": "model1.signed"
+									}
+								],
+								"visible": "false"
+							},
+							{
+								"id": "column45",
+								"type": "list.column",
+								"field": "model1.signed",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "showFilesGallary",
+										"triggerType": "click",
+										"dataSet": "model1",
+										"attachmentField": "model1.signed"
+									}
+								],
+								"visible": "false"
+							},
+							{
+								"id": "column44",
+								"type": "list.column",
+								"field": "model1.notSigned",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "showFilesGallary",
+										"triggerType": "click",
+										"dataSet": "model1",
+										"attachmentField": "model1.notSigned"
+									}
+								],
+								"visible": "false"
+							},
+							{
+								"id": "column33",
+								"type": "list.column",
+								"field": "model1.dateBuyerSignature",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"visible": "false",
+								"caption": "签字日期"
+							},
+							{
+								"id": "column2",
+								"type": "list.column",
+								"field": "model1.entityType",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column4",
+								"type": "list.column",
+								"field": "model1.ownerId",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column5",
+								"type": "list.column",
+								"field": "model1.city",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column6",
+								"type": "list.column",
+								"field": "model1.district",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column7",
+								"type": "list.column",
+								"field": "model1.sellerName",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column8",
+								"type": "list.column",
+								"field": "model1.phone",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column9",
+								"type": "list.column",
+								"field": "model1.address",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column10",
+								"type": "list.column",
+								"field": "model1.salesConsultant",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column11",
+								"type": "list.column",
+								"field": "model1.contact",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column14",
+								"type": "list.column",
+								"field": "model1.buyerAddress",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column19",
+								"type": "list.column",
+								"field": "model1.quantity",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column21",
+								"type": "list.column",
+								"field": "model1.vehiclePriceB",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column22",
+								"type": "list.column",
+								"field": "model1.pricesExcludingTax",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column23",
+								"type": "list.column",
+								"field": "model1.vatAmount",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column25",
+								"type": "list.column",
+								"field": "model1.advanceB",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column27",
+								"type": "list.column",
+								"field": "model1.remainingPriceB",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column28",
+								"type": "list.column",
+								"field": "model1.accountName",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column29",
+								"type": "list.column",
+								"field": "model1.bank",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column30",
+								"type": "list.column",
+								"field": "model1.account",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column31",
+								"type": "list.column",
+								"field": "model1.buyer",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column32",
+								"type": "list.column",
+								"field": "model1.sign",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column34",
+								"type": "list.column",
+								"field": "model1.seller",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column35",
+								"type": "list.column",
+								"field": "model1.authorizedSignature",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column36",
+								"type": "list.column",
+								"field": "model1.dateSellerSignature",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column38",
+								"type": "list.column",
+								"field": "model1.send",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column39",
+								"type": "list.column",
+								"field": "model1.ISRED",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column40",
+								"type": "list.column",
+								"field": "model1.OLDORDERNO",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column42",
+								"type": "list.column",
+								"field": "model1.time",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"visible": "false",
+								"displayFormat": "displayFormat1",
+								"caption": "签字日期"
+							},
+							{
+								"id": "column43",
+								"type": "list.column",
+								"field": "model1.signFlowId",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column46",
+								"type": "list.column",
+								"field": "model1.status",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column47",
+								"type": "list.column",
+								"field": "model1.BuyerSignature",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column48",
+								"type": "list.column",
+								"field": "model1.externalUserId",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column49",
+								"type": "list.column",
+								"field": "model1.qwContactId",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column50",
+								"type": "list.column",
+								"field": "model1.isFill",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								}
+							},
+							{
+								"id": "column53",
+								"type": "list.column",
+								"field": "model1.outboundDate",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"displayFormat": "displayFormat1"
+							},
+							{
+								"id": "column55",
+								"type": "list.column",
+								"field": "model1.soCarSubTypeId",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column52",
+								"type": "list.column",
+								"field": "model1.billingDate",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"displayFormat": "displayFormat1"
+							},
+							{
+								"id": "column56",
+								"type": "list.column",
+								"field": "model1.orderDate",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"displayFormat": "displayFormat1"
+							},
+							{
+								"id": "column57",
+								"type": "list.column",
+								"field": "model1.soCarFcstDeliveryDate",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"wrap": false,
+									"align": "center"
+								},
+								"displayFormat": "displayFormat1"
+							},
+							{
+								"id": "column58",
+								"type": "list.column",
+								"field": "model1.carsaletype",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"visible": "false"
+							},
+							{
+								"id": "column61",
+								"type": "list.column",
+								"field": "model1.createName.USER_NAME",
+								"caption": "创建人",
+								"dataRow": {
+									"align": "center",
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								}
+							},
+							{
+								"id": "column62",
+								"type": "list.column",
+								"field": "model1.createTime",
+								"dataRow": {
+									"align": "center",
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									}
+								},
+								"displayFormat": "displayFormat1",
+								"visible": "false",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									}
+								}
+							},
+							{
+								"id": "column37",
+								"type": "list.column",
+								"field": "model1.creattime",
+								"captionRow": {
+									"font": {
+										"bold": true,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 85",
+										"size": 14,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"align": "center"
+								},
+								"dataRow": {
+									"font": {
+										"bold": false,
+										"italic": false,
+										"underline": false,
+										"lineThrough": false,
+										"color": "font 65",
+										"size": 13,
+										"family": "arial, helvetica, sans-serif"
+									},
+									"displayFormat": "displayFormat1",
+									"align": "center"
+								},
+								"visible": "true",
+								"displayFormat": "displayFormat1"
+							}
+						],
+						"scrollMode": "all",
+						"dataRow": {
+							"height": 45
+						},
+						"compStyle": "style3",
+						"totalCountVisible": false
+					}
+				]
+			}
+		],
+		"viewSize": "entireView",
+		"width": "100%",
+		"minWidth": "600px",
+		"height": "100%",
+		"minHeight": "500px",
+		"overflow": "hidden",
+		"position": "default",
+		"compStyle": "style1"
+	}
+}

@@ -1,0 +1,29 @@
+{
+	"version": "4.19.7",
+	"params": [],
+	"sources": [],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "comp_without_type",
+				"value": "=123"
+			},
+			{
+				"type": "input",
+				"value": "=456"
+			},
+			{
+				"id": "empty_comp",
+				"type": "panel",
+				"components": []
+			},
+			{
+				"id": "normal_input",
+				"type": "input",
+				"value": "=789"
+			}
+		]
+	}
+}

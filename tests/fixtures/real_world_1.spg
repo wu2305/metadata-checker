@@ -1,0 +1,3991 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [
+		{
+			"id": "param1",
+			"name": "act_id",
+			"includeAllWhenEmpty": true,
+			"desc": "活动id"
+		},
+		{
+			"id": "param2",
+			"name": "spdm",
+			"desc": "商品代码"
+		},
+		{
+			"id": "param3",
+			"name": "hdspdm",
+			"desc": "活动商品代码"
+		},
+		{
+			"id": "param4",
+			"name": "ewm",
+			"desc": "二维码"
+		},
+		{
+			"id": "param5",
+			"name": "tpid",
+			"desc": "图片id"
+		},
+		{
+			"id": "param6",
+			"name": "sck",
+			"value": "0",
+			"desc": "素材库"
+		},
+		{
+			"id": "param7",
+			"name": "xcxewm",
+			"includeAllWhenEmpty": true,
+			"desc": "小程序二维码"
+		},
+		{
+			"id": "param8",
+			"name": "hdkqid",
+			"desc": "活动卡券id"
+		}
+	],
+	"sources": [
+		{
+			"id": "model2",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/fact_activity.tbl",
+			"primaryKey": "name",
+			"queryConditionReturnEmpty": false
+		},
+		{
+			"id": "model3",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/维表/dim_campaignType.tbl"
+		},
+		{
+			"id": "model5",
+			"modelType": "dwtable",
+			"path": "$DATA:/主数据/fact_customAutoStorefront.tbl"
+		},
+		{
+			"id": "model6",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/fact_activityGoods.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model6.activity.name=input7.value"
+					}
+				]
+			}
+		},
+		{
+			"id": "model7",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/fact_goods.tbl"
+		},
+		{
+			"id": "model8",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/fact_goods.tbl",
+			"name": "商品带出",
+			"dataSetResultType": "oneRowResult",
+			"queryConditionReturnEmpty": false
+		},
+		{
+			"id": "model4",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/fact_autoBasicMaterial.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"leftExp": "model4.materialType",
+						"operator": "=",
+						"rightValue": "1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model9",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/fact_autoBasicMaterial.tbl",
+			"name": "选择的素材",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model9.file_id IN param5"
+					}
+				]
+			},
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "file_id",
+			"queryConditionReturnEmpty": false
+		},
+		{
+			"id": "model10",
+			"modelType": "dwtable",
+			"path": "$DATA:/主数据/fact_productBrand.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"leftExp": "model10.enableStatus",
+						"operator": "==",
+						"rightValue": "1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model11",
+			"modelType": "dwtable",
+			"path": "$DATA:/主数据/fact_product.tbl"
+		},
+		{
+			"id": "model12",
+			"modelType": "dwtable",
+			"path": "$DATA:/主数据/fact_productCategory.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"leftExp": "model12.enableStatus",
+						"operator": "=",
+						"rightValue": "1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model13",
+			"modelType": "dwtable",
+			"path": "$DATA:/通用/dim_Promoter.tbl",
+			"primaryKey": "PromoterID",
+			"queryConditionReturnEmpty": false,
+			"cacheMode": "disable"
+		},
+		{
+			"id": "model14",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/fact_activityAttachment.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "HDID",
+			"queryConditionReturnEmpty": false,
+			"cacheMode": "disable",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model14.HDID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model1",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/fact_activity.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "name",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model1.name=input7.value"
+					}
+				]
+			},
+			"name": "活动1"
+		},
+		{
+			"id": "model16",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/系统表勿动/取门店店总.tbl",
+			"dataSetResultType": "oneRowResult",
+			"queryConditionReturnEmpty": false,
+			"params": [
+				{
+					"name": "groupid",
+					"value": "${combobox8.value}"
+				}
+			]
+		},
+		{
+			"id": "model15",
+			"modelType": "workflow",
+			"name": "流程表单数据",
+			"workFlowSourceType": "formdata",
+			"workFlowPath": "工作流/活动审批.wfl",
+			"formId": "model1",
+			"enableBusinessKeyExp": false,
+			"inheritFieldVisible": false
+		},
+		{
+			"id": "model17",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/活动卡券/fact_chooseActiveCard.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model17.hdName=input7.value"
+					}
+				]
+			}
+		},
+		{
+			"id": "model18",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/系统表勿动/取售后经理.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "USER_ID",
+			"queryConditionReturnEmpty": false,
+			"params": [
+				{
+					"name": "ssjg",
+					"value": "=$user.dept_id"
+				}
+			]
+		},
+		{
+			"id": "model19",
+			"modelType": "dwtable",
+			"path": "$DATA:/活动/系统表勿动/取门店财务经理.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "USER_ID",
+			"queryConditionReturnEmpty": false,
+			"params": [
+				{
+					"name": "ssjg",
+					"value": "=$user.dept_id"
+				}
+			]
+		}
+	],
+	"refComponentTypes": [
+		"canvas",
+		"panel",
+		"steps",
+		"panelbook",
+		"combobox",
+		"input",
+		"button",
+		"text",
+		"multipleinput",
+		"datecombobox",
+		"numberinput",
+		"list",
+		"icon",
+		"upload",
+		"floatpanel",
+		"image",
+		"richtextinput",
+		"dialog",
+		"checkbox"
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"viewSize": "entireView",
+		"width": "100%",
+		"minWidth": "600px",
+		"height": "100%",
+		"minHeight": "500px",
+		"overflow": "hidden",
+		"position": "default",
+		"components": [
+			{
+				"id": "panel16",
+				"type": "panel",
+				"width": "100%",
+				"minWidth": "20px",
+				"height": "15%",
+				"display": "inlineflexRow",
+				"flexDirection": "row",
+				"templateName": "panel_row",
+				"components": [
+					{
+						"id": "steps1",
+						"type": "steps",
+						"width": "100%",
+						"height": "100%",
+						"defaultStep": "选择活动类型",
+						"steps": [
+							{
+								"id": "step1",
+								"type": "steps.step",
+								"value": "选择活动类型",
+								"desc": ""
+							},
+							{
+								"id": "step2",
+								"type": "steps.step",
+								"value": "填写活动信息",
+								"desc": ""
+							},
+							{
+								"id": "step3",
+								"type": "steps.step",
+								"value": "选择活动素材",
+								"desc": ""
+							},
+							{
+								"id": "step4",
+								"type": "steps.step",
+								"value": "邀请意向客户",
+								"visible": "false"
+							}
+						],
+						"templateName": "steps",
+						"margin": "0px",
+						"stepsLayout": "horizontal",
+						"stepsAlign": "center",
+						"stepStyle": {
+							"fontCaption": {
+								"bold": true,
+								"size": 16
+							}
+						},
+						"numberStyle": {
+							"fontStepNumber": {
+								"size": 16
+							}
+						},
+						"fill": "bg1"
+					}
+				],
+				"margin": "0px 0px 10px 0px"
+			},
+			{
+				"id": "panelbook1",
+				"type": "panelbook",
+				"width": "100%",
+				"height": "85%",
+				"panels": [
+					{
+						"id": "panel1",
+						"type": "panelbook.panel",
+						"panelName": "panel1",
+						"components": [
+							{
+								"id": "panel17",
+								"type": "panel",
+								"width": "100%",
+								"height": "85%",
+								"templateName": "panel",
+								"components": [
+									{
+										"id": "panel26",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "26px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"components": [
+											{
+												"id": "combobox12",
+												"type": "combobox",
+												"width": "240px",
+												"templateName": "combobox",
+												"title": {
+													"type": "title",
+													"value": "业务类型\n",
+													"font": {
+														"color": "#000000"
+													}
+												},
+												"submitData": true,
+												"autoFilter": false,
+												"options": [
+													[
+														"集团活动",
+														"集团活动"
+													],
+													[
+														"门店活动",
+														"门店活动"
+													]
+												],
+												"notNull": true,
+												"dimension": "model2.entityType",
+												"height": "auto",
+												"minHeight": "35px",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "setComponentProperty",
+														"triggerType": "change",
+														"compId": "combobox9",
+														"propertyName": "value",
+														"propertyValue": "NULL"
+													},
+													{
+														"id": "action2",
+														"actionType": "newData",
+														"triggerType": "change",
+														"enabled": "condition",
+														"submitRange": "component",
+														"submitComponent": [
+															"combobox7",
+															"combobox18",
+															"combobox8",
+															"combobox3",
+															"combobox1",
+															"combobox13",
+															"combobox16"
+														]
+													}
+												],
+												"submitField": "model2.entityType",
+												"enableCleanValue": true
+											},
+											{
+												"id": "combobox3",
+												"type": "combobox",
+												"width": "165px",
+												"templateName": "combobox",
+												"options": [
+													[
+														"否",
+														"否"
+													],
+													[
+														"是",
+														"是"
+													]
+												],
+												"enableCleanValue": false,
+												"notNull": true,
+												"visible": "condition",
+												"visibleCondition": "combobox12.value='2'",
+												"title": {
+													"type": "title",
+													"value": "是否卡券活动",
+													"width": "auto"
+												},
+												"submitData": true,
+												"autoFilter": false,
+												"calcEnabled": true,
+												"submitField": "model2.couponActivity",
+												"exp": "IF(combobox12.value='2','否',NULL)"
+											},
+											{
+												"id": "input19",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"calcEnabled": true,
+												"exp": "combobox8.value",
+												"title": {
+													"type": "title"
+												},
+												"visible": "false"
+											}
+										],
+										"margin": "5px 10px 5px 10px"
+									},
+									{
+										"id": "panel24",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "26px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"components": [
+											{
+												"id": "combobox7",
+												"type": "combobox",
+												"width": "240px",
+												"height": "auto",
+												"minHeight": "35px",
+												"templateName": "combobox",
+												"title": {
+													"type": "title",
+													"value": "活动发起方",
+													"font": {
+														"color": "#000000"
+													}
+												},
+												"submitData": true,
+												"autoFilter": false,
+												"notNull": true,
+												"calcEnabled": true,
+												"margin": "8px 15px 8px 8px",
+												"options": [
+													[
+														"1",
+														"集团"
+													],
+													[
+														"2",
+														"门店"
+													]
+												],
+												"dimension": "model13",
+												"dimProperty": "model13.PromoterID",
+												"submitField": "model2.initiator",
+												"enableCleanValue": true,
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "newData",
+														"triggerType": "change",
+														"submitRange": "component",
+														"submitComponent": [
+															"combobox18",
+															"combobox8"
+														]
+													}
+												],
+												"disable": "condition",
+												"disableCondition": "IF($user.dept_id!='00000000',TRUE,FALSE)",
+												"exp": "IF($user.dept_id!='00000000','2',NULL)"
+											},
+											{
+												"id": "combobox18",
+												"type": "combobox",
+												"width": "165px",
+												"templateName": "combobox",
+												"options": [
+													[
+														"否",
+														"否"
+													],
+													[
+														"是",
+														"是"
+													]
+												],
+												"enableCleanValue": false,
+												"notNull": true,
+												"visible": "condition",
+												"visibleCondition": "combobox7.value='2'",
+												"title": {
+													"type": "title",
+													"value": "是否跨门店",
+													"width": "auto"
+												},
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.ifnoStore",
+												"calcEnabled": true,
+												"exp": "IF(combobox7.value=1,NULL,'否')",
+												"disable": "condition",
+												"disableCondition": "combobox12.value=2 AND combobox7.value=2"
+											},
+											{
+												"id": "combobox8",
+												"type": "combobox",
+												"width": "auto",
+												"minWidth": "240px",
+												"maxWidth": "600px",
+												"templateName": "combobox",
+												"title": {
+													"type": "title",
+													"value": "参与门店",
+													"font": {
+														"color": "#000000"
+													}
+												},
+												"dimension": "model5",
+												"submitData": true,
+												"autoFilter": false,
+												"notNull": true,
+												"submitField": "model2.participateStore",
+												"visible": "condition",
+												"visibleCondition": "combobox7.value=1 OR combobox18.value='是'",
+												"height": "auto",
+												"minHeight": "35px",
+												"multiple": true,
+												"enableCleanValue": true,
+												"selectAllEnable": true,
+												"calcEnabled": true,
+												"exp": "IF(combobox18='否',$user.dept_id.DEPT_ID)"
+											},
+											{
+												"id": "input5",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"calcEnabled": true,
+												"exp": "$user.dept_id.DEPT_ID",
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.dimDepart",
+												"visible": "false",
+												"title": {
+													"type": "title",
+													"value": "所属机构"
+												}
+											}
+										],
+										"margin": "5px 10px 5px 10px"
+									},
+									{
+										"id": "panel25",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "26px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"components": [
+											{
+												"id": "combobox9",
+												"type": "combobox",
+												"width": "240px",
+												"templateName": "combobox",
+												"title": {
+													"type": "title",
+													"value": "活动类型",
+													"font": {
+														"color": "#000000"
+													}
+												},
+												"submitData": true,
+												"autoFilter": false,
+												"options": [
+													[
+														"集团活动",
+														"集团活动"
+													],
+													[
+														"门店活动",
+														"门店活动"
+													]
+												],
+												"notNull": true,
+												"margin": "8px 15px 8px 8px",
+												"height": "auto",
+												"minHeight": "35px",
+												"showRootItems": false,
+												"disable": "condition",
+												"disableCondition": "combobox12.value= NULL",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "newData",
+														"triggerType": "change",
+														"submitRange": "component",
+														"submitComponent": [
+															"combobox1",
+															"combobox13",
+															"combobox16"
+														]
+													}
+												],
+												"enableCleanValue": true,
+												"dimension": "model3",
+												"itemFilter": "CASE WHEN combobox12.value IN ('2','4')\nTHEN id IN ('1','2','3')\nWHEN combobox12.value ='3'\nTHEN id IN ('1','2','3','5')\nWHEN combobox12.value ='1'\nTHEN id IN ('1','2','3','4')\nEND",
+												"dimProperty": "model3.id",
+												"submitField": "model2.campaignType"
+											},
+											{
+												"id": "input10",
+												"type": "input",
+												"width": "181px",
+												"templateName": "txtinput",
+												"calcEnabled": true,
+												"exp": "TOSTR(NOW(),'ddhhmmss')",
+												"visible": "false",
+												"title": {
+													"type": "title",
+													"value": "日期",
+													"width": "auto"
+												}
+											},
+											{
+												"id": "input18",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"calcEnabled": true,
+												"exp": "SEQNUM(0)",
+												"visible": "false",
+												"title": {
+													"type": "title",
+													"value": "自增"
+												}
+											}
+										],
+										"margin": "5px 10px 5px 10px"
+									},
+									{
+										"id": "input7",
+										"type": "input",
+										"width": "auto",
+										"templateName": "txtinput",
+										"title": {
+											"type": "title",
+											"value": "活动ID"
+										},
+										"calcEnabled": true,
+										"exp": "CONCAT(input10,input18)",
+										"submitData": true,
+										"autoFilter": false,
+										"submitField": "model2.name",
+										"visible": "false"
+									},
+									{
+										"id": "combobox1",
+										"type": "combobox",
+										"width": "370px",
+										"templateName": "combobox",
+										"title": {
+											"type": "title",
+											"value": "意向品牌",
+											"font": {
+												"color": "#000000"
+											}
+										},
+										"submitData": true,
+										"autoFilter": false,
+										"options": [
+											[
+												"集团活动",
+												"集团活动"
+											],
+											[
+												"门店活动",
+												"门店活动"
+											]
+										],
+										"notNull": false,
+										"dimension": "model11",
+										"margin": "15px",
+										"height": "auto",
+										"minHeight": "35px",
+										"dimProperty": "model11.carBrand",
+										"showRootItems": false,
+										"disable": "false",
+										"disableCondition": "combobox12.value= NULL",
+										"enableCleanValue": true,
+										"itemFilter": "isSales='在售'",
+										"multiple": true,
+										"submitField": "model2.carBrand",
+										"selectAllEnable": true,
+										"actions": [
+											{
+												"id": "action1",
+												"actionType": "newData",
+												"triggerType": "change",
+												"submitRange": "component",
+												"submitComponent": [
+													"combobox13",
+													"combobox16"
+												]
+											}
+										]
+									},
+									{
+										"id": "combobox13",
+										"type": "combobox",
+										"width": "370px",
+										"templateName": "combobox",
+										"title": {
+											"type": "title",
+											"value": "意向车系",
+											"font": {
+												"color": "#000000"
+											}
+										},
+										"submitData": true,
+										"autoFilter": false,
+										"options": [
+											[
+												"集团活动",
+												"集团活动"
+											],
+											[
+												"门店活动",
+												"门店活动"
+											]
+										],
+										"notNull": false,
+										"dimension": "model11",
+										"margin": "15px",
+										"height": "auto",
+										"minHeight": "35px",
+										"dimProperty": "model11.parentId",
+										"showRootItems": false,
+										"itemFilter": "carBrand IN combobox1.value  AND isSales='在售'",
+										"disable": "condition",
+										"disableCondition": "combobox1.value= NULL",
+										"enableCleanValue": true,
+										"multiple": true,
+										"submitField": "model2.carSeries",
+										"selectAllEnable": true,
+										"visible": "condition",
+										"visibleCondition": "combobox12.value!=2",
+										"actions": [
+											{
+												"id": "action1",
+												"actionType": "newData",
+												"triggerType": "change",
+												"submitRange": "component",
+												"submitComponent": [
+													"combobox16"
+												]
+											}
+										]
+									},
+									{
+										"id": "combobox16",
+										"type": "combobox",
+										"width": "370px",
+										"templateName": "combobox",
+										"title": {
+											"type": "title",
+											"value": "意向车型",
+											"font": {
+												"color": "#000000"
+											}
+										},
+										"submitData": true,
+										"autoFilter": false,
+										"options": [
+											[
+												"集团活动",
+												"集团活动"
+											],
+											[
+												"门店活动",
+												"门店活动"
+											]
+										],
+										"notNull": false,
+										"dimension": "model11",
+										"margin": "15px",
+										"height": "auto",
+										"minHeight": "35px",
+										"dimProperty": "model11.productName",
+										"showRootItems": false,
+										"itemFilter": "parentId IN combobox13.value AND isSales='在售'",
+										"disable": "condition",
+										"disableCondition": "combobox13.value= NULL",
+										"enableCleanValue": true,
+										"multiple": true,
+										"submitField": "model2.carModel",
+										"selectAllEnable": true,
+										"visible": "condition",
+										"visibleCondition": "combobox12.value!=2"
+									}
+								],
+								"padding": "5px 10px 5px 10px",
+								"border": "1px solid bg1@0"
+							},
+							{
+								"id": "panel18",
+								"type": "panel",
+								"width": "100%",
+								"height": "15%",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"fixedWhenScrollTop": true,
+								"components": [
+									{
+										"id": "button1",
+										"type": "button",
+										"width": "132px",
+										"value": "下一步",
+										"templateName": "button",
+										"compStyle": "button6",
+										"actions": [
+											{
+												"id": "action4",
+												"actionType": "validateForm",
+												"triggerType": "click"
+											},
+											{
+												"id": "action3",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"saveDraft": true,
+												"enabled": "false",
+												"showSuccessMsg": false
+											},
+											{
+												"id": "action1",
+												"actionType": "setComponentProperty",
+												"triggerType": "click",
+												"compId": "steps1",
+												"propertyName": "value",
+												"propertyValue": "'填写活动信息'",
+												"enabled": "condition"
+											},
+											{
+												"id": "action2",
+												"actionType": "switchPanel",
+												"triggerType": "click",
+												"panelbook": "panelbook1",
+												"panel": "nextPage",
+												"enabled": "condition"
+											}
+										],
+										"fill": "#072C52"
+									}
+								],
+								"rowJustifyContent": "flex-end",
+								"padding": "0px 10px 0px 0px"
+							}
+						]
+					},
+					{
+						"id": "panel2",
+						"type": "panelbook.panel",
+						"panelName": "panel2",
+						"components": [
+							{
+								"id": "panel15",
+								"type": "panel",
+								"width": "100%",
+								"height": "85%",
+								"templateName": "panel",
+								"overflow": "y",
+								"components": [
+									{
+										"id": "panel2",
+										"type": "panel",
+										"width": "100%",
+										"height": "auto",
+										"minHeight": "400px",
+										"display": "inlineflexColumn",
+										"flexDirection": "column",
+										"templateName": "panel_column",
+										"components": [
+											{
+												"id": "panel14",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "40px",
+												"minHeight": "30px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"margin": "5px 0px 5px 0px",
+												"components": [
+													{
+														"id": "text5",
+														"type": "text",
+														"width": "142px",
+														"minWidth": "16px",
+														"height": "auto",
+														"minHeight": "16px",
+														"templateName": "text",
+														"value": "活动基本信息",
+														"font": {
+															"bold": true,
+															"size": 16
+														}
+													}
+												],
+												"fill": "bg1@0",
+												"padding": "0px 0px 0px 5px"
+											},
+											{
+												"id": "input2",
+												"type": "input",
+												"width": "60%",
+												"minWidth": "400px",
+												"templateName": "txtinput",
+												"title": {
+													"type": "title",
+													"value": "活动名称"
+												},
+												"notNull": true,
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.campaignName",
+												"height": "35px",
+												"minHeight": "26px"
+											},
+											{
+												"id": "multipleinput3",
+												"type": "multipleinput",
+												"width": "60%",
+												"minWidth": "400px",
+												"templateName": "multipleinput",
+												"title": {
+													"type": "title",
+													"value": "活动副标题"
+												},
+												"notNull": true,
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.advertisement",
+												"height": "auto",
+												"minHeight": "30px"
+											},
+											{
+												"id": "multipleinput2",
+												"type": "multipleinput",
+												"width": "60%",
+												"minWidth": "400px",
+												"templateName": "multipleinput",
+												"title": {
+													"type": "title",
+													"value": "活动地点"
+												},
+												"notNull": true,
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.campaignAddress",
+												"height": "auto",
+												"minHeight": "30px"
+											},
+											{
+												"id": "datecombobox1",
+												"type": "datecombobox",
+												"width": "60%",
+												"height": "35px",
+												"minHeight": "35px",
+												"templateName": "datecombobox",
+												"title": {
+													"type": "title",
+													"value": "活动开始日期"
+												},
+												"notNull": true,
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.campaignstartTime",
+												"dateType": "date",
+												"earliest": "TODAY()",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "resetData",
+														"triggerType": "change",
+														"submitRange": "component",
+														"submitComponent": [
+															"datecombobox2",
+															"datecombobox8",
+															"datecombobox6"
+														]
+													}
+												],
+												"enableCleanValue": true,
+												"visible": "condition",
+												"visibleCondition": "combobox9.value != '5'"
+											},
+											{
+												"id": "datecombobox2",
+												"type": "datecombobox",
+												"width": "60%",
+												"height": "35px",
+												"minHeight": "35px",
+												"templateName": "datecombobox",
+												"title": {
+													"type": "title",
+													"value": "活动结束日期"
+												},
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.campaignendTime",
+												"notNull": true,
+												"dateType": "date",
+												"earliest": "datecombobox1",
+												"disable": "condition",
+												"disableCondition": "datecombobox1.value= NULL",
+												"enableCleanValue": true,
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "newData",
+														"triggerType": "change",
+														"submitRange": "component",
+														"submitComponent": [
+															"datecombobox8",
+															"datecombobox6"
+														]
+													}
+												],
+												"visible": "condition",
+												"visibleCondition": "combobox9.value != '5'"
+											},
+											{
+												"id": "panel8",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "auto",
+												"minHeight": "30px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"margin": "0px 0px 10px 0px",
+												"components": [
+													{
+														"id": "datecombobox8",
+														"type": "datecombobox",
+														"width": "240px",
+														"height": "auto",
+														"minHeight": "26px",
+														"templateName": "datecombobox",
+														"notNull": true,
+														"title": {
+															"type": "title",
+															"value": "报名开始日期"
+														},
+														"submitData": true,
+														"autoFilter": false,
+														"submitField": "model2.applicationStartDate",
+														"dateType": "date",
+														"disable": "condition",
+														"disableCondition": "datecombobox2.value= NULL",
+														"enableCleanValue": true,
+														"actions": [
+															{
+																"id": "action1",
+																"actionType": "newData",
+																"triggerType": "change",
+																"submitRange": "component",
+																"submitComponent": [
+																	"datecombobox6"
+																]
+															}
+														]
+													},
+													{
+														"id": "datecombobox6",
+														"type": "datecombobox",
+														"width": "40%",
+														"height": "35px",
+														"minHeight": "35px",
+														"templateName": "datecombobox",
+														"title": {
+															"type": "title",
+															"value": "报名结束日期"
+														},
+														"submitData": true,
+														"autoFilter": false,
+														"submitField": "model2.applicationEndDate",
+														"notNull": true,
+														"dateType": "date",
+														"disable": "condition",
+														"disableCondition": "datecombobox8.value= NULL",
+														"enableCleanValue": true
+													},
+													{
+														"id": "combobox5",
+														"type": "combobox",
+														"width": "25%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "活动报名状态"
+														},
+														"dimension": "model2.active_registration_status",
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"submitField": "model2.active_registration_status",
+														"height": "35px",
+														"minHeight": "35px",
+														"defaultValue": "1",
+														"disable": "false"
+													}
+												],
+												"visible": "condition",
+												"visibleCondition": "combobox9.value != '5'"
+											},
+											{
+												"id": "panel11",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "auto",
+												"minHeight": "30px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"components": [
+													{
+														"id": "combobox2",
+														"type": "combobox",
+														"width": "30%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "活动状态"
+														},
+														"dimension": "model1.campaignState",
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"submitField": "model2.campaignState",
+														"height": "35px",
+														"minHeight": "35px",
+														"defaultValue": "=IF(combobox9.value = '5','2','1')",
+														"disable": "true"
+													},
+													{
+														"id": "numberinput1",
+														"type": "numberinput",
+														"width": "30%",
+														"templateName": "numberinput",
+														"title": {
+															"type": "title",
+															"value": "活动计划人数"
+														},
+														"submitData": true,
+														"autoFilter": false,
+														"submitField": "model2.personnumber",
+														"notNull": false,
+														"height": "35px",
+														"minHeight": "35px"
+													},
+													{
+														"id": "numberinput2",
+														"type": "numberinput",
+														"width": "30%",
+														"templateName": "numberinput",
+														"notNull": false,
+														"submitData": true,
+														"autoFilter": false,
+														"submitField": "model2.campaignBudget",
+														"title": {
+															"type": "title",
+															"value": "活动预算费用"
+														},
+														"height": "35px",
+														"minHeight": "35px"
+													}
+												],
+												"visible": "condition",
+												"visibleCondition": "combobox9.value != '5'"
+											},
+											{
+												"id": "panel39",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "auto",
+												"minHeight": "30px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"components": [
+													{
+														"id": "combobox10",
+														"type": "combobox",
+														"width": "23%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "活动二维码",
+															"width": "100px"
+														},
+														"dimension": "options",
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"submitField": "model2.QRCode",
+														"height": "35px",
+														"options": [
+															[
+																"1",
+																"需要"
+															],
+															[
+																"0",
+																"不需要"
+															]
+														],
+														"enableCleanValue": false
+													},
+													{
+														"id": "combobox11",
+														"type": "combobox",
+														"width": "23%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "活动签到码",
+															"width": "100px"
+														},
+														"dimension": "options",
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"submitField": "model2.signQRCode",
+														"height": "35px",
+														"options": [
+															[
+																"1",
+																"需要"
+															],
+															[
+																"0",
+																"不需要"
+															]
+														]
+													},
+													{
+														"id": "combobox6",
+														"type": "combobox",
+														"width": "23%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "活动留资二维码",
+															"width": "100px"
+														},
+														"dimension": "options",
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"submitField": "model2.applyQRCode",
+														"height": "35px",
+														"options": [
+															[
+																"1",
+																"需要"
+															],
+															[
+																"0",
+																"不需要"
+															]
+														],
+														"visible": "condition",
+														"visibleCondition": "combobox12.value!=2"
+													},
+													{
+														"id": "combobox4",
+														"type": "combobox",
+														"width": "23%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "是否显示报名",
+															"width": "100px"
+														},
+														"dimension": "model2.is_enrolled",
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"submitField": "model2.is_enrolled",
+														"height": "35px",
+														"visible": "true"
+													}
+												],
+												"visible": "condition",
+												"visibleCondition": "combobox9.value != '5'"
+											},
+											{
+												"id": "panel10",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "auto",
+												"minHeight": "30px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"margin": "0px 0px 10px 0px",
+												"borderBottom": "1px solid bg1@2",
+												"components": [
+													{
+														"id": "combobox14",
+														"type": "combobox",
+														"width": "23%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "企微显示",
+															"width": "100px"
+														},
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"height": "35px",
+														"dimension": "model1.isQwSidebar",
+														"submitField": "model2.isQwSidebar",
+														"visible": "condition",
+														"visibleCondition": "combobox9.value != '5'"
+													},
+													{
+														"id": "combobox15",
+														"type": "combobox",
+														"width": "23%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "小程序轮播图显示",
+															"width": "120px"
+														},
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"height": "35px",
+														"dimension": "model1.isAppShow",
+														"submitField": "model2.isAppShow"
+													},
+													{
+														"id": "combobox17",
+														"type": "combobox",
+														"width": "23%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "预约试乘试驾",
+															"width": "100px"
+														},
+														"dimension": "options",
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"submitField": "model2.isBook",
+														"height": "35px",
+														"options": [
+															[
+																"1",
+																"需要"
+															],
+															[
+																"0",
+																"不需要"
+															]
+														],
+														"visible": "condition",
+														"visibleCondition": "combobox9.value != '5'"
+													},
+													{
+														"id": "combobox19",
+														"type": "combobox",
+														"width": "23%",
+														"templateName": "combobox",
+														"title": {
+															"type": "title",
+															"value": "活动日历显示",
+															"width": "100px"
+														},
+														"dimension": "options",
+														"submitData": true,
+														"autoFilter": false,
+														"notNull": true,
+														"submitField": "model2.isActivityDisplay",
+														"height": "35px",
+														"options": [
+															[
+																"1",
+																"是"
+															],
+															[
+																"0",
+																"否"
+															]
+														],
+														"visible": "condition",
+														"visibleCondition": "combobox12.value IN ('1','3') AND combobox9.value != '5'"
+													}
+												]
+											},
+											{
+												"id": "panel21",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "40px",
+												"minHeight": "26px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"margin": "5px 0px 5px 0px",
+												"components": [
+													{
+														"id": "text6",
+														"type": "text",
+														"width": "142px",
+														"minWidth": "16px",
+														"height": "auto",
+														"minHeight": "16px",
+														"templateName": "text",
+														"value": "活动条件",
+														"font": {
+															"bold": true,
+															"size": 16
+														}
+													}
+												],
+												"fill": "bg1@0",
+												"padding": "0px 0px 0px 5px",
+												"visible": "condition",
+												"visibleCondition": "combobox9.value != '5'"
+											},
+											{
+												"id": "multipleinput4",
+												"type": "multipleinput",
+												"width": "60%",
+												"minWidth": "400px",
+												"templateName": "multipleinput",
+												"notNull": false,
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.campaignDescribe",
+												"title": {
+													"type": "title",
+													"value": "活动说明"
+												},
+												"visible": "condition",
+												"visibleCondition": "combobox9.value != '5'"
+											},
+											{
+												"id": "multipleinput5",
+												"type": "multipleinput",
+												"width": "60%",
+												"minWidth": "400px",
+												"templateName": "multipleinput",
+												"title": {
+													"type": "title",
+													"value": "活动报名条件"
+												},
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.applicationCondition",
+												"notNull": false,
+												"visible": "condition",
+												"visibleCondition": "combobox9.value != '5'"
+											},
+											{
+												"id": "panel1",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "auto",
+												"minHeight": "26px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"margin": "0px 0px 10px 0px",
+												"borderBottom": "1px solid bg1@2"
+											},
+											{
+												"id": "panel6",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "40px",
+												"minHeight": "26px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"margin": "5px 0px 5px 0px",
+												"components": [
+													{
+														"id": "text3",
+														"type": "text",
+														"width": "142px",
+														"minWidth": "16px",
+														"height": "auto",
+														"minHeight": "16px",
+														"templateName": "text",
+														"value": "关联电子卡券",
+														"font": {
+															"bold": true,
+															"size": 16
+														}
+													},
+													{
+														"id": "button3",
+														"type": "button",
+														"width": "107px",
+														"prefixIcon": "$ICON:/5001",
+														"compStyle": "button6",
+														"templateName": "iconButton",
+														"icon": "$ICON:/768",
+														"value": "创建卡券",
+														"iconPosition": "left",
+														"fill": "#072C52",
+														"actions": [
+															{
+																"id": "action3",
+																"actionType": "showDialog",
+																"triggerType": "click",
+																"dialog": "dialog4"
+															}
+														],
+														"margin": "4px 10px 4px 4px"
+													}
+												],
+												"fill": "bg1@0",
+												"padding": "0px 0px 0px 5px",
+												"rowAlignItems": "center",
+												"rowJustifyContent": "space-between",
+												"visible": "condition",
+												"visibleCondition": "combobox3.value='是'"
+											},
+											{
+												"id": "list1",
+												"type": "list",
+												"width": "100%",
+												"height": "auto",
+												"minHeight": "200px",
+												"flexible": "true",
+												"templateName": "list",
+												"scrollMode": "all",
+												"margin": "5px 0px 5px 0px",
+												"pageVisible": "true",
+												"visible": "condition",
+												"visibleCondition": "combobox3.value='是'",
+												"dataSet": "model17",
+												"columns": [
+													{
+														"id": "column12",
+														"type": "list.column",
+														"caption": "操作",
+														"dataRow": {
+															"align": "center"
+														},
+														"components": [
+															{
+																"id": "button4",
+																"type": "button",
+																"width": "auto",
+																"value": "编辑",
+																"templateName": "button",
+																"font": {
+																	"color": "color2 65"
+																},
+																"border": "none",
+																"actions": [
+																	{
+																		"id": "action1",
+																		"actionType": "showDialog",
+																		"triggerType": "click",
+																		"dialog": "dialog4",
+																		"mode": "loadData"
+																	}
+																]
+															},
+															{
+																"id": "button7",
+																"type": "button",
+																"width": "auto",
+																"value": "删除",
+																"templateName": "button",
+																"border": "none",
+																"font": {
+																	"color": "color5 65"
+																},
+																"actions": [
+																	{
+																		"id": "action1",
+																		"actionType": "deleteData",
+																		"triggerType": "click",
+																		"dataSet": [
+																			"model17"
+																		],
+																		"checkUpdateResult": "none"
+																	}
+																]
+															}
+														]
+													},
+													{
+														"id": "column1",
+														"type": "list.column",
+														"field": "model17.hdCardid",
+														"visible": "false",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														}
+													},
+													{
+														"id": "column2",
+														"type": "list.column",
+														"field": "model17.hdName",
+														"visible": "false",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														}
+													},
+													{
+														"id": "column3",
+														"type": "list.column",
+														"field": "model17.card_name",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														}
+													},
+													{
+														"id": "column4",
+														"type": "list.column",
+														"field": "model17.card_category",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														}
+													},
+													{
+														"id": "column5",
+														"type": "list.column",
+														"field": "model17.card_type",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														}
+													},
+													{
+														"id": "column6",
+														"type": "list.column",
+														"field": "model17.cost",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														},
+														"caption": "单价"
+													},
+													{
+														"id": "column8",
+														"type": "list.column",
+														"field": "model17.create_time",
+														"visible": "false",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														}
+													},
+													{
+														"id": "column9",
+														"type": "list.column",
+														"field": "model17.created_by",
+														"visible": "false",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														}
+													},
+													{
+														"id": "column10",
+														"type": "list.column",
+														"field": "model17.modify_time",
+														"visible": "false",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														}
+													},
+													{
+														"id": "column11",
+														"type": "list.column",
+														"field": "model17.modify_by",
+														"visible": "false",
+														"captionRow": {
+															"align": "center"
+														},
+														"dataRow": {
+															"align": "center"
+														}
+													}
+												]
+											}
+										],
+										"overflow": "hidden"
+									}
+								],
+								"border": "1px solid bg1@0",
+								"padding": "5px 10px 5px 10px"
+							},
+							{
+								"id": "panel19",
+								"type": "panel",
+								"width": "100%",
+								"height": "15%",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"fixedWhenScrollTop": true,
+								"components": [
+									{
+										"id": "button9",
+										"type": "button",
+										"width": "132px",
+										"value": "上一步",
+										"templateName": "button",
+										"compStyle": "button6",
+										"actions": [
+											{
+												"id": "action1",
+												"actionType": "setComponentProperty",
+												"triggerType": "click",
+												"compId": "steps1",
+												"propertyName": "value",
+												"propertyValue": "'选择活动类型'"
+											},
+											{
+												"id": "action2",
+												"actionType": "switchPanel",
+												"triggerType": "click",
+												"panelbook": "panelbook1",
+												"panel": "previous",
+												"enabled": "condition"
+											}
+										],
+										"fill": "#072C52"
+									},
+									{
+										"id": "button2",
+										"type": "button",
+										"width": "132px",
+										"value": "下一步",
+										"templateName": "button",
+										"compStyle": "button6",
+										"actions": [
+											{
+												"id": "action3",
+												"actionType": "validateForm",
+												"triggerType": "click"
+											},
+											{
+												"id": "action4",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "false",
+												"saveDraft": true,
+												"showSuccessMsg": false,
+												"closeWhenSuccess": false
+											},
+											{
+												"id": "action1",
+												"actionType": "setComponentProperty",
+												"triggerType": "click",
+												"compId": "steps1",
+												"propertyName": "value",
+												"propertyValue": "'选择活动素材'",
+												"enabled": "condition"
+											},
+											{
+												"id": "action2",
+												"actionType": "switchPanel",
+												"triggerType": "click",
+												"panelbook": "panelbook1",
+												"panel": "nextPage",
+												"enabled": "condition"
+											}
+										],
+										"fill": "#072C52"
+									}
+								],
+								"rowJustifyContent": "flex-end"
+							}
+						]
+					},
+					{
+						"id": "panel3",
+						"type": "panelbook.panel",
+						"panelName": "panel3",
+						"components": [
+							{
+								"id": "panel22",
+								"type": "panel",
+								"width": "100%",
+								"minWidth": "20px",
+								"height": "85%",
+								"minHeight": "26px",
+								"templateName": "panel",
+								"components": [
+									{
+										"id": "panel42",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "26px",
+										"display": "inlineflexColumn",
+										"flexDirection": "column",
+										"templateName": "panel_column",
+										"components": [
+											{
+												"id": "panel43",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "auto",
+												"minHeight": "26px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"margin": "8px",
+												"components": [
+													{
+														"id": "icon1",
+														"type": "icon",
+														"width": "20px",
+														"minWidth": "20px",
+														"height": "20px",
+														"minHeight": "20px",
+														"templateName": "icon",
+														"icon": "$ICON:/5449",
+														"iconColor": "#F80703",
+														"iconSize": 10
+													},
+													{
+														"id": "text12",
+														"type": "text",
+														"width": "auto",
+														"minWidth": "16px",
+														"height": "auto",
+														"minHeight": "16px",
+														"templateName": "text",
+														"value": "小程序轮播图 (宽高比131:143，格式 jpg，< 2MB；另，图上方 20%区域勿放图文，避免信息重叠)"
+													}
+												]
+											},
+											{
+												"id": "upload3",
+												"type": "upload",
+												"isImage": true,
+												"width": "160px",
+												"minWidth": "160px",
+												"height": "120px",
+												"minHeight": "120px",
+												"templateName": "uploadimage",
+												"submitData": true,
+												"autoFilter": false,
+												"moreFields": [
+													{
+														"name": "name",
+														"valueType": "exp",
+														"value": "input7.value"
+													}
+												],
+												"multiple": false,
+												"dataSet": "model2",
+												"fileId": "isAppImageID",
+												"fileContent": "isAppImage",
+												"visible": "true",
+												"visibleCondition": "param6=0",
+												"showTitle": false,
+												"notNull": true,
+												"validEnabled": true,
+												"validExp": "upload3 IS NOT NULL",
+												"validMessage": "不能为空",
+												"compressFile": false
+											}
+										],
+										"visible": "condition",
+										"visibleCondition": "combobox15.value=1"
+									},
+									{
+										"id": "panel4",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "26px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"margin": "8px",
+										"rowAlignItems": "center",
+										"components": [
+											{
+												"id": "icon2",
+												"type": "icon",
+												"width": "20px",
+												"minWidth": "20px",
+												"height": "20px",
+												"minHeight": "20px",
+												"templateName": "icon",
+												"icon": "$ICON:/5449",
+												"iconColor": "#F80703",
+												"iconSize": 10
+											},
+											{
+												"id": "text4",
+												"type": "text",
+												"width": "310px",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "活动头图 (宽高比16：9,大小不超过2MB,格式jpg)"
+											},
+											{
+												"id": "text10",
+												"type": "text",
+												"width": "auto",
+												"minWidth": "10px",
+												"height": "20px",
+												"templateName": "text",
+												"value": "手动上传",
+												"margin": "0px 8px 0px 8px",
+												"font": {
+													"color": "color1",
+													"size": 12
+												},
+												"padding": "0px 5px 0px 5px",
+												"actions": [
+													{
+														"id": "action2",
+														"actionType": "setParamValue",
+														"triggerType": "click",
+														"params": [
+															{
+																"name": "param6",
+																"value": "0"
+															}
+														]
+													}
+												]
+											},
+											{
+												"id": "text2",
+												"type": "text",
+												"width": "100px",
+												"minWidth": "10px",
+												"height": "20px",
+												"templateName": "text",
+												"value": "素材库选择\n",
+												"margin": "0px 8px 0px 8px",
+												"font": {
+													"color": "color1",
+													"size": 12
+												},
+												"padding": "0px 5px 0px 5px",
+												"actions": [
+													{
+														"id": "action2",
+														"actionType": "setParamValue",
+														"triggerType": "click",
+														"params": [
+															{
+																"name": "param6",
+																"value": "1"
+															}
+														]
+													},
+													{
+														"id": "action3",
+														"actionType": "resetData",
+														"triggerType": "click",
+														"enabled": "condition",
+														"submitRange": "component",
+														"submitComponent": [
+															"upload2"
+														]
+													},
+													{
+														"id": "action1",
+														"actionType": "showDialog",
+														"triggerType": "click",
+														"dialog": "dialog3",
+														"enabled": "condition"
+													}
+												]
+											}
+										]
+									},
+									{
+										"id": "upload2",
+										"type": "upload",
+										"isImage": true,
+										"width": "160px",
+										"minWidth": "160px",
+										"height": "120px",
+										"minHeight": "120px",
+										"templateName": "uploadimage",
+										"submitData": true,
+										"autoFilter": false,
+										"moreFields": [
+											{
+												"name": "name",
+												"valueType": "exp",
+												"value": "input7.value"
+											},
+											{
+												"name": "campaignName",
+												"valueType": "exp",
+												"value": "input2.value"
+											},
+											{
+												"name": "initiator",
+												"valueType": "exp",
+												"value": "combobox7.value"
+											},
+											{
+												"name": "entityType",
+												"valueType": "exp",
+												"value": "combobox12.value"
+											},
+											{
+												"name": "campaignType",
+												"valueType": "exp",
+												"value": "combobox9.value"
+											},
+											{
+												"name": "participateStore",
+												"valueType": "exp",
+												"value": "combobox8.value"
+											},
+											{
+												"name": "campaignName",
+												"valueType": "exp",
+												"value": "input2.value"
+											},
+											{
+												"name": "advertisement",
+												"valueType": "exp",
+												"value": "multipleinput3.value"
+											},
+											{
+												"name": "campaignAddress",
+												"valueType": "exp",
+												"value": "multipleinput2.value"
+											},
+											{
+												"name": "campaignstartTime",
+												"valueType": "exp",
+												"value": "datecombobox1.value"
+											},
+											{
+												"name": "campaignendTime",
+												"valueType": "exp",
+												"value": "datecombobox2.value"
+											},
+											{
+												"name": "campaignState",
+												"valueType": "exp",
+												"value": "combobox2.value"
+											},
+											{
+												"name": "personnumber",
+												"valueType": "exp",
+												"value": "numberinput1.value"
+											},
+											{
+												"name": "campaignBudget",
+												"valueType": "exp",
+												"value": "numberinput2.value"
+											},
+											{
+												"name": "campaignDescribe",
+												"valueType": "exp",
+												"value": "multipleinput4.value"
+											},
+											{
+												"name": "applicationCondition",
+												"valueType": "exp",
+												"value": "multipleinput5.value"
+											},
+											{
+												"name": "applicationEndDate",
+												"valueType": "exp",
+												"value": "datecombobox6.value"
+											},
+											{
+												"name": "ISQRCode",
+												"valueType": "exp",
+												"value": "combobox10.value"
+											},
+											{
+												"name": "ISapplyQRCode",
+												"valueType": "exp",
+												"value": "combobox6.value"
+											},
+											{
+												"name": "ISsignQRCode",
+												"valueType": "exp",
+												"value": "combobox11.value"
+											},
+											{
+												"name": "isQwSidebar",
+												"valueType": "exp",
+												"value": "combobox14.value"
+											},
+											{
+												"name": "isAppShow",
+												"valueType": "exp",
+												"value": "combobox15.value"
+											},
+											{
+												"name": "dimDepart",
+												"valueType": "exp",
+												"value": "input5.value"
+											},
+											{
+												"name": "carBrand",
+												"valueType": "exp",
+												"value": "combobox1.value"
+											},
+											{
+												"name": "carSeries",
+												"valueType": "exp",
+												"value": "combobox13.value"
+											},
+											{
+												"name": "carModel",
+												"valueType": "exp",
+												"value": "combobox16.value"
+											},
+											{
+												"name": "isBook",
+												"valueType": "exp",
+												"value": "combobox17.value"
+											},
+											{
+												"name": "ifnoStore",
+												"valueType": "exp",
+												"value": "combobox18.value"
+											},
+											{
+												"name": "isActivityDisplay",
+												"valueType": "exp",
+												"value": "combobox19.value"
+											},
+											{
+												"name": "applicationStartDate",
+												"valueType": "exp",
+												"value": "datecombobox8.value"
+											},
+											{
+												"name": "couponActivity",
+												"valueType": "exp",
+												"value": "combobox3.value"
+											},
+											{
+												"name": "is_enrolled",
+												"valueType": "exp",
+												"value": "combobox4.value"
+											},
+											{
+												"name": "active_registration_status",
+												"valueType": "exp",
+												"value": "combobox5.value"
+											}
+										],
+										"multiple": false,
+										"dataSet": "model2",
+										"fileId": "headerImageID",
+										"fileContent": "headerImage",
+										"visible": "condition",
+										"visibleCondition": "param6=0",
+										"showTitle": false,
+										"notNull": true,
+										"validEnabled": true,
+										"validExp": "upload2 IS NOT NULL",
+										"validMessage": "活动头图不能为空",
+										"compressFile": false
+									},
+									{
+										"id": "floatpanel2",
+										"type": "floatpanel",
+										"width": "auto",
+										"minWidth": "80px",
+										"height": "120px",
+										"minHeight": "120px",
+										"panel": [
+											{
+												"id": "panel1",
+												"type": "floatpanel.panel",
+												"width": "auto",
+												"minWidth": "100px",
+												"height": "120px",
+												"minHeight": "120px",
+												"position": "relative",
+												"components": [
+													{
+														"id": "image3",
+														"type": "image",
+														"width": "160px",
+														"minWidth": "160px",
+														"height": "120px",
+														"minHeight": "120px",
+														"templateName": "image",
+														"image": "original field model9.image 0 0 100 no-repeat center middle",
+														"margin": "0px"
+													},
+													{
+														"id": "button5",
+														"type": "button",
+														"width": "20px",
+														"prefixIcon": "$ICON:/5001",
+														"compStyle": "style3",
+														"templateName": "iconButton",
+														"position": "absolute",
+														"icon": "$ICON:/181",
+														"actions": [
+															{
+																"id": "action1",
+																"actionType": "setParamValue",
+																"triggerType": "click",
+																"params": [
+																	{
+																		"name": "param5",
+																		"value": "0"
+																	},
+																	{
+																		"name": "param6",
+																		"value": "0"
+																	}
+																]
+															}
+														],
+														"prefixIconColor": "#F80703",
+														"top": 0,
+														"left": 132,
+														"padding": "0px",
+														"height": "20px",
+														"prefixIconSize": 12
+													}
+												],
+												"display": "inlineflexRow",
+												"flexDirection": "row"
+											}
+										],
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"rowJustifyContent": "flex-start",
+										"rowAlignItems": "flex-start",
+										"rowAlignContent": "flex-start",
+										"flexWrap": "wrap",
+										"templateName": "floatpanel",
+										"dataSet": "model9",
+										"visible": "condition",
+										"visibleCondition": "param6=1",
+										"margin": "8px",
+										"nomoreDataPlaceholderVisible": false
+									},
+									{
+										"id": "input12",
+										"type": "input",
+										"width": "208px",
+										"templateName": "txtinput",
+										"calcEnabled": true,
+										"exp": "model9.image",
+										"submitData": true,
+										"autoFilter": false,
+										"title": {
+											"type": "title",
+											"width": "50px",
+											"value": "图片"
+										},
+										"submitField": "model2.headerImage",
+										"visible": "false"
+									},
+									{
+										"id": "input13",
+										"type": "input",
+										"width": "210px",
+										"templateName": "txtinput",
+										"calcEnabled": true,
+										"exp": "model9.file_id",
+										"submitData": true,
+										"autoFilter": false,
+										"title": {
+											"type": "title",
+											"width": "50px",
+											"value": "图片id"
+										},
+										"submitField": "model2.headerImageID",
+										"visible": "false"
+									},
+									{
+										"id": "panel5",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "26px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"margin": "8px",
+										"rowAlignItems": "center",
+										"components": [
+											{
+												"id": "icon3",
+												"type": "icon",
+												"width": "20px",
+												"minWidth": "20px",
+												"height": "20px",
+												"minHeight": "20px",
+												"templateName": "icon",
+												"icon": "$ICON:/5449",
+												"iconColor": "#F80703",
+												"iconSize": 10
+											},
+											{
+												"id": "text9",
+												"type": "text",
+												"width": "auto",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "活动详情图（可选,大小尺寸无限制,上传后小程序自适应延展）"
+											}
+										]
+									},
+									{
+										"id": "upload1",
+										"type": "upload",
+										"isImage": true,
+										"width": "160px",
+										"minWidth": "160px",
+										"height": "120px",
+										"minHeight": "120px",
+										"templateName": "uploadimage",
+										"submitData": true,
+										"autoFilter": false,
+										"moreFields": [
+											{
+												"name": "name",
+												"valueType": "exp",
+												"value": "input7.value"
+											}
+										],
+										"multiple": false,
+										"dataSet": "model2",
+										"fileId": "detailRichTextID",
+										"fileContent": "detailRichText",
+										"visible": "true",
+										"visibleCondition": "param6=0",
+										"showTitle": false,
+										"notNull": true,
+										"compressFile": false,
+										"validEnabled": true,
+										"validExp": "upload1 IS NOT NULL",
+										"validMessage": "不能为空"
+									},
+									{
+										"id": "panel9",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "26px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"margin": "8px",
+										"rowAlignItems": "center",
+										"components": [
+											{
+												"id": "text11",
+												"type": "text",
+												"width": "auto",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "活动详情图文（可选）"
+											}
+										],
+										"visible": "false"
+									},
+									{
+										"id": "richtextinput1",
+										"type": "richtextinput",
+										"width": "auto",
+										"toolbar": [
+											"table",
+											"link",
+											"image",
+											"media",
+											"attachment",
+											"codesample",
+											"hr",
+											"fontselect",
+											"fontsizeselect",
+											"align",
+											"removeformat",
+											"indent",
+											"print"
+										],
+										"templateName": "richtextinput",
+										"submitData": true,
+										"autoFilter": false,
+										"showTitle": false,
+										"height": "auto",
+										"minHeight": "300px",
+										"moreFields": [
+											{
+												"name": "HDID",
+												"valueType": "exp",
+												"value": "input7.value"
+											}
+										],
+										"attachUploadEnable": true,
+										"imageSaveAsAttach": true,
+										"imageUploadEnable": true,
+										"dataSet": "model14",
+										"fileId": "FJID",
+										"submitField": "model2.eventDetailsWithTextAndImages",
+										"fileName": "FJMC",
+										"fileContent": "FJCCLJ",
+										"visible": "false"
+									},
+									{
+										"id": "panel45",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "26px",
+										"display": "inlineflexColumn",
+										"flexDirection": "column",
+										"templateName": "panel_column",
+										"components": [
+											{
+												"id": "input15",
+												"type": "input",
+												"width": "488px",
+												"templateName": "txtinput",
+												"calcEnabled": true,
+												"exp": "IF(combobox7.value=1,$user.LEADER,model16.ZD1)",
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.approver",
+												"title": {
+													"type": "title",
+													"value": "最高节点审批人"
+												}
+											},
+											{
+												"id": "input3",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"calcEnabled": true,
+												"submitData": true,
+												"autoFilter": false,
+												"visible": "false",
+												"title": {
+													"type": "title",
+													"value": "最高节点审批状态"
+												},
+												"submitField": "model2.approve_status",
+												"exp": "1"
+											},
+											{
+												"id": "input6",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"title": {
+													"type": "title",
+													"value": "售后经理"
+												},
+												"calcEnabled": true,
+												"exp": "model18.USER_ID",
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.aftersales_mgr"
+											},
+											{
+												"id": "input9",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"title": {
+													"type": "title",
+													"value": "售后经理审批状态",
+													"width": "auto"
+												},
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.aftersales_mgr_status",
+												"calcEnabled": true,
+												"exp": "1"
+											},
+											{
+												"id": "input8",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"title": {
+													"type": "title",
+													"value": "财务经理"
+												},
+												"calcEnabled": true,
+												"exp": "model19.USER_ID",
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.finance_mgr"
+											},
+											{
+												"id": "input17",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"title": {
+													"type": "title",
+													"value": "财务经理审批状态",
+													"width": "auto"
+												},
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.finance_mgr_status",
+												"calcEnabled": true,
+												"exp": "1"
+											},
+											{
+												"id": "input20",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"calcEnabled": true,
+												"exp": "1",
+												"submitData": true,
+												"autoFilter": false,
+												"submitField": "model2.status",
+												"title": {
+													"type": "title",
+													"value": "审批状态"
+												}
+											},
+											{
+												"id": "input16",
+												"type": "input",
+												"width": "240px",
+												"templateName": "txtinput",
+												"calcEnabled": true,
+												"title": {
+													"type": "title"
+												},
+												"exp": "model1.totalRowCount__"
+											}
+										],
+										"visible": "false"
+									}
+								],
+								"padding": "5px 10px 5px 10px",
+								"overflow": "y"
+							},
+							{
+								"id": "panel20",
+								"type": "panel",
+								"width": "100%",
+								"height": "15%",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"fixedWhenScrollTop": true,
+								"components": [
+									{
+										"id": "button10",
+										"type": "button",
+										"width": "132px",
+										"value": "上一步",
+										"templateName": "button",
+										"compStyle": "button6",
+										"actions": [
+											{
+												"id": "action1",
+												"actionType": "setComponentProperty",
+												"triggerType": "click",
+												"compId": "steps1",
+												"propertyName": "value",
+												"propertyValue": "'填写活动信息'"
+											},
+											{
+												"id": "action2",
+												"actionType": "switchPanel",
+												"triggerType": "click",
+												"panelbook": "panelbook1",
+												"panel": "previous",
+												"enabled": "condition"
+											}
+										],
+										"fill": "#072C52"
+									},
+									{
+										"id": "button11",
+										"type": "button",
+										"width": "132px",
+										"value": "提交审批",
+										"templateName": "button",
+										"compStyle": "button6",
+										"actions": [
+											{
+												"id": "action6",
+												"actionType": "setParamValue",
+												"triggerType": "click",
+												"params": [
+													{
+														"name": "param1",
+														"value": "${input7.value}"
+													}
+												]
+											},
+											{
+												"id": "action5",
+												"actionType": "validateForm",
+												"triggerType": "click",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload2",
+													"upload1"
+												],
+												"showErrorMsg": true,
+												"errorMsg": "图片2",
+												"errorMsgType": "messageBox",
+												"enabled": "condition"
+											},
+											{
+												"id": "action11",
+												"actionType": "validateForm",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "combobox15.value=1",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload3"
+												],
+												"showErrorMsg": true,
+												"errorMsg": "小程序",
+												"errorMsgType": "messageBox"
+											},
+											{
+												"id": "action1",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload3",
+													"upload2",
+													"upload1",
+													"richtextinput1",
+													"input15",
+													"input3",
+													"input20"
+												],
+												"closeWhenSuccess": false,
+												"dataSet": [
+													"model2"
+												],
+												"conditionExp": "param6=0 AND combobox7.value='2' AND (combobox3.value='否' OR combobox3.value='' OR  combobox3.value IS NULL)",
+												"successMsg": "提交成功！",
+												"validateMsg": "校验失败！",
+												"enabled": "condition",
+												"validateData": false
+											},
+											{
+												"id": "action13",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=0 AND combobox7.value='2' AND combobox3.value='是' ",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload3",
+													"upload2",
+													"upload1",
+													"richtextinput1",
+													"input15",
+													"input3",
+													"input6",
+													"input9",
+													"input8",
+													"input17",
+													"input20"
+												],
+												"validateMsg": "校验失败！",
+												"successMsg": "提交成功！",
+												"validateData": false
+											},
+											{
+												"id": "action3",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=0  AND combobox7.value='1'",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload3",
+													"upload2",
+													"upload1",
+													"richtextinput1",
+													"input15",
+													"input3",
+													"input20"
+												],
+												"validateData": false
+											},
+											{
+												"id": "action15",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=1 AND combobox7.value='2'  AND combobox3.value='是' ",
+												"submitRange": "component",
+												"submitComponent": [
+													"panel17",
+													"panel15",
+													"upload3",
+													"upload2",
+													"input12",
+													"input13",
+													"upload1",
+													"richtextinput1",
+													"input15",
+													"input3",
+													"input6",
+													"input9",
+													"input8",
+													"input17",
+													"input20"
+												],
+												"validateData": false
+											},
+											{
+												"id": "action4",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=1 AND combobox7.value='2'  AND (combobox3.value='否' OR combobox3.value='' OR  combobox3.value IS NULL)",
+												"submitRange": "component",
+												"submitComponent": [
+													"panel17",
+													"panel15",
+													"upload3",
+													"upload2",
+													"input12",
+													"input13",
+													"upload1",
+													"richtextinput1",
+													"input15",
+													"input3",
+													"input20"
+												],
+												"waitPrev": "button11.action1",
+												"successMsg": "提交成功",
+												"errorMsg": "提交失败",
+												"validateData": false
+											},
+											{
+												"id": "action16",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=1 AND combobox7.value='1'",
+												"submitRange": "component",
+												"submitComponent": [
+													"panel17",
+													"panel15",
+													"upload3",
+													"upload2",
+													"input12",
+													"input13",
+													"upload1",
+													"richtextinput1",
+													"input15",
+													"input3",
+													"input20"
+												],
+												"validateData": false
+											},
+											{
+												"id": "action14",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"submitRange": "dataset",
+												"dataSet": [
+													"model17"
+												],
+												"successMsg": "提交成功",
+												"errorMsg": "提交失败",
+												"validateData": false
+											},
+											{
+												"id": "action7",
+												"actionType": "webAPI",
+												"triggerType": "click",
+												"enabled": "condition",
+												"url": "/xiaoshouyi/app/集成测试.app/API/wxsend/getUnlimitedQRCode.action",
+												"params": [
+													{
+														"name": "scene",
+														"value": "${ENCODEURICOMPONENT(CONCAT(\"url=/xiaoshouyi/sm/\",param1))}"
+													}
+												],
+												"setResponseToVar": true,
+												"responseToVarName": "param7",
+												"showSuccessMsg": false
+											},
+											{
+												"id": "action8",
+												"actionType": "updateData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"dataSet": "model2",
+												"dataRange": "primaryKey",
+												"primaryKeyFieldValues": [
+													{
+														"name": "name",
+														"valueType": "exp",
+														"value": "param1"
+													}
+												],
+												"fieldValues": [
+													{
+														"name": "applyQRCode",
+														"valueType": "exp",
+														"value": "param7"
+													}
+												],
+												"successMsg": "提交成功"
+											},
+											{
+												"id": "action9",
+												"actionType": "webAPI",
+												"triggerType": "click",
+												"params": [
+													{
+														"name": "scene",
+														"value": "${ENCODEURICOMPONENT(CONCAT(\"url=/xiaoshouyi/smd/\",param1))}"
+													}
+												],
+												"url": "/xiaoshouyi/app/集成测试.app/API/wxsend/getUnlimitedQRCode.action",
+												"enabled": "condition",
+												"showConfirmDialog": false,
+												"setResponseToVar": true,
+												"responseToVarName": "param7"
+											},
+											{
+												"id": "action12",
+												"actionType": "batchStartFlow",
+												"triggerType": "click",
+												"enabled": "condition",
+												"sourceDataSetId": "model1",
+												"dataRange": "resultset",
+												"targetDataSetId": "model15",
+												"successMsg": "发起流程成功"
+											},
+											{
+												"id": "action10",
+												"actionType": "updateData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"dataSet": "model2",
+												"dataRange": "primaryKey",
+												"primaryKeyFieldValues": [
+													{
+														"name": "name",
+														"valueType": "exp",
+														"value": "param1"
+													}
+												],
+												"fieldValues": [
+													{
+														"name": "QRCode",
+														"valueType": "exp",
+														"value": "param7"
+													}
+												],
+												"successMsg": "提交成功"
+											},
+											{
+												"id": "action2",
+												"actionType": "goBack",
+												"triggerType": "click",
+												"enabled": "condition"
+											}
+										],
+										"fill": "#072C52",
+										"prefixIcon": "$ICON:/5048",
+										"visible": "condition",
+										"visibleCondition": "combobox9.value!='5'"
+									},
+									{
+										"id": "button6",
+										"type": "button",
+										"width": "132px",
+										"value": "保存",
+										"templateName": "button",
+										"compStyle": "button6",
+										"actions": [
+											{
+												"id": "action6",
+												"actionType": "setParamValue",
+												"triggerType": "click",
+												"params": [
+													{
+														"name": "param1",
+														"value": "${input7.value}"
+													}
+												]
+											},
+											{
+												"id": "action12",
+												"actionType": "validateForm",
+												"triggerType": "click",
+												"enabled": "condition",
+												"submitRange": "component",
+												"submitComponent": [
+													"panel17",
+													"panel15"
+												]
+											},
+											{
+												"id": "action5",
+												"actionType": "validateForm",
+												"triggerType": "click",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload2",
+													"upload1"
+												],
+												"showErrorMsg": true,
+												"showSuccessMsg": true
+											},
+											{
+												"id": "action11",
+												"actionType": "validateForm",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "combobox15.value=1",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload3"
+												],
+												"showErrorMsg": true,
+												"showSuccessMsg": true
+											},
+											{
+												"id": "action1",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload3",
+													"upload2",
+													"upload1",
+													"richtextinput1",
+													"input15"
+												],
+												"closeWhenSuccess": false,
+												"dataSet": [
+													"model2"
+												],
+												"enabled": "condition",
+												"conditionExp": "param6=0 AND combobox7.value='2'  AND (combobox3.value='否' OR combobox3.value='' OR  combobox3.value IS NULL)",
+												"successMsg": "保存成功",
+												"validateMsg": "校验失败！",
+												"validateData": false,
+												"errorMsg": "保存失败"
+											},
+											{
+												"id": "action3",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=0 AND combobox7.value='2' AND combobox3.value='是' ",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload3",
+													"upload2",
+													"upload1",
+													"richtextinput1",
+													"input15",
+													"input6",
+													"input8"
+												],
+												"validateData": false
+											},
+											{
+												"id": "action16",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=0  AND combobox7.value='1'",
+												"submitRange": "component",
+												"submitComponent": [
+													"upload3",
+													"upload2",
+													"upload1",
+													"richtextinput1",
+													"input15"
+												],
+												"validateData": false
+											},
+											{
+												"id": "action13",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=1 AND combobox7.value='2'  AND combobox3.value='是' ",
+												"submitRange": "component",
+												"submitComponent": [
+													"panel17",
+													"panel15",
+													"upload3",
+													"upload2",
+													"input12",
+													"input13",
+													"upload1",
+													"richtextinput1",
+													"input15",
+													"input6",
+													"input8"
+												],
+												"validateMsg": "校验失败！",
+												"successMsg": "保存成功",
+												"validateData": false,
+												"errorMsg": "保存失败"
+											},
+											{
+												"id": "action4",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=1 AND combobox7.value='2'  AND (combobox3.value='否' OR combobox3.value='' OR  combobox3.value IS NULL)",
+												"submitRange": "component",
+												"submitComponent": [
+													"panel17",
+													"panel15",
+													"upload3",
+													"upload2",
+													"input12",
+													"input13",
+													"upload1",
+													"richtextinput1",
+													"input15"
+												],
+												"waitPrev": "button6.action1",
+												"validateData": false,
+												"successMsg": "保存成功",
+												"errorMsg": "保存失败"
+											},
+											{
+												"id": "action17",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"conditionExp": "param6=1 AND combobox7.value='1'",
+												"submitRange": "component",
+												"submitComponent": [
+													"panel17",
+													"panel15",
+													"upload3",
+													"upload2",
+													"input12",
+													"input13",
+													"upload1",
+													"richtextinput1",
+													"input15"
+												],
+												"validateData": false
+											},
+											{
+												"id": "action14",
+												"actionType": "submitData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"submitRange": "dataset",
+												"dataSet": [
+													"model17"
+												],
+												"successMsg": "保存成功",
+												"errorMsg": "保存失败",
+												"validateData": false
+											},
+											{
+												"id": "action7",
+												"actionType": "webAPI",
+												"triggerType": "click",
+												"enabled": "condition",
+												"url": "/xiaoshouyi/app/集成测试.app/API/wxsend/getUnlimitedQRCode.action",
+												"params": [
+													{
+														"name": "scene",
+														"value": "${ENCODEURICOMPONENT(CONCAT(\"url=/xiaoshouyi/sm/\",param1))}"
+													}
+												],
+												"setResponseToVar": true,
+												"responseToVarName": "param7",
+												"successMsg": "保存成功"
+											},
+											{
+												"id": "action8",
+												"actionType": "updateData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"dataSet": "model2",
+												"dataRange": "primaryKey",
+												"primaryKeyFieldValues": [
+													{
+														"name": "name",
+														"valueType": "exp",
+														"value": "param1"
+													}
+												],
+												"fieldValues": [
+													{
+														"name": "applyQRCode",
+														"valueType": "exp",
+														"value": "param7"
+													}
+												],
+												"successMsg": "保存成功",
+												"errorMsg": "保存失败"
+											},
+											{
+												"id": "action9",
+												"actionType": "webAPI",
+												"triggerType": "click",
+												"params": [
+													{
+														"name": "scene",
+														"value": "${ENCODEURICOMPONENT(CONCAT(\"url=/xiaoshouyi/smd/\",param1))}"
+													}
+												],
+												"url": "/xiaoshouyi/app/集成测试.app/API/wxsend/getUnlimitedQRCode.action",
+												"enabled": "condition",
+												"showConfirmDialog": false,
+												"setResponseToVar": true,
+												"responseToVarName": "param7",
+												"successMsg": "保存成功"
+											},
+											{
+												"id": "action10",
+												"actionType": "updateData",
+												"triggerType": "click",
+												"enabled": "condition",
+												"dataSet": "model2",
+												"dataRange": "primaryKey",
+												"primaryKeyFieldValues": [
+													{
+														"name": "name",
+														"valueType": "exp",
+														"value": "param1"
+													}
+												],
+												"fieldValues": [
+													{
+														"name": "QRCode",
+														"valueType": "exp",
+														"value": "param7"
+													}
+												],
+												"successMsg": "保存成功",
+												"errorMsg": "保存失败"
+											},
+											{
+												"id": "action2",
+												"actionType": "goBack",
+												"triggerType": "click",
+												"enabled": "condition"
+											}
+										],
+										"fill": "#072C52",
+										"prefixIcon": "$ICON:/5048"
+									}
+								],
+								"rowJustifyContent": "flex-end"
+							}
+						],
+						"overflow": "hidden"
+					}
+				],
+				"defaultPanel": "panel1",
+				"templateName": "panelbook",
+				"border": "none"
+			},
+			{
+				"id": "dialog3",
+				"type": "dialog",
+				"width": "auto",
+				"minWidth": "500px",
+				"maxWidth": "800px",
+				"height": "auto",
+				"minHeight": "400px",
+				"padding": "0px",
+				"fill": "#FFF",
+				"boxShadow": "outset 0px 1px 8px 0px #000000 40",
+				"showFloat": false,
+				"components": [
+					{
+						"id": "panel13",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "26px",
+						"padding": "20px",
+						"margin": "0px",
+						"borderRadius": "0px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"rowAlignItems": "center",
+						"border": "none",
+						"masterId": "spgdialog-header",
+						"components": [
+							{
+								"id": "text7",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "70px",
+								"height": "auto",
+								"minHeight": "26px",
+								"contentAdjust": "no",
+								"textAlign": "left",
+								"verticalAlign": "center",
+								"margin": "0px",
+								"padding": "0px",
+								"value": "素材",
+								"flexible": "true",
+								"font": {
+									"bold": false,
+									"italic": false,
+									"underline": false,
+									"lineThrough": false,
+									"color": "font@3",
+									"size": 18,
+									"family": "微软雅黑, MicroSoft YaHei"
+								},
+								"masterId": "spgdialog-caption"
+							},
+							{
+								"id": "button19",
+								"type": "button",
+								"width": "36px",
+								"value": "",
+								"prefixIcon": "$ICON:/178",
+								"compStyle": "button3",
+								"masterId": "spgdialog-max",
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "maximize"
+									}
+								]
+							},
+							{
+								"id": "button20",
+								"type": "button",
+								"width": "36px",
+								"value": "",
+								"prefixIcon": "$ICON:/5148",
+								"compStyle": "button3",
+								"masterId": "spgdialog-close",
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "closeDialog"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel40",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "20px",
+						"maxHeight": "600px",
+						"padding": "0px 20px 0px 20px",
+						"margin": "0px",
+						"flexible": "true",
+						"borderRadius": "0px",
+						"border": "none",
+						"masterId": "spgdialog-container",
+						"components": [
+							{
+								"id": "floatpanel1",
+								"type": "floatpanel",
+								"width": "auto",
+								"minWidth": "150px",
+								"height": "auto",
+								"minHeight": "150px",
+								"panel": [
+									{
+										"id": "panel1",
+										"type": "floatpanel.panel",
+										"width": "auto",
+										"height": "auto",
+										"minHeight": "100px",
+										"position": "relative",
+										"flexWrap": "wrap",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"components": [
+											{
+												"id": "image1",
+												"type": "image",
+												"width": "168px",
+												"minWidth": "168px",
+												"height": "116px",
+												"minHeight": "116px",
+												"templateName": "image",
+												"image": "cover field model4.image 0 0 100 no-repeat center",
+												"margin": "5px"
+											},
+											{
+												"id": "checkbox1",
+												"type": "checkbox",
+												"checkType": "checkbox",
+												"width": "20px",
+												"minWidth": "20px",
+												"height": "20px",
+												"minHeight": "20px",
+												"templateName": "checkbox",
+												"showTitle": false,
+												"position": "absolute",
+												"top": 4,
+												"left": 6,
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "invokeComponentMethod",
+														"triggerType": "change",
+														"compId": "floatpanel1",
+														"method": "toggleCheckedRows"
+													}
+												]
+											}
+										]
+									}
+								],
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"rowJustifyContent": "flex-start",
+								"rowAlignItems": "flex-start",
+								"rowAlignContent": "flex-start",
+								"flexWrap": "wrap",
+								"templateName": "floatpanel",
+								"dataSet": "model4",
+								"enableCheckbox": true,
+								"checkboxComp": "checkbox1"
+							}
+						],
+						"overflow": "y"
+					},
+					{
+						"id": "panel41",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "26px",
+						"padding": "20px",
+						"margin": "0px",
+						"borderRadius": "0px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"rowJustifyContent": "flex-end",
+						"rowAlignItems": "center",
+						"border": "none",
+						"masterId": "spgdialog-footer",
+						"components": [
+							{
+								"id": "button21",
+								"type": "button",
+								"width": "70px",
+								"minWidth": "70px",
+								"height": "26px",
+								"value": "确定",
+								"border": "none",
+								"font": {
+									"bold": false,
+									"italic": false,
+									"underline": false,
+									"lineThrough": false,
+									"color": "bg1",
+									"size": 12,
+									"family": "arial, helvetica, sans-serif"
+								},
+								"fill": "#1B97F9",
+								"padding": "0px 10px 0px 10px",
+								"margin": "0px 5px 0px 5px",
+								"borderRadius": "3px",
+								"masterId": "spgdialog-ok",
+								"actions": [
+									{
+										"id": "action2",
+										"actionType": "setParamValue",
+										"triggerType": "click",
+										"params": [
+											{
+												"name": "param5",
+												"value": "=floatpanel1.checked.value"
+											}
+										]
+									},
+									{
+										"id": "action1",
+										"actionType": "closeDialog"
+									}
+								],
+								"visible": "condition",
+								"visibleCondition": "CONTAINS(floatpanel1.checked,',')=FALSE OR floatpanel1.checked!=NULL"
+							},
+							{
+								"id": "button22",
+								"type": "button",
+								"width": "70px",
+								"minWidth": "70px",
+								"height": "26px",
+								"value": "取消",
+								"padding": "0px 10px 0px 10px",
+								"margin": "0px 5px 0px 5px",
+								"fill": "none",
+								"masterId": "spgdialog-cancel",
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "closeDialog"
+									}
+								],
+								"font": {
+									"bold": false,
+									"italic": false,
+									"underline": false,
+									"lineThrough": false,
+									"color": "font@3",
+									"size": 12,
+									"family": "arial, helvetica, sans-serif"
+								},
+								"borderRadius": "3px",
+								"border": "1px solid #d2d2d2"
+							}
+						]
+					}
+				],
+				"templateName": "dialog",
+				"position": "absolute",
+				"top": 5,
+				"left": 389,
+				"name": "素材库"
+			},
+			{
+				"id": "dialog4",
+				"type": "dialog",
+				"width": "auto",
+				"minWidth": "500px",
+				"height": "auto",
+				"minHeight": "400px",
+				"padding": "0px",
+				"fill": "#FFF",
+				"boxShadow": "outset 0px 1px 8px 0px #000000 40",
+				"showFloat": false,
+				"components": [
+					{
+						"id": "panel55",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "26px",
+						"padding": "20px",
+						"margin": "0px",
+						"borderRadius": "0px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"rowAlignItems": "center",
+						"border": "none",
+						"masterId": "spgdialog-header",
+						"components": [
+							{
+								"id": "text16",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "70px",
+								"height": "auto",
+								"minHeight": "26px",
+								"contentAdjust": "no",
+								"textAlign": "left",
+								"verticalAlign": "center",
+								"margin": "0px",
+								"padding": "0px",
+								"value": "创建卡券",
+								"flexible": "true",
+								"font": {
+									"bold": false,
+									"italic": false,
+									"underline": false,
+									"lineThrough": false,
+									"color": "font@3",
+									"size": 18,
+									"family": "微软雅黑, MicroSoft YaHei"
+								},
+								"masterId": "spgdialog-caption"
+							},
+							{
+								"id": "button23",
+								"type": "button",
+								"width": "36px",
+								"value": "",
+								"prefixIcon": "$ICON:/178",
+								"compStyle": "button3",
+								"masterId": "spgdialog-max",
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "maximize"
+									}
+								]
+							},
+							{
+								"id": "button24",
+								"type": "button",
+								"width": "36px",
+								"value": "",
+								"prefixIcon": "$ICON:/5148",
+								"compStyle": "button3",
+								"masterId": "spgdialog-close",
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "closeDialog"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel56",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "20px",
+						"padding": "0px 20px 0px 20px",
+						"margin": "0px",
+						"flexible": "true",
+						"borderRadius": "0px",
+						"border": "none",
+						"masterId": "spgdialog-container",
+						"components": [
+							{
+								"id": "panel60",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "26px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "input11",
+										"type": "input",
+										"width": "240px",
+										"templateName": "txtinput",
+										"title": {
+											"type": "title",
+											"value": "卡券名称",
+											"width": "80px"
+										},
+										"submitData": true,
+										"autoFilter": false,
+										"submitField": "model17.card_name",
+										"notNull": true
+									},
+									{
+										"id": "combobox25",
+										"type": "combobox",
+										"width": "240px",
+										"templateName": "combobox",
+										"title": {
+											"type": "title",
+											"width": "80px",
+											"value": "卡券分类"
+										},
+										"enableCleanValue": true,
+										"submitData": true,
+										"autoFilter": false,
+										"submitField": "model17.card_category",
+										"dimension": "model17.card_category",
+										"notNull": true
+									}
+								]
+							},
+							{
+								"id": "panel61",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "26px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "combobox26",
+										"type": "combobox",
+										"width": "240px",
+										"templateName": "combobox",
+										"enableCleanValue": true,
+										"submitData": true,
+										"autoFilter": false,
+										"title": {
+											"type": "title",
+											"value": "卡券类型",
+											"width": "80px"
+										},
+										"submitField": "model17.card_type",
+										"dimension": "model17.card_type",
+										"itemFilter": "IF(combobox25.value='1',id IN ('1','2','3'),id IN ('4','5','6'))",
+										"notNull": true
+									},
+									{
+										"id": "panel62",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "26px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"components": [
+											{
+												"id": "numberinput11",
+												"type": "numberinput",
+												"width": "225px",
+												"templateName": "numberinput",
+												"submitData": true,
+												"autoFilter": false,
+												"title": {
+													"type": "title",
+													"value": "单价",
+													"width": "80px"
+												},
+												"margin": "8px 0px 8px 8px",
+												"submitField": "model17.cost"
+											},
+											{
+												"id": "text17",
+												"type": "text",
+												"width": "15px",
+												"height": "auto",
+												"templateName": "text",
+												"margin": "8px 8px 8px 0px",
+												"value": "元",
+												"borderTop": "1px solid #000000 15",
+												"borderRight": "1px solid #000000 15",
+												"borderBottom": "1px solid #000000 15"
+											}
+										]
+									}
+								]
+							},
+							{
+								"id": "multipleinput1",
+								"type": "multipleinput",
+								"width": "auto",
+								"templateName": "multipleinput",
+								"submitData": true,
+								"autoFilter": false,
+								"title": {
+									"type": "title",
+									"value": "权益说明",
+									"width": "80px"
+								},
+								"submitField": "model17.rightName",
+								"notNull": true
+							},
+							{
+								"id": "panel68",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "26px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "input14",
+										"type": "input",
+										"width": "240px",
+										"templateName": "txtinput",
+										"calcEnabled": true,
+										"exp": "TOSTR(TODAY(),'yyyymmdd')",
+										"title": {
+											"type": "title"
+										}
+									},
+									{
+										"id": "input1",
+										"type": "input",
+										"width": "240px",
+										"templateName": "txtinput",
+										"calcEnabled": true,
+										"exp": "SEQNUM(0)",
+										"title": {
+											"type": "title"
+										}
+									},
+									{
+										"id": "input22",
+										"type": "input",
+										"width": "240px",
+										"templateName": "txtinput",
+										"calcEnabled": true,
+										"submitData": true,
+										"autoFilter": false,
+										"title": {
+											"type": "title",
+											"value": "编号"
+										},
+										"exp": "CONCAT(input14,input1)",
+										"submitField": "model17.hdCardid"
+									},
+									{
+										"id": "input4",
+										"type": "input",
+										"width": "240px",
+										"templateName": "txtinput",
+										"calcEnabled": true,
+										"exp": "input7.value",
+										"submitData": true,
+										"autoFilter": false,
+										"submitField": "model17.hdName",
+										"title": {
+											"type": "title",
+											"value": "活动编号"
+										}
+									}
+								],
+								"visible": "false"
+							}
+						]
+					},
+					{
+						"id": "panel57",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "26px",
+						"padding": "20px",
+						"margin": "0px",
+						"borderRadius": "0px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"rowJustifyContent": "flex-end",
+						"rowAlignItems": "center",
+						"border": "none",
+						"masterId": "spgdialog-footer",
+						"components": [
+							{
+								"id": "button25",
+								"type": "button",
+								"width": "70px",
+								"minWidth": "70px",
+								"height": "26px",
+								"value": "确定",
+								"border": "none",
+								"font": {
+									"bold": false,
+									"italic": false,
+									"underline": false,
+									"lineThrough": false,
+									"color": "bg1",
+									"size": 12,
+									"family": "arial, helvetica, sans-serif"
+								},
+								"fill": "#1B97F9",
+								"padding": "0px 10px 0px 10px",
+								"margin": "0px 5px 0px 5px",
+								"borderRadius": "3px",
+								"masterId": "spgdialog-ok",
+								"actions": [
+									{
+										"id": "action2",
+										"actionType": "submitData",
+										"triggerType": "click",
+										"successMsg": "创建成功",
+										"errorMsg": "创建失败",
+										"saveDraft": true
+									},
+									{
+										"id": "action1",
+										"actionType": "closeDialog",
+										"enabled": "condition"
+									}
+								]
+							},
+							{
+								"id": "button26",
+								"type": "button",
+								"width": "70px",
+								"minWidth": "70px",
+								"height": "26px",
+								"value": "取消",
+								"padding": "0px 10px 0px 10px",
+								"margin": "0px 5px 0px 5px",
+								"fill": "none",
+								"masterId": "spgdialog-cancel",
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "closeDialog"
+									}
+								],
+								"font": {
+									"bold": false,
+									"italic": false,
+									"underline": false,
+									"lineThrough": false,
+									"color": "font@3",
+									"size": 12,
+									"family": "arial, helvetica, sans-serif"
+								},
+								"borderRadius": "3px",
+								"border": "1px solid #d2d2d2"
+							}
+						]
+					}
+				],
+				"templateName": "dialog",
+				"position": "absolute",
+				"top": -1,
+				"left": 265,
+				"resizable": false,
+				"name": "创建卡券"
+			}
+		],
+		"padding": "10px 20px 20px 20px"
+	}
+}

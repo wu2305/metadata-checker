@@ -1,0 +1,68 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [
+		{"id": "param1", "name": "P1", "value": "'test'"},
+		{"id": "param2", "name": "P2"}
+	],
+	"sources": [
+		{"id": "model1", "modelType": "query"},
+		{"id": "model2", "modelType": "dwtable"}
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "input1",
+				"type": "input",
+				"value": "=param1"
+			},
+			{
+				"id": "input2",
+				"type": "input",
+				"value": "=model1.fieldA"
+			},
+			{
+				"id": "input3",
+				"type": "input",
+				"value": "=IF(input1.value IS NULL, input2.value, CONCAT(input1.value, '-', input2.value))"
+			},
+			{
+				"id": "input4",
+				"type": "input",
+				"value": "=IF(model2.totalRowCount__ > 0, model2.fieldB, '')"
+			},
+			{
+				"id": "text1",
+				"type": "text",
+				"value": "=CONCAT('前缀', input3.value, '后缀')"
+			},
+			{
+				"id": "text2",
+				"type": "text",
+				"visible": "=input1.value != 'test' AND input2.value IS NOT NULL"
+			},
+			{
+				"id": "text3",
+				"type": "text",
+				"value": "=TODAY()"
+			},
+			{
+				"id": "text4",
+				"type": "text",
+				"value": "=ROUND(input3.value / input4.value, 2)"
+			},
+			{
+				"id": "text5",
+				"type": "text",
+				"value": "=${model2.C}"
+			},
+			{
+				"id": "text6",
+				"type": "text",
+				"value": "=IF($user.dept_id = '001', '管理员', '普通用户')"
+			}
+		]
+	}
+}

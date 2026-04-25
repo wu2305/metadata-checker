@@ -1,0 +1,56 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [
+		{"id": "param1", "name": "参数A", "desc": "测试参数A"},
+		{"id": "param2", "name": "参数B", "desc": "测试参数B"}
+	],
+	"sources": [
+		{"id": "model1", "modelType": "dwtable", "path": "data/table1.tbl"},
+		{"id": "model2", "modelType": "query", "path": "data/query1.tbl"}
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "input1",
+				"type": "input",
+				"value": "=param1-model1.A",
+				"defaultValue": "0"
+			},
+			{
+				"id": "input2",
+				"type": "input",
+				"value": "=param2-model2.B"
+			},
+			{
+				"id": "input3",
+				"type": "input",
+				"value": "=input2.value/input1.value"
+			},
+			{
+				"id": "text1",
+				"type": "text",
+				"value": "=IF(input3.value > 0, input3.value, 0)"
+			},
+			{
+				"id": "panel1",
+				"type": "panel",
+				"visible": "=$user.dept_id = '001'",
+				"components": [
+					{
+						"id": "input4",
+						"type": "input",
+						"value": "=input1.value + input2.value"
+					},
+					{
+						"id": "text2",
+						"type": "text",
+						"value": "${model2.C}"
+					}
+				]
+			}
+		]
+	}
+}

@@ -1,0 +1,28 @@
+[package]
+name = "metadata-checker"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "metadata-checker"
+path = "src/main.rs"
+
+[lib]
+name = "metadata_checker"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "help"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+regex = "1"
+redb = "4.1.0"
+petgraph = "0.8.3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
+codegen-units = 1

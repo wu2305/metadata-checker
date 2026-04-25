@@ -1,0 +1,16 @@
+{
+	"theme": "default",
+	"params": [],
+	"sources": [],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "text1",
+				"type": "text",
+				"value": "=123"
+			}
+		]
+	}
+}

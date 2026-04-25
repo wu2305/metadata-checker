@@ -1,0 +1,102 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [],
+	"sources": [],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "text1",
+				"type": "text",
+				"value": ""
+			},
+			{
+				"id": "text2",
+				"type": "text",
+				"value": "纯静态文本"
+			},
+			{
+				"id": "text3",
+				"type": "text",
+				"value": "=123"
+			},
+			{
+				"id": "text4",
+				"type": "text",
+				"value": "=TODAY()"
+			},
+			{
+				"id": "text5",
+				"type": "text",
+				"value": "=${中文变量}"
+			},
+			{
+				"id": "text6",
+				"type": "text",
+				"value": "=IF(input1.value IS NULL, '空值', input1.value)"
+			},
+			{
+				"id": "text7",
+				"type": "text",
+				"value": "=CONCAT('前缀', input2.value, '中缀', input3.value, '后缀')"
+			},
+			{
+				"id": "text8",
+				"type": "text",
+				"value": "=IF(IF(input1.value > 0, input2.value, 0) = input3.value, 'yes', 'no')"
+			},
+			{
+				"id": "text9",
+				"type": "text",
+				"value": "=input1.value = input2.value AND input3.value != input4.value OR input5.value >= input6.value"
+			},
+			{
+				"id": "list1",
+				"type": "list",
+				"value": "=list1.column1.value + list1.column2.value"
+			},
+			{
+				"id": "steps1",
+				"type": "steps",
+				"value": "=steps1.step"
+			},
+			{
+				"id": "input1",
+				"type": "input",
+				"value": "=param1"
+			},
+			{
+				"id": "input2",
+				"type": "input",
+				"value": "=model1.fieldA"
+			},
+			{
+				"id": "input3",
+				"type": "input",
+				"value": "=input1.value + input2.value"
+			},
+			{
+				"id": "input4",
+				"type": "input",
+				"value": "=input1.value - input2.value"
+			},
+			{
+				"id": "input5",
+				"type": "input",
+				"value": "=input1.value * input2.value"
+			},
+			{
+				"id": "input6",
+				"type": "input",
+				"value": "=input1.value / input2.value"
+			},
+			{
+				"id": "input7",
+				"type": "input",
+				"value": "=input1.value"
+			}
+		]
+	}
+}

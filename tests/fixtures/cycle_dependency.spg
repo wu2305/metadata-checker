@@ -1,0 +1,22 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [],
+	"sources": [],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "input1",
+				"type": "input",
+				"value": "=input2.value + 1"
+			},
+			{
+				"id": "input2",
+				"type": "input",
+				"value": "=input1.value + 1"
+			}
+		]
+	}
+}

@@ -1,0 +1,182 @@
+use metadata_checker::cli;
+use metadata_checker::dependency::DependencyGraph;
+use metadata_checker::graph::GraphDB;
+use metadata_checker::output;
+use metadata_checker::parser;
+use metadata_checker::priority;
+use metadata_checker::query;
+use metadata_checker::scanner;
+
+use anyhow::Result;
+use clap::Parser;
+use std::io::{self, Write};
+
+fn main() -> Result<()> {
+    let args = cli::Cli::parse();
+
+    // Cross-file graph analysis mode
+    if let Some(ref project_dir) = args.project_dir {
+        let db_path = std::path::PathBuf::from("/tmp/metadata-checker.graphdb");
+        
+        if args.build_graph {
+            scanner::scan_project(project_dir, &db_path)?;
+            println!("Graph database built at {:?}", db_path);
+            return Ok(());
+        }
+        
+        let graph = GraphDB::open(&db_path)?;
+        
+        if let Some(ref model_id) = args.query_model {
+            let model_node_id = format!("model:{}", model_id);
+            query::query_model(&graph, &model_node_id, args.is_human())?;
+            return Ok(());
+        }
+        
+        if let Some(ref page_id) = args.query_page {
+            query::query_page(&graph, page_id, args.is_human())?;
+            return Ok(());
+        }
+        
+        if let Some(ref pages) = args.query_cross {
+            if pages.len() >= 2 {
+                query::query_cross(&graph, &pages[0], &pages[1], args.is_human())?;
+            }
+            return Ok(());
+        }
+        
+        println!("No query specified. Use --query-model, --query-page, or --query-cross.");
+        return Ok(());
+    }
+
+    // Validate args
+    if args.input.is_none() && args.project_dir.is_none() {
+        eprintln!("Error: either <FILE> or --project-dir must be specified.");
+        std::process::exit(1);
+    }
+
+    let meta = if let Some(ref input) = args.input {
+        parser::parse_file(input)?
+    } else {
+        // Placeholder when only project-dir is used
+        parser::parse_file(std::path::Path::new(""))? // Will not reach here due to early returns below
+    };
+
+    // --query mode: print component query and exit
+    if let Some(ref target_id) = args.query {
+        if let Some(spg) = &meta.superpage {
+            let graph = DependencyGraph::new(spg);
+            if args.is_human() {
+                output::print_component_query_human(spg, &graph, target_id, args.priority)?;
+            } else {
+                output::print_component_query_json(spg, &graph, target_id, args.priority)?;
+            }
+        }
+        return Ok(());
+    }
+
+    // --human without --query: enter interactive mode
+    if args.is_human() {
+        if let Some(spg) = &meta.superpage {
+            run_interactive(spg)?;
+        }
+        return Ok(());
+    }
+
+    // Default non-human full report
+    output::print_non_human(&meta)?;
+
+    if args.priority {
+        if let Some(spg) = &meta.superpage {
+            let analyses = priority::analyze_priority(spg);
+            let report = priority::format_priority_human(&analyses);
+            println!("\n{}", report);
+        }
+    }
+
+    Ok(())
+}
+
+fn run_interactive(spg: &metadata_checker::superpage::SuperPageMetadata) -> Result<()> {
+    let graph = DependencyGraph::new(spg);
+
+    println!("=== SuperPage Interactive Mode ===");
+    println!("Version: {} | Theme: {} | Components: {} | Expressions: {}",
+        spg.version.as_deref().unwrap_or("N/A"),
+        spg.theme.as_deref().unwrap_or("N/A"),
+        spg.components.len(),
+        spg.expressions.len()
+    );
+
+    let model_names: Vec<&str> = spg.sources.iter().map(|s| s.id.as_str()).collect();
+    if !model_names.is_empty() {
+        println!("Models: {}", model_names.join(", "));
+    }
+
+    let param_names: Vec<&str> = spg.params.iter().map(|p| p.id.as_str()).collect();
+    if !param_names.is_empty() {
+        println!("Params: {}", param_names.join(", "));
+    }
+
+    let expr_comp_ids: Vec<&str> = {
+        let set: std::collections::HashSet<&str> = spg.expressions.iter()
+            .map(|e| e.component_id.as_str())
+            .collect();
+        set.into_iter().collect()
+    };
+    if !expr_comp_ids.is_empty() {
+        println!("Components with expressions: {}", expr_comp_ids.join(", "));
+    }
+
+    println!("\nCommands:");
+    println!("  <component-id>  Query a component");
+    println!("  all             Print full human-readable report");
+    println!("  q / quit / exit Exit interactive mode");
+    println!();
+
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+
+    loop {
+        write!(stdout, "> ")?;
+        stdout.flush()?;
+
+        let mut line = String::new();
+        if stdin.read_line(&mut line)? == 0 {
+            break;
+        }
+        let cmd = line.trim();
+
+        match cmd {
+            "q" | "quit" | "exit" => {
+                println!("Goodbye!");
+                break;
+            }
+            "" => continue,
+            "all" => {
+                let meta = metadata_checker::parser::PageMetadata {
+                    page_id: None,
+                    page_name: None,
+                    version: spg.version.clone(),
+                    components: vec![],
+                    data_bindings: vec![],
+                    settings: Default::default(),
+                    raw: spg.raw.clone(),
+                    superpage: Some(spg.clone()),
+                };
+                output::print_human(&meta)?;
+            }
+            target_id => {
+                let found = spg.components.iter().any(|c| c.id == target_id);
+                if !found {
+                    println!("Component '{}' not found.", target_id);
+                    continue;
+                }
+                if let Err(e) = output::print_component_query_human(spg, &graph, target_id, false) {
+                    println!("Error: {}", e);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}

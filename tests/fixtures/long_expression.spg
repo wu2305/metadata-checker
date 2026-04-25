@@ -1,0 +1,17 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [],
+	"sources": [],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "text1",
+				"type": "text",
+				"value": "=CONCAT('前缀文本', input1.value, '中缀文本', input2.value, '后缀文本', input3.value, '补充文本', input4.value, '结束文本')"
+			}
+		]
+	}
+}

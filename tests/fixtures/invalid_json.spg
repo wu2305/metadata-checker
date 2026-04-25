@@ -1,0 +1,11 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [
+		{"id": "param1" "name": "P1"}
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas"
+	}
+}

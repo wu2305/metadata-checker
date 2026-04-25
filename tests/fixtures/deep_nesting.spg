@@ -1,0 +1,45 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [
+		{"id": "param1", "name": "P1"}
+	],
+	"sources": [
+		{"id": "model1", "modelType": "dwtable"}
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "panel1",
+				"type": "panel",
+				"components": [
+					{
+						"id": "panel2",
+						"type": "panel",
+						"components": [
+							{
+								"id": "panel3",
+								"type": "panel",
+								"components": [
+									{
+										"id": "panel4",
+										"type": "panel",
+										"components": [
+											{
+												"id": "input1",
+												"type": "input",
+												"value": "=param1-model1.A"
+											}
+										]
+									}
+								]
+							}
+						]
+					}
+				]
+			}
+		]
+	}
+}

@@ -1,0 +1,5602 @@
+{
+	"version": "4.19.7",
+	"theme": "mobile",
+	"images": [
+		{
+			"name": "ed5f367289bce2525b78e67d9d680331.webp",
+			"category": "componentBackground",
+			"pictureFillInfo": {
+				"type": "contain"
+			}
+		}
+	],
+	"params": [
+		{
+			"id": "param1",
+			"name": "name",
+			"includeAllWhenEmpty": true,
+			"desc": ""
+		},
+		{
+			"id": "param2",
+			"name": "xs",
+			"value": "0",
+			"includeAllWhenEmpty": true,
+			"desc": ""
+		},
+		{
+			"id": "param3",
+			"name": "phone",
+			"includeAllWhenEmpty": true,
+			"desc": "手机号"
+		},
+		{
+			"id": "param4",
+			"name": "bhid",
+			"includeAllWhenEmpty": true,
+			"desc": "编号id"
+		},
+		{
+			"id": "param5",
+			"name": "externalUserId",
+			"includeAllWhenEmpty": true,
+			"desc": "好友关系id"
+		},
+		{
+			"id": "param6",
+			"name": "qwContactId",
+			"includeAllWhenEmpty": true,
+			"desc": "企业销售id"
+		},
+		{
+			"id": "param7",
+			"name": "gtype",
+			"desc": "购车名义"
+		},
+		{
+			"id": "param8",
+			"name": "jname",
+			"desc": "经办人"
+		},
+		{
+			"id": "param9",
+			"name": "filename",
+			"desc": ""
+		},
+		{
+			"id": "param10",
+			"name": "zbname",
+			"desc": "指标人"
+		},
+		{
+			"id": "param11",
+			"name": "zbphone",
+			"desc": "指标人手机号"
+		}
+	],
+	"sources": [
+		{
+			"id": "model1",
+			"modelType": "dwtable",
+			"path": "$DATA:/销售/fact_Carpurchaseloanconsultationagency.tbl",
+			"primaryKey": "name",
+			"queryConditionReturnEmpty": false,
+			"cacheMode": "disable",
+			"name": "购车贷款咨询代办提交"
+		},
+		{
+			"id": "model2",
+			"modelType": "dwtable",
+			"path": "$DATA:/主数据/fact_customAutoStorefront.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "dimDepart",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model2.dimDepart=input30"
+					}
+				]
+			}
+		},
+		{
+			"id": "model3",
+			"modelType": "dwtable",
+			"path": "$DATA:/销售/fact_Carpurchaseloanconsultationagency.tbl",
+			"primaryKey": "name",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "TOSTR(model3.creat_time,'yyyymmdd')=TOSTR(TODAY(),'yyyymmdd')"
+					}
+				]
+			},
+			"name": "购车贷款咨询代办过滤今天"
+		},
+		{
+			"id": "model4",
+			"modelType": "dwtable",
+			"path": "$DATA:/销售/加工表/购车贷款咨询代办.tbl",
+			"name": "购车贷款咨询代办加工",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "name",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "IF(model4.CANCELLATIONCONTRACT IS NULL,model4.SFQS=0,model4.SFQS!=0)"
+					}
+				]
+			},
+			"params": [
+				{
+					"name": "phone1",
+					"value": "${param3}"
+				}
+			]
+		},
+		{
+			"id": "model5",
+			"modelType": "dwtable",
+			"path": "$DATA:/销售/fact_Carpurchaseloanconsultationagency.tbl",
+			"primaryKey": "name",
+			"queryConditionReturnEmpty": false,
+			"cacheMode": "disable",
+			"name": "购车贷款咨询代办编辑",
+			"dataSetResultType": "oneRowResult",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model5.externalUserId=param5"
+					},
+					{
+						"exp": "model5.qwContactId=param6"
+					},
+					{
+						"exp": "model5.signed IS NULL"
+					},
+					{
+						"exp": "model5.creat_time.date=TODAY()"
+					},
+					{
+						"exp": "model5.CANCELLATIONCONTRACT IS NULL"
+					}
+				]
+			}
+		},
+		{
+			"id": "model6",
+			"desc": "",
+			"content": {
+				"version": "4.19.0",
+				"properties": {
+					"modelDataType": "DataFlow",
+					"extractDataEnabled": false,
+					"rollbackEnabled": false,
+					"modifyDbTableEnabled": [
+						"field",
+						"index",
+						"constraint"
+					],
+					"rebuildIndexAndKey": true
+				},
+				"dimensions": [
+					{
+						"name": "销售订单号",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dbfield": "NAME",
+						"defaultValueExp": "",
+						"inputField": "销售订单号",
+						"originalField": "销售订单号",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "业务类型",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dbfield": "ENTITYTYPE",
+						"inputField": "业务类型",
+						"originalField": "业务类型",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "所属机构",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dbfield": "DIMDEPART",
+						"dimensionPath": "$DATA:/主数据/fact_customAutoStorefront.tbl",
+						"inputField": "所属机构",
+						"originalField": "所属机构",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "所有人",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dbfield": "OWNERID",
+						"dimensionPath": "$DATA:/通用/szsys_4_depts.tbl",
+						"inputField": "所有人",
+						"originalField": "所有人",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "市",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dbfield": "CITY",
+						"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+						"inputField": "市",
+						"originalField": "市",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "区",
+						"dbfield": "DISTRICT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+						"inputField": "区",
+						"originalField": "区",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "卖方名称",
+						"dbfield": "SELLERNAME",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "卖方名称",
+						"originalField": "卖方名称",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "电话",
+						"dbfield": "PHONE",
+						"dataType": "C",
+						"length": 500,
+						"isDimension": true,
+						"inputField": "电话",
+						"originalField": "电话",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "地址",
+						"dbfield": "ADDRESS",
+						"dataType": "C",
+						"length": 100,
+						"isDimension": true,
+						"inputField": "地址",
+						"originalField": "地址",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "销售顾问",
+						"dbfield": "SALESCONSULTANT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dimensionPath": "",
+						"inputField": "销售顾问",
+						"originalField": "销售顾问",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "联系方式",
+						"dbfield": "CONTACT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "联系方式",
+						"originalField": "联系方式",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "买方姓名/名称",
+						"dbfield": "BUYERNAME",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "买方姓名/名称",
+						"originalField": "买方姓名/名称",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "买方联系方式",
+						"dbfield": "BUYERCONTACT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "买方联系方式",
+						"originalField": "买方联系方式",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "买方住址/住所",
+						"dbfield": "BUYERADDRESS",
+						"dataType": "C",
+						"length": 150,
+						"isDimension": true,
+						"inputField": "买方住址/住所",
+						"originalField": "买方住址/住所",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "身份证号/信用机构代码证",
+						"dbfield": "IDNUMBER",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "身份证号/信用机构代码证",
+						"originalField": "身份证号/信用机构代码证",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "品牌",
+						"dbfield": "CARBRAND",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dimensionPath": "$DATA:/主数据/fact_productBrand.tbl",
+						"inputField": "品牌",
+						"originalField": "品牌",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "车型",
+						"dbfield": "CARMODEL",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dimensionPath": "$DATA:/主数据/fact_product.tbl",
+						"inputField": "车型",
+						"originalField": "车型",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "颜色（外观/内饰）",
+						"dbfield": "COLOR",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "颜色（外观/内饰）",
+						"originalField": "颜色（外观/内饰）",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "数量",
+						"dbfield": "QUANTITY",
+						"dataType": "I",
+						"length": 12,
+						"isDimension": true,
+						"inputField": "数量",
+						"originalField": "数量",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "标的车辆价格",
+						"dbfield": "VEHICLEPRICE",
+						"dataType": "N",
+						"length": 12,
+						"isDimension": true,
+						"decimal": 2,
+						"inputField": "标的车辆价格",
+						"originalField": "标的车辆价格",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "预付款",
+						"dbfield": "ADVANCE",
+						"dataType": "N",
+						"length": 38,
+						"isDimension": true,
+						"decimal": 2,
+						"inputField": "预付款",
+						"originalField": "预付款",
+						"originalNode": "FACT_SALECONTRACT",
+						"displayFormat": "displayFormat"
+					},
+					{
+						"name": "户名",
+						"dbfield": "ACCOUNTNAME",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "户名",
+						"originalField": "户名",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "开户行",
+						"dbfield": "BANK",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "开户行",
+						"originalField": "开户行",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "账号",
+						"dbfield": "ACCOUNT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "账号",
+						"originalField": "账号",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "买方",
+						"dbfield": "BUYER",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dimensionPath": "$DATA:/主数据/fact_account.tbl",
+						"inputField": "买方",
+						"originalField": "买方",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "卖方",
+						"dbfield": "SELLER",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "卖方",
+						"originalField": "卖方",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "授权代表签字/盖章",
+						"dbfield": "AUTHORIZEDSIGNATURE",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "授权代表签字/盖章",
+						"originalField": "授权代表签字/盖章",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "创建日期",
+						"dbfield": "CREATTIME",
+						"dataType": "P",
+						"isDimension": true,
+						"periodType": "timestampdate",
+						"dateKeyValueFormat": "yyyyMMdd",
+						"defaultValueExp": "NOW()",
+						"inputField": "创建日期",
+						"originalField": "创建日期",
+						"originalNode": "FACT_SALECONTRACT",
+						"businessDesc": "以此为准"
+					},
+					{
+						"name": "是否发送",
+						"dbfield": "SEND",
+						"dataType": "I",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "是否发送",
+						"originalField": "是否发送",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "是否红冲",
+						"dbfield": "ISRED",
+						"dataType": "I",
+						"length": 38,
+						"isDimension": true,
+						"inputField": "是否红冲",
+						"originalField": "是否红冲",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "原始单据",
+						"dbfield": "OLDORDERNO",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "原始单据",
+						"originalField": "原始单据",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "订单状态",
+						"dbfield": "STATUS",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "订单状态",
+						"originalField": "订单状态",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "是否填写销售交车面访表",
+						"dbfield": "ISFILL",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dimensionPath": "$DATA:/通用/dim_Whether.tbl",
+						"defaultValueExp": "0",
+						"inputField": "是否填写销售交车面访表",
+						"originalField": "是否填写销售交车面访表",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "车架号",
+						"dbfield": "VIN",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "车架号",
+						"originalField": "车架号",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "开票日期",
+						"dbfield": "BILLINGDATE",
+						"dataType": "D",
+						"isDimension": true,
+						"periodType": "timestampdate",
+						"dateKeyValueFormat": "yyyyMMdd",
+						"inputField": "开票日期",
+						"originalField": "开票日期",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "出库日期",
+						"dbfield": "OUTBOUNDDATE",
+						"dataType": "D",
+						"isDimension": true,
+						"periodType": "timestampdate",
+						"dateKeyValueFormat": "yyyyMMdd",
+						"inputField": "出库日期",
+						"originalField": "出库日期",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "车系",
+						"dbfield": "CARSERIES",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dimensionPath": "$DATA:/主数据/fact_productCategory.tbl",
+						"inputField": "车系",
+						"originalField": "车系",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "车型细分",
+						"dbfield": "SOCARSUBTYPEID",
+						"dataType": "C",
+						"length": 200,
+						"isDimension": true,
+						"inputField": "车型细分",
+						"originalField": "车型细分",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "开单日期",
+						"dbfield": "ORDERDATE",
+						"dataType": "D",
+						"isDimension": true,
+						"periodType": "timestampdate",
+						"dateKeyValueFormat": "yyyyMMdd",
+						"inputField": "开单日期",
+						"originalField": "开单日期",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "预计交车时间",
+						"dbfield": "SOCARFCSTDELIVERYDATE",
+						"dataType": "D",
+						"isDimension": true,
+						"periodType": "timestampdate",
+						"dateKeyValueFormat": "yyyyMMdd",
+						"inputField": "预计交车时间",
+						"originalField": "预计交车时间",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "购车用途",
+						"dbfield": "CARSALETYPE",
+						"dataType": "C",
+						"length": 3000,
+						"isDimension": true,
+						"inputField": "购车用途",
+						"originalField": "购车用途",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "增配金额",
+						"dbfield": "ADDITIONALAMOUNT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "增配金额",
+						"originalField": "增配金额",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "贷款金额",
+						"dbfield": "LOANAMOUNT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "贷款金额",
+						"originalField": "贷款金额",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "贷款机构",
+						"dbfield": "LOANINSTITUTION",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "贷款机构",
+						"originalField": "贷款机构",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "贷款期数",
+						"dbfield": "LOANTERM",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "贷款期数",
+						"originalField": "贷款期数",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "金融佣金",
+						"dbfield": "FINANCECOMMISSION",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "金融佣金",
+						"originalField": "金融佣金",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "审核状态",
+						"dbfield": "APPROVALSTATUS",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"dimensionPath": "$DATA:/价审/dim_priceStatus.tbl",
+						"businessDesc": "1、待审批/2、通过/3、回退/4、草稿/5、驳回/6、提交",
+						"inputField": "审核状态",
+						"originalField": "审核状态",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "金融机构产品名称",
+						"dbfield": "FINANCIALINSTITUTION",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "金融机构产品名称",
+						"originalField": "金融机构产品名称",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "订金实收金额",
+						"dbfield": "DEPOSITRECEIVEDAMOUNT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "订金实收金额",
+						"originalField": "订金实收金额",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "订单实收金额",
+						"dbfield": "ORDERRECEIVEDAMOUNT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "订单实收金额",
+						"originalField": "订单实收金额",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "订单首付款金额",
+						"dbfield": "ORDERDOWNPAYMENTAMOUNT",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "订单首付款金额",
+						"originalField": "订单首付款金额",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "贷款状态",
+						"dbfield": "LOANSTATUS",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "贷款状态",
+						"originalField": "贷款状态",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "创建人",
+						"dbfield": "CREATENAME",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"defaultValueExp": "$user.id",
+						"dimensionPath": "$DATA:/通用/szsys_4_users.tbl",
+						"inputField": "创建人",
+						"originalField": "创建人",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "创建时间",
+						"dbfield": "CREATETIME",
+						"dataType": "P",
+						"isDimension": true,
+						"defaultValueExp": "NOW()",
+						"periodType": "timestampdate",
+						"dateKeyValueFormat": "yyyyMMdd",
+						"businessDesc": "废弃",
+						"inputField": "创建时间",
+						"originalField": "创建时间",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "修改时间",
+						"dbfield": "REVISETIME",
+						"dataType": "P",
+						"isDimension": true,
+						"periodType": "timestampdate",
+						"dateKeyValueFormat": "yyyyMMdd",
+						"inputField": "修改时间",
+						"originalField": "修改时间",
+						"originalNode": "FACT_SALECONTRACT"
+					},
+					{
+						"name": "最后修改人",
+						"dbfield": "LASTUPDATEPERSON",
+						"dataType": "C",
+						"length": 50,
+						"isDimension": true,
+						"inputField": "最后修改人",
+						"originalField": "最后修改人",
+						"originalNode": "FACT_SALECONTRACT"
+					}
+				],
+				"dataFlow": {
+					"nodes": {
+						"eb31108610c14b23a664b596292489a1": {
+							"alias": "FACT_SALECONTRACT",
+							"type": "ModelTable",
+							"moduleTablePath": "$DATA:/销售/fact_saleContract.tbl",
+							"id": "eb31108610c14b23a664b596292489a1",
+							"devFixedRowCount": 10000,
+							"checkFields": true,
+							"checkFreshData": false,
+							"checkRows": false,
+							"fields": [
+								{
+									"name": "销售订单号",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "NAME",
+									"defaultValueExp": "",
+									"inputField": "销售订单号"
+								},
+								{
+									"name": "业务类型",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "ENTITYTYPE",
+									"inputField": "业务类型"
+								},
+								{
+									"name": "所属机构",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "DIMDEPART",
+									"dimensionPath": "$DATA:/主数据/fact_customAutoStorefront.tbl",
+									"inputField": "所属机构"
+								},
+								{
+									"name": "所有人",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "OWNERID",
+									"dimensionPath": "$DATA:/通用/szsys_4_depts.tbl",
+									"inputField": "所有人"
+								},
+								{
+									"name": "市",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "CITY",
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "市"
+								},
+								{
+									"name": "区",
+									"dbfield": "DISTRICT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "区"
+								},
+								{
+									"name": "卖方名称",
+									"dbfield": "SELLERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方名称"
+								},
+								{
+									"name": "电话",
+									"dbfield": "PHONE",
+									"dataType": "C",
+									"length": 500,
+									"isDimension": true,
+									"inputField": "电话"
+								},
+								{
+									"name": "地址",
+									"dbfield": "ADDRESS",
+									"dataType": "C",
+									"length": 100,
+									"isDimension": true,
+									"inputField": "地址"
+								},
+								{
+									"name": "销售顾问",
+									"dbfield": "SALESCONSULTANT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "",
+									"inputField": "销售顾问"
+								},
+								{
+									"name": "联系方式",
+									"dbfield": "CONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "联系方式"
+								},
+								{
+									"name": "买方姓名/名称",
+									"dbfield": "BUYERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方姓名/名称"
+								},
+								{
+									"name": "买方联系方式",
+									"dbfield": "BUYERCONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方联系方式"
+								},
+								{
+									"name": "买方住址/住所",
+									"dbfield": "BUYERADDRESS",
+									"dataType": "C",
+									"length": 150,
+									"isDimension": true,
+									"inputField": "买方住址/住所"
+								},
+								{
+									"name": "身份证号/信用机构代码证",
+									"dbfield": "IDNUMBER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "身份证号/信用机构代码证"
+								},
+								{
+									"name": "品牌",
+									"dbfield": "CARBRAND",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productBrand.tbl",
+									"inputField": "品牌"
+								},
+								{
+									"name": "车型",
+									"dbfield": "CARMODEL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_product.tbl",
+									"inputField": "车型"
+								},
+								{
+									"name": "颜色（外观/内饰）",
+									"dbfield": "COLOR",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "颜色（外观/内饰）"
+								},
+								{
+									"name": "数量",
+									"dbfield": "QUANTITY",
+									"dataType": "I",
+									"length": 12,
+									"isDimension": true,
+									"inputField": "数量"
+								},
+								{
+									"name": "标的车辆价格",
+									"dbfield": "VEHICLEPRICE",
+									"dataType": "N",
+									"length": 12,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "标的车辆价格"
+								},
+								{
+									"name": "预付款",
+									"dbfield": "ADVANCE",
+									"dataType": "N",
+									"length": 38,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "预付款",
+									"displayFormat": "displayFormat"
+								},
+								{
+									"name": "户名",
+									"dbfield": "ACCOUNTNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "户名"
+								},
+								{
+									"name": "开户行",
+									"dbfield": "BANK",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "开户行"
+								},
+								{
+									"name": "账号",
+									"dbfield": "ACCOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "账号"
+								},
+								{
+									"name": "买方",
+									"dbfield": "BUYER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_account.tbl",
+									"inputField": "买方"
+								},
+								{
+									"name": "卖方",
+									"dbfield": "SELLER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方"
+								},
+								{
+									"name": "授权代表签字/盖章",
+									"dbfield": "AUTHORIZEDSIGNATURE",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "授权代表签字/盖章"
+								},
+								{
+									"name": "创建日期",
+									"dbfield": "CREATTIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"defaultValueExp": "NOW()",
+									"inputField": "创建日期",
+									"businessDesc": "以此为准"
+								},
+								{
+									"name": "是否发送",
+									"dbfield": "SEND",
+									"dataType": "I",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "是否发送"
+								},
+								{
+									"name": "是否红冲",
+									"dbfield": "ISRED",
+									"dataType": "I",
+									"length": 38,
+									"isDimension": true,
+									"inputField": "是否红冲"
+								},
+								{
+									"name": "原始单据",
+									"dbfield": "OLDORDERNO",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "原始单据"
+								},
+								{
+									"name": "订单状态",
+									"dbfield": "STATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单状态"
+								},
+								{
+									"name": "是否填写销售交车面访表",
+									"dbfield": "ISFILL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/dim_Whether.tbl",
+									"defaultValueExp": "0",
+									"inputField": "是否填写销售交车面访表"
+								},
+								{
+									"name": "车架号",
+									"dbfield": "VIN",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "车架号"
+								},
+								{
+									"name": "开票日期",
+									"dbfield": "BILLINGDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开票日期"
+								},
+								{
+									"name": "出库日期",
+									"dbfield": "OUTBOUNDDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "出库日期"
+								},
+								{
+									"name": "车系",
+									"dbfield": "CARSERIES",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productCategory.tbl",
+									"inputField": "车系"
+								},
+								{
+									"name": "车型细分",
+									"dbfield": "SOCARSUBTYPEID",
+									"dataType": "C",
+									"length": 200,
+									"isDimension": true,
+									"inputField": "车型细分"
+								},
+								{
+									"name": "开单日期",
+									"dbfield": "ORDERDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开单日期"
+								},
+								{
+									"name": "预计交车时间",
+									"dbfield": "SOCARFCSTDELIVERYDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "预计交车时间"
+								},
+								{
+									"name": "购车用途",
+									"dbfield": "CARSALETYPE",
+									"dataType": "C",
+									"length": 3000,
+									"isDimension": true,
+									"inputField": "购车用途"
+								},
+								{
+									"name": "增配金额",
+									"dbfield": "ADDITIONALAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "增配金额"
+								},
+								{
+									"name": "贷款金额",
+									"dbfield": "LOANAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款金额"
+								},
+								{
+									"name": "贷款机构",
+									"dbfield": "LOANINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款机构"
+								},
+								{
+									"name": "贷款期数",
+									"dbfield": "LOANTERM",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款期数"
+								},
+								{
+									"name": "金融佣金",
+									"dbfield": "FINANCECOMMISSION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融佣金"
+								},
+								{
+									"name": "审核状态",
+									"dbfield": "APPROVALSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/价审/dim_priceStatus.tbl",
+									"businessDesc": "1、待审批/2、通过/3、回退/4、草稿/5、驳回/6、提交",
+									"inputField": "审核状态"
+								},
+								{
+									"name": "金融机构产品名称",
+									"dbfield": "FINANCIALINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融机构产品名称"
+								},
+								{
+									"name": "订金实收金额",
+									"dbfield": "DEPOSITRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订金实收金额"
+								},
+								{
+									"name": "订单实收金额",
+									"dbfield": "ORDERRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单实收金额"
+								},
+								{
+									"name": "订单首付款金额",
+									"dbfield": "ORDERDOWNPAYMENTAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单首付款金额"
+								},
+								{
+									"name": "贷款状态",
+									"dbfield": "LOANSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款状态"
+								},
+								{
+									"name": "创建人",
+									"dbfield": "CREATENAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"defaultValueExp": "$user.id",
+									"dimensionPath": "$DATA:/通用/szsys_4_users.tbl",
+									"inputField": "创建人"
+								},
+								{
+									"name": "创建时间",
+									"dbfield": "CREATETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"defaultValueExp": "NOW()",
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"businessDesc": "废弃",
+									"inputField": "创建时间"
+								},
+								{
+									"name": "修改时间",
+									"dbfield": "REVISETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "修改时间"
+								},
+								{
+									"name": "最后修改人",
+									"dbfield": "LASTUPDATEPERSON",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "最后修改人"
+								}
+							],
+							"lastModifyTime": 1770173052651,
+							"dimensions": [
+								{
+									"name": "销售订单号",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "NAME",
+									"defaultValueExp": "",
+									"inputField": "销售订单号"
+								},
+								{
+									"name": "业务类型",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "ENTITYTYPE",
+									"inputField": "业务类型"
+								},
+								{
+									"name": "所属机构",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "DIMDEPART",
+									"dimensionPath": "$DATA:/主数据/fact_customAutoStorefront.tbl",
+									"inputField": "所属机构"
+								},
+								{
+									"name": "所有人",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "OWNERID",
+									"dimensionPath": "$DATA:/通用/szsys_4_depts.tbl",
+									"inputField": "所有人"
+								},
+								{
+									"name": "市",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "CITY",
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "市"
+								},
+								{
+									"name": "区",
+									"dbfield": "DISTRICT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "区"
+								},
+								{
+									"name": "卖方名称",
+									"dbfield": "SELLERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方名称"
+								},
+								{
+									"name": "电话",
+									"dbfield": "PHONE",
+									"dataType": "C",
+									"length": 500,
+									"isDimension": true,
+									"inputField": "电话"
+								},
+								{
+									"name": "地址",
+									"dbfield": "ADDRESS",
+									"dataType": "C",
+									"length": 100,
+									"isDimension": true,
+									"inputField": "地址"
+								},
+								{
+									"name": "销售顾问",
+									"dbfield": "SALESCONSULTANT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "",
+									"inputField": "销售顾问"
+								},
+								{
+									"name": "联系方式",
+									"dbfield": "CONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "联系方式"
+								},
+								{
+									"name": "买方姓名/名称",
+									"dbfield": "BUYERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方姓名/名称"
+								},
+								{
+									"name": "买方联系方式",
+									"dbfield": "BUYERCONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方联系方式"
+								},
+								{
+									"name": "买方住址/住所",
+									"dbfield": "BUYERADDRESS",
+									"dataType": "C",
+									"length": 150,
+									"isDimension": true,
+									"inputField": "买方住址/住所"
+								},
+								{
+									"name": "身份证号/信用机构代码证",
+									"dbfield": "IDNUMBER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "身份证号/信用机构代码证"
+								},
+								{
+									"name": "品牌",
+									"dbfield": "CARBRAND",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productBrand.tbl",
+									"inputField": "品牌"
+								},
+								{
+									"name": "车型",
+									"dbfield": "CARMODEL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_product.tbl",
+									"inputField": "车型"
+								},
+								{
+									"name": "颜色（外观/内饰）",
+									"dbfield": "COLOR",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "颜色（外观/内饰）"
+								},
+								{
+									"name": "数量",
+									"dbfield": "QUANTITY",
+									"dataType": "I",
+									"length": 12,
+									"isDimension": true,
+									"inputField": "数量"
+								},
+								{
+									"name": "标的车辆价格",
+									"dbfield": "VEHICLEPRICE",
+									"dataType": "N",
+									"length": 12,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "标的车辆价格"
+								},
+								{
+									"name": "预付款",
+									"dbfield": "ADVANCE",
+									"dataType": "N",
+									"length": 38,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "预付款",
+									"displayFormat": "displayFormat"
+								},
+								{
+									"name": "户名",
+									"dbfield": "ACCOUNTNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "户名"
+								},
+								{
+									"name": "开户行",
+									"dbfield": "BANK",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "开户行"
+								},
+								{
+									"name": "账号",
+									"dbfield": "ACCOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "账号"
+								},
+								{
+									"name": "买方",
+									"dbfield": "BUYER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_account.tbl",
+									"inputField": "买方"
+								},
+								{
+									"name": "卖方",
+									"dbfield": "SELLER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方"
+								},
+								{
+									"name": "授权代表签字/盖章",
+									"dbfield": "AUTHORIZEDSIGNATURE",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "授权代表签字/盖章"
+								},
+								{
+									"name": "创建日期",
+									"dbfield": "CREATTIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"defaultValueExp": "NOW()",
+									"inputField": "创建日期",
+									"businessDesc": "以此为准"
+								},
+								{
+									"name": "是否发送",
+									"dbfield": "SEND",
+									"dataType": "I",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "是否发送"
+								},
+								{
+									"name": "是否红冲",
+									"dbfield": "ISRED",
+									"dataType": "I",
+									"length": 38,
+									"isDimension": true,
+									"inputField": "是否红冲"
+								},
+								{
+									"name": "原始单据",
+									"dbfield": "OLDORDERNO",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "原始单据"
+								},
+								{
+									"name": "订单状态",
+									"dbfield": "STATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单状态"
+								},
+								{
+									"name": "是否填写销售交车面访表",
+									"dbfield": "ISFILL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/dim_Whether.tbl",
+									"defaultValueExp": "0",
+									"inputField": "是否填写销售交车面访表"
+								},
+								{
+									"name": "车架号",
+									"dbfield": "VIN",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "车架号"
+								},
+								{
+									"name": "开票日期",
+									"dbfield": "BILLINGDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开票日期"
+								},
+								{
+									"name": "出库日期",
+									"dbfield": "OUTBOUNDDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "出库日期"
+								},
+								{
+									"name": "车系",
+									"dbfield": "CARSERIES",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productCategory.tbl",
+									"inputField": "车系"
+								},
+								{
+									"name": "车型细分",
+									"dbfield": "SOCARSUBTYPEID",
+									"dataType": "C",
+									"length": 200,
+									"isDimension": true,
+									"inputField": "车型细分"
+								},
+								{
+									"name": "开单日期",
+									"dbfield": "ORDERDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开单日期"
+								},
+								{
+									"name": "预计交车时间",
+									"dbfield": "SOCARFCSTDELIVERYDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "预计交车时间"
+								},
+								{
+									"name": "购车用途",
+									"dbfield": "CARSALETYPE",
+									"dataType": "C",
+									"length": 3000,
+									"isDimension": true,
+									"inputField": "购车用途"
+								},
+								{
+									"name": "增配金额",
+									"dbfield": "ADDITIONALAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "增配金额"
+								},
+								{
+									"name": "贷款金额",
+									"dbfield": "LOANAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款金额"
+								},
+								{
+									"name": "贷款机构",
+									"dbfield": "LOANINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款机构"
+								},
+								{
+									"name": "贷款期数",
+									"dbfield": "LOANTERM",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款期数"
+								},
+								{
+									"name": "金融佣金",
+									"dbfield": "FINANCECOMMISSION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融佣金"
+								},
+								{
+									"name": "审核状态",
+									"dbfield": "APPROVALSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/价审/dim_priceStatus.tbl",
+									"businessDesc": "1、待审批/2、通过/3、回退/4、草稿/5、驳回/6、提交",
+									"inputField": "审核状态"
+								},
+								{
+									"name": "金融机构产品名称",
+									"dbfield": "FINANCIALINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融机构产品名称"
+								},
+								{
+									"name": "订金实收金额",
+									"dbfield": "DEPOSITRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订金实收金额"
+								},
+								{
+									"name": "订单实收金额",
+									"dbfield": "ORDERRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单实收金额"
+								},
+								{
+									"name": "订单首付款金额",
+									"dbfield": "ORDERDOWNPAYMENTAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单首付款金额"
+								},
+								{
+									"name": "贷款状态",
+									"dbfield": "LOANSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款状态"
+								},
+								{
+									"name": "创建人",
+									"dbfield": "CREATENAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"defaultValueExp": "$user.id",
+									"dimensionPath": "$DATA:/通用/szsys_4_users.tbl",
+									"inputField": "创建人"
+								},
+								{
+									"name": "创建时间",
+									"dbfield": "CREATETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"defaultValueExp": "NOW()",
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"businessDesc": "废弃",
+									"inputField": "创建时间"
+								},
+								{
+									"name": "修改时间",
+									"dbfield": "REVISETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "修改时间"
+								},
+								{
+									"name": "最后修改人",
+									"dbfield": "LASTUPDATEPERSON",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "最后修改人"
+								}
+							]
+						},
+						"eed334a1015d4a4e809f102fe558f713": {
+							"type": "Distinct",
+							"alias": "去重",
+							"inputNodes": [
+								"eb31108610c14b23a664b596292489a1"
+							],
+							"id": "eed334a1015d4a4e809f102fe558f713",
+							"distinctFields": [
+								"买方联系方式"
+							],
+							"distinctSorts": [
+								{
+									"exp": "创建时间",
+									"type": "desc"
+								}
+							],
+							"fields": [
+								{
+									"name": "买方联系方式",
+									"dbfield": "BUYERCONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方联系方式",
+									"originalField": "买方联系方式",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方姓名/名称",
+									"dbfield": "BUYERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方姓名/名称",
+									"originalField": "买方姓名/名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "销售订单号",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "NAME",
+									"defaultValueExp": "",
+									"inputField": "销售订单号",
+									"originalField": "销售订单号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "业务类型",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "ENTITYTYPE",
+									"inputField": "业务类型",
+									"originalField": "业务类型",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "所属机构",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "DIMDEPART",
+									"dimensionPath": "$DATA:/主数据/fact_customAutoStorefront.tbl",
+									"inputField": "所属机构",
+									"originalField": "所属机构",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "所有人",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "OWNERID",
+									"dimensionPath": "$DATA:/通用/szsys_4_depts.tbl",
+									"inputField": "所有人",
+									"originalField": "所有人",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "市",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "CITY",
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "市",
+									"originalField": "市",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "区",
+									"dbfield": "DISTRICT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "区",
+									"originalField": "区",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "卖方名称",
+									"dbfield": "SELLERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方名称",
+									"originalField": "卖方名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "电话",
+									"dbfield": "PHONE",
+									"dataType": "C",
+									"length": 500,
+									"isDimension": true,
+									"inputField": "电话",
+									"originalField": "电话",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "地址",
+									"dbfield": "ADDRESS",
+									"dataType": "C",
+									"length": 100,
+									"isDimension": true,
+									"inputField": "地址",
+									"originalField": "地址",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "销售顾问",
+									"dbfield": "SALESCONSULTANT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "",
+									"inputField": "销售顾问",
+									"originalField": "销售顾问",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "联系方式",
+									"dbfield": "CONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "联系方式",
+									"originalField": "联系方式",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方住址/住所",
+									"dbfield": "BUYERADDRESS",
+									"dataType": "C",
+									"length": 150,
+									"isDimension": true,
+									"inputField": "买方住址/住所",
+									"originalField": "买方住址/住所",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "身份证号/信用机构代码证",
+									"dbfield": "IDNUMBER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "身份证号/信用机构代码证",
+									"originalField": "身份证号/信用机构代码证",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "品牌",
+									"dbfield": "CARBRAND",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productBrand.tbl",
+									"inputField": "品牌",
+									"originalField": "品牌",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车型",
+									"dbfield": "CARMODEL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_product.tbl",
+									"inputField": "车型",
+									"originalField": "车型",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "颜色（外观/内饰）",
+									"dbfield": "COLOR",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "颜色（外观/内饰）",
+									"originalField": "颜色（外观/内饰）",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "数量",
+									"dbfield": "QUANTITY",
+									"dataType": "I",
+									"length": 12,
+									"isDimension": true,
+									"inputField": "数量",
+									"originalField": "数量",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "标的车辆价格",
+									"dbfield": "VEHICLEPRICE",
+									"dataType": "N",
+									"length": 12,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "标的车辆价格",
+									"originalField": "标的车辆价格",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "预付款",
+									"dbfield": "ADVANCE",
+									"dataType": "N",
+									"length": 38,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "预付款",
+									"originalField": "预付款",
+									"originalNode": "FACT_SALECONTRACT",
+									"displayFormat": "displayFormat"
+								},
+								{
+									"name": "户名",
+									"dbfield": "ACCOUNTNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "户名",
+									"originalField": "户名",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开户行",
+									"dbfield": "BANK",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "开户行",
+									"originalField": "开户行",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "账号",
+									"dbfield": "ACCOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "账号",
+									"originalField": "账号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方",
+									"dbfield": "BUYER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_account.tbl",
+									"inputField": "买方",
+									"originalField": "买方",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "卖方",
+									"dbfield": "SELLER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方",
+									"originalField": "卖方",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "授权代表签字/盖章",
+									"dbfield": "AUTHORIZEDSIGNATURE",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "授权代表签字/盖章",
+									"originalField": "授权代表签字/盖章",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建日期",
+									"dbfield": "CREATTIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"defaultValueExp": "NOW()",
+									"inputField": "创建日期",
+									"originalField": "创建日期",
+									"originalNode": "FACT_SALECONTRACT",
+									"businessDesc": "以此为准"
+								},
+								{
+									"name": "是否发送",
+									"dbfield": "SEND",
+									"dataType": "I",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "是否发送",
+									"originalField": "是否发送",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "是否红冲",
+									"dbfield": "ISRED",
+									"dataType": "I",
+									"length": 38,
+									"isDimension": true,
+									"inputField": "是否红冲",
+									"originalField": "是否红冲",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "原始单据",
+									"dbfield": "OLDORDERNO",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "原始单据",
+									"originalField": "原始单据",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单状态",
+									"dbfield": "STATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单状态",
+									"originalField": "订单状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "是否填写销售交车面访表",
+									"dbfield": "ISFILL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/dim_Whether.tbl",
+									"defaultValueExp": "0",
+									"inputField": "是否填写销售交车面访表",
+									"originalField": "是否填写销售交车面访表",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车架号",
+									"dbfield": "VIN",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "车架号",
+									"originalField": "车架号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开票日期",
+									"dbfield": "BILLINGDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开票日期",
+									"originalField": "开票日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "出库日期",
+									"dbfield": "OUTBOUNDDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "出库日期",
+									"originalField": "出库日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车系",
+									"dbfield": "CARSERIES",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productCategory.tbl",
+									"inputField": "车系",
+									"originalField": "车系",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车型细分",
+									"dbfield": "SOCARSUBTYPEID",
+									"dataType": "C",
+									"length": 200,
+									"isDimension": true,
+									"inputField": "车型细分",
+									"originalField": "车型细分",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开单日期",
+									"dbfield": "ORDERDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开单日期",
+									"originalField": "开单日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "预计交车时间",
+									"dbfield": "SOCARFCSTDELIVERYDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "预计交车时间",
+									"originalField": "预计交车时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "购车用途",
+									"dbfield": "CARSALETYPE",
+									"dataType": "C",
+									"length": 3000,
+									"isDimension": true,
+									"inputField": "购车用途",
+									"originalField": "购车用途",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "增配金额",
+									"dbfield": "ADDITIONALAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "增配金额",
+									"originalField": "增配金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款金额",
+									"dbfield": "LOANAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款金额",
+									"originalField": "贷款金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款机构",
+									"dbfield": "LOANINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款机构",
+									"originalField": "贷款机构",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款期数",
+									"dbfield": "LOANTERM",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款期数",
+									"originalField": "贷款期数",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "金融佣金",
+									"dbfield": "FINANCECOMMISSION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融佣金",
+									"originalField": "金融佣金",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "审核状态",
+									"dbfield": "APPROVALSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/价审/dim_priceStatus.tbl",
+									"businessDesc": "1、待审批/2、通过/3、回退/4、草稿/5、驳回/6、提交",
+									"inputField": "审核状态",
+									"originalField": "审核状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "金融机构产品名称",
+									"dbfield": "FINANCIALINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融机构产品名称",
+									"originalField": "金融机构产品名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订金实收金额",
+									"dbfield": "DEPOSITRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订金实收金额",
+									"originalField": "订金实收金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单实收金额",
+									"dbfield": "ORDERRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单实收金额",
+									"originalField": "订单实收金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单首付款金额",
+									"dbfield": "ORDERDOWNPAYMENTAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单首付款金额",
+									"originalField": "订单首付款金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款状态",
+									"dbfield": "LOANSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款状态",
+									"originalField": "贷款状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建人",
+									"dbfield": "CREATENAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"defaultValueExp": "$user.id",
+									"dimensionPath": "$DATA:/通用/szsys_4_users.tbl",
+									"inputField": "创建人",
+									"originalField": "创建人",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建时间",
+									"dbfield": "CREATETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"defaultValueExp": "NOW()",
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"businessDesc": "废弃",
+									"inputField": "创建时间",
+									"originalField": "创建时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "修改时间",
+									"dbfield": "REVISETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "修改时间",
+									"originalField": "修改时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "最后修改人",
+									"dbfield": "LASTUPDATEPERSON",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "最后修改人",
+									"originalField": "最后修改人",
+									"originalNode": "FACT_SALECONTRACT"
+								}
+							],
+							"lastModifyTime": 1770173138995,
+							"dimensions": [
+								{
+									"name": "买方联系方式",
+									"dbfield": "BUYERCONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方联系方式",
+									"originalField": "买方联系方式",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方姓名/名称",
+									"dbfield": "BUYERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方姓名/名称",
+									"originalField": "买方姓名/名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "销售订单号",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "NAME",
+									"defaultValueExp": "",
+									"inputField": "销售订单号",
+									"originalField": "销售订单号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "业务类型",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "ENTITYTYPE",
+									"inputField": "业务类型",
+									"originalField": "业务类型",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "所属机构",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "DIMDEPART",
+									"dimensionPath": "$DATA:/主数据/fact_customAutoStorefront.tbl",
+									"inputField": "所属机构",
+									"originalField": "所属机构",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "所有人",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "OWNERID",
+									"dimensionPath": "$DATA:/通用/szsys_4_depts.tbl",
+									"inputField": "所有人",
+									"originalField": "所有人",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "市",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "CITY",
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "市",
+									"originalField": "市",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "区",
+									"dbfield": "DISTRICT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "区",
+									"originalField": "区",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "卖方名称",
+									"dbfield": "SELLERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方名称",
+									"originalField": "卖方名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "电话",
+									"dbfield": "PHONE",
+									"dataType": "C",
+									"length": 500,
+									"isDimension": true,
+									"inputField": "电话",
+									"originalField": "电话",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "地址",
+									"dbfield": "ADDRESS",
+									"dataType": "C",
+									"length": 100,
+									"isDimension": true,
+									"inputField": "地址",
+									"originalField": "地址",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "销售顾问",
+									"dbfield": "SALESCONSULTANT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "",
+									"inputField": "销售顾问",
+									"originalField": "销售顾问",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "联系方式",
+									"dbfield": "CONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "联系方式",
+									"originalField": "联系方式",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方住址/住所",
+									"dbfield": "BUYERADDRESS",
+									"dataType": "C",
+									"length": 150,
+									"isDimension": true,
+									"inputField": "买方住址/住所",
+									"originalField": "买方住址/住所",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "身份证号/信用机构代码证",
+									"dbfield": "IDNUMBER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "身份证号/信用机构代码证",
+									"originalField": "身份证号/信用机构代码证",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "品牌",
+									"dbfield": "CARBRAND",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productBrand.tbl",
+									"inputField": "品牌",
+									"originalField": "品牌",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车型",
+									"dbfield": "CARMODEL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_product.tbl",
+									"inputField": "车型",
+									"originalField": "车型",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "颜色（外观/内饰）",
+									"dbfield": "COLOR",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "颜色（外观/内饰）",
+									"originalField": "颜色（外观/内饰）",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "数量",
+									"dbfield": "QUANTITY",
+									"dataType": "I",
+									"length": 12,
+									"isDimension": true,
+									"inputField": "数量",
+									"originalField": "数量",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "标的车辆价格",
+									"dbfield": "VEHICLEPRICE",
+									"dataType": "N",
+									"length": 12,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "标的车辆价格",
+									"originalField": "标的车辆价格",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "预付款",
+									"dbfield": "ADVANCE",
+									"dataType": "N",
+									"length": 38,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "预付款",
+									"originalField": "预付款",
+									"originalNode": "FACT_SALECONTRACT",
+									"displayFormat": "displayFormat"
+								},
+								{
+									"name": "户名",
+									"dbfield": "ACCOUNTNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "户名",
+									"originalField": "户名",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开户行",
+									"dbfield": "BANK",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "开户行",
+									"originalField": "开户行",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "账号",
+									"dbfield": "ACCOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "账号",
+									"originalField": "账号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方",
+									"dbfield": "BUYER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_account.tbl",
+									"inputField": "买方",
+									"originalField": "买方",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "卖方",
+									"dbfield": "SELLER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方",
+									"originalField": "卖方",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "授权代表签字/盖章",
+									"dbfield": "AUTHORIZEDSIGNATURE",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "授权代表签字/盖章",
+									"originalField": "授权代表签字/盖章",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建日期",
+									"dbfield": "CREATTIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"defaultValueExp": "NOW()",
+									"inputField": "创建日期",
+									"originalField": "创建日期",
+									"originalNode": "FACT_SALECONTRACT",
+									"businessDesc": "以此为准"
+								},
+								{
+									"name": "是否发送",
+									"dbfield": "SEND",
+									"dataType": "I",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "是否发送",
+									"originalField": "是否发送",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "是否红冲",
+									"dbfield": "ISRED",
+									"dataType": "I",
+									"length": 38,
+									"isDimension": true,
+									"inputField": "是否红冲",
+									"originalField": "是否红冲",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "原始单据",
+									"dbfield": "OLDORDERNO",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "原始单据",
+									"originalField": "原始单据",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单状态",
+									"dbfield": "STATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单状态",
+									"originalField": "订单状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "是否填写销售交车面访表",
+									"dbfield": "ISFILL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/dim_Whether.tbl",
+									"defaultValueExp": "0",
+									"inputField": "是否填写销售交车面访表",
+									"originalField": "是否填写销售交车面访表",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车架号",
+									"dbfield": "VIN",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "车架号",
+									"originalField": "车架号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开票日期",
+									"dbfield": "BILLINGDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开票日期",
+									"originalField": "开票日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "出库日期",
+									"dbfield": "OUTBOUNDDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "出库日期",
+									"originalField": "出库日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车系",
+									"dbfield": "CARSERIES",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productCategory.tbl",
+									"inputField": "车系",
+									"originalField": "车系",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车型细分",
+									"dbfield": "SOCARSUBTYPEID",
+									"dataType": "C",
+									"length": 200,
+									"isDimension": true,
+									"inputField": "车型细分",
+									"originalField": "车型细分",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开单日期",
+									"dbfield": "ORDERDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开单日期",
+									"originalField": "开单日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "预计交车时间",
+									"dbfield": "SOCARFCSTDELIVERYDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "预计交车时间",
+									"originalField": "预计交车时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "购车用途",
+									"dbfield": "CARSALETYPE",
+									"dataType": "C",
+									"length": 3000,
+									"isDimension": true,
+									"inputField": "购车用途",
+									"originalField": "购车用途",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "增配金额",
+									"dbfield": "ADDITIONALAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "增配金额",
+									"originalField": "增配金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款金额",
+									"dbfield": "LOANAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款金额",
+									"originalField": "贷款金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款机构",
+									"dbfield": "LOANINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款机构",
+									"originalField": "贷款机构",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款期数",
+									"dbfield": "LOANTERM",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款期数",
+									"originalField": "贷款期数",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "金融佣金",
+									"dbfield": "FINANCECOMMISSION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融佣金",
+									"originalField": "金融佣金",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "审核状态",
+									"dbfield": "APPROVALSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/价审/dim_priceStatus.tbl",
+									"businessDesc": "1、待审批/2、通过/3、回退/4、草稿/5、驳回/6、提交",
+									"inputField": "审核状态",
+									"originalField": "审核状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "金融机构产品名称",
+									"dbfield": "FINANCIALINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融机构产品名称",
+									"originalField": "金融机构产品名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订金实收金额",
+									"dbfield": "DEPOSITRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订金实收金额",
+									"originalField": "订金实收金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单实收金额",
+									"dbfield": "ORDERRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单实收金额",
+									"originalField": "订单实收金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单首付款金额",
+									"dbfield": "ORDERDOWNPAYMENTAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单首付款金额",
+									"originalField": "订单首付款金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款状态",
+									"dbfield": "LOANSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款状态",
+									"originalField": "贷款状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建人",
+									"dbfield": "CREATENAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"defaultValueExp": "$user.id",
+									"dimensionPath": "$DATA:/通用/szsys_4_users.tbl",
+									"inputField": "创建人",
+									"originalField": "创建人",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建时间",
+									"dbfield": "CREATETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"defaultValueExp": "NOW()",
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"businessDesc": "废弃",
+									"inputField": "创建时间",
+									"originalField": "创建时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "修改时间",
+									"dbfield": "REVISETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "修改时间",
+									"originalField": "修改时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "最后修改人",
+									"dbfield": "LASTUPDATEPERSON",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "最后修改人",
+									"originalField": "最后修改人",
+									"originalNode": "FACT_SALECONTRACT"
+								}
+							]
+						},
+						"default": {
+							"id": "default",
+							"type": "Output",
+							"alias": "模型输出",
+							"inputNodes": [
+								"eed334a1015d4a4e809f102fe558f713"
+							],
+							"fields": [
+								{
+									"name": "销售订单号",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "NAME",
+									"defaultValueExp": "",
+									"inputField": "销售订单号",
+									"originalField": "销售订单号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "业务类型",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "ENTITYTYPE",
+									"inputField": "业务类型",
+									"originalField": "业务类型",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "所属机构",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "DIMDEPART",
+									"dimensionPath": "$DATA:/主数据/fact_customAutoStorefront.tbl",
+									"inputField": "所属机构",
+									"originalField": "所属机构",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "所有人",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "OWNERID",
+									"dimensionPath": "$DATA:/通用/szsys_4_depts.tbl",
+									"inputField": "所有人",
+									"originalField": "所有人",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "市",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "CITY",
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "市",
+									"originalField": "市",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "区",
+									"dbfield": "DISTRICT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "区",
+									"originalField": "区",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "卖方名称",
+									"dbfield": "SELLERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方名称",
+									"originalField": "卖方名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "电话",
+									"dbfield": "PHONE",
+									"dataType": "C",
+									"length": 500,
+									"isDimension": true,
+									"inputField": "电话",
+									"originalField": "电话",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "地址",
+									"dbfield": "ADDRESS",
+									"dataType": "C",
+									"length": 100,
+									"isDimension": true,
+									"inputField": "地址",
+									"originalField": "地址",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "销售顾问",
+									"dbfield": "SALESCONSULTANT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "",
+									"inputField": "销售顾问",
+									"originalField": "销售顾问",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "联系方式",
+									"dbfield": "CONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "联系方式",
+									"originalField": "联系方式",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方姓名/名称",
+									"dbfield": "BUYERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方姓名/名称",
+									"originalField": "买方姓名/名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方联系方式",
+									"dbfield": "BUYERCONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方联系方式",
+									"originalField": "买方联系方式",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方住址/住所",
+									"dbfield": "BUYERADDRESS",
+									"dataType": "C",
+									"length": 150,
+									"isDimension": true,
+									"inputField": "买方住址/住所",
+									"originalField": "买方住址/住所",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "身份证号/信用机构代码证",
+									"dbfield": "IDNUMBER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "身份证号/信用机构代码证",
+									"originalField": "身份证号/信用机构代码证",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "品牌",
+									"dbfield": "CARBRAND",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productBrand.tbl",
+									"inputField": "品牌",
+									"originalField": "品牌",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车型",
+									"dbfield": "CARMODEL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_product.tbl",
+									"inputField": "车型",
+									"originalField": "车型",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "颜色（外观/内饰）",
+									"dbfield": "COLOR",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "颜色（外观/内饰）",
+									"originalField": "颜色（外观/内饰）",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "数量",
+									"dbfield": "QUANTITY",
+									"dataType": "I",
+									"length": 12,
+									"isDimension": true,
+									"inputField": "数量",
+									"originalField": "数量",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "标的车辆价格",
+									"dbfield": "VEHICLEPRICE",
+									"dataType": "N",
+									"length": 12,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "标的车辆价格",
+									"originalField": "标的车辆价格",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "预付款",
+									"dbfield": "ADVANCE",
+									"dataType": "N",
+									"length": 38,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "预付款",
+									"originalField": "预付款",
+									"originalNode": "FACT_SALECONTRACT",
+									"displayFormat": "displayFormat"
+								},
+								{
+									"name": "户名",
+									"dbfield": "ACCOUNTNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "户名",
+									"originalField": "户名",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开户行",
+									"dbfield": "BANK",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "开户行",
+									"originalField": "开户行",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "账号",
+									"dbfield": "ACCOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "账号",
+									"originalField": "账号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方",
+									"dbfield": "BUYER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_account.tbl",
+									"inputField": "买方",
+									"originalField": "买方",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "卖方",
+									"dbfield": "SELLER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方",
+									"originalField": "卖方",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "授权代表签字/盖章",
+									"dbfield": "AUTHORIZEDSIGNATURE",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "授权代表签字/盖章",
+									"originalField": "授权代表签字/盖章",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建日期",
+									"dbfield": "CREATTIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"defaultValueExp": "NOW()",
+									"inputField": "创建日期",
+									"originalField": "创建日期",
+									"originalNode": "FACT_SALECONTRACT",
+									"businessDesc": "以此为准"
+								},
+								{
+									"name": "是否发送",
+									"dbfield": "SEND",
+									"dataType": "I",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "是否发送",
+									"originalField": "是否发送",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "是否红冲",
+									"dbfield": "ISRED",
+									"dataType": "I",
+									"length": 38,
+									"isDimension": true,
+									"inputField": "是否红冲",
+									"originalField": "是否红冲",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "原始单据",
+									"dbfield": "OLDORDERNO",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "原始单据",
+									"originalField": "原始单据",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单状态",
+									"dbfield": "STATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单状态",
+									"originalField": "订单状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "是否填写销售交车面访表",
+									"dbfield": "ISFILL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/dim_Whether.tbl",
+									"defaultValueExp": "0",
+									"inputField": "是否填写销售交车面访表",
+									"originalField": "是否填写销售交车面访表",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车架号",
+									"dbfield": "VIN",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "车架号",
+									"originalField": "车架号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开票日期",
+									"dbfield": "BILLINGDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开票日期",
+									"originalField": "开票日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "出库日期",
+									"dbfield": "OUTBOUNDDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "出库日期",
+									"originalField": "出库日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车系",
+									"dbfield": "CARSERIES",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productCategory.tbl",
+									"inputField": "车系",
+									"originalField": "车系",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车型细分",
+									"dbfield": "SOCARSUBTYPEID",
+									"dataType": "C",
+									"length": 200,
+									"isDimension": true,
+									"inputField": "车型细分",
+									"originalField": "车型细分",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开单日期",
+									"dbfield": "ORDERDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开单日期",
+									"originalField": "开单日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "预计交车时间",
+									"dbfield": "SOCARFCSTDELIVERYDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "预计交车时间",
+									"originalField": "预计交车时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "购车用途",
+									"dbfield": "CARSALETYPE",
+									"dataType": "C",
+									"length": 3000,
+									"isDimension": true,
+									"inputField": "购车用途",
+									"originalField": "购车用途",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "增配金额",
+									"dbfield": "ADDITIONALAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "增配金额",
+									"originalField": "增配金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款金额",
+									"dbfield": "LOANAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款金额",
+									"originalField": "贷款金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款机构",
+									"dbfield": "LOANINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款机构",
+									"originalField": "贷款机构",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款期数",
+									"dbfield": "LOANTERM",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款期数",
+									"originalField": "贷款期数",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "金融佣金",
+									"dbfield": "FINANCECOMMISSION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融佣金",
+									"originalField": "金融佣金",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "审核状态",
+									"dbfield": "APPROVALSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/价审/dim_priceStatus.tbl",
+									"businessDesc": "1、待审批/2、通过/3、回退/4、草稿/5、驳回/6、提交",
+									"inputField": "审核状态",
+									"originalField": "审核状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "金融机构产品名称",
+									"dbfield": "FINANCIALINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融机构产品名称",
+									"originalField": "金融机构产品名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订金实收金额",
+									"dbfield": "DEPOSITRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订金实收金额",
+									"originalField": "订金实收金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单实收金额",
+									"dbfield": "ORDERRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单实收金额",
+									"originalField": "订单实收金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单首付款金额",
+									"dbfield": "ORDERDOWNPAYMENTAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单首付款金额",
+									"originalField": "订单首付款金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款状态",
+									"dbfield": "LOANSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款状态",
+									"originalField": "贷款状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建人",
+									"dbfield": "CREATENAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"defaultValueExp": "$user.id",
+									"dimensionPath": "$DATA:/通用/szsys_4_users.tbl",
+									"inputField": "创建人",
+									"originalField": "创建人",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建时间",
+									"dbfield": "CREATETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"defaultValueExp": "NOW()",
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"businessDesc": "废弃",
+									"inputField": "创建时间",
+									"originalField": "创建时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "修改时间",
+									"dbfield": "REVISETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "修改时间",
+									"originalField": "修改时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "最后修改人",
+									"dbfield": "LASTUPDATEPERSON",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "最后修改人",
+									"originalField": "最后修改人",
+									"originalNode": "FACT_SALECONTRACT"
+								}
+							],
+							"lastModifyTime": 1770173138995,
+							"dimensions": [
+								{
+									"name": "销售订单号",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "NAME",
+									"defaultValueExp": "",
+									"inputField": "销售订单号",
+									"originalField": "销售订单号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "业务类型",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "ENTITYTYPE",
+									"inputField": "业务类型",
+									"originalField": "业务类型",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "所属机构",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "DIMDEPART",
+									"dimensionPath": "$DATA:/主数据/fact_customAutoStorefront.tbl",
+									"inputField": "所属机构",
+									"originalField": "所属机构",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "所有人",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "OWNERID",
+									"dimensionPath": "$DATA:/通用/szsys_4_depts.tbl",
+									"inputField": "所有人",
+									"originalField": "所有人",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "市",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dbfield": "CITY",
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "市",
+									"originalField": "市",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "区",
+									"dbfield": "DISTRICT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/gen_dim_xzqhfz.tbl",
+									"inputField": "区",
+									"originalField": "区",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "卖方名称",
+									"dbfield": "SELLERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方名称",
+									"originalField": "卖方名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "电话",
+									"dbfield": "PHONE",
+									"dataType": "C",
+									"length": 500,
+									"isDimension": true,
+									"inputField": "电话",
+									"originalField": "电话",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "地址",
+									"dbfield": "ADDRESS",
+									"dataType": "C",
+									"length": 100,
+									"isDimension": true,
+									"inputField": "地址",
+									"originalField": "地址",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "销售顾问",
+									"dbfield": "SALESCONSULTANT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "",
+									"inputField": "销售顾问",
+									"originalField": "销售顾问",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "联系方式",
+									"dbfield": "CONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "联系方式",
+									"originalField": "联系方式",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方姓名/名称",
+									"dbfield": "BUYERNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方姓名/名称",
+									"originalField": "买方姓名/名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方联系方式",
+									"dbfield": "BUYERCONTACT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "买方联系方式",
+									"originalField": "买方联系方式",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方住址/住所",
+									"dbfield": "BUYERADDRESS",
+									"dataType": "C",
+									"length": 150,
+									"isDimension": true,
+									"inputField": "买方住址/住所",
+									"originalField": "买方住址/住所",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "身份证号/信用机构代码证",
+									"dbfield": "IDNUMBER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "身份证号/信用机构代码证",
+									"originalField": "身份证号/信用机构代码证",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "品牌",
+									"dbfield": "CARBRAND",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productBrand.tbl",
+									"inputField": "品牌",
+									"originalField": "品牌",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车型",
+									"dbfield": "CARMODEL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_product.tbl",
+									"inputField": "车型",
+									"originalField": "车型",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "颜色（外观/内饰）",
+									"dbfield": "COLOR",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "颜色（外观/内饰）",
+									"originalField": "颜色（外观/内饰）",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "数量",
+									"dbfield": "QUANTITY",
+									"dataType": "I",
+									"length": 12,
+									"isDimension": true,
+									"inputField": "数量",
+									"originalField": "数量",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "标的车辆价格",
+									"dbfield": "VEHICLEPRICE",
+									"dataType": "N",
+									"length": 12,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "标的车辆价格",
+									"originalField": "标的车辆价格",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "预付款",
+									"dbfield": "ADVANCE",
+									"dataType": "N",
+									"length": 38,
+									"isDimension": true,
+									"decimal": 2,
+									"inputField": "预付款",
+									"originalField": "预付款",
+									"originalNode": "FACT_SALECONTRACT",
+									"displayFormat": "displayFormat"
+								},
+								{
+									"name": "户名",
+									"dbfield": "ACCOUNTNAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "户名",
+									"originalField": "户名",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开户行",
+									"dbfield": "BANK",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "开户行",
+									"originalField": "开户行",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "账号",
+									"dbfield": "ACCOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "账号",
+									"originalField": "账号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "买方",
+									"dbfield": "BUYER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_account.tbl",
+									"inputField": "买方",
+									"originalField": "买方",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "卖方",
+									"dbfield": "SELLER",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "卖方",
+									"originalField": "卖方",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "授权代表签字/盖章",
+									"dbfield": "AUTHORIZEDSIGNATURE",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "授权代表签字/盖章",
+									"originalField": "授权代表签字/盖章",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建日期",
+									"dbfield": "CREATTIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"defaultValueExp": "NOW()",
+									"inputField": "创建日期",
+									"originalField": "创建日期",
+									"originalNode": "FACT_SALECONTRACT",
+									"businessDesc": "以此为准"
+								},
+								{
+									"name": "是否发送",
+									"dbfield": "SEND",
+									"dataType": "I",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "是否发送",
+									"originalField": "是否发送",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "是否红冲",
+									"dbfield": "ISRED",
+									"dataType": "I",
+									"length": 38,
+									"isDimension": true,
+									"inputField": "是否红冲",
+									"originalField": "是否红冲",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "原始单据",
+									"dbfield": "OLDORDERNO",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "原始单据",
+									"originalField": "原始单据",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单状态",
+									"dbfield": "STATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单状态",
+									"originalField": "订单状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "是否填写销售交车面访表",
+									"dbfield": "ISFILL",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/通用/dim_Whether.tbl",
+									"defaultValueExp": "0",
+									"inputField": "是否填写销售交车面访表",
+									"originalField": "是否填写销售交车面访表",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车架号",
+									"dbfield": "VIN",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "车架号",
+									"originalField": "车架号",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开票日期",
+									"dbfield": "BILLINGDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开票日期",
+									"originalField": "开票日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "出库日期",
+									"dbfield": "OUTBOUNDDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "出库日期",
+									"originalField": "出库日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车系",
+									"dbfield": "CARSERIES",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/主数据/fact_productCategory.tbl",
+									"inputField": "车系",
+									"originalField": "车系",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "车型细分",
+									"dbfield": "SOCARSUBTYPEID",
+									"dataType": "C",
+									"length": 200,
+									"isDimension": true,
+									"inputField": "车型细分",
+									"originalField": "车型细分",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "开单日期",
+									"dbfield": "ORDERDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "开单日期",
+									"originalField": "开单日期",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "预计交车时间",
+									"dbfield": "SOCARFCSTDELIVERYDATE",
+									"dataType": "D",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "预计交车时间",
+									"originalField": "预计交车时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "购车用途",
+									"dbfield": "CARSALETYPE",
+									"dataType": "C",
+									"length": 3000,
+									"isDimension": true,
+									"inputField": "购车用途",
+									"originalField": "购车用途",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "增配金额",
+									"dbfield": "ADDITIONALAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "增配金额",
+									"originalField": "增配金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款金额",
+									"dbfield": "LOANAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款金额",
+									"originalField": "贷款金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款机构",
+									"dbfield": "LOANINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款机构",
+									"originalField": "贷款机构",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款期数",
+									"dbfield": "LOANTERM",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款期数",
+									"originalField": "贷款期数",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "金融佣金",
+									"dbfield": "FINANCECOMMISSION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融佣金",
+									"originalField": "金融佣金",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "审核状态",
+									"dbfield": "APPROVALSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"dimensionPath": "$DATA:/价审/dim_priceStatus.tbl",
+									"businessDesc": "1、待审批/2、通过/3、回退/4、草稿/5、驳回/6、提交",
+									"inputField": "审核状态",
+									"originalField": "审核状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "金融机构产品名称",
+									"dbfield": "FINANCIALINSTITUTION",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "金融机构产品名称",
+									"originalField": "金融机构产品名称",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订金实收金额",
+									"dbfield": "DEPOSITRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订金实收金额",
+									"originalField": "订金实收金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单实收金额",
+									"dbfield": "ORDERRECEIVEDAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单实收金额",
+									"originalField": "订单实收金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "订单首付款金额",
+									"dbfield": "ORDERDOWNPAYMENTAMOUNT",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "订单首付款金额",
+									"originalField": "订单首付款金额",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "贷款状态",
+									"dbfield": "LOANSTATUS",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "贷款状态",
+									"originalField": "贷款状态",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建人",
+									"dbfield": "CREATENAME",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"defaultValueExp": "$user.id",
+									"dimensionPath": "$DATA:/通用/szsys_4_users.tbl",
+									"inputField": "创建人",
+									"originalField": "创建人",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "创建时间",
+									"dbfield": "CREATETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"defaultValueExp": "NOW()",
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"businessDesc": "废弃",
+									"inputField": "创建时间",
+									"originalField": "创建时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "修改时间",
+									"dbfield": "REVISETIME",
+									"dataType": "P",
+									"isDimension": true,
+									"periodType": "timestampdate",
+									"dateKeyValueFormat": "yyyyMMdd",
+									"inputField": "修改时间",
+									"originalField": "修改时间",
+									"originalNode": "FACT_SALECONTRACT"
+								},
+								{
+									"name": "最后修改人",
+									"dbfield": "LASTUPDATEPERSON",
+									"dataType": "C",
+									"length": 50,
+									"isDimension": true,
+									"inputField": "最后修改人",
+									"originalField": "最后修改人",
+									"originalNode": "FACT_SALECONTRACT"
+								}
+							]
+						}
+					}
+				}
+			},
+			"name": "销售合同",
+			"modelType": "dataflow",
+			"dataSetResultType": "oneRowResult",
+			"queryConditionReturnEmpty": false,
+			"cacheMode": "disable",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model6.VIN=input17"
+					},
+					{
+						"exp": "model6.STATUS='已生效'"
+					}
+				]
+			}
+		}
+	],
+	"refComponentTypes": [
+		"canvas",
+		"panel",
+		"input",
+		"numberinput",
+		"text",
+		"datecombobox",
+		"button"
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"viewSize": "mobile",
+		"width": "100%",
+		"minWidth": "320px",
+		"height": "667px",
+		"minHeight": "320px",
+		"overflow": "y",
+		"position": "center",
+		"components": [
+			{
+				"id": "panel8",
+				"type": "panel",
+				"width": "100%",
+				"minWidth": "20px",
+				"height": "610px",
+				"minHeight": "44px",
+				"templateName": "panel",
+				"components": [
+					{
+						"id": "input43",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"border": "1px solid bg1@0",
+						"calcEnabled": true,
+						"exp": "param10",
+						"submitData": true,
+						"autoFilter": false,
+						"submitField": "model1.zbName",
+						"title": {
+							"type": "title",
+							"value": "签约人姓名：",
+							"font": {
+								"size": 14
+							}
+						},
+						"disable": "true"
+					},
+					{
+						"id": "input42",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"border": "1px solid bg1@0",
+						"calcEnabled": true,
+						"exp": "param11",
+						"submitData": true,
+						"autoFilter": false,
+						"submitField": "model1.IndicatorPerson",
+						"title": {
+							"type": "title",
+							"value": "签约人手机号：",
+							"font": {
+								"size": 14
+							}
+						},
+						"disable": "true"
+					},
+					{
+						"id": "numberinput6",
+						"type": "numberinput",
+						"width": "320px",
+						"height": "35px",
+						"minHeight": "26px",
+						"templateName": "numberinput",
+						"border": "1px solid bg2@0",
+						"notNull": false,
+						"title": {
+							"type": "title",
+							"value": "预估年利率(%)：\n",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"submitData": false,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "IF(model5.EstimatedAnnualInterestRate!=NULL,model5.EstimatedAnnualInterestRate*100,'')",
+						"disable": "false",
+						"validEnabled": true,
+						"placeholder": "0-100",
+						"validExp": "numberinput6<=100",
+						"validMessage": "请输入不能超过100",
+						"visible": "false"
+					},
+					{
+						"id": "numberinput5",
+						"type": "numberinput",
+						"width": "320px",
+						"height": "35px",
+						"minHeight": "26px",
+						"templateName": "numberinput",
+						"border": "1px solid bg2@0",
+						"notNull": false,
+						"title": {
+							"type": "title",
+							"value": "预估年利率：\n",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "numberinput6/100",
+						"disable": "false",
+						"submitField": "model1.EstimatedAnnualInterestRate",
+						"validEnabled": false,
+						"validExp": "numberinput3<=model6.vehiclePrice",
+						"validMessage": "贷款金额不能超过车辆价格",
+						"visible": "false"
+					},
+					{
+						"id": "input4",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "签订地:",
+							"border": "none",
+							"font": {
+								"size": 14
+							},
+							"width": "100px"
+						},
+						"margin": "3px 0px 3px 0px",
+						"padding": "0px 0px 0px 5px",
+						"font": {
+							"size": 14
+						},
+						"height": "40px",
+						"minHeight": "26px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"disable": "true",
+						"actions": [
+							{
+								"id": "action1",
+								"actionType": "setParamValue",
+								"triggerType": "change",
+								"params": [
+									{
+										"name": "param2",
+										"value": "0"
+									}
+								]
+							}
+						],
+						"exp": "model2.address",
+						"submitField": "model1.placeSigning"
+					},
+					{
+						"id": "panel1",
+						"type": "panel",
+						"width": "360px",
+						"minWidth": "20px",
+						"height": "5px",
+						"minHeight": "1px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"borderBottom": "1px dashed bg1@1",
+						"margin": "5px 0px 10px 0px"
+					},
+					{
+						"id": "text1",
+						"type": "text",
+						"width": "320px",
+						"minWidth": "16px",
+						"height": "16px",
+						"minHeight": "16px",
+						"templateName": "text",
+						"value": "以下信息如为空值或有误，请在ERP订单中补录或修改",
+						"font": {
+							"color": "#F80703",
+							"size": 11
+						}
+					},
+					{
+						"id": "input5",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "合同编号：",
+							"border": "none",
+							"font": {
+								"size": 14
+							},
+							"width": "auto"
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"calcEnabled": true,
+						"submitData": true,
+						"autoFilter": false,
+						"exp": "IF(model5.totalRowCount__=1,model5.name,CONCAT('JR',input29,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model3.totalRowCount__+1,'000')))\n",
+						"textAlign": "left",
+						"toggleFocusOnEnter": true,
+						"disable": "true",
+						"visible": "true",
+						"submitField": "model1.name"
+					},
+					{
+						"id": "input13",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "购车贷款咨询单号：",
+							"border": "none",
+							"font": {
+								"size": 14
+							},
+							"width": "auto"
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"calcEnabled": true,
+						"submitData": true,
+						"autoFilter": false,
+						"exp": "model4.NAME11",
+						"textAlign": "left",
+						"toggleFocusOnEnter": true,
+						"disable": "true",
+						"visible": "true",
+						"submitField": "model1.contractNumber"
+					},
+					{
+						"id": "input14",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "委托方：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"calcEnabled": true,
+						"submitData": false,
+						"autoFilter": false,
+						"exp": "model4.BUYERNAME",
+						"textAlign": "left",
+						"toggleFocusOnEnter": true,
+						"disable": "true"
+					},
+					{
+						"id": "input9",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "委托方编码：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"calcEnabled": true,
+						"submitData": true,
+						"autoFilter": false,
+						"exp": "model4.BUYERNAME",
+						"textAlign": "left",
+						"toggleFocusOnEnter": true,
+						"disable": "true",
+						"submitField": "model1.principal",
+						"visible": "false"
+					},
+					{
+						"id": "input10",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "委托方手机号：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"calcEnabled": true,
+						"submitData": true,
+						"autoFilter": false,
+						"exp": "model4.BUYERCONTACT",
+						"textAlign": "left",
+						"toggleFocusOnEnter": true,
+						"disable": "true",
+						"submitField": "model1.principal_phone"
+					},
+					{
+						"id": "input15",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"title": {
+							"type": "title",
+							"value": "证件号(代)码：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "model4.IDNUMBER1",
+						"disable": "true",
+						"submitField": "model1.idNumber",
+						"validEnabled": true,
+						"validExp": "LEN(input15)=18",
+						"validMessage": "请按照规范输入正确的身份证号！"
+					},
+					{
+						"id": "input16",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"title": {
+							"type": "title",
+							"value": "受托方：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"margin": "3px 0px 3px 0px",
+						"padding": "0px 0px 0px 5px",
+						"font": {
+							"size": 14
+						},
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "model4.trustees",
+						"disable": "true",
+						"submitField": "model1.trustees"
+					},
+					{
+						"id": "input17",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"title": {
+							"type": "title",
+							"value": "车架号：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"font": {
+							"size": 14
+						},
+						"margin": "3px 0px 3px 0px",
+						"padding": "0px 0px 0px 5px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "model4.vin",
+						"disable": "true",
+						"submitField": "model1.vin"
+					},
+					{
+						"id": "numberinput2",
+						"type": "numberinput",
+						"width": "320px",
+						"height": "35px",
+						"minHeight": "26px",
+						"templateName": "numberinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "服务费：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "model4.payRMB",
+						"disable": "true",
+						"submitField": "model1.servicecharge"
+					},
+					{
+						"id": "input8",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "服务费(大写)：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"height": "35px",
+						"minHeight": "26px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "TOSTR(TONUM(numberinput2),'rmb')",
+						"disable": "true",
+						"visible": "false",
+						"submitField": "model1.servicechargeB"
+					},
+					{
+						"id": "numberinput1",
+						"type": "numberinput",
+						"width": "320px",
+						"templateName": "numberinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "不含税价款：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"height": "35px",
+						"minHeight": "26px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"disable": "true",
+						"exp": "ROUND(numberinput2/(1+(numberinput4)),2)",
+						"submitField": "model1.pricesExcludingTax"
+					},
+					{
+						"id": "input2",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "贷款金融机构:",
+							"border": "none",
+							"font": {
+								"size": 14
+							},
+							"width": "100px"
+						},
+						"margin": "3px 0px 3px 0px",
+						"padding": "0px 0px 0px 5px",
+						"font": {
+							"size": 14
+						},
+						"height": "40px",
+						"minHeight": "26px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"disable": "true",
+						"actions": [
+							{
+								"id": "action1",
+								"actionType": "setParamValue",
+								"triggerType": "change",
+								"params": [
+									{
+										"name": "param2",
+										"value": "0"
+									}
+								]
+							}
+						],
+						"exp": "model6.LOANINSTITUTION",
+						"submitField": "model1.lendingFinancialInstitutions"
+					},
+					{
+						"id": "numberinput3",
+						"type": "numberinput",
+						"width": "320px",
+						"height": "35px",
+						"minHeight": "26px",
+						"templateName": "numberinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "贷款金额：\n",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "model6.LOANAMOUNT",
+						"disable": "true",
+						"submitField": "model1.payRMB",
+						"validEnabled": false
+					},
+					{
+						"id": "input18",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"border": "1px solid bg2@0",
+						"notNull": false,
+						"title": {
+							"type": "title",
+							"value": "贷款金额(大写)：",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"height": "35px",
+						"minHeight": "26px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "TOSTR(TONUM(numberinput3),'rmb')",
+						"disable": "true",
+						"visible": "false",
+						"submitField": "model1.payRMBB"
+					},
+					{
+						"id": "numberinput7",
+						"type": "numberinput",
+						"width": "320px",
+						"templateName": "numberinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"margin": "3px 0px 3px 0px",
+						"padding": "0px 0px 0px 5px",
+						"border": "1px solid bg2@0",
+						"submitData": true,
+						"autoFilter": false,
+						"submitField": "model1.NumberOfLoanInstalments",
+						"calcEnabled": true,
+						"exp": "model6.LOANTERM",
+						"notNull": true,
+						"disable": "true",
+						"title": {
+							"type": "title",
+							"value": "贷款期数(月)：",
+							"font": {
+								"size": 14
+							},
+							"border": "none"
+						}
+					},
+					{
+						"id": "input20",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "增值税率%：",
+							"width": "100px",
+							"border": "none",
+							"font": {
+								"size": 14
+							}
+						},
+						"font": {
+							"size": 14
+						},
+						"margin": "3px 0px 3px 0px",
+						"padding": "0px 0px 0px 5px",
+						"height": "35px",
+						"minHeight": "26px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"disable": "true",
+						"exp": "model2.serviceTaxRate*100",
+						"submitField": "model1.rate"
+					},
+					{
+						"id": "input19",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"height": "35px",
+						"minHeight": "26px",
+						"title": {
+							"type": "title",
+							"value": "增值税额：",
+							"border": "none",
+							"font": {
+								"size": 14
+							},
+							"width": "100px"
+						},
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"margin": "3px 0px 3px 0px",
+						"padding": "0px 0px 0px 5px",
+						"font": {
+							"size": 14
+						},
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"disable": "true",
+						"exp": "ROUND(numberinput2-numberinput1,2)  ",
+						"submitField": "model1.vatAmount"
+					},
+					{
+						"id": "input21",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "户名：",
+							"border": "none",
+							"font": {
+								"size": 14
+							},
+							"width": "100px"
+						},
+						"padding": "0px 0px 0px 5px",
+						"margin": "3px 0px 3px 0px",
+						"font": {
+							"size": 14
+						},
+						"height": "35px",
+						"minHeight": "26px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "model4.accountName",
+						"disable": "true",
+						"submitField": "model1.accountName"
+					},
+					{
+						"id": "input22",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "开户行：",
+							"border": "none",
+							"font": {
+								"size": 14
+							},
+							"width": "100px"
+						},
+						"margin": "3px 0px 3px 0px",
+						"padding": "0px 0px 0px 5px",
+						"font": {
+							"size": 14
+						},
+						"height": "35px",
+						"minHeight": "26px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "model4.BANK",
+						"disable": "true",
+						"submitField": "model1.bank"
+					},
+					{
+						"id": "input3",
+						"type": "input",
+						"width": "320px",
+						"templateName": "txtinput",
+						"border": "1px solid bg2@0",
+						"notNull": true,
+						"title": {
+							"type": "title",
+							"value": "账号：",
+							"border": "none",
+							"font": {
+								"size": 14
+							},
+							"width": "100px"
+						},
+						"margin": "3px 0px 3px 0px",
+						"padding": "0px 0px 0px 5px",
+						"font": {
+							"size": 14
+						},
+						"height": "35px",
+						"minHeight": "26px",
+						"submitData": true,
+						"autoFilter": false,
+						"calcEnabled": true,
+						"exp": "model4.account",
+						"disable": "true",
+						"submitField": "model1.account"
+					},
+					{
+						"id": "panel5",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "44px",
+						"display": "inlineflexColumn",
+						"flexDirection": "column",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "input25",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"calcEnabled": true,
+								"exp": "model4.RECEIVEDAMOUNT",
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.ACTUALAMOUNTRECEIVED",
+								"title": {
+									"type": "title",
+									"value": "实收金额"
+								}
+							},
+							{
+								"id": "input29",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"visible": "false",
+								"calcEnabled": true,
+								"exp": "model2.mchCode",
+								"title": {
+									"type": "title",
+									"value": "门店编号："
+								},
+								"notNull": false
+							},
+							{
+								"id": "input30",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"calcEnabled": true,
+								"exp": "$user.dept_id",
+								"title": {
+									"type": "title",
+									"value": "部门"
+								},
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.dimDepart"
+							},
+							{
+								"id": "input38",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"calcEnabled": true,
+								"exp": "param7",
+								"title": {
+									"type": "title",
+									"value": "购车名义"
+								},
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.SIGNATORY"
+							},
+							{
+								"id": "input39",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"calcEnabled": true,
+								"exp": "param8",
+								"title": {
+									"type": "title",
+									"value": "经办人"
+								},
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.ORGNAME"
+							},
+							{
+								"id": "datecombobox1",
+								"type": "datecombobox",
+								"width": "320px",
+								"height": "35px",
+								"minHeight": "26px",
+								"templateName": "datecombobox",
+								"padding": "0px 0px 0px 5px",
+								"margin": "3px 0px 10px 0px",
+								"calcEnabled": true,
+								"exp": "NOW()",
+								"visible": "false",
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.date",
+								"title": {
+									"type": "title",
+									"value": "日期"
+								}
+							},
+							{
+								"id": "input1",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"calcEnabled": true,
+								"exp": "param5",
+								"title": {
+									"type": "title",
+									"value": "好友id"
+								},
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.externalUserId"
+							},
+							{
+								"id": "input6",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"calcEnabled": true,
+								"exp": "param6",
+								"title": {
+									"type": "title",
+									"value": "企微销售微信id"
+								},
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.qwContactId"
+							},
+							{
+								"id": "input7",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"calcEnabled": true,
+								"exp": "model2.contract_id",
+								"title": {
+									"type": "title",
+									"value": "门店合同章id："
+								},
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.assignedSealId"
+							},
+							{
+								"id": "numberinput4",
+								"type": "numberinput",
+								"width": "auto",
+								"templateName": "numberinput",
+								"calcEnabled": true,
+								"title": {
+									"type": "title",
+									"value": "服务类税率："
+								},
+								"exp": "model2.serviceTaxRate"
+							},
+							{
+								"id": "input11",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.fileName",
+								"calcEnabled": true,
+								"exp": "CONCAT('JR-','购车贷款咨询代办',RIGHT(input5,LEN(input5)-2),\".pdf\")",
+								"visible": "false",
+								"title": {
+									"type": "title",
+									"value": "filename"
+								}
+							},
+							{
+								"id": "input24",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"calcEnabled": true,
+								"exp": "'购车贷款咨询代办'",
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.fileType",
+								"title": {
+									"type": "title",
+									"value": "合同类型"
+								}
+							},
+							{
+								"id": "input12",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"title": {
+									"type": "title",
+									"value": "path"
+								},
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.path",
+								"calcEnabled": true,
+								"exp": "'/xiaoshouyi/app/销售.app/合同协议activedoc/购车贷款咨询代办服务合同（2024版讨论稿-外部).d.docx'",
+								"visible": "false"
+							},
+							{
+								"id": "input23",
+								"type": "input",
+								"width": "auto",
+								"templateName": "txtinput",
+								"title": {
+									"type": "title",
+									"value": "ref"
+								},
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.REF",
+								"calcEnabled": true,
+								"exp": "'JR'",
+								"visible": "false"
+							}
+						],
+						"visible": "false"
+					}
+				],
+				"overflow": "y",
+				"columnAlignItems": "center",
+				"margin": "0px",
+				"padding": "10px 5px 5px 5px"
+			},
+			{
+				"id": "panel10",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "57px",
+				"minHeight": "30px",
+				"display": "inlineflexRow",
+				"flexDirection": "row",
+				"templateName": "panel_row",
+				"rowJustifyContent": "center",
+				"rowAlignItems": "center",
+				"components": [
+					{
+						"id": "button6",
+						"type": "button",
+						"width": "81px",
+						"value": "预览",
+						"templateName": "button",
+						"height": "30px",
+						"font": {
+							"size": 14
+						},
+						"visible": "true",
+						"margin": "8px 20px 8px 15px",
+						"actions": [
+							{
+								"id": "action4",
+								"actionType": "setParamValue",
+								"triggerType": "click",
+								"params": [
+									{
+										"name": "param2",
+										"value": "1"
+									},
+									{
+										"name": "param9",
+										"value": "=input11.value"
+									}
+								]
+							},
+							{
+								"id": "action5",
+								"actionType": "validateForm",
+								"triggerType": "click"
+							},
+							{
+								"id": "action6",
+								"actionType": "submitData",
+								"triggerType": "click",
+								"enabled": "condition",
+								"conditionExp": "model5.totalRowCount__<=0"
+							},
+							{
+								"id": "action1",
+								"actionType": "updateData",
+								"triggerType": "click",
+								"dataSet": "model5",
+								"dataRange": "resultset",
+								"primaryKeyFieldValues": [
+									{
+										"name": "name",
+										"valueType": "exp",
+										"value": "input13"
+									}
+								],
+								"fieldValues": [
+									{
+										"name": "lendingFinancialInstitutions",
+										"valueType": "exp",
+										"value": "input2"
+									},
+									{
+										"name": "payRMB",
+										"valueType": "exp",
+										"value": "numberinput3"
+									},
+									{
+										"name": "payRMBB",
+										"valueType": "exp",
+										"value": "input18"
+									},
+									{
+										"name": "fileName",
+										"valueType": "exp",
+										"value": "input11"
+									},
+									{
+										"name": "path",
+										"valueType": "exp",
+										"value": "input12"
+									},
+									{
+										"name": "REF",
+										"valueType": "exp",
+										"value": "input23"
+									},
+									{
+										"name": "assignedSealId",
+										"valueType": "exp",
+										"value": "input7"
+									},
+									{
+										"name": "placeSigning",
+										"valueType": "exp",
+										"value": "input4"
+									},
+									{
+										"name": "name",
+										"valueType": "exp",
+										"value": "input5"
+									},
+									{
+										"name": "contractNumber",
+										"valueType": "exp",
+										"value": "input13"
+									},
+									{
+										"name": "principal",
+										"valueType": "exp",
+										"value": "input9"
+									},
+									{
+										"name": "principal_phone",
+										"valueType": "exp",
+										"value": "input10"
+									},
+									{
+										"name": "idNumber",
+										"valueType": "exp",
+										"value": "input15"
+									},
+									{
+										"name": "trustees",
+										"valueType": "exp",
+										"value": "input16"
+									},
+									{
+										"name": "vin",
+										"valueType": "exp",
+										"value": "input17"
+									},
+									{
+										"name": "servicecharge",
+										"valueType": "exp",
+										"value": "numberinput2"
+									},
+									{
+										"name": "servicechargeB",
+										"valueType": "exp",
+										"value": "input8"
+									},
+									{
+										"name": "pricesExcludingTax",
+										"valueType": "exp",
+										"value": "numberinput1"
+									},
+									{
+										"name": "rate",
+										"valueType": "exp",
+										"value": "input20"
+									},
+									{
+										"name": "vatAmount",
+										"valueType": "exp",
+										"value": "input19"
+									},
+									{
+										"name": "accountName",
+										"valueType": "exp",
+										"value": "input21"
+									},
+									{
+										"name": "bank",
+										"valueType": "exp",
+										"value": "input22"
+									},
+									{
+										"name": "account",
+										"valueType": "exp",
+										"value": "input3"
+									},
+									{
+										"name": "NumberOfLoanInstalments",
+										"valueType": "exp",
+										"value": "numberinput7"
+									},
+									{
+										"name": "EstimatedAnnualInterestRate",
+										"valueType": "exp",
+										"value": "numberinput5.value"
+									},
+									{
+										"name": "revisetime",
+										"valueType": "exp",
+										"value": "NOW()"
+									},
+									{
+										"name": "date",
+										"valueType": "exp",
+										"value": "NOW()"
+									},
+									{
+										"name": "fileType",
+										"valueType": "exp",
+										"value": "'购车贷款咨询代办'"
+									},
+									{
+										"name": "ORGNAME",
+										"valueType": "exp",
+										"value": "param8"
+									},
+									{
+										"name": "SIGNATORY",
+										"valueType": "exp",
+										"value": "param7"
+									},
+									{
+										"name": "dimDepart",
+										"valueType": "exp",
+										"value": "input30"
+									},
+									{
+										"name": "IndicatorPerson",
+										"valueType": "exp",
+										"value": "input42"
+									},
+									{
+										"name": "zbName",
+										"valueType": "exp",
+										"value": "input43.value"
+									}
+								],
+								"closeWhenSuccess": false,
+								"enabled": "condition",
+								"conditionExp": "model5.totalRowCount__=1"
+							},
+							{
+								"id": "action3",
+								"actionType": "webAPI",
+								"triggerType": "click",
+								"url": "/xiaoshouyi/app/集成测试.app/API/esign/theNonSignatory.action\n",
+								"params": [
+									{
+										"name": "path",
+										"value": "${'/xiaoshouyi/app/销售.app/合同协议activedoc/购车贷款咨询代办服务合同（2024版讨论稿-外部).d.docx'}"
+									},
+									{
+										"name": "fileName",
+										"value": "${param9}"
+									},
+									{
+										"name": "name",
+										"value": "${input14}"
+									},
+									{
+										"name": "Number",
+										"value": "${input15}"
+									},
+									{
+										"name": "trustees",
+										"value": "${input16}"
+									},
+									{
+										"name": "Institutions",
+										"value": "${input2}"
+									},
+									{
+										"name": "vin",
+										"value": "${input17}"
+									},
+									{
+										"name": "pay",
+										"value": "${input3}"
+									},
+									{
+										"name": "pay1",
+										"value": "${input18}"
+									},
+									{
+										"name": "service",
+										"value": "${input2}"
+									},
+									{
+										"name": "service1",
+										"value": "${input8}"
+									},
+									{
+										"name": "prices",
+										"value": "${numberinput1}"
+									},
+									{
+										"name": "vat",
+										"value": "${input20}"
+									},
+									{
+										"name": "rate",
+										"value": "${input19}"
+									},
+									{
+										"name": "name1",
+										"value": "${input21}"
+									},
+									{
+										"name": "bank",
+										"value": "${input22}"
+									},
+									{
+										"name": "account",
+										"value": "${input3}"
+									},
+									{
+										"name": "place",
+										"value": "${input4}"
+									},
+									{
+										"name": "DATE",
+										"value": "${TOSTR(TODAY(),'yyyy年mm月dd日')}"
+									},
+									{
+										"name": "ref",
+										"value": "${input23}"
+									},
+									{
+										"name": "positionPage",
+										"value": "${3}"
+									},
+									{
+										"name": "phone",
+										"value": "${input10}"
+									},
+									{
+										"name": "BH",
+										"value": "${input5}"
+									},
+									{
+										"name": "HTBH",
+										"value": "${input5}"
+									}
+								],
+								"enabled": "condition"
+							},
+							{
+								"id": "action2",
+								"actionType": "showFilesGallary",
+								"triggerType": "click",
+								"dataSet": "model5",
+								"attachmentField": "model5.notSigned",
+								"dataRange": "resultset",
+								"enabled": "condition",
+								"enableDownload": false
+							},
+							{
+								"id": "action7",
+								"actionType": "refreshModels",
+								"triggerType": "click",
+								"enabled": "condition"
+							}
+						]
+					}
+				]
+			}
+		],
+		"mobileSize": "phone"
+	}
+}

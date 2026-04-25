@@ -1,0 +1,20 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [],
+	"sources": [],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "input1",
+				"type": "input",
+				"value": "=param1",
+				"defaultValue": "=param2",
+				"visible": "=input2.value > 0",
+				"enable": "=input3.value = 'yes'"
+			}
+		]
+	}
+}

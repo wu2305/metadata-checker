@@ -1,0 +1,27 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [],
+	"sources": [],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "text1",
+				"type": "text",
+				"text": "=input1.value"
+			},
+			{
+				"id": "html1",
+				"type": "html",
+				"html": "=${model1.fieldA}"
+			},
+			{
+				"id": "formula1",
+				"type": "input",
+				"formula": "=input2.value + input3.value"
+			}
+		]
+	}
+}
