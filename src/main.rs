@@ -44,7 +44,13 @@ fn main() -> Result<()> {
             return Ok(());
         }
         
-        println!("No query specified. Use --query-model, --query-page, or --query-cross.");
+        if let Some(ref dataflow_id) = args.query_dataflow {
+            let model_node_id = format!("model:{}", dataflow_id);
+            query::query_dataflow(&graph, &model_node_id, args.is_human())?;
+            return Ok(());
+        }
+        
+        println!("No query specified. Use --query-model, --query-page, --query-cross, or --query-dataflow.");
         return Ok(());
     }
 

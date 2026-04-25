@@ -526,3 +526,60 @@ fn test_scanner_dataflow_internal_deps() {
 
     let _ = std::fs::remove_file(&db_path);
 }
+
+// ============================================================
+// 八、DataFlow subGraph 展开查询测试
+// ============================================================
+
+use metadata_checker::query::query_dataflow;
+
+#[test]
+fn test_query_dataflow_human_output() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-dataflow-query.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // Test human-readable output (should not panic)
+    let result = query_dataflow(&graph, "model:dataflow_output", true);
+    assert!(result.is_ok(), "query_dataflow human mode should succeed");
+
+    let _ = std::fs::remove_file(&db_path);
+}
+
+#[test]
+fn test_query_dataflow_json_output() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-dataflow-query-json.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // Test JSON output (should not panic)
+    let result = query_dataflow(&graph, "model:dataflow_output", false);
+    assert!(result.is_ok(), "query_dataflow JSON mode should succeed");
+
+    let _ = std::fs::remove_file(&db_path);
+}
+
+#[test]
+fn test_query_dataflow_not_found() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-dataflow-notfound.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // Test querying a non-existent DataFlow
+    let result = query_dataflow(&graph, "model:nonexistent", true);
+    assert!(result.is_ok(), "query_dataflow for non-existent model should not panic");
+
+    let _ = std::fs::remove_file(&db_path);
+}

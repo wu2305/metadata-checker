@@ -38,6 +38,9 @@ pub struct Cli {
 
     #[arg(long, value_name = "PAGES", num_args = 2, help = "Query cross-file relations between two pages")]
     pub query_cross: Option<Vec<String>>,
+
+    #[arg(long, value_name = "MODEL", help = "Expand and query a DataFlow model's internal subgraph")]
+    pub query_dataflow: Option<String>,
 }
 
 impl Cli {

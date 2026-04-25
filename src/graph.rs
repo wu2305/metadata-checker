@@ -288,6 +288,12 @@ impl GraphDB {
         paths
     }
 
+    pub fn get_node(&self, node_id: &str) -> Option<Node> {
+        self.node_indices.get(node_id)
+            .and_then(|&idx| self.graph.node_weight(idx))
+            .cloned()
+    }
+
     pub fn get_node_edges(&self, node_id: &str) -> Option<(Vec<(Node, Edge)>, Vec<(Node, Edge)>)> {
         let idx = self.node_indices.get(node_id)?;
 

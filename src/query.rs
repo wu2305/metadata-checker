@@ -93,3 +93,101 @@ pub fn query_cross(graph: &GraphDB, page_a: &str, page_b: &str, human: bool) -> 
     }
     Ok(())
 }
+
+pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result<()> {
+    let node = graph.get_node(dataflow_id);
+    if node.is_none() {
+        eprintln!("DataFlow {} not found in graph", dataflow_id);
+        return Ok(());
+    }
+    let node = node.unwrap();
+
+    // Extract internal dependencies from metadata
+    let internal_deps = node.meta.as_ref()
+        .and_then(|m| m.get("internalDeps"))
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            let mut deps: Vec<(String, Vec<String>)> = Vec::new();
+            for (k, v) in obj {
+                if let Some(arr) = v.as_array() {
+                    let dep_ids: Vec<String> = arr.iter()
+                        .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                        .collect();
+                    if !dep_ids.is_empty() {
+                        deps.push((k.clone(), dep_ids));
+                    }
+                }
+            }
+            deps
+        })
+        .unwrap_or_default();
+
+    // Get outgoing edges: DataflowInput (sources) and OutputsTo (targets)
+    let outgoing = graph.get_node_edges(dataflow_id)
+        .map(|(out, _)| out)
+        .unwrap_or_default();
+
+    let inputs: Vec<_> = outgoing.iter()
+        .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::DataflowInput))
+        .map(|(n, e)| (n.clone(), e.clone()))
+        .collect();
+
+    let outputs: Vec<_> = outgoing.iter()
+        .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::OutputsTo))
+        .map(|(n, e)| (n.clone(), e.clone()))
+        .collect();
+
+    if human {
+        let mut out = io::stdout();
+        writeln!(out, "=== DataFlow: {} ===", dataflow_id)?;
+        writeln!(out, "Name: {} | Path: {}", node.name, node.path)?;
+        writeln!(out, "Model Type: {}", node.meta.as_ref().and_then(|m| m.get("modelType")).and_then(|v| v.as_str()).unwrap_or("Unknown"))?;
+
+        writeln!(out, "
+--- Input Sources ({}): ---", inputs.len())?;
+        for (n, e) in &inputs {
+            writeln!(out, "  <- {} [{}] via {:?}", n.name, n.path, e.field_path)?;
+        }
+
+        writeln!(out, "
+--- Output Targets ({}): ---", outputs.len())?;
+        for (n, e) in &outputs {
+            writeln!(out, "  -> {} [{}] via {:?}", n.name, n.path, e.field_path)?;
+        }
+
+        writeln!(out, "
+--- Internal Node Dependencies ({}): ---", internal_deps.len())?;
+        if internal_deps.is_empty() {
+            writeln!(out, "  (No internal dependency information recorded)")?;
+        } else {
+            for (node_id, deps) in &internal_deps {
+                writeln!(out, "  {} -> {}", node_id, deps.join(", "))?;
+            }
+        }
+    } else {
+        let result = serde_json::json!({
+            "dataflow": dataflow_id,
+            "name": node.name,
+            "path": node.path,
+            "model_type": node.meta.as_ref().and_then(|m| m.get("modelType")).and_then(|v| v.as_str()),
+            "inputs": inputs.iter().map(|(n, e)| serde_json::json!({
+                "id": n.id,
+                "name": n.name,
+                "path": n.path,
+                "field_path": e.field_path,
+            })).collect::<Vec<_>>(),
+            "outputs": outputs.iter().map(|(n, e)| serde_json::json!({
+                "id": n.id,
+                "name": n.name,
+                "path": n.path,
+                "field_path": e.field_path,
+            })).collect::<Vec<_>>(),
+            "internal_deps": internal_deps.iter().map(|(id, deps)| serde_json::json!({
+                "node_id": id,
+                "depends_on": deps,
+            })).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    }
+    Ok(())
+}
