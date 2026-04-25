@@ -573,9 +573,22 @@ fn process_tbl_file(
     // For DataFlow type: process input sources (nodes referencing external tables)
     if is_dataflow {
         if let Some(nodes) = value.get("dataFlow").and_then(|d| d.get("nodes")).and_then(|n| n.as_object()) {
-            // First pass: create internal node entries and record inputNodes for subGraph expansion
+            // First pass: build alias map, field mappings, and internal deps
             let mut internal_deps: HashMap<String, Vec<String>> = HashMap::new();
+            let mut alias_map: HashMap<String, String> = HashMap::new();
+            let mut node_fields: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+            let mut node_types: HashMap<String, String> = HashMap::new();
+            
             for (node_id, node) in nodes {
+                // Record alias -> node_id mapping
+                if let Some(alias) = node.get("alias").and_then(|v| v.as_str()) {
+                    alias_map.insert(alias.to_string(), node_id.clone());
+                }
+                // Record node type
+                if let Some(node_type) = node.get("type").and_then(|v| v.as_str()) {
+                    node_types.insert(node_id.clone(), node_type.to_string());
+                }
+                // Record inputNodes dependencies
                 if let Some(input_nodes) = node.get("inputNodes").and_then(|v| v.as_array()) {
                     let deps: Vec<String> = input_nodes.iter()
                         .filter_map(|v| v.as_str().map(|s| s.to_string()))
@@ -584,12 +597,63 @@ fn process_tbl_file(
                         internal_deps.insert(node_id.clone(), deps);
                     }
                 }
+                // Record field mappings for each node
+                if let Some(fields) = node.get("fields").and_then(|v| v.as_array()) {
+                    let mut field_records: Vec<serde_json::Value> = Vec::new();
+                    for field in fields {
+                        let name = field.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let dbfield = field.get("dbfield").and_then(|v| v.as_str()).unwrap_or("");
+                        let original_field = field.get("originalField").and_then(|v| v.as_str());
+                        let original_node = field.get("originalNode").and_then(|v| v.as_str());
+                        let exp = field.get("exp").and_then(|v| v.as_str());
+                        
+                        // Include steps-based AddField expressions
+                        let mut step_exp: Option<String> = None;
+                        if let Some(steps) = node.get("steps").and_then(|v| v.as_array()) {
+                            for step in steps {
+                                if step.get("type").and_then(|v| v.as_str()) == Some("AddField") {
+                                    if let Some(add_field) = step.get("addField") {
+                                        if add_field.get("name").and_then(|v| v.as_str()) == Some(name) {
+                                            if let Some(e) = add_field.get("exp").and_then(|v| v.as_str()) {
+                                                step_exp = Some(e.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        let mut record = serde_json::json!({
+                            "name": name,
+                            "dbfield": dbfield,
+                        });
+                        if let Some(of) = original_field {
+                            record["originalField"] = serde_json::Value::String(of.to_string());
+                        }
+                        if let Some(on) = original_node {
+                            record["originalNode"] = serde_json::Value::String(on.to_string());
+                        }
+                        if let Some(e) = exp {
+                            record["exp"] = serde_json::Value::String(e.to_string());
+                        } else if let Some(e) = step_exp {
+                            record["exp"] = serde_json::Value::String(e.to_string());
+                        }
+                        field_records.push(record);
+                    }
+                    if !field_records.is_empty() {
+                        node_fields.insert(node_id.clone(), field_records);
+                    }
+                }
             }
-            // Store internal deps in model metadata for subGraph expansion
+            
+            // Store all DataFlow metadata for subGraph expansion
             if let Some(model_node) = graph.graph.node_weight_mut(*graph.node_indices.get(&model_id).unwrap()) {
                 let mut meta = model_node.meta.clone().unwrap_or(serde_json::Value::Null);
                 if let Some(obj) = meta.as_object_mut() {
                     obj.insert("internalDeps".to_string(), serde_json::to_value(&internal_deps).unwrap_or(serde_json::Value::Null));
+                    obj.insert("aliasMap".to_string(), serde_json::to_value(&alias_map).unwrap_or(serde_json::Value::Null));
+                    obj.insert("nodeFields".to_string(), serde_json::to_value(&node_fields).unwrap_or(serde_json::Value::Null));
+                    obj.insert("nodeTypes".to_string(), serde_json::to_value(&node_types).unwrap_or(serde_json::Value::Null));
                 }
                 model_node.meta = Some(meta);
             }
