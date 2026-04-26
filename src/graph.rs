@@ -142,6 +142,9 @@ impl GraphDB {
 
     /// 以只读模式打开图数据库（不创建表，不持有写锁）
     pub fn open_readonly(db_path: &Path) -> Result<Self> {
+        if !db_path.exists() {
+            anyhow::bail!("Graph database not found at {:?}", db_path);
+        }
         let db = Database::create(db_path)
             .with_context(|| format!("Failed to open database at {:?}", db_path))?;
 

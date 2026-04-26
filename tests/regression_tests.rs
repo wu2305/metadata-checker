@@ -147,7 +147,6 @@ fn test_invalid_tbl_does_not_abort_project_scan() {
 }
 
 #[test]
-#[ignore = "pending fix: string literal detection must handle escaped quotes"]
 fn test_expression_parser_handles_escaped_quotes_inside_string_literals() {
     let refs = metadata_checker::superpage::parse_expression_refs(
         r#"=IF(input1.value = 'it\'s model2.name', model1.amount, 0)"#,
@@ -171,7 +170,6 @@ fn test_expression_parser_handles_escaped_quotes_inside_string_literals() {
 }
 
 #[test]
-#[ignore = "pending fix: GraphDB::remove_nodes_by_ids must rebuild seen_edges after deletion"]
 fn test_incremental_dirty_file_rebuild_preserves_edges() {
     let project_dir = unique_temp_dir("dirty-rebuild");
     let db_path = project_dir.join(".metadata-checker.graphdb");
@@ -208,7 +206,6 @@ fn test_incremental_dirty_file_rebuild_preserves_edges() {
 }
 
 #[test]
-#[ignore = "pending fix: RawComponent must deserialize additional expression fields"]
 fn test_additional_expression_fields_are_extracted() {
     let dir = unique_temp_dir("extra-fields");
     let path = dir.join("extra_fields.spg");
@@ -249,7 +246,6 @@ fn test_additional_expression_fields_are_extracted() {
 }
 
 #[test]
-#[ignore = "pending fix: incremental state must use real hash or sub-second mtime"]
 fn test_same_size_quick_file_change_is_detected() {
     let project_dir = unique_temp_dir("same-size-change");
     let db_path = project_dir.join(".metadata-checker.graphdb");
