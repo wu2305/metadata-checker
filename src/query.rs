@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use crate::graph::GraphDB;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -152,13 +153,106 @@ pub fn query_cross(graph: &GraphDB, page_a: &str, page_b: &str, human: bool) -> 
 // DataFlow 字段级来源追溯
 // ============================================================
 
-#[derive(Debug, Clone)]
+/// DataFlow 节点字段记录（支持 serde 反序列化）
+#[derive(Debug, Clone, Deserialize)]
 struct FieldRecord {
     name: String,
     dbfield: String,
+    #[serde(rename = "originalField")]
     original_field: Option<String>,
+    #[serde(rename = "originalNode")]
     original_node: Option<String>,
     exp: Option<String>,
+}
+
+/// DataFlow 预解析元数据（一次性反序列化 + 预建索引）
+#[derive(Debug, Clone, Default)]
+struct DataFlowMeta {
+    /// alias -> node_id
+    alias_map: HashMap<String, String>,
+    /// node_id -> alias
+    id_to_alias: HashMap<String, String>,
+    /// node_id -> node_type
+    node_types: HashMap<String, String>,
+    /// node_id -> [dep_node_id]
+    internal_deps: HashMap<String, Vec<String>>,
+    /// 预建索引：node_id -> field_name -> FieldRecord
+    field_index: HashMap<String, HashMap<String, FieldRecord>>,
+}
+
+impl DataFlowMeta {
+    /// 从 node.meta 的 serde_json::Value 一次性构建
+    fn from_meta(meta: &serde_json::Value) -> Self {
+        let alias_map: HashMap<String, String> = meta
+            .get("aliasMap")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let node_fields_raw: HashMap<String, Vec<serde_json::Value>> = meta
+            .get("nodeFields")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let internal_deps: HashMap<String, Vec<String>> = meta
+            .get("internalDeps")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let node_types: HashMap<String, String> = meta
+            .get("nodeTypes")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        // 预解析 node_fields：serde_json::Value -> Vec<FieldRecord>，并建立 field_name 索引
+        let mut field_index: HashMap<String, HashMap<String, FieldRecord>> = HashMap::new();
+        
+        for (node_id, raw_fields) in &node_fields_raw {
+            let records: Vec<FieldRecord> = raw_fields
+                .iter()
+                .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                .collect();
+            let mut idx = HashMap::new();
+            for rec in &records {
+                idx.insert(rec.name.clone(), rec.clone());
+            }
+            field_index.insert(node_id.clone(), idx);
+        }
+
+        let id_to_alias: HashMap<String, String> = alias_map
+            .iter()
+            .map(|(a, id)| (id.clone(), a.clone()))
+            .collect();
+
+        DataFlowMeta {
+            alias_map,
+            id_to_alias,
+            node_types,
+            internal_deps,
+            field_index,
+        }
+    }
+
+    /// 根据 node_id 获取字段索引（预建，O(1)）
+    fn get_fields(&self,
+        node_id: &str,
+    ) -> Option<&HashMap<String, FieldRecord>> {
+        self.field_index.get(node_id)
+    }
+
+    /// 根据 node_id 获取节点类型
+    fn get_node_type(&self, node_id: &str) -> &str {
+        self.node_types.get(node_id).map(|s| s.as_str()).unwrap_or("Unknown")
+    }
+
+    /// 根据 alias 获取 node_id
+    fn get_node_id(&self, alias: &str) -> Option<&String> {
+        self.alias_map.get(alias)
+    }
+
+    /// 根据 node_id 获取 alias
+    fn get_alias(&self, node_id: &str) -> Option<&String> {
+        self.id_to_alias.get(node_id)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -171,69 +265,20 @@ struct TraceStep {
     exp: Option<String>,
 }
 
-/// 从节点字段映射中加载字段记录
-fn load_field_records(
-    node_fields: &HashMap<String, Vec<serde_json::Value>>,
-    node_id: &str,
-) -> HashMap<String, FieldRecord> {
-    let mut result = HashMap::new();
-    if let Some(fields) = node_fields.get(node_id) {
-        for field in fields {
-            let name = field
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let dbfield = field
-                .get("dbfield")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let original_field = field
-                .get("originalField")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let original_node = field
-                .get("originalNode")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let exp = field
-                .get("exp")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            result.insert(
-                name.clone(),
-                FieldRecord {
-                    name,
-                    dbfield,
-                    original_field,
-                    original_node,
-                    exp,
-                },
-            );
-        }
-    }
-    result
-}
-
 /// 递归追溯字段的数据来源链
 fn trace_field_source(
     output_field_name: &str,
     output_field: &FieldRecord,
-    alias_map: &HashMap<String, String>,
-    node_fields: &HashMap<String, Vec<serde_json::Value>>,
-    nodes_json: &HashMap<String, serde_json::Value>,
+    meta: &DataFlowMeta,
     visited: &mut Vec<String>,
 ) -> Vec<TraceStep> {
     let mut steps = Vec::new();
 
-    // Current step: output field
     let mut current_field_name = output_field_name.to_string();
     let mut current_node_alias: Option<String> = output_field.original_node.clone();
     let mut current_field_dbfield = output_field.dbfield.clone();
     let mut current_exp = output_field.exp.clone();
 
-    // Add output step
     steps.push(TraceStep {
         node_alias: "模型输出".to_string(),
         node_type: "Output".to_string(),
@@ -242,7 +287,6 @@ fn trace_field_source(
         exp: current_exp.clone(),
     });
 
-    // Trace backwards through originalNode
     loop {
         let node_alias = match &current_node_alias {
             Some(a) => a.clone(),
@@ -254,24 +298,27 @@ fn trace_field_source(
         }
         visited.push(current_field_name.clone());
 
-        let node_id = match alias_map.get(&node_alias) {
+        let node_id = match meta.get_node_id(&node_alias) {
             Some(id) => id,
             None => break,
         };
 
-        let node_type = nodes_json
-            .get(node_id)
-            .and_then(|n| n.get("type"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown")
-            .to_string();
+        let node_type = meta.get_node_type(node_id).to_string();
+        let field_records = match meta.get_fields(node_id) {
+            Some(recs) => recs,
+            None => {
+                steps.push(TraceStep {
+                    node_alias: node_alias.clone(),
+                    node_type: node_type.clone(),
+                    field_name: format!("{} (字段未在当前节点声明)", current_field_name),
+                    dbfield: "-".to_string(),
+                    exp: None,
+                });
+                break;
+            }
+        };
 
-        let field_records = load_field_records(node_fields, node_id);
-
-        // Try to find the field by originalField name first, then by name
-        let lookup_name = current_field_name.clone();
-        let field_rec = field_records.get(&lookup_name).or_else(|| {
-            // Try matching by originalField if the field name differs
+        let field_rec = field_records.get(&current_field_name).or_else(|| {
             field_records.values().find(|f| {
                 f.original_field.as_ref() == Some(&current_field_name)
                     || f.name == current_field_name
@@ -292,7 +339,6 @@ fn trace_field_source(
                 exp: current_exp.clone(),
             });
         } else {
-            // Field not found in this node, record what we know and stop
             steps.push(TraceStep {
                 node_alias: node_alias.clone(),
                 node_type: node_type.clone(),
@@ -306,7 +352,6 @@ fn trace_field_source(
 
     steps
 }
-
 /// 展开 DataFlow 子图，追溯字段来源
 pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result<()> {
     let node = graph.get_node(dataflow_id);
@@ -316,53 +361,8 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
     }
     let node = node.unwrap();
 
-    let meta = node.meta.as_ref();
-
-    // Extract metadata components
-    let alias_map: HashMap<String, String> = meta
-        .and_then(|m| m.get("aliasMap"))
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    let node_fields: HashMap<String, Vec<serde_json::Value>> = meta
-        .and_then(|m| m.get("nodeFields"))
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    let internal_deps: HashMap<String, Vec<String>> = meta
-        .and_then(|m| m.get("internalDeps"))
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    // We need the raw nodes JSON for node types - reconstruct from nodeFields keys + aliasMap
-    let node_types: HashMap<String, String> = meta
-        .and_then(|m| m.get("nodeTypes"))
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    let mut nodes_json: HashMap<String, serde_json::Value> = HashMap::new();
-    for (alias, node_id) in &alias_map {
-        let node_type = node_types
-            .get(node_id)
-            .map(|s| s.as_str())
-            .unwrap_or("Unknown");
-        nodes_json.insert(
-            node_id.clone(),
-            serde_json::json!({"type": node_type, "alias": alias}),
-        );
-    }
-    // Also include output node (default)
-    let default_type = node_types
-        .get("default")
-        .map(|s| s.as_str())
-        .unwrap_or("Output");
-    nodes_json.insert(
-        "default".to_string(),
-        serde_json::json!({"type": default_type, "alias": "模型输出"}),
-    );
-    if !node_fields.contains_key("default") {
-        // Try to get output fields from dimensions as fallback
-    }
+    let raw_meta = node.meta.as_ref();
+    let dfm = raw_meta.map(DataFlowMeta::from_meta).unwrap_or_default();
 
     let outgoing = graph
         .get_node_edges(dataflow_id)
@@ -388,12 +388,11 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
         writeln!(
             out,
             "Model Type: {}",
-            meta.and_then(|m| m.get("modelType"))
+            raw_meta.and_then(|m| m.get("modelType"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown")
         )?;
 
-        // --- Input Sources ---
         writeln!(out, "\n--- 输入数据源 ({}个): ---", inputs.len())?;
         for (n, e) in &inputs {
             writeln!(
@@ -404,7 +403,6 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
             )?;
         }
 
-        // --- Output Targets ---
         writeln!(out, "\n--- 输出物理表 ({}个): ---", outputs.len())?;
         for (n, e) in &outputs {
             writeln!(
@@ -415,23 +413,19 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
             )?;
         }
 
-        // --- Field-level Source Tracing ---
         writeln!(out, "\n=== 字段级来源追溯 ===")?;
 
-        // Get output node fields (default node)
-        let output_fields = load_field_records(&node_fields, "default");
+        let output_fields = dfm.get_fields("default");
 
-        if output_fields.is_empty() {
+        if output_fields.map(|f| f.is_empty()).unwrap_or(true) {
             writeln!(out, "\n(未找到输出节点字段映射信息)")?;
         } else {
-            for (field_name, field_rec) in &output_fields {
+            for (field_name, field_rec) in output_fields.unwrap() {
                 let mut visited = Vec::new();
                 let trace = trace_field_source(
                     field_name,
                     field_rec,
-                    &alias_map,
-                    &node_fields,
-                    &nodes_json,
+                    &dfm,
                     &mut visited,
                 );
 
@@ -442,7 +436,6 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                     continue;
                 }
 
-                // Print trace chain: Output -> ... -> Root Source
                 for (i, step) in trace.iter().enumerate() {
                     let is_output = i == 0;
                     let is_root = i == trace.len() - 1;
@@ -481,25 +474,18 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
             }
         }
 
-        // --- Internal Node Topology ---
         writeln!(out, "\n=== 内部节点拓扑 ===")?;
-        if internal_deps.is_empty() {
+        if dfm.internal_deps.is_empty() {
             writeln!(out, "(未记录内部节点依赖)")?;
         } else {
-            // Build reverse alias map for display
-            let id_to_alias: HashMap<&String, &String> =
-                alias_map.iter().map(|(a, id)| (id, a)).collect();
-
-            for (node_id, deps) in &internal_deps {
-                let alias = id_to_alias
-                    .get(node_id)
+            for (node_id, deps) in &dfm.internal_deps {
+                let alias = dfm.get_alias(node_id)
                     .map(|a| a.as_str())
                     .unwrap_or(node_id);
                 let dep_names: Vec<String> = deps
                     .iter()
                     .map(|d| {
-                        id_to_alias
-                            .get(d)
+                        dfm.get_alias(d)
                             .map(|a| a.to_string())
                             .unwrap_or_else(|| d.clone())
                     })
@@ -508,39 +494,37 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
             }
         }
     } else {
-        // JSON mode: keep existing structure but add field trace info
         let mut field_traces: Vec<serde_json::Value> = Vec::new();
 
-        let output_fields = load_field_records(&node_fields, "default");
-        for (field_name, field_rec) in &output_fields {
-            let mut visited = Vec::new();
-            let trace = trace_field_source(
-                field_name,
-                field_rec,
-                &alias_map,
-                &node_fields,
-                &nodes_json,
-                &mut visited,
-            );
+        if let Some(output_fields) = dfm.get_fields("default") {
+            for (field_name, field_rec) in output_fields {
+                let mut visited = Vec::new();
+                let trace = trace_field_source(
+                    field_name,
+                    field_rec,
+                    &dfm,
+                    &mut visited,
+                );
 
-            field_traces.push(serde_json::json!({
-                "field": field_name,
-                "dbfield": field_rec.dbfield,
-                "trace": trace.iter().map(|s| serde_json::json!({
-                    "node_alias": s.node_alias,
-                    "node_type": s.node_type,
-                    "field_name": s.field_name,
-                    "dbfield": s.dbfield,
-                    "exp": s.exp,
-                })).collect::<Vec<_>>(),
-            }));
+                field_traces.push(serde_json::json!({
+                    "field": field_name,
+                    "dbfield": field_rec.dbfield,
+                    "trace": trace.iter().map(|s| serde_json::json!({
+                        "node_alias": s.node_alias,
+                        "node_type": s.node_type,
+                        "field_name": s.field_name,
+                        "dbfield": s.dbfield,
+                        "exp": s.exp,
+                    })).collect::<Vec<_>>(),
+                }));
+            }
         }
 
         let result = serde_json::json!({
             "dataflow": dataflow_id,
             "name": node.name,
             "path": node.path,
-            "model_type": meta.and_then(|m| m.get("modelType")).and_then(|v| v.as_str()),
+            "model_type": raw_meta.and_then(|m| m.get("modelType")).and_then(|v| v.as_str()),
             "inputs": inputs.iter().map(|(n, e)| serde_json::json!({
                 "id": n.id,
                 "name": n.name,
@@ -554,7 +538,7 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                 "field_path": e.field_path,
             })).collect::<Vec<_>>(),
             "field_traces": field_traces,
-            "internal_deps": internal_deps.iter().map(|(id, deps)| serde_json::json!({
+            "internal_deps": dfm.internal_deps.iter().map(|(id, deps)| serde_json::json!({
                 "node_id": id,
                 "depends_on": deps,
             })).collect::<Vec<_>>(),
