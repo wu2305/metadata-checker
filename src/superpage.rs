@@ -153,6 +153,10 @@ struct RawComponent {
     submit_condition: Option<serde_json::Value>,
     #[serde(rename = "visibleCondition", default)]
     visible_condition: Option<serde_json::Value>,
+    #[serde(rename = "submitPageCondition", default)]
+    submit_page_condition: Option<serde_json::Value>,
+    #[serde(rename = "defaultPanelCondition", default)]
+    default_panel_condition: Option<serde_json::Value>,
     #[serde(rename = "submitField", default)]
     submit_field: Option<String>,
     #[serde(rename = "submitData", default)]
@@ -407,6 +411,8 @@ fn extract_components(
         ("maskCondition", &raw.mask_condition),
         ("submitCondition", &raw.submit_condition),
         ("visibleCondition", &raw.visible_condition),
+        ("submitPageCondition", &raw.submit_page_condition),
+        ("defaultPanelCondition", &raw.default_panel_condition),
     ];
 
     for (field_name, field_value) in &fields {

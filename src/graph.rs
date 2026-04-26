@@ -145,7 +145,7 @@ impl GraphDB {
         if !db_path.exists() {
             anyhow::bail!("Graph database not found at {:?}", db_path);
         }
-        let db = Database::create(db_path)
+        let db = Database::open(db_path)
             .with_context(|| format!("Failed to open database at {:?}", db_path))?;
 
         let mut graph = DiGraph::new();
