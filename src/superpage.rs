@@ -244,14 +244,12 @@ pub struct SpgSource {
 // 解析入口
 // ============================================================
 
-pub fn parse_superpage(path: &Path) -> Result<SuperPageMetadata> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
-    let raw: RawSuperPage = serde_json::from_str(&content)
-        .with_context(|| format!("Failed to parse JSON from: {}", path.display()))?;
+// ============================================================
 
-    let raw_value: serde_json::Value = serde_json::from_str(&content)
-        .unwrap_or(serde_json::Value::Null);
+/// 从已解析的 JSON Value 构建 SuperPageMetadata
+pub fn parse_superpage_from_value(raw_value: serde_json::Value) -> Result<SuperPageMetadata> {
+    let raw: RawSuperPage = serde_json::from_value(raw_value.clone())
+        .with_context(|| "Failed to parse JSON as RawSuperPage")?;
 
     let mut meta = SuperPageMetadata::default();
     meta.raw = raw_value;
@@ -276,7 +274,7 @@ pub fn parse_superpage(path: &Path) -> Result<SuperPageMetadata> {
 
     if let Some(canvas) = raw.canvas {
         extract_components(
-&canvas,
+            &canvas,
             None,
             &mut meta.components,
             &mut meta.expressions,
@@ -286,10 +284,14 @@ pub fn parse_superpage(path: &Path) -> Result<SuperPageMetadata> {
     Ok(meta)
 }
 
-// ============================================================
-// 递归提取组件
-// ============================================================
-
+/// 读取并解析 .spg 文件
+pub fn parse_superpage(path: &Path) -> Result<SuperPageMetadata> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+    let raw_value: serde_json::Value = serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse JSON from: {}", path.display()))?;
+    parse_superpage_from_value(raw_value)
+}
 fn extract_components(
     raw: &RawComponent,
     parent_id: Option<String>,

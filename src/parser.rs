@@ -56,7 +56,7 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
     let is_superpage = raw.get("canvas").is_some();
 
     if is_superpage {
-        meta.superpage = Some(superpage::parse_superpage(path)?);
+        meta.superpage = Some(superpage::parse_superpage_from_value(raw.clone())?);
         // Also set basic fields
         if let Some(obj) = raw.as_object() {
             meta.version = obj
