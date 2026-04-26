@@ -173,6 +173,16 @@ fn process_spg_file_from_value(
     let meta = crate::superpage::parse_superpage_from_value(raw_value)?;
     let mut node_ids = std::collections::HashSet::new();
 
+    // Build model_id -> path mapping from page sources for accurate model references
+    let source_path_map: std::collections::HashMap<String, String> = meta
+        .sources
+        .iter()
+        .filter_map(|s| {
+            let path = s.path.clone()?;
+            Some((s.id.clone(), path))
+        })
+        .collect();
+
     let page_name = Path::new(rel_path)
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -303,7 +313,10 @@ fn process_spg_file_from_value(
                 for ref_type in &expr.refs {
                     match ref_type {
                         crate::superpage::RefType::ModelField(model, field) => {
-                            let model_path = format!("{}.tbl", model);
+                            let model_path = source_path_map
+                                .get(model.as_str())
+                                .map(|p| p.to_string())
+                                .unwrap_or_else(|| format!("{}.tbl", model));
                             let model_id = format!("model:{}", model);
                             let field_id = format!("field:{}.{}", model, field);
                             graph.add_node(
@@ -343,7 +356,10 @@ fn process_spg_file_from_value(
             let parts: Vec<&str> = submit_field.split('.').collect();
             if parts.len() >= 2 {
                 let model = parts[0];
-                let model_path = format!("{}.tbl", model);
+                let model_path = source_path_map
+                    .get(model)
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| format!("{}.tbl", model));
                 let field = parts[1..].join(".");
                 let model_id = format!("model:{}", model);
                 let field_id = format!("field:{}.{}", model, field);
@@ -454,7 +470,10 @@ fn process_spg_file_from_value(
                             let parts: Vec<&str> = submit_field.split('.').collect();
                             if parts.len() >= 2 {
                                 let model = parts[0];
-                                let model_path = format!("{}.tbl", model);
+                                let model_path = source_path_map
+                                    .get(model)
+                                    .map(|p| p.to_string())
+                                    .unwrap_or_else(|| format!("{}.tbl", model));
                                 let field = parts[1..].join(".");
                                 let model_id = format!("model:{}", model);
                                 let field_id = format!("field:{}.{}", model, field);
@@ -517,7 +536,10 @@ fn process_spg_file_from_value(
                                     if let crate::superpage::RefType::ModelField(model, field) =
                                         ref_type
                                     {
-                                        let model_path = format!("{}.tbl", model);
+                                        let model_path = source_path_map
+                                            .get(&model)
+                                            .map(|p| p.to_string())
+                                            .unwrap_or_else(|| format!("{}.tbl", model));
                                         let ref_model_id = format!("model:{}", model);
                                         let ref_field_id = format!("field:{}.{}", model, field);
                                         graph.add_node(
@@ -609,7 +631,12 @@ fn process_spg_file_from_value(
                                                     field,
                                                 ) = ref_type
                                                 {
-                                                    let model_path = format!("{}.tbl", model);
+                                                    let model_path = source_path_map
+                                                        .get(&model)
+                                                        .map(|p| p.to_string())
+                                                        .unwrap_or_else(|| {
+                                                            format!("{}.tbl", model)
+                                                        });
                                                     let ref_model_id = format!("model:{}", model);
                                                     let ref_field_id =
                                                         format!("field:{}.{}", model, field);
@@ -670,7 +697,10 @@ fn process_spg_file_from_value(
                         let refs = crate::superpage::parse_expression_refs(param_value);
                         for ref_type in refs {
                             if let crate::superpage::RefType::ModelField(model, field) = ref_type {
-                                let model_path = format!("{}.tbl", model);
+                                let model_path = source_path_map
+                                    .get(&model)
+                                    .map(|p| p.to_string())
+                                    .unwrap_or_else(|| format!("{}.tbl", model));
                                 let ref_model_id = format!("model:{}", model);
                                 let ref_field_id = format!("field:{}.{}", model, field);
                                 graph.add_node(

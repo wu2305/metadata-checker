@@ -357,11 +357,6 @@ fn resolve_expression_refs_with_context(
     }
 }
 
-fn token_looks_like_model_field(token: &str) -> bool {
-    // Heuristic: model fields typically have dot notation and don't start with common component prefixes
-    token.contains('.') && !token.starts_with("param")
-}
-
 fn resolve_ref_token(
     token: &str,
     component_ids: &std::collections::HashSet<&str>,

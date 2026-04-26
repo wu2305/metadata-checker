@@ -42,21 +42,21 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 ./target/release/metadata-checker --project-dir /path/to/project --build-graph
 
 # 查询模型的读写关系
-./target/release/metadata-checker --query-model model1
+./target/release/metadata-checker --project-dir /path/to/project --query-model model1
 
 # 查询页面的跨文件关系
-./target/release/metadata-checker --query-page "page/合同管理/销售合同"
+./target/release/metadata-checker --project-dir /path/to/project --query-page "page/合同管理/销售合同"
 
 # 查询两个页面之间的关系
-./target/release/metadata-checker --query-cross "page/A" "page/B"
+./target/release/metadata-checker --project-dir /path/to/project --query-cross "page/A" "page/B"
 
 # 展开 DataFlow 子图
-./target/release/metadata-checker --query-dataflow flow.tbl
+./target/release/metadata-checker --project-dir /path/to/project --query-dataflow flow.tbl
 ```
 
 ### human 模式交互查询
 
-当仅使用 `--human` 参数（不带 `--query`）时，工具会列出所有组件 ID，提示用户输入要查询的组件 ID：
+当使用 `--interactive` 参数（需配合 `--human`）时，工具会进入交互模式，列出所有组件 ID，提示用户输入要查询的组件 ID：
 
 ```
 === 交互式查询 ===
@@ -72,7 +72,7 @@ Arguments:
   [FILE]                    页面元数据 JSON 文件路径
 
 Options:
-      --human               人类可读输出（交互模式）
+      --human               人类可读输出
       --non-human           机器友好的 JSON 输出（默认）
       --query <ID>          查询特定组件 ID 的详细信息
       --priority            附加计算优先级分析
