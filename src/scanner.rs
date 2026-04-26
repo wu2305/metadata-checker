@@ -162,7 +162,7 @@ fn resolve_reference_path(
 /// 解析单个 .spg 文件并写入图
 fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<Vec<String>> {
     let meta = parse_superpage(path)?;
-    let mut node_ids = Vec::new();
+    let mut node_ids = std::collections::HashSet::new();
 
     let page_name = Path::new(rel_path)
         .file_stem()
@@ -177,7 +177,7 @@ fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
         page_name.clone(),
         None,
     );
-    node_ids.push(page_id.clone());
+    node_ids.insert(page_id.clone());
 
     // Process embedded DataFlow models in sources
     for source in &meta.sources {
@@ -198,7 +198,7 @@ fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
             Some(serde_json::json!({"modelType": "DataFlow", "embeddedIn": page_name})),
         );
         if !node_ids.contains(&model_id) {
-            node_ids.push(model_id.clone());
+            node_ids.insert(model_id.clone());
         }
 
         // Extract dimensions as fields
@@ -214,7 +214,7 @@ fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
                         Some(dim.clone()),
                     );
                     if !node_ids.contains(&field_id) {
-                        node_ids.push(field_id.clone());
+                        node_ids.insert(field_id.clone());
                     }
                     graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
                 }
@@ -280,7 +280,7 @@ fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
             comp.id.clone(),
             None,
         );
-        node_ids.push(comp_id.clone());
+        node_ids.insert(comp_id.clone());
         graph.add_edge(&page_id, &comp_id, EdgeType::Contains, None);
 
         // Process expressions (reads)
@@ -407,7 +407,7 @@ fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
                 format!("{}:{}", action.action_type, action.id),
                 None,
             );
-            node_ids.push(action_id.clone());
+            node_ids.insert(action_id.clone());
             graph.add_edge(&comp_id, &action_id, EdgeType::Triggers, None);
 
             match action.action_type.as_str() {
@@ -688,20 +688,20 @@ fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
         }
     }
 
-    Ok(node_ids)
+    Ok(node_ids.into_iter().collect())
 }
 
 /// 解析单个 .tbl 文件并写入图
 fn process_tbl_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<Vec<String>> {
-    let mut node_ids = Vec::new();
+    let mut node_ids = std::collections::HashSet::new();
     let content = fs::read_to_string(path).ok().unwrap_or_default();
     if content.is_empty() {
-        return Ok(node_ids);
+        return Ok(node_ids.into_iter().collect());
     }
 
     let value: serde_json::Value = match serde_json::from_str(&content) {
         Ok(v) => v,
-        Err(_) => return Ok(node_ids),
+        Err(_) => return Ok(node_ids.into_iter().collect()),
     };
 
     // Use file stem as model identifier
@@ -721,7 +721,7 @@ fn process_tbl_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
         model_name.clone(),
         Some(serde_json::json!({"modelType": model_type})),
     );
-    node_ids.push(model_id.clone());
+    node_ids.insert(model_id.clone());
 
     // Process dimensions (fields)
     if let Some(dimensions) = value.get("dimensions").and_then(|d| d.as_array()) {
@@ -735,7 +735,7 @@ fn process_tbl_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
                     name.to_string(),
                     Some(dim.clone()),
                 );
-                node_ids.push(field_id.clone());
+                node_ids.insert(field_id.clone());
                 graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
             }
         }
@@ -907,5 +907,5 @@ fn process_tbl_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
         }
     }
 
-    Ok(node_ids)
+    Ok(node_ids.into_iter().collect())
 }
