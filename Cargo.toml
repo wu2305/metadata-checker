@@ -19,6 +19,7 @@ anyhow = "1"
 regex = "1"
 redb = "4.1.0"
 petgraph = "0.8.3"
+twox-hash = "2"
 
 [profile.release]
 opt-level = "z"

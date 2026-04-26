@@ -1,13 +1,12 @@
 use anyhow::Result;
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use twox_hash::XxHash64;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::graph::{EdgeType, FileState, GraphDB, NodeType};
-use crate::superpage::parse_superpage;
 
 /// 项目目录扫描模块
 ///
@@ -38,7 +37,7 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
         current_paths.insert(rel.clone(), path.clone());
 
         let content_bytes = fs::read(path)?;
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = XxHash64::default();
         hasher.write(&content_bytes);
         let file_hash = format!("{:x}", hasher.finish());
 
@@ -47,7 +46,7 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
                 // File unchanged, skip
             }
             _ => {
-                dirty_files.push((rel, path.clone()));
+                dirty_files.push((rel, path.clone(), content_bytes));
             }
         }
     }
@@ -80,23 +79,25 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
         return Ok(());
     }
 
-    for (rel, path) in &dirty_files {
+    for (rel, path, content_bytes) in &dirty_files {
         // Remove old nodes if updating
         if let Some(old_state) = prev_states.get(rel) {
             graph.remove_nodes_by_ids(&old_state.node_ids);
         }
 
         let node_ids = if path.extension().map(|e| e == "spg").unwrap_or(false) {
-            process_spg_file(&mut graph, rel, path)?
+            let raw_value: serde_json::Value = serde_json::from_slice(content_bytes)?;
+            process_spg_file_from_value(&mut graph, rel, raw_value)?
         } else if path.extension().map(|e| e == "tbl").unwrap_or(false) {
-            process_tbl_file(&mut graph, rel, path)?
+            let content = String::from_utf8_lossy(content_bytes);
+            process_tbl_file_from_string(&mut graph, rel, &content)?
         } else {
             Vec::new()
         };
 
-        let content_bytes = fs::read(path)?;
-        let mut hasher = DefaultHasher::new();
-        hasher.write(&content_bytes);
+        // Reuse hash from scan loop
+        let mut hasher = XxHash64::default();
+        hasher.write(content_bytes);
         let file_hash = format!("{:x}", hasher.finish());
 
         let metadata = fs::metadata(path)?;
@@ -164,8 +165,8 @@ fn resolve_reference_path(
 }
 
 /// 解析单个 .spg 文件并写入图
-fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<Vec<String>> {
-    let meta = parse_superpage(path)?;
+fn process_spg_file_from_value(graph: &mut GraphDB, rel_path: &str, raw_value: serde_json::Value) -> Result<Vec<String>> {
+    let meta = crate::superpage::parse_superpage_from_value(raw_value)?;
     let mut node_ids = std::collections::HashSet::new();
 
     let page_name = Path::new(rel_path)
@@ -700,9 +701,8 @@ fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
 }
 
 /// 解析单个 .tbl 文件并写入图
-fn process_tbl_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<Vec<String>> {
+fn process_tbl_file_from_string(graph: &mut GraphDB, rel_path: &str, content: &str) -> Result<Vec<String>> {
     let mut node_ids = std::collections::HashSet::new();
-    let content = fs::read_to_string(path).ok().unwrap_or_default();
     if content.is_empty() {
         return Ok(node_ids.into_iter().collect());
     }
