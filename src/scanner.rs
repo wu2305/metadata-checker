@@ -178,7 +178,8 @@ fn process_spg_file_from_value(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let page_id = format!("page:{}", page_name);
+    // Use normalized relative path for unique page_id to avoid collisions
+    let page_id = format!("page:{}", rel_path.replace("\\", "/"));
     graph.add_node(
         page_id.clone(),
         NodeType::Page,
@@ -285,7 +286,7 @@ fn process_spg_file_from_value(
     }
     // Process components and their expressions
     for comp in &meta.components {
-        let comp_id = format!("comp:{}/{}", page_name, comp.id);
+        let comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), comp.id);
         graph.add_node(
             comp_id.clone(),
             NodeType::Component,
@@ -336,7 +337,7 @@ fn process_spg_file_from_value(
 
     // Process submitField writes (implicit writes from component bindings)
     for comp in &meta.components {
-        let comp_id = format!("comp:{}/{}", page_name, comp.id);
+        let comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), comp.id);
 
         if let Some(submit_field) = comp.properties.get("submitField") {
             let parts: Vec<&str> = submit_field.split('.').collect();
@@ -377,7 +378,7 @@ fn process_spg_file_from_value(
         if comp.component_type != "embedsuperpage" {
             continue;
         }
-        let comp_id = format!("comp:{}/{}", page_name, comp.id);
+        let comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), comp.id);
 
         // Try to resolve resPath as integer index into referenceResources
         if let Some(ref res_path_str) = comp.res_path {
@@ -410,9 +411,14 @@ fn process_spg_file_from_value(
 
     // Process actions (explicit writes from interactions)
     for comp in &meta.components {
-        let comp_id = format!("comp:{}/{}", page_name, comp.id);
+        let comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), comp.id);
         for action in &comp.actions {
-            let action_id = format!("action:{}/{}/{}", page_name, comp.id, action.id);
+            let action_id = format!(
+                "action:{}|{}|{}",
+                rel_path.replace("\\", "/"),
+                comp.id,
+                action.id
+            );
             graph.add_node(
                 action_id.clone(),
                 NodeType::Action,
@@ -645,7 +651,8 @@ fn process_spg_file_from_value(
                 }
                 "setParamValue" => {
                     for (param_name, param_value) in &action.params {
-                        let param_id = format!("param:{}/{}", page_name, param_name);
+                        let param_id =
+                            format!("param:{}|{}", rel_path.replace("\\", "/"), param_name);
                         graph.add_node(
                             param_id.clone(),
                             NodeType::Field,

@@ -20,9 +20,15 @@ pub struct Cli {
     #[arg(
         long,
         group = "output_mode",
-        help = "Print human-readable output with headers and indentation. When used alone, enters interactive mode."
+        help = "Print human-readable output with headers and indentation"
     )]
     pub human: bool,
+
+    #[arg(
+        long,
+        help = "Enter interactive mode for component querying (requires --human)"
+    )]
+    pub interactive: bool,
 
     #[arg(
         long,
@@ -86,6 +92,10 @@ pub struct Cli {
 
 impl Cli {
     pub fn is_human(&self) -> bool {
-        self.human
+        self.human || self.interactive
+    }
+
+    pub fn is_interactive(&self) -> bool {
+        self.interactive
     }
 }

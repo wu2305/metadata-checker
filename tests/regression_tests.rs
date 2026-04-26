@@ -80,7 +80,7 @@ fn test_incremental_deleted_file_removes_nodes_and_state() {
     scan_project(&project_dir, &db_path).expect("initial scan should succeed");
     let graph = GraphDB::open(&db_path).expect("graph should open after initial scan");
     assert!(
-        graph.get_node("page:delete_me").is_some(),
+        graph.get_node("page:app/delete_me.spg").is_some(),
         "delete_me page should exist after initial scan"
     );
     drop(graph);
@@ -89,7 +89,7 @@ fn test_incremental_deleted_file_removes_nodes_and_state() {
     scan_project(&project_dir, &db_path).expect("scan after deletion should succeed");
     let graph = GraphDB::open(&db_path).expect("graph should open after deletion scan");
     assert_eq!(
-        graph.get_node("page:delete_me").is_none(),
+        graph.get_node("page:app/delete_me.spg").is_none(),
         true,
         "deleted page node should be removed from graph"
     );
@@ -98,7 +98,7 @@ fn test_incremental_deleted_file_removes_nodes_and_state() {
     scan_project(&project_dir, &db_path).expect("second deletion scan should not repeat deletion");
     let graph = GraphDB::open(&db_path).expect("graph should open after second scan");
     assert!(
-        page_has_contains_edge(&graph, "page:main", "input1"),
+        page_has_contains_edge(&graph, "page:app/main.spg", "input1"),
         "unrelated page edges should remain after deleting another file"
     );
 
@@ -119,7 +119,7 @@ fn test_project_local_graphdb_is_not_scanned_as_metadata() {
 
     let graph = GraphDB::open(&db_path).expect("graph should open after repeated scan");
     assert!(
-        page_has_contains_edge(&graph, "page:main", "input1"),
+        page_has_contains_edge(&graph, "page:app/main.spg", "input1"),
         "project-local graphdb must not interfere with page graph"
     );
 
@@ -139,7 +139,7 @@ fn test_invalid_tbl_does_not_abort_project_scan() {
     scan_project(&project_dir, &db_path).expect("invalid tbl should be skipped, not abort scan");
     let graph = GraphDB::open(&db_path).expect("graph should open after scan with invalid tbl");
     assert!(
-        page_has_contains_edge(&graph, "page:main", "text1"),
+        page_has_contains_edge(&graph, "page:app/main.spg", "text1"),
         "valid spg should still be indexed when another tbl is invalid"
     );
 
@@ -180,11 +180,11 @@ fn test_incremental_dirty_file_rebuild_preserves_edges() {
 
     let graph = GraphDB::open(&db_path).expect("graph should open after initial scan");
     assert!(
-        page_has_contains_edge(&graph, "page:main", "input1"),
+        page_has_contains_edge(&graph, "page:app/main.spg", "input1"),
         "initial scan should create page -> component edge"
     );
     assert!(
-        model_has_writer(&graph, "model:model1", "comp:main/input1"),
+        model_has_writer(&graph, "model:model1", "comp:app/main.spg|input1"),
         "initial scan should create submitField write edge"
     );
     drop(graph);
@@ -194,11 +194,11 @@ fn test_incremental_dirty_file_rebuild_preserves_edges() {
 
     let graph = GraphDB::open(&db_path).expect("graph should open after dirty scan");
     assert!(
-        page_has_contains_edge(&graph, "page:main", "input1"),
+        page_has_contains_edge(&graph, "page:app/main.spg", "input1"),
         "dirty rebuild must preserve page -> component edge"
     );
     assert!(
-        model_has_writer(&graph, "model:model1", "comp:main/input1"),
+        model_has_writer(&graph, "model:model1", "comp:app/main.spg|input1"),
         "dirty rebuild must preserve submitField write edge"
     );
 

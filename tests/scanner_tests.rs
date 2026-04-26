@@ -100,14 +100,14 @@ fn test_scanner_submit_data_action() {
     // Verify action node exists
     let action_node = graph
         .node_indices
-        .get("action:actions_test/button1/action1");
+        .get("action:app/actions_test.spg|button1|action1");
     assert!(action_node.is_some(), "Action node should exist");
 
     // Verify submitData creates ActionWrites edge to model1
     let model1_id = "model:model1";
     let writers = graph.find_writers(model1_id);
     let has_action_write = writers.iter().any(|(node, edge)| {
-        node.id == "action:actions_test/button1/action1"
+        node.id == "action:app/actions_test.spg|button1|action1"
             && matches!(edge.edge_type, EdgeType::ActionWrites)
     });
     assert!(
@@ -130,7 +130,7 @@ fn test_scanner_update_data_action() {
 
     let writers = graph.find_writers("model:model2");
     let has_update_action = writers.iter().any(|(node, edge)| {
-        node.id == "action:actions_test/button2/action2"
+        node.id == "action:app/actions_test.spg|button2|action2"
             && matches!(edge.edge_type, EdgeType::ActionWrites)
             && edge.field_path == Some("model2.status".to_string())
     });
@@ -155,7 +155,7 @@ fn test_scanner_insert_delete_data_actions() {
     // insertData: model1.id
     let writers_model1 = graph.find_writers("model:model1");
     let has_insert = writers_model1.iter().any(|(node, edge)| {
-        node.id == "action:actions_test/button3/action3"
+        node.id == "action:app/actions_test.spg|button3|action3"
             && matches!(edge.edge_type, EdgeType::ActionWrites)
             && edge.field_path == Some("model1.id".to_string())
     });
@@ -167,7 +167,7 @@ fn test_scanner_insert_delete_data_actions() {
     // deleteData: model2.deletedFlag
     let writers_model2 = graph.find_writers("model:model2");
     let has_delete = writers_model2.iter().any(|(node, edge)| {
-        node.id == "action:actions_test/button4/action4"
+        node.id == "action:app/actions_test.spg|button4|action4"
             && matches!(edge.edge_type, EdgeType::ActionWrites)
             && edge.field_path == Some("model2.deletedFlag".to_string())
     });
@@ -192,7 +192,7 @@ fn test_scanner_submit_data_without_submit_component() {
     // button5 submitData without submitComponent: should collect ALL submitField components
     let writers = graph.find_writers("model:model1");
     let has_global_submit = writers.iter().any(|(node, edge)| {
-        node.id == "action:actions_test/button5/action5"
+        node.id == "action:app/actions_test.spg|button5|action5"
             && matches!(edge.edge_type, EdgeType::ActionWrites)
     });
     assert!(
@@ -502,7 +502,7 @@ fn test_scanner_embedsuperpage_relation() {
     let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
 
     // Verify embedsuperpage creates EmbedsPage edge
-    let embed_comp = graph.node_indices.get("comp:page_relations/embed1");
+    let embed_comp = graph.node_indices.get("comp:app/page_relations.spg|embed1");
     assert!(embed_comp.is_some(), "embed1 component should exist");
 
     let outgoing: Vec<_> = graph
@@ -540,7 +540,7 @@ fn test_scanner_link_opens_page_relation() {
     // Debug: print action node outgoing edges
     let action_node = graph
         .node_indices
-        .get("action:page_relations/button1/action1");
+        .get("action:app/page_relations.spg|button1|action1");
     if let Some(&idx) = action_node {
         for e in graph
             .graph
@@ -592,7 +592,7 @@ fn test_scanner_link_passes_param() {
     // Verify link action creates PassesParam edges
     let action_node = graph
         .node_indices
-        .get("action:page_relations/button1/action1");
+        .get("action:app/page_relations.spg|button1|action1");
     assert!(action_node.is_some(), "link action should exist");
 
     let param_edges: Vec<_> = graph
@@ -631,7 +631,7 @@ fn test_scanner_set_param_value() {
     // Verify setParamValue creates SetsParam edge
     let action_node = graph
         .node_indices
-        .get("action:page_relations/button2/action2");
+        .get("action:app/page_relations.spg|button2|action2");
     assert!(action_node.is_some(), "setParamValue action should exist");
 
     let param_edges: Vec<_> = graph
