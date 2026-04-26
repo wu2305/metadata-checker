@@ -274,3 +274,10 @@ fn test_same_size_quick_file_change_is_detected() {
 
     let _ = fs::remove_dir_all(project_dir);
 }
+
+#[test]
+fn debug_parse_refs() {
+    let refs = metadata_checker::superpage::parse_expression_refs("=myinput1.value + input1.value");
+    println!("refs: {:?}", refs);
+    assert_eq!(refs.len(), 2);
+}

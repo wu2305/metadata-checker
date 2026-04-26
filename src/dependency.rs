@@ -258,7 +258,7 @@ pub fn trace_value_source(
 }
 
 /// 展开表达式，递归替换引用
-fn expand_expression(
+pub fn expand_expression(
     meta: &SuperPageMetadata,
     graph: &DependencyGraph,
     component_id: &str,
@@ -318,13 +318,13 @@ fn expand_expression(
                         });
 
                         // 替换引用
-                        expanded = expanded.replace(&format!("{}.value", dep_id), &dep_expanded);
+                        expanded = replace_with_boundary(&expanded, &format!("{}.value", dep_id), &dep_expanded);
                     }
                 }
             }
             RefType::ModelField(model_id, field) => {
                 let replacement = format!("({}.{})", model_id, field);
-                expanded = expanded.replace(&format!("{}.{}", model_id, field), &replacement);
+                expanded = replace_with_boundary(&expanded, &format!("{}.{}", model_id, field), &replacement);
             }
             RefType::Param(param_id) => {
                 let replacement = format!("({})", param_id);
@@ -355,6 +355,39 @@ fn regex_escape(s: &str) -> String {
         .replace("$", "\\$")
         .replace("|", "\\|")
 }
+
+/// Replace pattern only at word boundaries (word chars = [A-Za-z0-9_]).
+fn replace_with_boundary(s: &str, pattern: &str, replacement: &str) -> String {
+    let mut result = String::with_capacity(s.len() + replacement.len());
+    let pat_bytes = pattern.as_bytes();
+    let s_bytes = s.as_bytes();
+    let mut i = 0;
+
+    while i <= s_bytes.len().saturating_sub(pat_bytes.len()) {
+        if &s_bytes[i..i + pat_bytes.len()] == pat_bytes {
+            let prev_ok = i == 0 || !is_word_char(s_bytes[i - 1]);
+            let next_ok = i + pat_bytes.len() == s_bytes.len()
+                || !is_word_char(s_bytes[i + pat_bytes.len()]);
+            if prev_ok && next_ok {
+                result.push_str(replacement);
+                i += pat_bytes.len();
+                continue;
+            }
+        }
+        result.push(s_bytes[i] as char);
+        i += 1;
+    }
+    while i < s_bytes.len() {
+        result.push(s_bytes[i] as char);
+        i += 1;
+    }
+    result
+}
+
+fn is_word_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
 
 /// 确定来源类型
 fn determine_source_type(expr: &str, _chain: &[SourceNode]) -> SourceType {
