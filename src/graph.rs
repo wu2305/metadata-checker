@@ -79,6 +79,7 @@ pub struct GraphDB {
     pub graph: DiGraph<Node, Edge>,
     pub node_indices: HashMap<String, NodeIndex>,
     pub db_path: String,
+    is_dirty: bool,
     seen_edges: HashSet<(String, String, EdgeType, Option<String>)>,
 }
 
@@ -111,7 +112,7 @@ impl GraphDB {
             }
         }
 
-        let mut seen_edges = HashSet::new();
+        let mut seen_edges: HashSet<(String, String, EdgeType, Option<String>)> = HashSet::new();
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
             let (_, value) = item?;
@@ -129,6 +130,7 @@ impl GraphDB {
             graph,
             node_indices,
             db_path: db_path.to_string_lossy().to_string(),
+            is_dirty: false,
             seen_edges,
         })
     }
@@ -151,6 +153,7 @@ impl GraphDB {
                 existing.path = path;
                 existing.name = name;
             }
+            self.is_dirty = true;
             return idx;
         }
         let node = Node {
@@ -161,6 +164,7 @@ impl GraphDB {
             meta,
         };
         let idx = self.graph.add_node(node);
+        self.is_dirty = true;
         self.node_indices.insert(id, idx);
         idx
     }
@@ -186,6 +190,7 @@ impl GraphDB {
                 edge_type,
                 field_path,
             };
+            self.is_dirty = true;
             self.graph.add_edge(from_idx, to_idx, edge);
         }
     }
@@ -195,6 +200,7 @@ impl GraphDB {
         if node_ids.is_empty() {
             return;
         }
+        self.is_dirty = true;
 
         let remove_ids: HashSet<&str> = node_ids.iter().map(String::as_str).collect();
         let mut new_graph = DiGraph::new();
@@ -228,7 +234,10 @@ impl GraphDB {
         self.node_indices = new_indices;
     }
 
-    pub fn persist(&self, file_states: &HashMap<String, FileState>) -> Result<()> {
+    pub fn persist(&mut self, file_states: &HashMap<String, FileState>) -> Result<()> {
+        if !self.is_dirty {
+            return Ok(());
+        }
         let db = Database::create(&self.db_path)?;
         let write_txn = db.begin_write()?;
 
@@ -268,6 +277,7 @@ impl GraphDB {
         }
 
         write_txn.commit()?;
+        self.is_dirty = false;
         Ok(())
     }
 
