@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde::Deserialize;
@@ -434,13 +435,18 @@ fn extract_components(
 // 表达式引用解析
 // ============================================================
 
+
+/// 表达式引用提取正则（编译一次，全局复用）
+static EXPR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[a-zA-Z@$][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+|\$[a-zA-Z0-9_]+|\bparam\w+\b|\bmodel\d+\b").unwrap()
+});
+
 pub fn parse_expression_refs(expr: &str) -> Vec<RefType> {
     let mut refs = Vec::new();
     let mut seen = HashSet::new();
 
-    let re = Regex::new(r"[a-zA-Z@$][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+|\$[a-zA-Z0-9_]+|\bparam\w+\b|\bmodel\d+\b").unwrap();
 
-    for mat in re.find_iter(expr) {
+    for mat in EXPR_RE.find_iter(expr) {
         let token = mat.as_str();
 
         let lower = token.to_lowercase();
