@@ -1,6 +1,8 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -35,16 +37,13 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
             .to_string();
         current_paths.insert(rel.clone(), path.clone());
 
-        let metadata = fs::metadata(path)?;
-        let mtime = metadata
-            .modified()?
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let size = metadata.len();
+        let content_bytes = fs::read(path)?;
+        let mut hasher = DefaultHasher::new();
+        hasher.write(&content_bytes);
+        let file_hash = format!("{:x}", hasher.finish());
 
         match prev_states.get(&rel) {
-            Some(state) if state.mtime == mtime && state.size == size => {
+            Some(state) if state.file_hash == file_hash => {
                 // File unchanged, skip
             }
             _ => {
@@ -95,6 +94,11 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
             Vec::new()
         };
 
+        let content_bytes = fs::read(path)?;
+        let mut hasher = DefaultHasher::new();
+        hasher.write(&content_bytes);
+        let file_hash = format!("{:x}", hasher.finish());
+
         let metadata = fs::metadata(path)?;
         let mtime = metadata
             .modified()?
@@ -107,7 +111,7 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
             rel.clone(),
             FileState {
                 file_path: rel.clone(),
-                file_hash: format!("{}-{}", mtime, size),
+                file_hash,
                 mtime,
                 size,
                 node_ids,
@@ -266,9 +270,13 @@ fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
         }
     }
 
-    let mut expr_map: std::collections::HashMap<&str, Vec<&crate::superpage::ComponentExpr>> = std::collections::HashMap::new();
+    let mut expr_map: std::collections::HashMap<&str, Vec<&crate::superpage::ComponentExpr>> =
+        std::collections::HashMap::new();
     for expr in &meta.expressions {
-        expr_map.entry(&expr.component_id).or_insert_with(Vec::new).push(expr);
+        expr_map
+            .entry(&expr.component_id)
+            .or_insert_with(Vec::new)
+            .push(expr);
     }
     // Process components and their expressions
     for comp in &meta.components {
@@ -286,37 +294,37 @@ fn process_spg_file(graph: &mut GraphDB, rel_path: &str, path: &Path) -> Result<
         // Process expressions (reads)
         if let Some(exprs) = expr_map.get(comp.id.as_str()) {
             for expr in exprs {
-            for ref_type in &expr.refs {
-                match ref_type {
-                    crate::superpage::RefType::ModelField(model, field) => {
-                        let model_path = format!("{}.tbl", model);
-                        let model_id = format!("model:{}", model);
-                        let field_id = format!("field:{}.{}", model, field);
-                        graph.add_node(
-                            model_id.clone(),
-                            NodeType::Model,
-                            model_path.clone(),
-                            model.clone(),
-                            None,
-                        );
-                        graph.add_node(
-                            field_id.clone(),
-                            NodeType::Field,
-                            model_path,
-                            format!("{}", field),
-                            None,
-                        );
-                        graph.add_edge(
-                            &comp_id,
-                            &model_id,
-                            EdgeType::Reads,
-                            Some(format!("{}.{}", model, field)),
-                        );
-                        graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+                for ref_type in &expr.refs {
+                    match ref_type {
+                        crate::superpage::RefType::ModelField(model, field) => {
+                            let model_path = format!("{}.tbl", model);
+                            let model_id = format!("model:{}", model);
+                            let field_id = format!("field:{}.{}", model, field);
+                            graph.add_node(
+                                model_id.clone(),
+                                NodeType::Model,
+                                model_path.clone(),
+                                model.clone(),
+                                None,
+                            );
+                            graph.add_node(
+                                field_id.clone(),
+                                NodeType::Field,
+                                model_path,
+                                format!("{}", field),
+                                None,
+                            );
+                            graph.add_edge(
+                                &comp_id,
+                                &model_id,
+                                EdgeType::Reads,
+                                Some(format!("{}.{}", model, field)),
+                            );
+                            graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
-            }
             }
         }
     }

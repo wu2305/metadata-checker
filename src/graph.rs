@@ -121,7 +121,59 @@ impl GraphDB {
                     (node_indices.get(&edge.from), node_indices.get(&edge.to))
                 {
                     graph.add_edge(from_idx, to_idx, edge.clone());
-                    seen_edges.insert((edge.from.clone(), edge.to.clone(), edge.edge_type.clone(), edge.field_path.clone()));
+                    seen_edges.insert((
+                        edge.from.clone(),
+                        edge.to.clone(),
+                        edge.edge_type.clone(),
+                        edge.field_path.clone(),
+                    ));
+                }
+            }
+        }
+
+        Ok(GraphDB {
+            graph,
+            node_indices,
+            db_path: db_path.to_string_lossy().to_string(),
+            is_dirty: false,
+            seen_edges,
+        })
+    }
+
+    /// 以只读模式打开图数据库（不创建表，不持有写锁）
+    pub fn open_readonly(db_path: &Path) -> Result<Self> {
+        let db = Database::create(db_path)
+            .with_context(|| format!("Failed to open database at {:?}", db_path))?;
+
+        let mut graph = DiGraph::new();
+        let mut node_indices = HashMap::new();
+
+        let read_txn = db.begin_read()?;
+        let nodes_table = read_txn.open_table(NODES_TABLE)?;
+        for item in nodes_table.iter()? {
+            let (key, value) = item?;
+            let id = key.value();
+            if let Ok(node) = serde_json::from_slice::<Node>(value.value().as_slice()) {
+                let idx = graph.add_node(node);
+                node_indices.insert(id.to_string(), idx);
+            }
+        }
+
+        let mut seen_edges: HashSet<(String, String, EdgeType, Option<String>)> = HashSet::new();
+        let edges_table = read_txn.open_table(EDGES_TABLE)?;
+        for item in edges_table.iter()? {
+            let (_, value) = item?;
+            if let Ok(edge) = serde_json::from_slice::<Edge>(value.value().as_slice()) {
+                if let (Some(&from_idx), Some(&to_idx)) =
+                    (node_indices.get(&edge.from), node_indices.get(&edge.to))
+                {
+                    graph.add_edge(from_idx, to_idx, edge.clone());
+                    seen_edges.insert((
+                        edge.from.clone(),
+                        edge.to.clone(),
+                        edge.edge_type.clone(),
+                        edge.field_path.clone(),
+                    ));
                 }
             }
         }
@@ -180,7 +232,12 @@ impl GraphDB {
         if let (Some(&from_idx), Some(&to_idx)) =
             (self.node_indices.get(from), self.node_indices.get(to))
         {
-            let key = (from.to_string(), to.to_string(), edge_type.clone(), field_path.clone());
+            let key = (
+                from.to_string(),
+                to.to_string(),
+                edge_type.clone(),
+                field_path.clone(),
+            );
             if !self.seen_edges.insert(key) {
                 return;
             }
@@ -232,6 +289,17 @@ impl GraphDB {
 
         self.graph = new_graph;
         self.node_indices = new_indices;
+        // Rebuild seen_edges to match the new graph
+        self.seen_edges.clear();
+        for edge_ref in self.graph.edge_references() {
+            let edge = edge_ref.weight();
+            self.seen_edges.insert((
+                edge.from.clone(),
+                edge.to.clone(),
+                edge.edge_type.clone(),
+                edge.field_path.clone(),
+            ));
+        }
     }
 
     pub fn persist(&mut self, file_states: &HashMap<String, FileState>) -> Result<()> {

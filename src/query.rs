@@ -1,6 +1,6 @@
-use serde::Deserialize;
 use crate::graph::GraphDB;
 use anyhow::Result;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, Write};
 
@@ -205,7 +205,7 @@ impl DataFlowMeta {
 
         // 预解析 node_fields：serde_json::Value -> Vec<FieldRecord>，并建立 field_name 索引
         let mut field_index: HashMap<String, HashMap<String, FieldRecord>> = HashMap::new();
-        
+
         for (node_id, raw_fields) in &node_fields_raw {
             let records: Vec<FieldRecord> = raw_fields
                 .iter()
@@ -233,15 +233,16 @@ impl DataFlowMeta {
     }
 
     /// 根据 node_id 获取字段索引（预建，O(1)）
-    fn get_fields(&self,
-        node_id: &str,
-    ) -> Option<&HashMap<String, FieldRecord>> {
+    fn get_fields(&self, node_id: &str) -> Option<&HashMap<String, FieldRecord>> {
         self.field_index.get(node_id)
     }
 
     /// 根据 node_id 获取节点类型
     fn get_node_type(&self, node_id: &str) -> &str {
-        self.node_types.get(node_id).map(|s| s.as_str()).unwrap_or("Unknown")
+        self.node_types
+            .get(node_id)
+            .map(|s| s.as_str())
+            .unwrap_or("Unknown")
     }
 
     /// 根据 alias 获取 node_id
@@ -270,7 +271,7 @@ fn trace_field_source(
     output_field_name: &str,
     output_field: &FieldRecord,
     meta: &DataFlowMeta,
-    visited: &mut Vec<String>,
+    visited: &mut Vec<(String, String)>,
 ) -> Vec<TraceStep> {
     let mut steps = Vec::new();
 
@@ -293,15 +294,16 @@ fn trace_field_source(
             None => break,
         };
 
-        if visited.contains(&current_field_name) {
-            break;
-        }
-        visited.push(current_field_name.clone());
-
         let node_id = match meta.get_node_id(&node_alias) {
             Some(id) => id,
             None => break,
         };
+
+        let visit_key = (node_id.to_string(), current_field_name.clone());
+        if visited.contains(&visit_key) {
+            break;
+        }
+        visited.push(visit_key);
 
         let node_type = meta.get_node_type(node_id).to_string();
         let field_records = match meta.get_fields(node_id) {
@@ -388,7 +390,8 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
         writeln!(
             out,
             "Model Type: {}",
-            raw_meta.and_then(|m| m.get("modelType"))
+            raw_meta
+                .and_then(|m| m.get("modelType"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown")
         )?;
@@ -421,13 +424,8 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
             writeln!(out, "\n(未找到输出节点字段映射信息)")?;
         } else {
             for (field_name, field_rec) in output_fields.unwrap() {
-                let mut visited = Vec::new();
-                let trace = trace_field_source(
-                    field_name,
-                    field_rec,
-                    &dfm,
-                    &mut visited,
-                );
+                let mut visited: Vec<(String, String)> = Vec::new();
+                let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
 
                 writeln!(out, "\n[字段] {}", field_name)?;
 
@@ -479,7 +477,8 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
             writeln!(out, "(未记录内部节点依赖)")?;
         } else {
             for (node_id, deps) in &dfm.internal_deps {
-                let alias = dfm.get_alias(node_id)
+                let alias = dfm
+                    .get_alias(node_id)
                     .map(|a| a.as_str())
                     .unwrap_or(node_id);
                 let dep_names: Vec<String> = deps
@@ -498,13 +497,8 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
 
         if let Some(output_fields) = dfm.get_fields("default") {
             for (field_name, field_rec) in output_fields {
-                let mut visited = Vec::new();
-                let trace = trace_field_source(
-                    field_name,
-                    field_rec,
-                    &dfm,
-                    &mut visited,
-                );
+                let mut visited: Vec<(String, String)> = Vec::new();
+                let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
 
                 field_traces.push(serde_json::json!({
                     "field": field_name,

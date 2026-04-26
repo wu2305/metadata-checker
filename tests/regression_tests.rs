@@ -1,6 +1,6 @@
 use metadata_checker::graph::{EdgeType, GraphDB};
 use metadata_checker::scanner::scan_project;
-use metadata_checker::superpage::{parse_superpage, RefType};
+use metadata_checker::superpage::{RefType, parse_superpage};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};

@@ -33,7 +33,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        let graph = GraphDB::open(&db_path)?;
+        let graph = GraphDB::open_readonly(&db_path)?;
 
         if let Some(ref model_id) = args.query_model {
             let model_node_id = format!("model:{}", model_id);

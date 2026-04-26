@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::superpage::{ComponentExpr, RefType, SuperPageMetadata};
+use std::collections::HashMap;
 
 /// 组件计算优先级分析模块
 ///
@@ -46,26 +46,29 @@ pub fn analyze_priority(meta: &SuperPageMetadata) -> Vec<PriorityAnalysis> {
     }
 
     for comp in &meta.components {
-        let default_value_expr = expr_map.get(&(comp.id.as_str(), "defaultValue")).map(|e| (*e).clone());
+        let default_value_expr = expr_map
+            .get(&(comp.id.as_str(), "defaultValue"))
+            .map(|e| (*e).clone());
 
         let calc_exp_expr = expr_map
             .get(&(comp.id.as_str(), "exp"))
             .map(|e| (*e).clone())
             .or_else(|| {
-                expr_map.get(&(comp.id.as_str(), "value"))
+                expr_map
+                    .get(&(comp.id.as_str(), "value"))
                     .filter(|e| e.raw_expr.starts_with('=') || e.raw_expr.contains("${"))
                     .map(|e| (*e).clone())
             });
 
-        let calc_condition_expr = expr_map.get(&(comp.id.as_str(), "calcCondition")).map(|e| (*e).clone());
-        let priority_result = determine_priority(
-            &default_value_expr,
-            &calc_exp_expr,
-            &calc_condition_expr,
-        );
+        let calc_condition_expr = expr_map
+            .get(&(comp.id.as_str(), "calcCondition"))
+            .map(|e| (*e).clone());
+        let priority_result =
+            determine_priority(&default_value_expr, &calc_exp_expr, &calc_condition_expr);
 
         // 只输出有表达式的组件
-        if default_value_expr.is_some() || calc_exp_expr.is_some() || calc_condition_expr.is_some() {
+        if default_value_expr.is_some() || calc_exp_expr.is_some() || calc_condition_expr.is_some()
+        {
             results.push(PriorityAnalysis {
                 component_id: comp.id.clone(),
                 component_type: comp.component_type.clone(),
@@ -86,7 +89,11 @@ fn determine_priority(
     calc_exp: &Option<ComponentExpr>,
     calc_condition: &Option<ComponentExpr>,
 ) -> ExpDefaultValuePriority {
-    match (default_value.is_some(), calc_exp.is_some(), calc_condition.is_some()) {
+    match (
+        default_value.is_some(),
+        calc_exp.is_some(),
+        calc_condition.is_some(),
+    ) {
         (true, false, false) => ExpDefaultValuePriority::OnlyDefaultValue,
         (false, true, false) => ExpDefaultValuePriority::OnlyExp,
         (false, true, true) => ExpDefaultValuePriority::OnlyExp,
@@ -117,10 +124,7 @@ pub fn format_priority_human(analyses: &[PriorityAnalysis]) -> String {
 
         lines.push(format!(
             "{} {} ({}) — {:?}",
-            icon,
-            analysis.component_id,
-            analysis.component_type,
-            analysis.priority_result
+            icon, analysis.component_id, analysis.component_type, analysis.priority_result
         ));
 
         if let Some(dv) = &analysis.default_value_expr {
@@ -155,7 +159,10 @@ pub fn format_priority_human(analyses: &[PriorityAnalysis]) -> String {
     lines.push("".to_string());
     lines.push("=== 规则来源 ===".to_string());
     lines.push("源自 superpagecalculator.ts 的 calcp_defaultValue 逻辑：".to_string());
-    lines.push("1. 若 exp 存在且 calcCondition 不存在 → defaultValue 直接标记为 Calced（不计算）".to_string());
+    lines.push(
+        "1. 若 exp 存在且 calcCondition 不存在 → defaultValue 直接标记为 Calced（不计算）"
+            .to_string(),
+    );
     lines.push("2. 若 exp 存在且 calcCondition 存在 → 先计算 defaultValue 作为备用值".to_string());
     lines.push("3. 若 exp 不存在 → 正常计算 defaultValue".to_string());
     lines.push("4. 查看模式下（viewMode）defaultValue 只计算一次".to_string());

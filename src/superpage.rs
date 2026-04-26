@@ -1,9 +1,9 @@
-use std::sync::LazyLock;
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::LazyLock;
 
 /// SuperPage 元数据解析模块
 ///
@@ -139,6 +139,20 @@ struct RawComponent {
     formula: Option<serde_json::Value>,
     #[serde(default)]
     html: Option<serde_json::Value>,
+    #[serde(rename = "calcCondition", default)]
+    calc_condition: Option<serde_json::Value>,
+    #[serde(rename = "itemFilter", default)]
+    item_filter: Option<serde_json::Value>,
+    #[serde(rename = "validExp", default)]
+    valid_exp: Option<serde_json::Value>,
+    #[serde(rename = "calcExp", default)]
+    calc_exp: Option<serde_json::Value>,
+    #[serde(rename = "maskCondition", default)]
+    mask_condition: Option<serde_json::Value>,
+    #[serde(rename = "submitCondition", default)]
+    submit_condition: Option<serde_json::Value>,
+    #[serde(rename = "visibleCondition", default)]
+    visible_condition: Option<serde_json::Value>,
     #[serde(rename = "submitField", default)]
     submit_field: Option<String>,
     #[serde(rename = "submitData", default)]
@@ -256,29 +270,32 @@ pub fn parse_superpage_from_value(raw_value: serde_json::Value) -> Result<SuperP
     meta.version = raw.version;
     meta.theme = raw.theme;
 
-    meta.params = raw.params.into_iter().map(|p| SpgParam {
-        id: p.id,
-        name: p.name,
-        desc: p.desc,
-        default_value: p.value,
-    }).collect();
+    meta.params = raw
+        .params
+        .into_iter()
+        .map(|p| SpgParam {
+            id: p.id,
+            name: p.name,
+            desc: p.desc,
+            default_value: p.value,
+        })
+        .collect();
 
     meta.reference_resources = raw.reference_resources;
 
-    meta.sources = raw.sources.into_iter().map(|s| SpgSource {
-        id: s.id,
-        model_type: s.model_type,
-        path: s.path,
-        content: s.content,
-    }).collect();
+    meta.sources = raw
+        .sources
+        .into_iter()
+        .map(|s| SpgSource {
+            id: s.id,
+            model_type: s.model_type,
+            path: s.path,
+            content: s.content,
+        })
+        .collect();
 
     if let Some(canvas) = raw.canvas {
-        extract_components(
-            &canvas,
-            None,
-            &mut meta.components,
-            &mut meta.expressions,
-        );
+        extract_components(&canvas, None, &mut meta.components, &mut meta.expressions);
     }
 
     Ok(meta)
@@ -299,10 +316,18 @@ fn extract_components(
     expressions: &mut Vec<ComponentExpr>,
 ) {
     if raw.id.is_empty() || raw.component_type.is_empty() {
-        for child in &raw.components { extract_components(child, parent_id.clone(), components, expressions); }
-        for child in &raw.panels { extract_components(child, parent_id.clone(), components, expressions); }
-        for child in &raw.steps { extract_components(child, parent_id.clone(), components, expressions); }
-        for child in &raw.comps { extract_components(child, parent_id.clone(), components, expressions); }
+        for child in &raw.components {
+            extract_components(child, parent_id.clone(), components, expressions);
+        }
+        for child in &raw.panels {
+            extract_components(child, parent_id.clone(), components, expressions);
+        }
+        for child in &raw.steps {
+            extract_components(child, parent_id.clone(), components, expressions);
+        }
+        for child in &raw.comps {
+            extract_components(child, parent_id.clone(), components, expressions);
+        }
         return;
     }
 
@@ -326,18 +351,43 @@ fn extract_components(
 
     // 总是表达式字段：所有非空值都视为表达式
     let always_expr_fields = [
-        "exp", "itemFilter", "visibleCondition", "validExp",
-        "calcCondition", "calcExp", "maskCondition",
-        "submitCondition", "submitPageCondition", "defaultPanelCondition",
+        "exp",
+        "itemFilter",
+        "visibleCondition",
+        "validExp",
+        "calcCondition",
+        "calcExp",
+        "maskCondition",
+        "submitCondition",
+        "submitPageCondition",
+        "defaultPanelCondition",
     ];
     // 条件表达式字段：包含 = 或 ${ 时才视为表达式
     let conditional_expr_fields = [
-        "value", "defaultValue", "visible", "enable",
-        "text", "formula", "html", "desc",
-        "placeholder", "url", "documentTitle", "inputTitle",
-        "labelValue", "panelName", "rootPath", "selectedCaption",
-        "confirmCaption", "tip", "badge", "count",
-        "attrCaption", "caption", "defaultSelect", "defaultCheck",
+        "value",
+        "defaultValue",
+        "visible",
+        "enable",
+        "text",
+        "formula",
+        "html",
+        "desc",
+        "placeholder",
+        "url",
+        "documentTitle",
+        "inputTitle",
+        "labelValue",
+        "panelName",
+        "rootPath",
+        "selectedCaption",
+        "confirmCaption",
+        "tip",
+        "badge",
+        "count",
+        "attrCaption",
+        "caption",
+        "defaultSelect",
+        "defaultCheck",
         "maxLevel",
     ];
 
@@ -350,6 +400,13 @@ fn extract_components(
         ("text", &raw.text),
         ("formula", &raw.formula),
         ("html", &raw.html),
+        ("calcCondition", &raw.calc_condition),
+        ("itemFilter", &raw.item_filter),
+        ("validExp", &raw.valid_exp),
+        ("calcExp", &raw.calc_exp),
+        ("maskCondition", &raw.mask_condition),
+        ("submitCondition", &raw.submit_condition),
+        ("visibleCondition", &raw.visible_condition),
     ];
 
     for (field_name, field_value) in &fields {
@@ -368,7 +425,8 @@ fn extract_components(
             };
 
             if is_expr {
-                comp.properties.insert(field_name.to_string(), val_str.to_string());
+                comp.properties
+                    .insert(field_name.to_string(), val_str.to_string());
                 let refs = parse_expression_refs(val_str);
                 expressions.push(ComponentExpr {
                     component_id: raw.id.clone(),
@@ -377,82 +435,127 @@ fn extract_components(
                     refs,
                 });
             } else if !val_str.is_empty() {
-                comp.properties.insert(field_name.to_string(), val_str.to_string());
+                comp.properties
+                    .insert(field_name.to_string(), val_str.to_string());
             }
         }
     }
 
     // Handle submitField separately (always a string, no expression parsing needed)
     if let Some(ref submit_field) = raw.submit_field {
-        comp.properties.insert("submitField".to_string(), submit_field.clone());
+        comp.properties
+            .insert("submitField".to_string(), submit_field.clone());
     }
 
     // Populate actions
-    comp.actions = raw.actions.iter().map(|a| SpgAction {
-        id: a.id.clone(),
-        action_type: a.action_type.clone(),
-        trigger_type: a.trigger_type.clone(),
-        submit_range: a.submit_range.clone(),
-        data_set: a.data_set.as_ref().and_then(|v| {
-            if let Some(s) = v.as_str() {
-                Some(s.to_string())
-            } else if let Some(arr) = v.as_array() {
-                arr.first().and_then(|item| item.as_str()).map(|s| s.to_string())
-            } else {
-                None
-            }
-        }),
-        data_range: a.data_range.clone(),
-        field_values: a.field_values.iter().map(|fv| (
-            fv.name.clone(),
-            fv.value.as_str().unwrap_or("").to_string(),
-            fv.value_type.clone(),
-        )).collect(),
-        submit_component: a.submit_component.clone(),
-        path: a.path.as_ref().and_then(|v| {
-            if let Some(s) = v.as_str() {
-                Some(s.to_string())
-            } else if let Some(n) = v.as_i64() {
-                Some(n.to_string())
-            } else {
-                None
-            }
-        }),
-        short_url: a.short_url.clone(),
-        data: a.data.iter().map(|d| (d.name.clone(), d.value.clone())).collect(),
-        params: a.params.iter().map(|p| (p.name.clone(), p.value.clone())).collect(),
-        target_type: a.target_type.clone(),
-    }).collect();
+    comp.actions = raw
+        .actions
+        .iter()
+        .map(|a| SpgAction {
+            id: a.id.clone(),
+            action_type: a.action_type.clone(),
+            trigger_type: a.trigger_type.clone(),
+            submit_range: a.submit_range.clone(),
+            data_set: a.data_set.as_ref().and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    Some(s.to_string())
+                } else if let Some(arr) = v.as_array() {
+                    arr.first()
+                        .and_then(|item| item.as_str())
+                        .map(|s| s.to_string())
+                } else {
+                    None
+                }
+            }),
+            data_range: a.data_range.clone(),
+            field_values: a
+                .field_values
+                .iter()
+                .map(|fv| {
+                    (
+                        fv.name.clone(),
+                        fv.value.as_str().unwrap_or("").to_string(),
+                        fv.value_type.clone(),
+                    )
+                })
+                .collect(),
+            submit_component: a.submit_component.clone(),
+            path: a.path.as_ref().and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    Some(s.to_string())
+                } else if let Some(n) = v.as_i64() {
+                    Some(n.to_string())
+                } else {
+                    None
+                }
+            }),
+            short_url: a.short_url.clone(),
+            data: a
+                .data
+                .iter()
+                .map(|d| (d.name.clone(), d.value.clone()))
+                .collect(),
+            params: a
+                .params
+                .iter()
+                .map(|p| (p.name.clone(), p.value.clone()))
+                .collect(),
+            target_type: a.target_type.clone(),
+        })
+        .collect();
 
     components.push(comp);
 
     let parent = Some(raw.id.clone());
-    for child in &raw.components { extract_components(child, parent.clone(), components, expressions); }
-    for child in &raw.panels { extract_components(child, parent.clone(), components, expressions); }
-    for child in &raw.steps { extract_components(child, parent.clone(), components, expressions); }
-    for child in &raw.comps { extract_components(child, parent.clone(), components, expressions); }
+    for child in &raw.components {
+        extract_components(child, parent.clone(), components, expressions);
+    }
+    for child in &raw.panels {
+        extract_components(child, parent.clone(), components, expressions);
+    }
+    for child in &raw.steps {
+        extract_components(child, parent.clone(), components, expressions);
+    }
+    for child in &raw.comps {
+        extract_components(child, parent.clone(), components, expressions);
+    }
 }
 
 // ============================================================
 // 表达式引用解析
 // ============================================================
 
-
 /// 表达式引用提取正则（编译一次，全局复用）
 static EXPR_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[a-zA-Z@$][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+|\$[a-zA-Z0-9_]+|\bparam\w+\b|\bmodel\d+\b").unwrap()
+    Regex::new(
+        r"[a-zA-Z@$][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+|\$[a-zA-Z0-9_]+|\bparam\w+\b|\bmodel\d+\b",
+    )
+    .unwrap()
 });
 
 pub fn parse_expression_refs(expr: &str) -> Vec<RefType> {
     let mut refs = Vec::new();
     let mut seen = HashSet::new();
 
-
     for mat in EXPR_RE.find_iter(expr) {
         let token = mat.as_str();
 
         let lower = token.to_lowercase();
-        if ["if", "null", "true", "false", "undefined", "and", "or", "not", "is", "in", "between"].contains(&lower.as_str()) {
+        if [
+            "if",
+            "null",
+            "true",
+            "false",
+            "undefined",
+            "and",
+            "or",
+            "not",
+            "is",
+            "in",
+            "between",
+        ]
+        .contains(&lower.as_str())
+        {
             continue;
         }
         if token.parse::<f64>().is_ok() {
@@ -477,20 +580,23 @@ pub fn parse_expression_refs(expr: &str) -> Vec<RefType> {
     refs
 }
 
-/// 判断 token 是否位于字符串字面量内部
+/// 判断 token 是否位于字符串字面量内部（支持转义引号）
 fn is_in_string_literal(expr: &str, pos: usize) -> bool {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
 
-    for (i, c) in expr.char_indices() {
-        if i >= pos {
-            break;
-        }
-        if c == '\'' && !in_double_quote {
+    let bytes = expr.as_bytes();
+    let mut i = 0;
+    while i < pos && i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '\\' {
+            i += 1; // skip next character (escaped)
+        } else if c == (39 as char) && !in_double_quote {
             in_single_quote = !in_single_quote;
         } else if c == '"' && !in_single_quote {
             in_double_quote = !in_double_quote;
         }
+        i += 1;
     }
 
     in_single_quote || in_double_quote
@@ -532,7 +638,12 @@ fn classify_ref(token: &str) -> RefType {
         return RefType::Param(token.to_string());
     }
 
-    if !token.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(true) {
+    if !token
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(true)
+    {
         return RefType::ComponentValue(token.to_string());
     }
 

@@ -107,7 +107,7 @@ tests/             # 测试用例（115 个测试覆盖全部模块）
 
 ## 图数据库
 
-图数据库存储在 `/tmp/metadata-checker.graphdb`（可通过 `--project-dir` 配置）。
+图数据库存储在 ``.metadata-checker.graphdb`（位于 `--project-dir` 根目录）`（可通过 `--project-dir` 配置）。
 
 **节点类型**：`Page`、`Component`、`Model`、`Field`、`Action`
 

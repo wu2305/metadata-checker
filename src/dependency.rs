@@ -318,19 +318,13 @@ fn expand_expression(
                         });
 
                         // 替换引用
-                        let pattern = format!("{}\\.value", regex_escape(dep_id));
-                        let re = regex::Regex::new(&pattern)
-                            .unwrap_or_else(|_| regex::Regex::new("NEVER_MATCH").unwrap());
-                        expanded = re.replace_all(&expanded, &*dep_expanded).to_string();
+                        expanded = expanded.replace(&format!("{}.value", dep_id), &dep_expanded);
                     }
                 }
             }
             RefType::ModelField(model_id, field) => {
                 let replacement = format!("({}.{})", model_id, field);
-                let pattern = format!("{}\\.{}", regex_escape(model_id), regex_escape(field));
-                let re = regex::Regex::new(&pattern)
-                    .unwrap_or_else(|_| regex::Regex::new("NEVER_MATCH").unwrap());
-                expanded = re.replace_all(&expanded, &*replacement).to_string();
+                expanded = expanded.replace(&format!("{}.{}", model_id, field), &replacement);
             }
             RefType::Param(param_id) => {
                 let replacement = format!("({})", param_id);
