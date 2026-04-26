@@ -1,10 +1,10 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
-use twox_hash::XxHash64;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use twox_hash::XxHash64;
 
 use crate::graph::{EdgeType, FileState, GraphDB, NodeType};
 
@@ -165,7 +165,11 @@ fn resolve_reference_path(
 }
 
 /// 解析单个 .spg 文件并写入图
-fn process_spg_file_from_value(graph: &mut GraphDB, rel_path: &str, raw_value: serde_json::Value) -> Result<Vec<String>> {
+fn process_spg_file_from_value(
+    graph: &mut GraphDB,
+    rel_path: &str,
+    raw_value: serde_json::Value,
+) -> Result<Vec<String>> {
     let meta = crate::superpage::parse_superpage_from_value(raw_value)?;
     let mut node_ids = std::collections::HashSet::new();
 
@@ -701,7 +705,11 @@ fn process_spg_file_from_value(graph: &mut GraphDB, rel_path: &str, raw_value: s
 }
 
 /// 解析单个 .tbl 文件并写入图
-fn process_tbl_file_from_string(graph: &mut GraphDB, rel_path: &str, content: &str) -> Result<Vec<String>> {
+fn process_tbl_file_from_string(
+    graph: &mut GraphDB,
+    rel_path: &str,
+    content: &str,
+) -> Result<Vec<String>> {
     let mut node_ids = std::collections::HashSet::new();
     if content.is_empty() {
         return Ok(node_ids.into_iter().collect());

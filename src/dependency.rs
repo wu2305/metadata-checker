@@ -318,13 +318,21 @@ pub fn expand_expression(
                         });
 
                         // 替换引用
-                        expanded = replace_with_boundary(&expanded, &format!("{}.value", dep_id), &dep_expanded);
+                        expanded = replace_with_boundary(
+                            &expanded,
+                            &format!("{}.value", dep_id),
+                            &dep_expanded,
+                        );
                     }
                 }
             }
             RefType::ModelField(model_id, field) => {
                 let replacement = format!("({}.{})", model_id, field);
-                expanded = replace_with_boundary(&expanded, &format!("{}.{}", model_id, field), &replacement);
+                expanded = replace_with_boundary(
+                    &expanded,
+                    &format!("{}.{}", model_id, field),
+                    &replacement,
+                );
             }
             RefType::Param(param_id) => {
                 let replacement = format!("({})", param_id);
@@ -366,8 +374,8 @@ fn replace_with_boundary(s: &str, pattern: &str, replacement: &str) -> String {
     while i <= s_bytes.len().saturating_sub(pat_bytes.len()) {
         if &s_bytes[i..i + pat_bytes.len()] == pat_bytes {
             let prev_ok = i == 0 || !is_word_char(s_bytes[i - 1]);
-            let next_ok = i + pat_bytes.len() == s_bytes.len()
-                || !is_word_char(s_bytes[i + pat_bytes.len()]);
+            let next_ok =
+                i + pat_bytes.len() == s_bytes.len() || !is_word_char(s_bytes[i + pat_bytes.len()]);
             if prev_ok && next_ok {
                 result.push_str(replacement);
                 i += pat_bytes.len();
@@ -387,7 +395,6 @@ fn replace_with_boundary(s: &str, pattern: &str, replacement: &str) -> String {
 fn is_word_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
-
 
 /// 确定来源类型
 fn determine_source_type(expr: &str, _chain: &[SourceNode]) -> SourceType {
