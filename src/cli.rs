@@ -17,34 +17,70 @@ pub struct Cli {
     #[arg(value_name = "FILE", help = "Path to the page metadata JSON file")]
     pub input: Option<PathBuf>,
 
-    #[arg(long, group = "output_mode", help = "Print human-readable output with headers and indentation. When used alone, enters interactive mode.")]
+    #[arg(
+        long,
+        group = "output_mode",
+        help = "Print human-readable output with headers and indentation. When used alone, enters interactive mode."
+    )]
     pub human: bool,
 
-    #[arg(long, group = "output_mode", help = "Print compact machine-friendly JSON output (default)")]
+    #[arg(
+        long,
+        group = "output_mode",
+        help = "Print compact machine-friendly JSON output (default)"
+    )]
     pub non_human: bool,
 
-    #[arg(long, value_name = "ID", help = "Query detailed info for a specific component ID")]
+    #[arg(
+        long,
+        value_name = "ID",
+        help = "Query detailed info for a specific component ID"
+    )]
     pub query: Option<String>,
 
-    #[arg(long, help = "Additionally print priority analysis of defaultValue vs exp vs calcCondition")]
+    #[arg(
+        long,
+        help = "Additionally print priority analysis of defaultValue vs exp vs calcCondition"
+    )]
     pub priority: bool,
 
-    #[arg(long, value_name = "DIR", help = "Project directory to scan for cross-file analysis")]
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Project directory to scan for cross-file analysis"
+    )]
     pub project_dir: Option<PathBuf>,
 
     #[arg(long, help = "Build/update graph database from project directory")]
     pub build_graph: bool,
 
-    #[arg(long, value_name = "MODEL", help = "Query relationships for a specific model")]
+    #[arg(
+        long,
+        value_name = "MODEL",
+        help = "Query relationships for a specific model"
+    )]
     pub query_model: Option<String>,
 
-    #[arg(long, value_name = "PAGE", help = "Query relationships for a specific page")]
+    #[arg(
+        long,
+        value_name = "PAGE",
+        help = "Query relationships for a specific page"
+    )]
     pub query_page: Option<String>,
 
-    #[arg(long, value_name = "PAGES", num_args = 2, help = "Query cross-file relations between two pages")]
+    #[arg(
+        long,
+        value_name = "PAGES",
+        num_args = 2,
+        help = "Query cross-file relations between two pages"
+    )]
     pub query_cross: Option<Vec<String>>,
 
-    #[arg(long, value_name = "MODEL", help = "Expand and query a DataFlow model's internal subgraph")]
+    #[arg(
+        long,
+        value_name = "MODEL",
+        help = "Expand and query a DataFlow model's internal subgraph"
+    )]
     pub query_dataflow: Option<String>,
 }
 

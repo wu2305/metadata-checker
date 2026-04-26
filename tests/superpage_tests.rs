@@ -1,5 +1,5 @@
-use metadata_checker::superpage::{parse_superpage, parse_expression_refs, RefType};
 use metadata_checker::dependency::DependencyGraph;
+use metadata_checker::superpage::{RefType, parse_expression_refs, parse_superpage};
 use std::path::PathBuf;
 
 #[test]
@@ -61,7 +61,9 @@ fn test_parse_expressions() {
     assert_eq!(meta.expressions.len(), 7);
 
     // 检查 input3 的表达式
-    let input3_expr = meta.expressions.iter()
+    let input3_expr = meta
+        .expressions
+        .iter()
         .find(|e| e.component_id == "input3" && e.field == "value")
         .expect("input3.value expression not found");
     assert_eq!(input3_expr.raw_expr, "=input2.value/input1.value");
@@ -70,35 +72,55 @@ fn test_parse_expressions() {
 #[test]
 fn test_parse_expression_refs_simple() {
     let refs = parse_expression_refs("=input2.value/input1.value");
-    
+
     // 应该只有 input2 和 input1（.value 是属性，不是独立引用）
     // 实际上正则匹配的是 input2.value 和 input1.value
     assert_eq!(refs.len(), 2);
-    assert_eq!(refs.contains(&RefType::ComponentValue("input2".to_string())), true);
-    assert_eq!(refs.contains(&RefType::ComponentValue("input1".to_string())), true);
+    assert_eq!(
+        refs.contains(&RefType::ComponentValue("input2".to_string())),
+        true
+    );
+    assert_eq!(
+        refs.contains(&RefType::ComponentValue("input1".to_string())),
+        true
+    );
 }
 
 #[test]
 fn test_parse_expression_refs_model() {
     let refs = parse_expression_refs("=param1-model1.A");
-    
+
     // param1 和 model1.A 都应该被匹配
     let has_param1 = refs.contains(&RefType::Param("param1".to_string()));
-    let has_model1 = refs.iter().any(|r| matches!(r, RefType::ModelField(m, f) if m == "model1" && f == "A"));
-    assert_eq!(has_param1, true, "Expected param1 reference, got: {:?}", refs);
-    assert_eq!(has_model1, true, "Expected model1.A reference, got: {:?}", refs);
+    let has_model1 = refs
+        .iter()
+        .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model1" && f == "A"));
+    assert_eq!(
+        has_param1, true,
+        "Expected param1 reference, got: {:?}",
+        refs
+    );
+    assert_eq!(
+        has_model1, true,
+        "Expected model1.A reference, got: {:?}",
+        refs
+    );
 }
 
 #[test]
 fn test_parse_expression_refs_if() {
     let refs = parse_expression_refs("=IF(input3.value > 0, input3.value, 0)");
-    
+
     // 去重后 input3.value 应该只出现一次
-    let input3_count = refs.iter()
+    let input3_count = refs
+        .iter()
         .filter(|r| matches!(r, RefType::ComponentValue(id) if id == "input3"))
         .count();
-    assert_eq!(input3_count, 1, "input3 should appear exactly once due to deduplication");
-    
+    assert_eq!(
+        input3_count, 1,
+        "input3 should appear exactly once due to deduplication"
+    );
+
     // 总共应该只有 1 个引用（input3.value）
     assert_eq!(refs.len(), 1);
 }
@@ -106,17 +128,29 @@ fn test_parse_expression_refs_if() {
 #[test]
 fn test_parse_expression_refs_user() {
     let refs = parse_expression_refs("=$user.dept_id = '001'");
-    
-    let has_user = refs.iter().any(|r| matches!(r, RefType::UserProperty(p) if p == "user.dept_id"));
-    assert_eq!(has_user, true, "Expected $user.dept_id reference, got: {:?}", refs);
+
+    let has_user = refs
+        .iter()
+        .any(|r| matches!(r, RefType::UserProperty(p) if p == "user.dept_id"));
+    assert_eq!(
+        has_user, true,
+        "Expected $user.dept_id reference, got: {:?}",
+        refs
+    );
 }
 
 #[test]
 fn test_parse_expression_refs_macro() {
     let refs = parse_expression_refs("${model2.C}");
-    
-    let has_model = refs.iter().any(|r| matches!(r, RefType::ModelField(m, f) if m == "model2" && f == "C"));
-    assert_eq!(has_model, true, "Expected model2.C reference, got: {:?}", refs);
+
+    let has_model = refs
+        .iter()
+        .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model2" && f == "C"));
+    assert_eq!(
+        has_model, true,
+        "Expected model2.C reference, got: {:?}",
+        refs
+    );
 }
 
 #[test]
@@ -126,15 +160,27 @@ fn test_dependency_graph() {
     let graph = DependencyGraph::new(&meta);
 
     // input3 依赖 input2 和 input1
-    let input3_deps = graph.dependencies.get("input3").expect("input3 not found in graph");
-    let has_input2 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(id) if id == "input2"));
-    let has_input1 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
+    let input3_deps = graph
+        .dependencies
+        .get("input3")
+        .expect("input3 not found in graph");
+    let has_input2 = input3_deps
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input2"));
+    let has_input1 = input3_deps
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
     assert_eq!(has_input2, true, "input3 should depend on input2");
     assert_eq!(has_input1, true, "input3 should depend on input1");
 
     // text1 依赖 input3
-    let text1_deps = graph.dependencies.get("text1").expect("text1 not found in graph");
-    let has_input3 = text1_deps.iter().any(|r| matches!(r, RefType::ComponentValue(id) if id == "input3"));
+    let text1_deps = graph
+        .dependencies
+        .get("text1")
+        .expect("text1 not found in graph");
+    let has_input3 = text1_deps
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input3"));
     assert_eq!(has_input3, true, "text1 should depend on input3");
 }
 
@@ -175,27 +221,43 @@ fn test_no_cycles() {
 #[test]
 fn test_parse_expression_refs_complex() {
     let refs = parse_expression_refs("=input1.value + input2.value");
-    
+
     assert_eq!(refs.len(), 2);
-    assert_eq!(refs.contains(&RefType::ComponentValue("input1".to_string())), true);
-    assert_eq!(refs.contains(&RefType::ComponentValue("input2".to_string())), true);
+    assert_eq!(
+        refs.contains(&RefType::ComponentValue("input1".to_string())),
+        true
+    );
+    assert_eq!(
+        refs.contains(&RefType::ComponentValue("input2".to_string())),
+        true
+    );
 }
 
 #[test]
 fn test_skip_string_literals() {
-    let refs = parse_expression_refs("=IF(model5.EstimatedAnnualInterestRate!=NULL,model5.EstimatedAnnualInterestRate*100,'')");
-    
+    let refs = parse_expression_refs(
+        "=IF(model5.EstimatedAnnualInterestRate!=NULL,model5.EstimatedAnnualInterestRate*100,'')",
+    );
+
     // 不应该把空字符串 '' 当作引用
-    let has_empty_string = refs.iter().any(|r| matches!(r, RefType::Other(s) if s == "''"));
+    let has_empty_string = refs
+        .iter()
+        .any(|r| matches!(r, RefType::Other(s) if s == "''"));
     assert_eq!(!has_empty_string, true, "String literals should be skipped");
-    
+
     // 应该包含 model5
-    let has_model5 = refs.iter().any(|r| matches!(r, RefType::ModelField(m, _) if m == "model5"));
+    let has_model5 = refs
+        .iter()
+        .any(|r| matches!(r, RefType::ModelField(m, _) if m == "model5"));
     assert_eq!(has_model5, true, "Expected model5 reference");
-    
+
     // model5.EstimatedAnnualInterestRate 被去重后应该只出现一次
-    let model5_count = refs.iter()
+    let model5_count = refs
+        .iter()
         .filter(|r| matches!(r, RefType::ModelField(m, _) if m == "model5"))
         .count();
-    assert_eq!(model5_count, 1, "model5 should appear exactly once due to deduplication");
+    assert_eq!(
+        model5_count, 1,
+        "model5 should appear exactly once due to deduplication"
+    );
 }

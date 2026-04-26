@@ -21,7 +21,7 @@ pub struct DependencyGraph {
 }
 
 impl DependencyGraph {
-/// 从 SuperPage 元数据构建依赖图
+    /// 从 SuperPage 元数据构建依赖图
     pub fn new(meta: &SuperPageMetadata) -> Self {
         let mut deps = HashMap::new();
         let mut reverse = HashMap::new();
@@ -36,24 +36,25 @@ impl DependencyGraph {
         // 构建依赖关系
         for expr in &meta.expressions {
             let comp_id = expr.component_id.clone();
-            
+
             // 收集该组件的所有引用
             let entry = deps.entry(comp_id.clone()).or_insert_with(Vec::new);
             for ref_type in &expr.refs {
                 entry.push(ref_type.clone());
             }
-            
+
             // 记录表达式
-            exprs.entry(comp_id.clone())
+            exprs
+                .entry(comp_id.clone())
                 .or_insert_with(Vec::new)
                 .push(expr.clone());
 
             // 建立反向依赖
             for ref_type in &expr.refs {
                 match ref_type {
-                    RefType::ComponentValue(ref_id) |
-                    RefType::ComponentProperty(ref_id, _) => {
-                        reverse.entry(ref_id.clone())
+                    RefType::ComponentValue(ref_id) | RefType::ComponentProperty(ref_id, _) => {
+                        reverse
+                            .entry(ref_id.clone())
                             .or_insert_with(Vec::new)
                             .push(comp_id.clone());
                     }
@@ -77,10 +78,14 @@ impl DependencyGraph {
         // 初始化入度
         for (comp_id, refs) in &self.dependencies {
             in_degree.entry(comp_id.clone()).or_insert(0);
-            if refs.is_empty() { continue; }
+            if refs.is_empty() {
+                continue;
+            }
             let comp_id_owned = comp_id.clone();
             for ref_type in refs {
-                if let RefType::ComponentValue(dep_id) | RefType::ComponentProperty(dep_id, _) = ref_type {
+                if let RefType::ComponentValue(dep_id) | RefType::ComponentProperty(dep_id, _) =
+                    ref_type
+                {
                     if self.dependencies.contains_key(dep_id) {
                         *in_degree.entry(comp_id_owned.clone()).or_insert(0) += 1;
                         adj.entry(dep_id.clone())
@@ -103,7 +108,7 @@ impl DependencyGraph {
 
         while let Some(current) = queue.pop_front() {
             result.push(current.clone());
-            
+
             if let Some(neighbors) = adj.get(&current) {
                 for neighbor in neighbors {
                     if let Some(degree) = in_degree.get_mut(neighbor) {
@@ -128,13 +133,7 @@ impl DependencyGraph {
 
         for node in self.dependencies.keys() {
             if !visited.contains(node) {
-                self.dfs_cycle(
-                node,
-                &mut visited,
-                &mut rec_stack,
-                &mut path,
-                &mut cycles,
-            );
+                self.dfs_cycle(node, &mut visited, &mut rec_stack, &mut path, &mut cycles);
             }
         }
 
@@ -155,7 +154,9 @@ impl DependencyGraph {
 
         if let Some(refs) = self.dependencies.get(node) {
             for ref_type in refs {
-                if let RefType::ComponentValue(dep_id) | RefType::ComponentProperty(dep_id, _) = ref_type {
+                if let RefType::ComponentValue(dep_id) | RefType::ComponentProperty(dep_id, _) =
+                    ref_type
+                {
                     if !visited.contains(dep_id) {
                         self.dfs_cycle(dep_id, visited, rec_stack, path, cycles);
                     } else if rec_stack.contains(dep_id) {
@@ -226,7 +227,7 @@ pub fn trace_value_source(
 
     let mut source_chain = Vec::new();
     let mut visited = HashSet::new();
-    
+
     let expanded = expand_expression(
         meta,
         graph,
@@ -276,12 +277,16 @@ fn expand_expression(
     }
     visited.insert(key);
 
-    let clean = expr.trim_start_matches('=').trim_start_matches("${").trim_end_matches('}');
+    let clean = expr
+        .trim_start_matches('=')
+        .trim_start_matches("${")
+        .trim_end_matches('}');
     let mut expanded = clean.to_string();
 
     // 获取当前组件的引用
     let refs = if let Some(exprs) = graph.expressions.get(component_id) {
-        exprs.iter()
+        exprs
+            .iter()
             .find(|e| e.raw_expr == expr)
             .map(|e| e.refs.clone())
             .unwrap_or_default()
@@ -304,7 +309,7 @@ fn expand_expression(
                             visited,
                             depth - 1,
                         );
-                        
+
                         source_chain.push(SourceNode {
                             component_id: dep_id.clone(),
                             expr: dep_expr.raw_expr.clone(),
@@ -314,7 +319,8 @@ fn expand_expression(
 
                         // 替换引用
                         let pattern = format!("{}\\.value", regex_escape(dep_id));
-                        let re = regex::Regex::new(&pattern).unwrap_or_else(|_| regex::Regex::new("NEVER_MATCH").unwrap());
+                        let re = regex::Regex::new(&pattern)
+                            .unwrap_or_else(|_| regex::Regex::new("NEVER_MATCH").unwrap());
                         expanded = re.replace_all(&expanded, &*dep_expanded).to_string();
                     }
                 }
@@ -322,7 +328,8 @@ fn expand_expression(
             RefType::ModelField(model_id, field) => {
                 let replacement = format!("({}.{})", model_id, field);
                 let pattern = format!("{}\\.{}", regex_escape(model_id), regex_escape(field));
-                let re = regex::Regex::new(&pattern).unwrap_or_else(|_| regex::Regex::new("NEVER_MATCH").unwrap());
+                let re = regex::Regex::new(&pattern)
+                    .unwrap_or_else(|_| regex::Regex::new("NEVER_MATCH").unwrap());
                 expanded = re.replace_all(&expanded, &*replacement).to_string();
             }
             RefType::Param(param_id) => {

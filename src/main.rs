@@ -25,41 +25,43 @@ fn main() -> Result<()> {
 
     // Cross-file graph analysis mode
     if let Some(ref project_dir) = args.project_dir {
-        let db_path = std::path::PathBuf::from("/tmp/metadata-checker.graphdb");
-        
+        let db_path = graph_db_path(project_dir);
+
         if args.build_graph {
             scanner::scan_project(project_dir, &db_path)?;
             println!("Graph database built at {:?}", db_path);
             return Ok(());
         }
-        
+
         let graph = GraphDB::open(&db_path)?;
-        
+
         if let Some(ref model_id) = args.query_model {
             let model_node_id = format!("model:{}", model_id);
             query::query_model(&graph, &model_node_id, args.is_human())?;
             return Ok(());
         }
-        
+
         if let Some(ref page_id) = args.query_page {
             query::query_page(&graph, page_id, args.is_human())?;
             return Ok(());
         }
-        
+
         if let Some(ref pages) = args.query_cross {
             if pages.len() >= 2 {
                 query::query_cross(&graph, &pages[0], &pages[1], args.is_human())?;
             }
             return Ok(());
         }
-        
+
         if let Some(ref dataflow_id) = args.query_dataflow {
             let model_node_id = format!("model:{}", dataflow_id);
             query::query_dataflow(&graph, &model_node_id, args.is_human())?;
             return Ok(());
         }
-        
-        println!("No query specified. Use --query-model, --query-page, --query-cross, or --query-dataflow.");
+
+        println!(
+            "No query specified. Use --query-model, --query-page, --query-cross, or --query-dataflow."
+        );
         return Ok(());
     }
 
@@ -111,11 +113,17 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// 根据项目路径生成隔离的图数据库路径
+fn graph_db_path(project_dir: &std::path::Path) -> std::path::PathBuf {
+    project_dir.join(".metadata-checker.graphdb")
+}
+
 fn run_interactive(spg: &metadata_checker::superpage::SuperPageMetadata) -> Result<()> {
     let graph = DependencyGraph::new(spg);
 
     println!("=== SuperPage Interactive Mode ===");
-    println!("Version: {} | Theme: {} | Components: {} | Expressions: {}",
+    println!(
+        "Version: {} | Theme: {} | Components: {} | Expressions: {}",
         spg.version.as_deref().unwrap_or("N/A"),
         spg.theme.as_deref().unwrap_or("N/A"),
         spg.components.len(),
@@ -133,7 +141,9 @@ fn run_interactive(spg: &metadata_checker::superpage::SuperPageMetadata) -> Resu
     }
 
     let expr_comp_ids: Vec<&str> = {
-        let set: std::collections::HashSet<&str> = spg.expressions.iter()
+        let set: std::collections::HashSet<&str> = spg
+            .expressions
+            .iter()
             .map(|e| e.component_id.as_str())
             .collect();
         set.into_iter().collect()

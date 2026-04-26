@@ -1,6 +1,6 @@
+use metadata_checker::dependency::DependencyGraph;
 use metadata_checker::output;
 use metadata_checker::parser;
-use metadata_checker::dependency::DependencyGraph;
 use std::path::PathBuf;
 
 // ============================================================
@@ -53,11 +53,23 @@ fn test_print_human_superpage() {
     output::print_human_to(&meta, &mut buf).expect("print_human_to should succeed");
     let s = String::from_utf8(buf).expect("Valid UTF-8");
 
-    assert!(s.contains("=== SuperPage Metadata Report ==="), "Should contain SuperPage header");
-    assert!(s.contains("Version      : 4.19.7"), "Should contain version");
-    assert!(s.contains("Components   : 8"), "Should contain component count");
+    assert!(
+        s.contains("=== SuperPage Metadata Report ==="),
+        "Should contain SuperPage header"
+    );
+    assert!(
+        s.contains("Version      : 4.19.7"),
+        "Should contain version"
+    );
+    assert!(
+        s.contains("Components   : 8"),
+        "Should contain component count"
+    );
     assert!(s.contains("input1"), "Should mention input1 component");
-    assert!(s.contains("=== End of Report ==="), "Should end with footer");
+    assert!(
+        s.contains("=== End of Report ==="),
+        "Should end with footer"
+    );
 }
 
 #[test]
@@ -71,9 +83,18 @@ fn test_print_non_human_superpage() {
 
     let json: serde_json::Value = serde_json::from_str(&s).expect("Should be valid JSON");
     assert_eq!(json.get("version").and_then(|v| v.as_str()), Some("4.19.7"));
-    assert!(json.get("components").is_some(), "Should have components array");
-    assert!(json.get("expressions").is_some(), "Should have expressions array");
-    assert!(json.get("dependency_order").is_some(), "Should have dependency_order");
+    assert!(
+        json.get("components").is_some(),
+        "Should have components array"
+    );
+    assert!(
+        json.get("expressions").is_some(),
+        "Should have expressions array"
+    );
+    assert!(
+        json.get("dependency_order").is_some(),
+        "Should have dependency_order"
+    );
 }
 
 // ============================================================
@@ -88,12 +109,14 @@ fn test_print_component_query_human() {
     let graph = DependencyGraph::new(&spg);
 
     let mut buf: Vec<u8> = Vec::new();
-    output::print_component_query_human_to(
-        &spg, &graph, "input1", false, &mut buf
-    ).expect("Should print component query");
+    output::print_component_query_human_to(&spg, &graph, "input1", false, &mut buf)
+        .expect("Should print component query");
     let s = String::from_utf8(buf).expect("Valid UTF-8");
 
-    assert!(s.contains("=== Component: input1 ==="), "Should contain component header");
+    assert!(
+        s.contains("=== Component: input1 ==="),
+        "Should contain component header"
+    );
     assert!(s.contains("Type: input"), "Should contain component type");
     assert!(s.contains("value"), "Should mention value field");
 }
@@ -106,9 +129,8 @@ fn test_print_component_query_human_not_found() {
     let graph = DependencyGraph::new(&spg);
 
     let mut buf: Vec<u8> = Vec::new();
-    let result = output::print_component_query_human_to(
-        &spg, &graph, "nonexistent", false, &mut buf
-    );
+    let result =
+        output::print_component_query_human_to(&spg, &graph, "nonexistent", false, &mut buf);
     assert!(result.is_err(), "Should fail for nonexistent component");
 }
 
@@ -120,13 +142,15 @@ fn test_print_component_query_json() {
     let graph = DependencyGraph::new(&spg);
 
     let mut buf: Vec<u8> = Vec::new();
-    output::print_component_query_json_to(
-        &spg, &graph, "input3", false, &mut buf
-    ).expect("Should print JSON query");
+    output::print_component_query_json_to(&spg, &graph, "input3", false, &mut buf)
+        .expect("Should print JSON query");
     let s = String::from_utf8(buf).expect("Valid UTF-8");
 
     let json: serde_json::Value = serde_json::from_str(&s).expect("Should be valid JSON");
-    assert_eq!(json.get("component_id").and_then(|v| v.as_str()), Some("input3"));
+    assert_eq!(
+        json.get("component_id").and_then(|v| v.as_str()),
+        Some("input3")
+    );
     assert!(json.get("expressions").is_some(), "Should have expressions");
     assert!(json.get("value_trace").is_some(), "Should have value_trace");
 }

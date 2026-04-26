@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::superpage::{ComponentExpr, RefType, SuperPageMetadata};
 
 /// 组件计算优先级分析模块
@@ -39,22 +40,24 @@ pub enum ExpDefaultValuePriority {
 pub fn analyze_priority(meta: &SuperPageMetadata) -> Vec<PriorityAnalysis> {
     let mut results = Vec::new();
 
-    for comp in &meta.components {
-        let default_value_expr = meta.expressions.iter()
-            .find(|e| e.component_id == comp.id && e.field == "defaultValue")
-            .cloned();
-        
-        let calc_exp_expr = meta.expressions.iter()
-            .find(|e| {
-                (e.component_id == comp.id && e.field == "exp") ||
-                (e.component_id == comp.id && e.field == "value" && (e.raw_expr.starts_with('=') || e.raw_expr.contains("${")))
-            })
-            .cloned();
-        
-        let calc_condition_expr = meta.expressions.iter()
-            .find(|e| e.component_id == comp.id && e.field == "calcCondition")
-            .cloned();
+    let mut expr_map: HashMap<(&str, &str), &ComponentExpr> = HashMap::new();
+    for expr in &meta.expressions {
+        expr_map.insert((&expr.component_id, &expr.field), expr);
+    }
 
+    for comp in &meta.components {
+        let default_value_expr = expr_map.get(&(comp.id.as_str(), "defaultValue")).map(|e| (*e).clone());
+
+        let calc_exp_expr = expr_map
+            .get(&(comp.id.as_str(), "exp"))
+            .map(|e| (*e).clone())
+            .or_else(|| {
+                expr_map.get(&(comp.id.as_str(), "value"))
+                    .filter(|e| e.raw_expr.starts_with('=') || e.raw_expr.contains("${"))
+                    .map(|e| (*e).clone())
+            });
+
+        let calc_condition_expr = expr_map.get(&(comp.id.as_str(), "calcCondition")).map(|e| (*e).clone());
         let priority_result = determine_priority(
             &default_value_expr,
             &calc_exp_expr,

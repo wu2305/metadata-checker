@@ -1,5 +1,5 @@
-use metadata_checker::superpage::{parse_superpage, parse_expression_refs, RefType};
 use metadata_checker::dependency::DependencyGraph;
+use metadata_checker::superpage::{RefType, parse_expression_refs, parse_superpage};
 use std::path::PathBuf;
 
 // ============================================================
@@ -27,39 +27,62 @@ fn test_pure_function_no_refs() {
 
 #[test]
 fn test_nested_if_expression() {
-    let refs = parse_expression_refs("=IF(IF(input1.value > 0, input2.value, 0) = input3.value, 'yes', 'no')");
-    
+    let refs = parse_expression_refs(
+        "=IF(IF(input1.value > 0, input2.value, 0) = input3.value, 'yes', 'no')",
+    );
+
     // 应该解析出 input1, input2, input3
-    assert_eq!(refs.contains(&RefType::ComponentValue("input1".to_string())), true);
-    assert_eq!(refs.contains(&RefType::ComponentValue("input2".to_string())), true);
-    assert_eq!(refs.contains(&RefType::ComponentValue("input3".to_string())), true);
+    assert_eq!(
+        refs.contains(&RefType::ComponentValue("input1".to_string())),
+        true
+    );
+    assert_eq!(
+        refs.contains(&RefType::ComponentValue("input2".to_string())),
+        true
+    );
+    assert_eq!(
+        refs.contains(&RefType::ComponentValue("input3".to_string())),
+        true
+    );
 }
 
 #[test]
 fn test_logical_operators() {
-    let refs = parse_expression_refs("=input1.value = input2.value AND input3.value != input4.value OR input5.value >= input6.value");
-    
+    let refs = parse_expression_refs(
+        "=input1.value = input2.value AND input3.value != input4.value OR input5.value >= input6.value",
+    );
+
     assert_eq!(refs.len(), 6);
     for i in 1..=6 {
-        assert_eq!(refs.contains(&RefType::ComponentValue(format!("input{}", i))), true);
+        assert_eq!(
+            refs.contains(&RefType::ComponentValue(format!("input{}", i))),
+            true
+        );
     }
 }
 
 #[test]
 fn test_concat_multiple_args() {
     let refs = parse_expression_refs("=CONCAT('前缀', input2.value, '中缀', input3.value, '后缀')");
-    
+
     assert_eq!(refs.len(), 2);
-    assert_eq!(refs.contains(&RefType::ComponentValue("input2".to_string())), true);
-    assert_eq!(refs.contains(&RefType::ComponentValue("input3".to_string())), true);
+    assert_eq!(
+        refs.contains(&RefType::ComponentValue("input2".to_string())),
+        true
+    );
+    assert_eq!(
+        refs.contains(&RefType::ComponentValue("input3".to_string())),
+        true
+    );
 }
 
 #[test]
 fn test_is_null_expression() {
     let refs = parse_expression_refs("=IF(input1.value IS NULL, '空值', input1.value)");
-    
+
     // input1 去重后只出现一次
-    let input1_count = refs.iter()
+    let input1_count = refs
+        .iter()
         .filter(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"))
         .count();
     assert_eq!(input1_count, 1);
@@ -75,17 +98,21 @@ fn test_chinese_in_expression() {
 #[test]
 fn test_list_column_reference() {
     let refs = parse_expression_refs("=list1.column1.value + list1.column2.value");
-    
+
     // list1.column1.value 应该被解析为 ComponentValue("list1")
-    let has_list = refs.iter().any(|r| matches!(r, RefType::ComponentValue(id) if id == "list1"));
+    let has_list = refs
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "list1"));
     assert_eq!(has_list, true, "Should detect list1 reference");
 }
 
 #[test]
 fn test_steps_step_reference() {
     let refs = parse_expression_refs("=steps1.step");
-    
-    let has_steps = refs.iter().any(|r| matches!(r, RefType::ComponentValue(id) if id == "steps1"));
+
+    let has_steps = refs
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "steps1"));
     assert_eq!(has_steps, true, "Should detect steps1 reference");
 }
 
@@ -95,25 +122,41 @@ fn test_boundary_case_parsing() {
     let meta = parse_superpage(&path).expect("Failed to parse");
 
     // 验证空字符串 value 没有被当作表达式
-    let text1_exprs: Vec<_> = meta.expressions.iter()
+    let text1_exprs: Vec<_> = meta
+        .expressions
+        .iter()
         .filter(|e| e.component_id == "text1")
         .collect();
-    assert_eq!(text1_exprs.len(), 0, "Empty string value should not be an expression");
+    assert_eq!(
+        text1_exprs.len(),
+        0,
+        "Empty string value should not be an expression"
+    );
 
     // 验证纯静态文本 value 没有被当作表达式
-    let text2_exprs: Vec<_> = meta.expressions.iter()
+    let text2_exprs: Vec<_> = meta
+        .expressions
+        .iter()
         .filter(|e| e.component_id == "text2")
         .collect();
-    assert_eq!(text2_exprs.len(), 0, "Static text should not be an expression");
+    assert_eq!(
+        text2_exprs.len(),
+        0,
+        "Static text should not be an expression"
+    );
 
     // 验证常量表达式被正确提取
-    let text3_expr = meta.expressions.iter()
+    let text3_expr = meta
+        .expressions
+        .iter()
         .find(|e| e.component_id == "text3" && e.field == "value")
         .expect("text3 constant expr should be extracted");
     assert_eq!(text3_expr.raw_expr, "=123");
 
     // 验证 TODAY() 表达式被正确提取
-    let text4_expr = meta.expressions.iter()
+    let text4_expr = meta
+        .expressions
+        .iter()
         .find(|e| e.component_id == "text4" && e.field == "value")
         .expect("text4 TODAY expr should be extracted");
     assert_eq!(text4_expr.raw_expr, "=TODAY()");
@@ -127,14 +170,20 @@ fn test_cross_dependency() {
 
     // input3 依赖 input1 和 input2
     let input3_deps = graph.dependencies.get("input3").expect("input3 not found");
-    let has_input1 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
-    let has_input2 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(id) if id == "input2"));
+    let has_input1 = input3_deps
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
+    let has_input2 = input3_deps
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input2"));
     assert_eq!(has_input1, true);
     assert_eq!(has_input2, true);
 
     // input7 只依赖 input1（分支依赖验证）
     let input7_deps = graph.dependencies.get("input7").expect("input7 not found");
-    let has_input1_only = input7_deps.iter().all(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
+    let has_input1_only = input7_deps
+        .iter()
+        .all(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
     assert_eq!(has_input1_only, true);
 }
 
@@ -146,7 +195,11 @@ fn test_multi_source_dependency() {
 
     // text7 依赖 input2 和 input3（多源依赖）
     let text7_deps = graph.dependencies.get("text7").expect("text7 not found");
-    assert_eq!(text7_deps.len(), 2, "text7 should depend on exactly 2 components");
+    assert_eq!(
+        text7_deps.len(),
+        2,
+        "text7 should depend on exactly 2 components"
+    );
 }
 
 #[test]
@@ -173,7 +226,10 @@ fn test_file_not_found() {
     let result = parse_superpage(&path);
     assert_eq!(result.is_err(), true, "Should error for nonexistent file");
     let err_msg = format!("{}", result.unwrap_err());
-    assert_eq!(err_msg.contains("Failed to read file") || err_msg.contains("No such file"), true);
+    assert_eq!(
+        err_msg.contains("Failed to read file") || err_msg.contains("No such file"),
+        true
+    );
 }
 
 #[test]
@@ -182,7 +238,12 @@ fn test_invalid_json() {
     let result = parse_superpage(&path);
     assert_eq!(result.is_err(), true, "Should error for invalid JSON");
     let err_msg = format!("{}", result.unwrap_err());
-    assert_eq!(err_msg.contains("Failed to parse JSON"), true, "Error should mention JSON parsing: {}", err_msg);
+    assert_eq!(
+        err_msg.contains("Failed to parse JSON"),
+        true,
+        "Error should mention JSON parsing: {}",
+        err_msg
+    );
 }
 
 #[test]
@@ -196,7 +257,7 @@ fn test_empty_file() {
 fn test_missing_canvas() {
     let path = PathBuf::from("tests/fixtures/missing_canvas.spg");
     let meta = parse_superpage(&path).expect("Should parse even without canvas");
-    
+
     // 没有 canvas 应该返回空的 components
     assert_eq!(meta.components.len(), 0);
     assert_eq!(meta.expressions.len(), 0);
@@ -208,12 +269,16 @@ fn test_incomplete_expression() {
     let meta = parse_superpage(&path).expect("Should parse even with incomplete expressions");
 
     // text1.value = "=input1." 应该被提取
-    let text1_expr = meta.expressions.iter()
-        .find(|e| e.component_id == "text1");
-    assert_ne!(text1_expr, None, "Incomplete expression should still be extracted");
+    let text1_expr = meta.expressions.iter().find(|e| e.component_id == "text1");
+    assert_ne!(
+        text1_expr, None,
+        "Incomplete expression should still be extracted"
+    );
 
     // text2.value = "=$unknown.var" 应该被解析
-    let text2_expr = meta.expressions.iter()
-        .find(|e| e.component_id == "text2");
-    assert_ne!(text2_expr, None, "Unknown system var expression should be extracted");
+    let text2_expr = meta.expressions.iter().find(|e| e.component_id == "text2");
+    assert_ne!(
+        text2_expr, None,
+        "Unknown system var expression should be extracted"
+    );
 }

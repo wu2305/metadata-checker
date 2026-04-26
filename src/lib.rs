@@ -1,9 +1,9 @@
-pub mod superpage;
-pub mod dependency;
-pub mod parser;
-pub mod output;
 pub mod cli;
-pub mod priority;
+pub mod dependency;
 pub mod graph;
-pub mod scanner;
+pub mod output;
+pub mod parser;
+pub mod priority;
 pub mod query;
+pub mod scanner;
+pub mod superpage;

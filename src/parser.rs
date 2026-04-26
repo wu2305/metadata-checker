@@ -59,12 +59,18 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
         meta.superpage = Some(superpage::parse_superpage(path)?);
         // Also set basic fields
         if let Some(obj) = raw.as_object() {
-            meta.version = obj.get("version").and_then(|v| v.as_str()).map(String::from);
+            meta.version = obj
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(String::from);
         }
     } else {
         // Original parsing logic for non-superpage JSON
         if let Some(obj) = raw.as_object() {
-            meta.version = obj.get("version").and_then(|v| v.as_str()).map(String::from);
+            meta.version = obj
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(String::from);
 
             // Handle "forms" wrapper (fapp-style)
             if let Some(forms_val) = obj.get("forms") {
@@ -77,9 +83,14 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
                     if let Some(forms_arr) = forms_obj.get("forms").and_then(|v| v.as_array()) {
                         for form in forms_arr {
                             if let Some(form_obj) = form.as_object() {
-                                let page_id = form_obj.get("id").and_then(|v| v.as_str()).map(String::from);
+                                let page_id = form_obj
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .map(String::from);
                                 meta.page_id = meta.page_id.or(page_id);
-                                if let Some(components) = form_obj.get("components").and_then(|v| v.as_array()) {
+                                if let Some(components) =
+                                    form_obj.get("components").and_then(|v| v.as_array())
+                                {
                                     for comp in components {
                                         meta.components.push(extract_component(comp));
                                     }
@@ -91,9 +102,18 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
                         for param in params {
                             if let Some(pobj) = param.as_object() {
                                 meta.data_bindings.push(DataBinding {
-                                    source_id: pobj.get("id").and_then(|v| v.as_str()).map(String::from),
-                                    path: pobj.get("name").and_then(|v| v.as_str()).map(String::from),
-                                    filter: pobj.get("value").and_then(|v| v.as_str()).map(String::from),
+                                    source_id: pobj
+                                        .get("id")
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from),
+                                    path: pobj
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from),
+                                    filter: pobj
+                                        .get("value")
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from),
                                 });
                             }
                         }
@@ -116,7 +136,8 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
                     let mut comp = ComponentInfo::default();
                     if let Some(nobj) = node.as_object() {
                         comp.id = nobj.get("id").and_then(|v| v.as_str()).map(String::from);
-                        comp.component_type = nobj.get("type").and_then(|v| v.as_str()).map(String::from);
+                        comp.component_type =
+                            nobj.get("type").and_then(|v| v.as_str()).map(String::from);
                         comp.title = nobj.get("desc").and_then(|v| v.as_str()).map(String::from);
                         meta.components.push(comp);
                     }
@@ -140,7 +161,10 @@ fn extract_component(value: &Value) -> ComponentInfo {
             .and_then(|v| v.as_str())
             .map(String::from)
             .or_else(|| obj.get("title").and_then(|v| v.as_str()).map(String::from));
-        comp.db_field = obj.get("dbfield").and_then(|v| v.as_str()).map(String::from);
+        comp.db_field = obj
+            .get("dbfield")
+            .and_then(|v| v.as_str())
+            .map(String::from);
     }
     comp
 }

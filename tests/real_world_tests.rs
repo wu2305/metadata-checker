@@ -1,5 +1,5 @@
-use metadata_checker::superpage::parse_superpage;
 use metadata_checker::dependency::DependencyGraph;
+use metadata_checker::superpage::parse_superpage;
 use std::path::PathBuf;
 
 // ============================================================
@@ -16,7 +16,11 @@ fn test_real_world_parse_新增活动() {
     assert_ne!(meta.params.len(), 0);
     assert_ne!(meta.sources.len(), 0);
     assert_ne!(meta.components.len(), 0);
-    assert_ne!(meta.expressions.len(), 0, "Should have expressions in 新增活动");
+    assert_ne!(
+        meta.expressions.len(),
+        0,
+        "Should have expressions in 新增活动"
+    );
 
     println!("Components: {}", meta.components.len());
     println!("Expressions: {}", meta.expressions.len());
@@ -81,13 +85,17 @@ fn test_real_world_parse_代付款协议() {
     assert_eq!(meta.sources.len(), 8, "Should have 8 sources");
 
     // 验证有 dataflow 类型的数据源（数据加工流程）
-    let dataflows: Vec<_> = meta.sources.iter()
+    let dataflows: Vec<_> = meta
+        .sources
+        .iter()
         .filter(|s| s.model_type.as_deref() == Some("dataflow"))
         .collect();
     assert_eq!(dataflows.len(), 2, "Should have 2 dataflow sources");
 
     // 验证有 dwtable 类型的数据源
-    let dwtables: Vec<_> = meta.sources.iter()
+    let dwtables: Vec<_> = meta
+        .sources
+        .iter()
         .filter(|s| s.model_type.as_deref() == Some("dwtable"))
         .collect();
     assert_eq!(dwtables.len(), 6, "Should have 6 dwtable sources");
@@ -103,13 +111,17 @@ fn test_real_world_代付款协议_组件结构() {
     assert_eq!(has_components, true);
 
     // 验证有 text 组件
-    let text_comps: Vec<_> = meta.components.iter()
+    let text_comps: Vec<_> = meta
+        .components
+        .iter()
         .filter(|c| c.component_type == "text")
         .collect();
     assert_ne!(text_comps.len(), 0, "Should have text components");
 
     // text1 应该有宏表达式
-    let text1_exprs: Vec<_> = meta.expressions.iter()
+    let text1_exprs: Vec<_> = meta
+        .expressions
+        .iter()
         .filter(|e| e.component_id == "text1")
         .collect();
     assert_ne!(text1_exprs.len(), 0, "text1 should have expressions");
@@ -124,42 +136,61 @@ fn test_real_world_代付款协议_数据源过滤条件() {
     let raw = &meta.raw;
     if let Some(sources) = raw.get("sources").and_then(|v| v.as_array()) {
         // model7 应该有 TOSTR 过滤条件
-        let model7 = sources.iter().find(|s| {
-            s.get("id").and_then(|v| v.as_str()) == Some("model7")
-        });
+        let model7 = sources
+            .iter()
+            .find(|s| s.get("id").and_then(|v| v.as_str()) == Some("model7"));
         assert_ne!(model7, None, "Should have model7");
-        
+
         if let Some(m7) = model7 {
             if let Some(filter) = m7.get("filter") {
                 let filter_str = serde_json::to_string(filter).unwrap();
-                assert_eq!(filter_str.contains("TOSTR"), true, "model7 filter should contain TOSTR");
-                assert_eq!(filter_str.contains("TODAY()"), true, "model7 filter should contain TODAY()");
+                assert_eq!(
+                    filter_str.contains("TOSTR"),
+                    true,
+                    "model7 filter should contain TOSTR"
+                );
+                assert_eq!(
+                    filter_str.contains("TODAY()"),
+                    true,
+                    "model7 filter should contain TODAY()"
+                );
             }
         }
 
         // model8 应该有 AND 和 IS NOT NULL 过滤条件
-        let model8 = sources.iter().find(|s| {
-            s.get("id").and_then(|v| v.as_str()) == Some("model8")
-        });
+        let model8 = sources
+            .iter()
+            .find(|s| s.get("id").and_then(|v| v.as_str()) == Some("model8"));
         assert_ne!(model8, None, "Should have model8");
-        
+
         if let Some(m8) = model8 {
             if let Some(filter) = m8.get("filter") {
                 let filter_str = serde_json::to_string(filter).unwrap();
-                assert_eq!(filter_str.contains("AND"), true, "model8 filter should contain AND");
-                assert_eq!(filter_str.contains("IS NOT NULL"), true, "model8 filter should contain IS NOT NULL");
+                assert_eq!(
+                    filter_str.contains("AND"),
+                    true,
+                    "model8 filter should contain AND"
+                );
+                assert_eq!(
+                    filter_str.contains("IS NOT NULL"),
+                    true,
+                    "model8 filter should contain IS NOT NULL"
+                );
             }
         }
 
         // model1 应该有 param 引用
-        let model1 = sources.iter().find(|s| {
-            s.get("id").and_then(|v| v.as_str()) == Some("model1")
-        });
+        let model1 = sources
+            .iter()
+            .find(|s| s.get("id").and_then(|v| v.as_str()) == Some("model1"));
         if let Some(m1) = model1 {
             if let Some(filter) = m1.get("filter") {
                 let filter_str = serde_json::to_string(filter).unwrap();
-                assert_eq!(filter_str.contains("param3") || filter_str.contains("param4"), true, 
-                    "model1 filter should reference params");
+                assert_eq!(
+                    filter_str.contains("param3") || filter_str.contains("param4"),
+                    true,
+                    "model1 filter should reference params"
+                );
             }
         }
     }
@@ -194,16 +225,24 @@ fn test_real_world_parse_销售合同() {
     assert_eq!(meta.sources.len(), 1, "销售合同 should have 1 source");
 
     // 验证有 fieldsFilter 特殊组件
-    let fields_filter: Vec<_> = meta.components.iter()
+    let fields_filter: Vec<_> = meta
+        .components
+        .iter()
         .filter(|c| c.component_type == "fieldsFilter")
         .collect();
     assert_ne!(fields_filter.len(), 0, "Should have fieldsFilter component");
 
     // 验证有 fieldsFilter.comp 组件
-    let filter_comps: Vec<_> = meta.components.iter()
+    let filter_comps: Vec<_> = meta
+        .components
+        .iter()
         .filter(|c| c.component_type == "fieldsFilter.comp")
         .collect();
-    assert_ne!(filter_comps.len(), 0, "Should have fieldsFilter.comp components");
+    assert_ne!(
+        filter_comps.len(),
+        0,
+        "Should have fieldsFilter.comp components"
+    );
 }
 
 #[test]
@@ -217,16 +256,25 @@ fn test_real_world_销售合同_数据源表达式() {
         if let Some(model1) = sources.first() {
             if let Some(filter) = model1.get("filter") {
                 let filter_str = serde_json::to_string(filter).unwrap();
-                
+
                 // 验证有 USER_INGROUP 函数
-                assert_eq!(filter_str.contains("USER_INGROUP"), true, 
-                    "销售合同 filter should contain USER_INGROUP");
+                assert_eq!(
+                    filter_str.contains("USER_INGROUP"),
+                    true,
+                    "销售合同 filter should contain USER_INGROUP"
+                );
                 // 验证有 OR 逻辑
-                assert_eq!(filter_str.contains("OR"), true, 
-                    "销售合同 filter should contain OR");
+                assert_eq!(
+                    filter_str.contains("OR"),
+                    true,
+                    "销售合同 filter should contain OR"
+                );
                 // 验证有 IS NOT NULL
-                assert_eq!(filter_str.contains("IS NOT NULL"), true, 
-                    "销售合同 filter should contain IS NOT NULL");
+                assert_eq!(
+                    filter_str.contains("IS NOT NULL"),
+                    true,
+                    "销售合同 filter should contain IS NOT NULL"
+                );
             }
         }
     }
@@ -247,9 +295,12 @@ fn test_real_world_销售合同_组件表达式() {
                     for field in ["value", "text", "defaultValue"] {
                         if let Some(val) = obj.get(field).and_then(|v| v.as_str()) {
                             if val.starts_with('=') || val.starts_with("${") {
-                                println!("Found expression: {}.{} = {}", 
+                                println!(
+                                    "Found expression: {}.{} = {}",
                                     obj.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
-                                    field, val);
+                                    field,
+                                    val
+                                );
                             }
                         }
                     }
