@@ -927,6 +927,13 @@ fn process_tbl_file_from_string(
                         "nodeTypes".to_string(),
                         serde_json::to_value(&node_types).unwrap_or(serde_json::Value::Null),
                     );
+                    // Store dimensions for fallback when nodeFields is absent
+                    if let Some(dims) = value.get("dimensions") {
+                        obj.insert(
+                            "dimensions".to_string(),
+                            serde_json::to_value(dims).unwrap_or(serde_json::Value::Null),
+                        );
+                    }
                 }
                 model_node.meta = Some(meta);
             }
