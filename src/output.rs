@@ -204,6 +204,108 @@ pub fn print_non_human(meta: &PageMetadata) -> Result<()> {
     print_non_human_to(meta, None, &mut io::stdout())
 }
 
+/// 输出紧凑 summary（默认 non-human 模式）
+pub fn print_summary(
+    meta: &PageMetadata,
+    priority_analyses: Option<&[crate::priority::PriorityAnalysis]>,
+) -> Result<()> {
+    print_summary_to(meta, priority_analyses, &mut io::stdout())
+}
+
+pub fn print_summary_to(
+    meta: &PageMetadata,
+    priority_analyses: Option<&[crate::priority::PriorityAnalysis]>,
+    out: &mut dyn Write,
+) -> Result<()> {
+    if let Some(spg) = &meta.superpage {
+        let graph = DependencyGraph::new(spg);
+        let _topo = graph.topological_sort();
+        let cycles = graph.detect_cycles();
+
+        // Collect models read/written
+        let mut models_read: Vec<String> = Vec::new();
+        let mut models_written: Vec<String> = Vec::new();
+        for expr in &spg.expressions {
+            for ref_type in &expr.refs {
+                if let RefType::ModelField(model, _) = ref_type {
+                    models_read.push(model.clone());
+                }
+            }
+        }
+        models_read.sort();
+        models_read.dedup();
+
+        // Components with expressions
+        let important_components: Vec<Value> = spg
+            .expressions
+            .iter()
+            .map(|e| {
+                json!({
+                    "id": e.component_id,
+                    "field": e.field,
+                    "raw_expr": e.raw_expr,
+                })
+            })
+            .collect();
+
+        let priority_json = priority_analyses.map(|analyses| {
+            analyses
+                .iter()
+                .map(|a| {
+                    json!({
+                        "component_id": a.component_id,
+                        "priority_result": format!("{:?}", a.priority_result),
+                    })
+                })
+                .collect::<Vec<Value>>()
+        });
+
+        let summary = json!({
+            "schema_version": "1.0",
+            "kind": "SuperPage",
+            "page": {
+                "version": spg.version,
+                "theme": spg.theme,
+                "component_count": spg.components.len(),
+                "expression_count": spg.expressions.len(),
+            },
+            "summary": {
+                "models_read": models_read,
+                "models_written": models_written,
+                "cycle_count": cycles.len(),
+                "has_cycles": !cycles.is_empty(),
+            },
+            "important_components": important_components,
+            "diagnostics": {
+                "cycle_count": cycles.len(),
+                "has_cycles": !cycles.is_empty(),
+                "component_count": spg.components.len(),
+                "expression_count": spg.expressions.len(),
+            },
+            "priority_analysis": priority_json.unwrap_or_default(),
+            "next_queries": [
+                "--query <COMPONENT_ID> for component details",
+                "--priority for defaultValue vs exp analysis",
+                "--detail for full raw structure",
+                "--project-dir <DIR> --query-model <MODEL> for cross-file model usage",
+            ],
+        });
+        writeln!(out, "{}", serde_json::to_string_pretty(&summary)?)?;
+        return Ok(());
+    }
+
+    let summary = json!({
+        "schema_version": "1.0",
+        "kind": "Page",
+        "page_id": meta.page_id,
+        "version": meta.version,
+        "component_count": meta.components.len(),
+    });
+    writeln!(out, "{}", serde_json::to_string_pretty(&summary)?)?;
+    out.flush()?;
+    Ok(())
+}
+
 pub fn print_non_human_to(
     meta: &PageMetadata,
     priority_analyses: Option<&[crate::priority::PriorityAnalysis]>,

@@ -49,6 +49,12 @@ pub struct Cli {
 
     #[arg(
         long,
+        help = "Output full raw structure instead of compact summary (non-human mode)"
+    )]
+    pub detail: bool,
+
+    #[arg(
+        long,
         value_name = "DIR",
         help = "Project directory to scan for cross-file analysis"
     )]
