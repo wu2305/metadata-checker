@@ -157,6 +157,42 @@ struct RawComponent {
     submit_page_condition: Option<serde_json::Value>,
     #[serde(rename = "defaultPanelCondition", default)]
     default_panel_condition: Option<serde_json::Value>,
+    #[serde(default)]
+    desc: Option<serde_json::Value>,
+    #[serde(default)]
+    placeholder: Option<serde_json::Value>,
+    #[serde(default)]
+    url: Option<serde_json::Value>,
+    #[serde(rename = "documentTitle", default)]
+    document_title: Option<serde_json::Value>,
+    #[serde(rename = "inputTitle", default)]
+    input_title: Option<serde_json::Value>,
+    #[serde(rename = "labelValue", default)]
+    label_value: Option<serde_json::Value>,
+    #[serde(rename = "panelName", default)]
+    panel_name: Option<serde_json::Value>,
+    #[serde(rename = "rootPath", default)]
+    root_path: Option<serde_json::Value>,
+    #[serde(rename = "selectedCaption", default)]
+    selected_caption: Option<serde_json::Value>,
+    #[serde(rename = "confirmCaption", default)]
+    confirm_caption: Option<serde_json::Value>,
+    #[serde(default)]
+    tip: Option<serde_json::Value>,
+    #[serde(default)]
+    badge: Option<serde_json::Value>,
+    #[serde(default)]
+    count: Option<serde_json::Value>,
+    #[serde(rename = "attrCaption", default)]
+    attr_caption: Option<serde_json::Value>,
+    #[serde(default)]
+    caption: Option<serde_json::Value>,
+    #[serde(rename = "defaultSelect", default)]
+    default_select: Option<serde_json::Value>,
+    #[serde(rename = "defaultCheck", default)]
+    default_check: Option<serde_json::Value>,
+    #[serde(rename = "maxLevel", default)]
+    max_level: Option<serde_json::Value>,
     #[serde(rename = "submitField", default)]
     submit_field: Option<String>,
     #[serde(rename = "submitData", default)]
@@ -511,6 +547,24 @@ fn extract_components(
         ("visibleCondition", &raw.visible_condition),
         ("submitPageCondition", &raw.submit_page_condition),
         ("defaultPanelCondition", &raw.default_panel_condition),
+        ("desc", &raw.desc),
+        ("placeholder", &raw.placeholder),
+        ("url", &raw.url),
+        ("documentTitle", &raw.document_title),
+        ("inputTitle", &raw.input_title),
+        ("labelValue", &raw.label_value),
+        ("panelName", &raw.panel_name),
+        ("rootPath", &raw.root_path),
+        ("selectedCaption", &raw.selected_caption),
+        ("confirmCaption", &raw.confirm_caption),
+        ("tip", &raw.tip),
+        ("badge", &raw.badge),
+        ("count", &raw.count),
+        ("attrCaption", &raw.attr_caption),
+        ("caption", &raw.caption),
+        ("defaultSelect", &raw.default_select),
+        ("defaultCheck", &raw.default_check),
+        ("maxLevel", &raw.max_level),
     ];
 
     for (field_name, field_value) in &fields {

@@ -203,6 +203,27 @@ impl DataFlowMeta {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
+        // Parse dimensions for fallback
+        let dimensions: Vec<FieldRecord> = meta
+            .get("dimensions")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|dim| {
+                        let name = dim.get("name")?.as_str()?.to_string();
+                        let dbfield = dim.get("dbfield")?.as_str()?.to_string();
+                        Some(FieldRecord {
+                            name,
+                            dbfield,
+                            original_field: None,
+                            original_node: None,
+                            exp: None,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         // 预解析 node_fields：serde_json::Value -> Vec<FieldRecord>，并建立 field_name 索引
         let mut field_index: HashMap<String, HashMap<String, FieldRecord>> = HashMap::new();
 
@@ -216,6 +237,31 @@ impl DataFlowMeta {
                 idx.insert(rec.name.clone(), rec.clone());
             }
             field_index.insert(node_id.clone(), idx);
+        }
+
+        // Fallback: if nodeFields is empty but dimensions exist, use dimensions as default output
+        if field_index.is_empty() && !dimensions.is_empty() {
+            let mut idx = HashMap::new();
+            for dim in &dimensions {
+                idx.insert(dim.name.clone(), dim.clone());
+            }
+            field_index.insert("default".to_string(), idx);
+        }
+
+        // Fallback: if Output nodes have empty nodeFields, populate with dimensions
+        let output_nodes: Vec<String> = node_types
+            .iter()
+            .filter(|(_, t)| *t == "Output")
+            .map(|(id, _)| id.clone())
+            .collect();
+        for out_id in output_nodes {
+            if !field_index.contains_key(&out_id) && !dimensions.is_empty() {
+                let mut idx = HashMap::new();
+                for dim in &dimensions {
+                    idx.insert(dim.name.clone(), dim.clone());
+                }
+                field_index.insert(out_id.clone(), idx);
+            }
         }
 
         let id_to_alias: HashMap<String, String> = alias_map
