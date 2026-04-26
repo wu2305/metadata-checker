@@ -12,31 +12,77 @@ use std::io::{self, Write};
 /// - query_cross：查询两个页面之间的跨文件关系
 /// - query_dataflow：展开 DataFlow 的子图，做字段级来源追溯
 
+/// 追溯节点所属的页面（通过 Contains 边）
+fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node> {
+    if let Some((incoming, _)) = graph.get_node_edges(node_id) {
+        for (parent, edge) in incoming {
+            if matches!(edge.edge_type, crate::graph::EdgeType::Contains) {
+                if matches!(parent.node_type, crate::graph::NodeType::Page) {
+                    return Some(parent.clone());
+                }
+                if let Some(page) = find_parent_page(graph, &parent.id) {
+                    return Some(page);
+                }
+            }
+            if matches!(edge.edge_type, crate::graph::EdgeType::Triggers) {
+                if let Some(page) = find_parent_page(graph, &parent.id) {
+                    return Some(page);
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
     if human {
         let mut out = io::stdout();
         writeln!(out, "=== Model: {} ===", model_id)?;
 
         let readers = graph.find_readers(model_id);
-        writeln!(out, "\n--- Read By ({} pages) ---", readers.len())?;
+        writeln!(
+            out,
+            "
+--- Read By ({} nodes) ---",
+            readers.len()
+        )?;
         for (node, edge) in readers {
+            let page = find_parent_page(graph, &node.id);
+            let page_info = page
+                .as_ref()
+                .map(|p| format!(" (page: {})", p.name))
+                .unwrap_or_default();
             writeln!(
                 out,
-                "  {} [{}] via {}",
+                "  {} [{}] {}{} via {}",
                 node.name,
-                node.path,
+                node.id,
+                format!("{:?}", node.node_type).to_lowercase(),
+                page_info,
                 edge.field_path.as_deref().unwrap_or("-")
             )?;
         }
 
         let writers = graph.find_writers(model_id);
-        writeln!(out, "\n--- Written By ({} pages) ---", writers.len())?;
+        writeln!(
+            out,
+            "
+--- Written By ({} nodes) ---",
+            writers.len()
+        )?;
         for (node, edge) in writers {
+            let page = find_parent_page(graph, &node.id);
+            let page_info = page
+                .as_ref()
+                .map(|p| format!(" (page: {})", p.name))
+                .unwrap_or_default();
             writeln!(
                 out,
-                "  {} [{}] via {}",
+                "  {} [{}] {}{} via {}",
                 node.name,
-                node.path,
+                node.id,
+                format!("{:?}", node.node_type).to_lowercase(),
+                page_info,
                 edge.field_path.as_deref().unwrap_or("-")
             )?;
         }
@@ -44,18 +90,39 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
         let readers: Vec<_> = graph
             .find_readers(model_id)
             .into_iter()
-            .map(
-                |(n, e)| serde_json::json!({"node": n.name, "path": n.path, "field": e.field_path}),
-            )
+            .map(|(n, e)| {
+                let page = find_parent_page(graph, &n.id);
+                serde_json::json!({
+                    "page": page.as_ref().map(|p| p.name.clone()),
+                    "page_id": page.as_ref().map(|p| p.id.clone()),
+                    "component_or_action": n.name,
+                    "node_id": n.id,
+                    "node_type": format!("{:?}", n.node_type),
+                    "edge_type": "Reads",
+                    "field_path": e.field_path,
+                    "source_file": n.path,
+                })
+            })
             .collect();
         let writers: Vec<_> = graph
             .find_writers(model_id)
             .into_iter()
-            .map(
-                |(n, e)| serde_json::json!({"node": n.name, "path": n.path, "field": e.field_path}),
-            )
+            .map(|(n, e)| {
+                let page = find_parent_page(graph, &n.id);
+                serde_json::json!({
+                    "page": page.as_ref().map(|p| p.name.clone()),
+                    "page_id": page.as_ref().map(|p| p.id.clone()),
+                    "component_or_action": n.name,
+                    "node_id": n.id,
+                    "node_type": format!("{:?}", n.node_type),
+                    "edge_type": format!("{:?}", e.edge_type),
+                    "field_path": e.field_path,
+                    "source_file": n.path,
+                })
+            })
             .collect();
         let result = serde_json::json!({
+            "schema_version": "1.0",
             "model": model_id,
             "readers": readers,
             "writers": writers,

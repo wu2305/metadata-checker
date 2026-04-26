@@ -211,6 +211,15 @@ pub fn print_non_human_to(meta: &PageMetadata, out: &mut dyn Write) -> Result<()
         let cycles = graph.detect_cycles();
 
         let summary = json!({
+            "schema_version": "1.0",
+            "kind": "SuperPage",
+            "truncated": false,
+            "diagnostics": {
+                "cycle_count": cycles.len(),
+                "has_cycles": !cycles.is_empty(),
+                "component_count": spg.components.len(),
+                "expression_count": spg.expressions.len(),
+            },
             "version": spg.version,
             "theme": spg.theme,
             "params": spg.params.iter().map(|p| json!({
@@ -246,6 +255,11 @@ pub fn print_non_human_to(meta: &PageMetadata, out: &mut dyn Write) -> Result<()
             })).collect::<Vec<Value>>(),
             "dependency_order": topo,
             "cycles": cycles,
+            "next_queries": [
+                "--query <COMPONENT_ID> for component details",
+                "--priority for defaultValue vs exp analysis",
+                "--project-dir <DIR> --query-model <MODEL> for cross-file model usage",
+            ],
         });
         writeln!(out, "{}", serde_json::to_string_pretty(&summary)?)?;
         return Ok(());

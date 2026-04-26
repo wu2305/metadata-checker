@@ -92,7 +92,7 @@ pub struct Cli {
 
 impl Cli {
     pub fn is_human(&self) -> bool {
-        self.human || self.interactive
+        self.human
     }
 
     pub fn is_interactive(&self) -> bool {
