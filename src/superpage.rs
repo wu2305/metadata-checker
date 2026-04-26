@@ -302,6 +302,14 @@ pub fn parse_superpage_from_value(raw_value: serde_json::Value) -> Result<SuperP
         extract_components(&canvas, None, &mut meta.components, &mut meta.expressions);
     }
 
+    // Post-process: resolve refs with known context (component_ids, source_ids, param_ids)
+    resolve_expression_refs_with_context(
+        &mut meta.expressions,
+        &meta.components,
+        &meta.sources,
+        &meta.params,
+    );
+
     Ok(meta)
 }
 
@@ -312,6 +320,101 @@ pub fn parse_superpage(path: &Path) -> Result<SuperPageMetadata> {
     let raw_value: serde_json::Value = serde_json::from_str(&content)
         .with_context(|| format!("Failed to parse JSON from: {}", path.display()))?;
     parse_superpage_from_value(raw_value)
+}
+
+/// 使用已知的组件/模型/参数上下文，重新解析表达式引用
+/// 解决纯 regex 无法区分 customer.name（模型字段）和 input1.value（组件值）的问题
+fn resolve_expression_refs_with_context(
+    expressions: &mut [ComponentExpr],
+    components: &[SpgComponent],
+    sources: &[SpgSource],
+    params: &[SpgParam],
+) {
+    let component_ids: std::collections::HashSet<&str> =
+        components.iter().map(|c| c.id.as_str()).collect();
+    let source_ids: std::collections::HashSet<&str> =
+        sources.iter().map(|s| s.id.as_str()).collect();
+    let param_ids: std::collections::HashSet<&str> = params.iter().map(|p| p.id.as_str()).collect();
+
+    for expr in expressions {
+        for ref_type in &mut expr.refs {
+            *ref_type = match ref_type {
+                RefType::Other(token) => {
+                    resolve_ref_token(token, &component_ids, &source_ids, &param_ids)
+                }
+                RefType::ComponentValue(id) => {
+                    // Keep ComponentValue even if not found in current page
+                    // It may be a component from a parent page or external context
+                    RefType::ComponentValue(id.clone())
+                }
+                RefType::ModelField(model, field) if component_ids.contains(model.as_str()) => {
+                    // Was guessed as model but actually a component
+                    RefType::ComponentProperty(model.clone(), field.clone())
+                }
+                _ => ref_type.clone(),
+            };
+        }
+    }
+}
+
+fn token_looks_like_model_field(token: &str) -> bool {
+    // Heuristic: model fields typically have dot notation and don't start with common component prefixes
+    token.contains('.') && !token.starts_with("param")
+}
+
+fn resolve_ref_token(
+    token: &str,
+    component_ids: &std::collections::HashSet<&str>,
+    source_ids: &std::collections::HashSet<&str>,
+    param_ids: &std::collections::HashSet<&str>,
+) -> RefType {
+    let parts: Vec<&str> = token.split('.').collect();
+    let first = parts[0];
+
+    if parts.len() >= 2 {
+        let rest = parts[1..].join(".");
+
+        // Exact match: first part is a known component ID
+        if component_ids.contains(first) {
+            return RefType::ComponentProperty(first.to_string(), rest);
+        }
+
+        // Exact match: first part is a known source (model) ID
+        if source_ids.contains(first) {
+            return RefType::ModelField(first.to_string(), rest);
+        }
+
+        // Exact match: first part is a known param
+        if param_ids.contains(first) {
+            return RefType::Param(token.to_string());
+        }
+
+        // Fallback: if last part is "value" and first part looks like a component, treat as ComponentValue
+        if parts.last() == Some(&"value")
+            && (first.starts_with("input")
+                || first.starts_with("text")
+                || first.starts_with("select"))
+        {
+            return RefType::ComponentValue(first.to_string());
+        }
+
+        // Fallback: if first part starts with "model" or looks like a table name, treat as ModelField
+        if first.starts_with("model") || first.starts_with("tbl") || first.starts_with("fact_") {
+            return RefType::ModelField(first.to_string(), rest);
+        }
+
+        return RefType::Other(token.to_string());
+    }
+
+    if param_ids.contains(token) {
+        return RefType::Param(token.to_string());
+    }
+
+    if component_ids.contains(token) {
+        return RefType::ComponentValue(token.to_string());
+    }
+
+    RefType::Other(token.to_string())
 }
 fn extract_components(
     raw: &RawComponent,
