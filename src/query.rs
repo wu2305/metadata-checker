@@ -367,6 +367,28 @@ impl DataFlowMeta {
     fn get_alias(&self, node_id: &str) -> Option<&String> {
         self.id_to_alias.get(node_id)
     }
+
+    /// 获取 Output 类型节点的字段索引；如果没有 Output 节点，fallback 到 "default"
+    fn get_output_fields(&self) -> Vec<(&str, &HashMap<String, FieldRecord>)> {
+        let output_nodes: Vec<&str> = self
+            .node_types
+            .iter()
+            .filter(|(_, t)| *t == "Output")
+            .map(|(id, _)| id.as_str())
+            .collect();
+
+        if !output_nodes.is_empty() {
+            output_nodes
+                .into_iter()
+                .filter_map(|id| self.field_index.get(id).map(|fields| (id, fields)))
+                .collect()
+        } else {
+            self.field_index
+                .get("default")
+                .map(|fields| vec![("default", fields)])
+                .unwrap_or_default()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -531,56 +553,67 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
 
         writeln!(out, "\n=== 字段级来源追溯 ===")?;
 
-        let output_fields = dfm.get_fields("default");
+        let output_nodes = dfm.get_output_fields();
+        let is_dimensions_fallback = output_nodes.iter().any(|(id, _)| *id == "default");
 
-        if output_fields.map(|f| f.is_empty()).unwrap_or(true) {
+        if output_nodes.is_empty() {
             writeln!(out, "\n(未找到输出节点字段映射信息)")?;
         } else {
-            for (field_name, field_rec) in output_fields.unwrap() {
-                let mut visited: Vec<(String, String)> = Vec::new();
-                let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
-
-                writeln!(out, "\n[字段] {}", field_name)?;
-
-                if trace.len() <= 1 {
-                    writeln!(out, "  来源: (未记录来源关系)")?;
-                    continue;
+            for (node_id, fields) in output_nodes {
+                let alias = dfm
+                    .get_alias(node_id)
+                    .map_or(node_id.to_string(), |v| v.clone());
+                if is_dimensions_fallback {
+                    writeln!(out, "\n--- 输出字段 (来自 dimensions) ---")?;
+                } else {
+                    writeln!(out, "\n--- 输出节点: {} ({}) ---", alias, node_id)?;
                 }
+                for (field_name, field_rec) in fields {
+                    let mut visited: Vec<(String, String)> = Vec::new();
+                    let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
 
-                for (i, step) in trace.iter().enumerate() {
-                    let is_output = i == 0;
-                    let is_root = i == trace.len() - 1;
-                    let prefix = if is_output {
-                        "  输出"
-                    } else if is_root {
-                        "  根来源"
-                    } else {
-                        "  中间"
-                    };
-                    let exp_info = step
-                        .exp
-                        .as_ref()
-                        .map(|e| format!(" [exp: {}]", e))
-                        .unwrap_or_default();
-                    let type_label = match step.node_type.as_str() {
-                        "ModelTable" => "[数据表]",
-                        "Select" => "[列加工]",
-                        "Join" => "[关联]",
-                        "Union" => "[联合]",
-                        "Distinct" => "[去重]",
-                        "Output" => "[输出]",
-                        _ => "[节点]",
-                    };
-                    writeln!(
-                        out,
-                        "{} {} {}.{} (db={}){}",
-                        prefix,
-                        type_label,
-                        step.node_alias,
-                        step.field_name,
-                        step.dbfield,
-                        exp_info
-                    )?;
+                    writeln!(out, "\n[字段] {}", field_name)?;
+
+                    if trace.len() <= 1 {
+                        writeln!(out, "  来源: (未记录来源关系)")?;
+                        continue;
+                    }
+
+                    for (i, step) in trace.iter().enumerate() {
+                        let is_output = i == 0;
+                        let is_root = i == trace.len() - 1;
+                        let prefix = if is_output {
+                            "  输出"
+                        } else if is_root {
+                            "  根来源"
+                        } else {
+                            "  中间"
+                        };
+                        let exp_info = step
+                            .exp
+                            .as_ref()
+                            .map(|e| format!(" [exp: {}]", e))
+                            .unwrap_or_default();
+                        let type_label = match step.node_type.as_str() {
+                            "ModelTable" => "[数据表]",
+                            "Select" => "[列加工]",
+                            "Join" => "[关联]",
+                            "Union" => "[联合]",
+                            "Distinct" => "[去重]",
+                            "Output" => "[输出]",
+                            _ => "[节点]",
+                        };
+                        writeln!(
+                            out,
+                            "{} {} {}.{} (db={}){}",
+                            prefix,
+                            type_label,
+                            step.node_alias,
+                            step.field_name,
+                            step.dbfield,
+                            exp_info
+                        )?;
+                    }
                 }
             }
         }
