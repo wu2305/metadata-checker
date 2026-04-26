@@ -201,14 +201,29 @@ fn print_superpage_human(spg: &SuperPageMetadata, out: &mut dyn Write) -> Result
 }
 
 pub fn print_non_human(meta: &PageMetadata) -> Result<()> {
-    print_non_human_to(meta, &mut io::stdout())
+    print_non_human_to(meta, None, &mut io::stdout())
 }
 
-pub fn print_non_human_to(meta: &PageMetadata, out: &mut dyn Write) -> Result<()> {
+pub fn print_non_human_to(
+    meta: &PageMetadata,
+    priority_analyses: Option<&[crate::priority::PriorityAnalysis]>,
+    out: &mut dyn Write,
+) -> Result<()> {
     if let Some(spg) = &meta.superpage {
         let graph = DependencyGraph::new(spg);
         let topo = graph.topological_sort();
         let cycles = graph.detect_cycles();
+
+        let priority_json = priority_analyses.map(|analyses| {
+            analyses.iter().map(|a| json!({
+                "component_id": a.component_id,
+                "component_type": a.component_type,
+                "priority_result": format!("{:?}", a.priority_result),
+                "default_value": a.default_value_expr.as_ref().map(|e| e.raw_expr.clone()),
+                "exp": a.calc_exp_expr.as_ref().map(|e| e.raw_expr.clone()),
+                "calc_condition": a.calc_condition_expr.as_ref().map(|e| e.raw_expr.clone()),
+            })).collect::<Vec<Value>>()
+        });
 
         let summary = json!({
             "schema_version": "1.0",
@@ -255,6 +270,7 @@ pub fn print_non_human_to(meta: &PageMetadata, out: &mut dyn Write) -> Result<()
             })).collect::<Vec<Value>>(),
             "dependency_order": topo,
             "cycles": cycles,
+            "priority_analysis": priority_json.unwrap_or_default(),
             "next_queries": [
                 "--query <COMPONENT_ID> for component details",
                 "--priority for defaultValue vs exp analysis",

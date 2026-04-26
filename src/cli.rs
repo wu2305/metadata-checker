@@ -20,20 +20,17 @@ pub struct Cli {
     #[arg(
         long,
         group = "output_mode",
-        help = "Print human-readable output with headers and indentation"
+        help = "Print human-readable one-shot report"
     )]
     pub human: bool,
 
-    #[arg(
-        long,
-        help = "Enter interactive mode for component querying (requires --human)"
-    )]
+    #[arg(long, help = "Enter interactive REPL for component querying")]
     pub interactive: bool,
 
     #[arg(
         long,
         group = "output_mode",
-        help = "Print compact machine-friendly JSON output (default)"
+        help = "Print machine-friendly single JSON output (default)"
     )]
     pub non_human: bool,
 
@@ -46,7 +43,7 @@ pub struct Cli {
 
     #[arg(
         long,
-        help = "Additionally print priority analysis of defaultValue vs exp vs calcCondition"
+        help = "Append priority analysis (merged into JSON for non-human, text for human)"
     )]
     pub priority: bool,
 
@@ -63,14 +60,14 @@ pub struct Cli {
     #[arg(
         long,
         value_name = "MODEL",
-        help = "Query relationships for a specific model"
+        help = "Query relationships for a specific model (requires --project-dir)"
     )]
     pub query_model: Option<String>,
 
     #[arg(
         long,
         value_name = "PAGE",
-        help = "Query relationships for a specific page"
+        help = "Query relationships for a specific page (requires --project-dir)"
     )]
     pub query_page: Option<String>,
 
@@ -78,14 +75,14 @@ pub struct Cli {
         long,
         value_name = "PAGES",
         num_args = 2,
-        help = "Query cross-file relations between two pages"
+        help = "Query cross-file relations between two pages (requires --project-dir)"
     )]
     pub query_cross: Option<Vec<String>>,
 
     #[arg(
         long,
         value_name = "MODEL",
-        help = "Expand and query a DataFlow model's internal subgraph"
+        help = "Expand and query a DataFlow model's internal subgraph (requires --project-dir)"
     )]
     pub query_dataflow: Option<String>,
 }

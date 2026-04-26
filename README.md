@@ -25,14 +25,26 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 ### 解析单个页面
 
 ```bash
-# human 可读模式（进入交互式查询）
+# 默认：机器友好的 JSON 输出（单个合法 JSON）
+./target/release/metadata-checker page.spg
+
+# 带优先级分析（合并进主 JSON）
+./target/release/metadata-checker page.spg --priority
+
+# 查询特定组件（JSON 输出）
+./target/release/metadata-checker page.spg --query input3
+
+# 查询特定组件并带优先级分析（单 JSON）
+./target/release/metadata-checker page.spg --query input3 --priority
+
+# human 可读报告（一次性输出）
 ./target/release/metadata-checker page.spg --human
 
-# JSON 结构化输出（默认）
-./target/release/metadata-checker page.spg --non-human
+# human 模式带优先级分析
+./target/release/metadata-checker page.spg --human --priority
 
-# 查询特定组件并带优先级分析
-./target/release/metadata-checker page.spg --query input3 --priority
+# 交互式查询（REPL）
+./target/release/metadata-checker page.spg --interactive
 ```
 
 ### 项目级图数据库
@@ -54,12 +66,17 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 ./target/release/metadata-checker --project-dir /path/to/project --query-dataflow flow.tbl
 ```
 
-### human 模式交互查询
+### human 模式
 
-当使用 `--interactive` 参数（需配合 `--human`）时，工具会进入交互模式，列出所有组件 ID，提示用户输入要查询的组件 ID：
+`--human` 输出一次性人类可读报告，包含参数、数据源、组件表达式、依赖顺序、循环警告等。
+
+### 交互模式
+
+`--interactive` 进入 REPL，提示输入组件 ID 进行详细查询：
 
 ```
-=== 交互式查询 ===
+=== SuperPage Interactive Mode ===
+Version: 4.19.7 | Theme: default | Components: 5 | Expressions: 6
 请输入要查询的组件 ID（直接回车退出）: input3
 ```
 
@@ -72,16 +89,17 @@ Arguments:
   [FILE]                    页面元数据 JSON 文件路径
 
 Options:
-      --human               人类可读输出
-      --non-human           机器友好的 JSON 输出（默认）
+      --human               人类可读输出（一次性报告）
+      --interactive         交互式组件查询（REPL）
+      --non-human           机器友好的 JSON 输出（默认，单 JSON）
       --query <ID>          查询特定组件 ID 的详细信息
-      --priority            附加计算优先级分析
+      --priority            附加计算优先级分析（non-human 合并进 JSON）
       --project-dir <DIR>   项目目录（用于跨文件分析）
       --build-graph         从项目目录构建/更新图数据库
-      --query-model <MODEL> 查询模型的读写关系
-      --query-page <PAGE>   查询页面的依赖关系
-      --query-cross <A> <B> 查询两页面间的跨文件关系
-      --query-dataflow <M>  展开 DataFlow 模型的内部子图
+      --query-model <MODEL> 查询模型的读写关系（需 --project-dir）
+      --query-page <PAGE>   查询页面的依赖关系（需 --project-dir）
+      --query-cross <A> <B> 查询两页面间的跨文件关系（需 --project-dir）
+      --query-dataflow <M>  展开 DataFlow 模型的内部子图（需 --project-dir）
   -h, --help                打印帮助信息
   -V, --version             打印版本
 ```

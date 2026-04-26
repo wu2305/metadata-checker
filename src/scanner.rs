@@ -406,7 +406,7 @@ fn process_spg_file_from_value(
                         .file_stem()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| target_rel.clone());
-                    let target_page_id = format!("page:{}", target_name);
+                    let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
                     graph.add_node(
                         target_page_id.clone(),
                         NodeType::Page,
@@ -589,7 +589,8 @@ fn process_spg_file_from_value(
                                             .file_stem()
                                             .map(|s| s.to_string_lossy().to_string())
                                             .unwrap_or_else(|| target_rel.clone());
-                                        let target_page_id = format!("page:{}", target_name);
+                                        let target_page_id =
+                                            format!("page:{}", target_rel.replace(r"\", "/"));
                                         graph.add_node(
                                             target_page_id.clone(),
                                             NodeType::Page,

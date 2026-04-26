@@ -78,7 +78,7 @@ fn test_print_non_human_superpage() {
     let meta = parser::parse_file(&path).expect("Failed to parse");
 
     let mut buf: Vec<u8> = Vec::new();
-    output::print_non_human_to(&meta, &mut buf).expect("print_non_human_to should succeed");
+    output::print_non_human_to(&meta, None, &mut buf).expect("print_non_human_to should succeed");
     let s = String::from_utf8(buf).expect("Valid UTF-8");
 
     let json: serde_json::Value = serde_json::from_str(&s).expect("Should be valid JSON");
