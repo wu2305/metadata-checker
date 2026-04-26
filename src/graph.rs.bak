@@ -79,7 +79,6 @@ pub struct GraphDB {
     pub graph: DiGraph<Node, Edge>,
     pub node_indices: HashMap<String, NodeIndex>,
     pub db_path: String,
-    seen_edges: HashSet<(String, String, EdgeType, Option<String>)>,
 }
 
 impl GraphDB {
@@ -111,7 +110,6 @@ impl GraphDB {
             }
         }
 
-        let mut seen_edges = HashSet::new();
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
             let (_, value) = item?;
@@ -119,8 +117,7 @@ impl GraphDB {
                 if let (Some(&from_idx), Some(&to_idx)) =
                     (node_indices.get(&edge.from), node_indices.get(&edge.to))
                 {
-                    graph.add_edge(from_idx, to_idx, edge.clone());
-                    seen_edges.insert((edge.from.clone(), edge.to.clone(), edge.edge_type.clone(), edge.field_path.clone()));
+                    graph.add_edge(from_idx, to_idx, edge);
                 }
             }
         }
@@ -129,7 +126,6 @@ impl GraphDB {
             graph,
             node_indices,
             db_path: db_path.to_string_lossy().to_string(),
-            seen_edges,
         })
     }
     /// 添加节点（如已存在则更新）
@@ -176,10 +172,6 @@ impl GraphDB {
         if let (Some(&from_idx), Some(&to_idx)) =
             (self.node_indices.get(from), self.node_indices.get(to))
         {
-            let key = (from.to_string(), to.to_string(), edge_type.clone(), field_path.clone());
-            if !self.seen_edges.insert(key) {
-                return;
-            }
             let edge = Edge {
                 from: from.to_string(),
                 to: to.to_string(),
