@@ -1,9 +1,7 @@
 use crate::dependency::DependencyGraph;
-use crate::priority;
 use crate::superpage::{RefType, SuperPageMetadata};
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
 pub fn print_component_query_human(

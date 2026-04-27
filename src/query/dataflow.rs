@@ -429,22 +429,44 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
     } else {
         let mut field_traces: Vec<serde_json::Value> = Vec::new();
 
-        if let Some(output_fields) = dfm.get_fields("default") {
-            for (field_name, field_rec) in output_fields {
-                let mut visited: Vec<(String, String)> = Vec::new();
-                let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
+        let output_nodes = dfm.get_output_fields();
+        let is_dimensions_fallback = output_nodes.iter().any(|(id, _)| *id == "default");
 
-                field_traces.push(serde_json::json!({
-                    "field": field_name,
-                    "dbfield": field_rec.dbfield,
-                    "trace": trace.iter().map(|s| serde_json::json!({
-                        "node_alias": s.node_alias,
-                        "node_type": s.node_type,
-                        "field_name": s.field_name,
-                        "dbfield": s.dbfield,
-                        "exp": s.exp,
-                    })).collect::<Vec<_>>(),
-                }));
+        if output_nodes.is_empty() {
+            field_traces.push(serde_json::json!({
+                "trace_source": "missing",
+                "diagnostics": "No output node fields or dimensions found",
+            }));
+        } else {
+            for (node_id, fields) in output_nodes {
+                let trace_source = if is_dimensions_fallback {
+                    "dimensions_fallback"
+                } else {
+                    "output_node"
+                };
+                let alias = dfm
+                    .get_alias(node_id)
+                    .map_or(node_id.to_string(), |v| v.clone());
+
+                for (field_name, field_rec) in fields {
+                    let mut visited: Vec<(String, String)> = Vec::new();
+                    let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
+
+                    field_traces.push(serde_json::json!({
+                        "field": field_name,
+                        "dbfield": field_rec.dbfield,
+                        "output_node_id": node_id,
+                        "output_node_alias": alias,
+                        "trace_source": trace_source,
+                        "trace": trace.iter().map(|s| serde_json::json!({
+                            "node_alias": s.node_alias,
+                            "node_type": s.node_type,
+                            "field_name": s.field_name,
+                            "dbfield": s.dbfield,
+                            "exp": s.exp,
+                        })).collect::<Vec<_>>(),
+                    }));
+                }
             }
         }
 

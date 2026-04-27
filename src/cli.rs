@@ -20,11 +20,11 @@ pub struct Cli {
     #[arg(
         long,
         group = "output_mode",
-        help = "Print human-readable one-shot report"
+        help = "Enter interactive REPL for expert exploration"
     )]
     pub human: bool,
 
-    #[arg(long, help = "Enter interactive REPL for component querying")]
+    #[arg(long, help = "Alias for --human, enter interactive REPL")]
     pub interactive: bool,
 
     #[arg(
@@ -95,7 +95,7 @@ pub struct Cli {
 
 impl Cli {
     pub fn is_human(&self) -> bool {
-        self.human
+        self.human || self.interactive
     }
 
     pub fn is_interactive(&self) -> bool {

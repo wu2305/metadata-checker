@@ -1,7 +1,5 @@
 use crate::graph::GraphDB;
 use anyhow::Result;
-use serde::Deserialize;
-use std::collections::HashMap;
 use std::io::{self, Write};
 
 /// 图查询模块

@@ -37,10 +37,10 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 # 查询特定组件并带优先级分析（单 JSON）
 ./target/release/metadata-checker page.spg --query input3 --priority
 
-# human 可读报告（一次性输出）
+# 进入交互式 REPL（专家探索模式）
 ./target/release/metadata-checker page.spg --human
 
-# human 模式带优先级分析
+# 交互模式带优先级分析
 ./target/release/metadata-checker page.spg --human --priority
 
 # 交互式查询（REPL）
@@ -68,7 +68,7 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 
 ### human 模式
 
-`--human` 输出一次性人类可读报告，包含参数、数据源、组件表达式、依赖顺序、循环警告等。
+`--human` 进入交互式 REPL（专家探索模式），包含参数、数据源、组件表达式、依赖顺序、循环警告等。
 
 ### 交互模式
 
@@ -89,8 +89,8 @@ Arguments:
   [FILE]                    页面元数据 JSON 文件路径
 
 Options:
-      --human               人类可读输出（一次性报告）
-      --interactive         交互式组件查询（REPL）
+      --human               进入交互式 REPL（专家探索模式）
+      --interactive         --human 的别名，同样进入 REPL
       --non-human           机器友好的 JSON 输出（默认，单 JSON）
       --query <ID>          查询特定组件 ID 的详细信息
       --priority            附加计算优先级分析（non-human 合并进 JSON）

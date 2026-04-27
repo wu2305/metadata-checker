@@ -224,7 +224,7 @@ pub fn print_summary_to(
 
         // Collect models read/written
         let mut models_read: Vec<String> = Vec::new();
-        let mut models_written: Vec<String> = Vec::new();
+        let models_written: Vec<String> = Vec::new();
         for expr in &spg.expressions {
             for ref_type in &expr.refs {
                 if let RefType::ModelField(model, _) = ref_type {

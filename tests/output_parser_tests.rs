@@ -1,3 +1,4 @@
+use clap::Parser;
 use metadata_checker::dependency::DependencyGraph;
 use metadata_checker::output;
 use metadata_checker::parser;
@@ -237,4 +238,32 @@ fn test_detail_output_contains_resolved_refs() {
         first_expr.get("resolved_refs").is_some(),
         "Detail output should contain resolved_refs"
     );
+}
+
+// ============================================================
+// 五、CLI 行为测试
+// ============================================================
+
+#[test]
+fn test_cli_human_and_interactive_both_enter_repl() {
+    // 模拟 --human 和 --interactive 都进入 REPL
+    let cli_human = metadata_checker::cli::Cli::parse_from(["metadata-checker", "--human"]);
+    assert!(
+        cli_human.is_human(),
+        "--human should set is_human() to true"
+    );
+
+    let cli_interactive =
+        metadata_checker::cli::Cli::parse_from(["metadata-checker", "--interactive"]);
+    assert!(
+        cli_interactive.is_human(),
+        "--interactive should set is_human() to true"
+    );
+    assert!(
+        cli_interactive.is_interactive(),
+        "--interactive should set is_interactive() to true"
+    );
+
+    let cli_none = metadata_checker::cli::Cli::parse_from(["metadata-checker"]);
+    assert!(!cli_none.is_human(), "Default should not be human");
 }

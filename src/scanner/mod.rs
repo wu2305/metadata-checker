@@ -2,11 +2,11 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
 use std::hash::Hasher;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 use twox_hash::XxHash64;
 
-use crate::graph::{EdgeType, FileState, GraphDB, NodeType};
+use crate::graph::{FileState, GraphDB};
 
 /// 项目目录扫描模块
 ///

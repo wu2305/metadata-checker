@@ -45,8 +45,8 @@ metadata-checker <FILE.spg> [OPTIONS]
 
 | Flag | Description |
 |------|-------------|
-| `--human` | Print human-readable report with headers and indentation |
-| `--interactive` | Enter interactive REPL for querying component details (implies `--human`) |
+| `--human` | Enter interactive REPL for expert exploration |
+| `--interactive` | Alias for `--human`, also enters REPL |
 | `--non-human` | Machine-friendly compact JSON output (default) |
 | `--priority` | Additionally print/append priority analysis of defaultValue vs exp vs calcCondition |
 | `--query <ID>` | Query detailed info for a specific component ID |
@@ -59,7 +59,7 @@ metadata-checker <FILE.spg> [OPTIONS]
 
 ### Output Modes
 
-**`--human` mode:** One-shot human-readable report with sections for parameters, data sources, components with expressions, dependency order, cycle warnings, and priority analysis (if `--priority` is set).
+**`--human` mode:** Enters interactive REPL for expert exploration. You can input component IDs to query their details interactively.
 
 **`--interactive` mode:** Enter REPL where you can input component IDs to get detailed query results interactively.
 
@@ -111,8 +111,8 @@ metadata-checker --project-dir /path/to/project --query-dataflow dataflow_output
 ## Important Constraints
 
 1. `--project-dir` is **required** for all project-level queries (`--query-model`, `--query-page`, `--query-cross`, `--query-dataflow`). Without it, the tool exits with an error.
-2. `--interactive` enters REPL mode; `--human` alone prints a one-shot report.
-3. When `--priority` is used with `--non-human` (default), priority analysis is appended as a separate JSON object, not merged into the main output.
+2. `--human` and `--interactive` both enter REPL mode.
+3. When `--priority` is used with `--non-human` (default), priority analysis is merged into the main JSON output under the `priority_analysis` field.
 4. Component IDs in expressions use the full path format: `comp:app/page.spg|component_id`.
 5. Page node IDs use normalized relative paths: `page:app/page.spg`.
 

@@ -1,8 +1,7 @@
 use super::resolve_reference_path;
 use crate::graph::{EdgeType, GraphDB, NodeType};
-use crate::superpage;
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 pub fn process_spg_file_from_value(

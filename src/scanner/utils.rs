@@ -1,10 +1,6 @@
 use anyhow::Result;
-use std::collections::HashMap;
 use std::fs;
-use std::hash::Hasher;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
-use twox_hash::XxHash64;
 
 pub fn collect_files(dir: &Path, base: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     if let Ok(entries) = fs::read_dir(dir) {
