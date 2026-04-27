@@ -172,11 +172,18 @@ pub fn process_spg_file_from_value(
                                 format!("{}", field),
                                 None,
                             );
-                            graph.add_edge(
+                            let edge_meta = serde_json::json!({
+                                "component_field": expr.field,
+                                "raw_expr": expr.raw_expr,
+                                "ref_token": format!("{}.{}", model, field),
+                                "reason": format!("Component '{}' reads from model '{}'", comp.id, model),
+                            });
+                            graph.add_edge_with_meta(
                                 &comp_id,
                                 &model_id,
                                 EdgeType::Reads,
                                 Some(format!("{}.{}", model, field)),
+                                Some(edge_meta),
                             );
                             graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
                         }
@@ -330,11 +337,19 @@ pub fn process_spg_file_from_value(
                                     field.clone(),
                                     None,
                                 );
-                                graph.add_edge(
+                                let action_meta = serde_json::json!({
+                                    "action_type": action.action_type,
+                                    "trigger_type": action.trigger_type,
+                                    "submit_range": action.submit_range,
+                                    "source_component": comp.id,
+                                    "reason": format!("Action '{}' writes to model '{}'", action.action_type, model),
+                                });
+                                graph.add_edge_with_meta(
                                     &action_id,
                                     &model_id,
                                     EdgeType::ActionWrites,
                                     Some(format!("{}.{}", model, field)),
+                                    Some(action_meta),
                                 );
                                 graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
                             }

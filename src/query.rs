@@ -99,6 +99,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
                     "edge_type": "Reads",
                     "field_path": e.field_path,
                     "source_file": n.path,
+                    "meta": e.meta,
                 })
             })
             .collect();
@@ -116,6 +117,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
                     "edge_type": format!("{:?}", e.edge_type),
                     "field_path": e.field_path,
                     "source_file": n.path,
+                    "meta": e.meta,
                 })
             })
             .collect();
