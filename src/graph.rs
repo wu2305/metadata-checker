@@ -57,6 +57,7 @@ pub struct Edge {
     pub to: String,
     pub edge_type: EdgeType,
     pub field_path: Option<String>,
+    pub meta: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,6 +233,17 @@ impl GraphDB {
         edge_type: EdgeType,
         field_path: Option<String>,
     ) {
+        self.add_edge_with_meta(from, to, edge_type, field_path, None)
+    }
+
+    pub fn add_edge_with_meta(
+        &mut self,
+        from: &str,
+        to: &str,
+        edge_type: EdgeType,
+        field_path: Option<String>,
+        meta: Option<serde_json::Value>,
+    ) {
         if let (Some(&from_idx), Some(&to_idx)) =
             (self.node_indices.get(from), self.node_indices.get(to))
         {
@@ -249,6 +261,7 @@ impl GraphDB {
                 to: to.to_string(),
                 edge_type,
                 field_path,
+                meta,
             };
             self.is_dirty = true;
             self.graph.add_edge(from_idx, to_idx, edge);
