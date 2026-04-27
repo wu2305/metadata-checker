@@ -267,3 +267,57 @@ fn test_cli_human_and_interactive_both_enter_repl() {
     let cli_none = metadata_checker::cli::Cli::parse_from(["metadata-checker"]);
     assert!(!cli_none.is_human(), "Default should not be human");
 }
+
+// ============================================================
+// 六、REPL 集成测试
+// ============================================================
+
+#[test]
+#[ignore = "Requires compiled binary; run manually or in CI"]
+fn test_repl_interactive_priority() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let bin = std::env::current_dir()
+        .unwrap()
+        .join("target/debug/metadata-checker");
+    if !bin.exists() {
+        eprintln!("Binary not found, skipping integration test");
+        return;
+    }
+
+    let mut child = Command::new(&bin)
+        .args(["tests/fixtures/test_superpage.spg", "--human", "--priority"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn metadata-checker");
+
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin.write_all(b"input3\n").unwrap();
+        stdin.write_all(b"all\n").unwrap();
+        stdin.write_all(b"q\n").unwrap();
+    }
+
+    let output = child.wait_with_output().expect("Failed to read output");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("=== SuperPage Interactive Mode ==="),
+        "Should enter REPL"
+    );
+    assert!(
+        stdout.contains("Component: input3"),
+        "Should query component input3"
+    );
+    assert!(
+        stdout.contains("=== SuperPage Metadata Report ==="),
+        "Should print full report on 'all'"
+    );
+    assert!(
+        stdout.contains("Priority Analysis"),
+        "Should include priority analysis when --priority is set"
+    );
+}
