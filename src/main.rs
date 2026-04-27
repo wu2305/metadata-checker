@@ -94,7 +94,7 @@ fn main() -> Result<()> {
     // --human without --query: enter interactive mode
     if args.is_human() {
         if let Some(spg) = &meta.superpage {
-            run_interactive(spg)?;
+            run_interactive(spg, args.priority)?;
         }
         return Ok(());
     }
@@ -124,7 +124,10 @@ fn graph_db_path(project_dir: &std::path::Path) -> std::path::PathBuf {
     project_dir.join(".metadata-checker.graphdb")
 }
 
-fn run_interactive(spg: &metadata_checker::superpage::SuperPageMetadata) -> Result<()> {
+fn run_interactive(
+    spg: &metadata_checker::superpage::SuperPageMetadata,
+    show_priority: bool,
+) -> Result<()> {
     let graph = DependencyGraph::new(spg);
 
     println!("=== SuperPage Interactive Mode ===");
@@ -202,7 +205,9 @@ fn run_interactive(spg: &metadata_checker::superpage::SuperPageMetadata) -> Resu
                     println!("Component '{}' not found.", target_id);
                     continue;
                 }
-                if let Err(e) = output::print_component_query_human(spg, &graph, target_id, false) {
+                if let Err(e) =
+                    output::print_component_query_human(spg, &graph, target_id, show_priority)
+                {
                     println!("Error: {}", e);
                 }
             }

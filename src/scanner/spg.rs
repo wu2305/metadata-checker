@@ -173,10 +173,11 @@ pub fn process_spg_file_from_value(
                                 None,
                             );
                             let edge_meta = serde_json::json!({
-                                "component_field": expr.field,
-                                "raw_expr": expr.raw_expr,
-                                "ref_token": format!("{}.{}", model, field),
                                 "reason": format!("Component '{}' reads from model '{}'", comp.id, model),
+                                "action": "Reads",
+                                "component": comp.id,
+                                "expression": expr.raw_expr,
+                                "field": expr.field,
                             });
                             graph.add_edge_with_meta(
                                 &comp_id,
@@ -224,11 +225,18 @@ pub fn process_spg_file_from_value(
                     field.clone(),
                     None,
                 );
-                graph.add_edge(
+                let submit_meta = serde_json::json!({
+                    "reason": format!("Component '{}' binds submitField to model '{}'", comp.id, model),
+                    "action": "submitField",
+                    "component": comp.id,
+                    "field": format!("{}.{}", model, field),
+                });
+                graph.add_edge_with_meta(
                     &comp_id,
                     &model_id,
                     EdgeType::Writes,
                     Some(format!("{}.{}", model, field)),
+                    Some(submit_meta),
                 );
                 graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
             }
@@ -338,11 +346,10 @@ pub fn process_spg_file_from_value(
                                     None,
                                 );
                                 let action_meta = serde_json::json!({
-                                    "action_type": action.action_type,
-                                    "trigger_type": action.trigger_type,
-                                    "submit_range": action.submit_range,
-                                    "source_component": comp.id,
                                     "reason": format!("Action '{}' writes to model '{}'", action.action_type, model),
+                                    "action": action.action_type,
+                                    "component": comp.id,
+                                    "field": format!("{}.{}", model, field),
                                 });
                                 graph.add_edge_with_meta(
                                     &action_id,
@@ -376,11 +383,19 @@ pub fn process_spg_file_from_value(
                                 field_name.clone(),
                                 None,
                             );
-                            graph.add_edge(
+                            let ud_meta = serde_json::json!({
+                                "reason": format!("Action '{}' writes to field '{}'", action.action_type, field_name),
+                                "action": action.action_type,
+                                "component": comp.id,
+                                "field": format!("{}.{}", data_set, field_name),
+                                "expression": field_value,
+                            });
+                            graph.add_edge_with_meta(
                                 &action_id,
                                 &model_id,
                                 EdgeType::ActionWrites,
                                 Some(format!("{}.{}", data_set, field_name)),
+                                Some(ud_meta),
                             );
                             graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
                             // If value_type is "exp", parse expression refs for dependency analysis
@@ -460,11 +475,10 @@ pub fn process_spg_file_from_value(
                                             None,
                                         );
                                         let opens_meta = serde_json::json!({
-                                            "action_type": action.action_type,
-                                            "trigger_type": action.trigger_type,
-                                            "target_type": action.target_type,
-                                            "source_component": comp.id,
                                             "reason": format!("Link action opens page '{}'", target_name),
+                                            "action": action.action_type,
+                                            "component": comp.id,
+                                            "target": target_name,
                                         });
                                         graph.add_edge_with_meta(
                                             &action_id,
@@ -486,11 +500,11 @@ pub fn process_spg_file_from_value(
                                                 None,
                                             );
                                             let pass_meta = serde_json::json!({
+                                                "reason": format!("Link action passes param '{}'", param_name),
+                                                "action": action.action_type,
+                                                "component": comp.id,
                                                 "param_name": param_name,
                                                 "param_value": param_value,
-                                                "action_type": action.action_type,
-                                                "source_component": comp.id,
-                                                "reason": format!("Link action passes param '{}'", param_name),
                                             });
                                             graph.add_edge_with_meta(
                                                 &action_id,
@@ -573,12 +587,11 @@ pub fn process_spg_file_from_value(
                             None,
                         );
                         let sets_meta = serde_json::json!({
+                            "reason": format!("setParamValue sets param '{}'", param_name),
+                            "action": action.action_type,
+                            "component": comp.id,
                             "param_name": param_name,
                             "param_value": param_value,
-                            "action_type": action.action_type,
-                            "trigger_type": action.trigger_type,
-                            "source_component": comp.id,
-                            "reason": format!("setParamValue sets param '{}'", param_name),
                         });
                         graph.add_edge_with_meta(
                             &action_id,
