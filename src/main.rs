@@ -198,6 +198,12 @@ fn run_interactive(
                     superpage: Some(spg.clone()),
                 };
                 output::print_human(&meta)?;
+                if show_priority {
+                    let analyses = metadata_checker::priority::analyze_priority(spg);
+                    let report = metadata_checker::priority::format_priority_human(&analyses);
+                    println!("
+{}", report);
+                }
             }
             target_id => {
                 let found = spg.components.iter().any(|c| c.id == target_id);

@@ -317,7 +317,7 @@ fn test_repl_interactive_priority() {
         "Should print full report on 'all'"
     );
     assert!(
-        stdout.contains("Priority Analysis"),
+        stdout.contains("组件计算优先级分析"),
         "Should include priority analysis when --priority is set"
     );
 }
