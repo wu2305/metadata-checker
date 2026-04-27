@@ -12,7 +12,7 @@ use std::io::{self, Write};
 
 /// 追溯节点所属的页面（通过 Contains 边）
 fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node> {
-    if let Some((incoming, _)) = graph.get_node_edges(node_id) {
+    if let Some((_, incoming)) = graph.get_node_edges(node_id) {
         for (parent, edge) in incoming {
             if matches!(edge.edge_type, crate::graph::EdgeType::Contains) {
                 if matches!(parent.node_type, crate::graph::NodeType::Page) {

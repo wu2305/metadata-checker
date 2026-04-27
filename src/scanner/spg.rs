@@ -410,11 +410,18 @@ pub fn process_spg_file_from_value(
                                             field.clone(),
                                             None,
                                         );
-                                        graph.add_edge(
+                                        let read_meta = serde_json::json!({
+                                            "action_type": action.action_type,
+                                            "trigger_type": action.trigger_type,
+                                            "source_component": comp.id,
+                                            "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
+                                        });
+                                        graph.add_edge_with_meta(
                                             &action_id,
                                             &ref_model_id,
                                             EdgeType::Reads,
                                             Some(format!("{}.{}", model, field)),
+                                            Some(read_meta),
                                         );
                                         graph.add_edge(
                                             &ref_model_id,
@@ -452,11 +459,19 @@ pub fn process_spg_file_from_value(
                                             target_name.clone(),
                                             None,
                                         );
-                                        graph.add_edge(
+                                        let opens_meta = serde_json::json!({
+                                            "action_type": action.action_type,
+                                            "trigger_type": action.trigger_type,
+                                            "target_type": action.target_type,
+                                            "source_component": comp.id,
+                                            "reason": format!("Link action opens page '{}'", target_name),
+                                        });
+                                        graph.add_edge_with_meta(
                                             &action_id,
                                             &target_page_id,
                                             EdgeType::OpensPage,
                                             Some(target_rel.clone()),
+                                            Some(opens_meta),
                                         );
 
                                         // Process parameter passing via data array
@@ -470,11 +485,19 @@ pub fn process_spg_file_from_value(
                                                 param_name.clone(),
                                                 None,
                                             );
-                                            graph.add_edge(
+                                            let pass_meta = serde_json::json!({
+                                                "param_name": param_name,
+                                                "param_value": param_value,
+                                                "action_type": action.action_type,
+                                                "source_component": comp.id,
+                                                "reason": format!("Link action passes param '{}'", param_name),
+                                            });
+                                            graph.add_edge_with_meta(
                                                 &action_id,
                                                 &param_id,
                                                 EdgeType::PassesParam,
                                                 Some(param_value.clone()),
+                                                Some(pass_meta),
                                             );
                                             // Parse expression refs from param_value for dependency analysis
                                             let refs = crate::superpage::parse_expression_refs(
@@ -509,11 +532,18 @@ pub fn process_spg_file_from_value(
                                                         field.clone(),
                                                         None,
                                                     );
-                                                    graph.add_edge(
+                                                    let read_meta = serde_json::json!({
+                                                        "action_type": action.action_type,
+                                                        "trigger_type": action.trigger_type,
+                                                        "source_component": comp.id,
+                                                        "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
+                                                    });
+                                                    graph.add_edge_with_meta(
                                                         &action_id,
                                                         &ref_model_id,
                                                         EdgeType::Reads,
                                                         Some(format!("{}.{}", model, field)),
+                                                        Some(read_meta),
                                                     );
                                                     graph.add_edge(
                                                         &ref_model_id,
@@ -542,11 +572,20 @@ pub fn process_spg_file_from_value(
                             param_name.clone(),
                             None,
                         );
-                        graph.add_edge(
+                        let sets_meta = serde_json::json!({
+                            "param_name": param_name,
+                            "param_value": param_value,
+                            "action_type": action.action_type,
+                            "trigger_type": action.trigger_type,
+                            "source_component": comp.id,
+                            "reason": format!("setParamValue sets param '{}'", param_name),
+                        });
+                        graph.add_edge_with_meta(
                             &action_id,
                             &param_id,
                             EdgeType::SetsParam,
                             Some(param_value.clone()),
+                            Some(sets_meta),
                         );
                         // Parse expression refs from param_value for dependency analysis
                         let refs = crate::superpage::parse_expression_refs(param_value);
@@ -572,11 +611,18 @@ pub fn process_spg_file_from_value(
                                     field.clone(),
                                     None,
                                 );
-                                graph.add_edge(
+                                let read_meta = serde_json::json!({
+                                    "action_type": action.action_type,
+                                    "trigger_type": action.trigger_type,
+                                    "source_component": comp.id,
+                                    "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
+                                });
+                                graph.add_edge_with_meta(
                                     &action_id,
                                     &ref_model_id,
                                     EdgeType::Reads,
                                     Some(format!("{}.{}", model, field)),
+                                    Some(read_meta),
                                 );
                                 graph.add_edge(
                                     &ref_model_id,

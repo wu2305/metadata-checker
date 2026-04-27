@@ -48,7 +48,7 @@ metadata-checker <FILE.spg> [OPTIONS]
 | `--human` | Enter interactive REPL for expert exploration |
 | `--interactive` | Alias for `--human`, also enters REPL |
 | `--non-human` | Machine-friendly compact JSON output (default) |
-| `--priority` | Additionally print/append priority analysis of defaultValue vs exp vs calcCondition |
+| `--priority` | Additionally merge priority analysis into main JSON output |
 | `--query <ID>` | Query detailed info for a specific component ID |
 | `--project-dir <DIR>` | Project directory for cross-file graph analysis |
 | `--build-graph` | Scan project directory and build/update graph database |
@@ -122,7 +122,7 @@ metadata-checker --project-dir /path/to/project --query-dataflow dataflow_output
 # Parse single file, JSON output
 metadata-checker page.spg
 
-# Parse single file, human-readable report
+# Parse single file, enter interactive REPL
 metadata-checker page.spg --human
 
 # Parse with priority analysis (human)

@@ -90,7 +90,7 @@ fn test_is_null_expression() {
 
 #[test]
 fn test_chinese_in_expression() {
-    let refs = parse_expression_refs("=${中文变量}");
+    let _refs = parse_expression_refs("=${中文变量}");
     // 当前正则可能无法匹配中文变量名，这是一个已知限制
     // 但至少不应 panic
 }

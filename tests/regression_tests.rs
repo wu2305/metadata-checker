@@ -276,7 +276,7 @@ fn test_same_size_quick_file_change_is_detected() {
 }
 
 #[test]
-fn debug_parse_refs() {
+fn test_boundary_replace_keeps_similar_component_ids_separate() {
     let refs = metadata_checker::superpage::parse_expression_refs("=myinput1.value + input1.value");
     println!("refs: {:?}", refs);
     assert_eq!(refs.len(), 2);

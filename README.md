@@ -108,19 +108,31 @@ Options:
 
 ```
 src/
-├── main.rs        # CLI 入口与子命令分发
-├── cli.rs         # 命令行参数定义（clap）
-├── lib.rs         # 库入口
-├── superpage.rs   # .spg JSON 解析、组件树提取、表达式引用解析
-├── dependency.rs  # 组件依赖图、拓扑排序、循环检测、值追溯
-├── priority.rs    # defaultValue/exp/calcCondition 优先级分析
-├── output.rs      # human/JSON 双模式输出、交互式查询
-├── parser.rs      # 文件类型识别、统一元数据结构
-├── graph.rs       # petgraph 有向图 + redb 持久化
-├── scanner.rs     # 项目目录扫描、增量更新、SPG/TBL 处理
-└── query.rs       # 图查询接口（model/page/cross/dataflow）
+├── main.rs              # CLI 入口与子命令分发
+├── cli.rs               # 命令行参数定义（clap）
+├── lib.rs               # 库入口
+├── superpage/           # SuperPage 元数据解析
+│   ├── mod.rs           # 解析入口、组件提取、上下文解析
+│   ├── types.rs         # 公共类型定义（SpgComponent、RefType 等）
+│   ├── raw_types.rs     # JSON 反序列化结构体
+│   └── expr.rs          # 表达式引用解析（正则、classify_ref）
+├── dependency.rs        # 组件依赖图、拓扑排序、循环检测、值追溯
+├── priority.rs          # defaultValue/exp/calcCondition 优先级分析
+├── output/              # 输出模块
+│   ├── mod.rs           # human/JSON 双模式输出、summary/detail
+│   └── component.rs     # 组件查询输出（human + JSON）
+├── parser.rs            # 文件类型识别、统一元数据结构
+├── graph.rs             # petgraph 有向图 + redb 持久化
+├── scanner/             # 项目目录扫描
+│   ├── mod.rs           # 扫描入口、增量检测
+│   ├── utils.rs         # 文件收集、路径解析
+│   ├── spg.rs           # SPG 元数据解析和图构建
+│   └── tbl.rs           # TBL/DataFlow 元数据解析和图构建
+└── query/               # 图查询接口
+    ├── mod.rs           # model/page/cross 查询
+    └── dataflow.rs      # DataFlow 子图展开、字段级来源追溯
 
-tests/             # 测试用例（115 个测试覆盖全部模块）
+tests/                   # 测试用例（覆盖全部模块）
 ```
 
 ## 图数据库

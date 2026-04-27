@@ -318,7 +318,7 @@ fn test_topological_sort_with_independent() {
 
     // input1, input2 应该在 input3 之前
     let pos1 = order.iter().position(|id| id == "input1");
-    let pos2 = order.iter().position(|id| id == "input2");
+    let _pos2 = order.iter().position(|id| id == "input2");
     let pos3 = order.iter().position(|id| id == "input3");
     let pos_text1 = order.iter().position(|id| id == "text1");
 
