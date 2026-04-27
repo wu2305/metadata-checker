@@ -174,10 +174,12 @@ pub fn process_spg_file_from_value(
                             );
                             let edge_meta = serde_json::json!({
                                 "reason": format!("Component '{}' reads from model '{}'", comp.id, model),
-                                "action": "Reads",
-                                "component": comp.id,
-                                "expression": expr.raw_expr,
-                                "field": expr.field,
+                                "actor_kind": "component",
+                                "actor_id": comp.id,
+                                "operation": "Reads",
+                                "target_model": model,
+                                "target_field": field,
+                                "source_expr": expr.raw_expr,
                             });
                             graph.add_edge_with_meta(
                                 &comp_id,
@@ -227,9 +229,12 @@ pub fn process_spg_file_from_value(
                 );
                 let submit_meta = serde_json::json!({
                     "reason": format!("Component '{}' binds submitField to model '{}'", comp.id, model),
-                    "action": "submitField",
-                    "component": comp.id,
-                    "field": format!("{}.{}", model, field),
+                    "actor_kind": "component",
+                    "actor_id": comp.id,
+                    "operation": "Writes",
+                    "target_model": model,
+                    "target_field": field,
+                    "source_expr": format!("{}.{}", model, field),
                 });
                 graph.add_edge_with_meta(
                     &comp_id,
@@ -347,9 +352,12 @@ pub fn process_spg_file_from_value(
                                 );
                                 let action_meta = serde_json::json!({
                                     "reason": format!("Action '{}' writes to model '{}'", action.action_type, model),
-                                    "action": action.action_type,
-                                    "component": comp.id,
-                                    "field": format!("{}.{}", model, field),
+                                    "actor_kind": "action",
+                                    "actor_id": action_id,
+                                    "operation": "ActionWrites",
+                                    "trigger": action.trigger_type,
+                                    "target_model": model,
+                                    "target_field": field,
                                 });
                                 graph.add_edge_with_meta(
                                     &action_id,
@@ -385,10 +393,13 @@ pub fn process_spg_file_from_value(
                             );
                             let ud_meta = serde_json::json!({
                                 "reason": format!("Action '{}' writes to field '{}'", action.action_type, field_name),
-                                "action": action.action_type,
-                                "component": comp.id,
-                                "field": format!("{}.{}", data_set, field_name),
-                                "expression": field_value,
+                                "actor_kind": "action",
+                                "actor_id": action_id,
+                                "operation": "ActionWrites",
+                                "trigger": action.trigger_type,
+                                "target_model": data_set,
+                                "target_field": field_name,
+                                "source_expr": field_value,
                             });
                             graph.add_edge_with_meta(
                                 &action_id,
@@ -426,9 +437,14 @@ pub fn process_spg_file_from_value(
                                             None,
                                         );
                                         let read_meta = serde_json::json!({
-                                            "action_type": action.action_type,
-                                            "trigger_type": action.trigger_type,
-                                            "source_component": comp.id,
+
+
+                                            "actor_kind": "action",
+                                            "actor_id": action_id,
+                                            "operation": "Reads",
+                                            "trigger": action.trigger_type,
+                                            "target_model": model,
+                                            "target_field": field,
                                             "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                         });
                                         graph.add_edge_with_meta(
@@ -476,9 +492,11 @@ pub fn process_spg_file_from_value(
                                         );
                                         let opens_meta = serde_json::json!({
                                             "reason": format!("Link action opens page '{}'", target_name),
-                                            "action": action.action_type,
-                                            "component": comp.id,
-                                            "target": target_name,
+                                            "actor_kind": "action",
+                                            "actor_id": action_id,
+                                            "operation": "OpensPage",
+                                            "trigger": action.trigger_type,
+                                            "target_model": target_name,
                                         });
                                         graph.add_edge_with_meta(
                                             &action_id,
@@ -501,10 +519,12 @@ pub fn process_spg_file_from_value(
                                             );
                                             let pass_meta = serde_json::json!({
                                                 "reason": format!("Link action passes param '{}'", param_name),
-                                                "action": action.action_type,
-                                                "component": comp.id,
-                                                "param_name": param_name,
-                                                "param_value": param_value,
+                                                "actor_kind": "action",
+                                                "actor_id": action_id,
+                                                "operation": "PassesParam",
+                                                "trigger": action.trigger_type,
+                                                "target_field": param_name,
+                                                "source_expr": param_value,
                                             });
                                             graph.add_edge_with_meta(
                                                 &action_id,
@@ -547,11 +567,16 @@ pub fn process_spg_file_from_value(
                                                         None,
                                                     );
                                                     let read_meta = serde_json::json!({
-                                                        "action_type": action.action_type,
-                                                        "trigger_type": action.trigger_type,
-                                                        "source_component": comp.id,
-                                                        "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
-                                                    });
+
+
+                                                                "actor_kind": "action",
+                                                    "actor_id": action_id,
+                                                    "operation": "Reads",
+                                                    "trigger": action.trigger_type,
+                                                    "target_model": model,
+                                                    "target_field": field,
+                                                                "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
+                                                            });
                                                     graph.add_edge_with_meta(
                                                         &action_id,
                                                         &ref_model_id,
@@ -588,10 +613,12 @@ pub fn process_spg_file_from_value(
                         );
                         let sets_meta = serde_json::json!({
                             "reason": format!("setParamValue sets param '{}'", param_name),
-                            "action": action.action_type,
-                            "component": comp.id,
-                            "param_name": param_name,
-                            "param_value": param_value,
+                            "actor_kind": "action",
+                            "actor_id": action_id,
+                            "operation": "SetsParam",
+                            "trigger": action.trigger_type,
+                            "target_field": param_name,
+                            "source_expr": param_value,
                         });
                         graph.add_edge_with_meta(
                             &action_id,
@@ -625,9 +652,14 @@ pub fn process_spg_file_from_value(
                                     None,
                                 );
                                 let read_meta = serde_json::json!({
-                                    "action_type": action.action_type,
-                                    "trigger_type": action.trigger_type,
-                                    "source_component": comp.id,
+
+
+                                    "actor_kind": "action",
+                                            "actor_id": action_id,
+                                            "operation": "Reads",
+                                            "trigger": action.trigger_type,
+                                            "target_model": model,
+                                            "target_field": field,
                                     "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                 });
                                 graph.add_edge_with_meta(

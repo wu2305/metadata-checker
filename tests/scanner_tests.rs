@@ -815,3 +815,55 @@ fn test_query_dataflow_not_found() {
 
     let _ = std::fs::remove_file(&db_path);
 }
+
+// ============================================================
+// 九、边 meta schema 统一化测试
+// ============================================================
+
+#[test]
+fn test_edge_meta_schema_unified() {
+    let db_path = std::env::temp_dir().join("metadata-checker-test-meta-schema.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // Collect all edges with meta
+    let mut checked = 0;
+    for edge_ref in graph.graph.edge_indices() {
+        let edge = graph.graph.edge_weight(edge_ref).unwrap();
+        if let Some(meta) = &edge.meta {
+            let meta_str = meta.to_string();
+            // Unified schema: must contain reason, actor_kind, actor_id, operation
+            assert!(
+                meta_str.contains("reason"),
+                "Edge meta must contain 'reason': {:?}",
+                edge
+            );
+            assert!(
+                meta_str.contains("actor_kind"),
+                "Edge meta must contain 'actor_kind': {:?}",
+                edge
+            );
+            assert!(
+                meta_str.contains("actor_id"),
+                "Edge meta must contain 'actor_id': {:?}",
+                edge
+            );
+            assert!(
+                meta_str.contains("operation"),
+                "Edge meta must contain 'operation': {:?}",
+                edge
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 0,
+        "Should have at least one edge with meta in the graph"
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+}
