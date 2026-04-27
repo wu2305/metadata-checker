@@ -154,3 +154,87 @@ fn test_print_component_query_json() {
     assert!(json.get("expressions").is_some(), "Should have expressions");
     assert!(json.get("value_trace").is_some(), "Should have value_trace");
 }
+
+// ============================================================
+// 四、summary / detail JSON 契约测试
+// ============================================================
+
+#[test]
+fn test_print_summary_is_valid_json() {
+    let path = PathBuf::from("tests/fixtures/test_superpage.spg");
+    let meta = parser::parse_file(&path).expect("Failed to parse");
+
+    let mut buf: Vec<u8> = Vec::new();
+    output::print_summary_to(&meta, None, &mut buf).expect("print_summary_to should succeed");
+    let s = String::from_utf8(buf).expect("Valid UTF-8");
+
+    let json: serde_json::Value = serde_json::from_str(&s).expect("Summary should be valid JSON");
+    assert_eq!(
+        json.get("schema_version").and_then(|v| v.as_str()),
+        Some("1.0")
+    );
+    assert_eq!(json.get("kind").and_then(|v| v.as_str()), Some("SuperPage"));
+    assert!(json.get("summary").is_some(), "Should have summary object");
+    assert!(
+        json.get("important_components").is_some(),
+        "Should have important_components"
+    );
+    assert!(json.get("diagnostics").is_some(), "Should have diagnostics");
+    // Summary should NOT contain full components/expressions arrays
+    assert!(
+        json.get("components").is_none(),
+        "Summary should not contain full components"
+    );
+    assert!(
+        json.get("dependency_order").is_none(),
+        "Summary should not contain dependency_order"
+    );
+}
+
+#[test]
+fn test_print_summary_with_priority_is_valid_json() {
+    use metadata_checker::priority;
+
+    let path = PathBuf::from("tests/fixtures/test_superpage.spg");
+    let meta = parser::parse_file(&path).expect("Failed to parse");
+    let spg = meta.superpage.as_ref().expect("Should be SuperPage");
+    let analyses = priority::analyze_priority(spg);
+
+    let mut buf: Vec<u8> = Vec::new();
+    output::print_summary_to(&meta, Some(&analyses), &mut buf)
+        .expect("print_summary_to should succeed");
+    let s = String::from_utf8(buf).expect("Valid UTF-8");
+
+    let json: serde_json::Value = serde_json::from_str(&s).expect("Summary should be valid JSON");
+    assert_eq!(
+        json.get("schema_version").and_then(|v| v.as_str()),
+        Some("1.0")
+    );
+    assert!(
+        json.get("priority_analysis").is_some(),
+        "Should have priority_analysis"
+    );
+}
+
+#[test]
+fn test_detail_output_contains_resolved_refs() {
+    let path = PathBuf::from("tests/fixtures/test_superpage.spg");
+    let meta = parser::parse_file(&path).expect("Failed to parse");
+
+    let mut buf: Vec<u8> = Vec::new();
+    output::print_non_human_to(&meta, None, &mut buf).expect("print_non_human_to should succeed");
+    let s = String::from_utf8(buf).expect("Valid UTF-8");
+
+    let json: serde_json::Value = serde_json::from_str(&s).expect("Should be valid JSON");
+    let expressions = json
+        .get("expressions")
+        .and_then(|v| v.as_array())
+        .expect("Should have expressions array");
+    assert!(!expressions.is_empty(), "Should have expressions");
+
+    let first_expr = &expressions[0];
+    assert!(
+        first_expr.get("resolved_refs").is_some(),
+        "Detail output should contain resolved_refs"
+    );
+}

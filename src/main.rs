@@ -99,15 +99,21 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Default non-human full report
-    output::print_non_human(&meta)?;
+    // Default non-human: compact summary, --detail for full report
+    let priority_analyses = if args.priority {
+        meta.superpage
+            .as_ref()
+            .map(|spg| priority::analyze_priority(spg))
+    } else {
+        None
+    };
 
-    if args.priority {
-        if let Some(spg) = &meta.superpage {
-            let analyses = priority::analyze_priority(spg);
-            let report = priority::format_priority_human(&analyses);
-            println!("\n{}", report);
-        }
+    let priority_slice = priority_analyses.as_deref();
+
+    if args.detail {
+        output::print_non_human_to(&meta, priority_slice, &mut io::stdout())?;
+    } else {
+        output::print_summary(&meta, priority_slice)?;
     }
 
     Ok(())

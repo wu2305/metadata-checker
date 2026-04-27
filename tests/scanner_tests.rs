@@ -518,10 +518,24 @@ fn test_scanner_embedsuperpage_relation() {
 
     let target = graph.graph.node_weight(outgoing[0].target());
     assert!(target.is_some(), "Target page should exist");
+    let target_node = target.unwrap();
     assert_eq!(
-        target.unwrap().name,
-        "目标详情",
+        target_node.name, "目标详情",
         "Should resolve to 目标详情.spg"
+    );
+    // Verify target page ID uses path-based format, not just file stem
+    assert!(
+        target_node.id.starts_with("page:"),
+        "Page ID should start with page: prefix"
+    );
+    assert!(
+        target_node.id.contains("目标详情"),
+        "Page ID should contain page name"
+    );
+    // Should be path-based, e.g. page:目标页面/目标详情.spg
+    assert!(
+        target_node.id.contains("/") || target_node.id.contains("\\"),
+        "Page ID should use path-based format with directory separator"
     );
 
     let _ = std::fs::remove_file(&db_path);
@@ -570,10 +584,23 @@ fn test_scanner_link_opens_page_relation() {
 
     let target = graph.graph.node_weight(outgoing[0].target());
     assert!(target.is_some(), "Target page should exist");
+    let target_node = target.unwrap();
     assert_eq!(
-        target.unwrap().name,
-        "目标详情",
+        target_node.name, "目标详情",
         "Should resolve to 目标详情.spg"
+    );
+    // Verify target page ID uses path-based format
+    assert!(
+        target_node.id.starts_with("page:"),
+        "Page ID should start with page: prefix"
+    );
+    assert!(
+        target_node.id.contains("目标详情"),
+        "Page ID should contain page name"
+    );
+    assert!(
+        target_node.id.contains("/") || target_node.id.contains("\\"),
+        "Page ID should use path-based format with directory separator"
     );
 
     let _ = std::fs::remove_file(&db_path);
