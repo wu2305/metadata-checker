@@ -90,65 +90,144 @@ fn resolve_expression_refs_with_context(
         components.iter().map(|c| c.id.as_str()).collect();
     let source_ids: std::collections::HashSet<&str> =
         sources.iter().map(|s| s.id.as_str()).collect();
-    let param_ids: std::collections::HashSet<&str> =
-        params.iter().map(|p| p.id.as_str()).collect();
+    let param_ids: std::collections::HashSet<&str> = params.iter().map(|p| p.id.as_str()).collect();
 
     for expr in expressions {
         expr.resolved_refs.clear();
         for ref_type in &mut expr.refs {
             let (new_ref, confidence, reason, unresolved) = match ref_type {
                 RefType::Other(token) => {
-                    let resolved = resolve_ref_token(token, &component_ids, &source_ids, &param_ids);
+                    let resolved =
+                        resolve_ref_token(token, &component_ids, &source_ids, &param_ids);
                     let (conf, reason, unresolved) = classify_confidence(
-                        &resolved, token, &component_ids, &source_ids, &param_ids,
+                        &resolved,
+                        token,
+                        &component_ids,
+                        &source_ids,
+                        &param_ids,
                     );
                     (resolved, conf, reason, unresolved)
                 }
                 RefType::ComponentValue(id) => {
                     let (conf, reason, unresolved) = if component_ids.contains(id.as_str()) {
-                        (Confidence::High, format!("Exact match: '{}' is a known component ID", id), false)
+                        (
+                            Confidence::High,
+                            format!("Exact match: '{}' is a known component ID", id),
+                            false,
+                        )
                     } else {
-                        (Confidence::Medium, format!("'{}' looks like a component reference but not found in current page; may be from parent or external context", id), false)
+                        (
+                            Confidence::Medium,
+                            format!(
+                                "'{}' looks like a component reference but not found in current page; may be from parent or external context",
+                                id
+                            ),
+                            false,
+                        )
                     };
-                    (RefType::ComponentValue(id.clone()), conf, reason, unresolved)
+                    (
+                        RefType::ComponentValue(id.clone()),
+                        conf,
+                        reason,
+                        unresolved,
+                    )
                 }
-                RefType::ModelField(model, field) if component_ids.contains(model.as_str()) => {
-                    (RefType::ComponentProperty(model.clone(), field.clone()),
-                     Confidence::High,
-                     format!("Corrected: '{}' was initially guessed as model but is actually a known component ID", model),
-                     false)
-                }
+                RefType::ModelField(model, field) if component_ids.contains(model.as_str()) => (
+                    RefType::ComponentProperty(model.clone(), field.clone()),
+                    Confidence::High,
+                    format!(
+                        "Corrected: '{}' was initially guessed as model but is actually a known component ID",
+                        model
+                    ),
+                    false,
+                ),
                 RefType::ModelField(model, field) => {
                     let (conf, reason, unresolved) = if source_ids.contains(model.as_str()) {
-                        (Confidence::High, format!("Exact match: '{}' is a known source (model) ID", model), false)
-                    } else if model.starts_with("model") || model.starts_with("tbl") || model.starts_with("fact_") {
-                        (Confidence::Medium, format!("Heuristic: '{}' matches model naming pattern", model), false)
+                        (
+                            Confidence::High,
+                            format!("Exact match: '{}' is a known source (model) ID", model),
+                            false,
+                        )
+                    } else if model.starts_with("model")
+                        || model.starts_with("tbl")
+                        || model.starts_with("fact_")
+                    {
+                        (
+                            Confidence::Medium,
+                            format!("Heuristic: '{}' matches model naming pattern", model),
+                            false,
+                        )
                     } else {
-                        (Confidence::Low, format!("Ambiguous: '{}' does not match known model or component IDs", model), true)
+                        (
+                            Confidence::Low,
+                            format!(
+                                "Ambiguous: '{}' does not match known model or component IDs",
+                                model
+                            ),
+                            true,
+                        )
                     };
-                    (RefType::ModelField(model.clone(), field.clone()), conf, reason, unresolved)
+                    (
+                        RefType::ModelField(model.clone(), field.clone()),
+                        conf,
+                        reason,
+                        unresolved,
+                    )
                 }
                 RefType::Param(name) => {
                     let (conf, reason, unresolved) = if param_ids.contains(name.as_str()) {
-                        (Confidence::High, format!("Exact match: '{}' is a known param ID", name), false)
+                        (
+                            Confidence::High,
+                            format!("Exact match: '{}' is a known param ID", name),
+                            false,
+                        )
                     } else {
-                        (Confidence::Medium, format!("'{}' looks like a param but not found in current page", name), false)
+                        (
+                            Confidence::Medium,
+                            format!(
+                                "'{}' looks like a param but not found in current page",
+                                name
+                            ),
+                            false,
+                        )
                     };
                     (RefType::Param(name.clone()), conf, reason, unresolved)
                 }
-                RefType::UserProperty(prop) => {
-                    (RefType::UserProperty(prop.clone()), Confidence::High, format!("System user property: '{}'", prop), false)
-                }
-                RefType::SystemVar(var) => {
-                    (RefType::SystemVar(var.clone()), Confidence::High, format!("System variable: '{}'", var), false)
-                }
+                RefType::UserProperty(prop) => (
+                    RefType::UserProperty(prop.clone()),
+                    Confidence::High,
+                    format!("System user property: '{}'", prop),
+                    false,
+                ),
+                RefType::SystemVar(var) => (
+                    RefType::SystemVar(var.clone()),
+                    Confidence::High,
+                    format!("System variable: '{}'", var),
+                    false,
+                ),
                 RefType::ComponentProperty(id, prop) => {
                     let (conf, reason, unresolved) = if component_ids.contains(id.as_str()) {
-                        (Confidence::High, format!("Exact match: '{}' is a known component ID", id), false)
+                        (
+                            Confidence::High,
+                            format!("Exact match: '{}' is a known component ID", id),
+                            false,
+                        )
                     } else {
-                        (Confidence::Medium, format!("'{}' looks like a component but not found in current page", id), false)
+                        (
+                            Confidence::Medium,
+                            format!(
+                                "'{}' looks like a component but not found in current page",
+                                id
+                            ),
+                            false,
+                        )
                     };
-                    (RefType::ComponentProperty(id.clone(), prop.clone()), conf, reason, unresolved)
+                    (
+                        RefType::ComponentProperty(id.clone(), prop.clone()),
+                        conf,
+                        reason,
+                        unresolved,
+                    )
                 }
             };
             *ref_type = new_ref.clone();
@@ -173,40 +252,87 @@ fn classify_confidence(
     match resolved {
         RefType::ComponentValue(id) => {
             if component_ids.contains(id.as_str()) {
-                (Confidence::High, format!("Exact match: '{}' is a known component ID", id), false)
+                (
+                    Confidence::High,
+                    format!("Exact match: '{}' is a known component ID", id),
+                    false,
+                )
             } else {
-                (Confidence::Medium, format!("Pattern match: '{}' looks like a component reference", id), false)
+                (
+                    Confidence::Medium,
+                    format!("Pattern match: '{}' looks like a component reference", id),
+                    false,
+                )
             }
         }
         RefType::ComponentProperty(id, _prop) => {
             if component_ids.contains(id.as_str()) {
-                (Confidence::High, format!("Exact match: '{}' is a known component ID", id), false)
+                (
+                    Confidence::High,
+                    format!("Exact match: '{}' is a known component ID", id),
+                    false,
+                )
             } else {
-                (Confidence::Medium, format!("Pattern match: '{}' looks like a component reference", id), false)
+                (
+                    Confidence::Medium,
+                    format!("Pattern match: '{}' looks like a component reference", id),
+                    false,
+                )
             }
         }
         RefType::ModelField(model, _field) => {
             if source_ids.contains(model.as_str()) {
-                (Confidence::High, format!("Exact match: '{}' is a known source (model) ID", model), false)
-            } else if model.starts_with("model") || model.starts_with("tbl") || model.starts_with("fact_") {
-                (Confidence::Medium, format!("Heuristic: '{}' matches model naming pattern", model), false)
+                (
+                    Confidence::High,
+                    format!("Exact match: '{}' is a known source (model) ID", model),
+                    false,
+                )
+            } else if model.starts_with("model")
+                || model.starts_with("tbl")
+                || model.starts_with("fact_")
+            {
+                (
+                    Confidence::Medium,
+                    format!("Heuristic: '{}' matches model naming pattern", model),
+                    false,
+                )
             } else {
-                (Confidence::Low, format!("Ambiguous: '{}' is not a known model ID; may be unresolved", model), true)
+                (
+                    Confidence::Low,
+                    format!(
+                        "Ambiguous: '{}' is not a known model ID; may be unresolved",
+                        model
+                    ),
+                    true,
+                )
             }
         }
         RefType::Param(name) => {
             if param_ids.contains(name.as_str()) {
-                (Confidence::High, format!("Exact match: '{}' is a known param ID", name), false)
+                (
+                    Confidence::High,
+                    format!("Exact match: '{}' is a known param ID", name),
+                    false,
+                )
             } else {
-                (Confidence::Medium, format!("Pattern match: '{}' looks like a param reference", name), false)
+                (
+                    Confidence::Medium,
+                    format!("Pattern match: '{}' looks like a param reference", name),
+                    false,
+                )
             }
         }
         RefType::UserProperty(_) | RefType::SystemVar(_) => {
             (Confidence::High, "System reference".to_string(), false)
         }
-        RefType::Other(token) => {
-            (Confidence::Unresolved, format!("Cannot resolve: '{}' does not match any known context", token), true)
-        }
+        RefType::Other(token) => (
+            Confidence::Unresolved,
+            format!(
+                "Cannot resolve: '{}' does not match any known context",
+                token
+            ),
+            true,
+        ),
     }
 }
 

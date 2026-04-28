@@ -88,7 +88,9 @@ fn test_incremental_deleted_file_removes_nodes_and_state() {
     fs::remove_file(&deleted_page).expect("fixture page should be removable");
     scan_project(&project_dir, &db_path).expect("scan after deletion should succeed");
     let graph = GraphDB::open(&db_path).expect("graph should open after deletion scan");
-    assert!(graph.get_node("page:app/delete_me.spg").is_none(), "deleted page node should be removed from graph"
+    assert!(
+        graph.get_node("page:app/delete_me.spg").is_none(),
+        "deleted page node should be removed from graph"
     );
     drop(graph);
 

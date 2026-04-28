@@ -18,10 +18,10 @@ fn test_text_field_expression() {
         .expect("text1.text expression should be extracted");
 
     assert_eq!(text1_expr.raw_expr, "=input1.value");
-    assert!(text1_expr
+    assert!(
+        text1_expr
             .refs
             .contains(&RefType::ComponentValue("input1".to_string())),
-
     );
 }
 
@@ -41,7 +41,7 @@ fn test_html_field_expression() {
         .refs
         .iter()
         .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model1" && f == "fieldA"));
-assert!(has_model);
+    assert!(has_model);
 }
 
 #[test]
@@ -56,15 +56,15 @@ fn test_formula_field_expression() {
         .expect("formula1.formula expression should be extracted");
 
     assert_eq!(formula1_expr.raw_expr, "=input2.value + input3.value");
-    assert!(formula1_expr
+    assert!(
+        formula1_expr
             .refs
             .contains(&RefType::ComponentValue("input2".to_string())),
-
     );
-    assert!(formula1_expr
+    assert!(
+        formula1_expr
             .refs
             .contains(&RefType::ComponentValue("input3".to_string())),
-
     );
 }
 
@@ -77,7 +77,9 @@ fn test_missing_version_field() {
     let path = PathBuf::from("tests/fixtures/missing_version.spg");
     let meta = parse_superpage(&path).expect("Should parse even without version");
 
-    assert!(meta.version.is_none(), "version should be None when missing"
+    assert!(
+        meta.version.is_none(),
+        "version should be None when missing"
     );
     assert_eq!(meta.theme, Some("default".to_string()));
     assert_eq!(meta.components.len(), 2); // canvas + text1
@@ -98,29 +100,28 @@ fn test_long_expression_parsing() {
         .find(|e| e.component_id == "text1" && e.field == "value")
         .expect("Long expression should be extracted");
 
-    assert!(text1_expr.raw_expr.len() > 100, "Expression should be long"
-    );
+    assert!(text1_expr.raw_expr.len() > 100, "Expression should be long");
 
     // 验证所有组件引用都被正确解析
-    assert!(text1_expr
+    assert!(
+        text1_expr
             .refs
             .contains(&RefType::ComponentValue("input1".to_string())),
-
     );
-    assert!(text1_expr
+    assert!(
+        text1_expr
             .refs
             .contains(&RefType::ComponentValue("input2".to_string())),
-
     );
-    assert!(text1_expr
+    assert!(
+        text1_expr
             .refs
             .contains(&RefType::ComponentValue("input3".to_string())),
-
     );
-    assert!(text1_expr
+    assert!(
+        text1_expr
             .refs
             .contains(&RefType::ComponentValue("input4".to_string())),
-
     );
 }
 
@@ -153,7 +154,9 @@ fn test_diamond_dependency() {
         "input1 should have reverse dependencies"
     );
     if let Some(deps) = reverse_input1 {
-        assert!(deps.len() >= 3, "input1 should be depended on by multiple components"
+        assert!(
+            deps.len() >= 3,
+            "input1 should be depended on by multiple components"
         );
     }
 }

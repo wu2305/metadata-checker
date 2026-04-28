@@ -43,13 +43,13 @@ fn test_parse_components() {
     let meta = parse_superpage(&path).expect("Failed to parse superpage");
 
     let ids: Vec<String> = meta.components.iter().map(|c| c.id.clone()).collect();
-assert!(ids.contains(&"input1".to_string()));
-assert!(ids.contains(&"input2".to_string()));
-assert!(ids.contains(&"input3".to_string()));
-assert!(ids.contains(&"text1".to_string()));
-assert!(ids.contains(&"panel1".to_string()));
-assert!(ids.contains(&"input4".to_string()));
-assert!(ids.contains(&"text2".to_string()));
+    assert!(ids.contains(&"input1".to_string()));
+    assert!(ids.contains(&"input2".to_string()));
+    assert!(ids.contains(&"input3".to_string()));
+    assert!(ids.contains(&"text1".to_string()));
+    assert!(ids.contains(&"panel1".to_string()));
+    assert!(ids.contains(&"input4".to_string()));
+    assert!(ids.contains(&"text2".to_string()));
 }
 
 #[test]
@@ -76,12 +76,8 @@ fn test_parse_expression_refs_simple() {
     // 应该只有 input2 和 input1（.value 是属性，不是独立引用）
     // 实际上正则匹配的是 input2.value 和 input1.value
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),
-
-    );
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),
-
-    );
+    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),);
 }
 
 #[test]
@@ -93,14 +89,8 @@ fn test_parse_expression_refs_model() {
     let has_model1 = refs
         .iter()
         .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model1" && f == "A"));
-    assert!((
-        has_param1), "Expected param1 reference, got: {:?}",
-        refs
-    );
-    assert!((
-        has_model1), "Expected model1.A reference, got: {:?}",
-        refs
-    );
+    assert!((has_param1), "Expected param1 reference, got: {:?}", refs);
+    assert!((has_model1), "Expected model1.A reference, got: {:?}", refs);
 }
 
 #[test]
@@ -128,8 +118,9 @@ fn test_parse_expression_refs_user() {
     let has_user = refs
         .iter()
         .any(|r| matches!(r, RefType::UserProperty(p) if p == "user.dept_id"));
-    assert!((
-        has_user), "Expected $user.dept_id reference, got: {:?}",
+    assert!(
+        (has_user),
+        "Expected $user.dept_id reference, got: {:?}",
         refs
     );
 }
@@ -141,10 +132,7 @@ fn test_parse_expression_refs_macro() {
     let has_model = refs
         .iter()
         .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model2" && f == "C"));
-    assert!((
-        has_model), "Expected model2.C reference, got: {:?}",
-        refs
-    );
+    assert!((has_model), "Expected model2.C reference, got: {:?}", refs);
 }
 
 #[test]
@@ -164,8 +152,8 @@ fn test_dependency_graph() {
     let has_input1 = input3_deps
         .iter()
         .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
-assert!(has_input2, "input3 should depend on input2");
-assert!(has_input1, "input3 should depend on input1");
+    assert!(has_input2, "input3 should depend on input2");
+    assert!(has_input1, "input3 should depend on input1");
 
     // text1 依赖 input3
     let text1_deps = graph
@@ -175,7 +163,7 @@ assert!(has_input1, "input3 should depend on input1");
     let has_input3 = text1_deps
         .iter()
         .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input3"));
-assert!(has_input3, "text1 should depend on input3");
+    assert!(has_input3, "text1 should depend on input3");
 }
 
 #[test]
@@ -192,13 +180,13 @@ fn test_topological_sort() {
     let pos_text1 = order.iter().position(|id| id == "text1");
 
     if let (Some(p1), Some(p3)) = (pos_input1, pos_input3) {
-assert!(p1 < p3, "input1 should come before input3");
+        assert!(p1 < p3, "input1 should come before input3");
     }
     if let (Some(p2), Some(p3)) = (pos_input2, pos_input3) {
-assert!(p2 < p3, "input2 should come before input3");
+        assert!(p2 < p3, "input2 should come before input3");
     }
     if let (Some(p3), Some(pt)) = (pos_input3, pos_text1) {
-assert!(p3 < pt, "input3 should come before text1");
+        assert!(p3 < pt, "input3 should come before text1");
     }
 }
 
@@ -217,12 +205,8 @@ fn test_parse_expression_refs_complex() {
     let refs = parse_expression_refs("=input1.value + input2.value");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),
-
-    );
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),
-
-    );
+    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
 }
 
 #[test]
@@ -235,13 +219,13 @@ fn test_skip_string_literals() {
     let has_empty_string = refs
         .iter()
         .any(|r| matches!(r, RefType::Other(s) if s == "''"));
-assert!(!has_empty_string, "String literals should be skipped");
+    assert!(!has_empty_string, "String literals should be skipped");
 
     // 应该包含 model5
     let has_model5 = refs
         .iter()
         .any(|r| matches!(r, RefType::ModelField(m, _) if m == "model5"));
-assert!(has_model5, "Expected model5 reference");
+    assert!(has_model5, "Expected model5 reference");
 
     // model5.EstimatedAnnualInterestRate 被去重后应该只出现一次
     let model5_count = refs

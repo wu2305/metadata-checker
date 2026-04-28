@@ -142,11 +142,15 @@ fn test_real_world_代付款协议_数据源过滤条件() {
         assert_ne!(model7, None, "Should have model7");
 
         if let Some(filter) = model7.and_then(|m7| m7.get("filter")) {
-                let filter_str = serde_json::to_string(filter).unwrap();
-                assert!(filter_str.contains("TOSTR"), "model7 filter should contain TOSTR"
-                );
-                assert!(filter_str.contains("TODAY()"), "model7 filter should contain TODAY()"
-                );
+            let filter_str = serde_json::to_string(filter).unwrap();
+            assert!(
+                filter_str.contains("TOSTR"),
+                "model7 filter should contain TOSTR"
+            );
+            assert!(
+                filter_str.contains("TODAY()"),
+                "model7 filter should contain TODAY()"
+            );
         }
 
         // model8 应该有 AND 和 IS NOT NULL 过滤条件
@@ -156,11 +160,15 @@ fn test_real_world_代付款协议_数据源过滤条件() {
         assert_ne!(model8, None, "Should have model8");
 
         if let Some(filter) = model8.and_then(|m8| m8.get("filter")) {
-                let filter_str = serde_json::to_string(filter).unwrap();
-                assert!(filter_str.contains("AND"), "model8 filter should contain AND"
-                );
-                assert!(filter_str.contains("IS NOT NULL"), "model8 filter should contain IS NOT NULL"
-                );
+            let filter_str = serde_json::to_string(filter).unwrap();
+            assert!(
+                filter_str.contains("AND"),
+                "model8 filter should contain AND"
+            );
+            assert!(
+                filter_str.contains("IS NOT NULL"),
+                "model8 filter should contain IS NOT NULL"
+            );
         }
 
         // model1 应该有 param 引用
@@ -168,9 +176,11 @@ fn test_real_world_代付款协议_数据源过滤条件() {
             .iter()
             .find(|s| s.get("id").and_then(|v| v.as_str()) == Some("model1"));
         if let Some(filter) = model1.and_then(|m1| m1.get("filter")) {
-                let filter_str = serde_json::to_string(filter).unwrap();
-                assert!(filter_str.contains("param3") || filter_str.contains("param4"), "model1 filter should reference params"
-                );
+            let filter_str = serde_json::to_string(filter).unwrap();
+            assert!(
+                filter_str.contains("param3") || filter_str.contains("param4"),
+                "model1 filter should reference params"
+            );
         }
     }
 }
@@ -231,22 +241,29 @@ fn test_real_world_销售合同_数据源表达式() {
 
     // 检查 sources 中复杂的 exp 表达式
     let raw = &meta.raw;
-    if let Some(filter) = raw.get("sources")
+    if let Some(filter) = raw
+        .get("sources")
         .and_then(|v| v.as_array())
         .and_then(|arr| arr.first())
         .and_then(|model1| model1.get("filter"))
     {
-                let filter_str = serde_json::to_string(filter).unwrap();
+        let filter_str = serde_json::to_string(filter).unwrap();
 
-                // 验证有 USER_INGROUP 函数
-                assert!(filter_str.contains("USER_INGROUP"), "销售合同 filter should contain USER_INGROUP"
-                );
-                // 验证有 OR 逻辑
-                assert!(filter_str.contains("OR"), "销售合同 filter should contain OR"
-                );
-                // 验证有 IS NOT NULL
-                assert!(filter_str.contains("IS NOT NULL"), "销售合同 filter should contain IS NOT NULL"
-                );
+        // 验证有 USER_INGROUP 函数
+        assert!(
+            filter_str.contains("USER_INGROUP"),
+            "销售合同 filter should contain USER_INGROUP"
+        );
+        // 验证有 OR 逻辑
+        assert!(
+            filter_str.contains("OR"),
+            "销售合同 filter should contain OR"
+        );
+        // 验证有 IS NOT NULL
+        assert!(
+            filter_str.contains("IS NOT NULL"),
+            "销售合同 filter should contain IS NOT NULL"
+        );
     }
 }
 
@@ -257,7 +274,8 @@ fn test_real_world_销售合同_组件表达式() {
 
     // 检查 canvas 下的 panel 中是否有 IF/CONCAT 表达式
     let raw = &meta.raw;
-    if let Some(comps) = raw.get("canvas")
+    if let Some(comps) = raw
+        .get("canvas")
         .and_then(|v| v.as_object())
         .and_then(|canvas| canvas.get("components"))
         .and_then(|v| v.as_array())

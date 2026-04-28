@@ -84,28 +84,28 @@ pub fn process_tbl_file_from_string(
             .get("properties")
             .and_then(|p| p.get("depends"))
             .and_then(|v| v.as_array())
-        {
-            for dep in depends {
-                if let Some(dep_path) = dep.as_str() {
-                    let dep_model = Path::new(dep_path)
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| dep_path.to_string());
-                    let dep_model_id = format!("model:{}", dep_model);
-                    graph.add_node(
-                        dep_model_id.clone(),
-                        NodeType::Model,
-                        dep_path.to_string(),
-                        dep_model.clone(),
-                        Some(serde_json::json!({"modelType": "DataFlowDependency"})),
-                    );
-                    graph.add_edge(
-                        &model_id,
-                        &dep_model_id,
-                        EdgeType::DataflowInput,
-                        Some(dep_path.to_string()),
-                    );
-                }
+    {
+        for dep in depends {
+            if let Some(dep_path) = dep.as_str() {
+                let dep_model = Path::new(dep_path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| dep_path.to_string());
+                let dep_model_id = format!("model:{}", dep_model);
+                graph.add_node(
+                    dep_model_id.clone(),
+                    NodeType::Model,
+                    dep_path.to_string(),
+                    dep_model.clone(),
+                    Some(serde_json::json!({"modelType": "DataFlowDependency"})),
+                );
+                graph.add_edge(
+                    &model_id,
+                    &dep_model_id,
+                    EdgeType::DataflowInput,
+                    Some(dep_path.to_string()),
+                );
+            }
         }
     }
 
@@ -156,10 +156,8 @@ pub fn process_tbl_file_from_string(
                             for step in steps {
                                 if step.get("type").and_then(|v| v.as_str()) == Some("AddField")
                                     && let Some(add_field) = step.get("addField")
-                                    && add_field.get("name").and_then(|v| v.as_str())
-                                        == Some(name)
-                                    && let Some(e) =
-                                        add_field.get("exp").and_then(|v| v.as_str())
+                                    && add_field.get("name").and_then(|v| v.as_str()) == Some(name)
+                                    && let Some(e) = add_field.get("exp").and_then(|v| v.as_str())
                                 {
                                     step_exp = Some(e.to_string());
                                 }

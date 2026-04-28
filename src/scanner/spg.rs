@@ -196,10 +196,7 @@ pub fn process_spg_file_from_value(
     let mut expr_map: std::collections::HashMap<&str, Vec<&crate::superpage::ComponentExpr>> =
         std::collections::HashMap::new();
     for expr in &meta.expressions {
-        expr_map
-            .entry(&expr.component_id)
-            .or_default()
-            .push(expr);
+        expr_map.entry(&expr.component_id).or_default().push(expr);
     }
     // Process components and their expressions
     for comp in &meta.components {
@@ -232,14 +229,7 @@ pub fn process_spg_file_from_value(
                             "target_field": field,
                             "source_expr": expr.raw_expr,
                         });
-                        add_model_read(
-                            graph,
-                            &comp_id,
-                            model,
-                            field,
-                            &model_path,
-                            edge_meta,
-                        );
+                        add_model_read(graph, &comp_id, model, field, &model_path, edge_meta);
                     }
                 }
             }
@@ -295,24 +285,24 @@ pub fn process_spg_file_from_value(
             && let Some(target_rel) =
                 resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
         {
-                let target_name = Path::new(&target_rel)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| target_rel.clone());
-                let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
-                graph.add_node(
-                    target_page_id.clone(),
-                    NodeType::Page,
-                    target_rel.clone(),
-                    target_name.clone(),
-                    None,
-                );
-                graph.add_edge(
-                    &comp_id,
-                    &target_page_id,
-                    EdgeType::EmbedsPage,
-                    Some(target_rel.clone()),
-                );
+            let target_name = Path::new(&target_rel)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| target_rel.clone());
+            let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
+            graph.add_node(
+                target_page_id.clone(),
+                NodeType::Page,
+                target_rel.clone(),
+                target_name.clone(),
+                None,
+            );
+            graph.add_edge(
+                &comp_id,
+                &target_page_id,
+                EdgeType::EmbedsPage,
+                Some(target_rel.clone()),
+            );
         }
     }
 
@@ -446,108 +436,97 @@ pub fn process_spg_file_from_value(
                     }
                 }
                 "link" if action.target_type.as_str() == "app" => {
-                            // Try to resolve path as integer index into referenceResources
-                            if let Some(ref path_str) = action.path
-                                && let Ok(ref_idx) = path_str.parse::<usize>()
-                                && let Some(target_rel) = resolve_reference_path(
-                                    rel_path,
-                                    ref_idx,
-                                    &meta.reference_resources,
-                                    )
-                            {
-                                    let target_name = Path::new(&target_rel)
-                                        .file_stem()
-                                        .map(|s| s.to_string_lossy().to_string())
-                                        .unwrap_or_else(|| target_rel.clone());
-                                    let target_page_id =
-                                        format!("page:{}", target_rel.replace(r"\", "/"));
-                                    graph.add_node(
-                                        target_page_id.clone(),
-                                        NodeType::Page,
-                                        target_rel.clone(),
-                                        target_name.clone(),
-                                        None,
-                                    );
-                                    let opens_meta = serde_json::json!({
-                                        "reason": format!("Link action opens page '{}'", target_name),
+                    // Try to resolve path as integer index into referenceResources
+                    if let Some(ref path_str) = action.path
+                        && let Ok(ref_idx) = path_str.parse::<usize>()
+                        && let Some(target_rel) =
+                            resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
+                    {
+                        let target_name = Path::new(&target_rel)
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| target_rel.clone());
+                        let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
+                        graph.add_node(
+                            target_page_id.clone(),
+                            NodeType::Page,
+                            target_rel.clone(),
+                            target_name.clone(),
+                            None,
+                        );
+                        let opens_meta = serde_json::json!({
+                            "reason": format!("Link action opens page '{}'", target_name),
+                            "actor_kind": "action",
+                            "actor_id": action_id,
+                            "operation": "OpensPage",
+                            "trigger": action.trigger_type,
+                            "target_model": target_name,
+                        });
+                        graph.add_edge_with_meta(
+                            &action_id,
+                            &target_page_id,
+                            EdgeType::OpensPage,
+                            Some(target_rel.clone()),
+                            Some(opens_meta),
+                        );
+
+                        // Process parameter passing via data array
+                        for (param_name, param_value) in &action.data {
+                            let param_id = format!("param:{}/{}", target_name, param_name);
+                            graph.add_node(
+                                param_id.clone(),
+                                NodeType::Field,
+                                target_rel.clone(),
+                                param_name.clone(),
+                                None,
+                            );
+                            let pass_meta = serde_json::json!({
+                                "reason": format!("Link action passes param '{}'", param_name),
+                                "actor_kind": "action",
+                                "actor_id": action_id,
+                                "operation": "PassesParam",
+                                "trigger": action.trigger_type,
+                                "target_field": param_name,
+                                "source_expr": param_value,
+                            });
+                            graph.add_edge_with_meta(
+                                &action_id,
+                                &param_id,
+                                EdgeType::PassesParam,
+                                Some(param_value.clone()),
+                                Some(pass_meta),
+                            );
+                            // Parse expression refs from param_value for dependency analysis
+                            let refs = crate::superpage::parse_expression_refs(param_value);
+                            for ref_type in refs {
+                                if let crate::superpage::RefType::ModelField(model, field) =
+                                    ref_type
+                                {
+                                    let model_path = source_path_map
+                                        .get(&model)
+                                        .map(|p| p.to_string())
+                                        .unwrap_or_else(|| format!("{}.tbl", model));
+                                    let read_meta = serde_json::json!({
                                         "actor_kind": "action",
                                         "actor_id": action_id,
-                                        "operation": "OpensPage",
+                                        "operation": "Reads",
                                         "trigger": action.trigger_type,
-                                        "target_model": target_name,
+                                        "target_model": model,
+                                        "target_field": field,
+                                        "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                     });
-                                    graph.add_edge_with_meta(
+                                    add_model_read(
+                                        graph,
                                         &action_id,
-                                        &target_page_id,
-                                        EdgeType::OpensPage,
-                                        Some(target_rel.clone()),
-                                        Some(opens_meta),
+                                        &model,
+                                        &field,
+                                        &model_path,
+                                        read_meta,
                                     );
-
-                                    // Process parameter passing via data array
-                                    for (param_name, param_value) in &action.data {
-                                        let param_id =
-                                            format!("param:{}/{}", target_name, param_name);
-                                        graph.add_node(
-                                            param_id.clone(),
-                                            NodeType::Field,
-                                            target_rel.clone(),
-                                            param_name.clone(),
-                                            None,
-                                        );
-                                        let pass_meta = serde_json::json!({
-                                            "reason": format!("Link action passes param '{}'", param_name),
-                                            "actor_kind": "action",
-                                            "actor_id": action_id,
-                                            "operation": "PassesParam",
-                                            "trigger": action.trigger_type,
-                                            "target_field": param_name,
-                                            "source_expr": param_value,
-                                        });
-                                        graph.add_edge_with_meta(
-                                            &action_id,
-                                            &param_id,
-                                            EdgeType::PassesParam,
-                                            Some(param_value.clone()),
-                                            Some(pass_meta),
-                                        );
-                                        // Parse expression refs from param_value for dependency analysis
-                                        let refs = crate::superpage::parse_expression_refs(
-                                            param_value,
-                                        );
-                                        for ref_type in refs {
-                                            if let crate::superpage::RefType::ModelField(
-                                                model,
-                                                field,
-                                            ) = ref_type
-                                            {
-                                                let model_path = source_path_map
-                                                    .get(&model)
-                                                    .map(|p| p.to_string())
-                                                    .unwrap_or_else(|| {
-                                                        format!("{}.tbl", model)
-                                                    });
-                                                let read_meta = serde_json::json!({
-                                                    "actor_kind": "action",
-                                                    "actor_id": action_id,
-                                                    "operation": "Reads",
-                                                    "trigger": action.trigger_type,
-                                                    "target_model": model,
-                                                    "target_field": field,
-                                                    "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
-                                                });
-                                                add_model_read(
-                                                    graph,
-                                                    &action_id,
-                                                    &model,
-                                                    &field,
-                                                    &model_path,
-                                                    read_meta,
-                                                );
-                                        }
-                                    }
                                 }
                             }
+                        }
+                    }
                 }
                 "setParamValue" => {
                     for (param_name, param_value) in &action.params {

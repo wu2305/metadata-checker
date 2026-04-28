@@ -32,15 +32,9 @@ fn test_nested_if_expression() {
     );
 
     // 应该解析出 input1, input2, input3
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),
-
-    );
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),
-
-    );
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),
-
-    );
+    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),);
 }
 
 #[test]
@@ -51,9 +45,7 @@ fn test_logical_operators() {
 
     assert_eq!(refs.len(), 6);
     for i in 1..=6 {
-        assert!(refs.contains(&RefType::ComponentValue(format!("input{}", i))),
-
-        );
+        assert!(refs.contains(&RefType::ComponentValue(format!("input{}", i))),);
     }
 }
 
@@ -62,12 +54,8 @@ fn test_concat_multiple_args() {
     let refs = parse_expression_refs("=CONCAT('前缀', input2.value, '中缀', input3.value, '后缀')");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),
-
-    );
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),
-
-    );
+    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),);
 }
 
 #[test]
@@ -97,7 +85,7 @@ fn test_list_column_reference() {
     let has_list = refs
         .iter()
         .any(|r| matches!(r, RefType::ComponentValue(id) if id == "list1"));
-assert!(has_list, "Should detect list1 reference");
+    assert!(has_list, "Should detect list1 reference");
 }
 
 #[test]
@@ -107,7 +95,7 @@ fn test_steps_step_reference() {
     let has_steps = refs
         .iter()
         .any(|r| matches!(r, RefType::ComponentValue(id) if id == "steps1"));
-assert!(has_steps, "Should detect steps1 reference");
+    assert!(has_steps, "Should detect steps1 reference");
 }
 
 #[test]
@@ -170,15 +158,15 @@ fn test_cross_dependency() {
     let has_input2 = input3_deps
         .iter()
         .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input2"));
-assert!(has_input1);
-assert!(has_input2);
+    assert!(has_input1);
+    assert!(has_input2);
 
     // input7 只依赖 input1（分支依赖验证）
     let input7_deps = graph.dependencies.get("input7").expect("input7 not found");
     let has_input1_only = input7_deps
         .iter()
         .all(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
-assert!(has_input1_only);
+    assert!(has_input1_only);
 }
 
 #[test]
@@ -218,20 +206,20 @@ fn test_independent_components_topological() {
 fn test_file_not_found() {
     let path = PathBuf::from("tests/fixtures/nonexistent.spg");
     let result = parse_superpage(&path);
-assert!(result.is_err(), "Should error for nonexistent file");
+    assert!(result.is_err(), "Should error for nonexistent file");
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("Failed to read file") || err_msg.contains("No such file"),
-
-    );
+    assert!(err_msg.contains("Failed to read file") || err_msg.contains("No such file"),);
 }
 
 #[test]
 fn test_invalid_json() {
     let path = PathBuf::from("tests/fixtures/invalid_json.spg");
     let result = parse_superpage(&path);
-assert!(result.is_err(), "Should error for invalid JSON");
+    assert!(result.is_err(), "Should error for invalid JSON");
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("Failed to parse JSON"), "Error should mention JSON parsing: {}",
+    assert!(
+        err_msg.contains("Failed to parse JSON"),
+        "Error should mention JSON parsing: {}",
         err_msg
     );
 }
@@ -240,7 +228,7 @@ assert!(result.is_err(), "Should error for invalid JSON");
 fn test_empty_file() {
     let path = PathBuf::from("tests/fixtures/empty_file.spg");
     let result = parse_superpage(&path);
-assert!(result.is_err(), "Should error for empty file");
+    assert!(result.is_err(), "Should error for empty file");
 }
 
 #[test]

@@ -481,9 +481,7 @@ impl GraphDB {
     }
 
     /// 查询指定模型的上游依赖（DataflowInput 边）
-    pub fn find_upstream_dependencies<'a>(&'a self,
-        model_id: &str,
-    ) -> Vec<NodeEdgePair<'a>> {
+    pub fn find_upstream_dependencies<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
         let mut results = Vec::new();
         if let Some(&idx) = self.node_indices.get(model_id) {
             for edge_ref in self
@@ -502,10 +500,7 @@ impl GraphDB {
     }
 
     /// 查询指定模型的下游输出（OutputsTo 边）
-    pub fn find_downstream_outputs<'a>(
-        &'a self,
-        model_id: &str,
-    ) -> Vec<NodeEdgePair<'a>> {
+    pub fn find_downstream_outputs<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
         let mut results = Vec::new();
         if let Some(&idx) = self.node_indices.get(model_id) {
             for edge_ref in self

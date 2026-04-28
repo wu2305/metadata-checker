@@ -6,7 +6,7 @@ fn test_missing_version_field_tolerated() {
     let path = PathBuf::from("tests/fixtures/edge_cases.spg");
     let meta = parse_superpage(&path).expect("Should parse even without version");
 
-assert!(meta.version.is_none());
+    assert!(meta.version.is_none());
     // 其他字段应正常解析
     assert_eq!(meta.theme, Some("default".to_string()));
 }
@@ -44,9 +44,7 @@ fn test_system_variable_project() {
     let refs = parse_expression_refs("=$project.name");
 
     assert_eq!(refs.len(), 1);
-    assert!(refs.contains(&RefType::UserProperty("project.name".to_string())),
-
-    );
+    assert!(refs.contains(&RefType::UserProperty("project.name".to_string())),);
 }
 
 #[test]
@@ -54,9 +52,7 @@ fn test_system_variable_user_no_property() {
     let refs = parse_expression_refs("=$user");
 
     assert_eq!(refs.len(), 1);
-    assert!(refs.contains(&RefType::SystemVar("$user".to_string())),
-
-    );
+    assert!(refs.contains(&RefType::SystemVar("$user".to_string())),);
 }
 
 #[test]
@@ -83,10 +79,11 @@ fn test_nonexistent_component_reference() {
         .iter()
         .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
 
-    assert!((
-        has_nonexistent), "Should parse reference to nonexistent component"
+    assert!(
+        (has_nonexistent),
+        "Should parse reference to nonexistent component"
     );
-assert!(has_input1, "Should parse reference to input1");
+    assert!(has_input1, "Should parse reference to input1");
 }
 
 #[test]

@@ -100,9 +100,7 @@ fn main() -> Result<()> {
 
     // Default non-human: compact summary, --detail for full report
     let priority_analyses = if args.priority {
-        meta.superpage
-            .as_ref()
-            .map(priority::analyze_priority)
+        meta.superpage.as_ref().map(priority::analyze_priority)
     } else {
         None
     };
