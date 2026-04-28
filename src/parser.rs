@@ -13,7 +13,6 @@ use crate::superpage;
 /// - 其他 → 尝试旧版 Table 解析
 ///
 /// 同时提供统一的 PageMetadata 结构，兼容两种输入格式。
-
 /// Parsed metadata summary extracted from the low-code platform JSON.
 #[derive(Debug, Default)]
 pub struct PageMetadata {
@@ -73,27 +72,27 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
                 .map(String::from);
 
             // Handle "forms" wrapper (fapp-style)
-            if let Some(forms_val) = obj.get("forms") {
-                if let Some(forms_obj) = forms_val.as_object() {
-                    meta.version = forms_obj
-                        .get("version")
-                        .and_then(|v| v.as_str())
-                        .map(String::from)
-                        .or(meta.version);
-                    if let Some(forms_arr) = forms_obj.get("forms").and_then(|v| v.as_array()) {
-                        for form in forms_arr {
-                            if let Some(form_obj) = form.as_object() {
-                                let page_id = form_obj
-                                    .get("id")
-                                    .and_then(|v| v.as_str())
-                                    .map(String::from);
-                                meta.page_id = meta.page_id.or(page_id);
-                                if let Some(components) =
-                                    form_obj.get("components").and_then(|v| v.as_array())
-                                {
-                                    for comp in components {
-                                        meta.components.push(extract_component(comp));
-                                    }
+            if let Some(forms_val) = obj.get("forms")
+                && let Some(forms_obj) = forms_val.as_object()
+            {
+                meta.version = forms_obj
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+                    .or(meta.version);
+                if let Some(forms_arr) = forms_obj.get("forms").and_then(|v| v.as_array()) {
+                    for form in forms_arr {
+                        if let Some(form_obj) = form.as_object() {
+                            let page_id = form_obj
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                            meta.page_id = meta.page_id.or(page_id);
+                            if let Some(components) =
+                                form_obj.get("components").and_then(|v| v.as_array())
+                            {
+                                for comp in components {
+                                    meta.components.push(extract_component(comp));
                                 }
                             }
                         }
@@ -122,11 +121,11 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
             }
 
             // Handle "settings"
-            if let Some(settings) = obj.get("settings") {
-                if let Some(smap) = settings.as_object() {
-                    for (k, v) in smap {
-                        meta.settings.insert(k.clone(), v.clone());
-                    }
+            if let Some(settings) = obj.get("settings")
+                && let Some(smap) = settings.as_object()
+            {
+                for (k, v) in smap {
+                    meta.settings.insert(k.clone(), v.clone());
                 }
             }
 

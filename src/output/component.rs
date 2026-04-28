@@ -104,20 +104,20 @@ pub fn print_component_query_human_to(
     }
 
     let downstream = graph.reverse_deps.get(target_id);
-    if let Some(dep_ids) = downstream {
-        if !dep_ids.is_empty() {
-            writeln!(out, "\n--- Downstream Dependencies ---")?;
-            for dep_id in dep_ids {
-                if let Some(dep_comp) = spg.components.iter().find(|c| c.id == *dep_id) {
-                    writeln!(out, "\n> {} ({})", dep_id, dep_comp.component_type)?;
-                    let dep_exprs: Vec<_> = spg
-                        .expressions
-                        .iter()
-                        .filter(|e| e.component_id == *dep_id)
-                        .collect();
-                    for expr in dep_exprs {
-                        writeln!(out, "  [{}] {}", expr.field, expr.raw_expr)?;
-                    }
+    if let Some(dep_ids) = downstream
+        && !dep_ids.is_empty()
+    {
+        writeln!(out, "\n--- Downstream Dependencies ---")?;
+        for dep_id in dep_ids {
+            if let Some(dep_comp) = spg.components.iter().find(|c| c.id == *dep_id) {
+                writeln!(out, "\n> {} ({})", dep_id, dep_comp.component_type)?;
+                let dep_exprs: Vec<_> = spg
+                    .expressions
+                    .iter()
+                    .filter(|e| e.component_id == *dep_id)
+                    .collect();
+                for expr in dep_exprs {
+                    writeln!(out, "  [{}] {}", expr.field, expr.raw_expr)?;
                 }
             }
         }

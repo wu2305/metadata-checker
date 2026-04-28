@@ -65,7 +65,7 @@ fn test_parse_actions_basic() {
         .expect("button5 should exist");
     assert_eq!(button5.actions.len(), 1);
     assert_eq!(button5.actions[0].action_type, "submitData");
-    assert_eq!(button5.actions[0].submit_component.is_empty(), true);
+assert!(button5.actions[0].submit_component.is_empty());
 }
 
 #[test]

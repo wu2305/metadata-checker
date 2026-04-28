@@ -211,11 +211,8 @@ fn trace_field_source(
         exp: current_exp.clone(),
     });
 
-    loop {
-        let node_alias = match &current_node_alias {
-            Some(a) => a.clone(),
-            None => break,
-        };
+    while let Some(node_alias) = &current_node_alias {
+        let node_alias = node_alias.clone();
 
         let node_id = match meta.get_node_id(&node_alias) {
             Some(id) => id,

@@ -21,8 +21,8 @@ fn test_cycle_detection_simple() {
     assert_eq!(cycles.len(), 1, "Should detect exactly one cycle");
 
     let cycle = &cycles[0];
-    assert_eq!(cycle.contains(&"input1".to_string()), true);
-    assert_eq!(cycle.contains(&"input2".to_string()), true);
+assert!(cycle.contains(&"input1".to_string()));
+assert!(cycle.contains(&"input2".to_string()));
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn test_self_reference_detection() {
 
     assert_ne!(cycles.len(), 0, "Should detect self-reference cycle");
     let cycle = &cycles[0];
-    assert_eq!(cycle.contains(&"input1".to_string()), true);
+assert!(cycle.contains(&"input1".to_string()));
 }
 
 #[test]
@@ -89,8 +89,8 @@ fn test_deep_nesting_expression() {
         .refs
         .iter()
         .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model1" && f == "A"));
-    assert_eq!(has_param, true, "Should reference param1");
-    assert_eq!(has_model, true, "Should reference model1.A");
+assert!(has_param, "Should reference param1");
+assert!(has_model, "Should reference model1.A");
 }
 
 // ============================================================
@@ -115,8 +115,8 @@ fn test_complex_if_nested() {
     let has_field = refs
         .iter()
         .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model2" && f == "fieldB"));
-    assert_eq!(has_total, true);
-    assert_eq!(has_field, true);
+assert!(has_total);
+assert!(has_field);
 }
 
 #[test]
@@ -125,9 +125,8 @@ fn test_complex_concat_expression() {
 
     // 只应识别 input3.value
     assert_eq!(refs.len(), 1);
-    assert_eq!(
-        refs.contains(&RefType::ComponentValue("input3".to_string())),
-        true
+    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),
+
     );
 }
 
@@ -136,13 +135,11 @@ fn test_complex_logical_operators() {
     let refs = parse_expression_refs("=input1.value != 'test' AND input2.value IS NOT NULL");
 
     assert_eq!(refs.len(), 2);
-    assert_eq!(
-        refs.contains(&RefType::ComponentValue("input1".to_string())),
-        true
+    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),
+
     );
-    assert_eq!(
-        refs.contains(&RefType::ComponentValue("input2".to_string())),
-        true
+    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),
+
     );
 }
 
@@ -151,13 +148,11 @@ fn test_complex_arithmetic_with_function() {
     let refs = parse_expression_refs("=ROUND(input3.value / input4.value, 2)");
 
     assert_eq!(refs.len(), 2);
-    assert_eq!(
-        refs.contains(&RefType::ComponentValue("input3".to_string())),
-        true
+    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),
+
     );
-    assert_eq!(
-        refs.contains(&RefType::ComponentValue("input4".to_string())),
-        true
+    assert!(refs.contains(&RefType::ComponentValue("input4".to_string())),
+
     );
 }
 
@@ -166,9 +161,8 @@ fn test_macro_expression_parsing() {
     let refs = parse_expression_refs("=${model2.C}");
 
     assert_eq!(refs.len(), 1);
-    assert_eq!(
-        refs.contains(&RefType::ModelField("model2".to_string(), "C".to_string())),
-        true
+    assert!(refs.contains(&RefType::ModelField("model2".to_string(), "C".to_string())),
+
     );
 }
 
@@ -179,7 +173,7 @@ fn test_system_variable_expression() {
     let has_user = refs
         .iter()
         .any(|r| matches!(r, RefType::UserProperty(p) if p == "user.dept_id"));
-    assert_eq!(has_user, true, "Should detect $user.dept_id");
+assert!(has_user, "Should detect $user.dept_id");
 }
 
 #[test]
@@ -207,9 +201,8 @@ fn test_empty_fields_tolerance() {
 
     // 缺少 type 的组件不应被提取
     let has_no_type = meta.components.iter().any(|c| c.id == "comp_without_type");
-    assert_eq!(
-        !has_no_type, true,
-        "Component without type should not be extracted"
+    assert!((
+        !has_no_type), "Component without type should not be extracted"
     );
 
     // 缺少 id 的组件不应被提取
@@ -217,14 +210,13 @@ fn test_empty_fields_tolerance() {
         .components
         .iter()
         .any(|c| c.component_type == "input" && c.id.is_empty());
-    assert_eq!(
-        !has_no_id, true,
-        "Component without id should not be extracted"
+    assert!((
+        !has_no_id), "Component without id should not be extracted"
     );
 
     // 正常组件应被提取
     let has_normal = meta.components.iter().any(|c| c.id == "normal_input");
-    assert_eq!(has_normal, true, "Normal component should be extracted");
+assert!(has_normal, "Normal component should be extracted");
 }
 
 #[test]
@@ -238,11 +230,10 @@ fn test_empty_components_array() {
         .find(|c| c.id == "empty_comp")
         .unwrap();
     assert_eq!(empty_panel.component_type, "panel");
-    assert_eq!(
-        meta.expressions
+    assert!(meta.expressions
             .iter()
             .all(|e| e.component_id != "empty_comp"),
-        true
+
     );
 }
 
@@ -267,9 +258,9 @@ fn test_multi_field_expressions() {
     let has_default = input1_exprs.iter().any(|e| e.field == "defaultValue");
     let has_visible = input1_exprs.iter().any(|e| e.field == "visible");
 
-    assert_eq!(has_value, true);
-    assert_eq!(has_default, true);
-    assert_eq!(has_visible, true);
+assert!(has_value);
+assert!(has_default);
+assert!(has_visible);
 }
 
 // ============================================================
@@ -302,7 +293,7 @@ fn test_multi_source_dependency() {
     let has_input3 = text1_deps
         .iter()
         .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input3"));
-    assert_eq!(has_input3, true);
+assert!(has_input3);
 }
 
 // ============================================================
@@ -323,9 +314,9 @@ fn test_topological_sort_with_independent() {
     let pos_text1 = order.iter().position(|id| id == "text1");
 
     if let (Some(p1), Some(p3)) = (pos1, pos3) {
-        assert_eq!(p1 < p3, true, "input1 should come before input3");
+assert!(p1 < p3, "input1 should come before input3");
     }
     if let (Some(p3), Some(pt)) = (pos3, pos_text1) {
-        assert_eq!(p3 < pt, true, "input3 should come before text1");
+assert!(p3 < pt, "input3 should come before text1");
     }
 }

@@ -84,6 +84,7 @@ pub struct GraphDB {
     seen_edges: HashSet<(String, String, EdgeType, Option<String>)>,
 }
 
+type NodeEdgePair<'a> = (&'a Node, &'a Edge);
 impl GraphDB {
     /// 打开或创建图数据库
     pub fn open(db_path: &Path) -> Result<Self> {
@@ -117,18 +118,17 @@ impl GraphDB {
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
             let (_, value) = item?;
-            if let Ok(edge) = serde_json::from_slice::<Edge>(value.value().as_slice()) {
-                if let (Some(&from_idx), Some(&to_idx)) =
+            if let Ok(edge) = serde_json::from_slice::<Edge>(value.value().as_slice())
+                && let (Some(&from_idx), Some(&to_idx)) =
                     (node_indices.get(&edge.from), node_indices.get(&edge.to))
-                {
-                    graph.add_edge(from_idx, to_idx, edge.clone());
-                    seen_edges.insert((
-                        edge.from.clone(),
-                        edge.to.clone(),
-                        edge.edge_type.clone(),
-                        edge.field_path.clone(),
-                    ));
-                }
+            {
+                graph.add_edge(from_idx, to_idx, edge.clone());
+                seen_edges.insert((
+                    edge.from.clone(),
+                    edge.to.clone(),
+                    edge.edge_type.clone(),
+                    edge.field_path.clone(),
+                ));
             }
         }
 
@@ -167,18 +167,17 @@ impl GraphDB {
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
             let (_, value) = item?;
-            if let Ok(edge) = serde_json::from_slice::<Edge>(value.value().as_slice()) {
-                if let (Some(&from_idx), Some(&to_idx)) =
+            if let Ok(edge) = serde_json::from_slice::<Edge>(value.value().as_slice())
+                && let (Some(&from_idx), Some(&to_idx)) =
                     (node_indices.get(&edge.from), node_indices.get(&edge.to))
-                {
-                    graph.add_edge(from_idx, to_idx, edge.clone());
-                    seen_edges.insert((
-                        edge.from.clone(),
-                        edge.to.clone(),
-                        edge.edge_type.clone(),
-                        edge.field_path.clone(),
-                    ));
-                }
+            {
+                graph.add_edge(from_idx, to_idx, edge.clone());
+                seen_edges.insert((
+                    edge.from.clone(),
+                    edge.to.clone(),
+                    edge.edge_type.clone(),
+                    edge.field_path.clone(),
+                ));
             }
         }
 
@@ -340,13 +339,11 @@ impl GraphDB {
         {
             let mut edges_table = write_txn.open_table(EDGES_TABLE)?;
             edges_table.retain(|_, _| false)?;
-            let mut edge_count = 0usize;
-            for edge_ref in self.graph.edge_references() {
+            for (edge_count, edge_ref) in self.graph.edge_references().enumerate() {
                 let edge = edge_ref.weight();
                 let key = format!("{}", edge_count);
                 let bytes = serde_json::to_vec(edge).with_context(|| "Failed to serialize edge")?;
                 edges_table.insert(key.as_str(), bytes)?;
-                edge_count += 1;
             }
         }
 
@@ -380,7 +377,7 @@ impl GraphDB {
         Ok(states)
     }
     /// 查找读取指定模型的所有节点
-    pub fn find_readers<'a>(&'a self, model_id: &str) -> Vec<(&'a Node, &'a Edge)> {
+    pub fn find_readers<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
         let mut results = Vec::new();
         if let Some(&model_idx) = self.node_indices.get(model_id) {
             for edge_ref in self
@@ -388,10 +385,10 @@ impl GraphDB {
                 .edges_directed(model_idx, petgraph::Direction::Incoming)
             {
                 let edge = edge_ref.weight();
-                if matches!(edge.edge_type, EdgeType::Reads) {
-                    if let Some(node) = self.graph.node_weight(edge_ref.source()) {
-                        results.push((node, edge));
-                    }
+                if matches!(edge.edge_type, EdgeType::Reads)
+                    && let Some(node) = self.graph.node_weight(edge_ref.source())
+                {
+                    results.push((node, edge));
                 }
             }
         }
@@ -399,7 +396,7 @@ impl GraphDB {
     }
 
     /// 查找写入指定模型的所有节点
-    pub fn find_writers<'a>(&'a self, model_id: &str) -> Vec<(&'a Node, &'a Edge)> {
+    pub fn find_writers<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
         let mut results = Vec::new();
         if let Some(&model_idx) = self.node_indices.get(model_id) {
             for edge_ref in self
@@ -407,10 +404,10 @@ impl GraphDB {
                 .edges_directed(model_idx, petgraph::Direction::Incoming)
             {
                 let edge = edge_ref.weight();
-                if matches!(edge.edge_type, EdgeType::Writes | EdgeType::ActionWrites) {
-                    if let Some(node) = self.graph.node_weight(edge_ref.source()) {
-                        results.push((node, edge));
-                    }
+                if matches!(edge.edge_type, EdgeType::Writes | EdgeType::ActionWrites)
+                    && let Some(node) = self.graph.node_weight(edge_ref.source())
+                {
+                    results.push((node, edge));
                 }
             }
         }
@@ -422,7 +419,7 @@ impl GraphDB {
         &'a self,
         page_a: &str,
         page_b: &str,
-    ) -> Vec<Vec<(&'a Node, &'a Edge)>> {
+    ) -> Vec<Vec<NodeEdgePair<'a>>> {
         let mut paths = Vec::new();
         if let (Some(&a_idx), Some(&b_idx)) =
             (self.node_indices.get(page_a), self.node_indices.get(page_b))
@@ -437,19 +434,13 @@ impl GraphDB {
                 .collect();
 
             for a_n in &a_neighbors {
-                if b_neighbors.contains(a_n) {
-                    if let (Some(a_node), Some(mid_node)) =
+                if b_neighbors.contains(a_n)
+                    && let (Some(a_node), Some(mid_node)) =
                         (self.graph.node_weight(a_idx), self.graph.node_weight(*a_n))
-                    {
-                        if let Some(edge_a) = self.graph.edges_connecting(a_idx, *a_n).next() {
-                            if let Some(edge_b) = self.graph.edges_connecting(b_idx, *a_n).next() {
-                                paths.push(vec![
-                                    (a_node, edge_a.weight()),
-                                    (mid_node, edge_b.weight()),
-                                ]);
-                            }
-                        }
-                    }
+                    && let Some(edge_a) = self.graph.edges_connecting(a_idx, *a_n).next()
+                    && let Some(edge_b) = self.graph.edges_connecting(b_idx, *a_n).next()
+                {
+                    paths.push(vec![(a_node, edge_a.weight()), (mid_node, edge_b.weight())]);
                 }
             }
         }
@@ -468,16 +459,16 @@ impl GraphDB {
     pub fn get_node_edges<'a>(
         &'a self,
         node_id: &str,
-    ) -> Option<(Vec<(&'a Node, &'a Edge)>, Vec<(&'a Node, &'a Edge)>)> {
+    ) -> Option<(Vec<NodeEdgePair<'a>>, Vec<NodeEdgePair<'a>>)> {
         let idx = self.node_indices.get(node_id)?;
 
-        let outgoing: Vec<(&'a Node, &'a Edge)> = self
+        let outgoing: Vec<NodeEdgePair<'a>> = self
             .graph
             .edges_directed(*idx, petgraph::Direction::Outgoing)
             .filter_map(|e| self.graph.node_weight(e.target()).map(|n| (n, e.weight())))
             .collect();
 
-        let incoming: Vec<(&'a Node, &'a Edge)> = self
+        let incoming: Vec<NodeEdgePair<'a>> = self
             .graph
             .edges_directed(*idx, petgraph::Direction::Incoming)
             .filter_map(|e| self.graph.node_weight(e.source()).map(|n| (n, e.weight())))

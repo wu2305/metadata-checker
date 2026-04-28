@@ -10,7 +10,6 @@ use std::collections::HashMap;
 /// - calcCondition：条件计算值
 ///
 /// 当多个字段同时存在时，按平台规则确定最终生效的值。
-
 /// 组件计算优先级分析结果
 #[derive(Debug, Clone)]
 pub struct PriorityAnalysis {
@@ -174,13 +173,13 @@ pub fn format_priority_human(analyses: &[PriorityAnalysis]) -> String {
 fn refs_to_string(refs: &[RefType]) -> String {
     refs.iter()
         .map(|r| match r {
-            RefType::ComponentValue(id) => format!("{}", id),
+            RefType::ComponentValue(id) => id.clone(),
             RefType::ComponentProperty(id, prop) => format!("{}.{}", id, prop),
             RefType::ModelField(model, field) => format!("{}.{}", model, field),
-            RefType::Param(id) => format!("{}", id),
-            RefType::UserProperty(prop) => format!("{}", prop),
-            RefType::SystemVar(var) => format!("{}", var),
-            RefType::Other(s) => format!("{}", s),
+            RefType::Param(id) => id.clone(),
+            RefType::UserProperty(prop) => prop.clone(),
+            RefType::SystemVar(var) => var.clone(),
+            RefType::Other(s) => s.clone(),
         })
         .collect::<Vec<_>>()
         .join(", ")

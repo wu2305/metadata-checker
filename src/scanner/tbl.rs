@@ -13,7 +13,7 @@ pub fn process_tbl_file_from_string(
         return Ok(node_ids.into_iter().collect());
     }
 
-    let value: serde_json::Value = match serde_json::from_str(&content) {
+    let value: serde_json::Value = match serde_json::from_str(content) {
         Ok(v) => v,
         Err(_) => return Ok(node_ids.into_iter().collect()),
     };
@@ -56,61 +56,59 @@ pub fn process_tbl_file_from_string(
     }
 
     // For DataFlow type: process output physical table (dbTableName)
-    if is_dataflow {
-        if let Some(db_table_name) = value
+    if is_dataflow
+        && let Some(db_table_name) = value
             .get("properties")
             .and_then(|p| p.get("dbTableName"))
             .and_then(|v| v.as_str())
-        {
-            let output_model_id = format!("model:{}", db_table_name);
-            let db_table_path = format!("{}.tbl", db_table_name);
-            graph.add_node(
-                output_model_id.clone(),
-                NodeType::Model,
-                db_table_path,
-                db_table_name.to_string(),
-                Some(serde_json::json!({"modelType": "PhysicalTable"})),
-            );
-            graph.add_edge(
-                &model_id,
-                &output_model_id,
-                EdgeType::OutputsTo,
-                Some(db_table_name.to_string()),
-            );
-        }
+    {
+        let output_model_id = format!("model:{}", db_table_name);
+        let db_table_path = format!("{}.tbl", db_table_name);
+        graph.add_node(
+            output_model_id.clone(),
+            NodeType::Model,
+            db_table_path,
+            db_table_name.to_string(),
+            Some(serde_json::json!({"modelType": "PhysicalTable"})),
+        );
+        graph.add_edge(
+            &model_id,
+            &output_model_id,
+            EdgeType::OutputsTo,
+            Some(db_table_name.to_string()),
+        );
     }
 
     // For DataFlow type: process input sources (nodes referencing external tables)
-    if is_dataflow {
-        if let Some(nodes) = value
+    if is_dataflow
+        && let Some(nodes) = value
             .get("dataFlow")
             .and_then(|d| d.get("nodes"))
             .and_then(|n| n.as_object())
-        {
-            // First pass: build alias map, field mappings, and internal deps
-            let mut internal_deps: HashMap<String, Vec<String>> = HashMap::new();
-            let mut alias_map: HashMap<String, String> = HashMap::new();
-            let mut node_fields: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
-            let mut node_types: HashMap<String, String> = HashMap::new();
+    {
+        // First pass: build alias map, field mappings, and internal deps
+        let mut internal_deps: HashMap<String, Vec<String>> = HashMap::new();
+        let mut alias_map: HashMap<String, String> = HashMap::new();
+        let mut node_fields: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+        let mut node_types: HashMap<String, String> = HashMap::new();
 
-            for (node_id, node) in nodes {
-                // Record alias -> node_id mapping
-                if let Some(alias) = node.get("alias").and_then(|v| v.as_str()) {
-                    alias_map.insert(alias.to_string(), node_id.clone());
-                }
-                // Record node type
-                if let Some(node_type) = node.get("type").and_then(|v| v.as_str()) {
-                    node_types.insert(node_id.clone(), node_type.to_string());
-                }
-                // Record inputNodes dependencies
-                if let Some(input_nodes) = node.get("inputNodes").and_then(|v| v.as_array()) {
-                    let deps: Vec<String> = input_nodes
-                        .iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect();
-                    if !deps.is_empty() {
-                        internal_deps.insert(node_id.clone(), deps);
-                    }
+        for (node_id, node) in nodes {
+            // Record alias -> node_id mapping
+            if let Some(alias) = node.get("alias").and_then(|v| v.as_str()) {
+                alias_map.insert(alias.to_string(), node_id.clone());
+            }
+            // Record node type
+            if let Some(node_type) = node.get("type").and_then(|v| v.as_str()) {
+                node_types.insert(node_id.clone(), node_type.to_string());
+            }
+            // Record inputNodes dependencies
+            if let Some(input_nodes) = node.get("inputNodes").and_then(|v| v.as_array()) {
+                let deps: Vec<String> = input_nodes
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+                if !deps.is_empty() {
+                    internal_deps.insert(node_id.clone(), deps);
                 }
                 // Record field mappings for each node
                 if let Some(fields) = node.get("fields").and_then(|v| v.as_array()) {
@@ -126,18 +124,14 @@ pub fn process_tbl_file_from_string(
                         let mut step_exp: Option<String> = None;
                         if let Some(steps) = node.get("steps").and_then(|v| v.as_array()) {
                             for step in steps {
-                                if step.get("type").and_then(|v| v.as_str()) == Some("AddField") {
-                                    if let Some(add_field) = step.get("addField") {
-                                        if add_field.get("name").and_then(|v| v.as_str())
-                                            == Some(name)
-                                        {
-                                            if let Some(e) =
-                                                add_field.get("exp").and_then(|v| v.as_str())
-                                            {
-                                                step_exp = Some(e.to_string());
-                                            }
-                                        }
-                                    }
+                                if step.get("type").and_then(|v| v.as_str()) == Some("AddField")
+                                    && let Some(add_field) = step.get("addField")
+                                    && add_field.get("name").and_then(|v| v.as_str())
+                                        == Some(name)
+                                    && let Some(e) =
+                                        add_field.get("exp").and_then(|v| v.as_str())
+                                {
+                                    step_exp = Some(e.to_string());
                                 }
                             }
                         }

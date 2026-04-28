@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// - 边：组件 A 的表达式引用了组件 B 的值/属性
 ///
 /// 提供拓扑排序（计算先后顺序）和循环检测功能。
-
 /// 组件间依赖关系
 #[derive(Debug, Clone)]
 pub struct DependencyGraph {
@@ -85,13 +84,12 @@ impl DependencyGraph {
             for ref_type in refs {
                 if let RefType::ComponentValue(dep_id) | RefType::ComponentProperty(dep_id, _) =
                     ref_type
+                    && self.dependencies.contains_key(dep_id)
                 {
-                    if self.dependencies.contains_key(dep_id) {
-                        *in_degree.entry(comp_id_owned.clone()).or_insert(0) += 1;
-                        adj.entry(dep_id.clone())
-                            .or_insert_with(Vec::new)
-                            .push(comp_id_owned.clone());
-                    }
+                    *in_degree.entry(comp_id_owned.clone()).or_insert(0) += 1;
+                    adj.entry(dep_id.clone())
+                        .or_default()
+                        .push(comp_id_owned.clone());
                 }
             }
         }
@@ -162,7 +160,7 @@ impl DependencyGraph {
                     } else if rec_stack.contains(dep_id) {
                         // 发现循环
                         if let Some(pos) = path.iter().position(|x| x == dep_id) {
-                            let cycle: Vec<String> = path[pos..].iter().cloned().collect();
+                            let cycle: Vec<String> = path[pos..].to_vec();
                             cycles.push(cycle);
                         }
                     }
@@ -259,7 +257,7 @@ pub fn trace_value_source(
 
 /// 展开表达式，递归替换引用
 pub fn expand_expression(
-    meta: &SuperPageMetadata,
+    _meta: &SuperPageMetadata,
     graph: &DependencyGraph,
     component_id: &str,
     expr: &str,
@@ -301,7 +299,7 @@ pub fn expand_expression(
                     // 优先查找 value 字段
                     if let Some(dep_expr) = dep_exprs.iter().find(|e| e.field == "value") {
                         let dep_expanded = expand_expression(
-                            meta,
+                            _meta,
                             graph,
                             dep_id,
                             &dep_expr.raw_expr,
@@ -336,9 +334,7 @@ pub fn expand_expression(
             }
             RefType::Param(param_id) => {
                 let replacement = format!("({})", param_id);
-                let re = regex::Regex::new(&format!("\\b{}\\b", regex_escape(param_id)))
-                    .unwrap_or_else(|_| regex::Regex::new("NEVER_MATCH").unwrap());
-                expanded = re.replace_all(&expanded, &*replacement).to_string();
+                expanded = replace_with_boundary(&expanded, param_id, &replacement);
             }
             _ => {}
         }
@@ -346,24 +342,6 @@ pub fn expand_expression(
 
     format!("={}", expanded)
 }
-
-fn regex_escape(s: &str) -> String {
-    s.replace("\\", "\\\\")
-        .replace(".", "\\.")
-        .replace("*", "\\*")
-        .replace("+", "\\+")
-        .replace("?", "\\?")
-        .replace("[", "\\[")
-        .replace("]", "\\]")
-        .replace("(", "\\(")
-        .replace(")", "\\)")
-        .replace("{", "\\{")
-        .replace("}", "\\}")
-        .replace("^", "\\^")
-        .replace("$", "\\$")
-        .replace("|", "\\|")
-}
-
 /// Replace pattern only at word boundaries (word chars = [A-Za-z0-9_]).
 fn replace_with_boundary(s: &str, pattern: &str, replacement: &str) -> String {
     let mut result = String::with_capacity(s.len() + replacement.len());

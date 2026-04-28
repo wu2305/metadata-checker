@@ -19,7 +19,6 @@ use std::io::{self, Write};
 /// - query-model / query-page / query-cross / query-dataflow：图查询
 ///
 /// human 模式支持交互式组件查询（--human 不带 --query 时进入交互）。
-
 fn main() -> Result<()> {
     let args = cli::Cli::parse();
 
@@ -103,7 +102,7 @@ fn main() -> Result<()> {
     let priority_analyses = if args.priority {
         meta.superpage
             .as_ref()
-            .map(|spg| priority::analyze_priority(spg))
+            .map(priority::analyze_priority)
     } else {
         None
     };
@@ -201,8 +200,11 @@ fn run_interactive(
                 if show_priority {
                     let analyses = metadata_checker::priority::analyze_priority(spg);
                     let report = metadata_checker::priority::format_priority_human(&analyses);
-                    println!("
-{}", report);
+                    println!(
+                        "
+{}",
+                        report
+                    );
                 }
             }
             target_id => {

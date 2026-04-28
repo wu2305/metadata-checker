@@ -15,7 +15,6 @@ use crate::graph::{FileState, GraphDB};
 /// - .tbl：解析 App 类型（可写）和 DataFlow 类型（只读加工流程）
 ///
 /// 支持增量更新：对比文件 mtime/size/hash，只重新处理变更文件。
-
 /// Scan a project directory and build/update the graph database.
 pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
     let mut graph = GraphDB::open(db_path)?;

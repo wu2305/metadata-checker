@@ -5,11 +5,11 @@ use std::io::{self, Write};
 /// 图查询模块
 ///
 /// 提供面向用户的查询接口，支持 human 可读格式和 JSON 格式：
-/// - query_model：查询某个模型被哪些页面读取/写入
-/// - query_page：查询某个页面的出边/入边关系
-/// - query_cross：查询两个页面之间的跨文件关系
-/// - query_dataflow：展开 DataFlow 的子图，做字段级来源追溯
-
+///   - query_model：查询某个模型被哪些页面读取/写入
+///   - query_page：查询某个页面的出边/入边关系
+///   - query_cross：查询两个页面之间的跨文件关系
+///   - query_dataflow：展开 DataFlow 的子图，做字段级来源追溯
+///
 /// 追溯节点所属的页面（通过 Contains 边）
 fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node> {
     if let Some((_, incoming)) = graph.get_node_edges(node_id) {
@@ -22,10 +22,10 @@ fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node
                     return Some(page);
                 }
             }
-            if matches!(edge.edge_type, crate::graph::EdgeType::Triggers) {
-                if let Some(page) = find_parent_page(graph, &parent.id) {
-                    return Some(page);
-                }
+            if matches!(edge.edge_type, crate::graph::EdgeType::Triggers)
+                && let Some(page) = find_parent_page(graph, &parent.id)
+            {
+                return Some(page);
             }
         }
     }
@@ -140,21 +140,11 @@ pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
             writeln!(out, "=== Page: {} ===", page_id)?;
             writeln!(out, "\n--- Outgoing Edges ({}): ---", outgoing.len())?;
             for (node, edge) in outgoing {
-                writeln!(
-                    out,
-                    "  -> {} ({})",
-                    node.name,
-                    format!("{:?}", edge.edge_type)
-                )?;
+                writeln!(out, "  -> {} ({:?})", node.name, edge.edge_type)?;
             }
             writeln!(out, "\n--- Incoming Edges ({}): ---", incoming.len())?;
             for (node, edge) in incoming {
-                writeln!(
-                    out,
-                    "  <- {} ({})",
-                    node.name,
-                    format!("{:?}", edge.edge_type)
-                )?;
+                writeln!(out, "  <- {} ({:?})", node.name, edge.edge_type)?;
             }
         } else {
             let result = serde_json::json!({

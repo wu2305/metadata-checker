@@ -12,7 +12,6 @@ use std::io::{self, Write};
 /// - JSON 模式：结构化数据供下游工具消费
 ///
 /// 同时处理 --query 参数，支持按组件 ID 精确查询。
-
 pub fn print_human(meta: &PageMetadata) -> Result<()> {
     print_human_to(meta, &mut io::stdout())
 }

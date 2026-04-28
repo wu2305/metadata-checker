@@ -25,35 +25,33 @@ pub fn parse_superpage_from_value(raw_value: serde_json::Value) -> Result<SuperP
     let raw: RawSuperPage = serde_json::from_value(raw_value.clone())
         .with_context(|| "Failed to parse JSON as RawSuperPage")?;
 
-    let mut meta = SuperPageMetadata::default();
-    meta.raw = raw_value;
-    meta.version = raw.version;
-    meta.theme = raw.theme;
-
-    meta.params = raw
-        .params
-        .into_iter()
-        .map(|p| SpgParam {
-            id: p.id,
-            name: p.name,
-            desc: p.desc,
-            default_value: p.value,
-        })
-        .collect();
-
-    meta.reference_resources = raw.reference_resources;
-
-    meta.sources = raw
-        .sources
-        .into_iter()
-        .map(|s| SpgSource {
-            id: s.id,
-            model_type: s.model_type,
-            path: s.path,
-            content: s.content,
-        })
-        .collect();
-
+    let mut meta = SuperPageMetadata {
+        raw: raw_value,
+        version: raw.version,
+        theme: raw.theme,
+        params: raw
+            .params
+            .into_iter()
+            .map(|p| SpgParam {
+                id: p.id,
+                name: p.name,
+                desc: p.desc,
+                default_value: p.value,
+            })
+            .collect(),
+        reference_resources: raw.reference_resources,
+        sources: raw
+            .sources
+            .into_iter()
+            .map(|s| SpgSource {
+                id: s.id,
+                model_type: s.model_type,
+                path: s.path,
+                content: s.content,
+            })
+            .collect(),
+        ..Default::default()
+    };
     if let Some(canvas) = raw.canvas {
         extract_components(&canvas, None, &mut meta.components, &mut meta.expressions);
     }
@@ -199,10 +197,8 @@ fn extract_components(
         res_path: raw.res_path.as_ref().and_then(|v| {
             if let Some(s) = v.as_str() {
                 Some(s.to_string())
-            } else if let Some(n) = v.as_i64() {
-                Some(n.to_string())
             } else {
-                None
+                v.as_i64().map(|n| n.to_string())
             }
         }),
     };
@@ -362,10 +358,8 @@ fn extract_components(
             path: a.path.as_ref().and_then(|v| {
                 if let Some(s) = v.as_str() {
                     Some(s.to_string())
-                } else if let Some(n) = v.as_i64() {
-                    Some(n.to_string())
                 } else {
-                    None
+                    v.as_i64().map(|n| n.to_string())
                 }
             }),
             short_url: a.short_url.clone(),

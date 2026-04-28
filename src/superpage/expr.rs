@@ -85,10 +85,10 @@ fn is_in_string_literal(expr: &str, pos: usize) -> bool {
 fn classify_ref(token: &str) -> RefType {
     let token = token.trim();
 
-    if token.starts_with('$') {
-        let parts: Vec<&str> = token[1..].split('.').collect();
+    if let Some(stripped) = token.strip_prefix('$') {
+        let parts: Vec<&str> = stripped.split('.').collect();
         if parts.len() >= 2 {
-            return RefType::UserProperty(token[1..].to_string());
+            return RefType::UserProperty(stripped.to_string());
         }
         return RefType::SystemVar(token.to_string());
     }
