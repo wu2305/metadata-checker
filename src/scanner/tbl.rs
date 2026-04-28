@@ -55,12 +55,11 @@ pub fn process_tbl_file_from_string(
         }
     }
 
-    // For DataFlow type: process output physical table (dbTableName)
-    if is_dataflow
-        && let Some(db_table_name) = value
-            .get("properties")
-            .and_then(|p| p.get("dbTableName"))
-            .and_then(|v| v.as_str())
+    // Process output physical table (dbTableName) for both App and DataFlow
+    if let Some(db_table_name) = value
+        .get("properties")
+        .and_then(|p| p.get("dbTableName"))
+        .and_then(|v| v.as_str())
     {
         let output_model_id = format!("model:{}", db_table_name);
         let db_table_path = format!("{}.tbl", db_table_name);
@@ -77,6 +76,37 @@ pub fn process_tbl_file_from_string(
             EdgeType::OutputsTo,
             Some(db_table_name.to_string()),
         );
+    }
+
+    // For DataFlow type: process explicit depends (dependencies on other .tbl files)
+    if is_dataflow
+        && let Some(depends) = value
+            .get("properties")
+            .and_then(|p| p.get("depends"))
+            .and_then(|v| v.as_array())
+        {
+            for dep in depends {
+                if let Some(dep_path) = dep.as_str() {
+                    let dep_model = Path::new(dep_path)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| dep_path.to_string());
+                    let dep_model_id = format!("model:{}", dep_model);
+                    graph.add_node(
+                        dep_model_id.clone(),
+                        NodeType::Model,
+                        dep_path.to_string(),
+                        dep_model.clone(),
+                        Some(serde_json::json!({"modelType": "DataFlowDependency"})),
+                    );
+                    graph.add_edge(
+                        &model_id,
+                        &dep_model_id,
+                        EdgeType::DataflowInput,
+                        Some(dep_path.to_string()),
+                    );
+                }
+        }
     }
 
     // For DataFlow type: process input sources (nodes referencing external tables)
