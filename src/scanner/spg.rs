@@ -4,6 +4,74 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
+/// 确保 model 和 field 节点存在，并建立 Contains 关系。
+/// 返回 (model_id, field_id)。
+fn ensure_model_field(
+    graph: &mut GraphDB,
+    model: &str,
+    field: &str,
+    model_path: &str,
+    field_meta: Option<serde_json::Value>,
+) -> (String, String) {
+    let model_id = format!("model:{}", model);
+    let field_id = format!("field:{}.{}", model, field);
+    graph.add_node(
+        model_id.clone(),
+        NodeType::Model,
+        model_path.to_string(),
+        model.to_string(),
+        None,
+    );
+    graph.add_node(
+        field_id.clone(),
+        NodeType::Field,
+        model_path.to_string(),
+        field.to_string(),
+        field_meta,
+    );
+    graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+    (model_id, field_id)
+}
+
+/// 添加从 from_id 读取 model.field 的关系边。
+fn add_model_read(
+    graph: &mut GraphDB,
+    from_id: &str,
+    model: &str,
+    field: &str,
+    model_path: &str,
+    edge_meta: serde_json::Value,
+) {
+    let (model_id, _field_id) = ensure_model_field(graph, model, field, model_path, None);
+    graph.add_edge_with_meta(
+        from_id,
+        &model_id,
+        EdgeType::Reads,
+        Some(format!("{}.{}", model, field)),
+        Some(edge_meta),
+    );
+}
+
+/// 添加从 from_id 写入 model.field 的关系边。
+fn add_model_write(
+    graph: &mut GraphDB,
+    from_id: &str,
+    model: &str,
+    field: &str,
+    model_path: &str,
+    edge_type: EdgeType,
+    edge_meta: serde_json::Value,
+) {
+    let (model_id, _field_id) = ensure_model_field(graph, model, field, model_path, None);
+    graph.add_edge_with_meta(
+        from_id,
+        &model_id,
+        edge_type,
+        Some(format!("{}.{}", model, field)),
+        Some(edge_meta),
+    );
+}
+
 pub fn process_spg_file_from_value(
     graph: &mut GraphDB,
     rel_path: &str,
@@ -155,22 +223,6 @@ pub fn process_spg_file_from_value(
                             .get(model.as_str())
                             .map(|p| p.to_string())
                             .unwrap_or_else(|| format!("{}.tbl", model));
-                        let model_id = format!("model:{}", model);
-                        let field_id = format!("field:{}.{}", model, field);
-                        graph.add_node(
-                            model_id.clone(),
-                            NodeType::Model,
-                            model_path.clone(),
-                            model.clone(),
-                            None,
-                        );
-                        graph.add_node(
-                            field_id.clone(),
-                            NodeType::Field,
-                            model_path,
-                            field.to_string(),
-                            None,
-                        );
                         let edge_meta = serde_json::json!({
                             "reason": format!("Component '{}' reads from model '{}'", comp.id, model),
                             "actor_kind": "component",
@@ -180,14 +232,14 @@ pub fn process_spg_file_from_value(
                             "target_field": field,
                             "source_expr": expr.raw_expr,
                         });
-                        graph.add_edge_with_meta(
+                        add_model_read(
+                            graph,
                             &comp_id,
-                            &model_id,
-                            EdgeType::Reads,
-                            Some(format!("{}.{}", model, field)),
-                            Some(edge_meta),
+                            model,
+                            field,
+                            &model_path,
+                            edge_meta,
                         );
-                        graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
                     }
                 }
             }
@@ -207,23 +259,7 @@ pub fn process_spg_file_from_value(
                     .map(|p| p.to_string())
                     .unwrap_or_else(|| format!("{}.tbl", model));
                 let field = parts[1..].join(".");
-                let model_id = format!("model:{}", model);
-                let field_id = format!("field:{}.{}", model, field);
 
-                graph.add_node(
-                    model_id.clone(),
-                    NodeType::Model,
-                    model_path.clone(),
-                    model.to_string(),
-                    None,
-                );
-                graph.add_node(
-                    field_id.clone(),
-                    NodeType::Field,
-                    model_path,
-                    field.clone(),
-                    None,
-                );
                 let submit_meta = serde_json::json!({
                     "reason": format!("Component '{}' binds submitField to model '{}'", comp.id, model),
                     "actor_kind": "component",
@@ -233,14 +269,15 @@ pub fn process_spg_file_from_value(
                     "target_field": field,
                     "source_expr": format!("{}.{}", model, field),
                 });
-                graph.add_edge_with_meta(
+                add_model_write(
+                    graph,
                     &comp_id,
-                    &model_id,
+                    model,
+                    &field,
+                    &model_path,
                     EdgeType::Writes,
-                    Some(format!("{}.{}", model, field)),
-                    Some(submit_meta),
+                    submit_meta,
                 );
-                graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
             }
         }
     }
@@ -329,24 +366,8 @@ pub fn process_spg_file_from_value(
                                     .map(|p| p.to_string())
                                     .unwrap_or_else(|| format!("{}.tbl", model));
                                 let field = parts[1..].join(".");
-                                let model_id = format!("model:{}", model);
-                                let field_id = format!("field:{}.{}", model, field);
-                                graph.add_node(
-                                    model_id.clone(),
-                                    NodeType::Model,
-                                    model_path.clone(),
-                                    model.to_string(),
-                                    None,
-                                );
-                                graph.add_node(
-                                    field_id.clone(),
-                                    NodeType::Field,
-                                    model_path.clone(),
-                                    field.clone(),
-                                    None,
-                                );
                                 let action_meta = serde_json::json!({
-                                    "reason": format!("Action '{}' writes to model '{}'", action.action_type, model),
+                                    "reason": format!("Action 'submitData' writes to field '{}'", field),
                                     "actor_kind": "action",
                                     "actor_id": action_id,
                                     "operation": "ActionWrites",
@@ -354,38 +375,23 @@ pub fn process_spg_file_from_value(
                                     "target_model": model,
                                     "target_field": field,
                                 });
-                                graph.add_edge_with_meta(
+                                add_model_write(
+                                    graph,
                                     &action_id,
-                                    &model_id,
+                                    model,
+                                    &field,
+                                    &model_path,
                                     EdgeType::ActionWrites,
-                                    Some(format!("{}.{}", model, field)),
-                                    Some(action_meta),
+                                    action_meta,
                                 );
-                                graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
                             }
                         }
                     }
                 }
                 "updateData" | "insertData" | "deleteData" => {
                     if let Some(ref data_set) = action.data_set {
-                        let model_id = format!("model:{}", data_set);
                         let data_set_path = format!("{}.tbl", data_set);
-                        graph.add_node(
-                            model_id.clone(),
-                            NodeType::Model,
-                            data_set_path.clone(),
-                            data_set.clone(),
-                            None,
-                        );
                         for (field_name, field_value, value_type) in &action.field_values {
-                            let field_id = format!("field:{}.{}", data_set, field_name);
-                            graph.add_node(
-                                field_id.clone(),
-                                NodeType::Field,
-                                data_set_path.clone(),
-                                field_name.clone(),
-                                None,
-                            );
                             let ud_meta = serde_json::json!({
                                 "reason": format!("Action '{}' writes to field '{}'", action.action_type, field_name),
                                 "actor_kind": "action",
@@ -396,14 +402,15 @@ pub fn process_spg_file_from_value(
                                 "target_field": field_name,
                                 "source_expr": field_value,
                             });
-                            graph.add_edge_with_meta(
+                            add_model_write(
+                                graph,
                                 &action_id,
-                                &model_id,
+                                data_set,
+                                field_name,
+                                &data_set_path,
                                 EdgeType::ActionWrites,
-                                Some(format!("{}.{}", data_set, field_name)),
-                                Some(ud_meta),
+                                ud_meta,
                             );
-                            graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
                             // If value_type is "exp", parse expression refs for dependency analysis
                             if value_type == "exp" {
                                 let refs = crate::superpage::parse_expression_refs(field_value);
@@ -415,25 +422,7 @@ pub fn process_spg_file_from_value(
                                             .get(&model)
                                             .map(|p| p.to_string())
                                             .unwrap_or_else(|| format!("{}.tbl", model));
-                                        let ref_model_id = format!("model:{}", model);
-                                        let ref_field_id = format!("field:{}.{}", model, field);
-                                        graph.add_node(
-                                            ref_model_id.clone(),
-                                            NodeType::Model,
-                                            model_path.clone(),
-                                            model.clone(),
-                                            None,
-                                        );
-                                        graph.add_node(
-                                            ref_field_id.clone(),
-                                            NodeType::Field,
-                                            model_path.clone(),
-                                            field.clone(),
-                                            None,
-                                        );
                                         let read_meta = serde_json::json!({
-
-
                                             "actor_kind": "action",
                                             "actor_id": action_id,
                                             "operation": "Reads",
@@ -442,18 +431,13 @@ pub fn process_spg_file_from_value(
                                             "target_field": field,
                                             "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                         });
-                                        graph.add_edge_with_meta(
+                                        add_model_read(
+                                            graph,
                                             &action_id,
-                                            &ref_model_id,
-                                            EdgeType::Reads,
-                                            Some(format!("{}.{}", model, field)),
-                                            Some(read_meta),
-                                        );
-                                        graph.add_edge(
-                                            &ref_model_id,
-                                            &ref_field_id,
-                                            EdgeType::Contains,
-                                            None,
+                                            &model,
+                                            &field,
+                                            &model_path,
+                                            read_meta,
                                         );
                                     }
                                 }
@@ -543,46 +527,22 @@ pub fn process_spg_file_from_value(
                                                     .unwrap_or_else(|| {
                                                         format!("{}.tbl", model)
                                                     });
-                                                let ref_model_id = format!("model:{}", model);
-                                                let ref_field_id =
-                                                    format!("field:{}.{}", model, field);
-                                                graph.add_node(
-                                                    ref_model_id.clone(),
-                                                    NodeType::Model,
-                                                    model_path.clone(),
-                                                    model.clone(),
-                                                    None,
-                                                );
-                                                graph.add_node(
-                                                    ref_field_id.clone(),
-                                                    NodeType::Field,
-                                                    model_path.clone(),
-                                                    field.clone(),
-                                                    None,
-                                                );
                                                 let read_meta = serde_json::json!({
-
-
-                                                            "actor_kind": "action",
-                                                "actor_id": action_id,
-                                                "operation": "Reads",
-                                                "trigger": action.trigger_type,
-                                                "target_model": model,
-                                                "target_field": field,
-                                                            "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
-                                                        });
-                                                graph.add_edge_with_meta(
+                                                    "actor_kind": "action",
+                                                    "actor_id": action_id,
+                                                    "operation": "Reads",
+                                                    "trigger": action.trigger_type,
+                                                    "target_model": model,
+                                                    "target_field": field,
+                                                    "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
+                                                });
+                                                add_model_read(
+                                                    graph,
                                                     &action_id,
-                                                    &ref_model_id,
-                                                    EdgeType::Reads,
-                                                    Some(format!("{}.{}", model, field)),
-                                                    Some(read_meta),
-                                                );
-                                                graph.add_edge(
-                                                    &ref_model_id,
-                                                    &ref_field_id,
-                                                    EdgeType::Contains,
-                                                    None,
+                                                    &model,
+                                                    &field,
+                                                    &model_path,
+                                                    read_meta,
                                                 );
                                         }
                                     }
@@ -624,45 +584,22 @@ pub fn process_spg_file_from_value(
                                     .get(&model)
                                     .map(|p| p.to_string())
                                     .unwrap_or_else(|| format!("{}.tbl", model));
-                                let ref_model_id = format!("model:{}", model);
-                                let ref_field_id = format!("field:{}.{}", model, field);
-                                graph.add_node(
-                                    ref_model_id.clone(),
-                                    NodeType::Model,
-                                    model_path.clone(),
-                                    model.clone(),
-                                    None,
-                                );
-                                graph.add_node(
-                                    ref_field_id.clone(),
-                                    NodeType::Field,
-                                    model_path.clone(),
-                                    field.clone(),
-                                    None,
-                                );
                                 let read_meta = serde_json::json!({
-
-
                                     "actor_kind": "action",
-                                            "actor_id": action_id,
-                                            "operation": "Reads",
-                                            "trigger": action.trigger_type,
-                                            "target_model": model,
-                                            "target_field": field,
+                                    "actor_id": action_id,
+                                    "operation": "Reads",
+                                    "trigger": action.trigger_type,
+                                    "target_model": model,
+                                    "target_field": field,
                                     "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                 });
-                                graph.add_edge_with_meta(
+                                add_model_read(
+                                    graph,
                                     &action_id,
-                                    &ref_model_id,
-                                    EdgeType::Reads,
-                                    Some(format!("{}.{}", model, field)),
-                                    Some(read_meta),
-                                );
-                                graph.add_edge(
-                                    &ref_model_id,
-                                    &ref_field_id,
-                                    EdgeType::Contains,
-                                    None,
+                                    &model,
+                                    &field,
+                                    &model_path,
+                                    read_meta,
                                 );
                             }
                         }
