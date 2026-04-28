@@ -1,0 +1,22 @@
+{
+    "version": "1.0",
+    "properties": {
+        "modelDataType": "DataFlow",
+        "dbTableName": "physical_y",
+        "name": "df_b",
+        "depends": ["../df_a.tbl"]
+    },
+    "dimensions": [
+        {"name": "id", "dbfield": "ID", "dataType": "C", "length": 50}
+    ],
+    "dataFlow": {
+        "nodes": {
+            "input1": {
+                "id": "input1",
+                "alias": "physical_x",
+                "type": "ModelTable",
+                "moduleTablePath": "$DATA:/test_project/physical_x.tbl"
+            }
+        }
+    }
+}

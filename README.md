@@ -53,8 +53,17 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 # 扫描项目目录并构建/更新图数据库
 ./target/release/metadata-checker --project-dir /path/to/project --build-graph
 
-# 查询模型的读写关系
+# 查询模型的读写关系与 DataFlow lineage
 ./target/release/metadata-checker --project-dir /path/to/project --query-model model1
+
+# query-model 输出字段说明：
+# - readers: 读取该模型的页面/组件/动作
+# - writers: 写入该模型的页面/组件/动作
+# - dataflow_inputs: DataFlow 的输入依赖（ outgoing DataflowInput 边）
+# - dataflow_outputs: DataFlow 的输出目标（ outgoing OutputsTo 边）
+# - produced_by: 物理表的生产者（ incoming OutputsTo 边）
+# - consumed_by_dataflows: 消费该输入表的 DataFlow（ incoming DataflowInput 边）
+# - upstream_dependencies / downstream_outputs: 兼容旧字段，不建议新模型依赖
 
 # 查询页面的跨文件关系
 ./target/release/metadata-checker --project-dir /path/to/project --query-page "page/合同管理/销售合同"

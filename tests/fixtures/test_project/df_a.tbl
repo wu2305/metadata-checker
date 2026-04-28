@@ -1,0 +1,21 @@
+{
+    "version": "1.0",
+    "properties": {
+        "modelDataType": "DataFlow",
+        "dbTableName": "physical_x",
+        "name": "df_a"
+    },
+    "dimensions": [
+        {"name": "id", "dbfield": "ID", "dataType": "C", "length": 50}
+    ],
+    "dataFlow": {
+        "nodes": {
+            "input1": {
+                "id": "input1",
+                "alias": "input_source",
+                "type": "ModelTable",
+                "moduleTablePath": "$DATA:/source/input_source.tbl"
+            }
+        }
+    }
+}

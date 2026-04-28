@@ -1,0 +1,10 @@
+{
+    "version": "1.0",
+    "properties": {
+        "modelDataType": "App",
+        "name": "physical_x"
+    },
+    "dimensions": [
+        {"name": "id", "dbfield": "ID", "dataType": "C", "length": 50}
+    ]
+}

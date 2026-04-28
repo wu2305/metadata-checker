@@ -121,6 +121,63 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
                 })
             })
             .collect();
+        let dataflow_inputs = graph
+            .find_dataflow_inputs(model_id)
+            .into_iter()
+            .map(|(n, e)| {
+                serde_json::json!({
+                    "node_id": n.id,
+                    "name": n.name,
+                    "node_type": format!("{:?}", n.node_type),
+                    "field_path": e.field_path,
+                    "source_file": n.path,
+                    "edge_type": format!("{:?}", e.edge_type),
+                })
+            })
+            .collect::<Vec<_>>();
+        let dataflow_outputs = graph
+            .find_dataflow_outputs(model_id)
+            .into_iter()
+            .map(|(n, e)| {
+                serde_json::json!({
+                    "node_id": n.id,
+                    "name": n.name,
+                    "node_type": format!("{:?}", n.node_type),
+                    "field_path": e.field_path,
+                    "source_file": n.path,
+                    "edge_type": format!("{:?}", e.edge_type),
+                })
+            })
+            .collect::<Vec<_>>();
+        let produced_by = graph
+            .find_produced_by(model_id)
+            .into_iter()
+            .map(|(n, e)| {
+                serde_json::json!({
+                    "node_id": n.id,
+                    "name": n.name,
+                    "node_type": format!("{:?}", n.node_type),
+                    "field_path": e.field_path,
+                    "source_file": n.path,
+                    "edge_type": format!("{:?}", e.edge_type),
+                })
+            })
+            .collect::<Vec<_>>();
+        let consumed_by_dataflows = graph
+            .find_consumed_by_dataflows(model_id)
+            .into_iter()
+            .map(|(n, e)| {
+                serde_json::json!({
+                    "node_id": n.id,
+                    "name": n.name,
+                    "node_type": format!("{:?}", n.node_type),
+                    "field_path": e.field_path,
+                    "source_file": n.path,
+                    "edge_type": format!("{:?}", e.edge_type),
+                })
+            })
+            .collect::<Vec<_>>();
+        // 兼容性保留字段
         let upstream = graph
             .find_upstream_dependencies(model_id)
             .into_iter()
@@ -131,6 +188,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
                     "node_type": format!("{:?}", n.node_type),
                     "field_path": e.field_path,
                     "source_file": n.path,
+                    "edge_type": format!("{:?}", e.edge_type),
                 })
             })
             .collect::<Vec<_>>();
@@ -144,6 +202,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
                     "node_type": format!("{:?}", n.node_type),
                     "field_path": e.field_path,
                     "source_file": n.path,
+                    "edge_type": format!("{:?}", e.edge_type),
                 })
             })
             .collect::<Vec<_>>();
@@ -152,6 +211,10 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
             "model": model_id,
             "readers": readers,
             "writers": writers,
+            "dataflow_inputs": dataflow_inputs,
+            "dataflow_outputs": dataflow_outputs,
+            "produced_by": produced_by,
+            "consumed_by_dataflows": consumed_by_dataflows,
             "upstream_dependencies": upstream,
             "downstream_outputs": downstream,
         });

@@ -481,16 +481,17 @@ impl GraphDB {
     }
 
     /// 查询指定模型的上游依赖（DataflowInput 边）
-    pub fn find_upstream_dependencies<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
+    /// 查询 DataFlow 的输入依赖（ outgoing DataflowInput 边）
+    pub fn find_dataflow_inputs<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
         let mut results = Vec::new();
         if let Some(&idx) = self.node_indices.get(model_id) {
             for edge_ref in self
                 .graph
-                .edges_directed(idx, petgraph::Direction::Incoming)
+                .edges_directed(idx, petgraph::Direction::Outgoing)
             {
                 let edge = edge_ref.weight();
                 if matches!(edge.edge_type, EdgeType::DataflowInput)
-                    && let Some(node) = self.graph.node_weight(edge_ref.source())
+                    && let Some(node) = self.graph.node_weight(edge_ref.target())
                 {
                     results.push((node, edge));
                 }
@@ -499,8 +500,8 @@ impl GraphDB {
         results
     }
 
-    /// 查询指定模型的下游输出（OutputsTo 边）
-    pub fn find_downstream_outputs<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
+    /// 查询 DataFlow 的输出目标（ outgoing OutputsTo 边）
+    pub fn find_dataflow_outputs<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
         let mut results = Vec::new();
         if let Some(&idx) = self.node_indices.get(model_id) {
             for edge_ref in self
@@ -518,7 +519,54 @@ impl GraphDB {
         results
     }
 
-    /// 按 ID 获取节点
+    /// 查询物理表的生产者（ incoming OutputsTo 边）
+    pub fn find_produced_by<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
+        let mut results = Vec::new();
+        if let Some(&idx) = self.node_indices.get(model_id) {
+            for edge_ref in self
+                .graph
+                .edges_directed(idx, petgraph::Direction::Incoming)
+            {
+                let edge = edge_ref.weight();
+                if matches!(edge.edge_type, EdgeType::OutputsTo)
+                    && let Some(node) = self.graph.node_weight(edge_ref.source())
+                {
+                    results.push((node, edge));
+                }
+            }
+        }
+        results
+    }
+
+    /// 查询哪些 DataFlow 消费了该输入表（ incoming DataflowInput 边）
+    pub fn find_consumed_by_dataflows<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
+        let mut results = Vec::new();
+        if let Some(&idx) = self.node_indices.get(model_id) {
+            for edge_ref in self
+                .graph
+                .edges_directed(idx, petgraph::Direction::Incoming)
+            {
+                let edge = edge_ref.weight();
+                if matches!(edge.edge_type, EdgeType::DataflowInput)
+                    && let Some(node) = self.graph.node_weight(edge_ref.source())
+                {
+                    results.push((node, edge));
+                }
+            }
+        }
+        results
+    }
+
+    /// 兼容性保留：查询指定模型的上游依赖（ incoming DataflowInput 边）
+    pub fn find_upstream_dependencies<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
+        self.find_consumed_by_dataflows(model_id)
+    }
+
+    /// 兼容性保留：查询指定模型的下游输出（ outgoing OutputsTo 边）
+    pub fn find_downstream_outputs<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
+        self.find_dataflow_outputs(model_id)
+    }
+
     pub fn get_node(&self, node_id: &str) -> Option<Node> {
         self.node_indices
             .get(node_id)
