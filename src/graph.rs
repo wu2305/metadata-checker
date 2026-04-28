@@ -82,6 +82,8 @@ pub struct GraphDB {
     pub db_path: String,
     is_dirty: bool,
     seen_edges: HashSet<(String, String, EdgeType, Option<String>)>,
+    dirty_nodes: HashSet<String>,
+    removed_nodes: HashSet<String>,
 }
 
 type NodeEdgePair<'a> = (&'a Node, &'a Edge);
@@ -138,6 +140,8 @@ impl GraphDB {
             db_path: db_path.to_string_lossy().to_string(),
             is_dirty: false,
             seen_edges,
+            dirty_nodes: HashSet::new(),
+            removed_nodes: HashSet::new(),
         })
     }
 
@@ -187,6 +191,8 @@ impl GraphDB {
             db_path: db_path.to_string_lossy().to_string(),
             is_dirty: false,
             seen_edges,
+            dirty_nodes: HashSet::new(),
+            removed_nodes: HashSet::new(),
         })
     }
     /// 添加节点（如已存在则更新）
@@ -209,6 +215,8 @@ impl GraphDB {
                 existing.name = name;
             }
             self.is_dirty = true;
+            self.dirty_nodes.insert(id.clone());
+            self.removed_nodes.remove(&id);
             return idx;
         }
         let node = Node {
@@ -220,6 +228,8 @@ impl GraphDB {
         };
         let idx = self.graph.add_node(node);
         self.is_dirty = true;
+        self.dirty_nodes.insert(id.clone());
+        self.removed_nodes.remove(&id);
         self.node_indices.insert(id, idx);
         idx
     }
@@ -273,6 +283,10 @@ impl GraphDB {
             return;
         }
         self.is_dirty = true;
+        for id in node_ids {
+            self.removed_nodes.insert(id.clone());
+            self.dirty_nodes.remove(id);
+        }
 
         let remove_ids: HashSet<&str> = node_ids.iter().map(String::as_str).collect();
         let mut new_graph = DiGraph::new();
@@ -324,11 +338,19 @@ impl GraphDB {
         let db = Database::create(&self.db_path)?;
         let write_txn = db.begin_write()?;
 
-        {
+        // 增量更新节点：删除已移除节点，upsert 脏节点
+        if !self.removed_nodes.is_empty() {
             let mut nodes_table = write_txn.open_table(NODES_TABLE)?;
-            nodes_table.retain(|_, _| false)?;
-            for (id, idx) in &self.node_indices {
-                if let Some(node) = self.graph.node_weight(*idx) {
+            for id in &self.removed_nodes {
+                nodes_table.remove(id.as_str())?;
+            }
+        }
+        if !self.dirty_nodes.is_empty() {
+            let mut nodes_table = write_txn.open_table(NODES_TABLE)?;
+            for id in &self.dirty_nodes {
+                if let Some(&idx) = self.node_indices.get(id)
+                    && let Some(node) = self.graph.node_weight(idx)
+                {
                     let bytes = serde_json::to_vec(node)
                         .with_context(|| format!("Failed to serialize node {}", id))?;
                     nodes_table.insert(id.as_str(), bytes)?;
@@ -336,17 +358,26 @@ impl GraphDB {
             }
         }
 
+        // 边使用稳定 key 全量重写（数量通常远小于节点，且 key 需保持一致性）
         {
             let mut edges_table = write_txn.open_table(EDGES_TABLE)?;
             edges_table.retain(|_, _| false)?;
-            for (edge_count, edge_ref) in self.graph.edge_references().enumerate() {
+            for edge_ref in self.graph.edge_references() {
                 let edge = edge_ref.weight();
-                let key = format!("{}", edge_count);
+                let type_str = serde_json::to_string(&edge.edge_type).unwrap_or_default();
+                let key = format!(
+                    "{}|{}|{}|{}",
+                    edge.from,
+                    edge.to,
+                    type_str,
+                    edge.field_path.as_deref().unwrap_or("")
+                );
                 let bytes = serde_json::to_vec(edge).with_context(|| "Failed to serialize edge")?;
                 edges_table.insert(key.as_str(), bytes)?;
             }
         }
 
+        // 文件状态全量重写（数据量小）
         {
             let mut states_table = write_txn.open_table(FILE_STATES_TABLE)?;
             states_table.retain(|_, _| false)?;
@@ -359,6 +390,8 @@ impl GraphDB {
 
         write_txn.commit()?;
         self.is_dirty = false;
+        self.dirty_nodes.clear();
+        self.removed_nodes.clear();
         Ok(())
     }
 
