@@ -121,11 +121,35 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
                 })
             })
             .collect();
+        let upstream = graph
+            .find_upstream_dependencies(model_id)
+            .into_iter()
+            .map(|(n, e)| serde_json::json!({
+                "node_id": n.id,
+                "name": n.name,
+                "node_type": format!("{:?}", n.node_type),
+                "field_path": e.field_path,
+                "source_file": n.path,
+            }))
+            .collect::<Vec<_>>();
+        let downstream = graph
+            .find_downstream_outputs(model_id)
+            .into_iter()
+            .map(|(n, e)| serde_json::json!({
+                "node_id": n.id,
+                "name": n.name,
+                "node_type": format!("{:?}", n.node_type),
+                "field_path": e.field_path,
+                "source_file": n.path,
+            }))
+            .collect::<Vec<_>>();
         let result = serde_json::json!({
             "schema_version": "1.0",
             "model": model_id,
             "readers": readers,
             "writers": writers,
+            "upstream_dependencies": upstream,
+            "downstream_outputs": downstream,
         });
         println!("{}", serde_json::to_string_pretty(&result)?);
     }

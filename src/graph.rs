@@ -480,6 +480,49 @@ impl GraphDB {
         paths
     }
 
+    /// 查询指定模型的上游依赖（DataflowInput 边）
+    pub fn find_upstream_dependencies<'a>(&'a self,
+        model_id: &str,
+    ) -> Vec<NodeEdgePair<'a>> {
+        let mut results = Vec::new();
+        if let Some(&idx) = self.node_indices.get(model_id) {
+            for edge_ref in self
+                .graph
+                .edges_directed(idx, petgraph::Direction::Incoming)
+            {
+                let edge = edge_ref.weight();
+                if matches!(edge.edge_type, EdgeType::DataflowInput)
+                    && let Some(node) = self.graph.node_weight(edge_ref.source())
+                {
+                    results.push((node, edge));
+                }
+            }
+        }
+        results
+    }
+
+    /// 查询指定模型的下游输出（OutputsTo 边）
+    pub fn find_downstream_outputs<'a>(
+        &'a self,
+        model_id: &str,
+    ) -> Vec<NodeEdgePair<'a>> {
+        let mut results = Vec::new();
+        if let Some(&idx) = self.node_indices.get(model_id) {
+            for edge_ref in self
+                .graph
+                .edges_directed(idx, petgraph::Direction::Outgoing)
+            {
+                let edge = edge_ref.weight();
+                if matches!(edge.edge_type, EdgeType::OutputsTo)
+                    && let Some(node) = self.graph.node_weight(edge_ref.target())
+                {
+                    results.push((node, edge));
+                }
+            }
+        }
+        results
+    }
+
     /// 按 ID 获取节点
     pub fn get_node(&self, node_id: &str) -> Option<Node> {
         self.node_indices
