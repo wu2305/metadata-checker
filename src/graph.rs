@@ -38,6 +38,12 @@ pub enum EdgeType {
     SetsParam,
     OutputsTo,
     DataflowInternal,
+    ActionReads,
+    ActionNavigates,
+    ActionSetsParam,
+    ActionControlsComponent,
+    ActionValidates,
+    ActionLoadsData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

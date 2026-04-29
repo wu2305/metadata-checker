@@ -1,7 +1,7 @@
 ---
 name: metadata-checker
 description: |
-  Use the metadata-checker CLI tool to parse and analyze SuperPage (.spg) metadata files from a low-code platform.
+  Use the metadata-checker CLI tool to parse and analyze SuperPage (.spg) and Table (.tbl) metadata files from a low-code platform.
   This skill guides you on when and how to invoke the tool to extract component trees, expressions, dependencies,
   value source traces, and calculation priority analysis from page metadata JSON files.
 
@@ -17,131 +17,103 @@ description: |
 
 ## Overview
 
-The `metadata-checker` is a Rust CLI tool that parses `.spg` files (SuperPage metadata JSON) from a low-code platform.
-It extracts:
-- Component trees (with parent-child relationships)
-- Expressions from 30+ fields (value, exp, defaultValue, visible, itemFilter, validExp, calcCondition, calcExp, etc.)
-- Reference types within expressions (model fields, parameters, component values/properties, user properties, system variables)
-- Dependency graphs and topological sort order
-- Cycle detection
-- Calculation priority analysis (`--priority` flag)
+The `metadata-checker` is a Rust CLI tool that parses `.spg` files (SuperPage metadata JSON) and `.tbl` files (Table/DataFlow metadata) from a low-code platform.
 
-## Binary Location
+## Task Decision Tree
 
-The binary is built in the workspace at:
-```
-/Users/wuhaocheng/Documents/repos/metadata-checker/target/release/metadata-checker
-```
+When working with metadata-checker, follow this decision tree to choose the right command:
 
-## Usage
+### Q1: Do you have a single `.spg` file to analyze?
 
-### Basic Command
+**Yes** → Use `metadata-checker <FILE.spg>` (default JSON output)
 
+- Need a compact overview? → Default output (no flags)
+- Need full details (components, expressions, dependency_order)? → Add `--detail`
+- Need priority analysis (defaultValue vs exp vs calcCondition)? → Add `--priority`
+- Need to query a specific component? → Add `--query <COMPONENT_ID>`
+- Need human-readable text? → Add `--human` (expert exploration mode)
+
+### Q2: Do you need to understand what a specific ID does?
+
+**Yes** → Use `metadata-checker --explain <ID>`
+
+- Component in a single file → `--explain input1` (with `--project-dir` for cross-file context)
+- Model/field/page/dataflow in project graph → `--explain model:physical_x`
+
+Output includes: `what_is_it`, `reads`, `writes`, `triggered_by`, `affects`, `lineage`, `evidence`
+
+### Q3: Do you need the surrounding context of an ID?
+
+**Yes** → Use `metadata-checker --context <ID> --depth <N> --budget <compact|normal|full>`
+
+- Default depth is 1, default budget is `normal`.
+- Use `--budget compact` to avoid large raw JSON.
+
+### Q4: Do you need project-level analysis?
+
+**Yes** → You need `--project-dir <DIR>`
+
+First, build the graph database:
 ```bash
-metadata-checker <FILE.spg> [OPTIONS]
-```
-
-### Options
-
-| Flag | Description |
-|------|-------------|
-| `--human` | Enter interactive REPL for expert exploration |
-| `--interactive` | Alias for `--human`, also enters REPL |
-| `--non-human` | Machine-friendly compact JSON output (default) |
-| `--priority` | Additionally merge priority analysis into main JSON output |
-| `--query <ID>` | Query detailed info for a specific component ID |
-| `--project-dir <DIR>` | Project directory for cross-file graph analysis |
-| `--build-graph` | Scan project directory and build/update graph database |
-| `--query-model <MODEL>` | Query model read/write relationships (requires `--project-dir`) |
-| `--query-page <PAGE>` | Query page dependencies (requires `--project-dir`) |
-| `--query-cross <A> <B>` | Query cross-file relations between two pages (requires `--project-dir`) |
-| `--query-dataflow <MODEL>` | Expand DataFlow subgraph (requires `--project-dir`) |
-
-### Output Modes
-
-**`--human` mode:** Enters interactive REPL for expert exploration. You can input component IDs to query their details interactively.
-
-**`--interactive` mode:** Enter REPL where you can input component IDs to get detailed query results interactively.
-
-**`--non-human` mode (default):** Single JSON object with these top-level keys:
-- `schema_version` - Always "1.0"
-- `kind` - Always "SuperPage"
-- `truncated` - Boolean, whether output was truncated
-- `diagnostics` - Object with `cycle_count`, `has_cycles`, `component_count`, `expression_count`
-- `version` - Page version string
-- `theme` - Page theme string
-- `params` - Array of page parameters
-- `sources` - Array of data sources (models)
-- `components` - Array of components
-- `expressions` - Array of expressions with parsed refs
-- `dependency_order` - Topological sort of component IDs
-- `cycles` - Detected cycles (empty if none)
-- `next_queries` - Suggested follow-up queries
-
-### Project-Level Graph Queries (require `--project-dir`)
-
-All project-level queries require `--project-dir` to locate the graph database:
-
-```bash
-# Build/update graph database
 metadata-checker --project-dir /path/to/project --build-graph
-
-# Query model relationships
-metadata-checker --project-dir /path/to/project --query-model model1
-
-# Query page dependencies
-metadata-checker --project-dir /path/to/project --query-page "page:app/合同管理/销售合同.spg"
-
-# Query cross-file relations
-metadata-checker --project-dir /path/to/project --query-cross "page:app/A.spg" "page:app/B.spg"
-
-# Expand DataFlow subgraph
-metadata-checker --project-dir /path/to/project --query-dataflow dataflow_output
 ```
 
-**`query_model` JSON output** includes `schema_version`. Prefer these fields when reasoning about model usage:
-- `readers` - Pages/components/actions that read the model
-- `writers` - Pages/components/actions that write the model
-- `dataflow_inputs` - Input tables read by this DataFlow (outgoing `DataflowInput`)
-- `dataflow_outputs` - Physical tables produced by this DataFlow (outgoing `OutputsTo`)
-- `produced_by` - DataFlows/apps that produce this physical table (incoming `OutputsTo`)
-- `consumed_by_dataflows` - DataFlows that consume this table as input (incoming `DataflowInput`)
-- `upstream_dependencies` / `downstream_outputs` - Legacy compatibility fields; do not use them as the primary lineage semantics
+Then query:
+- Model read/write relationships → `--query-model <MODEL>`
+- Page dependencies → `--query-page <PAGE>`
+- Cross-file relations between two pages → `--query-cross <A> <B>`
+- DataFlow subgraph → `--query-dataflow <MODEL>`
+- Page-level logic summary → `--query-page-logic <PAGE>`
 
-For each reader/writer/lineage entry:
-- `page` / `page_id` - Source page name and ID
-- `component_or_action` - Component or action name
-- `node_id` - Full node ID in graph
-- `node_type` - Node type (Component, Action, etc.)
-- `edge_type` - Relationship type (Reads, Writes, ActionWrites, DataflowInput, OutputsTo)
-- `field_path` - Field path if applicable
-- `source_file` - Source file path
+### Q5: Do you need page-level logic summary?
+
+**Yes** → Use `metadata-checker --project-dir /path/to/project --query-page-logic <page>`
+
+Output includes: `page_inputs`, `data_sources`, `write_targets`, `entrypoints`, `action_flows`, `visibility_rules`, `navigation`, `risk_diagnostics`
+
+## Machine JSON Output Schema
+
+All machine outputs (`--non-human`, default) follow a unified top-level structure:
+
+```json
+{
+  "schema_version": "1.0",
+  "kind": "SuperPage | PageQuery | ModelQuery | CrossPageQuery | DataFlowQuery | ComponentQuery | PriorityQuery | Explain | Context | PageLogic",
+  "query_target": "...",
+  "summary": { /* Low-noise summary, AI should read this first */ },
+  "details": { /* Detailed data, only when needed */ },
+  "evidence": [ /* Evidence chain for every conclusion */ ],
+  "diagnostics": [ /* Warnings, errors, unresolved refs */ ],
+  "next_queries": [ /* Suggested follow-up CLI commands */ ]
+}
+```
+
+**AI Usage Rule**: Always read `summary` first. Only read `details` or `evidence` when you need to verify a specific claim. Never read raw JSON by default. If `diagnostics` contains entries, you must give a conservative answer.
 
 ## Important Constraints
 
-1. `--project-dir` is **required** for all project-level queries (`--query-model`, `--query-page`, `--query-cross`, `--query-dataflow`). Without it, the tool exits with an error.
-2. `--human` and `--interactive` both enter REPL mode.
-3. When `--priority` is used with `--non-human` (default), priority analysis is merged into the main JSON output under the `priority_analysis` field.
-4. Component IDs in expressions use the full path format: `comp:app/page.spg|component_id`.
-5. Page node IDs use normalized relative paths: `page:app/page.spg`.
+1. `--project-dir` is **required** for all project-level queries (`--query-model`, `--query-page`, `--query-cross`, `--query-dataflow`, `--explain`, `--context`, `--query-page-logic`). Without it, the tool exits with an error.
+2. `--human` and `--interactive` both enter REPL mode for expert exploration. Do not use them for automated/machine consumption.
+3. Component IDs in expressions use the full path format: `comp:app/page.spg|component_id`.
+4. Page node IDs use normalized relative paths: `page:app/page.spg`.
+5. Legacy compatibility fields exist but should not be used as primary semantics:
+   - `upstream_dependencies` → use `produced_by` / `consumed_by_dataflows` / `dataflow_inputs`
+   - `downstream_outputs` → use `dataflow_outputs` / `produced_by`
 
 ## Examples
 
 ```bash
-# Parse single file, JSON output
+# Parse single file, compact JSON output (default)
 metadata-checker page.spg
 
-# Parse single file, enter interactive REPL
-metadata-checker page.spg --human
-
-# Parse with priority analysis (human)
-metadata-checker page.spg --human --priority
+# Parse with full details
+metadata-checker page.spg --detail
 
 # Query specific component
-metadata-checker page.spg --query input3 --priority
+metadata-checker page.spg --query input3
 
-# Interactive REPL
-metadata-checker page.spg --interactive
+# Explain a component
+metadata-checker page.spg --explain input1
 
 # Build graph for project
 metadata-checker --project-dir /path/to/project --build-graph
@@ -151,4 +123,10 @@ metadata-checker --project-dir /path/to/project --query-model model1
 
 # Query model (human output)
 metadata-checker --project-dir /path/to/project --query-model model1 --human
+
+# Get context around a button
+metadata-checker --project-dir /path/to/project --context button1 --depth 2 --budget compact
+
+# Page logic summary
+metadata-checker --project-dir /path/to/project --query-page-logic "page:app/合同管理/销售合同.spg"
 ```

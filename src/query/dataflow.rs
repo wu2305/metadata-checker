@@ -278,8 +278,7 @@ fn trace_field_source(
 pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result<()> {
     let node = graph.get_node(dataflow_id);
     if node.is_none() {
-        eprintln!("DataFlow {} not found in graph", dataflow_id);
-        return Ok(());
+        anyhow::bail!("DataFlow {} not found in graph", dataflow_id);
     }
     let node = node.unwrap();
 
@@ -467,11 +466,15 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
             }
         }
 
-        let result = serde_json::json!({
-            "dataflow": dataflow_id,
+        let summary = serde_json::json!({
+            "dataflow_id": dataflow_id,
             "name": node.name,
-            "path": node.path,
-            "model_type": raw_meta.and_then(|m| m.get("modelType")).and_then(|v| v.as_str()),
+            "model_type": raw_meta.and_then(|m| m.get("modelType")).and_then(|v| v.as_str()).unwrap_or("DataFlow"),
+            "input_count": inputs.len(),
+            "output_count": outputs.len(),
+        });
+
+        let details = serde_json::json!({
             "inputs": inputs.iter().map(|(n, e)| serde_json::json!({
                 "id": n.id,
                 "name": n.name,
@@ -490,7 +493,31 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                 "depends_on": deps,
             })).collect::<Vec<_>>(),
         });
-        println!("{}", serde_json::to_string_pretty(&result)?);
+
+        let mut output =
+            crate::output::AiOutput::new(crate::output::OutputKind::DataFlowQuery, summary);
+        output.query_target = Some(dataflow_id.to_string());
+        output.details = Some(details);
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "DataFlow {} has {} inputs and {} outputs",
+                    dataflow_id,
+                    inputs.len(),
+                    outputs.len()
+                ),
+                "Parsed from DataFlow metadata",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(dataflow_id),
+        );
+        output.next_queries = vec![
+            format!("--explain {} for semantic summary", dataflow_id),
+            format!("--context {} --depth 2", dataflow_id),
+        ];
+
+        let output = output.validate();
+        println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
 }

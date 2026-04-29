@@ -1,5 +1,7 @@
 pub mod cli;
+pub mod context;
 pub mod dependency;
+pub mod explain;
 pub mod graph;
 pub mod output;
 pub mod parser;

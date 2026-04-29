@@ -1,5 +1,6 @@
 use crate::graph::GraphDB;
 use anyhow::Result;
+use serde_json::json;
 use std::io::{self, Write};
 
 /// 图查询模块
@@ -206,9 +207,14 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
                 })
             })
             .collect::<Vec<_>>();
-        let result = serde_json::json!({
-            "schema_version": "1.0",
-            "model": model_id,
+        let summary = serde_json::json!({
+            "model_id": model_id,
+            "read_by_count": readers.len(),
+            "written_by_count": writers.len(),
+            "dataflow_role": "Unknown",
+        });
+
+        let details = serde_json::json!({
             "readers": readers,
             "writers": writers,
             "dataflow_inputs": dataflow_inputs,
@@ -218,7 +224,31 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
             "upstream_dependencies": upstream,
             "downstream_outputs": downstream,
         });
-        println!("{}", serde_json::to_string_pretty(&result)?);
+
+        let mut output =
+            crate::output::AiOutput::new(crate::output::OutputKind::ModelQuery, summary);
+        output.query_target = Some(model_id.to_string());
+        output.details = Some(details);
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Model {} has {} readers and {} writers",
+                    model_id,
+                    readers.len(),
+                    writers.len()
+                ),
+                "Graph traversal from project database",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(model_id),
+        );
+        output.next_queries = vec![
+            format!("--explain {} for full semantic summary", model_id),
+            format!("--query-dataflow {} for internal subgraph", model_id),
+        ];
+
+        let output = output.validate();
+        println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
 }
@@ -238,15 +268,45 @@ pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
                 writeln!(out, "  <- {} ({:?})", node.name, edge.edge_type)?;
             }
         } else {
-            let result = serde_json::json!({
-                "page": page_id,
+            let summary = serde_json::json!({
+                "page_id": page_id,
+                "outgoing_count": outgoing.len(),
+                "incoming_count": incoming.len(),
+                "relation_types": outgoing.iter().map(|(_, e)| format!("{:?}", e.edge_type)).collect::<std::collections::HashSet<String>>().into_iter().collect::<Vec<String>>(),
+            });
+
+            let details = serde_json::json!({
                 "outgoing": outgoing.iter().map(|(n, e)| serde_json::json!({"name": n.name, "type": format!("{:?}", e.edge_type)})).collect::<Vec<_>>(),
                 "incoming": incoming.iter().map(|(n, e)| serde_json::json!({"name": n.name, "type": format!("{:?}", e.edge_type)})).collect::<Vec<_>>(),
             });
-            println!("{}", serde_json::to_string_pretty(&result)?);
+
+            let mut output =
+                crate::output::AiOutput::new(crate::output::OutputKind::PageQuery, summary);
+            output.query_target = Some(page_id.to_string());
+            output.details = Some(details);
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Page {} has {} outgoing and {} incoming edges",
+                        page_id,
+                        outgoing.len(),
+                        incoming.len()
+                    ),
+                    "Graph traversal from project database",
+                )
+                .with_confidence(crate::output::Confidence::High)
+                .with_node_id(page_id),
+            );
+            output.next_queries = vec![format!(
+                "--query-page-logic {} for page-level logic summary",
+                page_id
+            )];
+
+            let output = output.validate();
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
     } else {
-        eprintln!("Page {} not found in graph", page_id);
+        anyhow::bail!("Page {} not found in graph", page_id);
     }
     Ok(())
 }
@@ -287,15 +347,224 @@ pub fn query_cross(graph: &GraphDB, page_a: &str, page_b: &str, human: bool) -> 
                     .collect::<Vec<_>>()
             })
             .collect();
-        let result = serde_json::json!({
+
+        let summary = serde_json::json!({
             "page_a": page_a,
             "page_b": page_b,
+            "path_count": paths.len(),
+        });
+
+        let details = serde_json::json!({
             "paths": json_paths,
         });
-        println!("{}", serde_json::to_string_pretty(&result)?);
+
+        let mut output =
+            crate::output::AiOutput::new(crate::output::OutputKind::CrossPageQuery, summary);
+        output.query_target = Some(format!("{} <-> {}", page_a, page_b));
+        output.details = Some(details);
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Cross-page query found {} paths between {} and {}",
+                    paths.len(),
+                    page_a,
+                    page_b
+                ),
+                "Graph traversal from project database",
+            )
+            .with_confidence(crate::output::Confidence::High),
+        );
+        output.next_queries = vec![
+            format!("--query-page {} for page dependencies", page_a),
+            format!("--query-page {} for page dependencies", page_b),
+        ];
+
+        let output = output.validate();
+        println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
 }
 
 mod dataflow;
 pub use dataflow::query_dataflow;
+
+/// 查询页面级逻辑摘要
+///
+/// 输出 page_inputs、data_sources、write_targets、entrypoints、action_flows、visibility_rules、navigation、risk_diagnostics。
+pub fn query_page_logic(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
+    let page_node = graph
+        .get_node(page_id)
+        .ok_or_else(|| anyhow::anyhow!("Page '{}' not found in graph", page_id))?;
+
+    let (outgoing, _incoming) = graph
+        .get_node_edges(page_id)
+        .unwrap_or_else(|| (Vec::new(), Vec::new()));
+
+    let page_inputs: Vec<serde_json::Value> = Vec::new();
+    let mut data_sources: Vec<serde_json::Value> = Vec::new();
+    let mut write_targets: Vec<serde_json::Value> = Vec::new();
+    let mut entrypoints: Vec<serde_json::Value> = Vec::new();
+    let action_flows: Vec<serde_json::Value> = Vec::new();
+    let visibility_rules: Vec<serde_json::Value> = Vec::new();
+    let mut navigation: Vec<serde_json::Value> = Vec::new();
+    let risk_diagnostics: Vec<serde_json::Value> = Vec::new();
+
+    // Collect child components via Contains edges
+    let mut child_nodes = Vec::new();
+    for (target, edge) in &outgoing {
+        if matches!(edge.edge_type, crate::graph::EdgeType::Contains) {
+            child_nodes.push((*target).clone());
+        }
+    }
+
+    for child in &child_nodes {
+        let child_type = format!("{:?}", child.node_type).to_lowercase();
+        if child_type.contains("component") || child_type.contains("action") {
+            // Check if this component has actions (entrypoints)
+            if let Some((child_out, _)) = graph.get_node_edges(&child.id) {
+                let mut has_action = false;
+                for (target, edge) in &child_out {
+                    match edge.edge_type {
+                        crate::graph::EdgeType::Reads => {
+                            data_sources.push(json!({
+                                "component_id": child.id,
+                                "model": target.name,
+                                "field_path": edge.field_path,
+                            }));
+                        }
+                        crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
+                            write_targets.push(json!({
+                                "component_id": child.id,
+                                "model": target.name,
+                                "field_path": edge.field_path,
+                            }));
+                            has_action = true;
+                        }
+                        crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::SetsParam => {
+                            navigation.push(json!({
+                                "from": child.id,
+                                "to": target.id,
+                                "type": format!("{:?}", edge.edge_type),
+                            }));
+                            has_action = true;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if has_action {
+                    entrypoints.push(json!({
+                        "id": child.id,
+                        "name": child.name,
+                        "type": child_type,
+                    }));
+                }
+            }
+        }
+    }
+
+    // Simple risk diagnostics
+    let mut diagnostics = Vec::new();
+    if write_targets.is_empty() {
+        diagnostics.push(crate::output::Diagnostic {
+            severity: crate::output::DiagnosticSeverity::Info,
+            code: "NO_WRITE_TARGETS".to_string(),
+            message: "Page has no detected write targets".to_string(),
+            location: crate::output::Location::new(),
+            suggestion: Some("Verify if page is read-only or actions are not parsed".to_string()),
+        });
+    }
+
+    if entrypoints.is_empty() {
+        diagnostics.push(crate::output::Diagnostic {
+            severity: crate::output::DiagnosticSeverity::Warning,
+            code: "NO_ENTRYPOINTS".to_string(),
+            message: "Page has no detected user entrypoints (buttons, links, etc.)".to_string(),
+            location: crate::output::Location::new(),
+            suggestion: Some("Check component action definitions".to_string()),
+        });
+    }
+
+    let summary = serde_json::json!({
+        "page_id": page_id,
+        "page_name": page_node.name,
+        "entrypoint_count": entrypoints.len(),
+        "data_source_count": data_sources.len(),
+        "write_target_count": write_targets.len(),
+        "risk_count": diagnostics.len(),
+    });
+
+    let details = serde_json::json!({
+        "page_inputs": page_inputs,
+        "data_sources": data_sources,
+        "write_targets": write_targets,
+        "entrypoints": entrypoints,
+        "action_flows": action_flows,
+        "visibility_rules": visibility_rules,
+        "navigation": navigation,
+        "risk_diagnostics": diagnostics.iter().map(|d| serde_json::json!({
+            "severity": format!("{:?}", d.severity),
+            "code": d.code,
+            "message": d.message,
+            "suggestion": d.suggestion,
+        })).collect::<Vec<serde_json::Value>>(),
+    });
+
+    let mut output = crate::output::AiOutput::new(crate::output::OutputKind::PageLogic, summary);
+    output.query_target = Some(page_id.to_string());
+    output.details = Some(details);
+    output.diagnostics = diagnostics;
+    output.evidence.push(
+        crate::output::Evidence::new(
+            format!(
+                "Page {} has {} entrypoints, {} data sources, {} write targets",
+                page_id,
+                entrypoints.len(),
+                data_sources.len(),
+                write_targets.len()
+            ),
+            "Aggregated from graph child nodes",
+        )
+        .with_confidence(crate::output::Confidence::Medium)
+        .with_node_id(page_id)
+        .with_source_file(&page_node.path),
+    );
+    output.next_queries = vec![
+        format!("--query-page {} for page dependencies", page_id),
+        format!("--explain {} for page semantic summary", page_id),
+    ];
+
+    let output = output.validate();
+
+    if human {
+        let mut out = io::stdout();
+        writeln!(out, "=== Page Logic: {} ===", page_id)?;
+        writeln!(out, "Name: {}", page_node.name)?;
+        writeln!(out, "\nEntrypoints: {}", entrypoints.len())?;
+        for ep in &entrypoints {
+            writeln!(out, "  {:?}", ep)?;
+        }
+        writeln!(out, "\nData Sources: {}", data_sources.len())?;
+        for ds in &data_sources {
+            writeln!(out, "  {:?}", ds)?;
+        }
+        writeln!(out, "\nWrite Targets: {}", write_targets.len())?;
+        for wt in &write_targets {
+            writeln!(out, "  {:?}", wt)?;
+        }
+        writeln!(out, "\nNavigation: {}", navigation.len())?;
+        for nav in &navigation {
+            writeln!(out, "  {:?}", nav)?;
+        }
+        if !risk_diagnostics.is_empty() {
+            writeln!(out, "\n⚠️  Risk Diagnostics:")?;
+            for risk in &risk_diagnostics {
+                writeln!(out, "  {:?}", risk)?;
+            }
+        }
+        out.flush()?;
+    } else {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+    Ok(())
+}

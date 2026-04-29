@@ -102,13 +102,19 @@ Options:
       --interactive         --human 的别名，同样进入 REPL
       --non-human           机器友好的 JSON 输出（默认，单 JSON）
       --query <ID>          查询特定组件 ID 的详细信息
+      --explain <ID>        解释指定 ID 的语义（component/action/model/field/page/dataflow）
+      --context <ID>        输出目标节点周围的最小闭包上下文
+      --depth <N>           上下文深度（默认 1，配合 --context 使用）
+      --budget <B>           输出体积控制：compact|normal|full（默认 normal）
       --priority            附加计算优先级分析（non-human 合并进 JSON）
+      --detail              输出完整原始结构（non-human 模式）
       --project-dir <DIR>   项目目录（用于跨文件分析）
       --build-graph         从项目目录构建/更新图数据库
       --query-model <MODEL> 查询模型的读写关系（需 --project-dir）
       --query-page <PAGE>   查询页面的依赖关系（需 --project-dir）
       --query-cross <A> <B> 查询两页面间的跨文件关系（需 --project-dir）
       --query-dataflow <M>  展开 DataFlow 模型的内部子图（需 --project-dir）
+      --query-page-logic <P> 查询页面级逻辑摘要（需 --project-dir）
   -h, --help                打印帮助信息
   -V, --version             打印版本
 ```
@@ -162,13 +168,44 @@ tests/                   # 测试用例（覆盖全部模块）
 - `DataflowInput` — DataFlow 输入源
 - `DataflowInternal` — DataFlow 内部节点依赖
 
+## 统一 JSON 输出 Schema（Machine Contract）
+
+所有机器输出（默认 `--non-human`）通过 `src/output/schema.rs` 中的 `AiOutput` struct 统一序列化，**禁止手写 `json!`**。
+
+```json
+{
+  "schema_version": "1.0",
+  "kind": "SuperPage | PageQuery | ModelQuery | CrossPageQuery | DataFlowQuery | ComponentQuery | PriorityQuery | Explain | Context | PageLogic",
+  "query_target": "...",
+  "summary": { /* 低噪声摘要，AI 优先读取 */ },
+  "details": { /* 详细信息，按需展开 */ },
+  "evidence": [ /* 证据链：只要 summary 有实质内容，evidence 不能为空 */ ],
+  "diagnostics": [ /* 诊断信息：统一包含 severity/code/message/location/suggestion */ ],
+  "next_queries": [ /* 建议的下一步查询：必须为真实可运行命令 */ ]
+}
+```
+
+### AI 使用顺序
+
+1. **先读 `summary`**：建立页面/项目地图，获取高层信息
+2. **遇到 `diagnostics` 时保守回答**：不确定的关系必须保守处理
+3. **需要核查时读 `evidence`**：验证具体结论的出处
+4. **需要细节时读 `details`**：按需展开完整结构化结果
+
+### 兼容字段说明
+
+- `upstream_dependencies` / `downstream_outputs` 为 legacy 兼容字段，不应作为主语义字段
+- 禁止默认读取 raw JSON，必须从 `summary` 开始
+
+详细字段定义见 `docs/schema.md`。
+
 ## 测试
 
 ```bash
 cargo test
 ```
 
-115 个测试覆盖：
+115+ 个测试覆盖：
 - SuperPage 解析（组件、参数、数据源、表达式）
 - 表达式引用解析（简单、复杂、宏、模型、IF 条件）
 - 依赖图构建与拓扑排序

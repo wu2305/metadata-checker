@@ -1,5 +1,7 @@
 use metadata_checker::cli;
+use metadata_checker::context;
 use metadata_checker::dependency::DependencyGraph;
+use metadata_checker::explain;
 use metadata_checker::graph::GraphDB;
 use metadata_checker::output;
 use metadata_checker::parser;
@@ -58,8 +60,35 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
+        if let Some(ref page_logic_id) = args.query_page_logic {
+            query::query_page_logic(&graph, page_logic_id, args.is_human())?;
+            return Ok(());
+        }
+
+        if let Some(ref explain_id) = args.explain {
+            explain::explain_node_graph(&graph, explain_id, args.is_human())?;
+            return Ok(());
+        }
+
+        if let Some(ref context_id) = args.context {
+            if args.budget != "compact" && args.budget != "normal" && args.budget != "full" {
+                anyhow::bail!(
+                    "Invalid budget '{}'. Expected: compact | normal | full",
+                    args.budget
+                );
+            }
+            context::context_node_graph(
+                &graph,
+                context_id,
+                args.depth,
+                &args.budget,
+                args.is_human(),
+            )?;
+            return Ok(());
+        }
+
         println!(
-            "No query specified. Use --query-model, --query-page, --query-cross, or --query-dataflow."
+            "No query specified. Use --query-model, --query-page, --query-cross, --query-dataflow, --query-page-logic, --explain, or --context."
         );
         return Ok(());
     }
@@ -76,6 +105,14 @@ fn main() -> Result<()> {
         // Placeholder when only project-dir is used
         parser::parse_file(std::path::Path::new(""))? // Will not reach here due to early returns below
     };
+
+    // --explain mode
+    if let Some(ref explain_id) = args.explain {
+        if let Some(spg) = &meta.superpage {
+            explain::explain_component_spg(spg, explain_id, args.is_human())?;
+        }
+        return Ok(());
+    }
 
     // --query mode: print component query and exit
     if let Some(ref target_id) = args.query {

@@ -186,7 +186,8 @@ fn refs_to_string(refs: &[RefType]) -> String {
 }
 
 /// 生成机器可消费的 JSON 优先级报告
-pub fn format_priority_json(analyses: &[PriorityAnalysis]) -> String {
+#[allow(dead_code)]
+fn format_priority_json(analyses: &[PriorityAnalysis]) -> String {
     let json_val = serde_json::json!({
         "schema_version": "1.0",
         "total": analyses.len(),

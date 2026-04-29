@@ -91,6 +91,43 @@ pub struct Cli {
         help = "Expand and query a DataFlow model's internal subgraph (requires --project-dir)"
     )]
     pub query_dataflow: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "ID",
+        help = "Explain a component, action, model, field, page, or dataflow by ID"
+    )]
+    pub explain: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "ID",
+        help = "Output minimal closure context around a target node (requires --project-dir)"
+    )]
+    pub context: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "N",
+        default_value = "1",
+        help = "Context depth for --context (default: 1)"
+    )]
+    pub depth: usize,
+
+    #[arg(
+        long,
+        value_name = "BUDGET",
+        default_value = "normal",
+        help = "Output budget: compact | normal | full (default: normal)"
+    )]
+    pub budget: String,
+
+    #[arg(
+        long,
+        value_name = "PAGE",
+        help = "Query page-level logic summary (requires --project-dir)"
+    )]
+    pub query_page_logic: Option<String>,
 }
 
 impl Cli {

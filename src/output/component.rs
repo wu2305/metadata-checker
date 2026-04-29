@@ -287,10 +287,22 @@ pub fn print_component_query_json_to(
             Value::Null
         };
 
-    let result = json!({
+    let summary = json!({
         "component_id": comp.id,
-        "type": comp.component_type,
+        "component_type": comp.component_type,
         "parent_id": comp.parent_id,
+        "what_is_it": format!("{} component {}", comp.component_type, comp.id),
+        "reads_from": comp_exprs.iter().filter_map(|e| {
+            if e.refs.iter().any(|r| matches!(r, RefType::ModelField(_, _) | RefType::Param(_) | RefType::ComponentValue(_))) {
+                Some(json!({ "field": e.field, "raw_expr": e.raw_expr }))
+            } else { None }
+        }).collect::<Vec<serde_json::Value>>(),
+        "writes_to": [],
+        "triggered_by": [],
+        "affects": downstream.iter().map(|d| d.get("id").cloned().unwrap_or(serde_json::Value::Null)).collect::<Vec<serde_json::Value>>(),
+    });
+
+    let details = json!({
         "properties": comp.properties,
         "expressions": comp_exprs.iter().map(|e| json!({
             "field": e.field,
@@ -303,15 +315,33 @@ pub fn print_component_query_json_to(
                 RefType::UserProperty(prop) => json!({"type": "user_property", "property": prop}),
                 RefType::SystemVar(var) => json!({"type": "system_var", "var": var}),
                 RefType::Other(s) => json!({"type": "other", "value": s}),
-            }).collect::<Vec<Value>>(),
-        })).collect::<Vec<Value>>(),
+            }).collect::<Vec<serde_json::Value>>(),
+        })).collect::<Vec<serde_json::Value>>(),
         "upstream": upstream,
         "downstream": downstream,
         "value_trace": value_trace,
         "priority": priority,
     });
 
-    writeln!(out, "{}", serde_json::to_string_pretty(&result)?)?;
+    let mut output =
+        crate::output::AiOutput::new(crate::output::OutputKind::ComponentQuery, summary);
+    output.query_target = Some(comp.id.clone());
+    output.details = Some(details);
+    output.evidence.push(
+        crate::output::Evidence::new(
+            format!("Component {} is a {}", comp.id, comp.component_type),
+            "Direct component definition in parsed metadata",
+        )
+        .with_confidence(crate::output::Confidence::High)
+        .with_node_id(&comp.id),
+    );
+    output.next_queries = vec![
+        format!("--explain {} for semantic summary", comp.id),
+        format!("--context {} --depth 2 for surrounding closure", comp.id),
+    ];
+
+    let output = output.validate();
+    writeln!(out, "{}", serde_json::to_string_pretty(&output)?)?;
     out.flush()?;
     Ok(())
 }

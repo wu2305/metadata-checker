@@ -223,7 +223,7 @@ pub fn print_summary_to(
 
         // Collect models read/written
         let mut models_read: Vec<String> = Vec::new();
-        let models_written: Vec<String> = Vec::new();
+        let _models_written: Vec<String> = Vec::new();
         for expr in &spg.expressions {
             for ref_type in &expr.refs {
                 if let RefType::ModelField(model, _) = ref_type {
@@ -247,7 +247,7 @@ pub fn print_summary_to(
             })
             .collect();
 
-        let priority_json = priority_analyses.map(|analyses| {
+        let _priority_json = priority_analyses.map(|analyses| {
             analyses
                 .iter()
                 .map(|a| {
@@ -259,48 +259,88 @@ pub fn print_summary_to(
                 .collect::<Vec<Value>>()
         });
 
+        let mut diagnostics = Vec::new();
+        if !cycles.is_empty() {
+            diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Warning,
+                code: "CYCLE_DEPENDENCY".to_string(),
+                message: "Cycle dependencies detected".to_string(),
+                location: crate::output::Location::new(),
+                suggestion: Some("Check component expressions for circular references".to_string()),
+            });
+        } else {
+            diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "OK".to_string(),
+                message: "No cycles detected".to_string(),
+                location: crate::output::Location::new(),
+                suggestion: None,
+            });
+        }
+
         let summary = json!({
-            "schema_version": "1.0",
-            "kind": "SuperPage",
-            "page": {
+            "page_info": {
                 "version": spg.version,
                 "theme": spg.theme,
                 "component_count": spg.components.len(),
                 "expression_count": spg.expressions.len(),
-            },
-            "summary": {
-                "models_read": models_read,
-                "models_written": models_written,
-                "cycle_count": cycles.len(),
                 "has_cycles": !cycles.is_empty(),
             },
             "important_components": important_components,
-            "diagnostics": {
-                "cycle_count": cycles.len(),
-                "has_cycles": !cycles.is_empty(),
-                "component_count": spg.components.len(),
-                "expression_count": spg.expressions.len(),
-            },
-            "priority_analysis": priority_json.unwrap_or_default(),
-            "next_queries": [
-                "--query <COMPONENT_ID> for component details",
-                "--priority for defaultValue vs exp analysis",
-                "--detail for full raw structure",
-                "--project-dir <DIR> --query-model <MODEL> for cross-file model usage",
-            ],
+            "data_sources": spg.sources.iter().map(|s| json!({
+                "id": s.id,
+                "model_type": s.model_type,
+                "path": s.path,
+            })).collect::<Vec<Value>>(),
+            "page_params": spg.params.iter().map(|p| json!({
+                "id": p.id,
+                "name": p.name,
+                "default_value": p.default_value,
+            })).collect::<Vec<Value>>(),
         });
-        writeln!(out, "{}", serde_json::to_string_pretty(&summary)?)?;
+
+        let mut output =
+            crate::output::AiOutput::new(crate::output::OutputKind::SuperPage, summary);
+        output.diagnostics = diagnostics;
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "SuperPage has {} components and {} expressions",
+                    spg.components.len(),
+                    spg.expressions.len()
+                ),
+                "Parsed from input file",
+            )
+            .with_confidence(crate::output::Confidence::High),
+        );
+        output.next_queries = vec![
+            "--query <COMPONENT_ID> for component details".to_string(),
+            "--explain <COMPONENT_ID> for semantic explanation".to_string(),
+            "--priority for defaultValue vs exp analysis".to_string(),
+            "--detail for full raw structure".to_string(),
+            "--project-dir <DIR> --query-model <MODEL> for cross-file model usage".to_string(),
+        ];
+
+        let output = output.validate();
+        writeln!(out, "{}", serde_json::to_string_pretty(&output)?)?;
         return Ok(());
     }
 
     let summary = json!({
-        "schema_version": "1.0",
-        "kind": "Page",
         "page_id": meta.page_id,
         "version": meta.version,
         "component_count": meta.components.len(),
     });
-    writeln!(out, "{}", serde_json::to_string_pretty(&summary)?)?;
+
+    let mut output = crate::output::AiOutput::new(crate::output::OutputKind::SuperPage, summary);
+    output.evidence.push(
+        crate::output::Evidence::new("Legacy page metadata parsed", "Non-SuperPage format")
+            .with_confidence(crate::output::Confidence::Medium),
+    );
+    output.next_queries = vec!["--detail for full raw structure".to_string()];
+
+    let output = output.validate();
+    writeln!(out, "{}", serde_json::to_string_pretty(&output)?)?;
     out.flush()?;
     Ok(())
 }
@@ -326,29 +366,36 @@ pub fn print_non_human_to(
             })).collect::<Vec<Value>>()
         });
 
+        let mut diagnostics = Vec::new();
+        if !cycles.is_empty() {
+            diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Warning,
+                code: "CYCLE_DEPENDENCY".to_string(),
+                message: "Cycle dependencies detected".to_string(),
+                location: crate::output::Location::new(),
+                suggestion: Some("Check component expressions for circular references".to_string()),
+            });
+        } else {
+            diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "OK".to_string(),
+                message: "No cycles detected".to_string(),
+                location: crate::output::Location::new(),
+                suggestion: None,
+            });
+        }
+
         let summary = json!({
-            "schema_version": "1.0",
-            "kind": "SuperPage",
-            "truncated": false,
-            "diagnostics": {
-                "cycle_count": cycles.len(),
-                "has_cycles": !cycles.is_empty(),
+            "page_info": {
+                "version": spg.version,
+                "theme": spg.theme,
                 "component_count": spg.components.len(),
                 "expression_count": spg.expressions.len(),
+                "has_cycles": !cycles.is_empty(),
             },
-            "version": spg.version,
-            "theme": spg.theme,
-            "params": spg.params.iter().map(|p| json!({
-                "id": p.id,
-                "name": p.name,
-                "desc": p.desc,
-                "default_value": p.default_value,
-            })).collect::<Vec<Value>>(),
-            "sources": spg.sources.iter().map(|s| json!({
-                "id": s.id,
-                "model_type": s.model_type,
-                "path": s.path,
-            })).collect::<Vec<Value>>(),
+        });
+
+        let details = json!({
             "components": spg.components.iter().map(|c| json!({
                 "id": c.id,
                 "type": c.component_type,
@@ -385,20 +432,43 @@ pub fn print_non_human_to(
             })).collect::<Vec<Value>>(),
             "dependency_order": topo,
             "cycles": cycles,
-            "priority_analysis": priority_json.unwrap_or_default(),
-            "next_queries": [
-                "--query <COMPONENT_ID> for component details",
-                "--priority for defaultValue vs exp analysis",
-                "--project-dir <DIR> --query-model <MODEL> for cross-file model usage",
-            ],
+            "priority_analysis": priority_json,
         });
-        writeln!(out, "{}", serde_json::to_string_pretty(&summary)?)?;
+
+        let mut output =
+            crate::output::AiOutput::new(crate::output::OutputKind::SuperPage, summary);
+        output.details = Some(details);
+        output.diagnostics = diagnostics;
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "SuperPage parsed with {} components and {} expressions",
+                    spg.components.len(),
+                    spg.expressions.len()
+                ),
+                "Direct parsing from input file",
+            )
+            .with_confidence(crate::output::Confidence::High),
+        );
+        output.next_queries = vec![
+            "--query <COMPONENT_ID> for component details".to_string(),
+            "--explain <COMPONENT_ID> for semantic explanation".to_string(),
+            "--priority for defaultValue vs exp analysis".to_string(),
+            "--project-dir <DIR> --query-model <MODEL> for cross-file model usage".to_string(),
+        ];
+
+        let output = output.validate();
+        writeln!(out, "{}", serde_json::to_string_pretty(&output)?)?;
         return Ok(());
     }
 
     let summary = json!({
         "page_id": meta.page_id,
         "version": meta.version,
+        "component_count": meta.components.len(),
+    });
+
+    let details = json!({
         "components": meta.components.iter().map(|c| json!({
             "id": c.id,
             "type": c.component_type,
@@ -412,12 +482,23 @@ pub fn print_non_human_to(
         })).collect::<Vec<Value>>(),
         "settings": meta.settings,
     });
-    writeln!(out, "{}", serde_json::to_string_pretty(&summary)?)?;
+
+    let mut output = crate::output::AiOutput::new(crate::output::OutputKind::SuperPage, summary);
+    output.details = Some(details);
+    output.evidence.push(
+        crate::output::Evidence::new("Legacy page metadata parsed", "Non-SuperPage format")
+            .with_confidence(crate::output::Confidence::Medium),
+    );
+    output.next_queries = vec!["--detail for full raw structure".to_string()];
+
+    let output = output.validate();
+    writeln!(out, "{}", serde_json::to_string_pretty(&output)?)?;
     out.flush()?;
     Ok(())
 }
 
-pub fn print_value_traces(traces: &[ValueTrace], human: bool) -> Result<()> {
+#[allow(dead_code)]
+fn print_value_traces(traces: &[ValueTrace], human: bool) -> Result<()> {
     if human {
         let mut out = io::stdout();
         writeln!(out, "=== Value Source Traces ===")?;
@@ -465,4 +546,6 @@ pub fn print_value_traces(traces: &[ValueTrace], human: bool) -> Result<()> {
 }
 
 mod component;
+pub mod schema;
 pub use component::*;
+pub use schema::*;
