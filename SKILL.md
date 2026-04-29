@@ -99,12 +99,21 @@ metadata-checker --project-dir /path/to/project --query-cross "page:app/A.spg" "
 metadata-checker --project-dir /path/to/project --query-dataflow dataflow_output
 ```
 
-**`query_model` JSON output** includes `schema_version`, and for each reader/writer:
+**`query_model` JSON output** includes `schema_version`. Prefer these fields when reasoning about model usage:
+- `readers` - Pages/components/actions that read the model
+- `writers` - Pages/components/actions that write the model
+- `dataflow_inputs` - Input tables read by this DataFlow (outgoing `DataflowInput`)
+- `dataflow_outputs` - Physical tables produced by this DataFlow (outgoing `OutputsTo`)
+- `produced_by` - DataFlows/apps that produce this physical table (incoming `OutputsTo`)
+- `consumed_by_dataflows` - DataFlows that consume this table as input (incoming `DataflowInput`)
+- `upstream_dependencies` / `downstream_outputs` - Legacy compatibility fields; do not use them as the primary lineage semantics
+
+For each reader/writer/lineage entry:
 - `page` / `page_id` - Source page name and ID
 - `component_or_action` - Component or action name
 - `node_id` - Full node ID in graph
 - `node_type` - Node type (Component, Action, etc.)
-- `edge_type` - Relationship type (Reads, Writes, ActionWrites)
+- `edge_type` - Relationship type (Reads, Writes, ActionWrites, DataflowInput, OutputsTo)
 - `field_path` - Field path if applicable
 - `source_file` - Source file path
 

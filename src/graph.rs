@@ -480,7 +480,6 @@ impl GraphDB {
         paths
     }
 
-    /// 查询指定模型的上游依赖（DataflowInput 边）
     /// 查询 DataFlow 的输入依赖（ outgoing DataflowInput 边）
     pub fn find_dataflow_inputs<'a>(&'a self, model_id: &str) -> Vec<NodeEdgePair<'a>> {
         let mut results = Vec::new();

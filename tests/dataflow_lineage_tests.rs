@@ -13,6 +13,9 @@ fn copy_fixture_project(temp_dir: &Path) {
     let src = PathBuf::from("tests/fixtures/test_project");
     for entry in std::fs::read_dir(&src).unwrap() {
         let entry = entry.unwrap();
+        if entry.file_name() == ".metadata-checker.graphdb" {
+            continue;
+        }
         let dest = temp_dir.join(entry.file_name());
         if entry.file_type().unwrap().is_file() {
             std::fs::copy(entry.path(), dest).unwrap();
