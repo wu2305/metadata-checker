@@ -500,13 +500,16 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
         output.details = Some(details);
         output.evidence.push(
             crate::output::Evidence::new(
-                format!(
-                    "DataFlow {} has {} inputs and {} outputs",
-                    dataflow_id,
-                    inputs.len(),
-                    outputs.len()
-                ),
-                "Parsed from DataFlow metadata",
+                format!("DataFlow {} has {} inputs", dataflow_id, inputs.len()),
+                "Parsed from DataFlow metadata: input nodes",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(dataflow_id),
+        );
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("DataFlow {} has {} outputs", dataflow_id, outputs.len()),
+                "Parsed from DataFlow metadata: output nodes",
             )
             .with_confidence(crate::output::Confidence::High)
             .with_node_id(dataflow_id),

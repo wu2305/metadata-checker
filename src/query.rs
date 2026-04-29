@@ -229,19 +229,79 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
             crate::output::AiOutput::new(crate::output::OutputKind::ModelQuery, summary);
         output.query_target = Some(model_id.to_string());
         output.details = Some(details);
+        // 为 summary 中每个计数和 details 中每个主要数组提供独立 evidence
         output.evidence.push(
             crate::output::Evidence::new(
-                format!(
-                    "Model {} has {} readers and {} writers",
-                    model_id,
-                    readers.len(),
-                    writers.len()
-                ),
-                "Graph traversal from project database",
+                format!("Model {} has {} readers", model_id, readers.len()),
+                "Graph traversal: find_readers",
             )
             .with_confidence(crate::output::Confidence::High)
             .with_node_id(model_id),
         );
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Model {} has {} writers", model_id, writers.len()),
+                "Graph traversal: find_writers",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(model_id),
+        );
+        if !dataflow_inputs.is_empty() {
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Model {} is input to {} dataflows",
+                        model_id,
+                        dataflow_inputs.len()
+                    ),
+                    "Graph traversal: find_dataflow_inputs",
+                )
+                .with_confidence(crate::output::Confidence::High)
+                .with_node_id(model_id),
+            );
+        }
+        if !dataflow_outputs.is_empty() {
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Model {} is output from {} dataflows",
+                        model_id,
+                        dataflow_outputs.len()
+                    ),
+                    "Graph traversal: find_dataflow_outputs",
+                )
+                .with_confidence(crate::output::Confidence::High)
+                .with_node_id(model_id),
+            );
+        }
+        if !produced_by.is_empty() {
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Model {} is produced by {} nodes",
+                        model_id,
+                        produced_by.len()
+                    ),
+                    "Graph traversal: find_produced_by",
+                )
+                .with_confidence(crate::output::Confidence::High)
+                .with_node_id(model_id),
+            );
+        }
+        if !consumed_by_dataflows.is_empty() {
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Model {} is consumed by {} dataflows",
+                        model_id,
+                        consumed_by_dataflows.len()
+                    ),
+                    "Graph traversal: find_consumed_by_dataflows",
+                )
+                .with_confidence(crate::output::Confidence::High)
+                .with_node_id(model_id),
+            );
+        }
         output.next_queries = vec![
             format!("--explain {} for full semantic summary", model_id),
             format!("--query-dataflow {} for internal subgraph", model_id),
@@ -286,13 +346,16 @@ pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
             output.details = Some(details);
             output.evidence.push(
                 crate::output::Evidence::new(
-                    format!(
-                        "Page {} has {} outgoing and {} incoming edges",
-                        page_id,
-                        outgoing.len(),
-                        incoming.len()
-                    ),
-                    "Graph traversal from project database",
+                    format!("Page {} has {} outgoing edges", page_id, outgoing.len()),
+                    "Graph traversal: outgoing edges from page node",
+                )
+                .with_confidence(crate::output::Confidence::High)
+                .with_node_id(page_id),
+            );
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!("Page {} has {} incoming edges", page_id, incoming.len()),
+                    "Graph traversal: incoming edges to page node",
                 )
                 .with_confidence(crate::output::Confidence::High)
                 .with_node_id(page_id),
@@ -370,10 +433,20 @@ pub fn query_cross(graph: &GraphDB, page_a: &str, page_b: &str, human: bool) -> 
                     page_a,
                     page_b
                 ),
-                "Graph traversal from project database",
+                "Graph traversal: find_cross_relations",
             )
             .with_confidence(crate::output::Confidence::High),
         );
+        for (i, path) in paths.iter().take(5).enumerate() {
+            let nodes: Vec<String> = path.iter().map(|(n, _)| n.name.clone()).collect();
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!("Path {}: {}", i + 1, nodes.join(" -> ")),
+                    "Graph traversal: individual cross-page path",
+                )
+                .with_confidence(crate::output::Confidence::High),
+            );
+        }
         output.next_queries = vec![
             format!("--query-page {} for page dependencies", page_a),
             format!("--query-page {} for page dependencies", page_b),
@@ -516,19 +589,39 @@ pub fn query_page_logic(graph: &GraphDB, page_id: &str, human: bool) -> Result<(
     output.diagnostics = diagnostics;
     output.evidence.push(
         crate::output::Evidence::new(
-            format!(
-                "Page {} has {} entrypoints, {} data sources, {} write targets",
-                page_id,
-                entrypoints.len(),
-                data_sources.len(),
-                write_targets.len()
-            ),
-            "Aggregated from graph child nodes",
+            format!("Page {} has {} entrypoints", page_id, entrypoints.len()),
+            "Graph traversal: child components with actions",
         )
         .with_confidence(crate::output::Confidence::Medium)
         .with_node_id(page_id)
         .with_source_file(&page_node.path),
     );
+    if !data_sources.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Page {} reads from {} data sources",
+                    page_id,
+                    data_sources.len()
+                ),
+                "Graph traversal: Reads edges from child components",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(page_id)
+            .with_source_file(&page_node.path),
+        );
+    }
+    if !write_targets.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Page {} writes to {} targets", page_id, write_targets.len()),
+                "Graph traversal: Writes/ActionWrites edges from child components",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(page_id)
+            .with_source_file(&page_node.path),
+        );
+    }
     output.next_queries = vec![
         format!("--query-page {} for page dependencies", page_id),
         format!("--explain {} for page semantic summary", page_id),

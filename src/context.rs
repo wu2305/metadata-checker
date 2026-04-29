@@ -235,12 +235,30 @@ pub fn context_node_graph(
     output.evidence.push(
         crate::output::Evidence::new(
             format!("Context closure around {} with depth {}", node_id, depth),
-            "BFS traversal of graph edges",
+            "BFS traversal of graph edges from center node",
         )
         .with_confidence(crate::output::Confidence::High)
         .with_node_id(node_id)
         .with_source_file(&node.path),
     );
+    if !upstream_out.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Found {} upstream dependencies", upstream_out.len()),
+                "BFS traversal: incoming edges",
+            )
+            .with_confidence(crate::output::Confidence::High),
+        );
+    }
+    if !downstream_out.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Found {} downstream dependencies", downstream_out.len()),
+                "BFS traversal: outgoing edges",
+            )
+            .with_confidence(crate::output::Confidence::High),
+        );
+    }
     output.next_queries = vec![
         format!("--explain {} for semantic summary", node_id),
         format!(

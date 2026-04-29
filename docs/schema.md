@@ -46,18 +46,33 @@
 
 当前实现中，evidence 分为两类：
 
-1. **真实证据（Real Evidence）**：从解析或图遍历中直接提取的具体结论，例如：
-   - `SuperPage has 8 components and 7 expressions`（解析结果）
-   - `Model model:model1 has 3 readers and 1 writers`（图遍历）
-   - `Component input1 is a input`（组件定义）
+1. **真实证据（Real Evidence）**：从解析或图遍历中直接提取的具体结论，每条 evidence 对应 summary 中的一个计数或 details 中的一个主要数组。
+   已覆盖的查询：
+   - `SuperPage` 默认输出：解析结果（components/expressions 计数）
+   - `ModelQuery`：每个 reader/writer/dataflow_input/dataflow_output/produced_by/consumed_by_dataflows 数组独立 evidence
+   - `PageQuery`：outgoing/incoming 边数独立 evidence
+   - `CrossPageQuery`：path 总数 + 每条具体 path 的 evidence（最多 5 条）
+   - `DataFlowQuery`：inputs/outputs 独立 evidence
+   - `ComponentQuery`：组件定义 evidence
+   - `Explain`：节点存在 evidence
+   - `Context`：closure 范围 + upstream/downstream 独立 evidence
+   - `PageLogic`：entrypoints/data_sources/write_targets 独立 evidence
+
    这类证据带 `confidence: high` 或 `medium`，并有 `node_id`/`source_file` 等定位信息。
 
-2. **兜底证据（Fallback Evidence）**：当模块尚未产出真实证据时，`AiOutput::validate()` 自动添加：
+2. **兜底证据（Fallback Evidence）**：仅当某个查询路径**尚未**产出真实证据时，`AiOutput::validate()` 自动添加：
    - claim: `"Output generated from parsed metadata"`
    - confidence: `low`
    - 同时 diagnostics 追加 `EVIDENCE_INCOMPLETE`
 
-**AI 使用规则**：遇到 `EVIDENCE_INCOMPLETE` diagnostic 时，应保守回答，不基于 summary 做强断言。
+   M1 完成后，兜底证据仅在以下情况出现：
+   - 新增查询类型尚未实现独立 evidence 收集
+   - 代码路径遗漏（应视为 bug，需修复）
+
+**AI 使用规则**：
+- 优先读取 summary 中的计数，然后到 evidence 中找对应的具体来源
+- 遇到 `EVIDENCE_INCOMPLETE` diagnostic 时，应保守回答，不基于 summary 做强断言
+- 若 evidence 完整且 confidence 为 high/medium，可基于 evidence 做确定性结论
 
 ## Rust 实现
 
