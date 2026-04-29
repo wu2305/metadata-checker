@@ -1,5 +1,8 @@
 use clap::Parser;
 use metadata_checker::output::{AiOutput, OutputKind};
+use std::sync::Mutex;
+
+static CLI_LOCK: Mutex<()> = Mutex::new(());
 use metadata_checker::parser::parse_file;
 use std::path::PathBuf;
 
@@ -330,4 +333,161 @@ fn test_query_page_logic_contract() {
         result.is_ok(),
         "query_page_logic should succeed for existing page"
     );
+}
+
+/// 通过编译后的二进制 CLI 捕获 JSON 输出
+fn run_cli(args: &[&str]) -> String {
+    let _guard = CLI_LOCK.lock().unwrap();
+    let bin = std::env::current_dir()
+        .unwrap()
+        .join("target/debug/metadata-checker");
+    let cmd_output = std::process::Command::new(&bin)
+        .args(args)
+        .output()
+        .expect("Failed to run metadata-checker binary");
+    String::from_utf8(cmd_output.stdout).expect("Invalid UTF-8")
+}
+
+#[test]
+fn test_cli_query_model_contract() {
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    // build-graph 输出 human text, 但先确保 graph 建立
+    assert!(output.contains("Graph database built"));
+
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-model",
+        "model1",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("query_model output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::ModelQuery);
+    assert_eq!(ai.query_target, Some("model:model1".to_string()));
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_query_page_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page",
+        "page:app/page_relations.spg",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("query_page output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageQuery);
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_query_cross_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-cross",
+        "page:app/page_relations.spg",
+        "page:app/actions_test.spg",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("query_cross output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::CrossPageQuery);
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_query_dataflow_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-dataflow",
+        "dataflow_output",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_dataflow output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::DataFlowQuery);
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_explain_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "model:model1",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("explain output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_context_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "model:model1",
+        "--depth",
+        "1",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("context output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_query_page_logic_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/page_relations.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
 }

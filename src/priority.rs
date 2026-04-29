@@ -1,5 +1,4 @@
 use crate::superpage::{ComponentExpr, RefType, SuperPageMetadata};
-use serde_json;
 use std::collections::HashMap;
 
 /// 组件计算优先级分析模块
@@ -183,48 +182,4 @@ fn refs_to_string(refs: &[RefType]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// 生成机器可消费的 JSON 优先级报告
-#[allow(dead_code)]
-fn format_priority_json(analyses: &[PriorityAnalysis]) -> String {
-    let json_val = serde_json::json!({
-        "schema_version": "1.0",
-        "total": analyses.len(),
-        "analyses": analyses.iter().map(|a| {
-            let icon = match &a.priority_result {
-                ExpDefaultValuePriority::OnlyDefaultValue => "[D]",
-                ExpDefaultValuePriority::OnlyExp => "[E]",
-                ExpDefaultValuePriority::ExpDominatesNoCalcCondition => "[E>D]",
-                ExpDefaultValuePriority::ExpWithCalcConditionDefaultValueFallback => "[E~D]",
-                ExpDefaultValuePriority::AmbiguousConflict => "[!?]",
-            };
-            serde_json::json!({
-                "component_id": a.component_id,
-                "component_type": a.component_type,
-                "priority_icon": icon,
-                "priority_result": format!("{:?}", a.priority_result),
-                "default_value": a.default_value_expr.as_ref().map(|e| serde_json::json!({
-                    "raw_expr": e.raw_expr,
-                    "refs": e.refs.iter().map(|r| format!("{:?}", r)).collect::<Vec<String>>(),
-                })),
-                "exp": a.calc_exp_expr.as_ref().map(|e| serde_json::json!({
-                    "raw_expr": e.raw_expr,
-                    "refs": e.refs.iter().map(|r| format!("{:?}", r)).collect::<Vec<String>>(),
-                })),
-                "calc_condition": a.calc_condition_expr.as_ref().map(|e| serde_json::json!({
-                    "raw_expr": e.raw_expr,
-                    "refs": e.refs.iter().map(|r| format!("{:?}", r)).collect::<Vec<String>>(),
-                })),
-            })
-        }).collect::<Vec<serde_json::Value>>(),
-        "legend": {
-            "[D]": "Only defaultValue, no exp",
-            "[E]": "Only exp, no defaultValue",
-            "[E>D]": "exp dominates, defaultValue skipped (no calcCondition)",
-            "[E~D]": "exp + defaultValue + calcCondition, defaultValue as fallback",
-            "[!?]": "Ambiguous conflict",
-        },
-    });
-    serde_json::to_string_pretty(&json_val).unwrap_or_else(|_| "{}".to_string())
 }

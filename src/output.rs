@@ -1,4 +1,4 @@
-use crate::dependency::{DependencyGraph, ValueTrace};
+use crate::dependency::DependencyGraph;
 use crate::parser::PageMetadata;
 use crate::superpage::{RefType, SuperPageMetadata};
 use anyhow::Result;
@@ -494,54 +494,6 @@ pub fn print_non_human_to(
     let output = output.validate();
     writeln!(out, "{}", serde_json::to_string_pretty(&output)?)?;
     out.flush()?;
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn print_value_traces(traces: &[ValueTrace], human: bool) -> Result<()> {
-    if human {
-        let mut out = io::stdout();
-        writeln!(out, "=== Value Source Traces ===")?;
-        for trace in traces {
-            writeln!(out, "\n--- {}.{} ---", trace.component_id, trace.field)?;
-            writeln!(out, "Raw Expression: {}", trace.raw_expr)?;
-            writeln!(out, "Expanded     : {}", trace.expanded_expr)?;
-            writeln!(out, "Source Type  : {:?}", trace.source_type)?;
-            writeln!(
-                out,
-                "External Input: {}",
-                if trace.is_external_input { "Yes" } else { "No" }
-            )?;
-            if !trace.source_chain.is_empty() {
-                writeln!(out, "Source Chain:")?;
-                for (i, node) in trace.source_chain.iter().enumerate() {
-                    writeln!(out, "  [{}] {}: {}", i + 1, node.component_id, node.expr)?;
-                }
-            }
-        }
-        writeln!(out, "\n=== End of Traces ===")?;
-        out.flush()?;
-    } else {
-        let json_traces: Vec<Value> = traces
-            .iter()
-            .map(|t| {
-                json!({
-                    "component_id": t.component_id,
-                    "field": t.field,
-                    "raw_expr": t.raw_expr,
-                    "expanded_expr": t.expanded_expr,
-                    "source_type": format!("{:?}", t.source_type),
-                    "is_external_input": t.is_external_input,
-                    "source_chain": t.source_chain.iter().map(|n| json!({
-                        "component_id": n.component_id,
-                        "expr": n.expr,
-                        "source_type": format!("{:?}", n.source_type),
-                    })).collect::<Vec<Value>>(),
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&json_traces)?);
-    }
     Ok(())
 }
 
