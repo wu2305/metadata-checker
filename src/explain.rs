@@ -380,6 +380,32 @@ fn explain_component_graph(
                     "edge_type": "Triggers",
                     "source_file": target.path,
                 }));
+                // Aggregate action reads/writes/navigation
+                if let Some((action_out, _)) = graph.get_node_edges(&target.id) {
+                    for (t, e) in &action_out {
+                        match e.edge_type {
+                            crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
+                                reads.push(make_ref(t, e));
+                                has_read = true;
+                            }
+                            crate::graph::EdgeType::Writes
+                            | crate::graph::EdgeType::ActionWrites => {
+                                writes.push(make_ref(t, e));
+                                has_write = true;
+                            }
+                            crate::graph::EdgeType::OpensPage
+                            | crate::graph::EdgeType::ActionNavigates => {
+                                has_nav = true;
+                                affects.push(make_ref(t, e));
+                            }
+                            crate::graph::EdgeType::SetsParam
+                            | crate::graph::EdgeType::ActionSetsParam => {
+                                affects.push(make_ref(t, e));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
             crate::graph::EdgeType::OpensPage => {
                 has_nav = true;
@@ -967,7 +993,7 @@ fn explain_model_graph(
         );
     }
     output.next_queries = vec![
-        format!("--query-model {} for full model dependencies", node.id),
+        format!("--query-model {} for full model dependencies", node.name),
         format!("--context {} --depth 2 for surrounding closure", node.id),
     ];
 
@@ -1071,6 +1097,62 @@ fn explain_field_graph(
     }
 
     let read_count = readers.len();
+    // Backfill from parent model edges: scanner writes edges to model node with field_path
+    if let Some(ref model) = parent_model
+        && let Some((_model_out, model_in)) = graph.get_node_edges(&model.id) {
+            let field_name = node.name.as_str();
+            for (source, edge) in &model_in {
+                if matches!(
+                    edge.edge_type,
+                    crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads
+                ) && edge
+                    .field_path
+                    .as_ref()
+                    .map(|fp| {
+                        let parts: Vec<&str> = fp.split('.').collect();
+                        parts.last() == Some(&field_name)
+                    })
+                    .unwrap_or(false)
+                {
+                    let page = find_parent_page(graph, &source.id);
+                    readers.push(serde_json::json!({
+                        "id": source.id,
+                        "name": source.name,
+                        "type": format!("{:?}", source.node_type),
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "field_path": edge.field_path,
+                        "source_file": source.path,
+                        "page": page.as_ref().map(|p| p.name.clone()),
+                        "page_id": page.as_ref().map(|p| p.id.clone()),
+                    }));
+                }
+                if matches!(
+                    edge.edge_type,
+                    crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites
+                ) && edge
+                    .field_path
+                    .as_ref()
+                    .map(|fp| {
+                        let parts: Vec<&str> = fp.split('.').collect();
+                        parts.last() == Some(&field_name)
+                    })
+                    .unwrap_or(false)
+                {
+                    let page = find_parent_page(graph, &source.id);
+                    writers.push(serde_json::json!({
+                        "id": source.id,
+                        "name": source.name,
+                        "type": format!("{:?}", source.node_type),
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "field_path": edge.field_path,
+                        "source_file": source.path,
+                        "page": page.as_ref().map(|p| p.name.clone()),
+                        "page_id": page.as_ref().map(|p| p.id.clone()),
+                    }));
+                }
+            }
+    }
+
     let write_count = writers.len();
     let has_read = read_count > 0;
     let has_write = write_count > 0;
@@ -1247,7 +1329,6 @@ fn explain_page_graph(
                         }
                         crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
                             child_writes = true;
-                            has_action = true;
                         }
                         crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::SetsParam => {
                             has_action = true;
@@ -1510,7 +1591,6 @@ fn explain_dataflow_graph(
 ) -> Result<()> {
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
-    let mut internal_nodes = Vec::new();
 
     for (target, edge) in &outgoing {
         match edge.edge_type {
@@ -1524,7 +1604,7 @@ fn explain_dataflow_graph(
                 }));
             }
             crate::graph::EdgeType::DataflowInput => {
-                internal_nodes.push(serde_json::json!({
+                inputs.push(serde_json::json!({
                     "id": target.id,
                     "name": target.name,
                     "type": format!("{:?}", target.node_type),
@@ -1549,13 +1629,13 @@ fn explain_dataflow_graph(
     }
     let input_count = inputs.len();
     let output_count = outputs.len();
-    let internal_count = internal_nodes.len();
+
     let _has_read = input_count > 0;
     let _has_write = output_count > 0;
 
     let what = format!(
         "DataFlow {}，输入 {} 个源，输出 {} 个目标，内部 {} 个节点",
-        node.name, input_count, output_count, internal_count
+        node.name, input_count, output_count, 0
     );
 
     let summary = serde_json::json!({
@@ -1565,7 +1645,7 @@ fn explain_dataflow_graph(
         "importance": "data_source",
         "input_count": input_count,
         "output_count": output_count,
-        "internal_node_count": internal_count,
+        "internal_node_count": 0,
     });
 
     let lineage: Vec<serde_json::Value> = Vec::new();
@@ -1577,25 +1657,16 @@ fn explain_dataflow_graph(
         "lineage": lineage,
         "inputs": inputs,
         "outputs": outputs,
-        "internal_nodes": internal_nodes,
+
     });
 
-    let mut diagnostics = vec![crate::output::Diagnostic {
+    let diagnostics = vec![crate::output::Diagnostic {
         severity: crate::output::DiagnosticSeverity::Info,
         code: "LINEAGE_DEFERRED_TO_M6".to_string(),
         message: "Field-level lineage not yet implemented".to_string(),
         location: crate::output::Location::new(),
         suggestion: Some("Use --context or wait for M6 milestone".to_string()),
     }];
-    if internal_count == 0 {
-        diagnostics.push(crate::output::Diagnostic {
-            severity: crate::output::DiagnosticSeverity::Warning,
-            code: "DATAFLOW_INTERNAL_NODES_EMPTY".to_string(),
-            message: "Could not enumerate internal DataFlow nodes".to_string(),
-            location: crate::output::Location::new(),
-            suggestion: Some("Check if DataFlow metadata is complete".to_string()),
-        });
-    }
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(node.id.clone());

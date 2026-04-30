@@ -729,6 +729,33 @@ fn test_cli_explain_page_graph_contract() {
         details_obj.contains_key("lineage"),
         "details must have lineage"
     );
+
+    // Entrypoints should only include user-triggerable components (buttons with actions), not inputs with submitField
+    let entrypoints = details_obj
+        .get("entrypoints")
+        .expect("entrypoints must exist")
+        .as_array()
+        .expect("entrypoints must be array");
+    let ep_names: Vec<String> = entrypoints
+        .iter()
+        .filter_map(|e| {
+            e.get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+    assert!(
+        !ep_names.contains(&"input1".to_string()),
+        "input1 with submitField should not be counted as entrypoint"
+    );
+    assert!(
+        !ep_names.contains(&"input2".to_string()),
+        "input2 with submitField should not be counted as entrypoint"
+    );
+    assert!(
+        ep_names.contains(&"button1".to_string()),
+        "button1 with action should be an entrypoint"
+    );
 }
 
 #[test]
@@ -788,6 +815,17 @@ fn test_cli_explain_component_graph_contract() {
         details_obj.contains_key("lineage"),
         "details must have lineage"
     );
+
+    // button1 triggers action1 which writes model1 → component writes should aggregate action writes
+    let writes = details_obj
+        .get("writes")
+        .expect("writes must exist")
+        .as_array()
+        .expect("writes must be array");
+    assert!(
+        !writes.is_empty(),
+        "component explain should aggregate triggered action writes"
+    );
 }
 
 #[test]
@@ -843,6 +881,25 @@ fn test_cli_explain_field_graph_contract() {
     assert!(
         details_obj.contains_key("lineage"),
         "details must have lineage"
+    );
+
+    // Field model1.name is written by input1 (submitField) and button actions
+    let written_by_count = summary
+        .get("written_by_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(
+        written_by_count > 0,
+        "field:model1.name should have writers from model edges with matching field_path"
+    );
+    let writes = details_obj
+        .get("writes")
+        .expect("writes must exist")
+        .as_array()
+        .expect("writes must be array");
+    assert!(
+        !writes.is_empty(),
+        "field explain writes must be populated from parent model edge backfill"
     );
 }
 
@@ -911,6 +968,25 @@ fn test_cli_explain_dataflow_graph_contract() {
     assert!(
         details_obj.contains_key("outputs"),
         "dataflow details must have outputs"
+    );
+
+    // DataFlow should have inputs from outgoing DataflowInput edges
+    let input_count = summary
+        .get("input_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(
+        input_count > 0,
+        "dataflow_output should have at least 1 input from outgoing DataflowInput edges"
+    );
+    let inputs = details_obj
+        .get("inputs")
+        .expect("inputs must exist")
+        .as_array()
+        .expect("inputs must be array");
+    assert!(
+        !inputs.is_empty(),
+        "dataflow inputs array should not be empty"
     );
 }
 
