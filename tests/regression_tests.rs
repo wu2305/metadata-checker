@@ -1530,3 +1530,47 @@ fn test_cli_context_dataflow_semantics() {
         downstream
     );
 }
+
+#[test]
+fn test_cli_context_next_queries_no_double_prefix() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+
+    for target in [
+        "model:model1",
+        "model:dataflow_output",
+        "field:model1.name",
+        "comp:app/actions_test.spg|button1",
+        "action:app/actions_test.spg|button1|action1",
+        "page:app/actions_test.spg",
+    ] {
+        let output = run_cli(&[
+            "--project-dir",
+            "tests/fixtures/test_project",
+            "--context",
+            target,
+            "--depth",
+            "1",
+            "--budget",
+            "normal",
+        ]);
+        let ai: AiOutput = serde_json::from_str(&output).expect("context output must be AiOutput");
+        assert_eq!(ai.kind, OutputKind::Context);
+
+        for q in &ai.next_queries {
+            assert!(
+                !q.contains("--query-model model:"),
+                "next_queries must not contain double model: prefix for --query-model, got: {}",
+                q
+            );
+            assert!(
+                !q.contains("--query-dataflow model:"),
+                "next_queries must not contain double model: prefix for --query-dataflow, got: {}",
+                q
+            );
+        }
+    }
+}

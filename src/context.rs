@@ -37,14 +37,14 @@ fn generate_next_queries(
                     .strip_prefix("field:")
                     .and_then(|s| s.split('.').next())
                 {
-                    queries.push(format!(
-                        "--query-model model:{} for model details",
-                        model_part
-                    ));
+                    queries.push(format!("--query-model {} for model details", model_part));
                 }
-            } else {
-                queries.push(format!("--query-model {} for model details", node_id));
-                queries.push(format!("--query-dataflow {} for dataflow lineage", node_id));
+            } else if let Some(model_name) = node_id.strip_prefix("model:") {
+                queries.push(format!("--query-model {} for model details", model_name));
+                queries.push(format!(
+                    "--query-dataflow {} for dataflow lineage",
+                    model_name
+                ));
             }
         }
         crate::graph::NodeType::Page => {
