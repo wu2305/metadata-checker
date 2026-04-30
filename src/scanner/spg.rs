@@ -206,7 +206,7 @@ pub fn process_spg_file_from_value(
             NodeType::Component,
             rel_path.to_string(),
             comp.id.clone(),
-            None,
+            Some(serde_json::json!({"component_type": comp.component_type})),
         );
         node_ids.insert(comp_id.clone());
         graph.add_edge(&page_id, &comp_id, EdgeType::Contains, None);
