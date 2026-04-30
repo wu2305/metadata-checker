@@ -348,6 +348,18 @@ fn run_cli(args: &[&str]) -> String {
     String::from_utf8(cmd_output.stdout).expect("Invalid UTF-8")
 }
 
+fn run_cli_stderr(args: &[&str]) -> String {
+    let _guard = CLI_LOCK.lock().unwrap();
+    let bin = std::env::current_dir()
+        .unwrap()
+        .join("target/debug/metadata-checker");
+    let cmd_output = std::process::Command::new(&bin)
+        .args(args)
+        .output()
+        .expect("Failed to run metadata-checker binary");
+    String::from_utf8(cmd_output.stderr).expect("Invalid UTF-8")
+}
+
 #[test]
 fn test_cli_query_model_contract() {
     let output = run_cli(&[
@@ -1031,4 +1043,490 @@ fn test_cli_query_page_logic_contract() {
     assert_eq!(ai.kind, OutputKind::PageLogic);
     assert!(!ai.evidence.is_empty(), "evidence must not be empty");
     assert_ai_output_contract(&ai);
+}
+
+// ============================================================
+
+// ============================================================
+// M3 Context 扩展 contract 测试
+// ============================================================
+
+#[test]
+fn test_cli_context_component_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "comp:app/actions_test.spg|button1",
+        "--depth",
+        "1",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("context component output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_eq!(
+        ai.query_target,
+        Some("comp:app/actions_test.spg|button1".to_string())
+    );
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert_eq!(
+        summary.get("center_type").and_then(|v| v.as_str()),
+        Some("component")
+    );
+    assert_eq!(
+        summary.get("budget").and_then(|v| v.as_str()),
+        Some("normal")
+    );
+    assert_eq!(summary.get("depth").and_then(|v| v.as_u64()), Some(1));
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    assert!(details.contains_key("upstream"));
+    assert!(details.contains_key("downstream"));
+    assert!(details.contains_key("related_actions"));
+    assert!(details.contains_key("related_models"));
+    assert!(details.contains_key("related_pages"));
+    assert!(details.contains_key("related_components"));
+}
+
+#[test]
+fn test_cli_context_action_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "action:app/actions_test.spg|button1|action1",
+        "--depth",
+        "1",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("context action output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_eq!(
+        ai.query_target,
+        Some("action:app/actions_test.spg|button1|action1".to_string())
+    );
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_context_field_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "field:model1.name",
+        "--depth",
+        "1",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("context field output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_eq!(ai.query_target, Some("field:model1.name".to_string()));
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_context_page_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "page:app/actions_test.spg",
+        "--depth",
+        "1",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("context page output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_eq!(
+        ai.query_target,
+        Some("page:app/actions_test.spg".to_string())
+    );
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_context_dataflow_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "model:dataflow_output",
+        "--depth",
+        "1",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("context dataflow output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_eq!(ai.query_target, Some("model:dataflow_output".to_string()));
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+}
+
+#[test]
+fn test_cli_context_budget_invalid() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let stderr_output = run_cli_stderr(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "model:model1",
+        "--depth",
+        "1",
+        "--budget",
+        "invalid",
+    ]);
+    assert!(
+        stderr_output.contains("Invalid budget") || stderr_output.contains("invalid"),
+        "invalid budget should report error on stderr, got: {}",
+        stderr_output
+    );
+}
+
+#[test]
+fn test_cli_context_budget_compact_truncates() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "page:app/actions_test.spg",
+        "--depth",
+        "2",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("context compact output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert_eq!(
+        summary.get("budget").and_then(|v| v.as_str()),
+        Some("compact")
+    );
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    let total_related: usize = [
+        "upstream",
+        "downstream",
+        "related_actions",
+        "related_models",
+        "related_pages",
+        "related_components",
+    ]
+    .iter()
+    .map(|k| {
+        details
+            .get(*k)
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0)
+    })
+    .sum();
+    assert!(
+        total_related <= 30,
+        "compact budget should keep total related items small, got {}",
+        total_related
+    );
+}
+
+#[test]
+fn test_cli_context_budget_full_no_truncation() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output_normal = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "page:app/actions_test.spg",
+        "--depth",
+        "1",
+        "--budget",
+        "normal",
+    ]);
+    let output_full = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "page:app/actions_test.spg",
+        "--depth",
+        "1",
+        "--budget",
+        "full",
+    ]);
+
+    let ai_normal: AiOutput =
+        serde_json::from_str(&output_normal).expect("normal output must be AiOutput");
+    let ai_full: AiOutput =
+        serde_json::from_str(&output_full).expect("full output must be AiOutput");
+
+    let details_normal_val = ai_normal.details.expect("details must exist");
+    let details_normal = details_normal_val
+        .as_object()
+        .expect("details must be object");
+    let details_full_val = ai_full.details.expect("details must exist");
+    let details_full = details_full_val
+        .as_object()
+        .expect("details must be object");
+
+    let total_normal: usize = [
+        "upstream",
+        "downstream",
+        "related_actions",
+        "related_models",
+        "related_pages",
+        "related_components",
+    ]
+    .iter()
+    .map(|k| {
+        details_normal
+            .get(*k)
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0)
+    })
+    .sum();
+    let total_full: usize = [
+        "upstream",
+        "downstream",
+        "related_actions",
+        "related_models",
+        "related_pages",
+        "related_components",
+    ]
+    .iter()
+    .map(|k| {
+        details_full
+            .get(*k)
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0)
+    })
+    .sum();
+
+    assert!(
+        total_full >= total_normal,
+        "full budget should include at least as many items as normal, got full={} normal={}",
+        total_full,
+        total_normal
+    );
+
+    assert!(
+        !ai_full
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "OUTPUT_TRUNCATED"),
+        "full budget should not have OUTPUT_TRUNCATED diagnostic"
+    );
+}
+
+#[test]
+fn test_cli_context_component_semantics() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "comp:app/actions_test.spg|button1",
+        "--depth",
+        "2",
+        "--budget",
+        "full",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("context component semantics output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_ai_output_contract(&ai);
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    let pages = details
+        .get("related_pages")
+        .and_then(|v| v.as_array())
+        .expect("related_pages must be array");
+    let page_ids: Vec<String> = pages
+        .iter()
+        .filter_map(|p| {
+            p.get("from")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+    assert!(
+        page_ids.iter().any(|id| id.contains("actions_test.spg")),
+        "button1 context should include its parent page, got pages: {:?}",
+        page_ids
+    );
+
+    let actions = details
+        .get("related_actions")
+        .and_then(|v| v.as_array())
+        .expect("related_actions must be array");
+    let action_ids: Vec<String> = actions
+        .iter()
+        .filter_map(|a| a.get("to").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .collect();
+    assert!(
+        action_ids.iter().any(|id| id.contains("action1")),
+        "button1 context should include triggered action1, got actions: {:?}",
+        action_ids
+    );
+
+    let models = details
+        .get("related_models")
+        .and_then(|v| v.as_array())
+        .expect("related_models must be array");
+    let model_ids: Vec<String> = models
+        .iter()
+        .filter_map(|m| m.get("to").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .collect();
+    assert!(
+        model_ids.iter().any(|id| id.contains("model1")),
+        "button1 context should include model1 (written by action), got models: {:?}",
+        model_ids
+    );
+}
+
+#[test]
+fn test_cli_context_field_semantics() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "field:model1.name",
+        "--depth",
+        "2",
+        "--budget",
+        "full",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("context field semantics output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_ai_output_contract(&ai);
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    let models = details
+        .get("related_models")
+        .and_then(|v| v.as_array())
+        .expect("related_models must be array");
+    let model_ids: Vec<String> = models
+        .iter()
+        .filter_map(|m| {
+            m.get("from")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+    assert!(
+        model_ids.iter().any(|id| id == "model:model1"),
+        "field:model1.name context should include parent model:model1, got models: {:?}",
+        model_ids
+    );
+}
+
+#[test]
+fn test_cli_context_dataflow_semantics() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "model:dataflow_output",
+        "--depth",
+        "2",
+        "--budget",
+        "full",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("context dataflow semantics output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_ai_output_contract(&ai);
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    // DataflowInput edges are outgoing from dataflow_output to its input sources
+    let downstream = details
+        .get("downstream")
+        .and_then(|v| v.as_array())
+        .expect("downstream must be array");
+    let has_dataflow_input = downstream
+        .iter()
+        .any(|d| d.get("edge_type").and_then(|v| v.as_str()) == Some("DataflowInput"));
+    assert!(
+        has_dataflow_input,
+        "dataflow_output context should have DataflowInput edges in downstream, got: {:?}",
+        downstream
+    );
 }

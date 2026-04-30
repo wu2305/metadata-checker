@@ -7,6 +7,61 @@ use std::io::{self, Write};
 /// 输出目标节点周围的最小闭包上下文
 ///
 /// 支持 --depth <N> 和 --budget compact|normal|full。
+/// 根据目标类型生成后续查询建议
+fn generate_next_queries(
+    node_id: &str,
+    node_type: &crate::graph::NodeType,
+    depth: usize,
+) -> Vec<String> {
+    let mut queries = vec![format!("--explain {} for semantic summary", node_id)];
+    match node_type {
+        crate::graph::NodeType::Component | crate::graph::NodeType::Action => {
+            // 提取页面 ID（comp:page|id 或 action:page|comp|id 格式）
+            if let Some(page_part) = node_id.split('|').next() {
+                if let Some(page_id) = page_part.strip_prefix("comp:") {
+                    queries.push(format!(
+                        "--query-page-logic page:{} for page-level logic",
+                        page_id
+                    ));
+                } else if let Some(page_id) = page_part.strip_prefix("action:") {
+                    queries.push(format!(
+                        "--query-page-logic page:{} for page-level logic",
+                        page_id
+                    ));
+                }
+            }
+        }
+        crate::graph::NodeType::Model | crate::graph::NodeType::Field => {
+            if node_id.starts_with("field:") {
+                if let Some(model_part) = node_id
+                    .strip_prefix("field:")
+                    .and_then(|s| s.split('.').next())
+                {
+                    queries.push(format!(
+                        "--query-model model:{} for model details",
+                        model_part
+                    ));
+                }
+            } else {
+                queries.push(format!("--query-model {} for model details", node_id));
+                queries.push(format!("--query-dataflow {} for dataflow lineage", node_id));
+            }
+        }
+        crate::graph::NodeType::Page => {
+            queries.push(format!(
+                "--query-page-logic {} for page-level logic",
+                node_id
+            ));
+        }
+    }
+    queries.push(format!(
+        "--context {} --depth {} --budget full for full closure",
+        node_id,
+        depth + 1
+    ));
+    queries
+}
+
 pub fn context_node_graph(
     graph: &GraphDB,
     node_id: &str,
@@ -32,6 +87,7 @@ pub fn context_node_graph(
     let mut related_actions = Vec::new();
     let mut related_models = Vec::new();
     let mut related_pages = Vec::new();
+    let mut related_components = Vec::new();
 
     visited.insert(node_id.to_string());
     queue.push_back((node_id.to_string(), 0usize));
@@ -64,8 +120,9 @@ pub fn context_node_graph(
                             target.node_type,
                             crate::graph::NodeType::Model | crate::graph::NodeType::Field
                         ) {
-                            related_models.push(entry);
+                            related_models.push(entry.clone());
                         }
+                        related_components.push(entry);
                     }
                     crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
                         downstream.push(entry.clone());
@@ -73,17 +130,24 @@ pub fn context_node_graph(
                             target.node_type,
                             crate::graph::NodeType::Model | crate::graph::NodeType::Field
                         ) {
-                            related_models.push(entry);
+                            related_models.push(entry.clone());
                         }
+                        related_components.push(entry);
                     }
                     crate::graph::EdgeType::Triggers => {
                         downstream.push(entry.clone());
-                        related_actions.push(entry);
+                        related_actions.push(entry.clone());
+                        related_components.push(entry);
                     }
                     crate::graph::EdgeType::Contains => {
                         if matches!(target.node_type, crate::graph::NodeType::Page) {
-                            related_pages.push(entry);
+                            related_pages.push(entry.clone());
                         }
+                        related_components.push(entry);
+                    }
+                    crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::SetsParam => {
+                        downstream.push(entry.clone());
+                        related_components.push(entry);
                     }
                     _ => {
                         downstream.push(entry);
@@ -113,8 +177,9 @@ pub fn context_node_graph(
                             source.node_type,
                             crate::graph::NodeType::Model | crate::graph::NodeType::Field
                         ) {
-                            related_models.push(entry);
+                            related_models.push(entry.clone());
                         }
+                        related_components.push(entry);
                     }
                     crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
                         upstream.push(entry.clone());
@@ -122,17 +187,29 @@ pub fn context_node_graph(
                             source.node_type,
                             crate::graph::NodeType::Model | crate::graph::NodeType::Field
                         ) {
-                            related_models.push(entry);
+                            related_models.push(entry.clone());
                         }
+                        related_components.push(entry);
                     }
                     crate::graph::EdgeType::Triggers => {
                         upstream.push(entry.clone());
-                        related_actions.push(entry);
+                        related_actions.push(entry.clone());
+                        related_components.push(entry);
                     }
                     crate::graph::EdgeType::Contains => {
                         if matches!(source.node_type, crate::graph::NodeType::Page) {
-                            related_pages.push(entry);
+                            related_pages.push(entry.clone());
+                        } else if matches!(
+                            source.node_type,
+                            crate::graph::NodeType::Model | crate::graph::NodeType::Field
+                        ) {
+                            related_models.push(entry.clone());
                         }
+                        related_components.push(entry);
+                    }
+                    crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::SetsParam => {
+                        upstream.push(entry.clone());
+                        related_components.push(entry);
                     }
                     _ => {
                         upstream.push(entry);
@@ -143,68 +220,140 @@ pub fn context_node_graph(
     }
 
     // Budget-based truncation
-    let (upstream_out, downstream_out, actions_out, models_out) = match budget {
-        "compact" => {
-            let limit = 5usize;
-            (
-                upstream.iter().take(limit).cloned().collect::<Vec<Value>>(),
-                downstream
-                    .iter()
-                    .take(limit)
-                    .cloned()
-                    .collect::<Vec<Value>>(),
-                related_actions
-                    .iter()
-                    .take(limit)
-                    .cloned()
-                    .collect::<Vec<Value>>(),
-                related_models
-                    .iter()
-                    .take(limit)
-                    .cloned()
-                    .collect::<Vec<Value>>(),
-            )
-        }
-        "full" => (
-            upstream.clone(),
-            downstream.clone(),
-            related_actions.clone(),
-            related_models.clone(),
-        ),
-        _ => {
-            let limit = 20usize;
-            (
-                upstream.iter().take(limit).cloned().collect::<Vec<Value>>(),
-                downstream
-                    .iter()
-                    .take(limit)
-                    .cloned()
-                    .collect::<Vec<Value>>(),
-                related_actions
-                    .iter()
-                    .take(limit)
-                    .cloned()
-                    .collect::<Vec<Value>>(),
-                related_models
-                    .iter()
-                    .take(limit)
-                    .cloned()
-                    .collect::<Vec<Value>>(),
-            )
-        }
-    };
+    let (upstream_out, downstream_out, actions_out, models_out, pages_out, components_out) =
+        match budget {
+            "compact" => {
+                let limit = 5usize;
+                (
+                    upstream.iter().take(limit).cloned().collect::<Vec<Value>>(),
+                    downstream
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                    related_actions
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                    related_models
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                    related_pages
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                    related_components
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                )
+            }
+            "full" => (
+                upstream.clone(),
+                downstream.clone(),
+                related_actions.clone(),
+                related_models.clone(),
+                related_pages.clone(),
+                related_components.clone(),
+            ),
+            _ => {
+                let limit = 20usize;
+                (
+                    upstream.iter().take(limit).cloned().collect::<Vec<Value>>(),
+                    downstream
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                    related_actions
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                    related_models
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                    related_pages
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                    related_components
+                        .iter()
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<Value>>(),
+                )
+            }
+        };
 
     let truncated = upstream.len() > upstream_out.len()
         || downstream.len() > downstream_out.len()
         || related_actions.len() > actions_out.len()
-        || related_models.len() > models_out.len();
+        || related_models.len() > models_out.len()
+        || related_pages.len() > pages_out.len()
+        || related_components.len() > components_out.len();
 
     let mut diagnostics = Vec::new();
     if truncated {
+        let mut truncated_cats = Vec::new();
+        if upstream.len() > upstream_out.len() {
+            truncated_cats.push(format!(
+                "upstream ({}/{})",
+                upstream_out.len(),
+                upstream.len()
+            ));
+        }
+        if downstream.len() > downstream_out.len() {
+            truncated_cats.push(format!(
+                "downstream ({}/{})",
+                downstream_out.len(),
+                downstream.len()
+            ));
+        }
+        if related_actions.len() > actions_out.len() {
+            truncated_cats.push(format!(
+                "related_actions ({}/{})",
+                actions_out.len(),
+                related_actions.len()
+            ));
+        }
+        if related_models.len() > models_out.len() {
+            truncated_cats.push(format!(
+                "related_models ({}/{})",
+                models_out.len(),
+                related_models.len()
+            ));
+        }
+        if related_pages.len() > pages_out.len() {
+            truncated_cats.push(format!(
+                "related_pages ({}/{})",
+                pages_out.len(),
+                related_pages.len()
+            ));
+        }
+        if related_components.len() > components_out.len() {
+            truncated_cats.push(format!(
+                "related_components ({}/{})",
+                components_out.len(),
+                related_components.len()
+            ));
+        }
         diagnostics.push(crate::output::Diagnostic {
             severity: crate::output::DiagnosticSeverity::Info,
             code: "OUTPUT_TRUNCATED".to_string(),
-            message: "Output truncated due to budget limit".to_string(),
+            message: format!(
+                "Output truncated due to budget '{}': {}",
+                budget,
+                truncated_cats.join(", ")
+            ),
             location: crate::output::Location::new(),
             suggestion: Some(
                 "Use --budget full or increase --depth to see more relations".to_string(),
@@ -212,12 +361,28 @@ pub fn context_node_graph(
         });
     }
 
+    let high_value_relations = {
+        let mut counts = serde_json::Map::new();
+        counts.insert("upstream".to_string(), json!(upstream_out.len()));
+        counts.insert("downstream".to_string(), json!(downstream_out.len()));
+        counts.insert("related_actions".to_string(), json!(actions_out.len()));
+        counts.insert("related_models".to_string(), json!(models_out.len()));
+        counts.insert("related_pages".to_string(), json!(pages_out.len()));
+        counts.insert(
+            "related_components".to_string(),
+            json!(components_out.len()),
+        );
+        Value::Object(counts)
+    };
+
     let summary = json!({
         "center_node": node_id,
+        "center_type": format!("{:?}", node.node_type).to_lowercase(),
         "depth": depth,
         "budget": budget,
-        "related_nodes_count": visited.len() - 1,
+        "related_nodes_count": visited.len().saturating_sub(1),
         "truncated": truncated,
+        "high_value_relations": high_value_relations,
     });
 
     let details = json!({
@@ -225,7 +390,8 @@ pub fn context_node_graph(
         "downstream": downstream_out,
         "related_actions": actions_out,
         "related_models": models_out,
-        "related_pages": related_pages,
+        "related_pages": pages_out,
+        "related_components": components_out,
     });
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Context, summary);
@@ -259,14 +425,7 @@ pub fn context_node_graph(
             .with_confidence(crate::output::Confidence::High),
         );
     }
-    output.next_queries = vec![
-        format!("--explain {} for semantic summary", node_id),
-        format!(
-            "--context {} --depth {} --budget full for full closure",
-            node_id,
-            depth + 1
-        ),
-    ];
+    output.next_queries = generate_next_queries(node_id, &node.node_type, depth);
 
     let output = output.validate();
 

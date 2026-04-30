@@ -190,3 +190,48 @@ pub struct AiOutput {
 
 - `--query-page <PAGE>`（目标不存在时）
 - `--query-dataflow <MODEL>`（目标不存在时）
+
+## kind: Context 字段约束
+
+`--context <ID> --depth <N> --budget <compact|normal|full>` 输出目标节点周围的最小闭包上下文。
+
+### summary 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `center_node` | string | 中心节点 ID |
+| `center_type` | string | 中心节点类型：`component` / `action` / `model` / `field` / `page` / `dataflow` |
+| `depth` | number | BFS 深度 |
+| `budget` | string | `compact` / `normal` / `full` |
+| `related_nodes_count` | number | 访问到的邻居节点数（不含中心节点） |
+| `truncated` | boolean | 是否因 budget 被截断 |
+| `high_value_relations` | object | 各类关系数量统计：upstream/downstream/related_actions/related_models/related_pages/related_components |
+
+### details 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `upstream` | array | 谁影响我（按语义归类：读取来源、触发来源、父页面/父模型、DataFlow 输入） |
+| `downstream` | array | 我影响谁（被哪些组件/action 使用、写入哪些模型/字段、打开哪些页面） |
+| `related_actions` | array | 与目标强相关的 action |
+| `related_models` | array | 相关模型和字段（保留 field_path） |
+| `related_pages` | array | 所属页面、打开关系页面、嵌入页面、引用页面 |
+| `related_components` | array | 相关组件依赖闭包 |
+
+### diagnostics
+
+- `OUTPUT_TRUNCATED`：当 `truncated=true` 时出现，说明被截断的类别和原始数量
+
+### next_queries
+
+根据目标类型生成真实可运行命令：
+- component/action → `--explain <ID>`、`--query-page-logic <PAGE>`
+- model/field → `--explain <ID>`、`--query-model <MODEL>`
+- page → `--explain <PAGE>`、`--query-page-logic <PAGE>`
+- dataflow → `--query-dataflow <MODEL>`、`--explain <MODEL>`
+
+### AI 使用规则
+
+- `--context` 用于补充 `--explain`，不是替代
+- 默认不要读取 `full` budget，优先 `normal` 或 `compact`
+- 遇到 `OUTPUT_TRUNCATED` 时，可按需用 `--budget full` 重新查询

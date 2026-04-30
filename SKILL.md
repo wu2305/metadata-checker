@@ -68,8 +68,10 @@ Output structure (kind = Explain):
 
 **Yes** → Use `metadata-checker --context <ID> --depth <N> --budget <compact|normal|full>`
 
+- **定位**：`--context` 用于补充 `--explain`，不是替代。当 `--explain` 给出的摘要不够理解周围依赖/影响时，再用 `--context`。
 - Default depth is 1, default budget is `normal`.
-- Use `--budget compact` to avoid large raw JSON.
+- **AI 不要默认读取 `full` budget**，优先使用 `normal` 或 `compact`；只有遇到 `OUTPUT_TRUNCATED` diagnostic 且确实需要更多关系时，才升级到 `full`。
+- `--context` 输出包含：upstream（谁影响我）、downstream（我影响谁）、related_actions、related_models、related_pages、related_components。
 
 ### Q4: Do you need project-level analysis?
 

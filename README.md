@@ -73,6 +73,21 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 
 # 展开 DataFlow 子图
 ./target/release/metadata-checker --project-dir /path/to/project --query-dataflow flow.tbl
+
+# 解释一个组件（单文件模式）
+./target/release/metadata-checker page.spg --explain button1
+
+# 解释一个模型（项目图模式）
+./target/release/metadata-checker --project-dir /path/to/project --explain model:model1
+
+# 解释一个页面
+./target/release/metadata-checker --project-dir /path/to/project --explain page:app/page.spg
+
+# 查看组件周围上下文（深度 2，紧凑输出）
+./target/release/metadata-checker --project-dir /path/to/project --context comp:app/page.spg|button1 --depth 2 --budget compact
+
+# 查看字段周围上下文
+./target/release/metadata-checker --project-dir /path/to/project --context field:model1.name --depth 2 --budget normal
 ```
 
 ### human 模式
