@@ -1099,58 +1099,59 @@ fn explain_field_graph(
     let read_count = readers.len();
     // Backfill from parent model edges: scanner writes edges to model node with field_path
     if let Some(ref model) = parent_model
-        && let Some((_model_out, model_in)) = graph.get_node_edges(&model.id) {
-            let field_name = node.name.as_str();
-            for (source, edge) in &model_in {
-                if matches!(
-                    edge.edge_type,
-                    crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads
-                ) && edge
-                    .field_path
-                    .as_ref()
-                    .map(|fp| {
-                        let parts: Vec<&str> = fp.split('.').collect();
-                        parts.last() == Some(&field_name)
-                    })
-                    .unwrap_or(false)
-                {
-                    let page = find_parent_page(graph, &source.id);
-                    readers.push(serde_json::json!({
-                        "id": source.id,
-                        "name": source.name,
-                        "type": format!("{:?}", source.node_type),
-                        "edge_type": format!("{:?}", edge.edge_type),
-                        "field_path": edge.field_path,
-                        "source_file": source.path,
-                        "page": page.as_ref().map(|p| p.name.clone()),
-                        "page_id": page.as_ref().map(|p| p.id.clone()),
-                    }));
-                }
-                if matches!(
-                    edge.edge_type,
-                    crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites
-                ) && edge
-                    .field_path
-                    .as_ref()
-                    .map(|fp| {
-                        let parts: Vec<&str> = fp.split('.').collect();
-                        parts.last() == Some(&field_name)
-                    })
-                    .unwrap_or(false)
-                {
-                    let page = find_parent_page(graph, &source.id);
-                    writers.push(serde_json::json!({
-                        "id": source.id,
-                        "name": source.name,
-                        "type": format!("{:?}", source.node_type),
-                        "edge_type": format!("{:?}", edge.edge_type),
-                        "field_path": edge.field_path,
-                        "source_file": source.path,
-                        "page": page.as_ref().map(|p| p.name.clone()),
-                        "page_id": page.as_ref().map(|p| p.id.clone()),
-                    }));
-                }
+        && let Some((_model_out, model_in)) = graph.get_node_edges(&model.id)
+    {
+        let field_name = node.name.as_str();
+        for (source, edge) in &model_in {
+            if matches!(
+                edge.edge_type,
+                crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads
+            ) && edge
+                .field_path
+                .as_ref()
+                .map(|fp| {
+                    let parts: Vec<&str> = fp.split('.').collect();
+                    parts.last() == Some(&field_name)
+                })
+                .unwrap_or(false)
+            {
+                let page = find_parent_page(graph, &source.id);
+                readers.push(serde_json::json!({
+                    "id": source.id,
+                    "name": source.name,
+                    "type": format!("{:?}", source.node_type),
+                    "edge_type": format!("{:?}", edge.edge_type),
+                    "field_path": edge.field_path,
+                    "source_file": source.path,
+                    "page": page.as_ref().map(|p| p.name.clone()),
+                    "page_id": page.as_ref().map(|p| p.id.clone()),
+                }));
             }
+            if matches!(
+                edge.edge_type,
+                crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites
+            ) && edge
+                .field_path
+                .as_ref()
+                .map(|fp| {
+                    let parts: Vec<&str> = fp.split('.').collect();
+                    parts.last() == Some(&field_name)
+                })
+                .unwrap_or(false)
+            {
+                let page = find_parent_page(graph, &source.id);
+                writers.push(serde_json::json!({
+                    "id": source.id,
+                    "name": source.name,
+                    "type": format!("{:?}", source.node_type),
+                    "edge_type": format!("{:?}", edge.edge_type),
+                    "field_path": edge.field_path,
+                    "source_file": source.path,
+                    "page": page.as_ref().map(|p| p.name.clone()),
+                    "page_id": page.as_ref().map(|p| p.id.clone()),
+                }));
+            }
+        }
     }
 
     let write_count = writers.len();
