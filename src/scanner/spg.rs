@@ -41,12 +41,13 @@ fn add_model_read(
     field: &str,
     model_path: &str,
     edge_meta: serde_json::Value,
+    edge_type: EdgeType,
 ) {
     let (model_id, _field_id) = ensure_model_field(graph, model, field, model_path, None);
     graph.add_edge_with_meta(
         from_id,
         &model_id,
-        EdgeType::Reads,
+        edge_type,
         Some(format!("{}.{}", model, field)),
         Some(edge_meta),
     );
@@ -229,7 +230,15 @@ pub fn process_spg_file_from_value(
                             "target_field": field,
                             "source_expr": expr.raw_expr,
                         });
-                        add_model_read(graph, &comp_id, model, field, &model_path, edge_meta);
+                        add_model_read(
+                            graph,
+                            &comp_id,
+                            model,
+                            field,
+                            &model_path,
+                            edge_meta,
+                            EdgeType::Reads,
+                        );
                     }
                 }
             }
@@ -433,6 +442,7 @@ pub fn process_spg_file_from_value(
                                             &field,
                                             &model_path,
                                             read_meta,
+                                            EdgeType::ActionReads,
                                         );
                                     }
                                 }
@@ -463,14 +473,14 @@ pub fn process_spg_file_from_value(
                             "reason": format!("Link action opens page '{}'", target_name),
                             "actor_kind": "action",
                             "actor_id": action_id,
-                            "operation": "OpensPage",
+                            "operation": "ActionNavigates",
                             "trigger": action.trigger_type,
                             "target_model": target_name,
                         });
                         graph.add_edge_with_meta(
                             &action_id,
                             &target_page_id,
-                            EdgeType::OpensPage,
+                            EdgeType::ActionNavigates,
                             Some(target_rel.clone()),
                             Some(opens_meta),
                         );
@@ -527,6 +537,7 @@ pub fn process_spg_file_from_value(
                                         &field,
                                         &model_path,
                                         read_meta,
+                                        EdgeType::ActionReads,
                                     );
                                 }
                             }
@@ -548,7 +559,7 @@ pub fn process_spg_file_from_value(
                             "reason": format!("setParamValue sets param '{}'", param_name),
                             "actor_kind": "action",
                             "actor_id": action_id,
-                            "operation": "SetsParam",
+                            "operation": "ActionSetsParam",
                             "trigger": action.trigger_type,
                             "target_field": param_name,
                             "source_expr": param_value,
@@ -556,7 +567,7 @@ pub fn process_spg_file_from_value(
                         graph.add_edge_with_meta(
                             &action_id,
                             &param_id,
-                            EdgeType::SetsParam,
+                            EdgeType::ActionSetsParam,
                             Some(param_value.clone()),
                             Some(sets_meta),
                         );
@@ -584,6 +595,7 @@ pub fn process_spg_file_from_value(
                                     &field,
                                     &model_path,
                                     read_meta,
+                                    EdgeType::ActionReads,
                                 );
                             }
                         }

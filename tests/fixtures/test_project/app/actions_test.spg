@@ -133,6 +133,18 @@
                         "triggerType": "click"
                     }
                 ]
+            },
+            {
+                "id": "buttonUnknown",
+                "type": "button",
+                "value": "未知动作",
+                "actions": [
+                    {
+                        "id": "actionUnknown",
+                        "actionType": "someCustomAction",
+                        "triggerType": "click"
+                    }
+                ]
             }
         ]
     }

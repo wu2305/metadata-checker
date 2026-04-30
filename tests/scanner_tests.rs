@@ -574,7 +574,7 @@ fn test_scanner_link_opens_page_relation() {
     let outgoing: Vec<_> = graph
         .graph
         .edges_directed(*action_node.unwrap(), petgraph::Direction::Outgoing)
-        .filter(|e| matches!(e.weight().edge_type, EdgeType::OpensPage))
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::ActionNavigates))
         .collect();
 
     assert!(
@@ -634,7 +634,7 @@ fn test_scanner_link_passes_param() {
     let reads_edges: Vec<_> = graph
         .graph
         .edges_directed(*action_node.unwrap(), petgraph::Direction::Outgoing)
-        .filter(|e| matches!(e.weight().edge_type, EdgeType::Reads))
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::ActionReads))
         .collect();
 
     assert!(
@@ -664,7 +664,7 @@ fn test_scanner_set_param_value() {
     let param_edges: Vec<_> = graph
         .graph
         .edges_directed(*action_node.unwrap(), petgraph::Direction::Outgoing)
-        .filter(|e| matches!(e.weight().edge_type, EdgeType::SetsParam))
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::ActionSetsParam))
         .collect();
 
     assert!(
@@ -676,7 +676,7 @@ fn test_scanner_set_param_value() {
     let reads_edges: Vec<_> = graph
         .graph
         .edges_directed(*action_node.unwrap(), petgraph::Direction::Outgoing)
-        .filter(|e| matches!(e.weight().edge_type, EdgeType::Reads))
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::ActionReads))
         .collect();
 
     assert!(

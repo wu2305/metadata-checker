@@ -750,6 +750,18 @@ fn explain_action_graph(
     let condition_struct =
         crate::action_semantics::parse_condition(meta_condition.or(meta_condition_exp));
 
+    let wait_status = if meta_wait_prev.is_some() {
+        "blocking"
+    } else {
+        "none"
+    };
+    let may_interrupt = meta_condition.is_some() || meta_condition_exp.is_some();
+    let failure_behavior = if meta_condition.is_some() || meta_condition_exp.is_some() {
+        "skip_if_condition_fails"
+    } else {
+        "proceed"
+    };
+
     let summary = serde_json::json!({
         "what_is_it": what,
         "type": "action",
@@ -775,7 +787,10 @@ fn explain_action_graph(
         "action_category": action_category,
         "semantic_summary": semantic_summary,
         "blocks_on": blocks_on,
+        "wait_status": wait_status,
         "condition": condition_struct,
+        "may_interrupt": may_interrupt,
+        "failure_behavior": failure_behavior,
         "trigger_type": meta_trigger_type.unwrap_or("click"),
     });
 

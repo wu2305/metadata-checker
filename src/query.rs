@@ -631,7 +631,7 @@ pub fn query_page_logic(
         if let Some((node_out, _)) = graph.get_node_edges(&node.id) {
             for (target, edge) in &node_out {
                 match edge.edge_type {
-                    crate::graph::EdgeType::Reads => {
+                    crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
                         data_sources.push(json!({
                             "source_component": if matches!(node.node_type, crate::graph::NodeType::Component) { Some(node.id.clone()) } else { None },
                             "source_action": if matches!(node.node_type, crate::graph::NodeType::Action) { Some(node.id.clone()) } else { None },
@@ -649,7 +649,9 @@ pub fn query_page_logic(
                             "target_id": target.id,
                         }));
                     }
-                    crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::EmbedsPage => {
+                    crate::graph::EdgeType::OpensPage
+                    | crate::graph::EdgeType::ActionNavigates
+                    | crate::graph::EdgeType::EmbedsPage => {
                         navigation.push(json!({
                             "from": node.id,
                             "to": target.id,
@@ -703,7 +705,7 @@ pub fn query_page_logic(
 
         for (target, edge) in &action_out {
             match edge.edge_type {
-                crate::graph::EdgeType::Reads => {
+                crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
                     reads.push(json!({
                         "model": target.name,
                         "field_path": edge.field_path,
@@ -717,7 +719,9 @@ pub fn query_page_logic(
                         "target_id": target.id,
                     }));
                 }
-                crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::EmbedsPage => {
+                crate::graph::EdgeType::OpensPage
+                | crate::graph::EdgeType::ActionNavigates
+                | crate::graph::EdgeType::EmbedsPage => {
                     nav.push(json!({
                         "to": target.id,
                         "to_name": target.name,
@@ -780,6 +784,19 @@ pub fn query_page_logic(
             crate::action_semantics::parse_wait_prev(wait_prev.as_ref().and_then(|v| v.as_str()));
         let condition_struct = crate::action_semantics::parse_condition(condition_raw);
 
+        // 执行模型字段推断
+        let wait_status = if wait_prev.as_ref().and_then(|v| v.as_str()).is_some() {
+            "blocking"
+        } else {
+            "none"
+        };
+        let may_interrupt = condition_raw.is_some();
+        let failure_behavior = if condition_raw.is_some() {
+            "skip_if_condition_fails"
+        } else {
+            "proceed"
+        };
+
         action_flows.push(json!({
             "action_id": action_id,
             "action_type": action_type,
@@ -788,7 +805,10 @@ pub fn query_page_logic(
             "component_id": parent_component,
             "trigger_type": trigger_type,
             "blocks_on": blocks_on,
+            "wait_status": wait_status,
             "condition": condition_struct,
+            "may_interrupt": may_interrupt,
+            "failure_behavior": failure_behavior,
             "reads": reads,
             "writes": writes,
             "navigation": nav,
@@ -1115,7 +1135,25 @@ pub fn query_page_logic(
                 .get("component_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            writeln!(out, "  {} [{}] triggered by {}", aid, atype, cid)?;
+            let acat = flow
+                .get("action_category")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let summary = flow
+                .get("semantic_summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            writeln!(out, "  {} [{} | {}]", aid, atype, acat)?;
+            if !summary.is_empty() {
+                writeln!(out, "    summary: {}", summary)?;
+            }
+            writeln!(out, "    triggered by {}", cid)?;
+            if let Some(raw) = flow.get("blocks_on").and_then(|b| b.get("raw")).and_then(|v| v.as_str()) {
+                writeln!(out, "    waits for: {}", raw)?;
+            }
+            if let Some(raw) = flow.get("condition").and_then(|c| c.get("raw_expr")).and_then(|v| v.as_str()) {
+                writeln!(out, "    condition: {}", raw)?;
+            }
             let writes = flow
                 .get("writes")
                 .and_then(|v| v.as_array())

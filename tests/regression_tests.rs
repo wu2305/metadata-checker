@@ -1642,7 +1642,10 @@ fn test_cli_query_page_logic_actions_test_semantics() {
         .get("entrypoint_count")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    assert_eq!(ep_count, 5, "actions_test should have 5 button entrypoints");
+    assert_eq!(
+        ep_count, 6,
+        "actions_test should have 6 button entrypoints (including unknown action)"
+    );
 
     let details_val = ai.details.expect("details must exist");
     let details = details_val.as_object().expect("details must be object");
@@ -1679,8 +1682,8 @@ fn test_cli_query_page_logic_actions_test_semantics() {
         .expect("action_flows must be array");
     assert_eq!(
         action_flows.len(),
-        5,
-        "actions_test should have 5 action flows"
+        6,
+        "actions_test should have 6 action flows (including unknown action)"
     );
 
     // write_targets: should include model1 and model2
@@ -1761,9 +1764,10 @@ fn test_cli_query_page_logic_page_relations_navigation() {
         .get("navigation")
         .and_then(|v| v.as_array())
         .expect("navigation must be array");
-    let has_opens_page = navigation
-        .iter()
-        .any(|n| n.get("type").and_then(|v| v.as_str()) == Some("OpensPage"));
+    let has_opens_page = navigation.iter().any(|n| {
+        n.get("type").and_then(|v| v.as_str()) == Some("OpensPage")
+            || n.get("type").and_then(|v| v.as_str()) == Some("ActionNavigates")
+    });
     let has_embeds_page = navigation
         .iter()
         .any(|n| n.get("type").and_then(|v| v.as_str()) == Some("EmbedsPage"));
@@ -1928,5 +1932,172 @@ fn test_cli_query_page_logic_human_no_duplicate_model() {
     assert!(
         stdout.contains("model1.age") || stdout.contains("model1.name"),
         "human mode should still show correct field paths"
+    );
+}
+
+#[test]
+fn test_cli_query_page_logic_human_shows_semantics() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let stdout = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/actions_test.spg",
+        "--human",
+    ]);
+
+    // human 模式应展示 action_category 和 semantic_summary
+    assert!(
+        stdout.contains("data_write"),
+        "human mode should show action_category like data_write, got:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("summary:"),
+        "human mode should show semantic_summary, got:\n{}",
+        stdout
+    );
+    // button1 有 waitPrev，应展示 waits for
+    assert!(
+        stdout.contains("waits for:"),
+        "human mode should show blocks_on raw, got:\n{}",
+        stdout
+    );
+    // button2 有 conditionExp，应展示 condition
+    assert!(
+        stdout.contains("condition:"),
+        "human mode should show condition raw_expr, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_explain_and_page_logic_semantic_summary_consistency() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+
+    // --explain action:app/actions_test.spg|button2|action1
+    let explain_out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "action:app/actions_test.spg|button2|action1",
+    ]);
+    let explain_ai: AiOutput =
+        serde_json::from_str(&explain_out).expect("explain output must be AiOutput");
+    let explain_details = explain_ai
+        .details
+        .expect("details must exist")
+        .as_object()
+        .unwrap()
+        .clone();
+    let explain_summary = explain_details
+        .get("semantic_summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // --query-page-logic
+    let page_out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/actions_test.spg",
+    ]);
+    let page_ai: AiOutput =
+        serde_json::from_str(&page_out).expect("page_logic output must be AiOutput");
+    let page_details = page_ai
+        .details
+        .expect("details must exist")
+        .as_object()
+        .unwrap()
+        .clone();
+    let flows = page_details
+        .get("action_flows")
+        .and_then(|v| v.as_array())
+        .expect("action_flows must be array");
+    let button2_flow = flows.iter().find(|f| {
+        f.get("component_id").and_then(|v| v.as_str()) == Some("comp:app/actions_test.spg|button2")
+            && f.get("action_id").and_then(|v| v.as_str()) == Some("action1")
+    });
+    assert!(
+        button2_flow.is_some(),
+        "button2 action1 should exist in page_logic"
+    );
+    let page_summary = button2_flow
+        .unwrap()
+        .get("semantic_summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // 两者都应该提到 "更新" 和 "model2"
+    assert!(
+        explain_summary.contains("更新") && explain_summary.contains("model2"),
+        "explain semantic_summary should mention '更新' and 'model2', got: {}",
+        explain_summary
+    );
+    assert!(
+        page_summary.contains("更新") && page_summary.contains("model2"),
+        "page_logic semantic_summary should mention '更新' and 'model2', got: {}",
+        page_summary
+    );
+}
+
+#[test]
+fn test_cli_query_page_logic_unknown_action_type() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/actions_test.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+
+    // 应有 UNKNOWN_ACTION_TYPE diagnostic
+    assert!(
+        ai.diagnostics
+            .iter()
+            .any(|d| d.code == "UNKNOWN_ACTION_TYPE"),
+        "should have UNKNOWN_ACTION_TYPE diagnostic for someCustomAction"
+    );
+
+    // action_flows 中未知 action 的 category 应为 unknown
+    let details = ai
+        .details
+        .expect("details must exist")
+        .as_object()
+        .unwrap()
+        .clone();
+    let flows = details
+        .get("action_flows")
+        .and_then(|v| v.as_array())
+        .expect("action_flows must be array");
+    let unknown_flow = flows
+        .iter()
+        .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("someCustomAction"));
+    assert!(
+        unknown_flow.is_some(),
+        "unknown action should appear in flows"
+    );
+    assert_eq!(
+        unknown_flow
+            .unwrap()
+            .get("action_category")
+            .and_then(|v| v.as_str()),
+        Some("unknown")
     );
 }

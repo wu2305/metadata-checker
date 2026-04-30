@@ -45,7 +45,11 @@ pub fn build_semantic_summary(
         "insertData" => {
             let models: Vec<&str> = writes
                 .iter()
-                .filter_map(|w| w.get("model").and_then(|v| v.as_str()))
+                .filter_map(|w| {
+                    w.get("model")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| w.get("name").and_then(|v| v.as_str()))
+                })
                 .collect();
             if models.is_empty() {
                 format!("点击 {} 后插入新记录（未识别目标模型）", component_name)
@@ -60,7 +64,11 @@ pub fn build_semantic_summary(
         "updateData" => {
             let models: Vec<&str> = writes
                 .iter()
-                .filter_map(|w| w.get("model").and_then(|v| v.as_str()))
+                .filter_map(|w| {
+                    w.get("model")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| w.get("name").and_then(|v| v.as_str()))
+                })
                 .collect();
             if models.is_empty() {
                 format!("点击 {} 后更新记录（未识别目标模型）", component_name)
@@ -75,7 +83,11 @@ pub fn build_semantic_summary(
         "deleteData" => {
             let models: Vec<&str> = writes
                 .iter()
-                .filter_map(|w| w.get("model").and_then(|v| v.as_str()))
+                .filter_map(|w| {
+                    w.get("model")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| w.get("name").and_then(|v| v.as_str()))
+                })
                 .collect();
             if models.is_empty() {
                 format!("点击 {} 后删除记录（未识别目标模型）", component_name)
@@ -145,12 +157,34 @@ pub fn parse_wait_prev(raw: Option<&str>) -> Value {
         Some(s) => {
             let parts: Vec<&str> = s.split('.').collect();
             if parts.len() == 2 {
-                json!({
-                    "raw": s,
-                    "component_id": parts[0],
-                    "action_id": parts[1],
-                    "resolved": true,
-                })
+                // 启发式判断：如果第二部分是常见组件属性，则不是 action_id
+                let is_property = matches!(
+                    parts[1],
+                    "value"
+                        | "text"
+                        | "checked"
+                        | "selected"
+                        | "visible"
+                        | "disabled"
+                        | "readonly"
+                        | "hidden"
+                );
+                if is_property {
+                    json!({
+                        "raw": s,
+                        "component_id": parts[0],
+                        "action_id": null,
+                        "resolved": false,
+                        "reason": "second part looks like a component property, not an action id",
+                    })
+                } else {
+                    json!({
+                        "raw": s,
+                        "component_id": parts[0],
+                        "action_id": parts[1],
+                        "resolved": true,
+                    })
+                }
             } else {
                 json!({
                     "raw": s,
