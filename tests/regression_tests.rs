@@ -445,8 +445,473 @@ fn test_cli_explain_graph_contract() {
     ]);
     let ai: AiOutput = serde_json::from_str(&output).expect("explain output must be AiOutput");
     assert_eq!(ai.kind, OutputKind::Explain);
+    assert_eq!(ai.query_target, Some("model:model1".to_string()));
     assert!(!ai.evidence.is_empty(), "evidence must not be empty");
     assert_ai_output_contract(&ai);
+
+    // Semantic assertions for M2
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("what_is_it"),
+        "summary must have what_is_it"
+    );
+    assert!(
+        summary.contains_key("importance"),
+        "summary must have importance"
+    );
+    assert!(
+        summary.get("importance").and_then(|v| v.as_str()).is_some(),
+        "importance must be a string"
+    );
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    assert!(details_obj.contains_key("reads"), "details must have reads");
+    assert!(
+        details_obj.contains_key("writes"),
+        "details must have writes"
+    );
+    assert!(
+        details_obj.contains_key("triggered_by"),
+        "details must have triggered_by"
+    );
+    assert!(
+        details_obj.contains_key("affects"),
+        "details must have affects"
+    );
+    assert!(
+        details_obj.contains_key("lineage"),
+        "details must have lineage"
+    );
+
+    // Model explain should have read_by_count and written_by_count
+    assert!(
+        summary.contains_key("read_by_count"),
+        "model explain must have read_by_count"
+    );
+    assert!(
+        summary.contains_key("written_by_count"),
+        "model explain must have written_by_count"
+    );
+}
+
+#[test]
+fn test_cli_explain_component_single_file_contract() {
+    // 单文件模式 explain component with actions
+    let output = run_cli(&["tests/fixtures/actions_test.spg", "--explain", "button1"]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("single-file explain output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_eq!(ai.query_target, Some("button1".to_string()));
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("what_is_it"),
+        "summary must have what_is_it"
+    );
+    assert_eq!(
+        summary.get("importance").and_then(|v| v.as_str()),
+        Some("entrypoint"),
+        "button with actions should be entrypoint"
+    );
+    assert_eq!(
+        summary.get("type").and_then(|v| v.as_str()),
+        Some("component"),
+        "type must be component"
+    );
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    assert!(details_obj.contains_key("reads"), "details must have reads");
+    assert!(
+        details_obj.contains_key("writes"),
+        "details must have writes"
+    );
+    assert!(
+        details_obj.contains_key("triggered_by"),
+        "details must have triggered_by"
+    );
+    assert!(
+        details_obj.contains_key("affects"),
+        "details must have affects"
+    );
+    assert!(
+        details_obj.contains_key("lineage"),
+        "details must have lineage"
+    );
+
+    // button1 has submitData action → writes should not be empty
+    let writes = details_obj
+        .get("writes")
+        .expect("writes must exist")
+        .as_array()
+        .expect("writes must be array");
+    assert!(
+        !writes.is_empty(),
+        "button1 with submitData should have writes"
+    );
+
+    // should have LINEAGE_DEFERRED_TO_M6 diagnostic
+    assert!(
+        ai.diagnostics
+            .iter()
+            .any(|d| d.code == "LINEAGE_DEFERRED_TO_M6"),
+        "must have LINEAGE_DEFERRED_TO_M6 diagnostic"
+    );
+}
+
+#[test]
+fn test_cli_explain_component_single_file_no_actions_contract() {
+    let output = run_cli(&["tests/fixtures/test_superpage.spg", "--explain", "input1"]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("single-file explain output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_eq!(ai.query_target, Some("input1".to_string()));
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert_eq!(
+        summary.get("importance").and_then(|v| v.as_str()),
+        Some("calculated_display"),
+        "input without actions should be calculated_display"
+    );
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    // input1 has expression referencing param1-model1.A → reads should not be empty
+    let reads = details_obj
+        .get("reads")
+        .expect("reads must exist")
+        .as_array()
+        .expect("reads must be array");
+    assert!(
+        !reads.is_empty(),
+        "input1 with value expression should have reads"
+    );
+}
+
+#[test]
+fn test_cli_explain_action_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "action:app/actions_test.spg|button1|action1",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain action output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_eq!(
+        ai.query_target,
+        Some("action:app/actions_test.spg|button1|action1".to_string())
+    );
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("what_is_it"),
+        "summary must have what_is_it"
+    );
+    assert_eq!(
+        summary.get("type").and_then(|v| v.as_str()),
+        Some("action"),
+        "type must be action"
+    );
+    assert!(
+        summary.contains_key("parent_component"),
+        "action summary must have parent_component"
+    );
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    assert!(details_obj.contains_key("reads"), "details must have reads");
+    assert!(
+        details_obj.contains_key("writes"),
+        "details must have writes"
+    );
+    assert!(
+        details_obj.contains_key("triggered_by"),
+        "details must have triggered_by"
+    );
+    assert!(
+        details_obj.contains_key("affects"),
+        "details must have affects"
+    );
+    assert!(
+        details_obj.contains_key("lineage"),
+        "details must have lineage"
+    );
+
+    // submitData action should have writes
+    let writes = details_obj
+        .get("writes")
+        .expect("writes must exist")
+        .as_array()
+        .expect("writes must be array");
+    assert!(!writes.is_empty(), "submitData action should have writes");
+
+    // triggered_by should contain parent component
+    let triggered_by = details_obj
+        .get("triggered_by")
+        .expect("triggered_by must exist")
+        .as_array()
+        .expect("triggered_by must be array");
+    assert!(
+        triggered_by
+            .iter()
+            .any(|t| t.get("name").and_then(|v| v.as_str()) == Some("button1")),
+        "action should be triggered by button1"
+    );
+}
+
+#[test]
+fn test_cli_explain_page_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "page:app/actions_test.spg",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("explain page output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_eq!(
+        ai.query_target,
+        Some("page:app/actions_test.spg".to_string())
+    );
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("what_is_it"),
+        "summary must have what_is_it"
+    );
+    assert_eq!(
+        summary.get("type").and_then(|v| v.as_str()),
+        Some("page"),
+        "type must be page"
+    );
+    assert!(
+        summary.contains_key("entrypoint_count"),
+        "page summary must have entrypoint_count"
+    );
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    assert!(details_obj.contains_key("reads"), "details must have reads");
+    assert!(
+        details_obj.contains_key("writes"),
+        "details must have writes"
+    );
+    assert!(
+        details_obj.contains_key("triggered_by"),
+        "details must have triggered_by"
+    );
+    assert!(
+        details_obj.contains_key("affects"),
+        "details must have affects"
+    );
+    assert!(
+        details_obj.contains_key("lineage"),
+        "details must have lineage"
+    );
+}
+
+#[test]
+fn test_cli_explain_component_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "comp:app/actions_test.spg|button1",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain component output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_eq!(
+        ai.query_target,
+        Some("comp:app/actions_test.spg|button1".to_string())
+    );
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("what_is_it"),
+        "summary must have what_is_it"
+    );
+    assert_eq!(
+        summary.get("type").and_then(|v| v.as_str()),
+        Some("component"),
+        "type must be component"
+    );
+    assert!(
+        summary.contains_key("action_count"),
+        "component summary must have action_count"
+    );
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    assert!(details_obj.contains_key("reads"), "details must have reads");
+    assert!(
+        details_obj.contains_key("writes"),
+        "details must have writes"
+    );
+    assert!(
+        details_obj.contains_key("triggered_by"),
+        "details must have triggered_by"
+    );
+    assert!(
+        details_obj.contains_key("affects"),
+        "details must have affects"
+    );
+    assert!(
+        details_obj.contains_key("lineage"),
+        "details must have lineage"
+    );
+}
+
+#[test]
+fn test_cli_explain_field_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "field:model1.name",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain field output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_eq!(ai.query_target, Some("field:model1.name".to_string()));
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("what_is_it"),
+        "summary must have what_is_it"
+    );
+    assert_eq!(
+        summary.get("type").and_then(|v| v.as_str()),
+        Some("field"),
+        "type must be field"
+    );
+    assert!(
+        summary.contains_key("parent_model"),
+        "field summary must have parent_model"
+    );
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    assert!(details_obj.contains_key("reads"), "details must have reads");
+    assert!(
+        details_obj.contains_key("writes"),
+        "details must have writes"
+    );
+    assert!(
+        details_obj.contains_key("triggered_by"),
+        "details must have triggered_by"
+    );
+    assert!(
+        details_obj.contains_key("affects"),
+        "details must have affects"
+    );
+    assert!(
+        details_obj.contains_key("lineage"),
+        "details must have lineage"
+    );
+}
+
+#[test]
+fn test_cli_explain_dataflow_graph_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "model:dataflow_output",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain dataflow output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_eq!(ai.query_target, Some("model:dataflow_output".to_string()));
+    assert!(!ai.evidence.is_empty(), "evidence must not be empty");
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("what_is_it"),
+        "summary must have what_is_it"
+    );
+    assert_eq!(
+        summary.get("type").and_then(|v| v.as_str()),
+        Some("dataflow"),
+        "type must be dataflow"
+    );
+    assert!(
+        summary.contains_key("input_count"),
+        "dataflow summary must have input_count"
+    );
+    assert!(
+        summary.contains_key("output_count"),
+        "dataflow summary must have output_count"
+    );
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    assert!(details_obj.contains_key("reads"), "details must have reads");
+    assert!(
+        details_obj.contains_key("writes"),
+        "details must have writes"
+    );
+    assert!(
+        details_obj.contains_key("triggered_by"),
+        "details must have triggered_by"
+    );
+    assert!(
+        details_obj.contains_key("affects"),
+        "details must have affects"
+    );
+    assert!(
+        details_obj.contains_key("lineage"),
+        "details must have lineage"
+    );
+    assert!(
+        details_obj.contains_key("inputs"),
+        "dataflow details must have inputs"
+    );
+    assert!(
+        details_obj.contains_key("outputs"),
+        "dataflow details must have outputs"
+    );
 }
 
 #[test]

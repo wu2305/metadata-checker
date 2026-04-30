@@ -94,6 +94,42 @@ pub struct AiOutput {
 所有 machine 输出必须通过 `AiOutput` 序列化，调用 `.validate()` 自动检查契约：
 - summary 有实质内容但 evidence 为空时，自动添加兜底 evidence 和 `EVIDENCE_INCOMPLETE` diagnostic
 
+## kind: Explain 字段约束
+
+`--explain <ID>` 输出，按目标 `NodeType` 分发语义：
+
+### summary 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `what_is_it` | string | 自然语言短句，直接说明目标含义 |
+| `type` | string | 目标类型：`component` / `action` / `model` / `field` / `page` / `dataflow` |
+| `type_detail` | string | 具体名称或子类型 |
+| `importance` | string | 稳定分类：`entrypoint` / `data_source` / `write_target` / `navigation` / `calculated_display` / `container` / `unknown` |
+| `page` / `page_id` | string | 所属页面（Component/Action 有） |
+| `parent_component` / `parent_component_id` | string | 父组件（Action 有） |
+| `read_by_count` / `written_by_count` | number | 读写者计数（Model/Field 有） |
+| `action_count` | number | 动作数量（Component 有） |
+| `child_count` / `entrypoint_count` / `data_source_count` / `write_target_count` | number | 页面统计（Page 有） |
+| `input_count` / `output_count` / `internal_node_count` | number | DataFlow 统计 |
+
+### details 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `reads` | array | 目标读取的对象列表 |
+| `writes` | array | 目标写入的对象列表 |
+| `triggered_by` | array | 触发目标的源对象 |
+| `affects` | array | 目标影响的下游对象 |
+| `lineage` | array | 字段级血缘（M2 保留空数组） |
+
+### 允许为空的字段
+
+- `details.lineage`：M2 保留空数组，必须附带 `LINEAGE_DEFERRED_TO_M6` diagnostic
+- `details.reads` / `details.writes`：目标确实无读写关系时可为空
+- `summary.page` / `summary.page_id`：非页面上下文的目标可为 null
+
+## 兼容字段策略（Legacy）
 ## 兼容字段策略（Legacy）
 
 以下字段为兼容旧版本保留，**不应作为 AI 主语义字段**：

@@ -40,7 +40,29 @@ When working with metadata-checker, follow this decision tree to choose the righ
 - Component in a single file → `--explain input1` (with `--project-dir` for cross-file context)
 - Model/field/page/dataflow in project graph → `--explain model:physical_x`
 
-Output includes: `what_is_it`, `reads`, `writes`, `triggered_by`, `affects`, `lineage`, `evidence`
+Supported target types and ID formats:
+- `component` → `comp:app/page.spg|button1` 或单文件模式下裸 ID `button1`
+- `action` → `action:app/page.spg|button1|action1`
+- `model` → `model:model1`
+- `field` → `field:model1.fieldA`
+- `page` → `page:app/page.spg`
+- `dataflow` → `model:dataflow_output`（DataFlow 也是 Model 类型）
+
+Output structure (kind = Explain):
+- `summary.what_is_it`: 自然语言短句，例如"按钮 button1，位于页面 page_relations，具有1个动作"
+- `summary.importance`: 稳定分类：`entrypoint` / `data_source` / `write_target` / `navigation` / `calculated_display` / `container` / `unknown`
+- `details.reads`: 目标读取的模型字段、参数、组件值
+- `details.writes`: 目标写入的模型字段、参数、页面状态
+- `details.triggered_by`: 真实触发关系（组件被页面包含、action 被组件触发、页面被 action 打开）
+- `details.affects`: 下游影响对象（被哪些组件引用、影响哪些模型字段、打开哪些页面）
+- `details.lineage`: 字段级血缘（M2 保留空数组 + `LINEAGE_DEFERRED_TO_M6` diagnostic）
+- `evidence`: 每条结论的具体证据，包含 `source_file`、`node_id`、`edge_type`
+- `next_queries`: 建议的后续命令
+
+**When explain is not enough**:
+- 需要了解周围关联 → `--context <ID> --depth 2`
+- 需要页面整体逻辑 → `--query-page-logic <PAGE>`
+- 需要模型全量读写 → `--query-model <MODEL>`
 
 ### Q3: Do you need the surrounding context of an ID?
 

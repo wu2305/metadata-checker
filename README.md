@@ -168,6 +168,91 @@ tests/                   # 测试用例（覆盖全部模块）
 - `DataflowInput` — DataFlow 输入源
 - `DataflowInternal` — DataFlow 内部节点依赖
 
+## --explain 示例
+
+`--explain <ID>` 按目标类型分发语义，输出 `kind: Explain`：
+
+### 解释组件
+
+```bash
+metadata-checker --project-dir ./my-project --explain comp:app/page.spg|button1
+```
+
+输出摘要：
+```json
+{
+  "what_is_it": "组件 button1，位于页面 page_relations，具有 1 个动作",
+  "type": "component",
+  "importance": "entrypoint"
+}
+```
+
+details 包含：
+- `reads`：组件表达式引用的模型字段、参数
+- `writes`：action 写入的模型、参数
+- `triggered_by`：父页面（Contains）、被引用组件（incoming Reads）
+- `affects`：触发的 action（Triggers）、导航目标（OpensPage）
+
+### 解释模型
+
+```bash
+metadata-checker --project-dir ./my-project --explain model:model1
+```
+
+输出摘要：
+```json
+{
+  "what_is_it": "数据模型 model1，被 2 个组件/动作读取，被 6 个组件/动作写入，参与 0 个 DataFlow",
+  "type": "model",
+  "importance": "write_target",
+  "read_by_count": 2,
+  "written_by_count": 6
+}
+```
+
+### 解释页面
+
+```bash
+metadata-checker --project-dir ./my-project --explain page:app/page.spg
+```
+
+输出摘要：
+```json
+{
+  "what_is_it": "页面 page_relations，包含 4 个组件，2 个入口点，2 个数据源，0 个写入目标",
+  "type": "page",
+  "importance": "entrypoint",
+  "entrypoint_count": 2,
+  "data_source_count": 2
+}
+```
+
+### 解释动作
+
+```bash
+metadata-checker --project-dir ./my-project --explain action:app/page.spg|button1|action1
+```
+
+输出摘要：
+```json
+{
+  "what_is_it": "link 动作 link:action1，由 button1 触发，读取 model1",
+  "type": "action",
+  "importance": "navigation",
+  "parent_component": "button1"
+}
+```
+
+### explain 不足时的后续命令
+
+| 场景 | 后续命令 |
+|------|----------|
+| 需要了解周围关联 | `--context <ID> --depth 2` |
+| 需要页面整体逻辑 | `--query-page-logic <PAGE>` |
+| 需要模型全量读写 | `--query-model <MODEL>` |
+| 需要 DataFlow 子图 | `--query-dataflow <MODEL>` |
+
+## 统一 JSON 输出 Schema（Machine Contract）
 ## 统一 JSON 输出 Schema（Machine Contract）
 
 所有机器输出（默认 `--non-human`）通过 `src/output/schema.rs` 中的 `AiOutput` struct 统一序列化，**禁止手写 `json!`**。
