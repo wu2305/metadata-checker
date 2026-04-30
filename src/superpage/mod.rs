@@ -599,6 +599,9 @@ fn extract_components(
                 .map(|p| (p.name.clone(), p.value.clone()))
                 .collect(),
             target_type: a.target_type.clone(),
+            wait_prev: a.wait_prev.clone(),
+            condition: a.condition.clone(),
+            condition_exp: a.condition_exp.clone(),
         })
         .collect();
 

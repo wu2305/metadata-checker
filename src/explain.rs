@@ -711,10 +711,51 @@ fn explain_action_graph(
     );
     let importance = classify_importance(has_nav, has_write, has_read, &node.node_type);
 
+    // 从 graph 节点元数据提取原始 action 属性
+    let meta_wait_prev = node
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("waitPrev"))
+        .and_then(|v| v.as_str());
+    let meta_condition = node
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("condition"))
+        .and_then(|v| v.as_str());
+    let meta_condition_exp = node
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("conditionExp"))
+        .and_then(|v| v.as_str());
+    let meta_trigger_type = node
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("triggerType"))
+        .and_then(|v| v.as_str());
+
+    let action_category = crate::action_semantics::classify_action(&action_type);
+    let comp_name = parent_comp
+        .as_ref()
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| "?".to_string());
+    let semantic_summary = crate::action_semantics::build_semantic_summary(
+        &action_type,
+        &comp_name,
+        &node.name,
+        &reads,
+        &writes,
+        &affects,
+    );
+    let blocks_on = crate::action_semantics::parse_wait_prev(meta_wait_prev);
+    let condition_struct =
+        crate::action_semantics::parse_condition(meta_condition.or(meta_condition_exp));
+
     let summary = serde_json::json!({
         "what_is_it": what,
         "type": "action",
         "type_detail": action_type,
+        "action_category": action_category,
+        "semantic_summary": semantic_summary,
         "importance": importance,
         "parent_component": parent_comp.as_ref().map(|c| c.name.clone()),
         "parent_component_id": parent_comp.as_ref().map(|c| c.id.clone()),
@@ -731,6 +772,11 @@ fn explain_action_graph(
         "triggered_by": triggered_by,
         "affects": affects,
         "lineage": lineage,
+        "action_category": action_category,
+        "semantic_summary": semantic_summary,
+        "blocks_on": blocks_on,
+        "condition": condition_struct,
+        "trigger_type": meta_trigger_type.unwrap_or("click"),
     });
 
     let diagnostics = vec![crate::output::Diagnostic {
@@ -791,7 +837,22 @@ fn explain_action_graph(
         let mut out = io::stdout();
         writeln!(out, "=== Explain: {} ===", node.id)?;
         writeln!(out, "What: {}", what)?;
+        writeln!(out, "Category: {}", action_category)?;
+        writeln!(out, "Summary: {}", semantic_summary)?;
         writeln!(out, "Path: {}", node.path)?;
+        if meta_trigger_type.is_some() {
+            writeln!(out, "Trigger: {}", meta_trigger_type.unwrap_or("click"))?;
+        }
+        if let Some(raw) = meta_wait_prev {
+            writeln!(out, "Waits for: {}", raw)?;
+        }
+        if meta_condition.is_some() || meta_condition_exp.is_some() {
+            writeln!(
+                out,
+                "Condition: {}",
+                meta_condition.or(meta_condition_exp).unwrap_or("")
+            )?;
+        }
         if !reads.is_empty() {
             writeln!(
                 out,

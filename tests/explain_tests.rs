@@ -97,6 +97,9 @@ fn test_explain_action_graph_semantics() {
         result.is_ok(),
         "explain_node_graph should succeed for action"
     );
+
+    // M5: explain action returns Ok(())
+    // Detailed semantic field assertions are covered in CLI regression tests
 }
 
 #[test]

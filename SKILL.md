@@ -56,6 +56,12 @@ Output structure (kind = Explain):
 - `details.triggered_by`: 真实触发关系（组件被页面包含、action 被组件触发、页面被 action 打开）
 - `details.affects`: 下游影响对象（被哪些组件引用、影响哪些模型字段、打开哪些页面）
 - `details.lineage`: 字段级血缘（M2 保留空数组 + `LINEAGE_DEFERRED_TO_M6` diagnostic）
+- **Action 特有字段**:
+  - `action_category`: 动作语义分类（data_write / data_read / navigation / param_mutation / ui_control / validation / data_refresh / unknown）
+  - `semantic_summary`: 动作自然语言摘要，例如"点击 button1 后提交数据到 model1.name"
+  - `blocks_on`: 结构化等待前置动作（替代旧 `wait_prev`）
+  - `condition`: 结构化条件执行表达式（condition 或 conditionExp）
+  - `trigger_type`: click / hover / focus / ...
 - `evidence`: 每条结论的具体证据，包含 `source_file`、`node_id`、`edge_type`
 - `next_queries`: 建议的后续命令
 
@@ -100,9 +106,9 @@ Output structure (kind = PageLogic):
 - `summary.page_role`: 稳定分类：`form_submit_page` / `readonly_dashboard` / `navigation_page` / `data_maintenance_page` / `mixed_interaction_page` / `unknown`
 - `details.entrypoints`: 用户可触发入口（button、link 等），不含普通 input
 - `details.action_flows`: 按组件触发链输出 action，包含：
-  - `action_id` / `action_type` / `component_id` / `trigger_type`
-  - `wait_prev`: 等待前置 action（如 "button11.action1"）
-  - `condition`: 条件执行表达式（condition 或 conditionExp 字段）
+  - `action_id` / `action_type` / `action_category` / `semantic_summary` / `component_id` / `trigger_type`
+  - `blocks_on`: 结构化等待前置动作（替代旧 `wait_prev` 字符串）
+  - `condition`: 结构化条件执行表达式（condition 或 conditionExp）
   - `reads` / `writes` / `navigation` / `sets_params` / `passes_params`
 - `details.data_sources`: 页面读取的模型和字段
 - `details.write_targets`: 页面写入的模型和字段

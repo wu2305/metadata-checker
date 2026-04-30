@@ -62,6 +62,9 @@ pub struct SpgAction {
     pub data: Vec<(String, String)>,
     pub params: Vec<(String, String)>,
     pub target_type: String,
+    pub wait_prev: Option<String>,
+    pub condition: Option<String>,
+    pub condition_exp: Option<String>,
 }
 
 /// 组件上的表达式及其解析出的引用列表

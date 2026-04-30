@@ -321,7 +321,12 @@ pub fn process_spg_file_from_value(
                 NodeType::Action,
                 rel_path.to_string(),
                 format!("{}:{}", action.action_type, action.id),
-                None,
+                Some(serde_json::json!({
+                    "waitPrev": action.wait_prev,
+                    "condition": action.condition,
+                    "conditionExp": action.condition_exp,
+                    "triggerType": action.trigger_type,
+                })),
             );
             node_ids.insert(action_id.clone());
             graph.add_edge(&comp_id, &action_id, EdgeType::Triggers, None);

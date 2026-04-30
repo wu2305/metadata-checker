@@ -687,6 +687,32 @@ fn test_cli_explain_action_graph_contract() {
             .any(|t| t.get("name").and_then(|v| v.as_str()) == Some("button1")),
         "action should be triggered by button1"
     );
+
+    // M5 semantic fields
+    assert_eq!(
+        details_obj.get("action_category").and_then(|v| v.as_str()),
+        Some("data_write"),
+        "submitData should be data_write"
+    );
+    assert!(
+        details_obj
+            .get("semantic_summary")
+            .and_then(|v| v.as_str())
+            .is_some(),
+        "semantic_summary must be present"
+    );
+    assert!(
+        details_obj.contains_key("blocks_on"),
+        "blocks_on must be present"
+    );
+    assert!(
+        details_obj.contains_key("condition"),
+        "condition must be present"
+    );
+    assert_eq!(
+        details_obj.get("trigger_type").and_then(|v| v.as_str()),
+        Some("click")
+    );
 }
 
 #[test]
@@ -1858,7 +1884,8 @@ fn test_cli_query_page_logic_action_meta_no_collision() {
     assert_eq!(
         button1_flow
             .unwrap()
-            .get("wait_prev")
+            .get("blocks_on")
+            .and_then(|v| v.get("raw"))
             .and_then(|v| v.as_str()),
         Some("input1.value"),
         "button1 action1 should have wait_prev from raw file"
@@ -1869,6 +1896,7 @@ fn test_cli_query_page_logic_action_meta_no_collision() {
         button2_flow
             .unwrap()
             .get("condition")
+            .and_then(|v| v.get("raw_expr"))
             .and_then(|v| v.as_str()),
         Some("input1.value=='test'"),
         "button2 action1 should have condition from conditionExp"

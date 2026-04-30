@@ -758,18 +758,37 @@ pub fn query_page_logic(
             .get(&lookup_key)
             .and_then(|v| v.get("wait_prev"))
             .cloned();
-        let condition = action_meta
+        let condition_raw = action_meta
             .get(&lookup_key)
             .and_then(|v| v.get("condition"))
-            .cloned();
+            .and_then(|v| v.as_str());
+
+        let action_category = crate::action_semantics::classify_action(&action_type);
+        let comp_name = parent_component
+            .as_deref()
+            .and_then(|cid| cid.split('|').next_back())
+            .unwrap_or("?");
+        let semantic_summary = crate::action_semantics::build_semantic_summary(
+            &action_type,
+            comp_name,
+            &action_id,
+            &reads,
+            &writes,
+            &nav,
+        );
+        let blocks_on =
+            crate::action_semantics::parse_wait_prev(wait_prev.as_ref().and_then(|v| v.as_str()));
+        let condition_struct = crate::action_semantics::parse_condition(condition_raw);
 
         action_flows.push(json!({
             "action_id": action_id,
             "action_type": action_type,
+            "action_category": action_category,
+            "semantic_summary": semantic_summary,
             "component_id": parent_component,
             "trigger_type": trigger_type,
-            "wait_prev": wait_prev,
-            "condition": condition,
+            "blocks_on": blocks_on,
+            "condition": condition_struct,
             "reads": reads,
             "writes": writes,
             "navigation": nav,
@@ -896,6 +915,25 @@ pub fn query_page_logic(
                 ),
                 location: crate::output::Location::new(),
                 suggestion: Some("Verify if this action should produce a write target".to_string()),
+            });
+        }
+    }
+
+    // UNKNOWN_ACTION_TYPE：存在未识别的 action 类型
+    for flow in &action_flows {
+        if flow.get("action_category").and_then(|v| v.as_str()) == Some("unknown") {
+            let atype = flow
+                .get("action_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Warning,
+                code: "UNKNOWN_ACTION_TYPE".to_string(),
+                message: format!("Unknown action type '{}' encountered", atype),
+                location: crate::output::Location::new(),
+                suggestion: Some(
+                    "Check if this action type is supported by metadata-checker".to_string(),
+                ),
             });
         }
     }

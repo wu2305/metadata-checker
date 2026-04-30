@@ -122,6 +122,11 @@ pub struct AiOutput {
 | `triggered_by` | array | 触发目标的源对象 |
 | `affects` | array | 目标影响的下游对象 |
 | `lineage` | array | 字段级血缘（M2 保留空数组） |
+| `action_category` | string | 动作语义分类（Action 有）：data_write / data_read / navigation / param_mutation / ui_control / validation / data_refresh / data_initialization / unknown |
+| `semantic_summary` | string | 动作自然语言摘要（Action 有） |
+| `blocks_on` | object / null | 等待前置动作结构化解析（Action 有） |
+| `condition` | object / null | 条件执行表达式结构化解析（Action 有） |
+| `trigger_type` | string | 触发类型：click / hover / focus / ...（Action 有） |
 
 ### 允许为空的字段
 
@@ -294,8 +299,10 @@ pub struct AiOutput {
 | `action_type` | string | submitData / updateData / insertData / deleteData / link / setParamValue / ... |
 | `component_id` | string | 触发该 action 的组件完整 ID |
 | `trigger_type` | string | click / hover / focus / ... |
-| `wait_prev` | string / null | 等待前置 action 完成，值如 "button11.action1" |
-| `condition` | object / null | 条件执行表达式（condition 或 conditionExp 字段） |
+| `action_category` | string | 动作语义分类：data_write / data_read / navigation / param_mutation / ui_control / validation / data_refresh / data_initialization / unknown |
+| `semantic_summary` | string | 动作自然语言摘要 |
+| `blocks_on` | object / null | 等待前置动作结构化解析，替代旧 `wait_prev` 字符串 |
+| `condition` | object / null | 条件执行表达式结构化解析（condition 或 conditionExp） |
 | `reads` | array | action 读取的模型字段 |
 | `writes` | array | action 写入的模型字段 |
 | `navigation` | array | action 跳转/嵌入的目标页面 |

@@ -73,6 +73,12 @@ pub struct RawAction {
     pub params: Vec<RawSetParam>,
     #[serde(rename = "targetType", default)]
     pub target_type: String,
+    #[serde(rename = "waitPrev", default)]
+    pub wait_prev: Option<String>,
+    #[serde(default)]
+    pub condition: Option<String>,
+    #[serde(rename = "conditionExp", default)]
+    pub condition_exp: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
