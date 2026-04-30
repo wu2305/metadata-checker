@@ -1815,3 +1815,90 @@ fn test_cli_query_page_logic_risk_diagnostics() {
         "readonly page should have NO_WRITE_TARGETS diagnostic"
     );
 }
+
+#[test]
+fn test_cli_query_page_logic_action_meta_no_collision() {
+    // button1 和 button2 都有 action1，但元数据不应串线
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/actions_test.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    let action_flows = details
+        .get("action_flows")
+        .and_then(|v| v.as_array())
+        .expect("action_flows must be array");
+
+    // 找到 button1 和 button2 各自的 action1
+    let button1_flow = action_flows.iter().find(|f| {
+        f.get("component_id").and_then(|v| v.as_str()) == Some("comp:app/actions_test.spg|button1")
+            && f.get("action_id").and_then(|v| v.as_str()) == Some("action1")
+    });
+    let button2_flow = action_flows.iter().find(|f| {
+        f.get("component_id").and_then(|v| v.as_str()) == Some("comp:app/actions_test.spg|button2")
+            && f.get("action_id").and_then(|v| v.as_str()) == Some("action1")
+    });
+
+    assert!(button1_flow.is_some(), "button1 should have action1 flow");
+    assert!(button2_flow.is_some(), "button2 should have action1 flow");
+
+    // button1 action1 应有 wait_prev: "input1.value"
+    assert_eq!(
+        button1_flow
+            .unwrap()
+            .get("wait_prev")
+            .and_then(|v| v.as_str()),
+        Some("input1.value"),
+        "button1 action1 should have wait_prev from raw file"
+    );
+
+    // button2 action1 应有 condition: "input1.value=='test'"（来自 conditionExp）
+    assert_eq!(
+        button2_flow
+            .unwrap()
+            .get("condition")
+            .and_then(|v| v.as_str()),
+        Some("input1.value=='test'"),
+        "button2 action1 should have condition from conditionExp"
+    );
+}
+
+#[test]
+fn test_cli_query_page_logic_human_no_duplicate_model() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let stdout = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/actions_test.spg",
+        "--human",
+    ]);
+
+    // human 模式不应输出 model1.model1.field 这种重复模型名
+    assert!(
+        !stdout.contains("model1.model1"),
+        "human mode should not duplicate model name in field display, got:\n{}",
+        stdout
+    );
+    // 应正常输出 model1.age / model1.name 等
+    assert!(
+        stdout.contains("model1.age") || stdout.contains("model1.name"),
+        "human mode should still show correct field paths"
+    );
+}

@@ -130,7 +130,7 @@ fn test_scanner_update_data_action() {
 
     let writers = graph.find_writers("model:model2");
     let has_update_action = writers.iter().any(|(node, edge)| {
-        node.id == "action:app/actions_test.spg|button2|action2"
+        node.id == "action:app/actions_test.spg|button2|action1"
             && matches!(edge.edge_type, EdgeType::ActionWrites)
             && edge.field_path == Some("model2.status".to_string())
     });

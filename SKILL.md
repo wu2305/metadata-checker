@@ -99,12 +99,22 @@ Output structure (kind = PageLogic):
 - `summary.what_is_it`: 自然语言短句，例如“页面 actions_test，5 个用户入口，读取 2 个模型，写入 2 个模型，存在 1 个跳转”
 - `summary.page_role`: 稳定分类：`form_submit_page` / `readonly_dashboard` / `navigation_page` / `data_maintenance_page` / `mixed_interaction_page` / `unknown`
 - `details.entrypoints`: 用户可触发入口（button、link 等），不含普通 input
-- `details.action_flows`: 按组件触发链输出 action，包含 action_type、reads、writes、navigation、sets_params
+- `details.action_flows`: 按组件触发链输出 action，包含：
+  - `action_id` / `action_type` / `component_id` / `trigger_type`
+  - `wait_prev`: 等待前置 action（如 "button11.action1"）
+  - `condition`: 条件执行表达式（condition 或 conditionExp 字段）
+  - `reads` / `writes` / `navigation` / `sets_params` / `passes_params`
 - `details.data_sources`: 页面读取的模型和字段
 - `details.write_targets`: 页面写入的模型和字段
-- `details.navigation`: 页面跳转/嵌入关系
-- `details.visibility_rules`: 组件可见性规则（visible/hidden/disabled/readonly）
-- `details.risk_diagnostics`: 风险诊断，例如 `NO_WRITE_TARGETS`、`NO_ENTRYPOINTS`
+- `details.navigation`: 页面跳转/嵌入关系（OpensPage、EmbedsPage、SetsParam、PassesParam）
+- `details.visibility_rules`: 组件可见性规则（visible/hidden/disabled/readonly），递归扫描 canvas/components/panels/steps/comps
+- `details.risk_diagnostics`: 风险诊断，包括：
+  - `NO_WRITE_TARGETS`：只读页面
+  - `NO_ENTRYPOINTS`：无用户可触发入口
+  - `ACTION_FLOW_INCOMPLETE`：action 读取但未写入
+  - `UNRESOLVED_PAGE_NAVIGATION`：导航目标页面不存在
+  - `UNRESOLVED_MODEL_WRITE`：写入目标模型不存在
+  - `VISIBILITY_RULE_UNRESOLVED`：visibility 规则可能包含未解析引用
 - `next_queries`: 建议后续命令，例如 `--explain <PAGE>`、`--context <PAGE> --depth 2`
 
 ## Machine JSON Output Schema

@@ -550,7 +550,7 @@ pub fn query_page_logic(
                             }));
                         }
                     }
-                    // 收集 action 元数据
+                    // 收集 action 元数据，key 用 comp_id + "|" + action_id 防止同名 action 串线
                     if let Some(actions) = comp.get("actions").and_then(|a| a.as_array()) {
                         for act in actions {
                             if let Some(aid) = act.get("id").and_then(|v| v.as_str()) {
@@ -559,9 +559,13 @@ pub fn query_page_logic(
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("click");
                                 let wait_prev = act.get("waitPrev").cloned();
-                                let condition = act.get("condition").cloned();
+                                // condition: condition 字段或 conditionExp 字段
+                                let condition = act
+                                    .get("condition")
+                                    .or_else(|| act.get("conditionExp"))
+                                    .cloned();
                                 action_meta.insert(
-                                    aid.to_string(),
+                                    format!("{}|{}", comp_id, aid),
                                     json!({
                                         "trigger_type": trigger_type,
                                         "wait_prev": wait_prev,
@@ -738,18 +742,24 @@ pub fn query_page_logic(
             }
         }
 
+        // 用 parent_component 提取裸组件名构建 lookup key，避免同名 action 串线
+        let lookup_key = parent_component
+            .as_deref()
+            .and_then(|cid| cid.split('|').next_back())
+            .map(|comp_name| format!("{}|{}", comp_name, action_id))
+            .unwrap_or_else(|| action_id.clone());
         let trigger_type = action_meta
-            .get(&action_id)
+            .get(&lookup_key)
             .and_then(|v| v.get("trigger_type"))
             .and_then(|v| v.as_str())
             .unwrap_or("click")
             .to_string();
         let wait_prev = action_meta
-            .get(&action_id)
+            .get(&lookup_key)
             .and_then(|v| v.get("wait_prev"))
             .cloned();
         let condition = action_meta
-            .get(&action_id)
+            .get(&lookup_key)
             .and_then(|v| v.get("condition"))
             .cloned();
 
@@ -1034,15 +1044,24 @@ pub fn query_page_logic(
         }
         writeln!(out, "\n--- Data Sources ({}) ---", data_sources.len())?;
         for ds in &data_sources {
-            let model = ds.get("model").and_then(|v| v.as_str()).unwrap_or("?");
             let fp = ds.get("field_path").and_then(|v| v.as_str()).unwrap_or("?");
-            writeln!(out, "  {}.{}", model, fp)?;
+            // field_path 已包含 model 前缀（如 model1.fieldB），避免重复输出 model.model.field
+            let model = ds.get("model").and_then(|v| v.as_str()).unwrap_or("?");
+            if fp.starts_with(model) {
+                writeln!(out, "  {}", fp)?;
+            } else {
+                writeln!(out, "  {}.{}", model, fp)?;
+            }
         }
         writeln!(out, "\n--- Write Targets ({}) ---", write_targets.len())?;
         for wt in &write_targets {
-            let model = wt.get("model").and_then(|v| v.as_str()).unwrap_or("?");
             let fp = wt.get("field_path").and_then(|v| v.as_str()).unwrap_or("?");
-            writeln!(out, "  {}.{}", model, fp)?;
+            let model = wt.get("model").and_then(|v| v.as_str()).unwrap_or("?");
+            if fp.starts_with(model) {
+                writeln!(out, "  {}", fp)?;
+            } else {
+                writeln!(out, "  {}.{}", model, fp)?;
+            }
         }
         writeln!(out, "\n--- Action Flows ({}) ---", action_flows.len())?;
         for flow in &action_flows {

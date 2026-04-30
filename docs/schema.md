@@ -283,3 +283,29 @@ pub struct AiOutput {
 - `--query-model <MODEL> for model details`（对涉及的模型）
 
 **注意**：next_queries 中的 `--query-model` 不带 `model:` 前缀，CLI 会自动添加。
+
+## M4 补充字段（PageLogic）
+
+### action_flows 详细字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `action_id` | string | action 裸 ID（如 action1） |
+| `action_type` | string | submitData / updateData / insertData / deleteData / link / setParamValue / ... |
+| `component_id` | string | 触发该 action 的组件完整 ID |
+| `trigger_type` | string | click / hover / focus / ... |
+| `wait_prev` | string / null | 等待前置 action 完成，值如 "button11.action1" |
+| `condition` | object / null | 条件执行表达式（condition 或 conditionExp 字段） |
+| `reads` | array | action 读取的模型字段 |
+| `writes` | array | action 写入的模型字段 |
+| `navigation` | array | action 跳转/嵌入的目标页面 |
+| `sets_params` | array | action 设置的页面参数（setParamValue） |
+| `passes_params` | array | action 传递的页面参数（link） |
+
+### 风险诊断 code 补充
+
+| Code | Severity | 说明 |
+|------|----------|------|
+| `UNRESOLVED_PAGE_NAVIGATION` | Warning | 导航目标页面不存在于图中 |
+| `UNRESOLVED_MODEL_WRITE` | Warning | 写入目标模型不存在于图中 |
+| `VISIBILITY_RULE_UNRESOLVED` | Info | visibility 规则中的表达式可能包含未解析引用 |
