@@ -61,7 +61,12 @@ fn main() -> Result<()> {
         }
 
         if let Some(ref page_logic_id) = args.query_page_logic {
-            query::query_page_logic(&graph, page_logic_id, args.is_human())?;
+            query::query_page_logic(
+                &graph,
+                page_logic_id,
+                args.project_dir.as_deref(),
+                args.is_human(),
+            )?;
             return Ok(());
         }
 

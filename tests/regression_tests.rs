@@ -327,8 +327,12 @@ fn test_context_graph_contract() {
 #[test]
 fn test_query_page_logic_contract() {
     let (_db_path, graph) = setup_graph_db("logic");
-    let result =
-        metadata_checker::query::query_page_logic(&graph, "page:app/page_relations.spg", false);
+    let result = metadata_checker::query::query_page_logic(
+        &graph,
+        "page:app/page_relations.spg",
+        None,
+        false,
+    );
     assert!(
         result.is_ok(),
         "query_page_logic should succeed for existing page"
@@ -1573,4 +1577,241 @@ fn test_cli_context_next_queries_no_double_prefix() {
             );
         }
     }
+}
+
+// ============================================================
+// M4 PageLogic 语义测试
+// ============================================================
+
+#[test]
+fn test_cli_query_page_logic_actions_test_semantics() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/actions_test.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("what_is_it"),
+        "summary must have what_is_it"
+    );
+    assert!(
+        summary.contains_key("page_role"),
+        "summary must have page_role"
+    );
+
+    // entrypoints: 5 buttons, no inputs
+    let ep_count = summary
+        .get("entrypoint_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert_eq!(ep_count, 5, "actions_test should have 5 button entrypoints");
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    let entrypoints = details
+        .get("entrypoints")
+        .and_then(|v| v.as_array())
+        .expect("entrypoints must be array");
+    let ep_names: Vec<String> = entrypoints
+        .iter()
+        .filter_map(|e| {
+            e.get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+    assert!(
+        !ep_names.contains(&"input1".to_string()),
+        "input1 should not be an entrypoint"
+    );
+    assert!(
+        !ep_names.contains(&"input2".to_string()),
+        "input2 should not be an entrypoint"
+    );
+    assert!(
+        ep_names.contains(&"button1".to_string()),
+        "button1 should be an entrypoint"
+    );
+
+    // action_flows: should have 5 actions
+    let action_flows = details
+        .get("action_flows")
+        .and_then(|v| v.as_array())
+        .expect("action_flows must be array");
+    assert_eq!(
+        action_flows.len(),
+        5,
+        "actions_test should have 5 action flows"
+    );
+
+    // write_targets: should include model1 and model2
+    let write_targets = details
+        .get("write_targets")
+        .and_then(|v| v.as_array())
+        .expect("write_targets must be array");
+    let target_models: Vec<String> = write_targets
+        .iter()
+        .filter_map(|wt| {
+            wt.get("target_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+    assert!(
+        target_models.iter().any(|m| m == "model:model1"),
+        "write targets should include model:model1"
+    );
+    assert!(
+        target_models.iter().any(|m| m == "model:model2"),
+        "write targets should include model:model2"
+    );
+
+    // page_inputs: should have param1
+    let page_inputs = details
+        .get("page_inputs")
+        .and_then(|v| v.as_array())
+        .expect("page_inputs must be array");
+    assert!(
+        !page_inputs.is_empty(),
+        "actions_test should have page_inputs from raw file"
+    );
+
+    // next_queries: no double model: prefix
+    for q in &ai.next_queries {
+        assert!(
+            !q.contains("--query-model model:"),
+            "next_queries must not contain double model: prefix, got: {}",
+            q
+        );
+    }
+}
+
+#[test]
+fn test_cli_query_page_logic_page_relations_navigation() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/page_relations.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let nav_count = summary
+        .get("navigation_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(
+        nav_count >= 2,
+        "page_relations should have at least 2 navigation items (OpensPage + EmbedsPage)"
+    );
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    // navigation should include link and embedsuperpage
+    let navigation = details
+        .get("navigation")
+        .and_then(|v| v.as_array())
+        .expect("navigation must be array");
+    let has_opens_page = navigation
+        .iter()
+        .any(|n| n.get("type").and_then(|v| v.as_str()) == Some("OpensPage"));
+    let has_embeds_page = navigation
+        .iter()
+        .any(|n| n.get("type").and_then(|v| v.as_str()) == Some("EmbedsPage"));
+    assert!(
+        has_opens_page,
+        "page_relations should have OpensPage navigation"
+    );
+    assert!(
+        has_embeds_page,
+        "page_relations should have EmbedsPage navigation"
+    );
+
+    // action_flows should include setParamValue with reads
+    let action_flows = details
+        .get("action_flows")
+        .and_then(|v| v.as_array())
+        .expect("action_flows must be array");
+    let has_set_param = action_flows
+        .iter()
+        .any(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("setParamValue"));
+    assert!(
+        has_set_param,
+        "page_relations should have setParamValue action flow"
+    );
+
+    // data_sources should include model1.fieldA and model1.fieldB
+    let data_sources = details
+        .get("data_sources")
+        .and_then(|v| v.as_array())
+        .expect("data_sources must be array");
+    assert!(
+        !data_sources.is_empty(),
+        "page_relations should have data_sources from action reads"
+    );
+}
+
+#[test]
+fn test_cli_query_page_logic_risk_diagnostics() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/page_relations.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let risk_count = summary
+        .get("risk_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(
+        risk_count > 0,
+        "page_relations should have risk diagnostics (NO_WRITE_TARGETS)"
+    );
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    let risks = details
+        .get("risk_diagnostics")
+        .and_then(|v| v.as_array())
+        .expect("risk_diagnostics must be array");
+    let has_no_write_targets = risks
+        .iter()
+        .any(|r| r.get("code").and_then(|v| v.as_str()) == Some("NO_WRITE_TARGETS"));
+    assert!(
+        has_no_write_targets,
+        "readonly page should have NO_WRITE_TARGETS diagnostic"
+    );
 }

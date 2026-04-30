@@ -88,6 +88,26 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 
 # 查看字段周围上下文
 ./target/release/metadata-checker --project-dir /path/to/project --context field:model1.name --depth 2 --budget normal
+
+# 页面级逻辑摘要（推荐 AI 优先使用）
+./target/release/metadata-checker --project-dir /path/to/project --query-page-logic page:app/page.spg
+
+# PageLogic 典型输出片段：
+# {
+#   "kind": "PageLogic",
+#   "summary": {
+#     "what_is_it": "页面 actions_test，5 个用户入口，读取 0 个数据源，写入 9 个目标，0 个跳转",
+#     "page_role": "data_maintenance_page",
+#     "entrypoint_count": 5,
+#     "write_target_count": 9
+#   },
+#   "details": {
+#     "entrypoints": [...],
+#     "action_flows": [...],
+#     "write_targets": [...],
+#     "risk_diagnostics": [...]
+#   }
+# }
 ```
 
 ### human 模式

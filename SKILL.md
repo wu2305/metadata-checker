@@ -93,7 +93,19 @@ Then query:
 
 **Yes** → Use `metadata-checker --project-dir /path/to/project --query-page-logic <page>`
 
-Output includes: `page_inputs`, `data_sources`, `write_targets`, `entrypoints`, `action_flows`, `visibility_rules`, `navigation`, `risk_diagnostics`
+**定位**：当 AI 被问到“这个页面主要做什么、用户能触发哪些逻辑、会影响哪些数据”时，优先使用 `--query-page-logic`，而不是 `--context` 或 `--explain`。
+
+Output structure (kind = PageLogic):
+- `summary.what_is_it`: 自然语言短句，例如“页面 actions_test，5 个用户入口，读取 2 个模型，写入 2 个模型，存在 1 个跳转”
+- `summary.page_role`: 稳定分类：`form_submit_page` / `readonly_dashboard` / `navigation_page` / `data_maintenance_page` / `mixed_interaction_page` / `unknown`
+- `details.entrypoints`: 用户可触发入口（button、link 等），不含普通 input
+- `details.action_flows`: 按组件触发链输出 action，包含 action_type、reads、writes、navigation、sets_params
+- `details.data_sources`: 页面读取的模型和字段
+- `details.write_targets`: 页面写入的模型和字段
+- `details.navigation`: 页面跳转/嵌入关系
+- `details.visibility_rules`: 组件可见性规则（visible/hidden/disabled/readonly）
+- `details.risk_diagnostics`: 风险诊断，例如 `NO_WRITE_TARGETS`、`NO_ENTRYPOINTS`
+- `next_queries`: 建议后续命令，例如 `--explain <PAGE>`、`--context <PAGE> --depth 2`
 
 ## Machine JSON Output Schema
 

@@ -235,3 +235,51 @@ pub struct AiOutput {
 - `--context` 用于补充 `--explain`，不是替代
 - 默认不要读取 `full` budget，优先 `normal` 或 `compact`
 - 遇到 `OUTPUT_TRUNCATED` 时，可按需用 `--budget full` 重新查询
+
+## kind: PageLogic 字段约束
+
+`--query-page-logic <PAGE>` 输出页面级业务逻辑摘要。
+
+### summary 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `page_id` | string | 页面完整 ID |
+| `page_name` | string | 页面名称 |
+| `what_is_it` | string | 自然语言短句，说明页面主要功能 |
+| `page_role` | string | 稳定分类：`form_submit_page` / `readonly_dashboard` / `navigation_page` / `data_maintenance_page` / `mixed_interaction_page` / `unknown` |
+| `entrypoint_count` | number | 用户可触发入口数量 |
+| `data_source_count` | number | 读取的数据源数量 |
+| `write_target_count` | number | 写入目标数量 |
+| `navigation_count` | number | 跳转/嵌入数量 |
+| `risk_count` | number | 风险诊断数量 |
+
+### details 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `page_inputs` | array | 页面参数（params） |
+| `data_sources` | array | 读取的模型字段，包含 source_component / source_action / model / field_path / target_id |
+| `write_targets` | array | 写入的模型字段，包含 source_component / source_action / model / field_path / target_id |
+| `entrypoints` | array | 用户可触发组件（button、link 等），input 即使有 submitField 也不计入 |
+| `action_flows` | array | 动作链，每项包含 action_id / action_type / component_id / trigger_type / reads / writes / navigation / sets_params |
+| `visibility_rules` | array | 组件可见性规则（visible / hidden / disabled / readonly） |
+| `navigation` | array | 跳转/嵌入关系，包含 from / to / type / field_path |
+| `risk_diagnostics` | array | 风险诊断列表 |
+
+### risk_diagnostics code
+
+| Code | Severity | 说明 |
+|------|----------|------|
+| `NO_WRITE_TARGETS` | Info | 页面无写入目标（可能是只读页面） |
+| `NO_ENTRYPOINTS` | Warning | 页面无用户可触发入口 |
+| `ACTION_FLOW_INCOMPLETE` | Info | Action 读取但未写入（可能是查询动作） |
+| `PAGE_INPUTS_DEFERRED` | Info | 未能在文件系统中读取原始页面文件，page_inputs 为空 |
+
+### next_queries
+
+- `--explain <PAGE> for page semantic summary`
+- `--context <PAGE> --depth 2 --budget normal for surrounding context`
+- `--query-model <MODEL> for model details`（对涉及的模型）
+
+**注意**：next_queries 中的 `--query-model` 不带 `model:` 前缀，CLI 会自动添加。

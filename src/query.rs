@@ -464,80 +464,248 @@ pub use dataflow::query_dataflow;
 /// 查询页面级逻辑摘要
 ///
 /// 输出 page_inputs、data_sources、write_targets、entrypoints、action_flows、visibility_rules、navigation、risk_diagnostics。
-pub fn query_page_logic(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
+/// 查询页面级逻辑摘要
+///
+/// 输出 page_inputs、data_sources、write_targets、entrypoints、action_flows、visibility_rules、navigation、risk_diagnostics。
+pub fn query_page_logic(
+    graph: &GraphDB,
+    page_id: &str,
+    project_dir: Option<&std::path::Path>,
+    human: bool,
+) -> Result<()> {
     let page_node = graph
         .get_node(page_id)
         .ok_or_else(|| anyhow::anyhow!("Page '{}' not found in graph", page_id))?;
 
-    let (outgoing, _incoming) = graph
+    // ---- 1. 收集页面下所有 Component 节点，再收集它们 Triggers 出的 Action 节点 ----
+    let (page_out, _) = graph
         .get_node_edges(page_id)
         .unwrap_or_else(|| (Vec::new(), Vec::new()));
 
-    let page_inputs: Vec<serde_json::Value> = Vec::new();
-    let mut data_sources: Vec<serde_json::Value> = Vec::new();
-    let mut write_targets: Vec<serde_json::Value> = Vec::new();
-    let mut entrypoints: Vec<serde_json::Value> = Vec::new();
-    let action_flows: Vec<serde_json::Value> = Vec::new();
-    let visibility_rules: Vec<serde_json::Value> = Vec::new();
-    let mut navigation: Vec<serde_json::Value> = Vec::new();
-    let risk_diagnostics: Vec<serde_json::Value> = Vec::new();
+    let mut child_components: Vec<&crate::graph::Node> = Vec::new();
+    let mut child_actions: Vec<&crate::graph::Node> = Vec::new();
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // Collect child components via Contains edges
-    let mut child_nodes = Vec::new();
-    for (target, edge) in &outgoing {
-        if matches!(edge.edge_type, crate::graph::EdgeType::Contains) {
-            child_nodes.push((*target).clone());
-        }
-    }
-
-    for child in &child_nodes {
-        let child_type = format!("{:?}", child.node_type).to_lowercase();
-        if child_type.contains("component") || child_type.contains("action") {
-            // Check if this component has actions (entrypoints)
-            if let Some((child_out, _)) = graph.get_node_edges(&child.id) {
-                let mut has_action = false;
-                for (target, edge) in &child_out {
-                    match edge.edge_type {
-                        crate::graph::EdgeType::Reads => {
-                            data_sources.push(json!({
-                                "component_id": child.id,
-                                "model": target.name,
-                                "field_path": edge.field_path,
-                            }));
-                        }
-                        crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
-                            write_targets.push(json!({
-                                "component_id": child.id,
-                                "model": target.name,
-                                "field_path": edge.field_path,
-                            }));
-                            has_action = true;
-                        }
-                        crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::SetsParam => {
-                            navigation.push(json!({
-                                "from": child.id,
-                                "to": target.id,
-                                "type": format!("{:?}", edge.edge_type),
-                            }));
-                            has_action = true;
-                        }
-                        _ => {}
+    for (target, edge) in &page_out {
+        if matches!(edge.edge_type, crate::graph::EdgeType::Contains)
+            && matches!(target.node_type, crate::graph::NodeType::Component)
+            && !visited.contains(&target.id)
+        {
+            visited.insert(target.id.clone());
+            child_components.push(target);
+            // 收集该 component Triggers 出的 action
+            if let Some((comp_out, _)) = graph.get_node_edges(&target.id) {
+                for (act, e) in &comp_out {
+                    if matches!(e.edge_type, crate::graph::EdgeType::Triggers)
+                        && matches!(act.node_type, crate::graph::NodeType::Action)
+                        && !visited.contains(&act.id)
+                    {
+                        visited.insert(act.id.clone());
+                        child_actions.push(act);
                     }
-                }
-
-                if has_action {
-                    entrypoints.push(json!({
-                        "id": child.id,
-                        "name": child.name,
-                        "type": child_type,
-                    }));
                 }
             }
         }
     }
 
-    // Simple risk diagnostics
-    let mut diagnostics = Vec::new();
+    // ---- 2. Entrypoints：只包含用户可触发组件（有 action 的 button/link 等） ----
+    // 策略：Component 有 outgoing Triggers 边 → 有 action → 是 entrypoint
+    // input 即使有 submitField（Writes 边）也不当 entrypoint
+    let mut entrypoints: Vec<serde_json::Value> = Vec::new();
+    for comp in &child_components {
+        if let Some((comp_out, _)) = graph.get_node_edges(&comp.id) {
+            let has_trigger = comp_out
+                .iter()
+                .any(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::Triggers));
+            if has_trigger {
+                entrypoints.push(json!({
+                    "id": comp.id,
+                    "name": comp.name,
+                    "type": format!("{:?}", comp.node_type).to_lowercase(),
+                }));
+            }
+        }
+    }
+
+    // ---- 3. 收集所有 Component & Action 的出边，用于 data_sources / write_targets / navigation ----
+    let mut data_sources: Vec<serde_json::Value> = Vec::new();
+    let mut write_targets: Vec<serde_json::Value> = Vec::new();
+    let mut navigation: Vec<serde_json::Value> = Vec::new();
+    let mut action_flows: Vec<serde_json::Value> = Vec::new();
+
+    // 辅助：遍历所有相关节点（组件 + 直接子 action）
+    let mut all_nodes: Vec<&crate::graph::Node> = Vec::new();
+    all_nodes.extend(child_components.iter().copied());
+    all_nodes.extend(child_actions.iter().copied());
+
+    for node in &all_nodes {
+        if let Some((node_out, _)) = graph.get_node_edges(&node.id) {
+            for (target, edge) in &node_out {
+                match edge.edge_type {
+                    crate::graph::EdgeType::Reads => {
+                        data_sources.push(json!({
+                            "source_component": if matches!(node.node_type, crate::graph::NodeType::Component) { Some(node.id.clone()) } else { None },
+                            "source_action": if matches!(node.node_type, crate::graph::NodeType::Action) { Some(node.id.clone()) } else { None },
+                            "model": target.name,
+                            "field_path": edge.field_path,
+                            "target_id": target.id,
+                        }));
+                    }
+                    crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
+                        write_targets.push(json!({
+                            "source_component": if matches!(node.node_type, crate::graph::NodeType::Component) { Some(node.id.clone()) } else { None },
+                            "source_action": if matches!(node.node_type, crate::graph::NodeType::Action) { Some(node.id.clone()) } else { None },
+                            "model": target.name,
+                            "field_path": edge.field_path,
+                            "target_id": target.id,
+                        }));
+                    }
+                    crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::EmbedsPage => {
+                        navigation.push(json!({
+                            "from": node.id,
+                            "to": target.id,
+                            "to_name": target.name,
+                            "type": format!("{:?}", edge.edge_type),
+                            "field_path": edge.field_path,
+                        }));
+                    }
+                    crate::graph::EdgeType::SetsParam => {
+                        navigation.push(json!({
+                            "from": node.id,
+                            "to": target.id,
+                            "to_name": target.name,
+                            "type": "SetsParam",
+                            "field_path": edge.field_path,
+                        }));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // ---- 4. Action flows：遍历 Action 节点，聚合 reads/writes/navigation ----
+    for action in &child_actions {
+        let (action_out, action_in) = graph
+            .get_node_edges(&action.id)
+            .unwrap_or_else(|| (Vec::new(), Vec::new()));
+
+        // 解析 action name: "submitData:action1"
+        let (action_type, action_id) = action
+            .name
+            .split_once(':')
+            .map(|(t, i)| (t.to_string(), i.to_string()))
+            .unwrap_or_else(|| (action.name.clone(), action.name.clone()));
+
+        // 找到触发该 action 的组件（incoming Triggers 边）
+        let parent_component = action_in.iter().find_map(|(src, e)| {
+            if matches!(e.edge_type, crate::graph::EdgeType::Triggers)
+                && matches!(src.node_type, crate::graph::NodeType::Component)
+            {
+                Some(src.id.clone())
+            } else {
+                None
+            }
+        });
+
+        let mut reads = Vec::new();
+        let mut writes = Vec::new();
+        let mut nav = Vec::new();
+        let mut sets_params = Vec::new();
+
+        for (target, edge) in &action_out {
+            match edge.edge_type {
+                crate::graph::EdgeType::Reads => {
+                    reads.push(json!({
+                        "model": target.name,
+                        "field_path": edge.field_path,
+                        "target_id": target.id,
+                    }));
+                }
+                crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
+                    writes.push(json!({
+                        "model": target.name,
+                        "field_path": edge.field_path,
+                        "target_id": target.id,
+                    }));
+                }
+                crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::EmbedsPage => {
+                    nav.push(json!({
+                        "to": target.id,
+                        "to_name": target.name,
+                        "type": format!("{:?}", edge.edge_type),
+                    }));
+                }
+                crate::graph::EdgeType::SetsParam => {
+                    sets_params.push(json!({
+                        "to": target.id,
+                        "to_name": target.name,
+                        "field_path": edge.field_path,
+                    }));
+                }
+                _ => {}
+            }
+        }
+
+        action_flows.push(json!({
+            "action_id": action_id,
+            "action_type": action_type,
+            "component_id": parent_component,
+            "trigger_type": "click",
+            "reads": reads,
+            "writes": writes,
+            "navigation": nav,
+            "sets_params": sets_params,
+        }));
+    }
+
+    // ---- 5. Page inputs & visibility_rules：尝试读取原始文件 ----
+    let mut page_inputs: Vec<serde_json::Value> = Vec::new();
+    let mut visibility_rules: Vec<serde_json::Value> = Vec::new();
+    let mut from_file = false;
+
+    if let Some(proj_dir) = project_dir {
+        let file_path = proj_dir.join(&page_node.path);
+        if file_path.exists()
+            && let Ok(content) = std::fs::read_to_string(&file_path)
+            && let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content)
+        {
+            from_file = true;
+            // page_inputs: params
+            if let Some(params) = json_val.get("params").and_then(|p| p.as_array()) {
+                for p in params {
+                    page_inputs.push(json!({
+                        "id": p.get("id"),
+                        "name": p.get("name"),
+                        "type": "page_param",
+                    }));
+                }
+            }
+            // visibility_rules: components with visible/hidden/disabled/readonly
+            if let Some(components) = json_val
+                .get("canvas")
+                .and_then(|c| c.get("components"))
+                .and_then(|c| c.as_array())
+            {
+                for comp in components {
+                    let comp_id = comp.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    for prop in ["visible", "hidden", "disabled", "readonly"] {
+                        if let Some(val) = comp.get(prop) {
+                            visibility_rules.push(json!({
+                                "component_id": comp_id,
+                                "rule": prop,
+                                "expression": val,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- 6. Risk diagnostics ----
+    let mut diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
+
     if write_targets.is_empty() {
         diagnostics.push(crate::output::Diagnostic {
             severity: crate::output::DiagnosticSeverity::Info,
@@ -558,12 +726,92 @@ pub fn query_page_logic(graph: &GraphDB, page_id: &str, human: bool) -> Result<(
         });
     }
 
+    if !from_file {
+        diagnostics.push(crate::output::Diagnostic {
+            severity: crate::output::DiagnosticSeverity::Info,
+            code: "PAGE_INPUTS_DEFERRED".to_string(),
+            message: "Page inputs and visibility rules require raw file access".to_string(),
+            location: crate::output::Location::new(),
+            suggestion: Some("Run with --project-dir pointing to the project root".to_string()),
+        });
+    }
+
+    // UNRESOLVED_MODEL_WRITE：write target 指向不存在的模型（图中无对应节点）
+    // 当前 graph 边已经过滤，不需要额外检查
+
+    // ACTION_FLOW_INCOMPLETE：action 有 Reads 但没有 Writes（可能是只读查询）
+    for flow in &action_flows {
+        let reads = flow
+            .get("reads")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let writes = flow
+            .get("writes")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let action_type = flow
+            .get("action_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if reads > 0
+            && writes == 0
+            && ![
+                "link",
+                "showDialog",
+                "switchPanel",
+                "showComponent",
+                "hideComponent",
+            ]
+            .contains(&action_type)
+        {
+            diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "ACTION_FLOW_INCOMPLETE".to_string(),
+                message: format!(
+                    "Action {} reads but does not write; may be a query-only action",
+                    flow.get("action_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                ),
+                location: crate::output::Location::new(),
+                suggestion: Some("Verify if this action should produce a write target".to_string()),
+            });
+        }
+    }
+
+    // ---- 7. Summary & page_role ----
+    let page_role = if entrypoints.is_empty() {
+        "readonly_dashboard"
+    } else if !write_targets.is_empty() && !navigation.is_empty() {
+        "mixed_interaction_page"
+    } else if !write_targets.is_empty() {
+        "data_maintenance_page"
+    } else if !navigation.is_empty() {
+        "navigation_page"
+    } else {
+        "unknown"
+    };
+
+    let what_is_it = format!(
+        "页面 {}，{} 个用户入口，读取 {} 个数据源，写入 {} 个目标，{} 个跳转",
+        page_node.name,
+        entrypoints.len(),
+        data_sources.len(),
+        write_targets.len(),
+        navigation.len()
+    );
+
     let summary = serde_json::json!({
         "page_id": page_id,
         "page_name": page_node.name,
+        "what_is_it": what_is_it,
+        "page_role": page_role,
         "entrypoint_count": entrypoints.len(),
         "data_source_count": data_sources.len(),
         "write_target_count": write_targets.len(),
+        "navigation_count": navigation.len(),
         "risk_count": diagnostics.len(),
     });
 
@@ -587,12 +835,14 @@ pub fn query_page_logic(graph: &GraphDB, page_id: &str, human: bool) -> Result<(
     output.query_target = Some(page_id.to_string());
     output.details = Some(details);
     output.diagnostics = diagnostics;
+
+    // Evidence
     output.evidence.push(
         crate::output::Evidence::new(
             format!("Page {} has {} entrypoints", page_id, entrypoints.len()),
-            "Graph traversal: child components with actions",
+            "Graph traversal: child components with Triggers edges",
         )
-        .with_confidence(crate::output::Confidence::Medium)
+        .with_confidence(crate::output::Confidence::High)
         .with_node_id(page_id)
         .with_source_file(&page_node.path),
     );
@@ -604,7 +854,7 @@ pub fn query_page_logic(graph: &GraphDB, page_id: &str, human: bool) -> Result<(
                     page_id,
                     data_sources.len()
                 ),
-                "Graph traversal: Reads edges from child components",
+                "Graph traversal: Reads edges from page children",
             )
             .with_confidence(crate::output::Confidence::High)
             .with_node_id(page_id)
@@ -615,44 +865,89 @@ pub fn query_page_logic(graph: &GraphDB, page_id: &str, human: bool) -> Result<(
         output.evidence.push(
             crate::output::Evidence::new(
                 format!("Page {} writes to {} targets", page_id, write_targets.len()),
-                "Graph traversal: Writes/ActionWrites edges from child components",
+                "Graph traversal: Writes/ActionWrites edges from page children",
             )
             .with_confidence(crate::output::Confidence::High)
             .with_node_id(page_id)
             .with_source_file(&page_node.path),
         );
     }
-    output.next_queries = vec![
-        format!("--query-page {} for page dependencies", page_id),
+    if !action_flows.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Page {} has {} action flows", page_id, action_flows.len()),
+                "Graph traversal: Action nodes under page",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(page_id)
+            .with_source_file(&page_node.path),
+        );
+    }
+
+    // next_queries：避免重复 model: 前缀
+    let mut nq = vec![
         format!("--explain {} for page semantic summary", page_id),
+        format!(
+            "--context {} --depth 2 --budget normal for surrounding context",
+            page_id
+        ),
     ];
+    // 提取涉及的模型名，生成 --query-model 建议
+    let mut model_names: Vec<String> = write_targets
+        .iter()
+        .filter_map(|wt| wt.get("target_id").and_then(|v| v.as_str()))
+        .filter(|id| id.starts_with("model:"))
+        .map(|id| id.strip_prefix("model:").unwrap_or(id).to_string())
+        .collect();
+    model_names.sort();
+    model_names.dedup();
+    for m in model_names.iter().take(3) {
+        nq.push(format!("--query-model {} for model details", m));
+    }
+    output.next_queries = nq;
 
     let output = output.validate();
 
+    // ---- 8. Human 模式 ----
     if human {
         let mut out = io::stdout();
         writeln!(out, "=== Page Logic: {} ===", page_id)?;
-        writeln!(out, "Name: {}", page_node.name)?;
-        writeln!(out, "\nEntrypoints: {}", entrypoints.len())?;
+        writeln!(out, "Name: {} | Role: {}", page_node.name, page_role)?;
+        writeln!(out, "{}", what_is_it)?;
+        writeln!(out, "\n--- Entrypoints ({}) ---", entrypoints.len())?;
         for ep in &entrypoints {
             writeln!(out, "  {:?}", ep)?;
         }
-        writeln!(out, "\nData Sources: {}", data_sources.len())?;
+        writeln!(out, "\n--- Data Sources ({}) ---", data_sources.len())?;
         for ds in &data_sources {
             writeln!(out, "  {:?}", ds)?;
         }
-        writeln!(out, "\nWrite Targets: {}", write_targets.len())?;
+        writeln!(out, "\n--- Write Targets ({}) ---", write_targets.len())?;
         for wt in &write_targets {
             writeln!(out, "  {:?}", wt)?;
         }
-        writeln!(out, "\nNavigation: {}", navigation.len())?;
+        writeln!(out, "\n--- Action Flows ({}) ---", action_flows.len())?;
+        for flow in &action_flows {
+            writeln!(out, "  {:?}", flow)?;
+        }
+        writeln!(out, "\n--- Navigation ({}) ---", navigation.len())?;
         for nav in &navigation {
             writeln!(out, "  {:?}", nav)?;
         }
-        if !risk_diagnostics.is_empty() {
+        if !visibility_rules.is_empty() {
+            writeln!(
+                out,
+                "\n--- Visibility Rules ({}) ---",
+                visibility_rules.len()
+            )?;
+            for rule in &visibility_rules {
+                writeln!(out, "  {:?}", rule)?;
+            }
+        }
+        if !output.diagnostics.is_empty() {
             writeln!(out, "\n⚠️  Risk Diagnostics:")?;
-            for risk in &risk_diagnostics {
-                writeln!(out, "  {:?}", risk)?;
+            for diag in &output.diagnostics {
+                writeln!(out, "  [{}] {}", diag.code, diag.message)?;
             }
         }
         out.flush()?;
