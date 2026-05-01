@@ -1033,6 +1033,195 @@ fn test_cli_explain_dataflow_graph_contract() {
 }
 
 #[test]
+fn test_cli_explain_field_lineage_input_field() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "field:dataflow_output.工单号",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain field output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_ai_output_contract(&ai);
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    let lineage = details_obj
+        .get("lineage")
+        .expect("lineage must exist")
+        .as_array()
+        .expect("lineage must be array");
+    assert!(
+        !lineage.is_empty(),
+        "field:dataflow_output.工单号 should have lineage entries"
+    );
+    let first = lineage.first().unwrap().as_object().unwrap();
+    assert_eq!(
+        first.get("target_field").and_then(|v| v.as_str()),
+        Some("field:dataflow_output.工单号")
+    );
+    assert_eq!(
+        first.get("transform").and_then(|v| v.as_str()),
+        Some("inputField mapping")
+    );
+    let source_fields = first
+        .get("source_fields")
+        .and_then(|v| v.as_array())
+        .expect("source_fields must be array");
+    assert!(
+        source_fields
+            .iter()
+            .any(|v| v.as_str() == Some("field:dataflow_output.workNo")),
+        "source_fields should contain field:dataflow_output.workNo"
+    );
+    assert_eq!(
+        first.get("confidence").and_then(|v| v.as_str()),
+        Some("high")
+    );
+}
+
+#[test]
+fn test_cli_explain_field_lineage_expr_field() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "field:dataflow_output.预约单号",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain field output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_ai_output_contract(&ai);
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    let lineage = details_obj
+        .get("lineage")
+        .expect("lineage must exist")
+        .as_array()
+        .expect("lineage must be array");
+    assert!(
+        !lineage.is_empty(),
+        "field:dataflow_output.预约单号 should have lineage entries"
+    );
+    let first = lineage.first().unwrap().as_object().unwrap();
+    assert_eq!(
+        first.get("target_field").and_then(|v| v.as_str()),
+        Some("field:dataflow_output.预约单号")
+    );
+    assert_eq!(
+        first.get("transform").and_then(|v| v.as_str()),
+        Some("expression calculation")
+    );
+    assert_eq!(
+        first.get("source_expr").and_then(|v| v.as_str()),
+        Some("appointmentNo")
+    );
+    assert_eq!(
+        first.get("confidence").and_then(|v| v.as_str()),
+        Some("low")
+    );
+
+    // Should have LINEAGE_EXPR_UNPARSED diagnostic because appointmentNo is not a model.field reference
+    assert!(
+        ai.diagnostics
+            .iter()
+            .any(|d| d.code == "LINEAGE_EXPR_UNPARSED"),
+        "must have LINEAGE_EXPR_UNPARSED diagnostic for unresolved expression"
+    );
+}
+
+#[test]
+fn test_cli_explain_dataflow_internal_topology_detail() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "model:dataflow_output",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain dataflow output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_ai_output_contract(&ai);
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    assert!(
+        details_obj.contains_key("internal_topology"),
+        "dataflow explain must have internal_topology"
+    );
+    let topology = details_obj
+        .get("internal_topology")
+        .expect("internal_topology must exist")
+        .as_object()
+        .expect("internal_topology must be object");
+    let nodes = topology
+        .get("nodes")
+        .and_then(|v| v.as_array())
+        .expect("topology nodes must be array");
+    assert!(
+        !nodes.is_empty(),
+        "internal_topology nodes must not be empty"
+    );
+    let edges = topology
+        .get("edges")
+        .and_then(|v| v.as_array())
+        .expect("topology edges must be array");
+    assert!(
+        !edges.is_empty(),
+        "internal_topology edges must not be empty"
+    );
+
+    // Verify specific node types from fixture
+    let node_types: Vec<&str> = nodes
+        .iter()
+        .filter_map(|n| {
+            n.as_object()
+                .and_then(|o| o.get("type"))
+                .and_then(|v| v.as_str())
+        })
+        .collect();
+    assert!(
+        node_types.contains(&"ModelTable"),
+        "internal topology should contain ModelTable node"
+    );
+    assert!(
+        node_types.contains(&"Select"),
+        "internal topology should contain Select node"
+    );
+    assert!(
+        node_types.contains(&"Output"),
+        "internal topology should contain Output node"
+    );
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let internal_count = summary
+        .get("internal_node_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(
+        internal_count >= 3,
+        "dataflow_output should have at least 3 internal nodes"
+    );
+}
+
+#[test]
 fn test_cli_context_graph_contract() {
     let _ = run_cli(&[
         "--project-dir",

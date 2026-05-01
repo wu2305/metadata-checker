@@ -1138,7 +1138,6 @@ fn explain_field_graph(
     incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
 ) -> Result<()> {
-    // Find parent model
     let parent_model = incoming.iter().find_map(|(source, edge)| {
         if matches!(edge.edge_type, crate::graph::EdgeType::Contains)
             && matches!(source.node_type, crate::graph::NodeType::Model)
@@ -1195,7 +1194,6 @@ fn explain_field_graph(
     }
 
     let read_count = readers.len();
-    // Backfill from parent model edges: scanner writes edges to model node with field_path
     if let Some(ref model) = parent_model
         && let Some((_model_out, model_in)) = graph.get_node_edges(&model.id)
     {
@@ -1261,9 +1259,152 @@ fn explain_field_graph(
         .as_ref()
         .map(|m| m.name.as_str())
         .unwrap_or("?");
+
+    let mut lineage: Vec<serde_json::Value> = Vec::new();
+    let mut diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
+
+    let field_meta = node.meta.as_ref();
+    let source_input_field = field_meta
+        .and_then(|m| m.get("source_input_field"))
+        .and_then(|v| v.as_str());
+    let source_expr = field_meta
+        .and_then(|m| m.get("source_expr"))
+        .and_then(|v| v.as_str());
+    let source_expr_models = field_meta
+        .and_then(|m| m.get("source_expr_models"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+
+    if let Some(input_field) = source_input_field {
+        let via_model = parent_model
+            .as_ref()
+            .map(|m| m.id.clone())
+            .unwrap_or_default();
+        lineage.push(serde_json::json!({
+            "target_field": node.id,
+            "source_fields": [format!("field:{}.{}", model_name, input_field)],
+            "source_expr": null,
+            "transform": "inputField mapping",
+            "via_node": via_model,
+            "confidence": "high",
+            "evidence": {
+                "source_file": node.path,
+                "node_id": node.id,
+                "edge_type": "Contains",
+                "raw_expr": null,
+                "json_path": "dimensions[].inputField",
+            }
+        }));
+    }
+
+    if let Some(expr) = source_expr {
+        let mut source_fields: Vec<String> = Vec::new();
+        for model_ref in &source_expr_models {
+            source_fields.push(format!("model:{}", model_ref));
+        }
+        if source_fields.is_empty() {
+            diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "LINEAGE_EXPR_UNPARSED".to_string(),
+                message: format!(
+                    "Expression '{}' could not be resolved to specific source fields",
+                    expr
+                ),
+                location: crate::output::Location::new(),
+                suggestion: Some("Check if expression parser supports this syntax".to_string()),
+            });
+        }
+        lineage.push(serde_json::json!({
+            "target_field": node.id,
+            "source_fields": source_fields,
+            "source_expr": expr,
+            "transform": "expression calculation",
+            "via_node": parent_model.as_ref().map(|m| m.id.clone()).unwrap_or_default(),
+            "confidence": if source_fields.is_empty() { "low" } else { "medium" },
+            "evidence": {
+                "source_file": node.path,
+                "node_id": node.id,
+                "edge_type": "Contains",
+                "raw_expr": expr,
+                "json_path": "dimensions[].exp",
+            }
+        }));
+    }
+
+    if !produced_by.is_empty() {
+        for producer in &produced_by {
+            let producer_id = producer.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            if let Some((producer_out, _producer_in)) = graph.get_node_edges(producer_id) {
+                for (upstream_model, edge) in &producer_out {
+                    if matches!(edge.edge_type, crate::graph::EdgeType::DataflowInput) {
+                        lineage.push(serde_json::json!({
+                            "target_field": node.id,
+                            "source_fields": [format!("model:{}", upstream_model.name)],
+                            "source_expr": null,
+                            "transform": "DataFlow input",
+                            "via_node": producer_id.to_string(),
+                            "confidence": "medium",
+                            "evidence": {
+                                "source_file": upstream_model.path.clone(),
+                                "node_id": upstream_model.id.clone(),
+                                "edge_type": "DataflowInput",
+                                "raw_expr": null,
+                                "json_path": "properties.depends",
+                            }
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    for writer in &writers {
+        let writer_id = writer.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+        let field_path = writer
+            .get("field_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        lineage.push(serde_json::json!({
+            "target_field": node.id,
+            "source_fields": [],
+            "source_expr": null,
+            "transform": "page action write",
+            "via_node": writer_id.to_string(),
+            "confidence": "high",
+            "evidence": {
+                "source_file": writer.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
+                "node_id": writer_id,
+                "edge_type": writer.get("edge_type").and_then(|v| v.as_str()).unwrap_or(""),
+                "raw_expr": field_path,
+                "json_path": "actions[].fieldValues[]",
+            }
+        }));
+    }
+
+    if lineage.is_empty() {
+        diagnostics.push(crate::output::Diagnostic {
+            severity: crate::output::DiagnosticSeverity::Info,
+            code: "LINEAGE_SOURCE_MISSING".to_string(),
+            message: format!("Field {} has no traceable source lineage", node.id),
+            location: crate::output::Location::new(),
+            suggestion: Some(
+                "Check dimensions[].inputField or dimensions[].exp metadata".to_string(),
+            ),
+        });
+    }
+
     let what = format!(
-        "模型 {} 的字段 {}，被 {} 个组件/动作读取，被 {} 个组件/动作写入",
-        model_name, node.name, read_count, write_count
+        "模型 {} 的字段 {}，被 {} 个组件/动作读取，被 {} 个组件/动作写入，lineage {} 条",
+        model_name,
+        node.name,
+        read_count,
+        write_count,
+        lineage.len()
     );
     let importance = classify_importance(has_nav, has_write, has_read, &node.node_type);
 
@@ -1277,9 +1418,9 @@ fn explain_field_graph(
         "read_by_count": read_count,
         "written_by_count": write_count,
         "produced_by_dataflow_count": produced_by.len(),
+        "lineage_count": lineage.len(),
     });
 
-    let lineage: Vec<serde_json::Value> = Vec::new();
     let details = serde_json::json!({
         "reads": readers,
         "writes": writers,
@@ -1288,14 +1429,6 @@ fn explain_field_graph(
         "lineage": lineage,
         "produced_by": produced_by,
     });
-
-    let diagnostics = vec![crate::output::Diagnostic {
-        severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_DEFERRED_TO_M6".to_string(),
-        message: "Field-level lineage not yet implemented".to_string(),
-        location: crate::output::Location::new(),
-        suggestion: Some("Use --context or wait for M6 milestone".to_string()),
-    }];
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(node.id.clone());
@@ -1388,6 +1521,16 @@ fn explain_field_graph(
             )?;
             for w in &writers {
                 writeln!(out, "  {:?}", w)?;
+            }
+        }
+        if !output.diagnostics.is_empty() {
+            writeln!(
+                out,
+                "
+⚠️  Diagnostics:"
+            )?;
+            for diag in &output.diagnostics {
+                writeln!(out, "  [{}] {}", diag.code, diag.message)?;
             }
         }
         out.flush()?;
@@ -1732,9 +1875,110 @@ fn explain_dataflow_graph(
     let _has_read = input_count > 0;
     let _has_write = output_count > 0;
 
+    // M6: Parse DataFlow internal metadata
+    let raw_meta = node.meta.as_ref();
+    let internal_deps: std::collections::HashMap<String, Vec<String>> = raw_meta
+        .and_then(|m| m.get("internalDeps"))
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let alias_map: std::collections::HashMap<String, String> = raw_meta
+        .and_then(|m| m.get("aliasMap"))
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let node_types: std::collections::HashMap<String, String> = raw_meta
+        .and_then(|m| m.get("nodeTypes"))
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let dimensions: Vec<serde_json::Value> = raw_meta
+        .and_then(|m| m.get("dimensions"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let internal_node_count = alias_map.len();
+
+    // Build internal topology
+    let mut internal_nodes = Vec::new();
+    let mut internal_edges = Vec::new();
+    for (alias, node_id) in &alias_map {
+        let ntype = node_types
+            .get(node_id)
+            .map(|s| s.as_str())
+            .unwrap_or("Unknown");
+        internal_nodes.push(serde_json::json!({
+            "id": node_id,
+            "alias": alias,
+            "type": ntype,
+        }));
+        if let Some(deps) = internal_deps.get(node_id) {
+            for dep in deps {
+                internal_edges.push(serde_json::json!({
+                    "from": dep,
+                    "to": node_id,
+                }));
+            }
+        }
+    }
+
+    // Build field-level lineage from dimensions
+    let mut lineage: Vec<serde_json::Value> = Vec::new();
+    let mut diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
+    for dim in &dimensions {
+        let dim_name = dim.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+        let _dbfield = dim.get("dbfield").and_then(|v| v.as_str());
+        let input_field = dim.get("inputField").and_then(|v| v.as_str());
+        let exp = dim.get("exp").and_then(|v| v.as_str());
+
+        if let Some(input) = input_field {
+            lineage.push(serde_json::json!({
+                "target_field": dim_name,
+                "source_fields": [input],
+                "source_expr": null,
+                "transform": "inputField mapping",
+                "confidence": "high",
+            }));
+        } else if let Some(expr) = exp {
+            let refs = crate::superpage::parse_expression_refs(expr);
+            let source_fields: Vec<String> = refs
+                .iter()
+                .filter_map(|r| match r {
+                    crate::superpage::RefType::ModelField(m, f) => Some(format!("{}.{}", m, f)),
+                    _ => None,
+                })
+                .collect();
+            if source_fields.is_empty() {
+                diagnostics.push(crate::output::Diagnostic {
+                    severity: crate::output::DiagnosticSeverity::Info,
+                    code: "LINEAGE_EXPR_UNPARSED".to_string(),
+                    message: format!(
+                        "Dimension '{}' expression could not be resolved: {}",
+                        dim_name, expr
+                    ),
+                    location: crate::output::Location::new(),
+                    suggestion: Some("Expression parser may not support this syntax".to_string()),
+                });
+            }
+            lineage.push(serde_json::json!({
+                "target_field": dim_name,
+                "source_fields": source_fields,
+                "source_expr": expr,
+                "transform": "expression calculation",
+                "confidence": if source_fields.is_empty() { "low" } else { "medium" },
+            }));
+        } else {
+            diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "LINEAGE_SOURCE_MISSING".to_string(),
+                message: format!("Dimension '{}' has no inputField or exp", dim_name),
+                location: crate::output::Location::new(),
+                suggestion: Some("Add inputField or exp to dimension metadata".to_string()),
+            });
+        }
+    }
+
     let what = format!(
         "DataFlow {}，输入 {} 个源，输出 {} 个目标，内部 {} 个节点",
-        node.name, input_count, output_count, 0
+        node.name, input_count, output_count, internal_node_count
     );
 
     let summary = serde_json::json!({
@@ -1744,10 +1988,9 @@ fn explain_dataflow_graph(
         "importance": "data_source",
         "input_count": input_count,
         "output_count": output_count,
-        "internal_node_count": 0,
+        "internal_node_count": internal_node_count,
     });
 
-    let lineage: Vec<serde_json::Value> = Vec::new();
     let details = serde_json::json!({
         "reads": inputs.clone(),
         "writes": outputs.clone(),
@@ -1756,16 +1999,21 @@ fn explain_dataflow_graph(
         "lineage": lineage,
         "inputs": inputs,
         "outputs": outputs,
-
+        "internal_topology": {
+            "nodes": internal_nodes,
+            "edges": internal_edges,
+        },
     });
 
-    let diagnostics = vec![crate::output::Diagnostic {
-        severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_DEFERRED_TO_M6".to_string(),
-        message: "Field-level lineage not yet implemented".to_string(),
-        location: crate::output::Location::new(),
-        suggestion: Some("Use --context or wait for M6 milestone".to_string()),
-    }];
+    if internal_node_count == 0 {
+        diagnostics.push(crate::output::Diagnostic {
+            severity: crate::output::DiagnosticSeverity::Info,
+            code: "LINEAGE_SOURCE_MISSING".to_string(),
+            message: "DataFlow internal topology not available".to_string(),
+            location: crate::output::Location::new(),
+            suggestion: Some("Check if dataFlow.nodes exists in .tbl metadata".to_string()),
+        });
+    }
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(node.id.clone());

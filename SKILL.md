@@ -55,7 +55,11 @@ Output structure (kind = Explain):
 - `details.writes`: 目标写入的模型字段、参数、页面状态
 - `details.triggered_by`: 真实触发关系（组件被页面包含、action 被组件触发、页面被 action 打开）
 - `details.affects`: 下游影响对象（被哪些组件引用、影响哪些模型字段、打开哪些页面）
-- `details.lineage`: 字段级血缘（M2 保留空数组 + `LINEAGE_DEFERRED_TO_M6` diagnostic）
+- `details.lineage`: 字段级血缘（M6 已实现）
+  - DataFlow 字段：从 `dimensions[].inputField` 和 `dimensions[].exp` 追溯
+  - 页面写入字段：从 `submitData.submitFields[]`、`insertData/updateData/deleteData.fieldValues[]` 追溯
+  - 每项包含：`target_field`、`source_fields`、`source_expr`、`transform`、`confidence`、`evidence`
+  - 表达式无法解析时产生 `LINEAGE_EXPR_UNPARSED` diagnostic
 - **Action 特有字段**:
   - `action_category`: 动作语义分类（data_write / data_read / navigation / param_mutation / ui_control / validation / data_refresh / unknown）
   - `semantic_summary`: 动作自然语言摘要，例如"点击 button1 后提交数据到 model1.name"

@@ -121,7 +121,11 @@ pub struct AiOutput {
 | `writes` | array | 目标写入的对象列表 |
 | `triggered_by` | array | 触发目标的源对象 |
 | `affects` | array | 目标影响的下游对象 |
-| `lineage` | array | 字段级血缘（M2 保留空数组） |
+| `lineage` | array | 字段级血缘（M6 已实现）：每项包含 target_field / source_fields / source_expr / transform / confidence / evidence |
+| `inputs` | array | DataFlow 输入源列表（DataFlow 有） |
+| `outputs` | array | DataFlow 输出目标列表（DataFlow 有） |
+| `internal_topology` | object | DataFlow 内部节点拓扑：nodes + edges（DataFlow 有） |
+| `produced_by` | array | 字段产生者列表（Field 有） |
 | `action_category` | string | 动作语义分类（Action 有）：data_write / data_read / navigation / param_mutation / ui_control / validation / data_refresh / data_initialization / unknown |
 | `semantic_summary` | string | 动作自然语言摘要（Action 有） |
 | `blocks_on` | object / null | 等待前置动作结构化解析（Action 有） |
@@ -130,7 +134,8 @@ pub struct AiOutput {
 
 ### 允许为空的字段
 
-- `details.lineage`：M2 保留空数组，必须附带 `LINEAGE_DEFERRED_TO_M6` diagnostic
+- `details.lineage`：空数组表示无 traceable 来源，必须附带 `LINEAGE_SOURCE_MISSING` diagnostic；M6 已实现从 dimensions[].inputField / dimensions[].exp / submitField / fieldValues[] 追溯
+- `details.inputs` / `details.outputs`：DataFlow 确实无输入/输出时可为空
 - `details.reads` / `details.writes`：目标确实无读写关系时可为空
 - `summary.page` / `summary.page_id`：非页面上下文的目标可为 null
 
@@ -316,3 +321,28 @@ pub struct AiOutput {
 | `UNRESOLVED_PAGE_NAVIGATION` | Warning | 导航目标页面不存在于图中 |
 | `UNRESOLVED_MODEL_WRITE` | Warning | 写入目标模型不存在于图中 |
 | `VISIBILITY_RULE_UNRESOLVED` | Info | visibility 规则中的表达式可能包含未解析引用 |
+
+
+## M6 字段级血缘（Lineage）补充
+
+### lineage 项结构
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `target_field` | string | 目标字段 ID，如 `field:dataflow_output.工单号` |
+| `source_fields` | array | 来源字段列表，如 `["field:dataflow_output.workNo"]` |
+| `source_expr` | string / null | 原始表达式，如 `IF(status=="completed","已完成","处理中")` |
+| `transform` | string | 转换类型：`inputField mapping` / `expression calculation` / `submitField mapping` / `fieldValues mapping` / `unknown` |
+| `via_node` | string / null | 经过的中间节点 ID，如 `model:dataflow_output` |
+| `confidence` | string | `high`（inputField / submitField 直接映射） / `medium`（表达式解析出 ModelField） / `low`（表达式无法解析） |
+| `evidence` | object | 包含 `source_file`、`node_id`、`edge_type`、`json_path`、`raw_expr` |
+
+### lineage diagnostics code
+
+| Code | Severity | 说明 |
+|------|----------|------|
+| `LINEAGE_SOURCE_MISSING` | Info | 维度/字段无 inputField 或 exp，无法追溯来源 |
+| `LINEAGE_EXPR_UNPARSED` | Info | 表达式存在但解析器无法提取具体字段引用（如 `appointmentNo` 裸标识符） |
+| `LINEAGE_AMBIGUOUS_MODEL` | Warning | 字段名无法唯一定位到具体模型（M6 暂不支持，预留） |
+| `LINEAGE_CHAIN_TRUNCATED` | Info | 因 budget/depth 限制，血缘链在展开时被截断 |
+| `LINEAGE_DEFERRED_TO_M7` | Info | 表达式需要 AST 级解析能力，当前 regex 解析器不足以处理（仅用于复杂函数场景） |

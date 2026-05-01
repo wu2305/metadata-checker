@@ -42,12 +42,42 @@ pub fn process_tbl_file_from_string(
         for dim in dimensions {
             if let Some(name) = dim.get("name").and_then(|n| n.as_str()) {
                 let field_id = format!("field:{}.{}", model_name, name);
+                let mut field_meta = dim.clone();
+                // 添加字段来源信息到 meta
+                if let Some(input_field) = dim.get("inputField").and_then(|v| v.as_str())
+                    && let Some(obj) = field_meta.as_object_mut()
+                {
+                    obj.insert(
+                        "source_input_field".to_string(),
+                        serde_json::json!(input_field),
+                    );
+                }
+                if let Some(exp) = dim.get("exp").and_then(|v| v.as_str())
+                    && let Some(obj) = field_meta.as_object_mut()
+                {
+                    obj.insert("source_expr".to_string(), serde_json::json!(exp));
+                    // 粗粒度解析表达式中的字段引用
+                    let refs = crate::superpage::parse_expression_refs(exp);
+                    let ref_models: Vec<String> = refs
+                        .iter()
+                        .filter_map(|r| match r {
+                            crate::superpage::RefType::ModelField(m, _) => Some(m.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !ref_models.is_empty() {
+                        obj.insert(
+                            "source_expr_models".to_string(),
+                            serde_json::json!(ref_models),
+                        );
+                    }
+                }
                 graph.add_node(
                     field_id.clone(),
                     NodeType::Field,
                     rel_path.to_string(),
                     name.to_string(),
-                    Some(dim.clone()),
+                    Some(field_meta),
                 );
                 node_ids.insert(field_id.clone());
                 graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
