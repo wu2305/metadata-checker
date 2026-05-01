@@ -156,10 +156,12 @@ pub fn explain_component_spg(spg: &SuperPageMetadata, target_id: &str, human: bo
 
     let diagnostics = vec![crate::output::Diagnostic {
         severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_DEFERRED_TO_M6".to_string(),
-        message: "Field-level lineage not yet implemented".to_string(),
+        code: "LINEAGE_SOURCE_MISSING".to_string(),
+        message: "Field-level lineage source could not be determined".to_string(),
         location: crate::output::Location::new(),
-        suggestion: Some("Use --context or wait for M6 milestone".to_string()),
+        suggestion: Some(
+            "Check --context or --query-dataflow for upstream relationships".to_string(),
+        ),
     }];
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(target_id.to_string());
@@ -525,10 +527,12 @@ fn explain_component_graph(
 
     let diagnostics = vec![crate::output::Diagnostic {
         severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_DEFERRED_TO_M6".to_string(),
-        message: "Field-level lineage not yet implemented".to_string(),
+        code: "LINEAGE_SOURCE_MISSING".to_string(),
+        message: "Field-level lineage source could not be determined".to_string(),
         location: crate::output::Location::new(),
-        suggestion: Some("Use --context or wait for M6 milestone".to_string()),
+        suggestion: Some(
+            "Check --context or --query-dataflow for upstream relationships".to_string(),
+        ),
     }];
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
@@ -818,10 +822,12 @@ fn explain_action_graph(
 
     let diagnostics = vec![crate::output::Diagnostic {
         severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_DEFERRED_TO_M6".to_string(),
-        message: "Field-level lineage not yet implemented".to_string(),
+        code: "LINEAGE_SOURCE_MISSING".to_string(),
+        message: "Field-level lineage source could not be determined".to_string(),
         location: crate::output::Location::new(),
-        suggestion: Some("Use --context or wait for M6 milestone".to_string()),
+        suggestion: Some(
+            "Check --context or --query-dataflow for upstream relationships".to_string(),
+        ),
     }];
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
@@ -1017,10 +1023,12 @@ fn explain_model_graph(
 
     let diagnostics = vec![crate::output::Diagnostic {
         severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_DEFERRED_TO_M6".to_string(),
-        message: "Field-level lineage not yet implemented".to_string(),
+        code: "LINEAGE_SOURCE_MISSING".to_string(),
+        message: "Field-level lineage source could not be determined".to_string(),
         location: crate::output::Location::new(),
-        suggestion: Some("Use --context or wait for M6 milestone".to_string()),
+        suggestion: Some(
+            "Check --context or --query-dataflow for upstream relationships".to_string(),
+        ),
     }];
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
@@ -1897,10 +1905,12 @@ fn explain_page_graph(
     }
     diagnostics.push(crate::output::Diagnostic {
         severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_DEFERRED_TO_M6".to_string(),
-        message: "Field-level lineage not yet implemented".to_string(),
+        code: "LINEAGE_SOURCE_MISSING".to_string(),
+        message: "Field-level lineage source could not be determined".to_string(),
         location: crate::output::Location::new(),
-        suggestion: Some("Use --context or wait for M6 milestone".to_string()),
+        suggestion: Some(
+            "Check --context or --query-dataflow for upstream relationships".to_string(),
+        ),
     });
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);

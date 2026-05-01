@@ -543,11 +543,42 @@ pub fn query_page_logic(
                     let comp_id = comp.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     for prop in ["visible", "hidden", "disabled", "readonly"] {
                         if let Some(val) = comp.get(prop) {
-                            visibility_rules.push(json!({
+                            let mut rule = json!({
                                 "component_id": comp_id,
                                 "rule": prop,
                                 "expression": val,
-                            }));
+                            });
+                            // 对字符串表达式进行 AST 结构化解析
+                            if let Some(expr_str) = val.as_str()
+                                && (expr_str.starts_with("=") || expr_str.contains("${"))
+                            {
+                                let parse_result = crate::superpage::parse_expression_ast(expr_str);
+                                rule["refs"] = serde_json::json!(
+                                    parse_result
+                                        .refs
+                                        .iter()
+                                        .filter_map(|r| match r {
+                                            crate::superpage::RefType::ComponentValue(id) =>
+                                                Some(json!({"type": "ComponentValue", "id": id})),
+                                            crate::superpage::RefType::ModelField(m, f) => Some(
+                                                json!({"type": "ModelField", "id": m, "field": f})
+                                            ),
+                                            crate::superpage::RefType::Param(id) =>
+                                                Some(json!({"type": "Param", "id": id})),
+                                            _ => None,
+                                        })
+                                        .collect::<Vec<_>>()
+                                );
+                                rule["unresolved_refs"] = serde_json::json!(parse_result.resolved_refs.iter().filter(|rr| rr.unresolved).map(|rr| json!({"type": crate::action_semantics::ref_type_to_str(&rr.ref_type), "id": crate::action_semantics::ref_id(&rr.ref_type)})).collect::<Vec<_>>());
+                                rule["diagnostics"] = serde_json::json!(
+                                    parse_result
+                                        .diagnostics
+                                        .iter()
+                                        .map(|d| json!({"code": &d.code, "message": &d.message}))
+                                        .collect::<Vec<_>>()
+                                );
+                            }
+                            visibility_rules.push(rule);
                         }
                     }
                     // 收集 action 元数据，key 用 comp_id + "|" + action_id 防止同名 action 串线

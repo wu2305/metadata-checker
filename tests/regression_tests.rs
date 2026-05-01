@@ -569,12 +569,12 @@ fn test_cli_explain_component_single_file_contract() {
         "button1 with submitData should have writes"
     );
 
-    // should have LINEAGE_DEFERRED_TO_M6 diagnostic
+    // should have LINEAGE_SOURCE_MISSING diagnostic
     assert!(
         ai.diagnostics
             .iter()
-            .any(|d| d.code == "LINEAGE_DEFERRED_TO_M6"),
-        "must have LINEAGE_DEFERRED_TO_M6 diagnostic"
+            .any(|d| d.code == "LINEAGE_SOURCE_MISSING"),
+        "must have LINEAGE_SOURCE_MISSING diagnostic"
     );
 }
 

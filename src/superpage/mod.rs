@@ -526,13 +526,14 @@ fn extract_components(
             if is_expr {
                 comp.properties
                     .insert(field_name.to_string(), val_str.to_string());
-                let refs = parse_expression_refs(val_str);
+                let parse_result = parse_expression_ast(val_str);
                 expressions.push(ComponentExpr {
                     component_id: raw.id.clone(),
                     field: field_name.to_string(),
                     raw_expr: val_str.to_string(),
-                    refs: refs.clone(),
-                    resolved_refs: Vec::new(),
+                    refs: parse_result.refs.clone(),
+                    resolved_refs: parse_result.resolved_refs.clone(),
+                    diagnostics: parse_result.diagnostics.clone(),
                 });
             } else if !val_str.is_empty() {
                 comp.properties

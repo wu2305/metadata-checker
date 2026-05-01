@@ -345,4 +345,42 @@ pub struct AiOutput {
 | `LINEAGE_EXPR_UNPARSED` | Info | 表达式存在但解析器无法提取具体字段引用（如 `appointmentNo` 裸标识符） |
 | `LINEAGE_AMBIGUOUS_MODEL` | Warning | 字段名无法唯一定位到具体模型（M6 暂不支持，预留） |
 | `LINEAGE_CHAIN_TRUNCATED` | Info | 因 budget/depth 限制，血缘链在展开时被截断 |
-| `LINEAGE_DEFERRED_TO_M7` | Info | 表达式需要 AST 级解析能力，当前 regex 解析器不足以处理（仅用于复杂函数场景） |
+| `LINEAGE_DEFERRED_TO_M8` | Info | 表达式诊断和证据体系需要完整化，当前解析器未输出完整 evidence（预留） |
+
+## M7 表达式结构化解析补充
+
+### 表达式统一结构（condition / visibility_rules / ComponentExpr）
+
+所有表达式字段统一输出以下结构：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| raw_expr | string / null | 原始表达式字符串 |
+| refs | array | 提取的引用 ID 列表（去重） |
+| resolved_refs | array | 结构化引用对象列表，每项含 type / id / field / confidence / reason |
+| unresolved_refs | array | 无法确认类型的引用对象列表，每项含 type / id / reason |
+| ambiguous_refs | array | 被分类为 Other 的模糊引用列表，每项含 raw |
+| diagnostics | array | 表达式诊断列表，每项含 code / message / position |
+| confidence | string | high（无 unresolved 无 diagnostic） / medium（少量 unresolved/diagnostic） / low（大量问题） |
+
+### 引用类型枚举（resolved_refs[].type）
+
+| 类型 | 说明 |
+|------|------|
+| ComponentValue | 组件值引用，如 input1.value |
+| ComponentProperty | 组件属性引用，如 input1.checked.value |
+| ModelField | 模型字段引用，如 model1.fieldA 或 ${model1.fieldA} |
+| Param | 页面参数引用，如 param1 |
+| UserProperty | 用户属性引用，如 $user.name |
+| SystemVar | 系统变量引用，如 $currentDate |
+| Literal | 字面量或其他无法分类的引用 |
+
+### 表达式诊断 code
+
+| Code | Severity | 说明 |
+|------|----------|------|
+| EXPR_PARSE_ERROR | Warning | 表达式存在语法错误，无法构建完整 AST |
+| EXPR_UNRESOLVED_REF | Info | 标识符或成员访问无法被分类为已知引用类型 |
+| EXPR_UNSUPPORTED_FUNCTION | Info | 使用了当前未列入支持列表的函数 |
+| EXPR_AMBIGUOUS_REF | Info | 引用存在歧义，可能属于多种类型 |
+

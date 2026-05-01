@@ -197,17 +197,25 @@ pub fn parse_wait_prev(raw: Option<&str>) -> Value {
     }
 }
 
-/// 粗粒度解析 condition 表达式引用
+/// 结构化解析 condition 表达式引用（M7 AST 解析器）
 ///
 /// 输入：condition 原始表达式字符串
-/// 输出：结构化 JSON，包含 raw_expr、refs、confidence
+/// 输出：结构化 JSON，包含 raw_expr、refs、resolved_refs、unresolved_refs、diagnostics
 pub fn parse_condition(raw: Option<&str>) -> Value {
     match raw {
-        None => json!({"raw_expr": null, "refs": [], "resolved_refs": [], "confidence": "high"}),
+        None => json!({
+            "raw_expr": null,
+            "refs": [],
+            "resolved_refs": [],
+            "unresolved_refs": [],
+            "ambiguous_refs": [],
+            "diagnostics": [],
+            "confidence": "high",
+        }),
         Some(expr) => {
-            // 粗粒度提取：用简单正则提取 component/model 引用
-            let refs = crate::superpage::parse_expression_refs(expr);
-            let ref_ids: Vec<String> = refs
+            let result = crate::superpage::parse_expression_ast(expr);
+            let ref_ids: Vec<String> = result
+                .refs
                 .iter()
                 .filter_map(|r| match r {
                     crate::superpage::RefType::ComponentValue(id) => Some(id.clone()),
@@ -217,47 +225,100 @@ pub fn parse_condition(raw: Option<&str>) -> Value {
                     _ => None,
                 })
                 .collect();
-            let resolved: Vec<Value> = refs
+            let resolved: Vec<Value> = result
+                .resolved_refs
                 .iter()
-                .map(|r| match r {
-                    crate::superpage::RefType::ComponentValue(id) => json!({
-                        "type": "ComponentValue",
-                        "id": id,
-                    }),
-                    crate::superpage::RefType::ComponentProperty(id, field) => json!({
-                        "type": "ComponentProperty",
-                        "id": id,
-                        "field": field,
-                    }),
-                    crate::superpage::RefType::ModelField(model, field) => json!({
-                        "type": "ModelField",
-                        "id": model,
-                        "field": field,
-                    }),
-                    crate::superpage::RefType::Param(id) => json!({
-                        "type": "Param",
-                        "id": id,
-                    }),
-                    crate::superpage::RefType::UserProperty(prop) => json!({
-                        "type": "UserProperty",
-                        "id": prop,
-                    }),
-                    crate::superpage::RefType::SystemVar(var) => json!({
-                        "type": "SystemVar",
-                        "id": var,
-                    }),
-                    crate::superpage::RefType::Other(lit) => json!({
-                        "type": "Literal",
-                        "value": lit,
-                    }),
+                .filter(|rr| !rr.unresolved)
+                .map(|rr| {
+                    json!({
+                        "type": ref_type_to_str(&rr.ref_type),
+                        "id": ref_id(&rr.ref_type),
+                        "field": ref_field(&rr.ref_type),
+                        "confidence": format!("{:?}", rr.confidence).to_lowercase(),
+                        "reason": &rr.reason,
+                    })
                 })
                 .collect();
+            let unresolved: Vec<Value> = result
+                .resolved_refs
+                .iter()
+                .filter(|rr| rr.unresolved)
+                .map(|rr| {
+                    json!({
+                        "type": ref_type_to_str(&rr.ref_type),
+                        "id": ref_id(&rr.ref_type),
+                        "reason": &rr.reason,
+                    })
+                })
+                .collect();
+            let ambiguous: Vec<Value> = result
+                .refs
+                .iter()
+                .filter(|r| matches!(r, crate::superpage::RefType::Other(_)))
+                .map(|r| match r {
+                    crate::superpage::RefType::Other(lit) => json!({"raw": lit}),
+                    _ => unreachable!(),
+                })
+                .collect();
+            let diagnostics: Vec<Value> = result
+                .diagnostics
+                .iter()
+                .map(|d| {
+                    json!({
+                        "code": &d.code,
+                        "message": &d.message,
+                        "position": d.position,
+                    })
+                })
+                .collect();
+            let confidence = if unresolved.is_empty() && diagnostics.is_empty() {
+                "high"
+            } else if unresolved.len() <= 1 && diagnostics.len() <= 1 {
+                "medium"
+            } else {
+                "low"
+            };
             json!({
                 "raw_expr": expr,
                 "refs": ref_ids,
                 "resolved_refs": resolved,
-                "confidence": "medium",
+                "unresolved_refs": unresolved,
+                "ambiguous_refs": ambiguous,
+                "diagnostics": diagnostics,
+                "confidence": confidence,
             })
         }
+    }
+}
+
+pub(crate) fn ref_type_to_str(r: &crate::superpage::RefType) -> String {
+    match r {
+        crate::superpage::RefType::ComponentValue(_) => "ComponentValue".to_string(),
+        crate::superpage::RefType::ComponentProperty(_, _) => "ComponentProperty".to_string(),
+        crate::superpage::RefType::ModelField(_, _) => "ModelField".to_string(),
+        crate::superpage::RefType::Param(_) => "Param".to_string(),
+        crate::superpage::RefType::UserProperty(_) => "UserProperty".to_string(),
+        crate::superpage::RefType::SystemVar(_) => "SystemVar".to_string(),
+        crate::superpage::RefType::Other(lit) => format!("Other({})", lit),
+    }
+}
+
+pub(crate) fn ref_id(r: &crate::superpage::RefType) -> String {
+    match r {
+        crate::superpage::RefType::ComponentValue(id)
+        | crate::superpage::RefType::ComponentProperty(id, _)
+        | crate::superpage::RefType::ModelField(id, _)
+        | crate::superpage::RefType::Param(id)
+        | crate::superpage::RefType::UserProperty(id)
+        | crate::superpage::RefType::SystemVar(id)
+        | crate::superpage::RefType::Other(id) => id.clone(),
+    }
+}
+
+pub(crate) fn ref_field(r: &crate::superpage::RefType) -> Option<String> {
+    match r {
+        crate::superpage::RefType::ComponentProperty(_, field)
+        | crate::superpage::RefType::ModelField(_, field) => Some(field.clone()),
+        _ => None,
     }
 }

@@ -79,6 +79,7 @@ pub struct ComponentExpr {
     pub raw_expr: String,
     pub refs: Vec<RefType>,
     pub resolved_refs: Vec<ResolvedRef>,
+    pub diagnostics: Vec<super::expr_ast::ExprDiagnostic>,
 }
 
 /// 解析后的 SuperPage 完整元数据

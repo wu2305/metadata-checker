@@ -1,5 +1,7 @@
 use metadata_checker::dependency::DependencyGraph;
-use metadata_checker::superpage::{RefType, parse_expression_refs, parse_superpage};
+use metadata_checker::superpage::{
+    RefType, parse_expression_ast, parse_expression_refs, parse_superpage,
+};
 use std::path::PathBuf;
 
 // ============================================================
@@ -306,4 +308,131 @@ fn test_topological_sort_with_independent() {
     if let (Some(p3), Some(pt)) = (pos3, pos_text1) {
         assert!(p3 < pt, "input3 should come before text1");
     }
+}
+
+// ============================================================
+// 七、M7 AST 表达式解析器测试
+// ============================================================
+
+#[test]
+fn test_parse_expression_ast_basic() {
+    let result = parse_expression_ast("=input1.value + model1.fieldA");
+    assert!(result.ast.is_some(), "AST should be present");
+    assert_eq!(result.refs.len(), 2, "Should detect 2 refs");
+    assert!(
+        result
+            .refs
+            .contains(&RefType::ComponentValue("input1".to_string()))
+    );
+    assert!(result.refs.contains(&RefType::ModelField(
+        "model1".to_string(),
+        "fieldA".to_string()
+    )));
+    assert!(
+        !result.resolved_refs.is_empty(),
+        "resolved_refs should be populated"
+    );
+    assert!(
+        result.diagnostics.is_empty(),
+        "No diagnostics for simple expr"
+    );
+}
+
+#[test]
+fn test_parse_expression_ast_unsupported_function() {
+    let result = parse_expression_ast("=UNKNOWN_FUNC(input1.value)");
+    assert!(result.ast.is_some());
+    let has_unsupported = result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "EXPR_UNSUPPORTED_FUNCTION");
+    assert!(has_unsupported, "Should report unsupported function");
+}
+
+#[test]
+fn test_parse_expression_ast_unresolved_ref() {
+    let result = parse_expression_ast("=foo.bar");
+    assert!(!result.refs.is_empty());
+    let has_unresolved = result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "EXPR_UNRESOLVED_REF");
+    assert!(has_unresolved, "Should report unresolved ref");
+}
+
+#[test]
+fn test_parse_expression_ast_string_literal_skip() {
+    let result = parse_expression_ast("=CONCAT('model1.fieldA', input1.value)");
+    assert!(result.ast.is_some());
+    assert!(
+        !result
+            .refs
+            .iter()
+            .any(|r| matches!(r, RefType::ModelField(m, _) if m == "model1")),
+        "String literal should not be parsed as model field"
+    );
+    assert!(
+        result
+            .refs
+            .contains(&RefType::ComponentValue("input1".to_string()))
+    );
+}
+
+#[test]
+fn test_component_expr_contains_diagnostics() {
+    let path = PathBuf::from("tests/fixtures/boundary_cases.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse");
+    let text3_expr = meta
+        .expressions
+        .iter()
+        .find(|e| e.component_id == "text3" && e.field == "value")
+        .expect("text3.value should exist");
+    assert_eq!(text3_expr.raw_expr, "=123");
+    assert!(
+        text3_expr.diagnostics.is_empty(),
+        "Constant expression should have no diagnostics"
+    );
+}
+
+#[test]
+fn test_condition_structured_output() {
+    use metadata_checker::action_semantics::parse_condition;
+    let result = parse_condition(Some("=input1.value > 0 AND model1.fieldA IS NOT NULL"));
+    let arr = result.as_object().expect("should be object");
+    assert!(
+        arr.contains_key("unresolved_refs"),
+        "condition should have unresolved_refs"
+    );
+    assert!(
+        arr.contains_key("diagnostics"),
+        "condition should have diagnostics"
+    );
+    assert!(
+        arr.contains_key("ambiguous_refs"),
+        "condition should have ambiguous_refs"
+    );
+    let diagnostics = arr["diagnostics"]
+        .as_array()
+        .expect("diagnostics should be array");
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.get("code")
+                == Some(&serde_json::Value::String("EXPR_PARSE_ERROR".to_string()))),
+        "Well-formed condition should not have parse errors"
+    );
+}
+
+#[test]
+fn test_condition_with_unsupported_function() {
+    use metadata_checker::action_semantics::parse_condition;
+    let result = parse_condition(Some("=MY_CUSTOM_FUNC(input1.value)"));
+    let diagnostics = result["diagnostics"].as_array().expect("diagnostics array");
+    assert!(
+        diagnostics.iter().any(|d| d.get("code")
+            == Some(&serde_json::Value::String(
+                "EXPR_UNSUPPORTED_FUNCTION".to_string()
+            ))),
+        "Should report unsupported function in condition"
+    );
 }

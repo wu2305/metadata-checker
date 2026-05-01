@@ -704,11 +704,19 @@ fn extract_refs_from_ast(
                     RefType::SystemVar(v) => format!("系统变量引用: {}", v),
                     _ => format!("未知成员访问: {}", full_path),
                 };
+                let unresolved = matches!(ref_type, RefType::Other(_));
+                if unresolved && is_likely_unresolved(&full_path) {
+                    diagnostics.push(ExprDiagnostic {
+                        code: "EXPR_UNRESOLVED_REF".to_string(),
+                        message: format!("无法解析的成员访问: {}", full_path),
+                        position: None,
+                    });
+                }
                 resolved_refs.push(ResolvedRef {
                     ref_type,
                     confidence,
                     reason,
-                    unresolved: false,
+                    unresolved,
                 });
             } else {
                 // 回退到递归处理 base
