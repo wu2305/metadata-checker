@@ -79,6 +79,12 @@ pub struct RawAction {
     pub condition: Option<String>,
     #[serde(rename = "conditionExp", default)]
     pub condition_exp: Option<String>,
+    #[serde(rename = "targetComponent", default)]
+    pub target_component: Vec<String>,
+    #[serde(default)]
+    pub panelbook: Option<String>,
+    #[serde(default)]
+    pub panel: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]

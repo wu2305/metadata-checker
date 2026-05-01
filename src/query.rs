@@ -669,6 +669,26 @@ pub fn query_page_logic(
                             "field_path": edge.field_path,
                         }));
                     }
+                    crate::graph::EdgeType::ActionValidates
+                    | crate::graph::EdgeType::ActionLoadsData => {
+                        data_sources.push(json!({
+                            "source_component": if matches!(node.node_type, crate::graph::NodeType::Component) { Some(node.id.clone()) } else { None },
+                            "source_action": if matches!(node.node_type, crate::graph::NodeType::Action) { Some(node.id.clone()) } else { None },
+                            "model": target.name,
+                            "field_path": edge.field_path,
+                            "target_id": target.id,
+                            "type": format!("{:?}", edge.edge_type),
+                        }));
+                    }
+                    crate::graph::EdgeType::ActionControlsComponent => {
+                        navigation.push(json!({
+                            "from": node.id,
+                            "to": target.id,
+                            "to_name": target.name,
+                            "type": format!("{:?}", edge.edge_type),
+                            "field_path": edge.field_path,
+                        }));
+                    }
                     _ => {}
                 }
             }
@@ -728,7 +748,7 @@ pub fn query_page_logic(
                         "type": format!("{:?}", edge.edge_type),
                     }));
                 }
-                crate::graph::EdgeType::SetsParam => {
+                crate::graph::EdgeType::SetsParam | crate::graph::EdgeType::ActionSetsParam => {
                     sets_params.push(json!({
                         "to": target.id,
                         "to_name": target.name,
@@ -740,6 +760,29 @@ pub fn query_page_logic(
                         "to": target.id,
                         "to_name": target.name,
                         "field_path": edge.field_path,
+                    }));
+                }
+                crate::graph::EdgeType::ActionValidates => {
+                    reads.push(json!({
+                        "model": target.name,
+                        "field_path": edge.field_path,
+                        "target_id": target.id,
+                        "validate": true,
+                    }));
+                }
+                crate::graph::EdgeType::ActionLoadsData => {
+                    reads.push(json!({
+                        "model": target.name,
+                        "field_path": edge.field_path,
+                        "target_id": target.id,
+                        "load": true,
+                    }));
+                }
+                crate::graph::EdgeType::ActionControlsComponent => {
+                    nav.push(json!({
+                        "to": target.id,
+                        "to_name": target.name,
+                        "type": format!("{:?}", edge.edge_type),
                     }));
                 }
                 _ => {}
@@ -1148,10 +1191,18 @@ pub fn query_page_logic(
                 writeln!(out, "    summary: {}", summary)?;
             }
             writeln!(out, "    triggered by {}", cid)?;
-            if let Some(raw) = flow.get("blocks_on").and_then(|b| b.get("raw")).and_then(|v| v.as_str()) {
+            if let Some(raw) = flow
+                .get("blocks_on")
+                .and_then(|b| b.get("raw"))
+                .and_then(|v| v.as_str())
+            {
                 writeln!(out, "    waits for: {}", raw)?;
             }
-            if let Some(raw) = flow.get("condition").and_then(|c| c.get("raw_expr")).and_then(|v| v.as_str()) {
+            if let Some(raw) = flow
+                .get("condition")
+                .and_then(|c| c.get("raw_expr"))
+                .and_then(|v| v.as_str())
+            {
                 writeln!(out, "    condition: {}", raw)?;
             }
             let writes = flow

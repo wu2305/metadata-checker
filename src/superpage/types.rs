@@ -65,6 +65,9 @@ pub struct SpgAction {
     pub wait_prev: Option<String>,
     pub condition: Option<String>,
     pub condition_exp: Option<String>,
+    pub target_component: Vec<String>,
+    pub panelbook: Option<String>,
+    pub panel: Option<String>,
 }
 
 /// 组件上的表达式及其解析出的引用列表

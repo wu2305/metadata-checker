@@ -402,6 +402,17 @@ fn explain_component_graph(
                             | crate::graph::EdgeType::ActionSetsParam => {
                                 affects.push(make_ref(t, e));
                             }
+                            crate::graph::EdgeType::ActionControlsComponent => {
+                                affects.push(make_ref(t, e));
+                            }
+                            crate::graph::EdgeType::ActionValidates => {
+                                reads.push(make_ref(t, e));
+                                has_read = true;
+                            }
+                            crate::graph::EdgeType::ActionLoadsData => {
+                                reads.push(make_ref(t, e));
+                                has_read = true;
+                            }
                             _ => {}
                         }
                     }
@@ -649,6 +660,17 @@ fn explain_action_graph(
             crate::graph::EdgeType::SetsParam | crate::graph::EdgeType::ActionSetsParam => {
                 affects.push(make_ref(target, edge));
                 has_write = true;
+            }
+            crate::graph::EdgeType::ActionControlsComponent => {
+                affects.push(make_ref(target, edge));
+            }
+            crate::graph::EdgeType::ActionValidates => {
+                reads.push(make_ref(target, edge));
+                has_read = true;
+            }
+            crate::graph::EdgeType::ActionLoadsData => {
+                reads.push(make_ref(target, edge));
+                has_read = true;
             }
             _ => {}
         }

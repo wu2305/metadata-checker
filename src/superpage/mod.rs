@@ -602,6 +602,9 @@ fn extract_components(
             wait_prev: a.wait_prev.clone(),
             condition: a.condition.clone(),
             condition_exp: a.condition_exp.clone(),
+            target_component: a.target_component.clone(),
+            panelbook: a.panelbook.clone(),
+            panel: a.panel.clone(),
         })
         .collect();
 

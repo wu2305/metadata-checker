@@ -601,6 +601,153 @@ pub fn process_spg_file_from_value(
                         }
                     }
                 }
+                "showComponent" | "hideComponent" => {
+                    for target_comp in &action.target_component {
+                        let target_comp_id =
+                            format!("comp:{}|{}", rel_path.replace(r"\", "/"), target_comp);
+                        let ctrl_meta = serde_json::json!({
+                            "reason": format!("Action '{}' controls component '{}'", action.action_type, target_comp),
+                            "actor_kind": "action",
+                            "actor_id": action_id,
+                            "operation": "ActionControlsComponent",
+                            "trigger": action.trigger_type,
+                            "target_component": target_comp,
+                        });
+                        graph.add_edge_with_meta(
+                            &action_id,
+                            &target_comp_id,
+                            EdgeType::ActionControlsComponent,
+                            None,
+                            Some(ctrl_meta),
+                        );
+                    }
+                }
+                "switchPanel" => {
+                    if let Some(ref pb) = action.panelbook {
+                        let panelbook_id = format!("comp:{}|{}", rel_path.replace(r"\", "/"), pb);
+                        let ctrl_meta = serde_json::json!({
+                            "reason": format!("Action 'switchPanel' controls panelbook '{}'", pb),
+                            "actor_kind": "action",
+                            "actor_id": action_id,
+                            "operation": "ActionControlsComponent",
+                            "trigger": action.trigger_type,
+                            "panelbook": pb,
+                            "panel": action.panel,
+                        });
+                        graph.add_edge_with_meta(
+                            &action_id,
+                            &panelbook_id,
+                            EdgeType::ActionControlsComponent,
+                            None,
+                            Some(ctrl_meta),
+                        );
+                    }
+                }
+                "validateData" => {
+                    let target_comps: Vec<String> = match action.submit_range.as_deref() {
+                        Some("page") | Some("dataset") => {
+                            submit_field_map.keys().cloned().collect()
+                        }
+                        Some("component") | Some("dialog") => action.submit_component.clone(),
+                        _ => {
+                            if action.submit_component.is_empty() {
+                                submit_field_map.keys().cloned().collect()
+                            } else {
+                                action.submit_component.clone()
+                            }
+                        }
+                    };
+                    for target_comp_id in target_comps {
+                        if let Some(submit_field) = submit_field_map.get(&target_comp_id) {
+                            let parts: Vec<&str> = submit_field.split('.').collect();
+                            if parts.len() >= 2 {
+                                let model = parts[0];
+                                let model_path = source_path_map
+                                    .get(model)
+                                    .map(|p| p.to_string())
+                                    .unwrap_or_else(|| format!("{}.tbl", model));
+                                let field = parts[1..].join(".");
+                                let val_meta = serde_json::json!({
+                                    "reason": format!("Action 'validateData' validates field '{}'", field),
+                                    "actor_kind": "action",
+                                    "actor_id": action_id,
+                                    "operation": "ActionValidates",
+                                    "trigger": action.trigger_type,
+                                    "target_model": model,
+                                    "target_field": field,
+                                });
+                                add_model_write(
+                                    graph,
+                                    &action_id,
+                                    model,
+                                    &field,
+                                    &model_path,
+                                    EdgeType::ActionValidates,
+                                    val_meta,
+                                );
+                            }
+                        }
+                    }
+                }
+                "resetData" | "newData" | "refreshModels" | "refreshData" | "loadData" => {
+                    let mut targets: Vec<(String, String)> = Vec::new();
+                    if let Some(ref ds) = action.data_set {
+                        targets.push((ds.clone(), format!("{}.tbl", ds)));
+                    }
+                    for sc in &action.submit_component {
+                        if let Some(submit_field) = submit_field_map.get(sc) {
+                            let parts: Vec<&str> = submit_field.split('.').collect();
+                            if !parts.is_empty() {
+                                let model = parts[0].to_string();
+                                let model_path = source_path_map
+                                    .get(&model)
+                                    .map(|p| p.to_string())
+                                    .unwrap_or_else(|| format!("{}.tbl", model));
+                                targets.push((model, model_path));
+                            }
+                        }
+                    }
+                    if targets.is_empty() && !action.submit_component.is_empty() {
+                        for sc in &action.submit_component {
+                            let comp_full_id =
+                                format!("comp:{}|{}", rel_path.replace(r"\", "/"), sc);
+                            let load_meta = serde_json::json!({
+                                "reason": format!("Action '{}' loads/resets component '{}'", action.action_type, sc),
+                                "actor_kind": "action",
+                                "actor_id": action_id,
+                                "operation": "ActionLoadsData",
+                                "trigger": action.trigger_type,
+                                "target_component": sc,
+                            });
+                            graph.add_edge_with_meta(
+                                &action_id,
+                                &comp_full_id,
+                                EdgeType::ActionLoadsData,
+                                None,
+                                Some(load_meta),
+                            );
+                        }
+                    }
+                    for (model, model_path) in targets {
+                        let load_meta = serde_json::json!({
+                            "reason": format!("Action '{}' loads/resets model '{}'", action.action_type, model),
+                            "actor_kind": "action",
+                            "actor_id": action_id,
+                            "operation": "ActionLoadsData",
+                            "trigger": action.trigger_type,
+                            "target_model": model,
+                        });
+                        add_model_write(
+                            graph,
+                            &action_id,
+                            &model,
+                            "*",
+                            &model_path,
+                            EdgeType::ActionLoadsData,
+                            load_meta,
+                        );
+                    }
+                }
                 _ => {}
             }
         }
