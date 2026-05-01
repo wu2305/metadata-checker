@@ -282,6 +282,49 @@ fn test_detail_output_contains_resolved_refs() {
         first_expr.get("confidence").is_some(),
         "Detail output should contain confidence"
     );
+    assert!(
+        first_expr.get("component_id").is_some(),
+        "Detail output should contain component_id"
+    );
+    assert!(
+        first_expr.get("field").is_some(),
+        "Detail output should contain field"
+    );
+    assert!(
+        first_expr.get("source_file").is_some(),
+        "Detail output should contain source_file"
+    );
+    assert!(
+        first_expr.get("json_path").is_some(),
+        "Detail output should contain json_path"
+    );
+    assert!(
+        first_expr.get("refs_count").is_some(),
+        "Detail output should contain refs_count"
+    );
+    assert!(
+        first_expr.get("resolved_occurrence_count").is_some(),
+        "Detail output should contain resolved_occurrence_count"
+    );
+}
+
+#[test]
+fn test_expression_refs_and_resolved_occurrence_contract() {
+    let expr = "=model1.a + model1.a + input1.value";
+    let structed = metadata_checker::action_semantics::build_expression_struct(Some(expr));
+    let refs = structed
+        .get("refs")
+        .and_then(|v| v.as_array())
+        .expect("refs must be array");
+    let resolved = structed
+        .get("resolved_refs")
+        .and_then(|v| v.as_array())
+        .expect("resolved_refs must be array");
+    assert_eq!(refs.len(), 2, "refs should be deduplicated");
+    assert!(
+        resolved.len() >= refs.len(),
+        "resolved_refs should preserve occurrence-level refs"
+    );
 }
 
 // ============================================================

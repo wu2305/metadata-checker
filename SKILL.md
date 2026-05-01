@@ -61,7 +61,7 @@ Output structure (kind = Explain):
   - 每项包含：`target_field`、`source_fields`、`source_expr`、`transform`、`confidence`、`evidence`
   - 表达式无法解析时产生 `LINEAGE_EXPR_UNPARSED` diagnostic
 - **Action 特有字段**:
-  - `action_category`: 动作语义分类（data_write / data_read / navigation / param_mutation / ui_control / validation / data_refresh / unknown）
+  - `action_category`: 动作语义分类（data_write / data_read / navigation / param_mutation / ui_control / validation / data_initialization / data_refresh / unknown）
   - `semantic_summary`: 动作自然语言摘要，例如"点击 button1 后提交数据到 model1.name"
   - `blocks_on`: 结构化等待前置动作（替代旧 `wait_prev`）
   - `condition`: 结构化条件执行表达式（condition 或 conditionExp）
@@ -81,7 +81,7 @@ Output structure (kind = Explain):
 - **定位**：`--context` 用于补充 `--explain`，不是替代。当 `--explain` 给出的摘要不够理解周围依赖/影响时，再用 `--context`。
 - Default depth is 1, default budget is `normal`.
 - **AI 不要默认读取 `full` budget**，优先使用 `normal` 或 `compact`；只有遇到 `OUTPUT_TRUNCATED` diagnostic 且确实需要更多关系时，才升级到 `full`。
-- `--context` 输出包含：upstream（谁影响我）、downstream（我影响谁）、related_actions、related_models、related_pages、related_components。
+- `--context` 输出包含：upstream（谁影响我）、downstream（我影响谁）、related_actions、related_models、related_pages、related_nodes（全类型）、related_components（仅组件）。
 
 ### Q4: Do you need project-level analysis?
 
@@ -124,7 +124,7 @@ Output structure (kind = PageLogic):
   - `ACTION_FLOW_INCOMPLETE`：action 读取但未写入
   - `UNRESOLVED_PAGE_NAVIGATION`：导航目标页面不存在
   - `UNRESOLVED_MODEL_WRITE`：写入目标模型不存在
-  - `VISIBILITY_RULE_UNRESOLVED`：visibility 规则可能包含未解析引用
+  - `VISIBILITY_RULE_UNRESOLVED`：visibility 规则包含未解析或歧义引用（warning）
 - `next_queries`: 建议后续命令，例如 `--explain <PAGE>`、`--context <PAGE> --depth 2`
 
 ## Machine JSON Output Schema

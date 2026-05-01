@@ -13,7 +13,8 @@
 | `param_mutation` | 页面参数设置 | setParamValue |
 | `ui_control` | UI 组件控制 | showComponent, hideComponent, switchPanel, closeDialog |
 | `validation` | 数据校验 | validateData |
-| `data_refresh` | 数据刷新/重置 | refreshModels, resetData, newData |
+| `data_initialization` | 数据初始化 | newData |
+| `data_refresh` | 数据刷新/重置 | refreshData, refreshModels, resetData |
 | `unknown` | 未识别的动作类型 | 任意不在下表中的类型 |
 
 ## actionType → action_category 映射
@@ -31,10 +32,11 @@
 | switchPanel | ui_control | 切换面板/标签页显示 |
 | showComponent | ui_control | 显示指定组件 |
 | hideComponent | ui_control | 隐藏指定组件 |
-| newData | data_refresh | 新建数据（清空表单或初始化新记录） |
+| newData | data_initialization | 新建数据并初始化默认状态 |
 | loadData | data_read | 加载模型数据到页面 |
 | resetData | data_refresh | 重置模型/组件数据到初始状态 |
 | refreshModels | data_refresh | 刷新多个模型数据 |
+| refreshData | data_refresh | 刷新当前数据集 |
 | validateData | validation | 校验数据合法性 |
 
 ## 图边语义分类

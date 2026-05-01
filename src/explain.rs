@@ -174,6 +174,10 @@ pub fn explain_component_spg(spg: &SuperPageMetadata, target_id: &str, human: bo
         .with_confidence(crate::output::Confidence::High)
         .with_node_id(&comp.id),
     );
+    push_relation_evidence(&mut output, "reads", &reads);
+    push_relation_evidence(&mut output, "writes", &writes);
+    push_relation_evidence(&mut output, "triggered_by", &triggered_by);
+    push_relation_evidence(&mut output, "affects", &affects);
     output.diagnostics = diagnostics;
     output.next_queries = vec![
         format!("--context {} --depth 2 for surrounding closure", target_id),
@@ -268,7 +272,103 @@ fn make_ref(target: &crate::graph::Node, edge: &crate::graph::Edge) -> serde_jso
         "edge_type": format!("{:?}", edge.edge_type),
         "field_path": edge.field_path,
         "source_file": target.path,
+        "raw_expr": edge.meta.as_ref().and_then(|m| m.get("source_expr")).and_then(|v| v.as_str()),
+        "json_path": edge.meta.as_ref().and_then(|m| m.get("json_path")).and_then(|v| v.as_str()),
     })
+}
+
+/// 从详情项中提取字符串字段
+fn detail_str<'a>(item: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    item.get(key).and_then(|v| v.as_str())
+}
+
+/// 将 reads/writes/triggered_by/affects 之类的详情项转换为 evidence
+fn push_relation_evidence(
+    output: &mut crate::output::AiOutput,
+    relation: &str,
+    items: &[serde_json::Value],
+) {
+    for item in items.iter().take(5) {
+        let node_id = detail_str(item, "id")
+            .or_else(|| detail_str(item, "from"))
+            .or_else(|| detail_str(item, "to"))
+            .unwrap_or("?");
+        let edge_type = detail_str(item, "edge_type")
+            .or_else(|| detail_str(item, "type"))
+            .unwrap_or("unknown");
+        let raw_expr = detail_str(item, "raw_expr")
+            .or_else(|| detail_str(item, "field_path"))
+            .unwrap_or("n/a");
+        let source_file = detail_str(item, "source_file");
+        let json_path = detail_str(item, "json_path").unwrap_or("<graph-edge-derived>");
+        let ev = crate::output::Evidence::new(
+            format!("{} relation on {}", relation, node_id),
+            "Relation extracted from graph edge traversal",
+        )
+        .with_confidence(if source_file.is_some() {
+            crate::output::Confidence::High
+        } else {
+            crate::output::Confidence::Medium
+        })
+        .with_node_id(node_id)
+        .with_edge_type(edge_type)
+        .with_raw_expr(raw_expr)
+        .with_json_path(json_path);
+        let ev = if let Some(sf) = source_file {
+            ev.with_source_file(sf)
+        } else {
+            ev
+        };
+        output.evidence.push(ev);
+    }
+}
+
+/// 将 lineage 中内嵌 evidence 提升为顶层 evidence
+fn push_lineage_evidence(output: &mut crate::output::AiOutput, lineage: &[serde_json::Value]) {
+    for item in lineage.iter().take(5) {
+        let target_field = detail_str(item, "target_field").unwrap_or("?");
+        let evidence = item.get("evidence");
+        let source_file = evidence
+            .and_then(|e| e.get("source_file"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let node_id = evidence
+            .and_then(|e| e.get("node_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(target_field);
+        let edge_type = evidence
+            .and_then(|e| e.get("edge_type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Contains");
+        let raw_expr = evidence
+            .and_then(|e| e.get("raw_expr"))
+            .and_then(|v| v.as_str())
+            .or_else(|| detail_str(item, "source_expr"))
+            .unwrap_or("n/a");
+        let json_path = evidence
+            .and_then(|e| e.get("json_path"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("lineage");
+        let ev = crate::output::Evidence::new(
+            format!("Lineage for {}", target_field),
+            "Field lineage derived from metadata/source expressions",
+        )
+        .with_confidence(match detail_str(item, "confidence") {
+            Some("high") => crate::output::Confidence::High,
+            Some("low") => crate::output::Confidence::Low,
+            _ => crate::output::Confidence::Medium,
+        })
+        .with_node_id(node_id)
+        .with_edge_type(edge_type)
+        .with_raw_expr(raw_expr)
+        .with_json_path(json_path);
+        let ev = if source_file.is_empty() {
+            ev
+        } else {
+            ev.with_source_file(source_file)
+        };
+        output.evidence.push(ev);
+    }
 }
 
 /// 辅助：按重要性分类
@@ -568,6 +668,10 @@ fn explain_component_graph(
             .with_node_id(&node.id),
         );
     }
+    push_relation_evidence(&mut output, "reads", &reads);
+    push_relation_evidence(&mut output, "writes", &writes);
+    push_relation_evidence(&mut output, "triggered_by", &triggered_by);
+    push_relation_evidence(&mut output, "affects", &affects);
     output.next_queries = vec![
         format!("--context {} --depth 2 for surrounding closure", node.id),
         format!(
@@ -863,6 +967,24 @@ fn explain_action_graph(
             .with_node_id(&node.id),
         );
     }
+    if let Some(cond) = meta_condition.or(meta_condition_exp) {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Action {} has execution condition", node.id),
+                "Condition is defined in action metadata",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_source_file(&node.path)
+            .with_node_id(&node.id)
+            .with_edge_type("ActionCondition")
+            .with_raw_expr(cond)
+            .with_json_path("actions[].condition / actions[].conditionExp"),
+        );
+    }
+    push_relation_evidence(&mut output, "reads", &reads);
+    push_relation_evidence(&mut output, "writes", &writes);
+    push_relation_evidence(&mut output, "triggered_by", &triggered_by);
+    push_relation_evidence(&mut output, "affects", &affects);
     output.next_queries = vec![
         format!("--context {} --depth 2 for surrounding closure", node.id),
         format!(
@@ -1098,6 +1220,8 @@ fn explain_model_graph(
             .with_node_id(&node.id),
         );
     }
+    push_relation_evidence(&mut output, "reads", &reader_refs);
+    push_relation_evidence(&mut output, "writes", &writer_refs);
     output.next_queries = vec![
         format!("--query-model {} for full model dependencies", node.name),
         format!("--context {} --depth 2 for surrounding closure", node.id),
@@ -1597,12 +1721,12 @@ fn explain_field_graph(
     });
 
     let details = serde_json::json!({
-        "reads": readers,
-        "writes": writers,
+        "reads": readers.clone(),
+        "writes": writers.clone(),
         "triggered_by": writers.clone(),
         "affects": readers.clone(),
-        "lineage": lineage,
-        "produced_by": produced_by,
+        "lineage": lineage.clone(),
+        "produced_by": produced_by.clone(),
     });
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
@@ -1658,6 +1782,10 @@ fn explain_field_graph(
             .with_node_id(&node.id),
         );
     }
+    push_relation_evidence(&mut output, "reads", &readers);
+    push_relation_evidence(&mut output, "writes", &writers);
+    push_relation_evidence(&mut output, "produced_by", &produced_by);
+    push_lineage_evidence(&mut output, &lineage);
     output.next_queries = vec![
         format!(
             "--explain {} for parent model summary",
@@ -1884,13 +2012,13 @@ fn explain_page_graph(
 
     let lineage: Vec<serde_json::Value> = Vec::new();
     let details = serde_json::json!({
-        "reads": data_sources,
-        "writes": write_targets,
-        "triggered_by": opened_by,
-        "affects": entrypoints,
-        "lineage": lineage,
-        "navigation": navigation,
-        "entrypoints": entrypoints,
+        "reads": data_sources.clone(),
+        "writes": write_targets.clone(),
+        "triggered_by": opened_by.clone(),
+        "affects": entrypoints.clone(),
+        "lineage": lineage.clone(),
+        "navigation": navigation.clone(),
+        "entrypoints": entrypoints.clone(),
     });
 
     let mut diagnostics = Vec::new();
@@ -1960,6 +2088,11 @@ fn explain_page_graph(
             .with_node_id(&node.id),
         );
     }
+    push_relation_evidence(&mut output, "reads", &data_sources);
+    push_relation_evidence(&mut output, "writes", &write_targets);
+    push_relation_evidence(&mut output, "triggered_by", &opened_by);
+    push_relation_evidence(&mut output, "affects", &entrypoints);
+    push_relation_evidence(&mut output, "navigation", &navigation);
     output.next_queries = vec![
         format!("--query-page-logic {} for detailed page logic", node.id),
         format!("--query-page {} for page dependencies", node.id),
@@ -2189,9 +2322,9 @@ fn explain_dataflow_graph(
         "writes": outputs.clone(),
         "triggered_by": inputs.clone(),
         "affects": outputs.clone(),
-        "lineage": lineage,
-        "inputs": inputs,
-        "outputs": outputs,
+        "lineage": lineage.clone(),
+        "inputs": inputs.clone(),
+        "outputs": outputs.clone(),
         "internal_topology": {
             "nodes": internal_nodes,
             "edges": internal_edges,
@@ -2241,6 +2374,9 @@ fn explain_dataflow_graph(
             .with_node_id(&node.id),
         );
     }
+    push_relation_evidence(&mut output, "reads", &inputs);
+    push_relation_evidence(&mut output, "writes", &outputs);
+    push_lineage_evidence(&mut output, &lineage);
     output.next_queries = vec![
         format!("--query-dataflow {} for full subgraph", node.name),
         format!("--context {} --depth 2 for surrounding closure", node.id),

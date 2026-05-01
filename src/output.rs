@@ -3,6 +3,7 @@ use crate::parser::PageMetadata;
 use crate::superpage::{RefType, SuperPageMetadata};
 use anyhow::Result;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::io::{self, Write};
 
 /// 输出格式化模块
@@ -197,6 +198,25 @@ fn print_superpage_human(spg: &SuperPageMetadata, out: &mut dyn Write) -> Result
     writeln!(out, "\n=== End of Report ===")?;
     out.flush()?;
     Ok(())
+}
+
+/// 递归收集组件 ID 对应的稳定 json_path
+fn collect_component_json_paths(
+    arr: &[serde_json::Value],
+    path_prefix: &str,
+    paths: &mut HashMap<String, String>,
+) {
+    for (index, comp) in arr.iter().enumerate() {
+        let current = format!("{}[{}]", path_prefix, index);
+        if let Some(comp_id) = comp.get("id").and_then(|v| v.as_str()) {
+            paths.insert(comp_id.to_string(), current.clone());
+        }
+        for nested in ["components", "panels", "steps", "comps"] {
+            if let Some(children) = comp.get(nested).and_then(|v| v.as_array()) {
+                collect_component_json_paths(children, &format!("{}.{}", current, nested), paths);
+            }
+        }
+    }
 }
 
 pub fn print_non_human(meta: &PageMetadata) -> Result<()> {
@@ -395,6 +415,20 @@ pub fn print_non_human_to(
             },
         });
 
+        let mut component_json_paths: HashMap<String, String> = HashMap::new();
+        if let Some(components) = spg
+            .raw
+            .get("canvas")
+            .and_then(|c| c.get("components"))
+            .and_then(|v| v.as_array())
+        {
+            collect_component_json_paths(
+                components,
+                "canvas.components",
+                &mut component_json_paths,
+            );
+        }
+
         let details = json!({
             "components": spg.components.iter().map(|c| json!({
                 "id": c.id,
@@ -409,8 +443,35 @@ pub fn print_non_human_to(
                     let mut expr_struct =
                         crate::action_semantics::build_expression_struct(Some(&e.raw_expr));
                     if let Some(obj) = expr_struct.as_object_mut() {
+                        let json_path = component_json_paths
+                            .get(&e.component_id)
+                            .cloned()
+                            .map(|base| format!("{}.{}", base, e.field))
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "canvas.components[id='{}'].{}",
+                                    e.component_id, e.field
+                                )
+                            });
+                        let refs_count = obj
+                            .get("refs")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.len())
+                            .unwrap_or(0);
+                        let resolved_occurrence_count = obj
+                            .get("resolved_refs")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.len())
+                            .unwrap_or(0);
                         obj.insert("component_id".to_string(), json!(e.component_id));
                         obj.insert("field".to_string(), json!(e.field));
+                        obj.insert("source_file".to_string(), json!("input_file"));
+                        obj.insert("json_path".to_string(), json!(json_path));
+                        obj.insert("refs_count".to_string(), json!(refs_count));
+                        obj.insert(
+                            "resolved_occurrence_count".to_string(),
+                            json!(resolved_occurrence_count),
+                        );
                     }
                     expr_struct
                 })

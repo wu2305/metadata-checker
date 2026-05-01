@@ -1,0 +1,83 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "sources": [
+    {
+      "id": "model1",
+      "modelType": "dwtable",
+      "path": "app/app_table.tbl"
+    }
+  ],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {
+        "id": "input1",
+        "type": "input",
+        "submitField": "model1.name"
+      },
+      {
+        "id": "btnLoad",
+        "type": "button",
+        "actions": [
+          {
+            "id": "loadAction",
+            "actionType": "loadData",
+            "triggerType": "click",
+            "dataSet": "model1"
+          }
+        ]
+      },
+      {
+        "id": "btnNew",
+        "type": "button",
+        "actions": [
+          {
+            "id": "newAction",
+            "actionType": "newData",
+            "triggerType": "click",
+            "submitRange": "component",
+            "submitComponent": ["input1"]
+          }
+        ]
+      },
+      {
+        "id": "btnReset",
+        "type": "button",
+        "actions": [
+          {
+            "id": "resetAction",
+            "actionType": "resetData",
+            "triggerType": "click",
+            "dataSet": "model1"
+          }
+        ]
+      },
+      {
+        "id": "btnRefreshModels",
+        "type": "button",
+        "actions": [
+          {
+            "id": "refreshModelsAction",
+            "actionType": "refreshModels",
+            "triggerType": "click",
+            "dataSet": "model1"
+          }
+        ]
+      },
+      {
+        "id": "btnRefreshData",
+        "type": "button",
+        "actions": [
+          {
+            "id": "refreshDataAction",
+            "actionType": "refreshData",
+            "triggerType": "click",
+            "dataSet": "model1"
+          }
+        ]
+      }
+    ]
+  }
+}

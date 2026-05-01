@@ -87,7 +87,7 @@ pub fn context_node_graph(
     let mut related_actions = Vec::new();
     let mut related_models = Vec::new();
     let mut related_pages = Vec::new();
-    let mut related_components = Vec::new();
+    let mut related_nodes = Vec::new();
 
     visited.insert(node_id.to_string());
     queue.push_back((node_id.to_string(), 0usize));
@@ -122,7 +122,7 @@ pub fn context_node_graph(
                         ) {
                             related_models.push(entry.clone());
                         }
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
                         downstream.push(entry.clone());
@@ -132,22 +132,22 @@ pub fn context_node_graph(
                         ) {
                             related_models.push(entry.clone());
                         }
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     crate::graph::EdgeType::Triggers => {
                         downstream.push(entry.clone());
                         related_actions.push(entry.clone());
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     crate::graph::EdgeType::Contains => {
                         if matches!(target.node_type, crate::graph::NodeType::Page) {
                             related_pages.push(entry.clone());
                         }
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::SetsParam => {
                         downstream.push(entry.clone());
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     _ => {
                         downstream.push(entry);
@@ -179,7 +179,7 @@ pub fn context_node_graph(
                         ) {
                             related_models.push(entry.clone());
                         }
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
                         upstream.push(entry.clone());
@@ -189,12 +189,12 @@ pub fn context_node_graph(
                         ) {
                             related_models.push(entry.clone());
                         }
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     crate::graph::EdgeType::Triggers => {
                         upstream.push(entry.clone());
                         related_actions.push(entry.clone());
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     crate::graph::EdgeType::Contains => {
                         if matches!(source.node_type, crate::graph::NodeType::Page) {
@@ -205,11 +205,11 @@ pub fn context_node_graph(
                         ) {
                             related_models.push(entry.clone());
                         }
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::SetsParam => {
                         upstream.push(entry.clone());
-                        related_components.push(entry);
+                        related_nodes.push(entry);
                     }
                     _ => {
                         upstream.push(entry);
@@ -219,86 +219,111 @@ pub fn context_node_graph(
         }
     }
 
+    let related_components: Vec<Value> = related_nodes
+        .iter()
+        .filter(|entry| entry.get("type").and_then(|v| v.as_str()) == Some("Component"))
+        .cloned()
+        .collect();
+
     // Budget-based truncation
-    let (upstream_out, downstream_out, actions_out, models_out, pages_out, components_out) =
-        match budget {
-            "compact" => {
-                let limit = 5usize;
-                (
-                    upstream.iter().take(limit).cloned().collect::<Vec<Value>>(),
-                    downstream
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                    related_actions
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                    related_models
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                    related_pages
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                    related_components
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                )
-            }
-            "full" => (
-                upstream.clone(),
-                downstream.clone(),
-                related_actions.clone(),
-                related_models.clone(),
-                related_pages.clone(),
-                related_components.clone(),
-            ),
-            _ => {
-                let limit = 20usize;
-                (
-                    upstream.iter().take(limit).cloned().collect::<Vec<Value>>(),
-                    downstream
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                    related_actions
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                    related_models
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                    related_pages
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                    related_components
-                        .iter()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<Value>>(),
-                )
-            }
-        };
+    let (
+        upstream_out,
+        downstream_out,
+        actions_out,
+        models_out,
+        pages_out,
+        nodes_out,
+        components_out,
+    ) = match budget {
+        "compact" => {
+            let limit = 5usize;
+            (
+                upstream.iter().take(limit).cloned().collect::<Vec<Value>>(),
+                downstream
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_actions
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_models
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_pages
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_nodes
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_components
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+            )
+        }
+        "full" => (
+            upstream.clone(),
+            downstream.clone(),
+            related_actions.clone(),
+            related_models.clone(),
+            related_pages.clone(),
+            related_nodes.clone(),
+            related_components.clone(),
+        ),
+        _ => {
+            let limit = 20usize;
+            (
+                upstream.iter().take(limit).cloned().collect::<Vec<Value>>(),
+                downstream
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_actions
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_models
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_pages
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_nodes
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+                related_components
+                    .iter()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+            )
+        }
+    };
 
     let truncated = upstream.len() > upstream_out.len()
         || downstream.len() > downstream_out.len()
         || related_actions.len() > actions_out.len()
         || related_models.len() > models_out.len()
         || related_pages.len() > pages_out.len()
+        || related_nodes.len() > nodes_out.len()
         || related_components.len() > components_out.len();
 
     let mut diagnostics = Vec::new();
@@ -339,6 +364,13 @@ pub fn context_node_graph(
                 related_pages.len()
             ));
         }
+        if related_nodes.len() > nodes_out.len() {
+            truncated_cats.push(format!(
+                "related_nodes ({}/{})",
+                nodes_out.len(),
+                related_nodes.len()
+            ));
+        }
         if related_components.len() > components_out.len() {
             truncated_cats.push(format!(
                 "related_components ({}/{})",
@@ -368,6 +400,7 @@ pub fn context_node_graph(
         counts.insert("related_actions".to_string(), json!(actions_out.len()));
         counts.insert("related_models".to_string(), json!(models_out.len()));
         counts.insert("related_pages".to_string(), json!(pages_out.len()));
+        counts.insert("related_nodes".to_string(), json!(nodes_out.len()));
         counts.insert(
             "related_components".to_string(),
             json!(components_out.len()),
@@ -609,6 +642,7 @@ pub fn context_node_graph(
             "related_actions": actions_out,
             "related_models": models_out,
             "related_pages": pages_out,
+            "related_nodes": nodes_out,
             "related_components": components_out,
         })
     } else {
@@ -618,6 +652,7 @@ pub fn context_node_graph(
             "related_actions": actions_out,
             "related_models": models_out,
             "related_pages": pages_out,
+            "related_nodes": nodes_out,
             "related_components": components_out,
             "lineage": lineage,
         })

@@ -49,15 +49,16 @@ impl AiOutput {
         if has_substantive_summary && out.evidence.is_empty() {
             out.evidence.push(Evidence::new(
                 "Output generated from parsed metadata",
-                "Default evidence: detailed evidence chain will be populated in later milestones",
+                "Fallback evidence injected because this query path did not emit structured evidence",
             ).with_confidence(Confidence::Low));
             out.diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,
                 code: "EVIDENCE_INCOMPLETE".to_string(),
-                message: "Summary contains claims but no evidence is available yet".to_string(),
+                message: "Summary contains claims but no structured evidence was generated"
+                    .to_string(),
                 location: Location::default(),
                 suggestion: Some(
-                    "This is a known limitation; evidence will be populated in later milestones"
+                    "Use --detail for manual verification, and treat conclusions as low confidence"
                         .to_string(),
                 ),
             });

@@ -33,6 +33,29 @@ fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node
     None
 }
 
+/// 提取完整节点 ID 中的组件裸 ID（如 comp:app/a.spg|button1 -> button1）
+fn component_short_id(node_id: &str) -> &str {
+    node_id.split('|').next_back().unwrap_or(node_id)
+}
+
+/// 为 action 构造稳定的近似 json_path
+fn action_json_path(component_id: &str, action_id: &str) -> String {
+    format!(
+        "canvas.components[id='{}'].actions[id='{}']",
+        component_short_id(component_id),
+        action_id
+    )
+}
+
+/// 从边元数据提取字符串字段
+fn edge_meta_str(edge: &crate::graph::Edge, key: &str) -> Option<String> {
+    edge.meta
+        .as_ref()
+        .and_then(|m| m.get(key))
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string)
+}
+
 pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
     if human {
         let mut out = io::stdout();
@@ -511,6 +534,8 @@ pub fn query_page_logic(
     let mut page_inputs: Vec<serde_json::Value> = Vec::new();
     let mut visibility_rules: Vec<serde_json::Value> = Vec::new();
     let mut from_file = false;
+    let mut component_json_paths: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     // action_id (裸 id，不含前缀) -> { trigger_type, wait_prev, condition }
     let mut action_meta: std::collections::HashMap<String, serde_json::Value> =
         std::collections::HashMap::new();
@@ -536,11 +561,18 @@ pub fn query_page_logic(
             // 递归收集组件和 action 元数据
             fn collect_components(
                 arr: &[serde_json::Value],
+                path_prefix: &str,
+                source_file: &str,
+                component_json_paths: &mut std::collections::HashMap<String, String>,
                 visibility_rules: &mut Vec<serde_json::Value>,
                 action_meta: &mut std::collections::HashMap<String, serde_json::Value>,
             ) {
-                for comp in arr {
+                for (index, comp) in arr.iter().enumerate() {
                     let comp_id = comp.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let component_path = format!("{}[{}]", path_prefix, index);
+                    if !comp_id.is_empty() {
+                        component_json_paths.insert(comp_id.to_string(), component_path.clone());
+                    }
                     for prop in ["visible", "hidden", "disabled", "readonly"] {
                         if let Some(val) = comp.get(prop) {
                             let mut expr_struct =
@@ -549,6 +581,8 @@ pub fn query_page_logic(
                                 "component_id": comp_id,
                                 "rule": prop,
                                 "expression": val,
+                                "source_file": source_file,
+                                "json_path": format!("{}.{}", component_path, prop),
                             });
                             if let Some(obj) = expr_struct.as_object_mut() {
                                 for key in [
@@ -568,7 +602,7 @@ pub fn query_page_logic(
                     }
                     // 收集 action 元数据，key 用 comp_id + "|" + action_id 防止同名 action 串线
                     if let Some(actions) = comp.get("actions").and_then(|a| a.as_array()) {
-                        for act in actions {
+                        for (action_index, act) in actions.iter().enumerate() {
                             if let Some(aid) = act.get("id").and_then(|v| v.as_str()) {
                                 let trigger_type = act
                                     .get("triggerType")
@@ -580,12 +614,16 @@ pub fn query_page_logic(
                                     .get("condition")
                                     .or_else(|| act.get("conditionExp"))
                                     .cloned();
+                                let action_path =
+                                    format!("{}.actions[{}]", component_path, action_index);
                                 action_meta.insert(
                                     format!("{}|{}", comp_id, aid),
                                     json!({
                                         "trigger_type": trigger_type,
                                         "wait_prev": wait_prev,
                                         "condition": condition,
+                                        "json_path": action_path,
+                                        "source_file": source_file,
                                     }),
                                 );
                             }
@@ -594,7 +632,14 @@ pub fn query_page_logic(
                     // 递归嵌套组件
                     for nested_key in ["components", "panels", "steps", "comps"] {
                         if let Some(nested) = comp.get(nested_key).and_then(|v| v.as_array()) {
-                            collect_components(nested, visibility_rules, action_meta);
+                            collect_components(
+                                nested,
+                                &format!("{}.{}", component_path, nested_key),
+                                source_file,
+                                component_json_paths,
+                                visibility_rules,
+                                action_meta,
+                            );
                         }
                     }
                 }
@@ -605,7 +650,14 @@ pub fn query_page_logic(
                 .and_then(|c| c.get("components"))
                 .and_then(|c| c.as_array())
             {
-                collect_components(components, &mut visibility_rules, &mut action_meta);
+                collect_components(
+                    components,
+                    "canvas.components",
+                    &page_node.path,
+                    &mut component_json_paths,
+                    &mut visibility_rules,
+                    &mut action_meta,
+                );
             }
         }
     }
@@ -624,10 +676,22 @@ pub fn query_page_logic(
                     .and_then(|m| m.get("component_type"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("component");
+                let component_id = component_short_id(&comp.id);
+                let json_path = component_json_paths
+                    .get(component_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        format!("canvas.components[id='{}']", component_short_id(&comp.id))
+                    });
                 entrypoints.push(json!({
                     "id": comp.id,
                     "name": comp.name,
                     "type": comp_type,
+                    "source_file": comp.path,
+                    "node_id": comp.id,
+                    "edge_type": "Triggers",
+                    "raw_expr": serde_json::Value::Null,
+                    "json_path": format!("{}.actions[*]", json_path),
                 }));
             }
         }
@@ -648,21 +712,72 @@ pub fn query_page_logic(
             for (target, edge) in &node_out {
                 match edge.edge_type {
                     crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
+                        let default_json_path =
+                            if matches!(node.node_type, crate::graph::NodeType::Action) {
+                                let (atype, aid) = node
+                                    .name
+                                    .split_once(':')
+                                    .map(|(t, i)| (t.to_string(), i.to_string()))
+                                    .unwrap_or_else(|| (node.name.clone(), node.name.clone()));
+                                let parent_component = node.id.split('|').nth(1).unwrap_or("?");
+                                format!(
+                                    "{}.{}",
+                                    action_json_path(
+                                        &format!("comp:{}|{}", page_node.path, parent_component),
+                                        &aid
+                                    ),
+                                    if atype == "setParamValue" || atype == "link" {
+                                        "params[*].value"
+                                    } else {
+                                        "fieldValues[*].value"
+                                    }
+                                )
+                            } else {
+                                format!(
+                                    "canvas.components[id='{}'].<expression>",
+                                    component_short_id(&node.id)
+                                )
+                            };
                         data_sources.push(json!({
                             "source_component": if matches!(node.node_type, crate::graph::NodeType::Component) { Some(node.id.clone()) } else { None },
                             "source_action": if matches!(node.node_type, crate::graph::NodeType::Action) { Some(node.id.clone()) } else { None },
                             "model": target.name,
                             "field_path": edge.field_path,
                             "target_id": target.id,
+                            "source_file": node.path,
+                            "edge_type": format!("{:?}", edge.edge_type),
+                            "raw_expr": edge_meta_str(edge, "source_expr"),
+                            "json_path": edge_meta_str(edge, "json_path").unwrap_or(default_json_path),
                         }));
                     }
                     crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
+                        let default_json_path =
+                            if matches!(node.node_type, crate::graph::NodeType::Action) {
+                                let aid = node.name.split(':').nth(1).unwrap_or(node.name.as_str());
+                                let parent_component = node.id.split('|').nth(1).unwrap_or("?");
+                                format!(
+                                    "{}.fieldValues[*].value",
+                                    action_json_path(
+                                        &format!("comp:{}|{}", page_node.path, parent_component),
+                                        aid
+                                    )
+                                )
+                            } else {
+                                format!(
+                                    "canvas.components[id='{}'].submitField",
+                                    component_short_id(&node.id)
+                                )
+                            };
                         write_targets.push(json!({
                             "source_component": if matches!(node.node_type, crate::graph::NodeType::Component) { Some(node.id.clone()) } else { None },
                             "source_action": if matches!(node.node_type, crate::graph::NodeType::Action) { Some(node.id.clone()) } else { None },
                             "model": target.name,
                             "field_path": edge.field_path,
                             "target_id": target.id,
+                            "source_file": node.path,
+                            "edge_type": format!("{:?}", edge.edge_type),
+                            "raw_expr": edge_meta_str(edge, "source_expr"),
+                            "json_path": edge_meta_str(edge, "json_path").unwrap_or(default_json_path),
                         }));
                     }
                     crate::graph::EdgeType::OpensPage
@@ -674,6 +789,24 @@ pub fn query_page_logic(
                             "to_name": target.name,
                             "type": format!("{:?}", edge.edge_type),
                             "field_path": edge.field_path,
+                            "source_file": node.path,
+                            "edge_type": format!("{:?}", edge.edge_type),
+                            "raw_expr": edge_meta_str(edge, "source_expr"),
+                            "json_path": edge_meta_str(edge, "json_path").unwrap_or_else(|| {
+                                if matches!(node.node_type, crate::graph::NodeType::Action) {
+                                    let aid = node.name.split(':').nth(1).unwrap_or(node.name.as_str());
+                                    let parent_component = node.id.split('|').nth(1).unwrap_or("?");
+                                    format!(
+                                        "{}.path",
+                                        action_json_path(
+                                            &format!("comp:{}|{}", page_node.path, parent_component),
+                                            aid
+                                        )
+                                    )
+                                } else {
+                                    format!("canvas.components[id='{}'].resPath", component_short_id(&node.id))
+                                }
+                            }),
                         }));
                     }
                     crate::graph::EdgeType::SetsParam | crate::graph::EdgeType::PassesParam => {
@@ -683,6 +816,27 @@ pub fn query_page_logic(
                             "to_name": target.name,
                             "type": format!("{:?}", edge.edge_type),
                             "field_path": edge.field_path,
+                            "source_file": node.path,
+                            "edge_type": format!("{:?}", edge.edge_type),
+                            "raw_expr": edge_meta_str(edge, "source_expr"),
+                            "json_path": edge_meta_str(edge, "json_path").unwrap_or_else(|| {
+                                if matches!(node.node_type, crate::graph::NodeType::Action) {
+                                    let aid = node.name.split(':').nth(1).unwrap_or(node.name.as_str());
+                                    let parent_component = node.id.split('|').nth(1).unwrap_or("?");
+                                    format!(
+                                        "{}.params[*].value",
+                                        action_json_path(
+                                            &format!("comp:{}|{}", page_node.path, parent_component),
+                                            aid
+                                        )
+                                    )
+                                } else {
+                                    format!(
+                                        "canvas.components[id='{}'].params[*].value",
+                                        component_short_id(&node.id)
+                                    )
+                                }
+                            }),
                         }));
                     }
                     crate::graph::EdgeType::ActionValidates
@@ -694,6 +848,20 @@ pub fn query_page_logic(
                             "field_path": edge.field_path,
                             "target_id": target.id,
                             "type": format!("{:?}", edge.edge_type),
+                            "source_file": node.path,
+                            "edge_type": format!("{:?}", edge.edge_type),
+                            "raw_expr": edge_meta_str(edge, "source_expr"),
+                            "json_path": edge_meta_str(edge, "json_path").unwrap_or_else(|| {
+                                let aid = node.name.split(':').nth(1).unwrap_or(node.name.as_str());
+                                let parent_component = node.id.split('|').nth(1).unwrap_or("?");
+                                format!(
+                                    "{}.<derived-target>",
+                                    action_json_path(
+                                        &format!("comp:{}|{}", page_node.path, parent_component),
+                                        aid
+                                    )
+                                )
+                            }),
                         }));
                     }
                     crate::graph::EdgeType::ActionControlsComponent => {
@@ -703,6 +871,20 @@ pub fn query_page_logic(
                             "to_name": target.name,
                             "type": format!("{:?}", edge.edge_type),
                             "field_path": edge.field_path,
+                            "source_file": node.path,
+                            "edge_type": format!("{:?}", edge.edge_type),
+                            "raw_expr": edge_meta_str(edge, "source_expr"),
+                            "json_path": edge_meta_str(edge, "json_path").unwrap_or_else(|| {
+                                let aid = node.name.split(':').nth(1).unwrap_or(node.name.as_str());
+                                let parent_component = node.id.split('|').nth(1).unwrap_or("?");
+                                format!(
+                                    "{}.targetComponent[*]",
+                                    action_json_path(
+                                        &format!("comp:{}|{}", page_node.path, parent_component),
+                                        aid
+                                    )
+                                )
+                            }),
                         }));
                     }
                     _ => {}
@@ -746,6 +928,10 @@ pub fn query_page_logic(
                         "model": target.name,
                         "field_path": edge.field_path,
                         "target_id": target.id,
+                        "source_file": action.path,
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "raw_expr": edge_meta_str(edge, "source_expr"),
+                        "json_path": edge_meta_str(edge, "json_path"),
                     }));
                 }
                 crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
@@ -753,6 +939,10 @@ pub fn query_page_logic(
                         "model": target.name,
                         "field_path": edge.field_path,
                         "target_id": target.id,
+                        "source_file": action.path,
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "raw_expr": edge_meta_str(edge, "source_expr"),
+                        "json_path": edge_meta_str(edge, "json_path"),
                     }));
                 }
                 crate::graph::EdgeType::OpensPage
@@ -762,6 +952,10 @@ pub fn query_page_logic(
                         "to": target.id,
                         "to_name": target.name,
                         "type": format!("{:?}", edge.edge_type),
+                        "source_file": action.path,
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "raw_expr": edge_meta_str(edge, "source_expr"),
+                        "json_path": edge_meta_str(edge, "json_path"),
                     }));
                 }
                 crate::graph::EdgeType::SetsParam | crate::graph::EdgeType::ActionSetsParam => {
@@ -769,6 +963,10 @@ pub fn query_page_logic(
                         "to": target.id,
                         "to_name": target.name,
                         "field_path": edge.field_path,
+                        "source_file": action.path,
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "raw_expr": edge_meta_str(edge, "source_expr"),
+                        "json_path": edge_meta_str(edge, "json_path"),
                     }));
                 }
                 crate::graph::EdgeType::PassesParam => {
@@ -776,6 +974,10 @@ pub fn query_page_logic(
                         "to": target.id,
                         "to_name": target.name,
                         "field_path": edge.field_path,
+                        "source_file": action.path,
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "raw_expr": edge_meta_str(edge, "source_expr"),
+                        "json_path": edge_meta_str(edge, "json_path"),
                     }));
                 }
                 crate::graph::EdgeType::ActionValidates => {
@@ -784,6 +986,10 @@ pub fn query_page_logic(
                         "field_path": edge.field_path,
                         "target_id": target.id,
                         "validate": true,
+                        "source_file": action.path,
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "raw_expr": edge_meta_str(edge, "source_expr"),
+                        "json_path": edge_meta_str(edge, "json_path"),
                     }));
                 }
                 crate::graph::EdgeType::ActionLoadsData => {
@@ -792,6 +998,10 @@ pub fn query_page_logic(
                         "field_path": edge.field_path,
                         "target_id": target.id,
                         "load": true,
+                        "source_file": action.path,
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "raw_expr": edge_meta_str(edge, "source_expr"),
+                        "json_path": edge_meta_str(edge, "json_path"),
                     }));
                 }
                 crate::graph::EdgeType::ActionControlsComponent => {
@@ -799,6 +1009,10 @@ pub fn query_page_logic(
                         "to": target.id,
                         "to_name": target.name,
                         "type": format!("{:?}", edge.edge_type),
+                        "source_file": action.path,
+                        "edge_type": format!("{:?}", edge.edge_type),
+                        "raw_expr": edge_meta_str(edge, "source_expr"),
+                        "json_path": edge_meta_str(edge, "json_path"),
                     }));
                 }
                 _ => {}
@@ -821,6 +1035,20 @@ pub fn query_page_logic(
             .get(&lookup_key)
             .and_then(|v| v.get("wait_prev"))
             .cloned();
+        let action_path_hint = action_meta
+            .get(&lookup_key)
+            .and_then(|v| v.get("json_path"))
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| {
+                action_json_path(parent_component.as_deref().unwrap_or("?"), &action_id)
+            });
+        let action_source_file = action_meta
+            .get(&lookup_key)
+            .and_then(|v| v.get("source_file"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(action.path.as_str())
+            .to_string();
         let condition_raw = action_meta
             .get(&lookup_key)
             .and_then(|v| v.get("condition"))
@@ -873,6 +1101,9 @@ pub fn query_page_logic(
             "navigation": nav,
             "sets_params": sets_params,
             "passes_params": passes_params,
+            "source_file": action_source_file,
+            "node_id": action.id,
+            "json_path": action_path_hint,
         }));
     }
 
@@ -884,7 +1115,11 @@ pub fn query_page_logic(
             severity: crate::output::DiagnosticSeverity::Info,
             code: "NO_WRITE_TARGETS".to_string(),
             message: "Page has no detected write targets".to_string(),
-            location: crate::output::Location::new(),
+            location: crate::output::Location {
+                source_file: Some(page_node.path.clone()),
+                node_id: Some(page_id.to_string()),
+                json_path: None,
+            },
             suggestion: Some("Verify if page is read-only or actions are not parsed".to_string()),
         });
     }
@@ -894,18 +1129,30 @@ pub fn query_page_logic(
             severity: crate::output::DiagnosticSeverity::Warning,
             code: "NO_ENTRYPOINTS".to_string(),
             message: "Page has no detected user entrypoints (buttons, links, etc.)".to_string(),
-            location: crate::output::Location::new(),
+            location: crate::output::Location {
+                source_file: Some(page_node.path.clone()),
+                node_id: Some(page_id.to_string()),
+                json_path: Some("canvas.components[*].actions[*]".to_string()),
+            },
             suggestion: Some("Check component action definitions".to_string()),
         });
     }
 
     if !from_file {
         diagnostics.push(crate::output::Diagnostic {
-            severity: crate::output::DiagnosticSeverity::Info,
+            severity: crate::output::DiagnosticSeverity::Warning,
             code: "PAGE_INPUTS_DEFERRED".to_string(),
-            message: "Page inputs and visibility rules require raw file access".to_string(),
-            location: crate::output::Location::new(),
-            suggestion: Some("Run with --project-dir pointing to the project root".to_string()),
+            message: "Raw page file is unavailable; page_inputs/visibility_rules may be incomplete"
+                .to_string(),
+            location: crate::output::Location {
+                source_file: Some(page_node.path.clone()),
+                node_id: Some(page_id.to_string()),
+                json_path: None,
+            },
+            suggestion: Some(
+                "Ensure --project-dir points to the project root containing this page file"
+                    .to_string(),
+            ),
         });
     }
 
@@ -917,7 +1164,20 @@ pub fn query_page_logic(
                 severity: crate::output::DiagnosticSeverity::Warning,
                 code: "UNRESOLVED_PAGE_NAVIGATION".to_string(),
                 message: format!("Navigation target page '{}' not found in graph", to),
-                location: crate::output::Location::new(),
+                location: crate::output::Location {
+                    source_file: nav
+                        .get("source_file")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                    node_id: nav
+                        .get("from")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                    json_path: nav
+                        .get("json_path")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                },
                 suggestion: Some("Check if target page exists in project".to_string()),
             });
         }
@@ -931,7 +1191,25 @@ pub fn query_page_logic(
                 severity: crate::output::DiagnosticSeverity::Warning,
                 code: "UNRESOLVED_MODEL_WRITE".to_string(),
                 message: format!("Write target model '{}' not found in graph", target_id),
-                location: crate::output::Location::new(),
+                location: crate::output::Location {
+                    source_file: wt
+                        .get("source_file")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                    node_id: wt
+                        .get("source_action")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string)
+                        .or_else(|| {
+                            wt.get("source_component")
+                                .and_then(|v| v.as_str())
+                                .map(ToString::to_string)
+                        }),
+                    json_path: wt
+                        .get("json_path")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                },
                 suggestion: Some("Check if target model exists in project sources".to_string()),
             });
         }
@@ -961,14 +1239,30 @@ pub fn query_page_logic(
                 .or_else(|| rule.get("expression").and_then(|v| v.as_str()))
                 .unwrap_or("<non-string expression>");
             diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
+                severity: crate::output::DiagnosticSeverity::Warning,
                 code: "VISIBILITY_RULE_UNRESOLVED".to_string(),
                 message: format!(
                     "Visibility rule '{}' contains unresolved or ambiguous references",
                     expr
                 ),
-                location: crate::output::Location::new(),
-                suggestion: Some("Verify expression references are valid".to_string()),
+                location: crate::output::Location {
+                    source_file: rule
+                        .get("source_file")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                    node_id: rule
+                        .get("component_id")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                    json_path: rule
+                        .get("json_path")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                },
+                suggestion: Some(
+                    "Review the expression and verify each referenced component/model exists"
+                        .to_string(),
+                ),
             });
         }
     }
@@ -1009,7 +1303,20 @@ pub fn query_page_logic(
                         .and_then(|v| v.as_str())
                         .unwrap_or("?")
                 ),
-                location: crate::output::Location::new(),
+                location: crate::output::Location {
+                    source_file: flow
+                        .get("source_file")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                    node_id: flow
+                        .get("component_id")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                    json_path: flow
+                        .get("json_path")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                },
                 suggestion: Some("Verify if this action should produce a write target".to_string()),
             });
         }
@@ -1026,7 +1333,20 @@ pub fn query_page_logic(
                 severity: crate::output::DiagnosticSeverity::Warning,
                 code: "UNKNOWN_ACTION_TYPE".to_string(),
                 message: format!("Unknown action type '{}' encountered", atype),
-                location: crate::output::Location::new(),
+                location: crate::output::Location {
+                    source_file: flow
+                        .get("source_file")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                    node_id: flow
+                        .get("component_id")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                    json_path: flow
+                        .get("json_path")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
+                },
                 suggestion: Some(
                     "Check if this action type is supported by metadata-checker".to_string(),
                 ),
@@ -1069,17 +1389,18 @@ pub fn query_page_logic(
     });
 
     let details = serde_json::json!({
-        "page_inputs": page_inputs,
-        "data_sources": data_sources,
-        "write_targets": write_targets,
-        "entrypoints": entrypoints,
-        "action_flows": action_flows,
-        "visibility_rules": visibility_rules,
-        "navigation": navigation,
+        "page_inputs": page_inputs.clone(),
+        "data_sources": data_sources.clone(),
+        "write_targets": write_targets.clone(),
+        "entrypoints": entrypoints.clone(),
+        "action_flows": action_flows.clone(),
+        "visibility_rules": visibility_rules.clone(),
+        "navigation": navigation.clone(),
         "risk_diagnostics": diagnostics.iter().map(|d| serde_json::json!({
             "severity": format!("{:?}", d.severity),
             "code": d.code,
             "message": d.message,
+            "location": d.location,
             "suggestion": d.suggestion,
         })).collect::<Vec<serde_json::Value>>(),
     });
@@ -1096,8 +1417,41 @@ pub fn query_page_logic(
         )
         .with_confidence(crate::output::Confidence::High)
         .with_node_id(page_id)
-        .with_source_file(&page_node.path),
+        .with_source_file(&page_node.path)
+        .with_json_path("canvas.components[*].actions[*]")
+        .with_edge_type("Triggers"),
     );
+    for ep in entrypoints.iter().take(5) {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Entrypoint {} ({}) can trigger page logic",
+                    ep.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+                    ep.get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("component")
+                ),
+                "Component has action definitions in page metadata",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_source_file(
+                ep.get("source_file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&page_node.path),
+            )
+            .with_node_id(ep.get("id").and_then(|v| v.as_str()).unwrap_or("?"))
+            .with_edge_type(
+                ep.get("edge_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Triggers"),
+            )
+            .with_json_path(
+                ep.get("json_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("canvas.components[*].actions[*]"),
+            ),
+        );
+    }
     if !data_sources.is_empty() {
         output.evidence.push(
             crate::output::Evidence::new(
@@ -1110,8 +1464,51 @@ pub fn query_page_logic(
             )
             .with_confidence(crate::output::Confidence::High)
             .with_node_id(page_id)
-            .with_source_file(&page_node.path),
+            .with_source_file(&page_node.path)
+            .with_edge_type("Reads/ActionReads"),
         );
+        for ds in data_sources.iter().take(5) {
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Read {} via {}",
+                        ds.get("field_path").and_then(|v| v.as_str()).unwrap_or("?"),
+                        ds.get("source_action")
+                            .or_else(|| ds.get("source_component"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?")
+                    ),
+                    "Relation extracted from graph edge under page scope",
+                )
+                .with_confidence(crate::output::Confidence::High)
+                .with_source_file(
+                    ds.get("source_file")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&page_node.path),
+                )
+                .with_node_id(
+                    ds.get("source_action")
+                        .or_else(|| ds.get("source_component"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?"),
+                )
+                .with_edge_type(
+                    ds.get("edge_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Reads"),
+                )
+                .with_raw_expr(
+                    ds.get("raw_expr")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(ds.get("field_path").and_then(|v| v.as_str()).unwrap_or("?")),
+                )
+                .with_json_path(
+                    ds.get("json_path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("canvas.components[*].<expression>"),
+                ),
+            );
+        }
     }
     if !write_targets.is_empty() {
         output.evidence.push(
@@ -1121,8 +1518,166 @@ pub fn query_page_logic(
             )
             .with_confidence(crate::output::Confidence::High)
             .with_node_id(page_id)
-            .with_source_file(&page_node.path),
+            .with_source_file(&page_node.path)
+            .with_edge_type("Writes/ActionWrites"),
         );
+        for wt in write_targets.iter().take(5) {
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Write {} via {}",
+                        wt.get("field_path").and_then(|v| v.as_str()).unwrap_or("?"),
+                        wt.get("source_action")
+                            .or_else(|| wt.get("source_component"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?")
+                    ),
+                    "Write target inferred from action/submit binding edge",
+                )
+                .with_confidence(crate::output::Confidence::High)
+                .with_source_file(
+                    wt.get("source_file")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&page_node.path),
+                )
+                .with_node_id(
+                    wt.get("source_action")
+                        .or_else(|| wt.get("source_component"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?"),
+                )
+                .with_edge_type(
+                    wt.get("edge_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Writes"),
+                )
+                .with_raw_expr(
+                    wt.get("raw_expr")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(wt.get("field_path").and_then(|v| v.as_str()).unwrap_or("?")),
+                )
+                .with_json_path(
+                    wt.get("json_path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("canvas.components[*].actions[*].fieldValues[*].value"),
+                ),
+            );
+        }
+    }
+    if !navigation.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Page {} has {} navigation relations",
+                    page_id,
+                    navigation.len()
+                ),
+                "Graph traversal: OpensPage/EmbedsPage/Param transfer edges",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(page_id)
+            .with_source_file(&page_node.path)
+            .with_edge_type("Navigation"),
+        );
+        for nav_item in navigation.iter().take(5) {
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Navigation {} -> {} ({})",
+                        nav_item.get("from").and_then(|v| v.as_str()).unwrap_or("?"),
+                        nav_item.get("to").and_then(|v| v.as_str()).unwrap_or("?"),
+                        nav_item.get("type").and_then(|v| v.as_str()).unwrap_or("?")
+                    ),
+                    "Navigation relation extracted from action/component edges",
+                )
+                .with_confidence(crate::output::Confidence::High)
+                .with_source_file(
+                    nav_item
+                        .get("source_file")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&page_node.path),
+                )
+                .with_node_id(nav_item.get("from").and_then(|v| v.as_str()).unwrap_or("?"))
+                .with_edge_type(
+                    nav_item
+                        .get("edge_type")
+                        .or_else(|| nav_item.get("type"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Navigation"),
+                )
+                .with_raw_expr(
+                    nav_item.get("raw_expr").and_then(|v| v.as_str()).unwrap_or(
+                        nav_item
+                            .get("field_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?"),
+                    ),
+                )
+                .with_json_path(
+                    nav_item
+                        .get("json_path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("canvas.components[*].actions[*].path"),
+                ),
+            );
+        }
+    }
+    if !visibility_rules.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Page {} has {} visibility-related rules",
+                    page_id,
+                    visibility_rules.len()
+                ),
+                "Visibility conditions are collected recursively from component tree",
+            )
+            .with_confidence(crate::output::Confidence::Medium)
+            .with_node_id(page_id)
+            .with_source_file(&page_node.path)
+            .with_edge_type("VisibilityRule"),
+        );
+        for rule in visibility_rules.iter().take(5) {
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Visibility rule {}.{}",
+                        rule.get("component_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?"),
+                        rule.get("rule").and_then(|v| v.as_str()).unwrap_or("?")
+                    ),
+                    "Rule originates from component metadata field",
+                )
+                .with_confidence(match rule.get("confidence").and_then(|v| v.as_str()) {
+                    Some("high") => crate::output::Confidence::High,
+                    Some("low") => crate::output::Confidence::Low,
+                    _ => crate::output::Confidence::Medium,
+                })
+                .with_source_file(
+                    rule.get("source_file")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&page_node.path),
+                )
+                .with_node_id(
+                    rule.get("component_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?"),
+                )
+                .with_edge_type("VisibilityRule")
+                .with_raw_expr(
+                    rule.get("raw_expr")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| rule.get("expression").and_then(|v| v.as_str()))
+                        .unwrap_or("<non-string expression>"),
+                )
+                .with_json_path(
+                    rule.get("json_path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("canvas.components[*].visible"),
+                ),
+            );
+        }
     }
     if !action_flows.is_empty() {
         output.evidence.push(
@@ -1132,8 +1687,55 @@ pub fn query_page_logic(
             )
             .with_confidence(crate::output::Confidence::High)
             .with_node_id(page_id)
-            .with_source_file(&page_node.path),
+            .with_source_file(&page_node.path)
+            .with_edge_type("Triggers"),
         );
+        for flow in action_flows.iter().take(5) {
+            output.evidence.push(
+                crate::output::Evidence::new(
+                    format!(
+                        "Action flow {} ({})",
+                        flow.get("action_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?"),
+                        flow.get("action_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?")
+                    ),
+                    "Action flow assembled from action node edges plus raw action metadata",
+                )
+                .with_confidence(
+                    if flow.get("action_category").and_then(|v| v.as_str()) == Some("unknown") {
+                        crate::output::Confidence::Low
+                    } else {
+                        crate::output::Confidence::High
+                    },
+                )
+                .with_source_file(
+                    flow.get("source_file")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&page_node.path),
+                )
+                .with_node_id(flow.get("node_id").and_then(|v| v.as_str()).unwrap_or("?"))
+                .with_edge_type("Triggers")
+                .with_raw_expr(
+                    flow.get("condition")
+                        .and_then(|v| v.get("raw_expr"))
+                        .and_then(|v| v.as_str())
+                        .or_else(|| {
+                            flow.get("blocks_on")
+                                .and_then(|v| v.get("raw"))
+                                .and_then(|v| v.as_str())
+                        })
+                        .unwrap_or("action execution metadata"),
+                )
+                .with_json_path(
+                    flow.get("json_path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("canvas.components[*].actions[*]"),
+                ),
+            );
+        }
     }
 
     let mut nq = vec![

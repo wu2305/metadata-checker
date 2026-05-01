@@ -10,7 +10,8 @@ pub fn classify_action(action_type: &str) -> &'static str {
         "setParamValue" => "param_mutation",
         "showComponent" | "hideComponent" | "switchPanel" | "closeDialog" => "ui_control",
         "validateData" => "validation",
-        "newData" | "resetData" | "refreshModels" | "refreshData" => "data_refresh",
+        "newData" => "data_initialization",
+        "resetData" | "refreshModels" | "refreshData" => "data_refresh",
         _ => "unknown",
     }
 }
@@ -143,6 +144,9 @@ pub fn build_semantic_summary(
         }
         "refreshModels" => {
             format!("点击 {} 后刷新模型", component_name)
+        }
+        "refreshData" => {
+            format!("点击 {} 后刷新数据", component_name)
         }
         _ => format!("点击 {} 后执行 {} 动作", component_name, action_type),
     }

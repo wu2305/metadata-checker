@@ -105,6 +105,8 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 #     "entrypoints": [...],
 #     "action_flows": [...],
 #     "write_targets": [...],
+#     "navigation": [...],
+#     "visibility_rules": [...],
 #     "risk_diagnostics": [...]
 #   }
 # }
@@ -315,6 +317,9 @@ metadata-checker --project-dir ./my-project --explain action:app/page.spg|button
 ### 兼容字段说明
 
 - `upstream_dependencies` / `downstream_outputs` 为 legacy 兼容字段，不应作为主语义字段
+- `--context` 中新增 `related_nodes`（全类型节点闭包）；`related_components` 仅保留 `type=Component` 条目用于兼容
+- `action_flows[].action_category` 当前稳定枚举：`data_write` / `data_read` / `navigation` / `param_mutation` / `ui_control` / `validation` / `data_initialization` / `data_refresh` / `unknown`
+- `details.expressions[]` 增加 `component_id` / `field` / `source_file` / `json_path` / `refs_count` / `resolved_occurrence_count`，其中 `refs` 为去重集合，`resolved_refs` 为出现级列表
 - 禁止默认读取 raw JSON，必须从 `summary` 开始
 
 详细字段定义见 `docs/schema.md`。

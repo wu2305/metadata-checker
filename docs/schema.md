@@ -54,9 +54,9 @@
    - `CrossPageQuery`：path 总数 + 每条具体 path 的 evidence（最多 5 条）
    - `DataFlowQuery`：inputs/outputs 独立 evidence
    - `ComponentQuery`：组件定义 evidence
-   - `Explain`：节点存在 evidence
-   - `Context`：closure 范围 + upstream/downstream 独立 evidence
-   - `PageLogic`：entrypoints/data_sources/write_targets 独立 evidence
+   - `Explain`：节点定义 + reads/writes/triggered_by/affects/lineage 关系 evidence
+   - `Context`：closure 范围 + upstream/downstream/related_nodes evidence
+   - `PageLogic`：entrypoints/data_sources/write_targets/action_flows/navigation/visibility_rules evidence
 
    这类证据带 `confidence: high` 或 `medium`，并有 `node_id`/`source_file` 等定位信息。
 
@@ -126,7 +126,7 @@ pub struct AiOutput {
 | `outputs` | array | DataFlow 输出目标列表（DataFlow 有） |
 | `internal_topology` | object | DataFlow 内部节点拓扑：nodes + edges（DataFlow 有） |
 | `produced_by` | array | 字段产生者列表（Field 有） |
-| `action_category` | string | 动作语义分类（Action 有）：data_write / data_read / navigation / param_mutation / ui_control / validation / data_refresh / data_initialization / unknown |
+| `action_category` | string | 动作语义分类（Action 有）：data_write / data_read / navigation / param_mutation / ui_control / validation / data_initialization / data_refresh / unknown |
 | `semantic_summary` | string | 动作自然语言摘要（Action 有） |
 | `blocks_on` | object / null | 等待前置动作结构化解析（Action 有） |
 | `condition` | object / null | 条件执行表达式结构化解析（Action 有） |
@@ -215,7 +215,7 @@ pub struct AiOutput {
 | `budget` | string | `compact` / `normal` / `full` |
 | `related_nodes_count` | number | 访问到的邻居节点数（不含中心节点） |
 | `truncated` | boolean | 是否因 budget 被截断 |
-| `high_value_relations` | object | 各类关系数量统计：upstream/downstream/related_actions/related_models/related_pages/related_components |
+| `high_value_relations` | object | 各类关系数量统计：upstream/downstream/related_actions/related_models/related_pages/related_nodes/related_components |
 
 ### details 字段
 
@@ -226,7 +226,8 @@ pub struct AiOutput {
 | `related_actions` | array | 与目标强相关的 action |
 | `related_models` | array | 相关模型和字段（保留 field_path） |
 | `related_pages` | array | 所属页面、打开关系页面、嵌入页面、引用页面 |
-| `related_components` | array | 相关组件依赖闭包 |
+| `related_nodes` | array | 相关闭包节点（可包含 Component/Action/Model/Field/Page） |
+| `related_components` | array | 仅组件节点（`type=Component`）的子集，兼容旧字段 |
 
 ### diagnostics
 
@@ -269,13 +270,13 @@ pub struct AiOutput {
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `page_inputs` | array | 页面参数（params） |
-| `data_sources` | array | 读取的模型字段，包含 source_component / source_action / model / field_path / target_id |
-| `write_targets` | array | 写入的模型字段，包含 source_component / source_action / model / field_path / target_id |
-| `entrypoints` | array | 用户可触发组件（button、link 等），input 即使有 submitField 也不计入 |
-| `action_flows` | array | 动作链，每项包含 action_id / action_type / component_id / trigger_type / reads / writes / navigation / sets_params |
+| `data_sources` | array | 读取的模型字段，包含 source_component/source_action/model/field_path/target_id + source_file/edge_type/raw_expr/json_path |
+| `write_targets` | array | 写入的模型字段，包含 source_component/source_action/model/field_path/target_id + source_file/edge_type/raw_expr/json_path |
+| `entrypoints` | array | 用户可触发组件（button、link 等），并包含 source_file/node_id/edge_type/json_path |
+| `action_flows` | array | 动作链，每项包含 action_id/action_type/component_id/trigger_type/reads/writes/navigation/sets_params，并带 source_file/node_id/json_path |
 | `visibility_rules` | array | 组件可见性规则（visible / hidden / disabled / readonly） |
-| `navigation` | array | 跳转/嵌入关系，包含 from / to / type / field_path |
-| `risk_diagnostics` | array | 风险诊断列表 |
+| `navigation` | array | 跳转/嵌入关系，包含 from/to/type/field_path + source_file/edge_type/raw_expr/json_path |
+| `risk_diagnostics` | array | 风险诊断列表（包含 severity/code/message/location/suggestion） |
 
 ### risk_diagnostics code
 
@@ -284,7 +285,7 @@ pub struct AiOutput {
 | `NO_WRITE_TARGETS` | Info | 页面无写入目标（可能是只读页面） |
 | `NO_ENTRYPOINTS` | Warning | 页面无用户可触发入口 |
 | `ACTION_FLOW_INCOMPLETE` | Info | Action 读取但未写入（可能是查询动作） |
-| `PAGE_INPUTS_DEFERRED` | Info | 未能在文件系统中读取原始页面文件，page_inputs 为空 |
+| `PAGE_INPUTS_DEFERRED` | Warning | 未能读取原始页面文件，page_inputs / visibility_rules 可能不完整 |
 
 ### next_queries
 
@@ -304,7 +305,7 @@ pub struct AiOutput {
 | `action_type` | string | submitData / updateData / insertData / deleteData / link / setParamValue / ... |
 | `component_id` | string | 触发该 action 的组件完整 ID |
 | `trigger_type` | string | click / hover / focus / ... |
-| `action_category` | string | 动作语义分类：data_write / data_read / navigation / param_mutation / ui_control / validation / data_refresh / data_initialization / unknown |
+| `action_category` | string | 动作语义分类：data_write / data_read / navigation / param_mutation / ui_control / validation / data_initialization / data_refresh / unknown |
 | `semantic_summary` | string | 动作自然语言摘要 |
 | `blocks_on` | object / null | 等待前置动作结构化解析，替代旧 `wait_prev` 字符串 |
 | `condition` | object / null | 条件执行表达式结构化解析（condition 或 conditionExp） |
@@ -320,7 +321,7 @@ pub struct AiOutput {
 |------|----------|------|
 | `UNRESOLVED_PAGE_NAVIGATION` | Warning | 导航目标页面不存在于图中 |
 | `UNRESOLVED_MODEL_WRITE` | Warning | 写入目标模型不存在于图中 |
-| `VISIBILITY_RULE_UNRESOLVED` | Info | visibility 规则中的表达式可能包含未解析引用 |
+| `VISIBILITY_RULE_UNRESOLVED` | Warning | visibility 规则中的表达式包含未解析或歧义引用 |
 
 
 ## M6 字段级血缘（Lineage）补充
@@ -345,7 +346,6 @@ pub struct AiOutput {
 | `LINEAGE_EXPR_UNPARSED` | Info | 表达式存在但解析器无法提取具体字段引用（如 `appointmentNo` 裸标识符） |
 | `LINEAGE_AMBIGUOUS_MODEL` | Warning | 字段名无法唯一定位到具体模型（M6 暂不支持，预留） |
 | `LINEAGE_CHAIN_TRUNCATED` | Info | 因 budget/depth 限制，血缘链在展开时被截断 |
-| `LINEAGE_DEFERRED_TO_M8` | Info | 表达式诊断和证据体系需要完整化，当前解析器未输出完整 evidence（预留） |
 
 ## M7 表达式结构化解析补充
 
@@ -355,9 +355,15 @@ pub struct AiOutput {
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
+| component_id | string | 表达式所属组件 ID（仅 ComponentExpr 输出） |
+| field | string | 表达式所属字段名（仅 ComponentExpr 输出） |
+| source_file | string / null | 来源文件（单文件解析时为 `"input_file"`） |
+| json_path | string | 稳定近似 JSON 路径（可直接定位到组件字段） |
 | raw_expr | string / null | 原始表达式字符串 |
-| refs | array | 提取的引用 ID 列表（去重） |
-| resolved_refs | array | 结构化引用对象列表，每项含 type / id / field / confidence / reason |
+| refs | array | 提取的引用 ID 列表（去重集合） |
+| resolved_refs | array | 结构化引用对象列表（出现级列表，允许重复），每项含 type / id / field / confidence / reason |
+| refs_count | number | `refs` 去重后数量 |
+| resolved_occurrence_count | number | `resolved_refs` 出现次数总量 |
 | unresolved_refs | array | 无法确认类型的引用对象列表，每项含 type / id / reason |
 | ambiguous_refs | array | 被分类为 Other 的模糊引用列表，每项含 raw |
 | diagnostics | array | 表达式诊断列表，每项含 code / message / position |
@@ -383,4 +389,3 @@ pub struct AiOutput {
 | EXPR_UNRESOLVED_REF | Info | 标识符或成员访问无法被分类为已知引用类型 |
 | EXPR_UNSUPPORTED_FUNCTION | Info | 使用了当前未列入支持列表的函数 |
 | EXPR_AMBIGUOUS_REF | Info | 引用存在歧义，可能属于多种类型 |
-

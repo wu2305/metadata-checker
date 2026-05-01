@@ -1595,6 +1595,63 @@ fn test_cli_context_budget_full_no_truncation() {
 }
 
 #[test]
+fn test_cli_context_related_nodes_and_components_contract_m8() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "model:model1",
+        "--depth",
+        "1",
+        "--budget",
+        "full",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("context output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let high_value_relations = summary
+        .get("high_value_relations")
+        .and_then(|v| v.as_object())
+        .expect("high_value_relations must be object");
+    assert!(
+        high_value_relations.contains_key("related_nodes"),
+        "summary.high_value_relations should contain related_nodes"
+    );
+
+    let details = ai
+        .details
+        .expect("details must exist")
+        .as_object()
+        .expect("details must be object")
+        .clone();
+    let related_nodes = details
+        .get("related_nodes")
+        .and_then(|v| v.as_array())
+        .expect("related_nodes must be array");
+    let related_components = details
+        .get("related_components")
+        .and_then(|v| v.as_array())
+        .expect("related_components must be array");
+    assert!(
+        related_nodes
+            .iter()
+            .any(|n| n.get("type").and_then(|v| v.as_str()) != Some("Component")),
+        "related_nodes should include non-component node types"
+    );
+    assert!(
+        related_components
+            .iter()
+            .all(|n| n.get("type").and_then(|v| v.as_str()) == Some("Component")),
+        "related_components should only contain component nodes"
+    );
+}
+
+#[test]
 fn test_cli_context_component_semantics() {
     let _ = run_cli(&[
         "--project-dir",
@@ -2352,6 +2409,19 @@ fn test_cli_query_page_logic_unknown_action_type() {
             .any(|d| d.code == "UNKNOWN_ACTION_TYPE"),
         "should have UNKNOWN_ACTION_TYPE diagnostic for someCustomAction"
     );
+    let unknown_diag = ai
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "UNKNOWN_ACTION_TYPE")
+        .expect("UNKNOWN_ACTION_TYPE diagnostic should exist");
+    assert_eq!(
+        unknown_diag.severity,
+        metadata_checker::output::DiagnosticSeverity::Warning
+    );
+    assert!(
+        unknown_diag.location.json_path.is_some(),
+        "UNKNOWN_ACTION_TYPE diagnostic should include json_path location"
+    );
 
     // action_flows 中未知 action 的 category 应为 unknown
     let details = ai
@@ -2457,6 +2527,159 @@ fn test_cli_query_page_logic_new_action_types() {
             .get("action_category")
             .and_then(|v| v.as_str()),
         Some("validation")
+    );
+}
+
+#[test]
+fn test_cli_query_page_logic_action_category_contract_m8() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/action_category_contract.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+    let details = ai
+        .details
+        .expect("details must exist")
+        .as_object()
+        .expect("details must be object")
+        .clone();
+    let flows = details
+        .get("action_flows")
+        .and_then(|v| v.as_array())
+        .expect("action_flows must be array");
+
+    let find_cat = |action_type: &str| {
+        flows
+            .iter()
+            .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some(action_type))
+            .and_then(|f| f.get("action_category"))
+            .and_then(|v| v.as_str())
+    };
+    assert_eq!(find_cat("loadData"), Some("data_read"));
+    assert_eq!(find_cat("newData"), Some("data_initialization"));
+    assert_eq!(find_cat("resetData"), Some("data_refresh"));
+    assert_eq!(find_cat("refreshModels"), Some("data_refresh"));
+    assert_eq!(find_cat("refreshData"), Some("data_refresh"));
+}
+
+#[test]
+fn test_cli_query_page_logic_evidence_traceability_m8() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/actions_test.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+    assert!(
+        !ai.evidence.is_empty(),
+        "page logic evidence must not be empty"
+    );
+
+    let has_action_flow_evidence = ai.evidence.iter().any(|ev| {
+        ev.claim.contains("Action flow")
+            && ev.source_file.as_deref().is_some()
+            && ev.edge_type.as_deref().is_some()
+            && ev.json_path.as_deref().is_some()
+    });
+    assert!(
+        has_action_flow_evidence,
+        "action_flows should expose traceable evidence with source_file/edge_type/json_path"
+    );
+
+    let has_navigation_evidence = ai.evidence.iter().any(|ev| {
+        ev.claim.contains("Navigation")
+            && ev.edge_type.as_deref().is_some()
+            && ev.json_path.as_deref().is_some()
+    });
+    assert!(
+        has_navigation_evidence,
+        "navigation should expose traceable evidence"
+    );
+}
+
+#[test]
+fn test_cli_query_page_logic_visibility_evidence_traceability_m8() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/visibility_contract.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+
+    let has_visibility_evidence = ai.evidence.iter().any(|ev| {
+        ev.claim.contains("Visibility rule")
+            && ev.raw_expr.as_deref().is_some()
+            && ev.json_path.as_deref().is_some()
+            && ev.source_file.as_deref().is_some()
+    });
+    assert!(
+        has_visibility_evidence,
+        "visibility rules should expose raw_expr/json_path/source_file evidence"
+    );
+
+    let unresolved_diag = ai
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "VISIBILITY_RULE_UNRESOLVED")
+        .expect("should contain VISIBILITY_RULE_UNRESOLVED diagnostic");
+    assert_eq!(
+        unresolved_diag.severity,
+        metadata_checker::output::DiagnosticSeverity::Warning
+    );
+    assert!(
+        unresolved_diag.location.json_path.is_some(),
+        "visibility unresolved diagnostic should contain json_path location"
+    );
+}
+
+#[test]
+fn test_cli_explain_action_evidence_traceability_m8() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "action:app/actions_test.spg|button2|action1",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("explain output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_ai_output_contract(&ai);
+
+    let has_relation_evidence = ai.evidence.iter().any(|ev| {
+        (ev.claim.contains("reads relation") || ev.claim.contains("writes relation"))
+            && ev.edge_type.as_deref().is_some()
+            && ev.raw_expr.as_deref().is_some()
+            && ev.json_path.as_deref().is_some()
+    });
+    assert!(
+        has_relation_evidence,
+        "explain action should expose relation evidence with edge/raw_expr/json_path"
     );
 }
 
@@ -2758,5 +2981,16 @@ fn test_cli_explain_dataflow_lineage_schema() {
     assert!(
         evidence.contains_key("json_path"),
         "evidence must have json_path"
+    );
+
+    let has_lineage_top_evidence = ai.evidence.iter().any(|ev| {
+        ev.claim.contains("Lineage for")
+            && ev.raw_expr.as_deref().is_some()
+            && ev.json_path.as_deref().is_some()
+            && ev.edge_type.as_deref().is_some()
+    });
+    assert!(
+        has_lineage_top_evidence,
+        "top-level evidence should include lineage trace items with raw_expr/json_path/edge_type"
     );
 }
