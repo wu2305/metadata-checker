@@ -68,6 +68,7 @@ pub struct SpgAction {
     pub target_component: Vec<String>,
     pub panelbook: Option<String>,
     pub panel: Option<String>,
+    pub dialog: Option<String>,
 }
 
 /// 组件上的表达式及其解析出的引用列表

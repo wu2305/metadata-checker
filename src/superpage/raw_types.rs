@@ -85,6 +85,8 @@ pub struct RawAction {
     pub panelbook: Option<String>,
     #[serde(default)]
     pub panel: Option<String>,
+    #[serde(default)]
+    pub dialog: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]

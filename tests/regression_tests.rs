@@ -1643,8 +1643,8 @@ fn test_cli_query_page_logic_actions_test_semantics() {
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     assert_eq!(
-        ep_count, 6,
-        "actions_test should have 6 button entrypoints (including unknown action)"
+        ep_count, 10,
+        "actions_test should have 10 button entrypoints (including new actions)"
     );
 
     let details_val = ai.details.expect("details must exist");
@@ -1682,8 +1682,8 @@ fn test_cli_query_page_logic_actions_test_semantics() {
         .expect("action_flows must be array");
     assert_eq!(
         action_flows.len(),
-        6,
-        "actions_test should have 6 action flows (including unknown action)"
+        10,
+        "actions_test should have 10 action flows (including new actions)"
     );
 
     // write_targets: should include model1 and model2
@@ -2100,4 +2100,171 @@ fn test_cli_query_page_logic_unknown_action_type() {
             .and_then(|v| v.as_str()),
         Some("unknown")
     );
+}
+
+#[test]
+fn test_cli_query_page_logic_new_action_types() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/actions_test.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+
+    let details = ai
+        .details
+        .expect("details must exist")
+        .as_object()
+        .unwrap()
+        .clone();
+    let flows = details
+        .get("action_flows")
+        .and_then(|v| v.as_array())
+        .expect("action_flows must be array");
+
+    // showDialog should be navigation
+    let show_dialog = flows
+        .iter()
+        .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("showDialog"));
+    assert!(show_dialog.is_some(), "showDialog action should exist");
+    assert_eq!(
+        show_dialog
+            .unwrap()
+            .get("action_category")
+            .and_then(|v| v.as_str()),
+        Some("navigation")
+    );
+
+    // closeDialog should be ui_control
+    let close_dialog = flows
+        .iter()
+        .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("closeDialog"));
+    assert!(close_dialog.is_some(), "closeDialog action should exist");
+    assert_eq!(
+        close_dialog
+            .unwrap()
+            .get("action_category")
+            .and_then(|v| v.as_str()),
+        Some("ui_control")
+    );
+
+    // switchPanel should be ui_control
+    let switch_panel = flows
+        .iter()
+        .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("switchPanel"));
+    assert!(switch_panel.is_some(), "switchPanel action should exist");
+    assert_eq!(
+        switch_panel
+            .unwrap()
+            .get("action_category")
+            .and_then(|v| v.as_str()),
+        Some("ui_control")
+    );
+
+    // validateData should be validation
+    let validate = flows
+        .iter()
+        .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("validateData"));
+    assert!(validate.is_some(), "validateData action should exist");
+    assert_eq!(
+        validate
+            .unwrap()
+            .get("action_category")
+            .and_then(|v| v.as_str()),
+        Some("validation")
+    );
+}
+
+#[test]
+fn test_scanner_show_dialog_close_dialog_edges() {
+    use metadata_checker::graph::{EdgeType, GraphDB};
+    use metadata_checker::scanner::scan_project;
+    use std::path::Path;
+
+    let db_path = std::env::temp_dir().join("metadata-checker-test-dialog.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/test_project");
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // showDialog action should create ActionControlsComponent edge
+    let show_dialog_action = graph
+        .node_indices
+        .get("action:app/actions_test.spg|buttonShowDialog|actionShowDialog");
+    assert!(
+        show_dialog_action.is_some(),
+        "showDialog action should exist in graph"
+    );
+    let outgoing: Vec<_> = graph
+        .graph
+        .edges_directed(*show_dialog_action.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::ActionControlsComponent))
+        .collect();
+    assert!(
+        !outgoing.is_empty(),
+        "showDialog should create ActionControlsComponent edge"
+    );
+
+    // closeDialog action should create ActionControlsComponent edge
+    let close_dialog_action = graph
+        .node_indices
+        .get("action:app/actions_test.spg|buttonCloseDialog|actionCloseDialog");
+    assert!(
+        close_dialog_action.is_some(),
+        "closeDialog action should exist in graph"
+    );
+    let outgoing: Vec<_> = graph
+        .graph
+        .edges_directed(*close_dialog_action.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::ActionControlsComponent))
+        .collect();
+    assert!(
+        !outgoing.is_empty(),
+        "closeDialog should create ActionControlsComponent edge"
+    );
+
+    // switchPanel action should create ActionControlsComponent edge
+    let switch_panel_action = graph
+        .node_indices
+        .get("action:app/actions_test.spg|buttonSwitchPanel|actionSwitchPanel");
+    assert!(
+        switch_panel_action.is_some(),
+        "switchPanel action should exist in graph"
+    );
+    let outgoing: Vec<_> = graph
+        .graph
+        .edges_directed(*switch_panel_action.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::ActionControlsComponent))
+        .collect();
+    assert!(
+        !outgoing.is_empty(),
+        "switchPanel should create ActionControlsComponent edge"
+    );
+
+    // validateData action should create ActionValidates edge
+    let validate_action = graph
+        .node_indices
+        .get("action:app/actions_test.spg|buttonValidate|actionValidate");
+    assert!(
+        validate_action.is_some(),
+        "validateData action should exist in graph"
+    );
+    let outgoing: Vec<_> = graph
+        .graph
+        .edges_directed(*validate_action.unwrap(), petgraph::Direction::Outgoing)
+        .filter(|e| matches!(e.weight().edge_type, EdgeType::ActionValidates))
+        .collect();
+    assert!(
+        !outgoing.is_empty(),
+        "validateData should create ActionValidates edge"
+    );
+
+    let _ = std::fs::remove_file(&db_path);
 }

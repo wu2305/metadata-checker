@@ -622,9 +622,66 @@ pub fn process_spg_file_from_value(
                         );
                     }
                 }
+                "showDialog" => {
+                    if let Some(ref dialog_id) = action.dialog {
+                        let dialog_comp_id =
+                            format!("comp:{}|{}", rel_path.replace(r"\", "/"), dialog_id);
+                        // 确保目标节点存在
+                        if !graph.node_indices.contains_key(&dialog_comp_id) {
+                            graph.add_node(
+                                dialog_comp_id.clone(),
+                                NodeType::Component,
+                                rel_path.to_string(),
+                                dialog_id.clone(),
+                                None,
+                            );
+                        }
+                        let dialog_meta = serde_json::json!({
+                            "reason": format!("Action 'showDialog' opens dialog '{}'", dialog_id),
+                            "actor_kind": "action",
+                            "actor_id": action_id,
+                            "operation": "ActionControlsComponent",
+                            "trigger": action.trigger_type,
+                            "dialog": dialog_id,
+                        });
+                        graph.add_edge_with_meta(
+                            &action_id,
+                            &dialog_comp_id,
+                            EdgeType::ActionControlsComponent,
+                            None,
+                            Some(dialog_meta),
+                        );
+                    }
+                }
+                "closeDialog" => {
+                    let close_meta = serde_json::json!({
+                        "reason": "Action 'closeDialog' closes current dialog",
+                        "actor_kind": "action",
+                        "actor_id": action_id,
+                        "operation": "ActionControlsComponent",
+                        "trigger": action.trigger_type,
+                    });
+                    graph.add_edge_with_meta(
+                        &action_id,
+                        &comp_id,
+                        EdgeType::ActionControlsComponent,
+                        None,
+                        Some(close_meta),
+                    );
+                }
                 "switchPanel" => {
                     if let Some(ref pb) = action.panelbook {
                         let panelbook_id = format!("comp:{}|{}", rel_path.replace(r"\", "/"), pb);
+                        // 确保目标节点存在
+                        if !graph.node_indices.contains_key(&panelbook_id) {
+                            graph.add_node(
+                                panelbook_id.clone(),
+                                NodeType::Component,
+                                rel_path.to_string(),
+                                pb.clone(),
+                                None,
+                            );
+                        }
                         let ctrl_meta = serde_json::json!({
                             "reason": format!("Action 'switchPanel' controls panelbook '{}'", pb),
                             "actor_kind": "action",

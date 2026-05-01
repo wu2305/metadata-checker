@@ -9,7 +9,7 @@ pub fn classify_action(action_type: &str) -> &'static str {
         "setParamValue" => "param_mutation",
         "showComponent" | "hideComponent" | "switchPanel" | "closeDialog" => "ui_control",
         "validateData" => "validation",
-        "newData" | "resetData" | "refreshModels" => "data_refresh",
+        "newData" | "resetData" | "refreshModels" | "refreshData" => "data_refresh",
         _ => "unknown",
     }
 }

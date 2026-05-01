@@ -605,6 +605,7 @@ fn extract_components(
             target_component: a.target_component.clone(),
             panelbook: a.panelbook.clone(),
             panel: a.panel.clone(),
+            dialog: a.dialog.clone(),
         })
         .collect();
 

@@ -145,6 +145,61 @@
                         "triggerType": "click"
                     }
                 ]
+            },
+            {
+                "id": "buttonShowDialog",
+                "type": "button",
+                "value": "显示对话框",
+                "actions": [
+                    {
+                        "id": "actionShowDialog",
+                        "actionType": "showDialog",
+                        "triggerType": "click",
+                        "dialog": "dialog1"
+                    }
+                ]
+            },
+            {
+                "id": "buttonCloseDialog",
+                "type": "button",
+                "value": "关闭对话框",
+                "actions": [
+                    {
+                        "id": "actionCloseDialog",
+                        "actionType": "closeDialog",
+                        "triggerType": "click"
+                    }
+                ]
+            },
+            {
+                "id": "buttonSwitchPanel",
+                "type": "button",
+                "value": "切换面板",
+                "actions": [
+                    {
+                        "id": "actionSwitchPanel",
+                        "actionType": "switchPanel",
+                        "triggerType": "click",
+                        "panelbook": "panelbook1",
+                        "panel": "panel2"
+                    }
+                ]
+            },
+            {
+                "id": "buttonValidate",
+                "type": "button",
+                "value": "校验数据",
+                "actions": [
+                    {
+                        "id": "actionValidate",
+                        "actionType": "validateData",
+                        "triggerType": "click",
+                        "submitRange": "component",
+                        "submitComponent": [
+                            "input1"
+                        ]
+                    }
+                ]
             }
         ]
     }
