@@ -385,14 +385,105 @@ pub fn context_node_graph(
         "high_value_relations": high_value_relations,
     });
 
-    let details = json!({
-        "upstream": upstream_out,
-        "downstream": downstream_out,
-        "related_actions": actions_out,
-        "related_models": models_out,
-        "related_pages": pages_out,
-        "related_components": components_out,
-    });
+    // Build lineage for field targets
+    let mut lineage: Vec<serde_json::Value> = Vec::new();
+    if matches!(node.node_type, crate::graph::NodeType::Field) {
+        let field_meta = node.meta.as_ref();
+        if let Some(input_field) = field_meta
+            .and_then(|m| m.get("source_input_field"))
+            .and_then(|v| v.as_str())
+        {
+            let model_name = node
+                .id
+                .strip_prefix("field:")
+                .and_then(|s| s.split('.').next())
+                .unwrap_or("");
+            lineage.push(json!({
+                "target_field": node.id,
+                "source_fields": [format!("field:{}.{}", model_name, input_field)],
+                "source_expr": null,
+                "transform": "inputField mapping",
+                "via_node": null,
+                "confidence": "high",
+            }));
+        }
+        if let Some(expr) = field_meta
+            .and_then(|m| m.get("source_expr"))
+            .and_then(|v| v.as_str())
+        {
+            let refs = crate::superpage::parse_expression_refs(expr);
+            let source_fields: Vec<String> = refs
+                .iter()
+                .filter_map(|r| match r {
+                    crate::superpage::RefType::ModelField(m, f) => {
+                        Some(format!("field:{}.{}", m, f))
+                    }
+                    _ => None,
+                })
+                .collect();
+            lineage.push(json!({
+                "target_field": node.id,
+                "source_fields": source_fields,
+                "source_expr": expr,
+                "transform": "expression calculation",
+                "via_node": null,
+                "confidence": if source_fields.is_empty() { "low" } else { "medium" },
+            }));
+        }
+        // Collect page action writes from incoming edges
+        if let Some((_outgoing, incoming)) = graph.get_node_edges(node_id) {
+            for (source, edge) in &incoming {
+                if matches!(
+                    edge.edge_type,
+                    crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites
+                ) {
+                    let source_expr = edge
+                        .meta
+                        .as_ref()
+                        .and_then(|m| m.get("source_expr"))
+                        .and_then(|v| v.as_str());
+                    let mut source_fields: Vec<String> = Vec::new();
+                    if let Some(expr) = source_expr {
+                        let refs = crate::superpage::parse_expression_refs(expr);
+                        for r in refs {
+                            if let crate::superpage::RefType::ModelField(m, f) = r {
+                                source_fields.push(format!("field:{}.{}", m, f));
+                            }
+                        }
+                    }
+                    lineage.push(json!({
+                        "target_field": node.id,
+                        "source_fields": source_fields,
+                        "source_expr": source_expr,
+                        "transform": "page action write",
+                        "via_node": source.id.clone(),
+                        "confidence": if source_expr.is_some() && source_fields.is_empty() { "medium" } else { "high" },
+                    }));
+                }
+            }
+        }
+    }
+
+    let details = if lineage.is_empty() {
+        json!({
+            "upstream": upstream_out,
+            "downstream": downstream_out,
+            "related_actions": actions_out,
+            "related_models": models_out,
+            "related_pages": pages_out,
+            "related_components": components_out,
+        })
+    } else {
+        json!({
+            "upstream": upstream_out,
+            "downstream": downstream_out,
+            "related_actions": actions_out,
+            "related_models": models_out,
+            "related_pages": pages_out,
+            "related_components": components_out,
+            "lineage": lineage,
+        })
+    };
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Context, summary);
     output.query_target = Some(node_id.to_string());

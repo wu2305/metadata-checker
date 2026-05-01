@@ -2457,3 +2457,201 @@ fn test_scanner_show_dialog_close_dialog_edges() {
 
     let _ = std::fs::remove_file(&db_path);
 }
+
+#[test]
+fn test_cli_explain_field_lineage_action_writes() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "field:model1.name",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain field output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_ai_output_contract(&ai);
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    let lineage = details_obj
+        .get("lineage")
+        .expect("lineage must exist")
+        .as_array()
+        .expect("lineage must be array");
+    assert!(
+        !lineage.is_empty(),
+        "field:model1.name should have lineage entries from action writes"
+    );
+    // At least one entry should have source_expr and source_fields populated
+    let has_action_write = lineage.iter().any(|item| {
+        let obj = item.as_object().unwrap();
+        obj.get("transform").and_then(|v| v.as_str()) == Some("page action write")
+            && obj.get("source_expr").and_then(|v| v.as_str()).is_some()
+            && obj
+                .get("source_fields")
+                .and_then(|v| v.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false)
+    });
+    assert!(
+        has_action_write,
+        "lineage must contain action write with source_expr and source_fields"
+    );
+}
+
+#[test]
+fn test_cli_explain_field_lineage_chain_dataflow() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "field:df_b.id",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain field output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_ai_output_contract(&ai);
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    let lineage = details_obj
+        .get("lineage")
+        .expect("lineage must exist")
+        .as_array()
+        .expect("lineage must be array");
+    assert!(
+        !lineage.is_empty(),
+        "field:df_b.id should have chain lineage through physical_x/df_a"
+    );
+    let has_chain = lineage.iter().any(|item| {
+        let obj = item.as_object().unwrap();
+        obj.get("transform")
+            .and_then(|v| v.as_str())
+            .map(|s| s.starts_with("DataFlow chain"))
+            .unwrap_or(false)
+    });
+    assert!(has_chain, "lineage must contain DataFlow chain transform");
+}
+
+#[test]
+fn test_cli_context_field_lineage() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "field:dataflow_output.工单号",
+        "--depth",
+        "1",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("context field output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Context);
+    assert_ai_output_contract(&ai);
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    assert!(
+        details_obj.contains_key("lineage"),
+        "context field must have lineage"
+    );
+    let lineage = details_obj
+        .get("lineage")
+        .expect("lineage must exist")
+        .as_array()
+        .expect("lineage must be array");
+    assert!(
+        !lineage.is_empty(),
+        "context field:dataflow_output.工单号 should have lineage"
+    );
+    let first = lineage.first().unwrap().as_object().unwrap();
+    assert_eq!(
+        first.get("target_field").and_then(|v| v.as_str()),
+        Some("field:dataflow_output.工单号")
+    );
+    let source_fields = first
+        .get("source_fields")
+        .and_then(|v| v.as_array())
+        .expect("source_fields must be array");
+    assert!(
+        source_fields
+            .iter()
+            .any(|v| v.as_str() == Some("field:dataflow_output.workNo")),
+        "context lineage source_fields should contain field:dataflow_output.workNo"
+    );
+}
+
+#[test]
+fn test_cli_explain_dataflow_lineage_schema() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--explain",
+        "model:dataflow_output",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("explain dataflow output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    assert_ai_output_contract(&ai);
+
+    let details = ai.details.expect("details must exist");
+    let details_obj = details.as_object().expect("details must be object");
+    let lineage = details_obj
+        .get("lineage")
+        .expect("lineage must exist")
+        .as_array()
+        .expect("lineage must be array");
+    assert!(
+        !lineage.is_empty(),
+        "dataflow_output should have lineage entries"
+    );
+    let first = lineage.first().unwrap().as_object().unwrap();
+    // M6 schema: target_field must use field:<model>.<field> format
+    let target_field = first
+        .get("target_field")
+        .and_then(|v| v.as_str())
+        .expect("target_field must be string");
+    assert!(
+        target_field.starts_with("field:"),
+        "target_field must use field:<model>.<field> format, got: {}",
+        target_field
+    );
+    // via_node must exist
+    assert!(first.contains_key("via_node"), "lineage must have via_node");
+    // evidence must exist
+    assert!(first.contains_key("evidence"), "lineage must have evidence");
+    let evidence = first.get("evidence").unwrap().as_object().unwrap();
+    assert!(
+        evidence.contains_key("source_file"),
+        "evidence must have source_file"
+    );
+    assert!(
+        evidence.contains_key("node_id"),
+        "evidence must have node_id"
+    );
+    assert!(
+        evidence.contains_key("json_path"),
+        "evidence must have json_path"
+    );
+}

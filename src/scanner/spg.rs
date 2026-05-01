@@ -228,6 +228,7 @@ pub fn process_spg_file_from_value(
                             "operation": "Reads",
                             "target_model": model,
                             "target_field": field,
+                                    "source_expr": format!("{}.{}", model, field),
                             "source_expr": expr.raw_expr,
                         });
                         add_model_read(
@@ -266,6 +267,7 @@ pub fn process_spg_file_from_value(
                     "operation": "Writes",
                     "target_model": model,
                     "target_field": field,
+                                    "source_expr": format!("{}.{}", model, field),
                     "source_expr": format!("{}.{}", model, field),
                 });
                 add_model_write(
@@ -378,6 +380,7 @@ pub fn process_spg_file_from_value(
                                     "trigger": action.trigger_type,
                                     "target_model": model,
                                     "target_field": field,
+                                    "source_expr": format!("{}.{}", model, field),
                                 });
                                 add_model_write(
                                     graph,
@@ -427,14 +430,15 @@ pub fn process_spg_file_from_value(
                                             .map(|p| p.to_string())
                                             .unwrap_or_else(|| format!("{}.tbl", model));
                                         let read_meta = serde_json::json!({
-                                            "actor_kind": "action",
-                                            "actor_id": action_id,
-                                            "operation": "Reads",
-                                            "trigger": action.trigger_type,
-                                            "target_model": model,
-                                            "target_field": field,
-                                            "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
-                                        });
+                                                "actor_kind": "action",
+                                                "actor_id": action_id,
+                                                "operation": "Reads",
+                                                "trigger": action.trigger_type,
+                                                "target_model": model,
+                                                "target_field": field,
+                                        "source_expr": format!("{}.{}", model, field),
+                                                "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
+                                            });
                                         add_model_read(
                                             graph,
                                             &action_id,
@@ -528,6 +532,7 @@ pub fn process_spg_file_from_value(
                                         "trigger": action.trigger_type,
                                         "target_model": model,
                                         "target_field": field,
+                                    "source_expr": format!("{}.{}", model, field),
                                         "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                     });
                                     add_model_read(
@@ -586,6 +591,7 @@ pub fn process_spg_file_from_value(
                                     "trigger": action.trigger_type,
                                     "target_model": model,
                                     "target_field": field,
+                                    "source_expr": format!("{}.{}", model, field),
                                     "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                 });
                                 add_model_read(
@@ -732,6 +738,7 @@ pub fn process_spg_file_from_value(
                                     "trigger": action.trigger_type,
                                     "target_model": model,
                                     "target_field": field,
+                                    "source_expr": format!("{}.{}", model, field),
                                 });
                                 add_model_write(
                                     graph,

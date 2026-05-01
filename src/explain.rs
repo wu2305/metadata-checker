@@ -1169,6 +1169,12 @@ fn explain_field_graph(
             }
             crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
                 let page = find_parent_page(graph, &source.id);
+                let source_expr = edge
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("source_expr"))
+                    .and_then(|v| v.as_str());
+
                 writers.push(serde_json::json!({
                     "id": source.id,
                     "name": source.name,
@@ -1178,6 +1184,7 @@ fn explain_field_graph(
                     "source_file": source.path,
                     "page": page.as_ref().map(|p| p.name.clone()),
                     "page_id": page.as_ref().map(|p| p.id.clone()),
+                    "source_expr": source_expr,
                 }));
             }
             crate::graph::EdgeType::DataflowInput => {
@@ -1236,6 +1243,12 @@ fn explain_field_graph(
                 .unwrap_or(false)
             {
                 let page = find_parent_page(graph, &source.id);
+                let source_expr = edge
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("source_expr"))
+                    .and_then(|v| v.as_str());
+
                 writers.push(serde_json::json!({
                     "id": source.id,
                     "name": source.name,
@@ -1245,6 +1258,7 @@ fn explain_field_graph(
                     "source_file": source.path,
                     "page": page.as_ref().map(|p| p.name.clone()),
                     "page_id": page.as_ref().map(|p| p.id.clone()),
+                    "source_expr": source_expr,
                 }));
             }
         }
@@ -1339,22 +1353,51 @@ fn explain_field_graph(
     if !produced_by.is_empty() {
         for producer in &produced_by {
             let producer_id = producer.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            let producer_node = graph.get_node(producer_id);
+            // Try to resolve field-level mapping from producer node meta (dimensions)
+            let producer_dims: Vec<serde_json::Value> = producer_node
+                .as_ref()
+                .and_then(|n| n.meta.as_ref())
+                .and_then(|m| m.get("dimensions"))
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let field_name = node.name.as_str();
+            let mut mapped_source_field: Option<String> = None;
+            let mut mapped_transform = "DataFlow input";
+            for dim in &producer_dims {
+                let dim_name = dim.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                if dim_name == field_name {
+                    if let Some(input) = dim.get("inputField").and_then(|v| v.as_str()) {
+                        mapped_source_field = Some(input.to_string());
+                        mapped_transform = "DataFlow inputField mapping";
+                    } else if let Some(exp) = dim.get("exp").and_then(|v| v.as_str()) {
+                        mapped_source_field = Some(exp.to_string());
+                        mapped_transform = "DataFlow expression";
+                    }
+                    break;
+                }
+            }
             if let Some((producer_out, _producer_in)) = graph.get_node_edges(producer_id) {
                 for (upstream_model, edge) in &producer_out {
                     if matches!(edge.edge_type, crate::graph::EdgeType::DataflowInput) {
+                        let source_field = mapped_source_field
+                            .as_ref()
+                            .map(|sf| format!("field:{}.{}", upstream_model.name, sf));
+                        let source_fields: Vec<String> = source_field.into_iter().collect();
                         lineage.push(serde_json::json!({
                             "target_field": node.id,
-                            "source_fields": [format!("model:{}", upstream_model.name)],
-                            "source_expr": null,
-                            "transform": "DataFlow input",
+                            "source_fields": source_fields,
+                            "source_expr": mapped_source_field.as_ref(),
+                            "transform": mapped_transform,
                             "via_node": producer_id.to_string(),
-                            "confidence": "medium",
+                            "confidence": if mapped_source_field.is_some() { "high" } else { "medium" },
                             "evidence": {
                                 "source_file": upstream_model.path.clone(),
                                 "node_id": upstream_model.id.clone(),
                                 "edge_type": "DataflowInput",
-                                "raw_expr": null,
-                                "json_path": "properties.depends",
+                                "raw_expr": mapped_source_field.as_ref(),
+                                "json_path": "dataFlow.nodes[].fields[] / dimensions[]",
                             }
                         }));
                     }
@@ -1369,13 +1412,23 @@ fn explain_field_graph(
             .get("field_path")
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        let source_expr = writer.get("source_expr").and_then(|v| v.as_str());
+        let mut source_fields: Vec<String> = Vec::new();
+        if let Some(expr) = source_expr {
+            let refs = crate::superpage::parse_expression_refs(expr);
+            for r in refs {
+                if let crate::superpage::RefType::ModelField(m, f) = r {
+                    source_fields.push(format!("field:{}.{}", m, f));
+                }
+            }
+        }
         lineage.push(serde_json::json!({
             "target_field": node.id,
-            "source_fields": [],
-            "source_expr": null,
+            "source_fields": source_fields,
+            "source_expr": source_expr,
             "transform": "page action write",
             "via_node": writer_id.to_string(),
-            "confidence": "high",
+            "confidence": if source_expr.is_some() && source_fields.is_empty() { "medium" } else { "high" },
             "evidence": {
                 "source_file": writer.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
                 "node_id": writer_id,
@@ -1384,6 +1437,81 @@ fn explain_field_graph(
                 "json_path": "actions[].fieldValues[]",
             }
         }));
+    }
+
+    // Chain DataFlow lineage: if no direct source, try to trace through DataFlow inputs
+    if lineage.is_empty()
+        && let Some(ref model) = parent_model
+    {
+        // Check if parent is a DataFlow with input models
+        let dataflow_inputs = graph.find_dataflow_inputs(&model.id);
+        let field_name = node.name.as_str();
+        for (input_model, _edge) in dataflow_inputs {
+            let input_dims: Vec<serde_json::Value> = input_model
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("dimensions"))
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for dim in &input_dims {
+                let dim_name = dim.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let dbfield = dim.get("dbfield").and_then(|v| v.as_str()).unwrap_or("");
+                if dim_name == field_name || dbfield == field_name {
+                    let source_field = format!("field:{}.{}", input_model.name, dim_name);
+                    lineage.push(serde_json::json!({
+                        "target_field": node.id,
+                        "source_fields": [source_field],
+                        "source_expr": null,
+                        "transform": "DataFlow chain (input model field match)",
+                        "via_node": model.id.clone(),
+                        "confidence": "medium",
+                        "evidence": {
+                            "source_file": input_model.path.clone(),
+                            "node_id": input_model.id.clone(),
+                            "edge_type": "DataflowInput",
+                            "raw_expr": null,
+                            "json_path": format!("dimensions[].name='{}'", dim_name),
+                        }
+                    }));
+                    break;
+                }
+            }
+        }
+        // Check if parent is produced by a DataFlow (physical table case)
+        let producers = graph.find_produced_by(&model.id);
+        for (producer, _edge) in producers {
+            let producer_dims: Vec<serde_json::Value> = producer
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("dimensions"))
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for dim in &producer_dims {
+                let dim_name = dim.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let dbfield = dim.get("dbfield").and_then(|v| v.as_str()).unwrap_or("");
+                if dim_name == field_name || dbfield == field_name {
+                    let source_field = format!("field:{}.{}", producer.name, dim_name);
+                    lineage.push(serde_json::json!({
+                        "target_field": node.id,
+                        "source_fields": [source_field],
+                        "source_expr": null,
+                        "transform": "DataFlow chain (producer field match)",
+                        "via_node": producer.id.clone(),
+                        "confidence": "medium",
+                        "evidence": {
+                            "source_file": producer.path.clone(),
+                            "node_id": producer.id.clone(),
+                            "edge_type": "OutputsTo",
+                            "raw_expr": null,
+                            "json_path": format!("dimensions[].name='{}'", dim_name),
+                        }
+                    }));
+                    break;
+                }
+            }
+        }
     }
 
     if lineage.is_empty() {
@@ -1931,11 +2059,19 @@ fn explain_dataflow_graph(
 
         if let Some(input) = input_field {
             lineage.push(serde_json::json!({
-                "target_field": dim_name,
-                "source_fields": [input],
+                "target_field": format!("field:{}.{}", node.name, dim_name),
+                "source_fields": [format!("field:{}.{}", node.name, input)],
                 "source_expr": null,
                 "transform": "inputField mapping",
+                "via_node": node.id.clone(),
                 "confidence": "high",
+                "evidence": {
+                    "source_file": node.path.clone(),
+                    "node_id": format!("field:{}.{}", node.name, dim_name),
+                    "edge_type": "Contains",
+                    "raw_expr": null,
+                    "json_path": format!("dimensions[].inputField for {}", dim_name),
+                }
             }));
         } else if let Some(expr) = exp {
             let refs = crate::superpage::parse_expression_refs(expr);
@@ -1959,11 +2095,19 @@ fn explain_dataflow_graph(
                 });
             }
             lineage.push(serde_json::json!({
-                "target_field": dim_name,
-                "source_fields": source_fields,
+                "target_field": format!("field:{}.{}", node.name, dim_name),
+                "source_fields": source_fields.iter().map(|s| format!("field:{}", s)).collect::<Vec<_>>(),
                 "source_expr": expr,
                 "transform": "expression calculation",
+                "via_node": node.id.clone(),
                 "confidence": if source_fields.is_empty() { "low" } else { "medium" },
+                "evidence": {
+                    "source_file": node.path.clone(),
+                    "node_id": format!("field:{}.{}", node.name, dim_name),
+                    "edge_type": "Contains",
+                    "raw_expr": expr,
+                    "json_path": format!("dimensions[].exp for {}", dim_name),
+                }
             }));
         } else {
             diagnostics.push(crate::output::Diagnostic {
