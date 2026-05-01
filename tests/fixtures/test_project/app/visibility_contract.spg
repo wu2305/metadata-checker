@@ -1,0 +1,40 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "sources": [
+    {
+      "id": "model1",
+      "modelType": "dwtable",
+      "path": "data/table1.tbl"
+    }
+  ],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {
+        "id": "input1",
+        "type": "input",
+        "value": "abc"
+      },
+      {
+        "id": "text_ambiguous",
+        "type": "text",
+        "value": "A",
+        "visible": "=foo.bar"
+      },
+      {
+        "id": "text_unsupported",
+        "type": "text",
+        "value": "B",
+        "hidden": "=MY_CUSTOM_FUNC(input1.value)"
+      },
+      {
+        "id": "text_unresolved",
+        "type": "text",
+        "value": "C",
+        "disabled": "modelX.fieldY"
+      }
+    ]
+  }
+}

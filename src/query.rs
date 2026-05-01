@@ -543,40 +543,25 @@ pub fn query_page_logic(
                     let comp_id = comp.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     for prop in ["visible", "hidden", "disabled", "readonly"] {
                         if let Some(val) = comp.get(prop) {
+                            let mut expr_struct =
+                                crate::action_semantics::build_expression_struct(val.as_str());
                             let mut rule = json!({
                                 "component_id": comp_id,
                                 "rule": prop,
                                 "expression": val,
                             });
-                            // 对字符串表达式进行 AST 结构化解析
-                            if let Some(expr_str) = val.as_str()
-                                && (expr_str.starts_with("=") || expr_str.contains("${"))
-                            {
-                                let parse_result = crate::superpage::parse_expression_ast(expr_str);
-                                rule["refs"] = serde_json::json!(
-                                    parse_result
-                                        .refs
-                                        .iter()
-                                        .filter_map(|r| match r {
-                                            crate::superpage::RefType::ComponentValue(id) =>
-                                                Some(json!({"type": "ComponentValue", "id": id})),
-                                            crate::superpage::RefType::ModelField(m, f) => Some(
-                                                json!({"type": "ModelField", "id": m, "field": f})
-                                            ),
-                                            crate::superpage::RefType::Param(id) =>
-                                                Some(json!({"type": "Param", "id": id})),
-                                            _ => None,
-                                        })
-                                        .collect::<Vec<_>>()
-                                );
-                                rule["unresolved_refs"] = serde_json::json!(parse_result.resolved_refs.iter().filter(|rr| rr.unresolved).map(|rr| json!({"type": crate::action_semantics::ref_type_to_str(&rr.ref_type), "id": crate::action_semantics::ref_id(&rr.ref_type)})).collect::<Vec<_>>());
-                                rule["diagnostics"] = serde_json::json!(
-                                    parse_result
-                                        .diagnostics
-                                        .iter()
-                                        .map(|d| json!({"code": &d.code, "message": &d.message}))
-                                        .collect::<Vec<_>>()
-                                );
+                            if let Some(obj) = expr_struct.as_object_mut() {
+                                for key in [
+                                    "raw_expr",
+                                    "refs",
+                                    "resolved_refs",
+                                    "unresolved_refs",
+                                    "ambiguous_refs",
+                                    "diagnostics",
+                                    "confidence",
+                                ] {
+                                    rule[key] = obj.remove(key).unwrap_or(serde_json::Value::Null);
+                                }
                             }
                             visibility_rules.push(rule);
                         }
@@ -952,17 +937,34 @@ pub fn query_page_logic(
         }
     }
 
-    // VISIBILITY_RULE_UNRESOLVED：visibility 规则中的表达式包含未解析引用
+    // VISIBILITY_RULE_UNRESOLVED：visibility 规则中的表达式包含未解析或多义引用
     for rule in &visibility_rules {
-        if let Some(expr) = rule.get("expression").and_then(|v| v.as_str())
-            && expr.contains("model1")
-            && !expr.starts_with("=")
-        {
+        let has_unresolved = rule
+            .get("unresolved_refs")
+            .and_then(|v| v.as_array())
+            .map(|arr| !arr.is_empty())
+            .unwrap_or(false);
+        let has_unresolved_diag = rule
+            .get("diagnostics")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter().any(|d| {
+                    d.get("code").and_then(|v| v.as_str()) == Some("EXPR_UNRESOLVED_REF")
+                        || d.get("code").and_then(|v| v.as_str()) == Some("EXPR_AMBIGUOUS_REF")
+                })
+            })
+            .unwrap_or(false);
+        if has_unresolved || has_unresolved_diag {
+            let expr = rule
+                .get("raw_expr")
+                .and_then(|v| v.as_str())
+                .or_else(|| rule.get("expression").and_then(|v| v.as_str()))
+                .unwrap_or("<non-string expression>");
             diagnostics.push(crate::output::Diagnostic {
                 severity: crate::output::DiagnosticSeverity::Info,
                 code: "VISIBILITY_RULE_UNRESOLVED".to_string(),
                 message: format!(
-                    "Visibility rule '{}' may contain unresolved references",
+                    "Visibility rule '{}' contains unresolved or ambiguous references",
                     expr
                 ),
                 location: crate::output::Location::new(),

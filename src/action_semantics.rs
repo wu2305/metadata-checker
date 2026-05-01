@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use std::collections::HashSet;
 
 /// actionType → action_category 映射
 pub fn classify_action(action_type: &str) -> &'static str {
@@ -202,6 +203,14 @@ pub fn parse_wait_prev(raw: Option<&str>) -> Value {
 /// 输入：condition 原始表达式字符串
 /// 输出：结构化 JSON，包含 raw_expr、refs、resolved_refs、unresolved_refs、diagnostics
 pub fn parse_condition(raw: Option<&str>) -> Value {
+    build_expression_struct(raw)
+}
+
+/// 构建统一表达式结构（M7）
+///
+/// 输出字段：
+/// - raw_expr / refs / resolved_refs / unresolved_refs / ambiguous_refs / diagnostics / confidence
+pub fn build_expression_struct(raw: Option<&str>) -> Value {
     match raw {
         None => json!({
             "raw_expr": null,
@@ -214,16 +223,12 @@ pub fn parse_condition(raw: Option<&str>) -> Value {
         }),
         Some(expr) => {
             let result = crate::superpage::parse_expression_ast(expr);
+            let mut seen_ref_ids: HashSet<String> = HashSet::new();
             let ref_ids: Vec<String> = result
                 .refs
                 .iter()
-                .filter_map(|r| match r {
-                    crate::superpage::RefType::ComponentValue(id) => Some(id.clone()),
-                    crate::superpage::RefType::ComponentProperty(id, _) => Some(id.clone()),
-                    crate::superpage::RefType::ModelField(model, _) => Some(model.clone()),
-                    crate::superpage::RefType::Param(id) => Some(id.clone()),
-                    _ => None,
-                })
+                .map(ref_id)
+                .filter(|id| seen_ref_ids.insert(id.clone()))
                 .collect();
             let resolved: Vec<Value> = result
                 .resolved_refs
@@ -251,16 +256,23 @@ pub fn parse_condition(raw: Option<&str>) -> Value {
                     })
                 })
                 .collect();
+            let mut seen_ambiguous: HashSet<String> = HashSet::new();
             let ambiguous: Vec<Value> = result
                 .refs
                 .iter()
                 .filter(|r| matches!(r, crate::superpage::RefType::Other(_)))
-                .map(|r| match r {
-                    crate::superpage::RefType::Other(lit) => json!({"raw": lit}),
-                    _ => unreachable!(),
+                .filter_map(|r| match r {
+                    crate::superpage::RefType::Other(lit) => {
+                        if seen_ambiguous.insert(lit.clone()) {
+                            Some(json!({"raw": lit}))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
                 })
                 .collect();
-            let diagnostics: Vec<Value> = result
+            let mut diagnostics: Vec<Value> = result
                 .diagnostics
                 .iter()
                 .map(|d| {
@@ -271,6 +283,15 @@ pub fn parse_condition(raw: Option<&str>) -> Value {
                     })
                 })
                 .collect();
+            for item in &ambiguous {
+                if let Some(raw_ref) = item.get("raw").and_then(|v| v.as_str()) {
+                    diagnostics.push(json!({
+                        "code": "EXPR_AMBIGUOUS_REF",
+                        "message": format!("引用 '{}' 可能存在多义性，无法唯一分类", raw_ref),
+                        "position": null,
+                    }));
+                }
+            }
             let confidence = if unresolved.is_empty() && diagnostics.is_empty() {
                 "high"
             } else if unresolved.len() <= 1 && diagnostics.len() <= 1 {

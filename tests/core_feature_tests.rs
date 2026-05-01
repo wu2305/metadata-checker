@@ -436,3 +436,35 @@ fn test_condition_with_unsupported_function() {
         "Should report unsupported function in condition"
     );
 }
+
+#[test]
+fn test_condition_reports_ambiguous_and_unresolved_diagnostics() {
+    use metadata_checker::action_semantics::parse_condition;
+    let result = parse_condition(Some("=foo.bar + MY_CUSTOM_FUNC(input1.value)"));
+    let diagnostics = result["diagnostics"].as_array().expect("diagnostics array");
+
+    assert!(
+        diagnostics.iter().any(|d| {
+            d.get("code")
+                == Some(&serde_json::Value::String(
+                    "EXPR_UNRESOLVED_REF".to_string(),
+                ))
+        }),
+        "Should report unresolved reference in condition"
+    );
+    assert!(
+        diagnostics.iter().any(|d| {
+            d.get("code") == Some(&serde_json::Value::String("EXPR_AMBIGUOUS_REF".to_string()))
+        }),
+        "Should report ambiguous reference in condition"
+    );
+    assert!(
+        diagnostics.iter().any(|d| {
+            d.get("code")
+                == Some(&serde_json::Value::String(
+                    "EXPR_UNSUPPORTED_FUNCTION".to_string(),
+                ))
+        }),
+        "Should report unsupported function in condition"
+    );
+}

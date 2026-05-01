@@ -2036,6 +2036,95 @@ fn test_cli_query_page_logic_risk_diagnostics() {
 }
 
 #[test]
+fn test_cli_query_page_logic_visibility_rules_expression_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/visibility_contract.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    let visibility_rules = details
+        .get("visibility_rules")
+        .and_then(|v| v.as_array())
+        .expect("visibility_rules must be array");
+    assert!(
+        visibility_rules.len() >= 3,
+        "visibility_contract should expose at least 3 visibility rules"
+    );
+
+    for rule in visibility_rules {
+        for key in [
+            "expression",
+            "raw_expr",
+            "refs",
+            "resolved_refs",
+            "unresolved_refs",
+            "ambiguous_refs",
+            "diagnostics",
+            "confidence",
+        ] {
+            assert!(
+                rule.get(key).is_some(),
+                "visibility rule should contain unified field '{}'",
+                key
+            );
+        }
+    }
+
+    let has_ambiguous_diag = visibility_rules.iter().any(|r| {
+        r.get("diagnostics")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .any(|d| d.get("code").and_then(|v| v.as_str()) == Some("EXPR_AMBIGUOUS_REF"))
+            })
+            .unwrap_or(false)
+    });
+    assert!(
+        has_ambiguous_diag,
+        "visibility rule should include EXPR_AMBIGUOUS_REF diagnostics"
+    );
+
+    let has_unsupported_diag = visibility_rules.iter().any(|r| {
+        r.get("diagnostics")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter().any(|d| {
+                    d.get("code").and_then(|v| v.as_str()) == Some("EXPR_UNSUPPORTED_FUNCTION")
+                })
+            })
+            .unwrap_or(false)
+    });
+    assert!(
+        has_unsupported_diag,
+        "visibility rule should include EXPR_UNSUPPORTED_FUNCTION diagnostics"
+    );
+
+    let risks = details
+        .get("risk_diagnostics")
+        .and_then(|v| v.as_array())
+        .expect("risk_diagnostics must be array");
+    let has_visibility_unresolved = risks
+        .iter()
+        .any(|r| r.get("code").and_then(|v| v.as_str()) == Some("VISIBILITY_RULE_UNRESOLVED"));
+    assert!(
+        has_visibility_unresolved,
+        "visibility rule unresolved diagnostics should be propagated to risk diagnostics"
+    );
+}
+
+#[test]
 fn test_cli_query_page_logic_action_meta_no_collision() {
     // button1 和 button2 都有 action1，但元数据不应串线
     let _ = run_cli(&[

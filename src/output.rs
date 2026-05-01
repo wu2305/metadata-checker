@@ -402,34 +402,19 @@ pub fn print_non_human_to(
                 "parent_id": c.parent_id,
                 "properties": c.properties,
             })).collect::<Vec<Value>>(),
-            "expressions": spg.expressions.iter().map(|e| json!({
-                "component_id": e.component_id,
-                "field": e.field,
-                "raw_expr": e.raw_expr,
-                "refs": e.refs.iter().map(|r| match r {
-                    RefType::ComponentValue(id) => json!({"type": "component_value", "id": id}),
-                    RefType::ComponentProperty(id, prop) => json!({"type": "component_property", "id": id, "property": prop}),
-                    RefType::ModelField(model, field) => json!({"type": "model_field", "model": model, "field": field}),
-                    RefType::Param(id) => json!({"type": "param", "id": id}),
-                    RefType::UserProperty(prop) => json!({"type": "user_property", "property": prop}),
-                    RefType::SystemVar(var) => json!({"type": "system_var", "var": var}),
-                    RefType::Other(s) => json!({"type": "other", "value": s}),
-                }).collect::<Vec<Value>>(),
-                "resolved_refs": e.resolved_refs.iter().map(|rr| json!({
-                    "type": match &rr.ref_type {
-                        RefType::ComponentValue(id) => json!({"kind": "component_value", "id": id}),
-                        RefType::ComponentProperty(id, prop) => json!({"kind": "component_property", "id": id, "property": prop}),
-                        RefType::ModelField(model, field) => json!({"kind": "model_field", "model": model, "field": field}),
-                        RefType::Param(id) => json!({"kind": "param", "id": id}),
-                        RefType::UserProperty(prop) => json!({"kind": "user_property", "property": prop}),
-                        RefType::SystemVar(var) => json!({"kind": "system_var", "var": var}),
-                        RefType::Other(s) => json!({"kind": "other", "value": s}),
-                    },
-                    "confidence": format!("{:?}", rr.confidence),
-                    "reason": rr.reason,
-                    "unresolved": rr.unresolved,
-                })).collect::<Vec<Value>>(),
-            })).collect::<Vec<Value>>(),
+            "expressions": spg
+                .expressions
+                .iter()
+                .map(|e| {
+                    let mut expr_struct =
+                        crate::action_semantics::build_expression_struct(Some(&e.raw_expr));
+                    if let Some(obj) = expr_struct.as_object_mut() {
+                        obj.insert("component_id".to_string(), json!(e.component_id));
+                        obj.insert("field".to_string(), json!(e.field));
+                    }
+                    expr_struct
+                })
+                .collect::<Vec<Value>>(),
             "dependency_order": topo,
             "cycles": cycles,
             "priority_analysis": priority_json,

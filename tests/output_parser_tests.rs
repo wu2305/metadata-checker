@@ -262,6 +262,26 @@ fn test_detail_output_contains_resolved_refs() {
         first_expr.get("resolved_refs").is_some(),
         "Detail output should contain resolved_refs"
     );
+    assert!(
+        first_expr.get("raw_expr").is_some(),
+        "Detail output should contain raw_expr"
+    );
+    assert!(
+        first_expr.get("unresolved_refs").is_some(),
+        "Detail output should contain unresolved_refs"
+    );
+    assert!(
+        first_expr.get("ambiguous_refs").is_some(),
+        "Detail output should contain ambiguous_refs"
+    );
+    assert!(
+        first_expr.get("diagnostics").is_some(),
+        "Detail output should contain diagnostics"
+    );
+    assert!(
+        first_expr.get("confidence").is_some(),
+        "Detail output should contain confidence"
+    );
 }
 
 // ============================================================

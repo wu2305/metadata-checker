@@ -304,19 +304,17 @@ pub fn print_component_query_json_to(
 
     let details = json!({
         "properties": comp.properties,
-        "expressions": comp_exprs.iter().map(|e| json!({
-            "field": e.field,
-            "raw_expr": e.raw_expr,
-            "refs": e.refs.iter().map(|r| match r {
-                RefType::ComponentValue(id) => json!({"type": "component_value", "id": id}),
-                RefType::ComponentProperty(id, prop) => json!({"type": "component_property", "id": id, "property": prop}),
-                RefType::ModelField(model, field) => json!({"type": "model_field", "model": model, "field": field}),
-                RefType::Param(id) => json!({"type": "param", "id": id}),
-                RefType::UserProperty(prop) => json!({"type": "user_property", "property": prop}),
-                RefType::SystemVar(var) => json!({"type": "system_var", "var": var}),
-                RefType::Other(s) => json!({"type": "other", "value": s}),
-            }).collect::<Vec<serde_json::Value>>(),
-        })).collect::<Vec<serde_json::Value>>(),
+        "expressions": comp_exprs
+            .iter()
+            .map(|e| {
+                let mut expr_struct =
+                    crate::action_semantics::build_expression_struct(Some(&e.raw_expr));
+                if let Some(obj) = expr_struct.as_object_mut() {
+                    obj.insert("field".to_string(), json!(e.field));
+                }
+                expr_struct
+            })
+            .collect::<Vec<serde_json::Value>>(),
         "upstream": upstream,
         "downstream": downstream,
         "value_trace": value_trace,
