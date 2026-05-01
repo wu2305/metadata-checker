@@ -503,6 +503,103 @@ pub fn context_node_graph(
                 }
             }
         }
+        // Backfill from parent model edges (spg writes often go to model, not field node)
+        let field_name = node.name.as_str();
+        let parent_model = if let Some((_outgoing, incoming)) = graph.get_node_edges(node_id) {
+            incoming.iter().find_map(|(source, edge)| {
+                if matches!(edge.edge_type, crate::graph::EdgeType::Contains)
+                    && matches!(source.node_type, crate::graph::NodeType::Model)
+                {
+                    Some((*source).clone())
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
+        if let Some(ref model) = parent_model
+            && let Some((_model_out, model_in)) = graph.get_node_edges(&model.id)
+        {
+            for (source, edge) in &model_in {
+                if matches!(
+                    edge.edge_type,
+                    crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites
+                ) && edge
+                    .field_path
+                    .as_ref()
+                    .map(|fp| {
+                        let parts: Vec<&str> = fp.split('.').collect();
+                        parts.last() == Some(&field_name)
+                    })
+                    .unwrap_or(false)
+                {
+                    let source_expr = edge
+                        .meta
+                        .as_ref()
+                        .and_then(|m| m.get("source_expr"))
+                        .and_then(|v| v.as_str());
+                    let mut source_fields: Vec<String> = Vec::new();
+                    let mut resolved_refs: Vec<serde_json::Value> = Vec::new();
+                    let mut has_unresolved = false;
+                    if let Some(expr) = source_expr {
+                        let refs = crate::superpage::parse_expression_refs(expr);
+                        if refs.is_empty() {
+                            has_unresolved = true;
+                        }
+                        for r in refs {
+                            let (ref_type_str, ref_id, confidence) = match &r {
+                                crate::superpage::RefType::ModelField(m, f) => {
+                                    let fid = format!("field:{}.{}", m, f);
+                                    source_fields.push(fid.clone());
+                                    ("ModelField", fid, "high")
+                                }
+                                crate::superpage::RefType::ComponentValue(c) => {
+                                    ("ComponentValue", format!("comp:{}", c), "high")
+                                }
+                                crate::superpage::RefType::ComponentProperty(c, p) => {
+                                    ("ComponentProperty", format!("comp:{}.{}", c, p), "high")
+                                }
+                                crate::superpage::RefType::Param(p) => {
+                                    ("Param", format!("param:{}", p), "high")
+                                }
+                                crate::superpage::RefType::UserProperty(p) => {
+                                    ("UserProperty", format!("user:{}", p), "medium")
+                                }
+                                crate::superpage::RefType::SystemVar(v) => {
+                                    ("SystemVar", v.clone(), "high")
+                                }
+                                crate::superpage::RefType::Other(o) => {
+                                    has_unresolved = true;
+                                    ("Other", o.clone(), "low")
+                                }
+                            };
+                            resolved_refs.push(json!({
+                                "ref_type": ref_type_str,
+                                "ref_id": ref_id,
+                                "confidence": confidence,
+                            }));
+                        }
+                    }
+                    let confidence = if source_expr.is_some() && has_unresolved {
+                        "medium"
+                    } else if source_expr.is_some() && resolved_refs.is_empty() {
+                        "low"
+                    } else {
+                        "high"
+                    };
+                    lineage.push(json!({
+                        "target_field": node.id,
+                        "source_fields": source_fields,
+                        "source_expr": source_expr,
+                        "resolved_refs": resolved_refs,
+                        "transform": "page action write",
+                        "via_node": source.id.clone(),
+                        "confidence": confidence,
+                    }));
+                }
+            }
+        }
     }
 
     let details = if lineage.is_empty() {

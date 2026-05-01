@@ -256,6 +256,7 @@ pub fn process_tbl_file_from_string(
                             }
                         }
 
+                        let input_field = field.get("inputField").and_then(|v| v.as_str());
                         let mut record = serde_json::json!({
                             "name": name,
                             "dbfield": dbfield,
@@ -270,6 +271,9 @@ pub fn process_tbl_file_from_string(
                             record["exp"] = serde_json::Value::String(e.to_string());
                         } else if let Some(e) = step_exp {
                             record["exp"] = serde_json::Value::String(e.to_string());
+                        }
+                        if let Some(input) = input_field {
+                            record["inputField"] = serde_json::Value::String(input.to_string());
                         }
                         field_records.push(record);
                     }

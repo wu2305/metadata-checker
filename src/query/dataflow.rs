@@ -18,6 +18,8 @@ struct FieldRecord {
     #[serde(rename = "originalNode")]
     original_node: Option<String>,
     exp: Option<String>,
+    #[serde(rename = "inputField")]
+    input_field: Option<String>,
 }
 
 /// DataFlow 预解析元数据（一次性反序列化 + 预建索引）
@@ -67,12 +69,21 @@ impl DataFlowMeta {
                     .filter_map(|dim| {
                         let name = dim.get("name")?.as_str()?.to_string();
                         let dbfield = dim.get("dbfield")?.as_str()?.to_string();
+                        let exp = dim
+                            .get("exp")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let input_field = dim
+                            .get("inputField")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
                         Some(FieldRecord {
                             name,
                             dbfield,
                             original_field: None,
                             original_node: None,
-                            exp: None,
+                            exp,
+                            input_field,
                         })
                     })
                     .collect()
@@ -104,6 +115,7 @@ impl DataFlowMeta {
         }
 
         // Fallback: if Output nodes have empty nodeFields, populate with dimensions
+        // Also merge dimensions inputField/exp into existing Output node fields
         let output_nodes: Vec<String> = node_types
             .iter()
             .filter(|(_, t)| *t == "Output")
@@ -116,6 +128,24 @@ impl DataFlowMeta {
                     idx.insert(dim.name.clone(), dim.clone());
                 }
                 field_index.insert(out_id.clone(), idx);
+            } else if let Some(existing_idx) = field_index.get(&out_id) {
+                // Merge dimensions inputField/exp into existing Output fields
+                let dim_map: HashMap<String, &FieldRecord> =
+                    dimensions.iter().map(|d| (d.name.clone(), d)).collect();
+                let mut merged_idx = existing_idx.clone();
+                for (field_name, rec) in existing_idx {
+                    if let Some(dim) = dim_map.get(field_name) {
+                        let mut merged = rec.clone();
+                        if merged.exp.is_none() && dim.exp.is_some() {
+                            merged.exp = dim.exp.clone();
+                        }
+                        if merged.input_field.is_none() && dim.input_field.is_some() {
+                            merged.input_field = dim.input_field.clone();
+                        }
+                        merged_idx.insert(field_name.clone(), merged);
+                    }
+                }
+                field_index.insert(out_id.clone(), merged_idx);
             }
         }
 
@@ -359,7 +389,13 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                     writeln!(out, "\n[字段] {}", field_name)?;
 
                     if trace.len() <= 1 {
-                        writeln!(out, "  来源: (未记录来源关系)")?;
+                        if let Some(ref input) = field_rec.input_field {
+                            writeln!(out, "  来源: inputField 映射 -> {}", input)?;
+                        } else if let Some(ref exp) = field_rec.exp {
+                            writeln!(out, "  来源: 表达式 -> {}", exp)?;
+                        } else {
+                            writeln!(out, "  来源: (未记录来源关系)")?;
+                        }
                         continue;
                     }
 
