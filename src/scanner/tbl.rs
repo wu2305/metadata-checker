@@ -28,12 +28,19 @@ pub fn process_tbl_file_from_string(
     let is_dataflow = value.get("dataFlow").is_some();
     let model_type = if is_dataflow { "DataFlow" } else { "App" };
 
+    let mut model_meta = serde_json::json!({"modelType": model_type});
+    // Store dimensions in model meta so chain lineage can resolve field mappings
+    if let Some(dims) = value.get("dimensions")
+        && let Some(obj) = model_meta.as_object_mut()
+    {
+        obj.insert("dimensions".to_string(), dims.clone());
+    }
     graph.add_node(
         model_id.clone(),
         NodeType::Model,
         rel_path.to_string(),
         model_name.clone(),
-        Some(serde_json::json!({"modelType": model_type})),
+        Some(model_meta),
     );
     node_ids.insert(model_id.clone());
 
@@ -93,12 +100,22 @@ pub fn process_tbl_file_from_string(
     {
         let output_model_id = format!("model:{}", db_table_name);
         let db_table_path = format!("{}.tbl", db_table_name);
+        // Merge with existing meta if node already exists (e.g., physical table also has its own .tbl file)
+        let output_meta = if let Some(existing) = graph.get_node(&output_model_id) {
+            let mut merged = existing.meta.clone().unwrap_or(serde_json::json!({}));
+            if let Some(obj) = merged.as_object_mut() {
+                obj.insert("modelType".to_string(), serde_json::json!("PhysicalTable"));
+            }
+            Some(merged)
+        } else {
+            Some(serde_json::json!({"modelType": "PhysicalTable"}))
+        };
         graph.add_node(
             output_model_id.clone(),
             NodeType::Model,
-            db_table_path,
+            db_table_path.clone(),
             db_table_name.to_string(),
-            Some(serde_json::json!({"modelType": "PhysicalTable"})),
+            output_meta,
         );
         graph.add_edge(
             &model_id,
@@ -106,6 +123,51 @@ pub fn process_tbl_file_from_string(
             EdgeType::OutputsTo,
             Some(db_table_name.to_string()),
         );
+        // Also create field nodes for the output physical table so field-level lineage works
+        if let Some(dims) = value.get("dimensions").and_then(|d| d.as_array()) {
+            for dim in dims {
+                if let Some(name) = dim.get("name").and_then(|n| n.as_str()) {
+                    let field_id = format!("field:{}.{}", db_table_name, name);
+                    let mut field_meta = dim.clone();
+                    // 粗粒度解析表达式中的字段引用（如果有exp）
+                    if let Some(exp) = dim.get("exp").and_then(|v| v.as_str()) {
+                        let refs = crate::superpage::parse_expression_refs(exp);
+                        let ref_models: Vec<String> = refs
+                            .iter()
+                            .filter_map(|r| match r {
+                                crate::superpage::RefType::ModelField(m, _) => Some(m.clone()),
+                                _ => None,
+                            })
+                            .collect();
+                        if let Some(obj) = field_meta.as_object_mut() {
+                            obj.insert("source_expr".to_string(), serde_json::json!(exp));
+                            if !ref_models.is_empty() {
+                                obj.insert(
+                                    "source_expr_models".to_string(),
+                                    serde_json::json!(ref_models),
+                                );
+                            }
+                        }
+                    }
+                    if let Some(input_field) = dim.get("inputField").and_then(|v| v.as_str())
+                        && let Some(obj) = field_meta.as_object_mut()
+                    {
+                        obj.insert(
+                            "source_input_field".to_string(),
+                            serde_json::json!(input_field),
+                        );
+                    }
+                    graph.add_node(
+                        field_id.clone(),
+                        NodeType::Field,
+                        db_table_path.clone(),
+                        name.to_string(),
+                        Some(field_meta),
+                    );
+                    graph.add_edge(&output_model_id, &field_id, EdgeType::Contains, None);
+                }
+            }
+        }
     }
 
     // For DataFlow type: process explicit depends (dependencies on other .tbl files)

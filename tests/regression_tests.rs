@@ -2541,6 +2541,22 @@ fn test_cli_explain_field_lineage_chain_dataflow() {
             .unwrap_or(false)
     });
     assert!(has_chain, "lineage must contain DataFlow chain transform");
+
+    // df_b has two inputs: physical_x and df_a; both should appear in source_fields
+    let all_source_fields: Vec<String> = lineage
+        .iter()
+        .filter_map(|item| item.as_object().unwrap().get("source_fields"))
+        .filter_map(|v| v.as_array())
+        .flat_map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())))
+        .collect();
+    assert!(
+        all_source_fields.iter().any(|s| s == "field:physical_x.id"),
+        "df_b.id lineage must trace back to field:physical_x.id"
+    );
+    assert!(
+        all_source_fields.iter().any(|s| s == "field:df_a.id"),
+        "df_b.id lineage must trace back to field:df_a.id"
+    );
 }
 
 #[test]

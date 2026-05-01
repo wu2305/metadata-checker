@@ -1414,21 +1414,60 @@ fn explain_field_graph(
             .unwrap_or("");
         let source_expr = writer.get("source_expr").and_then(|v| v.as_str());
         let mut source_fields: Vec<String> = Vec::new();
+        let mut resolved_refs: Vec<serde_json::Value> = Vec::new();
+        let mut has_unresolved = false;
         if let Some(expr) = source_expr {
             let refs = crate::superpage::parse_expression_refs(expr);
+            if refs.is_empty() {
+                has_unresolved = true;
+            }
             for r in refs {
-                if let crate::superpage::RefType::ModelField(m, f) = r {
-                    source_fields.push(format!("field:{}.{}", m, f));
-                }
+                let (ref_type_str, ref_id, confidence) = match &r {
+                    crate::superpage::RefType::ModelField(m, f) => {
+                        let fid = format!("field:{}.{}", m, f);
+                        source_fields.push(fid.clone());
+                        ("ModelField", fid, "high")
+                    }
+                    crate::superpage::RefType::ComponentValue(c) => {
+                        ("ComponentValue", format!("comp:{}", c), "high")
+                    }
+                    crate::superpage::RefType::ComponentProperty(c, p) => {
+                        ("ComponentProperty", format!("comp:{}.{}", c, p), "high")
+                    }
+                    crate::superpage::RefType::Param(p) => {
+                        ("Param", format!("param:{}", p), "high")
+                    }
+                    crate::superpage::RefType::UserProperty(p) => {
+                        ("UserProperty", format!("user:{}", p), "medium")
+                    }
+                    crate::superpage::RefType::SystemVar(v) => ("SystemVar", v.clone(), "high"),
+                    crate::superpage::RefType::Other(o) => {
+                        has_unresolved = true;
+                        ("Other", o.clone(), "low")
+                    }
+                };
+                resolved_refs.push(serde_json::json!({
+                    "ref_type": ref_type_str,
+                    "ref_id": ref_id,
+                    "confidence": confidence,
+                }));
             }
         }
+        let confidence = if source_expr.is_some() && has_unresolved {
+            "medium"
+        } else if source_expr.is_some() && resolved_refs.is_empty() {
+            "low"
+        } else {
+            "high"
+        };
         lineage.push(serde_json::json!({
             "target_field": node.id,
             "source_fields": source_fields,
             "source_expr": source_expr,
+            "resolved_refs": resolved_refs,
             "transform": "page action write",
             "via_node": writer_id.to_string(),
-            "confidence": if source_expr.is_some() && source_fields.is_empty() { "medium" } else { "high" },
+            "confidence": confidence,
             "evidence": {
                 "source_file": writer.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
                 "node_id": writer_id,
