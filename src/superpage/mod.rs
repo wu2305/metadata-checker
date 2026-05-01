@@ -628,5 +628,8 @@ fn extract_components(
 
 // ============================================================
 
-mod expr;
-pub use expr::*;
+mod expr_ast;
+pub use expr_ast::ExprDiagnostic;
+pub use expr_ast::ExprParseResult;
+pub use expr_ast::parse_expression_ast;
+pub use expr_ast::parse_expression_refs;

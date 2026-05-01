@@ -38,7 +38,19 @@ impl DependencyGraph {
 
             // 收集该组件的所有引用
             let entry = deps.entry(comp_id.clone()).or_insert_with(Vec::new);
+            // validExp 等校验表达式中的自引用不应构成循环依赖
+            let is_validation_field = expr.field == "validExp" || expr.field == "visibleCondition";
             for ref_type in &expr.refs {
+                let is_self_ref = match ref_type {
+                    RefType::ComponentValue(ref_id) | RefType::ComponentProperty(ref_id, _) => {
+                        ref_id == &comp_id
+                    }
+                    _ => false,
+                };
+                // 仅在校验/条件字段中跳过自引用
+                if is_validation_field && is_self_ref {
+                    continue;
+                }
                 entry.push(ref_type.clone());
             }
 
@@ -52,6 +64,10 @@ impl DependencyGraph {
             for ref_type in &expr.refs {
                 match ref_type {
                     RefType::ComponentValue(ref_id) | RefType::ComponentProperty(ref_id, _) => {
+                        let is_self_ref = ref_id == &comp_id;
+                        if is_validation_field && is_self_ref {
+                            continue;
+                        }
                         reverse
                             .entry(ref_id.clone())
                             .or_insert_with(Vec::new)
