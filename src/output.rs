@@ -465,7 +465,7 @@ pub fn print_non_human_to(
                             .unwrap_or(0);
                         obj.insert("component_id".to_string(), json!(e.component_id));
                         obj.insert("field".to_string(), json!(e.field));
-                        obj.insert("source_file".to_string(), json!("input_file"));
+                        obj.insert("source_file".to_string(), json!(meta.input_path.clone()));
                         obj.insert("json_path".to_string(), json!(json_path));
                         obj.insert("refs_count".to_string(), json!(refs_count));
                         obj.insert(

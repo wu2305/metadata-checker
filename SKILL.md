@@ -67,6 +67,7 @@ Output structure (kind = Explain):
   - `condition`: 结构化条件执行表达式（condition 或 conditionExp）
   - `trigger_type`: click / hover / focus / ...
 - `evidence`: 每条结论的具体证据，包含 `source_file`、`node_id`、`edge_type`
+  - 当 `diagnostics` 出现 `EVIDENCE_SAMPLED` 时，表示 evidence 为控噪采样，需结合 `details` 全量数组判断
 - `next_queries`: 建议的后续命令
 
 **When explain is not enough**:
@@ -82,6 +83,7 @@ Output structure (kind = Explain):
 - Default depth is 1, default budget is `normal`.
 - **AI 不要默认读取 `full` budget**，优先使用 `normal` 或 `compact`；只有遇到 `OUTPUT_TRUNCATED` diagnostic 且确实需要更多关系时，才升级到 `full`。
 - `--context` 输出包含：upstream（谁影响我）、downstream（我影响谁）、related_actions、related_models、related_pages、related_nodes（全类型）、related_components（仅组件）。
+  - `--context` evidence 会附带 upstream/downstream 的边级采样证据；若缺原始 JSON 路径，`json_path` 为 `<graph-edge-derived>`。
 
 ### Q4: Do you need project-level analysis?
 
@@ -121,7 +123,8 @@ Output structure (kind = PageLogic):
 - `details.risk_diagnostics`: 风险诊断，包括：
   - `NO_WRITE_TARGETS`：只读页面
   - `NO_ENTRYPOINTS`：无用户可触发入口
-  - `ACTION_FLOW_INCOMPLETE`：action 读取但未写入
+  - `ACTION_FLOW_INCOMPLETE`：仅对按语义应有副作用（如 data_write/param_mutation）却“读取但无写入且无导航”的 action 提示
+  - `EVIDENCE_SAMPLED`：evidence 为低噪声采样，不代表 details 全集
   - `UNRESOLVED_PAGE_NAVIGATION`：导航目标页面不存在
   - `UNRESOLVED_MODEL_WRITE`：写入目标模型不存在
   - `VISIBILITY_RULE_UNRESOLVED`：visibility 规则包含未解析或歧义引用（warning）

@@ -294,6 +294,16 @@ fn test_detail_output_contains_resolved_refs() {
         first_expr.get("source_file").is_some(),
         "Detail output should contain source_file"
     );
+    assert_ne!(
+        first_expr.get("source_file").and_then(|v| v.as_str()),
+        Some("input_file"),
+        "source_file must not be hardcoded placeholder"
+    );
+    assert_eq!(
+        first_expr.get("source_file").and_then(|v| v.as_str()),
+        Some("tests/fixtures/test_superpage.spg"),
+        "source_file should reflect input file path when available"
+    );
     assert!(
         first_expr.get("json_path").is_some(),
         "Detail output should contain json_path"

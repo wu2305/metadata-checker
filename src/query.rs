@@ -56,6 +56,12 @@ fn edge_meta_str(edge: &crate::graph::Edge, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// 按优先顺序提取对象中的字符串字段，自动跳过 null/非字符串
+fn pick_str_field<'a>(obj: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| obj.get(*key).and_then(|v| v.as_str()))
+}
+
 pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
     if human {
         let mut out = io::stdout();
@@ -1196,15 +1202,8 @@ pub fn query_page_logic(
                         .get("source_file")
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string),
-                    node_id: wt
-                        .get("source_action")
-                        .and_then(|v| v.as_str())
-                        .map(ToString::to_string)
-                        .or_else(|| {
-                            wt.get("source_component")
-                                .and_then(|v| v.as_str())
-                                .map(ToString::to_string)
-                        }),
+                    node_id: pick_str_field(wt, &["source_action", "source_component"])
+                        .map(ToString::to_string),
                     json_path: wt
                         .get("json_path")
                         .and_then(|v| v.as_str())
@@ -1267,7 +1266,7 @@ pub fn query_page_logic(
         }
     }
 
-    // ACTION_FLOW_INCOMPLETE
+    // ACTION_FLOW_INCOMPLETE：仅对“通常应产生副作用”的动作类型发出提示
     for flow in &action_flows {
         let reads = flow
             .get("reads")
@@ -1279,20 +1278,36 @@ pub fn query_page_logic(
             .and_then(|v| v.as_array())
             .map(|a| a.len())
             .unwrap_or(0);
+        let nav_count = flow
+            .get("navigation")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
         let action_type = flow
             .get("action_type")
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        let action_category = flow
+            .get("action_category")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let is_query_refresh_like = matches!(
+            action_type,
+            "loadData" | "resetData" | "refreshData" | "refreshModels" | "newData" | "validateData"
+        ) || matches!(
+            action_category,
+            "data_read" | "data_refresh" | "data_initialization" | "validation"
+        );
+        let expects_side_effect = matches!(action_category, "data_write" | "param_mutation")
+            || matches!(
+                action_type,
+                "submitData" | "insertData" | "updateData" | "deleteData" | "setParamValue"
+            );
         if reads > 0
             && writes == 0
-            && ![
-                "link",
-                "showDialog",
-                "switchPanel",
-                "showComponent",
-                "hideComponent",
-            ]
-            .contains(&action_type)
+            && nav_count == 0
+            && expects_side_effect
+            && !is_query_refresh_like
         {
             diagnostics.push(crate::output::Diagnostic {
                 severity: crate::output::DiagnosticSeverity::Info,
@@ -1352,6 +1367,41 @@ pub fn query_page_logic(
                 ),
             });
         }
+    }
+
+    // EVIDENCE_SAMPLED：明细数量大于 evidence 展开上限时提示 evidence 非全集
+    let evidence_sample_limit = 5usize;
+    let sampling_categories = [
+        ("entrypoints", entrypoints.len()),
+        ("data_sources", data_sources.len()),
+        ("write_targets", write_targets.len()),
+        ("navigation", navigation.len()),
+        ("visibility_rules", visibility_rules.len()),
+        ("action_flows", action_flows.len()),
+    ];
+    let sampled_parts: Vec<String> = sampling_categories
+        .iter()
+        .filter(|(_, size)| *size > evidence_sample_limit)
+        .map(|(name, size)| format!("{name} {size}>{evidence_sample_limit}"))
+        .collect();
+    if !sampled_parts.is_empty() {
+        diagnostics.push(crate::output::Diagnostic {
+            severity: crate::output::DiagnosticSeverity::Info,
+            code: "EVIDENCE_SAMPLED".to_string(),
+            message: format!(
+                "Evidence includes only a sample for: {}",
+                sampled_parts.join(", ")
+            ),
+            location: crate::output::Location {
+                source_file: Some(page_node.path.clone()),
+                node_id: Some(page_id.to_string()),
+                json_path: None,
+            },
+            suggestion: Some(
+                "Use details arrays for full coverage; evidence is intentionally low-noise sampled"
+                    .to_string(),
+            ),
+        });
     }
 
     // ---- 7. Summary & page_role ----
@@ -1421,7 +1471,7 @@ pub fn query_page_logic(
         .with_json_path("canvas.components[*].actions[*]")
         .with_edge_type("Triggers"),
     );
-    for ep in entrypoints.iter().take(5) {
+    for ep in entrypoints.iter().take(evidence_sample_limit) {
         output.evidence.push(
             crate::output::Evidence::new(
                 format!(
@@ -1467,16 +1517,13 @@ pub fn query_page_logic(
             .with_source_file(&page_node.path)
             .with_edge_type("Reads/ActionReads"),
         );
-        for ds in data_sources.iter().take(5) {
+        for ds in data_sources.iter().take(evidence_sample_limit) {
             output.evidence.push(
                 crate::output::Evidence::new(
                     format!(
                         "Read {} via {}",
                         ds.get("field_path").and_then(|v| v.as_str()).unwrap_or("?"),
-                        ds.get("source_action")
-                            .or_else(|| ds.get("source_component"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("?")
+                        pick_str_field(ds, &["source_action", "source_component"]).unwrap_or("?")
                     ),
                     "Relation extracted from graph edge under page scope",
                 )
@@ -1487,10 +1534,7 @@ pub fn query_page_logic(
                         .unwrap_or(&page_node.path),
                 )
                 .with_node_id(
-                    ds.get("source_action")
-                        .or_else(|| ds.get("source_component"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?"),
+                    pick_str_field(ds, &["source_action", "source_component"]).unwrap_or("?"),
                 )
                 .with_edge_type(
                     ds.get("edge_type")
@@ -1521,16 +1565,13 @@ pub fn query_page_logic(
             .with_source_file(&page_node.path)
             .with_edge_type("Writes/ActionWrites"),
         );
-        for wt in write_targets.iter().take(5) {
+        for wt in write_targets.iter().take(evidence_sample_limit) {
             output.evidence.push(
                 crate::output::Evidence::new(
                     format!(
                         "Write {} via {}",
                         wt.get("field_path").and_then(|v| v.as_str()).unwrap_or("?"),
-                        wt.get("source_action")
-                            .or_else(|| wt.get("source_component"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("?")
+                        pick_str_field(wt, &["source_action", "source_component"]).unwrap_or("?")
                     ),
                     "Write target inferred from action/submit binding edge",
                 )
@@ -1541,10 +1582,7 @@ pub fn query_page_logic(
                         .unwrap_or(&page_node.path),
                 )
                 .with_node_id(
-                    wt.get("source_action")
-                        .or_else(|| wt.get("source_component"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?"),
+                    pick_str_field(wt, &["source_action", "source_component"]).unwrap_or("?"),
                 )
                 .with_edge_type(
                     wt.get("edge_type")
@@ -1579,7 +1617,7 @@ pub fn query_page_logic(
             .with_source_file(&page_node.path)
             .with_edge_type("Navigation"),
         );
-        for nav_item in navigation.iter().take(5) {
+        for nav_item in navigation.iter().take(evidence_sample_limit) {
             output.evidence.push(
                 crate::output::Evidence::new(
                     format!(
@@ -1637,7 +1675,7 @@ pub fn query_page_logic(
             .with_source_file(&page_node.path)
             .with_edge_type("VisibilityRule"),
         );
-        for rule in visibility_rules.iter().take(5) {
+        for rule in visibility_rules.iter().take(evidence_sample_limit) {
             output.evidence.push(
                 crate::output::Evidence::new(
                     format!(
@@ -1690,7 +1728,7 @@ pub fn query_page_logic(
             .with_source_file(&page_node.path)
             .with_edge_type("Triggers"),
         );
-        for flow in action_flows.iter().take(5) {
+        for flow in action_flows.iter().take(evidence_sample_limit) {
             output.evidence.push(
                 crate::output::Evidence::new(
                     format!(

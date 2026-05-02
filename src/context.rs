@@ -111,6 +111,7 @@ pub fn context_node_graph(
                     "type": format!("{:?}", target.node_type),
                     "edge_type": format!("{:?}", edge.edge_type),
                     "field_path": edge.field_path,
+                    "source_file": target.path,
                 });
 
                 match edge.edge_type {
@@ -168,6 +169,7 @@ pub fn context_node_graph(
                     "type": format!("{:?}", source.node_type),
                     "edge_type": format!("{:?}", edge.edge_type),
                     "field_path": edge.field_path,
+                    "source_file": source.path,
                 });
 
                 match edge.edge_type {
@@ -687,6 +689,75 @@ pub fn context_node_graph(
                 "BFS traversal: outgoing edges",
             )
             .with_confidence(crate::output::Confidence::High),
+        );
+    }
+    let edge_evidence_limit = match budget {
+        "compact" => 3usize,
+        "full" => 20usize,
+        _ => 5usize,
+    };
+    for edge in upstream_out.iter().take(edge_evidence_limit) {
+        let from = edge.get("from").and_then(|v| v.as_str()).unwrap_or("?");
+        let to = edge.get("to").and_then(|v| v.as_str()).unwrap_or("?");
+        let edge_type = edge
+            .get("edge_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let raw_expr = edge
+            .get("field_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("n/a");
+        let json_path = edge
+            .get("json_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<graph-edge-derived>");
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Upstream edge {} -> {}", from, to),
+                "Edge-level sampled evidence from context closure",
+            )
+            .with_confidence(crate::output::Confidence::Medium)
+            .with_source_file(
+                edge.get("source_file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&node.path),
+            )
+            .with_node_id(to)
+            .with_edge_type(edge_type)
+            .with_raw_expr(raw_expr)
+            .with_json_path(json_path),
+        );
+    }
+    for edge in downstream_out.iter().take(edge_evidence_limit) {
+        let from = edge.get("from").and_then(|v| v.as_str()).unwrap_or("?");
+        let to = edge.get("to").and_then(|v| v.as_str()).unwrap_or("?");
+        let edge_type = edge
+            .get("edge_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let raw_expr = edge
+            .get("field_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("n/a");
+        let json_path = edge
+            .get("json_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<graph-edge-derived>");
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Downstream edge {} -> {}", from, to),
+                "Edge-level sampled evidence from context closure",
+            )
+            .with_confidence(crate::output::Confidence::Medium)
+            .with_source_file(
+                edge.get("source_file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&node.path),
+            )
+            .with_node_id(to)
+            .with_edge_type(edge_type)
+            .with_raw_expr(raw_expr)
+            .with_json_path(json_path),
         );
     }
     output.next_queries = generate_next_queries(node_id, &node.node_type, depth);

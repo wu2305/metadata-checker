@@ -173,7 +173,7 @@ pub struct AiOutput {
 ```json
 {
   "severity": "error | warning | info",
-  "code": "EVIDENCE_INCOMPLETE | CYCLE_DEPENDENCY | OUTPUT_TRUNCATED | NO_WRITE_TARGETS | NO_ENTRYPOINTS | ...",
+  "code": "EVIDENCE_INCOMPLETE | EVIDENCE_SAMPLED | CYCLE_DEPENDENCY | OUTPUT_TRUNCATED | NO_WRITE_TARGETS | NO_ENTRYPOINTS | ...",
   "message": "人类可读描述",
   "location": {
     "source_file": "...",
@@ -228,6 +228,12 @@ pub struct AiOutput {
 | `related_pages` | array | 所属页面、打开关系页面、嵌入页面、引用页面 |
 | `related_nodes` | array | 相关闭包节点（可包含 Component/Action/Model/Field/Page） |
 | `related_components` | array | 仅组件节点（`type=Component`）的子集，兼容旧字段 |
+
+### context evidence 采样说明
+
+- `evidence` 中会包含 upstream/downstream 的**边级采样证据**（claim 为 `Upstream edge ...` / `Downstream edge ...`）
+- 采样上限随 budget 变化：`compact=3`、`normal=5`、`full=20`
+- 当边缺少原始 JSON 路径时，`json_path` 固定为 `<graph-edge-derived>`
 
 ### diagnostics
 
@@ -284,7 +290,8 @@ pub struct AiOutput {
 |------|----------|------|
 | `NO_WRITE_TARGETS` | Info | 页面无写入目标（可能是只读页面） |
 | `NO_ENTRYPOINTS` | Warning | 页面无用户可触发入口 |
-| `ACTION_FLOW_INCOMPLETE` | Info | Action 读取但未写入（可能是查询动作） |
+| `ACTION_FLOW_INCOMPLETE` | Info | 对 `data_write/param_mutation` 等应有副作用的动作，检测到“读取但无写入且无导航” |
+| `EVIDENCE_SAMPLED` | Info | evidence 为控噪采样，不代表 details 全集 |
 | `PAGE_INPUTS_DEFERRED` | Warning | 未能读取原始页面文件，page_inputs / visibility_rules 可能不完整 |
 
 ### next_queries
@@ -357,7 +364,7 @@ pub struct AiOutput {
 |------|------|------|
 | component_id | string | 表达式所属组件 ID（仅 ComponentExpr 输出） |
 | field | string | 表达式所属字段名（仅 ComponentExpr 输出） |
-| source_file | string / null | 来源文件（单文件解析时为 `"input_file"`） |
+| source_file | string / null | 来源文件（单文件解析时尽量为真实输入路径；无法确定时为 null） |
 | json_path | string | 稳定近似 JSON 路径（可直接定位到组件字段） |
 | raw_expr | string / null | 原始表达式字符串 |
 | refs | array | 提取的引用 ID 列表（去重集合） |

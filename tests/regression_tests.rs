@@ -1652,6 +1652,39 @@ fn test_cli_context_related_nodes_and_components_contract_m8() {
 }
 
 #[test]
+fn test_cli_context_edge_level_evidence_m8() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--context",
+        "comp:app/actions_test.spg|button1",
+        "--depth",
+        "1",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&output).expect("context output must be AiOutput");
+    let has_triggers_edge_evidence = ai.evidence.iter().any(|ev| {
+        ev.edge_type.as_deref() == Some("Triggers")
+            && (ev.claim.contains("Downstream edge") || ev.claim.contains("Upstream edge"))
+            && ev
+                .node_id
+                .as_deref()
+                .map(|id| id.contains("action:app/actions_test.spg|button1|action1"))
+                .unwrap_or(false)
+    });
+    assert!(
+        has_triggers_edge_evidence,
+        "context should include edge-level sampled evidence for Triggers edge"
+    );
+}
+
+#[test]
 fn test_cli_context_component_semantics() {
     let _ = run_cli(&[
         "--project-dir",
@@ -2568,6 +2601,43 @@ fn test_cli_query_page_logic_action_category_contract_m8() {
     assert_eq!(find_cat("resetData"), Some("data_refresh"));
     assert_eq!(find_cat("refreshModels"), Some("data_refresh"));
     assert_eq!(find_cat("refreshData"), Some("data_refresh"));
+    assert!(
+        !ai.diagnostics
+            .iter()
+            .any(|d| d.code == "ACTION_FLOW_INCOMPLETE"),
+        "load/refresh/init/validate actions should not be flagged as ACTION_FLOW_INCOMPLETE"
+    );
+}
+
+#[test]
+fn test_cli_query_page_logic_component_write_evidence_source_node_m8() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/action_category_contract.spg",
+    ]);
+    let ai: AiOutput =
+        serde_json::from_str(&output).expect("query_page_logic output must be AiOutput");
+
+    let evidence = ai
+        .evidence
+        .iter()
+        .find(|ev| {
+            ev.claim
+                .contains("Write model1.name via comp:app/action_category_contract.spg|input1")
+        })
+        .expect("component submit write evidence should include concrete component id");
+    assert_eq!(
+        evidence.node_id.as_deref(),
+        Some("comp:app/action_category_contract.spg|input1"),
+        "component write evidence node_id should be component id"
+    );
 }
 
 #[test]
@@ -2609,6 +2679,10 @@ fn test_cli_query_page_logic_evidence_traceability_m8() {
     assert!(
         has_navigation_evidence,
         "navigation should expose traceable evidence"
+    );
+    assert!(
+        ai.diagnostics.iter().any(|d| d.code == "EVIDENCE_SAMPLED"),
+        "when details exceed evidence sample cap, should emit EVIDENCE_SAMPLED diagnostic"
     );
 }
 
@@ -2681,6 +2755,30 @@ fn test_cli_explain_action_evidence_traceability_m8() {
         has_relation_evidence,
         "explain action should expose relation evidence with edge/raw_expr/json_path"
     );
+
+    let write_relation = ai
+        .evidence
+        .iter()
+        .find(|ev| ev.claim.contains("writes relation"))
+        .expect("explain action should contain writes relation evidence");
+    assert_eq!(
+        write_relation.source_file.as_deref(),
+        Some("app/actions_test.spg"),
+        "relation evidence should use action source file, not target model file"
+    );
+    if write_relation.json_path.as_deref() == Some("<graph-edge-derived>") {
+        assert_eq!(
+            write_relation.confidence,
+            metadata_checker::output::Confidence::Medium,
+            "graph-derived relation evidence should be conservative confidence"
+        );
+        assert!(
+            write_relation
+                .reason
+                .contains("raw json_path is not available"),
+            "graph-derived relation evidence should explain precision limitation"
+        );
+    }
 }
 
 #[test]

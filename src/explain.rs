@@ -264,14 +264,18 @@ fn is_dataflow_model(node: &crate::graph::Node) -> bool {
 }
 
 /// 辅助：构建带页面信息的引用对象
-fn make_ref(target: &crate::graph::Node, edge: &crate::graph::Edge) -> serde_json::Value {
+fn make_ref(
+    target: &crate::graph::Node,
+    edge: &crate::graph::Edge,
+    source_path: Option<&str>,
+) -> serde_json::Value {
     serde_json::json!({
         "id": target.id,
         "name": target.name,
         "type": format!("{:?}", target.node_type),
         "edge_type": format!("{:?}", edge.edge_type),
         "field_path": edge.field_path,
-        "source_file": target.path,
+        "source_file": edge.meta.as_ref().and_then(|m| m.get("source_file")).and_then(|v| v.as_str()).or(source_path),
         "raw_expr": edge.meta.as_ref().and_then(|m| m.get("source_expr")).and_then(|v| v.as_str()),
         "json_path": edge.meta.as_ref().and_then(|m| m.get("json_path")).and_then(|v| v.as_str()),
     })
@@ -301,19 +305,29 @@ fn push_relation_evidence(
             .unwrap_or("n/a");
         let source_file = detail_str(item, "source_file");
         let json_path = detail_str(item, "json_path").unwrap_or("<graph-edge-derived>");
-        let ev = crate::output::Evidence::new(
-            format!("{} relation on {}", relation, node_id),
-            "Relation extracted from graph edge traversal",
-        )
-        .with_confidence(if source_file.is_some() {
-            crate::output::Confidence::High
+        let (confidence, reason) = if json_path == "<graph-edge-derived>" {
+            (
+                crate::output::Confidence::Medium,
+                "Relation extracted from graph edge; raw json_path is not available",
+            )
+        } else if source_file.is_some() {
+            (
+                crate::output::Confidence::High,
+                "Relation extracted from graph edge with source metadata",
+            )
         } else {
-            crate::output::Confidence::Medium
-        })
-        .with_node_id(node_id)
-        .with_edge_type(edge_type)
-        .with_raw_expr(raw_expr)
-        .with_json_path(json_path);
+            (
+                crate::output::Confidence::Medium,
+                "Relation extracted from graph edge traversal",
+            )
+        };
+        let ev =
+            crate::output::Evidence::new(format!("{} relation on {}", relation, node_id), reason)
+                .with_confidence(confidence)
+                .with_node_id(node_id)
+                .with_edge_type(edge_type)
+                .with_raw_expr(raw_expr)
+                .with_json_path(json_path);
         let ev = if let Some(sf) = source_file {
             ev.with_source_file(sf)
         } else {
@@ -466,11 +480,11 @@ fn explain_component_graph(
     for (target, edge) in &outgoing {
         match edge.edge_type {
             crate::graph::EdgeType::Reads => {
-                reads.push(make_ref(target, edge));
+                reads.push(make_ref(target, edge, Some(&node.path)));
                 has_read = true;
             }
             crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
-                writes.push(make_ref(target, edge));
+                writes.push(make_ref(target, edge, Some(&node.path)));
                 has_write = true;
             }
             crate::graph::EdgeType::Triggers => {
@@ -487,32 +501,32 @@ fn explain_component_graph(
                     for (t, e) in &action_out {
                         match e.edge_type {
                             crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
-                                reads.push(make_ref(t, e));
+                                reads.push(make_ref(t, e, Some(&target.path)));
                                 has_read = true;
                             }
                             crate::graph::EdgeType::Writes
                             | crate::graph::EdgeType::ActionWrites => {
-                                writes.push(make_ref(t, e));
+                                writes.push(make_ref(t, e, Some(&target.path)));
                                 has_write = true;
                             }
                             crate::graph::EdgeType::OpensPage
                             | crate::graph::EdgeType::ActionNavigates => {
                                 has_nav = true;
-                                affects.push(make_ref(t, e));
+                                affects.push(make_ref(t, e, Some(&target.path)));
                             }
                             crate::graph::EdgeType::SetsParam
                             | crate::graph::EdgeType::ActionSetsParam => {
-                                affects.push(make_ref(t, e));
+                                affects.push(make_ref(t, e, Some(&target.path)));
                             }
                             crate::graph::EdgeType::ActionControlsComponent => {
-                                affects.push(make_ref(t, e));
+                                affects.push(make_ref(t, e, Some(&target.path)));
                             }
                             crate::graph::EdgeType::ActionValidates => {
-                                reads.push(make_ref(t, e));
+                                reads.push(make_ref(t, e, Some(&target.path)));
                                 has_read = true;
                             }
                             crate::graph::EdgeType::ActionLoadsData => {
-                                reads.push(make_ref(t, e));
+                                reads.push(make_ref(t, e, Some(&target.path)));
                                 has_read = true;
                             }
                             _ => {}
@@ -522,10 +536,10 @@ fn explain_component_graph(
             }
             crate::graph::EdgeType::OpensPage => {
                 has_nav = true;
-                affects.push(make_ref(target, edge));
+                affects.push(make_ref(target, edge, Some(&node.path)));
             }
             crate::graph::EdgeType::SetsParam => {
-                affects.push(make_ref(target, edge));
+                affects.push(make_ref(target, edge, Some(&node.path)));
             }
             _ => {}
         }
@@ -754,30 +768,30 @@ fn explain_action_graph(
     for (target, edge) in &outgoing {
         match edge.edge_type {
             crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
-                reads.push(make_ref(target, edge));
+                reads.push(make_ref(target, edge, Some(&node.path)));
                 has_read = true;
             }
             crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
-                writes.push(make_ref(target, edge));
+                writes.push(make_ref(target, edge, Some(&node.path)));
                 has_write = true;
             }
             crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::ActionNavigates => {
                 has_nav = true;
-                affects.push(make_ref(target, edge));
+                affects.push(make_ref(target, edge, Some(&node.path)));
             }
             crate::graph::EdgeType::SetsParam | crate::graph::EdgeType::ActionSetsParam => {
-                affects.push(make_ref(target, edge));
+                affects.push(make_ref(target, edge, Some(&node.path)));
                 has_write = true;
             }
             crate::graph::EdgeType::ActionControlsComponent => {
-                affects.push(make_ref(target, edge));
+                affects.push(make_ref(target, edge, Some(&node.path)));
             }
             crate::graph::EdgeType::ActionValidates => {
-                reads.push(make_ref(target, edge));
+                reads.push(make_ref(target, edge, Some(&node.path)));
                 has_read = true;
             }
             crate::graph::EdgeType::ActionLoadsData => {
-                reads.push(make_ref(target, edge));
+                reads.push(make_ref(target, edge, Some(&node.path)));
                 has_read = true;
             }
             _ => {}

@@ -227,6 +227,7 @@ fn run_interactive(
             "" => continue,
             "all" => {
                 let meta = metadata_checker::parser::PageMetadata {
+                    input_path: None,
                     page_id: None,
                     page_name: None,
                     version: spg.version.clone(),

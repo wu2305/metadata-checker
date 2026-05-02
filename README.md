@@ -318,8 +318,10 @@ metadata-checker --project-dir ./my-project --explain action:app/page.spg|button
 
 - `upstream_dependencies` / `downstream_outputs` 为 legacy 兼容字段，不应作为主语义字段
 - `--context` 中新增 `related_nodes`（全类型节点闭包）；`related_components` 仅保留 `type=Component` 条目用于兼容
+- `--context` 的 `evidence` 含 upstream/downstream 边级采样证据（`compact=3`、`normal=5`、`full=20`）；缺原始路径时 `json_path` 为 `<graph-edge-derived>`
 - `action_flows[].action_category` 当前稳定枚举：`data_write` / `data_read` / `navigation` / `param_mutation` / `ui_control` / `validation` / `data_initialization` / `data_refresh` / `unknown`
-- `details.expressions[]` 增加 `component_id` / `field` / `source_file` / `json_path` / `refs_count` / `resolved_occurrence_count`，其中 `refs` 为去重集合，`resolved_refs` 为出现级列表
+- `details.expressions[]` 增加 `component_id` / `field` / `source_file` / `json_path` / `refs_count` / `resolved_occurrence_count`，其中 `refs` 为去重集合，`resolved_refs` 为出现级列表；`source_file` 优先真实输入路径
+- 当 PageLogic 细项数量超过 evidence 展开上限时，会输出 `EVIDENCE_SAMPLED` 诊断，提示 evidence 为低噪声采样而非全集
 - 禁止默认读取 raw JSON，必须从 `summary` 开始
 
 详细字段定义见 `docs/schema.md`。

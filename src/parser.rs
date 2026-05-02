@@ -16,6 +16,7 @@ use crate::superpage;
 /// Parsed metadata summary extracted from the low-code platform JSON.
 #[derive(Debug, Default)]
 pub struct PageMetadata {
+    pub input_path: Option<String>,
     pub page_id: Option<String>,
     pub page_name: Option<String>,
     pub version: Option<String>,
@@ -49,7 +50,10 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
     let raw: Value = serde_json::from_str(&content)
         .with_context(|| format!("Failed to parse JSON from: {}", path.display()))?;
 
-    let mut meta = PageMetadata::default();
+    let mut meta = PageMetadata {
+        input_path: Some(path.display().to_string()),
+        ..PageMetadata::default()
+    };
 
     // Detect if it's a SuperPage by checking for "canvas" field
     let is_superpage = raw.get("canvas").is_some();
