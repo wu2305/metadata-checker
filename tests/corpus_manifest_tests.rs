@@ -159,4 +159,34 @@ fn test_corpus_manifest_key_tag_coverage() {
             "key tag should have at least one sample: {tag}"
         );
     }
+
+    let readonly_entry = coverage_matrix
+        .get("readonly_page")
+        .expect("readonly_page should exist in coverage_matrix");
+    let readonly_count = readonly_entry
+        .get("sample_count")
+        .and_then(Value::as_u64)
+        .expect("readonly_page.sample_count should be u64");
+    if readonly_count == 0 {
+        let coverage_gaps = manifest
+            .get("coverage_gaps")
+            .and_then(Value::as_array)
+            .expect("coverage_gaps should be array when readonly_page is not covered");
+        let has_gap = coverage_gaps
+            .iter()
+            .any(|item| item.as_str() == Some("readonly_page"));
+        assert!(
+            has_gap,
+            "when readonly_page has no coverage, coverage_gaps must explicitly include readonly_page"
+        );
+    } else {
+        let sample_ids = readonly_entry
+            .get("sample_ids")
+            .and_then(Value::as_array)
+            .expect("readonly_page.sample_ids should be array");
+        assert!(
+            !sample_ids.is_empty(),
+            "readonly_page sample_ids should not be empty when sample_count > 0"
+        );
+    }
 }

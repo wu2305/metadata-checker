@@ -17,6 +17,7 @@ Manifest 顶层字段：
 - `sample_count`：样本总数
 - `samples`：逐文件记录
 - `coverage_matrix`：按 tag 汇总的样本覆盖
+- `coverage_gaps`：未命中的 tag 列表（若为空表示当前矩阵无缺口）
 
 每个 `samples[]` 记录至少包含：
 
@@ -54,6 +55,21 @@ Manifest 顶层字段：
 - `readonly_page`
 
 另外补充 `showDialog` 与 `refreshData` 两个动作级 tag，便于直接回答样本覆盖问题。
+
+`readonly_page` 当前采用保守启发式：
+
+- 仅对 `.spg` 生效
+- 不含写入类动作：`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`
+- 且满足以下其一：
+  - 页面 action 全部落在只读/导航白名单（如 `link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll` 等）
+  - 页面存在结构信号（`canvas/components/sources/visibility/referenceResources`）且无 action
+- 该规则为文本启发式，可能存在误报/漏报
+
+`readonly_page` 样本示例：
+
+- `fixture:tests/fixtures/real_world_4.spg`
+- `fixture:tests/fixtures/test_project/app/page_relations.spg`
+- `fixture:tests/fixtures/test_project/app/visibility_contract.spg`
 
 ## 维护方式
 

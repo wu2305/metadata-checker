@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-05-03T05:44:36Z",
+  "generated_at": "2026-05-03T06:31:45Z",
   "scope": "M9-A真实语料索引与样本清单（仅元信息与启发式覆盖标签）",
   "scanned_roots": [
     {
@@ -54,6 +54,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -132,6 +136,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "showDialog",
@@ -275,6 +283,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -426,6 +438,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "refresh_action",
@@ -970,7 +986,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/价审.app/测试.spg",
       "file_type": "spg",
       "size_bytes": 762,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/价审.app/测试/SuperPage.spg",
@@ -978,7 +999,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/价审.app/测试/SuperPage.spg",
       "file_type": "spg",
       "size_bytes": 957,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/价审.app/测试/销售订单价格审批-信息补充.spg",
@@ -1039,7 +1065,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/关联员工企微.app/SuperPage.spg",
       "file_type": "spg",
       "size_bytes": 138,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/关联员工企微.app/info.spg",
@@ -1047,7 +1078,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/关联员工企微.app/info.spg",
       "file_type": "spg",
       "size_bytes": 470,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/关联员工企微.app/关联员工企微.spg",
@@ -1141,6 +1177,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -1384,7 +1424,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/会员/会员pc/会员权益/接机服务问卷.spg",
       "file_type": "spg",
       "size_bytes": 6171,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/会员/会员pc/会员权益/机场接送车核销台账.spg",
@@ -1486,6 +1531,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "showDialog",
@@ -1628,6 +1677,10 @@
       "size_bytes": 4314,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -1647,6 +1700,10 @@
         {
           "tag": "embedded_page",
           "detection_method": "heuristic_text_scan: match `type=embedsuperpage` or `referenceResources`"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -1678,6 +1735,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "showDialog",
           "detection_method": "heuristic_text_scan: match `actionType=showDialog`"
         },
@@ -1695,6 +1756,10 @@
       "size_bytes": 10648,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -1710,6 +1775,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -1803,6 +1872,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "showDialog",
           "detection_method": "heuristic_text_scan: match `actionType=showDialog`"
         },
@@ -1843,6 +1916,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -1856,6 +1933,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -1873,6 +1954,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -1927,6 +2012,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -1940,6 +2029,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -1957,6 +2050,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -1978,6 +2075,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -2085,6 +2186,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -2200,6 +2305,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -2303,6 +2412,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -2357,6 +2470,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -2462,6 +2579,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -2520,6 +2641,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -2543,6 +2668,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -2564,6 +2693,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -2698,6 +2831,10 @@
           "detection_method": "heuristic_text_scan: match `modelDataType=DataFlow` or `modelType=dataflow` or `dataFlow` block"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -2793,6 +2930,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -2882,6 +3023,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -3001,6 +3146,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -3121,6 +3270,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -3375,7 +3528,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/小程序备份/储值明细.spg",
       "file_type": "spg",
       "size_bytes": 2359,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/小程序备份/卡券明细.spg",
@@ -3387,6 +3545,10 @@
         {
           "tag": "actions",
           "detection_method": "heuristic_text_scan: match `\"actionType\"` or `\"actions\"` keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -3443,6 +3605,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -3462,6 +3628,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -3606,6 +3776,10 @@
         {
           "tag": "actions",
           "detection_method": "heuristic_text_scan: match `\"actionType\"` or `\"actions\"` keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -3748,6 +3922,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -3820,6 +3998,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -3829,7 +4011,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/小程序注册/授权登录.spg",
       "file_type": "spg",
       "size_bytes": 2498,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/待开发/待开发.spg",
@@ -3837,7 +4024,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/待开发/待开发.spg",
       "file_type": "spg",
       "size_bytes": 1109,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/待开发/验证URL传参.spg",
@@ -3849,6 +4041,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -3868,6 +4064,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -3883,6 +4083,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -3896,6 +4100,10 @@
         {
           "tag": "DataFlow",
           "detection_method": "heuristic_text_scan: match `modelDataType=DataFlow` or `modelType=dataflow` or `dataFlow` block"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -4251,6 +4459,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -4352,7 +4564,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/绑定车辆/车辆解绑.spg",
       "file_type": "spg",
       "size_bytes": 138,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/绑定车辆/隐私协议.spg",
@@ -4364,6 +4581,10 @@
         {
           "tag": "actions",
           "detection_method": "heuristic_text_scan: match `\"actionType\"` or `\"actions\"` keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -4459,6 +4680,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -4513,6 +4738,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -4574,6 +4803,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -4587,6 +4820,10 @@
       "size_bytes": 2386,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -4598,7 +4835,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/维修保养预约单/满意度问卷/售后首次到店面访.spg",
       "file_type": "spg",
       "size_bytes": 5494,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/维修保养预约单/满意度问卷/备份/生成问卷.spg",
@@ -4622,6 +4864,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -4654,6 +4900,10 @@
       "size_bytes": 10216,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -4665,7 +4915,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/维修保养预约单/满意度问卷/满意度问卷/售后维修回访/暂时无用/奔驰售后回访.spg",
       "file_type": "spg",
       "size_bytes": 11078,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/售后维修回访/暂时无用/沃尔沃售后回访.spg",
@@ -4673,7 +4928,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/维修保养预约单/满意度问卷/满意度问卷/售后维修回访/暂时无用/沃尔沃售后回访.spg",
       "file_type": "spg",
       "size_bytes": 14076,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/售后维修回访/暂时无用/路虎售后回访.spg",
@@ -4682,6 +4942,10 @@
       "file_type": "spg",
       "size_bytes": 14196,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -5224,6 +5488,10 @@
       "size_bytes": 13968,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -5237,6 +5505,10 @@
       "size_bytes": 19028,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -5249,6 +5521,10 @@
       "file_type": "spg",
       "size_bytes": 28076,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -5377,7 +5653,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售首次到店回访/暂时无用/奔驰首次到店回访.spg",
       "file_type": "spg",
       "size_bytes": 8997,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售首次到店回访/暂时无用/沃尔沃首次到店回访.spg",
@@ -5385,7 +5666,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售首次到店回访/暂时无用/沃尔沃首次到店回访.spg",
       "file_type": "spg",
       "size_bytes": 15321,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售首次到店回访/暂时无用/路虎首次到店回访.spg",
@@ -5394,6 +5680,10 @@
       "file_type": "spg",
       "size_bytes": 9726,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -5486,6 +5776,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -5559,6 +5853,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -5572,6 +5870,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -5585,6 +5887,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -5598,6 +5904,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -5608,6 +5918,10 @@
       "file_type": "spg",
       "size_bytes": 27665,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -5622,6 +5936,10 @@
       "size_bytes": 21137,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -5634,6 +5952,10 @@
       "file_type": "spg",
       "size_bytes": 16577,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -5648,6 +5970,10 @@
       "size_bytes": 17412,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -5661,6 +5987,10 @@
       "size_bytes": 15647,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -5673,6 +6003,10 @@
       "file_type": "spg",
       "size_bytes": 11325,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -5689,6 +6023,10 @@
         {
           "tag": "DataFlow",
           "detection_method": "heuristic_text_scan: match `modelDataType=DataFlow` or `modelType=dataflow` or `dataFlow` block"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -5702,6 +6040,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -5715,6 +6057,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -5732,6 +6078,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -5742,6 +6092,10 @@
       "file_type": "spg",
       "size_bytes": 28981,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -5754,7 +6108,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售首次到店回访/奔驰首次到点回访.spg",
       "file_type": "spg",
       "size_bytes": 5670,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售首次到店回访/沃尔沃首次到店回访.spg",
@@ -5762,7 +6121,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售首次到店回访/沃尔沃首次到店回访.spg",
       "file_type": "spg",
       "size_bytes": 6798,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售首次到店回访/路虎首次到店回访.spg",
@@ -5770,7 +6134,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售首次到店回访/路虎首次到店回访.spg",
       "file_type": "spg",
       "size_bytes": 5899,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷管理.spg",
@@ -6091,6 +6460,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -6253,6 +6626,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -6510,6 +6887,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -6707,6 +7088,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -6773,6 +7158,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -6796,6 +7185,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -6907,6 +7300,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -7029,6 +7426,10 @@
           "detection_method": "heuristic_text_scan: match `\"actionType\"` or `\"actions\"` keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "refresh_action",
           "detection_method": "heuristic_text_scan: match `actionType=refreshData/refreshModels`"
         }
@@ -7044,6 +7445,10 @@
         {
           "tag": "actions",
           "detection_method": "heuristic_text_scan: match `\"actionType\"` or `\"actions\"` keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "refresh_action",
@@ -7260,6 +7665,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -7283,6 +7692,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "refresh_action",
@@ -7316,6 +7729,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -7573,6 +7990,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -7739,6 +8160,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -8330,6 +8755,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -8499,7 +8928,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/问卷/四惠.spg",
       "file_type": "spg",
       "size_bytes": 138,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/问卷/通州.spg",
@@ -8507,7 +8941,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/问卷/通州.spg",
       "file_type": "spg",
       "size_bytes": 138,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/售后.app/预约试乘试驾小程序/编辑预约试乘试驾.spg",
@@ -8576,6 +9015,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -9028,7 +9471,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/活动.app/SuperPage.spg",
       "file_type": "spg",
       "size_bytes": 369,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/活动.app/不用/图文预览_copy.spg",
@@ -9040,6 +9488,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -9234,7 +9686,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/活动.app/不用/脚本测试/test.spg",
       "file_type": "spg",
       "size_bytes": 629,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/活动.app/不用/脚本测试/素材.spg",
@@ -9287,6 +9744,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -9358,6 +9819,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -9388,6 +9853,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -9401,6 +9870,10 @@
         {
           "tag": "actions",
           "detection_method": "heuristic_text_scan: match `\"actionType\"` or `\"actions\"` keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -9426,6 +9899,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -9496,6 +9973,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -9506,6 +9987,10 @@
       "file_type": "spg",
       "size_bytes": 76809,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -9577,6 +10062,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "showDialog",
           "detection_method": "heuristic_text_scan: match `actionType=showDialog`"
         },
@@ -9618,6 +10107,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "showDialog",
           "detection_method": "heuristic_text_scan: match `actionType=showDialog`"
         },
@@ -9637,6 +10130,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -9832,6 +10329,10 @@
       "size_bytes": 5261,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -9910,6 +10411,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -9984,6 +10489,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -9999,6 +10508,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -10163,6 +10676,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -10528,6 +11045,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -10764,6 +11285,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -10795,6 +11320,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -10983,6 +11512,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -10998,6 +11531,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -11060,6 +11597,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -11130,6 +11671,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -11143,6 +11688,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -11160,6 +11709,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -11211,6 +11764,10 @@
       "file_type": "spg",
       "size_bytes": 30340,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -11540,6 +12097,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -11567,6 +12128,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -11670,6 +12235,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -11821,6 +12390,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -11907,6 +12480,10 @@
       "file_type": "spg",
       "size_bytes": 12487,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -12015,6 +12592,10 @@
       "size_bytes": 16019,
       "coverage_tags": [
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12026,7 +12607,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/测试.app/SuperPage2.spg",
       "file_type": "spg",
       "size_bytes": 745,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/测试.app/data/tempFiles.tbl",
@@ -12042,7 +12628,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/测试.app/public/SuperPage.spg",
       "file_type": "spg",
       "size_bytes": 706,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/测试.app/文件快速上传.spg",
@@ -12079,6 +12670,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12101,7 +12696,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/测试03.app/SuperPage1.spg",
       "file_type": "spg",
       "size_bytes": 4188,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/测试03.app/分区测试.spg",
@@ -12109,7 +12709,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/测试03.app/分区测试.spg",
       "file_type": "spg",
       "size_bytes": 6229,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/测试03.app/应用/SuperPage2.spg",
@@ -12134,7 +12739,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/测试03.app/应用/SuperPage3.spg",
       "file_type": "spg",
       "size_bytes": 982,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/测试03.app/应用/测试.spg",
@@ -12146,6 +12756,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12159,6 +12773,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12172,6 +12790,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12181,7 +12803,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/销售.app/不用/SuperPage_1_copy.spg",
       "file_type": "spg",
       "size_bytes": 2239,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/销售.app/不用/ocr测试.spg",
@@ -12197,6 +12824,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -12241,6 +12872,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12258,6 +12893,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12273,6 +12912,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12335,6 +12978,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12348,6 +12995,10 @@
         {
           "tag": "actions",
           "detection_method": "heuristic_text_scan: match `\"actionType\"` or `\"actions\"` keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12465,6 +13116,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12488,6 +13143,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12501,6 +13160,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12518,6 +13181,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12531,6 +13198,10 @@
         {
           "tag": "actions",
           "detection_method": "heuristic_text_scan: match `\"actionType\"` or `\"actions\"` keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -12713,7 +13384,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/销售.app/合同协议activedoc/签名/销售合同/销售合同.spg",
       "file_type": "spg",
       "size_bytes": 966,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/销售.app/合同管理/gap.spg",
@@ -12731,6 +13407,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12743,6 +13423,10 @@
       "file_type": "spg",
       "size_bytes": 14784,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -12763,6 +13447,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -12786,6 +13474,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12807,6 +13499,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12826,6 +13522,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -12853,6 +13553,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12872,6 +13576,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -12895,6 +13603,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12914,6 +13626,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -12937,6 +13653,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12958,6 +13678,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -12977,6 +13701,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -13160,6 +13888,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -13179,6 +13911,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -13202,6 +13938,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -13221,6 +13961,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -13244,6 +13988,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -13265,6 +14013,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -13284,6 +14036,10 @@
         {
           "tag": "duplicate_action_id",
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         },
         {
           "tag": "visibility",
@@ -13514,7 +14270,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/销售.app/完善合同信息/交车单/空白页.spg",
       "file_type": "spg",
       "size_bytes": 1006,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/销售.app/完善合同信息/代上牌.spg",
@@ -14305,6 +15066,10 @@
         {
           "tag": "embedded_page",
           "detection_method": "heuristic_text_scan: match `type=embedsuperpage` or `referenceResources`"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -14349,6 +15114,10 @@
           "detection_method": "heuristic_text_scan: match `\"actionType\"` or `\"actions\"` keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -14390,6 +15159,10 @@
       "file_type": "spg",
       "size_bytes": 26111,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -14883,6 +15656,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -15079,6 +15856,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -15162,6 +15943,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -15175,6 +15960,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -15188,6 +15977,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -15322,6 +16115,10 @@
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -15333,7 +16130,12 @@
       "path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/集成测试.app/SuperPage1.spg",
       "file_type": "spg",
       "size_bytes": 365,
-      "coverage_tags": []
+      "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        }
+      ]
     },
     {
       "stable_id": "real_project:app/集成测试.app/data/tempTest.tbl",
@@ -23312,6 +24114,10 @@
           "detection_method": "heuristic_text_scan: repeated action-like `id` token in one file (coarse, possible false positives)"
         },
         {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
+        {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
         }
@@ -23405,6 +24211,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -23452,6 +24262,10 @@
         {
           "tag": "link_param",
           "detection_method": "heuristic_text_scan: match `actionType=link/setParamValue` or action param payload keys"
+        },
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
         }
       ]
     },
@@ -23462,6 +24276,10 @@
       "file_type": "spg",
       "size_bytes": 743,
       "coverage_tags": [
+        {
+          "tag": "readonly_page",
+          "detection_method": "heuristic_text_scan(conservative): only for .spg; require no write-like actions (`submitData/updateData/insertData/deleteData/newData/copyDataTo/importData/exportData/executeFlow/batchStartFlow/webAPI/script`) and either (a) all detected actionType values are in read-only allowlist (link/showDialog/closeDialog/switchPanel/showComponent/hideComponent/refresh/load/validate/maximize/goBack/setParamValue/scroll/etc.) or (b) page has structural signals (canvas/components/sources/visibility/referenceResources) with zero actions. May have false positives/negatives."
+        },
         {
           "tag": "visibility",
           "detection_method": "heuristic_text_scan: match `\"visible\"` or `\"visibleCondition\"` keys"
@@ -26670,8 +27488,207 @@
       ]
     },
     "readonly_page": {
-      "sample_count": 0,
-      "sample_ids": []
+      "sample_count": 197,
+      "sample_ids": [
+        "fixture:tests/fixtures/real_world_4.spg",
+        "fixture:tests/fixtures/test_project/app/dataflow_embedded.spg",
+        "fixture:tests/fixtures/test_project/app/page_relations.spg",
+        "fixture:tests/fixtures/test_project/app/visibility_contract.spg",
+        "real_project:app/价审.app/demo/审批.spg",
+        "real_project:app/价审.app/demo/测试.spg",
+        "real_project:app/价审.app/demo/财务查看页面.spg",
+        "real_project:app/价审.app/demo/销售订单价格预览.spg",
+        "real_project:app/价审.app/测试.spg",
+        "real_project:app/价审.app/测试/SuperPage.spg",
+        "real_project:app/关联员工企微.app/SuperPage.spg",
+        "real_project:app/关联员工企微.app/info.spg",
+        "real_project:app/售后.app/任务工作台/任务工作台.spg",
+        "real_project:app/售后.app/会员/会员pc/会员权益/接机服务问卷.spg",
+        "real_project:app/售后.app/会员/会员pc/会员等级分值规则.spg",
+        "real_project:app/售后.app/会员/会员权益小程序/会员权益.spg",
+        "real_project:app/售后.app/会员/会员权益小程序/卡券明细.spg",
+        "real_project:app/售后.app/会员/会员权益小程序/我的代金券.spg",
+        "real_project:app/售后.app/会员/会员权益小程序/我的储值.spg",
+        "real_project:app/售后.app/会员/会员权益小程序/我的次卡.spg",
+        "real_project:app/售后.app/会员/会员权益小程序/次卡.spg",
+        "real_project:app/售后.app/保单展示/保单信息.spg",
+        "real_project:app/售后.app/信息维护/人车关系信息.spg",
+        "real_project:app/售后.app/信息维护/企微好友关系.spg",
+        "real_project:app/售后.app/信息维护/会员信息.spg",
+        "real_project:app/售后.app/信息维护/保单记录.spg",
+        "real_project:app/售后.app/信息维护/品牌信息.spg",
+        "real_project:app/售后.app/信息维护/客户信息维护.spg",
+        "real_project:app/售后.app/信息维护/未认证车辆.spg",
+        "real_project:app/售后.app/信息维护/潜客信息列表.spg",
+        "real_project:app/售后.app/信息维护/粉丝数据.spg",
+        "real_project:app/售后.app/信息维护/维修工单.spg",
+        "real_project:app/售后.app/信息维护/车型信息.spg",
+        "real_project:app/售后.app/信息维护/车系信息.spg",
+        "real_project:app/售后.app/信息维护/车辆信息.spg",
+        "real_project:app/售后.app/信息维护/车辆信息维护.spg",
+        "real_project:app/售后.app/养修记录/养修记录.spg",
+        "real_project:app/售后.app/客户关怀/意见进度.spg",
+        "real_project:app/售后.app/导航/导航.spg",
+        "real_project:app/售后.app/小程序备份/ys/任务工作台.spg",
+        "real_project:app/售后.app/小程序备份/ys/维修工单.spg",
+        "real_project:app/售后.app/小程序备份/储值明细.spg",
+        "real_project:app/售后.app/小程序备份/卡券明细.spg",
+        "real_project:app/售后.app/小程序备份/多辆绑车列表.spg",
+        "real_project:app/售后.app/小程序备份/服务-未绑定.spg",
+        "real_project:app/售后.app/小程序备份/隐私协议.spg",
+        "real_project:app/售后.app/小程序备份/首页消息详情.spg",
+        "real_project:app/售后.app/小程序注册/小程序注册.spg",
+        "real_project:app/售后.app/小程序注册/授权登录.spg",
+        "real_project:app/售后.app/待开发/待开发.spg",
+        "real_project:app/售后.app/待开发/验证URL传参.spg",
+        "real_project:app/售后.app/我的.spg",
+        "real_project:app/售后.app/模板消息推送/内容详情.spg",
+        "real_project:app/售后.app/模板消息推送/客户素材推送查询.spg",
+        "real_project:app/售后.app/绑定车辆/多辆绑车列表.spg",
+        "real_project:app/售后.app/绑定车辆/车辆解绑.spg",
+        "real_project:app/售后.app/绑定车辆/隐私协议.spg",
+        "real_project:app/售后.app/结算单/朋友代付.spg",
+        "real_project:app/售后.app/结算单/结算单财务看.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/folder/售后维修回访/路虎售后回访链接.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/二维码.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/售后首次到店面访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/备份/生成问卷.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/售后维修回访/暂时无用/呼市雷萨-售后入厂满意度问卷调研.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/售后维修回访/暂时无用/奔驰售后回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/售后维修回访/暂时无用/沃尔沃售后回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/售后维修回访/暂时无用/路虎售后回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售交车回访/暂时无用/中山奔驰销售回访问卷.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售交车回访/暂时无用/呼市雷萨新车满意度问卷调研.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售交车回访/暂时无用/沃尔沃交车回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售首次到店回访/暂时无用/奔驰首次到店回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售首次到店回访/暂时无用/沃尔沃首次到店回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/满意度问卷/销售首次到店回访/暂时无用/路虎首次到店回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/生成问卷.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/售后维修回访/呼市雷萨-售后入厂满意度问卷调研.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/售后维修回访/奔驰售后回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/售后维修回访/沃尔沃售后回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/售后维修回访/路虎售后回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/售后首次到店面访/售后首次到店面访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/新问卷/售后维修保养完1推送满意度.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/新问卷/销售交车当天满意度.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/新问卷/销售潜客首次进店满意度.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/新问卷/问卷5.30/售后-维修满意度.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/新问卷/问卷5.30/销售交车当天满意度推送.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/新问卷/问卷5.30/销售潜客首次进店满意度推送.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售交车回访/中山背驰销售回访问卷.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售交车回访/呼市雷萨新车满意度问卷调研.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售交车回访/沃尔沃交车回访问卷.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售交车面访/销售交车面访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售首次到店回访/奔驰首次到点回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售首次到店回访/沃尔沃首次到店回访.spg",
+        "real_project:app/售后.app/维修保养预约单/满意度问卷/问卷后台/销售首次到店回访/路虎首次到店回访.spg",
+        "real_project:app/售后.app/维修保养预约单/预约/确认预约.spg",
+        "real_project:app/售后.app/维修保养预约单/预约/预约成功.spg",
+        "real_project:app/售后.app/维修保养预约单/首页/服务.spg",
+        "real_project:app/售后.app/维修保养预约单/首页/首页消息详情.spg",
+        "real_project:app/售后.app/维修透明化/今日透明化工单SA端.spg",
+        "real_project:app/售后.app/维修透明化/今日透明化工单技师端.spg",
+        "real_project:app/售后.app/维修透明化/售后首次到店问卷.spg",
+        "real_project:app/售后.app/维修透明化/备份/用户端维修透明化工单.spg",
+        "real_project:app/售后.app/维修透明化/备份/用户端维修透明化工单_1.spg",
+        "real_project:app/售后.app/维修透明化/用户端展示维修记录.spg",
+        "real_project:app/售后.app/维修透明化/维修历史记录.spg",
+        "real_project:app/售后.app/维修透明化/维修透明化首页.spg",
+        "real_project:app/售后.app/维修透明化/销售交车到店问卷.spg",
+        "real_project:app/售后.app/自定义规则参数/任务详情/客户信息详情页.spg",
+        "real_project:app/售后.app/车牌/车牌.spg",
+        "real_project:app/售后.app/问卷/四惠.spg",
+        "real_project:app/售后.app/问卷/通州.spg",
+        "real_project:app/售后.app/预约试乘试驾小程序/预约试乘试驾.spg",
+        "real_project:app/活动.app/SuperPage.spg",
+        "real_project:app/活动.app/不用/图文预览_copy.spg",
+        "real_project:app/活动.app/不用/脚本测试/test.spg",
+        "real_project:app/活动.app/公益活动/SuperPage5.spg",
+        "real_project:app/活动.app/公益活动/公益活动详情.spg",
+        "real_project:app/活动.app/功能测试/SuperPage2.spg",
+        "real_project:app/活动.app/功能测试/SuperPage3.spg",
+        "real_project:app/活动.app/功能测试/日历demo.spg",
+        "real_project:app/活动.app/功能测试/滑动面板.spg",
+        "real_project:app/活动.app/功能测试/销售订单价格.spg",
+        "real_project:app/活动.app/活动服务/已申领服务.spg",
+        "real_project:app/活动.app/活动服务/待申领服务.spg",
+        "real_project:app/活动.app/活动服务/活动卡券说明.spg",
+        "real_project:app/活动.app/活动淘汰的spg/活动商品.spg",
+        "real_project:app/活动.app/活动移动端/活动日历.spg",
+        "real_project:app/活动.app/活动移动端/社区活动.spg",
+        "real_project:app/活动.app/活动移动端/社区活动详情.spg",
+        "real_project:app/活动.app/素材/图文预览.spg",
+        "real_project:app/活动.app/素材/手机图文预览.spg",
+        "real_project:app/活动.app/素材/门店信息素材.spg",
+        "real_project:app/活动.app/车友圈/我的车主圈.spg",
+        "real_project:app/活动.app/销售活动/二维码/活动二维码.spg",
+        "real_project:app/活动.app/销售活动/二维码/活动展示.spg",
+        "real_project:app/活动.app/销售活动/二维码/活动留资二维码.spg",
+        "real_project:app/活动.app/销售活动/二维码/活动签到中间页.spg",
+        "real_project:app/活动.app/销售活动/二维码/活动签到成功.spg",
+        "real_project:app/活动.app/销售活动/二维码/活动签到码.spg",
+        "real_project:app/活动.app/销售活动/客流登记.spg",
+        "real_project:app/活动.app/销售活动/活动日历pc端/活动日历pc.spg",
+        "real_project:app/活动.app/销售活动/活动日历pc端/活动服务详情pc.spg",
+        "real_project:app/活动.app/销售活动/活动海报/上传活动海报.spg",
+        "real_project:app/活动.app/销售活动/转介绍/详情.spg",
+        "real_project:app/活动.app/销售活动/销售线索.spg",
+        "real_project:app/活动.app/销售活动/预约试乘试驾.spg",
+        "real_project:app/测试.app/SuperPage2.spg",
+        "real_project:app/测试.app/public/SuperPage.spg",
+        "real_project:app/测试.app/试乘试驾.spg",
+        "real_project:app/测试03.app/SuperPage1.spg",
+        "real_project:app/测试03.app/分区测试.spg",
+        "real_project:app/测试03.app/应用/SuperPage3.spg",
+        "real_project:app/测试03.app/应用/测试.spg",
+        "real_project:app/销售.app/不用/SuperPage1.spg",
+        "real_project:app/销售.app/不用/SuperPage_1.spg",
+        "real_project:app/销售.app/不用/SuperPage_1_copy.spg",
+        "real_project:app/销售.app/不用/ocr测试.spg",
+        "real_project:app/销售.app/不用/功能测试.spg",
+        "real_project:app/销售.app/不用/本地签字链接.spg",
+        "real_project:app/销售.app/不用/测试_预览_1_1.spg",
+        "real_project:app/销售.app/不用/用品销售合同/用品销售合同传参.spg",
+        "real_project:app/销售.app/不用/销售旧/SuperPage4.spg",
+        "real_project:app/销售.app/不用/销售旧/企微.spg",
+        "real_project:app/销售.app/不用/销售旧/潜客信息跟进旧.spg",
+        "real_project:app/销售.app/不用/销售旧/素材图文预览html.spg",
+        "real_project:app/销售.app/不用/销售旧/素材旧.spg",
+        "real_project:app/销售.app/不用/预览文件闪退测试.spg",
+        "real_project:app/销售.app/合同协议activedoc/签名/销售合同/销售合同.spg",
+        "real_project:app/销售.app/合同管理/gap.spg",
+        "real_project:app/销售.app/合同管理/个人信息披露书.spg",
+        "real_project:app/销售.app/合同管理/交车单.spg",
+        "real_project:app/销售.app/合同管理/代上牌.spg",
+        "real_project:app/销售.app/合同管理/代付款.spg",
+        "real_project:app/销售.app/合同管理/代办购置税.spg",
+        "real_project:app/销售.app/合同管理/合同汇总.spg",
+        "real_project:app/销售.app/合同管理/捷豹路虎个人信息出境函.spg",
+        "real_project:app/销售.app/合同管理/捷豹路虎个人信息确认函.spg",
+        "real_project:app/销售.app/合同管理/服务产品确认单.spg",
+        "real_project:app/销售.app/合同管理/汽车用品销售合同.spg",
+        "real_project:app/销售.app/合同管理/沃尔沃个人信息出境函.spg",
+        "real_project:app/销售.app/合同管理/沃尔沃个人信息确认函.spg",
+        "real_project:app/销售.app/合同管理/购车定单.spg",
+        "real_project:app/销售.app/合同管理/购车意向书.spg",
+        "real_project:app/销售.app/合同管理/购车贷款咨询代办.spg",
+        "real_project:app/销售.app/合同管理/车窗膜保障.spg",
+        "real_project:app/销售.app/合同管理/车辆维修期间补偿协议.spg",
+        "real_project:app/销售.app/合同管理/销售合同.spg",
+        "real_project:app/销售.app/合同管理/雷克萨斯个人信息同意书.spg",
+        "real_project:app/销售.app/完善合同信息/交车单/空白页.spg",
+        "real_project:app/销售.app/标签/标签库创建.spg",
+        "real_project:app/销售.app/试乘试驾登记表/捷豹路虎登记表_1.spg",
+        "real_project:app/销售.app/试乘试驾登记表/雷克萨斯登记表.spg",
+        "real_project:app/销售.app/销售/核销单/审批页面.spg",
+        "real_project:app/销售.app/销售/活动查看小程序码.spg",
+        "real_project:app/销售.app/销售/素材图文.spg",
+        "real_project:app/销售.app/销售/素材图片.spg",
+        "real_project:app/销售.app/销售/素材视频.spg",
+        "real_project:app/集成测试.app/SuperPage.spg",
+        "real_project:app/集成测试.app/SuperPage1.spg"
+      ]
     }
-  }
+  },
+  "coverage_gaps": []
 }
