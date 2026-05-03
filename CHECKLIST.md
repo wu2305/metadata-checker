@@ -144,3 +144,12 @@
 - [ ] 大型文件解析（>100KB）
 - [ ] 大量组件解析（>100个组件）
 - [ ] 大量表达式解析（>200个表达式）
+
+## 七、M9-A 真实语料索引与样本清单
+
+- [x] 生成 `tests/fixtures/corpus/manifest.json`（仅元信息，不复制真实大文件）
+- [x] 样本记录包含 `stable_id/source_kind/path/file_type/size_bytes/coverage_tags`
+- [x] 覆盖标签包含 `actions/DataFlow/dialog/conditionExp/visibility/waitPrev/link_param/refresh_action/submit_write/embedded_page/duplicate_action_id/readonly_page`
+- [x] 明确标注 `detection_method`（启发式文本扫描）
+- [x] 增加 manifest 约束测试（存在性、schema 基础字段、来源白名单、关键 tag 覆盖）
+- [x] 文档化维护方式（`docs/corpus-manifest.md`）

@@ -344,6 +344,16 @@ cargo test
 - 边界错误处理
 - 真实场景用例
 
+## 真实语料 Manifest（M9-A）
+
+- 机器可读清单：`tests/fixtures/corpus/manifest.json`
+- 人类摘要与维护说明：`docs/corpus-manifest.md`
+- 仅记录样本路径、大小、文件类型与启发式覆盖标签，不复制真实项目大文件
+- 允许来源仅包含：
+  - `/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
+  - `tests/fixtures/real_world_*.spg`
+  - `tests/fixtures/test_project/**/*.spg|*.tbl`
+
 ## 技术栈
 
 - **Rust 2024 Edition**
