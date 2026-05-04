@@ -1,0 +1,292 @@
+{
+  "schema_version": "1.0.0",
+  "scope": "M9-B regression corpus: selected samples for stable testing",
+  "total_count": 13,
+  "entries": [
+    {
+      "stable_id": "real_project:app/销售.app/销售/客户.spg",
+      "entry_type": "copied",
+      "source_path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/销售.app/销售/客户.spg",
+      "copied_path": "tests/fixtures/corpus/samples/app__销售.app__销售__客户.spg",
+      "file_type": "spg",
+      "size_bytes": 4188,
+      "coverage_tags": [
+        "actions",
+        "conditionExp",
+        "link_param",
+        "submit_write",
+        "visibility"
+      ],
+      "selection_reason": "conditionExp + submit_write + visibility + link_param 综合表单页，4.1KB，覆盖条件执行和写入语义",
+      "risk_points": [
+        "conditionExp 含复杂 IF/CONCAT",
+        "submitData 写入多个模型字段",
+        "link 导航传参"
+      ],
+      "expected_commands": [
+        "--explain comp:...",
+        "--query-page-logic page:..."
+      ]
+    },
+    {
+      "stable_id": "real_project:app/售后.app/待开发/验证URL传参.spg",
+      "entry_type": "copied",
+      "source_path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/待开发/验证URL传参.spg",
+      "copied_path": "tests/fixtures/corpus/samples/app__售后.app__待开发__验证URL传参.spg",
+      "file_type": "spg",
+      "size_bytes": 465,
+      "coverage_tags": [
+        "link_param",
+        "readonly_page"
+      ],
+      "selection_reason": "极简 link_param 传参页，0.5KB，测试参数传递和导航语义",
+      "risk_points": [
+        "极小文件，需验证解析器不 panic",
+        "link 参数传递路径"
+      ],
+      "expected_commands": [
+        "--explain",
+        "--query-page-logic"
+      ]
+    },
+    {
+      "stable_id": "real_project:app/关联员工企微.app/SuperPage.spg",
+      "entry_type": "copied",
+      "source_path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/关联员工企微.app/SuperPage.spg",
+      "copied_path": "tests/fixtures/corpus/samples/app__关联员工企微.app__SuperPage.spg",
+      "file_type": "spg",
+      "size_bytes": 138,
+      "coverage_tags": [
+        "readonly_page"
+      ],
+      "selection_reason": "极简只读页，0.1KB，测试 readonly_page 识别和零写入诊断",
+      "risk_points": [
+        "超小文件结构完整性",
+        "零 action 的页面需正确归类"
+      ],
+      "expected_commands": [
+        "--explain"
+      ]
+    },
+    {
+      "stable_id": "real_project:app/售后.app/维修保养预约单/预约/预约成功.spg",
+      "entry_type": "copied",
+      "source_path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/售后.app/维修保养预约单/预约/预约成功.spg",
+      "copied_path": "tests/fixtures/corpus/samples/app__售后.app__维修保养预约单__预约__预约成功.spg",
+      "file_type": "spg",
+      "size_bytes": 2887,
+      "coverage_tags": [
+        "actions",
+        "dialog",
+        "duplicate_action_id",
+        "embedded_page",
+        "link_param",
+        "readonly_page"
+      ],
+      "selection_reason": "dialog + duplicate_action_id + embedded_page，2.8KB，测试弹窗和动作语义聚合",
+      "risk_points": [
+        "多个同名 action1 需正确区分",
+        "showDialog/closeDialog 语义分类",
+        "嵌入页面关系"
+      ],
+      "expected_commands": [
+        "--explain action:...",
+        "--query-page-logic"
+      ]
+    },
+    {
+      "stable_id": "real_project:app/销售.app/标签/标签库创建.spg",
+      "entry_type": "copied",
+      "source_path": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/销售.app/标签/标签库创建.spg",
+      "copied_path": "tests/fixtures/corpus/samples/app__销售.app__标签__标签库创建.spg",
+      "file_type": "spg",
+      "size_bytes": 719,
+      "coverage_tags": [
+        "embedded_page",
+        "readonly_page"
+      ],
+      "selection_reason": "embedded_page + readonly_page，0.7KB，测试嵌入页面和嵌入 DataFlow 关系",
+      "risk_points": [
+        "embedSuperPage 类型解析",
+        "referenceResources 引用"
+      ],
+      "expected_commands": [
+        "--explain page:...",
+        "--context page:..."
+      ]
+    },
+    {
+      "stable_id": "fixture:tests/fixtures/test_project/app/actions_test.spg",
+      "entry_type": "referenced",
+      "source_path": "tests/fixtures/test_project/app/actions_test.spg",
+      "copied_path": "tests/fixtures/test_project/app/actions_test.spg",
+      "file_type": "spg",
+      "size_bytes": 6553,
+      "coverage_tags": [
+        "actions",
+        "conditionExp",
+        "dialog",
+        "duplicate_action_id",
+        "link_param",
+        "showDialog",
+        "submit_write",
+        "waitPrev"
+      ],
+      "selection_reason": "M5/M4 核心 fixture，覆盖 waitPrev、conditionExp、dialog、submit_write、duplicate_action_id",
+      "risk_points": [
+        "action 语义分类一致性",
+        "waitPrev 解析",
+        "condition 结构化输出"
+      ],
+      "expected_commands": [
+        "--explain",
+        "--query-page-logic",
+        "--context"
+      ]
+    },
+    {
+      "stable_id": "fixture:tests/fixtures/test_project/app/action_category_contract.spg",
+      "entry_type": "referenced",
+      "source_path": "tests/fixtures/test_project/app/action_category_contract.spg",
+      "copied_path": "tests/fixtures/test_project/app/action_category_contract.spg",
+      "file_type": "spg",
+      "size_bytes": 1750,
+      "coverage_tags": [
+        "actions",
+        "refreshData",
+        "refresh_action",
+        "submit_write"
+      ],
+      "selection_reason": "M5 动作语义分类 fixture，覆盖 refreshData、showComponent、hideComponent、validateData",
+      "risk_points": [
+        "refreshData 分类到 data_refresh",
+        "UI 控制动作边生成"
+      ],
+      "expected_commands": [
+        "--explain",
+        "--query-page-logic"
+      ]
+    },
+    {
+      "stable_id": "fixture:tests/fixtures/test_project/app/visibility_contract.spg",
+      "entry_type": "referenced",
+      "source_path": "tests/fixtures/test_project/app/visibility_contract.spg",
+      "copied_path": "tests/fixtures/test_project/app/visibility_contract.spg",
+      "file_type": "spg",
+      "size_bytes": 743,
+      "coverage_tags": [
+        "readonly_page",
+        "visibility"
+      ],
+      "selection_reason": "M7 visibility AST 解析 fixture，覆盖 visible/hidden/disabled/readonly 结构化输出",
+      "risk_points": [
+        "visibility 规则 AST 解析",
+        "未解析引用诊断"
+      ],
+      "expected_commands": [
+        "--query-page-logic"
+      ]
+    },
+    {
+      "stable_id": "fixture:tests/fixtures/test_project/df_a.tbl",
+      "entry_type": "referenced",
+      "source_path": "tests/fixtures/test_project/df_a.tbl",
+      "copied_path": "tests/fixtures/test_project/df_a.tbl",
+      "file_type": "tbl",
+      "size_bytes": 518,
+      "coverage_tags": [
+        "DataFlow"
+      ],
+      "selection_reason": "DataFlow 输入表 fixture，覆盖 DataFlow 拓扑解析",
+      "risk_points": [
+        "DataFlow dimensions[].inputField 解析",
+        "inputField 映射字段追溯"
+      ],
+      "expected_commands": [
+        "--query-dataflow",
+        "--explain model:..."
+      ]
+    },
+    {
+      "stable_id": "fixture:tests/fixtures/test_project/df_b.tbl",
+      "entry_type": "referenced",
+      "source_path": "tests/fixtures/test_project/df_b.tbl",
+      "copied_path": "tests/fixtures/test_project/df_b.tbl",
+      "file_type": "tbl",
+      "size_bytes": 556,
+      "coverage_tags": [
+        "DataFlow"
+      ],
+      "selection_reason": "DataFlow 中间表 fixture，覆盖链式 DataFlow 字段级追溯",
+      "risk_points": [
+        "链式 DataFlow df_a -> physical_x -> df_b",
+        "中间物理表字段映射"
+      ],
+      "expected_commands": [
+        "--query-dataflow",
+        "--explain field:..."
+      ]
+    },
+    {
+      "stable_id": "fixture:tests/fixtures/test_project/physical_x.tbl",
+      "entry_type": "referenced",
+      "source_path": "tests/fixtures/test_project/physical_x.tbl",
+      "copied_path": "tests/fixtures/test_project/physical_x.tbl",
+      "file_type": "tbl",
+      "size_bytes": 211,
+      "coverage_tags": [],
+      "selection_reason": "物理表 fixture，覆盖链式 DataFlow 中间节点",
+      "risk_points": [
+        "物理表作为 DataFlow 中间节点",
+        "output node 字段映射"
+      ],
+      "expected_commands": [
+        "--query-dataflow",
+        "--explain model:..."
+      ]
+    },
+    {
+      "stable_id": "fixture:tests/fixtures/test_project/app/page_relations.spg",
+      "entry_type": "referenced",
+      "source_path": "tests/fixtures/test_project/app/page_relations.spg",
+      "copied_path": "tests/fixtures/test_project/app/page_relations.spg",
+      "file_type": "spg",
+      "size_bytes": 1193,
+      "coverage_tags": [
+        "actions",
+        "embedded_page",
+        "link_param",
+        "readonly_page"
+      ],
+      "selection_reason": "页面关系 fixture，覆盖 link 导航、参数传递、embedSuperPage",
+      "risk_points": [
+        "link 传参 passes_params",
+        "embedSuperPage 嵌入关系"
+      ],
+      "expected_commands": [
+        "--explain",
+        "--query-page-logic"
+      ]
+    },
+    {
+      "stable_id": "fixture:tests/fixtures/test_project/app/dataflow_output.tbl",
+      "entry_type": "referenced",
+      "source_path": "tests/fixtures/test_project/app/dataflow_output.tbl",
+      "copied_path": "tests/fixtures/test_project/app/dataflow_output.tbl",
+      "file_type": "tbl",
+      "size_bytes": 1579,
+      "coverage_tags": [
+        "DataFlow"
+      ],
+      "selection_reason": "DataFlow 输出表 fixture，覆盖 DataFlow output 到物理表字段映射",
+      "risk_points": [
+        "output node 输出字段解析",
+        "DataFlow 内部拓扑"
+      ],
+      "expected_commands": [
+        "--query-dataflow",
+        "--explain model:..."
+      ]
+    }
+  ]
+}

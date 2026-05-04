@@ -1,0 +1,193 @@
+{
+	"version": "4.19.7",
+	"theme": "mobile",
+	"params": [
+		{
+			"id": "param1",
+			"name": "getCustomId",
+			"desc": "获取联系人id"
+		}
+	],
+	"sources": [
+		{
+			"id": "model1",
+			"modelType": "dwtable",
+			"path": "$DATA:/主数据/fact_qwSidebar.tbl",
+			"primaryKey": "qwContactId",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model1.externalUserId=param1"
+					},
+					{
+						"exp": "model1.staffId=$user.WXWORK_USER_ID"
+					},
+					{
+						"leftExp": "model1.phoneNumber",
+						"operator": "is not null",
+						"rightValue": ""
+					}
+				]
+			}
+		},
+		{
+			"id": "model2",
+			"modelType": "dwtable",
+			"path": "$DATA:/主数据/fact_qwSidebar.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "qwContactId",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model2.staffId=$user.WXWORK_USER_ID"
+					},
+					{
+						"exp": "model2.externalUserId=param1"
+					}
+				]
+			},
+			"name": "企微好友关系1"
+		}
+	],
+	"refComponentTypes": [
+		"canvas",
+		"panel",
+		"text",
+		"input",
+		"button"
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"viewSize": "mobile",
+		"width": "100%",
+		"minWidth": "320px",
+		"height": "auto",
+		"minHeight": "320px",
+		"overflow": "y",
+		"position": "center",
+		"components": [
+			{
+				"id": "panel1",
+				"type": "panel",
+				"width": "100%",
+				"minWidth": "20px",
+				"height": "100%",
+				"minHeight": "44px",
+				"templateName": "panel",
+				"padding": "30px 0px 0px 0px",
+				"columnJustifyContent": "flex-start",
+				"components": [
+					{
+						"id": "text45",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "16px",
+						"templateName": "text",
+						"value": "当前联系人未备注手机号，请备注手机号。",
+						"font": {
+							"bold": true,
+							"size": 16,
+							"family": "微软雅黑, MicroSoft YaHei"
+						},
+						"visible": "condition",
+						"visibleCondition": "model1.totalRowCount__=0",
+						"textAlign": "left"
+					},
+					{
+						"id": "input1",
+						"type": "input",
+						"width": "auto",
+						"templateName": "txtinput",
+						"margin": "10px 15px 10px 15px",
+						"height": "35px",
+						"minHeight": "26px",
+						"border": "1px solid bg1@0",
+						"calcEnabled": true,
+						"exp": "model1.phoneNumber",
+						"title": {
+							"type": "title",
+							"value": "手机号",
+							"border": "1px solid bg1@0"
+						}
+					},
+					{
+						"id": "button1",
+						"type": "button",
+						"width": "auto",
+						"value": "提交",
+						"templateName": "button",
+						"actions": [
+							{
+								"id": "action2",
+								"actionType": "updateData",
+								"triggerType": "click",
+								"enabled": "condition",
+								"dataSet": "model2",
+								"dataRange": "primaryKey",
+								"conditionExp": "model2.totalRowCount__ > 0",
+								"primaryKeyFieldValues": [
+									{
+										"name": "qwContactId",
+										"valueType": "exp",
+										"value": "param1"
+									}
+								],
+								"fieldValues": [
+									{
+										"name": "phoneNumber",
+										"valueType": "exp",
+										"value": "input1"
+									}
+								]
+							},
+							{
+								"id": "action1",
+								"actionType": "insertData",
+								"triggerType": "click",
+								"dataSet": "model2",
+								"enabled": "condition",
+								"conditionExp": "model2.totalRowCount__ <= 0",
+								"fieldValues": [
+									{
+										"name": "qwContactId",
+										"valueType": "exp",
+										"value": "param1"
+									},
+									{
+										"name": "staffId",
+										"valueType": "exp",
+										"value": "$user.WXWORK_USER_ID"
+									},
+									{
+										"name": "phoneNumber",
+										"valueType": "exp",
+										"value": "input1"
+									},
+									{
+										"name": "externalUserId",
+										"valueType": "exp",
+										"value": "param1"
+									},
+									{
+										"name": "addTime",
+										"valueType": "exp",
+										"value": "NOW()"
+									}
+								]
+							}
+						]
+					}
+				]
+			}
+		]
+	}
+}

@@ -1,0 +1,33 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"params": [
+		{
+			"id": "param1",
+			"name": "param_test",
+			"value": "0",
+			"desc": ""
+		}
+	],
+	"refComponentTypes": [
+		"canvas",
+		"input"
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "input1",
+				"type": "input",
+				"width": "240px",
+				"templateName": "txtinput",
+				"calcEnabled": true,
+				"exp": "param1",
+				"title": {
+					"type": "title"
+				}
+			}
+		]
+	}
+}

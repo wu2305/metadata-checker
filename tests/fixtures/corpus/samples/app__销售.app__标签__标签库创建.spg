@@ -1,0 +1,42 @@
+{
+	"version": "4.19.7",
+	"theme": "default",
+	"refComponentTypes": [
+		"canvas",
+		"resSelector",
+		"embedsuperpage"
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"components": [
+			{
+				"id": "resSelector2",
+				"type": "resSelector",
+				"width": "300px",
+				"templateName": "resselector",
+				"title": {
+					"type": "title"
+				}
+			},
+			{
+				"id": "embedsuperpage1",
+				"type": "embedsuperpage",
+				"width": "100%",
+				"minWidth": "400px",
+				"height": "100%",
+				"minHeight": "300px",
+				"templateName": "superpage"
+			},
+			{
+				"id": "resSelector1",
+				"type": "resSelector",
+				"width": "300px",
+				"templateName": "resselector",
+				"title": {
+					"type": "title"
+				}
+			}
+		]
+	}
+}

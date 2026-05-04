@@ -1,0 +1,140 @@
+{
+	"version": "4.19.7",
+	"theme": "mobile",
+	"refComponentTypes": [
+		"canvas",
+		"panel",
+		"text",
+		"button"
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"viewSize": "mobile",
+		"width": "100%",
+		"minWidth": "320px",
+		"height": "auto",
+		"minHeight": "320px",
+		"overflow": "y",
+		"position": "center",
+		"components": [
+			{
+				"id": "panel11",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "auto",
+				"minHeight": "26px",
+				"masterId": "spgdialog-header",
+				"padding": "18px 15px 0px 15px",
+				"components": [
+					{
+						"id": "text12",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "62px",
+						"minHeight": "16px",
+						"value": "预约成功",
+						"flexible": "true",
+						"textAlign": "center",
+						"masterId": "spgdialog-caption",
+						"font": {
+							"bold": true,
+							"size": 18,
+							"color": "black"
+						},
+						"lineHeight": "25px"
+					}
+				]
+			},
+			{
+				"id": "panel13",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "auto",
+				"minHeight": "26px",
+				"padding": "0px",
+				"margin": "0px",
+				"display": "inlineflexRow",
+				"flexDirection": "row",
+				"rowJustifyContent": "center",
+				"rowAlignItems": "center",
+				"borderTop": "1px solid bg2",
+				"masterId": "spgdialog-footer",
+				"borderRadius": "0px",
+				"gapType": "gapLine",
+				"gapLine": "1px solid bg2",
+				"components": [
+					{
+						"id": "button4",
+						"type": "button",
+						"width": "auto",
+						"minWidth": "70px",
+						"height": "44px",
+						"value": "取消",
+						"masterId": "spgdialog-cancel",
+						"compStyle": "style2",
+						"flexible": "true",
+						"font": {
+							"color": "#878B8F",
+							"size": 17
+						},
+						"padding": "0px",
+						"margin": "0px",
+						"actions": [
+							{
+								"id": "action1",
+								"actionType": "closeDialog"
+							},
+							{
+								"id": "action2",
+								"actionType": "link",
+								"triggerType": "click",
+								"targetType": "app",
+								"path": 0,
+								"displayType": "_self"
+							}
+						]
+					},
+					{
+						"id": "button5",
+						"type": "button",
+						"width": "auto",
+						"minWidth": "70px",
+						"height": "44px",
+						"value": "确定",
+						"masterId": "spgdialog-ok",
+						"compStyle": "style2",
+						"flexible": "true",
+						"font": {
+							"bold": true,
+							"color": "#296191",
+							"size": 17
+						},
+						"padding": "0px",
+						"margin": "0px",
+						"actions": [
+							{
+								"id": "action1",
+								"actionType": "closeDialog"
+							},
+							{
+								"id": "action2",
+								"actionType": "link",
+								"triggerType": "click",
+								"targetType": "app",
+								"displayType": "_self",
+								"path": 0
+							}
+						]
+					}
+				]
+			}
+		]
+	},
+	"referenceResources": [
+		"../预约保养小程序_old.mpg"
+	]
+}
