@@ -1,0 +1,39 @@
+{
+  "details_counts": {
+    "downstream_count": 1,
+    "related_actions_count": 1,
+    "related_components_count": 0,
+    "related_models_count": 0,
+    "related_pages_count": 1,
+    "upstream_count": 0
+  },
+  "diagnostics": [],
+  "evidence": [
+    {
+      "claim": "Context closure around comp:app/actions_test.spg|button1 with depth 1",
+      "confidence": "High",
+      "edge_type": null
+    },
+    {
+      "claim": "Found 1 downstream dependencies",
+      "confidence": "High",
+      "edge_type": null
+    },
+    {
+      "claim": "Downstream edge comp:app/actions_test.spg|button1 -> action:app/actions_test.spg|button1|action1",
+      "confidence": "Medium",
+      "edge_type": "Triggers"
+    }
+  ],
+  "kind": "Context",
+  "query_target": "comp:app/actions_test.spg|button1",
+  "schema_version": "1.0",
+  "summary": {
+    "budget": "normal",
+    "center_node": "comp:app/actions_test.spg|button1",
+    "center_type": "component",
+    "depth": 1,
+    "related_nodes_count": 2,
+    "truncated": false
+  }
+}

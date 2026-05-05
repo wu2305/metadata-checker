@@ -1,0 +1,56 @@
+{
+  "details_counts": {
+    "affects_count": 1,
+    "lineage_count": 0,
+    "reads_count": 0,
+    "triggered_by_count": 1,
+    "writes_count": 1
+  },
+  "diagnostics": [
+    {
+      "code": "LINEAGE_SOURCE_MISSING",
+      "severity": "Info"
+    }
+  ],
+  "evidence": [
+    {
+      "claim": "Component comp:app/actions_test.spg|button1 is defined in app/actions_test.spg",
+      "confidence": "High",
+      "edge_type": null
+    },
+    {
+      "claim": "Component comp:app/actions_test.spg|button1 writes to 1 targets",
+      "confidence": "High",
+      "edge_type": null
+    },
+    {
+      "claim": "writes relation on model:model1",
+      "confidence": "Medium",
+      "edge_type": "ActionWrites"
+    },
+    {
+      "claim": "triggered_by relation on page:app/actions_test.spg",
+      "confidence": "Medium",
+      "edge_type": "Contains"
+    },
+    {
+      "claim": "affects relation on action:app/actions_test.spg|button1|action1",
+      "confidence": "Medium",
+      "edge_type": "Triggers"
+    }
+  ],
+  "kind": "Explain",
+  "query_target": "comp:app/actions_test.spg|button1",
+  "schema_version": "1.0",
+  "summary": {
+    "action_count": 1,
+    "importance": "write_target",
+    "page": "actions_test",
+    "page_id": "page:app/actions_test.spg",
+    "read_count": 0,
+    "type": "component",
+    "type_detail": "button1",
+    "what_is_it": "组件 button1，位于页面 actions_test，具有 1 个动作，写入 model1",
+    "write_count": 1
+  }
+}

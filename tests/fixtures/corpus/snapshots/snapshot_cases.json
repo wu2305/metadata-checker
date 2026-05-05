@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0.0",
+  "scope": "M9-C snapshot output contract cases",
+  "update_env_var": "UPDATE_CORPUS_SNAPSHOTS",
+  "cases": [
+    {
+      "case_id": "query_page_logic_actions_test",
+      "sample_stable_id": "fixture:tests/fixtures/test_project/app/actions_test.spg",
+      "command_kind": "query-page-logic",
+      "target": "page:app/actions_test.spg",
+      "budget": null,
+      "snapshot_path": "tests/fixtures/corpus/snapshots/query_page_logic_actions_test.json",
+      "selection_reason": "覆盖 PageLogic + action_flows + condition + waitPrev + visibility + entrypoints",
+      "covered_contracts": ["PageLogic", "action_category", "condition", "blocks_on", "visibility_rules"]
+    },
+    {
+      "case_id": "explain_button1_actions_test",
+      "sample_stable_id": "fixture:tests/fixtures/test_project/app/actions_test.spg",
+      "command_kind": "explain",
+      "target": "comp:app/actions_test.spg|button1",
+      "budget": null,
+      "snapshot_path": "tests/fixtures/corpus/snapshots/explain_button1_actions_test.json",
+      "selection_reason": "覆盖 Explain(component) + reads/writes/triggered_by/affects + action 语义",
+      "covered_contracts": ["Explain", "action_category", "semantic_summary", "reads", "writes"]
+    },
+    {
+      "case_id": "context_button1_depth1",
+      "sample_stable_id": "fixture:tests/fixtures/test_project/app/actions_test.spg",
+      "command_kind": "context",
+      "target": "comp:app/actions_test.spg|button1",
+      "budget": "normal",
+      "snapshot_path": "tests/fixtures/corpus/snapshots/context_button1_depth1.json",
+      "selection_reason": "覆盖 Context(comp) + upstream/downstream/related_actions + budget=normal",
+      "covered_contracts": ["Context", "budget", "depth", "related_actions"]
+    },
+    {
+      "case_id": "query_dataflow_output",
+      "sample_stable_id": "fixture:tests/fixtures/test_project/app/dataflow_output.tbl",
+      "command_kind": "query-dataflow",
+      "target": "dataflow_output",
+      "budget": null,
+      "snapshot_path": "tests/fixtures/corpus/snapshots/query_dataflow_output.json",
+      "selection_reason": "覆盖 DataFlowQuery + lineage + internal_topology + inputs/outputs",
+      "covered_contracts": ["DataFlowQuery", "lineage", "internal_topology"]
+    },
+    {
+      "case_id": "explain_model_dataflow_output",
+      "sample_stable_id": "fixture:tests/fixtures/test_project/app/dataflow_output.tbl",
+      "command_kind": "explain",
+      "target": "model:dataflow_output",
+      "budget": null,
+      "snapshot_path": "tests/fixtures/corpus/snapshots/explain_model_dataflow_output.json",
+      "selection_reason": "覆盖 Explain(model) + DataFlow 输入/输出/内部节点 + lineage",
+      "covered_contracts": ["Explain", "DataFlow", "lineage", "inputs", "outputs"]
+    }
+  ]
+}

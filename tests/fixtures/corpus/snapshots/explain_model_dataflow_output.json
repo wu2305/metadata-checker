@@ -1,0 +1,77 @@
+{
+  "details_counts": {
+    "affects_count": 1,
+    "inputs_count": 1,
+    "internal_topology_edges_count": 2,
+    "internal_topology_nodes_count": 3,
+    "lineage_count": 3,
+    "outputs_count": 1,
+    "reads_count": 1,
+    "triggered_by_count": 1,
+    "writes_count": 1
+  },
+  "diagnostics": [
+    {
+      "code": "LINEAGE_EXPR_UNPARSED",
+      "severity": "Info"
+    },
+    {
+      "code": "LINEAGE_EXPR_UNPARSED",
+      "severity": "Info"
+    }
+  ],
+  "evidence": [
+    {
+      "claim": "DataFlow model:dataflow_output is defined in app/dataflow_output.tbl",
+      "confidence": "High",
+      "edge_type": null
+    },
+    {
+      "claim": "DataFlow model:dataflow_output has 1 inputs",
+      "confidence": "High",
+      "edge_type": null
+    },
+    {
+      "claim": "DataFlow model:dataflow_output has 1 outputs",
+      "confidence": "High",
+      "edge_type": null
+    },
+    {
+      "claim": "reads relation on model:fact_serviceappointments",
+      "confidence": "Medium",
+      "edge_type": "DataflowInput"
+    },
+    {
+      "claim": "writes relation on model:fact_dailyworkorders",
+      "confidence": "Medium",
+      "edge_type": "Model"
+    },
+    {
+      "claim": "Lineage for field:dataflow_output.工单号",
+      "confidence": "High",
+      "edge_type": "Contains"
+    },
+    {
+      "claim": "Lineage for field:dataflow_output.预约单号",
+      "confidence": "Low",
+      "edge_type": "Contains"
+    },
+    {
+      "claim": "Lineage for field:dataflow_output.工单状态",
+      "confidence": "Low",
+      "edge_type": "Contains"
+    }
+  ],
+  "kind": "Explain",
+  "query_target": "model:dataflow_output",
+  "schema_version": "1.0",
+  "summary": {
+    "importance": "data_source",
+    "input_count": 1,
+    "internal_node_count": 3,
+    "output_count": 1,
+    "type": "dataflow",
+    "type_detail": "dataflow_output",
+    "what_is_it": "DataFlow dataflow_output，输入 1 个源，输出 1 个目标，内部 3 个节点"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "details_counts": {
+    "inputs_count": 1,
+    "outputs_count": 1
+  },
+  "diagnostics": [],
+  "evidence": [
+    {
+      "claim": "DataFlow model:dataflow_output has 1 inputs",
+      "confidence": "High",
+      "edge_type": null
+    },
+    {
+      "claim": "DataFlow model:dataflow_output has 1 outputs",
+      "confidence": "High",
+      "edge_type": null
+    }
+  ],
+  "kind": "DataFlowQuery",
+  "query_target": "model:dataflow_output",
+  "schema_version": "1.0",
+  "summary": {
+    "dataflow_id": "model:dataflow_output",
+    "input_count": 1,
+    "model_type": "DataFlow",
+    "name": "dataflow_output",
+    "output_count": 1
+  }
+}
