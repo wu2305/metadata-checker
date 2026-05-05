@@ -284,3 +284,68 @@ fn test_entry_type_enum_valid() {
         );
     }
 }
+
+/// M9-B-11: 对 test_project 执行 scanner build-graph，验证不 panic 且图节点/边合理
+#[test]
+fn test_corpus_build_graph() {
+    let project_dir = PathBuf::from("tests/fixtures/test_project");
+    let db_path = PathBuf::from("tests/fixtures/corpus/test_graph.db");
+
+    // 清理旧图数据库（避免增量逻辑干扰）
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_dir_all(db_path.with_extension("db.lock"));
+
+    metadata_checker::scanner::scan_project(&project_dir, &db_path)
+        .expect("scan_project must succeed on test_project corpus");
+
+    let graph = metadata_checker::graph::GraphDB::open(&db_path).expect("GraphDB must open");
+
+    // 图应该有节点（至少一些 page/model/component 节点）
+    assert!(
+        !graph.node_indices.is_empty(),
+        "test_project graph should have nodes, got 0"
+    );
+
+    // 验证关键 fixture 对应的节点存在于图中
+    let expected_nodes = [
+        "page:app/actions_test.spg",
+        "model:df_a",
+        "model:df_b",
+        "model:physical_x",
+    ];
+    for node_id in &expected_nodes {
+        assert!(
+            graph.get_node(node_id).is_some(),
+            "graph must contain node: {}",
+            node_id
+        );
+    }
+
+    // 验证 actions_test.spg 的 button1 组件有 action 边
+    let comp_id = "comp:app/actions_test.spg|button1";
+    if let Some((outgoing, _)) = graph.get_node_edges(comp_id) {
+        let has_action_edge = outgoing.iter().any(|(_n, e)| {
+            matches!(
+                e.edge_type,
+                metadata_checker::graph::EdgeType::Triggers
+                    | metadata_checker::graph::EdgeType::ActionWrites
+            )
+        });
+        assert!(has_action_edge, "button1 should have action edges in graph");
+    } else {
+        panic!("button1 node should exist in graph");
+    }
+
+    // 验证 DataFlow 链式关系：df_a -> physical_x
+    if let Some((outgoing, _)) = graph.get_node_edges("model:df_a") {
+        let has_output_edge = outgoing
+            .iter()
+            .any(|(_n, e)| matches!(e.edge_type, metadata_checker::graph::EdgeType::OutputsTo));
+        assert!(has_output_edge, "df_a should have OutputsTo edge");
+    } else {
+        panic!("df_a node should exist in graph");
+    }
+
+    // 清理图数据库
+    let _ = std::fs::remove_file(&db_path);
+}

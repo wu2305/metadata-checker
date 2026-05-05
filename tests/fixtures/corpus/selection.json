@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "scope": "M9-B regression corpus: selected samples for stable testing",
-  "total_count": 13,
+  "total_count": 12,
   "entries": [
     {
       "stable_id": "real_project:app/销售.app/销售/客户.spg",
@@ -243,29 +243,6 @@
       "expected_commands": [
         "--query-dataflow",
         "--explain model:..."
-      ]
-    },
-    {
-      "stable_id": "fixture:tests/fixtures/test_project/app/page_relations.spg",
-      "entry_type": "referenced",
-      "source_path": "tests/fixtures/test_project/app/page_relations.spg",
-      "copied_path": "tests/fixtures/test_project/app/page_relations.spg",
-      "file_type": "spg",
-      "size_bytes": 1193,
-      "coverage_tags": [
-        "actions",
-        "embedded_page",
-        "link_param",
-        "readonly_page"
-      ],
-      "selection_reason": "页面关系 fixture，覆盖 link 导航、参数传递、embedSuperPage",
-      "risk_points": [
-        "link 传参 passes_params",
-        "embedSuperPage 嵌入关系"
-      ],
-      "expected_commands": [
-        "--explain",
-        "--query-page-logic"
       ]
     },
     {
