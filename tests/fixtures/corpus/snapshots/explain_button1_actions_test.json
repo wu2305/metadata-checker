@@ -24,9 +24,9 @@
       "edge_type": null
     },
     {
-      "claim": "writes relation on model:model1",
+      "claim": "affects relation on action:app/actions_test.spg|button1|action1",
       "confidence": "Medium",
-      "edge_type": "ActionWrites"
+      "edge_type": "Triggers"
     },
     {
       "claim": "triggered_by relation on page:app/actions_test.spg",
@@ -34,9 +34,9 @@
       "edge_type": "Contains"
     },
     {
-      "claim": "affects relation on action:app/actions_test.spg|button1|action1",
+      "claim": "writes relation on model:model1",
       "confidence": "Medium",
-      "edge_type": "Triggers"
+      "edge_type": "ActionWrites"
     }
   ],
   "kind": "Explain",

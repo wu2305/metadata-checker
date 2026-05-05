@@ -15,14 +15,14 @@
       "edge_type": null
     },
     {
-      "claim": "Found 1 downstream dependencies",
-      "confidence": "High",
-      "edge_type": null
-    },
-    {
       "claim": "Downstream edge comp:app/actions_test.spg|button1 -> action:app/actions_test.spg|button1|action1",
       "confidence": "Medium",
       "edge_type": "Triggers"
+    },
+    {
+      "claim": "Found 1 downstream dependencies",
+      "confidence": "High",
+      "edge_type": null
     }
   ],
   "kind": "Context",

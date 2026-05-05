@@ -10,122 +10,17 @@
   },
   "diagnostics": [
     {
-      "code": "UNKNOWN_ACTION_TYPE",
-      "severity": "Warning"
-    },
-    {
       "code": "EVIDENCE_SAMPLED",
       "severity": "Info"
+    },
+    {
+      "code": "UNKNOWN_ACTION_TYPE",
+      "severity": "Warning"
     }
   ],
   "evidence": [
     {
-      "claim": "Page page:app/actions_test.spg has 10 entrypoints",
-      "confidence": "High",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Entrypoint comp:app/actions_test.spg|buttonValidate (button) can trigger page logic",
-      "confidence": "High",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Entrypoint comp:app/actions_test.spg|buttonUnknown (button) can trigger page logic",
-      "confidence": "High",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Entrypoint comp:app/actions_test.spg|buttonSwitchPanel (button) can trigger page logic",
-      "confidence": "High",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Entrypoint comp:app/actions_test.spg|buttonShowDialog (button) can trigger page logic",
-      "confidence": "High",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Entrypoint comp:app/actions_test.spg|buttonCloseDialog (button) can trigger page logic",
-      "confidence": "High",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Page page:app/actions_test.spg reads from 1 data sources",
-      "confidence": "High",
-      "edge_type": "Reads/ActionReads"
-    },
-    {
-      "claim": "Read model1.name via action:app/actions_test.spg|buttonValidate|actionValidate",
-      "confidence": "High",
-      "edge_type": "ActionValidates"
-    },
-    {
-      "claim": "Page page:app/actions_test.spg writes to 9 targets",
-      "confidence": "High",
-      "edge_type": "Writes/ActionWrites"
-    },
-    {
-      "claim": "Write model1.age via comp:app/actions_test.spg|input2",
-      "confidence": "High",
-      "edge_type": "Writes"
-    },
-    {
-      "claim": "Write model1.name via comp:app/actions_test.spg|input1",
-      "confidence": "High",
-      "edge_type": "Writes"
-    },
-    {
-      "claim": "Write model1.name via action:app/actions_test.spg|button5|action5",
-      "confidence": "High",
-      "edge_type": "ActionWrites"
-    },
-    {
-      "claim": "Write model1.age via action:app/actions_test.spg|button5|action5",
-      "confidence": "High",
-      "edge_type": "ActionWrites"
-    },
-    {
-      "claim": "Write model2.deletedFlag via action:app/actions_test.spg|button4|action4",
-      "confidence": "High",
-      "edge_type": "ActionWrites"
-    },
-    {
-      "claim": "Page page:app/actions_test.spg has 3 navigation relations",
-      "confidence": "High",
-      "edge_type": "Navigation"
-    },
-    {
-      "claim": "Navigation action:app/actions_test.spg|buttonSwitchPanel|actionSwitchPanel -> comp:app/actions_test.spg|panelbook1 (ActionControlsComponent)",
-      "confidence": "High",
-      "edge_type": "ActionControlsComponent"
-    },
-    {
-      "claim": "Navigation action:app/actions_test.spg|buttonShowDialog|actionShowDialog -> comp:app/actions_test.spg|dialog1 (ActionControlsComponent)",
-      "confidence": "High",
-      "edge_type": "ActionControlsComponent"
-    },
-    {
-      "claim": "Navigation action:app/actions_test.spg|buttonCloseDialog|actionCloseDialog -> comp:app/actions_test.spg|buttonCloseDialog (ActionControlsComponent)",
-      "confidence": "High",
-      "edge_type": "ActionControlsComponent"
-    },
-    {
-      "claim": "Page page:app/actions_test.spg has 10 action flows",
-      "confidence": "High",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Action flow actionValidate (validateData)",
-      "confidence": "High",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Action flow actionUnknown (someCustomAction)",
-      "confidence": "Low",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Action flow actionSwitchPanel (switchPanel)",
+      "claim": "Action flow actionCloseDialog (closeDialog)",
       "confidence": "High",
       "edge_type": "Triggers"
     },
@@ -135,9 +30,114 @@
       "edge_type": "Triggers"
     },
     {
-      "claim": "Action flow actionCloseDialog (closeDialog)",
+      "claim": "Action flow actionSwitchPanel (switchPanel)",
       "confidence": "High",
       "edge_type": "Triggers"
+    },
+    {
+      "claim": "Action flow actionUnknown (someCustomAction)",
+      "confidence": "Low",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "Action flow actionValidate (validateData)",
+      "confidence": "High",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "Entrypoint comp:app/actions_test.spg|buttonCloseDialog (button) can trigger page logic",
+      "confidence": "High",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "Entrypoint comp:app/actions_test.spg|buttonShowDialog (button) can trigger page logic",
+      "confidence": "High",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "Entrypoint comp:app/actions_test.spg|buttonSwitchPanel (button) can trigger page logic",
+      "confidence": "High",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "Entrypoint comp:app/actions_test.spg|buttonUnknown (button) can trigger page logic",
+      "confidence": "High",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "Entrypoint comp:app/actions_test.spg|buttonValidate (button) can trigger page logic",
+      "confidence": "High",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "Navigation action:app/actions_test.spg|buttonCloseDialog|actionCloseDialog -> comp:app/actions_test.spg|buttonCloseDialog (ActionControlsComponent)",
+      "confidence": "High",
+      "edge_type": "ActionControlsComponent"
+    },
+    {
+      "claim": "Navigation action:app/actions_test.spg|buttonShowDialog|actionShowDialog -> comp:app/actions_test.spg|dialog1 (ActionControlsComponent)",
+      "confidence": "High",
+      "edge_type": "ActionControlsComponent"
+    },
+    {
+      "claim": "Navigation action:app/actions_test.spg|buttonSwitchPanel|actionSwitchPanel -> comp:app/actions_test.spg|panelbook1 (ActionControlsComponent)",
+      "confidence": "High",
+      "edge_type": "ActionControlsComponent"
+    },
+    {
+      "claim": "Page page:app/actions_test.spg has 10 action flows",
+      "confidence": "High",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "Page page:app/actions_test.spg has 10 entrypoints",
+      "confidence": "High",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "Page page:app/actions_test.spg has 3 navigation relations",
+      "confidence": "High",
+      "edge_type": "Navigation"
+    },
+    {
+      "claim": "Page page:app/actions_test.spg reads from 1 data sources",
+      "confidence": "High",
+      "edge_type": "Reads/ActionReads"
+    },
+    {
+      "claim": "Page page:app/actions_test.spg writes to 9 targets",
+      "confidence": "High",
+      "edge_type": "Writes/ActionWrites"
+    },
+    {
+      "claim": "Read model1.name via action:app/actions_test.spg|buttonValidate|actionValidate",
+      "confidence": "High",
+      "edge_type": "ActionValidates"
+    },
+    {
+      "claim": "Write model1.age via action:app/actions_test.spg|button5|action5",
+      "confidence": "High",
+      "edge_type": "ActionWrites"
+    },
+    {
+      "claim": "Write model1.age via comp:app/actions_test.spg|input2",
+      "confidence": "High",
+      "edge_type": "Writes"
+    },
+    {
+      "claim": "Write model1.name via action:app/actions_test.spg|button5|action5",
+      "confidence": "High",
+      "edge_type": "ActionWrites"
+    },
+    {
+      "claim": "Write model1.name via comp:app/actions_test.spg|input1",
+      "confidence": "High",
+      "edge_type": "Writes"
+    },
+    {
+      "claim": "Write model2.deletedFlag via action:app/actions_test.spg|button4|action4",
+      "confidence": "High",
+      "edge_type": "ActionWrites"
     }
   ],
   "kind": "PageLogic",

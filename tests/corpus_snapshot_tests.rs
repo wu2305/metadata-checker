@@ -131,20 +131,52 @@ fn normalize_ai_output(output: &AiOutput) -> serde_json::Value {
         output.summary.clone()
     };
 
+    let mut diagnostics_sorted: Vec<_> = output
+        .diagnostics
+        .iter()
+        .map(|d| {
+            json!({
+                "code": &d.code,
+                "severity": format!("{:?}", d.severity),
+            })
+        })
+        .collect();
+    diagnostics_sorted.sort_by(|a, b| {
+        let a_code = a.get("code").and_then(|v| v.as_str()).unwrap_or("");
+        let b_code = b.get("code").and_then(|v| v.as_str()).unwrap_or("");
+        a_code.cmp(b_code)
+    });
+
+    let mut evidence_sorted: Vec<_> = output
+        .evidence
+        .iter()
+        .map(|e| {
+            json!({
+                "claim": &e.claim,
+                "edge_type": &e.edge_type,
+                "confidence": format!("{:?}", e.confidence),
+            })
+        })
+        .collect();
+    evidence_sorted.sort_by(|a, b| {
+        let a_key = (
+            a.get("claim").and_then(|v| v.as_str()).unwrap_or(""),
+            a.get("edge_type").and_then(|v| v.as_str()).unwrap_or(""),
+        );
+        let b_key = (
+            b.get("claim").and_then(|v| v.as_str()).unwrap_or(""),
+            b.get("edge_type").and_then(|v| v.as_str()).unwrap_or(""),
+        );
+        a_key.cmp(&b_key)
+    });
+
     json!({
         "schema_version": &output.schema_version,
         "kind": format!("{:?}", output.kind),
         "query_target": output.query_target,
         "summary": summary_filtered,
-        "diagnostics": output.diagnostics.iter().map(|d| json!({
-            "code": &d.code,
-            "severity": format!("{:?}", d.severity),
-        })).collect::<Vec<_>>(),
-        "evidence": output.evidence.iter().map(|e| json!({
-            "claim": &e.claim,
-            "edge_type": &e.edge_type,
-            "confidence": format!("{:?}", e.confidence),
-        })).collect::<Vec<_>>(),
+        "diagnostics": diagnostics_sorted,
+        "evidence": evidence_sorted,
         "details_counts": details_counts,
     })
 }
@@ -205,6 +237,14 @@ fn test_snapshot_cases() {
     let update_mode = std::env::var("UPDATE_CORPUS_SNAPSHOTS")
         .map(|v| v == "1" || v == "true")
         .unwrap_or(false);
+
+    // P0: 确保图数据库已构建，不依赖被 git 忽略的 .metadata-checker.graphdb
+    let project_dir = PathBuf::from("tests/fixtures/test_project");
+    let db_path = PathBuf::from("tests/fixtures/test_project/.metadata-checker.graphdb");
+    if !db_path.exists() || update_mode {
+        metadata_checker::scanner::scan_project(&project_dir, &db_path)
+            .expect("scan_project must succeed on test_project");
+    }
 
     let cases = load_snapshot_cases();
     assert!(!cases.is_empty(), "snapshot_cases.json must have cases");

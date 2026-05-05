@@ -10,8 +10,15 @@
       "target": "page:app/actions_test.spg",
       "budget": null,
       "snapshot_path": "tests/fixtures/corpus/snapshots/query_page_logic_actions_test.json",
-      "selection_reason": "覆盖 PageLogic + action_flows + condition + waitPrev + visibility + entrypoints",
-      "covered_contracts": ["PageLogic", "action_category", "condition", "blocks_on", "visibility_rules"]
+      "selection_reason": "覆盖 PageLogic + action_flows + condition + waitPrev + entrypoints + write_targets",
+      "covered_contracts": [
+        "PageLogic",
+        "action_category",
+        "condition",
+        "blocks_on",
+        "entrypoints",
+        "write_targets"
+      ]
     },
     {
       "case_id": "explain_button1_actions_test",
@@ -21,7 +28,13 @@
       "budget": null,
       "snapshot_path": "tests/fixtures/corpus/snapshots/explain_button1_actions_test.json",
       "selection_reason": "覆盖 Explain(component) + reads/writes/triggered_by/affects + action 语义",
-      "covered_contracts": ["Explain", "action_category", "semantic_summary", "reads", "writes"]
+      "covered_contracts": [
+        "Explain",
+        "action_category",
+        "semantic_summary",
+        "reads",
+        "writes"
+      ]
     },
     {
       "case_id": "context_button1_depth1",
@@ -31,7 +44,12 @@
       "budget": "normal",
       "snapshot_path": "tests/fixtures/corpus/snapshots/context_button1_depth1.json",
       "selection_reason": "覆盖 Context(comp) + upstream/downstream/related_actions + budget=normal",
-      "covered_contracts": ["Context", "budget", "depth", "related_actions"]
+      "covered_contracts": [
+        "Context",
+        "budget",
+        "depth",
+        "related_actions"
+      ]
     },
     {
       "case_id": "query_dataflow_output",
@@ -41,7 +59,11 @@
       "budget": null,
       "snapshot_path": "tests/fixtures/corpus/snapshots/query_dataflow_output.json",
       "selection_reason": "覆盖 DataFlowQuery + lineage + internal_topology + inputs/outputs",
-      "covered_contracts": ["DataFlowQuery", "lineage", "internal_topology"]
+      "covered_contracts": [
+        "DataFlowQuery",
+        "lineage",
+        "internal_topology"
+      ]
     },
     {
       "case_id": "explain_model_dataflow_output",
@@ -51,7 +73,13 @@
       "budget": null,
       "snapshot_path": "tests/fixtures/corpus/snapshots/explain_model_dataflow_output.json",
       "selection_reason": "覆盖 Explain(model) + DataFlow 输入/输出/内部节点 + lineage",
-      "covered_contracts": ["Explain", "DataFlow", "lineage", "inputs", "outputs"]
+      "covered_contracts": [
+        "Explain",
+        "DataFlow",
+        "lineage",
+        "inputs",
+        "outputs"
+      ]
     }
   ]
 }

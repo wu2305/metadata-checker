@@ -22,11 +22,6 @@
   ],
   "evidence": [
     {
-      "claim": "DataFlow model:dataflow_output is defined in app/dataflow_output.tbl",
-      "confidence": "High",
-      "edge_type": null
-    },
-    {
       "claim": "DataFlow model:dataflow_output has 1 inputs",
       "confidence": "High",
       "edge_type": null
@@ -37,18 +32,18 @@
       "edge_type": null
     },
     {
-      "claim": "reads relation on model:fact_serviceappointments",
-      "confidence": "Medium",
-      "edge_type": "DataflowInput"
-    },
-    {
-      "claim": "writes relation on model:fact_dailyworkorders",
-      "confidence": "Medium",
-      "edge_type": "Model"
+      "claim": "DataFlow model:dataflow_output is defined in app/dataflow_output.tbl",
+      "confidence": "High",
+      "edge_type": null
     },
     {
       "claim": "Lineage for field:dataflow_output.工单号",
       "confidence": "High",
+      "edge_type": "Contains"
+    },
+    {
+      "claim": "Lineage for field:dataflow_output.工单状态",
+      "confidence": "Low",
       "edge_type": "Contains"
     },
     {
@@ -57,9 +52,14 @@
       "edge_type": "Contains"
     },
     {
-      "claim": "Lineage for field:dataflow_output.工单状态",
-      "confidence": "Low",
-      "edge_type": "Contains"
+      "claim": "reads relation on model:fact_serviceappointments",
+      "confidence": "Medium",
+      "edge_type": "DataflowInput"
+    },
+    {
+      "claim": "writes relation on model:fact_dailyworkorders",
+      "confidence": "Medium",
+      "edge_type": "Model"
     }
   ],
   "kind": "Explain",
