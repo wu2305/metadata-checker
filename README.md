@@ -344,7 +344,16 @@ cargo test
 - 边界错误处理
 - 真实场景用例
 
-## 真实语料 Manifest（M9-A）
+## 真实语料与 AI 验收（M9）
+
+| 阶段 | 产物 | 职责 |
+|------|------|------|
+| M9-A | `tests/fixtures/corpus/manifest.json` | 原始语料元信息索引（1290+ 样本） |
+| M9-B | `tests/fixtures/corpus/selection.json` | 精选 12 条代表样本进入仓库 |
+| M9-C | `tests/fixtures/corpus/snapshots/` | 结构化 snapshot，捕获输出契约变化 |
+| M9-D | `tests/fixtures/corpus/ai_eval/ai_eval_cases.json` | AI 问答评测集，验证模型能否基于 CLI 输出回答业务问题 |
+
+### M9-A 语料清单
 
 - 机器可读清单：`tests/fixtures/corpus/manifest.json`
 - 人类摘要与维护说明：`docs/corpus-manifest.md`
@@ -354,8 +363,30 @@ cargo test
   - `tests/fixtures/real_world_*.spg`
   - `tests/fixtures/test_project/**/*.spg|*.tbl`
 
-## 技术栈
+### M9-B 精选语料
 
+- 入选清单：`tests/fixtures/corpus/selection.json`
+- 精选 12 条代表样本（5 copied + 7 referenced），覆盖复杂页面、只读页面、表单写入、弹窗、嵌套 visibility、DataFlow、链式物理表、刷新类 action、conditionExp、waitPrev、link_param、duplicate_action_id
+- 说明文档：`tests/fixtures/corpus/samples/README.md`
+
+### M9-C Snapshot 契约
+
+- snapshot 目录：`tests/fixtures/corpus/snapshots/`
+- 首批 5 个 snapshot case，覆盖 `--query-page-logic`、`--explain`、`--context`、`--query-dataflow`
+- 只保存结构化摘要（schema_version、kind、summary 关键字段、diagnostics code、evidence claim、details count），不保存完整 raw JSON
+- 用于捕获输出契约变化：任何合同字段变更都会触发 snapshot diff
+- 更新机制：`UPDATE_CORPUS_SNAPSHOTS=1 cargo test --test corpus_snapshot_tests`
+
+### M9-D AI 问答验收
+
+- 评测集：`tests/fixtures/corpus/ai_eval/ai_eval_cases.json`
+- 10 个 eval case，覆盖页面用途、按钮效果、字段来源、DataFlow 链路、只读判定、参数传递、诊断影响、上下文邻居、条件动作、链式 DataFlow
+- 验证流程见 `docs/ai-eval.md`
+- 判分规则：命中 expected_facts、无 forbidden_claims、关键结论引用 evidence、diagnostics 保守处理
+- 失败分类：missed_fact、hallucination、wrong_command、ignored_diagnostic、over_read_details
+
+
+## 技术栈
 - **Rust 2024 Edition**
 - **clap** — CLI 参数解析
 - **serde_json** — JSON 序列化/反序列化

@@ -1,0 +1,314 @@
+{
+  "schema_version": "1.0.0",
+  "scope": "M9-D AI 问答评测集：验证空上下文小模型基于 SKILL.md + CLI 输出回答真实业务问题的能力",
+  "eval_count": 10,
+  "cases": [
+    {
+      "case_id": "page_purpose_actions_test",
+      "question": "页面 actions_test 主要做什么？用户能触发哪些逻辑？会影响哪些数据？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --query-page-logic page:app/actions_test.spg"
+      ],
+      "expected_facts": [
+        "页面是 actions_test",
+        "有多个用户入口（按钮）",
+        "按钮可以提交数据到 model1",
+        "按钮可以删除 model2 数据",
+        "有弹窗（showDialog/closeDialog）操作",
+        "有切换面板（switchPanel）操作"
+      ],
+      "forbidden_claims": [
+        "页面是只读的",
+        "没有任何写入操作",
+        "用户无法触发任何逻辑"
+      ],
+      "evidence_requirements": [
+        "summary.entrypoint_count > 0",
+        "summary.write_target_count > 0",
+        "details.action_flows 非空",
+        "存在 action_category=data_write 的 action"
+      ],
+      "answer_rubric": {
+        "must_mention": ["用户入口数量", "写入目标", "action 类型"],
+        "should_mention": ["弹窗", "切换面板"],
+        "must_not_mention": ["只读", "无写入"]
+      },
+      "uncertainty_policy": "如果诊断中有 UNKNOWN_ACTION_TYPE，应标注该 action 语义不确定",
+      "minimal_command_plan": ["--query-page-logic page:app/actions_test.spg"]
+    },
+    {
+      "case_id": "button_submit_effect",
+      "question": "点击 actions_test 页面中的 button1 会发生什么？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --explain comp:app/actions_test.spg|button1"
+      ],
+      "expected_facts": [
+        "button1 是一个按钮组件",
+        "button1 触发 action1",
+        "action1 是 submitData 类型",
+        "action1 写入 model1"
+      ],
+      "forbidden_claims": [
+        "button1 没有动作",
+        "button1 是只读的",
+        "button1 读取数据但不写入"
+      ],
+      "evidence_requirements": [
+        "summary.what_is_it 包含 button1",
+        "details.writes 非空",
+        "evidence 中有 ActionWrites 边"
+      ],
+      "answer_rubric": {
+        "must_mention": ["button1", "submitData", "model1"],
+        "should_mention": ["action1", "写入目标字段"],
+        "must_not_mention": ["只读", "无动作"]
+      },
+      "uncertainty_policy": "如果 lineage 为空，应说明字段来源无法追溯",
+      "minimal_command_plan": ["--explain comp:app/actions_test.spg|button1"]
+    },
+    {
+      "case_id": "field_lineage_model1_name",
+      "question": "字段 model1.name 的值从哪里来？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --explain field:model1.name"
+      ],
+      "expected_facts": [
+        "model1.name 被页面 action 写入",
+        "有 submitData/insertData/updateData 类型的 action 涉及该字段"
+      ],
+      "forbidden_claims": [
+        "字段值完全无法确定来源",
+        "字段是系统自动生成的，与用户无关",
+        "字段只读，不能被写入"
+      ],
+      "evidence_requirements": [
+        "summary 有 read_by_count/written_by_count",
+        "evidence 中有 ActionWrites 或 Writes 边",
+        "如果 lineage 为空，diagnostics 应有 LINEAGE_SOURCE_MISSING"
+      ],
+      "answer_rubric": {
+        "must_mention": ["写入者", "页面 action"],
+        "should_mention": ["submitData/insertData/updateData"],
+        "must_not_mention": ["只读", "来源完全未知"]
+      },
+      "uncertainty_policy": "如果 lineage 链不完整，允许说\"写入者已知，但完整来源链未追溯\"",
+      "minimal_command_plan": ["--explain field:model1.name"]
+    },
+    {
+      "case_id": "dataflow_output_source",
+      "question": "DataFlow 输出表 dataflow_output 是怎么来的？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --query-dataflow dataflow_output",
+        "--project-dir tests/fixtures/test_project --explain model:dataflow_output"
+      ],
+      "expected_facts": [
+        "dataflow_output 有输入源",
+        "dataflow_output 有输出目标",
+        "内部有节点拓扑（nodes/edges）"
+      ],
+      "forbidden_claims": [
+        "DataFlow 没有输入",
+        "DataFlow 没有输出",
+        "dataflow_output 是孤立节点"
+      ],
+      "evidence_requirements": [
+        "details.inputs_count > 0 或 details.outputs_count > 0",
+        "details.internal_topology 非空",
+        "evidence 有 OutputsTo 或 DataflowInput 边"
+      ],
+      "answer_rubric": {
+        "must_mention": ["输入源", "输出目标", "内部节点"],
+        "should_mention": ["链式 DataFlow"],
+        "must_not_mention": ["孤立", "无输入", "无输出"]
+      },
+      "uncertainty_policy": "如果 lineage 不完整，应标注字段级追溯缺失",
+      "minimal_command_plan": ["--query-dataflow dataflow_output", "--explain model:dataflow_output"]
+    },
+    {
+      "case_id": "readonly_page_check",
+      "question": "关联员工企微页面是只读的吗？用户能修改数据吗？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --explain page:app/关联员工企微.app/SuperPage.spg"
+      ],
+      "expected_facts": [
+        "页面是只读的",
+        "没有写入操作",
+        "没有 submitData/updateData/insertData/deleteData"
+      ],
+      "forbidden_claims": [
+        "页面可以写入数据",
+        "用户可以提交表单",
+        "页面有数据修改入口"
+      ],
+      "evidence_requirements": [
+        "summary 标记为 readonly_page 或 importance=readonly",
+        "details.writes 为空或 write_target_count=0",
+        "diagnostics 有 NO_WRITE_TARGETS 或类似提示"
+      ],
+      "answer_rubric": {
+        "must_mention": ["只读", "无写入"],
+        "should_mention": ["NO_WRITE_TARGETS diagnostic"],
+        "must_not_mention": ["写入", "提交", "修改"]
+      },
+      "uncertainty_policy": "如果页面确实无任何 action，可明确回答只读",
+      "minimal_command_plan": ["--explain page:app/关联员工企微.app/SuperPage.spg"]
+    },
+    {
+      "case_id": "param_passing_link",
+      "question": "验证URL传参页面跳转时传递了哪些参数？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --query-page-logic page:app/验证URL传参.spg"
+      ],
+      "expected_facts": [
+        "有 link 类型的 action",
+        "link 传递了参数",
+        "参数值来源明确"
+      ],
+      "forbidden_claims": [
+        "页面没有任何导航",
+        "link 没有传递参数",
+        "参数来源未知"
+      ],
+      "evidence_requirements": [
+        "details.navigation 非空",
+        "details.passes_params 或 sets_params 非空",
+        "evidence 有 PassesParam 或 SetsParam 边"
+      ],
+      "answer_rubric": {
+        "must_mention": ["link", "参数", "来源"],
+        "should_mention": ["目标页面"],
+        "must_not_mention": ["无导航", "无参数"]
+      },
+      "uncertainty_policy": "如果参数值是表达式，应标注表达式可能包含未解析引用",
+      "minimal_command_plan": ["--query-page-logic page:app/验证URL传参.spg"]
+    },
+    {
+      "case_id": "diagnostic_affects_answer",
+      "question": "actions_test 页面有 UNKNOWN_ACTION_TYPE 诊断，这会影响什么结论？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --query-page-logic page:app/actions_test.spg"
+      ],
+      "expected_facts": [
+        "UNKNOWN_ACTION_TYPE 表示某个 action 类型未被识别",
+        "该 action 的语义分类可能不准确",
+        "不应基于该 action 做确定性结论"
+      ],
+      "forbidden_claims": [
+        "UNKNOWN_ACTION_TYPE 不影响任何结论",
+        "可以忽略所有诊断",
+        "模型对所有 action 语义完全确定"
+      ],
+      "evidence_requirements": [
+        "diagnostics 中有 UNKNOWN_ACTION_TYPE",
+        "details.action_flows 中有对应 action 但 category=unknown",
+        "summary 中的 risk_count > 0"
+      ],
+      "answer_rubric": {
+        "must_mention": ["UNKNOWN_ACTION_TYPE", "语义不确定"],
+        "should_mention": ["保守回答", "action_category=unknown"],
+        "must_not_mention": ["不影响", "忽略", "完全确定"]
+      },
+      "uncertainty_policy": "遇到诊断时必须降级表达，不能假装诊断不存在",
+      "minimal_command_plan": ["--query-page-logic page:app/actions_test.spg"]
+    },
+    {
+      "case_id": "context_button1_neighbors",
+      "question": "button1 周围还有哪些关键依赖和影响？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --context comp:app/actions_test.spg|button1 --depth 1 --budget normal"
+      ],
+      "expected_facts": [
+        "button1 属于页面 actions_test",
+        "button1 触发 action1",
+        "action1 写入 model1"
+      ],
+      "forbidden_claims": [
+        "button1 是孤立组件",
+        "button1 不触发任何 action",
+        "button1 的上下游为空"
+      ],
+      "evidence_requirements": [
+        "summary.related_nodes_count > 0",
+        "details.related_actions 非空",
+        "details.downstream 包含 model1"
+      ],
+      "answer_rubric": {
+        "must_mention": ["所属页面", "触发的 action", "写入目标"],
+        "should_mention": ["上下游关系"],
+        "must_not_mention": ["孤立", "无影响"]
+      },
+      "uncertainty_policy": "如果 budget=compact 截断，应说明还有更深层关系未展开",
+      "minimal_command_plan": ["--context comp:app/actions_test.spg|button1 --depth 1 --budget normal"]
+    },
+    {
+      "case_id": "condition_action_behavior",
+      "question": "actions_test 中 buttonValidate 的动作在什么条件下执行？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --explain action:app/actions_test.spg|buttonValidate|actionValidate"
+      ],
+      "expected_facts": [
+        "buttonValidate 触发 validateData 类型 action",
+        "condition 或 conditionExp 控制执行条件",
+        "有条件时动作不会无条件执行"
+      ],
+      "forbidden_claims": [
+        "动作无条件执行",
+        "没有条件控制",
+        "condition 字段不存在"
+      ],
+      "evidence_requirements": [
+        "details.condition.raw_expr 非空",
+        "summary 有 condition 相关信息",
+        "evidence 有 condition 解析证据"
+      ],
+      "answer_rubric": {
+        "must_mention": ["validateData", "条件", "condition"],
+        "should_mention": ["conditionExp", "raw_expr"],
+        "must_not_mention": ["无条件", "没有条件"]
+      },
+      "uncertainty_policy": "如果 condition 表达式有未解析引用，应标注条件判断可能不完整",
+      "minimal_command_plan": ["--explain action:app/actions_test.spg|buttonValidate|actionValidate"]
+    },
+    {
+      "case_id": "dataflow_chain_trace",
+      "question": "df_a 经过 physical_x 到 df_b 的 DataFlow 链中，字段如何传递？",
+      "project_dir": "tests/fixtures/test_project",
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --query-dataflow df_a",
+        "--project-dir tests/fixtures/test_project --explain field:df_b.id"
+      ],
+      "expected_facts": [
+        "df_a 的输出连接到 physical_x",
+        "physical_x 作为中间节点",
+        "df_b 接收 physical_x 的数据",
+        "字段级 lineage 至少追到 df_a.id"
+      ],
+      "forbidden_claims": [
+        "df_a 和 df_b 没有连接",
+        "physical_x 不参与数据传递",
+        "字段来源完全未知"
+      ],
+      "evidence_requirements": [
+        "details.internal_topology 有 edges 连接节点",
+        "explain 输出 lineage 非空",
+        "evidence 有 DataflowInput/OutputsTo 边"
+      ],
+      "answer_rubric": {
+        "must_mention": ["df_a", "physical_x", "df_b", "链式"],
+        "should_mention": ["字段传递", "inputField"],
+        "must_not_mention": ["无连接", "不相关"]
+      },
+      "uncertainty_policy": "如果字段级 lineage 被截断，应标注截断位置和原因",
+      "minimal_command_plan": ["--query-dataflow df_a", "--explain field:df_b.id"]
+    }
+  ]
+}
