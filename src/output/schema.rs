@@ -81,6 +81,8 @@ pub enum OutputKind {
     Explain,
     Context,
     PageLogic,
+    Table,
+    DataFlow,
 }
 
 /// 证据结构

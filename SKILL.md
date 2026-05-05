@@ -190,6 +190,29 @@ metadata-checker --project-dir /path/to/project --context button1 --depth 2 --bu
 metadata-checker --project-dir /path/to/project --query-page-logic "page:app/合同管理/销售合同.spg"
 ```
 
+
+### .tbl 单文件使用指南
+
+当没有项目图数据库时，可直接解析单个  文件获取表/DataFlow 语义。
+
+**何时使用**
+- 需要快速判断一个  是物理表还是 DataFlow。
+- 需要查看 DataFlow 的输入、输出和字段加工链。
+- 项目图数据库尚未构建或目标文件不在项目中。
+
+**命令**
+
+
+**AI 阅读顺序**
+1. **summary**：先看 （AppTable / DataFlow）、、、、。
+2. **details.field_lineage**：字段级来源链，包含 、、、、。
+3. **details.dataflow_inputs / dataflow_outputs**：DataFlow 的输入输出拓扑。
+4. **evidence**：验证字段来源的  和 。
+5. **diagnostics**：若含 ，说明该 DataFlow 未指定输出物理表。
+
+**禁止行为**
+- 禁止把  当作 SuperPage 解析（ 属于语义错误）。
+- 禁止在没有  时编造字段来源。
 ## AI 回答协议（M9-D）
 
 当使用 metadata-checker CLI 回答业务问题时，必须遵守以下协议，禁止默认读取 raw JSON 或凭空推断。

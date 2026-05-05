@@ -47,6 +47,18 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 ./target/release/metadata-checker page.spg --interactive
 ```
 
+### 解析单个 .tbl 文件
+
+
+
+输出结构：
+- （物理表）或 （加工表）
+- 、、、
+- ：字段列表
+- ：DataFlow 输入节点
+- ：DataFlow 输出目标
+- ：字段来源链（inputField / exp / originalField）
+
 ### 项目级图数据库
 
 ```bash

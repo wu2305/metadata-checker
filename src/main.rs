@@ -8,6 +8,7 @@ use metadata_checker::parser;
 use metadata_checker::priority;
 use metadata_checker::query;
 use metadata_checker::scanner;
+use metadata_checker::tbl_single;
 
 use anyhow::Result;
 use clap::Parser;
@@ -115,6 +116,9 @@ fn main() -> Result<()> {
     if let Some(ref explain_id) = args.explain {
         if let Some(spg) = &meta.superpage {
             explain::explain_component_spg(spg, explain_id, args.is_human())?;
+        } else if let Some(tbl) = &meta.tbl {
+            let out = tbl_single::build_tbl_output(tbl);
+            println!("{}", serde_json::to_string_pretty(&out)?);
         }
         return Ok(());
     }
@@ -128,6 +132,9 @@ fn main() -> Result<()> {
             } else {
                 output::print_component_query_json(spg, &graph, target_id, args.priority)?;
             }
+        } else if let Some(tbl) = &meta.tbl {
+            let out = tbl_single::build_tbl_output(tbl);
+            println!("{}", serde_json::to_string_pretty(&out)?);
         }
         return Ok(());
     }
@@ -136,6 +143,8 @@ fn main() -> Result<()> {
     if args.is_human() {
         if let Some(spg) = &meta.superpage {
             run_interactive(spg, args.priority)?;
+        } else if let Some(tbl) = &meta.tbl {
+            tbl_single::print_tbl_human(tbl)?;
         }
         return Ok(());
     }
@@ -149,7 +158,10 @@ fn main() -> Result<()> {
 
     let priority_slice = priority_analyses.as_deref();
 
-    if args.detail {
+    if let Some(tbl) = &meta.tbl {
+        let out = tbl_single::build_tbl_output(tbl);
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    } else if args.detail {
         output::print_non_human_to(&meta, priority_slice, &mut io::stdout())?;
     } else {
         output::print_summary(&meta, priority_slice)?;
@@ -236,6 +248,7 @@ fn run_interactive(
                     settings: Default::default(),
                     raw: spg.raw.clone(),
                     superpage: Some(spg.clone()),
+                    tbl: None,
                 };
                 output::print_human(&meta)?;
                 if show_priority {

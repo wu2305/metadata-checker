@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::superpage;
+use crate::tbl_single;
 
 /// 文件解析入口模块
 ///
@@ -26,6 +27,8 @@ pub struct PageMetadata {
     pub raw: Value,
     /// SuperPage specific metadata
     pub superpage: Option<superpage::SuperPageMetadata>,
+    /// Table (.tbl) specific metadata
+    pub tbl: Option<tbl_single::TblMetadata>,
 }
 
 #[derive(Debug, Default)]
@@ -61,6 +64,16 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
     if is_superpage {
         meta.superpage = Some(superpage::parse_superpage_from_value(raw.clone())?);
         // Also set basic fields
+        if let Some(obj) = raw.as_object() {
+            meta.version = obj
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+        }
+    } else if path.extension().map(|e| e == "tbl").unwrap_or(false)
+        || raw.get("dimensions").is_some()
+    {
+        meta.tbl = Some(tbl_single::parse_tbl(path, raw.clone())?);
         if let Some(obj) = raw.as_object() {
             meta.version = obj
                 .get("version")

@@ -10,3 +10,4 @@ pub mod priority;
 pub mod query;
 pub mod scanner;
 pub mod superpage;
+pub mod tbl_single;

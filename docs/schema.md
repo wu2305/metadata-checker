@@ -19,7 +19,7 @@
 ```json
 {
   "schema_version": "1.0",
-  "kind": "SuperPage | PageQuery | ModelQuery | CrossPageQuery | DataFlowQuery | ComponentQuery | PriorityQuery | Explain | Context | PageLogic",
+  "kind": "SuperPage | PageQuery | ModelQuery | CrossPageQuery | DataFlowQuery | ComponentQuery | PriorityQuery | Explain | Context | PageLogic | Table | DataFlow",
   "query_target": "可选，被查询对象的 ID 或标识",
   "summary": { /* 低噪声摘要，模型优先读取 */ },
   "details": { /* 可选的详细信息，按需展开 */ },
@@ -428,3 +428,55 @@ AI 被问"这个值从哪里来"时，应优先查看 `source_type`：
 - `Computed` → "由表达式计算产生"
 - `Constant` → "固定常量"
 - `Unknown` → "来源无法确定，保守回答"
+
+## kind: Table 字段约束
+
+单文件 `.tbl` 物理表/应用表解析输出。
+
+### summary 字段
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `table_id` | string | 是 | 表标识，通常为文件名或 `dbTableName`。 |
+| `table_name` | string | 是 | 表显示名或文件名。 |
+| `table_type` | string | 是 | `"PhysicalTable" | "AppTable" | "DataFlow"`。单文件 .tbl 无 `dataFlow` 节点时为 `AppTable` 或 `PhysicalTable`。 |
+| `field_count` | int | 是 | `dimensions[]` 字段数量。 |
+| `input_count` | int | 是 | DataFlow 输入节点数，物理表为 0。 |
+| `output_count` | int | 是 | DataFlow 输出目标数，物理表为 0。 |
+| `what_is_it` | string | 是 | 自然语言短句，说明表类型和字段数。 |
+
+### details 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `fields` | array | 字段列表，含 `name`、`dbfield`、`data_type`、`length`、`is_dimension`、`input_field`、`exp`、`original_field`、`original_node`。 |
+| `dataflow_inputs` | array | DataFlow 输入节点（`ModelTable` 类型）。物理表为空数组。 |
+| `dataflow_outputs` | array | DataFlow 输出物理表。物理表为空数组。 |
+| `internal_nodes` | array | DataFlow 内部加工节点（`Select`、`AddField` 等）。物理表为空数组。 |
+| `field_lineage` | array | 字段级来源追溯，含 `target_field`、`source_fields`、`source_expr`、`transform`、`confidence`。 |
+
+### diagnostics
+
+- `DATAFLOW_NO_OUTPUT`：DataFlow 缺少 `dbTableName`，无法确定输出目标。
+- `DATAFLOW_NO_INPUTS`：DataFlow 没有 `ModelTable` 输入节点。
+- `EXPR_UNPARSED`：字段表达式过长或包含换行，无法完全解析引用。
+
+## kind: DataFlow 字段约束
+
+单文件 `.tbl` DataFlow 加工表解析输出。结构与 `kind: Table` 相同，但 `table_type` 固定为 `"DataFlow"`。
+
+额外语义：
+- `summary.input_count` > 0 表示存在输入源。
+- `summary.output_count` > 0 表示存在输出物理表。
+- `details.internal_nodes` 展示加工链。
+- `details.field_lineage` 反映 `inputField` / `exp` / `originalField` 来源。
+
+### 使用指南
+
+AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
+1. 先看 `summary.what_is_it` 获取整体描述。
+2. 查看 `details.dataflow_inputs` 了解输入源。
+3. 查看 `details.dataflow_outputs` 了解输出目标。
+4. 查看 `details.field_lineage` 了解字段加工逻辑。
+5. 遇到 `DATAFLOW_NO_OUTPUT` 或 `EXPR_UNPARSED` 时保守回答。
+
