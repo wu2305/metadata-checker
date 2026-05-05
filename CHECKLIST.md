@@ -33,7 +33,7 @@
 
 ## P4：文档收敛
 
-- [ ] 更新 docs/schema.md（新增 SourceType 字段说明）
-- [ ] 更新 README.md（新增 P0-P3 测试说明）
-- [ ] 更新 SKILL.md（新增来源分类 AI 使用指南）
-- [ ] 提交变更
+- [x] 更新 docs/schema.md（新增 SourceType 字段说明）
+- [x] 更新 README.md（新增 P0-P3 测试说明）
+- [x] 更新 SKILL.md（新增来源分类 AI 使用指南）
+- [x] 提交变更
