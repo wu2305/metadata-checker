@@ -1,5 +1,5 @@
 use crate::superpage::{ComponentExpr, RefType, SuperPageMetadata};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 /// 组件依赖关系分析模块
 ///
@@ -17,6 +17,8 @@ pub struct DependencyGraph {
     pub reverse_deps: HashMap<String, Vec<String>>,
     /// 表达式信息
     pub expressions: HashMap<String, Vec<ComponentExpr>>,
+    /// 组件在元数据中的出现顺序（用于稳定拓扑排序）
+    pub component_order: Vec<String>,
 }
 
 impl DependencyGraph {
@@ -78,14 +80,23 @@ impl DependencyGraph {
             }
         }
 
+        let component_order: Vec<String> = meta.components.iter().map(|c| c.id.clone()).collect();
+
         DependencyGraph {
             dependencies: deps,
             reverse_deps: reverse,
             expressions: exprs,
+            component_order,
         }
     }
 
     /// 获取拓扑排序（计算先后顺序）
+    /// 拓扑排序（计算先后顺序）
+    ///
+    /// 稳定排序规则：
+    /// - 入度为0的节点按元数据出现顺序处理
+    /// - 当多个节点同时入度为0时，先出现的组件先输出
+    /// - 这保证同一次解析多次运行结果一致
     pub fn topological_sort(&self) -> Vec<String> {
         let mut in_degree: HashMap<String, usize> = HashMap::new();
         let mut adj: HashMap<String, Vec<String>> = HashMap::new();
@@ -110,17 +121,27 @@ impl DependencyGraph {
             }
         }
 
-        let mut queue: VecDeque<String> = VecDeque::new();
+        // 使用 Vec 作为队列，每次按 component_order 排序后取第一个
+        let mut queue: Vec<String> = Vec::new();
         let mut result = Vec::new();
 
         // 找到所有入度为0的节点
         for (id, degree) in &in_degree {
             if *degree == 0 {
-                queue.push_back(id.clone());
+                queue.push(id.clone());
             }
         }
 
-        while let Some(current) = queue.pop_front() {
+        // 按元数据出现顺序稳定排序入度为0的节点
+        queue.sort_by_key(|id| {
+            self.component_order
+                .iter()
+                .position(|o| o == id)
+                .unwrap_or(usize::MAX)
+        });
+
+        while !queue.is_empty() {
+            let current = queue.remove(0);
             result.push(current.clone());
 
             if let Some(neighbors) = adj.get(&current) {
@@ -128,11 +149,19 @@ impl DependencyGraph {
                     if let Some(degree) = in_degree.get_mut(neighbor) {
                         *degree -= 1;
                         if *degree == 0 {
-                            queue.push_back(neighbor.clone());
+                            queue.push(neighbor.clone());
                         }
                     }
                 }
             }
+
+            // 重新排序，保证稳定性
+            queue.sort_by_key(|id| {
+                self.component_order
+                    .iter()
+                    .position(|o| o == id)
+                    .unwrap_or(usize::MAX)
+            });
         }
 
         result

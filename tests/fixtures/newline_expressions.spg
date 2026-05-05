@@ -1,0 +1,36 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "params": [
+    {"id": "param1", "name": "P1"}
+  ],
+  "sources": [
+    {"id": "model1", "modelType": "query"}
+  ],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {
+        "id": "input1",
+        "type": "input",
+        "value": "=IF(\n input1.value,\n model1.A,\n '')"
+      },
+      {
+        "id": "input2",
+        "type": "input",
+        "value": "='line1\nline2\nline3'"
+      },
+      {
+        "id": "input3",
+        "type": "input",
+        "value": "=MACRO\n(input1.value,\nmodel1.B)"
+      },
+      {
+        "id": "text1",
+        "type": "text",
+        "value": "=CONCAT('prefix\nsuffix', input2.value)"
+      }
+    ]
+  }
+}

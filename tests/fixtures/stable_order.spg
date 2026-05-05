@@ -1,0 +1,41 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "params": [
+    {"id": "param1", "name": "P1"}
+  ],
+  "sources": [
+    {"id": "model1", "modelType": "query"}
+  ],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {
+        "id": "z1",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "a1",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "m1",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "b1",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "input1",
+        "type": "input",
+        "value": "=a1.value + b1.value"
+      }
+    ]
+  }
+}
