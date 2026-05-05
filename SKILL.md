@@ -250,3 +250,41 @@ metadata-checker --project-dir /path/to/project --query-page-logic "page:app/合
 - 禁止忽略 diagnostics 做空洞确定性结论。
 - 禁止在 evidence 不足时编造来源。
 - 禁止重复使用错误的命令格式（例如 `--query-model model:model1` 会被 CLI 二次加前缀变成 `model:model:model1`，应写 `--query-model model1`）。
+
+## 来源分类使用指南（值追溯）
+
+当 AI 被问"这个值从哪里来""这个字段是用户输入的还是自动带出的"时，应结合 CLI 输出的来源分类信息。
+
+### source_type 快速判定
+
+CLI 在 `details.value_trace[]` 或 `details.lineage[]` 中提供 `source_type`：
+
+| source_type | 含义 | AI 回答建议 |
+|-------------|------|------------|
+| `Param` | 页面参数 | "来自页面参数" |
+| `UserInput` | 用户可交互输入 | "用户输入" |
+| `ModelAuto` | 数据模型自动绑定 | "从数据模型自动获取" |
+| `System` | 系统变量 | "系统变量" |
+| `Computed` | 表达式计算 | "由表达式计算产生" |
+| `Constant` | 固定常量 | "固定常量" |
+| `Unknown` | 无法分类 | "来源无法确定，保守回答" |
+
+### 使用顺序
+
+1. **先看 summary**：是否有 `source_type` 或 `value_trace_count` 等高层信息。
+2. **需要追溯时看 details.value_trace[]**：从目标组件开始，逐节点展开来源链。
+3. **字段级 lineage 用 details.lineage[]**：`target_field` → `source_fields` → `via_node` → `transform`。
+4. **每个节点有 evidence**：验证 `claim`、`source_file`、`json_path`。
+
+### 回答模板
+
+- 单级来源："组件 X 的值来源于页面参数 param1（source_type=Param）。"
+- 多级来源："组件 X 的值由 input2 计算产生（Computed），而 input2 又来源于页面参数 param1（Param）。"
+- 多分支来源："组件 X 的值由 input1 + input2 计算产生，其中 input1 来源于参数 param1，input2 来源于模型 model1.A。"
+- 不确定时："组件 X 的表达式包含未解析引用，source_type=Unknown，不能确定最终来源。"
+
+### 禁止行为
+
+- 禁止在没有 `value_trace` 或 `lineage` 时凭空推断来源。
+- 禁止将 `Computed` 误判为 `UserInput`（例如 input 组件有表达式时是计算产生，不是用户输入）。
+- 禁止忽略 `Unknown` 标记做空洞确定性结论。
