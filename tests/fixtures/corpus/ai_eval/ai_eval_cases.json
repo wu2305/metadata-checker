@@ -37,14 +37,16 @@
           "description": "summary.write_target_count > 0"
         },
         {
-          "description": "details.action_flows 非空",
-          "op": "manual",
-          "path": null
+          "path": "details.action_flows",
+          "op": "not_empty",
+          "description": "details.action_flows 非空"
         },
         {
-          "description": "存在 action_category=data_write 的 action",
-          "op": "manual",
-          "path": null
+          "path": "details.action_flows",
+          "op": "array_any",
+          "field": "action_category",
+          "value": "data_write",
+          "description": "存在 action_category=data_write 的 action"
         }
       ],
       "answer_rubric": {
@@ -113,19 +115,22 @@
       ],
       "evidence_requirements": [
         {
-          "description": "summary.what_is_it 包含 button1",
-          "op": "manual",
-          "path": null
+          "path": "summary.what_is_it",
+          "op": "contains",
+          "value": "button1",
+          "description": "summary.what_is_it 包含 button1"
         },
         {
-          "description": "details.writes 非空",
-          "op": "manual",
-          "path": null
+          "path": "details.writes",
+          "op": "not_empty",
+          "description": "details.writes 非空"
         },
         {
-          "description": "evidence 中有 ActionWrites 边",
-          "op": "manual",
-          "path": null
+          "path": "evidence",
+          "op": "array_any",
+          "field": "edge_type",
+          "value": "ActionWrites",
+          "description": "evidence 中有 ActionWrites 边"
         }
       ],
       "answer_rubric": {
@@ -186,19 +191,24 @@
       ],
       "evidence_requirements": [
         {
-          "description": "summary 有 read_by_count/written_by_count",
-          "op": "manual",
-          "path": null
+          "path": "summary",
+          "op": "contains_field_path",
+          "field_path": "written_by_count",
+          "description": "summary 有 written_by_count"
         },
         {
-          "description": "evidence 中有 ActionWrites 或 Writes 边",
-          "op": "manual",
-          "path": null
+          "path": "evidence",
+          "op": "array_any",
+          "field": "edge_type",
+          "value": "ActionWrites",
+          "description": "evidence 中有 ActionWrites 边"
         },
         {
-          "description": "如果 lineage 为空，diagnostics 应有 LINEAGE_SOURCE_MISSING",
-          "op": "manual",
-          "path": null
+          "path": "evidence",
+          "op": "array_any",
+          "field": "edge_type",
+          "value": "Writes",
+          "description": "evidence 中有 Writes 边"
         }
       ],
       "answer_rubric": {
@@ -261,19 +271,20 @@
       ],
       "evidence_requirements": [
         {
-          "description": "details.inputs_count > 0 或 details.outputs_count > 0",
-          "op": "manual",
-          "path": null
+          "path": "summary.input_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.input_count > 0"
         },
         {
-          "description": "details.internal_topology 非空",
-          "op": "manual",
-          "path": null
+          "path": "details.inputs",
+          "op": "not_empty",
+          "description": "details.inputs 非空"
         },
         {
-          "description": "evidence 有 OutputsTo 或 DataflowInput 边",
-          "op": "manual",
-          "path": null
+          "path": "details.outputs",
+          "op": "not_empty",
+          "description": "details.outputs 非空"
         }
       ],
       "answer_rubric": {
@@ -298,19 +309,20 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "evidence",
-          "op": "not_empty",
-          "description": "evidence 非空"
+          "path": "summary.input_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.input_count > 0"
         },
         {
-          "path": "summary",
+          "path": "details.inputs",
           "op": "not_empty",
-          "description": "summary 非空"
+          "description": "details.inputs 非空"
         },
         {
-          "path": "details",
+          "path": "details.outputs",
           "op": "not_empty",
-          "description": "details 非空"
+          "description": "details.outputs 非空"
         }
       ]
     },
@@ -334,11 +346,6 @@
       ],
       "evidence_requirements": [
         {
-          "description": "summary.page_role 为 readonly_dashboard",
-          "op": "manual",
-          "path": null
-        },
-        {
           "path": "summary.write_target_count",
           "op": "eq",
           "value": 0,
@@ -351,9 +358,11 @@
           "description": "summary.entrypoint_count = 0"
         },
         {
-          "description": "diagnostics 有 NO_ENTRYPOINTS 或 NO_WRITE_TARGETS",
-          "op": "manual",
-          "path": null
+          "path": "diagnostics",
+          "op": "array_any",
+          "field": "code",
+          "value": "NO_ENTRYPOINTS",
+          "description": "diagnostics 有 NO_ENTRYPOINTS"
         }
       ],
       "answer_rubric": {
@@ -418,14 +427,16 @@
       ],
       "evidence_requirements": [
         {
-          "description": "details.navigation 非空",
-          "op": "manual",
-          "path": null
+          "path": "details.navigation",
+          "op": "not_empty",
+          "description": "details.navigation 非空"
         },
         {
-          "description": "details.navigation 中有 PassesParam 边",
-          "op": "manual",
-          "path": null
+          "path": "details.navigation",
+          "op": "array_any",
+          "field": "type",
+          "value": "PassesParam",
+          "description": "details.navigation 中有 PassesParam 边"
         },
         {
           "path": "summary.navigation_count",
@@ -493,19 +504,24 @@
       ],
       "evidence_requirements": [
         {
-          "description": "diagnostics 中有 UNKNOWN_ACTION_TYPE",
-          "op": "manual",
-          "path": null
+          "path": "diagnostics",
+          "op": "array_any",
+          "field": "code",
+          "value": "UNKNOWN_ACTION_TYPE",
+          "description": "diagnostics 中有 UNKNOWN_ACTION_TYPE"
         },
         {
-          "description": "details.action_flows 中有对应 action 但 category=unknown",
-          "op": "manual",
-          "path": null
+          "path": "details.action_flows",
+          "op": "array_any",
+          "field": "action_category",
+          "value": "unknown",
+          "description": "details.action_flows 中有 category=unknown 的 action"
         },
         {
-          "description": "summary 中的 risk_count > 0",
-          "op": "manual",
-          "path": null
+          "path": "summary.risk_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.risk_count > 0"
         }
       ],
       "answer_rubric": {
@@ -575,14 +591,16 @@
           "description": "summary.related_nodes_count > 0"
         },
         {
-          "description": "details.related_actions 非空",
-          "op": "manual",
-          "path": null
+          "path": "details.related_actions",
+          "op": "not_empty",
+          "description": "details.related_actions 非空"
         },
         {
-          "description": "details.downstream 包含 model1",
-          "op": "manual",
-          "path": null
+          "path": "details.downstream",
+          "op": "array_any",
+          "field": "to",
+          "value": "model:model1",
+          "description": "details.downstream 包含 model:model1"
         }
       ],
       "answer_rubric": {
@@ -643,19 +661,15 @@
       ],
       "evidence_requirements": [
         {
-          "description": "details.condition.raw_expr 非空",
-          "op": "manual",
-          "path": null
+          "path": "details.condition.raw_expr",
+          "op": "exists",
+          "description": "details.condition.raw_expr 非空"
         },
         {
-          "description": "details.condition.refs 包含 input1",
-          "op": "manual",
-          "path": null
-        },
-        {
-          "description": "summary 有 condition 相关信息",
-          "op": "manual",
-          "path": null
+          "path": "details.condition.refs",
+          "op": "array_contains",
+          "value": "input1",
+          "description": "details.condition.refs 包含 input1"
         }
       ],
       "answer_rubric": {
@@ -712,19 +726,38 @@
       ],
       "evidence_requirements": [
         {
-          "description": "details.internal_topology 有 edges 连接节点",
-          "op": "manual",
-          "path": null
+          "path": "summary.input_count",
+          "op": "gt",
+          "value": 0,
+          "description": "df_a summary.input_count > 0",
+          "command_index": 0
         },
         {
-          "description": "explain 输出 lineage 非空",
-          "op": "manual",
-          "path": null
+          "path": "details.inputs",
+          "op": "not_empty",
+          "description": "df_a details.inputs 非空",
+          "command_index": 0
         },
         {
-          "description": "evidence 有 DataflowInput/OutputsTo 边",
-          "op": "manual",
-          "path": null
+          "path": "summary.lineage_count",
+          "op": "gt",
+          "value": 0,
+          "description": "field:df_b.id summary.lineage_count > 0",
+          "command_index": 1
+        },
+        {
+          "path": "details.lineage",
+          "op": "not_empty",
+          "description": "field:df_b.id details.lineage 非空",
+          "command_index": 1
+        },
+        {
+          "path": "details.lineage",
+          "op": "array_any_contains",
+          "field": "source_fields",
+          "value": "field:df_a.id",
+          "description": "lineage 中 source_fields 包含 field:df_a.id",
+          "command_index": 1
         }
       ],
       "answer_rubric": {
@@ -750,19 +783,38 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "evidence",
-          "op": "not_empty",
-          "description": "evidence 非空"
+          "path": "summary.input_count",
+          "op": "gt",
+          "value": 0,
+          "description": "df_a summary.input_count > 0",
+          "command_index": 0
         },
         {
-          "path": "summary",
+          "path": "details.inputs",
           "op": "not_empty",
-          "description": "summary 非空"
+          "description": "df_a details.inputs 非空",
+          "command_index": 0
         },
         {
-          "path": "kind",
-          "op": "exists",
-          "description": "kind 字段存在"
+          "path": "summary.lineage_count",
+          "op": "gt",
+          "value": 0,
+          "description": "field:df_b.id summary.lineage_count > 0",
+          "command_index": 1
+        },
+        {
+          "path": "details.lineage",
+          "op": "not_empty",
+          "description": "field:df_b.id details.lineage 非空",
+          "command_index": 1
+        },
+        {
+          "path": "details.lineage",
+          "op": "array_any_contains",
+          "field": "source_fields",
+          "value": "field:df_a.id",
+          "description": "lineage 中 source_fields 包含 field:df_a.id",
+          "command_index": 1
         }
       ]
     }

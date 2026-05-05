@@ -151,6 +151,7 @@ fn test_ai_eval_assertions_structure() {
         "contains",
         "array_any",
         "array_contains",
+        "array_any_contains",
         "contains_field_path",
         "exists",
         "manual",
@@ -338,7 +339,7 @@ fn test_ai_eval_commands_execute_and_assert() {
             .as_array()
             .expect("expected_output_assertions 必须是数组");
 
-        for cmd_val in cmds {
+        for (cmd_idx_in_case, cmd_val) in cmds.iter().enumerate() {
             let cmd_str = cmd_val.as_str().unwrap();
             // 将 project-dir 路径替换为隔离临时目录
             let isolated_cmd = cmd_str.replace("tests/fixtures/test_project", temp_str);
@@ -370,6 +371,16 @@ fn test_ai_eval_commands_execute_and_assert() {
 
             // 执行结构化断言
             for assertion in assertions {
+                let assertion_cmd_idx = assertion
+                    .get("command_index")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+                // 如果断言指定了 command_index，则只针对对应命令执行
+                if let Some(expected_idx) = assertion_cmd_idx
+                    && expected_idx != cmd_idx_in_case
+                {
+                    continue;
+                }
                 if let Err(err) = evaluate_assertion(assertion, &parsed, &case_id, cmd_str) {
                     failures.push(err);
                 }
@@ -604,6 +615,39 @@ fn evaluate_assertion(
                     description,
                     path.unwrap_or("?"),
                     expected_val,
+                    expected_val,
+                    arr.iter().take(3).collect::<Vec<_>>()
+                ));
+            }
+        }
+        "array_any_contains" => {
+            let field = assertion["field"].as_str().unwrap_or("?");
+            let expected_val = assertion["value"].as_str().unwrap_or("");
+            let empty_arr: &[serde_json::Value] = &[];
+            let arr = actual_value
+                .as_ref()
+                .and_then(|v| v.as_array().map(|a| a.as_slice()))
+                .unwrap_or(empty_arr);
+            let found = arr.iter().any(|item| {
+                let field_value = get_json_path(item, field);
+                field_value
+                    .as_ref()
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().any(|sub| sub.as_str() == Some(expected_val)))
+                    .unwrap_or(false)
+            });
+            if !found {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 数组中无元素满足 {} 包含 '{}'
+  期望: 至少一个元素的 {} 包含 '{}'
+  实际数组前3项: {:?}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    field,
+                    expected_val,
+                    field,
                     expected_val,
                     arr.iter().take(3).collect::<Vec<_>>()
                 ));

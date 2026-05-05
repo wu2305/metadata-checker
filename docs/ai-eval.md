@@ -116,3 +116,35 @@ M9-E 至少覆盖以下七类风险：
 | context_button1_neighbors | Context |
 | condition_action_behavior | Explain + Condition |
 | dataflow_chain_trace | DataFlowQuery + Explain + Lineage |
+
+## command_index 限定
+
+`expected_output_assertions` 支持可选字段 `command_index`，用于限定断言只针对特定命令执行。
+
+当某个 case 的 `required_commands` 包含多个命令且输出结构不同时，可以为每个命令指定独立的断言：
+
+```json
+{
+  "path": "summary.input_count",
+  "op": "gt",
+  "value": 0,
+  "description": "df_a summary.input_count > 0",
+  "command_index": 0
+}
+```
+
+- `command_index: 0` 表示只针对 `required_commands` 中第 1 个命令执行该断言。
+- 省略 `command_index` 时，断言对所有命令都执行。
+
+示例：dataflow_chain_trace 使用两个命令：
+- 命令 0 `--query-dataflow df_a` 验证 `summary.input_count > 0`（模型级 DataFlow 链路）
+- 命令 1 `--explain field:df_b.id` 验证 `details.lineage` 非空且 `source_fields` 包含 `field:df_a.id`（字段级链式追溯）
+
+## M9-E 断言增强记录
+
+| case_id | 增强前 | 增强后 |
+|---------|--------|--------|
+| dataflow_output_source | evidence/summary/details 非空 | summary.input_count > 0, details.inputs/outputs 非空 |
+| dataflow_chain_trace | evidence/summary/kind 非空 | command_index 区分：query-dataflow 验证 input_count/inputs 非空；explain field 验证 lineage_count > 0, lineage 非空, source_fields 包含 field:df_a.id |
+
+所有 case 的 evidence_requirements 已从 manual 自然语言迁移到结构化断言。
