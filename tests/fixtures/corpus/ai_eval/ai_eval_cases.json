@@ -1,6 +1,6 @@
 {
-  "schema_version": "1.1.0",
-  "scope": "M9-D AI 问答评测集：验证空上下文小模型基于 SKILL.md + CLI 输出回答真实业务问题的能力",
+  "schema_version": "1.2.0",
+  "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、运行器规范",
   "eval_count": 10,
   "cases": [
     {
@@ -66,7 +66,13 @@
       },
       "uncertainty_policy": "如果诊断中有 UNKNOWN_ACTION_TYPE，应标注该 action 语义不确定",
       "minimal_command_plan": [
-        "--query-page-logic page:app/actions_test.spg"
+        {
+          "command_kind": "--query-page-logic",
+          "target": "page:app/actions_test.spg",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
       ],
       "expected_output_assertions": [
         {
@@ -93,7 +99,50 @@
           "value": "data_write",
           "description": "存在 data_write 类别的 action"
         }
-      ]
+      ],
+      "risk_tags": [
+        "page_logic",
+        "diagnostic"
+      ],
+      "case_status": "active",
+      "difficulty": "basic",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "用户入口",
+          "写入目标",
+          "action",
+          "按钮",
+          "model1",
+          "model2"
+        ],
+        "must_not_include": [
+          "只读",
+          "无写入",
+          "没有任何写入操作"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     },
     {
       "case_id": "button_submit_effect",
@@ -150,7 +199,13 @@
       },
       "uncertainty_policy": "如果 lineage 为空，应说明字段来源无法追溯",
       "minimal_command_plan": [
-        "--explain 'comp:app/actions_test.spg|button1'"
+        {
+          "command_kind": "--explain",
+          "target": "comp:app/actions_test.spg|button1",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
       ],
       "expected_output_assertions": [
         {
@@ -171,7 +226,49 @@
           "value": "ActionWrites",
           "description": "evidence 中有 ActionWrites 边"
         }
-      ]
+      ],
+      "risk_tags": [
+        "explain",
+        "action_semantic"
+      ],
+      "case_status": "active",
+      "difficulty": "basic",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details",
+        "evidence"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "button1",
+          "submitData",
+          "model1",
+          "写入"
+        ],
+        "must_not_include": [
+          "只读",
+          "无动作",
+          "button1 没有动作"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     },
     {
       "case_id": "field_lineage_model1_name",
@@ -226,7 +323,13 @@
       },
       "uncertainty_policy": "如果 lineage 链不完整，允许说\"写入者已知，但完整来源链未追溯\"",
       "minimal_command_plan": [
-        "--explain field:model1.name"
+        {
+          "command_kind": "--explain",
+          "target": "field:model1.name",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
       ],
       "expected_output_assertions": [
         {
@@ -249,7 +352,48 @@
           "value": "Writes",
           "description": "evidence 中有 Writes 边"
         }
-      ]
+      ],
+      "risk_tags": [
+        "explain",
+        "lineage"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "evidence"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "model1.name",
+          "写入",
+          "页面 action",
+          "submitData"
+        ],
+        "must_not_include": [
+          "只读",
+          "来源完全未知",
+          "字段只读"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     },
     {
       "case_id": "dataflow_output_source",
@@ -304,8 +448,20 @@
       },
       "uncertainty_policy": "如果 lineage 不完整，应标注字段级追溯缺失",
       "minimal_command_plan": [
-        "--query-dataflow dataflow_output",
-        "--explain model:dataflow_output"
+        {
+          "command_kind": "--query-dataflow",
+          "target": "dataflow_output",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        },
+        {
+          "command_kind": "--explain",
+          "target": "model:dataflow_output",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
       ],
       "expected_output_assertions": [
         {
@@ -324,7 +480,50 @@
           "op": "not_empty",
           "description": "details.outputs 非空"
         }
-      ]
+      ],
+      "risk_tags": [
+        "dataflow",
+        "explain",
+        "lineage"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "dataflow_output",
+          "输入",
+          "输出",
+          "DataFlow",
+          "节点"
+        ],
+        "must_not_include": [
+          "没有输入",
+          "没有输出",
+          "孤立节点"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     },
     {
       "case_id": "readonly_page_check",
@@ -384,7 +583,13 @@
       },
       "uncertainty_policy": "如果页面确实无任何 action，可明确回答只读",
       "minimal_command_plan": [
-        "--explain page:app/dataflow_embedded.spg"
+        {
+          "command_kind": "--explain",
+          "target": "page:app/dataflow_embedded.spg",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
       ],
       "expected_output_assertions": [
         {
@@ -406,7 +611,49 @@
           "value": "NO_ENTRYPOINTS",
           "description": "diagnostics 有 NO_ENTRYPOINTS 或 NO_WRITE_TARGETS"
         }
-      ]
+      ],
+      "risk_tags": [
+        "explain",
+        "diagnostic",
+        "page_role"
+      ],
+      "case_status": "active",
+      "difficulty": "basic",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "只读",
+          "无写入",
+          "无入口",
+          "readonly_dashboard"
+        ],
+        "must_not_include": [
+          "可以写入",
+          "提交表单",
+          "数据修改入口",
+          "按钮"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     },
     {
       "case_id": "param_passing_link",
@@ -462,7 +709,13 @@
       },
       "uncertainty_policy": "如果参数值是表达式，应标注表达式可能包含未解析引用",
       "minimal_command_plan": [
-        "--query-page-logic page:app/page_relations.spg"
+        {
+          "command_kind": "--query-page-logic",
+          "target": "page:app/page_relations.spg",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
       ],
       "expected_output_assertions": [
         {
@@ -483,7 +736,50 @@
           "value": 0,
           "description": "summary.navigation_count > 0"
         }
-      ]
+      ],
+      "risk_tags": [
+        "page_logic",
+        "navigation",
+        "param_passing"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "link",
+          "参数",
+          "传递",
+          "目标页面",
+          "page_relations"
+        ],
+        "must_not_include": [
+          "无导航",
+          "无参数",
+          "没有传递"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     },
     {
       "case_id": "diagnostic_affects_answer",
@@ -541,7 +837,13 @@
       },
       "uncertainty_policy": "遇到诊断时必须降级表达，不能假装诊断不存在",
       "minimal_command_plan": [
-        "--query-page-logic page:app/actions_test.spg"
+        {
+          "command_kind": "--query-page-logic",
+          "target": "page:app/actions_test.spg",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
       ],
       "expected_output_assertions": [
         {
@@ -564,7 +866,48 @@
           "value": 0,
           "description": "summary.risk_count > 0"
         }
-      ]
+      ],
+      "risk_tags": [
+        "page_logic",
+        "diagnostic",
+        "action_semantic"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "UNKNOWN_ACTION_TYPE",
+          "语义不确定",
+          "保守回答"
+        ],
+        "must_not_include": [
+          "不影响",
+          "可以忽略",
+          "完全确定"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     },
     {
       "case_id": "context_button1_neighbors",
@@ -619,7 +962,18 @@
       },
       "uncertainty_policy": "如果 budget=compact 截断，应说明还有更深层关系未展开",
       "minimal_command_plan": [
-        "--context 'comp:app/actions_test.spg|button1' --depth 2 --budget normal"
+        {
+          "command_kind": "--context",
+          "target": "comp:app/actions_test.spg|button1",
+          "args": [
+            "--depth",
+            "2",
+            "--budget",
+            "normal"
+          ],
+          "requires_project_dir": true,
+          "budget": "normal"
+        }
       ],
       "expected_output_assertions": [
         {
@@ -640,7 +994,49 @@
           "value": "model:model1",
           "description": "details.downstream 包含 model:model1"
         }
-      ]
+      ],
+      "risk_tags": [
+        "context",
+        "explain"
+      ],
+      "case_status": "active",
+      "difficulty": "basic",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "button1",
+          "actions_test",
+          "action1",
+          "model1",
+          "上下游"
+        ],
+        "must_not_include": [
+          "孤立",
+          "无影响",
+          "不触发任何 action"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     },
     {
       "case_id": "condition_action_behavior",
@@ -689,7 +1085,13 @@
       },
       "uncertainty_policy": "如果 condition 表达式有未解析引用，应标注条件判断可能不完整",
       "minimal_command_plan": [
-        "--explain 'action:app/actions_test.spg|button2|action1'"
+        {
+          "command_kind": "--explain",
+          "target": "action:app/actions_test.spg|button2|action1",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
       ],
       "expected_output_assertions": [
         {
@@ -703,7 +1105,50 @@
           "value": "input1",
           "description": "details.condition.refs 包含字符串 input1"
         }
-      ]
+      ],
+      "risk_tags": [
+        "explain",
+        "condition",
+        "action_semantic"
+      ],
+      "case_status": "active",
+      "difficulty": "hard",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "updateData",
+          "条件",
+          "conditionExp",
+          "input1",
+          "test"
+        ],
+        "must_not_include": [
+          "无条件",
+          "没有条件",
+          "不判断条件"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     },
     {
       "case_id": "dataflow_chain_trace",
@@ -778,8 +1223,20 @@
       },
       "uncertainty_policy": "如果字段级 lineage 被截断，应标注截断位置和原因",
       "minimal_command_plan": [
-        "--query-dataflow df_a",
-        "--explain field:df_b.id"
+        {
+          "command_kind": "--query-dataflow",
+          "target": "df_a",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        },
+        {
+          "command_kind": "--explain",
+          "target": "field:df_b.id",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
       ],
       "expected_output_assertions": [
         {
@@ -816,7 +1273,76 @@
           "description": "lineage 中 source_fields 包含 field:df_a.id",
           "command_index": 1
         }
-      ]
+      ],
+      "risk_tags": [
+        "dataflow",
+        "lineage",
+        "explain"
+      ],
+      "case_status": "active",
+      "difficulty": "hard",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "df_a",
+          "physical_x",
+          "df_b",
+          "链式",
+          "字段传递",
+          "lineage"
+        ],
+        "must_not_include": [
+          "无连接",
+          "不相关",
+          "physical_x 不参与"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达，不能假装诊断不存在",
+          "不允许引用源码或历史上下文作为依据",
+          "如果证据不足，明确说明不确定，禁止编造"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata",
+          "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
     }
-  ]
+  ],
+  "eval_runner": {
+    "description": "AI Eval 独立运行器输入输出规范",
+    "input": {
+      "cases_json": "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+      "project_dir": "实际项目目录",
+      "binary_path": "metadata-checker 二进制路径",
+      "case_filter": "可选的 case_id 白名单"
+    },
+    "output": {
+      "eval_results_json": "结构化评测结果",
+      "fields": [
+        "case_id",
+        "commands_used",
+        "assertion_pass_count",
+        "assertion_fail_count",
+        "cli_output_valid",
+        "failures"
+      ]
+    },
+    "execution_rules": {
+      "serial_execution": true,
+      "isolated_graphdb": true,
+      "max_retries": 1
+    }
+  }
 }

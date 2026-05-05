@@ -351,7 +351,7 @@ cargo test
 | M9-A | `tests/fixtures/corpus/manifest.json` | 原始语料元信息索引（1290+ 样本） |
 | M9-B | `tests/fixtures/corpus/selection.json` | 精选 12 条代表样本进入仓库 |
 | M9-C | `tests/fixtures/corpus/snapshots/` | 结构化 snapshot，捕获输出契约变化 |
-| M9-D | `tests/fixtures/corpus/ai_eval/ai_eval_cases.json` | AI 问答评测集，验证模型能否基于 CLI 输出回答业务问题 |
+| M9-D | `tests/fixtures/corpus/ai_eval/ai_eval_cases.json` | AI 问答评测集，验证模型能否基于 CLI 输出回答业务问题 | |
 
 ### M9-A 语料清单
 
@@ -379,11 +379,15 @@ cargo test
 
 ### M9-D AI 问答验收
 
-- 评测集：`tests/fixtures/corpus/ai_eval/ai_eval_cases.json`
-- 10 个 eval case，覆盖页面用途、按钮效果、字段来源、DataFlow 链路、只读判定、参数传递、诊断影响、上下文邻居、条件动作、链式 DataFlow
-- 验证流程见 `docs/ai-eval.md`
-- 判分规则：命中 expected_facts、无 forbidden_claims、关键结论引用 evidence、diagnostics 保守处理
-- 失败分类：missed_fact、hallucination、wrong_command、ignored_diagnostic、over_read_details
+### M9-F AI Eval 独立运行器与回答判分
+
+- 结构化命令计划：`minimal_command_plan` 从字符串升级为 `command_kind` + `target` + `args` + `requires_project_dir`
+- 回答判分元数据：`answer_assertions`（must_include / must_not_include / diagnostic_disclaimer_required / evidence_reference_required）
+- 风险覆盖标签：`risk_tags` 覆盖 page_logic / explain / context / dataflow / lineage / condition / diagnostic
+- 难度分级：`difficulty` = basic / intermediate / hard
+- 运行约束：`max_command_count` ≤ 3，`allowed_output_sections` 控制模型可读字段
+- 评测记录模板：`docs/ai-eval-run-template.md`
+- 验证：`cargo test --test ai_eval_tests` 覆盖 23 项结构/语义/执行测试
 
 
 ## 技术栈

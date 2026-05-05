@@ -148,3 +148,67 @@ M9-E 至少覆盖以下七类风险：
 | dataflow_chain_trace | evidence/summary/kind 非空 | command_index 区分：query-dataflow 验证 input_count/inputs 非空；explain field 验证 lineage_count > 0, lineage 非空, source_fields 包含 field:df_a.id |
 
 所有 case 的 evidence_requirements 已从 manual 自然语言迁移到结构化断言。
+
+## M9-F：结构化命令计划与回答判分
+
+### 结构化 minimal_command_plan
+
+M9-F 将 `minimal_command_plan` 从字符串数组升级为结构化对象：
+
+```json
+{
+  "command_kind": "--query-page-logic",
+  "target": "page:app/actions_test.spg",
+  "args": [],
+  "requires_project_dir": true,
+  "budget": null
+}
+```
+
+字段说明：
+- `command_kind`：主命令，如 `--query-page-logic`、`--explain`、`--context`、`--query-dataflow`
+- `target`：目标 ID，如 `page:app/foo.spg`、`model:model1`、`field:model1.name`
+- `args`：额外参数数组，如 `["--depth", "2", "--budget", "normal"]`
+- `requires_project_dir`：是否必须配合 `--project-dir`
+- `budget`：若 args 含 `--budget`，提取的预算值
+
+`required_commands` 由 `minimal_command_plan` 确定性展开得到：
+```
+--project-dir <project_dir> <command_kind> <target> [<args...>]
+```
+
+### answer_assertions 回答判分
+
+```json
+{
+  "must_include": ["button1", "submitData", "model1"],
+  "must_not_include": ["只读", "无动作"],
+  "diagnostic_disclaimer_required": false,
+  "evidence_reference_required": true
+}
+```
+
+### risk_tags 风险覆盖
+
+全部 active case 必须覆盖以下标签：
+`page_logic`、`explain`、`context`、`dataflow`、`lineage`、`condition`、`diagonal`
+
+### case_status 与 difficulty
+
+- `case_status`：`active` / `quarantined` / `needs_fixture`
+- `difficulty`：`basic` / `intermediate` / `hard`
+- `max_command_count`：模型最多允许的 CLI 调用次数（默认 <= 3）
+- `allowed_output_sections`：模型允许读取的输出字段（默认包含 `summary`，按需加入 `details`/`evidence`）
+
+### answer_style_policy 回答风格
+
+所有 active case 共享同一套回答风格约束：
+- 先给结论，再列依据
+- 引用 CLI 输出的 summary/details/evidence 作为依据
+- 遇到 diagnostics 时保守表达
+- 禁止引用源码或历史上下文
+- 证据不足时明确说明不确定
+
+## 评测记录
+
+见 `docs/ai-eval-run-template.md`：结构化评测记录格式、失败分类、运行方式。

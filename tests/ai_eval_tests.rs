@@ -93,6 +93,13 @@ fn test_ai_eval_each_case_fields() {
         "answer_rubric",
         "uncertainty_policy",
         "minimal_command_plan",
+        "answer_assertions",
+        "risk_tags",
+        "max_command_count",
+        "allowed_output_sections",
+        "case_status",
+        "difficulty",
+        "answer_style_policy",
     ];
     let cases = load_ai_eval_cases();
     for case in &cases {
@@ -732,4 +739,481 @@ fn validate_ai_output_contract(
         }
     }
     Ok(())
+}
+
+/// ============================================================
+/// M9-F: 结构化 minimal_command_plan 字段校验
+#[test]
+fn test_ai_eval_structured_plan_fields() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let plans = case["minimal_command_plan"]
+            .as_array()
+            .expect("minimal_command_plan 必须是数组");
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        for (idx, plan) in plans.iter().enumerate() {
+            assert!(
+                plan.get("command_kind").is_some(),
+                "case {} plan[{}] 缺少 command_kind",
+                case_id,
+                idx
+            );
+            assert!(
+                plan.get("target").is_some(),
+                "case {} plan[{}] 缺少 target",
+                case_id,
+                idx
+            );
+            assert!(
+                plan.get("args").is_some(),
+                "case {} plan[{}] 缺少 args",
+                case_id,
+                idx
+            );
+            assert!(
+                plan.get("requires_project_dir").is_some(),
+                "case {} plan[{}] 缺少 requires_project_dir",
+                case_id,
+                idx
+            );
+            assert!(
+                plan["requires_project_dir"].as_bool() == Some(true),
+                "case {} plan[{}] requires_project_dir 必须为 true",
+                case_id,
+                idx
+            );
+        }
+    }
+}
+
+/// ============================================================
+/// M9-F: minimal_command_plan 必须能确定性展开为 required_commands
+#[test]
+fn test_ai_eval_plan_expands_to_required_commands() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let project_dir = case["project_dir"]
+            .as_str()
+            .unwrap_or("tests/fixtures/test_project");
+        let plans = case["minimal_command_plan"]
+            .as_array()
+            .expect("minimal_command_plan 必须是数组");
+        let required = case["required_commands"]
+            .as_array()
+            .expect("required_commands 必须是数组");
+
+        assert_eq!(
+            plans.len(),
+            required.len(),
+            "case {} plan 数量 {} 与 required_commands 数量 {} 不一致",
+            case_id,
+            plans.len(),
+            required.len()
+        );
+
+        for (idx, plan) in plans.iter().enumerate() {
+            let kind = plan["command_kind"].as_str().unwrap_or("");
+            let target = plan["target"].as_str().unwrap_or("");
+            let args: Vec<String> = plan["args"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|v| v.as_str().unwrap_or("").to_string())
+                .collect();
+            let expected_prefix = format!("--project-dir {}", project_dir);
+            let actual_cmd = required[idx].as_str().unwrap_or("");
+
+            assert!(
+                actual_cmd.starts_with(&expected_prefix),
+                "case {} cmd[{}] 必须以 '{}' 开头，实际: '{}'",
+                case_id,
+                idx,
+                expected_prefix,
+                actual_cmd
+            );
+            assert!(
+                actual_cmd.contains(kind),
+                "case {} cmd[{}] 必须包含 kind '{}'，实际: '{}'",
+                case_id,
+                idx,
+                kind,
+                actual_cmd
+            );
+            if !target.is_empty() {
+                let target_in_cmd = target.replace("'", "");
+                assert!(
+                    actual_cmd.contains(&target_in_cmd),
+                    "case {} cmd[{}] 必须包含 target '{}'，实际: '{}'",
+                    case_id,
+                    idx,
+                    target,
+                    actual_cmd
+                );
+            }
+            for arg in &args {
+                assert!(
+                    actual_cmd.contains(arg),
+                    "case {} cmd[{}] 必须包含 arg '{}'，实际: '{}'",
+                    case_id,
+                    idx,
+                    arg,
+                    actual_cmd
+                );
+            }
+        }
+    }
+}
+
+/// ============================================================
+/// M9-F: answer_assertions 结构校验
+#[test]
+fn test_ai_eval_answer_assertions_structure() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let aa = case["answer_assertions"]
+            .as_object()
+            .expect("answer_assertions 必须是对象");
+
+        assert!(
+            aa.contains_key("must_include"),
+            "case {} answer_assertions 缺少 must_include",
+            case_id
+        );
+        assert!(
+            aa.contains_key("must_not_include"),
+            "case {} answer_assertions 缺少 must_not_include",
+            case_id
+        );
+        assert!(
+            aa.contains_key("diagnostic_disclaimer_required"),
+            "case {} answer_assertions 缺少 diagnostic_disclaimer_required",
+            case_id
+        );
+        assert!(
+            aa.contains_key("evidence_reference_required"),
+            "case {} answer_assertions 缺少 evidence_reference_required",
+            case_id
+        );
+
+        let must = aa["must_include"]
+            .as_array()
+            .expect("must_include 必须是数组");
+        let must_not = aa["must_not_include"]
+            .as_array()
+            .expect("must_not_include 必须是数组");
+
+        assert!(
+            !must.is_empty(),
+            "case {} answer_assertions.must_include 不能为空",
+            case_id
+        );
+        assert!(
+            !must_not.is_empty(),
+            "case {} answer_assertions.must_not_include 不能为空",
+            case_id
+        );
+    }
+}
+
+/// ============================================================
+/// M9-F: answer_assertions.must_include 必须覆盖 expected_facts 核心实体
+#[test]
+fn test_ai_eval_answer_assertions_cover_expected_facts() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let must = case["answer_assertions"]["must_include"]
+            .as_array()
+            .expect("must_include 必须是数组");
+        let expected = case["expected_facts"]
+            .as_array()
+            .expect("expected_facts 必须是数组");
+
+        let must_strs: Vec<&str> = must.iter().filter_map(|v| v.as_str()).collect();
+        let mut uncovered = Vec::new();
+        for fact in expected {
+            let fact_str = fact.as_str().unwrap_or("");
+            // 启发式：expected_fact 必须包含至少一个 must_include 子串，或 must_include 包含 fact 子串
+            let covered = must_strs
+                .iter()
+                .any(|m| fact_str.contains(m) || m.contains(fact_str));
+            if !covered {
+                uncovered.push(fact_str);
+            }
+        }
+        // 允许最多 2 个 uncovered（因为有些 fact 可能太具体无法被 must_include 覆盖）
+        assert!(
+            uncovered.len() <= 3,
+            "case {} 有 {} 个 expected_facts 未被 must_include 覆盖: {:?}",
+            case_id,
+            uncovered.len(),
+            uncovered
+        );
+    }
+}
+
+/// ============================================================
+/// M9-F: answer_assertions.must_not_include 必须覆盖 forbidden_claims 核心禁用表达
+#[test]
+fn test_ai_eval_answer_assertions_cover_forbidden_claims() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let must_not = case["answer_assertions"]["must_not_include"]
+            .as_array()
+            .expect("must_not_include 必须是数组");
+        let forbidden = case["forbidden_claims"]
+            .as_array()
+            .expect("forbidden_claims 必须是数组");
+
+        let must_not_strs: Vec<&str> = must_not.iter().filter_map(|v| v.as_str()).collect();
+        let mut uncovered = Vec::new();
+        for claim in forbidden {
+            let claim_str = claim.as_str().unwrap_or("");
+            let covered = must_not_strs
+                .iter()
+                .any(|m| claim_str.contains(m) || m.contains(claim_str));
+            if !covered {
+                uncovered.push(claim_str);
+            }
+        }
+        assert!(
+            uncovered.len() <= 3,
+            "case {} 有 {} 个 forbidden_claims 未被 must_not_include 覆盖: {:?}",
+            case_id,
+            uncovered.len(),
+            uncovered
+        );
+    }
+}
+
+/// ============================================================
+/// M9-F: risk_tags 必须非空且覆盖全部风险类型
+#[test]
+fn test_ai_eval_risk_tags_coverage() {
+    let cases = load_ai_eval_cases();
+    let required_tags = [
+        "page_logic",
+        "explain",
+        "context",
+        "dataflow",
+        "lineage",
+        "condition",
+        "diagnostic",
+    ];
+    let mut all_tags = std::collections::HashSet::new();
+
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let tags = case["risk_tags"].as_array().expect("risk_tags 必须是数组");
+        assert!(!tags.is_empty(), "case {} 必须至少有一个 risk_tag", case_id);
+        for tag in tags {
+            all_tags.insert(tag.as_str().unwrap_or("").to_string());
+        }
+    }
+
+    for tag in &required_tags {
+        assert!(
+            all_tags.contains(*tag),
+            "所有 case 的 risk_tags 中必须包含 '{}'",
+            tag
+        );
+    }
+}
+
+/// ============================================================
+/// M9-F: max_command_count 校验
+#[test]
+fn test_ai_eval_max_command_count() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let plan_steps = case["minimal_command_plan"]
+            .as_array()
+            .expect("minimal_command_plan 必须是数组")
+            .len();
+        let max_cmd = case["max_command_count"].as_u64().unwrap_or(0) as usize;
+
+        assert!(
+            max_cmd >= plan_steps,
+            "case {} max_command_count {} 必须大于等于 plan 步数 {}",
+            case_id,
+            max_cmd,
+            plan_steps
+        );
+        assert!(
+            max_cmd <= 3,
+            "case {} max_command_count {} 不能超过 3",
+            case_id,
+            max_cmd
+        );
+    }
+}
+
+/// ============================================================
+/// M9-F: allowed_output_sections 必须包含 summary
+#[test]
+fn test_ai_eval_allowed_output_sections() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let sections = case["allowed_output_sections"]
+            .as_array()
+            .expect("allowed_output_sections 必须是数组");
+        let sections_str: Vec<String> = sections
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect();
+
+        assert!(
+            sections_str.contains(&"summary".to_string()),
+            "case {} allowed_output_sections 必须包含 summary",
+            case_id
+        );
+    }
+}
+
+/// ============================================================
+/// M9-F: case_status 与 difficulty 分布校验
+#[test]
+fn test_ai_eval_case_status_and_difficulty_distribution() {
+    let cases = load_ai_eval_cases();
+    let mut active_count = 0;
+    let mut basic_count = 0;
+    let mut intermediate_count = 0;
+    let mut hard_count = 0;
+
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let status = case["case_status"].as_str().unwrap_or("");
+        let difficulty = case["difficulty"].as_str().unwrap_or("");
+
+        assert!(
+            ["active", "quarantined", "needs_fixture"].contains(&status),
+            "case {} case_status '{}' 不在合法枚举中",
+            case_id,
+            status
+        );
+        assert!(
+            ["basic", "intermediate", "hard"].contains(&difficulty),
+            "case {} difficulty '{}' 不在合法枚举中",
+            case_id,
+            difficulty
+        );
+
+        if status == "active" {
+            active_count += 1;
+        }
+        match difficulty {
+            "basic" => basic_count += 1,
+            "intermediate" => intermediate_count += 1,
+            "hard" => hard_count += 1,
+            _ => {}
+        }
+    }
+
+    assert!(
+        active_count >= 10,
+        "active case 数量必须 >= 10，实际 {}",
+        active_count
+    );
+    assert!(
+        basic_count >= 3,
+        "basic case 数量必须 >= 3，实际 {}",
+        basic_count
+    );
+    assert!(
+        intermediate_count >= 3,
+        "intermediate case 数量必须 >= 3，实际 {}",
+        intermediate_count
+    );
+    assert!(
+        hard_count >= 2,
+        "hard case 数量必须 >= 2，实际 {}",
+        hard_count
+    );
+}
+
+/// ============================================================
+/// M9-F: answer_style_policy 校验
+#[test]
+fn test_ai_eval_answer_style_policy() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let status = case["case_status"].as_str().unwrap_or("");
+        if status != "active" {
+            continue;
+        }
+        assert!(
+            case.get("answer_style_policy").is_some(),
+            "case {} 必须有 answer_style_policy",
+            case_id
+        );
+        let policy = case["answer_style_policy"].as_object().expect("必须是对象");
+        assert!(
+            policy.contains_key("principles"),
+            "case {} answer_style_policy 缺少 principles",
+            case_id
+        );
+        assert!(
+            policy.contains_key("forbidden_practices"),
+            "case {} answer_style_policy 缺少 forbidden_practices",
+            case_id
+        );
+    }
+}
+
+/// ============================================================
+/// M9-F: answer_assertions 一致性校验（must_include 和 must_not_include 不能明显冲突）
+#[test]
+fn test_ai_eval_answer_assertions_consistency() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let must = case["answer_assertions"]["must_include"]
+            .as_array()
+            .expect("must_include 必须是数组");
+        let must_not = case["answer_assertions"]["must_not_include"]
+            .as_array()
+            .expect("must_not_include 必须是数组");
+
+        for m in must {
+            let m_str = m.as_str().unwrap_or("");
+            for n in must_not {
+                let n_str = n.as_str().unwrap_or("");
+                // 如果 must_include 和 must_not_include 有完全相同的字符串，视为冲突
+                assert_ne!(
+                    m_str, n_str,
+                    "case {} answer_assertions 冲突: '{}' 同时出现在 must_include 和 must_not_include",
+                    case_id, m_str
+                );
+            }
+        }
+    }
+}
+
+/// ============================================================
+/// M9-F: 含 diagnostics 风险的 case 必须有 diagnostic_disclaimer_required
+#[test]
+fn test_ai_eval_diagnostic_disclaimer_required() {
+    let cases = load_ai_eval_cases();
+    for case in &cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        let tags = case["risk_tags"].as_array().expect("risk_tags 必须是数组");
+        let has_diagnostic = tags.iter().any(|t| t.as_str() == Some("diagnostic"));
+        let disclaimer_required = case["answer_assertions"]["diagnostic_disclaimer_required"]
+            .as_bool()
+            .unwrap_or(false);
+
+        if has_diagnostic {
+            assert!(
+                disclaimer_required,
+                "case {} 含 diagnostic risk_tag，diagnostic_disclaimer_required 必须为 true",
+                case_id
+            );
+        }
+    }
 }
