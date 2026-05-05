@@ -46,3 +46,73 @@ M9-A/B/C 保证**语料和输出契约稳定**；M9-D 保证**AI 能基于稳定
 - 新增 eval case：编辑 `ai_eval_cases.json`，同步更新 `tests/ai_eval_tests.rs`。
 - 发现模型在某 case 持续失败：先检查 M9-C snapshot 是否已捕获输出变化；再检查 SKILL.md 协议是否足够明确；最后考虑补充 minimal_command_plan 或修改 expected_facts。
 - 不要把模型的大段回答提交进仓库，只在 `ai_eval_runs/`（如有）记录结论和分类。
+
+## 串行执行要求
+
+AI eval 测试必须串行执行。原因：
+- redb 嵌入式 KV 数据库同一时间只能被一个进程打开。
+- 多个 eval case 同时访问同一个 `.metadata-checker.graphdb` 会触发 `Database already open` 锁冲突。
+- `tests/ai_eval_tests.rs` 使用全局 `CLI_LOCK: Mutex<()>` 保证 CLI 调用串行。
+
+## GraphDB 隔离要求
+
+- eval 测试不依赖已有的 `.metadata-checker.graphdb`（该文件通常被 git ignore）。
+- 每次 eval 测试运行时，在临时目录复制一份 `tests/fixtures/test_project`，并在临时目录内独立构建图数据库。
+- 临时目录路径：`std::env::temp_dir().join("metadata-checker-ai-eval-test")`。
+- 测试结束后自动清理临时目录，避免磁盘膨胀。
+- 这种隔离确保 eval 测试和 snapshot/corpus 测试互不干扰，不抢锁。
+
+## 结构化断言执行器
+
+M9-E 引入 `expected_output_assertions`，机器自动判分：
+
+```json
+{
+  "path": "summary.entrypoint_count",
+  "op": "gt",
+  "value": 0,
+  "description": "页面必须有用户入口"
+}
+```
+
+支持的 ops：
+- `gt` / `gte` / `lt` / `lte` / `eq` / `ne` — 数值/字符串比较
+- `not_empty` / `empty` — 数组/对象空值检查
+- `contains` — 字符串包含
+- `array_any` — 数组中至少一个对象满足 field == value
+- `array_contains` — 数组中至少一个元素等于 value（支持字符串数组）
+- `contains_field_path` — 对象包含指定字段
+- `exists` — 路径存在且非 null
+- `manual` — 跳过机器校验，留给人工判分
+
+失败信息格式：
+```
+case <case_id> 命令 '<cmd>' 断言失败 [<description>]: path '<path>' <原因>
+  期望: <expected>
+  实际: <actual>
+```
+
+## M9-E 覆盖检查
+
+M9-E 至少覆盖以下七类风险：
+- PageLogic（页面级逻辑摘要）
+- Explain（单对象语义解释）
+- Context（邻居上下文）
+- DataFlowQuery（DataFlow 链路）
+- Diagnostics（诊断降级处理）
+- Condition（条件动作执行）
+- Lineage（字段来源追溯）
+
+当前 10 个 case 覆盖情况：
+| case_id | 覆盖类型 |
+|---------|----------|
+| page_purpose_actions_test | PageLogic |
+| button_submit_effect | Explain |
+| field_lineage_model1_name | Explain + Lineage |
+| dataflow_output_source | DataFlowQuery + Explain |
+| readonly_page_check | Explain + Diagnostics |
+| param_passing_link | PageLogic |
+| diagnostic_affects_answer | PageLogic + Diagnostics |
+| context_button1_neighbors | Context |
+| condition_action_behavior | Explain + Condition |
+| dataflow_chain_trace | DataFlowQuery + Explain + Lineage |

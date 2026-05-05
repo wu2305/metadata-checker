@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "scope": "M9-D AI 问答评测集：验证空上下文小模型基于 SKILL.md + CLI 输出回答真实业务问题的能力",
   "eval_count": 10,
   "cases": [
@@ -24,10 +24,28 @@
         "用户无法触发任何逻辑"
       ],
       "evidence_requirements": [
-        "summary.entrypoint_count > 0",
-        "summary.write_target_count > 0",
-        "details.action_flows 非空",
-        "存在 action_category=data_write 的 action"
+        {
+          "path": "summary.entrypoint_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.entrypoint_count > 0"
+        },
+        {
+          "path": "summary.write_target_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.write_target_count > 0"
+        },
+        {
+          "description": "details.action_flows 非空",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "存在 action_category=data_write 的 action",
+          "op": "manual",
+          "path": null
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -47,6 +65,32 @@
       "uncertainty_policy": "如果诊断中有 UNKNOWN_ACTION_TYPE，应标注该 action 语义不确定",
       "minimal_command_plan": [
         "--query-page-logic page:app/actions_test.spg"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.entrypoint_count",
+          "op": "gt",
+          "value": 0,
+          "description": "页面必须有用户入口"
+        },
+        {
+          "path": "summary.write_target_count",
+          "op": "gt",
+          "value": 0,
+          "description": "页面必须有写入目标"
+        },
+        {
+          "path": "details.action_flows",
+          "op": "not_empty",
+          "description": "action_flows 非空"
+        },
+        {
+          "path": "details.action_flows",
+          "op": "array_any",
+          "field": "action_category",
+          "value": "data_write",
+          "description": "存在 data_write 类别的 action"
+        }
       ]
     },
     {
@@ -68,9 +112,21 @@
         "button1 读取数据但不写入"
       ],
       "evidence_requirements": [
-        "summary.what_is_it 包含 button1",
-        "details.writes 非空",
-        "evidence 中有 ActionWrites 边"
+        {
+          "description": "summary.what_is_it 包含 button1",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "details.writes 非空",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "evidence 中有 ActionWrites 边",
+          "op": "manual",
+          "path": null
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -90,6 +146,26 @@
       "uncertainty_policy": "如果 lineage 为空，应说明字段来源无法追溯",
       "minimal_command_plan": [
         "--explain 'comp:app/actions_test.spg|button1'"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.what_is_it",
+          "op": "contains",
+          "value": "button1",
+          "description": "summary 包含 button1"
+        },
+        {
+          "path": "details.writes",
+          "op": "not_empty",
+          "description": "details.writes 非空"
+        },
+        {
+          "path": "evidence",
+          "op": "array_any",
+          "field": "edge_type",
+          "value": "ActionWrites",
+          "description": "evidence 中有 ActionWrites 边"
+        }
       ]
     },
     {
@@ -109,9 +185,21 @@
         "字段只读，不能被写入"
       ],
       "evidence_requirements": [
-        "summary 有 read_by_count/written_by_count",
-        "evidence 中有 ActionWrites 或 Writes 边",
-        "如果 lineage 为空，diagnostics 应有 LINEAGE_SOURCE_MISSING"
+        {
+          "description": "summary 有 read_by_count/written_by_count",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "evidence 中有 ActionWrites 或 Writes 边",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "如果 lineage 为空，diagnostics 应有 LINEAGE_SOURCE_MISSING",
+          "op": "manual",
+          "path": null
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -129,6 +217,28 @@
       "uncertainty_policy": "如果 lineage 链不完整，允许说\"写入者已知，但完整来源链未追溯\"",
       "minimal_command_plan": [
         "--explain field:model1.name"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary",
+          "op": "contains_field_path",
+          "field_path": "written_by_count",
+          "description": "summary 有 written_by_count"
+        },
+        {
+          "path": "evidence",
+          "op": "array_any",
+          "field": "edge_type",
+          "value": "ActionWrites",
+          "description": "evidence 中有 ActionWrites 或 Writes 边"
+        },
+        {
+          "path": "evidence",
+          "op": "array_any",
+          "field": "edge_type",
+          "value": "Writes",
+          "description": "evidence 中有 Writes 边"
+        }
       ]
     },
     {
@@ -150,9 +260,21 @@
         "dataflow_output 是孤立节点"
       ],
       "evidence_requirements": [
-        "details.inputs_count > 0 或 details.outputs_count > 0",
-        "details.internal_topology 非空",
-        "evidence 有 OutputsTo 或 DataflowInput 边"
+        {
+          "description": "details.inputs_count > 0 或 details.outputs_count > 0",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "details.internal_topology 非空",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "evidence 有 OutputsTo 或 DataflowInput 边",
+          "op": "manual",
+          "path": null
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -173,6 +295,23 @@
       "minimal_command_plan": [
         "--query-dataflow dataflow_output",
         "--explain model:dataflow_output"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "evidence",
+          "op": "not_empty",
+          "description": "evidence 非空"
+        },
+        {
+          "path": "summary",
+          "op": "not_empty",
+          "description": "summary 非空"
+        },
+        {
+          "path": "details",
+          "op": "not_empty",
+          "description": "details 非空"
+        }
       ]
     },
     {
@@ -194,10 +333,28 @@
         "页面有数据修改入口"
       ],
       "evidence_requirements": [
-        "summary.page_role 为 readonly_dashboard",
-        "summary.write_target_count = 0",
-        "summary.entrypoint_count = 0",
-        "diagnostics 有 NO_ENTRYPOINTS 或 NO_WRITE_TARGETS"
+        {
+          "description": "summary.page_role 为 readonly_dashboard",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "path": "summary.write_target_count",
+          "op": "eq",
+          "value": 0,
+          "description": "summary.write_target_count = 0"
+        },
+        {
+          "path": "summary.entrypoint_count",
+          "op": "eq",
+          "value": 0,
+          "description": "summary.entrypoint_count = 0"
+        },
+        {
+          "description": "diagnostics 有 NO_ENTRYPOINTS 或 NO_WRITE_TARGETS",
+          "op": "manual",
+          "path": null
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -219,6 +376,27 @@
       "uncertainty_policy": "如果页面确实无任何 action，可明确回答只读",
       "minimal_command_plan": [
         "--explain page:app/dataflow_embedded.spg"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.write_target_count",
+          "op": "eq",
+          "value": 0,
+          "description": "summary.write_target_count = 0"
+        },
+        {
+          "path": "summary.entrypoint_count",
+          "op": "eq",
+          "value": 0,
+          "description": "summary.entrypoint_count = 0"
+        },
+        {
+          "path": "diagnostics",
+          "op": "array_any",
+          "field": "code",
+          "value": "NO_ENTRYPOINTS",
+          "description": "diagnostics 有 NO_ENTRYPOINTS 或 NO_WRITE_TARGETS"
+        }
       ]
     },
     {
@@ -239,9 +417,22 @@
         "参数来源未知"
       ],
       "evidence_requirements": [
-        "details.navigation 非空",
-        "details.navigation 中有 PassesParam 边",
-        "summary.navigation_count > 0"
+        {
+          "description": "details.navigation 非空",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "details.navigation 中有 PassesParam 边",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "path": "summary.navigation_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.navigation_count > 0"
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -261,6 +452,26 @@
       "uncertainty_policy": "如果参数值是表达式，应标注表达式可能包含未解析引用",
       "minimal_command_plan": [
         "--query-page-logic page:app/page_relations.spg"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.navigation",
+          "op": "not_empty",
+          "description": "details.navigation 非空"
+        },
+        {
+          "path": "details.navigation",
+          "op": "array_any",
+          "field": "type",
+          "value": "PassesParam",
+          "description": "details.navigation 中有 PassesParam 边"
+        },
+        {
+          "path": "summary.navigation_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.navigation_count > 0"
+        }
       ]
     },
     {
@@ -281,9 +492,21 @@
         "模型对所有 action 语义完全确定"
       ],
       "evidence_requirements": [
-        "diagnostics 中有 UNKNOWN_ACTION_TYPE",
-        "details.action_flows 中有对应 action 但 category=unknown",
-        "summary 中的 risk_count > 0"
+        {
+          "description": "diagnostics 中有 UNKNOWN_ACTION_TYPE",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "details.action_flows 中有对应 action 但 category=unknown",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "summary 中的 risk_count > 0",
+          "op": "manual",
+          "path": null
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -303,6 +526,28 @@
       "uncertainty_policy": "遇到诊断时必须降级表达，不能假装诊断不存在",
       "minimal_command_plan": [
         "--query-page-logic page:app/actions_test.spg"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "diagnostics",
+          "op": "array_any",
+          "field": "code",
+          "value": "UNKNOWN_ACTION_TYPE",
+          "description": "diagnostics 中有 UNKNOWN_ACTION_TYPE"
+        },
+        {
+          "path": "details.action_flows",
+          "op": "array_any",
+          "field": "action_category",
+          "value": "unknown",
+          "description": "details.action_flows 中有 category=unknown 的 action"
+        },
+        {
+          "path": "summary.risk_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.risk_count > 0"
+        }
       ]
     },
     {
@@ -323,9 +568,22 @@
         "button1 的上下游为空"
       ],
       "evidence_requirements": [
-        "summary.related_nodes_count > 0",
-        "details.related_actions 非空",
-        "details.downstream 包含 model1"
+        {
+          "path": "summary.related_nodes_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.related_nodes_count > 0"
+        },
+        {
+          "description": "details.related_actions 非空",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "details.downstream 包含 model1",
+          "op": "manual",
+          "path": null
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -344,6 +602,26 @@
       "uncertainty_policy": "如果 budget=compact 截断，应说明还有更深层关系未展开",
       "minimal_command_plan": [
         "--context 'comp:app/actions_test.spg|button1' --depth 2 --budget normal"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.related_nodes_count",
+          "op": "gt",
+          "value": 0,
+          "description": "summary.related_nodes_count > 0"
+        },
+        {
+          "path": "details.related_actions",
+          "op": "not_empty",
+          "description": "details.related_actions 非空"
+        },
+        {
+          "path": "details.downstream",
+          "op": "array_any",
+          "field": "to",
+          "value": "model:model1",
+          "description": "details.downstream 包含 model:model1"
+        }
       ]
     },
     {
@@ -364,9 +642,21 @@
         "condition 字段不存在"
       ],
       "evidence_requirements": [
-        "details.condition.raw_expr 非空",
-        "details.condition.refs 包含 input1",
-        "summary 有 condition 相关信息"
+        {
+          "description": "details.condition.raw_expr 非空",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "details.condition.refs 包含 input1",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "summary 有 condition 相关信息",
+          "op": "manual",
+          "path": null
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -386,6 +676,19 @@
       "uncertainty_policy": "如果 condition 表达式有未解析引用，应标注条件判断可能不完整",
       "minimal_command_plan": [
         "--explain 'action:app/actions_test.spg|button2|action1'"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.condition.raw_expr",
+          "op": "exists",
+          "description": "details.condition.raw_expr 非空"
+        },
+        {
+          "path": "details.condition.refs",
+          "op": "array_contains",
+          "value": "input1",
+          "description": "details.condition.refs 包含字符串 input1"
+        }
       ]
     },
     {
@@ -408,9 +711,21 @@
         "字段来源完全未知"
       ],
       "evidence_requirements": [
-        "details.internal_topology 有 edges 连接节点",
-        "explain 输出 lineage 非空",
-        "evidence 有 DataflowInput/OutputsTo 边"
+        {
+          "description": "details.internal_topology 有 edges 连接节点",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "explain 输出 lineage 非空",
+          "op": "manual",
+          "path": null
+        },
+        {
+          "description": "evidence 有 DataflowInput/OutputsTo 边",
+          "op": "manual",
+          "path": null
+        }
       ],
       "answer_rubric": {
         "must_mention": [
@@ -432,6 +747,23 @@
       "minimal_command_plan": [
         "--query-dataflow df_a",
         "--explain field:df_b.id"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "evidence",
+          "op": "not_empty",
+          "description": "evidence 非空"
+        },
+        {
+          "path": "summary",
+          "op": "not_empty",
+          "description": "summary 非空"
+        },
+        {
+          "path": "kind",
+          "op": "exists",
+          "description": "kind 字段存在"
+        }
       ]
     }
   ]

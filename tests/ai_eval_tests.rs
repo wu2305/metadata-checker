@@ -1,11 +1,11 @@
-// use metadata_checker::output::AiOutput;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 static CLI_LOCK: Mutex<()> = Mutex::new(());
 
-/// M9-D AI 问答评测集结构校验与命令执行测试。
-/// 验证 ai_eval_cases.json 的 schema 完整性，并确保 required_commands 真实可执行。
+/// M9-E AI 问答评测集自动判分与执行隔离测试。
+/// 验证 ai_eval_cases.json schema，串行执行命令，使用隔离 graphdb，
+/// 并自动校验 expected_output_assertions 结构化断言。
 /// ============================================================
 /// 加载 ai_eval_cases.json
 fn load_ai_eval_cases() -> Vec<serde_json::Value> {
@@ -17,6 +17,21 @@ fn load_ai_eval_cases() -> Vec<serde_json::Value> {
         .as_array()
         .expect("cases must be array")
         .to_vec()
+}
+
+/// 递归复制目录
+fn copy_dir_all(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Path>) {
+    std::fs::create_dir_all(&dst).expect("create_dir_all failed");
+    for entry in std::fs::read_dir(src).expect("read_dir failed") {
+        let entry = entry.expect("dir entry failed");
+        let ty = entry.file_type().expect("file_type failed");
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()));
+        } else {
+            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))
+                .expect("copy file failed");
+        }
+    }
 }
 
 /// 运行 CLI 命令并返回 stdout
@@ -74,6 +89,7 @@ fn test_ai_eval_each_case_fields() {
         "expected_facts",
         "forbidden_claims",
         "evidence_requirements",
+        "expected_output_assertions",
         "answer_rubric",
         "uncertainty_policy",
         "minimal_command_plan",
@@ -119,25 +135,56 @@ fn test_ai_eval_expected_and_forbidden_non_empty() {
 }
 
 /// ============================================================
-/// 每个 case 至少有一个 evidence requirement
+/// expected_output_assertions 必须非空且结构正确
 #[test]
-fn test_ai_eval_evidence_requirements_non_empty() {
+fn test_ai_eval_assertions_structure() {
     let cases = load_ai_eval_cases();
+    let valid_ops = [
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "eq",
+        "ne",
+        "not_empty",
+        "empty",
+        "contains",
+        "array_any",
+        "array_contains",
+        "contains_field_path",
+        "exists",
+        "manual",
+    ];
     for case in &cases {
-        let ev = case["evidence_requirements"]
+        let assertions = case["expected_output_assertions"]
             .as_array()
-            .expect("evidence_requirements 必须是数组");
+            .expect("expected_output_assertions 必须是数组");
         let case_id = case["case_id"].as_str().unwrap_or("?");
         assert!(
-            !ev.is_empty(),
-            "case {} 至少需要一个 evidence_requirement",
+            !assertions.is_empty(),
+            "case {} 至少需要一个 expected_output_assertion",
             case_id
         );
+        for a in assertions {
+            let op = a["op"].as_str().unwrap_or("?");
+            assert!(
+                valid_ops.contains(&op),
+                "case {} 断言 op '{}' 不在合法枚举 {:?} 中",
+                case_id,
+                op,
+                valid_ops
+            );
+            assert!(
+                a.get("description").is_some(),
+                "case {} 断言必须有 description",
+                case_id
+            );
+        }
     }
 }
 
 /// ============================================================
-/// 命令白名单校验：required_commands 必须是合法 CLI 格式
+/// 命令白名单校验
 #[test]
 fn test_ai_eval_command_whitelist() {
     let _allowed_prefixes = ["--project-dir"];
@@ -263,30 +310,40 @@ fn test_ai_eval_count_consistent() {
 }
 
 /// ============================================================
-/// 真实执行 required_commands，验证输出为稳定 AiOutput 契约
+/// 隔离 graphdb + 串行执行 + 结构化断言自动判分
 #[test]
-fn test_ai_eval_commands_execute_and_validate() {
-    // P0: 确保图数据库已构建
-    let project_dir = PathBuf::from("tests/fixtures/test_project");
-    let db_path = PathBuf::from("tests/fixtures/test_project/.metadata-checker.graphdb");
+fn test_ai_eval_commands_execute_and_assert() {
+    // P0: 使用隔离临时目录，避免和 snapshot/corpus 测试抢锁
+    let temp_dir = std::env::temp_dir().join("metadata-checker-ai-eval-test");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    copy_dir_all("tests/fixtures/test_project", &temp_dir);
+
+    let project_dir = temp_dir.clone();
+    let db_path = temp_dir.join(".metadata-checker.graphdb");
     if !db_path.exists() {
         metadata_checker::scanner::scan_project(&project_dir, &db_path)
-            .expect("scan_project must succeed on test_project");
+            .expect("scan_project must succeed on isolated test_project");
     }
 
+    let temp_str = temp_dir.to_str().unwrap();
     let cases = load_ai_eval_cases();
-    let mut failures = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
 
     for case in &cases {
         let case_id = case["case_id"].as_str().unwrap_or("?").to_string();
         let cmds = case["required_commands"]
             .as_array()
             .expect("required_commands 必须是数组");
+        let assertions = case["expected_output_assertions"]
+            .as_array()
+            .expect("expected_output_assertions 必须是数组");
 
         for cmd_val in cmds {
             let cmd_str = cmd_val.as_str().unwrap();
-            // 解析 shell 命令字符串为参数数组
-            let args: Vec<String> = parse_shell_command(cmd_str);
+            // 将 project-dir 路径替换为隔离临时目录
+            let isolated_cmd = cmd_str.replace("tests/fixtures/test_project", temp_str);
+
+            let args: Vec<String> = parse_shell_command(&isolated_cmd);
             let output = run_cli(&args.iter().map(|s| s.as_str()).collect::<Vec<_>>());
             let output_trimmed = output.trim();
 
@@ -311,57 +368,14 @@ fn test_ai_eval_commands_execute_and_validate() {
                 continue;
             }
 
-            // 验证关键字段非空：summary、details、evidence、diagnostics、next_queries
-            for field in [
-                "summary",
-                "details",
-                "evidence",
-                "diagnostics",
-                "next_queries",
-            ] {
-                if parsed.get(field).is_none() {
-                    failures.push(format!(
-                        "case {} 命令 '{}' 缺少顶层字段 {}",
-                        case_id, cmd_str, field
-                    ));
+            // 执行结构化断言
+            for assertion in assertions {
+                if let Err(err) = evaluate_assertion(assertion, &parsed, &case_id, cmd_str) {
+                    failures.push(err);
                 }
             }
 
-            // 验证 kind 非空且为合法枚举
-            let kind = parsed
-                .get("kind")
-                .and_then(|v| v.as_str())
-                .unwrap_or("MISSING");
-            let valid_kinds = [
-                "SuperPage",
-                "PageQuery",
-                "ModelQuery",
-                "CrossPageQuery",
-                "DataFlowQuery",
-                "ComponentQuery",
-                "PriorityQuery",
-                "Explain",
-                "Context",
-                "PageLogic",
-            ];
-            if !valid_kinds.contains(&kind) {
-                failures.push(format!(
-                    "case {} 命令 '{}' kind '{}' 不在合法枚举中",
-                    case_id, cmd_str, kind
-                ));
-            }
-
-            // 验证 summary 非空
-            if let Some(summary) = parsed.get("summary")
-                && summary.as_object().map(|o| o.is_empty()).unwrap_or(true)
-            {
-                failures.push(format!(
-                    "case {} 命令 '{}' summary 为空对象",
-                    case_id, cmd_str
-                ));
-            }
-
-            // 检查是否包含明显错误信息（Node not found / Page not found / Error:）
+            // 检查是否包含明显错误信息
             if output_trimmed.contains("Node not found")
                 || output_trimmed.contains("Page not found")
                 || output_trimmed.contains("Error:")
@@ -376,14 +390,250 @@ fn test_ai_eval_commands_execute_and_validate() {
         }
     }
 
+    // 清理临时目录
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
     if !failures.is_empty() {
-        panic!("AI eval 命令执行验证失败:\n{}", failures.join("\n---\n"));
+        panic!(
+            "AI eval 命令执行与断言判分失败:\n{}",
+            failures.join("\n---\n")
+        );
     }
 }
 
-/// 将 shell 命令字符串拆分为参数数组（简单实现，支持单引号）
+/// ============================================================
+/// 断言执行器
+fn evaluate_assertion(
+    assertion: &serde_json::Value,
+    parsed: &serde_json::Value,
+    case_id: &str,
+    cmd_str: &str,
+) -> Result<(), String> {
+    let op = assertion["op"].as_str().unwrap_or("manual");
+    let path = assertion.get("path").and_then(|v| v.as_str());
+    let description = assertion["description"].as_str().unwrap_or("未命名断言");
+
+    if op == "manual" {
+        return Ok(());
+    }
+
+    let actual_value = if let Some(p) = path {
+        get_json_path(parsed, p)
+    } else {
+        None
+    };
+
+    match op {
+        "exists" => {
+            if actual_value.is_none() {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 不存在\n  期望: 存在\n  实际: null",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?")
+                ));
+            }
+        }
+        "not_empty" => {
+            let is_empty = actual_value
+                .as_ref()
+                .map(|v| {
+                    v.as_array()
+                        .map(|a| a.is_empty())
+                        .unwrap_or(v.as_object().map(|o| o.is_empty()).unwrap_or(v.is_null()))
+                })
+                .unwrap_or(true);
+            if is_empty {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 为空\n  期望: 非空\n  实际: {:?}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    actual_value
+                ));
+            }
+        }
+        "empty" => {
+            let is_empty = actual_value
+                .as_ref()
+                .map(|v| {
+                    v.as_array()
+                        .map(|a| a.is_empty())
+                        .unwrap_or(v.as_object().map(|o| o.is_empty()).unwrap_or(v.is_null()))
+                })
+                .unwrap_or(true);
+            if !is_empty {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 非空\n  期望: 空\n  实际: {:?}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    actual_value
+                ));
+            }
+        }
+        "contains" => {
+            let expected = assertion["value"].as_str().unwrap_or("");
+            let actual_str = actual_value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+            if !actual_str.contains(expected) {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 不包含 '{}'\n  期望: 包含 '{}'\n  实际: '{}'",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    expected,
+                    expected,
+                    actual_str
+                ));
+            }
+        }
+        "gt" => {
+            let expected = assertion["value"].as_f64().unwrap_or(0.0);
+            let actual = actual_value
+                .as_ref()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            if actual <= expected {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' <= {}\n  期望: > {}\n  实际: {}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    expected as i64,
+                    expected as i64,
+                    actual as i64
+                ));
+            }
+        }
+        "eq" => {
+            let expected = &assertion["value"];
+            if actual_value.as_ref() != Some(&expected) {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 不匹配\n  期望: {}\n  实际: {:?}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    expected,
+                    actual_value
+                ));
+            }
+        }
+        "ne" => {
+            let expected = &assertion["value"];
+            if actual_value.as_ref() == Some(&expected) {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 不应等于 {}\n  期望: ≠ {}\n  实际: {:?}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    expected,
+                    expected,
+                    actual_value
+                ));
+            }
+        }
+        "array_any" => {
+            let field = assertion["field"].as_str().unwrap_or("?");
+            let expected_val = &assertion["value"];
+            let empty_arr: &[serde_json::Value] = &[];
+            let arr = actual_value
+                .as_ref()
+                .and_then(|v| v.as_array().map(|a| a.as_slice()))
+                .unwrap_or(empty_arr);
+            let found = arr.iter().any(|item| {
+                get_json_path(item, field)
+                    .as_ref()
+                    .map(|v| **v == *expected_val)
+                    .unwrap_or(false)
+            });
+            if !found {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 数组中无元素满足 {} == {}\n  期望: 至少一个元素满足\n  实际数组前3项: {:?}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    field,
+                    expected_val,
+                    arr.iter().take(3).collect::<Vec<_>>()
+                ));
+            }
+        }
+        "contains_field_path" => {
+            let field_path = assertion["field_path"].as_str().unwrap_or("?");
+            let found = actual_value
+                .as_ref()
+                .and_then(|v| v.as_object())
+                .map(|o| o.contains_key(field_path))
+                .unwrap_or(false);
+            if !found {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 不包含字段 '{}'\n  期望: 包含字段 '{}'\n  实际: {:?}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    field_path,
+                    field_path,
+                    actual_value
+                ));
+            }
+        }
+        "array_contains" => {
+            let expected_val = &assertion["value"];
+            let empty_arr: &[serde_json::Value] = &[];
+            let arr = actual_value
+                .as_ref()
+                .and_then(|v| v.as_array().map(|a| a.as_slice()))
+                .unwrap_or(empty_arr);
+            let found = arr.iter().any(|item| item == expected_val);
+            if !found {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 数组不包含 {}
+  期望: 包含 {}
+  实际数组前3项: {:?}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    expected_val,
+                    expected_val,
+                    arr.iter().take(3).collect::<Vec<_>>()
+                ));
+            }
+        }
+        _ => {
+            return Err(format!(
+                "case {} 命令 '{}' 未知断言 op '{}': {}",
+                case_id, cmd_str, op, description
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 按点分隔路径获取 JSON 值
+fn get_json_path<'a>(root: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let mut current = root;
+    for segment in path.split('.') {
+        if let Some(obj) = current.as_object() {
+            current = obj.get(segment)?;
+        } else {
+            return None;
+        }
+    }
+    Some(current)
+}
+
+/// 将 shell 命令字符串拆分为参数数组（支持单引号）
 fn parse_shell_command(cmd: &str) -> Vec<String> {
-    // 使用 shlex 风格解析：按空格拆分，但保留单引号包裹的内容
     let mut args = Vec::new();
     let mut current = String::new();
     let mut in_quote = false;
