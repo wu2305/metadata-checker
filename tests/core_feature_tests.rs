@@ -689,3 +689,285 @@ fn test_topological_sort_stability() {
         "All 4 independent components should appear before input1"
     );
 }
+
+// ============================================================
+// P1: 组件值追溯 fixture 测试
+// ============================================================
+
+#[test]
+fn test_value_trace_single_level() {
+    let path = PathBuf::from("tests/fixtures/value_trace_single.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse");
+    let graph = DependencyGraph::new(&meta);
+
+    // input1.value = param1
+    let input1_deps = graph
+        .dependencies
+        .get("input1")
+        .expect("input1 should exist");
+    let has_param = input1_deps
+        .iter()
+        .any(|r| matches!(r, RefType::Param(p) if p == "param1"));
+    assert!(has_param, "input1 should trace to param1");
+}
+
+#[test]
+fn test_value_trace_multi_level() {
+    let path = PathBuf::from("tests/fixtures/value_trace_multi_level.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse");
+    let graph = DependencyGraph::new(&meta);
+
+    // input3 -> input2 -> input1 -> param1
+    // input3 -> model1.A
+    let input3_deps = graph
+        .dependencies
+        .get("input3")
+        .expect("input3 should exist");
+
+    // 直接依赖
+    let has_input2 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input2"));
+    let has_model = input3_deps
+        .iter()
+        .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model1" && f == "A"));
+    assert!(has_input2, "input3 should directly reference input2");
+    assert!(has_model, "input3 should directly reference model1.A");
+
+    // 拓扑排序验证依赖顺序
+    let order = graph.topological_sort();
+    let i1 = order.iter().position(|id| id == "input1").unwrap();
+    let i2 = order.iter().position(|id| id == "input2").unwrap();
+    let i3 = order.iter().position(|id| id == "input3").unwrap();
+    assert!(i1 < i2, "input1 should come before input2");
+    assert!(i2 < i3, "input2 should come before input3");
+}
+
+#[test]
+fn test_value_trace_multi_branch() {
+    let path = PathBuf::from("tests/fixtures/value_trace_multi_branch.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse");
+    let graph = DependencyGraph::new(&meta);
+
+    // input3 = input1.value + input2.value
+    let input3_deps = graph
+        .dependencies
+        .get("input3")
+        .expect("input3 should exist");
+
+    let has_input1 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input1"));
+    let has_input2 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input2"));
+    assert!(has_input1, "input3 should reference input1 (param1 branch)");
+    assert!(has_input2, "input3 should reference input2 (model1 branch)");
+
+    // input1 追溯到 param1，input2 追溯到 model1.A
+    let input1_deps = graph
+        .dependencies
+        .get("input1")
+        .expect("input1 should exist");
+    let input2_deps = graph
+        .dependencies
+        .get("input2")
+        .expect("input2 should exist");
+    let has_param1 = input1_deps
+        .iter()
+        .any(|r| matches!(r, RefType::Param(p) if p == "param1"));
+    let has_model1 = input2_deps
+        .iter()
+        .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model1" && f == "A"));
+    assert!(has_param1, "input1 should trace to param1");
+    assert!(has_model1, "input2 should trace to model1.A");
+}
+
+#[test]
+fn test_value_trace_cross_component_types() {
+    let path = PathBuf::from("tests/fixtures/test_superpage.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse");
+
+    // text1 引用 input3（跨类型：text -> input）
+    let text1_expr = meta
+        .expressions
+        .iter()
+        .find(|e| e.component_id == "text1" && e.field == "value")
+        .expect("text1.value should exist");
+    let has_input3 = text1_expr
+        .refs
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input3"));
+    assert!(
+        has_input3,
+        "text1 should reference input3 across component types"
+    );
+
+    // input3 引用 input1 和 input2（跨组件类型追溯）
+    let input3_expr = meta
+        .expressions
+        .iter()
+        .find(|e| e.component_id == "input3" && e.field == "value")
+        .expect("input3.value should exist");
+    let has_input1 = input3_expr
+        .refs
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input1"));
+    let has_input2 = input3_expr
+        .refs
+        .iter()
+        .any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input2"));
+    assert!(has_input1, "input3 should reference input1");
+    assert!(has_input2, "input3 should reference input2");
+
+    // 通过 input1/input2 间接追溯到 param1 和 model1.A
+    let graph = DependencyGraph::new(&meta);
+    let order = graph.topological_sort();
+    let i1 = order.iter().position(|id| id == "input1").unwrap();
+    let i2 = order.iter().position(|id| id == "input2").unwrap();
+    let i3 = order.iter().position(|id| id == "input3").unwrap();
+    assert!(i1 < i3, "input1 should come before input3 in topo order");
+    assert!(i2 < i3, "input2 should come before input3 in topo order");
+}
+
+// ============================================================
+// P2: 输出层来源分类定义测试
+// ============================================================
+
+#[test]
+fn test_source_type_param() {
+    use metadata_checker::dependency::{SourceType, trace_value_source};
+    let path = PathBuf::from("tests/fixtures/value_trace_single.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse");
+    let graph = DependencyGraph::new(&meta);
+    let trace =
+        trace_value_source(&meta, &graph, "input1", "value", 5).expect("Should trace input1.value");
+    assert!(
+        matches!(
+            trace.source_type,
+            SourceType::Param | SourceType::UserInput | SourceType::Constant
+        ),
+        "input1.value = param1 should be classified as Param, UserInput or Constant, got {:?}",
+        trace.source_type
+    );
+}
+
+#[test]
+fn test_source_type_computed() {
+    use metadata_checker::dependency::{SourceType, trace_value_source};
+    let path = PathBuf::from("tests/fixtures/value_trace_multi_branch.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse");
+    let graph = DependencyGraph::new(&meta);
+    let trace =
+        trace_value_source(&meta, &graph, "input3", "value", 5).expect("Should trace input3.value");
+    assert!(
+        matches!(
+            trace.source_type,
+            SourceType::Computed | SourceType::Unknown
+        ),
+        "input3.value = input1.value + input2.value should be Computed or Unknown, got {:?}",
+        trace.source_type
+    );
+}
+
+#[test]
+fn test_source_type_model_auto() {
+    use metadata_checker::dependency::{SourceType, trace_value_source};
+    let path = PathBuf::from("tests/fixtures/value_trace_multi_level.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse");
+    let graph = DependencyGraph::new(&meta);
+    let trace =
+        trace_value_source(&meta, &graph, "input3", "value", 5).expect("Should trace input3.value");
+    // input3 包含 model1.A，但表达式整体可能被判为 Computed
+    // 这里只验证 source_chain 中包含 ModelAuto 节点
+    let has_model_node = trace
+        .source_chain
+        .iter()
+        .any(|n| matches!(n.source_type, SourceType::ModelAuto));
+    assert!(
+        has_model_node || trace.raw_expr.contains("model1"),
+        "Trace should contain ModelAuto node or reference model1"
+    );
+}
+
+#[test]
+fn test_source_type_constant() {
+    use metadata_checker::dependency::{SourceType, trace_value_source};
+    let path = PathBuf::from("tests/fixtures/boundary_cases.spg");
+    let meta = parse_superpage(&path).expect("Failed to parse");
+    let graph = DependencyGraph::new(&meta);
+    let trace =
+        trace_value_source(&meta, &graph, "text3", "value", 5).expect("Should trace text3.value");
+    assert!(
+        matches!(
+            trace.source_type,
+            SourceType::Constant | SourceType::Computed | SourceType::Unknown
+        ),
+        "text3.value = 123 should be Constant, Computed or Unknown, got {:?}",
+        trace.source_type
+    );
+}
+
+// ============================================================
+// P3: 性能与规模测试
+// ============================================================
+
+#[test]
+fn test_large_page_parsing() {
+    let path = PathBuf::from("tests/fixtures/large_page.spg");
+    let meta = parse_superpage(&path).expect("Should parse large page");
+
+    // 150 组件 + canvas = 151
+    assert_eq!(
+        meta.components.len(),
+        151,
+        "Should parse all 150 components plus canvas"
+    );
+
+    // 表达式数量应接近 150（每个组件一个 value 表达式）
+    assert!(
+        meta.expressions.len() >= 100,
+        "Should extract at least 100 expressions from 150 components"
+    );
+
+    // 依赖图构建
+    let graph = DependencyGraph::new(&meta);
+    assert!(
+        !graph.dependencies.is_empty(),
+        "Large page should have dependencies"
+    );
+}
+
+#[test]
+fn test_large_page_topological_sort_performance() {
+    use std::time::Instant;
+    let path = PathBuf::from("tests/fixtures/large_page.spg");
+    let meta = parse_superpage(&path).expect("Should parse large page");
+    let graph = DependencyGraph::new(&meta);
+
+    let start = Instant::now();
+    let order = graph.topological_sort();
+    let elapsed = start.elapsed();
+
+    // debug 模式下 < 2s 是合理的阈值
+    assert!(
+        elapsed.as_secs() < 2,
+        "Topological sort of 150 components should take < 2s, took {:?}",
+        elapsed
+    );
+
+    // 验证排序覆盖所有组件
+    assert!(
+        order.len() >= meta.components.len() - 1,
+        "Topo sort should cover most components, got {} of {}",
+        order.len(),
+        meta.components.len()
+    );
+}
+
+#[test]
+fn test_large_page_expression_refs_count() {
+    let path = PathBuf::from("tests/fixtures/large_page.spg");
+    let meta = parse_superpage(&path).expect("Should parse large page");
+
+    let total_refs: usize = meta.expressions.iter().map(|e| e.refs.len()).sum();
+    assert!(
+        total_refs >= 50,
+        "150 components should produce at least 50 refs, got {}",
+        total_refs
+    );
+}

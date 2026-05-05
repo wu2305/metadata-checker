@@ -396,3 +396,35 @@ pub struct AiOutput {
 | EXPR_UNRESOLVED_REF | Info | 标识符或成员访问无法被分类为已知引用类型 |
 | EXPR_UNSUPPORTED_FUNCTION | Info | 使用了当前未列入支持列表的函数 |
 | EXPR_AMBIGUOUS_REF | Info | 引用存在歧义，可能属于多种类型 |
+
+## 来源分类（SourceType）
+
+组件值的来源类型，用于回答"这个值是用户输入、参数、模型自动带出还是计算得来"。
+
+### 稳定枚举
+
+| 值 | 说明 | 判断规则 |
+|----|------|----------|
+| `Param` | 页面参数 | 表达式引用 `paramX` 或直接以 `param` 开头 |
+| `UserInput` | 用户输入 | 无表达式、可交互输入组件 |
+| `ModelAuto` | 模型自动获取 | 表达式引用 `modelX.field` 或直接以 `model` 开头 |
+| `System` | 系统变量 | 表达式包含 `$user`、`$project` 等系统变量 |
+| `Computed` | 计算产生 | 表达式引用其他组件值（`.value` / `.checked`） |
+| `Constant` | 常量 | 纯常量表达式或静态默认值（不以 `=` 开头） |
+| `Unknown` | 未知 | 无法分类时保守标记 |
+
+### 字段位置
+
+- `details.value_trace[].source_type`：追溯链中每个节点的来源类型
+- `details.lineage[].source_type`：字段 lineage 中每个步骤的来源类型
+
+### 使用指南
+
+AI 被问"这个值从哪里来"时，应优先查看 `source_type`：
+- `Param` → "来自页面参数"
+- `UserInput` → "用户输入"
+- `ModelAuto` → "从数据模型自动获取"
+- `System` → "系统变量"
+- `Computed` → "由表达式计算产生"
+- `Constant` → "固定常量"
+- `Unknown` → "来源无法确定，保守回答"

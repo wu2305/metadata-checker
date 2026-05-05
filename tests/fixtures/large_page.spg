@@ -1,0 +1,777 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "params": [
+    {
+      "id": "param1",
+      "name": "P1",
+      "value": "'default'"
+    }
+  ],
+  "sources": [
+    {
+      "id": "model1",
+      "modelType": "query"
+    },
+    {
+      "id": "model2",
+      "modelType": "dwtable"
+    }
+  ],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {
+        "id": "comp0",
+        "type": "input",
+        "value": "=model1.field0"
+      },
+      {
+        "id": "comp1",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp2",
+        "type": "button",
+        "value": "=comp0.value + 2"
+      },
+      {
+        "id": "comp3",
+        "type": "select",
+        "value": "=model1.field3"
+      },
+      {
+        "id": "comp4",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp5",
+        "type": "input",
+        "value": "=comp0.value + 5"
+      },
+      {
+        "id": "comp6",
+        "type": "text",
+        "value": "=model1.field6"
+      },
+      {
+        "id": "comp7",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp8",
+        "type": "select",
+        "value": "=comp3.value + 8"
+      },
+      {
+        "id": "comp9",
+        "type": "checkbox",
+        "value": "=model1.field9"
+      },
+      {
+        "id": "comp10",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp11",
+        "type": "text",
+        "value": "=comp6.value + 11"
+      },
+      {
+        "id": "comp12",
+        "type": "button",
+        "value": "=model1.field12"
+      },
+      {
+        "id": "comp13",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp14",
+        "type": "checkbox",
+        "value": "=comp9.value + 14"
+      },
+      {
+        "id": "comp15",
+        "type": "input",
+        "value": "=model1.field15"
+      },
+      {
+        "id": "comp16",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp17",
+        "type": "button",
+        "value": "=comp12.value + 17"
+      },
+      {
+        "id": "comp18",
+        "type": "select",
+        "value": "=model1.field18"
+      },
+      {
+        "id": "comp19",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp20",
+        "type": "input",
+        "value": "=comp15.value + 20"
+      },
+      {
+        "id": "comp21",
+        "type": "text",
+        "value": "=model1.field21"
+      },
+      {
+        "id": "comp22",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp23",
+        "type": "select",
+        "value": "=comp18.value + 23"
+      },
+      {
+        "id": "comp24",
+        "type": "checkbox",
+        "value": "=model1.field24"
+      },
+      {
+        "id": "comp25",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp26",
+        "type": "text",
+        "value": "=comp21.value + 26"
+      },
+      {
+        "id": "comp27",
+        "type": "button",
+        "value": "=model1.field27"
+      },
+      {
+        "id": "comp28",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp29",
+        "type": "checkbox",
+        "value": "=comp24.value + 29"
+      },
+      {
+        "id": "comp30",
+        "type": "input",
+        "value": "=model1.field30"
+      },
+      {
+        "id": "comp31",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp32",
+        "type": "button",
+        "value": "=comp27.value + 32"
+      },
+      {
+        "id": "comp33",
+        "type": "select",
+        "value": "=model1.field33"
+      },
+      {
+        "id": "comp34",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp35",
+        "type": "input",
+        "value": "=comp30.value + 35"
+      },
+      {
+        "id": "comp36",
+        "type": "text",
+        "value": "=model1.field36"
+      },
+      {
+        "id": "comp37",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp38",
+        "type": "select",
+        "value": "=comp33.value + 38"
+      },
+      {
+        "id": "comp39",
+        "type": "checkbox",
+        "value": "=model1.field39"
+      },
+      {
+        "id": "comp40",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp41",
+        "type": "text",
+        "value": "=comp36.value + 41"
+      },
+      {
+        "id": "comp42",
+        "type": "button",
+        "value": "=model1.field42"
+      },
+      {
+        "id": "comp43",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp44",
+        "type": "checkbox",
+        "value": "=comp39.value + 44"
+      },
+      {
+        "id": "comp45",
+        "type": "input",
+        "value": "=model1.field45"
+      },
+      {
+        "id": "comp46",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp47",
+        "type": "button",
+        "value": "=comp42.value + 47"
+      },
+      {
+        "id": "comp48",
+        "type": "select",
+        "value": "=model1.field48"
+      },
+      {
+        "id": "comp49",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp50",
+        "type": "input",
+        "value": "=comp45.value + 50"
+      },
+      {
+        "id": "comp51",
+        "type": "text",
+        "value": "=model1.field51"
+      },
+      {
+        "id": "comp52",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp53",
+        "type": "select",
+        "value": "=comp48.value + 53"
+      },
+      {
+        "id": "comp54",
+        "type": "checkbox",
+        "value": "=model1.field54"
+      },
+      {
+        "id": "comp55",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp56",
+        "type": "text",
+        "value": "=comp51.value + 56"
+      },
+      {
+        "id": "comp57",
+        "type": "button",
+        "value": "=model1.field57"
+      },
+      {
+        "id": "comp58",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp59",
+        "type": "checkbox",
+        "value": "=comp54.value + 59"
+      },
+      {
+        "id": "comp60",
+        "type": "input",
+        "value": "=model1.field60"
+      },
+      {
+        "id": "comp61",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp62",
+        "type": "button",
+        "value": "=comp57.value + 62"
+      },
+      {
+        "id": "comp63",
+        "type": "select",
+        "value": "=model1.field63"
+      },
+      {
+        "id": "comp64",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp65",
+        "type": "input",
+        "value": "=comp60.value + 65"
+      },
+      {
+        "id": "comp66",
+        "type": "text",
+        "value": "=model1.field66"
+      },
+      {
+        "id": "comp67",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp68",
+        "type": "select",
+        "value": "=comp63.value + 68"
+      },
+      {
+        "id": "comp69",
+        "type": "checkbox",
+        "value": "=model1.field69"
+      },
+      {
+        "id": "comp70",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp71",
+        "type": "text",
+        "value": "=comp66.value + 71"
+      },
+      {
+        "id": "comp72",
+        "type": "button",
+        "value": "=model1.field72"
+      },
+      {
+        "id": "comp73",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp74",
+        "type": "checkbox",
+        "value": "=comp69.value + 74"
+      },
+      {
+        "id": "comp75",
+        "type": "input",
+        "value": "=model1.field75"
+      },
+      {
+        "id": "comp76",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp77",
+        "type": "button",
+        "value": "=comp72.value + 77"
+      },
+      {
+        "id": "comp78",
+        "type": "select",
+        "value": "=model1.field78"
+      },
+      {
+        "id": "comp79",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp80",
+        "type": "input",
+        "value": "=comp75.value + 80"
+      },
+      {
+        "id": "comp81",
+        "type": "text",
+        "value": "=model1.field81"
+      },
+      {
+        "id": "comp82",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp83",
+        "type": "select",
+        "value": "=comp78.value + 83"
+      },
+      {
+        "id": "comp84",
+        "type": "checkbox",
+        "value": "=model1.field84"
+      },
+      {
+        "id": "comp85",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp86",
+        "type": "text",
+        "value": "=comp81.value + 86"
+      },
+      {
+        "id": "comp87",
+        "type": "button",
+        "value": "=model1.field87"
+      },
+      {
+        "id": "comp88",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp89",
+        "type": "checkbox",
+        "value": "=comp84.value + 89"
+      },
+      {
+        "id": "comp90",
+        "type": "input",
+        "value": "=model1.field90"
+      },
+      {
+        "id": "comp91",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp92",
+        "type": "button",
+        "value": "=comp87.value + 92"
+      },
+      {
+        "id": "comp93",
+        "type": "select",
+        "value": "=model1.field93"
+      },
+      {
+        "id": "comp94",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp95",
+        "type": "input",
+        "value": "=comp90.value + 95"
+      },
+      {
+        "id": "comp96",
+        "type": "text",
+        "value": "=model1.field96"
+      },
+      {
+        "id": "comp97",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp98",
+        "type": "select",
+        "value": "=comp93.value + 98"
+      },
+      {
+        "id": "comp99",
+        "type": "checkbox",
+        "value": "=model1.field99"
+      },
+      {
+        "id": "comp100",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp101",
+        "type": "text",
+        "value": "=comp96.value + 101"
+      },
+      {
+        "id": "comp102",
+        "type": "button",
+        "value": "=model1.field102"
+      },
+      {
+        "id": "comp103",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp104",
+        "type": "checkbox",
+        "value": "=comp99.value + 104"
+      },
+      {
+        "id": "comp105",
+        "type": "input",
+        "value": "=model1.field105"
+      },
+      {
+        "id": "comp106",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp107",
+        "type": "button",
+        "value": "=comp102.value + 107"
+      },
+      {
+        "id": "comp108",
+        "type": "select",
+        "value": "=model1.field108"
+      },
+      {
+        "id": "comp109",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp110",
+        "type": "input",
+        "value": "=comp105.value + 110"
+      },
+      {
+        "id": "comp111",
+        "type": "text",
+        "value": "=model1.field111"
+      },
+      {
+        "id": "comp112",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp113",
+        "type": "select",
+        "value": "=comp108.value + 113"
+      },
+      {
+        "id": "comp114",
+        "type": "checkbox",
+        "value": "=model1.field114"
+      },
+      {
+        "id": "comp115",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp116",
+        "type": "text",
+        "value": "=comp111.value + 116"
+      },
+      {
+        "id": "comp117",
+        "type": "button",
+        "value": "=model1.field117"
+      },
+      {
+        "id": "comp118",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp119",
+        "type": "checkbox",
+        "value": "=comp114.value + 119"
+      },
+      {
+        "id": "comp120",
+        "type": "input",
+        "value": "=model1.field120"
+      },
+      {
+        "id": "comp121",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp122",
+        "type": "button",
+        "value": "=comp117.value + 122"
+      },
+      {
+        "id": "comp123",
+        "type": "select",
+        "value": "=model1.field123"
+      },
+      {
+        "id": "comp124",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp125",
+        "type": "input",
+        "value": "=comp120.value + 125"
+      },
+      {
+        "id": "comp126",
+        "type": "text",
+        "value": "=model1.field126"
+      },
+      {
+        "id": "comp127",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp128",
+        "type": "select",
+        "value": "=comp123.value + 128"
+      },
+      {
+        "id": "comp129",
+        "type": "checkbox",
+        "value": "=model1.field129"
+      },
+      {
+        "id": "comp130",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp131",
+        "type": "text",
+        "value": "=comp126.value + 131"
+      },
+      {
+        "id": "comp132",
+        "type": "button",
+        "value": "=model1.field132"
+      },
+      {
+        "id": "comp133",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp134",
+        "type": "checkbox",
+        "value": "=comp129.value + 134"
+      },
+      {
+        "id": "comp135",
+        "type": "input",
+        "value": "=model1.field135"
+      },
+      {
+        "id": "comp136",
+        "type": "text",
+        "value": "=param1"
+      },
+      {
+        "id": "comp137",
+        "type": "button",
+        "value": "=comp132.value + 137"
+      },
+      {
+        "id": "comp138",
+        "type": "select",
+        "value": "=model1.field138"
+      },
+      {
+        "id": "comp139",
+        "type": "checkbox",
+        "value": "=param1"
+      },
+      {
+        "id": "comp140",
+        "type": "input",
+        "value": "=comp135.value + 140"
+      },
+      {
+        "id": "comp141",
+        "type": "text",
+        "value": "=model1.field141"
+      },
+      {
+        "id": "comp142",
+        "type": "button",
+        "value": "=param1"
+      },
+      {
+        "id": "comp143",
+        "type": "select",
+        "value": "=comp138.value + 143"
+      },
+      {
+        "id": "comp144",
+        "type": "checkbox",
+        "value": "=model1.field144"
+      },
+      {
+        "id": "comp145",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "comp146",
+        "type": "text",
+        "value": "=comp141.value + 146"
+      },
+      {
+        "id": "comp147",
+        "type": "button",
+        "value": "=model1.field147"
+      },
+      {
+        "id": "comp148",
+        "type": "select",
+        "value": "=param1"
+      },
+      {
+        "id": "comp149",
+        "type": "checkbox",
+        "value": "=comp144.value + 149"
+      }
+    ]
+  }
+}

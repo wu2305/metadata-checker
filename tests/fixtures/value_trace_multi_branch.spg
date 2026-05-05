@@ -1,0 +1,31 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "params": [
+    {"id": "param1", "name": "P1"}
+  ],
+  "sources": [
+    {"id": "model1", "modelType": "query"}
+  ],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {
+        "id": "input1",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "input2",
+        "type": "input",
+        "value": "=model1.A"
+      },
+      {
+        "id": "input3",
+        "type": "input",
+        "value": "=input1.value + input2.value"
+      }
+    ]
+  }
+}

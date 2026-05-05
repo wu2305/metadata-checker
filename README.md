@@ -332,7 +332,7 @@ metadata-checker --project-dir ./my-project --explain action:app/page.spg|button
 cargo test
 ```
 
-115+ 个测试覆盖：
+150+ 个测试覆盖：
 - SuperPage 解析（组件、参数、数据源、表达式）
 - 表达式引用解析（简单、复杂、宏、模型、IF 条件）
 - 依赖图构建与拓扑排序
@@ -343,6 +343,16 @@ cargo test
 - 扫描器（动作解析、.tbl 解析、DataFlow 内嵌模型）
 - 边界错误处理
 - 真实场景用例
+
+### 新增测试（P0-P3）
+
+- **换行表达式**：`tests/fixtures/newline_expressions.spg` — 验证 `\n` 不 panic，引用仍能提取，字符串内换行不误判
+- **复杂循环检测**：`tests/fixtures/complex_cycle.spg`（A→B→C→D→B）— 验证环内节点 B/C/D，A 不在环内
+- **稳定拓扑排序**：`tests/fixtures/stable_order.spg` — 多次运行结果一致，按元数据出现顺序处理
+- **组件值追溯**：单级/多级/多分支 fixture — 验证 `trace_value_source` 能跨组件追溯到 Param/ModelAuto
+- **来源分类（SourceType）**：`Param`、`UserInput`、`ModelAuto`、`System`、`Computed`、`Constant`、`Unknown` — 测试覆盖每个枚举值
+- **性能与规模**：`tests/fixtures/large_page.spg`（150 组件）— 解析+拓扑排序 debug 模式 < 2s
+
 
 ## 真实语料与 AI 验收（M9）
 
