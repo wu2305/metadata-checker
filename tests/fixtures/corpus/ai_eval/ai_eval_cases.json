@@ -530,13 +530,13 @@
       "question": "页面 dataflow_embedded 是只读的吗？用户能修改数据吗？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain page:app/dataflow_embedded.spg"
+        "--project-dir tests/fixtures/test_project --query-page-logic page:app/dataflow_embedded.spg"
       ],
       "expected_facts": [
         "页面是只读仪表板",
         "没有用户可触发入口",
         "没有写入操作",
-        "没有 submitData/updateData/insertData/deleteData"
+        "summary.page_role 为 readonly_dashboard"
       ],
       "forbidden_claims": [
         "页面可以写入数据",
@@ -544,6 +544,12 @@
         "页面有数据修改入口"
       ],
       "evidence_requirements": [
+        {
+          "path": "summary.page_role",
+          "op": "eq",
+          "value": "readonly_dashboard",
+          "description": "summary.page_role 为 readonly_dashboard"
+        },
         {
           "path": "summary.write_target_count",
           "op": "eq",
@@ -560,8 +566,8 @@
           "path": "diagnostics",
           "op": "array_any",
           "field": "code",
-          "value": "NO_ENTRYPOINTS",
-          "description": "diagnostics 有 NO_ENTRYPOINTS"
+          "value": "NO_WRITE_TARGETS",
+          "description": "diagnostics 有 NO_WRITE_TARGETS"
         }
       ],
       "answer_rubric": {
@@ -584,7 +590,7 @@
       "uncertainty_policy": "如果页面确实无任何 action，可明确回答只读",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain",
+          "command_kind": "--query-page-logic",
           "target": "page:app/dataflow_embedded.spg",
           "args": [],
           "requires_project_dir": true,
@@ -592,6 +598,12 @@
         }
       ],
       "expected_output_assertions": [
+        {
+          "path": "summary.page_role",
+          "op": "eq",
+          "value": "readonly_dashboard",
+          "description": "summary.page_role 为 readonly_dashboard"
+        },
         {
           "path": "summary.write_target_count",
           "op": "eq",
@@ -608,8 +620,8 @@
           "path": "diagnostics",
           "op": "array_any",
           "field": "code",
-          "value": "NO_ENTRYPOINTS",
-          "description": "diagnostics 有 NO_ENTRYPOINTS 或 NO_WRITE_TARGETS"
+          "value": "NO_WRITE_TARGETS",
+          "description": "diagnostics 有 NO_WRITE_TARGETS 或 NO_ENTRYPOINTS"
         }
       ],
       "risk_tags": [

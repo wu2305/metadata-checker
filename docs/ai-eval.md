@@ -191,7 +191,7 @@ M9-F 将 `minimal_command_plan` 从字符串数组升级为结构化对象：
 ### risk_tags 风险覆盖
 
 全部 active case 必须覆盖以下标签：
-`page_logic`、`explain`、`context`、`dataflow`、`lineage`、`condition`、`diagonal`
+`page_logic`、`explain`、`context`、`dataflow`、`lineage`、`condition`、`diagnostic`
 
 ### case_status 与 difficulty
 
