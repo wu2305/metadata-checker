@@ -189,3 +189,64 @@ metadata-checker --project-dir /path/to/project --context button1 --depth 2 --bu
 # Page logic summary
 metadata-checker --project-dir /path/to/project --query-page-logic "page:app/合同管理/销售合同.spg"
 ```
+
+## AI 回答协议（M9-D）
+
+当使用 metadata-checker CLI 回答业务问题时，必须遵守以下协议，禁止默认读取 raw JSON 或凭空推断。
+
+### 1. 先选命令
+
+按问题类型优先选择以下命令：
+
+| 问题类型 | 优先命令 |
+|----------|----------|
+| 这个页面主要做什么？ | `--query-page-logic page:...` |
+| 这个按钮/组件做什么？ | `--explain comp:...\|component` |
+| 这个字段值从哪里来？ | `--explain field:model.field` |
+| 这个模型在哪里被读写？ | `--query-model model` / `--explain model:...` |
+| 这个动作在什么条件下执行？ | `--explain action:...\|...\|action` |
+| DataFlow 怎么来的？ | `--query-dataflow model` / `--explain model:dataflow_model` |
+| 周围还有哪些关键依赖？ | `--context \u003cID\u003e --depth 1 --budget normal` |
+
+### 2. 再读 summary
+
+执行命令后，**必须首先读取 `summary`**：
+- `summary.what_is_it` 给出自然语言一句话定义。
+- `summary.page_role` / `importance` 给出语义分类。
+- 计数字段（`entrypoint_count`、`write_target_count`、`read_by_count` 等）建立数量级认知。
+- **禁止跳过 summary 直接读取 details 或 evidence**。
+
+### 3. 需要核查时读 evidence
+
+当 summary 中的结论需要验证时，读取 `evidence`：
+- 每条 evidence 包含 `claim`、`source_file`、`node_id`、`edge_type`、`raw_expr`、`json_path`、`confidence`、`reason`。
+- 优先读取 `confidence=high` 的证据。
+- `confidence=medium/low` 的结论必须降级表达（"可能..."、"初步判断..."）。
+
+### 4. 需要细节时读 details
+
+只有在 summary + evidence 仍无法回答问题时，才展开 `details`：
+- `details.action_flows[]` 查看动作链详情。
+- `details.lineage[]` 查看字段来源链。
+- `details.upstream/downstream` 查看图邻居。
+
+### 5. 遇到 diagnostics 必须保守回答
+
+如果输出含 `diagnostics`，必须遵守：
+- `severity=error`：该结论不可信，必须说明"输出包含错误诊断，无法确定"。
+- `severity=warning`：结论可能不完整，必须说明"存在警告诊断，结论可能不完整"。
+- `severity=info`：仅作提示，不影响主要结论。
+- 常见需要降级的诊断码：`UNRESOLVED_REF`、`EVIDENCE_INCOMPLETE`、`EVIDENCE_SAMPLED`、`LINEAGE_SOURCE_MISSING`、`LINEAGE_EXPR_UNPARSED`、`UNKNOWN_ACTION_TYPE`。
+
+### 6. 输出体积控制
+
+- 默认使用 `--budget normal`；只有需要最小上下文时才用 `--budget compact`。
+- `truncated=true` 时说明输出被截断，还有未展示的关系。
+- 禁止无差别读取 `--budget full` 的完整 details 大数组。
+
+### 7. 禁止行为
+
+- 禁止默认读取 raw JSON 大对象。
+- 禁止忽略 diagnostics 做空洞确定性结论。
+- 禁止在 evidence 不足时编造来源。
+- 禁止重复使用错误的命令格式（例如 `--query-model model:model1` 会被 CLI 二次加前缀变成 `model:model:model1`，应写 `--query-model model1`）。

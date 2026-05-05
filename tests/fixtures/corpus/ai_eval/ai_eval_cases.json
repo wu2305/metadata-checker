@@ -30,19 +30,31 @@
         "存在 action_category=data_write 的 action"
       ],
       "answer_rubric": {
-        "must_mention": ["用户入口数量", "写入目标", "action 类型"],
-        "should_mention": ["弹窗", "切换面板"],
-        "must_not_mention": ["只读", "无写入"]
+        "must_mention": [
+          "用户入口数量",
+          "写入目标",
+          "action 类型"
+        ],
+        "should_mention": [
+          "弹窗",
+          "切换面板"
+        ],
+        "must_not_mention": [
+          "只读",
+          "无写入"
+        ]
       },
       "uncertainty_policy": "如果诊断中有 UNKNOWN_ACTION_TYPE，应标注该 action 语义不确定",
-      "minimal_command_plan": ["--query-page-logic page:app/actions_test.spg"]
+      "minimal_command_plan": [
+        "--query-page-logic page:app/actions_test.spg"
+      ]
     },
     {
       "case_id": "button_submit_effect",
       "question": "点击 actions_test 页面中的 button1 会发生什么？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain comp:app/actions_test.spg|button1"
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|button1'"
       ],
       "expected_facts": [
         "button1 是一个按钮组件",
@@ -61,12 +73,24 @@
         "evidence 中有 ActionWrites 边"
       ],
       "answer_rubric": {
-        "must_mention": ["button1", "submitData", "model1"],
-        "should_mention": ["action1", "写入目标字段"],
-        "must_not_mention": ["只读", "无动作"]
+        "must_mention": [
+          "button1",
+          "submitData",
+          "model1"
+        ],
+        "should_mention": [
+          "action1",
+          "写入目标字段"
+        ],
+        "must_not_mention": [
+          "只读",
+          "无动作"
+        ]
       },
       "uncertainty_policy": "如果 lineage 为空，应说明字段来源无法追溯",
-      "minimal_command_plan": ["--explain comp:app/actions_test.spg|button1"]
+      "minimal_command_plan": [
+        "--explain 'comp:app/actions_test.spg|button1'"
+      ]
     },
     {
       "case_id": "field_lineage_model1_name",
@@ -90,12 +114,22 @@
         "如果 lineage 为空，diagnostics 应有 LINEAGE_SOURCE_MISSING"
       ],
       "answer_rubric": {
-        "must_mention": ["写入者", "页面 action"],
-        "should_mention": ["submitData/insertData/updateData"],
-        "must_not_mention": ["只读", "来源完全未知"]
+        "must_mention": [
+          "写入者",
+          "页面 action"
+        ],
+        "should_mention": [
+          "submitData/insertData/updateData"
+        ],
+        "must_not_mention": [
+          "只读",
+          "来源完全未知"
+        ]
       },
       "uncertainty_policy": "如果 lineage 链不完整，允许说\"写入者已知，但完整来源链未追溯\"",
-      "minimal_command_plan": ["--explain field:model1.name"]
+      "minimal_command_plan": [
+        "--explain field:model1.name"
+      ]
     },
     {
       "case_id": "dataflow_output_source",
@@ -121,22 +155,36 @@
         "evidence 有 OutputsTo 或 DataflowInput 边"
       ],
       "answer_rubric": {
-        "must_mention": ["输入源", "输出目标", "内部节点"],
-        "should_mention": ["链式 DataFlow"],
-        "must_not_mention": ["孤立", "无输入", "无输出"]
+        "must_mention": [
+          "输入源",
+          "输出目标",
+          "内部节点"
+        ],
+        "should_mention": [
+          "链式 DataFlow"
+        ],
+        "must_not_mention": [
+          "孤立",
+          "无输入",
+          "无输出"
+        ]
       },
       "uncertainty_policy": "如果 lineage 不完整，应标注字段级追溯缺失",
-      "minimal_command_plan": ["--query-dataflow dataflow_output", "--explain model:dataflow_output"]
+      "minimal_command_plan": [
+        "--query-dataflow dataflow_output",
+        "--explain model:dataflow_output"
+      ]
     },
     {
       "case_id": "readonly_page_check",
-      "question": "关联员工企微页面是只读的吗？用户能修改数据吗？",
+      "question": "页面 dataflow_embedded 是只读的吗？用户能修改数据吗？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain page:app/关联员工企微.app/SuperPage.spg"
+        "--project-dir tests/fixtures/test_project --explain page:app/dataflow_embedded.spg"
       ],
       "expected_facts": [
-        "页面是只读的",
+        "页面是只读仪表板",
+        "没有用户可触发入口",
         "没有写入操作",
         "没有 submitData/updateData/insertData/deleteData"
       ],
@@ -146,29 +194,44 @@
         "页面有数据修改入口"
       ],
       "evidence_requirements": [
-        "summary 标记为 readonly_page 或 importance=readonly",
-        "details.writes 为空或 write_target_count=0",
-        "diagnostics 有 NO_WRITE_TARGETS 或类似提示"
+        "summary.page_role 为 readonly_dashboard",
+        "summary.write_target_count = 0",
+        "summary.entrypoint_count = 0",
+        "diagnostics 有 NO_ENTRYPOINTS 或 NO_WRITE_TARGETS"
       ],
       "answer_rubric": {
-        "must_mention": ["只读", "无写入"],
-        "should_mention": ["NO_WRITE_TARGETS diagnostic"],
-        "must_not_mention": ["写入", "提交", "修改"]
+        "must_mention": [
+          "只读",
+          "无写入",
+          "无入口"
+        ],
+        "should_mention": [
+          "readonly_dashboard",
+          "NO_WRITE_TARGETS"
+        ],
+        "must_not_mention": [
+          "写入",
+          "提交",
+          "修改",
+          "按钮"
+        ]
       },
       "uncertainty_policy": "如果页面确实无任何 action，可明确回答只读",
-      "minimal_command_plan": ["--explain page:app/关联员工企微.app/SuperPage.spg"]
+      "minimal_command_plan": [
+        "--explain page:app/dataflow_embedded.spg"
+      ]
     },
     {
       "case_id": "param_passing_link",
-      "question": "验证URL传参页面跳转时传递了哪些参数？",
+      "question": "page_relations 页面跳转时传递了哪些参数？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --query-page-logic page:app/验证URL传参.spg"
+        "--project-dir tests/fixtures/test_project --query-page-logic page:app/page_relations.spg"
       ],
       "expected_facts": [
         "有 link 类型的 action",
         "link 传递了参数",
-        "参数值来源明确"
+        "参数值来源包含静态值和模型字段引用"
       ],
       "forbidden_claims": [
         "页面没有任何导航",
@@ -177,16 +240,28 @@
       ],
       "evidence_requirements": [
         "details.navigation 非空",
-        "details.passes_params 或 sets_params 非空",
-        "evidence 有 PassesParam 或 SetsParam 边"
+        "details.navigation 中有 PassesParam 边",
+        "summary.navigation_count > 0"
       ],
       "answer_rubric": {
-        "must_mention": ["link", "参数", "来源"],
-        "should_mention": ["目标页面"],
-        "must_not_mention": ["无导航", "无参数"]
+        "must_mention": [
+          "link",
+          "参数",
+          "来源"
+        ],
+        "should_mention": [
+          "目标页面",
+          "PassesParam"
+        ],
+        "must_not_mention": [
+          "无导航",
+          "无参数"
+        ]
       },
       "uncertainty_policy": "如果参数值是表达式，应标注表达式可能包含未解析引用",
-      "minimal_command_plan": ["--query-page-logic page:app/验证URL传参.spg"]
+      "minimal_command_plan": [
+        "--query-page-logic page:app/page_relations.spg"
+      ]
     },
     {
       "case_id": "diagnostic_affects_answer",
@@ -211,19 +286,31 @@
         "summary 中的 risk_count > 0"
       ],
       "answer_rubric": {
-        "must_mention": ["UNKNOWN_ACTION_TYPE", "语义不确定"],
-        "should_mention": ["保守回答", "action_category=unknown"],
-        "must_not_mention": ["不影响", "忽略", "完全确定"]
+        "must_mention": [
+          "UNKNOWN_ACTION_TYPE",
+          "语义不确定"
+        ],
+        "should_mention": [
+          "保守回答",
+          "action_category=unknown"
+        ],
+        "must_not_mention": [
+          "不影响",
+          "忽略",
+          "完全确定"
+        ]
       },
       "uncertainty_policy": "遇到诊断时必须降级表达，不能假装诊断不存在",
-      "minimal_command_plan": ["--query-page-logic page:app/actions_test.spg"]
+      "minimal_command_plan": [
+        "--query-page-logic page:app/actions_test.spg"
+      ]
     },
     {
       "case_id": "context_button1_neighbors",
       "question": "button1 周围还有哪些关键依赖和影响？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --context comp:app/actions_test.spg|button1 --depth 1 --budget normal"
+        "--project-dir tests/fixtures/test_project --context 'comp:app/actions_test.spg|button1' --depth 2 --budget normal"
       ],
       "expected_facts": [
         "button1 属于页面 actions_test",
@@ -241,24 +328,35 @@
         "details.downstream 包含 model1"
       ],
       "answer_rubric": {
-        "must_mention": ["所属页面", "触发的 action", "写入目标"],
-        "should_mention": ["上下游关系"],
-        "must_not_mention": ["孤立", "无影响"]
+        "must_mention": [
+          "所属页面",
+          "触发的 action",
+          "写入目标"
+        ],
+        "should_mention": [
+          "上下游关系"
+        ],
+        "must_not_mention": [
+          "孤立",
+          "无影响"
+        ]
       },
       "uncertainty_policy": "如果 budget=compact 截断，应说明还有更深层关系未展开",
-      "minimal_command_plan": ["--context comp:app/actions_test.spg|button1 --depth 1 --budget normal"]
+      "minimal_command_plan": [
+        "--context 'comp:app/actions_test.spg|button1' --depth 2 --budget normal"
+      ]
     },
     {
       "case_id": "condition_action_behavior",
-      "question": "actions_test 中 buttonValidate 的动作在什么条件下执行？",
+      "question": "actions_test 中 button2 的动作在什么条件下执行？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain action:app/actions_test.spg|buttonValidate|actionValidate"
+        "--project-dir tests/fixtures/test_project --explain 'action:app/actions_test.spg|button2|action1'"
       ],
       "expected_facts": [
-        "buttonValidate 触发 validateData 类型 action",
-        "condition 或 conditionExp 控制执行条件",
-        "有条件时动作不会无条件执行"
+        "button2 触发 updateData 类型 action",
+        "conditionExp 控制执行条件",
+        "条件为 input1.value == 'test'"
       ],
       "forbidden_claims": [
         "动作无条件执行",
@@ -267,16 +365,28 @@
       ],
       "evidence_requirements": [
         "details.condition.raw_expr 非空",
-        "summary 有 condition 相关信息",
-        "evidence 有 condition 解析证据"
+        "details.condition.refs 包含 input1",
+        "summary 有 condition 相关信息"
       ],
       "answer_rubric": {
-        "must_mention": ["validateData", "条件", "condition"],
-        "should_mention": ["conditionExp", "raw_expr"],
-        "must_not_mention": ["无条件", "没有条件"]
+        "must_mention": [
+          "updateData",
+          "条件",
+          "conditionExp",
+          "input1"
+        ],
+        "should_mention": [
+          "input1.value=='test'"
+        ],
+        "must_not_mention": [
+          "无条件",
+          "没有条件"
+        ]
       },
       "uncertainty_policy": "如果 condition 表达式有未解析引用，应标注条件判断可能不完整",
-      "minimal_command_plan": ["--explain action:app/actions_test.spg|buttonValidate|actionValidate"]
+      "minimal_command_plan": [
+        "--explain 'action:app/actions_test.spg|button2|action1'"
+      ]
     },
     {
       "case_id": "dataflow_chain_trace",
@@ -303,12 +413,26 @@
         "evidence 有 DataflowInput/OutputsTo 边"
       ],
       "answer_rubric": {
-        "must_mention": ["df_a", "physical_x", "df_b", "链式"],
-        "should_mention": ["字段传递", "inputField"],
-        "must_not_mention": ["无连接", "不相关"]
+        "must_mention": [
+          "df_a",
+          "physical_x",
+          "df_b",
+          "链式"
+        ],
+        "should_mention": [
+          "字段传递",
+          "inputField"
+        ],
+        "must_not_mention": [
+          "无连接",
+          "不相关"
+        ]
       },
       "uncertainty_policy": "如果字段级 lineage 被截断，应标注截断位置和原因",
-      "minimal_command_plan": ["--query-dataflow df_a", "--explain field:df_b.id"]
+      "minimal_command_plan": [
+        "--query-dataflow df_a",
+        "--explain field:df_b.id"
+      ]
     }
   ]
 }
