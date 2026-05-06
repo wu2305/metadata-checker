@@ -71,7 +71,7 @@ pub struct Cli {
         long,
         value_name = "MS",
         default_value = "10000",
-        help = "Graph database lock acquisition timeout in milliseconds (default: 3000)"
+        help = "Graph database lock acquisition timeout in milliseconds (default: 10000)"
     )]
     pub graph_lock_timeout_ms: u64,
 

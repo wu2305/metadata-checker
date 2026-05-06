@@ -514,6 +514,6 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 | 诊断码 | 级别 | 触发条件 | 建议 |
 |--------|------|----------|------|
 | `GRAPH_DB_NOT_FOUND` | error | graphdb 文件不存在 | `--build-graph` |
-| `GRAPH_DB_LOCKED` | error | redb lock 冲突，多进程并发 | 等待或换 `--graph-db-path` |
+| `GRAPH_DB_LOCKED` | error | redb lock 冲突，多进程并发 | 等待、换 `--graph-db-path`，或在真实项目场景增加 `--graph-lock-timeout-ms 30000` |
 | `GRAPH_DB_PERMISSION_DENIED` | error | 只读目录或无权限 | 换到 `/tmp` 等可写路径 |
 | `GRAPH_DB_OPEN_ERROR` | error | 其他 redb/IO 错误 | `--build-graph` 重建 |
