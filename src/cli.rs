@@ -67,6 +67,14 @@ pub struct Cli {
     )]
     pub graph_db_path: Option<PathBuf>,
 
+    #[arg(
+        long,
+        value_name = "MS",
+        default_value = "3000",
+        help = "Graph database lock acquisition timeout in milliseconds (default: 3000)"
+    )]
+    pub graph_lock_timeout_ms: u64,
+
     #[arg(long, help = "Check graph database status and output JSON report")]
     pub check_graph: bool,
 

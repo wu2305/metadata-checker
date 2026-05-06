@@ -187,6 +187,8 @@ fn test_build_graph_to_tmp_real_project() {
         "--build-graph",
         "--graph-db-path",
         tmp.to_str().unwrap(),
+        "--graph-lock-timeout-ms",
+        "30000",
     ]);
     assert!(
         build_out.contains("Graph database built"),
@@ -203,6 +205,8 @@ fn test_build_graph_to_tmp_real_project() {
             "page:app/测试.app/文件快速上传.spg",
             "--graph-db-path",
             tmp.to_str().unwrap(),
+            "--graph-lock-timeout-ms",
+            "30000",
         ],
         &[
             "--project-dir",
@@ -211,6 +215,8 @@ fn test_build_graph_to_tmp_real_project() {
             "crm_customermanager",
             "--graph-db-path",
             tmp.to_str().unwrap(),
+            "--graph-lock-timeout-ms",
+            "30000",
         ],
         &[
             "--project-dir",
@@ -219,6 +225,8 @@ fn test_build_graph_to_tmp_real_project() {
             "page:app/测试.app/文件快速上传.spg",
             "--graph-db-path",
             tmp.to_str().unwrap(),
+            "--graph-lock-timeout-ms",
+            "30000",
         ],
     ];
     for args in queries {
@@ -229,6 +237,99 @@ fn test_build_graph_to_tmp_real_project() {
                 .iter()
                 .all(|d| d.code != "GRAPH_DB_NOT_FOUND" && d.code != "GRAPH_DB_LOCKED"),
             "real project query failed: {:?}",
+            ai.diagnostics
+        );
+    }
+
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+#[ignore = "requires real project at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_parallel_queries() {
+    let project = "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi";
+    if !std::path::Path::new(project).exists() {
+        return;
+    }
+    let tmp = std::env::temp_dir().join("m11_parallel.graphdb");
+    let _ = std::fs::remove_file(&tmp);
+
+    // Build first
+    let build_out = run_cli(&[
+        "--project-dir",
+        project,
+        "--build-graph",
+        "--graph-db-path",
+        tmp.to_str().unwrap(),
+        "--graph-lock-timeout-ms",
+        "30000",
+    ]);
+    assert!(
+        build_out.contains("Graph database built"),
+        "build failed: {}",
+        build_out
+    );
+
+    // Run two queries in parallel threads
+    let db_path1 = tmp.clone();
+    let db_path2 = tmp.clone();
+    let project1 = project.to_string();
+    let project2 = project.to_string();
+
+    let handle1 = std::thread::spawn(move || {
+        run_cli(&[
+            "--project-dir",
+            &project1,
+            "--query-model",
+            "crm_customermanager",
+            "--graph-db-path",
+            db_path1.to_str().unwrap(),
+            "--graph-lock-timeout-ms",
+            "30000",
+        ])
+    });
+    let handle2 = std::thread::spawn(move || {
+        run_cli(&[
+            "--project-dir",
+            &project2,
+            "--query-page-logic",
+            "page:app/测试.app/文件快速上传.spg",
+            "--graph-db-path",
+            db_path2.to_str().unwrap(),
+            "--graph-lock-timeout-ms",
+            "30000",
+        ])
+    });
+
+    let out1 = handle1.join().expect("thread 1 panicked");
+    let out2 = handle2.join().expect("thread 2 panicked");
+
+    for (label, out) in [("model", &out1), ("page_logic", &out2)] {
+        eprintln!(
+            "[TEST DEBUG] {} raw stdout (len={}): {}",
+            label,
+            out.len(),
+            out
+        );
+        let ai: AiOutput = match serde_json::from_str(out) {
+            Ok(v) => v,
+            Err(e) => panic!(
+                "parallel query {} parse error: {}. stdout: {}",
+                label, e, out
+            ),
+        };
+        for d in &ai.diagnostics {
+            eprintln!(
+                "[TEST DEBUG] {} diag: code={} msg={}",
+                label, d.code, d.message
+            );
+        }
+        assert!(
+            ai.diagnostics
+                .iter()
+                .all(|d| d.code != "GRAPH_DB_NOT_FOUND" && d.code != "GRAPH_DB_LOCKED"),
+            "parallel query {} failed: {:?}",
+            label,
             ai.diagnostics
         );
     }

@@ -24,6 +24,7 @@ use std::io::{self, Write};
 /// human 模式支持交互式组件查询（--human 不带 --query 时进入交互）。
 fn main() -> Result<()> {
     let args = cli::Cli::parse();
+    metadata_checker::graph::set_graph_lock_timeout_ms(args.graph_lock_timeout_ms);
 
     // Cross-file graph analysis mode
     if let Some(ref project_dir) = args.project_dir {

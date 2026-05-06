@@ -8,6 +8,15 @@ use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// 图数据库锁等待超时（毫秒），进程级可配置
+static GRAPH_LOCK_TIMEOUT_MS: AtomicU64 = AtomicU64::new(3000);
+
+/// 设置 graphdb 锁等待超时（毫秒）
+pub fn set_graph_lock_timeout_ms(ms: u64) {
+    GRAPH_LOCK_TIMEOUT_MS.store(ms, Ordering::Relaxed);
+}
 
 /// 项目级图数据库模块
 ///
@@ -89,7 +98,11 @@ const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
 /// redb 同一文件不支持多进程并发打开，因此通过辅助锁文件实现串行。
 fn acquire_graph_lock(db_path: &Path) -> Result<std::fs::File> {
     let lock_path = db_path.with_extension("graphdb.lock");
-    for attempt in 0..30 {
+    let timeout_ms = GRAPH_LOCK_TIMEOUT_MS.load(Ordering::Relaxed);
+    eprintln!("[LOCK] timeout_ms={}", timeout_ms);
+    let interval_ms = 100u64;
+    let max_attempts = timeout_ms.div_ceil(interval_ms).max(1);
+    for attempt in 0..max_attempts {
         match std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -97,13 +110,17 @@ fn acquire_graph_lock(db_path: &Path) -> Result<std::fs::File> {
         {
             Ok(f) => return Ok(f),
             Err(_) => {
-                if attempt < 29 {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                if attempt + 1 < max_attempts {
+                    std::thread::sleep(std::time::Duration::from_millis(interval_ms));
                 }
             }
         }
     }
-    anyhow::bail!("Cannot acquire graphdb lock after 3s: {:?}", lock_path)
+    anyhow::bail!(
+        "Cannot acquire graphdb lock after {}ms: {:?}",
+        timeout_ms,
+        lock_path
+    )
 }
 
 fn release_graph_lock(db_path: &Path) {
