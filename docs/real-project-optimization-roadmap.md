@@ -4,6 +4,8 @@
 
 ## M10：表与 DataFlow 单文件输出可理解
 
+状态：已收敛。剩余非阻塞观察项已归并到 M13 和 M14。
+
 ### 目标
 
 让 AI 在没有项目图数据库时，也能从单个 `.tbl` 文件获得正确的表/DataFlow 语义，而不是被误导为 SuperPage。
@@ -89,6 +91,7 @@
 - `EVIDENCE_SAMPLED` 提示存在，但 AI 仍需在 details 与 evidence 之间自行判断覆盖范围。
 - `query-model fact_saleContract` 输出 52 个 `consumed_by_dataflows`，summary 只说读写为 0，模型容易忽略 DataFlow 消费方。
 - `details` 中同类长列表缺少分组、排序依据、Top-N 摘要与剩余计数。
+- M10 遗留观察：单文件 `.tbl` / DataFlow 的 `details.fields`、`details.field_lineage`、`evidence` 在真实 DataFlow 上仍可能很长，低噪声预算不能只覆盖项目级查询，也要覆盖单文件 Table/DataFlow 输出。
 - `--budget compact|normal|full` 已存在，但不是所有查询都能体现清晰预算语义。
 - 默认 `SuperPage` 输出没有 `page_role/what_is_it`，AI 要从数据源和表达式中自行归纳页面用途。
 - `--priority` 在真实页面上对 AI 的增量信息不明显，容易让模型白跑命令。
@@ -97,6 +100,7 @@
 
 - CLI 增加或强化 `--budget compact`/`--ai-brief`，输出只包含 `summary`、`key_findings`、`risk_diagnostics`、`evidence_summary`、`next_queries`。
 - 长列表输出必须包含 `total_count`、`shown_count`、`truncated`、`remaining_count`。
+- 单文件 `.tbl` / DataFlow 输出必须支持低噪声摘要，默认避免让 AI 直接读取完整字段和 evidence 大数组。
 - `query-model` summary 增加 DataFlow 角色计数，如 `consumed_by_dataflow_count`、`produced_by_count`。
 - `query-page-logic` summary 增加 `top_entrypoints`、`top_writes`、`top_navigation` 的低噪声摘要。
 - 默认单页输出增加 `what_is_it` 与 `page_role`，不要求项目图也能给出保守页面意图。
@@ -111,6 +115,7 @@
 ### 问题清单
 
 - `next_queries` 中 `comp:...|button1` 未加引号，shell 会把 `|` 当管道。
+- M10 遗留观察：单文件 `.tbl` 输出的 `next_queries` 也需要纳入统一命令规范，不能只修页面/组件 target。
 - `SKILL.md` 虽有 ID 格式说明，但没有强制规定所有含 `|`、空格、中文路径的 target 必须加单引号。
 - 真实项目存在大量同名或局部名模型，如 `model1/model5/model74`，全项目查询容易命中错误节点。
 - 缺少 `find`/`search` 类命令，AI 要先依赖 `rg --files` 或猜路径。
@@ -121,6 +126,7 @@
 ### 验收目标
 
 - 所有 `next_queries` 对含 `|`、空格、中文路径的 target 自动加单引号。
+- 所有 `next_queries` 都应输出可直接复制执行的命令片段；无法确定 `<DIR>` 或 `<MODEL>` 时必须明确标注占位符来源和解析方式。
 - `SKILL.md` 增加命令引用硬规则：target 一律单引号包裹。
 - CLI 增加 `--find-page <KEYWORD>`、`--find-model <KEYWORD>`、`--find-component <KEYWORD>`。
 - CLI 增加页面作用域解析能力，例如 `--resolve-model page:... model5`。
@@ -177,4 +183,3 @@
 - `SKILL.md` 增加冲突处理规则：summary 不完整时结合 details 中角色字段，但必须说明口径。
 - `SKILL.md` 增加命令引用规则：所有 target 使用单引号。
 - 空上下文 `5.4-mini` 能按协议完成至少 5 个真实项目问题，不出现已知误判。
-
