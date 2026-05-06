@@ -27,7 +27,15 @@ fn main() -> Result<()> {
 
     // Cross-file graph analysis mode
     if let Some(ref project_dir) = args.project_dir {
-        let db_path = graph_db_path(project_dir);
+        let db_path = args
+            .resolve_graph_db_path()
+            .unwrap_or_else(|| graph_db_path(project_dir));
+
+        if args.check_graph {
+            let status = GraphDB::check_graph_db(&db_path);
+            println!("{}", serde_json::to_string_pretty(&status)?);
+            return Ok(());
+        }
 
         if args.build_graph {
             scanner::scan_project(project_dir, &db_path)?;
@@ -35,7 +43,13 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        let graph = GraphDB::open_readonly(&db_path)?;
+        let graph = match GraphDB::open_or_diagnostic(&db_path) {
+            Ok(g) => g,
+            Err(out) => {
+                println!("{}", serde_json::to_string_pretty(&out)?);
+                return Ok(());
+            }
+        };
 
         if let Some(ref model_id) = args.query_model {
             let model_node_id = format!("model:{}", model_id);
@@ -97,6 +111,16 @@ fn main() -> Result<()> {
             "No query specified. Use --query-model, --query-page, --query-cross, --query-dataflow, --query-page-logic, --explain, or --context."
         );
         return Ok(());
+    }
+
+    // --check-graph without --project-dir requires explicit --graph-db-path
+    if args.check_graph {
+        if let Some(ref db_path) = args.graph_db_path {
+            let status = GraphDB::check_graph_db(db_path);
+            println!("{}", serde_json::to_string_pretty(&status)?);
+            return Ok(());
+        }
+        anyhow::bail!("--check-graph requires either --project-dir or --graph-db-path");
     }
 
     // Validate args

@@ -83,6 +83,7 @@ pub enum OutputKind {
     PageLogic,
     Table,
     DataFlow,
+    GraphDbCheck,
 }
 
 /// 证据结构

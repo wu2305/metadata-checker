@@ -1,3 +1,6 @@
+use crate::output::schema::{
+    AiOutput, Confidence, Diagnostic, DiagnosticSeverity, Evidence, Location, OutputKind,
+};
 use anyhow::{Context, Result};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -151,14 +154,265 @@ impl GraphDB {
         })
     }
 
+    /// 检查图数据库状态，返回结构化 AiOutput（不 panic）
+    pub fn check_graph_db(db_path: &Path) -> AiOutput {
+        let mut out = AiOutput::new(
+            OutputKind::GraphDbCheck,
+            serde_json::json!({
+                "db_path": db_path.to_string_lossy().to_string(),
+                "exists": false,
+                "readable": false,
+                "writable": false,
+                "needs_rebuild": true,
+            }),
+        );
+        out.query_target = Some(db_path.to_string_lossy().to_string());
+
+        if !db_path.exists() {
+            out.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: "GRAPH_DB_NOT_FOUND".to_string(),
+                message: format!("Graph database not found at {:?}", db_path),
+                location: Location {
+                    source_file: Some(db_path.to_string_lossy().to_string()),
+                    node_id: None,
+                    json_path: None,
+                },
+                suggestion: Some(
+                    "Run metadata-checker --project-dir <DIR> --build-graph to create it"
+                        .to_string(),
+                ),
+            });
+            out.next_queries.push(format!(
+                "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
+                db_path.to_string_lossy()
+            ));
+            return out;
+        }
+
+        let meta = std::fs::metadata(db_path);
+        let readable = meta
+            .as_ref()
+            .map(|m| m.permissions().readonly())
+            .unwrap_or(true);
+        // On Unix, check write permission via OpenOptions
+        let writable = std::fs::OpenOptions::new()
+            .write(true)
+            .open(db_path)
+            .is_ok();
+
+        out.summary["exists"] = serde_json::json!(true);
+        out.summary["readable"] = serde_json::json!(!readable);
+        out.summary["writable"] = serde_json::json!(writable);
+
+        // Try open with redb to verify integrity
+        match Database::open(db_path) {
+            Ok(db) => {
+                let read_txn = db.begin_read();
+                let tables_ok = read_txn
+                    .map(|tx| {
+                        tx.open_table(NODES_TABLE).is_ok() && tx.open_table(EDGES_TABLE).is_ok()
+                    })
+                    .unwrap_or(false);
+                out.summary["needs_rebuild"] = serde_json::json!(!tables_ok);
+                out.evidence.push(
+                    Evidence::new("Graph database opened successfully", "redb open + read")
+                        .with_source_file(db_path.to_string_lossy().to_string())
+                        .with_confidence(Confidence::High),
+                );
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("lock")
+                    || msg.contains("already open")
+                    || msg.contains("Cannot acquire")
+                {
+                    out.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        code: "GRAPH_DB_LOCKED".to_string(),
+                        message: format!("Graph database is locked by another process: {}", msg),
+                        location: Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
+                        suggestion: Some(
+                            "Wait for other process to finish, or use a different --graph-db-path"
+                                .to_string(),
+                        ),
+                    });
+                } else if msg.contains("permission")
+                    || msg.contains("denied")
+                    || msg.contains("read-only")
+                {
+                    out.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        code: "GRAPH_DB_PERMISSION_DENIED".to_string(),
+                        message: format!("Graph database permission denied: {}", msg),
+                        location: Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
+                        suggestion: Some(
+                            "Use --graph-db-path pointing to a writable directory".to_string(),
+                        ),
+                    });
+                } else {
+                    out.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        code: "GRAPH_DB_OPEN_ERROR".to_string(),
+                        message: format!("Failed to open graph database: {}", msg),
+                        location: Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
+                        suggestion: Some("Try --build-graph to rebuild".to_string()),
+                    });
+                }
+                out.summary["needs_rebuild"] = serde_json::json!(true);
+            }
+        }
+
+        out
+    }
+
+    /// 尝试打开图数据库，失败时返回结构化 AiOutput 错误
+    pub fn open_or_diagnostic(db_path: &Path) -> Result<Self, Box<AiOutput>> {
+        if !db_path.exists() {
+            let mut out = AiOutput::new(
+                OutputKind::GraphDbCheck,
+                serde_json::json!({
+                    "db_path": db_path.to_string_lossy().to_string(),
+                    "exists": false,
+                }),
+            );
+            out.query_target = Some(db_path.to_string_lossy().to_string());
+            out.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: "GRAPH_DB_NOT_FOUND".to_string(),
+                message: format!("Graph database not found at {:?}", db_path),
+                location: Location {
+                    source_file: Some(db_path.to_string_lossy().to_string()),
+                    node_id: None,
+                    json_path: None,
+                },
+                suggestion: Some(
+                    "Run metadata-checker --project-dir <DIR> --build-graph to create it"
+                        .to_string(),
+                ),
+            });
+            out.next_queries.push(format!(
+                "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
+                db_path.to_string_lossy()
+            ));
+            return Err(Box::new(out));
+        }
+
+        match Self::open_readonly(db_path) {
+            Ok(g) => Ok(g),
+            Err(e) => {
+                let msg = e.to_string();
+                let mut out = AiOutput::new(
+                    OutputKind::GraphDbCheck,
+                    serde_json::json!({
+                        "db_path": db_path.to_string_lossy().to_string(),
+                        "exists": true,
+                    }),
+                );
+                out.query_target = Some(db_path.to_string_lossy().to_string());
+                if msg.contains("lock")
+                    || msg.contains("already open")
+                    || msg.contains("Cannot acquire")
+                {
+                    out.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        code: "GRAPH_DB_LOCKED".to_string(),
+                        message: format!("Graph database locked: {}", msg),
+                        location: Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
+                        suggestion: Some(
+                            "Use --graph-db-path to a separate path, or wait for other process"
+                                .to_string(),
+                        ),
+                    });
+                } else if msg.contains("permission")
+                    || msg.contains("denied")
+                    || msg.contains("read-only")
+                {
+                    out.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        code: "GRAPH_DB_PERMISSION_DENIED".to_string(),
+                        message: format!("Graph database permission denied: {}", msg),
+                        location: Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
+                        suggestion: Some(
+                            "Use --graph-db-path pointing to a writable directory".to_string(),
+                        ),
+                    });
+                } else {
+                    out.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        code: "GRAPH_DB_OPEN_ERROR".to_string(),
+                        message: format!("Failed to open graph database: {}", msg),
+                        location: Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
+                        suggestion: Some("Try --build-graph to rebuild".to_string()),
+                    });
+                }
+                Err(Box::new(out))
+            }
+        }
+    }
+
     /// 以只读模式打开图数据库（不创建表，不持有写锁）
+    /// 支持重试：当 redb 报告 lock 冲突时，最多重试 3 次，每次间隔 100ms。
     pub fn open_readonly(db_path: &Path) -> Result<Self> {
         if !db_path.exists() {
             anyhow::bail!("Graph database not found at {:?}", db_path);
         }
-        let db = Database::open(db_path)
-            .with_context(|| format!("Failed to open database at {:?}", db_path))?;
+        let mut last_err = None;
+        for attempt in 0..3 {
+            match Database::open(db_path) {
+                Ok(db) => {
+                    return Self::load_from_db(db, db_path);
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    if (msg.contains("lock")
+                        || msg.contains("already open")
+                        || msg.contains("Cannot acquire"))
+                        && attempt < 2
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        continue;
+                    }
+                    last_err = Some(e);
+                    break;
+                }
+            }
+        }
+        let err = last_err
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "Unknown redb error".to_string());
+        Err(anyhow::anyhow!(
+            "Failed to open database at {:?}: {}",
+            db_path,
+            err
+        ))
+    }
 
+    fn load_from_db(db: Database, db_path: &Path) -> Result<Self> {
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
 
@@ -201,7 +455,8 @@ impl GraphDB {
             removed_nodes: HashSet::new(),
         })
     }
-    /// 添加节点（如已存在则更新）
+
+    /// 检查图数据库状态，返回结构化 AiOutput（不 panic）
     pub fn add_node(
         &mut self,
         id: String,

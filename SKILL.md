@@ -89,17 +89,30 @@ Output structure (kind = Explain):
 
 **Yes** → You need `--project-dir <DIR>`
 
-First, build the graph database:
+**Step 1: 检查 graphdb 状态**
 ```bash
-metadata-checker --project-dir /path/to/project --build-graph
+metadata-checker --check-graph --graph-db-path /tmp/project.graphdb
 ```
+- 若返回 `GRAPH_DB_NOT_FOUND` → 进入 Step 2 构建。
+- 若返回 `GRAPH_DB_LOCKED` → 等待或换一个 `--graph-db-path`。
+- 若返回 `GRAPH_DB_PERMISSION_DENIED` → 将 `--graph-db-path` 指向 `/tmp` 等可写目录。
 
-Then query:
+**Step 2: 构建图数据库**
+```bash
+metadata-checker --project-dir /path/to/project --build-graph --graph-db-path /tmp/project.graphdb
+```
+- 默认路径是 `<project-dir>/.metadata-checker.graphdb`。
+- 当项目目录只读或沙箱限制写入时，**必须**指定 `--graph-db-path` 到可写位置（如 `/tmp`）。
+
+**Step 3: 查询**
+所有项目级查询都可以附加 `--graph-db-path`：
 - Model read/write relationships → `--query-model <MODEL>`
 - Page dependencies → `--query-page <PAGE>`
 - Cross-file relations between two pages → `--query-cross <A> <B>`
 - DataFlow subgraph → `--query-dataflow <MODEL>`
 - Page-level logic summary → `--query-page-logic <PAGE>`
+- Explain any node → `--explain <ID>`
+- Context around a node → `--context <ID> --depth 2 --budget normal`
 
 ### Q5: Do you need page-level logic summary?
 

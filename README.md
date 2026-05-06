@@ -71,8 +71,14 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 ### 项目级图数据库
 
 ```bash
-# 扫描项目目录并构建/更新图数据库
+# 扫描项目目录并构建/更新图数据库（默认路径：<project-dir>/.metadata-checker.graphdb）
 ./target/release/metadata-checker --project-dir /path/to/project --build-graph
+
+# 构建到自定义路径（适用于只读项目目录或沙箱环境）
+./target/release/metadata-checker --project-dir /path/to/project --build-graph --graph-db-path /tmp/my_project.graphdb
+
+# 检查图数据库状态
+./target/release/metadata-checker --check-graph --graph-db-path /tmp/my_project.graphdb
 
 # 查询模型的读写关系与 DataFlow lineage
 ./target/release/metadata-checker --project-dir /path/to/project --query-model model1

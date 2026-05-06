@@ -19,7 +19,7 @@
 ```json
 {
   "schema_version": "1.0",
-  "kind": "SuperPage | PageQuery | ModelQuery | CrossPageQuery | DataFlowQuery | ComponentQuery | PriorityQuery | Explain | Context | PageLogic | Table | DataFlow",
+  "kind": "SuperPage | PageQuery | ModelQuery | CrossPageQuery | DataFlowQuery | ComponentQuery | PriorityQuery | Explain | Context | PageLogic | Table | DataFlow | GraphDbCheck",
   "query_target": "可选，被查询对象的 ID 或标识",
   "summary": { /* 低噪声摘要，模型优先读取 */ },
   "details": { /* 可选的详细信息，按需展开 */ },
@@ -480,3 +480,40 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 4. 查看 `details.field_lineage` 了解字段加工逻辑。
 5. 遇到 `DATAFLOW_NO_OUTPUT` 或 `EXPR_UNPARSED` 时保守回答。
 
+
+## kind: GraphDbCheck 字段约束
+
+图数据库状态检查输出，由 `--check-graph` 触发。
+
+### summary 字段
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `db_path` | string | 是 | 检查的图数据库路径。 |
+| `exists` | bool | 是 | 文件是否存在。 |
+| `readable` | bool | 是 | 当前进程是否可读。 |
+| `writable` | bool | 是 | 当前进程是否可写。 |
+| `needs_rebuild` | bool | 是 | 是否需要重建（文件不存在、表损坏或打不开）。 |
+
+### diagnostics
+
+- `GRAPH_DB_NOT_FOUND`：图数据库文件不存在。必须运行 `--build-graph` 创建。
+- `GRAPH_DB_LOCKED`：图数据库被其他进程占用（redb lock 冲突）。建议等待或使用不同的 `--graph-db-path`。
+- `GRAPH_DB_PERMISSION_DENIED`：当前进程对图数据库路径无读/写权限。建议更换 `--graph-db-path` 到可写目录。
+- `GRAPH_DB_OPEN_ERROR`：其他打开错误。建议 `--build-graph` 重建。
+
+### next_queries
+
+- `--build-graph --graph-db-path <PATH>`：在指定路径重建图数据库。
+- `--check-graph --graph-db-path <PATH>`：再次检查指定路径状态。
+
+## GraphDB 相关通用诊断码
+
+以下诊断码可能出现在任何项目级查询输出中（当 graphdb 打开失败时，查询本身返回 `kind=GraphDbCheck`）：
+
+| 诊断码 | 级别 | 触发条件 | 建议 |
+|--------|------|----------|------|
+| `GRAPH_DB_NOT_FOUND` | error | graphdb 文件不存在 | `--build-graph` |
+| `GRAPH_DB_LOCKED` | error | redb lock 冲突，多进程并发 | 等待或换 `--graph-db-path` |
+| `GRAPH_DB_PERMISSION_DENIED` | error | 只读目录或无权限 | 换到 `/tmp` 等可写路径 |
+| `GRAPH_DB_OPEN_ERROR` | error | 其他 redb/IO 错误 | `--build-graph` 重建 |

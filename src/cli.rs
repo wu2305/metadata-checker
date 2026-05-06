@@ -60,6 +60,16 @@ pub struct Cli {
     )]
     pub project_dir: Option<PathBuf>,
 
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Custom graph database path (default: <project-dir>/.metadata-checker.graphdb)"
+    )]
+    pub graph_db_path: Option<PathBuf>,
+
+    #[arg(long, help = "Check graph database status and output JSON report")]
+    pub check_graph: bool,
+
     #[arg(long, help = "Build/update graph database from project directory")]
     pub build_graph: bool,
 
@@ -137,5 +147,15 @@ impl Cli {
 
     pub fn is_interactive(&self) -> bool {
         self.interactive
+    }
+
+    /// 解析图数据库路径
+    pub fn resolve_graph_db_path(&self) -> Option<PathBuf> {
+        if let Some(ref explicit) = self.graph_db_path {
+            return Some(explicit.clone());
+        }
+        self.project_dir
+            .as_ref()
+            .map(|dir| dir.join(".metadata-checker.graphdb"))
     }
 }
