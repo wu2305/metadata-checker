@@ -84,6 +84,33 @@ const EDGES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("edges"
 const FILE_STATES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("file_states");
 const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
 
+/// 进程间文件锁（用于串行化 graphdb 访问）
+///
+/// redb 同一文件不支持多进程并发打开，因此通过辅助锁文件实现串行。
+fn acquire_graph_lock(db_path: &Path) -> Result<std::fs::File> {
+    let lock_path = db_path.with_extension("graphdb.lock");
+    for attempt in 0..30 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(f) => return Ok(f),
+            Err(_) => {
+                if attempt < 29 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+    }
+    anyhow::bail!("Cannot acquire graphdb lock after 3s: {:?}", lock_path)
+}
+
+fn release_graph_lock(db_path: &Path) {
+    let lock_path = db_path.with_extension("graphdb.lock");
+    let _ = std::fs::remove_file(&lock_path);
+}
+
 /// 图数据库（内存图 + redb 持久化）
 pub struct GraphDB {
     pub graph: DiGraph<Node, Edge>,
@@ -99,6 +126,13 @@ type NodeEdgePair<'a> = (&'a Node, &'a Edge);
 impl GraphDB {
     /// 打开或创建图数据库
     pub fn open(db_path: &Path) -> Result<Self> {
+        let _lock = acquire_graph_lock(db_path)?;
+        let result = Self::open_inner(db_path);
+        release_graph_lock(db_path);
+        result
+    }
+
+    fn open_inner(db_path: &Path) -> Result<Self> {
         let db = Database::create(db_path)
             .with_context(|| format!("Failed to create/open database at {:?}", db_path))?;
 
@@ -190,19 +224,16 @@ impl GraphDB {
             return out;
         }
 
-        let meta = std::fs::metadata(db_path);
-        let readable = meta
-            .as_ref()
-            .map(|m| m.permissions().readonly())
-            .unwrap_or(true);
-        // On Unix, check write permission via OpenOptions
+        // File-level readable = can open for read (std::fs::File::open)
+        let file_readable = std::fs::File::open(db_path).is_ok();
+        // Writable = can open file for write
         let writable = std::fs::OpenOptions::new()
             .write(true)
             .open(db_path)
             .is_ok();
 
         out.summary["exists"] = serde_json::json!(true);
-        out.summary["readable"] = serde_json::json!(!readable);
+        out.summary["readable"] = serde_json::json!(file_readable);
         out.summary["writable"] = serde_json::json!(writable);
 
         // Try open with redb to verify integrity
@@ -245,19 +276,37 @@ impl GraphDB {
                     || msg.contains("denied")
                     || msg.contains("read-only")
                 {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_PERMISSION_DENIED".to_string(),
-                        message: format!("Graph database permission denied: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some(
-                            "Use --graph-db-path pointing to a writable directory".to_string(),
-                        ),
-                    });
+                    if file_readable && !writable {
+                        // File is read-only at OS level; redb needs write access
+                        out.diagnostics.push(Diagnostic {
+                            severity: DiagnosticSeverity::Info,
+                            code: "GRAPH_DB_READ_ONLY".to_string(),
+                            message: format!("Graph database file is read-only: {}", msg),
+                            location: Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            suggestion: Some(
+                                "redb requires write access even for read. Copy to a writable path with --graph-db-path"
+                                    .to_string(),
+                            ),
+                        });
+                    } else {
+                        out.diagnostics.push(Diagnostic {
+                            severity: DiagnosticSeverity::Error,
+                            code: "GRAPH_DB_PERMISSION_DENIED".to_string(),
+                            message: format!("Graph database permission denied: {}", msg),
+                            location: Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            suggestion: Some(
+                                "Use --graph-db-path pointing to a writable directory".to_string(),
+                            ),
+                        });
+                    }
                 } else {
                     out.diagnostics.push(Diagnostic {
                         severity: DiagnosticSeverity::Error,
@@ -376,8 +425,15 @@ impl GraphDB {
     }
 
     /// 以只读模式打开图数据库（不创建表，不持有写锁）
-    /// 支持重试：当 redb 报告 lock 冲突时，最多重试 3 次，每次间隔 100ms。
+    /// 通过辅助锁文件串行化访问，避免 redb 多进程 lock 冲突。
     pub fn open_readonly(db_path: &Path) -> Result<Self> {
+        let _lock = acquire_graph_lock(db_path)?;
+        let result = Self::open_readonly_inner(db_path);
+        release_graph_lock(db_path);
+        result
+    }
+
+    fn open_readonly_inner(db_path: &Path) -> Result<Self> {
         if !db_path.exists() {
             anyhow::bail!("Graph database not found at {:?}", db_path);
         }
