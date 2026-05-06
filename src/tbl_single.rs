@@ -164,8 +164,11 @@ pub fn parse_tbl(path: &Path, raw: serde_json::Value) -> Result<TblMetadata> {
                         fields: node_fields,
                     });
 
-                    // ModelTable nodes are inputs
-                    if node_type == "ModelTable" || node_type == "modelTable" {
+                    // Input nodes: ModelTable or FileInput
+                    if node_type == "ModelTable"
+                        || node_type == "modelTable"
+                        || node_type == "FileInput"
+                    {
                         meta.dataflow_inputs.push(DataFlowInput {
                             node_id: node_id.clone(),
                             node_type,
@@ -339,31 +342,37 @@ pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
     let field_lineage: Vec<serde_json::Value> = meta
         .fields
         .iter()
-        .filter_map(|f| {
+        .enumerate()
+        .filter_map(|(idx, f)| {
             let mut source_fields = Vec::new();
-            let mut transform = None;
+            let mut transforms = Vec::new();
             let mut confidence = Confidence::High;
 
             if let Some(input) = &f.input_field {
                 source_fields.push(input.clone());
-                transform = Some(format!("inputField: {}", input));
+                transforms.push(format!("inputField: {}", input));
             }
             if let Some(exp) = &f.exp {
-                transform = Some(format!("exp: {}", exp));
+                transforms.push(format!("exp: {}", exp));
                 // Parse expression for model refs
                 let refs = crate::superpage::parse_expression_refs(exp);
                 for r in &refs {
                     if let crate::superpage::RefType::ModelField(m, fld) = r {
-                        source_fields.push(format!("{}.{}", m.clone(), fld.clone()));
+                        let s = format!("{}.{}", m.clone(), fld.clone());
+                        if !source_fields.contains(&s) {
+                            source_fields.push(s);
+                        }
                     }
                 }
-                if !refs.is_empty() && source_fields.len() == 1 {
+                if !refs.is_empty() && source_fields.is_empty() {
                     confidence = Confidence::Medium;
                 }
             }
             if let Some(orig_field) = &f.original_field {
-                source_fields.push(orig_field.clone());
-                transform = Some(format!(
+                if !source_fields.contains(orig_field) {
+                    source_fields.push(orig_field.clone());
+                }
+                transforms.push(format!(
                     "originalField: {} (node: {})",
                     orig_field,
                     f.original_node.as_deref().unwrap_or("?")
@@ -374,12 +383,19 @@ pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
                 return None;
             }
 
+            let transform = if transforms.is_empty() {
+                None
+            } else {
+                Some(transforms.join("; "))
+            };
+
             Some(json!({
                 "target_field": format!("{}.{}", meta.table_id.as_deref().unwrap_or(""), f.name),
                 "source_fields": source_fields,
                 "source_expr": f.exp.as_deref().unwrap_or(""),
                 "transform": transform,
                 "confidence": confidence,
+                "json_path": format!("dimensions[{}]", idx),
             }))
         })
         .collect();
@@ -409,7 +425,7 @@ pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
         .with_confidence(Confidence::High),
     );
 
-    for f in &meta.fields {
+    for (idx, f) in meta.fields.iter().enumerate() {
         if f.input_field.is_some() || f.exp.is_some() || f.original_field.is_some() {
             let claim = format!(
                 "Field {} has source: inputField={:?}, exp={:?}, originalField={:?}",
@@ -418,7 +434,7 @@ pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
             output.evidence.push(
                 Evidence::new(claim, "Parsed from dimension metadata")
                     .with_source_file(source_file)
-                    .with_json_path(format!("dimensions[?name='{}']", f.name))
+                    .with_json_path(format!("dimensions[{}]", idx))
                     .with_raw_expr(f.exp.clone().unwrap_or_default())
                     .with_confidence(Confidence::High),
             );
@@ -472,8 +488,33 @@ pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
         });
     }
 
+    for inp in &meta.dataflow_inputs {
+        let unresolved = if let Some(ref path) = inp.module_table_path {
+            path.starts_with("$DATA:/") && !path.ends_with(".tbl")
+        } else {
+            false
+        };
+        if unresolved {
+            output.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                code: "DATAFLOW_INPUT_PATH_UNRESOLVED".to_string(),
+                message: format!(
+                    "DataFlow input node {} moduleTablePath does not end with .tbl: {}",
+                    inp.node_id,
+                    inp.module_table_path.as_deref().unwrap_or("")
+                ),
+                location: Location {
+                    source_file: Some(source_file.to_string()),
+                    node_id: Some(inp.node_id.clone()),
+                    json_path: Some(format!("dataFlow.nodes.{}.moduleTablePath", inp.node_id)),
+                },
+                suggestion: Some("Verify moduleTablePath points to a valid .tbl file".to_string()),
+            });
+        }
+    }
+
     // Check for unparseable expressions
-    for f in &meta.fields {
+    for (idx, f) in meta.fields.iter().enumerate() {
         if let Some(exp) = &f.exp {
             if exp.trim().is_empty() {
                 continue;
@@ -496,7 +537,7 @@ pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
                                 meta.table_id.as_deref().unwrap_or(""),
                                 f.name
                             )),
-                            json_path: Some(format!("dimensions[?name='{}'].exp", f.name)),
+                            json_path: Some(format!("dimensions[{}].exp", idx)),
                         },
                         suggestion: Some(
                             "Use --project-dir --explain for full lineage".to_string(),

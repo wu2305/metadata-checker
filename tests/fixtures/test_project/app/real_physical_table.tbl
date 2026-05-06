@@ -1,0 +1,49 @@
+{
+	"version": "4.19.0",
+	"properties": {
+		"dbTableName": "fact_coupon",
+		"modelDataType": "App",
+		"primaryKeys": [
+			"卡券类型"
+		],
+		"periodType": "none",
+		"datasource": "defdw",
+		"modifyDbTableEnabled": [
+			"field",
+			"index",
+			"constraint"
+		],
+		"dbSchema": ""
+	},
+	"dimensions": [
+		{
+			"dbfield": "COUPONNO",
+			"isDimension": true,
+			"dataType": "C",
+			"length": 50,
+			"name": "卡券号"
+		},
+		{
+			"dbfield": "ENTITYTYPE",
+			"isDimension": true,
+			"dataType": "C",
+			"length": 50,
+			"name": "业务类型",
+			"dimensionPath": "../通用/dim_cardid_entityType.tbl"
+		},
+		{
+			"name": "说明",
+			"dbfield": "explanation",
+			"dataType": "C",
+			"length": 50,
+			"isDimension": true
+		},
+		{
+			"name": "卡券类型",
+			"dataType": "C",
+			"length": 50,
+			"dbfield": "COUPONTYPE",
+			"isDimension": true
+		}
+	]
+}

@@ -264,3 +264,88 @@ fn test_real_project_tbl_not_superpage() {
         "real table should have fields"
     );
 }
+
+#[test]
+fn test_real_physical_table_fixture() {
+    let out = parse_tbl_fixture("real_physical_table.tbl");
+    assert_eq!(out.kind, OutputKind::Table);
+    let summary = out.summary.as_object().expect("summary should be object");
+    assert_eq!(
+        summary.get("table_type").and_then(|v| v.as_str()),
+        Some("PhysicalTable")
+    );
+    assert!(
+        summary
+            .get("field_count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0)
+            > 0,
+        "real physical table should have fields"
+    );
+    assert_eq!(
+        summary.get("input_count").and_then(|v| v.as_i64()),
+        Some(0),
+        "physical table has no inputs"
+    );
+    assert_eq!(
+        summary.get("output_count").and_then(|v| v.as_i64()),
+        Some(0),
+        "physical table has no outputs"
+    );
+    let details = out.details.as_ref().unwrap().as_object().unwrap();
+    let fields = details.get("fields").unwrap().as_array().unwrap();
+    assert!(!fields.is_empty(), "should have fields");
+    assert!(
+        out.evidence
+            .iter()
+            .any(|e| e.json_path.as_deref() == Some("dimensions[]")),
+        "should have dimensions[] evidence"
+    );
+}
+
+#[test]
+fn test_real_dataflow_fixture() {
+    let out = parse_tbl_fixture("real_dataflow.tbl");
+    assert_eq!(out.kind, OutputKind::DataFlow);
+    let summary = out.summary.as_object().expect("summary should be object");
+    assert_eq!(
+        summary.get("table_type").and_then(|v| v.as_str()),
+        Some("DataFlow")
+    );
+    assert!(
+        summary
+            .get("field_count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0)
+            > 0,
+        "real dataflow should have fields"
+    );
+    assert!(
+        summary
+            .get("input_count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0)
+            > 0,
+        "real dataflow should have inputs"
+    );
+    let details = out.details.as_ref().unwrap().as_object().unwrap();
+    let inputs = details.get("dataflow_inputs").unwrap().as_array().unwrap();
+    assert!(!inputs.is_empty(), "should have dataflow inputs");
+    let lineage = details.get("field_lineage").unwrap().as_array().unwrap();
+    assert!(!lineage.is_empty(), "should have field lineage");
+}
+
+#[test]
+fn test_dataflow_input_path_unresolved_diagnostic() {
+    // real_dataflow.tbl has moduleTablePath like $DATA:/售后/fact_serviceappointments.tbl
+    // which ends with .tbl so should NOT trigger the diagnostic
+    let out = parse_tbl_fixture("real_dataflow.tbl");
+    let has_unresolved = out
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "DATAFLOW_INPUT_PATH_UNRESOLVED");
+    assert!(
+        !has_unresolved,
+        "real_dataflow paths end with .tbl, should not trigger unresolved"
+    );
+}

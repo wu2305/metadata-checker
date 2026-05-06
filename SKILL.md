@@ -193,26 +193,29 @@ metadata-checker --project-dir /path/to/project --query-page-logic "page:app/合
 
 ### .tbl 单文件使用指南
 
-当没有项目图数据库时，可直接解析单个  文件获取表/DataFlow 语义。
+当没有项目图数据库时，可直接解析单个 `.tbl` 文件获取表/DataFlow 语义。
 
 **何时使用**
-- 需要快速判断一个  是物理表还是 DataFlow。
+- 需要快速判断一个 `.tbl` 是物理表还是 DataFlow。
 - 需要查看 DataFlow 的输入、输出和字段加工链。
 - 项目图数据库尚未构建或目标文件不在项目中。
 
 **命令**
-
+```bash
+metadata-checker app_table.tbl
+metadata-checker dataflow_output.tbl
+```
 
 **AI 阅读顺序**
-1. **summary**：先看 （AppTable / DataFlow）、、、、。
-2. **details.field_lineage**：字段级来源链，包含 、、、、。
+1. **summary**：先看 `table_type`（AppTable / DataFlow）、`field_count`、`input_count`、`output_count`、`what_is_it`。
+2. **details.field_lineage**：字段级来源链，包含 `target_field`、`source_fields`、`source_expr`、`transform`、`confidence`。
 3. **details.dataflow_inputs / dataflow_outputs**：DataFlow 的输入输出拓扑。
-4. **evidence**：验证字段来源的  和 。
-5. **diagnostics**：若含 ，说明该 DataFlow 未指定输出物理表。
+4. **evidence**：验证字段来源的 `source_file` 和 `json_path`。
+5. **diagnostics**：若含 `DATAFLOW_NO_OUTPUT`，说明该 DataFlow 未指定输出物理表。
 
 **禁止行为**
-- 禁止把  当作 SuperPage 解析（ 属于语义错误）。
-- 禁止在没有  时编造字段来源。
+- 禁止把 `.tbl` 当作 SuperPage 解析（`kind=SuperPage` 属于语义错误）。
+- 禁止在没有 `field_lineage` 时编造字段来源。
 ## AI 回答协议（M9-D）
 
 当使用 metadata-checker CLI 回答业务问题时，必须遵守以下协议，禁止默认读取 raw JSON 或凭空推断。

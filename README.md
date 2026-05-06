@@ -49,15 +49,24 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 
 ### 解析单个 .tbl 文件
 
+```bash
+# 物理表（AppTable）：查看字段定义
+./target/release/metadata-checker app_table.tbl
 
+# DataFlow：查看输入、输出和字段加工链
+./target/release/metadata-checker dataflow_output.tbl
+
+# DataFlow 人类可读摘要
+./target/release/metadata-checker dataflow_output.tbl --human
+```
 
 输出结构：
-- （物理表）或 （加工表）
-- 、、、
-- ：字段列表
-- ：DataFlow 输入节点
-- ：DataFlow 输出目标
-- ：字段来源链（inputField / exp / originalField）
+- `kind: Table`（物理表）或 `kind: DataFlow`（加工表）
+- `summary.table_type`、`field_count`、`input_count`、`output_count`
+- `details.fields`：字段列表
+- `details.dataflow_inputs`：DataFlow 输入节点
+- `details.dataflow_outputs`：DataFlow 输出目标
+- `details.field_lineage`：字段来源链（inputField / exp / originalField）
 
 ### 项目级图数据库
 

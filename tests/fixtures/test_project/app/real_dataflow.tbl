@@ -1,0 +1,121 @@
+{
+	"version": "4.19.0",
+	"properties": {
+		"modelDataType": "DataFlow",
+		"rollbackEnabled": false,
+		"modifyDbTableEnabled": [
+			"field",
+			"index",
+			"constraint"
+		],
+		"rebuildIndexAndKey": true,
+		"extractDataEnabled": false,
+		"primaryKeys": [
+			"车架号"
+		],
+		"datasource": "defdw",
+		"dbTableName": "dim_fivevin"
+	},
+	"dimensions": [
+		{
+			"inputField": "车架号",
+			"dbfield": "CJH",
+			"dataType": "C",
+			"name": "车架号",
+			"length": 20,
+			"isDimension": true,
+			"originalField": "车架号",
+			"originalNode": "售后有过进场记录"
+		}
+	],
+	"dataFlow": {
+		"nodes": {
+			"2e35e1c3d38a4d4687730626002368e0": {
+				"type": "FileInput",
+				"fileName": "售后进场车架号20240121.xlsx#售后有过进场记录",
+				"alias": "售后有过进场记录",
+				"id": "2e35e1c3d38a4d4687730626002368e0",
+				"projectName": "xiaoshouyi",
+				"devQueryFixedRows": true,
+				"devFixedRowCount": 10000,
+				"includeRowNum": false,
+				"includeSheetName": false,
+				"sheetIsForm": false,
+				"fieldsInferSize": 1000,
+				"includeSubDirectories": false,
+				"key": "bfc6996eb2af26cd4dffb7e79bef88e4",
+				"inferHeads": true,
+				"dbType": "MySQL",
+				"includeFileName": false,
+				"dataRowCount": 10000,
+				"lastModifyTime": 0,
+				"matchMultipleSheets": false,
+				"matchMultipleFiles": false,
+				"originalFields": [
+					{
+						"inputField": "车架号",
+						"dbfield": "CJH",
+						"dataType": "C",
+						"name": "车架号",
+						"length": 20,
+						"decimal": 0,
+						"isDimension": true
+					}
+				],
+				"fields": [
+					{
+						"inputField": "车架号",
+						"dbfield": "CJH",
+						"dataType": "C",
+						"name": "车架号",
+						"length": 20,
+						"isDimension": true
+					}
+				],
+				"dimensions": [
+					{
+						"inputField": "车架号",
+						"dbfield": "CJH",
+						"dataType": "C",
+						"name": "车架号",
+						"length": 20,
+						"isDimension": true
+					}
+				]
+			},
+			"default": {
+				"id": "default",
+				"type": "Output",
+				"alias": "模型输出",
+				"inputNodes": [
+					"2e35e1c3d38a4d4687730626002368e0"
+				],
+				"fields": [
+					{
+						"inputField": "车架号",
+						"dbfield": "CJH",
+						"dataType": "C",
+						"name": "车架号",
+						"length": 20,
+						"isDimension": true,
+						"originalField": "车架号",
+						"originalNode": "售后有过进场记录"
+					}
+				],
+				"lastModifyTime": 1737512392494,
+				"dimensions": [
+					{
+						"inputField": "车架号",
+						"dbfield": "CJH",
+						"dataType": "C",
+						"name": "车架号",
+						"length": 20,
+						"isDimension": true,
+						"originalField": "车架号",
+						"originalNode": "售后有过进场记录"
+					}
+				]
+			}
+		}
+	}
+}
