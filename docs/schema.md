@@ -498,7 +498,7 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 ### diagnostics
 
 - `GRAPH_DB_NOT_FOUND`：图数据库文件不存在。必须运行 `--build-graph` 创建。
-- `GRAPH_DB_LOCKED`：图数据库被其他进程占用（redb lock 冲突）。建议等待或使用不同的 `--graph-db-path`。
+- `GRAPH_DB_LOCKED`：图数据库被其他进程占用（redb lock 冲突）。建议等待、使用不同的 `--graph-db-path`，或在真实项目场景增加 `--graph-lock-timeout-ms`（默认 10s，可延至 30s）。
 - `GRAPH_DB_PERMISSION_DENIED`：当前进程对图数据库路径无读/写权限。建议更换 `--graph-db-path` 到可写目录。
 - `GRAPH_DB_OPEN_ERROR`：其他打开错误。建议 `--build-graph` 重建。
 

@@ -99,7 +99,6 @@ const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
 fn acquire_graph_lock(db_path: &Path) -> Result<std::fs::File> {
     let lock_path = db_path.with_extension("graphdb.lock");
     let timeout_ms = GRAPH_LOCK_TIMEOUT_MS.load(Ordering::Relaxed);
-    eprintln!("[LOCK] timeout_ms={}", timeout_ms);
     let interval_ms = 100u64;
     let max_attempts = timeout_ms.div_ceil(interval_ms).max(1);
     for attempt in 0..max_attempts {

@@ -94,7 +94,7 @@ Output structure (kind = Explain):
 metadata-checker --check-graph --graph-db-path /tmp/project.graphdb
 ```
 - 若返回 `GRAPH_DB_NOT_FOUND` → 进入 Step 2 构建。
-- 若返回 `GRAPH_DB_LOCKED` → 等待或换一个 `--graph-db-path`。
+- 若返回 `GRAPH_DB_LOCKED` → 等待、换一个 `--graph-db-path`，或在真实项目/大图场景增加 `--graph-lock-timeout-ms 30000`。
 - 若返回 `GRAPH_DB_PERMISSION_DENIED` → 将 `--graph-db-path` 指向 `/tmp` 等可写目录。
 
 **Step 2: 构建图数据库**
