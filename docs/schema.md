@@ -139,7 +139,7 @@ pub struct AiOutput {
 
 ### 允许为空的字段
 
-- `details.lineage`：空数组表示无 traceable 来源，必须附带 `LINEAGE_SOURCE_MISSING` diagnostic；M6 已实现从 dimensions[].inputField / dimensions[].exp / submitField / fieldValues[] 追溯
+- `details.lineage`：空数组表示无 traceable 来源。**M12 收敛后，仅当组件/字段确实存在写入/字段映射但无法追溯时才附带 `LINEAGE_SOURCE_MISSING` diagnostic；普通 button、text、无写入的 form_input 不再输出此诊断。** M6 已实现从 dimensions[].inputField / dimensions[].exp / submitField / fieldValues[] 追溯
 - `details.inputs` / `details.outputs`：DataFlow 确实无输入/输出时可为空
 - `details.reads` / `details.writes`：目标确实无读写关系时可为空
 - `summary.page` / `summary.page_id`：非页面上下文的目标可为 null

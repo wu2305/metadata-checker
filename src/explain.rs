@@ -750,7 +750,7 @@ fn explain_component_graph(
     let mut diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
     // Only emit LINEAGE_SOURCE_MISSING for components that actually need
     // field-level lineage tracing: form inputs or components with model writes
-    let needs_lineage = is_form_input_type(&comp_type) || (!writes_models.is_empty());
+    let needs_lineage = !writes_models.is_empty();
     if needs_lineage && lineage.is_empty() {
         diagnostics.push(crate::output::Diagnostic {
             severity: crate::output::DiagnosticSeverity::Info,
