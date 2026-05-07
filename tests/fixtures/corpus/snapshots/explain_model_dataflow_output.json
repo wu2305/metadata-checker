@@ -38,7 +38,7 @@
     },
     {
       "claim": "Lineage for field:dataflow_output.工单号",
-      "confidence": "High",
+      "confidence": "Medium",
       "edge_type": "Contains"
     },
     {

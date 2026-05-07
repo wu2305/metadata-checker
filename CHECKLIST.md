@@ -42,7 +42,7 @@
 
 - [x] M10：表与 DataFlow 单文件输出可理解，详见 `docs/real-project-optimization-roadmap.md`
 - [x] M11：图数据库路径、只读与并发可用性，详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M12：Explain 语义摘要与证据质量收敛，详见 `docs/real-project-optimization-roadmap.md`
+- [x] M12：Explain 语义摘要与证据质量收敛，详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M13：面向 AI 的低噪声 brief 输出模式，详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M14：目标定位与命令规范防错，详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M15：真实项目 AI 评测集扩展，详见 `docs/real-project-optimization-roadmap.md`

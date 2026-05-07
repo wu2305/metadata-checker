@@ -253,7 +253,29 @@ impl GraphDB {
         out.summary["writable"] = serde_json::json!(writable);
 
         // Try open with redb to verify integrity
-        match Database::open(db_path) {
+        let _lock = match acquire_graph_lock(db_path) {
+            Ok(l) => l,
+            Err(e) => {
+                out.diagnostics.push(Diagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    code: "GRAPH_DB_LOCK_FAILED".to_string(),
+                    message: format!("Cannot acquire graphdb lock: {}", e),
+                    location: Location {
+                        source_file: Some(db_path.to_string_lossy().to_string()),
+                        node_id: None,
+                        json_path: None,
+                    },
+                    suggestion: Some(
+                        "Wait for other process to finish, or use a different --graph-db-path"
+                            .to_string(),
+                    ),
+                });
+                return out;
+            }
+        };
+        let db_result = Database::open(db_path);
+        release_graph_lock(db_path);
+        match db_result {
             Ok(db) => {
                 let read_txn = db.begin_read();
                 let tables_ok = read_txn

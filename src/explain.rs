@@ -154,15 +154,7 @@ pub fn explain_component_spg(spg: &SuperPageMetadata, target_id: &str, human: bo
         })).collect::<Vec<Value>>(),
     });
 
-    let diagnostics = vec![crate::output::Diagnostic {
-        severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_SOURCE_MISSING".to_string(),
-        message: "Field-level lineage source could not be determined".to_string(),
-        location: crate::output::Location::new(),
-        suggestion: Some(
-            "Check --context or --query-dataflow for upstream relationships".to_string(),
-        ),
-    }];
+    let diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(target_id.to_string());
     output.details = Some(details);
@@ -269,16 +261,31 @@ fn make_ref(
     edge: &crate::graph::Edge,
     source_path: Option<&str>,
 ) -> serde_json::Value {
-    serde_json::json!({
+    let mut obj = serde_json::json!({
         "id": target.id,
         "name": target.name,
         "type": format!("{:?}", target.node_type),
         "edge_type": format!("{:?}", edge.edge_type),
         "field_path": edge.field_path,
         "source_file": edge.meta.as_ref().and_then(|m| m.get("source_file")).and_then(|v| v.as_str()).or(source_path),
-        "raw_expr": edge.meta.as_ref().and_then(|m| m.get("source_expr")).and_then(|v| v.as_str()),
-        "json_path": edge.meta.as_ref().and_then(|m| m.get("json_path")).and_then(|v| v.as_str()),
-    })
+    });
+    if let Some(expr) = edge
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("source_expr"))
+        .and_then(|v| v.as_str())
+    {
+        obj["raw_expr"] = serde_json::json!(expr);
+    }
+    if let Some(path) = edge
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("json_path"))
+        .and_then(|v| v.as_str())
+    {
+        obj["json_path"] = serde_json::json!(path);
+    }
+    obj
 }
 
 /// 从详情项中提取字符串字段
@@ -295,45 +302,66 @@ fn push_relation_evidence(
     for item in items.iter().take(5) {
         let node_id = detail_str(item, "id")
             .or_else(|| detail_str(item, "from"))
-            .or_else(|| detail_str(item, "to"))
-            .unwrap_or("?");
+            .or_else(|| detail_str(item, "to"));
         let edge_type = detail_str(item, "edge_type")
             .or_else(|| detail_str(item, "type"))
             .unwrap_or("unknown");
-        let raw_expr = detail_str(item, "raw_expr")
-            .or_else(|| detail_str(item, "field_path"))
-            .unwrap_or("n/a");
+        let raw_expr = detail_str(item, "raw_expr").or_else(|| detail_str(item, "field_path"));
         let source_file = detail_str(item, "source_file");
-        let json_path = detail_str(item, "json_path").unwrap_or("<graph-edge-derived>");
-        let (confidence, reason) = if json_path == "<graph-edge-derived>" {
+        let json_path = detail_str(item, "json_path");
+        let json_path_str = json_path.unwrap_or("<graph-edge-derived>");
+
+        let has_real_path = json_path.is_some() && json_path != Some("<graph-edge-derived>");
+        let (confidence, reason) = if has_real_path && source_file.is_some() {
+            (
+                crate::output::Confidence::High,
+                "Relation extracted from graph edge with source metadata and json_path",
+            )
+        } else if source_file.is_some() {
             (
                 crate::output::Confidence::Medium,
                 "Relation extracted from graph edge; raw json_path is not available",
             )
-        } else if source_file.is_some() {
-            (
-                crate::output::Confidence::High,
-                "Relation extracted from graph edge with source metadata",
-            )
         } else {
             (
-                crate::output::Confidence::Medium,
-                "Relation extracted from graph edge traversal",
+                crate::output::Confidence::Low,
+                "Relation inferred from graph traversal without direct JSON path",
             )
         };
-        let ev =
-            crate::output::Evidence::new(format!("{} relation on {}", relation, node_id), reason)
-                .with_confidence(confidence)
-                .with_node_id(node_id)
-                .with_edge_type(edge_type)
-                .with_raw_expr(raw_expr)
-                .with_json_path(json_path);
-        let ev = if let Some(sf) = source_file {
-            ev.with_source_file(sf)
+
+        let claim = if let Some(id) = node_id {
+            format!("{} relation on {}", relation, id)
         } else {
-            ev
+            format!("{} relation (target unidentified)", relation)
         };
+
+        let mut ev = crate::output::Evidence::new(claim, reason)
+            .with_confidence(confidence)
+            .with_edge_type(edge_type);
+        if let Some(id) = node_id {
+            ev = ev.with_node_id(id);
+        }
+        if let Some(expr) = raw_expr {
+            ev = ev.with_raw_expr(expr);
+        }
+        ev = ev.with_json_path(json_path_str);
+        if let Some(sf) = source_file {
+            ev = ev.with_source_file(sf);
+        }
         output.evidence.push(ev);
+
+        if node_id.is_none() || source_file.is_none() {
+            output.diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "EVIDENCE_LOCATION_MISSING".to_string(),
+                message: format!(
+                    "Evidence for {} relation lacks node_id or source_file; confidence reduced",
+                    relation
+                ),
+                location: crate::output::Location::new(),
+                suggestion: Some("Verify graph edge metadata completeness".to_string()),
+            });
+        }
     }
 }
 
@@ -344,12 +372,10 @@ fn push_lineage_evidence(output: &mut crate::output::AiOutput, lineage: &[serde_
         let evidence = item.get("evidence");
         let source_file = evidence
             .and_then(|e| e.get("source_file"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+            .and_then(|v| v.as_str());
         let node_id = evidence
             .and_then(|e| e.get("node_id"))
-            .and_then(|v| v.as_str())
-            .unwrap_or(target_field);
+            .and_then(|v| v.as_str());
         let edge_type = evidence
             .and_then(|e| e.get("edge_type"))
             .and_then(|v| v.as_str())
@@ -357,32 +383,68 @@ fn push_lineage_evidence(output: &mut crate::output::AiOutput, lineage: &[serde_
         let raw_expr = evidence
             .and_then(|e| e.get("raw_expr"))
             .and_then(|v| v.as_str())
-            .or_else(|| detail_str(item, "source_expr"))
-            .unwrap_or("n/a");
+            .or_else(|| detail_str(item, "source_expr"));
         let json_path = evidence
             .and_then(|e| e.get("json_path"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("lineage");
-        let ev = crate::output::Evidence::new(
-            format!("Lineage for {}", target_field),
-            "Field lineage derived from metadata/source expressions",
-        )
-        .with_confidence(match detail_str(item, "confidence") {
-            Some("high") => crate::output::Confidence::High,
-            Some("low") => crate::output::Confidence::Low,
-            _ => crate::output::Confidence::Medium,
-        })
-        .with_node_id(node_id)
-        .with_edge_type(edge_type)
-        .with_raw_expr(raw_expr)
-        .with_json_path(json_path);
-        let ev = if source_file.is_empty() {
-            ev
+            .and_then(|v| v.as_str());
+
+        let is_graph_derived = node_id.is_none() || json_path.is_none() || raw_expr.is_none();
+        let confidence = if is_graph_derived {
+            crate::output::Confidence::Medium
         } else {
-            ev.with_source_file(source_file)
+            match detail_str(item, "confidence") {
+                Some("high") => crate::output::Confidence::High,
+                Some("low") => crate::output::Confidence::Low,
+                _ => crate::output::Confidence::Medium,
+            }
         };
+
+        let reason = if is_graph_derived {
+            "Field lineage partially derived from graph traversal; some metadata missing"
+        } else {
+            "Field lineage derived from metadata/source expressions"
+        };
+
+        let mut ev = crate::output::Evidence::new(format!("Lineage for {}", target_field), reason)
+            .with_confidence(confidence)
+            .with_edge_type(edge_type);
+        if let Some(id) = node_id {
+            ev = ev.with_node_id(id);
+        }
+        if let Some(expr) = raw_expr {
+            ev = ev.with_raw_expr(expr);
+        }
+        if let Some(path) = json_path {
+            ev = ev.with_json_path(path);
+        }
+        if let Some(sf) = source_file {
+            ev = ev.with_source_file(sf);
+        }
         output.evidence.push(ev);
     }
+}
+
+/// 辅助：从节点元数据提取组件真实类型
+fn component_type_from_meta(node: &crate::graph::Node) -> String {
+    node.meta
+        .as_ref()
+        .and_then(|m| m.get("component_type"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| node.name.clone())
+}
+
+/// 辅助：判断是否为容器类型
+fn is_container_type(comp_type: &str) -> bool {
+    matches!(comp_type, "dialog" | "panel" | "embedsuperpage" | "form")
+}
+
+/// 辅助：判断是否为表单输入类型
+fn is_form_input_type(comp_type: &str) -> bool {
+    matches!(
+        comp_type,
+        "input" | "textarea" | "select" | "radio" | "checkbox" | "datePicker" | "number" | "search"
+    )
 }
 
 /// 辅助：按重要性分类
@@ -390,6 +452,8 @@ fn classify_importance(
     has_nav: bool,
     has_write: bool,
     has_read: bool,
+    has_action: bool,
+    comp_type: &str,
     node_type: &crate::graph::NodeType,
 ) -> String {
     match node_type {
@@ -400,22 +464,39 @@ fn classify_importance(
                 "container".to_string()
             }
         }
-        crate::graph::NodeType::Component | crate::graph::NodeType::Action => {
-            if has_nav {
-                "navigation".to_string()
+        crate::graph::NodeType::Component => {
+            if is_container_type(comp_type) {
+                "container".to_string()
+            } else if is_form_input_type(comp_type) {
+                "form_input".to_string()
+            } else if comp_type == "text" && has_read {
+                "data_source_display".to_string()
+            } else if has_action {
+                "entrypoint".to_string()
             } else if has_write {
-                "write_target".to_string()
+                "action_target".to_string()
             } else if has_read {
-                "data_source".to_string()
+                "data_source_display".to_string()
             } else {
-                "calculated_display".to_string()
+                "static_display".to_string()
+            }
+        }
+        crate::graph::NodeType::Action => {
+            if has_nav {
+                "entrypoint".to_string()
+            } else if has_write {
+                "action_target".to_string()
+            } else if has_read {
+                "data_source_display".to_string()
+            } else {
+                "static_display".to_string()
             }
         }
         crate::graph::NodeType::Model | crate::graph::NodeType::Field => {
             if has_write {
-                "write_target".to_string()
+                "action_target".to_string()
             } else if has_read {
-                "data_source".to_string()
+                "data_source_display".to_string()
             } else {
                 "unknown".to_string()
             }
@@ -468,14 +549,20 @@ fn explain_component_graph(
     human: bool,
 ) -> Result<()> {
     let parent_page = find_parent_page(graph, &node.id);
+    let comp_type = component_type_from_meta(node);
+
     let mut reads = Vec::new();
-    let mut writes = Vec::new();
+    let mut writes_models = Vec::new();
+    let mut navigates_to = Vec::new();
+    let mut affects_components = Vec::new();
+    let mut triggers = Vec::new();
+    let mut located_in = Vec::new();
     let mut triggered_by = Vec::new();
-    let mut affects = Vec::new();
     let mut action_count = 0usize;
     let mut has_nav = false;
     let mut has_write = false;
     let mut has_read = false;
+    let mut action_summaries: Vec<String> = Vec::new();
 
     for (target, edge) in &outgoing {
         match edge.edge_type {
@@ -484,62 +571,88 @@ fn explain_component_graph(
                 has_read = true;
             }
             crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
-                writes.push(make_ref(target, edge, Some(&node.path)));
+                writes_models.push(make_ref(target, edge, Some(&node.path)));
                 has_write = true;
             }
             crate::graph::EdgeType::Triggers => {
                 action_count += 1;
-                affects.push(serde_json::json!({
+                triggers.push(serde_json::json!({
                     "id": target.id,
                     "name": target.name,
                     "type": format!("{:?}", target.node_type),
                     "edge_type": "Triggers",
                     "source_file": target.path,
                 }));
-                // Aggregate action reads/writes/navigation
+                // Aggregate action reads/writes/navigation for semantic summary and component writes
+                let mut action_reads = Vec::new();
+                let mut action_writes = Vec::new();
+                let mut action_nav = Vec::new();
                 if let Some((action_out, _)) = graph.get_node_edges(&target.id) {
                     for (t, e) in &action_out {
                         match e.edge_type {
                             crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
                                 reads.push(make_ref(t, e, Some(&target.path)));
+                                action_reads.push(make_ref(t, e, Some(&target.path)));
                                 has_read = true;
                             }
                             crate::graph::EdgeType::Writes
                             | crate::graph::EdgeType::ActionWrites => {
-                                writes.push(make_ref(t, e, Some(&target.path)));
+                                writes_models.push(make_ref(t, e, Some(&target.path)));
+                                action_writes.push(make_ref(t, e, Some(&target.path)));
                                 has_write = true;
                             }
                             crate::graph::EdgeType::OpensPage
                             | crate::graph::EdgeType::ActionNavigates => {
                                 has_nav = true;
-                                affects.push(make_ref(t, e, Some(&target.path)));
+                                navigates_to.push(make_ref(t, e, Some(&target.path)));
+                                action_nav.push(make_ref(t, e, Some(&target.path)));
                             }
                             crate::graph::EdgeType::SetsParam
                             | crate::graph::EdgeType::ActionSetsParam => {
-                                affects.push(make_ref(t, e, Some(&target.path)));
+                                affects_components.push(make_ref(t, e, Some(&target.path)));
+                                has_write = true;
                             }
                             crate::graph::EdgeType::ActionControlsComponent => {
-                                affects.push(make_ref(t, e, Some(&target.path)));
+                                affects_components.push(make_ref(t, e, Some(&target.path)));
                             }
                             crate::graph::EdgeType::ActionValidates => {
                                 reads.push(make_ref(t, e, Some(&target.path)));
+                                action_reads.push(make_ref(t, e, Some(&target.path)));
                                 has_read = true;
                             }
                             crate::graph::EdgeType::ActionLoadsData => {
                                 reads.push(make_ref(t, e, Some(&target.path)));
+                                action_reads.push(make_ref(t, e, Some(&target.path)));
                                 has_read = true;
                             }
                             _ => {}
                         }
                     }
                 }
+                let action_type = if let Some(pos) = target.name.find(':') {
+                    target.name[..pos].to_string()
+                } else {
+                    "unknown".to_string()
+                };
+                let summary = crate::action_semantics::build_semantic_summary(
+                    &action_type,
+                    &node.name,
+                    &target.name,
+                    &action_reads,
+                    &action_writes,
+                    &action_nav,
+                );
+                action_summaries.push(summary);
             }
             crate::graph::EdgeType::OpensPage => {
                 has_nav = true;
-                affects.push(make_ref(target, edge, Some(&node.path)));
+                navigates_to.push(make_ref(target, edge, Some(&node.path)));
             }
             crate::graph::EdgeType::SetsParam => {
-                affects.push(make_ref(target, edge, Some(&node.path)));
+                affects_components.push(make_ref(target, edge, Some(&node.path)));
+            }
+            crate::graph::EdgeType::ActionControlsComponent => {
+                affects_components.push(make_ref(target, edge, Some(&node.path)));
             }
             _ => {}
         }
@@ -557,19 +670,9 @@ fn explain_component_graph(
                     "source_file": source.path,
                 }));
             }
-            crate::graph::EdgeType::Triggers => {
-                triggered_by.push(serde_json::json!({
-                    "id": source.id,
-                    "name": source.name,
-                    "type": format!("{:?}", source.node_type),
-                    "edge_type": "Triggers",
-                    "direction": "incoming",
-                    "source_file": source.path,
-                }));
-            }
             crate::graph::EdgeType::Contains => {
                 if matches!(source.node_type, crate::graph::NodeType::Page) {
-                    triggered_by.push(serde_json::json!({
+                    located_in.push(serde_json::json!({
                         "id": source.id,
                         "name": source.name,
                         "type": "Page",
@@ -587,67 +690,78 @@ fn explain_component_graph(
         .as_ref()
         .map(|p| format!("，位于页面 {}", p.name))
         .unwrap_or_default();
-    let action_info = if action_count > 0 {
-        format!("，具有 {} 个动作", action_count)
-    } else {
-        String::new()
-    };
-    let read_info = if !reads.is_empty() {
+
+    let what = if !action_summaries.is_empty() {
+        format!(
+            "{} {}，{}",
+            comp_type,
+            node.name,
+            action_summaries.join("；")
+        )
+    } else if !reads.is_empty() {
         let first = reads[0].get("name").and_then(|v| v.as_str()).unwrap_or("?");
-        format!("，读取 {}", first)
+        format!("{} {}，读取 {}", comp_type, node.name, first)
     } else {
-        String::new()
-    };
-    let write_info = if !writes.is_empty() {
-        let first = writes[0]
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        format!("，写入 {}", first)
-    } else {
-        String::new()
+        format!("{} {}{}", comp_type, node.name, page_info)
     };
 
-    let what = format!(
-        "组件 {}{}{}{}{}",
-        node.name, page_info, action_info, read_info, write_info
+    let importance = classify_importance(
+        has_nav,
+        has_write,
+        has_read,
+        action_count > 0,
+        &comp_type,
+        &node.node_type,
     );
 
-    let mut importance = classify_importance(has_nav, has_write, has_read, &node.node_type);
-    if action_count > 0 && importance == "calculated_display" {
-        importance = "entrypoint".to_string();
-    }
+    let semantic_summary = action_summaries.join("；");
 
     let summary = serde_json::json!({
         "what_is_it": what,
         "type": "component",
-        "type_detail": node.name,
+        "type_detail": comp_type,
         "importance": importance,
+        "semantic_summary": semantic_summary,
         "page": parent_page.as_ref().map(|p| p.name.clone()),
         "page_id": parent_page.as_ref().map(|p| p.id.clone()),
         "action_count": action_count,
         "read_count": reads.len(),
-        "write_count": writes.len(),
+        "write_count": writes_models.len(),
     });
 
     let lineage: Vec<serde_json::Value> = Vec::new();
     let details = serde_json::json!({
         "reads": reads,
-        "writes": writes,
+        "writes": writes_models,
+        "writes_models": writes_models,
+        "located_in": located_in,
+        "triggers": triggers,
+        "navigates_to": navigates_to,
+        "affects_components": affects_components,
         "triggered_by": triggered_by,
-        "affects": affects,
+        "affects": {
+            "components": affects_components,
+            "models": writes_models,
+            "pages": navigates_to,
+        },
         "lineage": lineage,
     });
 
-    let diagnostics = vec![crate::output::Diagnostic {
-        severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_SOURCE_MISSING".to_string(),
-        message: "Field-level lineage source could not be determined".to_string(),
-        location: crate::output::Location::new(),
-        suggestion: Some(
-            "Check --context or --query-dataflow for upstream relationships".to_string(),
-        ),
-    }];
+    let mut diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
+    // Only emit LINEAGE_SOURCE_MISSING for components that actually need
+    // field-level lineage tracing: form inputs or components with model writes
+    let needs_lineage = is_form_input_type(&comp_type) || (!writes_models.is_empty());
+    if needs_lineage && lineage.is_empty() {
+        diagnostics.push(crate::output::Diagnostic {
+            severity: crate::output::DiagnosticSeverity::Info,
+            code: "LINEAGE_SOURCE_MISSING".to_string(),
+            message: "Field-level lineage source could not be determined".to_string(),
+            location: crate::output::Location::new(),
+            suggestion: Some(
+                "Check --context or --query-dataflow for upstream relationships".to_string(),
+            ),
+        });
+    }
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(node.id.clone());
@@ -672,10 +786,14 @@ fn explain_component_graph(
             .with_node_id(&node.id),
         );
     }
-    if !writes.is_empty() {
+    if !writes_models.is_empty() {
         output.evidence.push(
             crate::output::Evidence::new(
-                format!("Component {} writes to {} targets", node.id, writes.len()),
+                format!(
+                    "Component {} writes to {} targets",
+                    node.id,
+                    writes_models.len()
+                ),
                 "Outgoing Writes/ActionWrites edges from component",
             )
             .with_confidence(crate::output::Confidence::High)
@@ -683,9 +801,11 @@ fn explain_component_graph(
         );
     }
     push_relation_evidence(&mut output, "reads", &reads);
-    push_relation_evidence(&mut output, "writes", &writes);
-    push_relation_evidence(&mut output, "triggered_by", &triggered_by);
-    push_relation_evidence(&mut output, "affects", &affects);
+    push_relation_evidence(&mut output, "writes_models", &writes_models);
+    push_relation_evidence(&mut output, "located_in", &located_in);
+    push_relation_evidence(&mut output, "triggers", &triggers);
+    push_relation_evidence(&mut output, "navigates_to", &navigates_to);
+    push_relation_evidence(&mut output, "affects_components", &affects_components);
     output.next_queries = vec![
         format!("--context {} --depth 2 for surrounding closure", node.id),
         format!(
@@ -715,14 +835,14 @@ fn explain_component_graph(
                 writeln!(out, "  {:?}", r)?;
             }
         }
-        if !writes.is_empty() {
+        if !writes_models.is_empty() {
             writeln!(
                 out,
                 "
 --- Writes ({}) ---",
-                writes.len()
+                writes_models.len()
             )?;
-            for w in &writes {
+            for w in &writes_models {
                 writeln!(out, "  {:?}", w)?;
             }
         }
@@ -732,7 +852,6 @@ fn explain_component_graph(
     }
     Ok(())
 }
-
 fn explain_action_graph(
     graph: &GraphDB,
     node: &crate::graph::Node,
@@ -754,7 +873,8 @@ fn explain_action_graph(
     let mut reads = Vec::new();
     let mut writes = Vec::new();
     let mut triggered_by = Vec::new();
-    let mut affects = Vec::new();
+    let mut navigates_to = Vec::new();
+    let mut affects_components = Vec::new();
     let mut has_nav = false;
     let mut has_write = false;
     let mut has_read = false;
@@ -777,14 +897,14 @@ fn explain_action_graph(
             }
             crate::graph::EdgeType::OpensPage | crate::graph::EdgeType::ActionNavigates => {
                 has_nav = true;
-                affects.push(make_ref(target, edge, Some(&node.path)));
+                navigates_to.push(make_ref(target, edge, Some(&node.path)));
             }
             crate::graph::EdgeType::SetsParam | crate::graph::EdgeType::ActionSetsParam => {
-                affects.push(make_ref(target, edge, Some(&node.path)));
+                affects_components.push(make_ref(target, edge, Some(&node.path)));
                 has_write = true;
             }
             crate::graph::EdgeType::ActionControlsComponent => {
-                affects.push(make_ref(target, edge, Some(&node.path)));
+                affects_components.push(make_ref(target, edge, Some(&node.path)));
             }
             crate::graph::EdgeType::ActionValidates => {
                 reads.push(make_ref(target, edge, Some(&node.path)));
@@ -853,7 +973,7 @@ fn explain_action_graph(
         "{} 动作 {}，{}{}{}",
         action_type, node.name, comp_info, read_info, write_info
     );
-    let importance = classify_importance(has_nav, has_write, has_read, &node.node_type);
+    let importance = classify_importance(has_nav, has_write, has_read, false, "", &node.node_type);
 
     // 从 graph 节点元数据提取原始 action 属性
     let meta_wait_prev = node
@@ -888,7 +1008,7 @@ fn explain_action_graph(
         &node.name,
         &reads,
         &writes,
-        &affects,
+        &navigates_to,
     );
     let blocks_on = crate::action_semantics::parse_wait_prev(meta_wait_prev);
     let condition_struct =
@@ -926,7 +1046,12 @@ fn explain_action_graph(
         "reads": reads,
         "writes": writes,
         "triggered_by": triggered_by,
-        "affects": affects,
+        "navigates_to": navigates_to,
+        "affects_components": affects_components,
+        "affects": {
+            "components": affects_components,
+            "pages": navigates_to,
+        },
         "lineage": lineage,
         "action_category": action_category,
         "semantic_summary": semantic_summary,
@@ -938,15 +1063,7 @@ fn explain_action_graph(
         "trigger_type": meta_trigger_type.unwrap_or("click"),
     });
 
-    let diagnostics = vec![crate::output::Diagnostic {
-        severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_SOURCE_MISSING".to_string(),
-        message: "Field-level lineage source could not be determined".to_string(),
-        location: crate::output::Location::new(),
-        suggestion: Some(
-            "Check --context or --query-dataflow for upstream relationships".to_string(),
-        ),
-    }];
+    let diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(node.id.clone());
@@ -998,7 +1115,8 @@ fn explain_action_graph(
     push_relation_evidence(&mut output, "reads", &reads);
     push_relation_evidence(&mut output, "writes", &writes);
     push_relation_evidence(&mut output, "triggered_by", &triggered_by);
-    push_relation_evidence(&mut output, "affects", &affects);
+    push_relation_evidence(&mut output, "navigates_to", &navigates_to);
+    push_relation_evidence(&mut output, "affects_components", &affects_components);
     output.next_queries = vec![
         format!("--context {} --depth 2 for surrounding closure", node.id),
         format!(
@@ -1123,7 +1241,7 @@ fn explain_model_graph(
         write_count,
         dataflow_inputs.len() + dataflow_outputs.len()
     );
-    let importance = classify_importance(has_nav, has_write, has_read, &node.node_type);
+    let importance = classify_importance(has_nav, has_write, has_read, false, "", &node.node_type);
 
     let summary = serde_json::json!({
         "what_is_it": what,
@@ -1157,15 +1275,7 @@ fn explain_model_graph(
         })).collect::<Vec<_>>(),
     });
 
-    let diagnostics = vec![crate::output::Diagnostic {
-        severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_SOURCE_MISSING".to_string(),
-        message: "Field-level lineage source could not be determined".to_string(),
-        location: crate::output::Location::new(),
-        suggestion: Some(
-            "Check --context or --query-dataflow for upstream relationships".to_string(),
-        ),
-    }];
+    let diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(node.id.clone());
@@ -1719,7 +1829,7 @@ fn explain_field_graph(
         write_count,
         lineage.len()
     );
-    let importance = classify_importance(has_nav, has_write, has_read, &node.node_type);
+    let importance = classify_importance(has_nav, has_write, has_read, false, "", &node.node_type);
 
     let summary = serde_json::json!({
         "what_is_it": what,
@@ -2010,7 +2120,7 @@ fn explain_page_graph(
         data_sources.len(),
         write_targets.len()
     );
-    let importance = classify_importance(has_nav, has_write, has_read, &node.node_type);
+    let importance = classify_importance(has_nav, has_write, has_read, false, "", &node.node_type);
 
     let summary = serde_json::json!({
         "what_is_it": what,

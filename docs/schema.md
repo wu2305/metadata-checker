@@ -105,7 +105,7 @@ pub struct AiOutput {
 | `what_is_it` | string | 自然语言短句，直接说明目标含义 |
 | `type` | string | 目标类型：`component` / `action` / `model` / `field` / `page` / `dataflow` |
 | `type_detail` | string | 具体名称或子类型 |
-| `importance` | string | 稳定分类：`entrypoint` / `data_source` / `write_target` / `navigation` / `calculated_display` / `container` / `unknown` |
+| `importance` | string | 稳定分类：`entrypoint` / `data_source_display` / `calculated_display` / `static_display` / `container` / `form_input` / `action_target` / `unknown` |
 | `page` / `page_id` | string | 所属页面（Component/Action 有） |
 | `parent_component` / `parent_component_id` | string | 父组件（Action 有） |
 | `read_by_count` / `written_by_count` | number | 读写者计数（Model/Field 有） |
@@ -118,9 +118,14 @@ pub struct AiOutput {
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `reads` | array | 目标读取的对象列表 |
-| `writes` | array | 目标写入的对象列表 |
-| `triggered_by` | array | 触发目标的源对象 |
-| `affects` | array | 目标影响的下游对象 |
+| `writes` | array | 目标写入的对象列表（Component 的 legacy 字段，等价于 `writes_models`） |
+| `writes_models` | array | 组件写入的模型/字段列表（含 action 聚合） |
+| `located_in` | array | 父页面 Contains 关系（含 page 名称/ID） |
+| `triggers` | array | 组件触发的 action 列表 |
+| `navigates_to` | array | 跳转/嵌入的目标页面列表 |
+| `affects_components` | array | 受影响的组件列表（ActionControlsComponent / SetsParam） |
+| `triggered_by` | array | 触发目标的源对象（incoming Reads），不再包含 Contains |
+| `affects` | object | legacy 字段，包含 `components` / `models` / `pages` 子数组 |
 | `lineage` | array | 字段级血缘（M6 已实现）：每项包含 target_field / source_fields / source_expr / transform / confidence / evidence |
 | `inputs` | array | DataFlow 输入源列表（DataFlow 有） |
 | `outputs` | array | DataFlow 输出目标列表（DataFlow 有） |

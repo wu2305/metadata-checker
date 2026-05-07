@@ -568,14 +568,6 @@ fn test_cli_explain_component_single_file_contract() {
         !writes.is_empty(),
         "button1 with submitData should have writes"
     );
-
-    // should have LINEAGE_SOURCE_MISSING diagnostic
-    assert!(
-        ai.diagnostics
-            .iter()
-            .any(|d| d.code == "LINEAGE_SOURCE_MISSING"),
-        "must have LINEAGE_SOURCE_MISSING diagnostic"
-    );
 }
 
 #[test]
@@ -3090,5 +3082,151 @@ fn test_cli_explain_dataflow_lineage_schema() {
     assert!(
         has_lineage_top_evidence,
         "top-level evidence should include lineage trace items with raw_expr/json_path/edge_type"
+    );
+}
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_explain_component_m12() {
+    let graph_db_path = "/tmp/m12_test_xiaoshouyi.graphdb";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    // button1: 真实类型、entrypoint、semantic_summary 包含 showDialog
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain",
+        "comp:app/售后.app/首页.spg|button1",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("explain button1 must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert_eq!(
+        summary.get("type_detail").and_then(|v| v.as_str()),
+        Some("button"),
+        "button1 type_detail must be real component type 'button', not 'button1'"
+    );
+    assert_eq!(
+        summary.get("importance").and_then(|v| v.as_str()),
+        Some("entrypoint"),
+        "button1 with action must be entrypoint"
+    );
+    let semantic = summary
+        .get("semantic_summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(
+        semantic.contains("打开对话框") || semantic.contains("showDialog"),
+        "button1 semantic_summary must mention dialog opening, got: {}",
+        semantic
+    );
+
+    // text11: 真实类型 text、data_source_display、无无意义 LINEAGE_SOURCE_MISSING
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain",
+        "comp:app/售后.app/首页.spg|text11",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("explain text11 must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert_eq!(
+        summary.get("type_detail").and_then(|v| v.as_str()),
+        Some("text"),
+        "text11 type_detail must be real component type 'text'"
+    );
+    assert_eq!(
+        summary.get("importance").and_then(|v| v.as_str()),
+        Some("data_source_display"),
+        "text11 reading model data must be data_source_display"
+    );
+    assert!(
+        !ai.diagnostics
+            .iter()
+            .any(|d| d.code == "LINEAGE_SOURCE_MISSING"),
+        "text11 must not emit LINEAGE_SOURCE_MISSING"
+    );
+
+    // button2: 真实类型 button、entrypoint
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain",
+        "comp:app/售后.app/首页.spg|button2",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("explain button2 must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert_eq!(
+        summary.get("type_detail").and_then(|v| v.as_str()),
+        Some("button"),
+        "button2 type_detail must be real component type 'button'"
+    );
+    assert_eq!(
+        summary.get("importance").and_then(|v| v.as_str()),
+        Some("entrypoint"),
+        "button2 with action must be entrypoint"
+    );
+
+    // 表单输入组件: 真实类型 input、form_input
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain",
+        "comp:app/价审.app/测试.spg|input1",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("explain input1 must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert_eq!(
+        summary.get("type_detail").and_then(|v| v.as_str()),
+        Some("input"),
+        "input1 type_detail must be real component type 'input'"
+    );
+    assert_eq!(
+        summary.get("importance").and_then(|v| v.as_str()),
+        Some("form_input"),
+        "input1 must be classified as form_input"
+    );
+
+    // 全局检查：evidence 中不出现 node_id="?"
+    for ev in &ai.evidence {
+        assert_ne!(
+            ev.node_id.as_deref(),
+            Some("?"),
+            "evidence must not contain node_id='?'"
+        );
+        assert_ne!(
+            ev.raw_expr.as_deref(),
+            Some("n/a"),
+            "evidence must not contain raw_expr='n/a'"
+        );
+    }
+
+    // 弱证据 confidence 检查：graph-edge-derived 且缺 source_file 的证据应为 Low
+    let has_low_graph_derived = ai.evidence.iter().any(|ev| {
+        ev.json_path.as_deref() == Some("<graph-edge-derived>")
+            && ev.source_file.is_none()
+            && ev.confidence == metadata_checker::output::Confidence::Low
+    });
+    assert!(
+        has_low_graph_derived || ai.evidence.iter().all(|ev| ev.source_file.is_some()),
+        "graph-derived evidence without source_file must be Low confidence"
     );
 }

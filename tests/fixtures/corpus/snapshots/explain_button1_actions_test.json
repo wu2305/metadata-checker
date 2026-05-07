@@ -1,9 +1,8 @@
 {
   "details_counts": {
-    "affects_count": 1,
     "lineage_count": 0,
     "reads_count": 0,
-    "triggered_by_count": 1,
+    "triggered_by_count": 0,
     "writes_count": 1
   },
   "diagnostics": [
@@ -24,17 +23,17 @@
       "edge_type": null
     },
     {
-      "claim": "affects relation on action:app/actions_test.spg|button1|action1",
-      "confidence": "Medium",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "triggered_by relation on page:app/actions_test.spg",
+      "claim": "located_in relation on page:app/actions_test.spg",
       "confidence": "Medium",
       "edge_type": "Contains"
     },
     {
-      "claim": "writes relation on model:model1",
+      "claim": "triggers relation on action:app/actions_test.spg|button1|action1",
+      "confidence": "Medium",
+      "edge_type": "Triggers"
+    },
+    {
+      "claim": "writes_models relation on model:model1",
       "confidence": "Medium",
       "edge_type": "ActionWrites"
     }
@@ -44,13 +43,14 @@
   "schema_version": "1.0",
   "summary": {
     "action_count": 1,
-    "importance": "write_target",
+    "importance": "entrypoint",
     "page": "actions_test",
     "page_id": "page:app/actions_test.spg",
     "read_count": 0,
+    "semantic_summary": "点击 button1 后提交数据到 model1.name",
     "type": "component",
-    "type_detail": "button1",
-    "what_is_it": "组件 button1，位于页面 actions_test，具有 1 个动作，写入 model1",
+    "type_detail": "button",
+    "what_is_it": "button button1，点击 button1 后提交数据到 model1.name",
     "write_count": 1
   }
 }
