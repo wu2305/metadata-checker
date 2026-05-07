@@ -50,16 +50,22 @@ Supported target types and ID formats:
 
 Output structure (kind = Explain):
 - `summary.what_is_it`: 自然语言短句，例如"按钮 button1，位于页面 page_relations，具有1个动作"
-- `summary.importance`: 稳定分类：`entrypoint` / `data_source` / `write_target` / `navigation` / `calculated_display` / `container` / `unknown`
+- `summary.importance`: 稳定分类（M12）：`entrypoint` / `data_source_display` / `calculated_display` / `static_display` / `container` / `form_input` / `action_target` / `unknown`。旧值 `data_source` / `write_target` / `navigation` 已废弃，保留时视为 legacy。
 - `details.reads`: 目标读取的模型字段、参数、组件值
 - `details.writes`: 目标写入的模型字段、参数、页面状态
-- `details.triggered_by`: 真实触发关系（组件被页面包含、action 被组件触发、页面被 action 打开）
-- `details.affects`: 下游影响对象（被哪些组件引用、影响哪些模型字段、打开哪些页面）
+- `details.triggered_by`: 真实触发关系（action 被组件触发、页面被 action 打开）。**M12 后不再包含 Contains（页面包含），Contains 已移入 `located_in`。**
+- `details.affects`: 下游影响对象（legacy 兼容对象，含 `components` / `models` / `pages` 子数组）
+- `details.located_in`: 父页面 Contains 关系（M12 从 `triggered_by` 中拆分）
+- `details.triggers`: 组件触发的 action 列表（M12 从 `affects` 中拆分）
+- `details.navigates_to`: 跳转/嵌入的目标页面
+- `details.writes_models`: 写入的模型/字段（含 action 聚合）
+- `details.affects_components`: 受影响的组件（ActionControlsComponent / SetsParam）
 - `details.lineage`: 字段级血缘（M6 已实现）
   - DataFlow 字段：从 `dimensions[].inputField` 和 `dimensions[].exp` 追溯
   - 页面写入字段：从 `submitData.submitFields[]`、`insertData/updateData/deleteData.fieldValues[]` 追溯
   - 每项包含：`target_field`、`source_fields`、`source_expr`、`transform`、`confidence`、`evidence`
   - 表达式无法解析时产生 `LINEAGE_EXPR_UNPARSED` diagnostic
+  - **M12 后，普通 button/text/dialog 无 lineage 时不输出 `LINEAGE_SOURCE_MISSING` 噪声，仅当组件/字段确实存在写入/字段映射但无法追溯时才输出**
 - **Action 特有字段**:
   - `action_category`: 动作语义分类（data_write / data_read / navigation / param_mutation / ui_control / validation / data_initialization / data_refresh / unknown）
   - `semantic_summary`: 动作自然语言摘要，例如"点击 button1 后提交数据到 model1.name"
