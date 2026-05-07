@@ -651,6 +651,7 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
             obj.insert("evidence_summary".to_string(), evidence_summary);
             obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
         }
+        output.evidence.truncate(5);
     }
 
     output.validate()

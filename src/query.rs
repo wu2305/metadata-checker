@@ -419,6 +419,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -
                 obj.insert("evidence_summary".to_string(), evidence_summary);
                 obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
             }
+            output.evidence.truncate(5);
         }
 
         let output = output.validate();
@@ -1577,51 +1578,6 @@ pub fn query_page_logic(
     output.details = Some(details);
     output.diagnostics = diagnostics.clone();
 
-    // Compact mode: add OUTPUT_TRUNCATED diagnostic and evidence_summary
-    if is_compact {
-        let truncated_arrays = [
-            ("data_sources", data_sources.len(), 5),
-            ("write_targets", write_targets.len(), 5),
-            ("entrypoints", entrypoints.len(), 5),
-            ("action_flows", action_flows.len(), 5),
-            ("visibility_rules", visibility_rules.len(), 5),
-            ("navigation", navigation.len(), 5),
-        ];
-        let truncated_parts: Vec<String> = truncated_arrays
-            .iter()
-            .filter(|(_, size, limit)| *size > *limit)
-            .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
-            .collect();
-        if !truncated_parts.is_empty() {
-            output.diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "OUTPUT_TRUNCATED".to_string(),
-                message: format!(
-                    "Compact budget: arrays truncated for: {}",
-                    truncated_parts.join(", ")
-                ),
-                location: crate::output::Location {
-                    source_file: Some(page_node.path.clone()),
-                    node_id: Some(page_id.to_string()),
-                    json_path: None,
-                },
-                suggestion: Some(
-                    "Use --budget normal or --budget full to see complete arrays".to_string(),
-                ),
-            });
-        }
-
-        // Add evidence_summary and key_findings to summary
-        let evidence_summary =
-            crate::output::brief::evidence_summary(&output.evidence, evidence_sample_limit);
-        let key_findings =
-            crate::output::brief::build_key_findings(&output.summary, &output.diagnostics);
-        if let Some(obj) = output.summary.as_object_mut() {
-            obj.insert("evidence_summary".to_string(), evidence_summary);
-            obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
-        }
-    }
-
     output.evidence.push(
         crate::output::Evidence::new(
             format!("Page {} has {} entrypoints", page_id, entrypoints.len()),
@@ -1958,6 +1914,52 @@ pub fn query_page_logic(
     }
     output.next_queries = nq;
 
+    // Compact mode: add OUTPUT_TRUNCATED diagnostic and evidence_summary
+    if is_compact {
+        let truncated_arrays = [
+            ("data_sources", data_sources.len(), 5),
+            ("write_targets", write_targets.len(), 5),
+            ("entrypoints", entrypoints.len(), 5),
+            ("action_flows", action_flows.len(), 5),
+            ("visibility_rules", visibility_rules.len(), 5),
+            ("navigation", navigation.len(), 5),
+        ];
+        let truncated_parts: Vec<String> = truncated_arrays
+            .iter()
+            .filter(|(_, size, limit)| *size > *limit)
+            .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
+            .collect();
+        if !truncated_parts.is_empty() {
+            output.diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "OUTPUT_TRUNCATED".to_string(),
+                message: format!(
+                    "Compact budget: arrays truncated for: {}",
+                    truncated_parts.join(", ")
+                ),
+                location: crate::output::Location {
+                    source_file: Some(page_node.path.clone()),
+                    node_id: Some(page_id.to_string()),
+                    json_path: None,
+                },
+                suggestion: Some(
+                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                ),
+            });
+        }
+
+        // Add evidence_summary and key_findings to summary
+        let evidence_summary =
+            crate::output::brief::evidence_summary(&output.evidence, evidence_sample_limit);
+        let key_findings =
+            crate::output::brief::build_key_findings(&output.summary, &output.diagnostics);
+        if let Some(obj) = output.summary.as_object_mut() {
+            obj.insert("evidence_summary".to_string(), evidence_summary);
+            obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
+        }
+        // Compact mode: truncate evidence array to limit noise
+        output.evidence.truncate(evidence_sample_limit);
+    }
     let output = output.validate();
 
     // ---- 8. Human 模式 ----
