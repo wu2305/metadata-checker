@@ -253,9 +253,13 @@ metadata-checker --project-dir ./my-project --explain comp:app/page.spg|button1
 
 details 包含：
 - `reads`：组件表达式引用的模型字段、参数
-- `writes`：action 写入的模型、参数
-- `triggered_by`：父页面（Contains）、被引用组件（incoming Reads）
-- `affects`：触发的 action（Triggers）、导航目标（OpensPage）
+- `writes` / `writes_models`：action 写入的模型、参数
+- `located_in`：父页面 Contains 关系
+- `triggers`：触发的 action 列表
+- `navigates_to`：跳转/嵌入的目标页面
+- `affects_components`：受影响的组件（ActionControlsComponent / SetsParam）
+- `triggered_by`：被触发的来源（incoming Reads），不再包含 Contains
+- `affects`：legacy 字段，包含 `components` / `models` / `pages` 子数组
 
 ### 解释模型
 
