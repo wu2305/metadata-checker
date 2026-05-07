@@ -272,7 +272,7 @@ metadata-checker --project-dir ./my-project --explain model:model1
 {
   "what_is_it": "数据模型 model1，被 2 个组件/动作读取，被 6 个组件/动作写入，参与 0 个 DataFlow",
   "type": "model",
-  "importance": "write_target",
+  "importance": "action_target",
   "read_by_count": 2,
   "written_by_count": 6
 }
@@ -306,7 +306,7 @@ metadata-checker --project-dir ./my-project --explain action:app/page.spg|button
 {
   "what_is_it": "link 动作 link:action1，由 button1 触发，读取 model1",
   "type": "action",
-  "importance": "navigation",
+  "importance": "entrypoint",
   "parent_component": "button1"
 }
 ```
