@@ -62,7 +62,8 @@ fn pick_str_field<'a>(obj: &'a serde_json::Value, keys: &[&str]) -> Option<&'a s
         .find_map(|key| obj.get(*key).and_then(|v| v.as_str()))
 }
 
-pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
+pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -> Result<()> {
+    let is_compact = budget == "compact";
     if human {
         let mut out = io::stdout();
         writeln!(out, "=== Model: {} ===", model_id)?;
@@ -236,23 +237,62 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
                 })
             })
             .collect::<Vec<_>>();
+        let consumed_by_dataflow_count = consumed_by_dataflows.len();
+        let produced_by_count = produced_by.len();
+        let dataflow_input_count = dataflow_inputs.len();
+        let dataflow_output_count = dataflow_outputs.len();
+
+        let mut what_is_it = format!(
+            "模型 {}，被 {} 个节点读取，被 {} 个节点写入",
+            model_id,
+            readers.len(),
+            writers.len()
+        );
+        if readers.is_empty()
+            && writers.is_empty()
+            && (dataflow_input_count > 0 || dataflow_output_count > 0)
+        {
+            what_is_it = format!(
+                "模型 {} 主要通过 DataFlow 被消费/产出（输入 {} 个，输出 {} 个）",
+                model_id, dataflow_input_count, dataflow_output_count
+            );
+        }
+
         let summary = serde_json::json!({
             "model_id": model_id,
+            "what_is_it": what_is_it,
             "read_by_count": readers.len(),
             "written_by_count": writers.len(),
-            "dataflow_role": "Unknown",
+            "consumed_by_dataflow_count": consumed_by_dataflow_count,
+            "produced_by_count": produced_by_count,
+            "dataflow_input_count": dataflow_input_count,
+            "dataflow_output_count": dataflow_output_count,
+            "dataflow_role": if dataflow_input_count > 0 || dataflow_output_count > 0 { "DataFlowParticipant" } else { "Unknown" },
         });
 
-        let details = serde_json::json!({
-            "readers": readers,
-            "writers": writers,
-            "dataflow_inputs": dataflow_inputs,
-            "dataflow_outputs": dataflow_outputs,
-            "produced_by": produced_by,
-            "consumed_by_dataflows": consumed_by_dataflows,
-            "upstream_dependencies": upstream,
-            "downstream_outputs": downstream,
-        });
+        let details = if is_compact {
+            serde_json::json!({
+                "readers": crate::output::brief::truncated_array(&readers, 5),
+                "writers": crate::output::brief::truncated_array(&writers, 5),
+                "dataflow_inputs": crate::output::brief::truncated_array(&dataflow_inputs, 5),
+                "dataflow_outputs": crate::output::brief::truncated_array(&dataflow_outputs, 5),
+                "produced_by": crate::output::brief::truncated_array(&produced_by, 5),
+                "consumed_by_dataflows": crate::output::brief::truncated_array(&consumed_by_dataflows, 5),
+                "upstream_dependencies": crate::output::brief::truncated_array(&upstream, 5),
+                "downstream_outputs": crate::output::brief::truncated_array(&downstream, 5),
+            })
+        } else {
+            serde_json::json!({
+                "readers": readers,
+                "writers": writers,
+                "dataflow_inputs": dataflow_inputs,
+                "dataflow_outputs": dataflow_outputs,
+                "produced_by": produced_by,
+                "consumed_by_dataflows": consumed_by_dataflows,
+                "upstream_dependencies": upstream,
+                "downstream_outputs": downstream,
+            })
+        };
 
         let mut output =
             crate::output::AiOutput::new(crate::output::OutputKind::ModelQuery, summary);
@@ -335,6 +375,51 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool) -> Result<()> {
             format!("--explain {} for full semantic summary", model_id),
             format!("--query-dataflow {} for internal subgraph", model_id),
         ];
+
+        // Compact mode: add OUTPUT_TRUNCATED diagnostic and evidence_summary
+        if is_compact {
+            let truncated_arrays = [
+                ("readers", readers.len(), 5),
+                ("writers", writers.len(), 5),
+                ("dataflow_inputs", dataflow_inputs.len(), 5),
+                ("dataflow_outputs", dataflow_outputs.len(), 5),
+                ("produced_by", produced_by.len(), 5),
+                ("consumed_by_dataflows", consumed_by_dataflows.len(), 5),
+                ("upstream_dependencies", upstream.len(), 5),
+                ("downstream_outputs", downstream.len(), 5),
+            ];
+            let truncated_parts: Vec<String> = truncated_arrays
+                .iter()
+                .filter(|(_, size, limit)| *size > *limit)
+                .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
+                .collect();
+            if !truncated_parts.is_empty() {
+                output.diagnostics.push(crate::output::Diagnostic {
+                    severity: crate::output::DiagnosticSeverity::Info,
+                    code: "OUTPUT_TRUNCATED".to_string(),
+                    message: format!(
+                        "Compact budget: arrays truncated for: {}",
+                        truncated_parts.join(", ")
+                    ),
+                    location: crate::output::Location {
+                        source_file: None,
+                        node_id: Some(model_id.to_string()),
+                        json_path: None,
+                    },
+                    suggestion: Some(
+                        "Use --budget normal or --budget full to see complete arrays".to_string(),
+                    ),
+                });
+            }
+
+            let evidence_summary = crate::output::brief::evidence_summary(&output.evidence, 5);
+            let key_findings =
+                crate::output::brief::build_key_findings(&output.summary, &output.diagnostics);
+            if let Some(obj) = output.summary.as_object_mut() {
+                obj.insert("evidence_summary".to_string(), evidence_summary);
+                obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
+            }
+        }
 
         let output = output.validate();
         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -501,7 +586,9 @@ pub fn query_page_logic(
     page_id: &str,
     project_dir: Option<&std::path::Path>,
     human: bool,
+    budget: &str,
 ) -> Result<()> {
+    let is_compact = budget == "compact";
     let page_node = graph
         .get_node(page_id)
         .ok_or_else(|| anyhow::anyhow!("Page '{}' not found in graph", page_id))?;
@@ -1426,6 +1513,12 @@ pub fn query_page_logic(
         navigation.len()
     );
 
+    // Build top-N lists for brief mode
+    let top_entrypoints: Vec<serde_json::Value> = entrypoints.iter().take(3).cloned().collect();
+    let top_data_sources: Vec<serde_json::Value> = data_sources.iter().take(3).cloned().collect();
+    let top_writes: Vec<serde_json::Value> = write_targets.iter().take(3).cloned().collect();
+    let top_navigation: Vec<serde_json::Value> = navigation.iter().take(3).cloned().collect();
+
     let summary = serde_json::json!({
         "page_id": page_id,
         "page_name": page_node.name,
@@ -1436,29 +1529,98 @@ pub fn query_page_logic(
         "write_target_count": write_targets.len(),
         "navigation_count": navigation.len(),
         "risk_count": diagnostics.len(),
+        "top_entrypoints": top_entrypoints,
+        "top_data_sources": top_data_sources,
+        "top_writes": top_writes,
+        "top_navigation": top_navigation,
     });
 
-    let details = serde_json::json!({
-        "page_inputs": page_inputs.clone(),
-        "data_sources": data_sources.clone(),
-        "write_targets": write_targets.clone(),
-        "entrypoints": entrypoints.clone(),
-        "action_flows": action_flows.clone(),
-        "visibility_rules": visibility_rules.clone(),
-        "navigation": navigation.clone(),
-        "risk_diagnostics": diagnostics.iter().map(|d| serde_json::json!({
-            "severity": format!("{:?}", d.severity),
-            "code": d.code,
-            "message": d.message,
-            "location": d.location,
-            "suggestion": d.suggestion,
-        })).collect::<Vec<serde_json::Value>>(),
-    });
+    let risk_diagnostics: Vec<serde_json::Value> = diagnostics
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "severity": format!("{:?}", d.severity),
+                "code": d.code,
+                "message": d.message,
+                "location": d.location,
+                "suggestion": d.suggestion,
+            })
+        })
+        .collect();
+
+    let details = if is_compact {
+        serde_json::json!({
+            "page_inputs": crate::output::brief::truncated_array(&page_inputs, 5),
+            "data_sources": crate::output::brief::truncated_array(&data_sources, 5),
+            "write_targets": crate::output::brief::truncated_array(&write_targets, 5),
+            "entrypoints": crate::output::brief::truncated_array(&entrypoints, 5),
+            "action_flows": crate::output::brief::truncated_array(&action_flows, 5),
+            "visibility_rules": crate::output::brief::truncated_array(&visibility_rules, 5),
+            "navigation": crate::output::brief::truncated_array(&navigation, 5),
+            "risk_diagnostics": crate::output::brief::truncated_array(&risk_diagnostics, 10),
+        })
+    } else {
+        serde_json::json!({
+            "page_inputs": page_inputs.clone(),
+            "data_sources": data_sources.clone(),
+            "write_targets": write_targets.clone(),
+            "entrypoints": entrypoints.clone(),
+            "action_flows": action_flows.clone(),
+            "visibility_rules": visibility_rules.clone(),
+            "navigation": navigation.clone(),
+            "risk_diagnostics": risk_diagnostics,
+        })
+    };
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::PageLogic, summary);
     output.query_target = Some(page_id.to_string());
     output.details = Some(details);
     output.diagnostics = diagnostics.clone();
+
+    // Compact mode: add OUTPUT_TRUNCATED diagnostic and evidence_summary
+    if is_compact {
+        let truncated_arrays = [
+            ("data_sources", data_sources.len(), 5),
+            ("write_targets", write_targets.len(), 5),
+            ("entrypoints", entrypoints.len(), 5),
+            ("action_flows", action_flows.len(), 5),
+            ("visibility_rules", visibility_rules.len(), 5),
+            ("navigation", navigation.len(), 5),
+        ];
+        let truncated_parts: Vec<String> = truncated_arrays
+            .iter()
+            .filter(|(_, size, limit)| *size > *limit)
+            .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
+            .collect();
+        if !truncated_parts.is_empty() {
+            output.diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "OUTPUT_TRUNCATED".to_string(),
+                message: format!(
+                    "Compact budget: arrays truncated for: {}",
+                    truncated_parts.join(", ")
+                ),
+                location: crate::output::Location {
+                    source_file: Some(page_node.path.clone()),
+                    node_id: Some(page_id.to_string()),
+                    json_path: None,
+                },
+                suggestion: Some(
+                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                ),
+            });
+        }
+
+        // Add evidence_summary and key_findings to summary
+        let evidence_summary =
+            crate::output::brief::evidence_summary(&output.evidence, evidence_sample_limit);
+        let key_findings =
+            crate::output::brief::build_key_findings(&output.summary, &output.diagnostics);
+        if let Some(obj) = output.summary.as_object_mut() {
+            obj.insert("evidence_summary".to_string(), evidence_summary);
+            obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
+        }
+    }
 
     output.evidence.push(
         crate::output::Evidence::new(

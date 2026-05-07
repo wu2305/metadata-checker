@@ -232,7 +232,8 @@ fn parse_dim_field(dim_obj: &serde_json::Map<String, serde_json::Value>, _idx: u
 }
 
 /// 构建单文件 .tbl 的 AiOutput
-pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
+pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
+    let is_compact = budget == "compact";
     let kind = if meta.is_dataflow {
         OutputKind::DataFlow
     } else {
@@ -268,11 +269,41 @@ pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
         )
     };
 
+    // 保守推断表角色
+    let table_role = if meta.is_dataflow {
+        "dataflow_pipeline"
+    } else if meta.db_table_name.is_some() {
+        "physical_storage"
+    } else {
+        "app_reference"
+    };
+
+    // 提取关键字段（id/key/code/name）
+    let key_fields: Vec<String> = meta
+        .fields
+        .iter()
+        .filter(|f| {
+            let n = f.name.to_lowercase();
+            n.contains("id") || n.contains("key") || n.contains("code") || n.contains("name")
+        })
+        .map(|f| f.name.clone())
+        .collect();
+
+    // 字段类型分布
+    let mut field_type_summary = std::collections::HashMap::<String, usize>::new();
+    for f in &meta.fields {
+        let dt = f.data_type.as_deref().unwrap_or("unknown").to_string();
+        *field_type_summary.entry(dt).or_insert(0) += 1;
+    }
+
     let summary = json!({
         "table_id": meta.table_id,
         "table_name": meta.table_name,
         "table_type": table_type,
+        "table_role": table_role,
         "field_count": field_count,
+        "key_fields": key_fields,
+        "field_type_summary": field_type_summary,
         "input_count": input_count,
         "output_count": output_count,
         "what_is_it": what_is_it,
@@ -400,13 +431,23 @@ pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
         })
         .collect();
 
-    let details = json!({
-        "fields": fields_json,
-        "dataflow_inputs": dataflow_inputs_json,
-        "dataflow_outputs": dataflow_outputs_json,
-        "internal_nodes": internal_nodes_json,
-        "field_lineage": field_lineage,
-    });
+    let details = if is_compact {
+        json!({
+            "fields": crate::output::brief::truncated_array(&fields_json, 10),
+            "dataflow_inputs": crate::output::brief::truncated_array(&dataflow_inputs_json, 5),
+            "dataflow_outputs": crate::output::brief::truncated_array(&dataflow_outputs_json, 5),
+            "internal_nodes": crate::output::brief::truncated_array(&internal_nodes_json, 5),
+            "field_lineage": crate::output::brief::truncated_array(&field_lineage, 5),
+        })
+    } else {
+        json!({
+            "fields": fields_json,
+            "dataflow_inputs": dataflow_inputs_json,
+            "dataflow_outputs": dataflow_outputs_json,
+            "internal_nodes": internal_nodes_json,
+            "field_lineage": field_lineage,
+        })
+    };
     output.details = Some(details);
 
     // Evidence
@@ -568,6 +609,48 @@ pub fn build_tbl_output(meta: &TblMetadata) -> AiOutput {
             ),
             "--project-dir <DIR> --query-model <MODEL> for cross-file usage".to_string(),
         ];
+    }
+
+    // Compact mode: add OUTPUT_TRUNCATED and evidence_summary
+    if is_compact {
+        let truncated_arrays = [
+            ("fields", fields_json.len(), 10),
+            ("dataflow_inputs", dataflow_inputs_json.len(), 5),
+            ("dataflow_outputs", dataflow_outputs_json.len(), 5),
+            ("internal_nodes", internal_nodes_json.len(), 5),
+            ("field_lineage", field_lineage.len(), 5),
+        ];
+        let truncated_parts: Vec<String> = truncated_arrays
+            .iter()
+            .filter(|(_, size, limit)| *size > *limit)
+            .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
+            .collect();
+        if !truncated_parts.is_empty() {
+            output.diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "OUTPUT_TRUNCATED".to_string(),
+                message: format!(
+                    "Compact budget: arrays truncated for: {}",
+                    truncated_parts.join(", ")
+                ),
+                location: crate::output::Location {
+                    source_file: meta.input_path.clone(),
+                    node_id: meta.table_id.clone(),
+                    json_path: None,
+                },
+                suggestion: Some(
+                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                ),
+            });
+        }
+
+        let evidence_summary = crate::output::brief::evidence_summary(&output.evidence, 5);
+        let key_findings =
+            crate::output::brief::build_key_findings(&output.summary, &output.diagnostics);
+        if let Some(obj) = output.summary.as_object_mut() {
+            obj.insert("evidence_summary".to_string(), evidence_summary);
+            obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
+        }
     }
 
     output.validate()

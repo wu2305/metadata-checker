@@ -244,7 +244,7 @@ fn setup_graph_db(suffix: &str) -> (std::path::PathBuf, GraphDB) {
 #[test]
 fn test_query_model_contract() {
     let (_db_path, graph) = setup_graph_db("model");
-    let result = metadata_checker::query::query_model(&graph, "model:model1", false);
+    let result = metadata_checker::query::query_model(&graph, "model:model1", false, "compact");
     assert!(
         result.is_ok(),
         "query_model should succeed for existing model"
@@ -332,6 +332,7 @@ fn test_query_page_logic_contract() {
         "page:app/page_relations.spg",
         None,
         false,
+        "compact",
     );
     assert!(
         result.is_ok(),
@@ -3228,5 +3229,364 @@ fn test_real_project_explain_component_m12() {
     assert!(
         has_low_graph_derived || ai.evidence.iter().all(|ev| ev.source_file.is_some()),
         "graph-derived evidence without source_file must be Low confidence"
+    );
+}
+
+// M13 compact 结构验证测试
+
+#[test]
+fn test_query_page_logic_compact_truncated_structure() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/actions_test.spg",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let key_findings = summary.get("key_findings").and_then(|v| v.as_array());
+    assert!(key_findings.is_some(), "compact must have key_findings");
+    assert!(
+        !key_findings.unwrap().is_empty(),
+        "key_findings must not be empty"
+    );
+    let evidence_summary = summary.get("evidence_summary").and_then(|v| v.as_object());
+    assert!(
+        evidence_summary.is_some(),
+        "compact must have evidence_summary"
+    );
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    for key in [
+        "action_flows",
+        "entrypoints",
+        "data_sources",
+        "write_targets",
+        "navigation",
+    ] {
+        if let Some(arr_struct) = details.get(key).and_then(|v| v.as_object()) {
+            assert!(
+                arr_struct.contains_key("total_count"),
+                "{} must have total_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("shown_count"),
+                "{} must have shown_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("truncated"),
+                "{} must have truncated",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("remaining_count"),
+                "{} must have remaining_count",
+                key
+            );
+            assert!(arr_struct.contains_key("items"), "{} must have items", key);
+        }
+    }
+    let has_truncated = ai.diagnostics.iter().any(|d| d.code == "OUTPUT_TRUNCATED");
+    assert!(
+        has_truncated,
+        "compact large page must have OUTPUT_TRUNCATED"
+    );
+}
+
+#[test]
+fn test_query_model_compact_brief_structure() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-model",
+        "model1",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::ModelQuery);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("what_is_it"),
+        "compact model query must have what_is_it"
+    );
+    assert!(
+        summary.contains_key("consumed_by_dataflow_count"),
+        "compact model query must have consumed_by_dataflow_count"
+    );
+    assert!(
+        summary.contains_key("produced_by_count"),
+        "compact model query must have produced_by_count"
+    );
+    let key_findings = summary.get("key_findings").and_then(|v| v.as_array());
+    assert!(key_findings.is_some(), "compact must have key_findings");
+    assert!(
+        !key_findings.unwrap().is_empty(),
+        "key_findings must not be empty"
+    );
+    let evidence_summary = summary.get("evidence_summary").and_then(|v| v.as_object());
+    assert!(
+        evidence_summary.is_some(),
+        "compact must have evidence_summary"
+    );
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    for key in ["readers", "writers", "dataflow_inputs", "dataflow_outputs"] {
+        if let Some(arr_struct) = details.get(key).and_then(|v| v.as_object()) {
+            assert!(
+                arr_struct.contains_key("total_count"),
+                "{} must have total_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("shown_count"),
+                "{} must have shown_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("truncated"),
+                "{} must have truncated",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("remaining_count"),
+                "{} must have remaining_count",
+                key
+            );
+            assert!(arr_struct.contains_key("items"), "{} must have items", key);
+        }
+    }
+}
+
+#[test]
+fn test_tbl_compact_truncated_structure() {
+    let path = Path::new("tests/fixtures/test_project/app/app_table.tbl");
+    let meta = parse_file(path).expect("parse should succeed");
+    let tbl = meta.tbl.expect("should have tbl metadata");
+    let out = metadata_checker::tbl_single::build_tbl_output(&tbl, "compact");
+    assert_eq!(out.kind, OutputKind::Table);
+    let summary = out.summary.as_object().expect("summary must be object");
+    let key_findings = summary.get("key_findings").and_then(|v| v.as_array());
+    assert!(key_findings.is_some(), "compact must have key_findings");
+    assert!(
+        !key_findings.unwrap().is_empty(),
+        "key_findings must not be empty"
+    );
+    let evidence_summary = summary.get("evidence_summary").and_then(|v| v.as_object());
+    assert!(
+        evidence_summary.is_some(),
+        "compact must have evidence_summary"
+    );
+
+    let details_val = out.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    for key in ["fields", "field_lineage"] {
+        if let Some(arr_struct) = details.get(key).and_then(|v| v.as_object()) {
+            assert!(
+                arr_struct.contains_key("total_count"),
+                "{} must have total_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("shown_count"),
+                "{} must have shown_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("truncated"),
+                "{} must have truncated",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("remaining_count"),
+                "{} must have remaining_count",
+                key
+            );
+            assert!(arr_struct.contains_key("items"), "{} must have items", key);
+        }
+    }
+    // 小文件可能不触发截断，结构验证已通过
+}
+
+#[test]
+fn test_dataflow_compact_truncated_structure() {
+    let path = Path::new("tests/fixtures/test_project/app/dataflow_output.tbl");
+    let meta = parse_file(path).expect("parse should succeed");
+    let tbl = meta.tbl.expect("should have tbl metadata");
+    let out = metadata_checker::tbl_single::build_tbl_output(&tbl, "compact");
+    assert_eq!(out.kind, OutputKind::DataFlow);
+    let summary = out.summary.as_object().expect("summary must be object");
+    let key_findings = summary.get("key_findings").and_then(|v| v.as_array());
+    assert!(key_findings.is_some(), "compact must have key_findings");
+    assert!(
+        !key_findings.unwrap().is_empty(),
+        "key_findings must not be empty"
+    );
+    let evidence_summary = summary.get("evidence_summary").and_then(|v| v.as_object());
+    assert!(
+        evidence_summary.is_some(),
+        "compact must have evidence_summary"
+    );
+
+    let details_val = out.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    for key in [
+        "fields",
+        "field_lineage",
+        "dataflow_inputs",
+        "dataflow_outputs",
+        "internal_nodes",
+    ] {
+        if let Some(arr_struct) = details.get(key).and_then(|v| v.as_object()) {
+            assert!(
+                arr_struct.contains_key("total_count"),
+                "{} must have total_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("shown_count"),
+                "{} must have shown_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("truncated"),
+                "{} must have truncated",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("remaining_count"),
+                "{} must have remaining_count",
+                key
+            );
+            assert!(arr_struct.contains_key("items"), "{} must have items", key);
+        }
+    }
+    // 小文件可能不触发截断，结构验证已通过
+}
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_query_page_logic_compact() {
+    let graph_db_path = "/tmp/m13_test_xiaoshouyi.graphdb";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--query-page-logic",
+        "page:app/售后.app/首页.spg",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let key_findings = summary.get("key_findings").and_then(|v| v.as_array());
+    assert!(key_findings.is_some(), "compact must have key_findings");
+    assert!(
+        !key_findings.unwrap().is_empty(),
+        "key_findings must not be empty"
+    );
+    let evidence_summary = summary.get("evidence_summary").and_then(|v| v.as_object());
+    assert!(
+        evidence_summary.is_some(),
+        "compact must have evidence_summary"
+    );
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    for key in [
+        "action_flows",
+        "entrypoints",
+        "data_sources",
+        "write_targets",
+        "navigation",
+    ] {
+        if let Some(arr_struct) = details.get(key).and_then(|v| v.as_object()) {
+            assert!(
+                arr_struct.contains_key("total_count"),
+                "{} must have total_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("shown_count"),
+                "{} must have shown_count",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("truncated"),
+                "{} must have truncated",
+                key
+            );
+            assert!(
+                arr_struct.contains_key("remaining_count"),
+                "{} must have remaining_count",
+                key
+            );
+            assert!(arr_struct.contains_key("items"), "{} must have items", key);
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_query_model_compact() {
+    let graph_db_path = "/tmp/m13_test_xiaoshouyi.graphdb";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--query-model",
+        "model:fact_saleContract",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::ModelQuery);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let key_findings = summary.get("key_findings").and_then(|v| v.as_array());
+    assert!(key_findings.is_some(), "compact must have key_findings");
+    assert!(
+        !key_findings.unwrap().is_empty(),
+        "key_findings must not be empty"
+    );
+    let evidence_summary = summary.get("evidence_summary").and_then(|v| v.as_object());
+    assert!(
+        evidence_summary.is_some(),
+        "compact must have evidence_summary"
     );
 }

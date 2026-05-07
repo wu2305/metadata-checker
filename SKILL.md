@@ -253,13 +253,16 @@ metadata-checker dataflow_output.tbl
 | DataFlow 怎么来的？ | `--query-dataflow model` / `--explain model:dataflow_model` |
 | 周围还有哪些关键依赖？ | `--context \u003cID\u003e --depth 1 --budget normal` |
 
-### 2. 再读 summary
+### 2. 再读 summary → key_findings → evidence_summary
 
-执行命令后，**必须首先读取 `summary`**：
-- `summary.what_is_it` 给出自然语言一句话定义。
-- `summary.page_role` / `importance` 给出语义分类。
-- 计数字段（`entrypoint_count`、`write_target_count`、`read_by_count` 等）建立数量级认知。
+执行命令后，**优先按以下顺序读取**（M13）：
+1. **`summary.what_is_it`**：自然语言一句话定义。
+2. **`summary.page_role` / `importance`**：语义分类。
+3. **`summary.key_findings`**：结构化关键发现与风险（compact 模式自动注入）。
+4. **`summary.evidence_summary`**：证据覆盖状态（compact 模式自动注入），确认结论是否有足够证据支撑。
+5. **计数字段**：建立数量级认知。
 - **禁止跳过 summary 直接读取 details 或 evidence**。
+- **禁止默认使用 `--budget full`**：AI 第一轮查询必须使用 `--budget compact`；只有 key_findings 或 evidence_summary 提示需要更多信息时，才使用 `--budget normal` 或 `--budget full`。
 
 ### 3. 需要核查时读 evidence
 
@@ -283,11 +286,17 @@ metadata-checker dataflow_output.tbl
 - `severity=info`：仅作提示，不影响主要结论。
 - 常见需要降级的诊断码：`UNRESOLVED_REF`、`EVIDENCE_INCOMPLETE`、`EVIDENCE_SAMPLED`、`LINEAGE_SOURCE_MISSING`、`LINEAGE_EXPR_UNPARSED`、`UNKNOWN_ACTION_TYPE`。
 
-### 6. 输出体积控制
+### 6. 输出体积控制（M13）
 
-- 默认使用 `--budget normal`；只有需要最小上下文时才用 `--budget compact`。
-- `truncated=true` 时说明输出被截断，还有未展示的关系。
-- 禁止无差别读取 `--budget full` 的完整 details 大数组。
+| Budget | 使用时机 | 说明 |
+|--------|----------|------|
+| `compact` | **AI 第一轮默认使用** | 只输出 brief 结构：summary + key_findings + evidence_summary + 截断后的 Top-N details。不展开完整大数组。 |
+| `normal` | 需要核查关键细节时 | 输出 brief + 主要 details（数组仍可能截断），保留 key_findings 和 evidence_summary。 |
+| `full` | 深度审计、需要完整数组时 | 输出完整 details（不截断），但仍保留 summary / key_findings / evidence_summary。 |
+
+- AI **禁止默认使用 `--budget full`**；必须从 compact 开始，按需升级。
+- 遇到 `OUTPUT_TRUNCATED` 诊断时，说明对应数组被截断，可按需用更高 budget 重新查询。
+- 非法 budget（非 compact/normal/full）会直接报错，不静默降级。
 
 ### 7. 禁止行为
 

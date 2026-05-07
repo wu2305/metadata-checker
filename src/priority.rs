@@ -183,3 +183,39 @@ fn refs_to_string(refs: &[RefType]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+/// 构建低噪声优先级摘要
+pub fn build_priority_summary(analyses: &[PriorityAnalysis]) -> serde_json::Value {
+    let total = analyses.len();
+    let high_risk_count = analyses
+        .iter()
+        .filter(|a| {
+            matches!(
+                a.priority_result,
+                ExpDefaultValuePriority::AmbiguousConflict
+            )
+        })
+        .count();
+    let top_conflicts: Vec<serde_json::Value> = analyses
+        .iter()
+        .filter(|a| {
+            matches!(
+                a.priority_result,
+                ExpDefaultValuePriority::AmbiguousConflict
+            )
+        })
+        .take(3)
+        .map(|a| {
+            serde_json::json!({
+                "component_id": a.component_id,
+                "component_type": a.component_type,
+                "priority_result": format!("{:?}", a.priority_result),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "priority_rule_count": total,
+        "high_risk_count": high_risk_count,
+        "top_priority_conflicts": top_conflicts,
+    })
+}

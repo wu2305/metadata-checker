@@ -9,7 +9,7 @@ fn parse_tbl_fixture(name: &str) -> AiOutput {
     let path = Path::new("tests/fixtures/test_project/app").join(name);
     let meta = parser::parse_file(&path).expect("parse should succeed");
     let tbl = meta.tbl.expect("should have tbl metadata");
-    tbl_single::build_tbl_output(&tbl)
+    tbl_single::build_tbl_output(&tbl, "full")
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn test_real_project_tbl_not_superpage() {
     );
     let meta = parser::parse_file(path).expect("parse should succeed");
     let tbl = meta.tbl.expect("should have tbl metadata");
-    let out = tbl_single::build_tbl_output(&tbl);
+    let out = tbl_single::build_tbl_output(&tbl, "full");
     assert_ne!(out.kind, OutputKind::SuperPage);
     assert_eq!(out.kind, OutputKind::Table);
     let summary = out.summary.as_object().expect("summary should be object");

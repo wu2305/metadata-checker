@@ -26,6 +26,14 @@ fn main() -> Result<()> {
     let args = cli::Cli::parse();
     metadata_checker::graph::set_graph_lock_timeout_ms(args.graph_lock_timeout_ms);
 
+    // Validate budget early for all paths
+    if args.budget != "compact" && args.budget != "normal" && args.budget != "full" {
+        anyhow::bail!(
+            "Invalid budget '{}'. Expected: compact | normal | full",
+            args.budget
+        );
+    }
+
     // Cross-file graph analysis mode
     if let Some(ref project_dir) = args.project_dir {
         let db_path = args
@@ -54,7 +62,7 @@ fn main() -> Result<()> {
 
         if let Some(ref model_id) = args.query_model {
             let model_node_id = format!("model:{}", model_id);
-            query::query_model(&graph, &model_node_id, args.is_human())?;
+            query::query_model(&graph, &model_node_id, args.is_human(), &args.budget)?;
             return Ok(());
         }
 
@@ -82,6 +90,7 @@ fn main() -> Result<()> {
                 page_logic_id,
                 args.project_dir.as_deref(),
                 args.is_human(),
+                &args.budget,
             )?;
             return Ok(());
         }
@@ -92,12 +101,6 @@ fn main() -> Result<()> {
         }
 
         if let Some(ref context_id) = args.context {
-            if args.budget != "compact" && args.budget != "normal" && args.budget != "full" {
-                anyhow::bail!(
-                    "Invalid budget '{}'. Expected: compact | normal | full",
-                    args.budget
-                );
-            }
             context::context_node_graph(
                 &graph,
                 context_id,
@@ -142,7 +145,7 @@ fn main() -> Result<()> {
         if let Some(spg) = &meta.superpage {
             explain::explain_component_spg(spg, explain_id, args.is_human())?;
         } else if let Some(tbl) = &meta.tbl {
-            let out = tbl_single::build_tbl_output(tbl);
+            let out = tbl_single::build_tbl_output(tbl, &args.budget);
             println!("{}", serde_json::to_string_pretty(&out)?);
         }
         return Ok(());
@@ -158,7 +161,7 @@ fn main() -> Result<()> {
                 output::print_component_query_json(spg, &graph, target_id, args.priority)?;
             }
         } else if let Some(tbl) = &meta.tbl {
-            let out = tbl_single::build_tbl_output(tbl);
+            let out = tbl_single::build_tbl_output(tbl, &args.budget);
             println!("{}", serde_json::to_string_pretty(&out)?);
         }
         return Ok(());
@@ -184,11 +187,14 @@ fn main() -> Result<()> {
     let priority_slice = priority_analyses.as_deref();
 
     if let Some(tbl) = &meta.tbl {
-        let out = tbl_single::build_tbl_output(tbl);
+        let out = tbl_single::build_tbl_output(tbl, &args.budget);
         println!("{}", serde_json::to_string_pretty(&out)?);
-    } else if args.detail {
+    } else if args.detail || args.budget == "full" {
+        output::print_non_human_to(&meta, priority_slice, &mut io::stdout())?;
+    } else if args.budget == "normal" {
         output::print_non_human_to(&meta, priority_slice, &mut io::stdout())?;
     } else {
+        // compact: summary-only brief output
         output::print_summary(&meta, priority_slice)?;
     }
 

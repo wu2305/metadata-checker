@@ -189,15 +189,86 @@ pub struct AiOutput {
 }
 ```
 
+## Brief 结构与截断数组
+
+### 截断数组包装
+
+所有长数组在 `compact` / `normal` 模式下统一包装为：
+
+```json
+{
+  "total_count": 42,
+  "shown_count": 5,
+  "truncated": true,
+  "remaining_count": 37,
+  "items": [ ... ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `total_count` | number | 原始数组总长度 |
+| `shown_count` | number | 当前展示长度 |
+| `truncated` | boolean | 是否被截断 |
+| `remaining_count` | number | 剩余未展示数量 |
+| `items` | array | 实际展示的子数组 |
+
+### evidence_summary 结构
+
+`compact` 模式下自动注入 `summary.evidence_summary`：
+
+```json
+{
+  "total_count": 25,
+  "shown_count": 5,
+  "sampled": true,
+  "confidence_counts": {
+    "high": 18,
+    "medium": 5,
+    "low": 2
+  },
+  "source_file_count": 3,
+  "has_graph_derived": true
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `total_count` | number | evidence 总数 |
+| `shown_count` | number | 当前展示数（可能因采样而 < total） |
+| `sampled` | boolean | 是否为采样子集 |
+| `confidence_counts` | object | high / medium / low 分布 |
+| `source_file_count` | number | 有 source_file 的证据数量 |
+| `has_graph_derived` | boolean | 是否包含 graph-derived 证据 |
+
+### key_findings 结构
+
+`compact` 模式下自动注入 `summary.key_findings`，每项包含：
+
+```json
+{
+  "claim": "页面有 3 个入口和 2 个写入目标",
+  "category": "summary",
+  "evidence_level": "high"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `claim` | string | 一句话结论 |
+| `category` | string | `summary` / `risk` / `truncation` |
+| `evidence_level` | string | `high` / `medium` / `low` / `sampled` |
+| `code` | string | 可选，关联的 diagnostic code |
+
 ## 输出体积控制（Budget）
 
 | Budget | 说明 |
 |--------|------|
-| `compact` | 仅 summary + 关键 evidence，details 深度截断到 1 层。 |
-| `normal` | summary + 完整 details + 前 20 条 evidence。 |
-| `full` | 不截断，包含所有 evidence 和原始元数据引用。 |
+| `compact` | 只输出 brief 结构与少量 Top-N，details 中所有长数组使用截断包装，自动注入 `evidence_summary` 和 `key_findings`。适合第一轮读取。 |
+| `normal` | 输出 brief + 主要 details（数组仍可能截断），保留 `evidence_summary` 和 `key_findings`。适合需要核查时的第二轮读取。 |
+| `full` | 输出完整 details（不截断），但仍保留 `summary`、`key_findings`、`evidence_summary`。适合深度审计。 |
 
-非法 budget 产生错误：CLI 层校验 `compact|normal|full`，非法值直接错误退出，不静默按 normal 处理。
+非法 budget 产生错误：CLI 层校验 `compact|normal|full`，非法值直接错误退出，不静默降级。
 
 ## 查询不存在目标的行为
 

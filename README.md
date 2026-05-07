@@ -119,24 +119,39 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 # 页面级逻辑摘要（推荐 AI 优先使用）
 ./target/release/metadata-checker --project-dir /path/to/project --query-page-logic page:app/page.spg
 
-# PageLogic 典型输出片段：
+# PageLogic 典型输出片段（--budget compact）：
 # {
 #   "kind": "PageLogic",
 #   "summary": {
 #     "what_is_it": "页面 actions_test，5 个用户入口，读取 0 个数据源，写入 9 个目标，0 个跳转",
 #     "page_role": "data_maintenance_page",
 #     "entrypoint_count": 5,
-#     "write_target_count": 9
+#     "write_target_count": 9,
+#     "key_findings": [
+#       { "claim": "页面 actions_test，5 个用户入口...", "category": "summary", "evidence_level": "high" }
+#     ],
+#     "evidence_summary": {
+#       "total_count": 25, "shown_count": 5, "sampled": true,
+#       "confidence_counts": { "high": 20, "medium": 3, "low": 2 },
+#       "source_file_count": 1, "has_graph_derived": false
+#     }
 #   },
 #   "details": {
-#     "entrypoints": [...],
-#     "action_flows": [...],
-#     "write_targets": [...],
-#     "navigation": [...],
-#     "visibility_rules": [...],
-#     "risk_diagnostics": [...]
-#   }
+#     "entrypoints": { "total_count": 5, "shown_count": 5, "truncated": false, "remaining_count": 0, "items": [...] },
+#     "action_flows": { "total_count": 9, "shown_count": 5, "truncated": true, "remaining_count": 4, "items": [...] },
+#     "write_targets": { "total_count": 9, "shown_count": 5, "truncated": true, "remaining_count": 4, "items": [...] },
+#     "navigation": { "total_count": 0, "shown_count": 0, "truncated": false, "remaining_count": 0, "items": [] },
+#     "risk_diagnostics": { "total_count": 2, "shown_count": 2, "truncated": false, "remaining_count": 0, "items": [...] }
+#   },
+#   "diagnostics": [
+#     { "code": "OUTPUT_TRUNCATED", "severity": "Info", "message": "Compact budget: arrays truncated for: action_flows 9>5, write_targets 9>5" }
+#   ]
 # }
+#
+# Budget 语义（M13）：
+# - compact：只输出 brief 结构与截断后的 Top-N，AI 第一轮优先使用。
+# - normal：输出 brief + 主要 details（数组仍可能截断）。
+# - full：输出完整 details（不截断），适合深度审计。
 ```
 
 ### human 模式

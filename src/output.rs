@@ -1,3 +1,5 @@
+pub mod brief;
+
 use crate::dependency::DependencyGraph;
 use crate::parser::PageMetadata;
 use crate::superpage::{RefType, SuperPageMetadata};
@@ -267,17 +269,8 @@ pub fn print_summary_to(
             })
             .collect();
 
-        let _priority_json = priority_analyses.map(|analyses| {
-            analyses
-                .iter()
-                .map(|a| {
-                    json!({
-                        "component_id": a.component_id,
-                        "priority_result": format!("{:?}", a.priority_result),
-                    })
-                })
-                .collect::<Vec<Value>>()
-        });
+        let priority_summary =
+            priority_analyses.map(|analyses| crate::priority::build_priority_summary(analyses));
 
         let mut diagnostics = Vec::new();
         if !cycles.is_empty() {
@@ -297,6 +290,72 @@ pub fn print_summary_to(
                 suggestion: None,
             });
         }
+        if let Some(analyses) = priority_analyses {
+            if analyses.is_empty() {
+                diagnostics.push(crate::output::Diagnostic {
+                    severity: crate::output::DiagnosticSeverity::Info,
+                    code: "NO_PRIORITY_RULES".to_string(),
+                    message: "No priority rules found in this page".to_string(),
+                    location: crate::output::Location::new(),
+                    suggestion: Some(
+                        "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
+                    ),
+                });
+            }
+        }
+
+        // 保守推断单页角色
+        let mut has_button = false;
+        let mut has_input = false;
+        let mut has_table = false;
+        for c in &spg.components {
+            let t = c.component_type.as_str().to_lowercase();
+            if t.contains("button") || t.contains("link") {
+                has_button = true;
+            }
+            if t.contains("input") || t.contains("field") || t.contains("select") {
+                has_input = true;
+            }
+            if t.contains("table") || t.contains("grid") || t.contains("list") {
+                has_table = true;
+            }
+        }
+        let has_write_action = spg.expressions.iter().any(|e| {
+            let r = e.raw_expr.to_lowercase();
+            r.contains("submitdata")
+                || r.contains("insertdata")
+                || r.contains("updatedata")
+                || r.contains("deletedata")
+        });
+        let has_nav_action = spg.expressions.iter().any(|e| {
+            let r = e.raw_expr.to_lowercase();
+            r.contains("openpage") || r.contains("showdialog") || r.contains("navigate")
+        });
+        let page_role = if has_write_action && has_nav_action {
+            "mixed_interaction_page"
+        } else if has_write_action {
+            "data_maintenance_page"
+        } else if has_nav_action {
+            "navigation_page"
+        } else if has_button && has_input {
+            "form_submit_page"
+        } else if !has_button
+            && !has_write_action
+            && !has_nav_action
+            && (has_table || spg.sources.len() > 1)
+        {
+            "readonly_dashboard"
+        } else {
+            "unknown"
+        };
+        let what_is_it = format!(
+            "SuperPage {}，{} 个组件，{} 个表达式，{} 个数据源，角色 {}",
+            meta.input_path.as_deref().unwrap_or("unknown"),
+            spg.components.len(),
+            spg.expressions.len(),
+            spg.sources.len(),
+            page_role
+        );
 
         let summary = json!({
             "page_info": {
@@ -306,6 +365,8 @@ pub fn print_summary_to(
                 "expression_count": spg.expressions.len(),
                 "has_cycles": !cycles.is_empty(),
             },
+            "what_is_it": what_is_it,
+            "page_role": page_role,
             "important_components": important_components,
             "data_sources": spg.sources.iter().map(|s| json!({
                 "id": s.id,
@@ -317,6 +378,7 @@ pub fn print_summary_to(
                 "name": p.name,
                 "default_value": p.default_value,
             })).collect::<Vec<Value>>(),
+            "priority_summary": priority_summary,
         });
 
         let mut output =
@@ -375,16 +437,8 @@ pub fn print_non_human_to(
         let topo = graph.topological_sort();
         let cycles = graph.detect_cycles();
 
-        let priority_json = priority_analyses.map(|analyses| {
-            analyses.iter().map(|a| json!({
-                "component_id": a.component_id,
-                "component_type": a.component_type,
-                "priority_result": format!("{:?}", a.priority_result),
-                "default_value": a.default_value_expr.as_ref().map(|e| e.raw_expr.clone()),
-                "exp": a.calc_exp_expr.as_ref().map(|e| e.raw_expr.clone()),
-                "calc_condition": a.calc_condition_expr.as_ref().map(|e| e.raw_expr.clone()),
-            })).collect::<Vec<Value>>()
-        });
+        let priority_summary =
+            priority_analyses.map(|analyses| crate::priority::build_priority_summary(analyses));
 
         let mut diagnostics = Vec::new();
         if !cycles.is_empty() {
@@ -404,6 +458,85 @@ pub fn print_non_human_to(
                 suggestion: None,
             });
         }
+        if let Some(analyses) = priority_analyses {
+            if analyses.is_empty() {
+                diagnostics.push(crate::output::Diagnostic {
+                    severity: crate::output::DiagnosticSeverity::Info,
+                    code: "NO_PRIORITY_RULES".to_string(),
+                    message: "No priority rules found in this page".to_string(),
+                    location: crate::output::Location::new(),
+                    suggestion: Some(
+                        "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
+                    ),
+                });
+            }
+        }
+        if let Some(analyses) = priority_analyses {
+            if analyses.is_empty() {
+                diagnostics.push(crate::output::Diagnostic {
+                    severity: crate::output::DiagnosticSeverity::Info,
+                    code: "NO_PRIORITY_RULES".to_string(),
+                    message: "No priority rules found in this page".to_string(),
+                    location: crate::output::Location::new(),
+                    suggestion: Some(
+                        "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
+                    ),
+                });
+            }
+        }
+
+        // 保守推断单页角色
+        let mut has_button = false;
+        let mut has_input = false;
+        let mut has_table = false;
+        for c in &spg.components {
+            let t = c.component_type.as_str().to_lowercase();
+            if t.contains("button") || t.contains("link") {
+                has_button = true;
+            }
+            if t.contains("input") || t.contains("field") || t.contains("select") {
+                has_input = true;
+            }
+            if t.contains("table") || t.contains("grid") || t.contains("list") {
+                has_table = true;
+            }
+        }
+        let has_write_action = spg.expressions.iter().any(|e| {
+            let r = e.raw_expr.to_lowercase();
+            r.contains("submitdata")
+                || r.contains("insertdata")
+                || r.contains("updatedata")
+                || r.contains("deletedata")
+        });
+        let has_nav_action = spg.expressions.iter().any(|e| {
+            let r = e.raw_expr.to_lowercase();
+            r.contains("openpage") || r.contains("showdialog") || r.contains("navigate")
+        });
+        let page_role = if has_write_action && has_nav_action {
+            "mixed_interaction_page"
+        } else if has_write_action {
+            "data_maintenance_page"
+        } else if has_nav_action {
+            "navigation_page"
+        } else if has_button && has_input {
+            "form_submit_page"
+        } else if !has_button
+            && !has_write_action
+            && !has_nav_action
+            && (has_table || spg.sources.len() > 1)
+        {
+            "readonly_dashboard"
+        } else {
+            "unknown"
+        };
+        let what_is_it = format!(
+            "SuperPage {}，{} 个组件，{} 个表达式，{} 个数据源，角色 {}",
+            meta.input_path.as_deref().unwrap_or("unknown"),
+            spg.components.len(),
+            spg.expressions.len(),
+            spg.sources.len(),
+            page_role
+        );
 
         let summary = json!({
             "page_info": {
@@ -413,6 +546,8 @@ pub fn print_non_human_to(
                 "expression_count": spg.expressions.len(),
                 "has_cycles": !cycles.is_empty(),
             },
+            "what_is_it": what_is_it,
+            "page_role": page_role,
         });
 
         let mut component_json_paths: HashMap<String, String> = HashMap::new();
@@ -478,7 +613,7 @@ pub fn print_non_human_to(
                 .collect::<Vec<Value>>(),
             "dependency_order": topo,
             "cycles": cycles,
-            "priority_analysis": priority_json,
+            "priority_summary": priority_summary,
         });
 
         let mut output =

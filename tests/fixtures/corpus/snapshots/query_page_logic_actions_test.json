@@ -151,6 +151,122 @@
     "page_name": "actions_test",
     "page_role": "mixed_interaction_page",
     "risk_count": 2,
+    "top_data_sources": [
+      {
+        "edge_type": "ActionValidates",
+        "field_path": "model1.name",
+        "json_path": "canvas.components[id='buttonValidate'].actions[id='actionValidate'].<derived-target>",
+        "model": "model1",
+        "raw_expr": "model1.name",
+        "source_action": "action:app/actions_test.spg|buttonValidate|actionValidate",
+        "source_component": null,
+        "source_file": "app/actions_test.spg",
+        "target_id": "model:model1",
+        "type": "ActionValidates"
+      }
+    ],
+    "top_entrypoints": [
+      {
+        "edge_type": "Triggers",
+        "id": "comp:app/actions_test.spg|buttonValidate",
+        "json_path": "canvas.components[11].actions[*]",
+        "name": "buttonValidate",
+        "node_id": "comp:app/actions_test.spg|buttonValidate",
+        "raw_expr": null,
+        "source_file": "app/actions_test.spg",
+        "type": "button"
+      },
+      {
+        "edge_type": "Triggers",
+        "id": "comp:app/actions_test.spg|buttonUnknown",
+        "json_path": "canvas.components[7].actions[*]",
+        "name": "buttonUnknown",
+        "node_id": "comp:app/actions_test.spg|buttonUnknown",
+        "raw_expr": null,
+        "source_file": "app/actions_test.spg",
+        "type": "button"
+      },
+      {
+        "edge_type": "Triggers",
+        "id": "comp:app/actions_test.spg|buttonSwitchPanel",
+        "json_path": "canvas.components[10].actions[*]",
+        "name": "buttonSwitchPanel",
+        "node_id": "comp:app/actions_test.spg|buttonSwitchPanel",
+        "raw_expr": null,
+        "source_file": "app/actions_test.spg",
+        "type": "button"
+      }
+    ],
+    "top_navigation": [
+      {
+        "edge_type": "ActionControlsComponent",
+        "field_path": null,
+        "from": "action:app/actions_test.spg|buttonSwitchPanel|actionSwitchPanel",
+        "json_path": "canvas.components[id='buttonSwitchPanel'].actions[id='actionSwitchPanel'].targetComponent[*]",
+        "raw_expr": null,
+        "source_file": "app/actions_test.spg",
+        "to": "comp:app/actions_test.spg|panelbook1",
+        "to_name": "panelbook1",
+        "type": "ActionControlsComponent"
+      },
+      {
+        "edge_type": "ActionControlsComponent",
+        "field_path": null,
+        "from": "action:app/actions_test.spg|buttonShowDialog|actionShowDialog",
+        "json_path": "canvas.components[id='buttonShowDialog'].actions[id='actionShowDialog'].targetComponent[*]",
+        "raw_expr": null,
+        "source_file": "app/actions_test.spg",
+        "to": "comp:app/actions_test.spg|dialog1",
+        "to_name": "dialog1",
+        "type": "ActionControlsComponent"
+      },
+      {
+        "edge_type": "ActionControlsComponent",
+        "field_path": null,
+        "from": "action:app/actions_test.spg|buttonCloseDialog|actionCloseDialog",
+        "json_path": "canvas.components[id='buttonCloseDialog'].actions[id='actionCloseDialog'].targetComponent[*]",
+        "raw_expr": null,
+        "source_file": "app/actions_test.spg",
+        "to": "comp:app/actions_test.spg|buttonCloseDialog",
+        "to_name": "buttonCloseDialog",
+        "type": "ActionControlsComponent"
+      }
+    ],
+    "top_writes": [
+      {
+        "edge_type": "Writes",
+        "field_path": "model1.age",
+        "json_path": "canvas.components[id='input2'].submitField",
+        "model": "model1",
+        "raw_expr": "model1.age",
+        "source_action": null,
+        "source_component": "comp:app/actions_test.spg|input2",
+        "source_file": "app/actions_test.spg",
+        "target_id": "model:model1"
+      },
+      {
+        "edge_type": "Writes",
+        "field_path": "model1.name",
+        "json_path": "canvas.components[id='input1'].submitField",
+        "model": "model1",
+        "raw_expr": "model1.name",
+        "source_action": null,
+        "source_component": "comp:app/actions_test.spg|input1",
+        "source_file": "app/actions_test.spg",
+        "target_id": "model:model1"
+      },
+      {
+        "edge_type": "ActionWrites",
+        "field_path": "model1.name",
+        "json_path": "canvas.components[id='button5'].actions[id='action5'].fieldValues[*].value",
+        "model": "model1",
+        "raw_expr": "model1.name",
+        "source_action": "action:app/actions_test.spg|button5|action5",
+        "source_component": null,
+        "source_file": "app/actions_test.spg",
+        "target_id": "model:model1"
+      }
+    ],
     "what_is_it": "页面 actions_test，10 个用户入口，读取 1 个数据源，写入 9 个目标，3 个跳转",
     "write_target_count": 9
   }
