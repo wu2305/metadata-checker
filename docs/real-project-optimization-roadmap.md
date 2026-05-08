@@ -183,3 +183,163 @@
 - `SKILL.md` 增加冲突处理规则：summary 不完整时结合 details 中角色字段，但必须说明口径。
 - `SKILL.md` 增加命令引用规则：所有 target 使用单引号。
 - 空上下文 `5.4-mini` 能按协议完成至少 5 个真实项目问题，不出现已知误判。
+
+## M17：条件抽取基础层
+
+### 目标
+
+从 `.spg` 中稳定抽取条件表达式，形成可复用的条件记录，而不是让 AI 直接阅读大体积 raw metadata。
+
+### 问题清单
+
+- `5.4-mini` 分析 `合同协议.spg` 的“正常显示数据条件”时，需要直接读取 5MB `.spg` 才能定位 `visibleCondition`、`disableCondition` 和 `filter.clauses[]`。
+- `--query-page-logic` 能给出页面规模和 Top-N 入口，但不能完整表达页面显示/禁用/数据过滤条件。
+- 条件表达式分散在组件、动作、数据源、默认值中，缺少统一结构。
+- 多行表达式、`IF`、`CASE`、`CONCAT`、系统变量和中文路径容易导致抽取遗漏。
+
+### 工作清单
+
+- 抽取 `visibleCondition`、`disableCondition`、`conditionExp`、`filter.clauses[].exp`、`defaultValueExp`、`exp`。
+- 为每条条件记录 `source_file`、`json_path`、`component_id/model_id/action_id`、`condition_type`。
+- 解析条件中引用的 `param*`、`$user.*`、`model*.field`、`input*.value`、`text*.value`、`model*.totalRowCount__`。
+- 定义统一结构 `ConditionRecord`，并写入 `docs/schema.md`。
+- 增加 fixture 覆盖空条件、多行条件、`IF/CASE/CONCAT`、中文路径、系统变量。
+
+### 验收目标
+
+- 给定 `.spg`，工具能列出所有条件表达式及引用对象。
+- 每条条件都有可核验位置，不允许缺少 `source_file` 和 `json_path`。
+- 本阶段只做抽取和定位，不输出业务解释。
+
+## M18：条件依赖图
+
+### 目标
+
+把条件表达式与上游数据来源、下游组件状态串起来，形成可查询的条件依赖路径。
+
+### 问题清单
+
+- 当前工具无法直接表达 `param5 -> model10.filter -> model10.totalRowCount__ -> panel13.visibleCondition` 这类链路。
+- 隐藏计算字段如 `input3.exp = model22.phoneNumber` 会成为条件中间层，但 PageLogic 摘要不会显式串联。
+- 模型过滤条件与 `model*.totalRowCount__` 的显示门控之间缺少结构化关系。
+
+### 工作清单
+
+- 建立 `param/input/text/model/system_user` 到 `condition` 的依赖边。
+- 将隐藏计算字段纳入依赖链，例如 `input3.exp`、`text41.value`、`input8.exp`。
+- 将 `model.filter` 与 `model.totalRowCount__` 建立关系。
+- 将 `visibleCondition/disableCondition` 与组件显示/禁用状态建立关系。
+- 输出条件依赖路径，保留每段 path 的 evidence。
+
+### 验收目标
+
+- 能回答“某个组件显示依赖哪些参数/模型/系统变量”。
+- 能回答“某个参数影响哪些模型和组件”。
+- 条件链中每个节点都能追溯到 `ConditionRecord` 或原始组件/模型定义。
+
+## M19：页面数据可用性摘要
+
+### 目标
+
+从条件依赖图生成低噪声页面级摘要，让 AI 不读 raw `.spg` 也能理解页面数据正常显示的主要前置条件。
+
+### 问题清单
+
+- `5.4-mini` 需要手动归纳 `param5 + text41 + input3 + $user.dept_id + model*.totalRowCount__`。
+- 当前 PageLogic 的 `data_source_count`、`entrypoint_count`、`write_target_count` 不能直接说明“页面为什么没数据”。
+- `visibleCondition`、`disableCondition` 和数据源过滤条件没有按影响范围排序。
+
+### 工作清单
+
+- 聚合页面级关键输入：入口参数、系统变量、隐藏计算字段、用户输入字段。
+- 聚合主要数据源过滤条件。
+- 聚合主要显示门控：`visibleCondition`。
+- 聚合主要交互门控：`disableCondition` 和 enabled condition。
+- 按影响范围排序：影响模型数量、影响组件数量、是否影响入口/面板/按钮。
+- 输出 `summary.display_prerequisites`、`summary.data_prerequisites`、`summary.action_prerequisites`。
+
+### 验收目标
+
+- AI 只读 summary 就能说出页面数据正常显示的主要条件。
+- compact 模式下输出 Top-N 条件，normal/full 模式可展开完整条件列表。
+- 对 `OUTPUT_TRUNCATED` 场景给出明确升级建议。
+
+## M20：Why 条件查询能力
+
+### 目标
+
+支持面向目标对象的条件解释，回答“为什么不显示、为什么按钮灰、为什么数据为空”。
+
+### 问题清单
+
+- 当前只能通过 PageLogic + raw `.spg` 人工推导某个面板或按钮的门控条件。
+- `model*.totalRowCount__` 作为数据命中行数门控没有专门解释。
+- target 不存在或写错时，条件查询需要沿用 M14 的候选建议和 shell-safe 命令规范。
+
+### 工作清单
+
+- 新增条件解释命令，命名可采用 `--explain-condition <TARGET>` 或拆分为 `--why-visible`、`--why-disabled`、`--why-data-empty`。
+- 输出目标条件链、上游依赖、失败原因候选。
+- 对 `model*.totalRowCount__` 特殊处理，解释为“数据集命中行数门控”。
+- 支持 page、component、model、field 四类 target。
+- target 不存在时返回候选目标和下一条查询命令。
+
+### 验收目标
+
+- 能解释“这个面板为什么不显示”。
+- 能解释“这个按钮为什么灰”。
+- 能解释“这个数据源为什么可能为空”。
+- 输出必须区分确定条件和推断条件。
+
+## M21：未知 Action 语义归类
+
+### 目标
+
+减少 `UNKNOWN_ACTION_TYPE` 对复杂页面理解的干扰，让 AI 能识别附件查看、接口发送、消息提示和脚本执行的基础语义。
+
+### 问题清单
+
+- `合同协议.spg` 中大量 `script`、`webAPI`、`showMessage`、`showFilesGallary` 被标记为 `UNKNOWN_ACTION_TYPE`。
+- 未知 action 会淹没 `key_findings`，导致 AI 只能保守地说“工具无法理解部分动作”。
+- 附件查看、接口发送、消息提示是低代码页面的常见关键行为。
+
+### 工作清单
+
+- 为 `script` 增加 `script_execution` 语义分类。
+- 为 `webAPI` 增加 `api_call` 语义分类，并保留接口参数证据。
+- 为 `showMessage` 增加 `message_prompt` 语义分类。
+- 为 `showFilesGallary` 增加 `file_gallery` 语义分类，识别附件数据集和附件字段。
+- 将这些 action 纳入 `action_category` 和 PageLogic action flow。
+- 保留无法解析参数的 diagnostic，但不再输出高噪声 `UNKNOWN_ACTION_TYPE`。
+
+### 验收目标
+
+- 复杂页面摘要不再被同类 `UNKNOWN_ACTION_TYPE` 重复刷屏。
+- AI 能识别附件查看、接口发送、消息提示、脚本执行。
+- 未解析脚本内容时仍保持保守，不编造脚本内部语义。
+
+## M22：条件类 AI 评测与协议收敛
+
+### 目标
+
+把页面条件分析能力固定成长期回归，验证空上下文小模型不读 raw `.spg` 也能回答条件类问题。
+
+### 问题清单
+
+- 当前真实项目评测主要覆盖页面用途、按钮行为、DataFlow、目标定位和 `.tbl` 单文件。
+- “页面为什么没数据 / 按钮为什么灰 / 面板为什么不显示”尚未形成固定评测。
+- `SKILL.md` 没有明确条件类问题的命令路线。
+
+### 工作清单
+
+- 增加真实项目 eval case：`合同协议.spg 正常显示数据的条件是什么？`
+- 增加 fixture case：简单显示条件、链式条件、按钮禁用、数据源为空、系统变量依赖。
+- 更新 `SKILL.md`，增加“页面没数据 / 按钮灰 / 面板不显示”的命令路线。
+- 空上下文 `5.4-mini` 验证时禁止读取 raw `.spg`，只能使用工具输出回答。
+- 评测断言必须覆盖 `param`、`$user`、隐藏字段、`model.filter`、`totalRowCount__`、`visibleCondition/disableCondition`。
+
+### 验收目标
+
+- 小模型能回答条件类问题，且不需要直接读取 5MB 原始元数据。
+- 回答包含证据链、截断说明和保守口径。
+- 禁止误判：不能把条件门控说成渲染故障，不能把未参与初始展示的参数说成必需条件。
