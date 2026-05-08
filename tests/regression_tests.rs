@@ -3895,3 +3895,59 @@ fn test_quote_cli_arg_special_chars() {
     // 内部单引号
     assert_eq!(quote_cli_arg("a'b"), "'a'\\''b'");
 }
+
+// M16: SKILL.md 关键术语静态测试
+
+#[test]
+fn test_skill_md_has_key_terms() {
+    let skill_md = std::fs::read_to_string("SKILL.md").expect("SKILL.md must exist in repo root");
+    let required_terms = [
+        "GRAPH_DB_LOCKED",
+        "--graph-lock-timeout-ms",
+        "<graph-edge-derived>",
+        "node_id=\"?\"",
+        "--budget compact",
+        "--find-model",
+        "--resolve-model",
+        "--human",
+        "consumed_by_dataflow_count",
+        "dataflow_role",
+        "单文件 fallback",
+        "证据强弱分级",
+        "summary 与 details 冲突",
+        "目标定位协议",
+        "真实项目故障处理",
+    ];
+    let mut missing = Vec::new();
+    for term in &required_terms {
+        if !skill_md.contains(term) {
+            missing.push(term);
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "SKILL.md 缺少以下关键术语: {:?}",
+        missing
+    );
+}
+
+#[test]
+fn test_skill_md_has_evidence_rules() {
+    let skill_md = std::fs::read_to_string("SKILL.md").expect("SKILL.md must exist in repo root");
+    // 必须包含禁止把 graph-edge-derived 当强证据的规则
+    assert!(
+        skill_md.contains("graph-edge-derived")
+            && (skill_md.contains("弱证据") || skill_md.contains("medium/low")),
+        "SKILL.md 必须定义 <graph-edge-derived> 为弱证据"
+    );
+    // 必须包含 budget 协议
+    assert!(
+        skill_md.contains("--budget compact") && skill_md.contains("--budget full"),
+        "SKILL.md 必须定义 budget 协议"
+    );
+    // 必须包含单引号规则
+    assert!(
+        skill_md.contains("单引号") || skill_md.contains("single quotes"),
+        "SKILL.md 必须定义单引号包裹规则"
+    );
+}

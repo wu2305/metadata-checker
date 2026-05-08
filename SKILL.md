@@ -48,6 +48,13 @@ Supported target types and ID formats:
 - `page` → `page:app/page.spg`
 - `dataflow` → `model:dataflow_output`（DataFlow 也是 Model 类型）
 
+**目标定位协议（M14）：**
+当目标 ID 不确定时，AI 必须按以下顺序操作，禁止猜测：
+1. **目标不确定** → 先用 `--find-page <KEYWORD>` / `--find-model <KEYWORD>` / `--find-component <KEYWORD>` 搜索候选。
+2. **页面内局部 model ID**（如 `model5`）→ 用 `--resolve-model-page 'page:...' --resolve-model model5` 解析到真实全局模型。
+3. **拼写错误**（如 `fact_saleContrac`）→ `--query-model` 会返回 `TARGET_NOT_FOUND` + `candidate_targets`，必须从候选中确认。
+4. **所有 target 必须单引号包裹**：特别是含中文、`|`、`$`、空格、括号的目标，例如 `'comp:app/售后.app/首页.spg|button1'`。
+
 Output structure (kind = Explain):
 - `summary.what_is_it`: 自然语言短句，例如"按钮 button1，位于页面 page_relations，具有1个动作"
 - `summary.importance`: 稳定分类（M12）：`entrypoint` / `data_source_display` / `calculated_display` / `static_display` / `container` / `form_input` / `action_target` / `unknown`。旧值 `data_source` / `write_target` / `navigation` 已废弃，保留时视为 legacy。
@@ -120,6 +127,20 @@ metadata-checker --project-dir /path/to/project --build-graph --graph-db-path /t
 - Explain any node → `--explain <ID>`
 - Context around a node → `--context <ID> --depth 2 --budget normal`
 
+**Step 4: 单文件 fallback（graphdb 不可用时）**
+如果 graphdb 无法构建或查询失败，但只需要分析单个文件：
+- 单个 `.spg` → `metadata-checker page.spg --budget compact`
+- 单个 `.tbl` → `metadata-checker table.tbl --budget compact`
+- 此时无法获得跨文件关系，但可以获得组件语义、字段血缘、表结构。
+
+**graphdb 故障决策树**
+| 诊断码 | 条件 | 动作 |
+|--------|------|------|
+| `GRAPH_DB_NOT_FOUND` | db 不存在 | `--build-graph` |
+| `GRAPH_DB_LOCKED` | 锁冲突 | 等待 / 换 `--graph-db-path` / `--graph-lock-timeout-ms 30000` |
+| `GRAPH_DB_PERMISSION_DENIED` | 只读或无权限 | `--graph-db-path /tmp/...` |
+| `GRAPH_DB_OPEN_ERROR` | 其他 redb/IO 错误 | `--build-graph` 重建 |
+
 ### Q5: Do you need page-level logic summary?
 
 **Yes** → Use `metadata-checker --project-dir /path/to/project --query-page-logic <page>`
@@ -178,6 +199,23 @@ All machine outputs (`--non-human`, default) follow a unified top-level structur
    - `upstream_dependencies` → use `produced_by` / `consumed_by_dataflows` / `dataflow_inputs`
    - `downstream_outputs` → use `dataflow_outputs` / `produced_by`
 
+## 证据强弱分级（M12-M16）
+
+AI 在引用 CLI 输出作为依据时，必须区分证据可信度：
+
+| 证据特征 | 可信度 | AI 表达要求 |
+|----------|--------|------------|
+| `json_path` 为真实文件路径（如 `canvas.components[...]`），`source_file` 存在，`node_id` 非 `?` | **high** | 可直接引用 |
+| `json_path="<graph-edge-derived>"`，无原始 JSON 路径 | **medium/low** | 降级表达，标注"图推导" |
+| `node_id="?"` 或 `source_file` 缺失 | **low** | 必须标注"证据位置缺失" |
+| `raw_expr="n/a"` 且 `confidence=medium` | **low** | 不可作为独立依据 |
+| 出现 `EVIDENCE_LOCATION_MISSING` 诊断 | **需人工确认** | 说明"该结论缺少原始文件定位" |
+
+**禁止行为**：
+- 禁止把 `<graph-edge-derived>` 当作可核验的强证据。
+- 禁止忽略 `node_id="?"` 或 `raw_expr="n/a"` 做空洞结论。
+- 禁止在 `EVIDENCE_LOCATION_MISSING` 存在时假装证据完整。
+
 ## Examples
 
 ```bash
@@ -209,23 +247,83 @@ metadata-checker --project-dir /path/to/project --context button1 --depth 2 --bu
 metadata-checker --project-dir /path/to/project --query-page-logic "page:app/合同管理/销售合同.spg"
 ```
 
+## 真实项目故障处理示例（M16）
 
-### .tbl 单文件使用指南
-
-当没有项目图数据库时，可直接解析单个 `.tbl` 文件获取表/DataFlow 语义。
-
-**何时使用**
-- 需要快速判断一个 `.tbl` 是物理表还是 DataFlow。
-- 需要查看 DataFlow 的输入、输出和字段加工链。
-- 项目图数据库尚未构建或目标文件不在项目中。
-
-**命令**
+**示例 1：graphdb 缺失**
 ```bash
-metadata-checker app_table.tbl
-metadata-checker dataflow_output.tbl
+metadata-checker --project-dir /path/to/project --query-model model1
+# 输出：GRAPH_DB_NOT_FOUND
+# 动作：metadata-checker --project-dir /path/to/project --build-graph --graph-db-path /tmp/project.graphdb
 ```
 
-**AI 阅读顺序**
+**示例 2：锁冲突**
+```bash
+metadata-checker --project-dir /path/to/project --query-model model1
+# 输出：GRAPH_DB_LOCKED
+# 动作：metadata-checker --project-dir /path/to/project --query-model model1 --graph-db-path /tmp/project2.graphdb --graph-lock-timeout-ms 30000
+```
+
+**示例 3：只读目录**
+```bash
+metadata-checker --project-dir /path/to/project --build-graph
+# 输出：GRAPH_DB_PERMISSION_DENIED
+# 动作：metadata-checker --project-dir /path/to/project --build-graph --graph-db-path /tmp/project.graphdb
+```
+
+**示例 4：目标找不到**
+```bash
+metadata-checker --project-dir /path/to/project --query-model fact_saleContrac
+# 输出：TARGET_NOT_FOUND + candidate_targets 包含 fact_saleContract
+# 动作：从 candidate_targets 确认，或用 --find-model fact_saleContrac
+```
+
+**示例 5：同名模型歧义**
+```bash
+metadata-checker --project-dir /path/to/project --resolve-model-page 'page:app/某页.spg' --resolve-model model5
+# 输出：多个候选，ambiguous=true
+# 动作：用 --explain 查看每个候选语义，或要求用户确认
+```
+
+**示例 6：单文件 fallback（graphdb 不可用）**
+```bash
+# graphdb 构建失败，但需要分析单个 .tbl
+metadata-checker data/tables/销售/fact_saleContract.tbl --budget compact
+# 输出：kind=Table, table_role=physical_storage, field_count=61
+```
+
+### .tbl 与 DataFlow 路径选择指南
+
+**场景 1：单文件 .tbl（无项目图数据库）**
+当没有项目图数据库时，可直接解析单个 `.tbl` 文件：
+```bash
+metadata-checker app_table.tbl --budget compact
+metadata-checker dataflow_output.tbl --budget compact
+```
+- 适用：快速判断物理表 vs DataFlow、查看字段列表、查看单文件 field_lineage。
+- 限制：无法获得跨文件模型读写关系、无法获得 DataFlow 被哪些页面消费。
+
+**场景 2：项目级 DataFlow 查询（有图数据库）**
+```bash
+metadata-checker --project-dir /path/to/project --query-dataflow model:dataflow_name --budget compact
+```
+- 适用：需要知道 DataFlow 被哪些页面/组件消费、DataFlow 的全局输入输出拓扑。
+- 输出：`summary.input_count`、`summary.output_count`、`details.inputs[]`、`details.outputs[]`、`details.consumed_by_dataflows[]`。
+
+**场景 3：项目级模型查询（有图数据库）**
+```bash
+metadata-checker --project-dir /path/to/project --query-model model:fact_saleContract --budget compact
+```
+- 适用：需要知道模型被哪些页面读取/写入、DataFlow 消费关系。
+- 注意：`read_by_count=0` 不等于"没有被使用"，必须同时查看 `consumed_by_dataflow_count`。
+
+**场景 4：页面内局部 DataFlow / 局部 model ID**
+当页面中引用局部 model ID（如 `model5`）而不知道全局模型名时：
+```bash
+metadata-checker --project-dir /path/to/project --resolve-model-page 'page:app/某页.spg' --resolve-model model5
+```
+- 适用：将页面内局部 model ID 解析为真实 `model:<table>` 或 DataFlow。
+
+**单文件 .tbl AI 阅读顺序**
 1. **summary**：先看 `table_type`（AppTable / DataFlow）、`field_count`、`input_count`、`output_count`、`what_is_it`。
 2. **details.field_lineage**：字段级来源链，包含 `target_field`、`source_fields`、`source_expr`、`transform`、`confidence`。
 3. **details.dataflow_inputs / dataflow_outputs**：DataFlow 的输入输出拓扑。
@@ -235,6 +333,7 @@ metadata-checker dataflow_output.tbl
 **禁止行为**
 - 禁止把 `.tbl` 当作 SuperPage 解析（`kind=SuperPage` 属于语义错误）。
 - 禁止在没有 `field_lineage` 时编造字段来源。
+- 禁止在 `read_by_count=0` 时忽略 `consumed_by_dataflow_count`。
 ## AI 回答协议（M9-D）
 
 当使用 metadata-checker CLI 回答业务问题时，必须遵守以下协议，禁止默认读取 raw JSON 或凭空推断。
@@ -286,6 +385,24 @@ metadata-checker dataflow_output.tbl
 - `severity=info`：仅作提示，不影响主要结论。
 - 常见需要降级的诊断码：`UNRESOLVED_REF`、`EVIDENCE_INCOMPLETE`、`EVIDENCE_SAMPLED`、`LINEAGE_SOURCE_MISSING`、`LINEAGE_EXPR_UNPARSED`、`UNKNOWN_ACTION_TYPE`。
 
+### 5a. summary 与 details 冲突时如何处理
+
+当 `summary` 中的计数/结论与 `details` 中的数组不一致时（常见原因是 compact 截断），AI 必须：
+
+1. **优先采信 summary 中的关键角色字段**：
+   - `summary.dataflow_role`（如 `DataFlowParticipant`）→ 说明模型主要通过 DataFlow 被消费
+   - `summary.consumed_by_dataflow_count` → DataFlow 消费方数量
+   - `summary.produced_by_count` / `summary.dataflow_input_count` / `summary.dataflow_output_count` → DataFlow 方向
+
+2. **当 summary 计数为 0 但 details 中存在数组时**：
+   - 说明 compact 模式下数组被截断，`summary.*_count` 是完整数量，`details.*` 只展示了 Top-N
+   - 示例："`read_by_count=0` 但 `details.consumed_by_dataflows` 有 52 项，说明该模型主要通过 DataFlow 被消费，而非直接读取"
+
+3. **禁止只取一个字段下结论**：
+   - 禁止只看 `read_by_count=0` 就断言"模型没有被使用"
+   - 禁止只看 `details.upstream` 为空就断言"没有上游依赖"
+   - 必须综合 `dataflow_role`、`consumed_by_dataflow_count`、`produced_by_count` 判断
+
 ### 6. 输出体积控制（M13）
 
 | Budget | 使用时机 | 说明 |
@@ -304,6 +421,9 @@ metadata-checker dataflow_output.tbl
 - 禁止忽略 diagnostics 做空洞确定性结论。
 - 禁止在 evidence 不足时编造来源。
 - 所有命令中的 target 必须用单引号包裹（例如 `--explain 'comp:app/售后.app/首页.spg|button1'`），避免 shell 对 `|`、中文路径、`$` 等特殊字符解析错误。CLI 已兼容 `--query-model model1` 和 `--query-model model:model1` 两种写法，但推荐裸模型名。
+- 禁止在目标 ID 不确定时猜测 `model1` / `model5` / `model74` 等局部名；必须先 `--find-*` 或 `--resolve-model`。
+- 禁止把 `read_by_count=0` 当作"模型没有被使用"；必须同时检查 `consumed_by_dataflow_count` 和 `dataflow_role`。
+- 禁止把单文件 `.tbl` 输出当作项目级 DataFlow 的全局拓扑。
 
 ## 来源分类使用指南（值追溯）
 

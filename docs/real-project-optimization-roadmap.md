@@ -174,7 +174,7 @@
 - `SKILL.md` 没有要求 AI 在目标 ID 不确定时先使用 find/resolve，而不是猜测。
 - `SKILL.md` 对 `--human` 与机器模式边界已经有说明，但没有真实项目故障处理示例。
 
-### 验收目标（M15 已收敛）
+### 验收目标（M16 已收敛）
 
 - `SKILL.md` 增加“真实项目项目级查询决策树”：check graph、build graph、query、fallback。
 - `SKILL.md` 增加“证据强弱分级”：真实 JSON 路径强，graph-derived 中，缺路径弱。
