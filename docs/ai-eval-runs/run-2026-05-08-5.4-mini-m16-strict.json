@@ -1,0 +1,99 @@
+{
+  "eval_run_id": "run-2026-05-08-5.4-mini-m16-strict",
+  "milestone": "M16",
+  "requested_model": "gpt-5.4-mini",
+  "reported_model": "gpt-5",
+  "skill_md_path": "/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md",
+  "binary_path": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker",
+  "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "graph_db_path": "/tmp/m16_strict_54mini_eval.graphdb",
+  "protocol_sources_read": [
+    "/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md"
+  ],
+  "forbidden_sources_read": [],
+  "commands_run": [
+    "sed -n '1,240p' /Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md",
+    "sed -n '241,420p' /Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md",
+    "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --check-graph --graph-db-path /tmp/m16_strict_54mini_eval.graphdb",
+    "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --build-graph --graph-db-path /tmp/m16_strict_54mini_eval.graphdb",
+    "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path /tmp/m16_strict_54mini_eval.graphdb --budget compact --query-page-logic 'page:app/售后.app/首页.spg'",
+    "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path /tmp/m16_strict_54mini_eval.graphdb --budget compact --explain 'comp:app/售后.app/首页.spg|button1'",
+    "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path /tmp/m16_strict_54mini_eval.graphdb --budget compact --explain 'comp:app/售后.app/首页.spg|text11'",
+    "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path /tmp/m16_strict_54mini_eval.graphdb --budget compact --query-model 'model:fact_saleContract'",
+    "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/data/tables/销售/fact_saleContract.tbl --budget compact",
+    "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --check-graph --graph-db-path /tmp/m16_strict_54mini_eval.graphdb"
+  ],
+  "cases": [
+    {
+      "id": "case_1",
+      "question": "页面 app/售后.app/首页.spg 主要用途是什么？",
+      "pass": true,
+      "answer": "这是一个导航页，不是写入页。它有 8 个用户入口，读取 5 个数据源，写入 0 个目标，存在 3 个跳转；核心作用是展示状态并把用户导向不同业务页面/对话框。",
+      "evidence_used": [
+        "PageLogic summary: page_role=navigation_page, entrypoint_count=8, data_source_count=5, navigation_count=3, write_target_count=0",
+        "top_navigation includes button1/button2 opening dialog components",
+        "top_data_sources include $user.dept_id.DEPT_ID, $user.dept_id.DEPT_NAME, model2.totalRowCount__, model4.totalRowCount__, model3.totalRowCount__"
+      ],
+      "diagnostics_handling": "已看到 INFO 级别的 NO_WRITE_TARGETS、EVIDENCE_SAMPLED、OUTPUT_TRUNCATED。它们不阻断结论，但说明证据是低噪声采样，不能把页面理解成完整写入页。",
+      "attention_drift_risk": "low"
+    },
+    {
+      "id": "case_2",
+      "question": "comp:app/售后.app/首页.spg|button1 的按钮行为是什么？",
+      "pass": true,
+      "answer": "点击 button1 后打开对话框 dialog2。它触发的是一个 showDialog 动作，没有读写模型，也没有页面跳转。",
+      "evidence_used": [
+        "Explain summary: action_count=1, importance=entrypoint, semantic_summary='点击 button1 后打开对话框'",
+        "details.triggers contains action:app/售后.app/首页.spg|button1|action1",
+        "details.affects_components contains comp:app/售后.app/首页.spg|dialog2"
+      ],
+      "diagnostics_handling": "无 diagnostics，结论稳定。",
+      "attention_drift_risk": "low"
+    },
+    {
+      "id": "case_3",
+      "question": "comp:app/售后.app/首页.spg|text11 是否是用户主要入口？为什么？",
+      "pass": true,
+      "answer": "不能把它判定为主要入口。它确实是一个可点击入口，但只是首页 8 个入口之一；元数据还显示页面里有多个同级入口和其他导航触发点，而 text11 本身只做了一个跳转动作，并且它主要读取的是 model3.totalRowCount__ 这种展示型数据。",
+      "evidence_used": [
+        "PageLogic summary: entrypoint_count=8, top_entrypoints includes text11",
+        "Explain summary for text11: action_count=1, read_count=1, write_count=0, semantic_summary='点击 text11 后跳转（未识别目标页面)'",
+        "PageLogic top_navigation and top_entrypoints show other entrypoints such as button1, button2, panel14, panel15"
+      ],
+      "diagnostics_handling": "page-level diagnostics only show INFO 级别采样/截断，不足以支持“主要入口”这种强断言；因此采用保守结论。",
+      "attention_drift_risk": "medium"
+    },
+    {
+      "id": "case_4",
+      "question": "model/fact_saleContract 是否被 DataFlow 消费或高扇出？",
+      "pass": true,
+      "answer": "是，被大量 DataFlow 消费，且扇出很高。查询结果显示 consumed_by_dataflow_count=52，dataflow_output_count=1，read_by_count=0，written_by_count=0；这说明它主要通过 DataFlow 参与全局拓扑，而不是被页面直接读写。",
+      "evidence_used": [
+        "ModelQuery summary: consumed_by_dataflow_count=52, dataflow_role=DataFlowParticipant, produced_by_count=1",
+        "details.consumed_by_dataflows shows 52 total with sample inputs from multiple derived models",
+        "details.dataflow_outputs / produced_by indicate a single output to model:fact_saleContract"
+      ],
+      "diagnostics_handling": "仅有 INFO 级别 OUTPUT_TRUNCATED，数组被截断但计数是完整的；按协议优先采信 summary 计数。",
+      "attention_drift_risk": "low"
+    },
+    {
+      "id": "case_5",
+      "question": "单文件 /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/data/tables/销售/fact_saleContract.tbl 是物理表、应用表还是 DataFlow？",
+      "pass": true,
+      "answer": "它是物理表，table_type=PhysicalTable，table_role=physical_storage。该单文件解析出 61 个字段，不是 DataFlow。",
+      "evidence_used": [
+        "Table summary: table_type=PhysicalTable, table_role=physical_storage, field_count=61",
+        "evidence: direct single-file .tbl parsing from dimensions[]",
+        "key_findings explicitly say 'PhysicalTable fact_saleContract，61 个字段'"
+      ],
+      "diagnostics_handling": "只有 INFO 级 OUTPUT_TRUNCATED，表示字段数组在 compact 下截断；但 table_type 和 table_role 结论清晰。",
+      "attention_drift_risk": "low"
+    }
+  ],
+  "overall_pass": true,
+  "blockers": [],
+  "observations": [
+    "这份 SKILL.md 对小模型的真实使用协议是够用的：它明确了 graphdb 检查/构建顺序、compact-first 读取顺序、页面/组件/模型/.tbl 的命令选择，以及 diagnostics 降级规则。",
+    "唯一需要保守处理的是“主要入口”这类语义主观判断；协议能提供足够证据，但不会自动给出主次排序，因此必须根据入口数量、动作类型和展示/跳转语义做保守推断。"
+  ]
+}
