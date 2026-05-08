@@ -52,23 +52,26 @@ M9-A/B/C 保证**语料和输出契约稳定**；M9-D 保证**AI 能基于稳定
 ai_eval_cases.json 支持两类 case：
 
 ### fixture case（默认）
-- : 
-- : false（或省略）
+- `project_dir`: `tests/fixtures/test_project`
+- `requires_real_project`: false（或省略）
 - 测试在隔离临时目录执行，自动复制 fixture 项目并构建 graphdb
 
 ### 真实项目 case
-- : 
-- : true
-- : 真实项目中的目标 ID（如 ）
-- : 真实项目中的源文件相对路径（如 ）
-- 测试在真实项目目录执行，使用独立  避免锁冲突
+- `project_dir`: `/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
+- `requires_real_project`: true
+- `graph_db_path_strategy`: `temp_per_case` 或 `none_single_file`
+- `real_project_target`: 真实项目中的目标 ID（如 `page:app/售后.app/首页.spg`）
+- `source_path`: 真实项目中的源文件相对路径（如 `app/售后.app/首页.spg`）
+- 测试在真实项目目录执行，项目级命令使用独立 graphdb 避免锁冲突；单文件 `.tbl` case 使用 `none_single_file`
 
 真实项目 case 至少覆盖以下场景：
 - 页面用途（page_logic）
 - 按钮行为（explain + entrypoint）
+- 文本统计/仪表盘组件误判（text/dashboard，不把 `data_source_display` 当成主要写入入口）
 - 高扇出模型（dataflow + consumed_by_dataflow_count）
 - 目标查找（find-page / find-model）
 - 拼写错误候选（typo + candidate_targets）
+- `.tbl` 单文件理解（PhysicalTable，不当成 SuperPage 或 DataFlow）
 - DataFlow .tbl 理解（dataflow + input/output）
 
 ## 串行执行要求

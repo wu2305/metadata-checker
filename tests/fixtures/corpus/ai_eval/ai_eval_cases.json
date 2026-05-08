@@ -1,7 +1,7 @@
 {
   "schema_version": "1.2.0",
   "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、运行器规范",
-  "eval_count": 16,
+  "eval_count": 18,
   "cases": [
     {
       "case_id": "page_purpose_actions_test",
@@ -1336,6 +1336,7 @@
       "question": "售后.app 的首页是什么类型页面？用户能触发哪些操作？页面读取了哪些数据？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
       "real_project_target": "page:app/售后.app/首页.spg",
       "source_path": "app/售后.app/首页.spg",
       "required_commands": [
@@ -1474,6 +1475,7 @@
       "question": "售后首页上的 button1 是什么组件？用户点击后会发生什么？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
       "real_project_target": "comp:app/售后.app/首页.spg|button1",
       "source_path": "app/售后.app/首页.spg",
       "required_commands": [
@@ -1607,6 +1609,7 @@
       "question": "fact_saleContract 这个模型在整个项目中扮演什么角色？被哪些地方消费？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
       "real_project_target": "model:fact_saleContract",
       "source_path": "data/tables/销售/fact_saleContract.tbl",
       "required_commands": [
@@ -1736,6 +1739,7 @@
       "question": "如何在项目中找到名为'首页'的页面？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
       "real_project_target": "page:app/售后.app/首页.spg",
       "source_path": "app/售后.app/首页.spg",
       "required_commands": [
@@ -1847,6 +1851,7 @@
       "question": "如果查询时把 fact_saleContract 拼写成了 fact_saleContrac，系统会怎样处理？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
       "real_project_target": "model:fact_saleContract",
       "source_path": "data/tables/销售/fact_saleContract.tbl",
       "required_commands": [
@@ -1971,6 +1976,7 @@
       "question": "客户信息详情这个 DataFlow 表在整个数据链路中扮演什么角色？有哪些输入和输出？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
       "real_project_target": "model:客户信息详情",
       "source_path": "data/tables/加工表/客户信息详情.tbl",
       "required_commands": [
@@ -2099,6 +2105,286 @@
           "将 DataFlow 误判为普通物理表",
           "忽略 input/output 数量",
           "使用 --budget full 无差别输出"
+        ]
+      }
+    },
+    {
+      "case_id": "real_text_dashboard_not_primary_entrypoint",
+      "question": "售后首页中的 text11 这类文本/统计展示组件是否应被当成主要用户入口？它对页面理解有什么作用？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
+      "real_project_target": "comp:app/售后.app/首页.spg|text11",
+      "source_path": "app/售后.app/首页.spg",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain 'comp:app/售后.app/首页.spg|text11' --budget compact"
+      ],
+      "expected_facts": [
+        "text11 是 text 组件",
+        "importance 是 data_source_display",
+        "读取 model3.totalRowCount__",
+        "存在 click/link 动作",
+        "应理解为统计展示组件兼次要跳转点，不应当成表单提交或主要写入入口"
+      ],
+      "forbidden_claims": [
+        "text11 是表单提交按钮",
+        "text11 会写入数据",
+        "text11 是主要写入入口",
+        "text11 没有数据来源",
+        "text11 是普通静态文本且没有动作"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "summary.type_detail",
+          "op": "eq",
+          "value": "text",
+          "description": "text11 必须是 text 组件"
+        },
+        {
+          "path": "summary.importance",
+          "op": "eq",
+          "value": "data_source_display",
+          "description": "importance 必须是 data_source_display"
+        },
+        {
+          "path": "summary.read_count",
+          "op": "gt",
+          "value": 0,
+          "description": "text11 必须读取统计数据源"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "text",
+          "data_source_display",
+          "统计",
+          "次要跳转"
+        ],
+        "should_mention": [
+          "model3.totalRowCount__",
+          "click-link"
+        ],
+        "must_not_mention": [
+          "写入",
+          "表单提交",
+          "主要入口"
+        ]
+      },
+      "uncertainty_policy": "如果只看到 triggers，必须结合 importance 和 reads 判断，不能把展示型统计文本等同于主要写入入口",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain",
+          "target": "comp:app/售后.app/首页.spg|text11",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.type_detail",
+          "op": "eq",
+          "value": "text",
+          "description": "type_detail 必须是 text"
+        },
+        {
+          "path": "summary.importance",
+          "op": "eq",
+          "value": "data_source_display",
+          "description": "importance 必须是 data_source_display"
+        },
+        {
+          "path": "details.reads",
+          "op": "not_empty",
+          "description": "reads 必须非空"
+        },
+        {
+          "path": "details.triggers",
+          "op": "not_empty",
+          "description": "triggers 可说明它有跳转动作"
+        }
+      ],
+      "risk_tags": [
+        "explain",
+        "dashboard",
+        "real_project"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "text",
+          "data_source_display",
+          "统计",
+          "次要"
+        ],
+        "must_not_include": [
+          "写入数据",
+          "表单提交",
+          "主要写入入口",
+          "没有数据来源"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先区分展示型统计组件和主要用户入口",
+          "引用 summary.importance 与 details.reads 作为依据",
+          "说明 triggers 代表可点击跳转，不等于写入入口"
+        ],
+        "forbidden_practices": [
+          "只看到 triggers 就判定为主要入口",
+          "把 text 组件说成 button",
+          "忽略 data_source_display"
+        ]
+      }
+    },
+    {
+      "case_id": "real_tbl_single_fact_saleContract",
+      "question": "单独读取 data/tables/销售/fact_saleContract.tbl 时，这是什么类型的元数据？能否把它当成 SuperPage 或 DataFlow？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "graph_db_path_strategy": "none_single_file",
+      "real_project_target": "data/tables/销售/fact_saleContract.tbl",
+      "source_path": "data/tables/销售/fact_saleContract.tbl",
+      "required_commands": [
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/data/tables/销售/fact_saleContract.tbl --budget compact"
+      ],
+      "expected_facts": [
+        "kind 是 Table",
+        "table_type 是 PhysicalTable",
+        "table_role 是 physical_storage",
+        "field_count 大于 0",
+        "不能当成 SuperPage",
+        "不能当成 DataFlow 管道"
+      ],
+      "forbidden_claims": [
+        "这是 SuperPage",
+        "这是 DataFlow 管道",
+        "没有字段",
+        "可以用页面逻辑解释"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "kind",
+          "op": "eq",
+          "value": "Table",
+          "description": "kind 必须是 Table"
+        },
+        {
+          "path": "summary.table_type",
+          "op": "eq",
+          "value": "PhysicalTable",
+          "description": "table_type 必须是 PhysicalTable"
+        },
+        {
+          "path": "summary.field_count",
+          "op": "gt",
+          "value": 0,
+          "description": "field_count 必须 > 0"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "Table",
+          "PhysicalTable",
+          "physical_storage",
+          "字段"
+        ],
+        "should_mention": [
+          "不是 SuperPage",
+          "不是 DataFlow"
+        ],
+        "must_not_mention": [
+          "SuperPage",
+          "DataFlow 管道"
+        ]
+      },
+      "uncertainty_policy": "如果只解析单文件，应说明这是文件自身结构判断，不代表项目级上下游关系全集",
+      "minimal_command_plan": [
+        {
+          "command_kind": "single-file",
+          "target": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/data/tables/销售/fact_saleContract.tbl",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": false,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "kind",
+          "op": "eq",
+          "value": "Table",
+          "description": "kind 必须是 Table"
+        },
+        {
+          "path": "summary.table_type",
+          "op": "eq",
+          "value": "PhysicalTable",
+          "description": "table_type 必须是 PhysicalTable"
+        },
+        {
+          "path": "summary.table_role",
+          "op": "eq",
+          "value": "physical_storage",
+          "description": "table_role 必须是 physical_storage"
+        },
+        {
+          "path": "summary.field_count",
+          "op": "gt",
+          "value": 0,
+          "description": "field_count 必须 > 0"
+        }
+      ],
+      "risk_tags": [
+        "single_file",
+        "dataflow",
+        "real_project"
+      ],
+      "case_status": "active",
+      "difficulty": "basic",
+      "max_command_count": 1,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "Table",
+          "PhysicalTable",
+          "physical_storage",
+          "字段"
+        ],
+        "must_not_include": [
+          "这是 SuperPage",
+          "这是 DataFlow 管道",
+          "没有字段"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先说明单文件类型，再说明不能当成页面或 DataFlow",
+          "引用 summary.table_type/table_role/field_count 作为依据",
+          "区分单文件判断与项目级上下游查询"
+        ],
+        "forbidden_practices": [
+          "把物理表当成 SuperPage",
+          "把 PhysicalTable 说成 DataFlow 管道",
+          "忽略 kind 和 table_type"
         ]
       }
     }

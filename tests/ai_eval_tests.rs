@@ -78,6 +78,91 @@ fn test_ai_eval_case_count() {
 }
 
 /// ============================================================
+/// M15：真实项目 case 必须覆盖关键误判场景
+#[test]
+fn test_m15_real_project_case_requirements() {
+    let cases = load_ai_eval_cases();
+    let real_cases: Vec<_> = cases
+        .iter()
+        .filter(|case| {
+            case.get("requires_real_project")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        })
+        .collect();
+
+    assert!(
+        real_cases.len() >= 8,
+        "M15 要求真实项目 case 不少于 8 个，实际 {} 个",
+        real_cases.len()
+    );
+
+    let mut has_page_purpose = false;
+    let mut has_button_behavior = false;
+    let mut has_text_dashboard = false;
+    let mut has_dataflow_consumption = false;
+    let mut has_tbl_single = false;
+
+    for case in &real_cases {
+        let case_id = case["case_id"].as_str().unwrap_or("?");
+        assert!(
+            case.get("real_project_target").is_some(),
+            "真实项目 case {} 必须有 real_project_target",
+            case_id
+        );
+        assert!(
+            case.get("source_path").is_some(),
+            "真实项目 case {} 必须有 source_path",
+            case_id
+        );
+        assert!(
+            case.get("graph_db_path_strategy").is_some(),
+            "真实项目 case {} 必须有 graph_db_path_strategy",
+            case_id
+        );
+
+        let question = case["question"].as_str().unwrap_or("");
+        let risk_tags = case["risk_tags"]
+            .as_array()
+            .map(|tags| {
+                tags.iter()
+                    .filter_map(|tag| tag.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let required_commands = case["required_commands"]
+            .as_array()
+            .map(|cmds| {
+                cmds.iter()
+                    .filter_map(|cmd| cmd.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+
+        has_page_purpose |= question.contains("页面") && risk_tags.contains(&"page_logic");
+        has_button_behavior |= question.contains("button") || question.contains("按钮");
+        has_text_dashboard |= risk_tags.contains(&"dashboard") || question.contains("统计");
+        has_dataflow_consumption |=
+            question.contains("DataFlow") || risk_tags.contains(&"dataflow");
+        has_tbl_single |= risk_tags.contains(&"single_file")
+            || (required_commands.contains(".tbl") && !required_commands.contains("--project-dir"));
+    }
+
+    assert!(has_page_purpose, "M15 必须覆盖真实页面用途问题");
+    assert!(has_button_behavior, "M15 必须覆盖真实按钮行为问题");
+    assert!(
+        has_text_dashboard,
+        "M15 必须覆盖文本统计/仪表盘组件误判问题"
+    );
+    assert!(
+        has_dataflow_consumption,
+        "M15 必须覆盖模型被 DataFlow 消费问题"
+    );
+    assert!(has_tbl_single, "M15 必须覆盖真实 .tbl 单文件理解问题");
+}
+
+/// ============================================================
 /// 每个 case 必须包含完整字段
 #[test]
 fn test_ai_eval_each_case_fields() {
@@ -195,7 +280,6 @@ fn test_ai_eval_assertions_structure() {
 /// 命令白名单校验
 #[test]
 fn test_ai_eval_command_whitelist() {
-    let _allowed_prefixes = ["--project-dir"];
     let required_subcommands = [
         "--query-page-logic",
         "--explain",
@@ -221,19 +305,21 @@ fn test_ai_eval_command_whitelist() {
 
         for cmd in cmds {
             let cmd_str = cmd.as_str().expect("required_commands 每项必须是字符串");
-            assert!(
-                cmd_str.starts_with("--project-dir "),
-                "case {} 的命令 '{}' 必须以 '--project-dir ' 开头",
-                case_id,
-                cmd_str
-            );
-
-            let has_subcommand = required_subcommands.iter().any(|sub| cmd_str.contains(sub));
-            assert!(
-                has_subcommand,
-                "case {} 的命令 '{}' 必须包含合法子命令",
-                case_id, cmd_str
-            );
+            if cmd_str.starts_with("--project-dir ") {
+                let has_subcommand = required_subcommands.iter().any(|sub| cmd_str.contains(sub));
+                assert!(
+                    has_subcommand,
+                    "case {} 的命令 '{}' 必须包含合法子命令",
+                    case_id, cmd_str
+                );
+            } else {
+                assert!(
+                    cmd_str.contains(".tbl") || cmd_str.contains(".spg"),
+                    "case {} 的单文件命令 '{}' 必须指向 .tbl 或 .spg",
+                    case_id,
+                    cmd_str
+                );
+            }
         }
     }
 }
@@ -355,11 +441,19 @@ fn test_ai_eval_commands_execute_and_assert() {
 
         // 真实项目 case 使用独立 graphdb 路径，避免和 fixture 临时目录冲突
         let real_project_db = if is_real_project {
-            let db = std::env::temp_dir().join(format!(
-                "metadata-checker-ai-eval-{}.graphdb",
-                case_id.replace("/", "_")
-            ));
-            Some(db)
+            let graph_strategy = case
+                .get("graph_db_path_strategy")
+                .and_then(|v| v.as_str())
+                .unwrap_or("temp_per_case");
+            if graph_strategy == "none_single_file" {
+                None
+            } else {
+                let db = std::env::temp_dir().join(format!(
+                    "metadata-checker-ai-eval-{}.graphdb",
+                    case_id.replace("/", "_")
+                ));
+                Some(db)
+            }
         } else {
             None
         };
@@ -375,7 +469,7 @@ fn test_ai_eval_commands_execute_and_assert() {
                         let _ =
                             metadata_checker::scanner::scan_project(std::path::Path::new(pd), db);
                     }
-                    if !cmd.contains("--graph-db-path") {
+                    if cmd.contains("--project-dir") && !cmd.contains("--graph-db-path") {
                         cmd.push_str(&format!(" --graph-db-path {}", db.to_str().unwrap()));
                     }
                 }
@@ -786,6 +880,7 @@ fn test_ai_eval_structured_plan_fields() {
             .expect("minimal_command_plan 必须是数组");
         let case_id = case["case_id"].as_str().unwrap_or("?");
         for (idx, plan) in plans.iter().enumerate() {
+            let command_kind = plan["command_kind"].as_str().unwrap_or("");
             assert!(
                 plan.get("command_kind").is_some(),
                 "case {} plan[{}] 缺少 command_kind",
@@ -810,12 +905,21 @@ fn test_ai_eval_structured_plan_fields() {
                 case_id,
                 idx
             );
-            assert!(
-                plan["requires_project_dir"].as_bool() == Some(true),
-                "case {} plan[{}] requires_project_dir 必须为 true",
-                case_id,
-                idx
-            );
+            if command_kind == "single-file" {
+                assert!(
+                    plan["requires_project_dir"].as_bool() == Some(false),
+                    "case {} plan[{}] single-file requires_project_dir 必须为 false",
+                    case_id,
+                    idx
+                );
+            } else {
+                assert!(
+                    plan["requires_project_dir"].as_bool() == Some(true),
+                    "case {} plan[{}] requires_project_dir 必须为 true",
+                    case_id,
+                    idx
+                );
+            }
         }
     }
 }
@@ -849,6 +953,7 @@ fn test_ai_eval_plan_expands_to_required_commands() {
         for (idx, plan) in plans.iter().enumerate() {
             let kind = plan["command_kind"].as_str().unwrap_or("");
             let target = plan["target"].as_str().unwrap_or("");
+            let requires_project_dir = plan["requires_project_dir"].as_bool().unwrap_or(true);
             let args: Vec<String> = plan["args"]
                 .as_array()
                 .unwrap_or(&vec![])
@@ -858,22 +963,32 @@ fn test_ai_eval_plan_expands_to_required_commands() {
             let expected_prefix = format!("--project-dir {}", project_dir);
             let actual_cmd = required[idx].as_str().unwrap_or("");
 
-            assert!(
-                actual_cmd.starts_with(&expected_prefix),
-                "case {} cmd[{}] 必须以 '{}' 开头，实际: '{}'",
-                case_id,
-                idx,
-                expected_prefix,
-                actual_cmd
-            );
-            assert!(
-                actual_cmd.contains(kind),
-                "case {} cmd[{}] 必须包含 kind '{}'，实际: '{}'",
-                case_id,
-                idx,
-                kind,
-                actual_cmd
-            );
+            if requires_project_dir {
+                assert!(
+                    actual_cmd.starts_with(&expected_prefix),
+                    "case {} cmd[{}] 必须以 '{}' 开头，实际: '{}'",
+                    case_id,
+                    idx,
+                    expected_prefix,
+                    actual_cmd
+                );
+                assert!(
+                    actual_cmd.contains(kind),
+                    "case {} cmd[{}] 必须包含 kind '{}'，实际: '{}'",
+                    case_id,
+                    idx,
+                    kind,
+                    actual_cmd
+                );
+            } else {
+                assert!(
+                    kind == "single-file",
+                    "case {} cmd[{}] 非 project-dir 命令只能使用 single-file，实际 kind='{}'",
+                    case_id,
+                    idx,
+                    kind
+                );
+            }
             if !target.is_empty() {
                 let target_in_cmd = target.replace("'", "");
                 assert!(

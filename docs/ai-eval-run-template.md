@@ -77,16 +77,17 @@ cargo test --test ai_eval_tests
 
 ### 真实项目评测（M15）
 
-1. 确认真实项目路径存在：
-2. 使用独立 graphdb 路径：
+1. 确认真实项目路径存在：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
+2. 使用独立 graphdb 路径：`/tmp/metadata-checker-ai-eval-<case_id>.graphdb`
 3. 串行执行，避免 redb 锁冲突
-4. 记录中标注  和 
+4. 记录中标注 `requires_real_project` 和 `graph_db_path_strategy`
 
 ### 5.4-mini 空上下文验收
 
 - 使用全新空上下文 5.4-mini，只提供 SKILL.md + 二进制路径 + 项目路径 + case question
 - 至少覆盖 5 类问题：页面用途、按钮行为、文本统计、模型被 DataFlow 消费、.tbl 单文件理解
 - 记录结构化结果，不提交大段模型原文
+- M15 当前记录：`docs/ai-eval-runs/run-2026-05-08-5.4-mini-m15.json`
 - 失败项必须归类：missed_fact / hallucination / wrong_command / ignored_diagnostic
 
 ### 人工/半自动评测流程
