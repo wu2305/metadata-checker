@@ -3898,9 +3898,20 @@ fn test_quote_cli_arg_special_chars() {
 
 // M16: SKILL.md 关键术语静态测试
 
+fn skill_md_paths_for_protocol_check() -> Vec<std::path::PathBuf> {
+    let mut paths = vec![std::path::PathBuf::from("SKILL.md")];
+    let deployed_skill_path = std::env::var("METADATA_CHECKER_SKILL_PATH").unwrap_or_else(|_| {
+        "/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md".to_string()
+    });
+    let deployed_skill = std::path::PathBuf::from(deployed_skill_path);
+    if deployed_skill.exists() {
+        paths.push(deployed_skill);
+    }
+    paths
+}
+
 #[test]
 fn test_skill_md_has_key_terms() {
-    let skill_md = std::fs::read_to_string("SKILL.md").expect("SKILL.md must exist in repo root");
     let required_terms = [
         "GRAPH_DB_LOCKED",
         "--graph-lock-timeout-ms",
@@ -3918,36 +3929,48 @@ fn test_skill_md_has_key_terms() {
         "目标定位协议",
         "真实项目故障处理",
     ];
-    let mut missing = Vec::new();
-    for term in &required_terms {
-        if !skill_md.contains(term) {
-            missing.push(term);
+
+    for skill_path in skill_md_paths_for_protocol_check() {
+        let skill_md = std::fs::read_to_string(&skill_path)
+            .unwrap_or_else(|err| panic!("{} must be readable: {}", skill_path.display(), err));
+        let mut missing = Vec::new();
+        for term in &required_terms {
+            if !skill_md.contains(term) {
+                missing.push(term);
+            }
         }
+        assert!(
+            missing.is_empty(),
+            "{} 缺少以下关键术语: {:?}",
+            skill_path.display(),
+            missing
+        );
     }
-    assert!(
-        missing.is_empty(),
-        "SKILL.md 缺少以下关键术语: {:?}",
-        missing
-    );
 }
 
 #[test]
 fn test_skill_md_has_evidence_rules() {
-    let skill_md = std::fs::read_to_string("SKILL.md").expect("SKILL.md must exist in repo root");
-    // 必须包含禁止把 graph-edge-derived 当强证据的规则
-    assert!(
-        skill_md.contains("graph-edge-derived")
-            && (skill_md.contains("弱证据") || skill_md.contains("medium/low")),
-        "SKILL.md 必须定义 <graph-edge-derived> 为弱证据"
-    );
-    // 必须包含 budget 协议
-    assert!(
-        skill_md.contains("--budget compact") && skill_md.contains("--budget full"),
-        "SKILL.md 必须定义 budget 协议"
-    );
-    // 必须包含单引号规则
-    assert!(
-        skill_md.contains("单引号") || skill_md.contains("single quotes"),
-        "SKILL.md 必须定义单引号包裹规则"
-    );
+    for skill_path in skill_md_paths_for_protocol_check() {
+        let skill_md = std::fs::read_to_string(&skill_path)
+            .unwrap_or_else(|err| panic!("{} must be readable: {}", skill_path.display(), err));
+        // 必须包含禁止把 graph-edge-derived 当强证据的规则
+        assert!(
+            skill_md.contains("graph-edge-derived")
+                && (skill_md.contains("弱证据") || skill_md.contains("medium/low")),
+            "{} 必须定义 <graph-edge-derived> 为弱证据",
+            skill_path.display()
+        );
+        // 必须包含 budget 协议
+        assert!(
+            skill_md.contains("--budget compact") && skill_md.contains("--budget full"),
+            "{} 必须定义 budget 协议",
+            skill_path.display()
+        );
+        // 必须包含单引号规则
+        assert!(
+            skill_md.contains("单引号") || skill_md.contains("single quotes"),
+            "{} 必须定义单引号包裹规则",
+            skill_path.display()
+        );
+    }
 }
