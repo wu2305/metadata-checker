@@ -336,3 +336,76 @@ fn test_real_project_parallel_queries() {
 
     let _ = std::fs::remove_file(&tmp);
 }
+
+/// 主动制造锁冲突，验证 CLI 返回 GRAPH_DB_LOCKED 结构化诊断
+#[test]
+fn test_graph_db_locked_returns_structured_diagnostic() {
+    let db_path = std::env::temp_dir().join("m15_lock_test.graphdb");
+    let lock_path = db_path.with_extension("graphdb.lock");
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(&lock_path);
+
+    // 先 build graph
+    let build_out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+        "--graph-db-path",
+        db_path.to_str().unwrap(),
+    ]);
+    assert!(build_out.contains("Graph database built"));
+    assert!(db_path.exists());
+
+    // 手动持有辅助锁文件，阻止 CLI 进程获取
+    let _lock_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path)
+        .expect("should create lock file in test");
+
+    // CLI 进程在 100ms 超时后应返回 GRAPH_DB_LOCKED
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-model",
+        "model1",
+        "--graph-db-path",
+        db_path.to_str().unwrap(),
+        "--graph-lock-timeout-ms",
+        "100",
+    ]);
+
+    let ai: AiOutput = serde_json::from_str(&output).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::GraphDbCheck);
+    let has_locked = ai.diagnostics.iter().any(|d| d.code == "GRAPH_DB_LOCKED");
+    assert!(
+        has_locked,
+        "expected GRAPH_DB_LOCKED diagnostic when lock is held, got: {:?}",
+        ai.diagnostics
+    );
+
+    // suggestion 必须包含等待、换路径或提高超时
+    let suggestion = ai
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "GRAPH_DB_LOCKED")
+        .and_then(|d| d.suggestion.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    assert!(
+        suggestion.contains("wait")
+            || suggestion.contains("graph-db-path")
+            || suggestion.contains("lock-timeout"),
+        "GRAPH_DB_LOCKED suggestion should mention wait, graph-db-path, or lock-timeout, got: {}",
+        suggestion
+    );
+
+    // next_queries 应该给出可执行的替代命令
+    assert!(
+        !ai.next_queries.is_empty(),
+        "GRAPH_DB_LOCKED output should provide next_queries, got none"
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(&lock_path);
+}

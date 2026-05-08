@@ -424,10 +424,14 @@ impl GraphDB {
                             json_path: None,
                         },
                         suggestion: Some(
-                            "Use --graph-db-path to a separate path, or wait for other process"
+                            "Use --graph-db-path to a separate path, wait for other process, or increase --graph-lock-timeout-ms"
                                 .to_string(),
                         ),
                     });
+                    out.next_queries.push(format_next_query(
+                        "metadata-checker --project-dir <DIR> --query-model <MODEL> --graph-db-path {} --graph-lock-timeout-ms 30000",
+                        &db_path.to_string_lossy(),
+                    ));
                 } else if msg.contains("permission")
                     || msg.contains("denied")
                     || msg.contains("read-only")
