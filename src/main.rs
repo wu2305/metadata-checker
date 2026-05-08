@@ -61,7 +61,11 @@ fn main() -> Result<()> {
         };
 
         if let Some(ref model_id) = args.query_model {
-            let model_node_id = format!("model:{}", model_id);
+            let model_node_id = if model_id.starts_with("model:") {
+                model_id.clone()
+            } else {
+                format!("model:{}", model_id)
+            };
             query::query_model(&graph, &model_node_id, args.is_human(), &args.budget)?;
             return Ok(());
         }
@@ -79,7 +83,11 @@ fn main() -> Result<()> {
         }
 
         if let Some(ref dataflow_id) = args.query_dataflow {
-            let model_node_id = format!("model:{}", dataflow_id);
+            let model_node_id = if dataflow_id.starts_with("model:") {
+                dataflow_id.clone()
+            } else {
+                format!("model:{}", dataflow_id)
+            };
             query::query_dataflow(&graph, &model_node_id, args.is_human())?;
             return Ok(());
         }
@@ -111,8 +119,44 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
+        if let Some(ref keyword) = args.find_page {
+            let out = query::find_nodes(&graph, keyword, Some("page"), 20);
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+
+        if let Some(ref keyword) = args.find_model {
+            let out = query::find_nodes(&graph, keyword, Some("model"), 20);
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+
+        if let Some(ref keyword) = args.find_component {
+            let out = query::find_nodes(&graph, keyword, Some("component"), 20);
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+
+        if let Some(ref resolve_args) = args.resolve_model {
+            let (page_id, local_model_id) = match resolve_args.len() {
+                2 => (resolve_args[0].clone(), resolve_args[1].clone()),
+                1 if args.resolve_model_page.is_some() => (
+                    args.resolve_model_page.clone().unwrap(),
+                    resolve_args[0].clone(),
+                ),
+                _ => {
+                    anyhow::bail!(
+                        "--resolve-model requires either 'PAGE_ID MODEL_ID' or --resolve-model-page"
+                    );
+                }
+            };
+            let out = query::resolve_model_in_page(&graph, &page_id, &local_model_id);
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+
         println!(
-            "No query specified. Use --query-model, --query-page, --query-cross, --query-dataflow, --query-page-logic, --explain, or --context."
+            "No query specified. Use --query-model, --query-page, --query-cross, --query-dataflow, --query-page-logic, --explain, --context, --find-page, --find-model, --find-component, or --resolve-model."
         );
         return Ok(());
     }

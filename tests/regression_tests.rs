@@ -266,8 +266,8 @@ fn test_query_page_not_found_returns_error() {
     let (_db_path, graph) = setup_graph_db("page_nf");
     let result = metadata_checker::query::query_page(&graph, "page:nonexistent.spg", false);
     assert!(
-        result.is_err(),
-        "query_page should fail for nonexistent page"
+        result.is_ok(),
+        "query_page should return Ok with TARGET_NOT_FOUND output for nonexistent page"
     );
 }
 
@@ -298,8 +298,8 @@ fn test_query_dataflow_not_found_returns_error() {
     let (_db_path, graph) = setup_graph_db("df_nf");
     let result = metadata_checker::query::query_dataflow(&graph, "model:nonexistent", false);
     assert!(
-        result.is_err(),
-        "query_dataflow should fail for nonexistent dataflow"
+        result.is_ok(),
+        "query_dataflow should return Ok with TARGET_NOT_FOUND output for nonexistent dataflow"
     );
 }
 
@@ -3589,4 +3589,207 @@ fn test_real_project_query_model_compact() {
         evidence_summary.is_some(),
         "compact must have evidence_summary"
     );
+}
+
+// M14 回归测试：目标定位与命令规范防错
+
+#[test]
+fn test_quote_cli_arg_shell_safe() {
+    use metadata_checker::output::schema::quote_cli_arg;
+    assert_eq!(quote_cli_arg("simple"), "simple");
+    assert_eq!(quote_cli_arg("model1"), "model1");
+    assert_eq!(
+        quote_cli_arg("comp:app/售后.app/首页.spg|button1"),
+        "'comp:app/售后.app/首页.spg|button1'"
+    );
+    assert_eq!(
+        quote_cli_arg("page:app/售后.app/首页.spg"),
+        "'page:app/售后.app/首页.spg'"
+    );
+    assert_eq!(quote_cli_arg("model:test(1)"), "'model:test(1)'");
+    assert_eq!(quote_cli_arg("model:test$var"), "'model:test$var'");
+    assert_eq!(quote_cli_arg(""), "''");
+}
+
+#[test]
+fn test_format_next_query_shell_safe() {
+    use metadata_checker::output::schema::format_next_query;
+    assert_eq!(
+        format_next_query("--explain {} for summary", "comp:app/a.spg|b1"),
+        "--explain 'comp:app/a.spg|b1' for summary"
+    );
+    assert_eq!(
+        format_next_query("--query-model {}", "model1"),
+        "--query-model model1"
+    );
+}
+
+#[test]
+fn test_cli_query_model_bare_vs_prefix() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out_bare = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-model",
+        "model1",
+    ]);
+    let out_prefix = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-model",
+        "model:model1",
+    ]);
+    let ai_bare: AiOutput = serde_json::from_str(&out_bare).expect("bare must parse");
+    let ai_prefix: AiOutput = serde_json::from_str(&out_prefix).expect("prefix must parse");
+    assert_eq!(ai_bare.query_target, ai_prefix.query_target);
+    assert_eq!(
+        ai_bare.query_target,
+        Some("model:model1".to_string()),
+        "query_target should be normalized to model:model1"
+    );
+    assert_eq!(ai_bare.kind, ai_prefix.kind);
+}
+
+#[test]
+fn test_cli_find_page_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--find-page",
+        "page",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("find-page must parse");
+    assert_eq!(ai.kind, OutputKind::PageQuery);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("match_count"),
+        "find-page summary must have match_count"
+    );
+    let details_val = ai.details.expect("details must be object");
+    let details = details_val.as_object().expect("details must be object");
+    assert!(
+        details.contains_key("matches"),
+        "find-page details must have matches"
+    );
+}
+
+#[test]
+fn test_cli_find_model_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--find-model",
+        "model",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("find-model must parse");
+    assert_eq!(ai.kind, OutputKind::ModelQuery);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("match_count"),
+        "find-model summary must have match_count"
+    );
+}
+
+#[test]
+fn test_cli_find_component_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--find-component",
+        "button",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("find-component must parse");
+    assert_eq!(ai.kind, OutputKind::ComponentQuery);
+    let summary = ai.summary.as_object().expect("summary must be object");
+    assert!(
+        summary.contains_key("match_count"),
+        "find-component summary must have match_count"
+    );
+}
+
+#[test]
+fn test_cli_target_not_found_candidates() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-model",
+        "model:nonexistent_xyz",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("not-found must parse");
+    assert_eq!(ai.kind, OutputKind::ModelQuery);
+    let has_target_not_found = ai.diagnostics.iter().any(|d| d.code == "TARGET_NOT_FOUND");
+    assert!(
+        has_target_not_found,
+        "must have TARGET_NOT_FOUND diagnostic, got {:?}",
+        ai.diagnostics
+    );
+    let details_val = ai.details.expect("details must be object");
+    let details = details_val.as_object().expect("details must be object");
+    assert!(
+        details.contains_key("candidate_targets"),
+        "not-found must include candidate_targets"
+    );
+    assert!(
+        !ai.next_queries.is_empty(),
+        "not-found must provide next_queries"
+    );
+}
+
+#[test]
+fn test_cli_resolve_model_in_page_single() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--resolve-model-page",
+        "page:app/page_relations.spg",
+        "--resolve-model",
+        "model1",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("resolve must parse");
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let resolved_count = summary
+        .get("resolved_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(
+        resolved_count >= 1 || !ai.diagnostics.is_empty(),
+        "resolve should return at least one candidate or a diagnostic"
+    );
+}
+
+#[test]
+fn test_quote_cli_arg_inner_quote() {
+    use metadata_checker::output::schema::quote_cli_arg;
+    // 内部单引号必须转义为 '\''
+    assert_eq!(quote_cli_arg("a'b"), "'a'\\'b'");
+    assert_eq!(quote_cli_arg("it's"), "'it'\\'s'");
 }

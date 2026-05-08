@@ -1,4 +1,5 @@
 use crate::dependency::DependencyGraph;
+use crate::output::schema::format_next_query;
 use crate::superpage::{RefType, SuperPageMetadata};
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -334,8 +335,8 @@ pub fn print_component_query_json_to(
         .with_node_id(&comp.id),
     );
     output.next_queries = vec![
-        format!("--explain {} for semantic summary", comp.id),
-        format!("--context {} --depth 2 for surrounding closure", comp.id),
+        format_next_query("--explain {} for semantic summary", &comp.id),
+        format_next_query("--context {} --depth 2 for surrounding closure", &comp.id),
     ];
 
     let output = output.validate();

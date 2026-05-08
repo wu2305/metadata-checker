@@ -1,4 +1,5 @@
 use crate::graph::GraphDB;
+use crate::output::schema::{format_next_query, format_next_query_multi};
 use anyhow::Result;
 use serde_json::json;
 use std::io::{self, Write};
@@ -64,6 +65,16 @@ fn pick_str_field<'a>(obj: &'a serde_json::Value, keys: &[&str]) -> Option<&'a s
 
 pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -> Result<()> {
     let is_compact = budget == "compact";
+    if graph.get_node(model_id).is_none() {
+        let candidates = graph.find_candidates(model_id, 5);
+        let out = crate::output::schema::build_target_not_found_output(
+            crate::output::schema::OutputKind::ModelQuery,
+            model_id,
+            &candidates,
+        );
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
     if human {
         let mut out = io::stdout();
         writeln!(out, "=== Model: {} ===", model_id)?;
@@ -372,8 +383,8 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -
             );
         }
         output.next_queries = vec![
-            format!("--explain {} for full semantic summary", model_id),
-            format!("--query-dataflow {} for internal subgraph", model_id),
+            format_next_query("--explain {} for full semantic summary", model_id),
+            format_next_query("--query-dataflow {} for internal subgraph", model_id),
         ];
 
         // Compact mode: add OUTPUT_TRUNCATED diagnostic and evidence_summary
@@ -475,16 +486,23 @@ pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
                 .with_confidence(crate::output::Confidence::High)
                 .with_node_id(page_id),
             );
-            output.next_queries = vec![format!(
+            output.next_queries = vec![format_next_query(
                 "--query-page-logic {} for page-level logic summary",
-                page_id
+                page_id,
             )];
 
             let output = output.validate();
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
     } else {
-        anyhow::bail!("Page {} not found in graph", page_id);
+        let candidates = graph.find_candidates(page_id, 5);
+        let out = crate::output::schema::build_target_not_found_output(
+            crate::output::schema::OutputKind::PageQuery,
+            page_id,
+            &candidates,
+        );
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
     }
     Ok(())
 }
@@ -563,8 +581,8 @@ pub fn query_cross(graph: &GraphDB, page_a: &str, page_b: &str, human: bool) -> 
             );
         }
         output.next_queries = vec![
-            format!("--query-page {} for page dependencies", page_a),
-            format!("--query-page {} for page dependencies", page_b),
+            format_next_query("--query-page {} for page dependencies", page_a),
+            format_next_query("--query-page {} for page dependencies", page_b),
         ];
 
         let output = output.validate();
@@ -590,9 +608,19 @@ pub fn query_page_logic(
     budget: &str,
 ) -> Result<()> {
     let is_compact = budget == "compact";
-    let page_node = graph
-        .get_node(page_id)
-        .ok_or_else(|| anyhow::anyhow!("Page '{}' not found in graph", page_id))?;
+    let page_node = match graph.get_node(page_id) {
+        Some(n) => n,
+        None => {
+            let candidates = graph.find_candidates(page_id, 5);
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::PageQuery,
+                page_id,
+                &candidates,
+            );
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+    };
 
     // ---- 1. 收集页面下所有 Component 节点，再收集它们 Triggers 出的 Action 节点 ----
     let (page_out, _) = graph
@@ -1895,10 +1923,10 @@ pub fn query_page_logic(
     }
 
     let mut nq = vec![
-        format!("--explain {} for page semantic summary", page_id),
-        format!(
+        format_next_query("--explain {} for page semantic summary", page_id),
+        format_next_query_multi(
             "--context {} --depth 2 --budget normal for surrounding context",
-            page_id
+            &[page_id, "2"],
         ),
     ];
     let mut model_names: Vec<String> = write_targets
@@ -1910,7 +1938,7 @@ pub fn query_page_logic(
     model_names.sort();
     model_names.dedup();
     for m in model_names.iter().take(3) {
-        nq.push(format!("--query-model {} for model details", m));
+        nq.push(format_next_query("--query-model {} for model details", m));
     }
     output.next_queries = nq;
 
@@ -2092,4 +2120,332 @@ pub fn query_page_logic(
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
+}
+
+/// 按关键词搜索图节点
+///
+/// 返回匹配节点列表，按名称相似度排序。
+pub fn find_nodes(
+    graph: &GraphDB,
+    keyword: &str,
+    node_type_filter: Option<&str>,
+    limit: usize,
+) -> crate::output::schema::AiOutput {
+    let keyword_lower = keyword.to_lowercase();
+    let mut matches = Vec::new();
+
+    for (_, idx) in &graph.node_indices {
+        if let Some(node) = graph.graph.node_weight(*idx) {
+            let node_type_str = format!("{:?}", node.node_type).to_lowercase();
+            if let Some(filter) = node_type_filter {
+                if !node_type_str.contains(filter) {
+                    continue;
+                }
+            }
+            let score = if node.id.to_lowercase() == keyword_lower
+                || node.name.to_lowercase() == keyword_lower
+            {
+                100.0
+            } else if node.id.to_lowercase().contains(&keyword_lower)
+                || node.name.to_lowercase().contains(&keyword_lower)
+            {
+                80.0
+            } else if node.path.to_lowercase().contains(&keyword_lower) {
+                50.0
+            } else {
+                0.0
+            };
+            if score > 0.0 {
+                matches.push((node.clone(), score));
+            }
+        }
+    }
+
+    matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut seen = std::collections::HashSet::new();
+    let matches: Vec<_> = matches
+        .into_iter()
+        .filter(|(n, _)| seen.insert(n.id.clone()))
+        .take(limit)
+        .collect();
+
+    let match_count = matches.len();
+    let match_details: Vec<serde_json::Value> = matches
+        .iter()
+        .map(|(n, score)| {
+            serde_json::json!({
+                "id": n.id,
+                "name": n.name,
+                "node_type": format!("{:?}", n.node_type),
+                "source_file": n.path,
+                "match_score": score,
+                "match_reason": if *score >= 100.0 {
+                    "exact match"
+                } else if *score >= 80.0 {
+                    "name/id substring match"
+                } else {
+                    "path match"
+                },
+            })
+        })
+        .collect();
+
+    let kind = match node_type_filter {
+        Some("page") => crate::output::schema::OutputKind::PageQuery,
+        Some("model") => crate::output::schema::OutputKind::ModelQuery,
+        Some("component") => crate::output::schema::OutputKind::ComponentQuery,
+        _ => crate::output::schema::OutputKind::PageQuery,
+    };
+
+    let summary = serde_json::json!({
+        "keyword": keyword,
+        "match_count": match_count,
+        "what_is_it": format!("Found {} nodes matching '{}'", match_count, keyword),
+    });
+
+    let mut output = crate::output::schema::AiOutput::new(kind, summary);
+    output.query_target = Some(keyword.to_string());
+    output.details = Some(serde_json::json!({
+        "matches": match_details,
+    }));
+
+    for (n, score) in &matches {
+        output.evidence.push(
+            crate::output::schema::Evidence::new(
+                format!("Node {} ({}) matches with score {}", n.id, n.name, score),
+                "Keyword search against graph node index",
+            )
+            .with_confidence(if *score >= 100.0 {
+                crate::output::schema::Confidence::High
+            } else if *score >= 80.0 {
+                crate::output::schema::Confidence::Medium
+            } else {
+                crate::output::schema::Confidence::Low
+            })
+            .with_node_id(&n.id)
+            .with_source_file(&n.path),
+        );
+    }
+
+    if match_count > 0 {
+        let top = &matches[0].0;
+        output
+            .next_queries
+            .push(crate::output::schema::format_next_query(
+                "--explain {} for semantic summary",
+                &top.id,
+            ));
+        output
+            .next_queries
+            .push(crate::output::schema::format_next_query(
+                "--context {} --depth 2 for surrounding context",
+                &top.id,
+            ));
+    } else {
+        output.diagnostics.push(crate::output::schema::Diagnostic {
+            severity: crate::output::schema::DiagnosticSeverity::Info,
+            code: "NO_MATCHES_FOUND".to_string(),
+            message: format!("No nodes found matching keyword '{}'", keyword),
+            location: crate::output::schema::Location::default(),
+            suggestion: Some("Try a broader keyword or verify spelling".to_string()),
+        });
+    }
+
+    output.validate()
+}
+
+/// 在页面作用域内解析局部模型 ID
+///
+/// 从页面的数据源、组件绑定、action reads/writes、DataFlow 输入输出中搜索与 local_model_id 匹配的模型。
+pub fn resolve_model_in_page(
+    graph: &GraphDB,
+    page_id: &str,
+    local_model_id: &str,
+) -> crate::output::schema::AiOutput {
+    let page_node = match graph.get_node(page_id) {
+        Some(n) => n,
+        None => {
+            let mut out = crate::output::schema::AiOutput::new(
+                crate::output::schema::OutputKind::ModelQuery,
+                serde_json::json!({
+                    "page_id": page_id,
+                    "local_model_id": local_model_id,
+                    "resolved_count": 0,
+                    "what_is_it": format!("Page {} not found", page_id),
+                }),
+            );
+            out.diagnostics.push(crate::output::schema::Diagnostic {
+                severity: crate::output::schema::DiagnosticSeverity::Error,
+                code: "TARGET_NOT_FOUND".to_string(),
+                message: format!("Page '{}' not found in graph", page_id),
+                location: crate::output::schema::Location::default(),
+                suggestion: Some("Verify page ID or use --find-page to search".to_string()),
+            });
+            out.next_queries
+                .push(crate::output::schema::format_next_query(
+                    "--find-page {} to search for similar pages",
+                    page_id,
+                ));
+            return out.validate();
+        }
+    };
+
+    let mut candidates: Vec<(crate::graph::Node, f64, String)> = Vec::new();
+    let local_lower = local_model_id.to_lowercase();
+
+    // 从页面出边收集关联模型
+    if let Some((outgoing, _)) = graph.get_node_edges(page_id) {
+        for (target, edge) in &outgoing {
+            let score = if target.id.to_lowercase() == local_lower {
+                100.0
+            } else if target.id.to_lowercase().contains(&local_lower)
+                || target.name.to_lowercase().contains(&local_lower)
+            {
+                80.0
+            } else {
+                0.0
+            };
+            if score > 0.0 {
+                candidates.push(((*target).clone(), score, format!("{:?}", edge.edge_type)));
+            }
+        }
+    }
+
+    // 全局搜索裸名匹配
+    let bare = local_model_id
+        .strip_prefix("model:")
+        .unwrap_or(local_model_id);
+    for (_, idx) in &graph.node_indices {
+        if let Some(node) = graph.graph.node_weight(*idx) {
+            if node.id.starts_with("model:") {
+                let node_bare = node.id.strip_prefix("model:").unwrap_or(&node.id);
+                if node_bare.eq_ignore_ascii_case(bare) {
+                    candidates.push((node.clone(), 60.0, "global model match".to_string()));
+                }
+            }
+        }
+    }
+
+    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut seen = std::collections::HashSet::new();
+    let candidates: Vec<_> = candidates
+        .into_iter()
+        .filter(|(n, _, _)| seen.insert(n.id.clone()))
+        .collect();
+
+    let resolved_count = candidates.len();
+    let ambiguous = resolved_count > 1;
+
+    let candidate_details: Vec<serde_json::Value> = candidates
+        .iter()
+        .map(|(n, score, reason)| {
+            serde_json::json!({
+                "model_id": n.id,
+                "model_name": n.name,
+                "confidence": score,
+                "match_reason": reason,
+            })
+        })
+        .collect();
+
+    let summary = serde_json::json!({
+        "page_id": page_id,
+        "local_model_id": local_model_id,
+        "resolved_count": resolved_count,
+        "ambiguous": ambiguous,
+        "what_is_it": if resolved_count == 0 {
+            format!("No model resolved for '{}' in page {}", local_model_id, page_id)
+        } else if ambiguous {
+            format!("Multiple models match '{}' in page {}", local_model_id, page_id)
+        } else {
+            format!("Model {} resolved in page {}", candidates[0].0.id, page_id)
+        },
+    });
+
+    let mut output = crate::output::schema::AiOutput::new(
+        crate::output::schema::OutputKind::ModelQuery,
+        summary,
+    );
+    output.query_target = Some(format!("{}|{}", page_id, local_model_id));
+    output.details = Some(serde_json::json!({
+        "candidates": candidate_details,
+        "page_source_file": page_node.path,
+    }));
+
+    for (n, score, reason) in &candidates {
+        output.evidence.push(
+            crate::output::schema::Evidence::new(
+                format!("Model {} matched via {} (score {})", n.id, reason, score),
+                "Page-scoped model resolution",
+            )
+            .with_confidence(if *score >= 80.0 {
+                crate::output::schema::Confidence::High
+            } else {
+                crate::output::schema::Confidence::Medium
+            })
+            .with_node_id(&n.id)
+            .with_source_file(&page_node.path),
+        );
+    }
+
+    if resolved_count == 0 {
+        output.diagnostics.push(crate::output::schema::Diagnostic {
+            severity: crate::output::schema::DiagnosticSeverity::Warning,
+            code: "MODEL_UNRESOLVED".to_string(),
+            message: format!(
+                "No model matching '{}' found in page {}",
+                local_model_id, page_id
+            ),
+            location: crate::output::schema::Location {
+                source_file: Some(page_node.path),
+                node_id: Some(page_id.to_string()),
+                json_path: None,
+            },
+            suggestion: Some("Use --find-model to search globally".to_string()),
+        });
+        output
+            .next_queries
+            .push(crate::output::schema::format_next_query(
+                "--find-model {} to search globally",
+                local_model_id,
+            ));
+    } else if ambiguous {
+        output.diagnostics.push(crate::output::schema::Diagnostic {
+            severity: crate::output::schema::DiagnosticSeverity::Info,
+            code: "AMBIGUOUS_RESOLUTION".to_string(),
+            message: format!(
+                "Multiple models match '{}'; candidate count: {}",
+                local_model_id, resolved_count
+            ),
+            location: crate::output::schema::Location {
+                source_file: Some(page_node.path),
+                node_id: Some(page_id.to_string()),
+                json_path: None,
+            },
+            suggestion: Some("Use --explain <MODEL_ID> to verify specific model".to_string()),
+        });
+        for (n, _, _) in &candidates {
+            output
+                .next_queries
+                .push(crate::output::schema::format_next_query(
+                    "--explain {} for semantic summary",
+                    &n.id,
+                ));
+        }
+    } else {
+        output
+            .next_queries
+            .push(crate::output::schema::format_next_query(
+                "--explain {} for semantic summary",
+                &candidates[0].0.id,
+            ));
+        output
+            .next_queries
+            .push(crate::output::schema::format_next_query(
+                "--query-model {} for model dependencies",
+                &candidates[0].0.id,
+            ));
+    }
+
+    output.validate()
 }

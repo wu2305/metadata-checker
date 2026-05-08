@@ -4,6 +4,7 @@
 
 use crate::output::schema::{
     AiOutput, Confidence, Diagnostic, DiagnosticSeverity, Evidence, Location, OutputKind,
+    format_next_query,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -593,19 +594,19 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
     let table_id = meta.table_id.as_deref().unwrap_or("unknown");
     if meta.is_dataflow {
         output.next_queries = vec![
-            format!("--explain model:{} for model semantics", table_id),
-            format!(
+            format_next_query("--explain model:{} for model semantics", table_id),
+            format_next_query(
                 "--context model:{} --depth 1 for surrounding context",
-                table_id
+                table_id,
             ),
             "--project-dir <DIR> --query-dataflow <MODEL> for full DataFlow lineage".to_string(),
         ];
     } else {
         output.next_queries = vec![
-            format!("--explain model:{} for model semantics", table_id),
-            format!(
+            format_next_query("--explain model:{} for model semantics", table_id),
+            format_next_query(
                 "--context model:{} --depth 1 for surrounding context",
-                table_id
+                table_id,
             ),
             "--project-dir <DIR> --query-model <MODEL> for cross-file usage".to_string(),
         ];

@@ -317,11 +317,12 @@ pub struct AiOutput {
 
 ### next_queries
 
-根据目标类型生成真实可运行命令：
-- component/action → `--explain <ID>`、`--query-page-logic <PAGE>`
-- model/field → `--explain <ID>`、`--query-model <MODEL>`
-- page → `--explain <PAGE>`、`--query-page-logic <PAGE>`
-- dataflow → `--query-dataflow <MODEL>`、`--explain <MODEL>`
+根据目标类型生成可直接复制执行的 shell-safe 命令片段。所有 target 自动用单引号包裹，避免 `|`、中文路径、`$` 等特殊字符被 shell 解析：
+- component/action → `--explain '<ID>'`、`--query-page-logic '<PAGE>'`
+- model/field → `--explain '<ID>'`、`--query-model '<MODEL>'`
+- page → `--explain '<PAGE>'`、`--query-page-logic '<PAGE>'`
+- dataflow → `--query-dataflow '<MODEL>'`、`--explain '<MODEL>'`
+- 目标不存在时 → `--find-page '<KEYWORD>'`、`--find-model '<KEYWORD>'`、`--find-component '<KEYWORD>'`
 
 ### AI 使用规则
 
@@ -593,3 +594,68 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 | `GRAPH_DB_LOCKED` | error | redb lock 冲突，多进程并发 | 等待、换 `--graph-db-path`，或在真实项目场景增加 `--graph-lock-timeout-ms 30000` |
 | `GRAPH_DB_PERMISSION_DENIED` | error | 只读目录或无权限 | 换到 `/tmp` 等可写路径 |
 | `GRAPH_DB_OPEN_ERROR` | error | 其他 redb/IO 错误 | `--build-graph` 重建 |
+
+## kind: PageQuery / ModelQuery / ComponentQuery（find 命令复用） 字段约束
+
+`--find-page <KEYWORD>`、`--find-model <KEYWORD>`、`--find-component <KEYWORD>` 输出统一 AI JSON。
+
+### summary 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `keyword` | string | 查询关键词 |
+| `match_count` | number | 匹配结果数量 |
+| `what_is_it` | string | 自然语言说明匹配结果概况 |
+
+### details.matches[] 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 节点完整 ID |
+| `name` | string | 节点名称 |
+| `node_type` | string | 节点类型 |
+| `source_file` | string | 来源文件路径 |
+| `match_score` | number | 匹配分数 |
+| `match_reason` | string | 匹配原因 |
+
+### diagnostics
+
+- `NO_MATCHES_FOUND`：未找到匹配节点，建议扩大关键词或检查拼写
+
+### next_queries
+
+- `--explain '<ID>'`：查看第一个匹配目标的语义摘要
+- `--context '<ID>' --depth 2`：查看第一个匹配目标的上下文
+
+## kind: ModelResolve 字段约束（内部 kind，可能复用 ModelQuery）
+
+`--resolve-model-page <PAGE_ID> --resolve-model <LOCAL_MODEL_ID>` 在页面作用域内解析局部模型 ID。
+
+### summary 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `page_id` | string | 页面完整 ID |
+| `local_model_id` | string | 用户传入的局部模型名 |
+| `resolved_count` | number | 解析成功数量 |
+| `ambiguous` | boolean | 候选是否不唯一 |
+| `what_is_it` | string | 自然语言说明解析结果 |
+
+### details.candidates[] 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `model_id` | string | 候选节点完整 ID |
+| `model_name` | string | 候选节点名称 |
+| `confidence` | number | 匹配分数（0-100） |
+| `match_reason` | string | 匹配原因（如 "exact match" / "substring match" / "global model match"） |
+
+### diagnostics
+
+- `TARGET_NOT_FOUND`：页面不存在时输出，附带 `candidate_targets`
+- `AMBIGUOUS_RESOLUTION`：当解析出多个候选时输出，提示 AI 需要进一步确认
+
+### next_queries
+
+- `--explain '<ID>'`：查看候选目标语义摘要
+- `--find-model '<KEYWORD>'`：当解析失败时，使用全局搜索

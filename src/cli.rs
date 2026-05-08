@@ -146,6 +146,42 @@ pub struct Cli {
         help = "Query page-level logic summary (requires --project-dir)"
     )]
     pub query_page_logic: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "KEYWORD",
+        help = "Find pages matching keyword (requires --project-dir)"
+    )]
+    pub find_page: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "KEYWORD",
+        help = "Find models matching keyword (requires --project-dir)"
+    )]
+    pub find_model: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "KEYWORD",
+        help = "Find components matching keyword (requires --project-dir)"
+    )]
+    pub find_component: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "PAGE_ID",
+        help = "Page ID for --resolve-model scope"
+    )]
+    pub resolve_model_page: Option<String>,
+
+    #[arg(
+        long,
+        num_args = 1..=2,
+        value_names = ["PAGE_ID", "MODEL"],
+        help = "Resolve local model ID within page scope. Accepts either 'PAGE_ID MODEL' or just 'MODEL' (with --resolve-model-page)"
+    )]
+    pub resolve_model: Option<Vec<String>>,
 }
 
 impl Cli {

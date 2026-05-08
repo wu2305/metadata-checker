@@ -133,7 +133,7 @@ fn test_explain_not_found_returns_error() {
 
     let result = metadata_checker::explain::explain_node_graph(&graph, "model:nonexistent", false);
     assert!(
-        result.is_err(),
-        "explain_node_graph should fail for nonexistent node"
+        result.is_ok(),
+        "explain_node_graph should return Ok with TARGET_NOT_FOUND output for nonexistent node"
     );
 }

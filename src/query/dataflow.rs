@@ -1,4 +1,5 @@
 use crate::graph::GraphDB;
+use crate::output::schema::format_next_query;
 use anyhow::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -306,11 +307,19 @@ fn trace_field_source(
 }
 /// 展开 DataFlow 子图，追溯字段来源
 pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result<()> {
-    let node = graph.get_node(dataflow_id);
-    if node.is_none() {
-        anyhow::bail!("DataFlow {} not found in graph", dataflow_id);
-    }
-    let node = node.unwrap();
+    let node = match graph.get_node(dataflow_id) {
+        Some(n) => n,
+        None => {
+            let candidates = graph.find_candidates(dataflow_id, 5);
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::ModelQuery,
+                dataflow_id,
+                &candidates,
+            );
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+    };
 
     let raw_meta = node.meta.as_ref();
     let dfm = raw_meta.map(DataFlowMeta::from_meta).unwrap_or_default();
@@ -551,8 +560,8 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
             .with_node_id(dataflow_id),
         );
         output.next_queries = vec![
-            format!("--explain {} for semantic summary", dataflow_id),
-            format!("--context {} --depth 2", dataflow_id),
+            format_next_query("--explain {} for semantic summary", dataflow_id),
+            format_next_query("--context {} --depth 2", dataflow_id),
         ];
 
         let output = output.validate();

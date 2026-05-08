@@ -303,7 +303,7 @@ metadata-checker dataflow_output.tbl
 - 禁止默认读取 raw JSON 大对象。
 - 禁止忽略 diagnostics 做空洞确定性结论。
 - 禁止在 evidence 不足时编造来源。
-- 禁止重复使用错误的命令格式（例如 `--query-model model:model1` 会被 CLI 二次加前缀变成 `model:model:model1`，应写 `--query-model model1`）。
+- 所有命令中的 target 必须用单引号包裹（例如 `--explain 'comp:app/售后.app/首页.spg|button1'`），避免 shell 对 `|`、中文路径、`$` 等特殊字符解析错误。CLI 已兼容 `--query-model model1` 和 `--query-model model:model1` 两种写法，但推荐裸模型名。
 
 ## 来源分类使用指南（值追溯）
 

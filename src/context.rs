@@ -1,4 +1,5 @@
 use crate::graph::GraphDB;
+use crate::output::schema::{format_next_query, format_next_query_multi};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::{HashSet, VecDeque};
@@ -13,20 +14,23 @@ fn generate_next_queries(
     node_type: &crate::graph::NodeType,
     depth: usize,
 ) -> Vec<String> {
-    let mut queries = vec![format!("--explain {} for semantic summary", node_id)];
+    let mut queries = vec![format_next_query(
+        "--explain {} for semantic summary",
+        node_id,
+    )];
     match node_type {
         crate::graph::NodeType::Component | crate::graph::NodeType::Action => {
             // 提取页面 ID（comp:page|id 或 action:page|comp|id 格式）
             if let Some(page_part) = node_id.split('|').next() {
                 if let Some(page_id) = page_part.strip_prefix("comp:") {
-                    queries.push(format!(
+                    queries.push(format_next_query(
                         "--query-page-logic page:{} for page-level logic",
-                        page_id
+                        page_id,
                     ));
                 } else if let Some(page_id) = page_part.strip_prefix("action:") {
-                    queries.push(format!(
+                    queries.push(format_next_query(
                         "--query-page-logic page:{} for page-level logic",
-                        page_id
+                        page_id,
                     ));
                 }
             }
@@ -37,27 +41,32 @@ fn generate_next_queries(
                     .strip_prefix("field:")
                     .and_then(|s| s.split('.').next())
                 {
-                    queries.push(format!("--query-model {} for model details", model_part));
+                    queries.push(format_next_query(
+                        "--query-model {} for model details",
+                        model_part,
+                    ));
                 }
             } else if let Some(model_name) = node_id.strip_prefix("model:") {
-                queries.push(format!("--query-model {} for model details", model_name));
-                queries.push(format!(
+                queries.push(format_next_query(
+                    "--query-model {} for model details",
+                    model_name,
+                ));
+                queries.push(format_next_query(
                     "--query-dataflow {} for dataflow lineage",
-                    model_name
+                    model_name,
                 ));
             }
         }
         crate::graph::NodeType::Page => {
-            queries.push(format!(
+            queries.push(format_next_query(
                 "--query-page-logic {} for page-level logic",
-                node_id
+                node_id,
             ));
         }
     }
-    queries.push(format!(
+    queries.push(format_next_query_multi(
         "--context {} --depth {} --budget full for full closure",
-        node_id,
-        depth + 1
+        &[node_id, &(depth + 1).to_string()],
     ));
     queries
 }
@@ -76,9 +85,19 @@ pub fn context_node_graph(
             budget
         );
     }
-    let node = graph
-        .get_node(node_id)
-        .ok_or_else(|| anyhow::anyhow!("Node '{}' not found in graph", node_id))?;
+    let node = match graph.get_node(node_id) {
+        Some(n) => n,
+        None => {
+            let candidates = graph.find_candidates(node_id, 5);
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::Context,
+                node_id,
+                &candidates,
+            );
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+    };
 
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();

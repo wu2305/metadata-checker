@@ -809,8 +809,8 @@ fn test_query_dataflow_not_found() {
     // Test querying a non-existent DataFlow
     let result = query_dataflow(&graph, "model:nonexistent", true);
     assert!(
-        result.is_err(),
-        "query_dataflow for non-existent model should return error"
+        result.is_ok(),
+        "query_dataflow for non-existent model should return Ok with TARGET_NOT_FOUND output"
     );
 
     let _ = std::fs::remove_file(&db_path);

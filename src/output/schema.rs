@@ -214,3 +214,117 @@ impl std::str::FromStr for Budget {
         }
     }
 }
+
+/// Shell-safe 单引号包裹 CLI 参数
+///
+/// 当参数包含空格、|、中文、$、(、) 等需要转义的字符时，用单引号包裹。
+/// 如果参数本身不含特殊字符，原样返回，避免不必要的引号。
+pub fn quote_cli_arg(arg: &str) -> String {
+    let needs_quote = arg.chars().any(|c| {
+        !c.is_ascii()
+            || c.is_whitespace()
+            || matches!(
+                c,
+                '|' | '&'
+                    | ';'
+                    | '('
+                    | ')'
+                    | '{'
+                    | '}'
+                    | '$'
+                    | '`'
+                    | '"'
+                    | '\''
+                    | '<'
+                    | '>'
+                    | '*'
+                    | '?'
+                    | '['
+                    | ']'
+                    | '#'
+                    | '\\'
+                    | '!'
+            )
+    });
+    if needs_quote || arg.is_empty() {
+        let escaped = arg.replace("'", "'\\'");
+        format!("'{}'", escaped)
+    } else {
+        arg.to_string()
+    }
+}
+
+/// 生成 shell-safe 的 next_query 字符串
+///
+/// template 中的 {} 占位符会被 quote_cli_arg 处理后的值替换。
+/// 例如 format_next_query("--explain {} for summary", target_id)
+pub fn format_next_query(template: &str, arg: &str) -> String {
+    let quoted = quote_cli_arg(arg);
+    template.replacen("{}", &quoted, 1)
+}
+
+/// 多参数版本，按顺序替换 template 中的 {} 占位符
+pub fn format_next_query_multi(template: &str, args: &[&str]) -> String {
+    let mut result = template.to_string();
+    for arg in args {
+        result = result.replacen("{}", &quote_cli_arg(arg), 1);
+    }
+    result
+}
+
+/// 构建目标不存在时的结构化输出，附带候选建议
+pub fn build_target_not_found_output(
+    kind: OutputKind,
+    target_id: &str,
+    candidates: &[(crate::graph::Node, String)],
+) -> AiOutput {
+    let candidate_targets: Vec<serde_json::Value> = candidates
+        .iter()
+        .map(|(node, reason)| {
+            serde_json::json!({
+                "id": node.id,
+                "name": node.name,
+                "node_type": format!("{:?}", node.node_type),
+                "reason": reason,
+            })
+        })
+        .collect();
+
+    let summary = serde_json::json!({
+        "target_id": target_id,
+        "resolved_count": 0,
+        "what_is_it": format!("Target '{}' not found in graph", target_id),
+        "candidate_count": candidate_targets.len(),
+    });
+
+    let mut out = AiOutput::new(kind, summary);
+    out.query_target = Some(target_id.to_string());
+    out.details = Some(serde_json::json!({
+        "candidate_targets": candidate_targets,
+    }));
+    out.diagnostics.push(Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: "TARGET_NOT_FOUND".to_string(),
+        message: format!("Target '{}' not found in graph", target_id),
+        location: Location::default(),
+        suggestion: if candidates.is_empty() {
+            Some("Verify the target ID or use --find-page / --find-model / --find-component to search".to_string())
+        } else {
+            Some("Did you mean one of the candidate targets below?".to_string())
+        },
+    });
+
+    for (node, _) in candidates {
+        out.next_queries.push(format_next_query(
+            "--explain {} for semantic summary",
+            &node.id,
+        ));
+    }
+    if candidates.is_empty() {
+        out.next_queries.push(format_next_query(
+            "--find-page {} to search for similar pages",
+            target_id,
+        ));
+    }
+    out.validate()
+}

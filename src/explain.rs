@@ -1,5 +1,6 @@
 use crate::dependency::DependencyGraph;
 use crate::graph::GraphDB;
+use crate::output::schema::format_next_query;
 use crate::superpage::{RefType, SuperPageMetadata};
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -172,7 +173,7 @@ pub fn explain_component_spg(spg: &SuperPageMetadata, target_id: &str, human: bo
     push_relation_evidence(&mut output, "affects", &affects);
     output.diagnostics = diagnostics;
     output.next_queries = vec![
-        format!("--context {} --depth 2 for surrounding closure", target_id),
+        format_next_query("--context {} --depth 2 for surrounding closure", target_id),
         "--project-dir <DIR> --explain model:<MODEL> for cross-file context".to_string(),
     ];
 
@@ -509,9 +510,19 @@ fn classify_importance(
 /// 支持完整 ID，例如 --explain model:physical_x。
 /// 按 NodeType 分发，生成语义化的 summary、details、evidence。
 pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result<()> {
-    let node = graph
-        .get_node(node_id)
-        .ok_or_else(|| anyhow::anyhow!("Node '{}' not found in graph", node_id))?;
+    let node = match graph.get_node(node_id) {
+        Some(n) => n,
+        None => {
+            let candidates = graph.find_candidates(node_id, 5);
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::Explain,
+                node_id,
+                &candidates,
+            );
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+    };
 
     let (outgoing, incoming) = graph
         .get_node_edges(node_id)
@@ -807,13 +818,14 @@ fn explain_component_graph(
     push_relation_evidence(&mut output, "navigates_to", &navigates_to);
     push_relation_evidence(&mut output, "affects_components", &affects_components);
     output.next_queries = vec![
-        format!("--context {} --depth 2 for surrounding closure", node.id),
-        format!(
+        format_next_query("--context {} --depth 2 for surrounding closure", &node.id),
+        format_next_query(
             "--query-page-logic {} for page-level logic",
             parent_page
                 .as_ref()
                 .map(|p| p.id.clone())
                 .unwrap_or_default()
+                .as_str(),
         ),
     ];
 
@@ -1118,13 +1130,14 @@ fn explain_action_graph(
     push_relation_evidence(&mut output, "navigates_to", &navigates_to);
     push_relation_evidence(&mut output, "affects_components", &affects_components);
     output.next_queries = vec![
-        format!("--context {} --depth 2 for surrounding closure", node.id),
-        format!(
+        format_next_query("--context {} --depth 2 for surrounding closure", &node.id),
+        format_next_query(
             "--explain {} for parent component",
             parent_comp
                 .as_ref()
                 .map(|c| c.id.clone())
                 .unwrap_or_default()
+                .as_str(),
         ),
     ];
 
@@ -1347,8 +1360,8 @@ fn explain_model_graph(
     push_relation_evidence(&mut output, "reads", &reader_refs);
     push_relation_evidence(&mut output, "writes", &writer_refs);
     output.next_queries = vec![
-        format!("--query-model {} for full model dependencies", node.name),
-        format!("--context {} --depth 2 for surrounding closure", node.id),
+        format_next_query("--query-model {} for full model dependencies", &node.name),
+        format_next_query("--context {} --depth 2 for surrounding closure", &node.id),
     ];
 
     let output = output.validate();
@@ -1911,14 +1924,15 @@ fn explain_field_graph(
     push_relation_evidence(&mut output, "produced_by", &produced_by);
     push_lineage_evidence(&mut output, &lineage);
     output.next_queries = vec![
-        format!(
+        format_next_query(
             "--explain {} for parent model summary",
             parent_model
                 .as_ref()
                 .map(|m| m.id.clone())
                 .unwrap_or_default()
+                .as_str(),
         ),
-        format!("--context {} --depth 2 for surrounding closure", node.id),
+        format_next_query("--context {} --depth 2 for surrounding closure", &node.id),
     ];
 
     let output = output.validate();
@@ -2218,8 +2232,8 @@ fn explain_page_graph(
     push_relation_evidence(&mut output, "affects", &entrypoints);
     push_relation_evidence(&mut output, "navigation", &navigation);
     output.next_queries = vec![
-        format!("--query-page-logic {} for detailed page logic", node.id),
-        format!("--query-page {} for page dependencies", node.id),
+        format_next_query("--query-page-logic {} for detailed page logic", &node.id),
+        format_next_query("--query-page {} for page dependencies", &node.id),
     ];
 
     let output = output.validate();
@@ -2502,8 +2516,8 @@ fn explain_dataflow_graph(
     push_relation_evidence(&mut output, "writes", &outputs);
     push_lineage_evidence(&mut output, &lineage);
     output.next_queries = vec![
-        format!("--query-dataflow {} for full subgraph", node.name),
-        format!("--context {} --depth 2 for surrounding closure", node.id),
+        format_next_query("--query-dataflow {} for full subgraph", &node.name),
+        format_next_query("--context {} --depth 2 for surrounding closure", &node.id),
     ];
 
     let output = output.validate();

@@ -1,5 +1,6 @@
 use crate::output::schema::{
     AiOutput, Confidence, Diagnostic, DiagnosticSeverity, Evidence, Location, OutputKind,
+    format_next_query,
 };
 use anyhow::{Context, Result};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -233,9 +234,9 @@ impl GraphDB {
                         .to_string(),
                 ),
             });
-            out.next_queries.push(format!(
+            out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
-                db_path.to_string_lossy()
+                &db_path.to_string_lossy(),
             ));
             return out;
         }
@@ -390,9 +391,9 @@ impl GraphDB {
                         .to_string(),
                 ),
             });
-            out.next_queries.push(format!(
+            out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
-                db_path.to_string_lossy()
+                &db_path.to_string_lossy(),
             ));
             return Err(Box::new(out));
         }
@@ -948,5 +949,112 @@ impl GraphDB {
             .collect();
 
         Some((outgoing, incoming))
+    }
+}
+
+impl GraphDB {
+    /// 搜索与目标 ID 相似的候选节点
+    ///
+    /// 匹配策略（按优先级排序）：
+    /// 1. 裸名匹配：target 去掉前缀后与节点的 name 匹配
+    /// 2. 子串匹配：target 包含节点 ID 或节点 ID 包含 target
+    /// 3. 同路径匹配：同 source_file 下的节点
+    /// 4. 前缀匹配：同前缀（如 model:）下的节点
+    /// 返回按置信度降序排列的候选列表，最多 limit 个。
+    pub fn find_candidates(&self, target_id: &str, limit: usize) -> Vec<(Node, String)> {
+        let mut candidates: Vec<(Node, f64, String)> = Vec::new();
+        let target_lower = target_id.to_lowercase();
+
+        // 提取 target 的裸名（去掉前缀）
+        let target_bare = target_id
+            .strip_prefix("model:")
+            .or_else(|| target_id.strip_prefix("page:"))
+            .or_else(|| target_id.strip_prefix("comp:"))
+            .or_else(|| target_id.strip_prefix("action:"))
+            .or_else(|| target_id.strip_prefix("field:"))
+            .unwrap_or(target_id);
+
+        for (_, idx) in &self.node_indices {
+            if let Some(node) = self.graph.node_weight(*idx) {
+                // 跳过空节点和精确匹配
+                if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty()
+                {
+                    continue;
+                }
+
+                let node_lower = node.id.to_lowercase();
+                let node_bare = node
+                    .id
+                    .strip_prefix("model:")
+                    .or_else(|| node.id.strip_prefix("page:"))
+                    .or_else(|| node.id.strip_prefix("comp:"))
+                    .or_else(|| node.id.strip_prefix("action:"))
+                    .or_else(|| node.id.strip_prefix("field:"))
+                    .unwrap_or(&node.id);
+
+                // 计算相似度
+                let mut score = 0.0;
+                let mut reason = "substring match";
+
+                // 裸名精确匹配（要求非空）
+                if !target_bare.is_empty()
+                    && !node_bare.is_empty()
+                    && node_bare.eq_ignore_ascii_case(target_bare)
+                {
+                    score = 100.0;
+                    reason = "bare name exact match";
+                }
+                // 子串匹配
+                else if node_lower.contains(&target_lower) || target_lower.contains(&node_lower) {
+                    score = 80.0;
+                    reason = "substring match";
+                }
+                // 前缀相似（同前缀类型）——降低权重，避免混入大量噪声
+                else if !node_bare.is_empty()
+                    && target_id.starts_with("model:")
+                    && node.id.starts_with("model:")
+                {
+                    score = 15.0;
+                    reason = "same prefix (model)";
+                } else if !node_bare.is_empty()
+                    && target_id.starts_with("page:")
+                    && node.id.starts_with("page:")
+                {
+                    score = 15.0;
+                    reason = "same prefix (page)";
+                } else if !node_bare.is_empty()
+                    && target_id.starts_with("comp:")
+                    && node.id.starts_with("comp:")
+                {
+                    score = 15.0;
+                    reason = "same prefix (component)";
+                }
+                // 名称部分相似
+                else if node_bare
+                    .to_lowercase()
+                    .contains(&target_lower.to_lowercase())
+                    || target_bare
+                        .to_lowercase()
+                        .contains(&node_bare.to_lowercase())
+                {
+                    score = 20.0;
+                    reason = "partial name match";
+                }
+
+                if score >= 20.0 {
+                    candidates.push((node.clone(), score, reason.to_string()));
+                }
+            }
+        }
+
+        // 去重并按分数降序
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut seen = std::collections::HashSet::new();
+        candidates
+            .into_iter()
+            .filter(|(n, _, _)| seen.insert(n.id.clone()))
+            .take(limit)
+            .map(|(n, _, r)| (n, r))
+            .collect()
     }
 }
