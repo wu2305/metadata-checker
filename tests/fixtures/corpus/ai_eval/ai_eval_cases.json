@@ -1,7 +1,7 @@
 {
   "schema_version": "1.2.0",
   "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、运行器规范",
-  "eval_count": 10,
+  "eval_count": 16,
   "cases": [
     {
       "case_id": "page_purpose_actions_test",
@@ -1328,6 +1328,777 @@
           "忽略 diagnostics 做空洞确定性结论",
           "使用 --budget full 无差别输出整页 metadata",
           "引用未在 CLI 输出中出现的字段或关系"
+        ]
+      }
+    },
+    {
+      "case_id": "real_page_purpose_首页",
+      "question": "售后.app 的首页是什么类型页面？用户能触发哪些操作？页面读取了哪些数据？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "real_project_target": "page:app/售后.app/首页.spg",
+      "source_path": "app/售后.app/首页.spg",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-page-logic 'page:app/售后.app/首页.spg' --budget compact"
+      ],
+      "expected_facts": [
+        "页面是售后.app 的首页",
+        "有多个用户入口（按钮等可点击组件）",
+        "页面读取了多个数据源",
+        "页面有导航跳转",
+        "页面不是只读的静态展示页"
+      ],
+      "forbidden_claims": [
+        "页面是只读的",
+        "没有任何用户入口",
+        "没有任何数据来源",
+        "没有任何导航跳转"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "summary.entrypoint_count",
+          "op": "gt",
+          "value": 0,
+          "description": "entrypoint_count > 0"
+        },
+        {
+          "path": "summary.data_source_count",
+          "op": "gt",
+          "value": 0,
+          "description": "data_source_count > 0"
+        },
+        {
+          "path": "summary.navigation_count",
+          "op": "gt",
+          "value": 0,
+          "description": "navigation_count > 0"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "用户入口",
+          "数据来源",
+          "导航"
+        ],
+        "should_mention": [
+          "页面类型",
+          "按钮"
+        ],
+        "must_not_mention": [
+          "只读",
+          "无入口"
+        ]
+      },
+      "uncertainty_policy": "如果诊断中有 NO_WRITE_TARGETS，应保守表达页面可能没有写入操作",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--query-page-logic",
+          "target": "page:app/售后.app/首页.spg",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.entrypoint_count",
+          "op": "gt",
+          "value": 0,
+          "description": "页面必须有用户入口"
+        },
+        {
+          "path": "summary.data_source_count",
+          "op": "gt",
+          "value": 0,
+          "description": "页面必须有数据来源"
+        },
+        {
+          "path": "summary.navigation_count",
+          "op": "gt",
+          "value": 0,
+          "description": "页面必须有导航跳转"
+        },
+        {
+          "path": "kind",
+          "op": "eq",
+          "value": "PageLogic",
+          "description": "kind 必须是 PageLogic"
+        }
+      ],
+      "risk_tags": [
+        "page_logic",
+        "diagnostic",
+        "real_project"
+      ],
+      "case_status": "active",
+      "difficulty": "basic",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "用户入口",
+          "数据来源",
+          "导航",
+          "首页"
+        ],
+        "must_not_include": [
+          "只读",
+          "无入口",
+          "无数据来源"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details、evidence 字段作为依据",
+          "遇到 diagnostics 时必须保守表达",
+          "不允许引用源码或历史上下文作为依据"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略 diagnostics 做空洞确定性结论",
+          "使用 --budget full 无差别输出整页 metadata"
+        ]
+      }
+    },
+    {
+      "case_id": "real_button_behavior_首页",
+      "question": "售后首页上的 button1 是什么组件？用户点击后会发生什么？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "real_project_target": "comp:app/售后.app/首页.spg|button1",
+      "source_path": "app/售后.app/首页.spg",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain 'comp:app/售后.app/首页.spg|button1' --budget compact"
+      ],
+      "expected_facts": [
+        "组件是按钮（button）",
+        "组件重要性是 entrypoint（用户入口）",
+        "点击后触发 action（如 showDialog）",
+        "会影响其他组件（如打开 dialog2）",
+        "不是静态展示文本"
+      ],
+      "forbidden_claims": [
+        "组件是文本或输入框",
+        "没有任何动作",
+        "是静态展示",
+        "importance 是 data_source 或 static_display"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "summary.type_detail",
+          "op": "eq",
+          "value": "button",
+          "description": "type_detail == button"
+        },
+        {
+          "path": "summary.importance",
+          "op": "eq",
+          "value": "entrypoint",
+          "description": "importance == entrypoint"
+        },
+        {
+          "path": "details.triggers",
+          "op": "not_empty",
+          "description": "triggers 非空"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "按钮",
+          "入口",
+          "动作",
+          "对话框"
+        ],
+        "should_mention": [
+          "showDialog",
+          "dialog2"
+        ],
+        "must_not_mention": [
+          "文本",
+          "静态",
+          "无动作"
+        ]
+      },
+      "uncertainty_policy": "如果 action 目标页面未识别，应标注跳转目标不确定",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain",
+          "target": "comp:app/售后.app/首页.spg|button1",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.type_detail",
+          "op": "eq",
+          "value": "button",
+          "description": "type_detail 必须是 button"
+        },
+        {
+          "path": "summary.importance",
+          "op": "eq",
+          "value": "entrypoint",
+          "description": "importance 必须是 entrypoint"
+        },
+        {
+          "path": "details.triggers",
+          "op": "not_empty",
+          "description": "triggers 必须非空"
+        },
+        {
+          "path": "details.affects_components",
+          "op": "not_empty",
+          "description": "affects_components 必须非空"
+        }
+      ],
+      "risk_tags": [
+        "explain",
+        "real_project"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "按钮",
+          "入口",
+          "动作",
+          "dialog"
+        ],
+        "must_not_include": [
+          "文本",
+          "静态",
+          "无动作"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 CLI 输出的 summary、details 字段作为依据"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details",
+          "使用 --budget full 无差别输出"
+        ]
+      }
+    },
+    {
+      "case_id": "real_high_fanout_model",
+      "question": "fact_saleContract 这个模型在整个项目中扮演什么角色？被哪些地方消费？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "real_project_target": "model:fact_saleContract",
+      "source_path": "data/tables/销售/fact_saleContract.tbl",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-model model:fact_saleContract --budget compact"
+      ],
+      "expected_facts": [
+        "模型主要通过 DataFlow 被消费",
+        "consumed_by_dataflow_count 大于 0",
+        "read_by_count 和 written_by_count 可能为 0",
+        "有 DataFlow 产出关系",
+        "compact 输出中数组被截断（OUTPUT_TRUNCATED）"
+      ],
+      "forbidden_claims": [
+        "模型没有被任何 DataFlow 消费",
+        "模型有很多直接读取/写入",
+        "模型不活跃",
+        "只需看 readers/writers 就能判断模型角色",
+        "没有下游依赖"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "summary.consumed_by_dataflow_count",
+          "op": "gt",
+          "value": 0,
+          "description": "consumed_by_dataflow_count > 0"
+        },
+        {
+          "path": "summary.dataflow_role",
+          "op": "contains",
+          "value": "DataFlow",
+          "description": "dataflow_role 包含 DataFlow"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "DataFlow",
+          "消费",
+          "被消费",
+          "产出"
+        ],
+        "should_mention": [
+          "consumed_by_dataflow",
+          "dataflow_role"
+        ],
+        "must_not_mention": [
+          "没有下游",
+          "不活跃",
+          "只需看 readers"
+        ]
+      },
+      "uncertainty_policy": "如果 read_by_count=0，必须说明模型主要通过 DataFlow 被消费，而非直接读取",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--query-model",
+          "target": "model:fact_saleContract",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.consumed_by_dataflow_count",
+          "op": "gt",
+          "value": 0,
+          "description": "consumed_by_dataflow_count 必须 > 0"
+        },
+        {
+          "path": "summary.dataflow_role",
+          "op": "contains",
+          "value": "DataFlow",
+          "description": "dataflow_role 必须包含 DataFlow"
+        },
+        {
+          "path": "diagnostics",
+          "op": "array_any",
+          "field": "code",
+          "value": "OUTPUT_TRUNCATED",
+          "description": "必须有 OUTPUT_TRUNCATED 诊断（高扇出模型数组截断）"
+        }
+      ],
+      "risk_tags": [
+        "dataflow",
+        "explain",
+        "diagnostic",
+        "real_project"
+      ],
+      "case_status": "active",
+      "difficulty": "hard",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "DataFlow",
+          "消费",
+          "fact_saleContract"
+        ],
+        "must_not_include": [
+          "没有下游",
+          "不活跃",
+          "只需看 readers"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出一句话结论，再展开依据",
+          "引用 summary.dataflow_role 和 summary.consumed_by_dataflow_count 作为依据",
+          "遇到 OUTPUT_TRUNCATED 时说明这是 compact 截断，完整数据需要 --budget full"
+        ],
+        "forbidden_practices": [
+          "只看 read_by_count/written_by_count 就判断模型角色",
+          "忽略 DataFlow 关系",
+          "使用 --budget full 无差别输出"
+        ]
+      }
+    },
+    {
+      "case_id": "real_target_find_首页",
+      "question": "如何在项目中找到名为'首页'的页面？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "real_project_target": "page:app/售后.app/首页.spg",
+      "source_path": "app/售后.app/首页.spg",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --find-page 首页"
+      ],
+      "expected_facts": [
+        "返回多个匹配结果（多个页面叫首页）",
+        "包含售后.app/首页.spg",
+        "next_queries 可执行",
+        "match_count 大于 0"
+      ],
+      "forbidden_claims": [
+        "没有找到任何结果",
+        "返回错误",
+        "match_count 为 0"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "summary.match_count",
+          "op": "gt",
+          "value": 0,
+          "description": "match_count > 0"
+        },
+        {
+          "path": "details.matches",
+          "op": "not_empty",
+          "description": "matches 非空"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "匹配",
+          "首页",
+          "候选"
+        ],
+        "should_mention": [
+          "售后",
+          "next_queries"
+        ],
+        "must_not_mention": [
+          "无结果",
+          "错误"
+        ]
+      },
+      "uncertainty_policy": "如果有多个首页，应列出主要候选并建议用户确认",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--find-page",
+          "target": "首页",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.match_count",
+          "op": "gt",
+          "value": 0,
+          "description": "match_count 必须 > 0"
+        },
+        {
+          "path": "details.matches",
+          "op": "not_empty",
+          "description": "matches 必须非空"
+        },
+        {
+          "path": "next_queries",
+          "op": "not_empty",
+          "description": "next_queries 必须非空"
+        }
+      ],
+      "risk_tags": [
+        "page_logic",
+        "real_project"
+      ],
+      "case_status": "active",
+      "difficulty": "basic",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "匹配",
+          "首页",
+          "候选"
+        ],
+        "must_not_include": [
+          "无结果",
+          "错误"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出匹配数量，再列出主要候选",
+          "引用 summary.match_count 和 details.matches 作为依据"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 matches 数组"
+        ]
+      }
+    },
+    {
+      "case_id": "real_typo_candidate",
+      "question": "如果查询时把 fact_saleContract 拼写成了 fact_saleContrac，系统会怎样处理？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "real_project_target": "model:fact_saleContract",
+      "source_path": "data/tables/销售/fact_saleContract.tbl",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-model model:fact_saleContrac --budget compact"
+      ],
+      "expected_facts": [
+        "返回 TARGET_NOT_FOUND 诊断",
+        "候选列表包含 fact_saleContract",
+        "回答必须保守说明目标未精确命中",
+        "next_queries 包含可执行的 --explain 命令"
+      ],
+      "forbidden_claims": [
+        "直接返回 fact_saleContract 的完整数据",
+        "没有给出任何候选",
+        "断言目标一定存在",
+        "忽略拼写错误直接回答"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "diagnostics",
+          "op": "array_any",
+          "field": "code",
+          "value": "TARGET_NOT_FOUND",
+          "description": "必须有 TARGET_NOT_FOUND 诊断"
+        },
+        {
+          "path": "details.candidate_targets",
+          "op": "not_empty",
+          "description": "candidate_targets 非空"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "未找到",
+          "候选",
+          "拼写",
+          "保守"
+        ],
+        "should_mention": [
+          "fact_saleContract",
+          "TARGET_NOT_FOUND"
+        ],
+        "must_not_mention": [
+          "一定存在",
+          "精确命中",
+          "无候选"
+        ]
+      },
+      "uncertainty_policy": "必须明确说明目标未精确命中，建议用户确认候选或使用 --find-model 搜索",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--query-model",
+          "target": "model:fact_saleContrac",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "diagnostics",
+          "op": "array_any",
+          "field": "code",
+          "value": "TARGET_NOT_FOUND",
+          "description": "必须有 TARGET_NOT_FOUND 诊断"
+        },
+        {
+          "path": "details.candidate_targets",
+          "op": "not_empty",
+          "description": "candidate_targets 必须非空"
+        },
+        {
+          "path": "next_queries",
+          "op": "not_empty",
+          "description": "next_queries 必须非空"
+        }
+      ],
+      "risk_tags": [
+        "diagnostic",
+        "real_project"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details",
+        "diagnostics"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "未找到",
+          "候选",
+          "拼写",
+          "保守"
+        ],
+        "must_not_include": [
+          "一定存在",
+          "精确命中",
+          "无候选"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先说明目标未找到，再给出候选建议",
+          "引用 diagnostics 和 candidate_targets 作为依据",
+          "遇到 TARGET_NOT_FOUND 时必须保守表达"
+        ],
+        "forbidden_practices": [
+          "忽略 TARGET_NOT_FOUND 直接回答模型内容",
+          "编造目标一定存在的结论"
+        ]
+      }
+    },
+    {
+      "case_id": "real_dataflow_tbl",
+      "question": "客户信息详情这个 DataFlow 表在整个数据链路中扮演什么角色？有哪些输入和输出？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "real_project_target": "model:客户信息详情",
+      "source_path": "data/tables/加工表/客户信息详情.tbl",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-dataflow model:客户信息详情 --budget compact"
+      ],
+      "expected_facts": [
+        "是 DataFlow 管道（dataflow_pipeline）",
+        "有多个输入源（大于 0）",
+        "有输出目标（大于 0）",
+        "compact 输出中 arrays 被截断",
+        "不是普通物理表"
+      ],
+      "forbidden_claims": [
+        "没有输入",
+        "没有输出",
+        "是普通物理表",
+        "没有任何数据流关系"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "summary.input_count",
+          "op": "gt",
+          "value": 0,
+          "description": "input_count > 0"
+        },
+        {
+          "path": "summary.output_count",
+          "op": "gt",
+          "value": 0,
+          "description": "output_count > 0"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "DataFlow",
+          "输入",
+          "输出",
+          "管道"
+        ],
+        "should_mention": [
+          "input_count",
+          "output_count",
+          "截断"
+        ],
+        "must_not_mention": [
+          "普通表",
+          "无输入",
+          "无输出"
+        ]
+      },
+      "uncertainty_policy": "如果 field_lineage 被截断，应说明需要 --budget full 查看完整链路",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--query-dataflow",
+          "target": "model:客户信息详情",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.input_count",
+          "op": "gt",
+          "value": 0,
+          "description": "input_count 必须 > 0"
+        },
+        {
+          "path": "summary.output_count",
+          "op": "gt",
+          "value": 0,
+          "description": "output_count 必须 > 0"
+        },
+        {
+          "path": "details.inputs",
+          "op": "not_empty",
+          "description": "inputs 必须非空"
+        },
+        {
+          "path": "details.outputs",
+          "op": "not_empty",
+          "description": "outputs 必须非空"
+        }
+      ],
+      "risk_tags": [
+        "dataflow",
+        "lineage",
+        "real_project"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 2,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "DataFlow",
+          "输入",
+          "输出",
+          "管道"
+        ],
+        "must_not_include": [
+          "普通表",
+          "无输入",
+          "无输出",
+          "没有输入",
+          "没有输出",
+          "是普通物理表",
+          "没有任何数据流关系"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先说明 DataFlow 角色，再列出输入输出数量",
+          "引用 summary.input_count/output_count 作为依据",
+          "遇到 OUTPUT_TRUNCATED 时说明 compact 截断"
+        ],
+        "forbidden_practices": [
+          "将 DataFlow 误判为普通物理表",
+          "忽略 input/output 数量",
+          "使用 --budget full 无差别输出"
         ]
       }
     }

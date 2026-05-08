@@ -18,6 +18,8 @@
   "cases_json": "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
   "binary_path": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/release/metadata-checker",
   "project_dir": "tests/fixtures/test_project",
+  "real_project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "case_filter": "all | fixture-only | real-only",
   "timestamp": "2026-05-05T12:00:00Z",
   "summary": {
     "total_cases": 10,
@@ -72,6 +74,20 @@ cargo test --test ai_eval_tests
 ```
 
 自动执行所有 active case 的 expected_output_assertions 校验。
+
+### 真实项目评测（M15）
+
+1. 确认真实项目路径存在：
+2. 使用独立 graphdb 路径：
+3. 串行执行，避免 redb 锁冲突
+4. 记录中标注  和 
+
+### 5.4-mini 空上下文验收
+
+- 使用全新空上下文 5.4-mini，只提供 SKILL.md + 二进制路径 + 项目路径 + case question
+- 至少覆盖 5 类问题：页面用途、按钮行为、文本统计、模型被 DataFlow 消费、.tbl 单文件理解
+- 记录结构化结果，不提交大段模型原文
+- 失败项必须归类：missed_fact / hallucination / wrong_command / ignored_diagnostic
 
 ### 人工/半自动评测流程
 

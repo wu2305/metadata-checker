@@ -45,5 +45,5 @@
 - [x] M12：Explain 语义摘要与证据质量收敛，详见 `docs/real-project-optimization-roadmap.md`
 - [x] M13：面向 AI 的低噪声 brief 输出模式，详见 `docs/real-project-optimization-roadmap.md`
 - [x] M14：目标定位与命令规范防错，详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M15：真实项目 AI 评测集扩展，详见 `docs/real-project-optimization-roadmap.md`
+- [x] M15：真实项目 AI 评测集扩展，详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M16：SKILL.md 真实使用协议收敛，详见 `docs/real-project-optimization-roadmap.md`

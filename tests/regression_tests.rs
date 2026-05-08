@@ -3793,3 +3793,105 @@ fn test_quote_cli_arg_inner_quote() {
     assert_eq!(quote_cli_arg("a'b"), "'a'\\''b'");
     assert_eq!(quote_cli_arg("it's"), "'it'\\''s'");
 }
+
+// M15-E: next_queries shell 安全回归评测（真实项目输出扫描）
+
+/// 验证真实项目 PageLogic 输出的 next_queries 中所有含特殊字符的 target 都被单引号包裹
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_next_queries_shell_safe() {
+    let graph_db_path = "/tmp/m15_test_nextqueries.graphdb";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    // 1. 中文页面路径
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--query-page-logic",
+        "page:app/售后.app/首页.spg",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    for q in &ai.next_queries {
+        // 如果 query 包含中文路径或 |，target 必须用单引号包裹
+        if q.contains("page:app/售后.app") || q.contains("|") {
+            assert!(
+                q.contains("'page:app/售后.app") || q.contains("'comp:app/售后.app"),
+                "next_query with Chinese path must use single quotes: {}",
+                q
+            );
+        }
+    }
+
+    // 2. 含 | 的 component target
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain",
+        "comp:app/售后.app/首页.spg|button1",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    for q in &ai.next_queries {
+        if q.contains("|") {
+            assert!(
+                q.contains("'"),
+                "next_query with | must use single quotes: {}",
+                q
+            );
+        }
+    }
+
+    // 3. --query-model 裸名与前缀等价不再测试 double prefix（已有 test_cli_query_model_bare_vs_prefix）
+    // 这里验证 target 不确定时推荐 --find-*
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--query-model",
+        "model:nonexistent_xyz",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    let has_find_recommendation = ai.next_queries.iter().any(|q| {
+        q.contains("--find-model") || q.contains("--find-page") || q.contains("--find-component")
+    });
+    assert!(
+        has_find_recommendation,
+        "TARGET_NOT_FOUND output must recommend --find-* commands, got next_queries: {:?}",
+        ai.next_queries
+    );
+
+    let _ = std::fs::remove_file(graph_db_path);
+}
+
+/// 验证 quote_cli_arg 对各类特殊字符的正确处理
+#[test]
+fn test_quote_cli_arg_special_chars() {
+    use metadata_checker::output::schema::quote_cli_arg;
+    // 空格
+    assert_eq!(quote_cli_arg("hello world"), "'hello world'");
+    // 括号
+    assert_eq!(quote_cli_arg("model:test(1)"), "'model:test(1)'");
+    // $
+    assert_eq!(quote_cli_arg("model:test$var"), "'model:test$var'");
+    // 空字符串
+    assert_eq!(quote_cli_arg(""), "''");
+    // 内部单引号
+    assert_eq!(quote_cli_arg("a'b"), "'a'\\''b'");
+}

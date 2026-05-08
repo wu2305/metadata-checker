@@ -19,7 +19,7 @@
 - 缺少 `.tbl` 单文件 evidence，无法回到 `dimensions`、`inputField`、`exp`、`target/output` 等原始 JSON 路径。
 - 缺少 `.tbl` 单文件诊断，解析不到输出节点时没有区分“确实无输出”和“当前解析能力不足”。
 
-### 验收目标
+### 验收目标（M15 已收敛）
 
 - 真实 `.tbl` 单文件输出 `kind=Table | DataFlow`，不再输出 `SuperPage`。
 - `summary` 至少包含 `table_id/name`、`table_type`、`field_count`、`input_count`、`output_count`、`what_is_it`。
@@ -44,7 +44,7 @@
 - 没有临时图数据库路径，空模型只能在真实项目中写入副产物。
 - 没有“只读检查 graphdb 是否可用”的轻量命令，AI 需要尝试真实查询才知道是否阻塞。
 
-### 验收目标
+### 验收目标（M15 已收敛）
 
 - CLI 增加 `--graph-db-path <PATH>`，支持将 graphdb 放在 `/tmp` 或工作区内。
 - CLI 增加只读检查能力，例如 `--check-graph`，输出图数据库是否存在、可读、可写、是否需要 rebuild。
@@ -69,7 +69,7 @@
 - `triggered_by` 与 `affects` 的关系命名对 AI 不够直观，容易把“页面包含组件”理解成业务触发。
 - Action 的 `semantic_summary` 在 `PageLogic` 中较好，但 `Explain` 的 component/action 摘要没有完全复用。
 
-### 验收目标
+### 验收目标（M15 已收敛）
 
 - `--explain comp:...|button1` 输出 `semantic_summary`，明确“点击后打开哪个对话框/跳转/写入/刷新”。
 - `--explain` 的 `type_detail` 使用真实类型，不使用 ID。
@@ -96,7 +96,7 @@
 - 默认 `SuperPage` 输出没有 `page_role/what_is_it`，AI 要从数据源和表达式中自行归纳页面用途。
 - `--priority` 在真实页面上对 AI 的增量信息不明显，容易让模型白跑命令。
 
-### 验收目标
+### 验收目标（M15 已收敛）
 
 - CLI 增加或强化 `--budget compact`/`--ai-brief`，输出只包含 `summary`、`key_findings`、`risk_diagnostics`、`evidence_summary`、`next_queries`。
 - 长列表输出必须包含 `total_count`、`shown_count`、`truncated`、`remaining_count`。
@@ -123,7 +123,7 @@
 - 查询错误时缺少候选目标建议，例如“你可能想查 page:... 或 comp:...|...”。
 - `--query-model` 接收裸模型名，但 `--explain` 接收 `model:` 前缀，规范差异容易让模型混用。
 
-### 验收目标
+### 验收目标（M15 已收敛）
 
 - 所有 `next_queries` 对含 `|`、空格、中文路径的 target 自动加单引号。
 - 所有 `next_queries` 都应输出可直接复制执行的命令片段；无法确定 `<DIR>` 或 `<MODEL>` 时必须明确标注占位符来源和解析方式。
@@ -149,7 +149,7 @@
 - 缺少 `next_queries` shell 安全测试，无法防止未加引号的 `|` 回归。
 - 缺少针对 `fact_saleContract` 这类高扇出模型的摘要质量测试。
 
-### 验收目标
+### 验收目标（M15 已收敛）
 
 - 在不复制整个真实项目的前提下，建立真实项目选择清单，引用 `xiaoshouyi` 中固定文件和目标。
 - 每个真实项目评测 case 包含问题、命令计划、期望摘要、禁止误判、证据要求。
@@ -174,7 +174,7 @@
 - `SKILL.md` 没有要求 AI 在目标 ID 不确定时先使用 find/resolve，而不是猜测。
 - `SKILL.md` 对 `--human` 与机器模式边界已经有说明，但没有真实项目故障处理示例。
 
-### 验收目标
+### 验收目标（M15 已收敛）
 
 - `SKILL.md` 增加“真实项目项目级查询决策树”：check graph、build graph、query、fallback。
 - `SKILL.md` 增加“证据强弱分级”：真实 JSON 路径强，graph-derived 中，缺路径弱。

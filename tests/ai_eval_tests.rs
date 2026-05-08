@@ -202,6 +202,9 @@ fn test_ai_eval_command_whitelist() {
         "--context",
         "--query-dataflow",
         "--query-model",
+        "--find-page",
+        "--find-model",
+        "--find-component",
     ];
     let cases = load_ai_eval_cases();
     for case in &cases {
@@ -339,6 +342,10 @@ fn test_ai_eval_commands_execute_and_assert() {
 
     for case in &cases {
         let case_id = case["case_id"].as_str().unwrap_or("?").to_string();
+        let is_real_project = case
+            .get("requires_real_project")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let cmds = case["required_commands"]
             .as_array()
             .expect("required_commands 必须是数组");
@@ -346,10 +353,37 @@ fn test_ai_eval_commands_execute_and_assert() {
             .as_array()
             .expect("expected_output_assertions 必须是数组");
 
+        // 真实项目 case 使用独立 graphdb 路径，避免和 fixture 临时目录冲突
+        let real_project_db = if is_real_project {
+            let db = std::env::temp_dir().join(format!(
+                "metadata-checker-ai-eval-{}.graphdb",
+                case_id.replace("/", "_")
+            ));
+            Some(db)
+        } else {
+            None
+        };
+
         for (cmd_idx_in_case, cmd_val) in cmds.iter().enumerate() {
             let cmd_str = cmd_val.as_str().unwrap();
-            // 将 project-dir 路径替换为隔离临时目录
-            let isolated_cmd = cmd_str.replace("tests/fixtures/test_project", temp_str);
+            let isolated_cmd = if is_real_project {
+                // 真实项目 case：添加 --graph-db-path 到独立路径
+                let mut cmd = cmd_str.to_string();
+                if let Some(ref db) = real_project_db {
+                    if !db.exists() {
+                        let pd = case["project_dir"].as_str().unwrap_or("");
+                        let _ =
+                            metadata_checker::scanner::scan_project(std::path::Path::new(pd), db);
+                    }
+                    if !cmd.contains("--graph-db-path") {
+                        cmd.push_str(&format!(" --graph-db-path {}", db.to_str().unwrap()));
+                    }
+                }
+                cmd
+            } else {
+                // fixture case：将 project-dir 路径替换为隔离临时目录
+                cmd_str.replace("tests/fixtures/test_project", temp_str)
+            };
 
             let args: Vec<String> = parse_shell_command(&isolated_cmd);
             let output = run_cli(&args.iter().map(|s| s.as_str()).collect::<Vec<_>>());
