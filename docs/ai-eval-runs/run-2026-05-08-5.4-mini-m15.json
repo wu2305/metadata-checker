@@ -1,0 +1,119 @@
+{
+  "eval_run_id": "run-2026-05-08-5.4-mini-m15",
+  "model": "gpt-5.4-mini",
+  "binary_path_used": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker",
+  "skill_md_used": true,
+  "skill_md_path": "/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md",
+  "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "graph_db_path": "/tmp/m15_54mini_eval.graphdb",
+  "timestamp": "2026-05-08T00:00:00+08:00",
+  "summary": {
+    "total_cases": 5,
+    "passed": 5,
+    "failed": 0,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "case_id": "mini_real_page_purpose",
+      "status": "pass",
+      "commands_used": [
+        "'/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker' --check-graph --graph-db-path '/tmp/m15_54mini_eval.graphdb'",
+        "'/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker' --project-dir '/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi' --build-graph --graph-db-path '/tmp/m15_54mini_eval.graphdb'",
+        "'/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker' --project-dir '/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi' --graph-db-path '/tmp/m15_54mini_eval.graphdb' --query-page-logic 'page:app/售后.app/首页.spg'"
+      ],
+      "answer": "首页是 navigation_page。可触发 8 个入口，主要是 button1/button2 打开对话框，text11/13/15 与 panel13/14/15 可点击跳转。读取 5 处数据：$user.dept_id.DEPT_ID/DEPT_NAME、model2/model4/model3.totalRowCount__。无写入。",
+      "evidence_fields_used": [
+        "summary.page_role",
+        "summary.entrypoint_count",
+        "summary.data_source_count",
+        "details.entrypoints",
+        "details.action_flows",
+        "details.data_sources",
+        "diagnostics"
+      ],
+      "missed_facts": [],
+      "forbidden_claims_hit": [],
+      "diagnostics_handling": "correctly_conservative",
+      "failure_category": null
+    },
+    {
+      "case_id": "mini_real_button_behavior",
+      "status": "pass",
+      "commands_used": [
+        "'/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker' --project-dir '/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi' --graph-db-path '/tmp/m15_54mini_eval.graphdb' --query-page-logic 'page:app/售后.app/首页.spg'"
+      ],
+      "answer": "button1 是 button 组件。点击后执行 showDialog，打开 dialog2，不写数据、无参数传递。",
+      "evidence_fields_used": [
+        "details.action_flows",
+        "details.navigation",
+        "details.entrypoints",
+        "diagnostics"
+      ],
+      "missed_facts": [],
+      "forbidden_claims_hit": [],
+      "diagnostics_handling": "correctly_conservative",
+      "failure_category": null
+    },
+    {
+      "case_id": "mini_real_text_dashboard_not_entrypoint",
+      "status": "pass",
+      "commands_used": [
+        "'/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker' --project-dir '/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi' --graph-db-path '/tmp/m15_54mini_eval.graphdb' --explain 'comp:app/售后.app/首页.spg|text11'"
+      ],
+      "answer": "不应当作主要入口；summary 给它的 importance 是 data_source_display。它是 text 组件，读 model3.totalRowCount__，但有 1 个 click-link 动作，更多是展示型统计文本，兼具次要跳转点作用。",
+      "evidence_fields_used": [
+        "summary.importance",
+        "summary.type_detail",
+        "summary.action_count",
+        "details.reads",
+        "details.triggers",
+        "details.located_in"
+      ],
+      "missed_facts": [],
+      "forbidden_claims_hit": [],
+      "diagnostics_handling": "n/a",
+      "failure_category": null
+    },
+    {
+      "case_id": "mini_real_high_fanout_model",
+      "status": "pass",
+      "commands_used": [
+        "'/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker' --project-dir '/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi' --graph-db-path '/tmp/m15_54mini_eval.graphdb' --query-model 'model:fact_saleContract'"
+      ],
+      "answer": "fact_saleContract 是 DataFlow 参与模型，主要被 52 个下游 DataFlow 消费，自己有 1 个输出、0 个读写；消费方多为销售/售后加工表和少量页面模型，如首保_53603、车辆维修期间补偿、合同协议.spg。",
+      "evidence_fields_used": [
+        "summary.dataflow_role",
+        "summary.consumed_by_dataflow_count",
+        "summary.produced_by_count",
+        "details.consumed_by_dataflows",
+        "details.produced_by"
+      ],
+      "missed_facts": [],
+      "forbidden_claims_hit": [],
+      "diagnostics_handling": "n/a",
+      "failure_category": null
+    },
+    {
+      "case_id": "mini_real_tbl_single",
+      "status": "pass",
+      "commands_used": [
+        "'/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker' '/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/data/tables/销售/fact_saleContract.tbl'"
+      ],
+      "answer": "这是 PhysicalTable 物理表元数据，不是 SuperPage，也不是 DataFlow。summary 显示 61 个字段、0 个输入/输出，属于 physical_storage。",
+      "evidence_fields_used": [
+        "summary.table_type",
+        "summary.table_role",
+        "summary.field_count",
+        "summary.input_count",
+        "summary.output_count",
+        "details.dataflow_inputs",
+        "details.dataflow_outputs"
+      ],
+      "missed_facts": [],
+      "forbidden_claims_hit": [],
+      "diagnostics_handling": "n/a",
+      "failure_category": null
+    }
+  ]
+}
