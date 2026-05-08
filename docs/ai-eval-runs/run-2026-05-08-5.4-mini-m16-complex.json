@@ -1,0 +1,181 @@
+{
+  "eval_run_id": "run-2026-05-08-5.4-mini-m16-complex",
+  "milestone": "M16",
+  "requested_model": "gpt-5.4-mini",
+  "reported_model": "Codex",
+  "skill_md_path": "/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md",
+  "binary_path": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker",
+  "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "graph_db_path": "/tmp/m16_complex_54mini_eval.graphdb",
+  "protocol_sources_read": [
+    {
+      "path": "/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md",
+      "purpose": "Read task decision tree, project-level graphdb workflow, budget/diagnostics rules, and target resolution protocol."
+    }
+  ],
+  "forbidden_sources_read": [],
+  "commands_run": [
+    {
+      "cmd": "sed -n '1,240p' /Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md",
+      "result": "Read the first half of SKILL.md, including the task decision tree and project-level workflow."
+    },
+    {
+      "cmd": "sed -n '241,420p' /Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md",
+      "result": "Read the remainder of SKILL.md, including .tbl vs DataFlow guidance, evidence strength rules, and diagnostics handling."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --check-graph --graph-db-path /tmp/m16_complex_54mini_eval.graphdb",
+      "result": "Returned GRAPH_DB_NOT_FOUND for the requested graphdb path."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --build-graph --graph-db-path /tmp/m16_complex_54mini_eval.graphdb",
+      "result": "Built graph database successfully at /tmp/m16_complex_54mini_eval.graphdb."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-model fact_saleContrac --budget compact --graph-db-path /tmp/m16_complex_54mini_eval.graphdb",
+      "result": "Returned TARGET_NOT_FOUND with candidate_targets including model:fact_salecontract and model:fact_saleContract."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --find-model fact_saleContrac --budget compact --graph-db-path /tmp/m16_complex_54mini_eval.graphdb",
+      "result": "Returned 2 model matches, including model:fact_saleContract."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-model model:fact_saleContract --budget compact --graph-db-path /tmp/m16_complex_54mini_eval.graphdb",
+      "result": "Returned ModelQuery with read_by_count=0, consumed_by_dataflow_count=52, dataflow_role=DataFlowParticipant, produced_by_count=1."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-page-logic 'page:app/售后.app/首页.spg' --budget compact --graph-db-path /tmp/m16_complex_54mini_eval.graphdb",
+      "result": "Returned PageLogic with 8 entrypoints, 5 data sources, 0 write targets, 3 navigations, EVIDENCE_SAMPLED and OUTPUT_TRUNCATED diagnostics."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain 'comp:app/售后.app/首页.spg|text11' --budget compact --graph-db-path /tmp/m16_complex_54mini_eval.graphdb",
+      "result": "Returned Explain for text11 showing importance=data_source_display, one read from model3, and a navigation action."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --resolve-model-page 'page:app/售后.app/首页.spg' --resolve-model model3 --budget compact --graph-db-path /tmp/m16_complex_54mini_eval.graphdb",
+      "result": "Resolved local model3 to model:model3 in page:app/售后.app/首页.spg."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/data/tables/销售/fact_saleContract.tbl --budget compact",
+      "result": "Returned Table query for a PhysicalTable with 61 fields and table_role=physical_storage."
+    },
+    {
+      "cmd": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/debug/metadata-checker --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain model:model3 --budget compact --graph-db-path /tmp/m16_complex_54mini_eval.graphdb",
+      "result": "Returned Explain showing model:model3 is a DataFlow with 22 inputs and 0 outputs."
+    }
+  ],
+  "cases": [
+    {
+      "id": "C1",
+      "scenario": "graphdb 缺失时是否能识别 GRAPH_DB_NOT_FOUND 并构建到指定 graphdb 路径",
+      "pass": true,
+      "answer": "是。先用指定路径检查时返回 GRAPH_DB_NOT_FOUND，随后按协议成功构建到 /tmp/m16_complex_54mini_eval.graphdb。",
+      "evidence_used": [
+        "check-graph summary.exists=false, summary.needs_rebuild=true",
+        "diagnostics[0].code=GRAPH_DB_NOT_FOUND",
+        "build-graph success message: Graph database built at \"/tmp/m16_complex_54mini_eval.graphdb\""
+      ],
+      "diagnostics_handling": "完全按 SKILL.md 的 Step 1 -> Step 2 处理，没有猜测，直接重建到可写 /tmp 路径。",
+      "protocol_check": "complied: yes",
+      "attention_drift_risk": "low"
+    },
+    {
+      "id": "C2",
+      "scenario": "目标拼写错误时是否保守处理 TARGET_NOT_FOUND，并使用候选或 --find-model 找到 fact_saleContract",
+      "pass": true,
+      "answer": "是。query-model fact_saleContrac 返回 TARGET_NOT_FOUND，并给出候选；--find-model fact_saleContrac 也找到了 model:fact_saleContract，但同时还有 model:fact_salecontract，所以没有擅自消歧。",
+      "evidence_used": [
+        "diagnostics[0].code=TARGET_NOT_FOUND",
+        "details.candidate_targets includes model:fact_saleContract",
+        "--find-model matched both model:fact_salecontract and model:fact_saleContract"
+      ],
+      "diagnostics_handling": "保留歧义，不把候选当作唯一答案；只确认候选集合里包含目标模型。",
+      "protocol_check": "complied: yes",
+      "attention_drift_risk": "medium"
+    },
+    {
+      "id": "C3",
+      "scenario": "页面内局部模型解析时不猜测 model3，必须用 resolve-model-page/resolve-model 或必要的 find/explain 解析",
+      "pass": true,
+      "answer": "是。text11 的页面逻辑明确读到 model3.totalRowCount__，随后 --resolve-model-page 把页面内的 model3 解析成 model:model3，再用 --explain model:model3 确认它是一个 DataFlow。",
+      "evidence_used": [
+        "page logic top_data_sources / data_sources includes text11 -> model3.totalRowCount__",
+        "--resolve-model-page resolved_count=1, resolved to model:model3",
+        "--explain model:model3 summary: type=dataflow, input_count=22, output_count=0"
+      ],
+      "diagnostics_handling": "对 page logic 的 sampled/truncated 输出保持保守，但局部 model 的映射用显式 resolve 结果确认。",
+      "protocol_check": "complied: yes",
+      "attention_drift_risk": "low"
+    },
+    {
+      "id": "C4",
+      "scenario": "summary/details 口径冲突时，model:fact_saleContract 的 read_by_count=0 不能断言未被使用",
+      "pass": true,
+      "answer": "是。read_by_count=0 但同时 dataflow_role=DataFlowParticipant、consumed_by_dataflow_count=52、produced_by_count=1，说明它主要通过 DataFlow 被消费，不能说成未被使用。",
+      "evidence_used": [
+        "summary.read_by_count=0",
+        "summary.dataflow_role=DataFlowParticipant",
+        "summary.consumed_by_dataflow_count=52",
+        "summary.produced_by_count=1",
+        "diagnostics includes OUTPUT_TRUNCATED"
+      ],
+      "diagnostics_handling": "严格按 SKILL.md 的口径冲突规则，以 DataFlow 角色和消费计数纠正 read_by_count=0 的误读。",
+      "protocol_check": "complied: yes",
+      "attention_drift_risk": "low"
+    },
+    {
+      "id": "C5",
+      "scenario": "组件语义误判防护，comp:app/售后.app/首页.spg|text11 不能说成主要写入入口或表单提交入口",
+      "pass": true,
+      "answer": "是。text11 的 Explain 结果是 importance=data_source_display，它读 model3.totalRowCount__，动作语义是点击后跳转；没有写入目标，也不是表单提交入口。",
+      "evidence_used": [
+        "Explain summary.importance=data_source_display",
+        "Explain summary.read_count=1, write_count=0",
+        "PageLogic top_entrypoints includes text11 as a trigger",
+        "PageLogic top_writes is empty"
+      ],
+      "diagnostics_handling": "不把导航/展示组件误判为写入组件；页面存在 EVIDENCE_SAMPLED 但不影响 text11 的语义判断。",
+      "protocol_check": "complied: yes",
+      "attention_drift_risk": "low"
+    },
+    {
+      "id": "C6",
+      "scenario": "单文件 .tbl 与项目级关系分离，fact_saleContract.tbl 不能和项目级 model:fact_saleContract 混淆",
+      "pass": true,
+      "answer": "是。单文件 fact_saleContract.tbl 被解析为 PhysicalTable/physical_storage，61 个字段、输入输出都是 0；项目级 model:fact_saleContract 则是被 52 个 DataFlow 消费的模型，两者语义不同。",
+      "evidence_used": [
+        "single-file .tbl kind=Table",
+        "table_type=PhysicalTable, table_role=physical_storage",
+        "single-file summary.field_count=61, input_count=0, output_count=0",
+        "project query summary.consumed_by_dataflow_count=52",
+        "project query summary.dataflow_role=DataFlowParticipant"
+      ],
+      "diagnostics_handling": "把单文件解析与项目图查询分开看，没有用单文件结论替代项目级关系。",
+      "protocol_check": "complied: yes",
+      "attention_drift_risk": "low"
+    },
+    {
+      "id": "C7",
+      "scenario": "证据强弱/diagnostics：遇到 OUTPUT_TRUNCATED、EVIDENCE_SAMPLED 或 graph-edge-derived 时必须降级或说明口径",
+      "pass": true,
+      "answer": "是。页面逻辑输出明确带有 EVIDENCE_SAMPLED 和 OUTPUT_TRUNCATED，text11 的 Explain 里还有 <graph-edge-derived> 的中等证据；我只把这些当作降级证据，没有把它们当成强证据硬下结论。",
+      "evidence_used": [
+        "PageLogic diagnostics: EVIDENCE_SAMPLED",
+        "PageLogic diagnostics: OUTPUT_TRUNCATED",
+        "Explain evidence for model3 read relation uses json_path=<graph-edge-derived> with confidence=medium",
+        "Explain model:model3 diagnostics: LINEAGE_SOURCE_MISSING"
+      ],
+      "diagnostics_handling": "对 sampled/truncated/graph-derived 证据全部降级表述，不把 <graph-edge-derived> 当作可核验强证据。",
+      "protocol_check": "complied: yes",
+      "attention_drift_risk": "low"
+    }
+  ],
+  "overall_pass": true,
+  "blockers": [],
+  "observations": [
+    "本次验证严格只用了 SKILL.md、指定二进制和真实项目元数据，没有读取禁止的 roadmap/checklist/schema/eval 记录。",
+    "图数据库已按要求建到 /tmp/m16_complex_54mini_eval.graphdb，后续项目级查询都在同一 graphdb 上完成。",
+    "fact_saleContrac 的拼写错误结果存在两个近似候选：fact_salecontract 和 fact_saleContract；工具给出了候选但没有自动消歧，这种情况下应继续确认而不是猜。",
+    "页面首页的 text11 是展示/跳转入口，不是写入入口；项目级 fact_saleContract 则确实被 DataFlow 广泛消费，二者语义层级不同。"
+  ]
+}
