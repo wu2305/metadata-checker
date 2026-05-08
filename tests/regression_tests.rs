@@ -3790,6 +3790,6 @@ fn test_cli_resolve_model_in_page_single() {
 fn test_quote_cli_arg_inner_quote() {
     use metadata_checker::output::schema::quote_cli_arg;
     // 内部单引号必须转义为 '\''
-    assert_eq!(quote_cli_arg("a'b"), "'a'\\'b'");
-    assert_eq!(quote_cli_arg("it's"), "'it'\\'s'");
+    assert_eq!(quote_cli_arg("a'b"), "'a'\\''b'");
+    assert_eq!(quote_cli_arg("it's"), "'it'\\''s'");
 }

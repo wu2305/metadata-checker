@@ -952,6 +952,43 @@ impl GraphDB {
     }
 }
 
+/// 计算 Levenshtein 编辑距离
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let a_len = a_chars.len();
+    let b_len = b_chars.len();
+
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+
+    let mut prev = vec![0usize; b_len + 1];
+    let mut curr = vec![0usize; b_len + 1];
+
+    for j in 0..=b_len {
+        prev[j] = j;
+    }
+
+    for i in 1..=a_len {
+        curr[0] = i;
+        for j in 1..=b_len {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b_len]
+}
+
 impl GraphDB {
     /// 搜索与目标 ID 相似的候选节点
     ///
@@ -1004,44 +1041,64 @@ impl GraphDB {
                     score = 100.0;
                     reason = "bare name exact match";
                 }
-                // 子串匹配
-                else if node_lower.contains(&target_lower) || target_lower.contains(&node_lower) {
-                    score = 80.0;
-                    reason = "substring match";
-                }
-                // 前缀相似（同前缀类型）——降低权重，避免混入大量噪声
-                else if !node_bare.is_empty()
-                    && target_id.starts_with("model:")
-                    && node.id.starts_with("model:")
-                {
-                    score = 15.0;
-                    reason = "same prefix (model)";
-                } else if !node_bare.is_empty()
-                    && target_id.starts_with("page:")
-                    && node.id.starts_with("page:")
-                {
-                    score = 15.0;
-                    reason = "same prefix (page)";
-                } else if !node_bare.is_empty()
-                    && target_id.starts_with("comp:")
-                    && node.id.starts_with("comp:")
-                {
-                    score = 15.0;
-                    reason = "same prefix (component)";
-                }
-                // 名称部分相似
-                else if node_bare
-                    .to_lowercase()
-                    .contains(&target_lower.to_lowercase())
-                    || target_bare
-                        .to_lowercase()
-                        .contains(&node_bare.to_lowercase())
-                {
-                    score = 20.0;
-                    reason = "partial name match";
+                // 完整 ID 编辑距离（对 typo 最鲁棒）
+                else {
+                    let id_dist = levenshtein(&node.id.to_lowercase(), &target_lower);
+                    let bare_dist =
+                        levenshtein(&node_bare.to_lowercase(), &target_bare.to_lowercase());
+                    if id_dist == 0 || bare_dist == 0 {
+                        score = 100.0;
+                        reason = "exact match";
+                    } else if id_dist <= 1 || bare_dist <= 1 {
+                        score = 90.0;
+                        reason = "typo edit distance 1";
+                    } else if id_dist <= 2 || bare_dist <= 2 {
+                        score = 70.0;
+                        reason = "typo edit distance 2";
+                    } else if id_dist <= 3 || bare_dist <= 3 {
+                        score = 50.0;
+                        reason = "typo edit distance 3";
+                    } else if id_dist <= 5 || bare_dist <= 5 {
+                        score = 25.0;
+                        reason = "weak edit distance";
+                    }
                 }
 
-                if score >= 20.0 {
+                // 子串匹配作为补充
+                if score == 0.0 {
+                    if node_lower.contains(&target_lower) {
+                        score = 60.0;
+                        reason = "substring match";
+                    } else if target_lower.contains(&node_lower) {
+                        score = 10.0;
+                        reason = "partial substring match";
+                    }
+                }
+
+                // 同前缀（极低权重，仅作为兜底）
+                if score == 0.0 {
+                    if !node_bare.is_empty()
+                        && target_id.starts_with("model:")
+                        && node.id.starts_with("model:")
+                    {
+                        score = 5.0;
+                        reason = "same prefix (model)";
+                    } else if !node_bare.is_empty()
+                        && target_id.starts_with("page:")
+                        && node.id.starts_with("page:")
+                    {
+                        score = 5.0;
+                        reason = "same prefix (page)";
+                    } else if !node_bare.is_empty()
+                        && target_id.starts_with("comp:")
+                        && node.id.starts_with("comp:")
+                    {
+                        score = 5.0;
+                        reason = "same prefix (component)";
+                    }
+                }
+
+                if score >= 10.0 {
                     candidates.push((node.clone(), score, reason.to_string()));
                 }
             }

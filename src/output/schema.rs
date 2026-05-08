@@ -247,7 +247,7 @@ pub fn quote_cli_arg(arg: &str) -> String {
             )
     });
     if needs_quote || arg.is_empty() {
-        let escaped = arg.replace("'", "'\\'");
+        let escaped = arg.replace("'", "'\\''");
         format!("'{}'", escaped)
     } else {
         arg.to_string()
@@ -297,6 +297,16 @@ pub fn build_target_not_found_output(
         "candidate_count": candidate_targets.len(),
     });
 
+    let find_cmd = match kind {
+        OutputKind::ModelQuery | OutputKind::DataFlowQuery | OutputKind::DataFlow => {
+            "--find-model {} to search globally"
+        }
+        OutputKind::ComponentQuery | OutputKind::Explain | OutputKind::SuperPage => {
+            "--find-component {} to search globally"
+        }
+        _ => "--find-page {} to search globally",
+    };
+
     let mut out = AiOutput::new(kind, summary);
     out.query_target = Some(target_id.to_string());
     out.details = Some(serde_json::json!({
@@ -308,7 +318,10 @@ pub fn build_target_not_found_output(
         message: format!("Target '{}' not found in graph", target_id),
         location: Location::default(),
         suggestion: if candidates.is_empty() {
-            Some("Verify the target ID or use --find-page / --find-model / --find-component to search".to_string())
+            Some(format!(
+                "Verify the target ID or use {} to search",
+                find_cmd.replace("{}", "<keyword>")
+            ))
         } else {
             Some("Did you mean one of the candidate targets below?".to_string())
         },
@@ -321,10 +334,8 @@ pub fn build_target_not_found_output(
         ));
     }
     if candidates.is_empty() {
-        out.next_queries.push(format_next_query(
-            "--find-page {} to search for similar pages",
-            target_id,
-        ));
+        out.next_queries
+            .push(format_next_query(find_cmd, target_id));
     }
     out.validate()
 }
