@@ -48,7 +48,7 @@
 - [x] M15：真实项目 AI 评测集扩展，详见 `docs/real-project-optimization-roadmap.md`
 - [x] M16：SKILL.md 真实使用协议收敛，详见 `docs/real-project-optimization-roadmap.md`
 - [x] M17：条件抽取基础层，详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M18：条件依赖图，详见 `docs/real-project-optimization-roadmap.md`
+- [ ] M18：条件依赖图（含页面局部模型到物理表字段的写入归并），详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M19：页面数据可用性摘要，详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M20：Why 条件查询能力，详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M21：未知 Action 语义归类，详见 `docs/real-project-optimization-roadmap.md`
