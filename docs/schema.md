@@ -659,3 +659,66 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 
 - `--explain '<ID>'`：查看候选目标语义摘要
 - `--find-model '<KEYWORD>'`：当解析失败时，使用全局搜索
+
+## ConditionRecord 字段定义
+
+`--explain`、单文件 `.spg` 解析、以及项目级查询的 `details.conditions` 数组中，条件统一使用以下结构：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `condition_id` | string | 条件唯一标识，格式为 `{owner_id}#{field}#{index}` |
+| `condition_type` | string | 条件技术来源，见下表 |
+| `effect_type` | string | 条件业务效果：`show`/`hide`/`enable`/`disable`/`readonly`/`execute`/`filter`/`compute`/`validate`/`mask`/`submit`/`default_panel` |
+| `subject_type` | string | 条件作用对象：`component`/`action`/`model_source`/`field`/`page` |
+| `raw_expr` | string | 原始表达式字符串，保留多行和原始空白 |
+| `normalized_expr` | string | 去首尾空白的规范化表达式 |
+| `source_file` | string | 来源文件路径（绝对路径或相对路径） |
+| `json_path` | string | 在原始 JSON 中的精确路径，如 `canvas.components[0].visibleCondition` |
+| `owner_type` | string | 条件所属对象类型：`component`/`action`/`model_source`/`field`/`page` |
+| `owner_id` | string | 所属对象 ID（组件 ID、action ID、source ID 等） |
+| `referenced_symbols` | string[] | 表达式中引用的符号列表，格式为 `component:{id}`、`model:{model}.{field}`、`param:{name}`、`user:{prop}`、`system:{name}` |
+| `diagnostics` | object[] | 解析诊断，每项包含 `code` 和 `message` |
+
+### condition_type 枚举
+
+| 值 | 来源字段 | 说明 |
+|------|------|------|
+| `visible_condition` | `visibleCondition` / `visible` | 组件显示/隐藏条件 |
+| `enable_condition` | `enable` / `disableCondition` | 组件启用/禁用条件 |
+| `action_condition_exp` | `action.conditionExp` | 动作执行条件（表达式形式） |
+| `action_condition` | `action.condition` | 动作执行条件（字符串形式） |
+| `item_filter` | `itemFilter` | 列表/表格项过滤条件 |
+| `calc_condition` | `calcCondition` | 计算触发条件 |
+| `valid_exp` | `validExp` | 校验表达式 |
+| `calc_exp` | `calcExp` | 计算表达式 |
+| `mask_condition` | `maskCondition` | 掩码/脱敏条件 |
+| `submit_condition` | `submitCondition` | 提交条件 |
+| `submit_page_condition` | `submitPageCondition` | 页面提交条件 |
+| `default_panel_condition` | `defaultPanelCondition` | 默认面板条件 |
+| `field_exp` | `exp` / `value` / `text` / `formula` / `html` 等 | 通用字段表达式 |
+| `default_value_exp` | `defaultValue` | 默认值表达式 |
+| `source_filter_exp` | `source.filter.clauses[].exp` | 数据源过滤表达式（完整表达式） |
+| `source_filter_clause` | `source.filter.clauses[].leftExp` | 数据源过滤子句（拆分形式） |
+
+### effect_type 与 subject_type 映射
+
+| condition_type | effect_type | subject_type |
+|------|------|------|
+| `visible_condition` | `show` | `component` |
+| `enable_condition` | `enable` | `component` |
+| `action_condition_exp` / `action_condition` | `execute` | `action` |
+| `source_filter_exp` / `source_filter_clause` | `filter` | `model_source` |
+| `calc_condition` / `calc_exp` / `field_exp` / `default_value_exp` | `compute` | `component` 或 `field` |
+| `valid_exp` | `validate` | `component` |
+| `mask_condition` | `mask` | `component` |
+| `submit_condition` / `submit_page_condition` | `submit` | `component` |
+| `default_panel_condition` | `default_panel` | `component` |
+
+### 单文件 .spg 输出中的 conditions
+
+单文件解析时，`summary.page_info` 增加 `conditions_count` 字段；`details` 中增加 `conditions` 数组，元素为上述 `ConditionRecord`。
+
+### 诊断码
+
+- `EMPTY_CONDITION`：条件表达式为空字符串，不生成有效记录但保留诊断
+- `EXPR_DIAGNOSTIC_*`：表达式 AST 解析产生的诊断（如未解析引用、不支持函数等）

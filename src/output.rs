@@ -1,5 +1,6 @@
 pub mod brief;
 
+use crate::conditions::scan_conditions;
 use crate::dependency::DependencyGraph;
 use crate::parser::PageMetadata;
 use crate::superpage::{RefType, SuperPageMetadata};
@@ -348,12 +349,14 @@ pub fn print_summary_to(
         } else {
             "unknown"
         };
+        let conditions = scan_conditions(spg, meta.input_path.as_deref());
         let what_is_it = format!(
-            "SuperPage {}，{} 个组件，{} 个表达式，{} 个数据源，角色 {}",
+            "SuperPage {}，{} 个组件，{} 个表达式，{} 个数据源，{} 个条件表达式，角色 {}",
             meta.input_path.as_deref().unwrap_or("unknown"),
             spg.components.len(),
             spg.expressions.len(),
             spg.sources.len(),
+            conditions.len(),
             page_role
         );
 
@@ -364,6 +367,7 @@ pub fn print_summary_to(
                 "component_count": spg.components.len(),
                 "expression_count": spg.expressions.len(),
                 "has_cycles": !cycles.is_empty(),
+                "conditions_count": conditions.len(),
             },
             "what_is_it": what_is_it,
             "page_role": page_role,
@@ -387,9 +391,10 @@ pub fn print_summary_to(
         output.evidence.push(
             crate::output::Evidence::new(
                 format!(
-                    "SuperPage has {} components and {} expressions",
+                    "SuperPage has {} components, {} expressions, {} conditions",
                     spg.components.len(),
-                    spg.expressions.len()
+                    spg.expressions.len(),
+                    conditions.len()
                 ),
                 "Parsed from input file",
             )
@@ -529,12 +534,14 @@ pub fn print_non_human_to(
         } else {
             "unknown"
         };
+        let conditions = scan_conditions(spg, meta.input_path.as_deref());
         let what_is_it = format!(
-            "SuperPage {}，{} 个组件，{} 个表达式，{} 个数据源，角色 {}",
+            "SuperPage {}，{} 个组件，{} 个表达式，{} 个数据源，{} 个条件表达式，角色 {}",
             meta.input_path.as_deref().unwrap_or("unknown"),
             spg.components.len(),
             spg.expressions.len(),
             spg.sources.len(),
+            conditions.len(),
             page_role
         );
 
@@ -545,6 +552,7 @@ pub fn print_non_human_to(
                 "component_count": spg.components.len(),
                 "expression_count": spg.expressions.len(),
                 "has_cycles": !cycles.is_empty(),
+                "conditions_count": conditions.len(),
             },
             "what_is_it": what_is_it,
             "page_role": page_role,
@@ -614,6 +622,21 @@ pub fn print_non_human_to(
             "dependency_order": topo,
             "cycles": cycles,
             "priority_summary": priority_summary,
+            "conditions": conditions.iter().map(|c| json!({
+                "condition_id": c.condition_id,
+                "condition_type": format!("{:?}", c.condition_type).to_lowercase(),
+                "effect_type": format!("{:?}", c.effect_type).to_lowercase(),
+                "subject_type": format!("{:?}", c.subject_type).to_lowercase(),
+                "raw_expr": c.raw_expr,
+                "json_path": c.json_path,
+                "owner_type": format!("{:?}", c.owner_type).to_lowercase(),
+                "owner_id": c.owner_id,
+                "referenced_symbols": c.referenced_symbols,
+                "diagnostics": c.diagnostics.iter().map(|d| json!({
+                    "code": d.code,
+                    "message": d.message,
+                })).collect::<Vec<Value>>(),
+            })).collect::<Vec<Value>>(),
         });
 
         let mut output =
@@ -623,9 +646,10 @@ pub fn print_non_human_to(
         output.evidence.push(
             crate::output::Evidence::new(
                 format!(
-                    "SuperPage parsed with {} components and {} expressions",
+                    "SuperPage parsed with {} components, {} expressions, {} conditions",
                     spg.components.len(),
-                    spg.expressions.len()
+                    spg.expressions.len(),
+                    conditions.len()
                 ),
                 "Direct parsing from input file",
             )

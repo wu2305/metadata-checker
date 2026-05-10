@@ -1,5 +1,6 @@
 pub mod action_semantics;
 pub mod cli;
+pub mod conditions;
 pub mod context;
 pub mod dependency;
 pub mod explain;

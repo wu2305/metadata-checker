@@ -440,6 +440,7 @@ fn extract_components(
         "submitCondition",
         "submitPageCondition",
         "defaultPanelCondition",
+        "disableCondition",
     ];
     // 条件表达式字段：包含 = 或 ${ 时才视为表达式
     let conditional_expr_fields = [
@@ -488,6 +489,7 @@ fn extract_components(
         ("visibleCondition", &raw.visible_condition),
         ("submitPageCondition", &raw.submit_page_condition),
         ("defaultPanelCondition", &raw.default_panel_condition),
+        ("disableCondition", &raw.disable_condition),
         ("desc", &raw.desc),
         ("placeholder", &raw.placeholder),
         ("url", &raw.url),

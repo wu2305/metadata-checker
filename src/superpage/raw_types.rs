@@ -133,6 +133,8 @@ pub struct RawComponent {
     pub exp: Option<serde_json::Value>,
     #[serde(default)]
     pub enable: Option<serde_json::Value>,
+    #[serde(rename = "disableCondition", default)]
+    pub disable_condition: Option<serde_json::Value>,
     #[serde(default)]
     pub text: Option<serde_json::Value>,
     #[serde(default)]
