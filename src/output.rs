@@ -622,21 +622,7 @@ pub fn print_non_human_to(
             "dependency_order": topo,
             "cycles": cycles,
             "priority_summary": priority_summary,
-            "conditions": conditions.iter().map(|c| json!({
-                "condition_id": c.condition_id,
-                "condition_type": format!("{:?}", c.condition_type).to_lowercase(),
-                "effect_type": format!("{:?}", c.effect_type).to_lowercase(),
-                "subject_type": format!("{:?}", c.subject_type).to_lowercase(),
-                "raw_expr": c.raw_expr,
-                "json_path": c.json_path,
-                "owner_type": format!("{:?}", c.owner_type).to_lowercase(),
-                "owner_id": c.owner_id,
-                "referenced_symbols": c.referenced_symbols,
-                "diagnostics": c.diagnostics.iter().map(|d| json!({
-                    "code": d.code,
-                    "message": d.message,
-                })).collect::<Vec<Value>>(),
-            })).collect::<Vec<Value>>(),
+            "conditions": conditions.iter().map(|c| serde_json::to_value(c).unwrap()).collect::<Vec<Value>>(),
         });
 
         let mut output =

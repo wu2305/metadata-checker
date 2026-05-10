@@ -127,6 +127,8 @@ pub struct RawComponent {
     pub value: Option<serde_json::Value>,
     #[serde(rename = "defaultValue", default)]
     pub default_value: Option<serde_json::Value>,
+    #[serde(rename = "defaultValueExp", default)]
+    pub default_value_exp: Option<serde_json::Value>,
     #[serde(default)]
     pub visible: Option<serde_json::Value>,
     #[serde(default)]

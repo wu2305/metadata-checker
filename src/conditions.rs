@@ -113,7 +113,7 @@ fn field_to_condition_type(field: &str) -> ConditionType {
         "submitCondition" => ConditionType::SubmitCondition,
         "submitPageCondition" => ConditionType::SubmitPageCondition,
         "defaultPanelCondition" => ConditionType::DefaultPanelCondition,
-        "defaultValue" => ConditionType::DefaultValueExp,
+        "defaultValue" | "defaultValueExp" => ConditionType::DefaultValueExp,
         "exp" | "value" | "text" | "formula" | "html" | "desc" | "placeholder" | "url"
         | "documentTitle" | "inputTitle" | "labelValue" | "panelName" | "rootPath"
         | "selectedCaption" | "confirmCaption" | "tip" | "badge" | "count" | "attrCaption"
@@ -187,6 +187,108 @@ fn collect_json_paths(
     }
 }
 
+/// 递归扫描组件数组中的 action 条件（遍历 components/panels/steps/comps）
+fn scan_actions_recursive(
+    components: &[serde_json::Value],
+    base_path: &str,
+    source_file: Option<&str>,
+) -> Vec<ConditionRecord> {
+    let mut records = Vec::new();
+    for (comp_idx, comp) in components.iter().enumerate() {
+        let current_path = format!("{}[{}]", base_path, comp_idx);
+        let comp_id = comp.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+        // 扫描当前组件的 actions
+        if let Some(actions) = comp.get("actions").and_then(|v| v.as_array()) {
+            for (action_idx, action) in actions.iter().enumerate() {
+                let action_id = action.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let action_base_path = format!("{}.actions[{}]", current_path, action_idx);
+
+                if let Some(cond_exp) = action.get("conditionExp").and_then(|v| v.as_str()) {
+                    let owner_type = OwnerType::Action;
+                    let subject_type = owner_type_to_subject_type(&owner_type);
+                    if cond_exp.is_empty() {
+                        records.push(ConditionRecord {
+                            condition_id: format!("{}#{}#conditionExp", comp_id, action_id),
+                            condition_type: ConditionType::ActionConditionExp,
+                            effect_type: EffectType::Execute,
+                            subject_type: subject_type.clone(),
+                            raw_expr: "".to_string(),
+                            normalized_expr: "".to_string(),
+                            source_file: source_file.map(|s| s.to_string()),
+                            json_path: format!("{}.conditionExp", action_base_path),
+                            owner_type: owner_type.clone(),
+                            owner_id: format!("{}:{}", comp_id, action_id),
+                            referenced_symbols: Vec::new(),
+                            diagnostics: vec![ConditionDiagnostic {
+                                code: "EMPTY_CONDITION".to_string(),
+                                message: "Action conditionExp 为空".to_string(),
+                            }],
+                        });
+                    } else {
+                        let parse_result = parse_expression_ast(cond_exp);
+                        let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
+                        records.push(ConditionRecord {
+                            condition_id: format!("{}#{}#conditionExp", comp_id, action_id),
+                            condition_type: ConditionType::ActionConditionExp,
+                            effect_type: EffectType::Execute,
+                            subject_type: subject_type.clone(),
+                            raw_expr: cond_exp.to_string(),
+                            normalized_expr: cond_exp.trim().to_string(),
+                            source_file: source_file.map(|s| s.to_string()),
+                            json_path: format!("{}.conditionExp", action_base_path),
+                            owner_type: owner_type.clone(),
+                            owner_id: format!("{}:{}", comp_id, action_id),
+                            referenced_symbols: refs,
+                            diagnostics: parse_result
+                                .diagnostics
+                                .iter()
+                                .map(ConditionDiagnostic::from)
+                                .collect(),
+                        });
+                    }
+                }
+
+                if let Some(cond) = action.get("condition").and_then(|v| v.as_str()) {
+                    if !cond.is_empty() {
+                        let owner_type = OwnerType::Action;
+                        let subject_type = owner_type_to_subject_type(&owner_type);
+                        let parse_result = parse_expression_ast(cond);
+                        let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
+                        records.push(ConditionRecord {
+                            condition_id: format!("{}#{}#condition", comp_id, action_id),
+                            condition_type: ConditionType::ActionCondition,
+                            effect_type: EffectType::Execute,
+                            subject_type: subject_type.clone(),
+                            raw_expr: cond.to_string(),
+                            normalized_expr: cond.trim().to_string(),
+                            source_file: source_file.map(|s| s.to_string()),
+                            json_path: format!("{}.condition", action_base_path),
+                            owner_type: owner_type.clone(),
+                            owner_id: format!("{}:{}", comp_id, action_id),
+                            referenced_symbols: refs,
+                            diagnostics: parse_result
+                                .diagnostics
+                                .iter()
+                                .map(ConditionDiagnostic::from)
+                                .collect(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // 递归进入嵌套子组件
+        for nested in ["components", "panels", "steps", "comps"] {
+            if let Some(children) = comp.get(nested).and_then(|v| v.as_array()) {
+                let nested_path = format!("{}.{}", current_path, nested);
+                records.extend(scan_actions_recursive(children, &nested_path, source_file));
+            }
+        }
+    }
+    records
+}
+
 /// 扫描 SuperPage 中所有条件表达式
 pub fn scan_conditions(spg: &SuperPageMetadata, source_file: Option<&str>) -> Vec<ConditionRecord> {
     let mut records = Vec::new();
@@ -244,95 +346,14 @@ pub fn scan_conditions(spg: &SuperPageMetadata, source_file: Option<&str>) -> Ve
         });
     }
 
-    // 2. 从 actions 提取动作条件
+    // 2. 从 actions 提取动作条件（递归遍历嵌套组件）
     if let Some(components) = spg
         .raw
         .get("canvas")
         .and_then(|c| c.get("components"))
         .and_then(|v| v.as_array())
     {
-        for (comp_idx, comp) in components.iter().enumerate() {
-            let comp_id = comp.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(actions) = comp.get("actions").and_then(|v| v.as_array()) {
-                for (action_idx, action) in actions.iter().enumerate() {
-                    let action_id = action.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let base_path =
-                        format!("canvas.components[{}].actions[{}]", comp_idx, action_idx);
-
-                    if let Some(cond_exp) = action.get("conditionExp").and_then(|v| v.as_str()) {
-                        let owner_type = OwnerType::Action;
-                        let subject_type = owner_type_to_subject_type(&owner_type);
-                        if cond_exp.is_empty() {
-                            records.push(ConditionRecord {
-                                condition_id: format!("{}#{}#conditionExp", comp_id, action_id),
-                                condition_type: ConditionType::ActionConditionExp,
-                                effect_type: EffectType::Execute,
-                                subject_type: subject_type.clone(),
-                                raw_expr: "".to_string(),
-                                normalized_expr: "".to_string(),
-                                source_file: source_file.map(|s| s.to_string()),
-                                json_path: format!("{}.conditionExp", base_path),
-                                owner_type: owner_type.clone(),
-                                owner_id: format!("{}:{}", comp_id, action_id),
-                                referenced_symbols: Vec::new(),
-                                diagnostics: vec![ConditionDiagnostic {
-                                    code: "EMPTY_CONDITION".to_string(),
-                                    message: "Action conditionExp 为空".to_string(),
-                                }],
-                            });
-                        } else {
-                            let parse_result = parse_expression_ast(cond_exp);
-                            let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
-                            records.push(ConditionRecord {
-                                condition_id: format!("{}#{}#conditionExp", comp_id, action_id),
-                                condition_type: ConditionType::ActionConditionExp,
-                                effect_type: EffectType::Execute,
-                                subject_type: subject_type.clone(),
-                                raw_expr: cond_exp.to_string(),
-                                normalized_expr: cond_exp.trim().to_string(),
-                                source_file: source_file.map(|s| s.to_string()),
-                                json_path: format!("{}.conditionExp", base_path),
-                                owner_type: owner_type.clone(),
-                                owner_id: format!("{}:{}", comp_id, action_id),
-                                referenced_symbols: refs,
-                                diagnostics: parse_result
-                                    .diagnostics
-                                    .iter()
-                                    .map(ConditionDiagnostic::from)
-                                    .collect(),
-                            });
-                        }
-                    }
-
-                    if let Some(cond) = action.get("condition").and_then(|v| v.as_str()) {
-                        if !cond.is_empty() {
-                            let owner_type = OwnerType::Action;
-                            let subject_type = owner_type_to_subject_type(&owner_type);
-                            let parse_result = parse_expression_ast(cond);
-                            let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
-                            records.push(ConditionRecord {
-                                condition_id: format!("{}#{}#condition", comp_id, action_id),
-                                condition_type: ConditionType::ActionCondition,
-                                effect_type: EffectType::Execute,
-                                subject_type: subject_type.clone(),
-                                raw_expr: cond.to_string(),
-                                normalized_expr: cond.trim().to_string(),
-                                source_file: source_file.map(|s| s.to_string()),
-                                json_path: format!("{}.condition", base_path),
-                                owner_type: owner_type.clone(),
-                                owner_id: format!("{}:{}", comp_id, action_id),
-                                referenced_symbols: refs,
-                                diagnostics: parse_result
-                                    .diagnostics
-                                    .iter()
-                                    .map(ConditionDiagnostic::from)
-                                    .collect(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
+        records.extend(scan_actions_recursive(components, "canvas.components", source_file));
     }
 
     // 3. 从 sources 提取 filter

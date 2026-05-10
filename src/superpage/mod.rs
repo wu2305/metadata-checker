@@ -441,6 +441,7 @@ fn extract_components(
         "submitPageCondition",
         "defaultPanelCondition",
         "disableCondition",
+        "defaultValueExp",
     ];
     // 条件表达式字段：包含 = 或 ${ 时才视为表达式
     let conditional_expr_fields = [
@@ -469,11 +470,13 @@ fn extract_components(
         "defaultSelect",
         "defaultCheck",
         "maxLevel",
+        "defaultValueExp",
     ];
 
     let fields = [
         ("value", &raw.value),
         ("defaultValue", &raw.default_value),
+        ("defaultValueExp", &raw.default_value_exp),
         ("visible", &raw.visible),
         ("exp", &raw.exp),
         ("enable", &raw.enable),

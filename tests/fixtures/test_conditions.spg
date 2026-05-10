@@ -2,7 +2,10 @@
     "version": "4.19.7",
     "theme": "default",
     "params": [
-        {"id": "param1", "name": "参数A"}
+        {
+            "id": "param1",
+            "name": "参数A"
+        }
     ],
     "sources": [
         {
@@ -13,8 +16,14 @@
                 "scope": "self",
                 "matchAll": true,
                 "clauses": [
-                    {"exp": "model1.status = 'active'"},
-                    {"leftExp": "model1.dept_id", "operator": "=", "rightValue": "$user.dept_id"}
+                    {
+                        "exp": "model1.status = 'active'"
+                    },
+                    {
+                        "leftExp": "model1.dept_id",
+                        "operator": "=",
+                        "rightValue": "$user.dept_id"
+                    }
                 ]
             }
         },
@@ -47,7 +56,9 @@
                         "triggerType": "click",
                         "conditionExp": "=input1.value == 'test'",
                         "submitRange": "component",
-                        "submitComponent": ["input1"]
+                        "submitComponent": [
+                            "input1"
+                        ]
                     }
                 ]
             },
@@ -65,7 +76,28 @@
                         "id": "input2",
                         "type": "input",
                         "exp": "=CONCAT(input1.value, '-suffix')",
-                        "enable": "=input1.value > 0"
+                        "enable": "=input1.value > 0",
+                        "defaultValueExp": "=IF(input1.value > 0, input1.value, 'fallback')"
+                    },
+                    {
+                        "id": "nestedPanel",
+                        "type": "panel",
+                        "components": [
+                            {
+                                "id": "nestedButton",
+                                "type": "button",
+                                "value": "嵌套按钮",
+                                "actions": [
+                                    {
+                                        "id": "nestedAction",
+                                        "actionType": "customAction",
+                                        "triggerType": "click",
+                                        "conditionExp": "=input2.value != ''",
+                                        "condition": "=nestedButton.value != ''"
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             }
