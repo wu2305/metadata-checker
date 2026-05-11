@@ -256,6 +256,7 @@
 - `5.4-mini` 需要手动归纳 `param5 + text41 + input3 + $user.dept_id + model*.totalRowCount__`。
 - 当前 PageLogic 的 `data_source_count`、`entrypoint_count`、`write_target_count` 不能直接说明“页面为什么没数据”。
 - `visibleCondition`、`disableCondition` 和数据源过滤条件没有按影响范围排序。
+- M18 已能建出条件图和物理表写入归并，但 `--context comp:...|input3 --depth 2` 会访问数百个邻近节点，混入同名局部模型、旁路 DataFlow、其他页面组件等低相关关系，容易让小模型从主链路漂移。
 
 ### 工作清单
 
@@ -265,12 +266,15 @@
 - 聚合主要交互门控：`disableCondition` 和 enabled condition。
 - 按影响范围排序：影响模型数量、影响组件数量、是否影响入口/面板/按钮。
 - 输出 `summary.display_prerequisites`、`summary.data_prerequisites`、`summary.action_prerequisites`。
+- 从 M18 的条件图中抽取 `primary_paths` / `key_paths`，优先展示与目标页面、目标组件、目标物理表直接相关的链路，例如 `input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber <- 潜客信息跟进.button1.action1/action4`。
+- 对跨页面或同名局部模型扩散出的旁路关系降级到 `related_context`，并在 summary 中只给计数和升级建议，不默认展开。
 
 ### 验收目标
 
 - AI 只读 summary 就能说出页面数据正常显示的主要条件。
 - compact 模式下输出 Top-N 条件，normal/full 模式可展开完整条件列表。
 - 对 `OUTPUT_TRUNCATED` 场景给出明确升级建议。
+- 小模型默认读取 summary 时能优先复述主链路，不会把同名局部模型的其他页面引用、DataFlow 旁路或低相关组件误认为页面正常显示的必要条件。
 
 ## M20：Why 条件查询能力
 
@@ -283,6 +287,7 @@
 - 当前只能通过 PageLogic + raw `.spg` 人工推导某个面板或按钮的门控条件。
 - `model*.totalRowCount__` 作为数据命中行数门控没有专门解释。
 - target 不存在或写错时，条件查询需要沿用 M14 的候选建议和 shell-safe 命令规范。
+- 通用 `--context` 适合探索，但不适合作为“为什么不显示 / 为什么没数据”的默认回答入口；它会把主因、旁路依赖和低相关邻居混在一起，增加注意力漂移风险。
 
 ### 工作清单
 
@@ -291,6 +296,7 @@
 - 对 `model*.totalRowCount__` 特殊处理，解释为“数据集命中行数门控”。
 - 支持 page、component、model、field 四类 target。
 - target 不存在时返回候选目标和下一条查询命令。
+- 输出目标化 `primary_reason` / `primary_path`，把与目标无直接因果关系的邻居放入低优先级 `related_context`，并标明其不是必要条件。
 
 ### 验收目标
 
@@ -298,6 +304,7 @@
 - 能解释“这个按钮为什么灰”。
 - 能解释“这个数据源为什么可能为空”。
 - 输出必须区分确定条件和推断条件。
+- 对 `合同协议.spg|input3` 这类目标查询，默认输出聚焦主因链路；不需要 AI 再从数百个 context 节点中自行筛选。
 
 ## M21：未知 Action 语义归类
 
@@ -337,17 +344,21 @@
 - 当前真实项目评测主要覆盖页面用途、按钮行为、DataFlow、目标定位和 `.tbl` 单文件。
 - “页面为什么没数据 / 按钮为什么灰 / 面板为什么不显示”尚未形成固定评测。
 - `SKILL.md` 没有明确条件类问题的命令路线。
+- M18 残留的注意力漂移风险尚未进入评测：模型可能把 `--context` 中的同名局部模型、旁路 DataFlow、其他页面组件当成主链路证据。
 
 ### 工作清单
 
 - 增加真实项目 eval case：`合同协议.spg 正常显示数据的条件是什么？`
+- 增加真实项目 eval case：`合同协议.spg 的 input3 来源是什么？`，要求答案优先输出 `input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber <- 潜客信息跟进.button1.action1/action4`，并禁止把旁路 context 当作必要条件。
 - 增加 fixture case：简单显示条件、链式条件、按钮禁用、数据源为空、系统变量依赖。
 - 更新 `SKILL.md`，增加“页面没数据 / 按钮灰 / 面板不显示”的命令路线。
 - 空上下文 `5.4-mini` 验证时禁止读取 raw `.spg`，只能使用工具输出回答。
 - 评测断言必须覆盖 `param`、`$user`、隐藏字段、`model.filter`、`totalRowCount__`、`visibleCondition/disableCondition`。
+- 评测断言必须包含注意力漂移负例：同名局部模型的其他页面引用、旁路 DataFlow、低相关组件不得被写成主因或必要条件。
 
 ### 验收目标
 
 - 小模型能回答条件类问题，且不需要直接读取 5MB 原始元数据。
 - 回答包含证据链、截断说明和保守口径。
 - 禁止误判：不能把条件门控说成渲染故障，不能把未参与初始展示的参数说成必需条件。
+- 禁止漂移：当工具同时输出主链路和相关上下文时，小模型必须优先引用主链路，并显式区分“相关但非必要”的旁路关系。
