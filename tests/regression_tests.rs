@@ -3305,6 +3305,125 @@ fn test_query_page_logic_compact_truncated_structure() {
 }
 
 #[test]
+fn test_cli_query_page_logic_m19_prerequisites_contract() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/page_relations.spg",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+    assert_ai_output_contract(&ai);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    // M19 summary 计数字段
+    assert!(
+        summary.contains_key("display_prerequisites_count"),
+        "summary must have display_prerequisites_count"
+    );
+    assert!(
+        summary.contains_key("data_prerequisites_count"),
+        "summary must have data_prerequisites_count"
+    );
+    assert!(
+        summary.contains_key("action_prerequisites_count"),
+        "summary must have action_prerequisites_count"
+    );
+    assert!(
+        summary.contains_key("primary_paths_count"),
+        "summary must have primary_paths_count"
+    );
+    assert!(
+        summary.contains_key("related_context_count"),
+        "summary must have related_context_count"
+    );
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    // normal 模式下 prerequisites 和 primary_paths 为普通数组
+    for key in [
+        "display_prerequisites",
+        "data_prerequisites",
+        "action_prerequisites",
+        "primary_paths",
+    ] {
+        assert!(
+            details.get(key).and_then(|v| v.as_array()).is_some(),
+            "{} must be an array in normal mode",
+            key
+        );
+    }
+
+    // related_context 在 normal 模式下也是数组，但可能包含 summary 字段
+    assert!(
+        details
+            .get("related_context")
+            .and_then(|v| v.as_array())
+            .is_some(),
+        "related_context must be an array in normal mode"
+    );
+}
+
+#[test]
+fn test_cli_query_page_logic_m19_compact_truncation() {
+    let _ = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--build-graph",
+    ]);
+    let out = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--query-page-logic",
+        "page:app/page_relations.spg",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+
+    let details_val = ai.details.expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    // compact 模式下 prerequisites 数组应被截断到合理长度
+    for key in [
+        "display_prerequisites",
+        "data_prerequisites",
+        "action_prerequisites",
+    ] {
+        if let Some(arr_struct) = details.get(key).and_then(|v| v.as_object()) {
+            let items = arr_struct
+                .get("items")
+                .and_then(|v| v.as_array())
+                .expect("items must be array");
+            let shown_count = arr_struct
+                .get("shown_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            assert_eq!(
+                items.len() as u64,
+                shown_count,
+                "{} items length must match shown_count",
+                key
+            );
+            assert!(
+                shown_count <= 5,
+                "compact {} shown_count must be <= 5, got {}",
+                key,
+                shown_count
+            );
+        }
+    }
+}
 fn test_query_model_compact_brief_structure() {
     let _ = run_cli(&[
         "--project-dir",

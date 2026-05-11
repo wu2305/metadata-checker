@@ -49,7 +49,7 @@
 - [x] M16：SKILL.md 真实使用协议收敛，详见 `docs/real-project-optimization-roadmap.md`
 - [x] M17：条件抽取基础层，详见 `docs/real-project-optimization-roadmap.md`
 - [x] M18：条件依赖图（含页面局部模型到物理表字段的写入归并），详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M19：页面数据可用性摘要（含 M18 残留主链路低噪声输出与注意力漂移治理），详见 `docs/real-project-optimization-roadmap.md`
+- [x] M19：页面数据可用性摘要（含 M18 残留主链路低噪声输出与注意力漂移治理），详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M20：Why 条件查询能力（目标化主因链路，避免通用 context 漂移），详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M21：未知 Action 语义归类，详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M22：条件类 AI 评测与协议收敛（含注意力漂移负例断言），详见 `docs/real-project-optimization-roadmap.md`
