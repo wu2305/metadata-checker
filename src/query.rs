@@ -1,3 +1,4 @@
+use crate::path::{PathFinder, PathSelector};
 use crate::graph::GraphDB;
 use crate::output::schema::{format_next_query, format_next_query_multi};
 use anyhow::Result;
@@ -1382,130 +1383,64 @@ pub fn query_page_logic(
     sort_by_impact(&mut data_prerequisites);
     sort_by_impact(&mut action_prerequisites);
 
-    // ---- 5.6 主链路抽取（M19.5） ----
+    // ---- 5.6 主链路抽取（M19.5）—— 使用路径计算领域模型 ----
     let mut primary_paths: Vec<serde_json::Value> = Vec::new();
     let mut related_context: Vec<serde_json::Value> = Vec::new();
-    let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut candidate_paths: Vec<serde_json::Value> = Vec::new();
+    let mut supporting_paths: Vec<serde_json::Value> = Vec::new();
+    let mut rejected_paths: Vec<serde_json::Value> = Vec::new();
+    let mut path_selection_diagnostics: Vec<String> = Vec::new();
 
-    // 从 entrypoints 出发，沿 write 边追踪到物理表
-    for ep in &entrypoints {
-        if let Some(ep_id) = ep.get("id").and_then(|v| v.as_str()) {
-            if let Some((ep_out, _ep_in)) = graph.get_node_edges(ep_id) {
-                for (target, edge) in &ep_out {
-                    if matches!(edge.edge_type, crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites) {
-                        let field_path = edge.field_path.as_deref().unwrap_or("?");
-                        let path_key = format!("{}->{}", ep_id, target.id);
-                        if !seen_paths.contains(&path_key) {
-                            seen_paths.insert(path_key);
-                            let source_expr = edge
-                                .meta
-                                .as_ref()
-                                .and_then(|m| m.get("source_expr"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            let json_path = edge
-                                .meta
-                                .as_ref()
-                                .and_then(|m| m.get("json_path"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            primary_paths.push(serde_json::json!({
-                                "from": ep_id,
-                                "to": target.id,
-                                "edge_type": format!("{:?}", edge.edge_type),
-                                "field_path": field_path,
-                                "source_file": ep.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
-                                "json_path": json_path,
-                                "raw_expr": source_expr,
-                                "confidence": "high",
-                            }));
-                        }
-                    }
-                }
-            }
-        }
+    // 1. 提取锚点
+    let path_query = crate::path::AnchorExtractor::extract(
+        graph, page_id, &page_node,
+        &child_components, &child_actions,
+        &data_sources, &write_targets, &entrypoints,
+    );
+
+    // 2. 路径发现（有界 BFS）
+    let finder = crate::path::BoundedCausalPathFinder::default();
+    let candidates = finder.find_candidates(graph, &path_query);
+
+    // 3. 路径选择（分组保底）
+    let selector = crate::path::RuleBasedPathSelector;
+    let selection = selector.select(&path_query, candidates);
+
+    // 4. 转换回兼容格式，同时保留新结构
+    for p in selection.primary_paths {
+        primary_paths.push(p.to_json());
+    }
+    for p in selection.candidate_paths {
+        candidate_paths.push(p.to_json());
+    }
+    for p in selection.supporting_paths {
+        supporting_paths.push(p.to_json());
+    }
+    for p in selection.related_context {
+        related_context.push(p.to_json());
+    }
+    for p in selection.rejected_paths {
+        rejected_paths.push(p.to_json());
+    }
+    for d in selection.selection_diagnostics {
+        path_selection_diagnostics.push(d);
     }
 
-    // 从 data_sources 出发，读取边也纳入主链路
-    for ds in &data_sources {
-        if let (Some(src), Some(tgt), Some(et)) = (
-            ds.get("source_component").or_else(|| ds.get("source_action")).and_then(|v| v.as_str()),
-            ds.get("target_id").and_then(|v| v.as_str()),
-            ds.get("edge_type").and_then(|v| v.as_str()),
-        ) {
-            let path_key = format!("{}->{}", src, tgt);
-            if !seen_paths.contains(&path_key) {
-                seen_paths.insert(path_key);
-                primary_paths.push(serde_json::json!({
-                    "from": src,
-                    "to": tgt,
-                    "edge_type": et,
-                    "field_path": ds.get("field_path").and_then(|v| v.as_str()).unwrap_or("?"),
-                    "source_file": ds.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
-                    "json_path": ds.get("json_path").and_then(|v| v.as_str()).unwrap_or(""),
-                    "raw_expr": ds.get("raw_expr").and_then(|v| v.as_str()).unwrap_or(""),
-                    "confidence": if ds.get("json_path").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false) { "high" } else { "medium" },
-                }));
-            }
-        }
-    }
-
-    // 跨页面写入反向查询：对当前页面读取的物理表，查找其他页面的 ActionWrites
-    let mut model_targets: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for ds in &data_sources {
-        if let Some(tgt) = ds.get("target_id").and_then(|v| v.as_str()) {
-            if tgt.starts_with("model:") {
-                model_targets.insert(tgt.to_string());
-            }
-        }
-    }
-    for model_id in &model_targets {
-        if let Some((_out, incoming)) = graph.get_node_edges(model_id) {
-            for (source, edge) in &incoming {
-                if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::Writes) {
-                    // 过滤掉来源是当前页面的写入
-                    if source.path != page_node.path {
-                        let path_key = format!("{}->{}", source.id, model_id);
-                        if !seen_paths.contains(&path_key) {
-                            seen_paths.insert(path_key);
-                            primary_paths.push(serde_json::json!({
-                                "from": source.id,
-                                "to": model_id,
-                                "edge_type": format!("{:?}", edge.edge_type),
-                                "field_path": edge.field_path.as_deref().unwrap_or("?"),
-                                "source_file": &source.path,
-                                "json_path": edge.meta.as_ref()
-                                    .and_then(|m| m.get("json_path"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or(""),
-                                "raw_expr": edge.meta.as_ref()
-                                    .and_then(|m| m.get("source_expr"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or(""),
-                                "confidence": "high",
-                            }));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // 旁路关系：收集非本页面的跨页关系
+    // 旁路关系：收集非本页面的跨页关系（保留旧逻辑作为补充）
+    let mut seen_ctx: std::collections::HashSet<String> = std::collections::HashSet::new();
     for comp in &child_components {
         if let Some((comp_out, _comp_in)) = graph.get_node_edges(&comp.id) {
-            for (target, edge) in &comp_out {
-                // 跨页面关系（目标页面不是当前页面）
+            for (target, edge) in comp_out {
                 if target.id.starts_with("page:") && target.id != page_id {
                     let ctx_key = format!("{}->{}", comp.id, target.id);
-                    if !seen_paths.contains(&ctx_key) {
-                        seen_paths.insert(ctx_key);
+                    if !seen_ctx.contains(&ctx_key) {
+                        seen_ctx.insert(ctx_key.clone());
                         related_context.push(serde_json::json!({
                             "from": comp.id,
                             "to": target.id,
                             "edge_type": format!("{:?}", edge.edge_type),
                             "field_path": edge.field_path,
-                            "source_file": comp.path,
+                            "source_file": comp.path.clone(),
                             "confidence": "low",
                             "reason": "跨页面旁路关系",
                         }));
