@@ -371,6 +371,68 @@ pub struct AiOutput {
 | `EVIDENCE_SAMPLED` | Info | evidence 为控噪采样，不代表 details 全集 |
 | `PAGE_INPUTS_DEFERRED` | Warning | 未能读取原始页面文件，page_inputs / visibility_rules 可能不完整 |
 
+### M19 页面可用性摘要字段（summary）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `display_prerequisites_count` | number | 显示门控条件数量（visibleCondition / enableCondition / disableCondition） |
+| `data_prerequisites_count` | number | 数据源过滤条件数量（sourceFilter / filter clause / totalRowCount__） |
+| `action_prerequisites_count` | number | 动作执行条件数量（action condition / conditionExp） |
+| `primary_paths_count` | number | 主链路数量（从关键字段出发的端到端路径） |
+| `related_context_count` | number | 旁路关系数量（非必要但相关的跨页/跨模型关系） |
+
+### M19 页面可用性摘要字段（details）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `display_prerequisites` | array | 显示门控条件列表，每项为 Prerequisite 结构 |
+| `data_prerequisites` | array | 数据源过滤条件列表，每项为 Prerequisite 结构 |
+| `action_prerequisites` | array | 动作执行条件列表，每项为 Prerequisite 结构 |
+| `primary_paths` | array | 主链路列表，每项为 PathSegment 结构 |
+| `related_context` | array | 旁路关系列表（compact 模式默认截断，normal/full 展开） |
+| `related_context_summary` | object | 旁路关系统计，含 total_count / by_type / note |
+
+### M19 Prerequisite 项结构
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `kind` | string | 条件类型：VisibleCondition / EnableCondition / SourceFilterExp / ActionConditionExp / CalcCondition / DefaultValueExp / ... |
+| `target` | string | 条件作用对象 ID（组件 ID / action ID / model ID） |
+| `owner_type` | string | 所属对象类型：Component / Action / ModelSource / FieldDefault / Page |
+| `subject_type` | string | 语义主体：component / action / model_source / field / page |
+| `effect_type` | string | 业务效果：show / hide / enable / disable / execute / filter / compute / ... |
+| `raw_expr` | string | 原始表达式字符串 |
+| `normalized_expr` | string | 去空白后的规范化表达式 |
+| `json_path` | string | 在原始 JSON 中的精确路径 |
+| `source_file` | string | 来源文件路径 |
+| `depends_on` | array | 表达式引用的符号列表 |
+| `impact` | object | 影响范围对象，含 affected_component_count / affected_model_count / is_entrypoint / is_main_panel / affects_row_count / impact_score |
+| `evidence` | object | 证据对象，含 node_id / edge_type / json_path / raw_expr / source_file |
+| `confidence` | string | high（有 json_path 和 raw_expr）/ medium（缺 json_path 或 raw_expr）/ low（证据缺失） |
+| `diagnostics` | array | 诊断列表，每项含 code / message |
+
+### M19 PathSegment 结构（primary_paths）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `from` | string | 起点节点 ID |
+| `to` | string | 终点节点 ID |
+| `edge_type` | string | 边类型：Reads / Writes / ActionWrites / DependsOn / Contains / ... |
+| `field_path` | string | 字段路径，如 model1.fieldA |
+| `source_file` | string | 来源文件路径 |
+| `json_path` | string | 原始 JSON 路径（若有） |
+| `raw_expr` | string | 原始表达式（若有） |
+| `confidence` | string | high（有 json_path）/ medium（图推导）/ low（推断） |
+
+### M19 注意力漂移治理约定
+
+- `related_context` 默认只输出计数和类型分布，不展开明细。
+- compact 模式不展开 `related_context` 明细。
+- normal 模式最多展示 Top-N 旁路。
+- full 模式才展开完整旁路关系。
+- 输出中明确标记：`related_context` 不是必要条件。
+- 当邻居数量过大时，应生成 `ATTENTION_DRIFT` diagnostic，建议使用 `primary_paths` 优先回答。
+
 ### next_queries
 
 - `--explain <PAGE> for page semantic summary`
