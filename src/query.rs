@@ -1449,6 +1449,47 @@ pub fn query_page_logic(
         }
     }
 
+    // 跨页面写入反向查询：对当前页面读取的物理表，查找其他页面的 ActionWrites
+    let mut model_targets: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for ds in &data_sources {
+        if let Some(tgt) = ds.get("target_id").and_then(|v| v.as_str()) {
+            if tgt.starts_with("model:") {
+                model_targets.insert(tgt.to_string());
+            }
+        }
+    }
+    for model_id in &model_targets {
+        if let Some((_out, incoming)) = graph.get_node_edges(model_id) {
+            for (source, edge) in &incoming {
+                if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::Writes) {
+                    // 过滤掉来源是当前页面的写入
+                    if source.path != page_node.path {
+                        let path_key = format!("{}->{}", source.id, model_id);
+                        if !seen_paths.contains(&path_key) {
+                            seen_paths.insert(path_key);
+                            primary_paths.push(serde_json::json!({
+                                "from": source.id,
+                                "to": model_id,
+                                "edge_type": format!("{:?}", edge.edge_type),
+                                "field_path": edge.field_path.as_deref().unwrap_or("?"),
+                                "source_file": &source.path,
+                                "json_path": edge.meta.as_ref()
+                                    .and_then(|m| m.get("json_path"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(""),
+                                "raw_expr": edge.meta.as_ref()
+                                    .and_then(|m| m.get("source_expr"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(""),
+                                "confidence": "high",
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 旁路关系：收集非本页面的跨页关系
     for comp in &child_components {
         if let Some((comp_out, _comp_in)) = graph.get_node_edges(&comp.id) {
