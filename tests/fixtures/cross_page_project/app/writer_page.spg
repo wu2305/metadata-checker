@@ -1,0 +1,37 @@
+{
+    "version": "4.19.7",
+    "theme": "default",
+    "sources": [
+        {
+            "id": "model6",
+            "modelType": "dwtable",
+            "path": "$DATA:/主数据/fact_qwSidebar.tbl"
+        }
+    ],
+    "canvas": {
+        "id": "canvas",
+        "type": "canvas",
+        "components": [
+            {
+                "id": "inputA",
+                "type": "input",
+                "value": "=model6.phoneNumber",
+                "submitField": "model6.phoneNumber"
+            },
+            {
+                "id": "buttonWrite",
+                "type": "button",
+                "value": "写入",
+                "actions": [
+                    {
+                        "id": "actionWrite",
+                        "actionType": "submitData",
+                        "triggerType": "click",
+                        "submitRange": "component",
+                        "submitComponent": ["inputA"]
+                    }
+                ]
+            }
+        ]
+    }
+}

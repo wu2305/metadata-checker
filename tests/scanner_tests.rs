@@ -867,3 +867,56 @@ fn test_edge_meta_schema_unified() {
 
     let _ = std::fs::remove_file(&db_path);
 }
+
+
+#[test]
+fn test_cross_page_physical_table_writer_discovery() {
+    let db_path =
+        std::env::temp_dir().join("metadata-checker-test-cross-page.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/cross_page_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // 验证物理表节点 model:fact_qwSidebar 存在
+    let physical_id = "model:fact_qwSidebar";
+    assert!(
+        graph.get_node(physical_id).is_some(),
+        "Physical table node {} should exist",
+        physical_id
+    );
+
+    // 验证 writer_page 的 actionWrite 被列为物理表的 writer
+    let writers = graph.find_writers(physical_id);
+    let writer_action = writers
+        .iter()
+        .find(|(n, _)| n.id.contains("actionWrite"));
+    assert!(
+        writer_action.is_some(),
+        "actionWrite should be a writer of {}",
+        physical_id
+    );
+
+    let (_, writer_edge) = writer_action.unwrap();
+    assert_eq!(writer_edge.edge_type, EdgeType::ActionWrites);
+    assert!(
+        writer_edge
+            .field_path
+            .as_deref()
+            .unwrap_or("")
+            .contains("phoneNumber"),
+        "Edge should reference phoneNumber"
+    );
+
+    // 验证 reader_page 的 inputB 被列为物理表的 reader
+    let readers = graph.find_readers(physical_id);
+    assert!(
+        readers.iter().any(|(n, _)| n.id.contains("inputB")),
+        "inputB should be a reader of {}",
+        physical_id
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+}

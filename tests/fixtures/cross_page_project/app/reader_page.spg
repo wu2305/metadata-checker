@@ -1,0 +1,22 @@
+{
+    "version": "4.19.7",
+    "theme": "default",
+    "sources": [
+        {
+            "id": "model22",
+            "modelType": "dwtable",
+            "path": "$DATA:/主数据/fact_qwSidebar.tbl"
+        }
+    ],
+    "canvas": {
+        "id": "canvas",
+        "type": "canvas",
+        "components": [
+            {
+                "id": "inputB",
+                "type": "input",
+                "value": "=model22.phoneNumber"
+            }
+        ]
+    }
+}

@@ -57,6 +57,8 @@ pub enum EdgeType {
     ActionControlsComponent,
     ActionValidates,
     ActionLoadsData,
+    /// 条件/表达式对上游符号的依赖（组件值、参数、用户属性、系统变量）
+    DependsOn,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

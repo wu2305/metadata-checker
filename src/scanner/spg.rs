@@ -33,6 +33,21 @@ fn ensure_model_field(
     (model_id, field_id)
 }
 
+/// 从模型路径中提取物理表名（去除路径前缀和 .tbl 后缀）。
+/// - "$DATA:/主数据/fact_qwSidebar.tbl" -> "fact_qwSidebar"
+/// - "data/table1.tbl" -> "table1"
+/// - "model1.tbl" -> "model1"
+fn resolve_physical_table_name(model_path: &str) -> Option<String> {
+    let path = model_path.trim_end_matches('/');
+    let stem = Path::new(path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())?;
+    if stem.is_empty() {
+        return None;
+    }
+    Some(stem)
+}
+
 /// 添加从 from_id 读取 model.field 的关系边。
 fn add_model_read(
     graph: &mut GraphDB,
@@ -47,10 +62,25 @@ fn add_model_read(
     graph.add_edge_with_meta(
         from_id,
         &model_id,
-        edge_type,
+        edge_type.clone(),
         Some(format!("{}.{}", model, field)),
-        Some(edge_meta),
+        Some(edge_meta.clone()),
     );
+
+    // 同时创建到物理表的读取边（如果局部模型 ID 与物理表名不同）
+    if let Some(physical_name) = resolve_physical_table_name(model_path) {
+        if model != physical_name {
+            let (phy_model_id, _) =
+                ensure_model_field(graph, &physical_name, field, model_path, None);
+            graph.add_edge_with_meta(
+                from_id,
+                &phy_model_id,
+                edge_type,
+                Some(format!("{}.{}", physical_name, field)),
+                Some(edge_meta),
+            );
+        }
+    }
 }
 
 /// 添加从 from_id 写入 model.field 的关系边。
@@ -67,10 +97,25 @@ fn add_model_write(
     graph.add_edge_with_meta(
         from_id,
         &model_id,
-        edge_type,
+        edge_type.clone(),
         Some(format!("{}.{}", model, field)),
-        Some(edge_meta),
+        Some(edge_meta.clone()),
     );
+
+    // 同时创建到物理表的写入边（如果局部模型 ID 与物理表名不同）
+    if let Some(physical_name) = resolve_physical_table_name(model_path) {
+        if model != physical_name {
+            let (phy_model_id, _) =
+                ensure_model_field(graph, &physical_name, field, model_path, None);
+            graph.add_edge_with_meta(
+                from_id,
+                &phy_model_id,
+                edge_type,
+                Some(format!("{}.{}", physical_name, field)),
+                Some(edge_meta),
+            );
+        }
+    }
 }
 
 pub fn process_spg_file_from_value(
@@ -216,30 +261,149 @@ pub fn process_spg_file_from_value(
         if let Some(exprs) = expr_map.get(comp.id.as_str()) {
             for expr in exprs {
                 for ref_type in &expr.refs {
-                    if let crate::superpage::RefType::ModelField(model, field) = ref_type {
-                        let model_path = source_path_map
-                            .get(model.as_str())
-                            .map(|p| p.to_string())
-                            .unwrap_or_else(|| format!("{}.tbl", model));
-                        let edge_meta = serde_json::json!({
-                            "reason": format!("Component '{}' reads from model '{}'", comp.id, model),
-                            "actor_kind": "component",
-                            "actor_id": comp.id,
-                            "operation": "Reads",
-                            "target_model": model,
-                            "target_field": field,
-                                    "source_expr": format!("{}.{}", model, field),
-                            "source_expr": expr.raw_expr,
-                        });
-                        add_model_read(
-                            graph,
-                            &comp_id,
-                            model,
-                            field,
-                            &model_path,
-                            edge_meta,
-                            EdgeType::Reads,
-                        );
+                    match ref_type {
+                        crate::superpage::RefType::ModelField(model, field) => {
+                            let model_path = source_path_map
+                                .get(model.as_str())
+                                .map(|p| p.to_string())
+                                .unwrap_or_else(|| format!("{}.tbl", model));
+                            let edge_meta = serde_json::json!({
+                                "reason": format!("Component '{}' reads from model '{}'", comp.id, model),
+                                "actor_kind": "component",
+                                "actor_id": comp.id,
+                                "operation": "Reads",
+                                "target_model": model,
+                                "target_field": field,
+                                "source_expr": expr.raw_expr,
+                            });
+                            add_model_read(
+                                graph,
+                                &comp_id,
+                                model,
+                                field,
+                                &model_path,
+                                edge_meta,
+                                EdgeType::Reads,
+                            );
+                        }
+                        crate::superpage::RefType::ComponentValue(target_id) => {
+                            let target_comp_id = format!(
+                                "comp:{}|{}",
+                                rel_path.replace(r"", "/"),
+                                target_id
+                            );
+                            let edge_meta = serde_json::json!({
+                                "reason": format!(
+                                    "Component '{}' depends on component '{}' via field '{}'",
+                                    comp.id, target_id, expr.field
+                                ),
+                                "actor_kind": "component",
+                                "actor_id": comp.id,
+                                "operation": "DependsOn",
+                                "target_component": target_id,
+                                "source_expr": expr.raw_expr,
+                                "source_field": expr.field,
+                            });
+                            graph.add_edge_with_meta(
+                                &comp_id,
+                                &target_comp_id,
+                                EdgeType::DependsOn,
+                                Some(format!("comp:{}.value", target_id)),
+                                Some(edge_meta),
+                            );
+                        }
+                        crate::superpage::RefType::Param(param_name) => {
+                            let param_id = format!(
+                                "param:{}|{}",
+                                rel_path.replace(r"", "/"),
+                                param_name
+                            );
+                            graph.add_node(
+                                param_id.clone(),
+                                NodeType::Page,
+                                rel_path.to_string(),
+                                param_name.clone(),
+                                Some(serde_json::json!({"kind": "param"})),
+                            );
+                            let edge_meta = serde_json::json!({
+                                "reason": format!(
+                                    "Component '{}' depends on param '{}' via field '{}'",
+                                    comp.id, param_name, expr.field
+                                ),
+                                "actor_kind": "component",
+                                "actor_id": comp.id,
+                                "operation": "DependsOn",
+                                "target_param": param_name,
+                                "source_expr": expr.raw_expr,
+                                "source_field": expr.field,
+                            });
+                            graph.add_edge_with_meta(
+                                &comp_id,
+                                &param_id,
+                                EdgeType::DependsOn,
+                                Some(format!("param:{}", param_name)),
+                                Some(edge_meta),
+                            );
+                        }
+                        crate::superpage::RefType::UserProperty(prop) => {
+                            let user_id = format!("user:{}", prop);
+                            graph.add_node(
+                                user_id.clone(),
+                                NodeType::Page,
+                                "system".to_string(),
+                                format!("$user.{}", prop),
+                                Some(serde_json::json!({"kind": "user_property"})),
+                            );
+                            let edge_meta = serde_json::json!({
+                                "reason": format!(
+                                    "Component '{}' depends on user property '$user.{}' via field '{}'",
+                                    comp.id, prop, expr.field
+                                ),
+                                "actor_kind": "component",
+                                "actor_id": comp.id,
+                                "operation": "DependsOn",
+                                "target_user_property": prop,
+                                "source_expr": expr.raw_expr,
+                                "source_field": expr.field,
+                            });
+                            graph.add_edge_with_meta(
+                                &comp_id,
+                                &user_id,
+                                EdgeType::DependsOn,
+                                Some(format!("$user.{}", prop)),
+                                Some(edge_meta),
+                            );
+                        }
+                        crate::superpage::RefType::SystemVar(var_name) => {
+                            let sys_id = format!("system:{}", var_name);
+                            graph.add_node(
+                                sys_id.clone(),
+                                NodeType::Page,
+                                "system".to_string(),
+                                format!("${}", var_name),
+                                Some(serde_json::json!({"kind": "system_var"})),
+                            );
+                            let edge_meta = serde_json::json!({
+                                "reason": format!(
+                                    "Component '{}' depends on system variable '${}' via field '{}'",
+                                    comp.id, var_name, expr.field
+                                ),
+                                "actor_kind": "component",
+                                "actor_id": comp.id,
+                                "operation": "DependsOn",
+                                "target_system_var": var_name,
+                                "source_expr": expr.raw_expr,
+                                "source_field": expr.field,
+                            });
+                            graph.add_edge_with_meta(
+                                &comp_id,
+                                &sys_id,
+                                EdgeType::DependsOn,
+                                Some(format!("${}", var_name)),
+                                Some(edge_meta),
+                            );
+                        }
+                        _ => {}
                     }
                 }
             }
