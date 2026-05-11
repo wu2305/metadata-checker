@@ -784,3 +784,107 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 
 - `EMPTY_CONDITION`：条件表达式为空字符串，不生成有效记录但保留诊断
 - `EXPR_DIAGNOSTIC_*`：表达式 AST 解析产生的诊断（如未解析引用、不支持函数等）
+
+## PageLogic 查询输出
+
+### 概述
+
+`--query-page-logic` 输出页面级数据可用性摘要，核心目标是让 AI 不读 raw `.spg` 也能理解：
+- 页面正常显示数据的主要前置条件
+- 关键字段值的来源链路
+- 相关但非必要的旁路关系
+
+### summary 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `page_id` | string | 页面节点 ID，如 `page:app/销售.app/销售/合同协议.spg` |
+| `page_name` | string | 页面名称 |
+| `what_is_it` | string | 一句话描述页面角色 |
+| `page_role` | string | `readonly_dashboard` / `mixed_interaction_page` / `data_maintenance_page` / `navigation_page` |
+| `entrypoint_count` | int | 用户可触发入口数量 |
+| `data_source_count` | int | 数据源读取数量 |
+| `write_target_count` | int | 写入目标数量 |
+| `navigation_count` | int | 页面跳转关系数量 |
+| `display_prerequisites_count` | int | 显示前置条件数量 |
+| `data_prerequisites_count` | int | 数据前置条件数量 |
+| `action_prerequisites_count` | int | 动作前置条件数量 |
+| `primary_paths_count` | int | 主链路数量 |
+| `related_context_count` | int | 旁路关系数量 |
+| `top_display_prerequisites` | object[] | Top-3 显示前置条件（AI 优先读取） |
+| `top_data_prerequisites` | object[] | Top-3 数据前置条件 |
+| `top_action_prerequisites` | object[] | Top-3 动作前置条件 |
+| `key_primary_paths` | object[] | Top-5 主链路（AI 优先读取） |
+
+### details 字段（budget 差异）
+
+**compact 模式**：
+- 所有数组被截断到 Top-5/Top-3
+- 输出 `related_context_summary`（计数 + 类型分布）
+- 不输出 `candidate_paths`、`rejected_paths`、`path_selection_diagnostics`
+
+**normal 模式**：
+- 输出完整 `primary_paths`、`supporting_paths`、`related_context`
+- 不输出 `candidate_paths`、`rejected_paths`
+
+**full 模式**：
+- 额外输出 `candidate_paths`（候选解释链路）
+- 额外输出 `rejected_paths`（被过滤路径 + 过滤原因）
+- 额外输出 `path_selection_diagnostics`（选择器诊断）
+
+### PathCandidate 结构
+
+每条路径候选包含：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `path_id` | string | 路径唯一标识，如 `comp:input1>model:model22>model:fact_qwSidebar` |
+| `purpose` | string | 路径用途描述 |
+| `terminals` | string[] | 路径终端类型：`TargetComponent`、`SinkPhysicalField`、`CrossPageWriter`、`DataFilter`、`Entrypoint`、`Unknown` |
+| `segments` | object[] | 路径段数组，每段包含 `from`、`to`、`edge`、`evidence`、`confidence` |
+| `evidence` | string[] | 路径证据文本 |
+| `selection_reason` | string | 被选择/保留的理由 |
+| `classification` | string | 路径分类：`PrimaryPath`、`CandidatePath`、`SupportingPath`、`RelatedContext`、`RejectedPath` |
+| `classification_reason` | string | 分类理由 |
+| `confidence` | string | `high` / `medium` / `low` |
+| `diagnostics` | string[] | 路径级诊断 |
+| `rank_features` | object | 排名特征（见下） |
+
+### PathSegment 结构
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `from` | object | 起点节点：`node_id`、`node_type`、`path`、`name` |
+| `to` | object | 终点节点：同上 |
+| `edge` | object | 边信息：`edge_type`、`field_path`、`json_path`、`source_expr` |
+| `evidence` | string | 段证据 |
+| `confidence` | string | `high` / `medium` / `low` |
+
+### rank_features 结构
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `contains_target_component` | bool | 是否包含目标组件 |
+| `contains_physical_field` | bool | 是否包含物理表字段 |
+| `contains_cross_page_writer` | bool | 是否包含跨页写入 |
+| `field_name_match` | bool | 字段名是否匹配 |
+| `same_page` | bool | 是否全路径在当前页面 |
+| `has_condition_node` | bool | 是否包含条件节点 |
+| `has_json_path` | bool | 是否有原始 JSON 路径证据 |
+| `edge_type_sequence` | string[] | 边类型序列 |
+| `path_length` | int | 路径段数 |
+| `source_file_count` | int | 涉及的不同源文件数 |
+| `contains_only_structural_edges` | bool | 是否仅结构边（Contains/Triggers） |
+| `contains_dataflow_side_branch` | bool | 是否包含 DataFlow 旁路 |
+| `contains_entrypoint` | bool | 是否包含入口组件 |
+| `contains_model_filter` | bool | 是否包含模型过滤 |
+| `contains_model_read` | bool | 是否包含模型读取 |
+| `contains_model_write` | bool | 是否包含模型写入 |
+
+### 设计原则
+
+1. **rank_features 不等于最终打分**：特征供策略使用，但不直接决定真伪。
+2. **分组保底**：key_primary_paths 采用分类保底策略，避免单一 Top-K 忽视问题。
+3. **可替换选择器**：`PathSelector` trait 允许后续接入 `WeightedPathSelector`、`FutureLearningPathSelector` 等。
+4. **related_context 不是必要条件**：明确标记为参考信息，不进入主结论。
+

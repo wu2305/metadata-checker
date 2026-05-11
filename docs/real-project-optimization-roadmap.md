@@ -278,6 +278,8 @@
 
 ## M19-FIX：可扩展主链路计算框架
 
+**状态：主体实现已收敛，真实项目回归测试待验证。**
+
 ### 背景
 
 M19 已接入页面级 prerequisites、`primary_paths`、`key_primary_paths` 与 `related_context`，但当前 `primary_paths` 仍偏向“高置信图边列表”，不是围绕页面数据可用性目标的因果路径。典型症状：

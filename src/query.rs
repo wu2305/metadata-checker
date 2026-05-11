@@ -609,6 +609,7 @@ pub fn query_page_logic(
     budget: &str,
 ) -> Result<()> {
     let is_compact = budget == "compact";
+    let is_full = budget == "full";
     let page_node = match graph.get_node(page_id) {
         Some(n) => n,
         None => {
@@ -1867,6 +1868,7 @@ pub fn query_page_logic(
         })
         .collect();
 
+    // M19-FIX: budget 差异输出
     let details = if is_compact {
         serde_json::json!({
             "page_inputs": crate::output::brief::truncated_array(&page_inputs, 5),
@@ -1884,7 +1886,8 @@ pub fn query_page_logic(
             "related_context": crate::output::brief::truncated_array(&related_context, 3),
             "related_context_summary": related_context_summary.clone(),
         })
-    } else {
+    } else if is_full {
+        // full 模式：输出完整路径分类 + rejected + diagnostics
         serde_json::json!({
             "page_inputs": page_inputs.clone(),
             "data_sources": data_sources.clone(),
@@ -1898,6 +1901,29 @@ pub fn query_page_logic(
             "data_prerequisites": data_prerequisites.clone(),
             "action_prerequisites": action_prerequisites.clone(),
             "primary_paths": primary_paths.clone(),
+            "candidate_paths": candidate_paths.clone(),
+            "supporting_paths": supporting_paths.clone(),
+            "related_context": related_context.clone(),
+            "rejected_paths": rejected_paths.clone(),
+            "path_selection_diagnostics": path_selection_diagnostics.clone(),
+            "related_context_summary": related_context_summary.clone(),
+        })
+    } else {
+        // normal 模式：输出 primary + supporting，不输出 rejected
+        serde_json::json!({
+            "page_inputs": page_inputs.clone(),
+            "data_sources": data_sources.clone(),
+            "write_targets": write_targets.clone(),
+            "entrypoints": entrypoints.clone(),
+            "action_flows": action_flows.clone(),
+            "visibility_rules": visibility_rules.clone(),
+            "navigation": navigation.clone(),
+            "risk_diagnostics": risk_diagnostics,
+            "display_prerequisites": display_prerequisites.clone(),
+            "data_prerequisites": data_prerequisites.clone(),
+            "action_prerequisites": action_prerequisites.clone(),
+            "primary_paths": primary_paths.clone(),
+            "supporting_paths": supporting_paths.clone(),
             "related_context": related_context.clone(),
             "related_context_summary": related_context_summary.clone(),
         })
