@@ -19,7 +19,9 @@ fn generate_next_queries(
         node_id,
     )];
     match node_type {
-        crate::graph::NodeType::Component | crate::graph::NodeType::Action => {
+        crate::graph::NodeType::Component
+        | crate::graph::NodeType::Action
+        | crate::graph::NodeType::Condition => {
             // 提取页面 ID（comp:page|id 或 action:page|comp|id 格式）
             if let Some(page_part) = node_id.split('|').next() {
                 if let Some(page_id) = page_part.strip_prefix("comp:") {

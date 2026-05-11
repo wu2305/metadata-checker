@@ -961,3 +961,47 @@ fn test_cross_page_update_data_physical_table_writer() {
 
     let _ = std::fs::remove_file(&db_path);
 }
+
+
+#[test]
+fn test_condition_nodes_in_graph() {
+    let db_path =
+        std::env::temp_dir().join("metadata-checker-test-cond-nodes.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/cross_page_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    // writer_page inputA value 条件节点
+    let cond_id = "cond:app/writer_page.spg|inputA#value#0";
+    let node = graph.get_node(cond_id);
+    assert!(node.is_some(), "Graph should contain Condition node {}", cond_id);
+
+    let cond = node.unwrap();
+    assert!(
+        matches!(cond.node_type, metadata_checker::graph::NodeType::Condition),
+        "Node should be Condition type: {:?}",
+        cond.node_type
+    );
+
+    // condition -> owner 边
+    let (outgoing, _incoming) = graph.get_node_edges(cond_id).unwrap();
+    assert!(
+        !outgoing.is_empty(),
+        "Condition {} should have outgoing edges",
+        cond_id
+    );
+
+    // condition -> upstream model 依赖边
+    let model_dep = outgoing
+        .iter()
+        .find(|(n, _)| n.id == "model:model6");
+    assert!(
+        model_dep.is_some(),
+        "Condition should have outgoing edge to model:model6"
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+}

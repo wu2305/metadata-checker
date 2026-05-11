@@ -34,6 +34,8 @@ pub enum NodeType {
     Model,
     Field,
     Action,
+    /// 条件/表达式节点（visibleCondition、action.conditionExp 等）
+    Condition,
 }
 
 /// 图中边类型（关系语义）

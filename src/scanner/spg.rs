@@ -289,7 +289,7 @@ pub fn process_spg_file_from_value(
                         crate::superpage::RefType::ComponentValue(target_id) => {
                             let target_comp_id = format!(
                                 "comp:{}|{}",
-                                rel_path.replace(r"", "/"),
+                                rel_path.replace(r"\", "/"),
                                 target_id
                             );
                             let edge_meta = serde_json::json!({
@@ -315,7 +315,7 @@ pub fn process_spg_file_from_value(
                         crate::superpage::RefType::Param(param_name) => {
                             let param_id = format!(
                                 "param:{}|{}",
-                                rel_path.replace(r"", "/"),
+                                rel_path.replace(r"\", "/"),
                                 param_name
                             );
                             graph.add_node(
@@ -981,6 +981,117 @@ pub fn process_spg_file_from_value(
                 }
                 _ => {}
             }
+        }
+    }
+
+    // 写入 condition 节点和依赖边
+    let conditions = crate::conditions::scan_conditions(&meta, Some(rel_path));
+    for cond in &conditions {
+        let cond_node_id = format!(
+            "cond:{}|{}",
+            rel_path.replace(r"\", "/"),
+            cond.condition_id
+        );
+        let cond_name = format!("{:?}:{}", cond.condition_type, cond.condition_id);
+        let cond_meta = serde_json::json!({
+            "condition_type": format!("{:?}", cond.condition_type),
+            "effect_type": format!("{:?}", cond.effect_type),
+            "subject_type": format!("{:?}", cond.subject_type),
+            "raw_expr": cond.raw_expr,
+            "normalized_expr": cond.normalized_expr,
+            "json_path": cond.json_path,
+            "owner_type": format!("{:?}", cond.owner_type),
+            "owner_id": cond.owner_id,
+            "referenced_symbols": cond.referenced_symbols,
+        });
+        graph.add_node(
+            cond_node_id.clone(),
+            NodeType::Condition,
+            cond.source_file.as_deref().unwrap_or(rel_path).to_string(),
+            cond_name,
+            Some(cond_meta),
+        );
+        if !node_ids.contains(&cond_node_id) {
+            node_ids.insert(cond_node_id.clone());
+        }
+
+        // condition -> owner 边
+        let owner_node_id = match cond.owner_type {
+            crate::conditions::OwnerType::Component => {
+                format!("comp:{}|{}", rel_path.replace(r"\", "/"), cond.owner_id)
+            }
+            crate::conditions::OwnerType::Action => {
+                let parts: Vec<&str> = cond.owner_id.split(':').collect();
+                if parts.len() >= 2 {
+                    format!(
+                        "action:{}|{}|{}",
+                        rel_path.replace(r"\", "/"),
+                        parts[0],
+                        parts[1]
+                    )
+                } else {
+                    continue;
+                }
+            }
+            crate::conditions::OwnerType::ModelSource => {
+                format!("model:{}", cond.owner_id)
+            }
+            crate::conditions::OwnerType::FieldDefault => {
+                format!("comp:{}|{}", rel_path.replace(r"\", "/"), cond.owner_id)
+            }
+            crate::conditions::OwnerType::Page => {
+                page_id.clone()
+            }
+        };
+        let owner_edge_meta = serde_json::json!({
+            "reason": format!("Condition '{}' belongs to owner '{}'", cond.condition_id, cond.owner_id),
+            "actor_kind": "condition",
+            "actor_id": cond.condition_id,
+            "operation": "Conditions",
+            "json_path": cond.json_path,
+            "condition_type": format!("{:?}", cond.condition_type),
+        });
+        graph.add_edge_with_meta(
+            &cond_node_id,
+            &owner_node_id,
+            EdgeType::DependsOn,
+            Some(cond.json_path.clone()),
+            Some(owner_edge_meta),
+        );
+
+        // condition -> upstream dependency 边
+        for sym in &cond.referenced_symbols {
+            let sym_parts: Vec<&str> = sym.splitn(2, ':').collect();
+            if sym_parts.len() < 2 {
+                continue;
+            }
+            let (kind, target_id) = (sym_parts[0], sym_parts[1]);
+            let target_node_id = match kind {
+                "param" => format!("param:{}|{}", rel_path.replace(r"\", "/"), target_id),
+                "model" => {
+                    let model_name = target_id.split('.').next().unwrap_or(target_id);
+                    format!("model:{}", model_name)
+                }
+                "component" => format!("comp:{}|{}", rel_path.replace(r"\", "/"), target_id),
+                "user" => format!("user:{}", target_id),
+                "system" => format!("system:{}", target_id),
+                _ => continue,
+            };
+            let dep_edge_meta = serde_json::json!({
+                "reason": format!("Condition '{}' depends on symbol '{}'", cond.condition_id, sym),
+                "actor_kind": "condition",
+                "actor_id": cond.condition_id,
+                "operation": "DependsOn",
+                "source_expr": cond.raw_expr,
+                "json_path": cond.json_path,
+            });
+            graph.add_edge_with_meta(
+                &cond_node_id,
+                &target_node_id,
+                EdgeType::DependsOn,
+                Some(sym.clone()),
+                Some(dep_edge_meta),
+            );
         }
     }
 

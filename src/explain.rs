@@ -502,6 +502,9 @@ fn classify_importance(
                 "unknown".to_string()
             }
         }
+        crate::graph::NodeType::Condition => {
+            "condition".to_string()
+        }
     }
 }
 
@@ -548,7 +551,37 @@ pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result
         crate::graph::NodeType::Page => {
             explain_page_graph(graph, &node, outgoing, incoming, human)?
         }
+        crate::graph::NodeType::Condition => {
+            explain_condition_graph(graph, &node, outgoing, incoming, human)?
+        }
     }
+    Ok(())
+}
+
+fn explain_condition_graph(
+    _graph: &GraphDB,
+    node: &crate::graph::Node,
+    _outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    _incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    _human: bool,
+) -> Result<()> {
+    let summary = serde_json::json!({
+        "what_is_it": format!("条件节点 {} 定义于 {}", node.name, node.path),
+        "type": "condition",
+    });
+    let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
+    output.query_target = Some(node.id.clone());
+    output.evidence.push(
+        crate::output::Evidence::new(
+            format!("Condition node {} defined in {}", node.id, node.path),
+            "Graph condition node",
+        )
+        .with_confidence(crate::output::Confidence::High)
+        .with_node_id(&node.id)
+        .with_source_file(&node.path),
+    );
+    let out = output.validate();
+    println!("{}", serde_json::to_string_pretty(&out)?);
     Ok(())
 }
 
