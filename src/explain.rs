@@ -1433,6 +1433,109 @@ fn explain_model_graph(
     Ok(())
 }
 
+/// 解释参数节点：展示哪些组件/条件依赖此参数，以及哪些动作设置了此参数
+fn explain_param_graph(
+    graph: &GraphDB,
+    node: &crate::graph::Node,
+    _outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    human: bool,
+) -> Result<()> {
+    let mut dependents = Vec::new();
+    let mut setters = Vec::new();
+
+    for (source, edge) in &incoming {
+        match edge.edge_type {
+            crate::graph::EdgeType::DependsOn => {
+                let page = find_parent_page(graph, &source.id);
+                dependents.push(serde_json::json!({
+                    "id": source.id,
+                    "name": source.name,
+                    "type": format!("{:?}", source.node_type),
+                    "edge_type": format!("{:?}", edge.edge_type),
+                    "field_path": edge.field_path,
+                    "source_file": source.path,
+                    "page": page.as_ref().map(|p| p.name.clone()),
+                    "page_id": page.as_ref().map(|p| p.id.clone()),
+                }));
+            }
+            crate::graph::EdgeType::ActionSetsParam => {
+                let page = find_parent_page(graph, &source.id);
+                setters.push(serde_json::json!({
+                    "id": source.id,
+                    "name": source.name,
+                    "type": format!("{:?}", source.node_type),
+                    "edge_type": format!("{:?}", edge.edge_type),
+                    "field_path": edge.field_path,
+                    "source_file": source.path,
+                    "page": page.as_ref().map(|p| p.name.clone()),
+                    "page_id": page.as_ref().map(|p| p.id.clone()),
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    let dep_count = dependents.len();
+    let set_count = setters.len();
+    let what = format!(
+        "页面参数 {}，被 {} 个组件/条件依赖，被 {} 个动作设置",
+        node.name, dep_count, set_count
+    );
+
+    let summary = serde_json::json!({
+        "what_is_it": what,
+        "type": "param",
+        "type_detail": node.name,
+        "dependent_count": dep_count,
+        "setter_count": set_count,
+    });
+
+    let details = serde_json::json!({
+        "dependents": dependents.clone(),
+        "setters": setters.clone(),
+    });
+
+    let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
+    output.query_target = Some(node.id.clone());
+    output.details = Some(details);
+    output.evidence.push(
+        crate::output::Evidence::new(
+            format!("Param {} has {} dependents and {} setters", node.id, dep_count, set_count),
+            "Graph param node with DependsOn and ActionSetsParam edges",
+        )
+        .with_confidence(crate::output::Confidence::High)
+        .with_node_id(&node.id)
+        .with_source_file(&node.path),
+    );
+
+    let output = output.validate();
+
+    if human {
+        let mut out = io::stdout();
+        writeln!(out, "=== Explain: {} ===", node.id)?;
+        writeln!(out, "What: {}", what)?;
+        writeln!(out, "Path: {}", node.path)?;
+        if !dependents.is_empty() {
+            writeln!(out, "
+--- Dependents ({}) ---", dependents.len())?;
+            for d in &dependents {
+                writeln!(out, "  {:?}", d)?;
+            }
+        }
+        if !setters.is_empty() {
+            writeln!(out, "
+--- Setters ({}) ---", setters.len())?;
+            for s in &setters {
+                writeln!(out, "  {:?}", s)?;
+            }
+        }
+    } else {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+    Ok(())
+}
+
 fn explain_field_graph(
     graph: &GraphDB,
     node: &crate::graph::Node,
@@ -1440,6 +1543,11 @@ fn explain_field_graph(
     incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
 ) -> Result<()> {
+    // 参数节点走独立分支
+    if node.id.starts_with("param:") {
+        return explain_param_graph(graph, node, _outgoing, incoming, human);
+    }
+
     let parent_model = incoming.iter().find_map(|(source, edge)| {
         if matches!(edge.edge_type, crate::graph::EdgeType::Contains)
             && matches!(source.node_type, crate::graph::NodeType::Model)
@@ -1453,6 +1561,7 @@ fn explain_field_graph(
     let mut readers = Vec::new();
     let mut writers = Vec::new();
     let mut produced_by = Vec::new();
+    let mut determined_by = Vec::new();
 
     for (source, edge) in &incoming {
         match edge.edge_type {
@@ -1498,11 +1607,25 @@ fn explain_field_graph(
                     "source_file": source.path,
                 }));
             }
+            crate::graph::EdgeType::DependsOn => {
+                let page = find_parent_page(graph, &source.id);
+                determined_by.push(serde_json::json!({
+                    "id": source.id,
+                    "name": source.name,
+                    "type": format!("{:?}", source.node_type),
+                    "edge_type": format!("{:?}", edge.edge_type),
+                    "field_path": edge.field_path,
+                    "source_file": source.path,
+                    "page": page.as_ref().map(|p| p.name.clone()),
+                    "page_id": page.as_ref().map(|p| p.id.clone()),
+                }));
+            }
             _ => {}
         }
     }
 
     let read_count = readers.len();
+    let det_count = determined_by.len();
     if let Some(ref model) = parent_model
         && let Some((_model_out, model_in)) = graph.get_node_edges(&model.id)
     {
@@ -1867,14 +1990,25 @@ fn explain_field_graph(
         });
     }
 
-    let what = format!(
-        "模型 {} 的字段 {}，被 {} 个组件/动作读取，被 {} 个组件/动作写入，lineage {} 条",
-        model_name,
-        node.name,
-        read_count,
-        write_count,
-        lineage.len()
-    );
+    let what = if det_count > 0 {
+        format!(
+            "模型 {} 的字段 {}，被 {} 个组件/动作读取，被 {} 个条件决定，lineage {} 条",
+            model_name,
+            node.name,
+            read_count,
+            det_count,
+            lineage.len()
+        )
+    } else {
+        format!(
+            "模型 {} 的字段 {}，被 {} 个组件/动作读取，被 {} 个组件/动作写入，lineage {} 条",
+            model_name,
+            node.name,
+            read_count,
+            write_count,
+            lineage.len()
+        )
+    };
     let importance = classify_importance(has_nav, has_write, has_read, false, "", &node.node_type);
 
     let summary = serde_json::json!({
@@ -1888,6 +2022,7 @@ fn explain_field_graph(
         "written_by_count": write_count,
         "produced_by_dataflow_count": produced_by.len(),
         "lineage_count": lineage.len(),
+        "determined_by_count": det_count,
     });
 
     let details = serde_json::json!({
@@ -1897,6 +2032,7 @@ fn explain_field_graph(
         "affects": readers.clone(),
         "lineage": lineage.clone(),
         "produced_by": produced_by.clone(),
+        "determined_by": determined_by.clone(),
     });
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);

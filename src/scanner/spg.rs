@@ -320,7 +320,7 @@ pub fn process_spg_file_from_value(
                             );
                             graph.add_node(
                                 param_id.clone(),
-                                NodeType::Page,
+                                NodeType::Field,
                                 rel_path.to_string(),
                                 param_name.clone(),
                                 Some(serde_json::json!({"kind": "param"})),
@@ -349,7 +349,7 @@ pub fn process_spg_file_from_value(
                             let user_id = format!("user:{}", prop);
                             graph.add_node(
                                 user_id.clone(),
-                                NodeType::Page,
+                                NodeType::Field,
                                 "system".to_string(),
                                 format!("$user.{}", prop),
                                 Some(serde_json::json!({"kind": "user_property"})),
@@ -378,7 +378,7 @@ pub fn process_spg_file_from_value(
                             let sys_id = format!("system:{}", var_name);
                             graph.add_node(
                                 sys_id.clone(),
-                                NodeType::Page,
+                                NodeType::Field,
                                 "system".to_string(),
                                 format!("${}", var_name),
                                 Some(serde_json::json!({"kind": "system_var"})),
@@ -1091,6 +1091,49 @@ pub fn process_spg_file_from_value(
                 EdgeType::DependsOn,
                 Some(sym.clone()),
                 Some(dep_edge_meta),
+            );
+        }
+    }
+
+    // 建立 model.filter 与 model.totalRowCount__ 的隐式关系
+    for cond in &conditions {
+        if matches!(cond.condition_type, crate::conditions::ConditionType::SourceFilterExp)
+            && matches!(cond.owner_type, crate::conditions::OwnerType::ModelSource)
+        {
+            let model_name = &cond.owner_id;
+            let trc_field_id = format!("field:{}.totalRowCount__", model_name);
+            let trc_model_id = format!("model:{}", model_name);
+            graph.add_node(
+                trc_field_id.clone(),
+                NodeType::Field,
+                rel_path.to_string(),
+                "totalRowCount__".to_string(),
+                Some(serde_json::json!({
+                    "kind": "implicit",
+                    "description": "模型过滤后的隐式行数字段",
+                })),
+            );
+            graph.add_edge(&trc_model_id, &trc_field_id, EdgeType::Contains, None);
+
+            let cond_node_id = format!(
+                "cond:{}|{}",
+                rel_path.replace(r"\", "/"),
+                cond.condition_id
+            );
+            let trc_edge_meta = serde_json::json!({
+                "reason": format!("Filter condition determines {}.totalRowCount__", model_name),
+                "actor_kind": "condition",
+                "actor_id": cond.condition_id.clone(),
+                "operation": "DependsOn",
+                "source_expr": cond.raw_expr.clone(),
+                "json_path": cond.json_path.clone(),
+            });
+            graph.add_edge_with_meta(
+                &cond_node_id,
+                &trc_field_id,
+                EdgeType::DependsOn,
+                Some(format!("{}.totalRowCount__", model_name)),
+                Some(trc_edge_meta),
             );
         }
     }
