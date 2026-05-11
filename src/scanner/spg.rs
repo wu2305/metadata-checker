@@ -561,7 +561,10 @@ pub fn process_spg_file_from_value(
                 }
                 "updateData" | "insertData" | "deleteData" => {
                     if let Some(ref data_set) = action.data_set {
-                        let data_set_path = format!("{}.tbl", data_set);
+                        let data_set_path = source_path_map
+                            .get(data_set)
+                            .map(|p| p.to_string())
+                            .unwrap_or_else(|| format!("{}.tbl", data_set));
                         for (field_name, field_value, value_type) in &action.field_values {
                             let ud_meta = serde_json::json!({
                                 "reason": format!("Action '{}' writes to field '{}'", action.action_type, field_name),

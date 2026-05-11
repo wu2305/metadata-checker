@@ -920,3 +920,44 @@ fn test_cross_page_physical_table_writer_discovery() {
 
     let _ = std::fs::remove_file(&db_path);
 }
+
+
+#[test]
+fn test_cross_page_update_data_physical_table_writer() {
+    let db_path =
+        std::env::temp_dir().join("metadata-checker-test-cross-page-update.db");
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/cross_page_project");
+
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+
+    let physical_id = "model:fact_qwSidebar";
+
+    // 验证 update_writer_page 的 actionUpdate 被列为物理表的 writer
+    let writers = graph.find_writers(physical_id);
+    let writer_action = writers
+        .iter()
+        .find(|(n, _)| n.id.contains("actionUpdate"));
+    assert!(
+        writer_action.is_some(),
+        "actionUpdate (updateData with dataSet=model6) should be a writer of {}. Found writers: {:?}",
+        physical_id,
+        writers.iter().map(|(n, _)| n.id.clone()).collect::<Vec<_>>()
+    );
+
+    let (_, writer_edge) = writer_action.unwrap();
+    assert_eq!(writer_edge.edge_type, EdgeType::ActionWrites);
+    assert!(
+        writer_edge
+            .field_path
+            .as_deref()
+            .unwrap_or("")
+            .contains("phoneNumber"),
+        "Edge should reference phoneNumber: {:?}",
+        writer_edge.field_path
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+}
