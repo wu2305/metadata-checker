@@ -3371,6 +3371,24 @@ fn test_cli_query_page_logic_m19_prerequisites_contract() {
             .is_some(),
         "related_context must be an array in normal mode"
     );
+
+    // M19 summary 可读字段：Top-N prerequisites 和 key_primary_paths
+    assert!(
+        summary.contains_key("top_display_prerequisites"),
+        "summary must have top_display_prerequisites for readable AI output"
+    );
+    assert!(
+        summary.contains_key("top_data_prerequisites"),
+        "summary must have top_data_prerequisites for readable AI output"
+    );
+    assert!(
+        summary.contains_key("top_action_prerequisites"),
+        "summary must have top_action_prerequisites for readable AI output"
+    );
+    assert!(
+        summary.contains_key("key_primary_paths"),
+        "summary must have key_primary_paths for readable AI output"
+    );
 }
 
 #[test]

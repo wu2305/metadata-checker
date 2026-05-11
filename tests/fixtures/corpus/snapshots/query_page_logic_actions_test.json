@@ -149,13 +149,27 @@
     "data_source_count": 1,
     "display_prerequisites_count": 0,
     "entrypoint_count": 10,
+    "key_primary_paths": [
+      {
+        "confidence": "high",
+        "edge_type": "Writes",
+        "field_path": "model1.name",
+        "from": "comp:app/action_category_contract.spg|input1",
+        "json_path": "",
+        "raw_expr": "model1.name",
+        "source_file": "app/action_category_contract.spg",
+        "to": "model:model1"
+      }
+    ],
     "navigation_count": 3,
     "page_id": "page:app/actions_test.spg",
     "page_name": "actions_test",
     "page_role": "mixed_interaction_page",
-    "primary_paths_count": 0,
+    "primary_paths_count": 1,
     "related_context_count": 0,
     "risk_count": 2,
+    "top_action_prerequisites": [],
+    "top_data_prerequisites": [],
     "top_data_sources": [
       {
         "edge_type": "ActionValidates",
@@ -170,6 +184,7 @@
         "type": "ActionValidates"
       }
     ],
+    "top_display_prerequisites": [],
     "top_entrypoints": [
       {
         "edge_type": "Triggers",

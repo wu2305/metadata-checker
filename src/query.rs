@@ -1321,6 +1321,7 @@ pub fn query_page_logic(
                 if matches!(source.node_type, crate::graph::NodeType::Condition)
                     && matches!(edge.edge_type, crate::graph::EdgeType::DependsOn)
                     && !seen_conditions.contains(&source.id)
+                    && source.path == page_node.path
                 {
                     seen_conditions.insert(source.id.clone());
                     if let Some(prereq) = build_prerequisite(source, edge) {
@@ -1528,7 +1529,7 @@ pub fn query_page_logic(
         "note": "related_context 不是必要条件，仅作参考",
     });
 
-    // primary_paths 按 confidence 排序
+    // primary_paths 按 confidence 排序，高 confidence 优先
     primary_paths.sort_by(|a, b| {
         let a_conf = a.get("confidence").and_then(|v| v.as_str()).unwrap_or("medium");
         let b_conf = b.get("confidence").and_then(|v| v.as_str()).unwrap_or("medium");
@@ -1541,6 +1542,35 @@ pub fn query_page_logic(
 
     // ---- 6. Risk diagnostics ----
     let mut diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
+    // 注意力漂移治理：限制 primary_paths 数量，超出的旁路关系降级到 related_context
+    const PRIMARY_PATH_LIMIT: usize = 50;
+    if primary_paths.len() > PRIMARY_PATH_LIMIT {
+        let overflow = primary_paths.split_off(PRIMARY_PATH_LIMIT);
+        let overflow_count = overflow.len();
+        for mut path in overflow {
+            if let Some(obj) = path.as_object_mut() {
+                obj.insert("reason".to_string(), serde_json::json!("旁路关系：超出主链路限制"));
+                obj.insert("confidence".to_string(), serde_json::json!("low"));
+            }
+            related_context.push(path);
+        }
+        diagnostics.push(crate::output::Diagnostic {
+            severity: crate::output::DiagnosticSeverity::Info,
+            code: "PRIMARY_PATHS_TRUNCATED".to_string(),
+            message: format!(
+                "Primary paths limited to {}; {} overflow relations moved to related_context",
+                PRIMARY_PATH_LIMIT,
+                overflow_count
+            ),
+            location: crate::output::Location {
+                source_file: Some(page_node.path.clone()),
+                node_id: Some(page_id.to_string()),
+                json_path: None,
+            },
+            suggestion: Some("Use --budget full to see more relations, or focus on key_primary_paths in summary".to_string()),
+        });
+    }
+
 
     if write_targets.is_empty() {
         diagnostics.push(crate::output::Diagnostic {
@@ -1858,6 +1888,12 @@ pub fn query_page_logic(
     let top_writes: Vec<serde_json::Value> = write_targets.iter().take(3).cloned().collect();
     let top_navigation: Vec<serde_json::Value> = navigation.iter().take(3).cloned().collect();
 
+    // Build top-N prerequisite lists for readable summary
+    let top_display_prerequisites: Vec<serde_json::Value> = display_prerequisites.iter().take(3).cloned().collect();
+    let top_data_prerequisites: Vec<serde_json::Value> = data_prerequisites.iter().take(3).cloned().collect();
+    let top_action_prerequisites: Vec<serde_json::Value> = action_prerequisites.iter().take(3).cloned().collect();
+    let key_primary_paths: Vec<serde_json::Value> = primary_paths.iter().take(5).cloned().collect();
+
     let summary = serde_json::json!({
         "page_id": page_id,
         "page_name": page_node.name,
@@ -1877,6 +1913,10 @@ pub fn query_page_logic(
         "action_prerequisites_count": action_prerequisites.len(),
         "primary_paths_count": primary_paths.len(),
         "related_context_count": related_context.len(),
+        "top_display_prerequisites": top_display_prerequisites,
+        "top_data_prerequisites": top_data_prerequisites,
+        "top_action_prerequisites": top_action_prerequisites,
+        "key_primary_paths": key_primary_paths,
     });
 
     let risk_diagnostics: Vec<serde_json::Value> = diagnostics
