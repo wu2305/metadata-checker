@@ -1229,6 +1229,275 @@ pub fn query_page_logic(
         }));
     }
 
+    // ---- 5.5 收集页面级条件前置条件（M19） ----
+    let mut display_prerequisites: Vec<serde_json::Value> = Vec::new();
+    let mut data_prerequisites: Vec<serde_json::Value> = Vec::new();
+    let mut action_prerequisites: Vec<serde_json::Value> = Vec::new();
+    let mut seen_conditions: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    /// 从 Condition 节点构建 prerequisite 结构
+    fn build_prerequisite(
+        cond_node: &crate::graph::Node,
+        edge: &crate::graph::Edge,
+    ) -> Option<serde_json::Value> {
+        let meta = cond_node.meta.as_ref()?;
+        let condition_type = meta.get("condition_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let raw_expr = meta.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
+        let normalized_expr = meta.get("normalized_expr").and_then(|v| v.as_str()).unwrap_or("");
+        let json_path = meta.get("json_path").and_then(|v| v.as_str()).unwrap_or("");
+        let owner_type = meta.get("owner_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let owner_id = meta.get("owner_id").and_then(|v| v.as_str()).unwrap_or("");
+        let effect_type = meta.get("effect_type").and_then(|v| v.as_str()).unwrap_or("");
+        let subject_type = meta.get("subject_type").and_then(|v| v.as_str()).unwrap_or("");
+        let referenced_symbols: Vec<String> = meta
+            .get("referenced_symbols")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let source_file = cond_node.path.clone();
+
+        // 影响范围计算：统计引用的模型数量和组件数量
+        let affected_model_count = referenced_symbols.iter().filter(|s| s.starts_with("model:")).count();
+        let affected_component_count = referenced_symbols.iter().filter(|s| s.starts_with("comp:")).count();
+        let is_entrypoint = matches!(subject_type, "action") || matches!(effect_type, "execute");
+        let is_main_panel = matches!(subject_type, "component") && !matches!(effect_type, "execute");
+        let affects_row_count = matches!(effect_type, "Filter") || condition_type.contains("Filter");
+
+        // confidence：有原始表达式和 JSON 路径时为 high
+        let confidence = if !json_path.is_empty() && !raw_expr.is_empty() {
+            "high"
+        } else {
+            "medium"
+        };
+
+        // 诊断：空表达式
+        let mut diagnostics: Vec<serde_json::Value> = Vec::new();
+        if raw_expr.trim().is_empty() {
+            diagnostics.push(serde_json::json!({
+                "code": "EMPTY_CONDITION",
+                "message": "条件表达式为空",
+            }));
+        }
+
+        Some(serde_json::json!({
+            "kind": condition_type,
+            "target": owner_id,
+            "owner_type": owner_type,
+            "subject_type": subject_type,
+            "effect_type": effect_type,
+            "raw_expr": raw_expr,
+            "normalized_expr": normalized_expr,
+            "json_path": json_path,
+            "source_file": source_file,
+            "depends_on": referenced_symbols,
+            "impact": {
+                "affected_component_count": affected_component_count,
+                "affected_model_count": affected_model_count,
+                "is_entrypoint": is_entrypoint,
+                "is_main_panel": is_main_panel,
+                "affects_row_count": affects_row_count,
+                "impact_score": affected_model_count + affected_component_count + if is_entrypoint { 3 } else if is_main_panel { 2 } else { 1 },
+            },
+            "evidence": {
+                "node_id": cond_node.id,
+                "edge_type": format!("{:?}", edge.edge_type),
+                "json_path": json_path,
+                "raw_expr": raw_expr,
+                "source_file": cond_node.path,
+            },
+            "confidence": confidence,
+            "diagnostics": diagnostics,
+        }))
+    }
+
+    // 辅助：遍历节点入边，收集 condition
+    let mut collect_from_node = |node_id: &str| {
+        if let Some((_out, incoming)) = graph.get_node_edges(node_id) {
+            for (source, edge) in &incoming {
+                if matches!(source.node_type, crate::graph::NodeType::Condition)
+                    && matches!(edge.edge_type, crate::graph::EdgeType::DependsOn)
+                    && !seen_conditions.contains(&source.id)
+                {
+                    seen_conditions.insert(source.id.clone());
+                    if let Some(prereq) = build_prerequisite(source, edge) {
+                        let kind = prereq.get("kind").and_then(|v| v.as_str()).unwrap_or("unknown");
+                        match kind {
+                            "VisibleCondition" | "EnableCondition" | "MaskCondition" => {
+                                display_prerequisites.push(prereq);
+                            }
+                            "SourceFilterExp" | "SourceFilterClause" | "ItemFilter" | "CalcCondition" | "CalcExp" | "DefaultValueExp" | "FieldExp" => {
+                                data_prerequisites.push(prereq);
+                            }
+                            "ActionConditionExp" | "ActionCondition" | "SubmitCondition" | "SubmitPageCondition" => {
+                                action_prerequisites.push(prereq);
+                            }
+                            _ => {
+                                // 默认归入 display_prerequisites
+                                display_prerequisites.push(prereq);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    // 从组件收集
+    for comp in &child_components {
+        collect_from_node(&comp.id);
+    }
+    // 从动作收集
+    for action in &child_actions {
+        collect_from_node(&action.id);
+    }
+    // 从数据源模型收集（model filter）
+    for ds in &data_sources {
+        if let Some(target_id) = ds.get("target_id").and_then(|v| v.as_str()) {
+            collect_from_node(target_id);
+        }
+    }
+
+    // 排序：按 impact_score 降序
+    fn sort_by_impact(prereqs: &mut Vec<serde_json::Value>) {
+        prereqs.sort_by(|a, b| {
+            let a_score = a
+                .get("impact")
+                .and_then(|v| v.get("impact_score"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let b_score = b
+                .get("impact")
+                .and_then(|v| v.get("impact_score"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            b_score.cmp(&a_score)
+        });
+    }
+    sort_by_impact(&mut display_prerequisites);
+    sort_by_impact(&mut data_prerequisites);
+    sort_by_impact(&mut action_prerequisites);
+
+    // ---- 5.6 主链路抽取（M19.5） ----
+    let mut primary_paths: Vec<serde_json::Value> = Vec::new();
+    let mut related_context: Vec<serde_json::Value> = Vec::new();
+    let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // 从 entrypoints 出发，沿 write 边追踪到物理表
+    for ep in &entrypoints {
+        if let Some(ep_id) = ep.get("id").and_then(|v| v.as_str()) {
+            if let Some((ep_out, _ep_in)) = graph.get_node_edges(ep_id) {
+                for (target, edge) in &ep_out {
+                    if matches!(edge.edge_type, crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites) {
+                        let field_path = edge.field_path.as_deref().unwrap_or("?");
+                        let path_key = format!("{}->{}", ep_id, target.id);
+                        if !seen_paths.contains(&path_key) {
+                            seen_paths.insert(path_key);
+                            let source_expr = edge
+                                .meta
+                                .as_ref()
+                                .and_then(|m| m.get("source_expr"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            let json_path = edge
+                                .meta
+                                .as_ref()
+                                .and_then(|m| m.get("json_path"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            primary_paths.push(serde_json::json!({
+                                "from": ep_id,
+                                "to": target.id,
+                                "edge_type": format!("{:?}", edge.edge_type),
+                                "field_path": field_path,
+                                "source_file": ep.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
+                                "json_path": json_path,
+                                "raw_expr": source_expr,
+                                "confidence": "high",
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 从 data_sources 出发，读取边也纳入主链路
+    for ds in &data_sources {
+        if let (Some(src), Some(tgt), Some(et)) = (
+            ds.get("source_component").or_else(|| ds.get("source_action")).and_then(|v| v.as_str()),
+            ds.get("target_id").and_then(|v| v.as_str()),
+            ds.get("edge_type").and_then(|v| v.as_str()),
+        ) {
+            let path_key = format!("{}->{}", src, tgt);
+            if !seen_paths.contains(&path_key) {
+                seen_paths.insert(path_key);
+                primary_paths.push(serde_json::json!({
+                    "from": src,
+                    "to": tgt,
+                    "edge_type": et,
+                    "field_path": ds.get("field_path").and_then(|v| v.as_str()).unwrap_or("?"),
+                    "source_file": ds.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
+                    "json_path": ds.get("json_path").and_then(|v| v.as_str()).unwrap_or(""),
+                    "raw_expr": ds.get("raw_expr").and_then(|v| v.as_str()).unwrap_or(""),
+                    "confidence": if ds.get("json_path").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false) { "high" } else { "medium" },
+                }));
+            }
+        }
+    }
+
+    // 旁路关系：收集非本页面的跨页关系
+    for comp in &child_components {
+        if let Some((comp_out, _comp_in)) = graph.get_node_edges(&comp.id) {
+            for (target, edge) in &comp_out {
+                // 跨页面关系（目标页面不是当前页面）
+                if target.id.starts_with("page:") && target.id != page_id {
+                    let ctx_key = format!("{}->{}", comp.id, target.id);
+                    if !seen_paths.contains(&ctx_key) {
+                        seen_paths.insert(ctx_key);
+                        related_context.push(serde_json::json!({
+                            "from": comp.id,
+                            "to": target.id,
+                            "edge_type": format!("{:?}", edge.edge_type),
+                            "field_path": edge.field_path,
+                            "source_file": comp.path,
+                            "confidence": "low",
+                            "reason": "跨页面旁路关系",
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- 5.7 注意力漂移治理：旁路关系统计 ----
+    let related_context_summary = serde_json::json!({
+        "total_count": related_context.len(),
+        "by_type": {
+            "OpensPage": related_context.iter().filter(|v| v.get("edge_type").and_then(|e| e.as_str()) == Some("OpensPage")).count(),
+            "EmbedsPage": related_context.iter().filter(|v| v.get("edge_type").and_then(|e| e.as_str()) == Some("EmbedsPage")).count(),
+            "other": related_context.iter().filter(|v| {
+                let et = v.get("edge_type").and_then(|e| e.as_str()).unwrap_or("");
+                et != "OpensPage" && et != "EmbedsPage"
+            }).count(),
+        },
+        "note": "related_context 不是必要条件，仅作参考",
+    });
+
+    // primary_paths 按 confidence 排序
+    primary_paths.sort_by(|a, b| {
+        let a_conf = a.get("confidence").and_then(|v| v.as_str()).unwrap_or("medium");
+        let b_conf = b.get("confidence").and_then(|v| v.as_str()).unwrap_or("medium");
+        match (a_conf, b_conf) {
+            ("high", "medium") | ("high", "low") | ("medium", "low") => std::cmp::Ordering::Less,
+            ("medium", "high") | ("low", "high") | ("low", "medium") => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        }
+    });
+
     // ---- 6. Risk diagnostics ----
     let mut diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
 
@@ -1562,6 +1831,11 @@ pub fn query_page_logic(
         "top_data_sources": top_data_sources,
         "top_writes": top_writes,
         "top_navigation": top_navigation,
+        "display_prerequisites_count": display_prerequisites.len(),
+        "data_prerequisites_count": data_prerequisites.len(),
+        "action_prerequisites_count": action_prerequisites.len(),
+        "primary_paths_count": primary_paths.len(),
+        "related_context_count": related_context.len(),
     });
 
     let risk_diagnostics: Vec<serde_json::Value> = diagnostics
@@ -1587,6 +1861,12 @@ pub fn query_page_logic(
             "visibility_rules": crate::output::brief::truncated_array(&visibility_rules, 5),
             "navigation": crate::output::brief::truncated_array(&navigation, 5),
             "risk_diagnostics": crate::output::brief::truncated_array(&risk_diagnostics, 10),
+            "display_prerequisites": crate::output::brief::truncated_array(&display_prerequisites, 5),
+            "data_prerequisites": crate::output::brief::truncated_array(&data_prerequisites, 5),
+            "action_prerequisites": crate::output::brief::truncated_array(&action_prerequisites, 5),
+            "primary_paths": crate::output::brief::truncated_array(&primary_paths, 5),
+            "related_context": crate::output::brief::truncated_array(&related_context, 3),
+            "related_context_summary": related_context_summary.clone(),
         })
     } else {
         serde_json::json!({
@@ -1598,6 +1878,12 @@ pub fn query_page_logic(
             "visibility_rules": visibility_rules.clone(),
             "navigation": navigation.clone(),
             "risk_diagnostics": risk_diagnostics,
+            "display_prerequisites": display_prerequisites.clone(),
+            "data_prerequisites": data_prerequisites.clone(),
+            "action_prerequisites": action_prerequisites.clone(),
+            "primary_paths": primary_paths.clone(),
+            "related_context": related_context.clone(),
+            "related_context_summary": related_context_summary.clone(),
         })
     };
 
