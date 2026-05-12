@@ -108,6 +108,16 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
+        if let Some(ref explain_target) = args.explain_condition {
+            explain::explain_condition_target(
+                &graph,
+                explain_target,
+                args.is_human(),
+                &args.budget,
+            )?;
+            return Ok(());
+        }
+
         if let Some(ref context_id) = args.context {
             context::context_node_graph(
                 &graph,

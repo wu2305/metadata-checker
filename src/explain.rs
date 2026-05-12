@@ -1,5 +1,7 @@
 use crate::dependency::DependencyGraph;
 use crate::graph::GraphDB;
+use crate::path::PathSelector;
+use crate::path::PathFinder;
 use crate::output::schema::format_next_query;
 use crate::superpage::{RefType, SuperPageMetadata};
 use anyhow::Result;
@@ -512,6 +514,255 @@ fn classify_importance(
 ///
 /// 支持完整 ID，例如 --explain model:physical_x。
 /// 按 NodeType 分发，生成语义化的 summary、details、evidence。
+/// 解释目标节点为什么具有当前状态（为什么不显示/为什么不可用/为什么数据为空）
+///
+/// 支持的目标格式：
+/// - `comp:PAGE|ID` — 解释组件为什么不显示或为什么不可用
+/// - `model:ID` — 解释模型为什么可能为空
+/// - `field:MODEL.FIELD` — 解释字段值来源或为什么为空
+pub fn explain_condition_target(
+    graph: &GraphDB,
+    target_id: &str,
+    human: bool,
+    _budget: &str,
+) -> Result<()> {
+    let target_node = match graph.get_node(target_id) {
+        Some(n) => n,
+        None => {
+            let candidates = graph.find_candidates(target_id, 5);
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::Explain,
+                target_id,
+                &candidates,
+            );
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+    };
+
+    let page_node = match target_node.node_type {
+        crate::graph::NodeType::Page => target_node.clone(),
+        _ => find_parent_page(graph, &target_node.id).unwrap_or(target_node.clone()),
+    };
+
+    let mut blocking_conditions: Vec<serde_json::Value> = Vec::new();
+    let mut data_empty_gates: Vec<serde_json::Value> = Vec::new();
+    let mut supporting_context: Vec<serde_json::Value> = Vec::new();
+    let mut related_context: Vec<serde_json::Value> = Vec::new();
+    let mut seen_conditions: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    if let Some((_out, incoming)) = graph.get_node_edges(&target_node.id) {
+        for (source, edge) in &incoming {
+            if !matches!(source.node_type, crate::graph::NodeType::Condition) {
+                continue;
+            }
+            if !matches!(edge.edge_type, crate::graph::EdgeType::DependsOn) {
+                continue;
+            }
+            if seen_conditions.contains(&source.id) {
+                continue;
+            }
+            seen_conditions.insert(source.id.clone());
+            let meta = source.meta.as_ref().unwrap_or(&serde_json::Value::Null);
+            let condition_type = meta.get("condition_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let effect_type = meta.get("effect_type").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_expr = meta.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
+            let normalized_expr = meta.get("normalized_expr").and_then(|v| v.as_str()).unwrap_or("");
+            let json_path = meta.get("json_path").and_then(|v| v.as_str()).unwrap_or("");
+            let owner_type = meta.get("owner_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let subject_type = meta.get("subject_type").and_then(|v| v.as_str()).unwrap_or("");
+            let referenced_symbols: Vec<String> = meta
+                .get("referenced_symbols")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
+            let cond_obj = serde_json::json!({
+                "condition_id": source.id.clone(),
+                "condition_type": condition_type,
+                "effect_type": effect_type,
+                "subject_type": subject_type,
+                "owner_type": owner_type,
+                "raw_expr": raw_expr,
+                "normalized_expr": normalized_expr,
+                "json_path": json_path,
+                "source_file": source.path,
+                "referenced_symbols": referenced_symbols,
+            });
+            if condition_type == "visible_condition" || condition_type == "disable_condition" {
+                blocking_conditions.push(cond_obj);
+            } else if condition_type.contains("Filter") || raw_expr.contains("totalRowCount__") {
+                data_empty_gates.push(cond_obj);
+            } else if condition_type == "action_condition" || condition_type == "action_condition_exp" {
+                blocking_conditions.push(cond_obj);
+            } else {
+                supporting_context.push(cond_obj);
+            }
+        }
+    }
+
+    let mut primary_path: Vec<serde_json::Value> = Vec::new();
+    if target_node.id.starts_with("field:") || target_node.id.starts_with("comp:") {
+        // 1. 有界 BFS 发现候选路径
+        let path_query = crate::path::PathQuery {
+            page_id: format!("page:{}", page_node.path),
+            page_path: page_node.path.clone(),
+            target_anchors: vec![target_node.id.clone()],
+            source_anchors: Vec::new(),
+            sink_anchors: Vec::new(),
+            bridge_anchors: Vec::new(),
+            excluded_anchors: Vec::new(),
+            budget: _budget.to_string(),
+        };
+        let finder = crate::path::BoundedCausalPathFinder::default();
+        let mut candidates = finder.find_candidates(graph, &path_query);
+
+        // 2. 字段级主链路保底：为组件/字段目标构造精确三段路径
+        if target_node.id.starts_with("comp:") {
+            // 收集组件的 outgoing Reads 边，构造 data_source
+            if let Some((outgoing, _incoming)) = graph.get_node_edges(&target_node.id) {
+                for (target, edge) in &outgoing {
+                    if matches!(edge.edge_type, crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads)
+                        && edge.field_path.is_some()
+                    {
+                        let data_source = serde_json::json!({
+                            "source_component": target_node.id,
+                            "target_id": target.id,
+                            "field_path": edge.field_path,
+                            "raw_expr": edge.meta.as_ref().and_then(|m| m.get("source_expr")).and_then(|v| v.as_str()),
+                            "json_path": edge.meta.as_ref().and_then(|m| m.get("json_path")).and_then(|v| v.as_str()),
+                        });
+                        let field_candidates = crate::path::build_field_causal_paths_for_data_source(
+                            graph, &page_node, &data_source,
+                        );
+                        candidates.extend(field_candidates);
+                    }
+                }
+            }
+        } else if target_node.id.starts_with("field:") {
+            // field 目标：构造 comp 来源和 raw_expr
+            let parts: Vec<&str> = target_node.id.split('.').collect();
+            if parts.len() >= 2 {
+                let model_id = parts[0];
+                let field_name = parts[1..].join(".");
+                let data_source = serde_json::json!({
+                    "source_component": target_node.id,
+                    "target_id": target_node.id,
+                    "field_path": format!("{}.{}", model_id, field_name),
+                    "raw_expr": format!("${{{}}}", target_node.id),
+                });
+                let field_candidates = crate::path::build_field_causal_paths_for_data_source(
+                    graph, &page_node, &data_source,
+                );
+                candidates.extend(field_candidates);
+            }
+        }
+
+        // 去重
+        {
+            let mut seen = std::collections::HashSet::new();
+            candidates.retain(|c| seen.insert(c.path_id.clone()));
+        }
+
+        let selector = crate::path::RuleBasedPathSelector;
+        let selection = selector.select(&path_query, candidates);
+        for p in selection.primary_paths {
+            primary_path.push(p.to_json());
+        }
+        for p in selection.candidate_paths {
+            related_context.push(serde_json::json!({
+                "type": "candidate_path",
+                "path": p.to_json(),
+            }));
+        }
+    }
+
+    let primary_reason = if !blocking_conditions.is_empty() {
+        format!(
+            "目标 {} 受 {} 个阻塞条件影响（visible/disable/action condition）",
+            target_node.id, blocking_conditions.len()
+        )
+    } else if !data_empty_gates.is_empty() {
+        format!(
+            "目标 {} 受 {} 个数据门控影响（filter/totalRowCount__）",
+            target_node.id, data_empty_gates.len()
+        )
+    } else if !primary_path.is_empty() {
+        format!(
+            "目标 {} 的数据链路已找到，共 {} 条主路径",
+            target_node.id, primary_path.len()
+        )
+    } else {
+        format!("目标 {} 未发现明确的阻塞条件或数据链路", target_node.id)
+    };
+
+    let summary = serde_json::json!({
+        "what_is_it": format!("Why 解释: {}", target_node.id),
+        "target_id": target_node.id,
+        "target_type": format!("{:?}", target_node.node_type),
+        "target_name": target_node.name,
+        "primary_reason": primary_reason,
+        "blocking_conditions_count": blocking_conditions.len(),
+        "data_empty_gates_count": data_empty_gates.len(),
+        "primary_paths_count": primary_path.len(),
+        "supporting_context_count": supporting_context.len(),
+        "related_context_count": related_context.len(),
+    });
+
+    let details = serde_json::json!({
+        "target": {
+            "node_id": target_node.id,
+            "node_type": format!("{:?}", target_node.node_type),
+            "name": target_node.name,
+            "path": target_node.path,
+        },
+        "primary_path": primary_path,
+        "blocking_conditions": blocking_conditions,
+        "data_empty_gates": data_empty_gates,
+        "supporting_context": supporting_context,
+        "related_context": related_context,
+    });
+
+    let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
+    output.query_target = Some(target_id.to_string());
+    output.details = Some(details);
+
+    if human {
+        println!("=== Why: {} ===", target_id);
+        println!("Primary reason: {}", primary_reason);
+        if !blocking_conditions.is_empty() {
+            println!("
+Blocking conditions:");
+            for c in &blocking_conditions {
+                println!("  - {}: {}",
+                    c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
+                    c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
+                );
+            }
+        }
+        if !data_empty_gates.is_empty() {
+            println!("
+Data empty gates:");
+            for c in &data_empty_gates {
+                println!("  - {}: {}",
+                    c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
+                    c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
+                );
+            }
+        }
+        if !primary_path.is_empty() {
+            println!("
+Primary paths:");
+            for p in &primary_path {
+                println!("  {}", serde_json::to_string(p).unwrap_or_default());
+            }
+        }
+    } else {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+
+    Ok(())
+}
+
 pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result<()> {
     let node = match graph.get_node(node_id) {
         Some(n) => n,

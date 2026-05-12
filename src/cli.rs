@@ -182,6 +182,13 @@ pub struct Cli {
         help = "Resolve local model ID within page scope. Accepts either 'PAGE_ID MODEL' or just 'MODEL' (with --resolve-model-page)"
     )]
     pub resolve_model: Option<Vec<String>>,
+
+    #[arg(
+        long,
+        value_name = "TARGET",
+        help = "Explain why a component/model/field behaves as it does (visible/disabled/data-empty). Supports comp:PAGE|ID, model:ID, field:MODEL.FIELD (requires --project-dir)"
+    )]
+    pub explain_condition: Option<String>,
 }
 
 impl Cli {

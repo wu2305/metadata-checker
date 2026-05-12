@@ -4283,3 +4283,83 @@ fn test_real_project_query_page_logic_input3_chain() {
         summary_rc, details_rc_total
     );
 }
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_explain_condition_input3() {
+    let graph_db_path = "/tmp/m20_test_xiaoshouyi.graphdb";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain-condition",
+        "comp:app/销售.app/销售/合同协议.spg|input3",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let details_val = ai.details.as_ref().expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    // 必须包含 primary_reason
+    assert!(
+        summary.contains_key("primary_reason"),
+        "summary 必须包含 primary_reason"
+    );
+
+    // primary_path 必须包含 input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber 链路
+    let primary_path = details
+        .get("primary_path")
+        .and_then(|v| v.as_array())
+        .expect("primary_path must be array");
+    let has_input3_chain = primary_path.iter().any(|p| {
+        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
+        path_id.contains("input3") && path_id.contains("model22.phoneNumber") && path_id.contains("fact_qwSidebar.phoneNumber")
+    });
+    assert!(
+        has_input3_chain,
+        "primary_path 必须包含 input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber 链路"
+    );
+
+    // primary_path 前 5 条不能全是无关模型（如 model19.brand）
+    let top5 = primary_path.iter().take(5).collect::<Vec<_>>();
+    let all_noise = top5.iter().all(|p| {
+        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
+        !path_id.contains("input3") && !path_id.contains("model22")
+    });
+    assert!(
+        !all_noise,
+        "primary_path 前 5 条不能全部是无关噪声，至少应包含 input3 链路"
+    );
+
+    // blocking_conditions 或 data_empty_gates 不应包含 phone_time
+    let empty: Vec<serde_json::Value> = Vec::new();
+    let blocking = details
+        .get("blocking_conditions")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let gates = details
+        .get("data_empty_gates")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    for cond in blocking.iter().chain(gates.iter()) {
+        let raw = cond.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            !raw.contains("phone_time"),
+            "input3 的 why 解释不应包含 phone_time"
+        );
+    }
+}
