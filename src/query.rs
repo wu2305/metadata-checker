@@ -1475,20 +1475,6 @@ pub fn query_page_logic(
         }
     }
 
-    // ---- 5.7 注意力漂移治理：旁路关系统计 ----
-    let related_context_summary = serde_json::json!({
-        "total_count": related_context.len(),
-        "by_type": {
-            "OpensPage": related_context.iter().filter(|v| v.get("edge_type").and_then(|e| e.as_str()) == Some("OpensPage")).count(),
-            "EmbedsPage": related_context.iter().filter(|v| v.get("edge_type").and_then(|e| e.as_str()) == Some("EmbedsPage")).count(),
-            "other": related_context.iter().filter(|v| {
-                let et = v.get("edge_type").and_then(|e| e.as_str()).unwrap_or("");
-                et != "OpensPage" && et != "EmbedsPage"
-            }).count(),
-        },
-        "note": "related_context 不是必要条件，仅作参考",
-    });
-
     // primary_paths 按 confidence 排序，高 confidence 优先
     primary_paths.sort_by(|a, b| {
         let a_conf = a.get("confidence").and_then(|v| v.as_str()).unwrap_or("medium");
@@ -1530,6 +1516,20 @@ pub fn query_page_logic(
             suggestion: Some("Use --budget full to see more relations, or focus on key_primary_paths in summary".to_string()),
         });
     }
+    // ---- 5.7 注意力漂移治理：旁路关系统计（必须在 truncation 之后）
+    let related_context_summary = serde_json::json!({
+        "total_count": related_context.len(),
+        "by_type": {
+            "OpensPage": related_context.iter().filter(|v| v.get("edge_type").and_then(|e| e.as_str()) == Some("OpensPage")).count(),
+            "EmbedsPage": related_context.iter().filter(|v| v.get("edge_type").and_then(|e| e.as_str()) == Some("EmbedsPage")).count(),
+            "other": related_context.iter().filter(|v| {
+                let et = v.get("edge_type").and_then(|e| e.as_str()).unwrap_or("");
+                et != "OpensPage" && et != "EmbedsPage"
+            }).count(),
+        },
+        "note": "related_context 不是必要条件，仅作参考",
+    });
+
 
 
     if write_targets.is_empty() {

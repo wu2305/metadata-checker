@@ -4267,4 +4267,19 @@ fn test_real_project_query_page_logic_input3_chain() {
         top3_has_input3,
         "key_primary_paths 前 3 条必须包含 input3 三段链路，避免无关噪声排在前位"
     );
+
+    // summary.related_context_count 与 details.related_context_summary.total_count 必须一致
+    let summary_rc = summary.get("related_context_count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let details_val = ai.details.as_ref().expect("details must exist");
+    let details_obj = details_val.as_object().expect("details must be object");
+    let details_rc_total = details_obj
+        .get("related_context_summary")
+        .and_then(|v| v.get("total_count"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert_eq!(
+        summary_rc, details_rc_total,
+        "summary.related_context_count ({}) 必须等于 details.related_context_summary.total_count ({})",
+        summary_rc, details_rc_total
+    );
 }
