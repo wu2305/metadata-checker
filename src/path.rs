@@ -155,6 +155,7 @@ pub struct PathRankFeatures {
     pub contains_model_filter: bool,
     pub contains_model_read: bool,
     pub contains_model_write: bool,
+    pub contains_field_alias: bool,
 }
 
 impl Default for PathRankFeatures {
@@ -176,6 +177,7 @@ impl Default for PathRankFeatures {
             contains_model_filter: false,
             contains_model_read: false,
             contains_model_write: false,
+            contains_field_alias: false,
         }
     }
 }
@@ -290,10 +292,20 @@ impl AnchorExtractor {
             }
         }
 
-        // 3. 数据来源锚点：data_sources 指向的模型
+        // 3. 数据来源锚点：data_sources 指向的模型和字段
         for ds in data_sources {
             if let Some(tgt) = ds.get("target_id").and_then(|v| v.as_str()) {
                 source_anchors.push(tgt.to_string());
+            }
+            // 从 raw_expr 解析局部模型字段锚点，例如 model22.phoneNumber -> field:model22.phoneNumber
+            if let Some(expr) = ds.get("raw_expr").and_then(|v| v.as_str()) {
+                if let Some(dot) = expr.find('.') {
+                    let model = &expr[..dot];
+                    let field = &expr[dot+1..];
+                    if !model.is_empty() && !field.is_empty() && !model.starts_with('$') {
+                        source_anchors.push(format!("field:{}.{}", model, field));
+                    }
+                }
             }
         }
 
@@ -301,7 +313,7 @@ impl AnchorExtractor {
         let mut model_targets: std::collections::HashSet<String> = std::collections::HashSet::new();
         for ds in data_sources {
             if let Some(tgt) = ds.get("target_id").and_then(|v| v.as_str()) {
-                if tgt.starts_with("model:") {
+                if tgt.starts_with("model:") || tgt.starts_with("field:") {
                     model_targets.insert(tgt.to_string());
                 }
             }
@@ -309,7 +321,7 @@ impl AnchorExtractor {
         for model_id in &model_targets {
             if let Some((_out, incoming)) = graph.get_node_edges(model_id) {
                 for (source, edge) in &incoming {
-                    if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::Writes)
+                    if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::Writes | crate::graph::EdgeType::FieldWrite)
                         && source.path != page_node.path
                     {
                         bridge_anchors.push(source.id.clone());
@@ -371,6 +383,8 @@ impl Default for BoundedCausalPathFinder {
                 EdgeType::DataflowInput,
                 EdgeType::DataflowInternal,
                 EdgeType::DataflowOutput,
+                EdgeType::FieldAlias,
+                EdgeType::FieldWrite,
                 EdgeType::Triggers,
             ],
         }
@@ -431,8 +445,8 @@ impl PathFinder for BoundedCausalPathFinder {
                         }
 
                         let next_id = target.id.clone();
-                        if visited_nodes.contains(&next_id) {
-                            continue; // 防止环
+                        if visited_nodes.contains(&next_id) && edge.edge_type != EdgeType::FieldAlias {
+                            continue; // 防止环，但允许 FieldAlias 回退
                         }
 
                         let segment = PathSegment {
@@ -504,13 +518,13 @@ impl PathFinder for BoundedCausalPathFinder {
                         }
                     }
                     // 对 Model 节点反向遍历 incoming ActionWrites/Writes 边，找到写入者 action
-                    if current_node.starts_with("model:") {
+                    if current_node.starts_with("model:") || current_node.starts_with("field:") {
                         for (source, edge) in &incoming {
-                            if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::Writes)
+                            if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::Writes | crate::graph::EdgeType::FieldWrite)
                                 && self.allowed_edge_types.contains(&edge.edge_type)
                             {
                                 let next_id = source.id.clone();
-                                if visited_nodes.contains(&next_id) {
+                                if visited_nodes.contains(&next_id) && edge.edge_type != crate::graph::EdgeType::FieldWrite {
                                     continue;
                                 }
                                 let segment = PathSegment {
@@ -582,6 +596,179 @@ impl PathFinder for BoundedCausalPathFinder {
     }
 }
 
+/// 为单个 data_source 构造字段级因果路径
+///
+/// 算法：
+/// 1. 从 data_source.source_component 得到起点（组件）
+/// 2. 从 data_source.raw_expr 解析局部模型字段，例如 model22.phoneNumber
+/// 3. 构造本地字段节点 field:model22.phoneNumber
+/// 4. 通过 FieldAlias 找 canonical 字段 field:fact_qwSidebar.phoneNumber
+/// 5. 从 canonical 字段的 incoming 边中找 FieldWrite
+/// 6. 只接受 edge.field_path 匹配目标字段的 writer
+/// 7. 生成三段路径：组件 -> 局部字段 -> canonical 字段 <- action
+pub fn build_field_causal_paths_for_data_source(
+    graph: &crate::graph::GraphDB,
+    page_node: &crate::graph::Node,
+    data_source: &serde_json::Value,
+) -> Vec<PathCandidate> {
+    let mut candidates: Vec<PathCandidate> = Vec::new();
+
+    let src = match data_source.get("source_component").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return candidates,
+    };
+    let fp = data_source.get("field_path").and_then(|v| v.as_str());
+    let raw_expr = data_source.get("raw_expr").and_then(|v| v.as_str());
+
+    // 解析 raw_expr 得到局部模型字段，例如 model22.phoneNumber
+    // 去掉 ${} 包装，例如 ${model22.phoneNumber} -> model22.phoneNumber
+    let stripped_expr = raw_expr.map(|e| {
+        e.strip_prefix("${").unwrap_or(e)
+            .strip_suffix("}").unwrap_or(e)
+    });
+    let local_field_id = match stripped_expr {
+        Some(expr) => {
+            if let Some(dot) = expr.find('.') {
+                let model = &expr[..dot];
+                let field = &expr[dot + 1..];
+                if !model.is_empty() && !field.is_empty() && !model.starts_with('$') {
+                    format!("field:{}.{}", model, field)
+                } else {
+                    return candidates;
+                }
+            } else {
+                return candidates;
+            }
+        }
+        None => return candidates,
+    };
+
+    // 构造 query（仅用于 build_candidate）
+    let query = PathQuery {
+        page_id: page_node.id.clone(),
+        page_path: page_node.path.clone(),
+        target_anchors: vec![src.to_string()],
+        source_anchors: vec![local_field_id.clone()],
+        sink_anchors: Vec::new(),
+        bridge_anchors: Vec::new(),
+        excluded_anchors: Vec::new(),
+        budget: "normal".to_string(),
+    };
+
+    // 组件 -> 局部字段段
+    let comp_to_local_seg = PathSegment {
+        from: PathNodeRef {
+            node_id: src.to_string(),
+            node_type: "Component".to_string(),
+            path: page_node.path.clone(),
+            name: src.split('|').last().unwrap_or(src).to_string(),
+        },
+        to: PathNodeRef {
+            node_id: local_field_id.clone(),
+            node_type: "Field".to_string(),
+            path: page_node.path.clone(),
+            name: local_field_id.split('.').last().unwrap_or("").to_string(),
+        },
+        edge: PathEdgeRef {
+            from: src.to_string(),
+            to: local_field_id.clone(),
+            edge_type: "Reads".to_string(),
+            field_path: fp.map(|s| s.to_string()),
+            json_path: data_source.get("json_path").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            source_expr: raw_expr.map(|s| s.to_string()),
+            source_file: Some(page_node.path.clone()),
+        },
+        evidence: format!("{} -> {} via Reads", src, local_field_id),
+        confidence: "high".to_string(),
+    };
+
+    // 查找局部字段的 outgoing FieldAlias，找到 canonical 字段
+    if let Some((outgoing, _incoming)) = graph.get_node_edges(&local_field_id) {
+        for (target, edge) in outgoing {
+            if edge.edge_type == crate::graph::EdgeType::FieldAlias {
+                let canonical_field_id = target.id.clone();
+                let local_to_canonical_seg = PathSegment {
+                    from: PathNodeRef {
+                        node_id: local_field_id.clone(),
+                        node_type: "Field".to_string(),
+                        path: page_node.path.clone(),
+                        name: local_field_id.split('.').last().unwrap_or("").to_string(),
+                    },
+                    to: PathNodeRef {
+                        node_id: canonical_field_id.clone(),
+                        node_type: "Field".to_string(),
+                        path: target.path.clone(),
+                        name: canonical_field_id.split('.').last().unwrap_or("").to_string(),
+                    },
+                    edge: PathEdgeRef {
+                        from: local_field_id.clone(),
+                        to: canonical_field_id.clone(),
+                        edge_type: "FieldAlias".to_string(),
+                        field_path: edge.field_path.clone(),
+                        json_path: None,
+                        source_expr: None,
+                        source_file: Some(page_node.path.clone()),
+                    },
+                    evidence: format!("{} -> {} via FieldAlias", local_field_id, canonical_field_id),
+                    confidence: "high".to_string(),
+                };
+
+                // 从 canonical 字段反向查找 FieldWrite
+                if let Some((_out, incoming)) = graph.get_node_edges(&canonical_field_id) {
+                    for (source, edge) in incoming {
+                        if edge.edge_type == crate::graph::EdgeType::FieldWrite
+                            && source.path != page_node.path
+                        {
+                            // 只接受字段匹配的 writer
+                            let edge_fp = edge.field_path.as_deref().unwrap_or("");
+                            let canonical_field_name = canonical_field_id.split('.').last().unwrap_or("");
+                            if edge_fp.ends_with(canonical_field_name) {
+                                let canonical_to_action_seg = PathSegment {
+                                    from: PathNodeRef {
+                                        node_id: canonical_field_id.clone(),
+                                        node_type: "Field".to_string(),
+                                        path: target.path.clone(),
+                                        name: canonical_field_name.to_string(),
+                                    },
+                                    to: PathNodeRef {
+                                        node_id: source.id.clone(),
+                                        node_type: "Action".to_string(),
+                                        path: source.path.clone(),
+                                        name: source.name.clone(),
+                                    },
+                                    edge: PathEdgeRef {
+                                        from: canonical_field_id.clone(),
+                                        to: source.id.clone(),
+                                        edge_type: "FieldWrite".to_string(),
+                                        field_path: edge.field_path.clone(),
+                                        json_path: None,
+                                        source_expr: None,
+                                        source_file: Some(source.path.clone()),
+                                    },
+                                    evidence: format!("{} <- {} via FieldWrite", canonical_field_id, source.id),
+                                    confidence: "high".to_string(),
+                                };
+
+                                let mut segs = Vec::new();
+                                segs.push(comp_to_local_seg.clone());
+                                segs.push(local_to_canonical_seg.clone());
+                                segs.push(canonical_to_action_seg);
+
+                                let path_id = format!("{}>{}>{}>{}", src, local_field_id, canonical_field_id, source.id);
+                                let candidate = build_candidate(
+                                    &path_id, &segs, &query, &Vec::new()
+                                );
+                                candidates.push(candidate);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    candidates
+}
 /// 根据路径段构建候选路径
 fn build_candidate(
     path_id: &str,
@@ -704,8 +891,10 @@ fn compute_rank_features(segments: &[PathSegment], query: &PathQuery) -> PathRan
         }
     }
 
-    features.edge_type_sequence = edge_types;
     features.source_file_count = seen_files.len();
+    // 检测 FieldAlias 边
+    features.contains_field_alias = edge_types.iter().any(|et| et == "FieldAlias");
+    features.edge_type_sequence = edge_types;
     features.contains_only_structural_edges = features
         .edge_type_sequence
         .iter()
@@ -765,6 +954,14 @@ fn classify_path(
         || features.contains_physical_field;
 
     let has_target = features.contains_target_component || features.contains_entrypoint;
+
+    // 字段级主链路强制提升：含 FieldAlias + 跨页 writer 直接升为主链路
+    if features.contains_field_alias && features.contains_cross_page_writer {
+        return (
+            PathClassification::PrimaryPath,
+            "字段级主链路：局部模型字段通过 FieldAlias 映射到物理表，且有跨页 writer".to_string(),
+        );
+    }
 
     // primary_path: 同时有数据语义 + 目标锚点 + 物理表字段或跨页 writer
     if has_data_semantic
@@ -957,6 +1154,8 @@ impl PathSelector for RuleBasedPathSelector {
                     seg.edge.field_path.as_ref().map_or(false, |fp| fp.contains("phoneNumber"))
                 });
                 if has_phone { s += 5; }
+                // 字段级 alias 路径优先：三段路径（含 FieldAlias）高于两段短路径
+                if p.rank_features.contains_field_alias { s += 4; }
                 s
             }
             let score_ord = score(b).cmp(&score(a));

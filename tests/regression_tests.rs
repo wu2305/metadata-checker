@@ -3442,6 +3442,7 @@ fn test_cli_query_page_logic_m19_compact_truncation() {
         }
     }
 }
+#[test]
 fn test_query_model_compact_brief_structure() {
     let _ = run_cli(&[
         "--project-dir",
@@ -4144,30 +4145,68 @@ fn test_real_project_query_page_logic_input3_chain() {
         .and_then(|v| v.as_array())
         .expect("key_primary_paths must be array");
 
-    // 至少有一条路径包含 input3
-    let has_input3 = key_primary_paths.iter().any(|p| {
-        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
-        path_id.contains("input3")
-    });
-    assert!(has_input3, "key_primary_paths 必须包含 input3 的链路");
-
-    // 至少有一条路径包含 fact_qwSidebar 和 潜客信息跟进 action4
-    let has_writer = key_primary_paths.iter().any(|p| {
-        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
-        path_id.contains("fact_qwSidebar") && path_id.contains("潜客信息跟进") && path_id.contains("action4")
-    });
+    // 精确 segments 断言：必须存在三段路径 input3 -> field:model22.phoneNumber -> field:fact_qwSidebar.phoneNumber <- action
+    let mut found_input3_chain = false;
+    let mut found_action4_write = false;
+    let mut found_action1_write = false;
+    for p in key_primary_paths.iter() {
+        let empty: Vec<serde_json::Value> = Vec::new();
+        let segs = p
+            .get("segments")
+            .and_then(|v| v.as_array())
+            .unwrap_or(&empty);
+        // 找 input3 主链路
+        if segs.len() >= 3 {
+            let to0 = segs[0].get("to").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
+            let et1 = segs[1].get("edge").and_then(|v| v.get("edge_type")).and_then(|v| v.as_str()).unwrap_or("");
+            let to1 = segs[1].get("to").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
+            let from2 = segs[2].get("from").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
+            let et2 = segs[2].get("edge").and_then(|v| v.get("edge_type")).and_then(|v| v.as_str()).unwrap_or("");
+            let fp2 = segs[2].get("edge").and_then(|v| v.get("field_path")).and_then(|v| v.as_str()).unwrap_or("");
+            if to0 == "field:model22.phoneNumber"
+                && et1 == "FieldAlias"
+                && to1 == "field:fact_qwSidebar.phoneNumber"
+                && from2 == "field:fact_qwSidebar.phoneNumber"
+                && et2 == "FieldWrite"
+                && fp2.ends_with("phoneNumber")
+            {
+                found_input3_chain = true;
+                let action_id = segs[2].get("to").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
+                if action_id.contains("action4") {
+                    found_action4_write = true;
+                }
+                if action_id.contains("action1") {
+                    found_action1_write = true;
+                }
+            }
+        }
+    }
     assert!(
-        has_writer,
-        "key_primary_paths 必须包含 input3 -> fact_qwSidebar <- 潜客信息跟进.action4 的链路"
+        found_input3_chain,
+        "key_primary_paths 必须包含三段链路: input3 -> field:model22.phoneNumber -> field:fact_qwSidebar.phoneNumber <- action"
+    );
+    assert!(
+        found_action4_write,
+        "key_primary_paths 必须包含 action4 对 fact_qwSidebar.phoneNumber 的 FieldWrite"
+    );
+    assert!(
+        found_action1_write,
+        "key_primary_paths 必须包含 action1 对 fact_qwSidebar.phoneNumber 的 FieldWrite"
     );
 
-    // 前 5 条中至少有一条包含 input3
-    let top5_has_input3 = key_primary_paths.iter().take(5).any(|p| {
-        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
-        path_id.contains("input3")
+    // 前 3 条中至少有一条是 input3 链路
+    let top3_has_input3 = key_primary_paths.iter().take(3).any(|p| {
+        let empty: Vec<serde_json::Value> = Vec::new();
+        let segs = p.get("segments").and_then(|v| v.as_array()).unwrap_or(&empty);
+        segs.iter().any(|s| {
+            s.get("to")
+                .and_then(|v| v.get("node_id"))
+                .and_then(|v| v.as_str())
+                .map_or(false, |id| id == "field:model22.phoneNumber")
+        })
     });
     assert!(
-        top5_has_input3,
-        "key_primary_paths 前 5 条必须包含 input3 链路，避免高扇出噪声排在前位"
+        top3_has_input3,
+        "key_primary_paths 前 3 条必须包含 input3 三段链路，避免无关噪声排在前位"
     );
 }
