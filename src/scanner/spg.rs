@@ -1138,5 +1138,36 @@ pub fn process_spg_file_from_value(
         }
     }
 
+    // Process dwtable sources: establish DataflowInput from local model to physical table
+    for source in &meta.sources {
+        if source.model_type.as_deref() != Some("dwtable") {
+            continue;
+        }
+        let Some(ref path) = source.path else {
+            continue;
+        };
+
+        // Extract physical table name from path like "$DATA:/主数据/fact_qwSidebar.tbl"
+        let physical_table = std::path::Path::new(path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(path);
+        let model_id = format!("model:{}", source.id);
+        let physical_model_id = format!("model:{}", physical_table);
+        graph.add_node(
+            physical_model_id.clone(),
+            NodeType::Model,
+            path.clone(),
+            physical_table.to_string(),
+            Some(serde_json::json!({"modelType": "PhysicalTable", "sourcePath": path})),
+        );
+        graph.add_edge(
+            &model_id,
+            &physical_model_id,
+            EdgeType::DataflowInput,
+            Some(path.clone()),
+        );
+    }
+
     Ok(node_ids.into_iter().collect())
 }

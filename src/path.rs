@@ -250,10 +250,30 @@ impl AnchorExtractor {
         let mut bridge_anchors: Vec<String> = Vec::new();
         let mut excluded_anchors: Vec<String> = Vec::new();
 
-        // 1. 目标组件锚点：entrypoints 和关键组件
+        // 1. 目标组件锚点：优先 data_sources / write_targets 组件，再 entrypoints
+        let mut seen_anchors: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // 从 data_sources 中提取读取模型的组件作为目标锚点（数据语义优先）
+        for ds in data_sources {
+            if let Some(src) = ds.get("source_component").and_then(|v| v.as_str()) {
+                if seen_anchors.insert(src.to_string()) {
+                    target_anchors.push(src.to_string());
+                }
+            }
+        }
+        // 从 write_targets 中提取写入组件作为目标锚点
+        for wt in write_targets {
+            if let Some(src) = wt.get("source_component").and_then(|v| v.as_str()) {
+                if seen_anchors.insert(src.to_string()) {
+                    target_anchors.push(src.to_string());
+                }
+            }
+        }
+        // 最后收集 entrypoints
         for ep in entrypoints {
             if let Some(id) = ep.get("id").and_then(|v| v.as_str()) {
-                target_anchors.push(id.to_string());
+                if seen_anchors.insert(id.to_string()) {
+                    target_anchors.push(id.to_string());
+                }
             }
         }
 
@@ -367,11 +387,28 @@ impl PathFinder for BoundedCausalPathFinder {
         let mut visited_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         // 从每个 target_anchor 出发做 BFS，寻找到 sink_anchor / source_anchor / bridge_anchor 的路径
+        const MAX_CANDIDATES_PER_ANCHOR: usize = 15;
+        const MAX_TOTAL_CANDIDATES: usize = 10000;
         for anchor in &query.target_anchors {
+            if candidates.len() >= MAX_TOTAL_CANDIDATES {
+                diagnostics.push(format!(
+                    "Total candidates reached limit {}, stopping further expansion",
+                    MAX_TOTAL_CANDIDATES
+                ));
+                break;
+            }
+            let mut anchor_candidate_count = 0;
             let mut bfs_queue: Vec<(Vec<PathSegment>, Vec<String>, usize)> = Vec::new();
             bfs_queue.push((Vec::new(), vec![anchor.clone()], 0));
 
             while let Some((segments, visited_nodes, depth)) = bfs_queue.pop() {
+                if anchor_candidate_count >= MAX_CANDIDATES_PER_ANCHOR {
+                    diagnostics.push(format!(
+                        "Anchor {} reached candidate limit {}, skipping further expansion",
+                        anchor, MAX_CANDIDATES_PER_ANCHOR
+                    ));
+                    break;
+                }
                 if depth >= self.max_depth {
                     diagnostics.push(format!(
                         "Path truncated at depth {} from anchor {}",
@@ -450,6 +487,7 @@ impl PathFinder for BoundedCausalPathFinder {
                                     &diagnostics,
                                 );
                                 candidates.push(candidate);
+                                anchor_candidate_count += 1;
                             }
                         }
 
@@ -831,13 +869,50 @@ impl PathSelector for RuleBasedPathSelector {
             }
         }
 
-        // 限制 primary_paths 数量
-        const PRIMARY_LIMIT: usize = 50;
-        if primary_paths.len() > PRIMARY_LIMIT {
-            let overflow = primary_paths.split_off(PRIMARY_LIMIT);
+        // 按重要性排序 primary_paths，优先保留高价值路径
+        primary_paths.sort_by(|a, b| {
+            fn score(p: &PathCandidate) -> i32 {
+                let mut s = 0;
+                if p.rank_features.contains_physical_field { s += 3; }
+                if p.rank_features.contains_target_component { s += 2; }
+                if p.rank_features.contains_cross_page_writer { s += 2; }
+                if p.rank_features.path_length <= 2 { s += 2; }
+                else if p.rank_features.path_length <= 3 { s += 1; }
+                if p.rank_features.contains_model_filter { s += 1; }
+                s
+            }
+            let score_ord = score(b).cmp(&score(a));
+            if score_ord != std::cmp::Ordering::Equal {
+                return score_ord;
+            }
+            let len_ord = a.rank_features.path_length.cmp(&b.rank_features.path_length);
+            if len_ord != std::cmp::Ordering::Equal {
+                return len_ord;
+            }
+            std::cmp::Ordering::Equal
+        });
+
+        // 限制 primary_paths 数量，同时确保多样性：每个 anchor 最多保留 3 条
+        const PRIMARY_LIMIT: usize = 100;
+        const MAX_PER_ANCHOR: usize = 3;
+        let mut anchor_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut diverse_primary: Vec<PathCandidate> = Vec::new();
+        let mut overflow: Vec<PathCandidate> = Vec::new();
+        for p in primary_paths {
+            // 从 path_id 提取起始 anchor
+            let anchor = p.path_id.split('>').next().unwrap_or("").to_string();
+            let count = anchor_counts.entry(anchor.clone()).or_insert(0);
+            if *count < MAX_PER_ANCHOR && diverse_primary.len() < PRIMARY_LIMIT {
+                *count += 1;
+                diverse_primary.push(p);
+            } else {
+                overflow.push(p);
+            }
+        }
+        if !overflow.is_empty() {
             selection_diagnostics.push(format!(
-                "primary_paths 超出限制 {}，{} 条降级到 candidate_paths",
-                PRIMARY_LIMIT,
+                "primary_paths 经多样性截断后保留 {} 条，{} 条降级到 candidate_paths",
+                diverse_primary.len(),
                 overflow.len()
             ));
             for mut p in overflow {
@@ -845,6 +920,7 @@ impl PathSelector for RuleBasedPathSelector {
                 candidate_paths.push(p);
             }
         }
+        primary_paths = diverse_primary;
 
         PathSelectionResult {
             primary_paths,

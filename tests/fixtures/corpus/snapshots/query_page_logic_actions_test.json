@@ -372,7 +372,7 @@
     "page_name": "actions_test",
     "page_role": "mixed_interaction_page",
     "primary_paths_count": 2,
-    "related_context_count": 37,
+    "related_context_count": 51,
     "risk_count": 2,
     "top_action_prerequisites": [],
     "top_data_prerequisites": [],

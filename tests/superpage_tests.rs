@@ -237,3 +237,12 @@ fn test_skip_string_literals() {
         "model5 should appear exactly once due to deduplication"
     );
 }
+
+#[test]
+fn test_parse_expression_refs_model22_phonenumber() {
+    let refs = parse_expression_refs("model22.phoneNumber");
+    let has_model22 = refs
+        .iter()
+        .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model22" && f == "phoneNumber"));
+    assert!(has_model22, "Expected model22.phoneNumber reference, got: {:?}", refs);
+}

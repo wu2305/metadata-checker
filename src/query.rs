@@ -624,35 +624,45 @@ pub fn query_page_logic(
         }
     };
 
-    // ---- 1. 收集页面下所有 Component 节点，再收集它们 Triggers 出的 Action 节点 ----
-    let (page_out, _) = graph
-        .get_node_edges(page_id)
-        .unwrap_or_else(|| (Vec::new(), Vec::new()));
-
+    // ---- 1. 递归收集页面下所有 Component 节点，再收集它们 Triggers 出的 Action 节点 ----
     let mut child_components: Vec<&crate::graph::Node> = Vec::new();
     let mut child_actions: Vec<&crate::graph::Node> = Vec::new();
     let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for (target, edge) in &page_out {
-        if matches!(edge.edge_type, crate::graph::EdgeType::Contains)
-            && matches!(target.node_type, crate::graph::NodeType::Component)
-            && !visited.contains(&target.id)
-        {
-            visited.insert(target.id.clone());
-            child_components.push(target);
-            if let Some((comp_out, _)) = graph.get_node_edges(&target.id) {
-                for (act, e) in &comp_out {
-                    if matches!(e.edge_type, crate::graph::EdgeType::Triggers)
-                        && matches!(act.node_type, crate::graph::NodeType::Action)
-                        && !visited.contains(&act.id)
-                    {
-                        visited.insert(act.id.clone());
-                        child_actions.push(act);
+    fn collect_components_recursive<'a>(
+        graph: &'a crate::graph::GraphDB,
+        parent_id: &str,
+        child_components: &mut Vec<&'a crate::graph::Node>,
+        child_actions: &mut Vec<&'a crate::graph::Node>,
+        visited: &mut std::collections::HashSet<String>,
+    ) {
+        if let Some((outgoing, _)) = graph.get_node_edges(parent_id) {
+            for (target, edge) in &outgoing {
+                if matches!(edge.edge_type, crate::graph::EdgeType::Contains)
+                    && matches!(target.node_type, crate::graph::NodeType::Component)
+                    && !visited.contains(&target.id)
+                {
+                    visited.insert(target.id.clone());
+                    child_components.push(target);
+                    if let Some((comp_out, _)) = graph.get_node_edges(&target.id) {
+                        for (act, e) in &comp_out {
+                            if matches!(e.edge_type, crate::graph::EdgeType::Triggers)
+                                && matches!(act.node_type, crate::graph::NodeType::Action)
+                                && !visited.contains(&act.id)
+                            {
+                                visited.insert(act.id.clone());
+                                child_actions.push(act);
+                            }
+                        }
                     }
+                    collect_components_recursive(graph, &target.id, child_components, child_actions, visited);
                 }
             }
         }
     }
+
+    collect_components_recursive(graph, page_id, &mut child_components, &mut child_actions, &mut visited);
+
 
     // ---- 2. 从原始文件读取：递归收集组件元数据、action 元数据、visibility_rules ----
     let mut page_inputs: Vec<serde_json::Value> = Vec::new();
@@ -1828,7 +1838,8 @@ pub fn query_page_logic(
     let top_display_prerequisites: Vec<serde_json::Value> = display_prerequisites.iter().take(3).cloned().collect();
     let top_data_prerequisites: Vec<serde_json::Value> = data_prerequisites.iter().take(3).cloned().collect();
     let top_action_prerequisites: Vec<serde_json::Value> = action_prerequisites.iter().take(3).cloned().collect();
-    let key_primary_paths: Vec<serde_json::Value> = primary_paths.iter().take(5).cloned().collect();
+    // key_primary_paths 从已排序的 primary_paths 中取前 10 条（已按重要性排序）
+    let key_primary_paths: Vec<serde_json::Value> = primary_paths.iter().take(10).cloned().collect();
 
     let summary = serde_json::json!({
         "page_id": page_id,
