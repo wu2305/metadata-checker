@@ -860,6 +860,29 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 | `evidence` | string | 段证据 |
 | `confidence` | string | `high` / `medium` / `low` |
 
+#### 字段级主链路标准结构
+
+典型的跨页字段因果链路由三段 `PathSegment` 组成：
+
+1. **组件读取局部模型字段**：`Component --Reads--> field:modelX.fieldY`
+   - `edge_type`: `Reads`
+   - `field_path`: `modelX.fieldY`
+   - `source_expr`: 原始表达式，如 `${modelX.fieldY}`
+2. **局部字段映射到物理表字段**：`field:modelX.fieldY --FieldAlias--> field:physicalModel.fieldY`
+   - `edge_type`: `FieldAlias`
+   - 保留局部模型来源和物理表目标
+3. **物理表字段被跨页 action 写入**：`field:physicalModel.fieldY <--FieldWrite-- action:otherPage|button|actionN`
+   - `edge_type`: `FieldWrite`
+   - `field_path`: `physicalModel.fieldY`
+   - `source_expr`: 写入来源，如 `input2` 或 `NULL`
+
+该三段路径进入 `key_primary_paths` 的前提是 `rank_features` 同时满足：
+- `contains_target_component = true`
+- `contains_physical_field = true`
+- `contains_field_alias = true`
+- `contains_field_write = true`
+- `contains_cross_page_writer = true`
+
 ### rank_features 结构
 
 | 字段 | 类型 | 说明 |
@@ -880,6 +903,8 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 | `contains_model_filter` | bool | 是否包含模型过滤 |
 | `contains_model_read` | bool | 是否包含模型读取 |
 | `contains_model_write` | bool | 是否包含模型写入 |
+| `contains_field_alias` | bool | 是否包含局部模型字段到物理表字段的 FieldAlias 映射 |
+| `contains_field_write` | bool | 是否包含字段级写入（FieldWrite） |
 
 ### 设计原则
 
@@ -887,4 +912,3 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 2. **分组保底**：key_primary_paths 采用分类保底策略，避免单一 Top-K 忽视问题。
 3. **可替换选择器**：`PathSelector` trait 允许后续接入 `WeightedPathSelector`、`FutureLearningPathSelector` 等。
 4. **related_context 不是必要条件**：明确标记为参考信息，不进入主结论。
-
