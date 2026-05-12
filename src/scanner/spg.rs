@@ -1199,13 +1199,16 @@ pub fn process_spg_file_from_value(
             .unwrap_or(path);
         let model_id = format!("model:{}", source.id);
         let physical_model_id = format!("model:{}", physical_table);
-        graph.add_node(
-            physical_model_id.clone(),
-            NodeType::Model,
-            path.clone(),
-            physical_table.to_string(),
-            Some(serde_json::json!({"modelType": "PhysicalTable", "sourcePath": path})),
-        );
+        // 避免覆盖已有节点（如 App/DataFlow 表）的 modelType
+        if graph.get_node(&physical_model_id).is_none() {
+            graph.add_node(
+                physical_model_id.clone(),
+                NodeType::Model,
+                path.clone(),
+                physical_table.to_string(),
+                Some(serde_json::json!({"modelType": "PhysicalTable", "sourcePath": path})),
+            );
+        }
         graph.add_edge(
             &model_id,
             &physical_model_id,

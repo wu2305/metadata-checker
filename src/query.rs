@@ -1418,10 +1418,13 @@ pub fn query_page_logic(
         let field_candidates = crate::path::build_field_causal_paths_for_data_source(
             graph, &page_node, ds,
         );
-        for c in &field_candidates {
-            eprintln!("[DEBUG] field_candidate: {} classification={:?}", c.path_id, c.classification);
-        }
         candidates.extend(field_candidates);
+    }
+
+    // 去重：按 path_id 保留第一个，后续重复丢弃
+    {
+        let mut seen = std::collections::HashSet::new();
+        candidates.retain(|c| seen.insert(c.path_id.clone()));
     }
 
     // 3. 路径选择（分组保底）

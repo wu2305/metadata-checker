@@ -4136,6 +4136,17 @@ fn test_real_project_query_page_logic_input3_chain() {
         "--budget",
         "compact",
     ]);
+    let err = run_cli_stderr(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--query-page-logic",
+        "page:app/销售.app/销售/合同协议.spg",
+        "--budget",
+        "compact",
+    ]);
+    assert!(!err.contains("[DEBUG]"), "stderr 不应包含 [DEBUG] 调试输出");
     let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
     assert_eq!(ai.kind, OutputKind::PageLogic);
 
@@ -4192,6 +4203,53 @@ fn test_real_project_query_page_logic_input3_chain() {
     assert!(
         found_action1_write,
         "key_primary_paths 必须包含 action1 对 fact_qwSidebar.phoneNumber 的 FieldWrite"
+    );
+
+    // source_expr 透传断言
+    let mut action1_source_expr: Option<String> = None;
+    let mut action4_source_expr: Option<String> = None;
+    let mut phone_time_in_chain = false;
+    let mut cross_page_writer_true = false;
+    for p in key_primary_paths.iter() {
+        let empty: Vec<serde_json::Value> = Vec::new();
+        let segs = p.get("segments").and_then(|v| v.as_array()).unwrap_or(&empty);
+        for s in segs.iter() {
+            let action_id = s.get("to").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
+            let source_expr = s.get("edge").and_then(|v| v.get("source_expr")).and_then(|v| v.as_str());
+            let fp = s.get("edge").and_then(|v| v.get("field_path")).and_then(|v| v.as_str()).unwrap_or("");
+            if action_id.contains("action1") && fp.ends_with("phoneNumber") {
+                action1_source_expr = source_expr.map(|s| s.to_string());
+            }
+            if action_id.contains("action4") && fp.ends_with("phoneNumber") {
+                action4_source_expr = source_expr.map(|s| s.to_string());
+            }
+            if fp.contains("phone_time") {
+                phone_time_in_chain = true;
+            }
+        }
+        if let Some(rf) = p.get("rank_features") {
+            if rf.get("contains_cross_page_writer").and_then(|v| v.as_bool()).unwrap_or(false) {
+                cross_page_writer_true = true;
+            }
+        }
+    }
+    assert_eq!(
+        action1_source_expr.as_deref(),
+        Some("input2"),
+        "action1 FieldWrite 的 source_expr 应为 input2"
+    );
+    assert_eq!(
+        action4_source_expr.as_deref(),
+        Some("NULL"),
+        "action4 FieldWrite 的 source_expr 应为 NULL"
+    );
+    assert!(
+        !phone_time_in_chain,
+        "input3 主链路不应包含 phone_time"
+    );
+    assert!(
+        cross_page_writer_true,
+        "至少一条 key_primary_paths 的 rank_features.contains_cross_page_writer 应为 true"
     );
 
     // 前 3 条中至少有一条是 input3 链路

@@ -156,6 +156,7 @@ pub struct PathRankFeatures {
     pub contains_model_read: bool,
     pub contains_model_write: bool,
     pub contains_field_alias: bool,
+    pub contains_field_write: bool,
 }
 
 impl Default for PathRankFeatures {
@@ -178,6 +179,7 @@ impl Default for PathRankFeatures {
             contains_model_read: false,
             contains_model_write: false,
             contains_field_alias: false,
+            contains_field_write: false,
         }
     }
 }
@@ -742,7 +744,7 @@ pub fn build_field_causal_paths_for_data_source(
                                         edge_type: "FieldWrite".to_string(),
                                         field_path: edge.field_path.clone(),
                                         json_path: None,
-                                        source_expr: None,
+                                        source_expr: edge.meta.as_ref().and_then(|m| m.get("source_expr")).and_then(|v| v.as_str()).map(|s| s.to_string()),
                                         source_file: Some(source.path.clone()),
                                     },
                                     evidence: format!("{} <- {} via FieldWrite", canonical_field_id, source.id),
@@ -864,6 +866,18 @@ fn compute_rank_features(segments: &[PathSegment], query: &PathQuery) -> PathRan
             features.contains_cross_page_writer = true;
         }
 
+        // 字段级写入检测：含 FieldWrite 边即标记
+        if seg.edge.edge_type == "FieldWrite" {
+            features.contains_field_write = true;
+        }
+
+        // 跨页 writer 检测：边类型为写边，且目标节点路径不等于当前页面
+        if matches!(seg.edge.edge_type.as_str(), "FieldWrite" | "ActionWrites" | "Writes")
+            && seg.to.path != query.page_path
+        {
+            features.contains_cross_page_writer = true;
+        }
+
         if seg.to.node_type == "Condition" || seg.from.node_type == "Condition" {
             features.has_condition_node = true;
         }
@@ -956,10 +970,15 @@ fn classify_path(
     let has_target = features.contains_target_component || features.contains_entrypoint;
 
     // 字段级主链路强制提升：含 FieldAlias + 跨页 writer 直接升为主链路
-    if features.contains_field_alias && features.contains_cross_page_writer {
+    if features.contains_field_alias
+        && features.contains_field_write
+        && features.contains_cross_page_writer
+        && features.contains_target_component
+        && features.contains_physical_field
+    {
         return (
             PathClassification::PrimaryPath,
-            "字段级主链路：局部模型字段通过 FieldAlias 映射到物理表，且有跨页 writer".to_string(),
+            "字段级主链路：含目标组件、FieldAlias、物理字段和跨页 action writer".to_string(),
         );
     }
 
