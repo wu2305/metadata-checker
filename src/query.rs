@@ -1839,7 +1839,98 @@ pub fn query_page_logic(
     let top_data_prerequisites: Vec<serde_json::Value> = data_prerequisites.iter().take(3).cloned().collect();
     let top_action_prerequisites: Vec<serde_json::Value> = action_prerequisites.iter().take(3).cloned().collect();
     // key_primary_paths 从已排序的 primary_paths 中取前 10 条（已按重要性排序）
-    let key_primary_paths: Vec<serde_json::Value> = primary_paths.iter().take(10).cloned().collect();
+    let mut key_primary_paths: Vec<serde_json::Value> = primary_paths.iter().take(10).cloned().collect();
+
+    // 保底：为 data_sources 中没有出现在 key_primary_paths 的关键组件构造跨页 writer 链路
+    for ds in &data_sources {
+        let src = ds.get("source_component").and_then(|v| v.as_str()).unwrap_or("");
+        let tgt = ds.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
+        let fp = ds.get("field_path").and_then(|v| v.as_str());
+        if src.is_empty() || tgt.is_empty() {
+            continue;
+        }
+        // 保底逻辑：不检查是否已存在
+        // 查找目标节点的跨页 writer
+        if let Some((_out, incoming)) = graph.get_node_edges(tgt) {
+            for (source, edge) in &incoming {
+                if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::FieldWrite)
+                    && source.path != page_node.path
+                {
+                    let path_id = format!("{}>{}>{}", src, tgt, source.id);
+                    let mut segments = Vec::new();
+                    segments.push(serde_json::json!({
+                        "from": {
+                            "node_id": src,
+                            "node_type": "Component",
+                            "path": page_node.path,
+                            "name": src.split('|').last().unwrap_or(src)
+                        },
+                        "to": {
+                            "node_id": tgt,
+                            "node_type": if tgt.starts_with("field:") { "Field" } else { "Model" },
+                            "path": ds.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
+                            "name": tgt.split('.').last().unwrap_or(tgt).split(':').last().unwrap_or(tgt)
+                        },
+                        "edge": {
+                            "edge_type": "Reads",
+                            "field_path": fp,
+                            "json_path": ds.get("json_path").and_then(|v| v.as_str()),
+                            "source_expr": ds.get("raw_expr").and_then(|v| v.as_str())
+                        },
+                        "evidence": format!("{} -> {} via Reads", src, tgt),
+                        "confidence": "high"
+                    }));
+                    segments.push(serde_json::json!({
+                        "from": {
+                            "node_id": tgt,
+                            "node_type": if tgt.starts_with("field:") { "Field" } else { "Model" },
+                            "path": ds.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
+                            "name": tgt.split('.').last().unwrap_or(tgt).split(':').last().unwrap_or(tgt)
+                        },
+                        "to": {
+                            "node_id": source.id.clone(),
+                            "node_type": "Action",
+                            "path": source.path.clone(),
+                            "name": source.name.clone()
+                        },
+                        "edge": {
+                            "edge_type": format!("{:?}", edge.edge_type),
+                            "field_path": edge.field_path.clone(),
+                            "json_path": edge_meta_str(edge, "json_path"),
+                            "source_expr": edge_meta_str(edge, "source_expr")
+                        },
+                        "evidence": format!("{} <- {} via {:?}", tgt, source.id, edge.edge_type),
+                        "confidence": "high"
+                    }));
+                    let path = serde_json::json!({
+                        "path_id": path_id,
+                        "classification": "PrimaryPath",
+                        "classification_reason": "从 data_sources 保底构造的跨页写入链路",
+                        "confidence": "high",
+                        "segments": segments,
+                        "evidence": segments.iter().map(|s| s.get("evidence").and_then(|v| v.as_str()).unwrap_or("").to_string()).collect::<Vec<String>>(),
+                        "rank_features": {
+                            "contains_target_component": true,
+                            "contains_physical_field": fp.map(|f| f.contains("tbl.") || f.contains("fact_")).unwrap_or(false),
+                            "contains_cross_page_writer": true,
+                            "path_length": 2
+                        }
+                    });
+                    diagnostics.push(crate::output::schema::Diagnostic {
+                        severity: crate::output::schema::DiagnosticSeverity::Info,
+                        code: "FALLBACK_PATH".to_string(),
+                        message: format!("保底路径候选: {} -> {} <- {}", src, tgt, source.id),
+                        location: crate::output::schema::Location::default(),
+                        suggestion: None,
+                    });
+                    if key_primary_paths.len() < 10 {
+                        key_primary_paths.push(path);
+                    }
+                    break; // 每个组件只保底一条
+                }
+            }
+        }
+    }
 
     let summary = serde_json::json!({
         "page_id": page_id,

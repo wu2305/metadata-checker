@@ -54,6 +54,10 @@ pub enum EdgeType {
     OutputsTo,
     DataflowInternal,
     DataflowOutput,
+    /// 局部模型字段到物理表字段的别名映射
+    FieldAlias,
+    /// Action 对字段的直接写入
+    FieldWrite,
     ActionReads,
     ActionNavigates,
     ActionSetsParam,

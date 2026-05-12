@@ -58,10 +58,18 @@ fn add_model_read(
     edge_meta: serde_json::Value,
     edge_type: EdgeType,
 ) {
-    let (model_id, _field_id) = ensure_model_field(graph, model, field, model_path, None);
+    let (model_id, field_id) = ensure_model_field(graph, model, field, model_path, None);
     graph.add_edge_with_meta(
         from_id,
         &model_id,
+        edge_type.clone(),
+        Some(format!("{}.{}", model, field)),
+        Some(edge_meta.clone()),
+    );
+    // 字段级读取边：组件直接指向字段节点
+    graph.add_edge_with_meta(
+        from_id,
+        &field_id,
         edge_type.clone(),
         Some(format!("{}.{}", model, field)),
         Some(edge_meta.clone()),
@@ -70,19 +78,33 @@ fn add_model_read(
     // 同时创建到物理表的读取边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
         if model != physical_name {
-            let (phy_model_id, _) =
+            let (phy_model_id, phy_field_id) =
                 ensure_model_field(graph, &physical_name, field, model_path, None);
             graph.add_edge_with_meta(
                 from_id,
                 &phy_model_id,
-                edge_type,
+                edge_type.clone(),
                 Some(format!("{}.{}", physical_name, field)),
-                Some(edge_meta),
+                Some(edge_meta.clone()),
+            );
+            // 字段级读取边：组件直接指向物理字段节点
+            graph.add_edge_with_meta(
+                from_id,
+                &phy_field_id,
+                edge_type.clone(),
+                Some(format!("{}.{}", physical_name, field)),
+                Some(edge_meta.clone()),
+            );
+            // 局部模型字段到物理表字段的别名映射
+            graph.add_edge(
+                &field_id,
+                &phy_field_id,
+                EdgeType::FieldAlias,
+                Some(format!("{}.{}", model, field)),
             );
         }
     }
 }
-
 /// 添加从 from_id 写入 model.field 的关系边。
 fn add_model_write(
     graph: &mut GraphDB,
@@ -93,7 +115,7 @@ fn add_model_write(
     edge_type: EdgeType,
     edge_meta: serde_json::Value,
 ) {
-    let (model_id, _field_id) = ensure_model_field(graph, model, field, model_path, None);
+    let (model_id, field_id) = ensure_model_field(graph, model, field, model_path, None);
     graph.add_edge_with_meta(
         from_id,
         &model_id,
@@ -101,18 +123,41 @@ fn add_model_write(
         Some(format!("{}.{}", model, field)),
         Some(edge_meta.clone()),
     );
+    // 字段级写入边：action 直接指向字段节点
+    graph.add_edge_with_meta(
+        from_id,
+        &field_id,
+        EdgeType::FieldWrite,
+        Some(format!("{}.{}", model, field)),
+        Some(edge_meta.clone()),
+    );
 
     // 同时创建到物理表的写入边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
         if model != physical_name {
-            let (phy_model_id, _) =
+            let (phy_model_id, phy_field_id) =
                 ensure_model_field(graph, &physical_name, field, model_path, None);
             graph.add_edge_with_meta(
                 from_id,
                 &phy_model_id,
-                edge_type,
+                edge_type.clone(),
                 Some(format!("{}.{}", physical_name, field)),
-                Some(edge_meta),
+                Some(edge_meta.clone()),
+            );
+            // 字段级写入边：action 直接指向物理字段节点
+            graph.add_edge_with_meta(
+                from_id,
+                &phy_field_id,
+                EdgeType::FieldWrite,
+                Some(format!("{}.{}", physical_name, field)),
+                Some(edge_meta.clone()),
+            );
+            // 局部模型字段到物理表字段的别名映射
+            graph.add_edge(
+                &field_id,
+                &phy_field_id,
+                EdgeType::FieldAlias,
+                Some(format!("{}.{}", model, field)),
             );
         }
     }

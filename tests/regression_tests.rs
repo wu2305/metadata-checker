@@ -4111,3 +4111,63 @@ fn test_skill_md_has_evidence_rules() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_query_page_logic_input3_chain() {
+    let graph_db_path = "/tmp/m19_test_xiaoshouyi.graphdb";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--query-page-logic",
+        "page:app/销售.app/销售/合同协议.spg",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::PageLogic);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let key_primary_paths = summary
+        .get("key_primary_paths")
+        .and_then(|v| v.as_array())
+        .expect("key_primary_paths must be array");
+
+    // 至少有一条路径包含 input3
+    let has_input3 = key_primary_paths.iter().any(|p| {
+        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
+        path_id.contains("input3")
+    });
+    assert!(has_input3, "key_primary_paths 必须包含 input3 的链路");
+
+    // 至少有一条路径包含 fact_qwSidebar 和 潜客信息跟进 action4
+    let has_writer = key_primary_paths.iter().any(|p| {
+        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
+        path_id.contains("fact_qwSidebar") && path_id.contains("潜客信息跟进") && path_id.contains("action4")
+    });
+    assert!(
+        has_writer,
+        "key_primary_paths 必须包含 input3 -> fact_qwSidebar <- 潜客信息跟进.action4 的链路"
+    );
+
+    // 前 5 条中至少有一条包含 input3
+    let top5_has_input3 = key_primary_paths.iter().take(5).any(|p| {
+        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
+        path_id.contains("input3")
+    });
+    assert!(
+        top5_has_input3,
+        "key_primary_paths 前 5 条必须包含 input3 链路，避免高扇出噪声排在前位"
+    );
+}
