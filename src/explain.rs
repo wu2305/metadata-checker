@@ -590,9 +590,11 @@ pub fn explain_condition_target(
             });
             if condition_type == "visible_condition" || condition_type == "disable_condition" {
                 blocking_conditions.push(cond_obj);
+            } else if condition_type == "VisibleCondition" || condition_type == "DisableCondition" {
+                blocking_conditions.push(cond_obj);
             } else if condition_type.contains("Filter") || raw_expr.contains("totalRowCount__") {
                 data_empty_gates.push(cond_obj);
-            } else if condition_type == "action_condition" || condition_type == "action_condition_exp" {
+            } else if condition_type == "ActionCondition" || condition_type == "ActionConditionExp" {
                 blocking_conditions.push(cond_obj);
             } else {
                 supporting_context.push(cond_obj);
