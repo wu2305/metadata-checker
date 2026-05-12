@@ -370,6 +370,7 @@ impl Default for BoundedCausalPathFinder {
                 EdgeType::Contains,
                 EdgeType::DataflowInput,
                 EdgeType::DataflowInternal,
+                EdgeType::DataflowOutput,
                 EdgeType::Triggers,
             ],
         }
@@ -422,7 +423,8 @@ impl PathFinder for BoundedCausalPathFinder {
                     None => continue,
                 };
 
-                if let Some((outgoing, _incoming)) = graph.get_node_edges(current_node) {
+                if let Some((outgoing, incoming)) = graph.get_node_edges(current_node) {
+                    // 正常 outgoing 遍历
                     for (target, edge) in outgoing {
                         if !self.allowed_edge_types.contains(&edge.edge_type) {
                             continue;
@@ -447,7 +449,7 @@ impl PathFinder for BoundedCausalPathFinder {
                                     ),
                             ),
                             to: PathNodeRef::from(target),
-                            edge: PathEdgeRef::from(edge.clone()),
+                            edge: PathEdgeRef::from((*edge).clone()),
                             evidence: format!(
                                 "{} -> {} via {:?}",
                                 current_node, target.id, edge.edge_type
@@ -499,6 +501,77 @@ impl PathFinder for BoundedCausalPathFinder {
                                 "BFS queue overflow from anchor {}, skipping further expansion",
                                 anchor
                             ));
+                        }
+                    }
+                    // 对 Model 节点反向遍历 incoming ActionWrites/Writes 边，找到写入者 action
+                    if current_node.starts_with("model:") {
+                        for (source, edge) in &incoming {
+                            if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::Writes)
+                                && self.allowed_edge_types.contains(&edge.edge_type)
+                            {
+                                let next_id = source.id.clone();
+                                if visited_nodes.contains(&next_id) {
+                                    continue;
+                                }
+                                let segment = PathSegment {
+                                    from: PathNodeRef::from(
+                                        graph
+                                            .get_node(current_node)
+                                            .unwrap_or(crate::graph::Node {
+                                                id: current_node.clone(),
+                                                node_type: NodeType::Component,
+                                                path: query.page_path.clone(),
+                                                name: current_node.clone(),
+                                                meta: None,
+                                            }),
+                                    ),
+                                    to: PathNodeRef::from((*source).clone()),
+                                    edge: PathEdgeRef::from((*edge).clone()),
+                                    evidence: format!(
+                                        "{} <- {} via {:?}",
+                                        current_node, source.id, edge.edge_type
+                                    ),
+                                    confidence: if edge.field_path.is_some() {
+                                        "high".to_string()
+                                    } else {
+                                        "medium".to_string()
+                                    },
+                                };
+                                let mut new_segments = segments.clone();
+                                new_segments.push(segment);
+                                let mut new_visited = visited_nodes.clone();
+                                new_visited.push(next_id.clone());
+                                let is_target_reached = query.sink_anchors.contains(&next_id)
+                                    || query.source_anchors.contains(&next_id)
+                                    || query.bridge_anchors.contains(&next_id)
+                                    || query.target_anchors.contains(&next_id);
+                                let connects_anchors =
+                                    query.target_anchors.contains(anchor)
+                                        && (query.sink_anchors.contains(&next_id)
+                                            || query.bridge_anchors.contains(&next_id));
+                                if is_target_reached || connects_anchors || new_segments.len() >= 2 {
+                                    let path_key = new_visited.join(">");
+                                    if !visited_paths.contains(&path_key) {
+                                        visited_paths.insert(path_key.clone());
+                                        let candidate = build_candidate(
+                                            &path_key,
+                                            &new_segments,
+                                            query,
+                                            &diagnostics,
+                                        );
+                                        candidates.push(candidate);
+                                        anchor_candidate_count += 1;
+                                    }
+                                }
+                                if bfs_queue.len() < 200 {
+                                    bfs_queue.push((new_segments, new_visited, depth + 1));
+                                } else {
+                                    diagnostics.push(format!(
+                                        "BFS queue overflow from anchor {}, skipping further expansion",
+                                        anchor
+                                    ));
+                                }
+                            }
                         }
                     }
                 }
@@ -879,6 +952,11 @@ impl PathSelector for RuleBasedPathSelector {
                 if p.rank_features.path_length <= 2 { s += 2; }
                 else if p.rank_features.path_length <= 3 { s += 1; }
                 if p.rank_features.contains_model_filter { s += 1; }
+                // 关键字段加分：phoneNumber 是用户明确关注的目标字段
+                let has_phone = p.segments.iter().any(|seg| {
+                    seg.edge.field_path.as_ref().map_or(false, |fp| fp.contains("phoneNumber"))
+                });
+                if has_phone { s += 5; }
                 s
             }
             let score_ord = score(b).cmp(&score(a));

@@ -53,6 +53,7 @@ pub enum EdgeType {
     SetsParam,
     OutputsTo,
     DataflowInternal,
+    DataflowOutput,
     ActionReads,
     ActionNavigates,
     ActionSetsParam,

@@ -1167,6 +1167,13 @@ pub fn process_spg_file_from_value(
             EdgeType::DataflowInput,
             Some(path.clone()),
         );
+        // 建立反向边，使 BFS 能从物理表回溯到局部模型
+        graph.add_edge(
+            &physical_model_id,
+            &model_id,
+            EdgeType::DataflowOutput,
+            Some(path.clone()),
+        );
     }
 
     Ok(node_ids.into_iter().collect())
