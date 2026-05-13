@@ -888,6 +888,22 @@ Primary paths:");
 fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph::Node, String)> {
     let mut candidates = Vec::new();
     let target_lower = target_id.to_lowercase();
+
+    // 解析目标前缀和裸名
+    let target_prefix = if target_id.starts_with("model:") {
+        Some("model")
+    } else if target_id.starts_with("page:") {
+        Some("page")
+    } else if target_id.starts_with("comp:") {
+        Some("comp")
+    } else if target_id.starts_with("action:") {
+        Some("action")
+    } else if target_id.starts_with("field:") {
+        Some("field")
+    } else {
+        None
+    };
+
     let target_bare = target_id
         .strip_prefix("model:")
         .or_else(|| target_id.strip_prefix("page:"))
@@ -895,6 +911,18 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
         .or_else(|| target_id.strip_prefix("action:"))
         .or_else(|| target_id.strip_prefix("field:"))
         .unwrap_or(target_id);
+
+    // 对 comp:PAGE|ID 格式，提取 PAGE 部分以便同页面搜索
+    let target_page = if target_prefix == Some("comp") || target_prefix == Some("action") {
+        target_bare.split('|').next().map(|s| s.to_string())
+    } else {
+        None
+    };
+    let target_id_part = if target_prefix == Some("comp") || target_prefix == Some("action") {
+        target_bare.split('|').last().map(|s| s.to_string())
+    } else {
+        Some(target_bare.to_string())
+    };
 
     for (_, idx) in &graph.node_indices {
         if let Some(node) = graph.graph.node_weight(*idx) {
@@ -913,10 +941,26 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
             let mut score = 0.0;
             let mut reason = "substring match";
 
-            if !target_bare.is_empty() && node_bare == target_bare {
+            // 同页面组件优先
+            if let Some(ref page) = target_page {
+                if node_bare.starts_with(page) {
+                    if let Some(ref id_part) = target_id_part {
+                        if node.name.to_lowercase().contains(&id_part.to_lowercase()) {
+                            score = 3.0;
+                            reason = "same page component name match";
+                        }
+                    }
+                }
+            }
+
+            // 裸名精确匹配（不同前缀）
+            if score == 0.0 && !target_bare.is_empty() && node_bare == target_bare {
                 score = 5.0;
                 reason = "bare name match with different prefix";
-            } else if node.id.to_lowercase().contains(&target_lower) || node.name.to_lowercase().contains(&target_lower) {
+            }
+
+            // 子串匹配
+            if score == 0.0 && (node.id.to_lowercase().contains(&target_lower) || node.name.to_lowercase().contains(&target_lower)) {
                 score = 1.0;
             }
 

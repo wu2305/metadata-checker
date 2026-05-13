@@ -299,12 +299,12 @@ pub fn build_target_not_found_output(
 
     let find_cmd = match kind {
         OutputKind::ModelQuery | OutputKind::DataFlowQuery | OutputKind::DataFlow => {
-            "--find-model {} to search globally"
+            "--find-model {}"
         }
         OutputKind::ComponentQuery | OutputKind::Explain | OutputKind::SuperPage => {
-            "--find-component {} to search globally"
+            "--find-component {}"
         }
-        _ => "--find-page {} to search globally",
+        _ => "--find-page {}",
     };
 
     let mut out = AiOutput::new(kind, summary);
@@ -319,7 +319,7 @@ pub fn build_target_not_found_output(
         location: Location::default(),
         suggestion: if candidates.is_empty() {
             Some(format!(
-                "Verify the target ID or use {} to search",
+                "Verify the target ID or use {} to search globally",
                 find_cmd.replace("{}", "<keyword>")
             ))
         } else {
