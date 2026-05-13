@@ -4540,3 +4540,62 @@ fn test_real_project_explain_condition_page_合同协议() {
         "page:合同协议.spg 必须包含至少一个 VisibleCondition"
     );
 }
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_explain_condition_input33_candidates() {
+    let graph_db_path = "/tmp/m20_test_xiaoshouyi_input33.db";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain-condition",
+        "comp:app/销售.app/销售/合同协议.spg|input33",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let details_val = ai.details.as_ref().expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    // candidate_count > 0
+    let candidate_count = summary
+        .get("candidate_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(candidate_count > 0, "input33 应返回至少 1 个候选");
+
+    // 候选包含 input3
+    let candidates = details
+        .get("candidate_targets")
+        .and_then(|v| v.as_array())
+        .expect("candidate_targets must be array");
+    let has_input3 = candidates.iter().any(|c| {
+        let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        id.ends_with("|input3")
+    });
+    assert!(has_input3, "input33 的候选必须包含 input3");
+
+    // next_queries shell-safe（target ID 被单引号包裹）
+    let next_queries = ai.next_queries;
+    for q in &next_queries {
+        assert!(
+            q.contains("'") && q.split("'").nth(1).is_some(),
+            "next_queries 必须 shell-safe（target ID 被单引号包裹）: {}",
+            q
+        );
+    }
+}

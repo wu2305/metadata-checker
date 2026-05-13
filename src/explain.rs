@@ -885,11 +885,20 @@ Primary paths:");
 }
 
 /// 辅助：在页面范围内查找近似候选目标
+/// 计算两个字符串的最长公共前缀长度
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.chars().zip(b.chars()).take_while(|(ca, cb)| ca == cb).count()
+}
+
+/// 判断字符串是否全为数字
+fn is_all_digits(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
+}
+
 fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph::Node, String)> {
     let mut candidates = Vec::new();
     let target_lower = target_id.to_lowercase();
 
-    // 解析目标前缀和裸名
     let target_prefix = if target_id.starts_with("model:") {
         Some("model")
     } else if target_id.starts_with("page:") {
@@ -912,7 +921,6 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
         .or_else(|| target_id.strip_prefix("field:"))
         .unwrap_or(target_id);
 
-    // 对 comp:PAGE|ID 格式，提取 PAGE 部分以便同页面搜索
     let target_page = if target_prefix == Some("comp") || target_prefix == Some("action") {
         target_bare.split('|').next().map(|s| s.to_string())
     } else {
@@ -945,9 +953,28 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
             if let Some(ref page) = target_page {
                 if node_bare.starts_with(page) {
                     if let Some(ref id_part) = target_id_part {
-                        if node.name.to_lowercase().contains(&id_part.to_lowercase()) {
+                        let node_name_lower = node.name.to_lowercase();
+                        let target_id_lower = id_part.to_lowercase();
+
+                        // 双向子串匹配：input3 匹配 input33（前缀），input3 匹配 input13（包含子串）
+                        if node_name_lower.contains(&target_id_lower)
+                            || target_id_lower.contains(&node_name_lower)
+                        {
                             score = 3.0;
                             reason = "same page component name match";
+                        }
+
+                        // 公共前缀 + 数字后缀近似：input33 ~ input3 / input13 / input23
+                        if score == 0.0 {
+                            let prefix_len = common_prefix_len(&node_name_lower, &target_id_lower);
+                            if prefix_len >= 3 {
+                                let node_suffix = &node_name_lower[prefix_len..];
+                                let target_suffix = &target_id_lower[prefix_len..];
+                                if is_all_digits(node_suffix) && is_all_digits(target_suffix) {
+                                    score = 2.5;
+                                    reason = "same prefix numeric suffix match";
+                                }
+                            }
                         }
                     }
                 }
@@ -960,7 +987,10 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
             }
 
             // 子串匹配
-            if score == 0.0 && (node.id.to_lowercase().contains(&target_lower) || node.name.to_lowercase().contains(&target_lower)) {
+            if score == 0.0
+                && (node.id.to_lowercase().contains(&target_lower)
+                    || node.name.to_lowercase().contains(&target_lower))
+            {
                 score = 1.0;
             }
 
