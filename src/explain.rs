@@ -554,7 +554,7 @@ fn build_cond_obj(source: &crate::graph::Node) -> serde_json::Value {
 fn classify_condition(cond_obj: &serde_json::Value) -> &'static str {
     let condition_type = cond_obj.get("condition_type").and_then(|v| v.as_str()).unwrap_or("unknown");
     let raw_expr = cond_obj.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
-    if matches!(condition_type, "VisibleCondition" | "DisableCondition" | "ActionCondition" | "ActionConditionExp") {
+    if matches!(condition_type, "VisibleCondition" | "DisableCondition" | "EnableCondition" | "ActionCondition" | "ActionConditionExp") {
         "blocking"
     } else if condition_type.contains("Filter") || raw_expr.contains("totalRowCount__") {
         "data_empty"
@@ -649,7 +649,18 @@ pub fn explain_condition_target(
         }
         ids
     } else {
-        vec![target_node.id.clone()]
+        let mut ids = vec![target_node.id.clone()];
+        // 组件目标：也收集其触发的 action 节点的条件
+        if target_node.node_type == crate::graph::NodeType::Component {
+            if let Some((outgoing, _incoming)) = graph.get_node_edges(&target_node.id) {
+                for (child, edge) in &outgoing {
+                    if matches!(edge.edge_type, crate::graph::EdgeType::Triggers) {
+                        ids.push(child.id.clone());
+                    }
+                }
+            }
+        }
+        ids
     };
 
     for node_id in &target_node_ids {

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.2.0",
   "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、运行器规范",
-  "eval_count": 18,
+  "eval_count": 23,
   "cases": [
     {
       "case_id": "page_purpose_actions_test",
@@ -2385,6 +2385,601 @@
           "把物理表当成 SuperPage",
           "把 PhysicalTable 说成 DataFlow 管道",
           "忽略 kind 和 table_type"
+        ]
+      }
+    },
+    {
+      "case_id": "fixture_condition_input1_visible_disabled",
+      "question": "actions_test 页面中的 input1 为什么不显示或不可用？",
+      "project_dir": "tests/fixtures/test_project",
+      "requires_real_project": false,
+      "real_project_target": null,
+      "source_path": null,
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|input1' --budget compact"
+      ],
+      "expected_facts": [
+        "input1 的显示受 visibleCondition 控制",
+        "input1 的可用性受 disableCondition 控制",
+        "visibleCondition 依赖 input2.value",
+        "disableCondition 是 input1.value == 'disabled'"
+      ],
+      "forbidden_claims": [
+        "input1 没有任何条件控制",
+        "input1 的条件导致数据源为空",
+        "input1 的显示不受任何组件影响"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "summary.blocking_conditions_count",
+          "op": "gt",
+          "value": 0,
+          "description": "必须有阻塞条件"
+        },
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any",
+          "field": "condition_type",
+          "value": "VisibleCondition",
+          "description": "必须包含 VisibleCondition"
+        },
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any",
+          "field": "condition_type",
+          "value": "EnableCondition",
+          "description": "必须包含 EnableCondition"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "visibleCondition",
+          "disableCondition",
+          "input2.value",
+          "input1.value"
+        ],
+        "should_mention": [
+          "阻塞条件",
+          "json_path"
+        ],
+        "must_not_mention": [
+          "数据源为空",
+          "没有任何条件",
+          "totalRowCount__"
+        ]
+      },
+      "uncertainty_policy": "如果条件表达式存在未解析符号，应保守表达",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "comp:app/actions_test.spg|input1",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.blocking_conditions_count",
+          "op": "gt",
+          "value": 0,
+          "description": "必须有阻塞条件"
+        },
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any",
+          "field": "condition_type",
+          "value": "VisibleCondition",
+          "description": "必须包含 VisibleCondition"
+        },
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any",
+          "field": "condition_type",
+          "value": "EnableCondition",
+          "description": "必须包含 EnableCondition"
+        }
+      ],
+      "risk_tags": [
+        "condition",
+        "fixture",
+        "M22"
+      ],
+      "case_status": "active",
+      "difficulty": "basic",
+      "max_command_count": 1,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "visibleCondition",
+          "disableCondition",
+          "input2",
+          "input1"
+        ],
+        "must_not_include": [
+          "没有任何条件",
+          "数据源为空",
+          "totalRowCount__"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出主因结论，再展开具体条件",
+          "引用 CLI 输出的 summary 和 details 作为依据",
+          "区分 visibleCondition 和 disableCondition 的作用"
+        ],
+        "forbidden_practices": [
+          "跳过 summary 直接读取完整 details 大数组",
+          "忽略条件类型混为一谈",
+          "把 action conditionExp 说成组件显示条件"
+        ]
+      }
+    },
+    {
+      "case_id": "fixture_condition_button2_action_gate",
+      "question": "actions_test 页面中 button2 的 updateData action 在什么条件下才会执行？",
+      "project_dir": "tests/fixtures/test_project",
+      "requires_real_project": false,
+      "real_project_target": null,
+      "source_path": null,
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|button2' --budget compact"
+      ],
+      "expected_facts": [
+        "button2 的 action 有 conditionExp 限制",
+        "conditionExp 是 input1.value=='test'",
+        "只有当 input1.value 等于 'test' 时 action 才会执行"
+      ],
+      "forbidden_claims": [
+        "button2 的 action 没有任何条件",
+        "button2 的 action 无条件执行",
+        "button2 的数据源为空"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any",
+          "field": "condition_type",
+          "value": "ActionConditionExp",
+          "description": "必须包含 ActionConditionExp"
+        },
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any",
+          "field": "raw_expr",
+          "value": "input1.value=='test'",
+          "description": "conditionExp 内容正确"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "conditionExp",
+          "input1.value=='test'",
+          "ActionConditionExp"
+        ],
+        "should_mention": [
+          "button2",
+          "updateData"
+        ],
+        "must_not_mention": [
+          "数据源为空",
+          "没有任何条件"
+        ]
+      },
+      "uncertainty_policy": "如果 action 条件未解析，应保守表达",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "comp:app/actions_test.spg|button2",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any",
+          "field": "condition_type",
+          "value": "ActionConditionExp",
+          "description": "必须包含 ActionConditionExp"
+        }
+      ],
+      "risk_tags": [
+        "condition",
+        "fixture",
+        "M22"
+      ],
+      "case_status": "active",
+      "difficulty": "basic",
+      "max_command_count": 1,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "conditionExp",
+          "input1.value",
+          "button2"
+        ],
+        "must_not_include": [
+          "没有任何条件",
+          "数据源为空"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出 action 执行条件结论",
+          "引用 CLI 输出的 blocking_conditions 作为依据",
+          "明确 conditionExp 的值和语义"
+        ],
+        "forbidden_practices": [
+          "把 action 条件说成组件显示条件",
+          "忽略 conditionExp 直接说 action 无条件执行"
+        ]
+      }
+    },
+    {
+      "case_id": "real_condition_contract_input3_source",
+      "question": "合同协议.spg 中的 input3 值是从哪里来的？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
+      "real_project_target": "comp:app/销售.app/销售/合同协议.spg|input3",
+      "source_path": "app/销售.app/销售/合同协议.spg",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain-condition 'comp:app/销售.app/销售/合同协议.spg|input3' --budget compact"
+      ],
+      "expected_facts": [
+        "input3 的值读取自 model22.phoneNumber",
+        "model22.phoneNumber 映射到物理表 fact_qwSidebar.phoneNumber",
+        "fact_qwSidebar.phoneNumber 被潜客信息跟进.spg 的 button1.action1/action4 写入"
+      ],
+      "forbidden_claims": [
+        "input3 的值来自 model19.brand",
+        "input3 的值来自 text57",
+        "input3 的值来源不明",
+        "旁路关系是必要条件"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "details.primary_path",
+          "op": "not_empty",
+          "description": "必须有字段级主链路"
+        },
+        {
+          "path": "summary.primary_paths_count",
+          "op": "gt",
+          "value": 0,
+          "description": "主链路数量大于 0"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "model22.phoneNumber",
+          "fact_qwSidebar.phoneNumber",
+          "潜客信息跟进"
+        ],
+        "should_mention": [
+          "button1",
+          "action1",
+          "action4"
+        ],
+        "must_not_mention": [
+          "model19.brand",
+          "text57",
+          "来源不明"
+        ]
+      },
+      "uncertainty_policy": "如果主链路中存在未解析字段，应保守表达并引用 related_context",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "comp:app/销售.app/销售/合同协议.spg|input3",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.primary_path",
+          "op": "not_empty",
+          "description": "必须有字段级主链路"
+        },
+        {
+          "path": "summary.primary_paths_count",
+          "op": "gt",
+          "value": 0,
+          "description": "主链路数量大于 0"
+        }
+      ],
+      "risk_tags": [
+        "condition",
+        "real_project",
+        "M22",
+        "attention_drift"
+      ],
+      "case_status": "active",
+      "difficulty": "hard",
+      "max_command_count": 1,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "model22.phoneNumber",
+          "fact_qwSidebar",
+          "phoneNumber"
+        ],
+        "must_not_include": [
+          "model19.brand",
+          "text57",
+          "来源不明"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出主链路结论：input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber",
+          "引用 CLI 输出的 primary_path 和 segments 作为证据",
+          "明确区分主链路和 related_context"
+        ],
+        "forbidden_practices": [
+          "把 related_context 中的旁路关系当作必要条件",
+          "忽略 primary_path 直接说来源不明",
+          "把高扇出读边当成主链路"
+        ]
+      }
+    },
+    {
+      "case_id": "real_condition_contract_display",
+      "question": "合同协议.spg 页面正常显示数据需要满足哪些条件？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
+      "real_project_target": "page:app/销售.app/销售/合同协议.spg",
+      "source_path": "app/销售.app/销售/合同协议.spg",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain-condition 'page:app/销售.app/销售/合同协议.spg' --budget compact"
+      ],
+      "expected_facts": [
+        "页面有多个显示/隐藏条件（visibleCondition）",
+        "页面有数据源过滤条件（filter）",
+        "页面有按钮/动作执行条件（action condition）",
+        "某些条件依赖系统变量如 $user.WXWORK_USER_ID"
+      ],
+      "forbidden_claims": [
+        "页面没有任何条件",
+        "页面无条件显示",
+        "页面是只读的静态展示"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "summary.blocking_conditions_count",
+          "op": "gt",
+          "value": 0,
+          "description": "必须有阻塞条件"
+        },
+        {
+          "path": "summary.data_empty_gates_count",
+          "op": "gt",
+          "value": 0,
+          "description": "必须有数据门控"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "visibleCondition",
+          "filter",
+          "数据源门控"
+        ],
+        "should_mention": [
+          "action condition",
+          "$user"
+        ],
+        "must_not_mention": [
+          "页面没有任何条件",
+          "只读"
+        ]
+      },
+      "uncertainty_policy": "如果条件过多或复杂，应给出 Top-N 重点条件并说明截断",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "page:app/销售.app/销售/合同协议.spg",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.blocking_conditions_count",
+          "op": "gt",
+          "value": 0,
+          "description": "必须有阻塞条件"
+        },
+        {
+          "path": "summary.data_empty_gates_count",
+          "op": "gt",
+          "value": 0,
+          "description": "必须有数据门控"
+        }
+      ],
+      "risk_tags": [
+        "condition",
+        "real_project",
+        "M22"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 1,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "visibleCondition",
+          "filter",
+          "数据门控"
+        ],
+        "must_not_include": [
+          "页面没有任何条件",
+          "只读"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出页面显示条件的总体结论",
+          "引用 CLI 输出的 summary.blocking_conditions_count 和 data_empty_gates_count",
+          "区分 display_prerequisites 和 data_prerequisites"
+        ],
+        "forbidden_practices": [
+          "把复杂页面的所有条件平铺输出",
+          "忽略 summary 直接读取 details 大数组",
+          "把条件门控说成渲染故障"
+        ]
+      }
+    },
+    {
+      "case_id": "real_condition_model22_scope",
+      "question": "model:model22 的数据源过滤条件有哪些？是否有来自其他页面的同名模型条件混入？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "requires_real_project": true,
+      "graph_db_path_strategy": "temp_per_case",
+      "real_project_target": "model:model22",
+      "source_path": "app/销售.app/销售/合同协议.spg",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain-condition 'model:model22' --budget compact"
+      ],
+      "expected_facts": [
+        "model22 的过滤条件主要来自合同协议.spg",
+        "model22 的 data_empty_gates 包含 externalUserId=param5 和 staffId=$user.WXWORK_USER_ID",
+        "其他页面同名 model22 的条件被放入 related_context",
+        "related_context 标注了 '非当前页面必要条件'"
+      ],
+      "forbidden_claims": [
+        "其他页面同名 model22 的过滤条件是主因",
+        "data_empty_gates 包含其他页面的条件",
+        "model22 的过滤条件来源不明"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "details.data_empty_gates",
+          "op": "not_empty",
+          "description": "必须有数据门控"
+        },
+        {
+          "path": "summary.related_context_count",
+          "op": "gt",
+          "value": 0,
+          "description": "必须有 related_context"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "合同协议.spg",
+          "related_context",
+          "非当前页面必要条件"
+        ],
+        "should_mention": [
+          "externalUserId",
+          "staffId",
+          "$user.WXWORK_USER_ID"
+        ],
+        "must_not_mention": [
+          "其他页面同名 model22 是必要条件",
+          "所有 model22 的条件都同等重要"
+        ]
+      },
+      "uncertainty_policy": "如果主页面推断不确定，应保守表达并引用相关上下文",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "model:model22",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.data_empty_gates",
+          "op": "not_empty",
+          "description": "必须有数据门控"
+        },
+        {
+          "path": "summary.related_context_count",
+          "op": "gt",
+          "value": 0,
+          "description": "必须有 related_context"
+        }
+      ],
+      "risk_tags": [
+        "condition",
+        "real_project",
+        "M22",
+        "attention_drift"
+      ],
+      "case_status": "active",
+      "difficulty": "hard",
+      "max_command_count": 1,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "合同协议.spg",
+          "related_context",
+          "非当前页面必要条件"
+        ],
+        "must_not_include": [
+          "其他页面同名 model22 是必要条件",
+          "所有条件都同等重要"
+        ],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出主页面 model22 的条件",
+          "明确说明其他页面同名模型的条件在 related_context 中",
+          "引用 CLI 输出的 related_context 和 note 作为证据"
+        ],
+        "forbidden_practices": [
+          "把 related_context 中的条件当作主因",
+          "忽略 note: 非当前页面必要条件",
+          "混淆不同页面的同名局部模型"
         ]
       }
     }

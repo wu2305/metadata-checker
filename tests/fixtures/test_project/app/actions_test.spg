@@ -27,7 +27,9 @@
                 "id": "input1",
                 "type": "input",
                 "submitField": "model1.name",
-                "value": "test"
+                "value": "test",
+                "visibleCondition": "input2.value != ''",
+                "disableCondition": "input1.value == 'disabled'"
             },
             {
                 "id": "input2",
