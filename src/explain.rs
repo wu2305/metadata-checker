@@ -520,6 +520,7 @@ fn classify_importance(
 /// - `comp:PAGE|ID` — 解释组件为什么不显示或为什么不可用
 /// - `model:ID` — 解释模型为什么可能为空
 /// - `field:MODEL.FIELD` — 解释字段值来源或为什么为空
+///
 /// 辅助：从条件节点构建条件对象
 fn build_cond_obj(source: &crate::graph::Node) -> serde_json::Value {
     let meta = source.meta.as_ref().unwrap_or(&serde_json::Value::Null);
@@ -927,12 +928,12 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
         None
     };
     let target_id_part = if target_prefix == Some("comp") || target_prefix == Some("action") {
-        target_bare.split('|').last().map(|s| s.to_string())
+        target_bare.split('|').next_back().map(|s| s.to_string())
     } else {
         Some(target_bare.to_string())
     };
 
-    for (_, idx) in &graph.node_indices {
+    for idx in graph.node_indices.values() {
         if let Some(node) = graph.graph.node_weight(*idx) {
             if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty() {
                 continue;
@@ -950,8 +951,9 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
             let mut reason = "substring match";
 
             // 同页面组件优先
-            if let Some(ref page) = target_page {
-                if node_bare.starts_with(page) {
+            if let Some(ref page) = target_page
+                && node_bare.starts_with(page)
+            {
                     if let Some(ref id_part) = target_id_part {
                         let node_name_lower = node.name.to_lowercase();
                         let target_id_lower = id_part.to_lowercase();
@@ -977,7 +979,6 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
                             }
                         }
                     }
-                }
             }
 
             // 裸名精确匹配（不同前缀）
@@ -1060,7 +1061,7 @@ fn explain_condition_graph(
 ) -> Result<()> {
     // 从节点 meta 提取条件核心信息
     let meta = node.meta.as_ref().unwrap_or(&serde_json::Value::Null);
-    let cond_id = node.id.split('|').last().unwrap_or(&node.id);
+    let cond_id = node.id.split('|').next_back().unwrap_or(&node.id);
     let condition_type = meta.get("condition_type").and_then(|v| v.as_str()).unwrap_or("unknown");
     let raw_expr = meta.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
     let normalized_expr = meta.get("normalized_expr").and_then(|v| v.as_str()).unwrap_or("");
@@ -1316,8 +1317,8 @@ fn explain_condition_graph(
         output.evidence.push(
             crate::output::Evidence::new(
                 format!(
-                    "Condition {} controls {} (type={})",
-                    cond_id, target.name, format!("{:?}", target.node_type)
+                    "Condition {} controls {} (type={:?})",
+                    cond_id, target.name, target.node_type
                 ),
                 "Condition determines owner component/action visibility or execution",
             )
