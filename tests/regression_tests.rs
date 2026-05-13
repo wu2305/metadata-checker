@@ -4363,3 +4363,71 @@ fn test_real_project_explain_condition_input3() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_explain_condition_model22_filter() {
+    let graph_db_path = "/tmp/m20_test_xiaoshouyi_model22.db";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain-condition",
+        "model:model22",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let details_val = ai.details.as_ref().expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    // model22 应该有 data_empty_gates（filter 条件）
+    let data_empty_gates = details
+        .get("data_empty_gates")
+        .and_then(|v| v.as_array())
+        .expect("data_empty_gates must be array");
+    assert!(
+        !data_empty_gates.is_empty(),
+        "model:model22 的 explain-condition 必须包含 data_empty_gates（filter 条件）"
+    );
+
+    // 至少有一个 filter 条件是 SourceFilterExp
+    let has_source_filter = data_empty_gates.iter().any(|c| {
+        let ct = c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("");
+        ct == "SourceFilterExp"
+    });
+    assert!(
+        has_source_filter,
+        "model:model22 必须包含 SourceFilterExp 类型的 filter 条件"
+    );
+
+    // summary 中 data_empty_gates_count > 0
+    let gates_count = summary
+        .get("data_empty_gates_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(gates_count > 0, "summary.data_empty_gates_count 必须大于 0");
+
+    // primary_reason 应提到数据门控
+    let primary_reason = summary
+        .get("primary_reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(
+        primary_reason.contains("数据门控") || primary_reason.contains("filter"),
+        "model:model22 的 primary_reason 应说明数据门控或 filter 影响"
+    );
+}
