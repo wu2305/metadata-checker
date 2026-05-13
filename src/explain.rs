@@ -520,6 +520,81 @@ fn classify_importance(
 /// - `comp:PAGE|ID` — 解释组件为什么不显示或为什么不可用
 /// - `model:ID` — 解释模型为什么可能为空
 /// - `field:MODEL.FIELD` — 解释字段值来源或为什么为空
+/// 辅助：从条件节点构建条件对象
+fn build_cond_obj(source: &crate::graph::Node) -> serde_json::Value {
+    let meta = source.meta.as_ref().unwrap_or(&serde_json::Value::Null);
+    let condition_type = meta.get("condition_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let effect_type = meta.get("effect_type").and_then(|v| v.as_str()).unwrap_or("");
+    let raw_expr = meta.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
+    let normalized_expr = meta.get("normalized_expr").and_then(|v| v.as_str()).unwrap_or("");
+    let json_path = meta.get("json_path").and_then(|v| v.as_str()).unwrap_or("");
+    let owner_type = meta.get("owner_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let subject_type = meta.get("subject_type").and_then(|v| v.as_str()).unwrap_or("");
+    let referenced_symbols: Vec<String> = meta
+        .get("referenced_symbols")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+    serde_json::json!({
+        "condition_id": source.id.clone(),
+        "condition_type": condition_type,
+        "effect_type": effect_type,
+        "subject_type": subject_type,
+        "owner_type": owner_type,
+        "raw_expr": raw_expr,
+        "normalized_expr": normalized_expr,
+        "json_path": json_path,
+        "source_file": source.path,
+        "referenced_symbols": referenced_symbols,
+    })
+}
+
+/// 辅助：分类条件
+fn classify_condition(cond_obj: &serde_json::Value) -> &'static str {
+    let condition_type = cond_obj.get("condition_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let raw_expr = cond_obj.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
+    if matches!(condition_type, "VisibleCondition" | "DisableCondition" | "ActionCondition" | "ActionConditionExp") {
+        "blocking"
+    } else if condition_type.contains("Filter") || raw_expr.contains("totalRowCount__") {
+        "data_empty"
+    } else {
+        "supporting"
+    }
+}
+
+/// 辅助：收集节点的 incoming condition 边
+fn collect_conditions_for_node(
+    graph: &GraphDB,
+    node_id: &str,
+    _page_path: &str,
+    seen: &mut std::collections::HashSet<String>,
+) -> Vec<serde_json::Value> {
+    let mut results = Vec::new();
+    if let Some((_out, incoming)) = graph.get_node_edges(node_id) {
+        for (source, edge) in &incoming {
+            if !matches!(source.node_type, crate::graph::NodeType::Condition) {
+                continue;
+            }
+            if !matches!(edge.edge_type, crate::graph::EdgeType::DependsOn) {
+                continue;
+            }
+            if !seen.insert(source.id.clone()) {
+                continue;
+            }
+            let cond_obj = build_cond_obj(source);
+            results.push(cond_obj);
+        }
+    }
+    results
+}
+
+/// 解释目标节点为什么具有当前状态（为什么不显示/为什么不可用/为什么数据为空）
+///
+/// 支持的目标格式：
+/// - `comp:PAGE|ID` — 解释组件为什么不显示或为什么不可用
+/// - `model:ID` — 解释模型为什么可能为空
+/// - `field:MODEL.FIELD` — 解释字段值来源或为什么为空
+/// - `page:PATH` — 解释页面主要条件门控和数据链路
 pub fn explain_condition_target(
     graph: &GraphDB,
     target_id: &str,
@@ -529,7 +604,7 @@ pub fn explain_condition_target(
     let target_node = match graph.get_node(target_id) {
         Some(n) => n,
         None => {
-            let candidates = graph.find_candidates(target_id, 5);
+            let candidates = find_local_candidates(graph, target_id);
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::Explain,
                 target_id,
@@ -544,6 +619,7 @@ pub fn explain_condition_target(
         crate::graph::NodeType::Page => target_node.clone(),
         _ => find_parent_page(graph, &target_node.id).unwrap_or(target_node.clone()),
     };
+    let page_path = page_node.path.clone();
 
     let mut blocking_conditions: Vec<serde_json::Value> = Vec::new();
     let mut data_empty_gates: Vec<serde_json::Value> = Vec::new();
@@ -551,63 +627,95 @@ pub fn explain_condition_target(
     let mut related_context: Vec<serde_json::Value> = Vec::new();
     let mut seen_conditions: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    if let Some((_out, incoming)) = graph.get_node_edges(&target_node.id) {
-        for (source, edge) in &incoming {
-            if !matches!(source.node_type, crate::graph::NodeType::Condition) {
-                continue;
+    // ---- 收集条件（区分当前页面 vs 其他页面） ----
+    let target_node_ids: Vec<String> = if target_node.node_type == crate::graph::NodeType::Page {
+        // page 目标：收集页面内所有子节点（组件、模型、字段等）的条件
+        let mut ids = vec![target_node.id.clone()];
+        if let Some((outgoing, _incoming)) = graph.get_node_edges(&target_node.id) {
+            for (child, edge) in &outgoing {
+                if matches!(edge.edge_type, crate::graph::EdgeType::Contains | crate::graph::EdgeType::Triggers) {
+                    ids.push(child.id.clone());
+                    // 再下一层（components/panels 等嵌套）
+                    if let Some((child_out, _)) = graph.get_node_edges(&child.id) {
+                        for (grandchild, gedge) in &child_out {
+                            if matches!(gedge.edge_type, crate::graph::EdgeType::Contains | crate::graph::EdgeType::Triggers) {
+                                ids.push(grandchild.id.clone());
+                            }
+                        }
+                    }
+                }
             }
-            if !matches!(edge.edge_type, crate::graph::EdgeType::DependsOn) {
-                continue;
-            }
-            if seen_conditions.contains(&source.id) {
-                continue;
-            }
-            seen_conditions.insert(source.id.clone());
-            let meta = source.meta.as_ref().unwrap_or(&serde_json::Value::Null);
-            let condition_type = meta.get("condition_type").and_then(|v| v.as_str()).unwrap_or("unknown");
-            let effect_type = meta.get("effect_type").and_then(|v| v.as_str()).unwrap_or("");
-            let raw_expr = meta.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
-            let normalized_expr = meta.get("normalized_expr").and_then(|v| v.as_str()).unwrap_or("");
-            let json_path = meta.get("json_path").and_then(|v| v.as_str()).unwrap_or("");
-            let owner_type = meta.get("owner_type").and_then(|v| v.as_str()).unwrap_or("unknown");
-            let subject_type = meta.get("subject_type").and_then(|v| v.as_str()).unwrap_or("");
-            let referenced_symbols: Vec<String> = meta
-                .get("referenced_symbols")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
-                .unwrap_or_default();
-            let cond_obj = serde_json::json!({
-                "condition_id": source.id.clone(),
-                "condition_type": condition_type,
-                "effect_type": effect_type,
-                "subject_type": subject_type,
-                "owner_type": owner_type,
-                "raw_expr": raw_expr,
-                "normalized_expr": normalized_expr,
-                "json_path": json_path,
-                "source_file": source.path,
-                "referenced_symbols": referenced_symbols,
-            });
-            if condition_type == "visible_condition" || condition_type == "disable_condition" {
-                blocking_conditions.push(cond_obj);
-            } else if condition_type == "VisibleCondition" || condition_type == "DisableCondition" {
-                blocking_conditions.push(cond_obj);
-            } else if condition_type.contains("Filter") || raw_expr.contains("totalRowCount__") {
-                data_empty_gates.push(cond_obj);
-            } else if condition_type == "ActionCondition" || condition_type == "ActionConditionExp" {
-                blocking_conditions.push(cond_obj);
+        }
+        ids
+    } else {
+        vec![target_node.id.clone()]
+    };
+
+    for node_id in &target_node_ids {
+        let conds = collect_conditions_for_node(graph, node_id, &page_path, &mut seen_conditions);
+        for cond_obj in conds {
+            let source_file = cond_obj.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
+            if source_file == page_path {
+                // 当前页面的条件
+                match classify_condition(&cond_obj) {
+                    "blocking" => blocking_conditions.push(cond_obj),
+                    "data_empty" => data_empty_gates.push(cond_obj),
+                    _ => supporting_context.push(cond_obj),
+                }
             } else {
-                supporting_context.push(cond_obj);
+                // 其他页面的条件：暂存到 related_context
+                let mut rc = cond_obj.clone();
+                if let Some(obj) = rc.as_object_mut() {
+                    obj.insert("note".to_string(), serde_json::json!("非当前页面必要条件"));
+                }
+                related_context.push(rc);
             }
         }
     }
 
+    // ---- model 目标特殊处理：推断主页面 ----
+    if target_node.node_type == crate::graph::NodeType::Model {
+        // model 节点的 path 是 .tbl 文件，不是页面路径
+        // 从 related_context 中按 source_file 分组，找到条件最多的页面作为主页面
+        let mut page_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for rc in &related_context {
+            if let Some(file) = rc.get("source_file").and_then(|v| v.as_str()) {
+                *page_counts.entry(file.to_string()).or_insert(0) += 1;
+            }
+        }
+        let mut primary_page: Option<String> = None;
+        let mut max_count = 0usize;
+        for (file, count) in page_counts {
+            if count > max_count {
+                max_count = count;
+                primary_page = Some(file);
+            }
+        }
+        if let Some(primary_page) = primary_page {
+            // 把 primary_page 的条件从 related_context 提升出来
+            let mut remaining_related: Vec<serde_json::Value> = Vec::new();
+            for rc in related_context {
+                let rc_file = rc.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
+                if rc_file == primary_page {
+                    match classify_condition(&rc) {
+                        "blocking" => blocking_conditions.push(rc),
+                        "data_empty" => data_empty_gates.push(rc),
+                        _ => supporting_context.push(rc),
+                    }
+                } else {
+                    remaining_related.push(rc);
+                }
+            }
+            related_context = remaining_related;
+        }
+    }
+
+    // ---- 字段级主链路（comp/field 目标） ----
     let mut primary_path: Vec<serde_json::Value> = Vec::new();
     if target_node.id.starts_with("field:") || target_node.id.starts_with("comp:") {
-        // 1. 有界 BFS 发现候选路径
         let path_query = crate::path::PathQuery {
-            page_id: format!("page:{}", page_node.path),
-            page_path: page_node.path.clone(),
+            page_id: format!("page:{}", page_path),
+            page_path: page_path.clone(),
             target_anchors: vec![target_node.id.clone()],
             source_anchors: Vec::new(),
             sink_anchors: Vec::new(),
@@ -618,9 +726,7 @@ pub fn explain_condition_target(
         let finder = crate::path::BoundedCausalPathFinder::default();
         let mut candidates = finder.find_candidates(graph, &path_query);
 
-        // 2. 字段级主链路保底：为组件/字段目标构造精确三段路径
         if target_node.id.starts_with("comp:") {
-            // 收集组件的 outgoing Reads 边，构造 data_source
             if let Some((outgoing, _incoming)) = graph.get_node_edges(&target_node.id) {
                 for (target, edge) in &outgoing {
                     if matches!(edge.edge_type, crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads)
@@ -641,7 +747,6 @@ pub fn explain_condition_target(
                 }
             }
         } else if target_node.id.starts_with("field:") {
-            // field 目标：构造 comp 来源和 raw_expr
             let parts: Vec<&str> = target_node.id.split('.').collect();
             if parts.len() >= 2 {
                 let model_id = parts[0];
@@ -659,7 +764,6 @@ pub fn explain_condition_target(
             }
         }
 
-        // 去重
         {
             let mut seen = std::collections::HashSet::new();
             candidates.retain(|c| seen.insert(c.path_id.clone()));
@@ -678,7 +782,22 @@ pub fn explain_condition_target(
         }
     }
 
-    let primary_reason = if !blocking_conditions.is_empty() {
+    // ---- 构建 primary_reason ----
+    let primary_reason = if target_node.node_type == crate::graph::NodeType::Page {
+        if !blocking_conditions.is_empty() {
+            format!(
+                "页面 {} 有 {} 个阻塞条件（visible/disable/action condition）",
+                target_node.name, blocking_conditions.len()
+            )
+        } else if !data_empty_gates.is_empty() {
+            format!(
+                "页面 {} 有 {} 个数据门控（filter/totalRowCount__）",
+                target_node.name, data_empty_gates.len()
+            )
+        } else {
+            format!("页面 {} 未发现明确的阻塞条件或数据门控", target_node.name)
+        }
+    } else if !blocking_conditions.is_empty() {
         format!(
             "目标 {} 受 {} 个阻塞条件影响（visible/disable/action condition）",
             target_node.id, blocking_conditions.len()
@@ -763,6 +882,52 @@ Primary paths:");
     }
 
     Ok(())
+}
+
+/// 辅助：在页面范围内查找近似候选目标
+fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph::Node, String)> {
+    let mut candidates = Vec::new();
+    let target_lower = target_id.to_lowercase();
+    let target_bare = target_id
+        .strip_prefix("model:")
+        .or_else(|| target_id.strip_prefix("page:"))
+        .or_else(|| target_id.strip_prefix("comp:"))
+        .or_else(|| target_id.strip_prefix("action:"))
+        .or_else(|| target_id.strip_prefix("field:"))
+        .unwrap_or(target_id);
+
+    for (_, idx) in &graph.node_indices {
+        if let Some(node) = graph.graph.node_weight(*idx) {
+            if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty() {
+                continue;
+            }
+            let node_bare = node
+                .id
+                .strip_prefix("model:")
+                .or_else(|| node.id.strip_prefix("page:"))
+                .or_else(|| node.id.strip_prefix("comp:"))
+                .or_else(|| node.id.strip_prefix("action:"))
+                .or_else(|| node.id.strip_prefix("field:"))
+                .unwrap_or(&node.id);
+
+            let mut score = 0.0;
+            let mut reason = "substring match";
+
+            if !target_bare.is_empty() && node_bare == target_bare {
+                score = 5.0;
+                reason = "bare name match with different prefix";
+            } else if node.id.to_lowercase().contains(&target_lower) || node.name.to_lowercase().contains(&target_lower) {
+                score = 1.0;
+            }
+
+            if score > 0.0 {
+                candidates.push((node.clone(), score, reason.to_string()));
+            }
+        }
+    }
+
+    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.into_iter().take(5).map(|(n, _, r)| (n, r)).collect()
 }
 
 pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result<()> {

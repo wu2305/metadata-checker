@@ -4431,6 +4431,30 @@ fn test_real_project_explain_condition_model22_filter() {
         .unwrap_or(0);
     assert!(gates_count > 0, "summary.data_empty_gates_count 必须大于 0");
 
+    // data_empty_gates 必须只包含当前页面（合同协议.spg）的条件
+    for g in data_empty_gates.iter() {
+        let sf = g.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            sf.contains("合同协议"),
+            "model:model22 的 data_empty_gates 只能包含合同协议.spg 的条件，实际: {}",
+            sf
+        );
+    }
+
+    // related_context 必须包含其他页面的条件
+    let related = details
+        .get("related_context")
+        .and_then(|v| v.as_array())
+        .expect("related_context must be array");
+    let has_other_page = related.iter().any(|r| {
+        let sf = r.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
+        !sf.contains("合同协议")
+    });
+    assert!(
+        has_other_page,
+        "model:model22 的 related_context 必须包含其他页面的同名 model22 条件"
+    );
+
     // primary_reason 应提到数据门控
     let primary_reason = summary
         .get("primary_reason")
@@ -4439,5 +4463,80 @@ fn test_real_project_explain_condition_model22_filter() {
     assert!(
         primary_reason.contains("数据门控") || primary_reason.contains("filter"),
         "model:model22 的 primary_reason 应说明数据门控或 filter 影响"
+    );
+}
+
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_explain_condition_page_合同协议() {
+    let graph_db_path = "/tmp/m20_test_xiaoshouyi_page.db";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain-condition",
+        "page:app/销售.app/销售/合同协议.spg",
+        "--budget",
+        "compact",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let details_val = ai.details.as_ref().expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+
+    // 不能返回空 summary
+    let gates_count = summary
+        .get("data_empty_gates_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let blocking_count = summary
+        .get("blocking_conditions_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(
+        gates_count > 0 || blocking_count > 0,
+        "page:合同协议.spg 的 explain-condition 不能为空"
+    );
+
+    // 必须至少包含一个 SourceFilterExp
+    let empty: Vec<serde_json::Value> = Vec::new();
+    let gates = details
+        .get("data_empty_gates")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let has_filter = gates.iter().any(|c| {
+        let ct = c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("");
+        ct == "SourceFilterExp"
+    });
+    assert!(
+        has_filter,
+        "page:合同协议.spg 必须包含至少一个 SourceFilterExp"
+    );
+
+    // 必须至少包含一个 VisibleCondition
+    let blocking = details
+        .get("blocking_conditions")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let has_visible = blocking.iter().any(|c| {
+        let ct = c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("");
+        ct == "VisibleCondition"
+    });
+    assert!(
+        has_visible,
+        "page:合同协议.spg 必须包含至少一个 VisibleCondition"
     );
 }
