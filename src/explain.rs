@@ -706,9 +706,13 @@ pub fn explain_condition_target(
         if let Some(primary_page) = primary_page {
             // 把 primary_page 的条件从 related_context 提升出来
             let mut remaining_related: Vec<serde_json::Value> = Vec::new();
-            for rc in related_context {
+            for mut rc in related_context {
                 let rc_file = rc.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
                 if rc_file == primary_page {
+                    // 提升为主条件时清除 note，避免主链路被误判为旁路
+                    if let Some(obj) = rc.as_object_mut() {
+                        obj.remove("note");
+                    }
                     match classify_condition(&rc) {
                         "blocking" => blocking_conditions.push(rc),
                         "data_empty" => data_empty_gates.push(rc),
@@ -790,6 +794,7 @@ pub fn explain_condition_target(
             related_context.push(serde_json::json!({
                 "type": "candidate_path",
                 "path": p.to_json(),
+                "note": "相关但非必要上下文",
             }));
         }
     }

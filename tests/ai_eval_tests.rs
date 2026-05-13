@@ -244,6 +244,7 @@ fn test_ai_eval_assertions_structure() {
         "array_any",
         "array_contains",
         "array_any_contains",
+        "array_any_contains_substring",
         "contains_field_path",
         "exists",
         "manual",
@@ -283,6 +284,7 @@ fn test_ai_eval_command_whitelist() {
     let required_subcommands = [
         "--query-page-logic",
         "--explain",
+        "--explain-condition",
         "--context",
         "--query-dataflow",
         "--query-model",
@@ -306,7 +308,8 @@ fn test_ai_eval_command_whitelist() {
         for cmd in cmds {
             let cmd_str = cmd.as_str().expect("required_commands 每项必须是字符串");
             if cmd_str.starts_with("--project-dir ") {
-                let has_subcommand = required_subcommands.iter().any(|sub| cmd_str.contains(sub));
+                let parts: Vec<&str> = cmd_str.split_whitespace().collect();
+                let has_subcommand = required_subcommands.iter().any(|sub| parts.contains(sub));
                 assert!(
                     has_subcommand,
                     "case {} 的命令 '{}' 必须包含合法子命令",
@@ -774,6 +777,47 @@ fn evaluate_assertion(
             if !found {
                 return Err(format!(
                     "case {} 命令 '{}' 断言失败 [{}]: path '{}' 数组中无元素满足 {} 包含 '{}'
+  期望: 至少一个元素的 {} 包含 '{}'
+  实际数组前3项: {:?}",
+                    case_id,
+                    cmd_str,
+                    description,
+                    path.unwrap_or("?"),
+                    field,
+                    expected_val,
+                    field,
+                    expected_val,
+                    arr.iter().take(3).collect::<Vec<_>>()
+                ));
+            }
+        }
+        "array_any_contains_substring" => {
+            let field = assertion["field"].as_str().unwrap_or("?");
+            let expected_val = assertion["value"].as_str().unwrap_or("");
+            let empty_arr: &[serde_json::Value] = &[];
+            let arr = actual_value
+                .as_ref()
+                .and_then(|v| v.as_array().map(|a| a.as_slice()))
+                .unwrap_or(empty_arr);
+            let found = arr.iter().any(|item| {
+                let field_value = get_json_path(item, field);
+                if let Some(v) = field_value {
+                    if let Some(s) = v.as_str() {
+                        s.contains(expected_val)
+                    } else if let Some(a) = v.as_array() {
+                        a.iter().any(|sub| {
+                            sub.as_str().map(|s| s.contains(expected_val)).unwrap_or(false)
+                        })
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            });
+            if !found {
+                return Err(format!(
+                    "case {} 命令 '{}' 断言失败 [{}]: path '{}' 数组中无元素满足 {} 包含子串 '{}'
   期望: 至少一个元素的 {} 包含 '{}'
   实际数组前3项: {:?}",
                     case_id,

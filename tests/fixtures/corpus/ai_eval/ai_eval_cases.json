@@ -1,7 +1,7 @@
 {
   "schema_version": "1.2.0",
   "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、运行器规范",
-  "eval_count": 23,
+  "eval_count": 24,
   "cases": [
     {
       "case_id": "page_purpose_actions_test",
@@ -2653,7 +2653,10 @@
         "input3 的值来自 model19.brand",
         "input3 的值来自 text57",
         "input3 的值来源不明",
-        "旁路关系是必要条件"
+        "旁路关系是必要条件",
+        "model19.brand",
+        "text57",
+        "来源不明"
       ],
       "evidence_requirements": [
         {
@@ -2709,6 +2712,34 @@
           "op": "gt",
           "value": 0,
           "description": "主链路数量大于 0"
+        },
+        {
+          "path": "details.primary_path",
+          "op": "array_any_contains_substring",
+          "field": "evidence",
+          "value": "model22.phoneNumber",
+          "description": "主链路必须包含 model22.phoneNumber"
+        },
+        {
+          "path": "details.primary_path",
+          "op": "array_any_contains_substring",
+          "field": "evidence",
+          "value": "fact_qwSidebar.phoneNumber",
+          "description": "主链路必须包含 fact_qwSidebar.phoneNumber"
+        },
+        {
+          "path": "details.primary_path",
+          "op": "array_any_contains_substring",
+          "field": "evidence",
+          "value": "action1",
+          "description": "主链路必须包含 action1"
+        },
+        {
+          "path": "details.primary_path",
+          "op": "array_any_contains_substring",
+          "field": "evidence",
+          "value": "action4",
+          "description": "主链路必须包含 action4"
         }
       ],
       "risk_tags": [
@@ -2728,7 +2759,12 @@
         "must_include": [
           "model22.phoneNumber",
           "fact_qwSidebar",
-          "phoneNumber"
+          "phoneNumber",
+          "model22.phoneNumber",
+          "fact_qwSidebar.phoneNumber",
+          "潜客信息跟进",
+          "action1",
+          "action4"
         ],
         "must_not_include": [
           "model19.brand",
@@ -2942,6 +2978,20 @@
           "op": "gt",
           "value": 0,
           "description": "必须有 related_context"
+        },
+        {
+          "path": "details.data_empty_gates",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "param5",
+          "description": "data_empty_gates 必须包含 param5"
+        },
+        {
+          "path": "details.data_empty_gates",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "WXWORK_USER_ID",
+          "description": "data_empty_gates 必须包含 WXWORK_USER_ID"
         }
       ],
       "risk_tags": [
@@ -2961,7 +3011,11 @@
         "must_include": [
           "合同协议.spg",
           "related_context",
-          "非当前页面必要条件"
+          "非当前页面必要条件",
+          "param5",
+          "WXWORK_USER_ID",
+          "externalUserId",
+          "staffId"
         ],
         "must_not_include": [
           "其他页面同名 model22 是必要条件",
@@ -2980,6 +3034,137 @@
           "把 related_context 中的条件当作主因",
           "忽略 note: 非当前页面必要条件",
           "混淆不同页面的同名局部模型"
+        ]
+      }
+    },
+    {
+      "case_id": "fixture_condition_model_filter_user_var",
+      "question": "actions_test 页面中 model1 的数据源过滤条件有哪些？是否涉及系统变量？",
+      "project_dir": "tests/fixtures/test_project",
+      "requires_real_project": false,
+      "real_project_target": null,
+      "source_path": null,
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --explain-condition 'model:model1' --budget compact"
+      ],
+      "expected_facts": [
+        "model1 有过滤条件 externalUserId=param1",
+        "model1 有过滤条件 staffId=$user.WXWORK_USER_ID",
+        "过滤条件涉及系统变量 $user.WXWORK_USER_ID",
+        "input1 的 exp 引用了 model1.totalRowCount__"
+      ],
+      "forbidden_claims": [
+        "model1 没有任何过滤条件",
+        "model1 的条件不涉及系统变量",
+        "model1 是只读数据源"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "details.data_empty_gates",
+          "op": "not_empty",
+          "description": "必须有数据门控"
+        },
+        {
+          "path": "details.data_empty_gates",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "param1",
+          "description": "data_empty_gates 必须包含 param1"
+        },
+        {
+          "path": "details.data_empty_gates",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "WXWORK_USER_ID",
+          "description": "data_empty_gates 必须包含 WXWORK_USER_ID"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "filter",
+          "param1",
+          "$user.WXWORK_USER_ID",
+          "totalRowCount__"
+        ],
+        "should_mention": [
+          "externalUserId",
+          "staffId"
+        ],
+        "must_not_mention": [
+          "没有任何过滤条件",
+          "只读"
+        ]
+      },
+      "uncertainty_policy": "如果过滤条件未完全解析，应保守表达",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "model:model1",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.data_empty_gates",
+          "op": "not_empty",
+          "description": "必须有数据门控"
+        },
+        {
+          "path": "details.data_empty_gates",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "param1",
+          "description": "data_empty_gates 必须包含 param1"
+        },
+        {
+          "path": "details.data_empty_gates",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "WXWORK_USER_ID",
+          "description": "data_empty_gates 必须包含 WXWORK_USER_ID"
+        }
+      ],
+      "risk_tags": [
+        "condition",
+        "fixture",
+        "M22",
+        "system_variable"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 1,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "filter",
+          "param1",
+          "$user",
+          "WXWORK_USER_ID"
+        ],
+        "must_not_include": [
+          "没有任何过滤条件",
+          "只读"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出 model1 过滤条件的总体结论",
+          "区分 param 条件和系统变量条件",
+          "引用 CLI 输出的 data_empty_gates 作为依据"
+        ],
+        "forbidden_practices": [
+          "忽略 filter 条件直接说数据源为空",
+          "把 totalRowCount__ 说成普通字段"
         ]
       }
     }

@@ -11,7 +11,21 @@
         {
             "id": "model1",
             "modelType": "dwtable",
-            "path": "data/table1.tbl"
+            "path": "data/table1.tbl",
+            "filter": {
+                "clauses": [
+                    {
+                        "field": "externalUserId",
+                        "op": "=",
+                        "exp": "param1"
+                    },
+                    {
+                        "field": "staffId",
+                        "op": "=",
+                        "exp": "$user.WXWORK_USER_ID"
+                    }
+                ]
+            }
         },
         {
             "id": "model2",
@@ -29,7 +43,8 @@
                 "submitField": "model1.name",
                 "value": "test",
                 "visibleCondition": "input2.value != ''",
-                "disableCondition": "input1.value == 'disabled'"
+                "disableCondition": "input1.value == 'disabled'",
+                "exp": "model1.totalRowCount__ > 0"
             },
             {
                 "id": "input2",
