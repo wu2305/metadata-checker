@@ -53,4 +53,4 @@
 - [x] M19-FIX：可扩展主链路计算框架（候选路径、分类、可替换 selector、真实项目主链验收），详见 `docs/real-project-optimization-roadmap.md`
 - [x] M20：Why 条件查询能力（目标化主因链路，避免通用 context 漂移），详见 `docs/real-project-optimization-roadmap.md`
 - [x] M21：未知 Action 语义归类，详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M22：条件类 AI 评测与协议收敛（含注意力漂移负例断言），详见 `docs/real-project-optimization-roadmap.md`
+- [x] M22：条件类 AI 评测与协议收敛（含注意力漂移负例断言），详见 `docs/real-project-optimization-roadmap.md`
