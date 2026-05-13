@@ -794,7 +794,7 @@ pub fn explain_condition_target(
             related_context.push(serde_json::json!({
                 "type": "candidate_path",
                 "path": p.to_json(),
-                "note": "相关但非必要上下文",
+                "note": "非当前页面必要条件",
             }));
         }
     }

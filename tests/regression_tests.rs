@@ -4435,6 +4435,16 @@ fn test_real_project_explain_condition_input3() {
             "input3 的 why 解释不应包含 phone_time"
         );
     }
+
+    // 主区 blocking_conditions / data_empty_gates 不得带旁路 note
+    for cond in blocking.iter().chain(gates.iter()) {
+        if let Some(note) = cond.get("note").and_then(|v| v.as_str()) {
+            assert!(
+                note != "非当前页面必要条件",
+                "input3 的主条件不应包含旁路 note"
+            );
+        }
+    }
 }
 
 #[test]
@@ -4527,6 +4537,26 @@ fn test_real_project_explain_condition_model22_filter() {
         primary_reason.contains("数据门控") || primary_reason.contains("filter"),
         "model:model22 的 primary_reason 应说明数据门控或 filter 影响"
     );
+
+    // 主区 data_empty_gates 不得带旁路 note
+    for g in data_empty_gates.iter() {
+        if let Some(note) = g.get("note").and_then(|v| v.as_str()) {
+            assert!(
+                note != "非当前页面必要条件",
+                "model:model22 的主 data_empty_gates 不应包含旁路 note"
+            );
+        }
+    }
+
+    // related_context 必须全部有旁路 note
+    for r in related.iter() {
+        let note = r.get("note").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            note.contains("非当前页面") || note.contains("非必要"),
+            "model:model22 的 related_context 每项必须有旁路 note，实际: {:?}",
+            r
+        );
+    }
 }
 
 

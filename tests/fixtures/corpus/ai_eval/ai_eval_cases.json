@@ -1,7 +1,7 @@
 {
   "schema_version": "1.2.0",
   "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、运行器规范",
-  "eval_count": 24,
+  "eval_count": 26,
   "cases": [
     {
       "case_id": "page_purpose_actions_test",
@@ -3165,6 +3165,234 @@
         "forbidden_practices": [
           "忽略 filter 条件直接说数据源为空",
           "把 totalRowCount__ 说成普通字段"
+        ]
+      }
+    },
+    {
+      "case_id": "fixture_condition_chain_dependency",
+      "question": "actions_test 页面中 input_chain_a 为什么不显示？它的条件链涉及哪些组件？",
+      "project_dir": "tests/fixtures/test_project",
+      "requires_real_project": false,
+      "real_project_target": null,
+      "source_path": null,
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|input_chain_a' --budget compact"
+      ],
+      "expected_facts": [
+        "input_chain_a 的显示受 visibleCondition 控制",
+        "visibleCondition 依赖 input_chain_b.value",
+        "input_chain_b 的值来自 param1（链式上游）"
+      ],
+      "forbidden_claims": [
+        "只有 input_chain_b 影响显示",
+        "没有链式依赖",
+        "input_chain_a 没有任何条件",
+        "input_chain_a 的条件不依赖任何组件"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "input_chain_b",
+          "description": "blocking_conditions 必须包含 input_chain_b"
+        },
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any_contains_substring",
+          "field": "referenced_symbols",
+          "value": "input_chain_b",
+          "description": "referenced_symbols 必须包含 input_chain_b"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "visibleCondition",
+          "input_chain_b",
+          "链式依赖"
+        ],
+        "should_mention": [
+          "param1",
+          "input_chain_a"
+        ],
+        "must_not_mention": [
+          "只有 input_chain_b",
+          "没有链式依赖"
+        ]
+      },
+      "uncertainty_policy": "如果链式上游未完全解析，应保守表达",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "comp:app/actions_test.spg|input_chain_a",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "input_chain_b",
+          "description": "blocking_conditions 必须包含 input_chain_b"
+        },
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any_contains_substring",
+          "field": "referenced_symbols",
+          "value": "input_chain_b",
+          "description": "referenced_symbols 必须包含 input_chain_b"
+        }
+      ],
+      "risk_tags": [
+        "condition",
+        "fixture",
+        "M22",
+        "chain"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 1,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "visibleCondition",
+          "input_chain_b"
+        ],
+        "must_not_include": [
+          "只有 input_chain_b",
+          "没有链式依赖",
+          "没有任何条件"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先给出直接条件结论",
+          "再说明链式上游依赖",
+          "引用 CLI 输出的 blocking_conditions 和 referenced_symbols"
+        ],
+        "forbidden_practices": [
+          "忽略直接条件只说上游组件",
+          "把链式依赖简化成单一原因",
+          "跳过 summary 直接读取 details 大数组"
+        ]
+      }
+    },
+    {
+      "case_id": "fixture_hidden_component_not_failure",
+      "question": "actions_test 页面中 panel_test 为什么不显示？隐藏组件 hidden_customer_id 是渲染故障吗？",
+      "project_dir": "tests/fixtures/test_project",
+      "requires_real_project": false,
+      "real_project_target": null,
+      "source_path": null,
+      "required_commands": [
+        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|panel_test' --budget compact"
+      ],
+      "expected_facts": [
+        "panel_test 的显示受 visibleCondition 控制",
+        "visibleCondition 依赖 hidden_customer_id.value",
+        "hidden_customer_id 是隐藏组件，不是页面渲染故障",
+        "隐藏组件可以作为条件证据，但不是显示故障原因"
+      ],
+      "forbidden_claims": [
+        "隐藏组件不可用所以页面渲染失败",
+        "隐藏字段本身是页面不显示的原因",
+        "所有隐藏组件都是必要条件",
+        "hidden_customer_id 是一个错误"
+      ],
+      "evidence_requirements": [
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "hidden_customer_id",
+          "description": "blocking_conditions 必须包含 hidden_customer_id"
+        }
+      ],
+      "answer_rubric": {
+        "must_mention": [
+          "visibleCondition",
+          "hidden_customer_id",
+          "条件证据"
+        ],
+        "should_mention": [
+          "隐藏组件",
+          "不是渲染故障"
+        ],
+        "must_not_mention": [
+          "渲染失败",
+          "页面故障",
+          "所有隐藏组件都是必要条件"
+        ]
+      },
+      "uncertainty_policy": "如果隐藏组件的语义不确定，应保守表达",
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "comp:app/actions_test.spg|panel_test",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "hidden_customer_id",
+          "description": "blocking_conditions 必须包含 hidden_customer_id"
+        }
+      ],
+      "risk_tags": [
+        "condition",
+        "fixture",
+        "M22",
+        "hidden"
+      ],
+      "case_status": "active",
+      "difficulty": "intermediate",
+      "max_command_count": 1,
+      "allowed_output_sections": [
+        "summary",
+        "details"
+      ],
+      "answer_assertions": {
+        "must_include": [
+          "visibleCondition",
+          "hidden_customer_id"
+        ],
+        "must_not_include": [
+          "渲染失败",
+          "页面故障",
+          "所有隐藏组件都是必要条件"
+        ],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+      },
+      "answer_style_policy": {
+        "principles": [
+          "先说明 visibleCondition 的门控作用",
+          "明确 hidden_customer_id 是条件引用，不是渲染故障",
+          "引用 CLI 输出的 blocking_conditions 作为证据"
+        ],
+        "forbidden_practices": [
+          "把隐藏组件说成页面渲染失败",
+          "把条件引用夸大为系统故障",
+          "忽略 visibleCondition 直接说面板有问题"
         ]
       }
     }

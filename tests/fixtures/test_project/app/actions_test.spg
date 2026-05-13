@@ -5,6 +5,10 @@
         {
             "id": "param1",
             "name": "参数A"
+        },
+        {
+            "id": "param_chain",
+            "name": "链式参数"
         }
     ],
     "sources": [
@@ -271,6 +275,29 @@
                         "field": "attachment"
                     }
                 ]
+            },
+            {
+                "id": "input_chain_b",
+                "type": "input",
+                "value": "chain_val",
+                "exp": "param1"
+            },
+            {
+                "id": "input_chain_a",
+                "type": "input",
+                "visibleCondition": "input_chain_b.value != ''",
+                "value": "test"
+            },
+            {
+                "id": "hidden_customer_id",
+                "type": "hidden",
+                "value": "hidden_val"
+            },
+            {
+                "id": "panel_test",
+                "type": "panel",
+                "visibleCondition": "hidden_customer_id.value != ''",
+                "components": []
             }
         ]
     }

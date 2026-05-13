@@ -1410,3 +1410,77 @@ fn test_ai_eval_diagnostic_disclaimer_required() {
         }
     }
 }
+
+/// ============================================================
+/// array_any_contains_substring 断言操作符质量测试
+/// ============================================================
+#[test]
+fn test_array_any_contains_substring_evaluator() {
+    // 命中：字符串字段子串匹配
+    let item = serde_json::json!({"raw_expr": "model22.externalUserId=param5"});
+    let arr = vec![item];
+    let found = arr.iter().any(|item| {
+        let field_value = item.get("raw_expr");
+        if let Some(v) = field_value {
+            if let Some(s) = v.as_str() {
+                s.contains("param5")
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    });
+    assert!(found, "字符串字段子串应命中");
+
+    // 命中：数组字段子串匹配（evidence 数组）
+    let item2 = serde_json::json!({"evidence": ["input3 -> field:model22.phoneNumber via Reads"]});
+    let arr2 = vec![item2];
+    let found2 = arr2.iter().any(|item| {
+        let field_value = item.get("evidence");
+        if let Some(v) = field_value {
+            if let Some(a) = v.as_array() {
+                a.iter().any(|sub| sub.as_str().map(|s| s.contains("model22.phoneNumber")).unwrap_or(false))
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    });
+    assert!(found2, "数组字段子串应命中");
+
+    // 不命中：无关字段不应误匹配
+    let item3 = serde_json::json!({"raw_expr": "model19.brand='foo'"});
+    let arr3 = vec![item3];
+    let found3 = arr3.iter().any(|item| {
+        let field_value = item.get("raw_expr");
+        if let Some(v) = field_value {
+            if let Some(s) = v.as_str() {
+                s.contains("param5")
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    });
+    assert!(!found3, "无关字段不应误命中");
+
+    // 不命中：对象整体 stringify 不应误匹配
+    let item4 = serde_json::json!({"nested": {"deep": "param5"}});
+    let arr4 = vec![item4];
+    let found4 = arr4.iter().any(|item| {
+        let field_value = item.get("raw_expr");
+        if let Some(v) = field_value {
+            if let Some(s) = v.as_str() {
+                s.contains("param5")
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    });
+    assert!(!found4, "对象 stringify 不应误命中");
+}
