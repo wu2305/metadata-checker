@@ -1,12 +1,12 @@
 {
   "details_counts": {
-    "action_flows_count": 10,
-    "data_sources_count": 1,
-    "entrypoints_count": 10,
+    "action_flows_count": 14,
+    "data_sources_count": 2,
+    "entrypoints_count": 14,
     "navigation_count": 3,
     "page_inputs_count": 1,
     "visibility_rules_count": 0,
-    "write_targets_count": 9
+    "write_targets_count": 18
   },
   "diagnostics": [
     {
@@ -20,12 +20,7 @@
   ],
   "evidence": [
     {
-      "claim": "Action flow actionCloseDialog (closeDialog)",
-      "confidence": "High",
-      "edge_type": "Triggers"
-    },
-    {
-      "claim": "Action flow actionShowDialog (showDialog)",
+      "claim": "Action flow actionShowMessage (showMessage)",
       "confidence": "High",
       "edge_type": "Triggers"
     },
@@ -45,12 +40,12 @@
       "edge_type": "Triggers"
     },
     {
-      "claim": "Entrypoint comp:app/actions_test.spg|buttonCloseDialog (button) can trigger page logic",
+      "claim": "Action flow actionWebAPI (webAPI)",
       "confidence": "High",
       "edge_type": "Triggers"
     },
     {
-      "claim": "Entrypoint comp:app/actions_test.spg|buttonShowDialog (button) can trigger page logic",
+      "claim": "Entrypoint comp:app/actions_test.spg|buttonShowMessage (button) can trigger page logic",
       "confidence": "High",
       "edge_type": "Triggers"
     },
@@ -70,6 +65,11 @@
       "edge_type": "Triggers"
     },
     {
+      "claim": "Entrypoint comp:app/actions_test.spg|buttonWebAPI (button) can trigger page logic",
+      "confidence": "High",
+      "edge_type": "Triggers"
+    },
+    {
       "claim": "Navigation action:app/actions_test.spg|buttonCloseDialog|actionCloseDialog -> comp:app/actions_test.spg|buttonCloseDialog (ActionControlsComponent)",
       "confidence": "High",
       "edge_type": "ActionControlsComponent"
@@ -85,12 +85,12 @@
       "edge_type": "ActionControlsComponent"
     },
     {
-      "claim": "Page page:app/actions_test.spg has 10 action flows",
+      "claim": "Page page:app/actions_test.spg has 14 action flows",
       "confidence": "High",
       "edge_type": "Triggers"
     },
     {
-      "claim": "Page page:app/actions_test.spg has 10 entrypoints",
+      "claim": "Page page:app/actions_test.spg has 14 entrypoints",
       "confidence": "High",
       "edge_type": "Triggers"
     },
@@ -100,12 +100,12 @@
       "edge_type": "Navigation"
     },
     {
-      "claim": "Page page:app/actions_test.spg reads from 1 data sources",
+      "claim": "Page page:app/actions_test.spg reads from 2 data sources",
       "confidence": "High",
       "edge_type": "Reads/ActionReads"
     },
     {
-      "claim": "Page page:app/actions_test.spg writes to 9 targets",
+      "claim": "Page page:app/actions_test.spg writes to 18 targets",
       "confidence": "High",
       "edge_type": "Writes/ActionWrites"
     },
@@ -115,9 +115,9 @@
       "edge_type": "ActionValidates"
     },
     {
-      "claim": "Write model1.age via action:app/actions_test.spg|button5|action5",
+      "claim": "Read table1.name via action:app/actions_test.spg|buttonValidate|actionValidate",
       "confidence": "High",
-      "edge_type": "ActionWrites"
+      "edge_type": "ActionValidates"
     },
     {
       "claim": "Write model1.age via comp:app/actions_test.spg|input2",
@@ -125,40 +125,89 @@
       "edge_type": "Writes"
     },
     {
-      "claim": "Write model1.name via action:app/actions_test.spg|button5|action5",
-      "confidence": "High",
-      "edge_type": "ActionWrites"
-    },
-    {
       "claim": "Write model1.name via comp:app/actions_test.spg|input1",
       "confidence": "High",
       "edge_type": "Writes"
     },
     {
-      "claim": "Write model2.deletedFlag via action:app/actions_test.spg|button4|action4",
+      "claim": "Write table1.age via comp:app/actions_test.spg|input2",
+      "confidence": "High",
+      "edge_type": "Writes"
+    },
+    {
+      "claim": "Write table1.name via action:app/actions_test.spg|button5|action5",
       "confidence": "High",
       "edge_type": "ActionWrites"
+    },
+    {
+      "claim": "Write table1.name via comp:app/actions_test.spg|input1",
+      "confidence": "High",
+      "edge_type": "Writes"
     }
   ],
   "kind": "PageLogic",
   "query_target": "page:app/actions_test.spg",
   "schema_version": "1.0",
   "summary": {
-    "action_prerequisites_count": 0,
+    "action_prerequisites_count": 1,
     "data_prerequisites_count": 0,
-    "data_source_count": 1,
+    "data_source_count": 2,
     "display_prerequisites_count": 0,
-    "entrypoint_count": 10,
+    "entrypoint_count": 14,
     "navigation_count": 3,
     "page_id": "page:app/actions_test.spg",
     "page_name": "actions_test",
     "page_role": "mixed_interaction_page",
-    "primary_paths_count": 21,
-    "related_context_count": 0,
+    "primary_paths_count": 24,
+    "related_context_count": 38,
     "risk_count": 2,
-    "top_action_prerequisites": [],
+    "top_action_prerequisites": [
+      {
+        "confidence": "high",
+        "depends_on": [
+          "component:input1"
+        ],
+        "diagnostics": [],
+        "effect_type": "Execute",
+        "evidence": {
+          "edge_type": "DependsOn",
+          "json_path": "canvas.components[3].actions[0].conditionExp",
+          "node_id": "cond:app/actions_test.spg|button2#action1#conditionExp",
+          "raw_expr": "input1.value=='test'",
+          "source_file": "app/actions_test.spg"
+        },
+        "impact": {
+          "affected_component_count": 0,
+          "affected_model_count": 0,
+          "affects_row_count": false,
+          "impact_score": 1,
+          "is_entrypoint": false,
+          "is_main_panel": false
+        },
+        "json_path": "canvas.components[3].actions[0].conditionExp",
+        "kind": "ActionConditionExp",
+        "normalized_expr": "input1.value=='test'",
+        "owner_type": "Action",
+        "raw_expr": "input1.value=='test'",
+        "source_file": "app/actions_test.spg",
+        "subject_type": "Action",
+        "target": "button2:action1"
+      }
+    ],
     "top_data_prerequisites": [],
     "top_data_sources": [
+      {
+        "edge_type": "ActionValidates",
+        "field_path": "table1.name",
+        "json_path": "canvas.components[id='buttonValidate'].actions[id='actionValidate'].<derived-target>",
+        "model": "table1",
+        "raw_expr": "model1.name",
+        "source_action": "action:app/actions_test.spg|buttonValidate|actionValidate",
+        "source_component": null,
+        "source_file": "app/actions_test.spg",
+        "target_id": "model:table1",
+        "type": "ActionValidates"
+      },
       {
         "edge_type": "ActionValidates",
         "field_path": "model1.name",
@@ -176,6 +225,16 @@
     "top_entrypoints": [
       {
         "edge_type": "Triggers",
+        "id": "comp:app/actions_test.spg|buttonWebAPI",
+        "json_path": "canvas.components[13].actions[*]",
+        "name": "buttonWebAPI",
+        "node_id": "comp:app/actions_test.spg|buttonWebAPI",
+        "raw_expr": null,
+        "source_file": "app/actions_test.spg",
+        "type": "button"
+      },
+      {
+        "edge_type": "Triggers",
         "id": "comp:app/actions_test.spg|buttonValidate",
         "json_path": "canvas.components[11].actions[*]",
         "name": "buttonValidate",
@@ -190,16 +249,6 @@
         "json_path": "canvas.components[7].actions[*]",
         "name": "buttonUnknown",
         "node_id": "comp:app/actions_test.spg|buttonUnknown",
-        "raw_expr": null,
-        "source_file": "app/actions_test.spg",
-        "type": "button"
-      },
-      {
-        "edge_type": "Triggers",
-        "id": "comp:app/actions_test.spg|buttonSwitchPanel",
-        "json_path": "canvas.components[10].actions[*]",
-        "name": "buttonSwitchPanel",
-        "node_id": "comp:app/actions_test.spg|buttonSwitchPanel",
         "raw_expr": null,
         "source_file": "app/actions_test.spg",
         "type": "button"
@@ -243,6 +292,17 @@
     "top_writes": [
       {
         "edge_type": "Writes",
+        "field_path": "table1.age",
+        "json_path": "canvas.components[id='input2'].submitField",
+        "model": "table1",
+        "raw_expr": "model1.age",
+        "source_action": null,
+        "source_component": "comp:app/actions_test.spg|input2",
+        "source_file": "app/actions_test.spg",
+        "target_id": "model:table1"
+      },
+      {
+        "edge_type": "Writes",
         "field_path": "model1.age",
         "json_path": "canvas.components[id='input2'].submitField",
         "model": "model1",
@@ -254,28 +314,17 @@
       },
       {
         "edge_type": "Writes",
-        "field_path": "model1.name",
+        "field_path": "table1.name",
         "json_path": "canvas.components[id='input1'].submitField",
-        "model": "model1",
+        "model": "table1",
         "raw_expr": "model1.name",
         "source_action": null,
         "source_component": "comp:app/actions_test.spg|input1",
         "source_file": "app/actions_test.spg",
-        "target_id": "model:model1"
-      },
-      {
-        "edge_type": "ActionWrites",
-        "field_path": "model1.name",
-        "json_path": "canvas.components[id='button5'].actions[id='action5'].fieldValues[*].value",
-        "model": "model1",
-        "raw_expr": "model1.name",
-        "source_action": "action:app/actions_test.spg|button5|action5",
-        "source_component": null,
-        "source_file": "app/actions_test.spg",
-        "target_id": "model:model1"
+        "target_id": "model:table1"
       }
     ],
-    "what_is_it": "页面 actions_test，10 个用户入口，读取 1 个数据源，写入 9 个目标，3 个跳转",
-    "write_target_count": 9
+    "what_is_it": "页面 actions_test，14 个用户入口，读取 2 个数据源，写入 18 个目标，3 个跳转",
+    "write_target_count": 18
   }
 }

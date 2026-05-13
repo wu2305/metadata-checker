@@ -1915,8 +1915,8 @@ fn test_cli_query_page_logic_actions_test_semantics() {
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     assert_eq!(
-        ep_count, 10,
-        "actions_test should have 10 button entrypoints (including new actions)"
+        ep_count, 14,
+        "actions_test should have 14 button entrypoints (including new actions)"
     );
 
     let details_val = ai.details.expect("details must exist");
@@ -1954,8 +1954,8 @@ fn test_cli_query_page_logic_actions_test_semantics() {
         .expect("action_flows must be array");
     assert_eq!(
         action_flows.len(),
-        10,
-        "actions_test should have 10 action flows (including new actions)"
+        14,
+        "actions_test should have 14 action flows (including new actions)"
     );
 
     // write_targets: should include model1 and model2
@@ -2474,6 +2474,29 @@ fn test_cli_query_page_logic_unknown_action_type() {
             .and_then(|v| v.as_str()),
         Some("unknown")
     );
+
+    // script/webAPI/showMessage/showFilesGallary 不应产生 UNKNOWN_ACTION_TYPE
+    let unknown_types: Vec<&str> = ai.diagnostics
+        .iter()
+        .filter(|d| d.code == "UNKNOWN_ACTION_TYPE")
+        .filter_map(|d| d.message.split("'").nth(1))
+        .collect();
+    assert!(
+        !unknown_types.iter().any(|t| *t == "script"),
+        "script should not produce UNKNOWN_ACTION_TYPE"
+    );
+    assert!(
+        !unknown_types.iter().any(|t| *t == "webAPI"),
+        "webAPI should not produce UNKNOWN_ACTION_TYPE"
+    );
+    assert!(
+        !unknown_types.iter().any(|t| *t == "showMessage"),
+        "showMessage should not produce UNKNOWN_ACTION_TYPE"
+    );
+    assert!(
+        !unknown_types.iter().any(|t| *t == "showFilesGallary"),
+        "showFilesGallary should not produce UNKNOWN_ACTION_TYPE"
+    );
 }
 
 #[test]
@@ -2553,6 +2576,46 @@ fn test_cli_query_page_logic_new_action_types() {
             .get("action_category")
             .and_then(|v| v.as_str()),
         Some("validation")
+    );
+
+    // script should be script_execution
+    let script = flows
+        .iter()
+        .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("script"));
+    assert!(script.is_some(), "script action should exist");
+    assert_eq!(
+        script.unwrap().get("action_category").and_then(|v| v.as_str()),
+        Some("script_execution")
+    );
+
+    // webAPI should be api_call
+    let web_api = flows
+        .iter()
+        .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("webAPI"));
+    assert!(web_api.is_some(), "webAPI action should exist");
+    assert_eq!(
+        web_api.unwrap().get("action_category").and_then(|v| v.as_str()),
+        Some("api_call")
+    );
+
+    // showMessage should be message_prompt
+    let show_msg = flows
+        .iter()
+        .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("showMessage"));
+    assert!(show_msg.is_some(), "showMessage action should exist");
+    assert_eq!(
+        show_msg.unwrap().get("action_category").and_then(|v| v.as_str()),
+        Some("message_prompt")
+    );
+
+    // showFilesGallary should be file_gallery
+    let file_gallery = flows
+        .iter()
+        .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("showFilesGallary"));
+    assert!(file_gallery.is_some(), "showFilesGallary action should exist");
+    assert_eq!(
+        file_gallery.unwrap().get("action_category").and_then(|v| v.as_str()),
+        Some("file_gallery")
     );
 }
 

@@ -200,6 +200,60 @@
                         ]
                     }
                 ]
+            },
+            {
+                "id": "buttonScript",
+                "type": "button",
+                "value": "执行脚本",
+                "actions": [
+                    {
+                        "id": "actionScript",
+                        "actionType": "script",
+                        "triggerType": "click",
+                        "script": "alert('hello')"
+                    }
+                ]
+            },
+            {
+                "id": "buttonWebAPI",
+                "type": "button",
+                "value": "调用接口",
+                "actions": [
+                    {
+                        "id": "actionWebAPI",
+                        "actionType": "webAPI",
+                        "triggerType": "click",
+                        "apiURL": "/api/v1/test"
+                    }
+                ]
+            },
+            {
+                "id": "buttonShowMessage",
+                "type": "button",
+                "value": "显示消息",
+                "actions": [
+                    {
+                        "id": "actionShowMessage",
+                        "actionType": "showMessage",
+                        "triggerType": "click",
+                        "messageText": "操作成功",
+                        "messageType": "success"
+                    }
+                ]
+            },
+            {
+                "id": "buttonShowFilesGallary",
+                "type": "button",
+                "value": "查看附件",
+                "actions": [
+                    {
+                        "id": "actionShowFilesGallary",
+                        "actionType": "showFilesGallary",
+                        "triggerType": "click",
+                        "dataSet": "model1",
+                        "field": "attachment"
+                    }
+                ]
             }
         ]
     }

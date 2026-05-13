@@ -131,7 +131,7 @@ pub struct AiOutput {
 | `outputs` | array | DataFlow 输出目标列表（DataFlow 有） |
 | `internal_topology` | object | DataFlow 内部节点拓扑：nodes + edges（DataFlow 有） |
 | `produced_by` | array | 字段产生者列表（Field 有） |
-| `action_category` | string | 动作语义分类（Action 有）：data_write / data_read / navigation / param_mutation / ui_control / validation / data_initialization / data_refresh / unknown |
+| `action_category` | string | 动作语义分类（Action 有）：data_write / data_read / navigation / param_mutation / ui_control / validation / data_initialization / data_refresh / script_execution / api_call / message_prompt / file_gallery / unknown |
 | `semantic_summary` | string | 动作自然语言摘要（Action 有） |
 | `blocks_on` | object / null | 等待前置动作结构化解析（Action 有） |
 | `condition` | object / null | 条件执行表达式结构化解析（Action 有） |
@@ -514,7 +514,7 @@ pub struct AiOutput {
 | `action_type` | string | submitData / updateData / insertData / deleteData / link / setParamValue / ... |
 | `component_id` | string | 触发该 action 的组件完整 ID |
 | `trigger_type` | string | click / hover / focus / ... |
-| `action_category` | string | 动作语义分类：data_write / data_read / navigation / param_mutation / ui_control / validation / data_initialization / data_refresh / unknown |
+| `action_category` | string | 动作语义分类：data_write / data_read / navigation / param_mutation / ui_control / validation / data_initialization / data_refresh / script_execution / api_call / message_prompt / file_gallery / unknown |
 | `semantic_summary` | string | 动作自然语言摘要 |
 | `blocks_on` | object / null | 等待前置动作结构化解析，替代旧 `wait_prev` 字符串 |
 | `condition` | object / null | 条件执行表达式结构化解析（condition 或 conditionExp） |

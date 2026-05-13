@@ -3,7 +3,7 @@
     "lineage_count": 0,
     "reads_count": 0,
     "triggered_by_count": 0,
-    "writes_count": 1
+    "writes_count": 2
   },
   "diagnostics": [
     {
@@ -18,7 +18,7 @@
       "edge_type": null
     },
     {
-      "claim": "Component comp:app/actions_test.spg|button1 writes to 1 targets",
+      "claim": "Component comp:app/actions_test.spg|button1 writes to 2 targets",
       "confidence": "High",
       "edge_type": null
     },
@@ -36,6 +36,11 @@
       "claim": "writes_models relation on model:model1",
       "confidence": "Medium",
       "edge_type": "ActionWrites"
+    },
+    {
+      "claim": "writes_models relation on model:table1",
+      "confidence": "Medium",
+      "edge_type": "ActionWrites"
     }
   ],
   "kind": "Explain",
@@ -47,10 +52,10 @@
     "page": "actions_test",
     "page_id": "page:app/actions_test.spg",
     "read_count": 0,
-    "semantic_summary": "点击 button1 后提交数据到 model1.name",
+    "semantic_summary": "点击 button1 后提交数据到 table1.name, model1.name",
     "type": "component",
     "type_detail": "button",
-    "what_is_it": "button button1，点击 button1 后提交数据到 model1.name",
-    "write_count": 1
+    "what_is_it": "button button1，点击 button1 后提交数据到 table1.name, model1.name",
+    "write_count": 2
   }
 }

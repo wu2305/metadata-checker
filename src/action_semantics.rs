@@ -12,6 +12,10 @@ pub fn classify_action(action_type: &str) -> &'static str {
         "validateData" => "validation",
         "newData" => "data_initialization",
         "resetData" | "refreshModels" | "refreshData" => "data_refresh",
+        "script" => "script_execution",
+        "webAPI" => "api_call",
+        "showMessage" => "message_prompt",
+        "showFilesGallary" => "file_gallery",
         _ => "unknown",
     }
 }
@@ -147,6 +151,18 @@ pub fn build_semantic_summary(
         }
         "refreshData" => {
             format!("点击 {} 后刷新数据", component_name)
+        }
+        "script" => {
+            format!("点击 {} 后执行脚本（具体副作用需人工确认）", component_name)
+        }
+        "webAPI" => {
+            format!("点击 {} 后调用接口", component_name)
+        }
+        "showMessage" => {
+            format!("点击 {} 后显示消息提示", component_name)
+        }
+        "showFilesGallary" => {
+            format!("点击 {} 后打开附件/文件预览", component_name)
         }
         _ => format!("点击 {} 后执行 {} 动作", component_name, action_type),
     }

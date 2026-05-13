@@ -1714,11 +1714,13 @@ pub fn query_page_logic(
             action_category,
             "data_read" | "data_refresh" | "data_initialization" | "validation"
         );
-        let expects_side_effect = matches!(action_category, "data_write" | "param_mutation")
-            || matches!(
-                action_type,
-                "submitData" | "insertData" | "updateData" | "deleteData" | "setParamValue"
-            );
+        let expects_side_effect = matches!(
+            action_category,
+            "data_write" | "param_mutation" | "api_call"
+        ) || matches!(
+            action_type,
+            "submitData" | "insertData" | "updateData" | "deleteData" | "setParamValue" | "webAPI"
+        );
         if reads > 0
             && writes == 0
             && nav_count == 0
@@ -1753,30 +1755,48 @@ pub fn query_page_logic(
         }
     }
 
-    // UNKNOWN_ACTION_TYPE：存在未识别的 action 类型
-    for flow in &action_flows {
-        if flow.get("action_category").and_then(|v| v.as_str()) == Some("unknown") {
-            let atype = flow
-                .get("action_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
+    // UNKNOWN_ACTION_TYPE：存在未识别的 action 类型（聚合同类，避免刷屏）
+    {
+        let mut unknown_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut unknown_examples: std::collections::HashMap<String, (String, Option<String>, Option<String>, Option<String>)> = std::collections::HashMap::new();
+        for flow in &action_flows {
+            if flow.get("action_category").and_then(|v| v.as_str()) == Some("unknown") {
+                let atype = flow
+                    .get("action_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                *unknown_counts.entry(atype.clone()).or_insert(0) += 1;
+                if !unknown_examples.contains_key(&atype) {
+                    unknown_examples.insert(
+                        atype,
+                        (
+                            flow.get("source_file")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            flow.get("component_id").and_then(|v| v.as_str()).map(ToString::to_string),
+                            flow.get("json_path").and_then(|v| v.as_str()).map(ToString::to_string),
+                            flow.get("action_id").and_then(|v| v.as_str()).map(ToString::to_string),
+                        ),
+                    );
+                }
+            }
+        }
+        for (atype, count) in unknown_counts {
+            let (source_file, node_id, json_path, _action_id) = unknown_examples.get(&atype).cloned().unwrap_or_default();
             diagnostics.push(crate::output::Diagnostic {
                 severity: crate::output::DiagnosticSeverity::Warning,
                 code: "UNKNOWN_ACTION_TYPE".to_string(),
-                message: format!("Unknown action type '{}' encountered", atype),
+                message: if count > 1 {
+                    format!("Unknown action type '{}' encountered ({} occurrences)", atype, count)
+                } else {
+                    format!("Unknown action type '{}' encountered", atype)
+                },
                 location: crate::output::Location {
-                    source_file: flow
-                        .get("source_file")
-                        .and_then(|v| v.as_str())
-                        .map(ToString::to_string),
-                    node_id: flow
-                        .get("component_id")
-                        .and_then(|v| v.as_str())
-                        .map(ToString::to_string),
-                    json_path: flow
-                        .get("json_path")
-                        .and_then(|v| v.as_str())
-                        .map(ToString::to_string),
+                    source_file: Some(source_file),
+                    node_id,
+                    json_path,
                 },
                 suggestion: Some(
                     "Check if this action type is supported by metadata-checker".to_string(),
