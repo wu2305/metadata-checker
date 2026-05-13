@@ -4345,12 +4345,22 @@ fn test_real_project_explain_condition_input3() {
         "primary_path 前 5 条不能全部是无关噪声，至少应包含 input3 链路"
     );
 
-    // blocking_conditions 或 data_empty_gates 不应包含 phone_time
+    // blocking_conditions 应包含 visibleCondition（input3 影响 text45 显示）
     let empty: Vec<serde_json::Value> = Vec::new();
     let blocking = details
         .get("blocking_conditions")
         .and_then(|v| v.as_array())
         .unwrap_or(&empty);
+    let has_visible_condition = blocking.iter().any(|c| {
+        let ct = c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("");
+        ct == "VisibleCondition"
+    });
+    assert!(
+        has_visible_condition,
+        "input3 的 explain-condition 应包含关联的 VisibleCondition"
+    );
+
+    // blocking_conditions 或 data_empty_gates 不应包含 phone_time
     let gates = details
         .get("data_empty_gates")
         .and_then(|v| v.as_array())
