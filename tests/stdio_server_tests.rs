@@ -201,3 +201,52 @@ fn test_stdio_server_unknown_command() {
 
     let _ = child.wait();
 }
+
+/// 负例：缺少 target 字段
+#[test]
+fn test_stdio_server_missing_target() {
+    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-missing-target",
+        "command": "explain_condition",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(resp["ok"].as_bool(), Some(false), "missing target must return ok=false");
+    assert!(
+        resp["error"].as_str().unwrap_or("").contains("JSON parse error"),
+        "error must mention JSON parse: got {}",
+        resp["error"].as_str().unwrap_or("(none)")
+    );
+
+    let _ = child.wait();
+}
