@@ -920,7 +920,7 @@ M25 只解决 runtime 生命周期可靠性：状态查询、变更检测、手�
 - `status` 能让 AI 判断当前 runtime 是否加载了预期 graphdb。
 - M25 完成后，才能进入 M26 的 skill/function calling 接入。
 
-## M26：Skill / Function Calling 接入与性能验收
+## M26：Skill / Function Calling 接入与性能验收 ✅
 
 ### 目标
 

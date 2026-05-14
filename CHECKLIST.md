@@ -57,4 +57,4 @@
 - [x] M23：Hot Graph Runtime 基座（进程内复用 GraphDB，暂不做 LazyLoad / stdio server），详见 `docs/real-project-optimization-roadmap.md`
 - [x] M24：Stdio Function Calling Server（JSONL 长驻查询服务），详见 `docs/real-project-optimization-roadmap.md`
 - [x] M25：Runtime Cache 与 Reload（graphdb 变更检测、状态查询、失败降级），详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M26：Skill / Function Calling 接入与性能验收，详见 `docs/real-project-optimization-roadmap.md`
+- [x] M26：Skill / Function Calling 接入与性能验收，详见 `docs/real-project-optimization-roadmap.md`
