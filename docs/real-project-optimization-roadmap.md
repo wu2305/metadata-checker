@@ -430,7 +430,7 @@ M19 已接入页面级 prerequisites、`primary_paths`、`key_primary_paths` 与
 - 禁止误判：不能把条件门控说成渲染故障，不能把未参与初始展示的参数说成必需条件。
 - 禁止漂移：当工具同时输出主链路和相关上下文时，小模型必须优先引用主链路，并显式区分“相关但非必要”的旁路关系。
 
-## M23：Hot Graph Runtime 基座
+## M23：Hot Graph Runtime 基座 ✅
 
 ### 目标
 

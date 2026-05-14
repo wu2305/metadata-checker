@@ -596,6 +596,59 @@ fn collect_conditions_for_node(
 /// - `model:ID` — 解释模型为什么可能为空
 /// - `field:MODEL.FIELD` — 解释字段值来源或为什么为空
 /// - `page:PATH` — 解释页面主要条件门控和数据链路
+///
+/// 将 explain-condition JSON 结果渲染为人类可读摘要文本
+///
+/// 供 runtime 在 human 模式下复用，不直接打印到 stdout
+pub fn render_explain_condition_human(result: &serde_json::Value, target_id: &str) -> String {
+    let obj = match result.as_object() {
+        Some(o) => o,
+        None => return format!("Invalid explain output for {}", target_id),
+    };
+    let summary = obj.get("summary").and_then(|v| v.as_object());
+    let details = obj.get("details").and_then(|v| v.as_object());
+    let target = details
+        .and_then(|d| d.get("target"))
+        .and_then(|t| t.get("node_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(target_id);
+    let primary_reason = summary.and_then(|s| s.get("primary_reason").and_then(|v| v.as_str())).unwrap_or("");
+    let empty_arr: Vec<serde_json::Value> = Vec::new();
+    let blocking = details.and_then(|d| d.get("blocking_conditions").and_then(|v| v.as_array())).unwrap_or(&empty_arr);
+    let gates = details.and_then(|d| d.get("data_empty_gates").and_then(|v| v.as_array())).unwrap_or(&empty_arr);
+    let paths = details.and_then(|d| d.get("primary_path").and_then(|v| v.as_array())).unwrap_or(&empty_arr);
+
+    let mut lines = Vec::new();
+    lines.push(format!("=== Why: {} ===", target));
+    lines.push(format!("Primary reason: {}", primary_reason));
+    if !blocking.is_empty() {
+        lines.push("Blocking conditions:".to_string());
+        for c in blocking {
+            lines.push(format!("  - {}: {}",
+                c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
+                c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
+            ));
+        }
+    }
+    if !gates.is_empty() {
+        lines.push("Data empty gates:".to_string());
+        for c in gates {
+            lines.push(format!("  - {}: {}",
+                c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
+                c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
+            ));
+        }
+    }
+    if !paths.is_empty() {
+        lines.push("Primary paths:".to_string());
+        for p in paths {
+            lines.push(format!("  {}", serde_json::to_string(p).unwrap_or_default()));
+        }
+    }
+    lines.join("
+")
+}
+
 /// CLI 包装：explain-condition 输出到 stdout
 ///
 /// 内部调用 build_explain_condition_output 获取结构化结果，再按 human/JSON 格式打印
@@ -608,50 +661,8 @@ pub fn explain_condition_target(
     let result = build_explain_condition_output(graph, target_id, budget)?;
 
     if human {
-        // human 模式从 JSON 中提取字段打印
-        let obj = result.as_object().ok_or_else(|| anyhow::anyhow!("explain output must be object"))?;
-        let summary = obj.get("summary").and_then(|v| v.as_object());
-        let details = obj.get("details").and_then(|v| v.as_object());
-        let target = details
-            .and_then(|d| d.get("target"))
-            .and_then(|t| t.get("node_id"))
-            .and_then(|v| v.as_str())
-            .unwrap_or(target_id);
-        let primary_reason = summary.and_then(|s| s.get("primary_reason").and_then(|v| v.as_str())).unwrap_or("");
-        let empty_arr: Vec<serde_json::Value> = Vec::new();
-        let blocking = details.and_then(|d| d.get("blocking_conditions").and_then(|v| v.as_array())).unwrap_or(&empty_arr);
-        let gates = details.and_then(|d| d.get("data_empty_gates").and_then(|v| v.as_array())).unwrap_or(&empty_arr);
-        let paths = details.and_then(|d| d.get("primary_path").and_then(|v| v.as_array())).unwrap_or(&empty_arr);
-
-        println!("=== Why: {} ===", target);
-        println!("Primary reason: {}", primary_reason);
-        if !blocking.is_empty() {
-            println!("
-Blocking conditions:");
-            for c in blocking {
-                println!("  - {}: {}",
-                    c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
-                    c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
-                );
-            }
-        }
-        if !gates.is_empty() {
-            println!("
-Data empty gates:");
-            for c in gates {
-                println!("  - {}: {}",
-                    c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
-                    c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
-                );
-            }
-        }
-        if !paths.is_empty() {
-            println!("
-Primary paths:");
-            for p in paths {
-                println!("  {}", serde_json::to_string(p).unwrap_or_default());
-            }
-        }
+        let text = render_explain_condition_human(&result, target_id);
+        println!("{}", text);
     } else {
         println!("{}", serde_json::to_string_pretty(&result)?);
     }

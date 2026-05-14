@@ -35,6 +35,11 @@ fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
 
     let runtime = GraphRuntime::load(&db_path).expect("GraphRuntime::load must succeed");
     assert_eq!(runtime.load_count, 1, "首次加载后 load_count 应为 1");
+    assert!(
+        runtime.graph_load_ms > 0,
+        "首次加载 graph_load_ms 应大于 0，实际 {}",
+        runtime.graph_load_ms
+    );
 
     let request = RuntimeQueryRequest {
         command: RuntimeQueryCommand::ExplainCondition,
@@ -99,6 +104,11 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
 
     let runtime = GraphRuntime::load(&db_path).expect("load real project graph must succeed");
     assert_eq!(runtime.load_count, 1);
+    assert!(
+        runtime.graph_load_ms > 0,
+        "真实项目首次加载 graph_load_ms 应大于 0，实际 {}",
+        runtime.graph_load_ms
+    );
 
     let request = RuntimeQueryRequest {
         command: RuntimeQueryCommand::ExplainCondition,
@@ -107,18 +117,28 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
         human: false,
     };
 
-    let resp = runtime.query(request).expect("query must succeed");
-    let result = resp.result;
+    // 第一次查询
+    let resp1 = runtime.query(request.clone()).expect("第一次 query 必须成功");
+    let result1 = resp1.result;
 
-    // kind == Explain
+    // 第二次查询（复用 graph）
+    let resp2 = runtime.query(request).expect("第二次 query 必须成功");
+    let result2 = resp2.result;
+
+    // 两次结果关键字段一致
     assert_eq!(
-        result.get("kind").and_then(|v| v.as_str()),
+        result1.get("kind").and_then(|v| v.as_str()),
         Some("Explain"),
         "kind must be Explain"
     );
+    assert_eq!(
+        result1.get("query_target"),
+        result2.get("query_target"),
+        "两次查询 query_target 必须一致"
+    );
 
     // primary_path 非空
-    let primary_path = result
+    let primary_path = result1
         .get("details")
         .and_then(|d| d.get("primary_path"))
         .and_then(|v| v.as_array())
@@ -158,9 +178,12 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
         "primary_path must contain action1 or action4"
     );
 
-    // graph_load_ms == 0（热查询）
+    // 第二次 graph_load_ms == 0（热查询复用）
     assert_eq!(
-        resp.timing.graph_load_ms, 0,
-        "real project query graph_load_ms must be 0"
+        resp2.timing.graph_load_ms, 0,
+        "第二次查询 graph_load_ms 必须为 0"
     );
+
+    // load_count 仍为 1
+    assert_eq!(runtime.load_count, 1, "两次查询后 load_count 仍为 1");
 }

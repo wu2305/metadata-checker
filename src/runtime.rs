@@ -22,6 +22,8 @@ pub struct GraphRuntime {
     pub graph_file_size: u64,
     /// 累计加载次数（热查询应保持为 1）
     pub load_count: usize,
+    /// 首次 graph 加载耗时（毫秒）
+    pub graph_load_ms: u128,
 }
 
 /// Runtime 查询命令枚举
@@ -87,6 +89,7 @@ impl GraphRuntime {
             graph_file_mtime,
             graph_file_size,
             load_count: 1,
+            graph_load_ms,
         })
     }
 
@@ -98,7 +101,7 @@ impl GraphRuntime {
         let mut diagnostics = Vec::new();
 
         let query_start = Instant::now();
-        let result = match request.command {
+        let mut result = match request.command {
             RuntimeQueryCommand::ExplainCondition => {
                 crate::explain::build_explain_condition_output(
                     &self.graph,
@@ -108,6 +111,13 @@ impl GraphRuntime {
             }
         };
         let query_compute_ms = query_start.elapsed().as_millis();
+
+        if request.human {
+            let human_text = crate::explain::render_explain_condition_human(&result, &request.target);
+            if let Some(obj) = result.as_object_mut() {
+                obj.insert("human_summary".to_string(), serde_json::Value::String(human_text));
+            }
+        }
 
         let serialize_start = Instant::now();
         // 预序列化以统计耗时，但不改变返回的 result
