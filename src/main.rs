@@ -34,6 +34,16 @@ fn main() -> Result<()> {
         );
     }
 
+    // Stdio server mode (M24)
+    if args.serve_stdio {
+        let db_path = match args.resolve_graph_db_path() {
+            Some(p) => p,
+            None => anyhow::bail!("--serve-stdio requires --graph-db-path or --project-dir"),
+        };
+        metadata_checker::stdio_server::run_stdio_server(&db_path)?;
+        return Ok(());
+    }
+
     // Cross-file graph analysis mode
     if let Some(ref project_dir) = args.project_dir {
         let db_path = args

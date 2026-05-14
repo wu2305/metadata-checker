@@ -690,7 +690,7 @@ M23 只解决一件事：把“加载图”和“执行查询”从 CLI 分支�
 - M25：Runtime Cache 与 Reload。处理 graphdb 文件变更检测、手动 reload、reload 失败降级。
 - M26：Skill / Function Calling 接入与性能验收。更新 skill 决策树，固化冷 CLI、首次 stdio、第二次 stdio 的真实项目性能基线。
 
-## M24：Stdio Function Calling Server
+## M24：Stdio Function Calling Server ✅
 
 ### 目标
 

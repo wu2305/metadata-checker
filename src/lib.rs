@@ -14,3 +14,4 @@ pub mod superpage;
 pub mod path;
 pub mod tbl_single;
 pub mod runtime;
+pub mod stdio_server;

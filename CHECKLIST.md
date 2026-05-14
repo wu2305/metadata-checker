@@ -55,6 +55,6 @@
 - [x] M21：未知 Action 语义归类，详见 `docs/real-project-optimization-roadmap.md`
 - [x] M22：条件类 AI 评测与协议收敛（含注意力漂移负例断言），详见 `docs/real-project-optimization-roadmap.md`
 - [x] M23：Hot Graph Runtime 基座（进程内复用 GraphDB，暂不做 LazyLoad / stdio server），详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M24：Stdio Function Calling Server（JSONL 长驻查询服务），详见 `docs/real-project-optimization-roadmap.md`
+- [x] M24：Stdio Function Calling Server（JSONL 长驻查询服务），详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M25：Runtime Cache 与 Reload（graphdb 变更检测、状态查询、失败降级），详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M26：Skill / Function Calling 接入与性能验收，详见 `docs/real-project-optimization-roadmap.md`

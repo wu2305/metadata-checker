@@ -189,6 +189,12 @@ pub struct Cli {
         help = "Explain why a component/model/field behaves as it does (visible/disabled/data-empty). Supports comp:PAGE|ID, model:ID, field:MODEL.FIELD (requires --project-dir)"
     )]
     pub explain_condition: Option<String>,
+
+    #[arg(
+        long,
+        help = "启动 JSONL stdin/stdout 长驻查询服务（机器协议，非人类 REPL）"
+    )]
+    pub serve_stdio: bool,
 }
 
 impl Cli {
