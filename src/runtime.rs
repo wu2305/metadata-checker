@@ -79,6 +79,20 @@ pub struct GraphFingerprint {
     pub mtime: Option<SystemTime>,
     /// 文件大小
     pub size: u64,
+    /// 文件前 4096 字节的内容 hash
+    pub content_prefix_hash: u64,
+}
+
+/// 计算文件前 prefix_len 字节的内容 hash
+fn compute_prefix_hash(path: &std::path::Path, prefix_len: usize) -> u64 {
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+
+    let mut hasher = DefaultHasher::new();
+    if let Ok(data) = std::fs::read(path) {
+        data.iter().take(prefix_len).for_each(|b| b.hash(&mut hasher));
+    }
+    hasher.finish()
 }
 
 /// reload_if_changed 结果枚举
@@ -133,10 +147,12 @@ impl GraphRuntime {
         let mut diagnostics = Vec::new();
         diagnostics.push(format!("Graph loaded in {} ms", graph_load_ms));
 
+        let prefix_hash = compute_prefix_hash(&path, 4096);
         let fingerprint = GraphFingerprint {
             path: path.clone(),
             mtime: graph_file_mtime,
             size: graph_file_size,
+            content_prefix_hash: prefix_hash,
         };
 
         Ok(GraphRuntime {
@@ -209,10 +225,12 @@ impl GraphRuntime {
         let (mtime, size) = std::fs::metadata(path)
             .map(|m| (m.modified().ok(), m.len()))
             .unwrap_or((None, 0));
+        let prefix_hash = compute_prefix_hash(path, 4096);
         Ok(GraphFingerprint {
             path: path.clone(),
             mtime,
             size,
+            content_prefix_hash: prefix_hash,
         })
     }
 
@@ -220,7 +238,8 @@ impl GraphRuntime {
     pub fn is_graph_changed(&self) -> Result<bool> {
         let current = self.current_fingerprint()?;
         let changed = current.size != self.graph_fingerprint.size
-            || current.mtime != self.graph_fingerprint.mtime;
+            || current.mtime != self.graph_fingerprint.mtime
+            || current.content_prefix_hash != self.graph_fingerprint.content_prefix_hash;
         Ok(changed)
     }
 
