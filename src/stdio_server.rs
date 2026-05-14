@@ -145,10 +145,13 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
     // 可选：在查询前检查 graphdb 是否变更
     if request.check_reload == Some(true) {
         match runtime.reload_if_changed() {
-            Ok(true) => diagnostics.push("GRAPH_RELOADED".to_string()),
-            Ok(false) => {}
+            Ok(crate::runtime::ReloadResult::Reloaded) => diagnostics.push("GRAPH_RELOADED".to_string()),
+            Ok(crate::runtime::ReloadResult::Unchanged) => {}
+            Ok(crate::runtime::ReloadResult::ReloadFailed { .. }) => {
+                diagnostics.push("GRAPH_RELOAD_FAILED".to_string());
+            }
             Err(e) => {
-                diagnostics.push(format!("GRAPH_RELOAD_CHECK_FAILED: {}", e));
+                diagnostics.push(format!("GRAPH_RELOAD_FAILED: {}", e));
             }
         }
     }

@@ -3,7 +3,7 @@ use metadata_checker::scanner;
 
 /// 构建 fixture graphdb 到临时目录
 fn build_fixture_graphdb() -> (std::path::PathBuf, std::path::PathBuf) {
-    let unique = format!("metadata-checker-runtime-test-{}-{:#?}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    let unique = format!("metadata-checker-runtime-test-{:?}-{}", std::thread::current().id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
     let temp_dir = std::env::temp_dir().join(unique);
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
@@ -209,8 +209,8 @@ fn test_runtime_reload_if_changed_no_change() {
     let (_temp_dir, db_path) = build_fixture_graphdb();
     let mut runtime = GraphRuntime::load(&db_path).expect("load must succeed");
 
-    let reloaded = runtime.reload_if_changed().expect("reload_if_changed must succeed");
-    assert_eq!(reloaded, false, "未变更时不应 reload");
+    let result = runtime.reload_if_changed().expect("reload_if_changed must succeed");
+    assert_eq!(result, metadata_checker::runtime::ReloadResult::Unchanged, "未变更时应返回 Unchanged");
     assert_eq!(runtime.reload_count, 0, "未变更时 reload_count 仍为 0");
 }
 
@@ -226,8 +226,8 @@ fn test_runtime_reload_if_changed_after_replace() {
     scanner::scan_project(&temp_dir, &db_path,
     ).expect("re-scan must succeed");
 
-    let reloaded = runtime.reload_if_changed().expect("reload_if_changed must succeed");
-    assert_eq!(reloaded, true, "文件变更后应 reload");
+    let result = runtime.reload_if_changed().expect("reload_if_changed must succeed");
+    assert_eq!(result, metadata_checker::runtime::ReloadResult::Reloaded, "文件变更后应返回 Reloaded");
     assert_eq!(runtime.reload_count, 1, "reload_count 应增加到 1");
     assert_eq!(runtime.status().node_count, old_node_count, "reload 后 node_count 应一致");
     assert!(runtime.last_reload_error.is_none());

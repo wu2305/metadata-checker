@@ -3,7 +3,7 @@ use std::process::{Command, Stdio};
 
 /// 构建 fixture graphdb 到临时目录
 fn build_fixture_graphdb() -> (std::path::PathBuf, std::path::PathBuf) {
-    let unique = format!("metadata-checker-stdio-test-{}-{:#?}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    let unique = format!("metadata-checker-stdio-test-{:?}-{}", std::thread::current().id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
     let temp_dir = std::env::temp_dir().join(unique);
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
@@ -350,6 +350,64 @@ fn test_stdio_server_reload_success() {
             d.as_str().unwrap_or("").contains("GRAPH_RELOADED")
         ),
         "diagnostics 必须包含 GRAPH_RELOADED"
+    );
+
+    let _ = child.wait();
+}
+
+/// M25 验收：stdio reload 失败时返回 GRAPH_RELOAD_FAILED
+#[test]
+fn test_stdio_server_reload_failure() {
+    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    // 等待 server 启动完成
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // 在 server 启动后破坏 graphdb
+    std::fs::write(&db_path, b"not a valid graphdb").unwrap();
+
+    let req = serde_json::json!({
+        "request_id": "req-reload-fail",
+        "command": "reload"
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(resp["ok"].as_bool(), Some(false), "损坏 graphdb reload 必须返回 ok=false");
+    assert!(
+        resp["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
+            d.as_str().unwrap_or("").contains("GRAPH_RELOAD_FAILED")
+        ),
+        "diagnostics 必须包含 GRAPH_RELOAD_FAILED"
+    );
+    assert!(
+        resp["error"].as_str().unwrap_or("").contains("Reload failed"),
+        "error 必须包含 Reload failed"
     );
 
     let _ = child.wait();

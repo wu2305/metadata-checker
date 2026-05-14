@@ -81,13 +81,24 @@ pub struct GraphFingerprint {
     pub size: u64,
 }
 
+/// reload_if_changed 结果枚举
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ReloadResult {
+    /// 文件未变更，未执行 reload
+    Unchanged,
+    /// 文件已变更，reload 成功
+    Reloaded,
+    /// 文件已变更，reload 失败
+    ReloadFailed { error: String },
+}
+
 /// Runtime 状态快照
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeStatus {
     /// graphdb 路径
     pub graph_db_path: PathBuf,
-    /// 加载时间戳（ISO8601 字符串）
-    pub loaded_at: String,
+    /// 加载时间戳（Unix 时间戳秒数）
+    pub loaded_at: u64,
     /// 首次加载次数
     pub load_count: usize,
     /// 累计 reload 次数
@@ -213,18 +224,19 @@ impl GraphRuntime {
         Ok(changed)
     }
 
-    /// 如果 graphdb 发生变化则 reload，返回是否实际执行了 reload
-    pub fn reload_if_changed(&mut self) -> Result<bool> {
+    /// 如果 graphdb 发生变化则 reload，返回明确的结果枚举
+    pub fn reload_if_changed(&mut self) -> Result<ReloadResult> {
         if self.is_graph_changed()? {
             match self.reload() {
-                Ok(()) => Ok(true),
+                Ok(()) => Ok(ReloadResult::Reloaded),
                 Err(e) => {
-                    self.last_reload_error = Some(format!("{}", e));
-                    Ok(false)
+                    let err = format!("{}", e);
+                    self.last_reload_error = Some(err.clone());
+                    Ok(ReloadResult::ReloadFailed { error: err })
                 }
             }
         } else {
-            Ok(false)
+            Ok(ReloadResult::Unchanged)
         }
     }
 
@@ -253,13 +265,13 @@ impl GraphRuntime {
 
     /// 获取当前 runtime 状态快照
     pub fn status(&self) -> RuntimeStatus {
-        let loaded_at_str = self.loaded_at
+        let loaded_at_secs = self.loaded_at
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| format!("{}", d.as_secs()))
-            .unwrap_or_else(|_| "unknown".to_string());
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         RuntimeStatus {
             graph_db_path: self.graph_db_path.clone(),
-            loaded_at: loaded_at_str,
+            loaded_at: loaded_at_secs,
             load_count: self.load_count,
             reload_count: self.reload_count,
             node_count: self.graph.graph.node_count(),
