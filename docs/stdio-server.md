@@ -16,13 +16,34 @@ metadata-checker --serve-stdio --project-dir /path/to/project
 
 每行一个 JSON 对象，stdin 逐行读取：
 
+### explain_condition
+
 ```json
 {
   "request_id": "req-1",
   "command": "explain_condition",
   "target": "comp:app/销售.app/销售/合同协议.spg|input3",
   "budget": "compact",
-  "human": false
+  "human": false,
+  "check_reload": false
+}
+```
+
+### status
+
+```json
+{
+  "request_id": "req-status",
+  "command": "status"
+}
+```
+
+### reload
+
+```json
+{
+  "request_id": "req-reload",
+  "command": "reload"
 }
 ```
 
@@ -31,10 +52,11 @@ metadata-checker --serve-stdio --project-dir /path/to/project
 | 字段 | 类型 | 必需 | 说明 |
 |---|---|---|---|
 | `request_id` | string | 是 | 请求标识，响应原样返回 |
-| `command` | string | 是 | 命令名，当前只支持 `explain_condition` |
-| `target` | string | 是 | 查询目标 |
+| `command` | string | 是 | 命令名：`explain_condition` / `status` / `reload` |
+| `target` | string | explain_condition 必需 | 查询目标 |
 | `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal` |
 | `human` | bool | 否 | 是否生成 human_summary，默认 `false` |
+| `check_reload` | bool | 否 | 查询前检查 graphdb 是否变更并自动 reload，默认 `false` |
 
 ## 响应格式
 
@@ -92,6 +114,7 @@ metadata-checker --serve-stdio --project-dir /path/to/project
 - 非法 JSON：返回 `ok=false`，`error` 包含解析错误。
 - 未知 command：返回 `ok=false`，`error` 包含 "Unknown command"。
 - 查询异常：返回 `ok=false`，`error` 包含异常信息。
+- 缺少 target：对 `explain_condition` 返回 `ok=false`，`error` 包含 "Missing target"。
 
 ## 热查询特性
 

@@ -823,7 +823,7 @@ M24 只解决协议和进程生命周期：启动一次、加载一次 graphdb�
 - stdout 协议对 function calling 包装层稳定可解析。
 - M24 完成后，才能进入 M25 的 reload/cache。
 
-## M25：Runtime Cache 与 Reload
+## M25：Runtime Cache 与 Reload ✅
 
 ### 目标
 

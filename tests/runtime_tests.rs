@@ -3,7 +3,8 @@ use metadata_checker::scanner;
 
 /// 构建 fixture graphdb 到临时目录
 fn build_fixture_graphdb() -> (std::path::PathBuf, std::path::PathBuf) {
-    let temp_dir = std::env::temp_dir().join("metadata-checker-runtime-test");
+    let unique = format!("metadata-checker-runtime-test-{}-{:#?}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    let temp_dir = std::env::temp_dir().join(unique);
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
     let src = std::path::Path::new("tests/fixtures/test_project");
@@ -186,4 +187,75 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
 
     // load_count 仍为 1
     assert_eq!(runtime.load_count, 1, "两次查询后 load_count 仍为 1");
+}
+
+/// M25 验收：status() 返回正确的节点和边数量
+#[test]
+fn test_runtime_status_returns_counts() {
+    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let runtime = GraphRuntime::load(&db_path).expect("load must succeed");
+
+    let status = runtime.status();
+    assert_eq!(status.load_count, 1);
+    assert_eq!(status.reload_count, 0);
+    assert!(status.node_count > 0, "node_count must be > 0");
+    assert!(status.graph_db_path.ends_with(".metadata-checker.graphdb"));
+    assert!(status.last_reload_error.is_none());
+}
+
+/// M25 验收：graphdb 未变更时 reload_if_changed 返回 false
+#[test]
+fn test_runtime_reload_if_changed_no_change() {
+    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let mut runtime = GraphRuntime::load(&db_path).expect("load must succeed");
+
+    let reloaded = runtime.reload_if_changed().expect("reload_if_changed must succeed");
+    assert_eq!(reloaded, false, "未变更时不应 reload");
+    assert_eq!(runtime.reload_count, 0, "未变更时 reload_count 仍为 0");
+}
+
+/// M25 验收：graphdb 替换后 reload_if_changed 返回 true
+#[test]
+fn test_runtime_reload_if_changed_after_replace() {
+    let (temp_dir, db_path) = build_fixture_graphdb();
+    let mut runtime = GraphRuntime::load(&db_path).expect("load must succeed");
+    let old_node_count = runtime.status().node_count;
+
+    // 重建 graphdb（模拟外部更新）
+    let _ = std::fs::remove_file(&db_path);
+    scanner::scan_project(&temp_dir, &db_path,
+    ).expect("re-scan must succeed");
+
+    let reloaded = runtime.reload_if_changed().expect("reload_if_changed must succeed");
+    assert_eq!(reloaded, true, "文件变更后应 reload");
+    assert_eq!(runtime.reload_count, 1, "reload_count 应增加到 1");
+    assert_eq!(runtime.status().node_count, old_node_count, "reload 后 node_count 应一致");
+    assert!(runtime.last_reload_error.is_none());
+}
+
+/// M25 验收：reload 失败时保留旧 graph，仍可查询
+#[test]
+fn test_runtime_reload_failure_preserves_old_graph() {
+    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let mut runtime = GraphRuntime::load(&db_path).expect("load must succeed");
+    let old_node_count = runtime.status().node_count;
+
+    // 破坏 graphdb 文件
+    std::fs::write(&db_path, b"not a valid graphdb").unwrap();
+
+    let result = runtime.reload();
+    assert!(result.is_err(), "损坏的 graphdb reload 必须失败");
+    assert!(runtime.last_reload_error.is_some(), "失败时应记录 last_reload_error");
+    assert_eq!(runtime.status().node_count, old_node_count, "失败时应保留旧 graph");
+    assert_eq!(runtime.reload_count, 0, "失败时 reload_count 不应增加");
+
+    // 旧 graph 仍可查询
+    let request = RuntimeQueryRequest {
+        command: RuntimeQueryCommand::ExplainCondition,
+        target: "comp:app/actions_test.spg|input1".to_string(),
+        budget: "compact".to_string(),
+        human: false,
+    };
+    let resp = runtime.query(request).expect("旧 graph 仍可查询");
+    assert_eq!(resp.result.get("kind").and_then(|v| v.as_str()), Some("Explain"));
 }

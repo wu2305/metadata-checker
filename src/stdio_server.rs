@@ -11,9 +11,14 @@ use crate::runtime::{GraphRuntime, RuntimeQueryCommand, RuntimeQueryRequest};
 pub struct StdioRequest {
     pub request_id: String,
     pub command: String,
-    pub target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub budget: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub human: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check_reload: Option<bool>,
 }
 
 /// Stdio JSONL 响应
@@ -38,7 +43,7 @@ pub struct StdioResponse {
 /// 加载 graphdb 一次，进入 stdin/stdout 循环处理请求。
 /// stderr 输出运行日志，stdout 只输出 JSONL 响应。
 pub fn run_stdio_server(graph_db_path: &std::path::Path) -> Result<()> {
-    let runtime = GraphRuntime::load(graph_db_path)
+    let mut runtime = GraphRuntime::load(graph_db_path)
         .map_err(|e| anyhow::anyhow!("Failed to load graphdb: {}", e))?;
     eprintln!("[stdio-server] Graph loaded, {} nodes, ready", runtime.graph.graph.node_count());
 
@@ -83,7 +88,7 @@ pub fn run_stdio_server(graph_db_path: &std::path::Path) -> Result<()> {
             }
         };
 
-        let resp = handle_request(&runtime, &request);
+        let resp = handle_request(&mut runtime, &request);
         write_response(&mut stdout_lock, &resp)?;
     }
 
@@ -92,11 +97,76 @@ pub fn run_stdio_server(graph_db_path: &std::path::Path) -> Result<()> {
 }
 
 /// 处理单个请求
-fn handle_request(runtime: &GraphRuntime, request: &StdioRequest) -> StdioResponse {
+fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioResponse {
     let mut diagnostics = Vec::new();
 
+    // 处理 status 命令（不需要 target）
+    if request.command == "status" {
+        let status = runtime.status();
+        return StdioResponse {
+            request_id: request.request_id.clone(),
+            ok: true,
+            result: Some(serde_json::to_value(status).unwrap_or(serde_json::Value::Null)),
+            error: None,
+            diagnostics,
+            timing: None,
+        };
+    }
+
+    // 处理 reload 命令（不需要 target）
+    if request.command == "reload" {
+        match runtime.reload() {
+            Ok(()) => {
+                diagnostics.push("GRAPH_RELOADED".to_string());
+                let status = runtime.status();
+                return StdioResponse {
+                    request_id: request.request_id.clone(),
+                    ok: true,
+                    result: Some(serde_json::to_value(status).unwrap_or(serde_json::Value::Null)),
+                    error: None,
+                    diagnostics,
+                    timing: None,
+                };
+            }
+            Err(e) => {
+                diagnostics.push("GRAPH_RELOAD_FAILED".to_string());
+                return StdioResponse {
+                    request_id: request.request_id.clone(),
+                    ok: false,
+                    result: None,
+                    error: Some(format!("Reload failed: {}", e)),
+                    diagnostics,
+                    timing: None,
+                };
+            }
+        }
+    }
+
+    // 可选：在查询前检查 graphdb 是否变更
+    if request.check_reload == Some(true) {
+        match runtime.reload_if_changed() {
+            Ok(true) => diagnostics.push("GRAPH_RELOADED".to_string()),
+            Ok(false) => {}
+            Err(e) => {
+                diagnostics.push(format!("GRAPH_RELOAD_CHECK_FAILED: {}", e));
+            }
+        }
+    }
+
     let command = match request.command.as_str() {
-        "explain_condition" => RuntimeQueryCommand::ExplainCondition,
+        "explain_condition" => {
+            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                return StdioResponse {
+                    request_id: request.request_id.clone(),
+                    ok: false,
+                    result: None,
+                    error: Some("Missing target for explain_condition".to_string()),
+                    diagnostics,
+                    timing: None,
+                };
+            }
+            RuntimeQueryCommand::ExplainCondition
+        }
         other => {
             return StdioResponse {
                 request_id: request.request_id.clone(),
@@ -114,7 +184,7 @@ fn handle_request(runtime: &GraphRuntime, request: &StdioRequest) -> StdioRespon
 
     let req = RuntimeQueryRequest {
         command,
-        target: request.target.clone(),
+        target: request.target.clone().unwrap_or_default(),
         budget,
         human,
     };

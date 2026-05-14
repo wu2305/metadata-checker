@@ -24,6 +24,12 @@ pub struct GraphRuntime {
     pub load_count: usize,
     /// 首次 graph 加载耗时（毫秒）
     pub graph_load_ms: u128,
+    /// 累计 reload 次数
+    pub reload_count: usize,
+    /// 上次 reload 错误信息
+    pub last_reload_error: Option<String>,
+    /// graphdb 文件指纹
+    pub graph_fingerprint: GraphFingerprint,
 }
 
 /// Runtime 查询命令枚举
@@ -64,6 +70,40 @@ pub struct RuntimeTiming {
     pub total_ms: u128,
 }
 
+/// GraphDB 文件指纹，用于变更检测
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphFingerprint {
+    /// graphdb 文件路径
+    pub path: PathBuf,
+    /// 文件修改时间
+    pub mtime: Option<SystemTime>,
+    /// 文件大小
+    pub size: u64,
+}
+
+/// Runtime 状态快照
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeStatus {
+    /// graphdb 路径
+    pub graph_db_path: PathBuf,
+    /// 加载时间戳（ISO8601 字符串）
+    pub loaded_at: String,
+    /// 首次加载次数
+    pub load_count: usize,
+    /// 累计 reload 次数
+    pub reload_count: usize,
+    /// 图中节点数量
+    pub node_count: usize,
+    /// 图中边数量
+    pub edge_count: usize,
+    /// 文件修改时间
+    pub graph_file_mtime: Option<SystemTime>,
+    /// 文件大小
+    pub graph_file_size: u64,
+    /// 上次 reload 错误
+    pub last_reload_error: Option<String>,
+}
+
 impl GraphRuntime {
     /// 加载 graphdb 并构建 Runtime
     ///
@@ -82,6 +122,12 @@ impl GraphRuntime {
         let mut diagnostics = Vec::new();
         diagnostics.push(format!("Graph loaded in {} ms", graph_load_ms));
 
+        let fingerprint = GraphFingerprint {
+            path: path.clone(),
+            mtime: graph_file_mtime,
+            size: graph_file_size,
+        };
+
         Ok(GraphRuntime {
             graph,
             graph_db_path: path,
@@ -90,6 +136,9 @@ impl GraphRuntime {
             graph_file_size,
             load_count: 1,
             graph_load_ms,
+            reload_count: 0,
+            last_reload_error: None,
+            graph_fingerprint: fingerprint,
         })
     }
 
@@ -141,5 +190,83 @@ impl GraphRuntime {
             },
             diagnostics,
         })
+    }
+
+    /// 获取当前 graphdb 文件指纹
+    pub fn current_fingerprint(&self) -> Result<GraphFingerprint> {
+        let path = &self.graph_db_path;
+        let (mtime, size) = std::fs::metadata(path)
+            .map(|m| (m.modified().ok(), m.len()))
+            .unwrap_or((None, 0));
+        Ok(GraphFingerprint {
+            path: path.clone(),
+            mtime,
+            size,
+        })
+    }
+
+    /// 检查 graphdb 文件是否发生变化
+    pub fn is_graph_changed(&self) -> Result<bool> {
+        let current = self.current_fingerprint()?;
+        let changed = current.size != self.graph_fingerprint.size
+            || current.mtime != self.graph_fingerprint.mtime;
+        Ok(changed)
+    }
+
+    /// 如果 graphdb 发生变化则 reload，返回是否实际执行了 reload
+    pub fn reload_if_changed(&mut self) -> Result<bool> {
+        if self.is_graph_changed()? {
+            match self.reload() {
+                Ok(()) => Ok(true),
+                Err(e) => {
+                    self.last_reload_error = Some(format!("{}", e));
+                    Ok(false)
+                }
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// 安全 reload：先加载新图，成功后再替换旧图
+    pub fn reload(&mut self) -> Result<()> {
+        match Self::load(&self.graph_db_path) {
+            Ok(new_runtime) => {
+                self.graph = new_runtime.graph;
+                self.loaded_at = new_runtime.loaded_at;
+                self.graph_file_mtime = new_runtime.graph_file_mtime;
+                self.graph_file_size = new_runtime.graph_file_size;
+                self.load_count = new_runtime.load_count;
+                self.graph_load_ms = new_runtime.graph_load_ms;
+                self.graph_fingerprint = new_runtime.graph_fingerprint;
+                self.reload_count += 1;
+                self.last_reload_error = None;
+                Ok(())
+            }
+            Err(e) => {
+                let err_msg = format!("reload failed: {}", e);
+                self.last_reload_error = Some(err_msg.clone());
+                Err(anyhow::anyhow!("{}", err_msg))
+            }
+        }
+    }
+
+    /// 获取当前 runtime 状态快照
+    pub fn status(&self) -> RuntimeStatus {
+        let loaded_at_str = self.loaded_at
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| format!("{}", d.as_secs()))
+            .unwrap_or_else(|_| "unknown".to_string());
+        RuntimeStatus {
+            graph_db_path: self.graph_db_path.clone(),
+            loaded_at: loaded_at_str,
+            load_count: self.load_count,
+            reload_count: self.reload_count,
+            node_count: self.graph.graph.node_count(),
+            edge_count: self.graph.graph.edge_count(),
+            graph_file_mtime: self.graph_file_mtime,
+            graph_file_size: self.graph_file_size,
+            last_reload_error: self.last_reload_error.clone(),
+        }
     }
 }

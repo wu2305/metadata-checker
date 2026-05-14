@@ -3,7 +3,7 @@ use std::process::{Command, Stdio};
 
 /// 构建 fixture graphdb 到临时目录
 fn build_fixture_graphdb() -> (std::path::PathBuf, std::path::PathBuf) {
-    let unique = format!("metadata-checker-stdio-test-{:#?}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    let unique = format!("metadata-checker-stdio-test-{}-{:#?}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
     let temp_dir = std::env::temp_dir().join(unique);
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
@@ -243,9 +243,113 @@ fn test_stdio_server_missing_target() {
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
     assert_eq!(resp["ok"].as_bool(), Some(false), "missing target must return ok=false");
     assert!(
-        resp["error"].as_str().unwrap_or("").contains("JSON parse error"),
-        "error must mention JSON parse: got {}",
+        resp["error"].as_str().unwrap_or("").contains("Missing target"),
+        "error must mention Missing target: got {}",
         resp["error"].as_str().unwrap_or("(none)")
+    );
+
+    let _ = child.wait();
+}
+
+/// M25 验收：stdio status 命令返回 runtime 状态
+#[test]
+fn test_stdio_server_status() {
+    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-status",
+        "command": "status"
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(resp["ok"].as_bool(), Some(true), "status must return ok=true");
+    assert_eq!(resp["request_id"].as_str(), Some("req-status"));
+    let result = resp["result"].as_object().expect("status result must be object");
+    assert!(
+        result.get("node_count").and_then(|v| v.as_u64()).unwrap_or(0) > 0,
+        "status node_count must be > 0"
+    );
+    assert_eq!(result["reload_count"].as_u64(), Some(0), "status reload_count must be 0");
+    assert_eq!(result["load_count"].as_u64(), Some(1), "status load_count must be 1");
+
+    let _ = child.wait();
+}
+
+/// M25 验收：stdio reload 成功后 reload_count 增加
+#[test]
+fn test_stdio_server_reload_success() {
+    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-reload",
+        "command": "reload"
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(resp["ok"].as_bool(), Some(true), "reload must return ok=true");
+    let result = resp["result"].as_object().expect("reload result must be object");
+    assert_eq!(
+        result["reload_count"].as_u64(),
+        Some(1),
+        "reload 后 reload_count 必须为 1"
+    );
+    assert!(
+        resp["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
+            d.as_str().unwrap_or("").contains("GRAPH_RELOADED")
+        ),
+        "diagnostics 必须包含 GRAPH_RELOADED"
     );
 
     let _ = child.wait();
