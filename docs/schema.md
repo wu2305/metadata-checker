@@ -207,6 +207,13 @@ pub struct AiOutput {
 - `model:` 目标：由于模型可被多个页面引用，默认选择**条件数量最多的页面**作为主页面，其余页面的条件放入 `related_context`
 - 所有 `related_context` 项必须标注 `"note": "非当前页面必要条件"`
 
+### 边界说明
+
+- 当前 `--explain-condition` 组件条件解释**默认只输出直接条件引用**，不展开被引用组件的上游值来源。
+- 例如 `A.visibleCondition = B.value != ''` 只输出 `B` 的引用，不输出 `B.value` 来自哪个 param/model/user。
+- 如需展开链式上游，需继续对被引用组件执行 `--explain-condition 'comp:...|B'`。
+- 链式条件展开能力已列入后续里程碑规划，当前版本不支持自动递归展开。
+
 ## 兼容字段策略（Legacy）
 ## 兼容字段策略（Legacy）
 

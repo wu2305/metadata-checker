@@ -3169,8 +3169,8 @@
       }
     },
     {
-      "case_id": "fixture_condition_chain_dependency",
-      "question": "actions_test 页面中 input_chain_a 为什么不显示？它的条件链涉及哪些组件？",
+      "case_id": "fixture_condition_direct_dependency",
+      "question": "actions_test 页面中 input_chain_a 为什么不显示？它的直接条件引用了哪些组件？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
       "real_project_target": null,
@@ -3180,7 +3180,8 @@
       ],
       "expected_facts": [
         "input_chain_a 的显示受 visibleCondition 控制",
-        "visibleCondition 依赖 input_chain_b.value"
+        "visibleCondition 直接引用 input_chain_b.value",
+        "工具当前只输出直接条件引用，不展开被引用组件的上游值来源"
       ],
       "forbidden_claims": [
         "只有 input_chain_b 影响显示",
@@ -3209,14 +3210,14 @@
         "must_mention": [
           "visibleCondition",
           "input_chain_b",
-          "链式依赖"
+          "直接条件引用"
         ],
         "should_mention": [
           "input_chain_a"
         ],
         "must_not_mention": [
           "只有 input_chain_b",
-          "没有链式依赖",
+          "没有上游依赖",
           "param1"
         ]
       },
@@ -3253,7 +3254,7 @@
         "condition",
         "fixture",
         "M22",
-        "chain"
+        "direct_reference"
       ],
       "case_status": "active",
       "difficulty": "intermediate",
@@ -3269,7 +3270,7 @@
         ],
         "must_not_include": [
           "只有 input_chain_b",
-          "没有链式依赖",
+          "没有上游依赖",
           "没有任何条件",
           "param1"
         ],
@@ -3279,12 +3280,12 @@
       "answer_style_policy": {
         "principles": [
           "先给出直接条件结论",
-          "再说明链式上游依赖",
+          "说明直接条件引用了 input_chain_b",
           "引用 CLI 输出的 blocking_conditions 和 referenced_symbols"
         ],
         "forbidden_practices": [
           "忽略直接条件只说上游组件",
-          "把链式依赖简化成单一原因",
+          "编造未输出的 param1 来源",
           "跳过 summary 直接读取 details 大数组"
         ]
       }
