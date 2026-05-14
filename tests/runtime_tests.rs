@@ -1,38 +1,13 @@
 use metadata_checker::runtime::{GraphRuntime, RuntimeQueryCommand, RuntimeQueryRequest};
 use metadata_checker::scanner;
 
-/// 构建 fixture graphdb 到临时目录
-fn build_fixture_graphdb() -> (std::path::PathBuf, std::path::PathBuf) {
-    let unique = format!("metadata-checker-runtime-test-{:?}-{}", std::thread::current().id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
-    let temp_dir = std::env::temp_dir().join(unique);
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(&temp_dir).unwrap();
-    let src = std::path::Path::new("tests/fixtures/test_project");
-    copy_dir_all(src, &temp_dir);
-    let db_path = temp_dir.join(".metadata-checker.graphdb");
-    scanner::scan_project(&temp_dir, &db_path,
-    ).expect("scan_project must succeed");
-    (temp_dir, db_path)
-}
-
-fn copy_dir_all(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Path>) {
-    std::fs::create_dir_all(&dst).unwrap();
-    for entry in std::fs::read_dir(src).unwrap() {
-        let entry = entry.unwrap();
-        let ty = entry.file_type().unwrap();
-        if ty.is_dir() {
-            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()));
-        } else {
-            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name())).unwrap();
-        }
-    }
-}
+mod common;
 
 /// M23 核心验收：同一个 GraphRuntime 连续执行两次 ExplainCondition，
 /// 第二次不再重复加载 graphdb
 #[test]
 fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
 
     let runtime = GraphRuntime::load(&db_path).expect("GraphRuntime::load must succeed");
     assert_eq!(runtime.load_count, 1, "首次加载后 load_count 应为 1");
@@ -192,7 +167,7 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
 /// M25 验收：status() 返回正确的节点和边数量
 #[test]
 fn test_runtime_status_returns_counts() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let runtime = GraphRuntime::load(&db_path).expect("load must succeed");
 
     let status = runtime.status();
@@ -206,7 +181,7 @@ fn test_runtime_status_returns_counts() {
 /// M25 验收：graphdb 未变更时 reload_if_changed 返回 false
 #[test]
 fn test_runtime_reload_if_changed_no_change() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let mut runtime = GraphRuntime::load(&db_path).expect("load must succeed");
 
     let result = runtime.reload_if_changed().expect("reload_if_changed must succeed");
@@ -217,7 +192,7 @@ fn test_runtime_reload_if_changed_no_change() {
 /// M25 验收：graphdb 替换后 reload_if_changed 返回 true
 #[test]
 fn test_runtime_reload_if_changed_after_replace() {
-    let (temp_dir, db_path) = build_fixture_graphdb();
+    let (temp_dir, db_path) = common::build_fixture_graphdb();
     let mut runtime = GraphRuntime::load(&db_path).expect("load must succeed");
     let old_node_count = runtime.status().node_count;
 
@@ -236,7 +211,7 @@ fn test_runtime_reload_if_changed_after_replace() {
 /// M25 验收：reload 失败时保留旧 graph，仍可查询
 #[test]
 fn test_runtime_reload_failure_preserves_old_graph() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let mut runtime = GraphRuntime::load(&db_path).expect("load must succeed");
     let old_node_count = runtime.status().node_count;
 

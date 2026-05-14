@@ -1,39 +1,13 @@
 use std::io::{BufRead, Write};
 use std::process::{Command, Stdio};
 
-/// 构建 fixture graphdb 到临时目录
-fn build_fixture_graphdb() -> (std::path::PathBuf, std::path::PathBuf) {
-    let unique = format!("metadata-checker-stdio-test-{:?}-{}", std::thread::current().id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
-    let temp_dir = std::env::temp_dir().join(unique);
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(&temp_dir).unwrap();
-    let src = std::path::Path::new("tests/fixtures/test_project");
-    copy_dir_all(src, &temp_dir);
-    let db_path = temp_dir.join(".metadata-checker.graphdb");
-    metadata_checker::scanner::scan_project(&temp_dir,
-        &db_path,
-    ).expect("scan_project must succeed");
-    (temp_dir, db_path)
-}
-
-fn copy_dir_all(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Path>) {
-    std::fs::create_dir_all(&dst).unwrap();
-    for entry in std::fs::read_dir(src).unwrap() {
-        let entry = entry.unwrap();
-        let ty = entry.file_type().unwrap();
-        if ty.is_dir() {
-            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()));
-        } else {
-            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name())).unwrap();
-        }
-    }
-}
+mod common;
 
 /// M24 核心验收：启动 stdio server，连续两次 explain_condition，
 /// 第二次 graph_load_ms == 0
 #[test]
 fn test_stdio_server_reuses_graph() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let bin = env!("CARGO_BIN_EXE_metadata-checker");
 
     let mut child = Command::new(bin)
@@ -115,7 +89,7 @@ fn test_stdio_server_reuses_graph() {
 /// 负例：非法 JSON 请求
 #[test]
 fn test_stdio_server_invalid_json() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let bin = env!("CARGO_BIN_EXE_metadata-checker");
 
     let mut child = Command::new(bin)
@@ -156,7 +130,7 @@ fn test_stdio_server_invalid_json() {
 /// 负例：未知 command
 #[test]
 fn test_stdio_server_unknown_command() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let bin = env!("CARGO_BIN_EXE_metadata-checker");
 
     let mut child = Command::new(bin)
@@ -205,7 +179,7 @@ fn test_stdio_server_unknown_command() {
 /// 负例：缺少 target 字段
 #[test]
 fn test_stdio_server_missing_target() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let bin = env!("CARGO_BIN_EXE_metadata-checker");
 
     let mut child = Command::new(bin)
@@ -254,7 +228,7 @@ fn test_stdio_server_missing_target() {
 /// M25 验收：stdio status 命令返回 runtime 状态
 #[test]
 fn test_stdio_server_status() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let bin = env!("CARGO_BIN_EXE_metadata-checker");
 
     let mut child = Command::new(bin)
@@ -304,7 +278,7 @@ fn test_stdio_server_status() {
 /// M25 验收：stdio reload 成功后 reload_count 增加
 #[test]
 fn test_stdio_server_reload_success() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let bin = env!("CARGO_BIN_EXE_metadata-checker");
 
     let mut child = Command::new(bin)
@@ -358,7 +332,7 @@ fn test_stdio_server_reload_success() {
 /// M25 验收：stdio reload 失败时返回 GRAPH_RELOAD_FAILED
 #[test]
 fn test_stdio_server_reload_failure() {
-    let (_temp_dir, db_path) = build_fixture_graphdb();
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let bin = env!("CARGO_BIN_EXE_metadata-checker");
 
     let mut child = Command::new(bin)
@@ -408,6 +382,73 @@ fn test_stdio_server_reload_failure() {
     assert!(
         resp["error"].as_str().unwrap_or("").contains("Reload failed"),
         "error 必须包含 Reload failed"
+    );
+
+    let _ = child.wait();
+}
+
+/// M25 验收：check_reload=true + graphdb 损坏时，查询仍成功但返回 GRAPH_RELOAD_FAILED diagnostic
+#[test]
+fn test_stdio_server_check_reload_failure() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    // 等待 server 启动完成
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // 破坏 graphdb 文件
+    std::fs::write(&db_path, b"not a valid graphdb").unwrap();
+
+    let req = serde_json::json!({
+        "request_id": "req-check-reload-fail",
+        "command": "explain_condition",
+        "target": "comp:app/actions_test.spg|input1",
+        "budget": "compact",
+        "human": false,
+        "check_reload": true
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+
+    // 查询本身仍应成功（旧 graph 还在）
+    assert_eq!(resp["ok"].as_bool(), Some(true), "check_reload 失败不应导致查询失败");
+    assert_eq!(
+        resp["result"]["kind"].as_str(),
+        Some("Explain"),
+        "result.kind 必须是 Explain"
+    );
+
+    // 但 diagnostics 必须包含 GRAPH_RELOAD_FAILED
+    assert!(
+        resp["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
+            d.as_str().unwrap_or("").contains("GRAPH_RELOAD_FAILED")
+        ),
+        "diagnostics 必须包含 GRAPH_RELOAD_FAILED"
     );
 
     let _ = child.wait();
