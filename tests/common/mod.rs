@@ -28,6 +28,15 @@ pub fn build_fixture_graphdb() -> (PathBuf, PathBuf) {
     (temp_dir, db_path)
 }
 
+/// 判断是否应跳过的 fixture 运行产物
+fn should_skip_fixture_artifact(path: &std::path::Path) -> bool {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    name == ".metadata-checker.graphdb"
+        || name == ".metadata-checker.graphdb.lock"
+        || name.ends_with(".graphdb")
+        || name.ends_with(".graphdb.lock")
+}
+
 fn copy_dir_all(
     src: impl AsRef<std::path::Path>,
     dst: impl AsRef<std::path::Path>,
@@ -36,6 +45,9 @@ fn copy_dir_all(
     for entry_result in std::fs::read_dir(src)? {
         let entry = entry_result
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("read_dir entry failed: {}", e)))?;
+        if should_skip_fixture_artifact(&entry.path()) {
+            continue;
+        }
         let ty = entry.file_type()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("file_type failed for {:?}: {}", entry.path(), e)))?;
         if ty.is_dir() {
