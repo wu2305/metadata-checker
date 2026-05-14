@@ -1,0 +1,166 @@
+use metadata_checker::runtime::{GraphRuntime, RuntimeQueryCommand, RuntimeQueryRequest};
+use metadata_checker::scanner;
+
+/// 构建 fixture graphdb 到临时目录
+fn build_fixture_graphdb() -> (std::path::PathBuf, std::path::PathBuf) {
+    let temp_dir = std::env::temp_dir().join("metadata-checker-runtime-test");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let src = std::path::Path::new("tests/fixtures/test_project");
+    copy_dir_all(src, &temp_dir);
+    let db_path = temp_dir.join(".metadata-checker.graphdb");
+    scanner::scan_project(&temp_dir, &db_path,
+    ).expect("scan_project must succeed");
+    (temp_dir, db_path)
+}
+
+fn copy_dir_all(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Path>) {
+    std::fs::create_dir_all(&dst).unwrap();
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let ty = entry.file_type().unwrap();
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()));
+        } else {
+            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name())).unwrap();
+        }
+    }
+}
+
+/// M23 核心验收：同一个 GraphRuntime 连续执行两次 ExplainCondition，
+/// 第二次不再重复加载 graphdb
+#[test]
+fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
+    let (_temp_dir, db_path) = build_fixture_graphdb();
+
+    let runtime = GraphRuntime::load(&db_path).expect("GraphRuntime::load must succeed");
+    assert_eq!(runtime.load_count, 1, "首次加载后 load_count 应为 1");
+
+    let request = RuntimeQueryRequest {
+        command: RuntimeQueryCommand::ExplainCondition,
+        target: "comp:app/actions_test.spg|input1".to_string(),
+        budget: "compact".to_string(),
+        human: false,
+    };
+
+    // 第一次查询
+    let resp1 = runtime.query(request.clone()).expect("第一次 query 必须成功");
+    let result1 = resp1.result.clone();
+    assert!(
+        result1.get("summary").is_some(),
+        "第一次查询结果必须有 summary"
+    );
+    assert!(
+        result1.get("details").is_some(),
+        "第一次查询结果必须有 details"
+    );
+    assert_eq!(
+        result1.get("kind").and_then(|v| v.as_str()),
+        Some("Explain"),
+        "第一次查询结果 kind 必须是 Explain"
+    );
+
+    // 第二次查询（复用同一 runtime）
+    let resp2 = runtime.query(request).expect("第二次 query 必须成功");
+    let result2 = resp2.result;
+    assert_eq!(
+        result1.get("query_target"),
+        result2.get("query_target"),
+        "两次查询的 query_target 必须一致"
+    );
+    assert_eq!(
+        result1.get("summary").unwrap().get("blocking_conditions_count"),
+        result2.get("summary").unwrap().get("blocking_conditions_count"),
+        "两次查询的 blocking_conditions_count 必须一致"
+    );
+
+    // 第二次 graph_load_ms 必须为 0（热查询复用）
+    assert_eq!(
+        resp2.timing.graph_load_ms, 0,
+        "第二次查询 graph_load_ms 应为 0，因为 graph 已在内存中"
+    );
+
+    // load_count 仍为 1
+    assert_eq!(
+        runtime.load_count, 1,
+        "连续两次查询后 load_count 仍为 1"
+    );
+}
+
+/// M23 验收：真实项目 input3  explain-condition
+/// 通过 runtime 复用 graphdb，结果仍包含 model22.phoneNumber / fact_qwSidebar.phoneNumber
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
+    let project_dir = "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi";
+    let db_path = std::path::PathBuf::from("/tmp/m23_runtime_test.graphdb");
+    let _ = std::fs::remove_file(&db_path);
+    scanner::scan_project(std::path::Path::new(project_dir), &db_path).expect("scan real project must succeed");
+
+    let runtime = GraphRuntime::load(&db_path).expect("load real project graph must succeed");
+    assert_eq!(runtime.load_count, 1);
+
+    let request = RuntimeQueryRequest {
+        command: RuntimeQueryCommand::ExplainCondition,
+        target: "comp:app/销售.app/销售/合同协议.spg|input3".to_string(),
+        budget: "compact".to_string(),
+        human: false,
+    };
+
+    let resp = runtime.query(request).expect("query must succeed");
+    let result = resp.result;
+
+    // kind == Explain
+    assert_eq!(
+        result.get("kind").and_then(|v| v.as_str()),
+        Some("Explain"),
+        "kind must be Explain"
+    );
+
+    // primary_path 非空
+    let primary_path = result
+        .get("details")
+        .and_then(|d| d.get("primary_path"))
+        .and_then(|v| v.as_array())
+        .expect("primary_path must be array");
+    assert!(!primary_path.is_empty(), "primary_path must not be empty");
+
+    // 必须包含 model22.phoneNumber
+    let has_model22 = primary_path.iter().any(|p| {
+        p.get("path_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.contains("model22.phoneNumber"))
+            .unwrap_or(false)
+    });
+    assert!(has_model22, "primary_path must contain model22.phoneNumber");
+
+    // 必须包含 fact_qwSidebar.phoneNumber
+    let has_fact = primary_path.iter().any(|p| {
+        p.get("path_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.contains("fact_qwSidebar.phoneNumber"))
+            .unwrap_or(false)
+    });
+    assert!(
+        has_fact,
+        "primary_path must contain fact_qwSidebar.phoneNumber"
+    );
+
+    // 必须包含 action1 或 action4
+    let has_writer = primary_path.iter().any(|p| {
+        p.get("path_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.contains("action1") || s.contains("action4"))
+            .unwrap_or(false)
+    });
+    assert!(
+        has_writer,
+        "primary_path must contain action1 or action4"
+    );
+
+    // graph_load_ms == 0（热查询）
+    assert_eq!(
+        resp.timing.graph_load_ms, 0,
+        "real project query graph_load_ms must be 0"
+    );
+}

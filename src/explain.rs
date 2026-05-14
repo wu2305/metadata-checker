@@ -596,12 +596,77 @@ fn collect_conditions_for_node(
 /// - `model:ID` — 解释模型为什么可能为空
 /// - `field:MODEL.FIELD` — 解释字段值来源或为什么为空
 /// - `page:PATH` — 解释页面主要条件门控和数据链路
+/// CLI 包装：explain-condition 输出到 stdout
+///
+/// 内部调用 build_explain_condition_output 获取结构化结果，再按 human/JSON 格式打印
 pub fn explain_condition_target(
     graph: &GraphDB,
     target_id: &str,
     human: bool,
-    _budget: &str,
+    budget: &str,
 ) -> Result<()> {
+    let result = build_explain_condition_output(graph, target_id, budget)?;
+
+    if human {
+        // human 模式从 JSON 中提取字段打印
+        let obj = result.as_object().ok_or_else(|| anyhow::anyhow!("explain output must be object"))?;
+        let summary = obj.get("summary").and_then(|v| v.as_object());
+        let details = obj.get("details").and_then(|v| v.as_object());
+        let target = details
+            .and_then(|d| d.get("target"))
+            .and_then(|t| t.get("node_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(target_id);
+        let primary_reason = summary.and_then(|s| s.get("primary_reason").and_then(|v| v.as_str())).unwrap_or("");
+        let empty_arr: Vec<serde_json::Value> = Vec::new();
+        let blocking = details.and_then(|d| d.get("blocking_conditions").and_then(|v| v.as_array())).unwrap_or(&empty_arr);
+        let gates = details.and_then(|d| d.get("data_empty_gates").and_then(|v| v.as_array())).unwrap_or(&empty_arr);
+        let paths = details.and_then(|d| d.get("primary_path").and_then(|v| v.as_array())).unwrap_or(&empty_arr);
+
+        println!("=== Why: {} ===", target);
+        println!("Primary reason: {}", primary_reason);
+        if !blocking.is_empty() {
+            println!("
+Blocking conditions:");
+            for c in blocking {
+                println!("  - {}: {}",
+                    c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
+                    c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
+                );
+            }
+        }
+        if !gates.is_empty() {
+            println!("
+Data empty gates:");
+            for c in gates {
+                println!("  - {}: {}",
+                    c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
+                    c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
+                );
+            }
+        }
+        if !paths.is_empty() {
+            println!("
+Primary paths:");
+            for p in paths {
+                println!("  {}", serde_json::to_string(p).unwrap_or_default());
+            }
+        }
+    } else {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    }
+
+    Ok(())
+}
+
+/// 构建 explain-condition 结构化 JSON 输出，不直接打印
+///
+/// 返回纯 JSON Value，供 CLI 包装或 runtime 复用
+pub fn build_explain_condition_output(
+    graph: &GraphDB,
+    target_id: &str,
+    _budget: &str,
+) -> Result<serde_json::Value> {
     let target_node = match graph.get_node(target_id) {
         Some(n) => n,
         None => {
@@ -611,8 +676,7 @@ pub fn explain_condition_target(
                 target_id,
                 &candidates,
             );
-            println!("{}", serde_json::to_string_pretty(&out)?);
-            return Ok(());
+            return Ok(serde_json::to_value(out)?);
         }
     };
 
@@ -628,15 +692,12 @@ pub fn explain_condition_target(
     let mut related_context: Vec<serde_json::Value> = Vec::new();
     let mut seen_conditions: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // ---- 收集条件（区分当前页面 vs 其他页面） ----
     let target_node_ids: Vec<String> = if target_node.node_type == crate::graph::NodeType::Page {
-        // page 目标：收集页面内所有子节点（组件、模型、字段等）的条件
         let mut ids = vec![target_node.id.clone()];
         if let Some((outgoing, _incoming)) = graph.get_node_edges(&target_node.id) {
             for (child, edge) in &outgoing {
                 if matches!(edge.edge_type, crate::graph::EdgeType::Contains | crate::graph::EdgeType::Triggers) {
                     ids.push(child.id.clone());
-                    // 再下一层（components/panels 等嵌套）
                     if let Some((child_out, _)) = graph.get_node_edges(&child.id) {
                         for (grandchild, gedge) in &child_out {
                             if matches!(gedge.edge_type, crate::graph::EdgeType::Contains | crate::graph::EdgeType::Triggers) {
@@ -650,7 +711,6 @@ pub fn explain_condition_target(
         ids
     } else {
         let mut ids = vec![target_node.id.clone()];
-        // 组件目标：也收集其触发的 action 节点的条件
         if target_node.node_type == crate::graph::NodeType::Component {
             if let Some((outgoing, _incoming)) = graph.get_node_edges(&target_node.id) {
                 for (child, edge) in &outgoing {
@@ -668,14 +728,12 @@ pub fn explain_condition_target(
         for cond_obj in conds {
             let source_file = cond_obj.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
             if source_file == page_path {
-                // 当前页面的条件
                 match classify_condition(&cond_obj) {
                     "blocking" => blocking_conditions.push(cond_obj),
                     "data_empty" => data_empty_gates.push(cond_obj),
                     _ => supporting_context.push(cond_obj),
                 }
             } else {
-                // 其他页面的条件：暂存到 related_context
                 let mut rc = cond_obj.clone();
                 if let Some(obj) = rc.as_object_mut() {
                     obj.insert("note".to_string(), serde_json::json!("非当前页面必要条件"));
@@ -685,10 +743,7 @@ pub fn explain_condition_target(
         }
     }
 
-    // ---- model 目标特殊处理：推断主页面 ----
     if target_node.node_type == crate::graph::NodeType::Model {
-        // model 节点的 path 是 .tbl 文件，不是页面路径
-        // 从 related_context 中按 source_file 分组，找到条件最多的页面作为主页面
         let mut page_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for rc in &related_context {
             if let Some(file) = rc.get("source_file").and_then(|v| v.as_str()) {
@@ -704,12 +759,10 @@ pub fn explain_condition_target(
             }
         }
         if let Some(primary_page) = primary_page {
-            // 把 primary_page 的条件从 related_context 提升出来
             let mut remaining_related: Vec<serde_json::Value> = Vec::new();
             for mut rc in related_context {
                 let rc_file = rc.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
                 if rc_file == primary_page {
-                    // 提升为主条件时清除 note，避免主链路被误判为旁路
                     if let Some(obj) = rc.as_object_mut() {
                         obj.remove("note");
                     }
@@ -726,7 +779,6 @@ pub fn explain_condition_target(
         }
     }
 
-    // ---- 字段级主链路（comp/field 目标） ----
     let mut primary_path: Vec<serde_json::Value> = Vec::new();
     if target_node.id.starts_with("field:") || target_node.id.starts_with("comp:") {
         let path_query = crate::path::PathQuery {
@@ -799,7 +851,6 @@ pub fn explain_condition_target(
         }
     }
 
-    // ---- 构建 primary_reason ----
     let primary_reason = if target_node.node_type == crate::graph::NodeType::Page {
         if !blocking_conditions.is_empty() {
             format!(
@@ -864,41 +915,7 @@ pub fn explain_condition_target(
     output.query_target = Some(target_id.to_string());
     output.details = Some(details);
 
-    if human {
-        println!("=== Why: {} ===", target_id);
-        println!("Primary reason: {}", primary_reason);
-        if !blocking_conditions.is_empty() {
-            println!("
-Blocking conditions:");
-            for c in &blocking_conditions {
-                println!("  - {}: {}",
-                    c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
-                    c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
-                );
-            }
-        }
-        if !data_empty_gates.is_empty() {
-            println!("
-Data empty gates:");
-            for c in &data_empty_gates {
-                println!("  - {}: {}",
-                    c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("?"),
-                    c.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("?"),
-                );
-            }
-        }
-        if !primary_path.is_empty() {
-            println!("
-Primary paths:");
-            for p in &primary_path {
-                println!("  {}", serde_json::to_string(p).unwrap_or_default());
-            }
-        }
-    } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    }
-
-    Ok(())
+    Ok(serde_json::to_value(output)?)
 }
 
 /// 辅助：在页面范围内查找近似候选目标
