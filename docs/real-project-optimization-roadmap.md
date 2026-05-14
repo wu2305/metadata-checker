@@ -429,3 +429,96 @@ M19 已接入页面级 prerequisites、`primary_paths`、`key_primary_paths` 与
 - 回答包含证据链、截断说明和保守口径。
 - 禁止误判：不能把条件门控说成渲染故障，不能把未参与初始展示的参数说成必需条件。
 - 禁止漂移：当工具同时输出主链路和相关上下文时，小模型必须优先引用主链路，并显式区分“相关但非必要”的旁路关系。
+
+## M23：Hot Graph Runtime 基座
+
+### 目标
+
+让项目级查询能够在同一进程内复用已加载的 `GraphDB`，为后续 function calling / stdio server / MCP 长驻工具形态打基础。
+
+M23 只解决一件事：把“加载图”和“执行查询”从 CLI 分支中解耦，证明同一个 runtime 连续执行多次查询时，第二次不再全量加载 graphdb。
+
+### 非目标
+
+- 不实现 Lazy GraphDB。
+- 不新增 redb 邻接索引。
+- 不实现 MCP server。
+- 不改 `metadata-checker` skill 调用协议。
+- 不做 pathfinder 深度性能优化。
+- 不改变现有 CLI 输出协议。
+
+### 背景问题
+
+- AI 通过 skill 调用 CLI 时，每次都是新进程冷启动。
+- 当前项目级查询会在 `src/main.rs` 中先打开 graphdb，再通过 `GraphDB::load_from_db` 全量反序列化 nodes/edges 并构建 `petgraph`。
+- `samply` 对真实项目 `xiaoshouyi` 的 `input3 --explain-condition` 采样显示，冷查询的主要成本集中在 graphdb 全量读取、redb range 迭代、`serde_json::from_slice`、`serde_json::Value::deserialize` 和内存图构建。
+- 如果目标转向 function calling / 长驻进程，全量加载并不是错误方向；问题是不能每次 function call 都重复加载。
+
+### 设计原则
+
+- 保留现有 `GraphDB` 全量加载模型，作为热查询和复杂关系遍历的主路径。
+- 先建立运行时复用边界，再考虑服务协议。
+- 查询逻辑应能被 CLI 和 runtime 共同调用，避免继续把业务查询逻辑写死在 `main.rs` 分支里。
+- 阶段耗时必须可观测，否则后续无法判断优化是否真正命中冷启动问题。
+
+### 工作清单
+
+- 新增运行时模块，例如 `src/runtime.rs`。
+- 新增 `GraphRuntime` 结构，至少包含：
+  - `graph: GraphDB`
+  - `graph_db_path: PathBuf`
+  - `loaded_at: SystemTime`
+  - `graph_file_mtime: Option<SystemTime>`
+  - `graph_file_size: u64`
+  - `load_count: usize`
+- 实现 `GraphRuntime::load(graph_db_path: impl AsRef<Path>) -> Result<Self>`。
+- 实现 `GraphRuntime::query(request: RuntimeQueryRequest) -> Result<RuntimeQueryResponse>`。
+- 定义 `RuntimeQueryRequest`，至少支持：
+  - `command: RuntimeQueryCommand`
+  - `target: String`
+  - `budget: String`
+  - `human: bool`
+- 定义 `RuntimeQueryCommand`，M23 最小范围只要求：
+  - `ExplainCondition`
+- 定义 `RuntimeQueryResponse`，至少包含：
+  - `result: serde_json::Value`
+  - `timing: RuntimeTiming`
+  - `diagnostics: Vec<String>`
+- 定义 `RuntimeTiming`，至少包含：
+  - `graph_load_ms`
+  - `query_compute_ms`
+  - `serialize_ms`
+  - `total_ms`
+- 将 `explain_condition_target` 的核心逻辑拆出为“返回 `serde_json::Value`”的函数。
+  - CLI 仍负责 `println!("{}", serde_json::to_string_pretty(...))`。
+  - runtime 直接复用该函数，避免通过 stdout 解析结果。
+- 保留当前 `explain_condition_target` 作为 CLI 包装函数，避免破坏现有调用。
+- 增加 runtime 单元测试或集成测试：
+  - 加载 fixture graphdb。
+  - 连续执行两次同一 `ExplainCondition` 查询。
+  - 断言 `load_count == 1`。
+  - 断言两次查询结果的关键字段一致。
+- 增加真实项目 ignored 测试或手动验收命令：
+  - 目标：`comp:app/销售.app/销售/合同协议.spg|input3`
+  - 要求结果仍包含 `model22.phoneNumber`、`fact_qwSidebar.phoneNumber`、`action1`、`action4`。
+- 增加阶段耗时日志或测试可读输出，用于区分：
+  - 第一次 runtime 查询：包含 graph load。
+  - 第二次 runtime 查询：`graph_load_ms == 0` 或接近 0。
+- 更新 `main.rs` 内部调用路径时保持 CLI 行为兼容：
+  - 单次 CLI 项目级查询仍可继续冷启动。
+  - M23 不要求 CLI 自动进入长驻模式。
+
+### 验收目标
+
+- `cargo check` 无 warning。
+- 现有测试不回退。
+- `GraphRuntime` 可以在一个进程内复用同一份内存 `GraphDB`。
+- 同一个 runtime 连续执行两次 `ExplainCondition`，第二次不调用 `GraphDB::load_from_db`。
+- `input3` 真实项目查询的主链路不回退，仍能输出 `input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber <- 潜客信息跟进.button1.action1/action4`。
+- M23 完成后，才能进入 M24 的 stdio function calling server。
+
+### 后续拆分
+
+- M24：Stdio Function Calling Server。把 `GraphRuntime` 暴露为 JSONL stdin/stdout 长驻服务。
+- M25：Runtime Cache 与 Reload。处理 graphdb 文件变更检测、手动 reload、reload 失败降级。
+- M26：Skill / Function Calling 接入与性能验收。更新 skill 决策树，固化冷 CLI、首次 stdio、第二次 stdio 的真实项目性能基线。

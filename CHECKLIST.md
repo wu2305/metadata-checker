@@ -54,3 +54,4 @@
 - [x] M20：Why 条件查询能力（目标化主因链路，避免通用 context 漂移），详见 `docs/real-project-optimization-roadmap.md`
 - [x] M21：未知 Action 语义归类，详见 `docs/real-project-optimization-roadmap.md`
 - [x] M22：条件类 AI 评测与协议收敛（含注意力漂移负例断言），详见 `docs/real-project-optimization-roadmap.md`
+- [ ] M23：Hot Graph Runtime 基座（进程内复用 GraphDB，暂不做 LazyLoad / stdio server），详见 `docs/real-project-optimization-roadmap.md`
