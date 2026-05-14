@@ -3180,14 +3180,14 @@
       ],
       "expected_facts": [
         "input_chain_a 的显示受 visibleCondition 控制",
-        "visibleCondition 依赖 input_chain_b.value",
-        "input_chain_b 的值来自 param1（链式上游）"
+        "visibleCondition 依赖 input_chain_b.value"
       ],
       "forbidden_claims": [
         "只有 input_chain_b 影响显示",
         "没有链式依赖",
         "input_chain_a 没有任何条件",
-        "input_chain_a 的条件不依赖任何组件"
+        "input_chain_a 的条件不依赖任何组件",
+        "input_chain_b 的值来自 param1"
       ],
       "evidence_requirements": [
         {
@@ -3212,15 +3212,15 @@
           "链式依赖"
         ],
         "should_mention": [
-          "param1",
           "input_chain_a"
         ],
         "must_not_mention": [
           "只有 input_chain_b",
-          "没有链式依赖"
+          "没有链式依赖",
+          "param1"
         ]
       },
-      "uncertainty_policy": "如果链式上游未完全解析，应保守表达",
+      "uncertainty_policy": "当前工具输出只覆盖直接条件引用，不展开链式上游值来源；如需 param1 来源请补充 --explain-condition 'comp:app/actions_test.spg|input_chain_b'",
       "minimal_command_plan": [
         {
           "command_kind": "--explain-condition",
@@ -3270,7 +3270,8 @@
         "must_not_include": [
           "只有 input_chain_b",
           "没有链式依赖",
-          "没有任何条件"
+          "没有任何条件",
+          "param1"
         ],
         "diagnostic_disclaimer_required": false,
         "evidence_reference_required": true
