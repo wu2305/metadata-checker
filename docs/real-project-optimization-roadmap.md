@@ -508,6 +508,173 @@ M23 只解决一件事：把“加载图”和“执行查询”从 CLI 分支�
   - 单次 CLI 项目级查询仍可继续冷启动。
   - M23 不要求 CLI 自动进入长驻模式。
 
+### 落地任务拆解
+
+#### M23.1：确认当前查询入口和可复用边界
+
+- 阅读 `src/main.rs` 中项目级查询分支，确认 `--explain-condition` 当前调用链。
+- 阅读 `src/explain.rs` 中 `explain_condition_target`，标记所有直接 `println!`、`serde_json::to_string_pretty`、`human` 输出分支。
+- 阅读 `src/graph.rs` 中 `GraphDB::open_or_diagnostic`、`GraphDB::open_readonly`、`GraphDB::load_from_db`，确认全量加载发生点。
+- 记录 M23 不改动的范围：
+  - 不改 `GraphDB` 序列化格式。
+  - 不改 redb 表结构。
+  - 不改 `PathFinder` 算法。
+  - 不改 CLI JSON 输出 shape。
+- 输出一份简短实现备注，说明 M23 的最小代码改动路径。
+
+验收：
+
+- 能指出 `GraphRuntime` 应复用的最小查询函数。
+- 能指出哪些 CLI 输出逻辑必须留在 wrapper 层。
+
+#### M23.2：拆出 ExplainCondition 纯查询函数
+
+- 在 `src/explain.rs` 中新增返回结构化结果的函数，建议命名：
+  - `build_explain_condition_output(graph: &GraphDB, target_id: &str, budget: &str) -> Result<serde_json::Value>`
+- 将 `explain_condition_target` 中构建 JSON 的主体逻辑迁移到新函数。
+- `build_explain_condition_output` 不允许直接 `println!` / `eprintln!`。
+- `build_explain_condition_output` 不处理 human 输出。
+- 原 `explain_condition_target` 保留为 CLI wrapper：
+  - 调用 `build_explain_condition_output`。
+  - `human == false` 时继续 pretty JSON 输出。
+  - `human == true` 时保持现有行为或显式沿用当前 JSON 输出，不能破坏编译。
+- target 不存在时仍返回当前 `TARGET_NOT_FOUND` 结构，不能退化为 error。
+- 保持 `details.primary_path`、`details.related_context`、`details.data_empty_gates` 等字段不变。
+
+验收：
+
+- 现有 `--explain-condition` CLI 输出与重构前等价。
+- `cargo test --test regression_tests test_real_project_query_page_logic_input3_chain -- --ignored --nocapture` 仍通过，若该测试名调整则运行现有 input3 真实项目回归。
+- 不新增 `#[allow(dead_code)]`。
+
+#### M23.3：新增 Runtime 类型与请求响应协议
+
+- 新增 `src/runtime.rs`。
+- 在 `src/lib.rs` 或模块入口注册 `pub mod runtime;`，若当前项目没有 `lib.rs`，按现有模块组织在 `main.rs` 中声明 `mod runtime;`。
+- 定义 `GraphRuntime`：
+  - `graph: GraphDB`
+  - `graph_db_path: PathBuf`
+  - `loaded_at: SystemTime`
+  - `graph_file_mtime: Option<SystemTime>`
+  - `graph_file_size: u64`
+  - `load_count: usize`
+- 定义 `RuntimeQueryCommand`：
+  - `ExplainCondition`
+- 定义 `RuntimeQueryRequest`：
+  - `command: RuntimeQueryCommand`
+  - `target: String`
+  - `budget: String`
+  - `human: bool`
+- 定义 `RuntimeQueryResponse`：
+  - `result: serde_json::Value`
+  - `timing: RuntimeTiming`
+  - `diagnostics: Vec<String>`
+- 定义 `RuntimeTiming`：
+  - `graph_load_ms: u128`
+  - `query_compute_ms: u128`
+  - `serialize_ms: u128`
+  - `total_ms: u128`
+- 为上述类型添加中文文档注释，文档注释放在 `#[derive(...)]` 之前。
+- 只为确实需要序列化的请求/响应类型派生 `Serialize` / `Deserialize`。
+
+验收：
+
+- `cargo check` 无 warning。
+- 类型命名和字段命名符合 Rust 规范。
+- 没有为了消除 warning 添加 `#[allow(dead_code)]`。
+
+#### M23.4：实现 GraphRuntime 加载与查询
+
+- 实现 `GraphRuntime::load(graph_db_path: impl AsRef<Path>) -> Result<Self>`。
+- `load` 内部调用当前稳定的 graphdb 打开方式，优先使用现有 CLI 项目级查询同路径。
+- `load` 记录 graphdb 文件 metadata：
+  - `mtime`
+  - `size`
+  - `loaded_at`
+- `load_count` 初始化为 `1`。
+- 实现 `GraphRuntime::query(&self, request: RuntimeQueryRequest) -> Result<RuntimeQueryResponse>`。
+- M23 只支持 `RuntimeQueryCommand::ExplainCondition`。
+- `query` 调用 `build_explain_condition_output(&self.graph, &request.target, &request.budget)`。
+- `query` 的 `graph_load_ms` 必须为 `0`，因为 runtime 已经加载。
+- `query_compute_ms` 只统计查询构建耗时。
+- `serialize_ms` 可以先统计 `serde_json::to_vec(&result)` 的耗时，但不能改变返回的 `result`。
+- `total_ms` 覆盖整个 `query` 调用。
+- 对不支持的命令不预留空分支；M23 只有一个 enum variant。
+
+验收：
+
+- 同一个 `GraphRuntime` 调用多次 `query`，`load_count` 保持 `1`。
+- `query` 不调用 `GraphDB::open_or_diagnostic` / `GraphDB::load_from_db`。
+- `query` 返回的 `result.kind == "Explain"`。
+
+#### M23.5：补测试项目与 runtime 回归
+
+- 新增测试文件或扩展现有 regression 测试，建议命名：
+  - `tests/runtime_tests.rs`
+- 测试 fixture graphdb 可以在测试内基于 `tests/fixtures/test_project` 构建到 `/tmp` 或临时目录。
+- 增加测试：`test_graph_runtime_reuses_loaded_graph_for_explain_condition`。
+- 测试步骤：
+  - 构建 fixture graphdb。
+  - `GraphRuntime::load(&graph_db_path)`。
+  - 第一次执行 `ExplainCondition`。
+  - 第二次执行同一 `ExplainCondition`。
+  - 断言 `runtime.load_count == 1`。
+  - 断言两次结果的 `kind`、`query_target`、关键 `summary` 字段一致。
+  - 断言第二次响应的 `timing.graph_load_ms == 0`。
+- 增加真实项目 ignored 测试，建议命名：
+  - `test_real_project_runtime_input3_explain_condition_reuses_graph`
+- 真实项目测试目标：
+  - project：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
+  - target：`comp:app/销售.app/销售/合同协议.spg|input3`
+- 真实项目测试断言：
+  - `details.primary_path` 中包含 `model22.phoneNumber`
+  - 包含 `fact_qwSidebar.phoneNumber`
+  - 包含 `action1`
+  - 包含 `action4`
+  - 连续两次查询 `load_count == 1`
+
+验收：
+
+- fixture 测试默认运行。
+- 真实项目测试标记 `#[ignore]`，避免 CI 依赖本机路径。
+- 测试断言使用 `assert_eq!` / 明确 helper，避免只 `assert!(json.to_string().contains(...))` 的弱断言；真实项目长 JSON 可使用已有 `array_any_contains_substring` 类 helper。
+
+#### M23.6：保留 CLI 兼容并避免范围外扩散
+
+- 不新增 CLI 参数。
+- 不新增 `--serve-stdio`。
+- 不更新 `SKILL.md`。
+- 不改变 `--explain-condition` 当前命令输出。
+- 如必须调整 `main.rs`，只做调用函数名变化，不改变分支顺序和参数语义。
+- 不把 `GraphRuntime` 接入默认 CLI 单次查询路径；M23 只提供 runtime 能力和测试证明。
+
+验收：
+
+- 现有命令仍可运行：
+  - `./target/release/metadata-checker --project-dir <PROJECT> --graph-db-path <DB> --explain-condition '<TARGET>' --budget compact`
+- 输出字段兼容 M22 eval。
+
+#### M23.7：性能与验证记录
+
+- 运行 `cargo check`。
+- 运行受影响测试：
+  - `cargo test --test runtime_tests`
+  - `cargo test --test regression_tests`
+  - 如改动 explain 输出，再运行 `cargo test --test explain_tests` 或仓库中对应 explain 测试文件。
+- 运行真实项目 ignored 测试或手动命令，记录结果。
+- 可选：用 `samply` 对 runtime 测试或后续 M24 stdio 查询再采样；M23 不强制。
+- 在提交信息或交付说明中明确：
+  - 第一次 runtime 查询包含 graph load。
+  - 第二次 runtime 查询复用内存 graph。
+  - CLI 单次查询仍是冷启动，留给 M24/M26 接入解决。
+
+验收：
+
+- `cargo check` 0 warning。
+- 默认测试通过。
+- 真实项目 input3 主链路不回退。
+- git diff 只包含 runtime、explain 查询函数拆分、测试和必要模块注册。
+
 ### 验收目标
 
 - `cargo check` 无 warning。
@@ -522,3 +689,336 @@ M23 只解决一件事：把“加载图”和“执行查询”从 CLI 分支�
 - M24：Stdio Function Calling Server。把 `GraphRuntime` 暴露为 JSONL stdin/stdout 长驻服务。
 - M25：Runtime Cache 与 Reload。处理 graphdb 文件变更检测、手动 reload、reload 失败降级。
 - M26：Skill / Function Calling 接入与性能验收。更新 skill 决策树，固化冷 CLI、首次 stdio、第二次 stdio 的真实项目性能基线。
+
+## M24：Stdio Function Calling Server
+
+### 目标
+
+把 M23 的 `GraphRuntime` 暴露为长驻 JSONL stdio 服务，让 AI/function calling 包装层可以在一个进程内连续执行多个项目级查询。
+
+M24 只解决协议和进程生命周期：启动一次、加载一次 graphdb、stdin 每行一个请求、stdout 每行一个响应。
+
+### 非目标
+
+- 不做 MCP server。
+- 不做后台 daemon。
+- 不做 graphdb 自动 reload。
+- 不更新 `metadata-checker` skill 默认调用策略。
+- 不新增 Lazy GraphDB。
+- 不改变单次 CLI 查询输出。
+
+### 工作清单
+
+- 在 `src/cli.rs` 新增参数：
+  - `--serve-stdio`
+  - `--serve-graph-db-path <PATH>` 或复用现有 `--graph-db-path`
+- 在 `src/main.rs` 中增加 `--serve-stdio` 分支。
+- 新增服务模块，建议命名：
+  - `src/stdio_server.rs`
+- 定义 JSONL 请求结构：
+  - `request_id: String`
+  - `command: String`
+  - `target: String`
+  - `budget: Option<String>`
+  - `human: Option<bool>`
+- 定义 JSONL 响应结构：
+  - `request_id: String`
+  - `ok: bool`
+  - `result: Option<serde_json::Value>`
+  - `error: Option<String>`
+  - `diagnostics: Vec<String>`
+  - `timing: RuntimeTiming`
+- 服务启动时：
+  - 解析 graphdb path。
+  - 调用 `GraphRuntime::load`。
+  - stderr 输出启动日志。
+  - stdout 不输出启动日志，避免污染 JSONL 协议。
+- 服务循环：
+  - 从 stdin 逐行读取。
+  - 空行跳过。
+  - 非法 JSON 返回 `ok=false`，不能 panic。
+  - 未知 command 返回 `ok=false` 和明确错误。
+  - 支持 `explain_condition` 命令，映射到 `RuntimeQueryCommand::ExplainCondition`。
+  - 每个响应必须单行 JSON。
+  - stdout 每次响应后 flush。
+- 错误处理：
+  - 可恢复错误转为 JSONL error。
+  - 不在库代码中 `println!` / `eprintln!`。
+  - server 层可以用 stderr 输出运行日志。
+- 增加测试：
+  - 启动 `metadata-checker --serve-stdio --graph-db-path <fixture_db>` 子进程。
+  - 连续写入两个 `explain_condition` 请求。
+  - 读取两行响应。
+  - 断言两个响应 `ok=true`。
+  - 断言第二个响应 `timing.graph_load_ms == 0`。
+  - 断言两次响应不包含非 JSON 日志。
+- 增加负例测试：
+  - 非法 JSON 行。
+  - 未知 command。
+  - 缺 target。
+
+### 落地任务拆解
+
+#### M24.1：CLI 参数和入口
+
+- 修改 `src/cli.rs`，增加 `serve_stdio: bool`。
+- 确认 help 文本说明这是机器协议，不是人类 REPL。
+- 修改 `src/main.rs`：
+  - 在项目级查询分支前处理 `--serve-stdio`。
+  - 缺少 graphdb path 时返回结构化错误或 `anyhow::bail!`。
+  - 不要求 `<FILE>` input。
+
+验收：
+
+- `metadata-checker --help` 能看到 `--serve-stdio`。
+- 不影响现有 `--project-dir --query-*` 分支。
+
+#### M24.2：JSONL 协议实现
+
+- 新增 `StdioRequest` / `StdioResponse` 类型。
+- 类型字段使用 snake_case。
+- command 先用字符串解析，不急于暴露复杂 enum 到外部协议。
+- 内部再转换到 `RuntimeQueryRequest`。
+- 所有响应必须包含原始 `request_id`；若请求 JSON 都无法解析，则使用空字符串或生成 `"unknown"`。
+
+验收：
+
+- 一行输入只产生一行输出。
+- stdout 只包含 JSONL。
+- stderr 才允许包含启动和错误日志。
+
+#### M24.3：子进程集成测试
+
+- 新增 `tests/stdio_server_tests.rs`。
+- 使用 `std::process::Command` 启动当前测试 binary 对应的 `metadata-checker` 可执行文件；如果现有测试已有 helper，复用 helper。
+- 子进程 stdin/stdout 使用 pipe。
+- 测试结束必须 kill/wait 子进程，避免遗留进程。
+- 测试 fixture graphdb 在临时目录中构建，避免污染仓库。
+
+验收：
+
+- `cargo test --test stdio_server_tests` 通过。
+- 测试失败时不会挂住。
+
+#### M24.4：协议文档
+
+- 新增或更新 docs，建议：
+  - `docs/stdio-server.md`
+- 文档包含：
+  - 启动命令。
+  - 请求示例。
+  - 响应示例。
+  - 错误响应示例。
+  - stdout/stderr 边界。
+
+验收：
+
+- 文档示例可以直接复制执行。
+
+### 验收目标
+
+- `cargo check` 无 warning。
+- `cargo test --test stdio_server_tests` 通过。
+- stdio server 连续两个请求只加载一次 graphdb。
+- stdout 协议对 function calling 包装层稳定可解析。
+- M24 完成后，才能进入 M25 的 reload/cache。
+
+## M25：Runtime Cache 与 Reload
+
+### 目标
+
+让长驻 runtime 能识别 graphdb 文件变化，并在不崩溃的前提下刷新内存图，避免 AI/function calling 使用过期图。
+
+M25 只解决 runtime 生命周期可靠性：状态查询、变更检测、手动 reload、失败降级。
+
+### 非目标
+
+- 不做自动后台文件监听。
+- 不做多项目 graph runtime 池。
+- 不做 MCP server。
+- 不更新 skill 默认策略。
+- 不做 Lazy GraphDB。
+
+### 工作清单
+
+- 扩展 `GraphRuntime`：
+  - `reload_count: usize`
+  - `last_reload_error: Option<String>`
+  - `graph_fingerprint: GraphFingerprint`
+- 新增 `GraphFingerprint`：
+  - `path: PathBuf`
+  - `mtime: Option<SystemTime>`
+  - `size: u64`
+- 实现 `GraphRuntime::current_fingerprint() -> Result<GraphFingerprint>`。
+- 实现 `GraphRuntime::is_graph_changed() -> Result<bool>`。
+- 实现 `GraphRuntime::reload_if_changed() -> Result<bool>`。
+- 实现 `GraphRuntime::reload() -> Result<()>`。
+- reload 策略：
+  - 新图加载成功后再替换旧 graph。
+  - 新图加载失败时保留旧 graph。
+  - 记录 `last_reload_error`。
+  - 返回 diagnostic，不能静默失败。
+- stdio server 增加命令：
+  - `status`
+  - `reload`
+- stdio server 每次普通查询前可选调用 `reload_if_changed()`；如果担心开销，M25 可先只在请求显式带 `check_reload: true` 时执行，但协议必须明确。
+- `status` 输出：
+  - graphdb path
+  - loaded_at
+  - load_count
+  - reload_count
+  - node_count
+  - edge_count
+  - graph_file_mtime
+  - graph_file_size
+  - last_reload_error
+- 增加测试：
+  - graphdb 未变化时 `reload_if_changed()` 返回 false。
+  - graphdb 替换后 `reload_if_changed()` 返回 true。
+  - reload 失败时旧 runtime 仍可查询。
+  - stdio `status` 返回当前 runtime 状态。
+  - stdio `reload` 成功后 `reload_count` 增加。
+
+### 落地任务拆解
+
+#### M25.1：Fingerprint 与状态输出
+
+- 在 `src/runtime.rs` 中新增 `GraphFingerprint`。
+- 为 `GraphRuntime` 增加 `status()` 方法，返回 JSON 或强类型 `RuntimeStatus`。
+- `status` 不触发 reload。
+
+验收：
+
+- 单元测试能读取 node/edge 数和 graphdb 文件状态。
+
+#### M25.2：安全 reload
+
+- reload 不允许先清空当前 graph。
+- 使用局部变量加载新 `GraphRuntime` 或新 `GraphDB`。
+- 加载成功后再替换 `self.graph` 和 fingerprint。
+- 加载失败时保留旧 graph，返回错误并记录。
+
+验收：
+
+- 损坏 graphdb reload 失败后，旧查询仍可返回结果。
+
+#### M25.3：stdio 命令扩展
+
+- `status` 不要求 target。
+- `reload` 不要求 target。
+- 普通查询响应 diagnostics 中可以包含 `"GRAPH_RELOADED"` 或 `"GRAPH_RELOAD_FAILED"`。
+- 错误响应仍保持单行 JSON。
+
+验收：
+
+- 连续请求：`status` -> `explain_condition` -> `reload` -> `status` 都可解析。
+
+### 验收目标
+
+- 长驻进程不会静默使用过期 graphdb。
+- reload 失败不会导致服务崩溃或丢失旧图。
+- `status` 能让 AI 判断当前 runtime 是否加载了预期 graphdb。
+- M25 完成后，才能进入 M26 的 skill/function calling 接入。
+
+## M26：Skill / Function Calling 接入与性能验收
+
+### 目标
+
+把 M23-M25 的长驻查询能力接入 AI 使用路径，并用真实项目性能基线验证“第二次查询不再冷启动”。
+
+M26 只解决 AI 使用协议和性能验收，不再大改 runtime 架构。
+
+### 非目标
+
+- 不新增新的查询语义。
+- 不重写 pathfinder。
+- 不做 Lazy GraphDB。
+- 不做 MCP server，除非 M24 stdio 已稳定且另开后续里程碑。
+
+### 工作清单
+
+- 更新 `/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md` 或仓库内同步文档，增加 stdio server 决策树。
+- 决策规则：
+  - 单次、低成本、临时查询可继续 CLI。
+  - 同一项目连续多个项目级查询优先 stdio server。
+  - 条件类、context、query-model 连续追问应复用 stdio server。
+  - graphdb 变更后先发 `status` / `reload`。
+- 增加 function calling wrapper 示例文档，建议：
+  - `docs/function-calling-runtime.md`
+- 文档包含：
+  - 如何启动 stdio server。
+  - 如何发送 JSONL 请求。
+  - 如何处理 `request_id`。
+  - 如何处理错误响应。
+  - 如何关闭进程。
+- 建立性能基线文档，建议：
+  - `docs/performance-baseline.md`
+- 基线至少包含：
+  - CLI 冷查询 `input3 --explain-condition` 耗时。
+  - stdio server 首次查询耗时。
+  - stdio server 第二次查询耗时。
+  - graph load 阶段耗时。
+  - query compute 阶段耗时。
+  - 输出大小。
+- 用真实项目 `xiaoshouyi` 验收：
+  - `comp:app/销售.app/销售/合同协议.spg|input3`
+  - `model:fact_qwSidebar`
+  - 一个 `--context` 或后续已接入 command。
+- 更新 ai-eval 或手工验收清单：
+  - 记录 stdio 模式下输出仍满足 M22 主链路断言。
+  - 记录模型不会因为新增 timing/status 字段发生注意力漂移。
+- 可选运行 `samply`：
+  - 对 stdio 第二次查询采样。
+  - 确认热点不再是 `GraphDB::load_from_db`。
+
+### 落地任务拆解
+
+#### M26.1：Skill 决策树更新
+
+- 更新 skill 文档时保持 summary-first 原则。
+- 把 stdio server 放在“同一项目连续多问”路径，不替代所有 CLI。
+- 明确 stdout JSONL 不能混入日志。
+- 明确单次查询仍可用 CLI，避免模型为了简单问题启动长驻服务。
+
+验收：
+
+- skill 文档能指导 AI 在连续追问时复用服务。
+
+#### M26.2：性能基线采集
+
+- 记录命令：
+  - CLI 冷查询。
+  - stdio 启动。
+  - stdio 第一次请求。
+  - stdio 第二次请求。
+- 每个命令记录：
+  - real/user/sys 或 runtime timing。
+  - 输出大小。
+  - graphdb 路径。
+  - git commit。
+- 基线数字不要求绝对固定，但必须能证明第二次 stdio 查询绕过 graph load。
+
+验收：
+
+- `docs/performance-baseline.md` 有真实项目数据。
+
+#### M26.3：AI 输出抗漂移检查
+
+- 用 M22 的 input3 问题重新跑一轮工具输出。
+- 确认新增 timing/status 不被模型当作业务证据。
+- 如果输出新增字段会干扰 AI，调整 skill 读取策略：
+  - 先读 `summary`
+  - 再读 `details.primary_path`
+  - timing 只用于性能判断
+
+验收：
+
+- 业务回答仍优先引用主链路，不引用 runtime timing 作为业务原因。
+
+### 验收目标
+
+- AI 连续项目级查询不再天然冷启动。
+- stdio 第二次查询的 `graph_load_ms == 0`。
+- 真实项目 input3 主链路不回退。
+- skill 文档明确 CLI 与 stdio server 的选择边界。
+- 性能基线文档记录可复现命令和结果。
