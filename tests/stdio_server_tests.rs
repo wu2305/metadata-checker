@@ -3,6 +3,16 @@ use std::process::{Command, Stdio};
 
 mod common;
 
+/// 递归检查 JSON 中任意字符串字段是否包含指定片段
+fn json_contains_str(value: &serde_json::Value, needle: &str) -> bool {
+    match value {
+        serde_json::Value::String(s) => s.contains(needle),
+        serde_json::Value::Array(items) => items.iter().any(|v| json_contains_str(v, needle)),
+        serde_json::Value::Object(map) => map.values().any(|v| json_contains_str(v, needle)),
+        _ => false,
+    }
+}
+
 /// M24 核心验收：启动 stdio server，连续两次 explain_condition，
 /// 第二次 graph_load_ms == 0
 #[test]
@@ -1079,6 +1089,20 @@ fn test_stdio_server_external_graphdb_with_project_dir() {
         "details must have action_flows"
     );
 
+    let action_flows = details["action_flows"]["items"]
+        .as_array()
+        .expect("action_flows.items must be array");
+    let has_raw_index_json_path = action_flows.iter().any(|flow| {
+        let json_path = flow["json_path"].as_str().unwrap_or("");
+        json_path.starts_with("canvas.components[")
+            && json_path.contains("].actions[")
+            && !json_path.contains("[id='")
+    });
+    assert!(
+        has_raw_index_json_path,
+        "external graphdb + explicit project_dir must read raw .spg json_path, not graph-derived id fallback"
+    );
+
     // 清理外部 graphdb
     let _ = std::fs::remove_file(&external_db);
     let _ = child.wait();
@@ -1093,7 +1117,24 @@ fn test_real_project_stdio_query_model_fact_qw_sidebar() {
         return;
     }
 
-    let db_path = project_dir.join(".metadata-checker.graphdb");
+    let project_db_path = project_dir.join(".metadata-checker.graphdb");
+    let tmp_db_path = std::path::PathBuf::from("/tmp/m23_runtime_test.graphdb");
+    let (db_path, cleanup_db) = if project_db_path.exists() {
+        (project_db_path, None)
+    } else if tmp_db_path.exists() {
+        (tmp_db_path, None)
+    } else {
+        let generated = std::env::temp_dir().join(format!(
+            "m27-real-{}.graphdb",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        metadata_checker::scanner::scan_project(project_dir, &generated)
+            .expect("real project graphdb build must succeed");
+        (generated.clone(), Some(generated))
+    };
     let bin = env!("CARGO_BIN_EXE_metadata-checker");
 
     let mut child = Command::new(bin)
@@ -1141,7 +1182,9 @@ fn test_real_project_stdio_query_model_fact_qw_sidebar() {
     let resp1: serde_json::Value = serde_json::from_str(&line1).expect("resp1 must be valid JSON");
     assert_eq!(resp1["ok"].as_bool(), Some(true));
 
-    let writers = resp1["result"]["details"]["writers"].as_array().expect("writers must be array");
+    let writers = resp1["result"]["details"]["writers"]["items"]
+        .as_array()
+        .expect("details.writers.items must be array");
     let has_writer = writers.iter().any(|w| {
         let id = w["node_id"].as_str().unwrap_or("");
         id.contains("潜客信息跟进") && (id.contains("action1") || id.contains("action4"))
@@ -1152,11 +1195,28 @@ fn test_real_project_stdio_query_model_fact_qw_sidebar() {
     stdout_reader.read_line(&mut line2).unwrap();
     let resp2: serde_json::Value = serde_json::from_str(&line2).expect("resp2 must be valid JSON");
     assert_eq!(resp2["ok"].as_bool(), Some(true));
+    for needle in [
+        "input3",
+        "model22.phoneNumber",
+        "fact_qwSidebar.phoneNumber",
+        "action1",
+        "action4",
+    ] {
+        assert!(
+            json_contains_str(&resp2["result"], needle),
+            "query_page_logic stdio result must contain primary-chain token: {}",
+            needle
+        );
+    }
     assert_eq!(
         resp2["timing"]["graph_load_ms"].as_u64(),
         Some(0),
         "第二次查询 graph_load_ms 必须为 0"
     );
 
+    drop(stdin);
     let _ = child.wait();
+    if let Some(path) = cleanup_db {
+        let _ = std::fs::remove_file(path);
+    }
 }
