@@ -340,6 +340,47 @@ pub struct AiOutput {
 
 非法 budget 产生错误：CLI 层校验 `compact|normal|full`，非法值直接错误退出，不静默降级。
 
+## Stdio JSONL 契约
+
+`--serve-stdio` 使用统一 request / response envelope，便于 function calling wrapper 稳定消费。
+
+请求字段：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `request_id` | string | 是 | 请求标识，响应原样返回；非法 JSON 时为空字符串 |
+| `command` | string | 是 | `explain_condition` / `explain` / `query_model` / `query_page_logic` / `context` / `status` / `reload` |
+| `target` | string | 查询类命令必需 | 查询目标节点、模型或页面 |
+| `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal` |
+| `depth` | number | `context` 可选 | 非负整数，默认 `1` |
+| `human` | boolean | 否 | 目前仅 `explain_condition` 支持 |
+| `check_reload` | boolean | 否 | 查询前检测 graphdb 是否需要 reload |
+
+成功响应：
+
+```json
+{"request_id": "r1", "ok": true, "result": {}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 1, "serialize_ms": 0, "total_ms": 1}}
+```
+
+错误响应：
+
+```json
+{"request_id": "r1", "ok": false, "error": {"code": "MISSING_TARGET", "message": "Missing target for explain_condition"}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 0, "serialize_ms": 0, "total_ms": 0}}
+```
+
+错误码：
+
+| code | 说明 |
+|------|------|
+| `INVALID_JSON` | 输入行不是合法 JSON request |
+| `UNKNOWN_COMMAND` | command 不在 stdio 支持列表中 |
+| `MISSING_TARGET` | 查询类命令缺少 target 或 target 为空 |
+| `INVALID_TARGET` | target 格式非法或不能作为对应命令的目标 |
+| `INVALID_BUDGET` | budget 不是 `compact` / `normal` / `full` |
+| `INVALID_DEPTH` | context depth 不是非负整数 |
+| `GRAPH_RELOAD_FAILED` | reload graphdb 失败；旧 graph 保留可继续查询 |
+| `QUERY_FAILED` | 查询执行失败 |
+
 ## 查询不存在目标的行为
 
 以下查询在目标不存在时返回明确错误（`Result::Err`），不静默输出半截 JSON：

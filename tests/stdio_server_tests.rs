@@ -13,6 +13,16 @@ fn json_contains_str(value: &serde_json::Value, needle: &str) -> bool {
     }
 }
 
+/// 读取 stdio 错误码
+fn stdio_error_code(resp: &serde_json::Value) -> Option<&str> {
+    resp["error"]["code"].as_str()
+}
+
+/// 读取 stdio 错误消息
+fn stdio_error_message(resp: &serde_json::Value) -> &str {
+    resp["error"]["message"].as_str().unwrap_or("")
+}
+
 /// 判断 query_page_logic 是否读取到了原始 .spg 文件中的索引式 action json_path
 fn has_raw_index_action_json_path(result: &serde_json::Value) -> bool {
     let Some(action_flows) = result["details"]["action_flows"]["items"].as_array() else {
@@ -77,11 +87,12 @@ fn test_stdio_server_reuses_graph() {
     stdout_reader.read_line(&mut line1).unwrap();
     let resp1: serde_json::Value = serde_json::from_str(&line1).expect("resp1 must be valid JSON");
     assert_eq!(resp1["ok"].as_bool(), Some(true), "resp1 ok must be true");
-    assert_eq!(resp1["request_id"].as_str(), Some("req-1"), "resp1 request_id must match");
-    assert!(
-        resp1["result"].is_object(),
-        "resp1 result must be object"
+    assert_eq!(
+        resp1["request_id"].as_str(),
+        Some("req-1"),
+        "resp1 request_id must match"
     );
+    assert!(resp1["result"].is_object(), "resp1 result must be object");
     assert_eq!(
         resp1["result"]["kind"].as_str(),
         Some("Explain"),
@@ -93,7 +104,11 @@ fn test_stdio_server_reuses_graph() {
     stdout_reader.read_line(&mut line2).unwrap();
     let resp2: serde_json::Value = serde_json::from_str(&line2).expect("resp2 must be valid JSON");
     assert_eq!(resp2["ok"].as_bool(), Some(true), "resp2 ok must be true");
-    assert_eq!(resp2["request_id"].as_str(), Some("req-2"), "resp2 request_id must match");
+    assert_eq!(
+        resp2["request_id"].as_str(),
+        Some("req-2"),
+        "resp2 request_id must match"
+    );
 
     // 第二次 graph_load_ms == 0（热查询复用）
     assert_eq!(
@@ -141,9 +156,14 @@ fn test_stdio_server_invalid_json() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(false), "invalid JSON must return ok=false");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(false),
+        "invalid JSON must return ok=false"
+    );
+    assert_eq!(stdio_error_code(&resp), Some("INVALID_JSON"));
     assert!(
-        resp["error"].as_str().unwrap_or("").contains("JSON parse error"),
+        stdio_error_message(&resp).contains("JSON parse error"),
         "error must mention JSON parse"
     );
 
@@ -190,9 +210,14 @@ fn test_stdio_server_unknown_command() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(false), "unknown command must return ok=false");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(false),
+        "unknown command must return ok=false"
+    );
+    assert_eq!(stdio_error_code(&resp), Some("UNKNOWN_COMMAND"));
     assert!(
-        resp["error"].as_str().unwrap_or("").contains("Unknown command"),
+        stdio_error_message(&resp).contains("Unknown command"),
         "error must mention unknown command"
     );
 
@@ -238,12 +263,171 @@ fn test_stdio_server_missing_target() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(false), "missing target must return ok=false");
-    assert!(
-        resp["error"].as_str().unwrap_or("").contains("Missing target"),
-        "error must mention Missing target: got {}",
-        resp["error"].as_str().unwrap_or("(none)")
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(false),
+        "missing target must return ok=false"
     );
+    assert_eq!(stdio_error_code(&resp), Some("MISSING_TARGET"));
+    assert!(
+        stdio_error_message(&resp).contains("Missing target"),
+        "error must mention Missing target: got {}",
+        stdio_error_message(&resp)
+    );
+
+    let _ = child.wait();
+}
+
+/// M28 负例：非法 budget 返回结构化 INVALID_BUDGET
+#[test]
+fn test_stdio_server_invalid_budget() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-invalid-budget",
+        "command": "explain_condition",
+        "target": "comp:app/actions_test.spg|input1",
+        "budget": "maximum",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(false),
+        "invalid budget must return ok=false"
+    );
+    assert_eq!(stdio_error_code(&resp), Some("INVALID_BUDGET"));
+    assert!(stdio_error_message(&resp).contains("Invalid budget"));
+
+    let _ = child.wait();
+}
+
+/// M28 负例：命令不接受的 target 形态返回结构化 INVALID_TARGET
+#[test]
+fn test_stdio_server_invalid_target() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-invalid-target",
+        "command": "query_page_logic",
+        "target": "model:model1",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(false),
+        "invalid target must return ok=false"
+    );
+    assert_eq!(stdio_error_code(&resp), Some("INVALID_TARGET"));
+    assert!(stdio_error_message(&resp).contains("Invalid target"));
+
+    let _ = child.wait();
+}
+
+/// M28 负例：非法 context depth 返回结构化 INVALID_DEPTH
+#[test]
+fn test_stdio_server_invalid_depth() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-invalid-depth",
+        "command": "context",
+        "target": "comp:app/actions_test.spg|input1",
+        "depth": "deep",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(false),
+        "invalid depth must return ok=false"
+    );
+    assert_eq!(stdio_error_code(&resp), Some("INVALID_DEPTH"));
+    assert!(stdio_error_message(&resp).contains("Invalid depth"));
 
     let _ = child.wait();
 }
@@ -285,15 +469,33 @@ fn test_stdio_server_status() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(true), "status must return ok=true");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(true),
+        "status must return ok=true"
+    );
     assert_eq!(resp["request_id"].as_str(), Some("req-status"));
-    let result = resp["result"].as_object().expect("status result must be object");
+    let result = resp["result"]
+        .as_object()
+        .expect("status result must be object");
     assert!(
-        result.get("node_count").and_then(|v| v.as_u64()).unwrap_or(0) > 0,
+        result
+            .get("node_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            > 0,
         "status node_count must be > 0"
     );
-    assert_eq!(result["reload_count"].as_u64(), Some(0), "status reload_count must be 0");
-    assert_eq!(result["load_count"].as_u64(), Some(1), "status load_count must be 1");
+    assert_eq!(
+        result["reload_count"].as_u64(),
+        Some(0),
+        "status reload_count must be 0"
+    );
+    assert_eq!(
+        result["load_count"].as_u64(),
+        Some(1),
+        "status load_count must be 1"
+    );
 
     let _ = child.wait();
 }
@@ -335,17 +537,25 @@ fn test_stdio_server_reload_success() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(true), "reload must return ok=true");
-    let result = resp["result"].as_object().expect("reload result must be object");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(true),
+        "reload must return ok=true"
+    );
+    let result = resp["result"]
+        .as_object()
+        .expect("reload result must be object");
     assert_eq!(
         result["reload_count"].as_u64(),
         Some(1),
         "reload 后 reload_count 必须为 1"
     );
     assert!(
-        resp["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
-            d.as_str().unwrap_or("").contains("GRAPH_RELOADED")
-        ),
+        resp["diagnostics"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .any(|d| d.as_str().unwrap_or("").contains("GRAPH_RELOADED")),
         "diagnostics 必须包含 GRAPH_RELOADED"
     );
 
@@ -395,17 +605,94 @@ fn test_stdio_server_reload_failure() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(false), "损坏 graphdb reload 必须返回 ok=false");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(false),
+        "损坏 graphdb reload 必须返回 ok=false"
+    );
+    assert_eq!(stdio_error_code(&resp), Some("GRAPH_RELOAD_FAILED"));
     assert!(
-        resp["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
-            d.as_str().unwrap_or("").contains("GRAPH_RELOAD_FAILED")
-        ),
+        resp["diagnostics"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .any(|d| d.as_str().unwrap_or("").contains("GRAPH_RELOAD_FAILED")),
         "diagnostics 必须包含 GRAPH_RELOAD_FAILED"
     );
     assert!(
-        resp["error"].as_str().unwrap_or("").contains("Reload failed"),
+        stdio_error_message(&resp).contains("Reload failed"),
         "error 必须包含 Reload failed"
     );
+
+    let _ = child.wait();
+}
+
+/// M28 验收：显式 reload 失败后旧 graph 仍可继续服务查询
+#[test]
+fn test_stdio_server_reload_failure_keeps_old_graph_usable() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    std::fs::write(&db_path, b"not a valid graphdb").unwrap();
+
+    let reload_req = serde_json::json!({
+        "request_id": "req-reload-fail-old-graph",
+        "command": "reload"
+    });
+    let query_req = serde_json::json!({
+        "request_id": "req-after-reload-fail",
+        "command": "explain_condition",
+        "target": "comp:app/actions_test.spg|input1",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", reload_req).unwrap();
+        writeln!(stdin_lock, "{}", query_req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut reload_line = String::new();
+    stdout_reader.read_line(&mut reload_line).unwrap();
+    let reload_resp: serde_json::Value =
+        serde_json::from_str(&reload_line).expect("reload resp must be valid JSON");
+    assert_eq!(reload_resp["ok"].as_bool(), Some(false));
+    assert_eq!(stdio_error_code(&reload_resp), Some("GRAPH_RELOAD_FAILED"));
+
+    let mut query_line = String::new();
+    stdout_reader.read_line(&mut query_line).unwrap();
+    let query_resp: serde_json::Value =
+        serde_json::from_str(&query_line).expect("query resp must be valid JSON");
+    assert_eq!(
+        query_resp["ok"].as_bool(),
+        Some(true),
+        "reload 失败后旧 graph 必须仍可查询"
+    );
+    assert_eq!(
+        query_resp["request_id"].as_str(),
+        Some("req-after-reload-fail")
+    );
+    assert_eq!(query_resp["result"]["kind"].as_str(), Some("Explain"));
 
     let _ = child.wait();
 }
@@ -459,7 +746,11 @@ fn test_stdio_server_check_reload_failure() {
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
 
     // 查询本身仍应成功（旧 graph 还在）
-    assert_eq!(resp["ok"].as_bool(), Some(true), "check_reload 失败不应导致查询失败");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(true),
+        "check_reload 失败不应导致查询失败"
+    );
     assert_eq!(
         resp["result"]["kind"].as_str(),
         Some("Explain"),
@@ -468,9 +759,11 @@ fn test_stdio_server_check_reload_failure() {
 
     // 但 diagnostics 必须包含 GRAPH_RELOAD_FAILED
     assert!(
-        resp["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
-            d.as_str().unwrap_or("").contains("GRAPH_RELOAD_FAILED")
-        ),
+        resp["diagnostics"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .any(|d| d.as_str().unwrap_or("").contains("GRAPH_RELOAD_FAILED")),
         "diagnostics 必须包含 GRAPH_RELOAD_FAILED"
     );
 
@@ -517,7 +810,11 @@ fn test_stdio_server_query_model() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(true), "query_model must return ok=true");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(true),
+        "query_model must return ok=true"
+    );
     assert_eq!(resp["request_id"].as_str(), Some("req-query-model"));
     assert!(resp["result"].is_object(), "result must be object");
     assert_eq!(
@@ -574,7 +871,11 @@ fn test_stdio_server_context() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(true), "context must return ok=true");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(true),
+        "context must return ok=true"
+    );
     assert_eq!(resp["request_id"].as_str(), Some("req-context"));
     assert!(resp["result"].is_object(), "result must be object");
     assert_eq!(
@@ -630,7 +931,11 @@ fn test_stdio_server_explain() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(true), "explain must return ok=true");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(true),
+        "explain must return ok=true"
+    );
     assert_eq!(resp["request_id"].as_str(), Some("req-explain"));
     assert!(resp["result"].is_object(), "result must be object");
     assert_eq!(
@@ -686,7 +991,11 @@ fn test_stdio_server_query_page_logic() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(true), "query_page_logic must return ok=true");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(true),
+        "query_page_logic must return ok=true"
+    );
     assert_eq!(resp["request_id"].as_str(), Some("req-page-logic"));
     assert!(resp["result"].is_object(), "result must be object");
     assert_eq!(
@@ -696,7 +1005,9 @@ fn test_stdio_server_query_page_logic() {
     );
 
     // 验证 project_dir 已正确传递：details 中应包含 entrypoints/data_sources/action_flows
-    let details = resp["result"]["details"].as_object().expect("details must be object");
+    let details = resp["result"]["details"]
+        .as_object()
+        .expect("details must be object");
     assert!(
         details.contains_key("entrypoints"),
         "details must have entrypoints"
@@ -828,9 +1139,14 @@ fn test_stdio_server_query_model_missing_target() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(false), "missing target must return ok=false");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(false),
+        "missing target must return ok=false"
+    );
+    assert_eq!(stdio_error_code(&resp), Some("MISSING_TARGET"));
     assert!(
-        resp["error"].as_str().unwrap_or("").contains("Missing target for query_model"),
+        stdio_error_message(&resp).contains("Missing target for query_model"),
         "error must mention missing target"
     );
 
@@ -878,9 +1194,8 @@ fn test_stdio_server_context_missing_target() {
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
     assert_eq!(resp["ok"].as_bool(), Some(false));
-    assert!(
-        resp["error"].as_str().unwrap_or("").contains("Missing target for context")
-    );
+    assert_eq!(stdio_error_code(&resp), Some("MISSING_TARGET"));
+    assert!(stdio_error_message(&resp).contains("Missing target for context"));
 
     let _ = child.wait();
 }
@@ -925,9 +1240,8 @@ fn test_stdio_server_query_page_logic_missing_target() {
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
     assert_eq!(resp["ok"].as_bool(), Some(false));
-    assert!(
-        resp["error"].as_str().unwrap_or("").contains("Missing target for query_page_logic")
-    );
+    assert_eq!(stdio_error_code(&resp), Some("MISSING_TARGET"));
+    assert!(stdio_error_message(&resp).contains("Missing target for query_page_logic"));
 
     let _ = child.wait();
 }
@@ -972,9 +1286,8 @@ fn test_stdio_server_explain_missing_target() {
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
     assert_eq!(resp["ok"].as_bool(), Some(false));
-    assert!(
-        resp["error"].as_str().unwrap_or("").contains("Missing target for explain")
-    );
+    assert_eq!(stdio_error_code(&resp), Some("MISSING_TARGET"));
+    assert!(stdio_error_message(&resp).contains("Missing target for explain"));
 
     let _ = child.wait();
 }
@@ -1019,11 +1332,20 @@ fn test_stdio_server_human_not_supported_diagnostic() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(true), "human=true 不应导致查询失败");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(true),
+        "human=true 不应导致查询失败"
+    );
     assert!(
-        resp["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
-            d.as_str().unwrap_or("").contains("HUMAN_MODE_NOT_SUPPORTED")
-        ),
+        resp["diagnostics"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .any(|d| d
+                .as_str()
+                .unwrap_or("")
+                .contains("HUMAN_MODE_NOT_SUPPORTED")),
         "diagnostics 必须包含 HUMAN_MODE_NOT_SUPPORTED"
     );
 
@@ -1085,10 +1407,16 @@ fn test_stdio_server_external_graphdb_with_project_dir() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
-    assert_eq!(resp["ok"].as_bool(), Some(true), "external graphdb + project_dir must work");
+    assert_eq!(
+        resp["ok"].as_bool(),
+        Some(true),
+        "external graphdb + project_dir must work"
+    );
     assert_eq!(resp["request_id"].as_str(), Some("req-ext"));
 
-    let details = resp["result"]["details"].as_object().expect("details must be object");
+    let details = resp["result"]["details"]
+        .as_object()
+        .expect("details must be object");
     assert!(
         details.contains_key("entrypoints"),
         "details must have entrypoints"
@@ -1183,9 +1511,11 @@ fn test_stdio_server_reload_preserves_project_dir_for_external_graphdb() {
     let resp2: serde_json::Value = serde_json::from_str(&line2).expect("resp2 must be valid JSON");
     assert_eq!(resp2["ok"].as_bool(), Some(true));
     assert!(
-        resp2["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
-            d.as_str().unwrap_or("").contains("GRAPH_RELOADED")
-        ),
+        resp2["diagnostics"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .any(|d| d.as_str().unwrap_or("").contains("GRAPH_RELOADED")),
         "reload diagnostics must contain GRAPH_RELOADED"
     );
 
@@ -1274,9 +1604,11 @@ fn test_stdio_server_check_reload_preserves_project_dir_for_external_graphdb() {
     let resp2: serde_json::Value = serde_json::from_str(&line2).expect("resp2 must be valid JSON");
     assert_eq!(resp2["ok"].as_bool(), Some(true));
     assert!(
-        resp2["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
-            d.as_str().unwrap_or("").contains("GRAPH_RELOADED")
-        ),
+        resp2["diagnostics"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .any(|d| d.as_str().unwrap_or("").contains("GRAPH_RELOADED")),
         "check_reload diagnostics must contain GRAPH_RELOADED"
     );
     assert!(
@@ -1293,7 +1625,9 @@ fn test_stdio_server_check_reload_preserves_project_dir_for_external_graphdb() {
 #[test]
 #[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
 fn test_real_project_stdio_query_model_fact_qw_sidebar() {
-    let project_dir = std::path::Path::new("/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi");
+    let project_dir = std::path::Path::new(
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+    );
     if !project_dir.exists() {
         return;
     }
@@ -1370,7 +1704,10 @@ fn test_real_project_stdio_query_model_fact_qw_sidebar() {
         let id = w["node_id"].as_str().unwrap_or("");
         id.contains("潜客信息跟进") && (id.contains("action1") || id.contains("action4"))
     });
-    assert!(has_writer, "fact_qwSidebar writers must include 潜客信息跟进 action1/action4");
+    assert!(
+        has_writer,
+        "fact_qwSidebar writers must include 潜客信息跟进 action1/action4"
+    );
 
     let mut line2 = String::new();
     stdout_reader.read_line(&mut line2).unwrap();

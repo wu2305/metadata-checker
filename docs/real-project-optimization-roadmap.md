@@ -1141,7 +1141,7 @@ M27 只扩展 stdio command surface，不改变各查询本身的业务语义和
 
 ### 工作清单
 
-- 定义统一 request schema：
+- [x] 定义统一 request schema：
   - `request_id`
   - `command`
   - `target`
@@ -1149,20 +1149,20 @@ M27 只扩展 stdio command surface，不改变各查询本身的业务语义和
   - `depth`
   - `human`
   - `check_reload`
-- 定义统一 success response：
+- [x] 定义统一 success response：
   - `request_id`
   - `ok: true`
   - `result`
   - `diagnostics`
   - `timing`
-- 定义统一 error response：
+- [x] 定义统一 error response：
   - `request_id`
   - `ok: false`
   - `error.code`
   - `error.message`
   - `diagnostics`
   - `timing`
-- 统一错误码：
+- [x] 统一错误码：
   - `INVALID_JSON`
   - `UNKNOWN_COMMAND`
   - `MISSING_TARGET`
@@ -1171,11 +1171,11 @@ M27 只扩展 stdio command surface，不改变各查询本身的业务语义和
   - `INVALID_DEPTH`
   - `GRAPH_RELOAD_FAILED`
   - `QUERY_FAILED`
-- 更新文档：
+- [x] 更新文档：
   - `docs/function-calling-runtime.md`
   - `docs/schema.md`
   - `/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md`
-- 增加负例测试：
+- [x] 增加负例测试：
   - malformed JSONL
   - unknown command
   - missing target

@@ -39,9 +39,9 @@ stdin 每行一个 JSON 对象：
 | `request_id` | string | 是 | 请求标识，响应原样返回 |
 | `command` | string | 是 | `explain_condition` / `explain` / `query_model` / `query_page_logic` / `context` / `status` / `reload` |
 | `target` | string | 查询类命令必需 | 查询目标 |
-| `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal` |
+| `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal`；非法值返回 `INVALID_BUDGET` |
 | `human` | bool | 否 | 是否生成 human_summary，默认 `false`（目前仅 `explain_condition` 支持） |
-| `depth` | usize | 否 | `context` 命令专用，默认 `1` |
+| `depth` | usize | 否 | `context` 命令专用，默认 `1`；非法值返回 `INVALID_DEPTH` |
 | `check_reload` | bool | 否 | 查询前检测 graphdb 变更，默认 `false` |
 
 ## 读取 JSONL 响应
@@ -55,8 +55,10 @@ stdout 每行一个 JSON 对象：
 
 错误响应：
 ```json
-{"request_id": "r1", "ok": false, "error": "Unknown command: magic", "diagnostics": [], "timing": null}
+{"request_id": "r1", "ok": false, "error": {"code": "UNKNOWN_COMMAND", "message": "Unknown command: magic"}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 0, "serialize_ms": 0, "total_ms": 0}}
 ```
+
+错误响应固定使用 `error.code` / `error.message`，function calling wrapper 不应解析错误字符串。
 
 ## Function Calling 包装示例（伪代码）
 
@@ -194,18 +196,21 @@ reload_result = runtime.reload()
 if reload_result["ok"]:
     print("Graph reloaded")
 else:
-    print(f"Reload failed: {reload_result['error']}")
+    print(f"Reload failed: {reload_result['error']['code']} {reload_result['error']['message']}")
 ```
 
 ## 错误处理
 
-| 场景 | 响应 | 处理建议 |
+| 场景 | `error.code` | 处理建议 |
 |---|---|---|
-| 未知 command | `ok=false`, `error="Unknown command: ..."` | 检查 command 字段 |
-| 缺少 target | `ok=false`, `error="Missing target for explain_condition"` | 补充 target 字段 |
-| JSON 解析失败 | `ok=false`, `error="JSON parse error: ..."` | 检查请求格式 |
-| reload 失败 | `ok=false`, `diagnostics` 含 `GRAPH_RELOAD_FAILED` | 保留旧 graph，检查 graphdb 文件完整性 |
-| 查询异常 | `ok=false`, `error="Query failed: ..."` | 检查 target 是否存在 |
+| JSON 解析失败 | `INVALID_JSON` | 检查 JSONL 请求格式 |
+| 未知 command | `UNKNOWN_COMMAND` | 检查 command 字段 |
+| 缺少 target | `MISSING_TARGET` | 补充 target 字段 |
+| 非法 target | `INVALID_TARGET` | 修正 target ID 格式或改用 `--context` 核查候选 ID |
+| 非法 budget | `INVALID_BUDGET` | 只使用 `compact` / `normal` / `full` |
+| 非法 depth | `INVALID_DEPTH` | `context.depth` 必须是非负整数 |
+| reload 失败 | `GRAPH_RELOAD_FAILED` | 旧 graph 继续保留，检查 graphdb 文件完整性 |
+| 查询异常 | `QUERY_FAILED` | 检查 target 是否存在，必要时重建 graphdb |
 
 ## stdout / stderr 边界
 

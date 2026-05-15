@@ -63,7 +63,14 @@ pub struct StdioRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check_reload: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub depth: Option<usize>,
+    pub depth: Option<serde_json::Value>,
+}
+
+/// Stdio 结构化错误
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StdioError {
+    pub code: String,
+    pub message: String,
 }
 
 /// Stdio JSONL 响应
@@ -76,11 +83,102 @@ pub struct StdioResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+    pub error: Option<StdioError>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<crate::runtime::RuntimeTiming>,
+}
+
+fn zero_timing() -> crate::runtime::RuntimeTiming {
+    crate::runtime::RuntimeTiming {
+        graph_load_ms: 0,
+        query_compute_ms: 0,
+        serialize_ms: 0,
+        total_ms: 0,
+    }
+}
+
+fn error_response(
+    request_id: String,
+    code: &str,
+    message: impl Into<String>,
+    diagnostics: Vec<String>,
+) -> StdioResponse {
+    StdioResponse {
+        request_id,
+        ok: false,
+        result: None,
+        error: Some(StdioError {
+            code: code.to_string(),
+            message: message.into(),
+        }),
+        diagnostics,
+        timing: Some(zero_timing()),
+    }
+}
+
+fn validate_budget(budget: &str) -> Result<(), StdioError> {
+    match budget {
+        "compact" | "normal" | "full" => Ok(()),
+        other => Err(StdioError {
+            code: "INVALID_BUDGET".to_string(),
+            message: format!(
+                "Invalid budget '{}'. Expected: compact | normal | full",
+                other
+            ),
+        }),
+    }
+}
+
+fn parse_depth(depth: Option<&serde_json::Value>) -> Result<usize, StdioError> {
+    match depth {
+        None => Ok(1),
+        Some(v) => v.as_u64().map(|n| n as usize).ok_or_else(|| StdioError {
+            code: "INVALID_DEPTH".to_string(),
+            message: "Invalid depth. Expected non-negative integer".to_string(),
+        }),
+    }
+}
+
+fn command_requires_target(command: &StdioCommand) -> bool {
+    matches!(
+        command,
+        StdioCommand::ExplainCondition
+            | StdioCommand::Explain
+            | StdioCommand::QueryModel
+            | StdioCommand::QueryPageLogic
+            | StdioCommand::Context
+    )
+}
+
+fn validate_target_for_command(command: &StdioCommand, target: &str) -> Result<(), StdioError> {
+    let allowed_prefixes: &[&str] = match command {
+        StdioCommand::QueryModel => &["model:"],
+        StdioCommand::QueryPageLogic => &["page:"],
+        StdioCommand::ExplainCondition | StdioCommand::Explain | StdioCommand::Context => {
+            &["comp:", "action:", "model:", "field:", "page:", "dataflow:"]
+        }
+        StdioCommand::Status | StdioCommand::Reload | StdioCommand::Unknown(_) => return Ok(()),
+    };
+
+    if target != target.trim()
+        || target.contains('\0')
+        || !allowed_prefixes
+            .iter()
+            .any(|prefix| target.starts_with(prefix))
+    {
+        return Err(StdioError {
+            code: "INVALID_TARGET".to_string(),
+            message: format!(
+                "Invalid target '{}' for command '{}'",
+                target,
+                command.command_name()
+            ),
+        });
+    }
+
+    Ok(())
 }
 
 /// 启动 JSONL stdio 服务
@@ -93,7 +191,10 @@ pub fn run_stdio_server(
 ) -> Result<()> {
     let mut runtime = GraphRuntime::load_with_project_dir(graph_db_path, project_dir)
         .map_err(|e| anyhow::anyhow!("Failed to load graphdb: {}", e))?;
-    eprintln!("[stdio-server] Graph loaded, {} nodes, ready", runtime.graph.graph.node_count());
+    eprintln!(
+        "[stdio-server] Graph loaded, {} nodes, ready",
+        runtime.graph.graph.node_count()
+    );
 
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -103,14 +204,12 @@ pub fn run_stdio_server(
         let line = match line {
             Ok(l) => l,
             Err(e) => {
-                let resp = StdioResponse {
-                    request_id: String::new(),
-                    ok: false,
-                    result: None,
-                    error: Some(format!("stdin read error: {}", e)),
-                    diagnostics: vec![],
-                    timing: None,
-                };
+                let resp = error_response(
+                    String::new(),
+                    "QUERY_FAILED",
+                    format!("stdin read error: {}", e),
+                    vec![],
+                );
                 write_response(&mut stdout_lock, &resp)?;
                 continue;
             }
@@ -123,14 +222,12 @@ pub fn run_stdio_server(
         let request: StdioRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                let resp = StdioResponse {
-                    request_id: String::new(),
-                    ok: false,
-                    result: None,
-                    error: Some(format!("JSON parse error: {}", e)),
-                    diagnostics: vec![],
-                    timing: None,
-                };
+                let resp = error_response(
+                    String::new(),
+                    "INVALID_JSON",
+                    format!("JSON parse error: {}", e),
+                    vec![],
+                );
                 write_response(&mut stdout_lock, &resp)?;
                 continue;
             }
@@ -159,7 +256,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
             result: Some(serde_json::to_value(status).unwrap_or(serde_json::Value::Null)),
             error: None,
             diagnostics,
-            timing: None,
+            timing: Some(zero_timing()),
         };
     }
 
@@ -175,19 +272,17 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                     result: Some(serde_json::to_value(status).unwrap_or(serde_json::Value::Null)),
                     error: None,
                     diagnostics,
-                    timing: None,
+                    timing: Some(zero_timing()),
                 };
             }
             Err(e) => {
                 diagnostics.push("GRAPH_RELOAD_FAILED".to_string());
-                return StdioResponse {
-                    request_id: request.request_id.clone(),
-                    ok: false,
-                    result: None,
-                    error: Some(format!("Reload failed: {}", e)),
+                return error_response(
+                    request.request_id.clone(),
+                    "GRAPH_RELOAD_FAILED",
+                    format!("Reload failed: {}", e),
                     diagnostics,
-                    timing: None,
-                };
+                );
             }
         }
     }
@@ -195,7 +290,9 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
     // 可选：在查询前检查 graphdb 是否变更
     if request.check_reload == Some(true) {
         match runtime.reload_if_changed() {
-            Ok(crate::runtime::ReloadResult::Reloaded) => diagnostics.push("GRAPH_RELOADED".to_string()),
+            Ok(crate::runtime::ReloadResult::Reloaded) => {
+                diagnostics.push("GRAPH_RELOADED".to_string())
+            }
             Ok(crate::runtime::ReloadResult::Unchanged) => {}
             Ok(crate::runtime::ReloadResult::ReloadFailed { .. }) => {
                 diagnostics.push("GRAPH_RELOAD_FAILED".to_string());
@@ -206,23 +303,53 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
         }
     }
 
-    let budget = request.budget.clone().unwrap_or_else(|| "normal".to_string());
+    let budget = request
+        .budget
+        .clone()
+        .unwrap_or_else(|| "normal".to_string());
+    if let Err(err) = validate_budget(&budget) {
+        return error_response(
+            request.request_id.clone(),
+            &err.code,
+            err.message,
+            diagnostics,
+        );
+    }
     let human = request.human.unwrap_or(false);
     if human && request.command.as_str() != "explain_condition" {
         diagnostics.push("HUMAN_MODE_NOT_SUPPORTED".to_string());
     }
 
+    if command_requires_target(&command) {
+        let target = request.target.as_deref().unwrap_or("");
+        if target.trim().is_empty() {
+            return error_response(
+                request.request_id.clone(),
+                "MISSING_TARGET",
+                format!("Missing target for {}", command.command_name()),
+                diagnostics,
+            );
+        }
+        if let Err(err) = validate_target_for_command(&command, target) {
+            let StdioError { code, message } = err;
+            return error_response(request.request_id.clone(), &code, message, diagnostics);
+        }
+    }
+
     match command {
         StdioCommand::ExplainCondition => {
-            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                return StdioResponse {
-                    request_id: request.request_id.clone(),
-                    ok: false,
-                    result: None,
-                    error: Some("Missing target for explain_condition".to_string()),
+            if request
+                .target
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+            {
+                return error_response(
+                    request.request_id.clone(),
+                    "MISSING_TARGET",
+                    "Missing target for explain_condition",
                     diagnostics,
-                    timing: None,
-                };
+                );
             }
             let req = RuntimeQueryRequest {
                 command: RuntimeQueryCommand::ExplainCondition,
@@ -244,27 +371,28 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
                 Err(e) => {
                     diagnostics.push(format!("Query error: {}", e));
-                    StdioResponse {
-                        request_id: request.request_id.clone(),
-                        ok: false,
-                        result: None,
-                        error: Some(format!("Query failed: {}", e)),
+                    error_response(
+                        request.request_id.clone(),
+                        "QUERY_FAILED",
+                        format!("Query failed: {}", e),
                         diagnostics,
-                        timing: None,
-                    }
+                    )
                 }
             }
         }
         StdioCommand::QueryModel => {
-            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                return StdioResponse {
-                    request_id: request.request_id.clone(),
-                    ok: false,
-                    result: None,
-                    error: Some("Missing target for query_model".to_string()),
+            if request
+                .target
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+            {
+                return error_response(
+                    request.request_id.clone(),
+                    "MISSING_TARGET",
+                    "Missing target for query_model",
                     diagnostics,
-                    timing: None,
-                };
+                );
             }
             let start = std::time::Instant::now();
             match crate::query::build_query_model_output(
@@ -290,29 +418,36 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
                 Err(e) => {
                     diagnostics.push(format!("Query error: {}", e));
-                    StdioResponse {
-                        request_id: request.request_id.clone(),
-                        ok: false,
-                        result: None,
-                        error: Some(format!("Query failed: {}", e)),
+                    error_response(
+                        request.request_id.clone(),
+                        "QUERY_FAILED",
+                        format!("Query failed: {}", e),
                         diagnostics,
-                        timing: None,
-                    }
+                    )
                 }
             }
         }
         StdioCommand::Context => {
-            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                return StdioResponse {
-                    request_id: request.request_id.clone(),
-                    ok: false,
-                    result: None,
-                    error: Some("Missing target for context".to_string()),
+            if request
+                .target
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+            {
+                return error_response(
+                    request.request_id.clone(),
+                    "MISSING_TARGET",
+                    "Missing target for context",
                     diagnostics,
-                    timing: None,
-                };
+                );
             }
-            let depth = request.depth.unwrap_or(1);
+            let depth = match parse_depth(request.depth.as_ref()) {
+                Ok(depth) => depth,
+                Err(err) => {
+                    let StdioError { code, message } = err;
+                    return error_response(request.request_id.clone(), &code, message, diagnostics);
+                }
+            };
             let start = std::time::Instant::now();
             match crate::context::build_context_output(
                 &runtime.graph,
@@ -338,27 +473,28 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
                 Err(e) => {
                     diagnostics.push(format!("Query error: {}", e));
-                    StdioResponse {
-                        request_id: request.request_id.clone(),
-                        ok: false,
-                        result: None,
-                        error: Some(format!("Query failed: {}", e)),
+                    error_response(
+                        request.request_id.clone(),
+                        "QUERY_FAILED",
+                        format!("Query failed: {}", e),
                         diagnostics,
-                        timing: None,
-                    }
+                    )
                 }
             }
         }
         StdioCommand::Explain => {
-            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                return StdioResponse {
-                    request_id: request.request_id.clone(),
-                    ok: false,
-                    result: None,
-                    error: Some("Missing target for explain".to_string()),
+            if request
+                .target
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+            {
+                return error_response(
+                    request.request_id.clone(),
+                    "MISSING_TARGET",
+                    "Missing target for explain",
                     diagnostics,
-                    timing: None,
-                };
+                );
             }
             let start = std::time::Instant::now();
             match crate::explain::build_explain_output(
@@ -383,27 +519,28 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
                 Err(e) => {
                     diagnostics.push(format!("Query error: {}", e));
-                    StdioResponse {
-                        request_id: request.request_id.clone(),
-                        ok: false,
-                        result: None,
-                        error: Some(format!("Query failed: {}", e)),
+                    error_response(
+                        request.request_id.clone(),
+                        "QUERY_FAILED",
+                        format!("Query failed: {}", e),
                         diagnostics,
-                        timing: None,
-                    }
+                    )
                 }
             }
         }
         StdioCommand::QueryPageLogic => {
-            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                return StdioResponse {
-                    request_id: request.request_id.clone(),
-                    ok: false,
-                    result: None,
-                    error: Some("Missing target for query_page_logic".to_string()),
+            if request
+                .target
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+            {
+                return error_response(
+                    request.request_id.clone(),
+                    "MISSING_TARGET",
+                    "Missing target for query_page_logic",
                     diagnostics,
-                    timing: None,
-                };
+                );
             }
             let start = std::time::Instant::now();
             let project_dir = runtime.project_dir.as_deref();
@@ -431,38 +568,33 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
                 Err(e) => {
                     diagnostics.push(format!("Query error: {}", e));
-                    StdioResponse {
-                        request_id: request.request_id.clone(),
-                        ok: false,
-                        result: None,
-                        error: Some(format!("Query failed: {}", e)),
+                    error_response(
+                        request.request_id.clone(),
+                        "QUERY_FAILED",
+                        format!("Query failed: {}", e),
                         diagnostics,
-                        timing: None,
-                    }
+                    )
                 }
             }
         }
         StdioCommand::Status | StdioCommand::Reload => {
             // Status 和 Reload 已在 match 前处理，此处不应到达
-            StdioResponse {
-                request_id: request.request_id.clone(),
-                ok: false,
-                result: None,
-                error: Some(format!("Internal error: {} should have been handled earlier", command.command_name())),
+            error_response(
+                request.request_id.clone(),
+                "QUERY_FAILED",
+                format!(
+                    "Internal error: {} should have been handled earlier",
+                    command.command_name()
+                ),
                 diagnostics,
-                timing: None,
-            }
+            )
         }
-        StdioCommand::Unknown(other) => {
-            StdioResponse {
-                request_id: request.request_id.clone(),
-                ok: false,
-                result: None,
-                error: Some(format!("Unknown command: {}", other)),
-                diagnostics,
-                timing: None,
-            }
-        }
+        StdioCommand::Unknown(other) => error_response(
+            request.request_id.clone(),
+            "UNKNOWN_COMMAND",
+            format!("Unknown command: {}", other),
+            diagnostics,
+        ),
     }
 }
 
