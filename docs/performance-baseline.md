@@ -9,7 +9,7 @@ M26-M30 文档：记录 CLI 冷查询、stdio server 热查询、统一 timing �
 - GraphDB 大小：269 MB（`ls -lh` 显示约 257 MiB）
 - 节点数：78,114 | 边数：150,029
 - 硬件：Apple Silicon M3 (arm64), macOS
-- 采集版本：M30 工作树（基于 `295b503` 之后的 stdio timing/capacity 修改）
+- 采集版本：`036efcd`（包含 M30 stdio timing/capacity 修改）
 - 编译：`cargo build`（debug 模式）
 
 ## 性能指标定义
