@@ -23,6 +23,19 @@ The `metadata-checker` is a Rust CLI tool that parses `.spg` files (SuperPage me
 
 When working with metadata-checker, follow this decision tree to choose the right command:
 
+### Fast Routing
+
+| User asks... | First command | Read first | Do not confuse with |
+|---|---|---|---|
+| “这个组件什么时候显示/为什么不显示？” | `--explain-condition 'comp:PAGE\|ID' --budget normal` | `summary.primary_reason`, then `details.blocking_conditions` / `details.data_empty_gates` | `value` 表达式不是显示条件 |
+| “这个值从哪里来？” | `--explain-condition 'comp:PAGE\|ID'` or `--explain field:MODEL.FIELD` | `details.primary_path` | `related_context` is not necessary evidence |
+| “这个按钮/动作做什么？” | `--explain 'comp:PAGE\|button'` or action id | `summary.what_is_it`, `details.triggers`, `details.writes_models` | Page Contains is location, not trigger |
+| “这个页面做什么/有哪些逻辑？” | `--query-page-logic 'page:PAGE' --budget compact` | `summary.key_findings`, `details.action_flows` | Compact arrays may be truncated |
+| “谁读写这个模型/表？” | `--query-model modelName --budget compact` | `summary`, then `details.read_by/write_by/consumed_by_dataflows` | `read_by_count=0` does not mean unused |
+| “周围还有什么关系？” | `--context 'ID' --depth 2 --budget normal` | upstream/downstream summaries | Context is supplemental, not the primary answer |
+
+**Default reading order**: `summary` first, then the smallest relevant `details` array, then `evidence` for verification. Do not start by reading raw JSON or using `--budget full`.
+
 ### Q1: Do you have a single `.spg` file to analyze?
 
 **Yes** → Use `metadata-checker <FILE.spg>` (default JSON output)
@@ -87,6 +100,50 @@ Output structure (kind = Explain):
 - 需要了解周围关联 → `--context <ID> --depth 2`
 - 需要页面整体逻辑 → `--query-page-logic <PAGE>`
 - 需要模型全量读写 → `--query-model <MODEL>`
+
+### Q2.5: Do you need to answer "why" questions?
+
+**Yes** → Use `metadata-checker --explain-condition <TARGET>`
+
+Use this for:
+- "为什么这个组件不显示？" / "哪些情况会显示？"
+- "为什么这个按钮灰显/不可用？"
+- "为什么这个数据源可能为空？"
+- "这个字段值从哪里来？"
+
+Supported target formats:
+- `comp:PAGE|ID` → `--explain-condition 'comp:app/售后.app/绑定车辆/会员已注册.spg|text41'`
+- `model:ID` → `--explain-condition 'model:model22'`
+- `field:MODEL.FIELD` → `--explain-condition 'field:model22.phoneNumber'`
+- `page:PATH` → `--explain-condition 'page:app/销售.app/销售/合同协议.spg'`
+
+**AI reading strategy**:
+1. Read `summary.primary_reason`.
+2. For display/disable/action gates, read `details.blocking_conditions`.
+3. For row-count/data availability gates, read `details.data_empty_gates`.
+4. For value lineage, read `details.primary_path`.
+5. Treat `details.supporting_context` as explanatory context only.
+6. Treat `details.related_context` as related but not necessary unless the user explicitly asks to broaden scope.
+
+**Display/hidden recursive rule (M31)**:
+- If the target component has no direct visible/display condition, check `condition_scope = inherited`.
+- `inherited` conditions are ancestor container gates and are necessary for the target to appear.
+- If an inherited/direct condition references `modelX.totalRowCount__`, read `condition_scope = expanded_from_total_row_count` in `data_empty_gates`; this is the current page's `modelX` filter.
+- `condition_scope = referenced_by_model_filter` means another model filter references the target component. It is not the target component's display condition.
+- If the same condition appears on both child and parent, it is deduped by `condition_key`; use `deduped_condition_ids` / `deduped_owner_node_ids` only when auditing evidence.
+
+**Example answer shape for display questions**:
+```text
+目标组件自身没有 direct visibleCondition。
+它继承祖先容器 panel35 的 visibleCondition: model11.totalRowCount__ > 0。
+该 row-count gate 展开为当前页面 model11 的 filter: model11.ISSHOW == 1。
+因此 text41 有机会显示的条件是：祖先容器显示且 model11 filter 命中数据。
+```
+
+**Boundary**:
+- `value` / `exp` expressions are value computation, not display conditions.
+- Model filters that reference the target component, such as `model2.name=text41`, are supporting context, not display gates.
+- Ordinary chained component references are not recursively expanded by default; if `A.visibleCondition = B.value != ''`, run `--explain-condition 'comp:PAGE|B'` only when the user asks for the upstream value source.
 
 ### Q3: Do you need the surrounding context of an ID?
 
