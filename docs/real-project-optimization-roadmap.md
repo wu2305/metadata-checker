@@ -940,8 +940,8 @@ M26 只解决 AI 使用协议和性能验收，不再大改 runtime 架构。
 - 更新 `/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md` 或仓库内同步文档，增加 stdio server 决策树。
 - 决策规则：
   - 单次、低成本、临时查询可继续 CLI。
-  - 同一项目连续多个项目级查询优先 stdio server。
-  - 条件类、context、query-model 连续追问应复用 stdio server。
+  - 同一项目连续多个 `explain_condition` 查询优先 stdio server。
+  - `context`、`query-model`、`query-page-logic` 连续追问当前仍走 CLI；除非后续里程碑显式扩展 stdio command，不能在 skill/function calling 文档中宣称已支持。
   - graphdb 变更后先发 `status` / `reload`。
 - 增加 function calling wrapper 示例文档，建议：
   - `docs/function-calling-runtime.md`
@@ -962,8 +962,8 @@ M26 只解决 AI 使用协议和性能验收，不再大改 runtime 架构。
   - 输出大小。
 - 用真实项目 `xiaoshouyi` 验收：
   - `comp:app/销售.app/销售/合同协议.spg|input3`
-  - `model:fact_qwSidebar`
-  - 一个 `--context` 或后续已接入 command。
+  - `field:fact_qwSidebar.phoneNumber`（通过当前已接入的 `explain_condition` 验证）
+  - `--context` / `--query-model` / `--query-page-logic` 作为 CLI 边界记录，不纳入当前 stdio 验收。
 - 更新 ai-eval 或手工验收清单：
   - 记录 stdio 模式下输出仍满足 M22 主链路断言。
   - 记录模型不会因为新增 timing/status 字段发生注意力漂移。
@@ -1017,8 +1017,273 @@ M26 只解决 AI 使用协议和性能验收，不再大改 runtime 架构。
 
 ### 验收目标
 
-- AI 连续项目级查询不再天然冷启动。
+- AI 连续 `explain_condition` 查询不再天然冷启动。
 - stdio 第二次查询的 `graph_load_ms == 0`。
 - 真实项目 input3 主链路不回退。
 - skill 文档明确 CLI 与 stdio server 的选择边界。
 - 性能基线文档记录可复现命令和结果。
+
+## M27：Stdio 查询命令面扩展
+
+### 目标
+
+把当前 AI 高频项目级查询接入 stdio server，让 function calling 在同一进程内复用 `GraphRuntime`，不再因为 `context` / `query-model` / `query-page-logic` 退回 CLI 而重复冷启动。
+
+M27 只扩展 stdio command surface，不改变各查询本身的业务语义和输出结构。
+
+### 非目标
+
+- 不重写 pathfinder。
+- 不改变 `--explain-condition` 主链路选择规则。
+- 不引入 Lazy GraphDB。
+- 不把 stdio server 升级成 MCP server。
+- 不为了 stdio 扩展重写 CLI 输出 schema。
+
+### 工作清单
+
+- 新增 stdio command：`context`
+  - 对齐 CLI：`--context <ID> --depth <N> --budget <compact|normal|full>`。
+  - request 字段：`target`、`depth`、`budget`、`human`、`check_reload`。
+  - 默认 `depth=1`，默认 `budget=normal`，AI 使用建议优先 `compact` / `normal`。
+- 新增 stdio command：`query_model`
+  - 对齐 CLI：`--query-model <MODEL>`。
+  - request 字段：`target`、`budget`、`human`、`check_reload`。
+  - 真实项目验收目标必须包含 `model:fact_qwSidebar`。
+- 新增 stdio command：`query_page_logic`
+  - 对齐 CLI：`--query-page-logic <PAGE>`。
+  - request 字段：`target`、`budget`、`human`、`check_reload`。
+  - compact 输出必须保留 `input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber <- action1/action4` 主链路。
+- 新增 stdio command：`explain`
+  - 对齐 CLI：`--explain <ID>`。
+  - 用于普通对象解释，不替代 `explain_condition`。
+- 抽出统一 stdio command registry。
+  - 建议放在 `src/stdio.rs` 或 `src/runtime/stdio.rs`。
+  - 每个 command 必须声明 required fields、默认参数、输出 kind、错误码。
+  - 避免在 `main.rs` 中继续堆叠大 match 分支。
+
+### 落地任务拆解
+
+#### M27.1：Stdio command registry
+
+- 抽出 `StdioCommand` / `StdioRequest` / `StdioResponse` 处理入口。
+- 保留既有 `explain_condition` / `status` / `reload` 行为不变。
+- unknown command 返回单行 JSON 错误，不 panic。
+- missing required field 返回结构化错误。
+
+验收：
+
+- 既有 `stdio_server_tests` 全部通过。
+- unknown command / missing target 负例测试通过。
+
+#### M27.2：接入 `context`
+
+- 在 runtime 层复用当前 graph 调用 context 查询。
+- 支持 `depth`、`budget`、`human`。
+- `check_reload=true` 时沿用 M25 reload 检测逻辑。
+
+验收：
+
+- stdio `context` 输出结构与 CLI JSON 结构一致。
+- 第二次 stdio `context` 查询 `timing.graph_load_ms == 0`。
+- malformed depth / budget 有稳定错误码。
+
+#### M27.3：接入 `query_model`
+
+- 在 runtime 层复用当前 graph 调用 model 查询。
+- 支持 physical table target 和普通 model target。
+- 不降低 M19/M22 主链路与 field alias 回归质量。
+
+验收：
+
+- 真实项目 `model:fact_qwSidebar` 能看到 `潜客信息跟进.spg|button1|action1` / `action4` 写入。
+- 第二次 stdio `query_model` 查询 `timing.graph_load_ms == 0`。
+
+#### M27.4：接入 `query_page_logic`
+
+- 在 runtime 层复用当前 graph 调用页面逻辑查询。
+- 支持 compact/normal/full budget。
+- 输出过大时仍遵守已有截断和 diagnostics 规则。
+
+验收：
+
+- 真实项目 `page:app/销售.app/销售/合同协议.spg` compact 输出包含 input3 主链路。
+- 第二次 stdio `query_page_logic` 查询 `timing.graph_load_ms == 0`。
+
+#### M27.5：接入 `explain`
+
+- 在 runtime 层复用当前 graph 调用 explain 查询。
+- 保持普通 explain 与 explain_condition 的用途区分。
+
+验收：
+
+- `explain comp:...|input3` 与 CLI JSON 输出结构一致。
+- `explain_condition` 既有测试不回退。
+
+### 验收目标
+
+- stdio 支持 `explain_condition`、`explain`、`context`、`query_model`、`query_page_logic`、`status`、`reload`。
+- 所有新增 command 的第二次查询 `graph_load_ms == 0`。
+- 新增 command 错误响应保持单行 JSON。
+- 真实项目 `input3` 与 `fact_qwSidebar` 主链路不回退。
+- skill 文档不再要求 AI 为这些查询退回 CLI，除非 graphdb 不可用。
+
+## M28：Stdio 请求/响应契约收敛
+
+### 目标
+
+统一 stdio 的 request / response / error schema，让 function calling wrapper 可以稳定消费，不靠字符串猜测或每个 command 特判。
+
+### 非目标
+
+- 不新增查询命令。
+- 不改变 CLI human 输出。
+- 不重写已有 JSON 结果中的业务字段。
+
+### 工作清单
+
+- 定义统一 request schema：
+  - `request_id`
+  - `command`
+  - `target`
+  - `budget`
+  - `depth`
+  - `human`
+  - `check_reload`
+- 定义统一 success response：
+  - `request_id`
+  - `ok: true`
+  - `result`
+  - `diagnostics`
+  - `timing`
+- 定义统一 error response：
+  - `request_id`
+  - `ok: false`
+  - `error.code`
+  - `error.message`
+  - `diagnostics`
+  - `timing`
+- 统一错误码：
+  - `INVALID_JSON`
+  - `UNKNOWN_COMMAND`
+  - `MISSING_TARGET`
+  - `INVALID_TARGET`
+  - `INVALID_BUDGET`
+  - `INVALID_DEPTH`
+  - `GRAPH_RELOAD_FAILED`
+  - `QUERY_FAILED`
+- 更新文档：
+  - `docs/function-calling-runtime.md`
+  - `docs/schema.md`
+  - `/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md`
+- 增加负例测试：
+  - malformed JSONL
+  - unknown command
+  - missing target
+  - invalid depth
+  - invalid budget
+  - reload failed 后旧 graph 仍可用
+
+### 验收目标
+
+- 所有 stdio command 使用同一响应 envelope。
+- stdout 只输出 JSONL，stderr 只输出日志。
+- function calling wrapper 不需要按 command 猜测错误格式。
+- schema 文档和测试断言一致。
+
+## M29：Function Calling 工具层优化
+
+### 目标
+
+基于 M27-M28 的 stdio 能力，为 AI 提供更不易误用的工具描述、调用边界和读取策略。
+
+### 非目标
+
+- 不实现 MCP server。
+- 不新增底层图查询能力。
+- 不把所有 CLI 参数暴露给 AI。
+
+### 工作清单
+
+- 设计工具拆分：
+  - `metadata_explain_condition`
+  - `metadata_explain`
+  - `metadata_context`
+  - `metadata_query_model`
+  - `metadata_query_page_logic`
+  - `metadata_runtime_status`
+  - `metadata_runtime_reload`
+- 明确每个 tool 的使用边界：
+  - “为什么不显示 / 为什么没数据 / 值从哪来” → `metadata_explain_condition`
+  - “这个对象是什么” → `metadata_explain`
+  - “周围关系是什么” → `metadata_context`
+  - “模型读写全貌” → `metadata_query_model`
+  - “页面整体逻辑” → `metadata_query_page_logic`
+- 更新 skill 决策树：
+  - 单次问题可用 CLI。
+  - 同一项目连续追问优先 stdio/function calling。
+  - graphdb 变更后先 `status` / `reload`。
+  - graphdb 不可用时才单文件 fallback。
+- 增加 anti-drift 约束：
+  - `timing` 只能用于性能判断。
+  - 业务回答优先读 `summary`。
+  - 证据核查读 `details.primary_path` / `evidence`。
+  - `related_context` 默认不是必要条件。
+- 增加 function calling 示例：
+  - 连续解释 `input3`、`model:model22`、`field:fact_qwSidebar.phoneNumber`。
+  - 查询 `model:fact_qwSidebar`。
+  - 查询 `合同协议.spg` 页面逻辑。
+
+### 验收目标
+
+- AI 能根据问题类型选择正确 tool。
+- tool 描述不引导 AI 读取 timing/status 作为业务证据。
+- skill 文档与 stdio 已支持命令完全一致。
+- 真实项目样例能覆盖 input3 主链路、fact_qwSidebar writer、页面逻辑三类问题。
+
+## M30：Stdio 性能与容量治理
+
+### 目标
+
+在 stdio command 扩展后，防止大查询把性能瓶颈从 GraphDB 冷加载转移到 pathfinder、evidence 组装或 JSON 序列化上。
+
+### 非目标
+
+- 不优化 GraphDB 构建速度。
+- 不做 Lazy GraphDB。
+- 不牺牲主链路正确性换取性能。
+
+### 工作清单
+
+- 所有 stdio 查询记录统一 timing：
+  - `graph_load_ms`
+  - `query_compute_ms`
+  - `serialize_ms`
+  - `total_ms`
+  - `output_size_bytes`
+- 输出预算治理：
+  - 默认 compact 或 normal，禁止默认 full。
+  - full 必须显式指定。
+  - 超预算返回 `OUTPUT_TRUNCATED` diagnostics。
+  - 截断不能删除 primary path。
+- 建立真实项目性能基线：
+  - `explain_condition input3`
+  - `context input3 depth=2`
+  - `query_model fact_qwSidebar`
+  - `query_page_logic 合同协议.spg`
+  - 对比 CLI 冷启动与 stdio 第二次请求。
+- 热点分析：
+  - stdio 第二次查询不得进入 `GraphDB::load_from_db`。
+  - 若慢，优先检查 pathfinder、evidence 组装、JSON serialize、大数组排序和 clone。
+  - 可选使用 `samply` 对真实项目第二次查询采样。
+- 回归门槛：
+  - 第二次 stdio 查询 `graph_load_ms == 0`。
+  - 小查询 `total_ms < 50ms`。
+  - 中等查询 `total_ms < 300ms`。
+  - 大查询必须可被 budget 截断，且输出不发生注意力漂移。
+
+### 验收目标
+
+- stdio 扩展后，第二次查询不再冷启动。
+- 大输出有预算和截断机制，不依赖 AI 自行忽略噪声。
+- 性能基线文档记录可复现命令、commit、graphdb 路径、输出大小和 timing。
+- 真实项目主链路验收不因性能截断回退。

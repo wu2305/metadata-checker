@@ -58,3 +58,7 @@
 - [x] M24：Stdio Function Calling Server（JSONL 长驻查询服务），详见 `docs/real-project-optimization-roadmap.md`
 - [x] M25：Runtime Cache 与 Reload（graphdb 变更检测、状态查询、失败降级），详见 `docs/real-project-optimization-roadmap.md`
 - [x] M26：Skill / Function Calling 接入与性能验收，详见 `docs/real-project-optimization-roadmap.md`
+- [ ] M27：Stdio 查询命令面扩展（context / query_model / query_page_logic / explain），详见 `docs/real-project-optimization-roadmap.md`
+- [ ] M28：Stdio 请求/响应契约收敛（统一 schema、错误码、负例测试），详见 `docs/real-project-optimization-roadmap.md`
+- [ ] M29：Function Calling 工具层优化（工具拆分、使用边界、anti-drift 读取策略），详见 `docs/real-project-optimization-roadmap.md`
+- [ ] M30：Stdio 性能与容量治理（timing、预算截断、真实项目性能基线），详见 `docs/real-project-optimization-roadmap.md`

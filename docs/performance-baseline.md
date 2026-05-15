@@ -5,11 +5,11 @@ M26 文档：记录 CLI 冷查询 vs stdio server 热查询的性能对比。
 ## 测试环境
 
 - 项目：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
-- GraphDB 路径：`/tmp/m23_runtime_test.graphdb`
+- GraphDB 路径：`/tmp/m23_runtime_test.graphdb`（历史命名沿用，内容为本轮 M26 验收图）
 - GraphDB 大小：269 MB
 - 节点数：78,114 | 边数：150,029
 - 硬件：Apple Silicon M3 (arm64), macOS
-- 版本：`master 6ba529c` + `e09132b`
+- 采集版本：`master 6fdf681`（包含 M23-M26 runtime/stdio/reload/skill 文档修正）
 - 编译：`cargo build`（debug 模式）
 
 ## 性能指标定义
@@ -121,8 +121,10 @@ EOF
 验收目标：`comp:app/销售.app/销售/合同协议.spg|input3`
 验收命令：
 ```bash
-echo '{"request_id":"r1","command":"explain_condition","target":"comp:app/销售.app/销售/合同协议.spg|input3","budget":"compact"}' \
-  | ./target/debug/metadata-checker --serve-stdio --graph-db-path /tmp/m23_runtime_test.graphdb
+cat << 'EOF' | ./target/debug/metadata-checker --serve-stdio --graph-db-path /tmp/m23_runtime_test.graphdb
+{"request_id":"r1","command":"explain_condition","target":"comp:app/销售.app/销售/合同协议.spg|input3","budget":"compact"}
+{"request_id":"r2","command":"explain_condition","target":"field:fact_qwSidebar.phoneNumber","budget":"compact"}
+EOF
 ```
 
 验收结果：
@@ -130,6 +132,8 @@ echo '{"request_id":"r1","command":"explain_condition","target":"comp:app/销售
 - `r1.timing.graph_load_ms == 0`
 - `r1.result.kind == "Explain"`
 - `r1.result.details.primary_path` 非空
+- `r2.ok == true`
+- `r2.result.details.primary_path` 或 `r2.result.details.related_context` 能看到 `fact_qwSidebar.phoneNumber` 关联链路
 
 **主链路验证**：
 ```
@@ -139,6 +143,11 @@ input3
  <- action:潜客信息跟进.spg|button1|action1
  <- action:潜客信息跟进.spg|button1|action4
 ```
+
+**能力边界验证**：
+- 本基线只验证当前 stdio 已支持的 `explain_condition` / `status` / `reload`。
+- `--context`、`--query-model`、`--query-page-logic` 当前不属于 stdio command，仍通过 CLI 验收。
+- 因此 M26 不把 unsupported command 的 function-calling 包装视为已完成能力。
 
 **抗漂移验证**：
 - `timing` 字段只出现在根级，不在 `summary` / `details` / `evidence` 中。

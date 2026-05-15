@@ -130,13 +130,16 @@ runtime = MetadataCheckerRuntime("/tmp/project.graphdb")
 r1 = runtime.explain_condition("comp:app/销售.app/销售/合同协议.spg|input3")
 # 第二次：解释关联模型
 r2 = runtime.explain_condition("model:model22")
-# 第三次：上下文查询（若 stdio 已支持）
-# r3 = runtime.context("comp:app/销售.app/销售/合同协议.spg|input3", depth=2)
+# 第三次：解释物理表字段或关联模型
+r3 = runtime.explain_condition("field:fact_qwSidebar.phoneNumber")
 
 runtime.close()
 ```
 
-适用：同一项目内多个相关问题、AI 连续追问场景。
+适用：同一项目内多个相关条件解释问题、AI 连续追问字段来源/显示条件/数据为空原因的场景。
+
+当前 stdio server 仅支持 `explain_condition` / `status` / `reload`。
+`--context` / `--query-model` / `--query-page-logic` 仍需通过 CLI 执行，不能把这些命令包装成 stdio 请求。
 
 ### 模式 3：graphdb 变更后刷新
 
