@@ -1204,7 +1204,7 @@ M27 只扩展 stdio command surface，不改变各查询本身的业务语义和
 
 ### 工作清单
 
-- 设计工具拆分：
+- [x] 设计工具拆分：
   - `metadata_explain_condition`
   - `metadata_explain`
   - `metadata_context`
@@ -1212,23 +1212,23 @@ M27 只扩展 stdio command surface，不改变各查询本身的业务语义和
   - `metadata_query_page_logic`
   - `metadata_runtime_status`
   - `metadata_runtime_reload`
-- 明确每个 tool 的使用边界：
+- [x] 明确每个 tool 的使用边界：
   - “为什么不显示 / 为什么没数据 / 值从哪来” → `metadata_explain_condition`
   - “这个对象是什么” → `metadata_explain`
   - “周围关系是什么” → `metadata_context`
   - “模型读写全貌” → `metadata_query_model`
   - “页面整体逻辑” → `metadata_query_page_logic`
-- 更新 skill 决策树：
+- [x] 更新 skill 决策树：
   - 单次问题可用 CLI。
   - 同一项目连续追问优先 stdio/function calling。
   - graphdb 变更后先 `status` / `reload`。
   - graphdb 不可用时才单文件 fallback。
-- 增加 anti-drift 约束：
+- [x] 增加 anti-drift 约束：
   - `timing` 只能用于性能判断。
   - 业务回答优先读 `summary`。
   - 证据核查读 `details.primary_path` / `evidence`。
   - `related_context` 默认不是必要条件。
-- 增加 function calling 示例：
+- [x] 增加 function calling 示例：
   - 连续解释 `input3`、`model:model22`、`field:fact_qwSidebar.phoneNumber`。
   - 查询 `model:fact_qwSidebar`。
   - 查询 `合同协议.spg` 页面逻辑。

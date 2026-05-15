@@ -381,6 +381,28 @@ pub struct AiOutput {
 | `GRAPH_RELOAD_FAILED` | reload graphdb 失败；旧 graph 保留可继续查询 |
 | `QUERY_FAILED` | 查询执行失败 |
 
+### Function Calling 工具层约束
+
+M29 推荐 function calling wrapper 暴露以下任务型工具。工具层只映射 stdio 已支持命令，不新增底层查询语义：
+
+| Tool | stdio command | 业务用途 |
+|------|---------------|----------|
+| `metadata_explain_condition` | `explain_condition` | 为什么不显示、为什么没数据、值从哪来 |
+| `metadata_explain` | `explain` | 解释单个节点是什么 |
+| `metadata_context` | `context` | 扩展查看目标周围关系 |
+| `metadata_query_model` | `query_model` | 查看模型读写全貌和跨页 writer |
+| `metadata_query_page_logic` | `query_page_logic` | 查看页面入口、写入、跳转、可见性 |
+| `metadata_runtime_status` | `status` | 查看 runtime 状态 |
+| `metadata_runtime_reload` | `reload` | 手动刷新 graphdb |
+
+Anti-drift 读取规则：
+
+- `timing` 只能用于性能判断，不得作为业务证据。
+- 业务回答优先读取 `result.summary`。
+- 证据核查读取 `result.details.primary_path` / `result.summary.key_primary_paths` / `result.evidence`。
+- `related_context` 默认不是必要条件，只能作为相关上下文表述。
+- `metadata_runtime_status` / `metadata_runtime_reload` 只回答运行时健康状态，不回答业务来源链路。
+
 ## 查询不存在目标的行为
 
 以下查询在目标不存在时返回明确错误（`Result::Err`），不静默输出半截 JSON：

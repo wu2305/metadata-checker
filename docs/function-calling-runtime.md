@@ -62,6 +62,49 @@ stdout 每行一个 JSON 对象：
 
 ## Function Calling 包装示例（伪代码）
 
+### 工具拆分契约（M29）
+
+Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼任意 stdio request。工具名、底层 command 和使用边界如下：
+
+| Tool | stdio command | 必需参数 | 默认 budget | 适用问题 | 主要读取位置 |
+|---|---|---|---|---|---|
+| `metadata_explain_condition` | `explain_condition` | `target` | `compact` | 为什么不显示、为什么没数据、值从哪来、组件/页面可用性 | `result.summary`、`result.summary.key_primary_paths`、`result.details.primary_path`、`result.evidence` |
+| `metadata_explain` | `explain` | `target` | `compact` | 这个对象是什么、它读写/跳转/影响什么 | `result.summary`、`result.details`、`result.evidence` |
+| `metadata_context` | `context` | `target`, `depth` | `normal` | 周围关系是什么、需要扩展核查上下游 | `result.summary`、`result.details.upstream`、`result.details.downstream` |
+| `metadata_query_model` | `query_model` | `target` | `compact` | 模型读写全貌、谁读/谁写、跨页 writer | `result.summary`、`result.details.readers`、`result.details.writers`、`result.evidence` |
+| `metadata_query_page_logic` | `query_page_logic` | `target` | `compact` | 页面整体逻辑、入口、写入、跳转、可见性规则 | `result.summary`、`result.details.page_inputs`、`result.details.write_targets`、`result.details.action_flows` |
+| `metadata_runtime_status` | `status` | 无 | 不适用 | 只检查 runtime/graph 状态 | `result`；不得作为业务证据 |
+| `metadata_runtime_reload` | `reload` | 无 | 不适用 | graphdb 更新后手动刷新 | `ok`、`error.code`；不得作为业务证据 |
+
+工具入参边界：
+
+| Tool | 参数 |
+|---|---|
+| `metadata_explain_condition` | `target: string`, `budget?: compact|normal|full`, `human?: false`, `check_reload?: boolean` |
+| `metadata_explain` | `target: string`, `budget?: compact|normal|full` |
+| `metadata_context` | `target: string`, `depth?: number`, `budget?: compact|normal|full` |
+| `metadata_query_model` | `target: string`, `budget?: compact|normal|full` |
+| `metadata_query_page_logic` | `target: string`, `budget?: compact|normal|full`, `check_reload?: boolean` |
+| `metadata_runtime_status` | 无业务参数 |
+| `metadata_runtime_reload` | 无业务参数 |
+
+选择规则：
+
+- “为什么不显示 / 为什么没数据 / 值从哪来” → `metadata_explain_condition`。
+- “这个对象是什么” → `metadata_explain`。
+- “周围关系是什么 / 需要补看上下游” → `metadata_context`。
+- “模型读写全貌 / 谁写了这个表” → `metadata_query_model`。
+- “页面整体逻辑 / 入口 / 写入 / 跳转 / 可见性” → `metadata_query_page_logic`。
+- `metadata_runtime_status` 和 `metadata_runtime_reload` 只能用于运行时健康与刷新判断，不能作为业务结论证据。
+
+Anti-drift 约束：
+
+- `timing` 只能用于性能判断，不能解释业务数据来源、显示条件或写入链路。
+- 业务回答优先读取 `result.summary`。
+- 证据核查读取 `result.details.primary_path` / `result.summary.key_primary_paths` / `result.evidence`。
+- `related_context` 默认只是相关上下文，不是必要条件；只有输出明确标为阻塞条件或主路径证据时才可作为必要条件表述。
+- 不默认使用 `budget=full`；先 `compact`，证据不足再升到 `normal`，只有审计长数组时才用 `full`。
+
 ```python
 import subprocess
 import json
@@ -164,14 +207,18 @@ metadata-checker --project-dir /path/to/project --explain-condition 'comp:app/�
 ```python
 runtime = MetadataCheckerRuntime("/tmp/project.graphdb", "/path/to/project")
 
-# 第一次：解释 input3
+# 第一次：解释 input3 主链路，对应 metadata_explain_condition
 r1 = runtime.explain_condition("comp:app/销售.app/销售/合同协议.spg|input3")
-# 第二次：查询物理表读写
-r2 = runtime.query_model("model:fact_qwSidebar")
-# 第三次：查询页面逻辑
-r3 = runtime.query_page_logic("page:app/销售.app/销售/合同协议.spg")
-# 第四次：按需看上下文
-r4 = runtime.context("comp:app/销售.app/销售/合同协议.spg|input3", depth=2)
+# 第二次：解释局部模型，对应 metadata_explain_condition
+r2 = runtime.explain_condition("model:model22")
+# 第三次：核查物理表字段，对应 metadata_explain_condition
+r3 = runtime.explain_condition("field:fact_qwSidebar.phoneNumber")
+# 第四次：查询物理表读写，对应 metadata_query_model
+r4 = runtime.query_model("model:fact_qwSidebar")
+# 第五次：查询页面逻辑，对应 metadata_query_page_logic
+r5 = runtime.query_page_logic("page:app/销售.app/销售/合同协议.spg")
+# 第六次：按需看上下文，对应 metadata_context
+r6 = runtime.context("comp:app/销售.app/销售/合同协议.spg|input3", depth=2)
 
 runtime.close()
 ```

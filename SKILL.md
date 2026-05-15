@@ -189,6 +189,27 @@ All machine outputs (`--non-human`, default) follow a unified top-level structur
 
 **AI Usage Rule**: Always read `summary` first. Only read `details` or `evidence` when you need to verify a specific claim. Never read raw JSON by default. If `diagnostics` contains entries, you must give a conservative answer.
 
+## Function Calling 工具层（M29）
+
+同一项目连续追问时，优先让 function calling wrapper 通过 stdio server 复用已加载 graph。工具层只暴露任务型工具，不让 AI 直接拼任意 stdio request：
+
+| Tool | stdio command | 何时使用 |
+|------|---------------|----------|
+| `metadata_explain_condition` | `explain_condition` | 为什么不显示 / 为什么没数据 / 值从哪来 |
+| `metadata_explain` | `explain` | 这个对象是什么 |
+| `metadata_context` | `context` | 周围关系是什么 / 需要补查上下游 |
+| `metadata_query_model` | `query_model` | 模型读写全貌 / 谁写了这个表 |
+| `metadata_query_page_logic` | `query_page_logic` | 页面整体逻辑 / 入口 / 写入 / 跳转 / 可见性 |
+| `metadata_runtime_status` | `status` | 只检查 runtime/graph 状态 |
+| `metadata_runtime_reload` | `reload` | graphdb 更新后手动刷新 |
+
+**Function Calling anti-drift 规则**：
+- `timing` 只能用于性能判断，不能作为业务证据。
+- 业务回答优先读取 `result.summary`。
+- 证据核查读取 `result.details.primary_path` / `result.summary.key_primary_paths` / `result.evidence`。
+- `related_context` 默认不是必要条件，只能作为相关上下文表述。
+- `metadata_runtime_status` / `metadata_runtime_reload` 不能回答业务来源链路。
+
 ## Important Constraints
 
 1. `--project-dir` is **required** for all project-level queries (`--query-model`, `--query-page`, `--query-cross`, `--query-dataflow`, `--explain`, `--context`, `--query-page-logic`). Without it, the tool exits with an error.
