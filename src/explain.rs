@@ -1049,7 +1049,10 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
     candidates.into_iter().take(5).map(|(n, _, r)| (n, r)).collect()
 }
 
-pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result<()> {
+/// 构建 explain JSON 输出
+///
+/// 返回 Value，由外层调用者决定输出格式。
+pub fn build_explain_output(graph: &GraphDB, node_id: &str) -> Result<Value> {
     let node = match graph.get_node(node_id) {
         Some(n) => n,
         None => {
@@ -1059,8 +1062,7 @@ pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result
                 node_id,
                 &candidates,
             );
-            println!("{}", serde_json::to_string_pretty(&out)?);
-            return Ok(());
+            return Ok(serde_json::to_value(out)?);
         }
     };
 
@@ -1068,31 +1070,86 @@ pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result
         .get_node_edges(node_id)
         .unwrap_or_else(|| (Vec::new(), Vec::new()));
 
-    match node.node_type {
+    let value = match node.node_type {
         crate::graph::NodeType::Component => {
-            explain_component_graph(graph, &node, outgoing, incoming, human)?
+            explain_component_graph(graph, &node, outgoing, incoming, false)?
         }
         crate::graph::NodeType::Action => {
-            explain_action_graph(graph, &node, outgoing, incoming, human)?
+            explain_action_graph(graph, &node, outgoing, incoming, false)?
         }
         crate::graph::NodeType::Model => {
             if is_dataflow_model(&node) {
-                explain_dataflow_graph(graph, &node, outgoing, incoming, human)?
+                explain_dataflow_graph(graph, &node, outgoing, incoming, false)?
             } else {
-                explain_model_graph(graph, &node, outgoing, incoming, human)?
+                explain_model_graph(graph, &node, outgoing, incoming, false)?
             }
         }
         crate::graph::NodeType::Field => {
-            explain_field_graph(graph, &node, outgoing, incoming, human)?
+            explain_field_graph(graph, &node, outgoing, incoming, false)?
         }
         crate::graph::NodeType::Page => {
-            explain_page_graph(graph, &node, outgoing, incoming, human)?
+            explain_page_graph(graph, &node, outgoing, incoming, false)?
         }
         crate::graph::NodeType::Condition => {
-            explain_condition_graph(graph, &node, outgoing, incoming, human)?
+            explain_condition_graph(graph, &node, outgoing, incoming, false)?
         }
+    };
+    Ok(value)
+}
+
+/// 解释图节点
+///
+/// CLI 包装器，负责调用 `build_explain_output` 并按 `human` 参数决定输出格式。
+pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result<()> {
+    if human {
+        let node = match graph.get_node(node_id) {
+            Some(n) => n,
+            None => {
+                let candidates = graph.find_candidates(node_id, 5);
+                let out = crate::output::schema::build_target_not_found_output(
+                    crate::output::schema::OutputKind::Explain,
+                    node_id,
+                    &candidates,
+                );
+                println!("{}", serde_json::to_string_pretty(&out)?);
+                return Ok(());
+            }
+        };
+
+        let (outgoing, incoming) = graph
+            .get_node_edges(node_id)
+            .unwrap_or_else(|| (Vec::new(), Vec::new()));
+
+        match node.node_type {
+            crate::graph::NodeType::Component => {
+                let _ = explain_component_graph(graph, &node, outgoing, incoming, true)?;
+            }
+            crate::graph::NodeType::Action => {
+                let _ = explain_action_graph(graph, &node, outgoing, incoming, true)?;
+            }
+            crate::graph::NodeType::Model => {
+                if is_dataflow_model(&node) {
+                    let _ = explain_dataflow_graph(graph, &node, outgoing, incoming, true)?;
+                } else {
+                    let _ = explain_model_graph(graph, &node, outgoing, incoming, true)?;
+                }
+            }
+            crate::graph::NodeType::Field => {
+                let _ = explain_field_graph(graph, &node, outgoing, incoming, true)?;
+            }
+            crate::graph::NodeType::Page => {
+                let _ = explain_page_graph(graph, &node, outgoing, incoming, true)?;
+            }
+            crate::graph::NodeType::Condition => {
+                let _ = explain_condition_graph(graph, &node, outgoing, incoming, true)?;
+            }
+        }
+        Ok(())
+    } else {
+        let value = build_explain_output(graph, node_id)?;
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        Ok(())
     }
-    Ok(())
 }
 
 /// 解释条件节点：输出完整条件依赖路径，包含上游依赖、下游影响与每段 evidence
@@ -1102,7 +1159,7 @@ fn explain_condition_graph(
     outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
-) -> Result<()> {
+) -> Result<Value> {
     // 从节点 meta 提取条件核心信息
     let meta = node.meta.as_ref().unwrap_or(&serde_json::Value::Null);
     let cond_id = node.id.split('|').next_back().unwrap_or(&node.id);
@@ -1444,10 +1501,8 @@ fn explain_condition_graph(
                 writeln!(out, "  {:?}", e)?;
             }
         }
-    } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
     }
-    Ok(())
+    Ok(serde_json::to_value(output)?)
 }
 
 fn explain_component_graph(
@@ -1456,7 +1511,7 @@ fn explain_component_graph(
     outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let parent_page = find_parent_page(graph, &node.id);
     let comp_type = component_type_from_meta(node);
 
@@ -1757,10 +1812,8 @@ fn explain_component_graph(
             }
         }
         out.flush()?;
-    } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
     }
-    Ok(())
+    Ok(serde_json::to_value(output)?)
 }
 fn explain_action_graph(
     graph: &GraphDB,
@@ -1768,7 +1821,7 @@ fn explain_action_graph(
     outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let parent_comp = incoming.iter().find_map(|(source, edge)| {
         if matches!(edge.edge_type, crate::graph::EdgeType::Triggers)
             && matches!(source.node_type, crate::graph::NodeType::Component)
@@ -2084,10 +2137,8 @@ fn explain_action_graph(
             }
         }
         out.flush()?;
-    } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
     }
-    Ok(())
+    Ok(serde_json::to_value(output)?)
 }
 
 fn explain_model_graph(
@@ -2096,7 +2147,7 @@ fn explain_model_graph(
     _outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     _incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
-) -> Result<()> {
+) -> Result<Value> {
     // Use existing graph query helpers for richer semantics
     let readers = graph.find_readers(&node.id);
     let writers = graph.find_writers(&node.id);
@@ -2292,10 +2343,8 @@ fn explain_model_graph(
             }
         }
         out.flush()?;
-    } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
     }
-    Ok(())
+    Ok(serde_json::to_value(output)?)
 }
 
 /// 解释参数节点：展示哪些组件/条件依赖此参数，以及哪些动作设置了此参数
@@ -2305,7 +2354,7 @@ fn explain_param_graph(
     _outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let mut dependents = Vec::new();
     let mut setters = Vec::new();
 
@@ -2395,10 +2444,8 @@ fn explain_param_graph(
                 writeln!(out, "  {:?}", s)?;
             }
         }
-    } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
     }
-    Ok(())
+    Ok(serde_json::to_value(output)?)
 }
 
 fn explain_field_graph(
@@ -2407,7 +2454,7 @@ fn explain_field_graph(
     _outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
-) -> Result<()> {
+) -> Result<Value> {
     // 参数节点走独立分支
     if node.id.starts_with("param:") {
         return explain_param_graph(graph, node, _outgoing, incoming, human);
@@ -3009,10 +3056,8 @@ fn explain_field_graph(
             }
         }
         out.flush()?;
-    } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
     }
-    Ok(())
+    Ok(serde_json::to_value(output)?)
 }
 
 fn explain_page_graph(
@@ -3021,7 +3066,7 @@ fn explain_page_graph(
     outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let mut entrypoints = Vec::new();
     let mut data_sources = Vec::new();
     let mut write_targets = Vec::new();
@@ -3300,10 +3345,8 @@ fn explain_page_graph(
             }
         }
         out.flush()?;
-    } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
     }
-    Ok(())
+    Ok(serde_json::to_value(output)?)
 }
 
 fn explain_dataflow_graph(
@@ -3312,7 +3355,7 @@ fn explain_dataflow_graph(
     outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
     human: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
 
@@ -3584,8 +3627,6 @@ fn explain_dataflow_graph(
             }
         }
         out.flush()?;
-    } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
     }
-    Ok(())
+    Ok(serde_json::to_value(output)?)
 }

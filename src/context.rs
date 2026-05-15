@@ -73,13 +73,15 @@ fn generate_next_queries(
     queries
 }
 
-pub fn context_node_graph(
+/// 构建上下文查询 JSON 输出
+///
+/// 返回 Value，由外层调用者决定输出格式。
+pub fn build_context_output(
     graph: &GraphDB,
     node_id: &str,
     depth: usize,
     budget: &str,
-    human: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let budget_str = budget.to_lowercase();
     if budget_str != "compact" && budget_str != "normal" && budget_str != "full" {
         anyhow::bail!(
@@ -96,8 +98,7 @@ pub fn context_node_graph(
                 node_id,
                 &candidates,
             );
-            println!("{}", serde_json::to_string_pretty(&out)?);
-            return Ok(());
+            return Ok(serde_json::to_value(out)?);
         }
     };
 
@@ -784,7 +785,20 @@ pub fn context_node_graph(
     output.next_queries = generate_next_queries(node_id, &node.node_type, depth);
 
     let output = output.validate();
+    Ok(serde_json::to_value(output)?)
+}
 
+/// 输出目标节点周围的最小闭包上下文
+///
+/// CLI 包装器，负责调用 `build_context_output` 并按 `human` 参数决定输出格式。
+pub fn context_node_graph(
+    graph: &GraphDB,
+    node_id: &str,
+    depth: usize,
+    budget: &str,
+    human: bool,
+) -> Result<()> {
+    let output = build_context_output(graph, node_id, depth, budget)?;
     if human {
         let mut out = io::stdout();
         writeln!(out, "=== Context: {} ===", node_id)?;
@@ -793,18 +807,33 @@ pub fn context_node_graph(
             "Depth: {} | Budget: {} | Related Nodes: {}",
             depth,
             budget,
-            visited.len() - 1
+            output.get("summary")
+                .and_then(|s| s.get("related_nodes_count"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
         )?;
-        if truncated {
+        if output.get("summary")
+            .and_then(|s| s.get("truncated"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             writeln!(out, "⚠️  Output truncated due to budget limit")?;
         }
-        writeln!(out, "\n--- Upstream ({}) ---", upstream_out.len())?;
-        for u in &upstream_out {
-            writeln!(out, "  {:?}", u)?;
+        let upstream = output.get("details").and_then(|d| d.get("upstream")).and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+        let downstream = output.get("details").and_then(|d| d.get("downstream")).and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+        writeln!(out, "
+--- Upstream ({}) ---", upstream)?;
+        if let Some(arr) = output.get("details").and_then(|d| d.get("upstream")).and_then(|v| v.as_array()) {
+            for u in arr {
+                writeln!(out, "  {:?}", u)?;
+            }
         }
-        writeln!(out, "\n--- Downstream ({}) ---", downstream_out.len())?;
-        for d in &downstream_out {
-            writeln!(out, "  {:?}", d)?;
+        writeln!(out, "
+--- Downstream ({}) ---", downstream)?;
+        if let Some(arr) = output.get("details").and_then(|d| d.get("downstream")).and_then(|v| v.as_array()) {
+            for d_item in arr {
+                writeln!(out, "  {:?}", d_item)?;
+            }
         }
         out.flush()?;
     } else {

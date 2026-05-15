@@ -19,6 +19,8 @@ pub struct StdioRequest {
     pub human: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check_reload: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth: Option<usize>,
 }
 
 /// Stdio JSONL 响应
@@ -156,7 +158,10 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
         }
     }
 
-    let command = match request.command.as_str() {
+    let budget = request.budget.clone().unwrap_or_else(|| "normal".to_string());
+    let human = request.human.unwrap_or(false);
+
+    match request.command.as_str() {
         "explain_condition" => {
             if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
                 return StdioResponse {
@@ -168,49 +173,229 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                     timing: None,
                 };
             }
-            RuntimeQueryCommand::ExplainCondition
+            let req = RuntimeQueryRequest {
+                command: RuntimeQueryCommand::ExplainCondition,
+                target: request.target.clone().unwrap_or_default(),
+                budget: budget.clone(),
+                human,
+            };
+            match runtime.query(req) {
+                Ok(response) => {
+                    diagnostics.extend(response.diagnostics);
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: true,
+                        result: Some(response.result),
+                        error: None,
+                        diagnostics,
+                        timing: Some(response.timing),
+                    }
+                }
+                Err(e) => {
+                    diagnostics.push(format!("Query error: {}", e));
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: false,
+                        result: None,
+                        error: Some(format!("Query failed: {}", e)),
+                        diagnostics,
+                        timing: None,
+                    }
+                }
+            }
+        }
+        "query_model" => {
+            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                return StdioResponse {
+                    request_id: request.request_id.clone(),
+                    ok: false,
+                    result: None,
+                    error: Some("Missing target for query_model".to_string()),
+                    diagnostics,
+                    timing: None,
+                };
+            }
+            let start = std::time::Instant::now();
+            match crate::query::build_query_model_output(
+                &runtime.graph,
+                &request.target.clone().unwrap_or_default(),
+                &budget,
+            ) {
+                Ok(result) => {
+                    let total_ms = start.elapsed().as_millis();
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: true,
+                        result: Some(result),
+                        error: None,
+                        diagnostics,
+                        timing: Some(crate::runtime::RuntimeTiming {
+                            graph_load_ms: 0,
+                            query_compute_ms: total_ms,
+                            serialize_ms: 0,
+                            total_ms,
+                        }),
+                    }
+                }
+                Err(e) => {
+                    diagnostics.push(format!("Query error: {}", e));
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: false,
+                        result: None,
+                        error: Some(format!("Query failed: {}", e)),
+                        diagnostics,
+                        timing: None,
+                    }
+                }
+            }
+        }
+        "context" => {
+            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                return StdioResponse {
+                    request_id: request.request_id.clone(),
+                    ok: false,
+                    result: None,
+                    error: Some("Missing target for context".to_string()),
+                    diagnostics,
+                    timing: None,
+                };
+            }
+            let depth = request.depth.unwrap_or(1);
+            let start = std::time::Instant::now();
+            match crate::context::build_context_output(
+                &runtime.graph,
+                &request.target.clone().unwrap_or_default(),
+                depth,
+                &budget,
+            ) {
+                Ok(result) => {
+                    let total_ms = start.elapsed().as_millis();
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: true,
+                        result: Some(result),
+                        error: None,
+                        diagnostics,
+                        timing: Some(crate::runtime::RuntimeTiming {
+                            graph_load_ms: 0,
+                            query_compute_ms: total_ms,
+                            serialize_ms: 0,
+                            total_ms,
+                        }),
+                    }
+                }
+                Err(e) => {
+                    diagnostics.push(format!("Query error: {}", e));
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: false,
+                        result: None,
+                        error: Some(format!("Query failed: {}", e)),
+                        diagnostics,
+                        timing: None,
+                    }
+                }
+            }
+        }
+        "explain" => {
+            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                return StdioResponse {
+                    request_id: request.request_id.clone(),
+                    ok: false,
+                    result: None,
+                    error: Some("Missing target for explain".to_string()),
+                    diagnostics,
+                    timing: None,
+                };
+            }
+            let start = std::time::Instant::now();
+            match crate::explain::build_explain_output(
+                &runtime.graph,
+                &request.target.clone().unwrap_or_default(),
+            ) {
+                Ok(result) => {
+                    let total_ms = start.elapsed().as_millis();
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: true,
+                        result: Some(result),
+                        error: None,
+                        diagnostics,
+                        timing: Some(crate::runtime::RuntimeTiming {
+                            graph_load_ms: 0,
+                            query_compute_ms: total_ms,
+                            serialize_ms: 0,
+                            total_ms,
+                        }),
+                    }
+                }
+                Err(e) => {
+                    diagnostics.push(format!("Query error: {}", e));
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: false,
+                        result: None,
+                        error: Some(format!("Query failed: {}", e)),
+                        diagnostics,
+                        timing: None,
+                    }
+                }
+            }
+        }
+        "query_page_logic" => {
+            if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                return StdioResponse {
+                    request_id: request.request_id.clone(),
+                    ok: false,
+                    result: None,
+                    error: Some("Missing target for query_page_logic".to_string()),
+                    diagnostics,
+                    timing: None,
+                };
+            }
+            let start = std::time::Instant::now();
+            match crate::query::build_query_page_logic_output(
+                &runtime.graph,
+                &request.target.clone().unwrap_or_default(),
+                None,
+                &budget,
+            ) {
+                Ok(result) => {
+                    let total_ms = start.elapsed().as_millis();
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: true,
+                        result: Some(result),
+                        error: None,
+                        diagnostics,
+                        timing: Some(crate::runtime::RuntimeTiming {
+                            graph_load_ms: 0,
+                            query_compute_ms: total_ms,
+                            serialize_ms: 0,
+                            total_ms,
+                        }),
+                    }
+                }
+                Err(e) => {
+                    diagnostics.push(format!("Query error: {}", e));
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: false,
+                        result: None,
+                        error: Some(format!("Query failed: {}", e)),
+                        diagnostics,
+                        timing: None,
+                    }
+                }
+            }
         }
         other => {
-            return StdioResponse {
+            StdioResponse {
                 request_id: request.request_id.clone(),
                 ok: false,
                 result: None,
                 error: Some(format!("Unknown command: {}", other)),
-                diagnostics,
-                timing: None,
-            };
-        }
-    };
-
-    let budget = request.budget.clone().unwrap_or_else(|| "normal".to_string());
-    let human = request.human.unwrap_or(false);
-
-    let req = RuntimeQueryRequest {
-        command,
-        target: request.target.clone().unwrap_or_default(),
-        budget,
-        human,
-    };
-
-    match runtime.query(req) {
-        Ok(response) => {
-            diagnostics.extend(response.diagnostics);
-            StdioResponse {
-                request_id: request.request_id.clone(),
-                ok: true,
-                result: Some(response.result),
-                error: None,
-                diagnostics,
-                timing: Some(response.timing),
-            }
-        }
-        Err(e) => {
-            diagnostics.push(format!("Query error: {}", e));
-            StdioResponse {
-                request_id: request.request_id.clone(),
-                ok: false,
-                result: None,
-                error: Some(format!("Query failed: {}", e)),
                 diagnostics,
                 timing: None,
             }

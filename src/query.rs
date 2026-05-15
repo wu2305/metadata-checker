@@ -14,7 +14,7 @@ use std::io::{self, Write};
 ///   - query_dataflow：展开 DataFlow 的子图，做字段级来源追溯
 ///
 /// 追溯节点所属的页面（通过 Contains 边）
-fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node> {
+pub fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node> {
     if let Some((_, incoming)) = graph.get_node_edges(node_id) {
         for (parent, edge) in incoming {
             if matches!(edge.edge_type, crate::graph::EdgeType::Contains) {
@@ -64,8 +64,329 @@ fn pick_str_field<'a>(obj: &'a serde_json::Value, keys: &[&str]) -> Option<&'a s
         .find_map(|key| obj.get(*key).and_then(|v| v.as_str()))
 }
 
-pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -> Result<()> {
+/// 构建 query_model JSON 输出，不直接打印
+pub fn build_query_model_output(graph: &GraphDB, model_id: &str, budget: &str) -> Result<serde_json::Value> {
     let is_compact = budget == "compact";
+    if graph.get_node(model_id).is_none() {
+        let candidates = graph.find_candidates(model_id, 5);
+        let out = crate::output::schema::build_target_not_found_output(
+            crate::output::schema::OutputKind::ModelQuery,
+            model_id,
+            &candidates,
+        );
+        return Ok(serde_json::to_value(out)?);
+    }
+    let readers: Vec<_> = graph
+        .find_readers(model_id)
+        .into_iter()
+        .map(|(n, e)| {
+            let page = find_parent_page(graph, &n.id);
+            serde_json::json!({
+                "page": page.as_ref().map(|p| p.name.clone()),
+                "page_id": page.as_ref().map(|p| p.id.clone()),
+                "component_or_action": n.name,
+                "node_id": n.id,
+                "node_type": format!("{:?}", n.node_type),
+                "edge_type": "Reads",
+                "field_path": e.field_path,
+                "source_file": n.path,
+                "meta": e.meta,
+            })
+        })
+        .collect();
+    let writers: Vec<_> = graph
+        .find_writers(model_id)
+        .into_iter()
+        .map(|(n, e)| {
+            let page = find_parent_page(graph, &n.id);
+            serde_json::json!({
+                "page": page.as_ref().map(|p| p.name.clone()),
+                "page_id": page.as_ref().map(|p| p.id.clone()),
+                "component_or_action": n.name,
+                "node_id": n.id,
+                "node_type": format!("{:?}", n.node_type),
+                "edge_type": format!("{:?}", e.edge_type),
+                "field_path": e.field_path,
+                "source_file": n.path,
+                "meta": e.meta,
+            })
+        })
+        .collect();
+    let dataflow_inputs = graph
+        .find_dataflow_inputs(model_id)
+        .into_iter()
+        .map(|(n, e)| {
+            serde_json::json!({
+                "node_id": n.id,
+                "name": n.name,
+                "node_type": format!("{:?}", n.node_type),
+                "field_path": e.field_path,
+                "source_file": n.path,
+                "edge_type": format!("{:?}", e.edge_type),
+            })
+        })
+        .collect::<Vec<_>>();
+    let dataflow_outputs = graph
+        .find_dataflow_outputs(model_id)
+        .into_iter()
+        .map(|(n, e)| {
+            serde_json::json!({
+                "node_id": n.id,
+                "name": n.name,
+                "node_type": format!("{:?}", n.node_type),
+                "field_path": e.field_path,
+                "source_file": n.path,
+                "edge_type": format!("{:?}", e.edge_type),
+            })
+        })
+        .collect::<Vec<_>>();
+    let produced_by = graph
+        .find_produced_by(model_id)
+        .into_iter()
+        .map(|(n, e)| {
+            serde_json::json!({
+                "node_id": n.id,
+                "name": n.name,
+                "node_type": format!("{:?}", n.node_type),
+                "field_path": e.field_path,
+                "source_file": n.path,
+                "edge_type": format!("{:?}", e.edge_type),
+            })
+        })
+        .collect::<Vec<_>>();
+    let consumed_by_dataflows = graph
+        .find_consumed_by_dataflows(model_id)
+        .into_iter()
+        .map(|(n, e)| {
+            serde_json::json!({
+                "node_id": n.id,
+                "name": n.name,
+                "node_type": format!("{:?}", n.node_type),
+                "field_path": e.field_path,
+                "source_file": n.path,
+                "edge_type": format!("{:?}", e.edge_type),
+            })
+        })
+        .collect::<Vec<_>>();
+    // 兼容性保留字段
+    let upstream = graph
+        .find_upstream_dependencies(model_id)
+        .into_iter()
+        .map(|(n, e)| {
+            serde_json::json!({
+                "node_id": n.id,
+                "name": n.name,
+                "node_type": format!("{:?}", n.node_type),
+                "field_path": e.field_path,
+                "source_file": n.path,
+                "edge_type": format!("{:?}", e.edge_type),
+            })
+        })
+        .collect::<Vec<_>>();
+    let downstream = graph
+        .find_downstream_outputs(model_id)
+        .into_iter()
+        .map(|(n, e)| {
+            serde_json::json!({
+                "node_id": n.id,
+                "name": n.name,
+                "node_type": format!("{:?}", n.node_type),
+                "field_path": e.field_path,
+                "source_file": n.path,
+                "edge_type": format!("{:?}", e.edge_type),
+            })
+        })
+        .collect::<Vec<_>>();
+    let consumed_by_dataflow_count = consumed_by_dataflows.len();
+    let produced_by_count = produced_by.len();
+    let dataflow_input_count = dataflow_inputs.len();
+    let dataflow_output_count = dataflow_outputs.len();
+
+    let mut what_is_it = format!(
+        "模型 {}，被 {} 个节点读取，被 {} 个节点写入",
+        model_id,
+        readers.len(),
+        writers.len()
+    );
+    if readers.is_empty()
+        && writers.is_empty()
+        && (dataflow_input_count > 0 || dataflow_output_count > 0)
+    {
+        what_is_it = format!(
+            "模型 {} 主要通过 DataFlow 被消费/产出（输入 {} 个，输出 {} 个）",
+            model_id, dataflow_input_count, dataflow_output_count
+        );
+    }
+
+    let summary = serde_json::json!({
+        "model_id": model_id,
+        "what_is_it": what_is_it,
+        "read_by_count": readers.len(),
+        "written_by_count": writers.len(),
+        "consumed_by_dataflow_count": consumed_by_dataflow_count,
+        "produced_by_count": produced_by_count,
+        "dataflow_input_count": dataflow_input_count,
+        "dataflow_output_count": dataflow_output_count,
+        "dataflow_role": if dataflow_input_count > 0 || dataflow_output_count > 0 { "DataFlowParticipant" } else { "Unknown" },
+    });
+
+    let details = if is_compact {
+        serde_json::json!({
+            "readers": crate::output::brief::truncated_array(&readers, 5),
+            "writers": crate::output::brief::truncated_array(&writers, 5),
+            "dataflow_inputs": crate::output::brief::truncated_array(&dataflow_inputs, 5),
+            "dataflow_outputs": crate::output::brief::truncated_array(&dataflow_outputs, 5),
+            "produced_by": crate::output::brief::truncated_array(&produced_by, 5),
+            "consumed_by_dataflows": crate::output::brief::truncated_array(&consumed_by_dataflows, 5),
+            "upstream_dependencies": crate::output::brief::truncated_array(&upstream, 5),
+            "downstream_outputs": crate::output::brief::truncated_array(&downstream, 5),
+        })
+    } else {
+        serde_json::json!({
+            "readers": readers,
+            "writers": writers,
+            "dataflow_inputs": dataflow_inputs,
+            "dataflow_outputs": dataflow_outputs,
+            "produced_by": produced_by,
+            "consumed_by_dataflows": consumed_by_dataflows,
+            "upstream_dependencies": upstream,
+            "downstream_outputs": downstream,
+        })
+    };
+
+    let mut output =
+        crate::output::AiOutput::new(crate::output::OutputKind::ModelQuery, summary);
+    output.query_target = Some(model_id.to_string());
+    output.details = Some(details);
+    // 为 summary 中每个计数和 details 中每个主要数组提供独立 evidence
+    output.evidence.push(
+        crate::output::Evidence::new(
+            format!("Model {} has {} readers", model_id, readers.len()),
+            "Graph traversal: find_readers",
+        )
+        .with_confidence(crate::output::Confidence::High)
+        .with_node_id(model_id),
+    );
+    output.evidence.push(
+        crate::output::Evidence::new(
+            format!("Model {} has {} writers", model_id, writers.len()),
+            "Graph traversal: find_writers",
+        )
+        .with_confidence(crate::output::Confidence::High)
+        .with_node_id(model_id),
+    );
+    if !dataflow_inputs.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Model {} is input to {} dataflows",
+                    model_id,
+                    dataflow_inputs.len()
+                ),
+                "Graph traversal: find_dataflow_inputs",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(model_id),
+        );
+    }
+    if !dataflow_outputs.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Model {} is output from {} dataflows",
+                    model_id,
+                    dataflow_outputs.len()
+                ),
+                "Graph traversal: find_dataflow_outputs",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(model_id),
+        );
+    }
+    if !produced_by.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Model {} is produced by {} nodes",
+                    model_id,
+                    produced_by.len()
+                ),
+                "Graph traversal: find_produced_by",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(model_id),
+        );
+    }
+    if !consumed_by_dataflows.is_empty() {
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!(
+                    "Model {} is consumed by {} dataflows",
+                    model_id,
+                    consumed_by_dataflows.len()
+                ),
+                "Graph traversal: find_consumed_by_dataflows",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(model_id),
+        );
+    }
+    output.next_queries = vec![
+        format_next_query("--explain {} for full semantic summary", model_id),
+        format_next_query("--query-dataflow {} for internal subgraph", model_id),
+    ];
+
+    // Compact mode: add OUTPUT_TRUNCATED diagnostic and evidence_summary
+    if is_compact {
+        let truncated_arrays = [
+            ("readers", readers.len(), 5),
+            ("writers", writers.len(), 5),
+            ("dataflow_inputs", dataflow_inputs.len(), 5),
+            ("dataflow_outputs", dataflow_outputs.len(), 5),
+            ("produced_by", produced_by.len(), 5),
+            ("consumed_by_dataflows", consumed_by_dataflows.len(), 5),
+            ("upstream_dependencies", upstream.len(), 5),
+            ("downstream_outputs", downstream.len(), 5),
+        ];
+        let truncated_parts: Vec<String> = truncated_arrays
+            .iter()
+            .filter(|(_, size, limit)| *size > *limit)
+            .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
+            .collect();
+        if !truncated_parts.is_empty() {
+            output.diagnostics.push(crate::output::Diagnostic {
+                severity: crate::output::DiagnosticSeverity::Info,
+                code: "OUTPUT_TRUNCATED".to_string(),
+                message: format!(
+                    "Compact budget: arrays truncated for: {}",
+                    truncated_parts.join(", ")
+                ),
+                location: crate::output::Location {
+                    source_file: None,
+                    node_id: Some(model_id.to_string()),
+                    json_path: None,
+                },
+                suggestion: Some(
+                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                ),
+            });
+        }
+
+        let evidence_summary = crate::output::brief::evidence_summary(&output.evidence, 5);
+        let key_findings =
+            crate::output::brief::build_key_findings(&output.summary, &output.diagnostics);
+        if let Some(obj) = output.summary.as_object_mut() {
+            obj.insert("evidence_summary".to_string(), evidence_summary);
+            obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
+        }
+        output.evidence.truncate(5);
+    }
+
+    let output = output.validate();
+    Ok(serde_json::to_value(output)?)
+}
+
+pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -> Result<()> {
     if graph.get_node(model_id).is_none() {
         let candidates = graph.find_candidates(model_id, 5);
         let out = crate::output::schema::build_target_not_found_output(
@@ -128,313 +449,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -
             )?;
         }
     } else {
-        let readers: Vec<_> = graph
-            .find_readers(model_id)
-            .into_iter()
-            .map(|(n, e)| {
-                let page = find_parent_page(graph, &n.id);
-                serde_json::json!({
-                    "page": page.as_ref().map(|p| p.name.clone()),
-                    "page_id": page.as_ref().map(|p| p.id.clone()),
-                    "component_or_action": n.name,
-                    "node_id": n.id,
-                    "node_type": format!("{:?}", n.node_type),
-                    "edge_type": "Reads",
-                    "field_path": e.field_path,
-                    "source_file": n.path,
-                    "meta": e.meta,
-                })
-            })
-            .collect();
-        let writers: Vec<_> = graph
-            .find_writers(model_id)
-            .into_iter()
-            .map(|(n, e)| {
-                let page = find_parent_page(graph, &n.id);
-                serde_json::json!({
-                    "page": page.as_ref().map(|p| p.name.clone()),
-                    "page_id": page.as_ref().map(|p| p.id.clone()),
-                    "component_or_action": n.name,
-                    "node_id": n.id,
-                    "node_type": format!("{:?}", n.node_type),
-                    "edge_type": format!("{:?}", e.edge_type),
-                    "field_path": e.field_path,
-                    "source_file": n.path,
-                    "meta": e.meta,
-                })
-            })
-            .collect();
-        let dataflow_inputs = graph
-            .find_dataflow_inputs(model_id)
-            .into_iter()
-            .map(|(n, e)| {
-                serde_json::json!({
-                    "node_id": n.id,
-                    "name": n.name,
-                    "node_type": format!("{:?}", n.node_type),
-                    "field_path": e.field_path,
-                    "source_file": n.path,
-                    "edge_type": format!("{:?}", e.edge_type),
-                })
-            })
-            .collect::<Vec<_>>();
-        let dataflow_outputs = graph
-            .find_dataflow_outputs(model_id)
-            .into_iter()
-            .map(|(n, e)| {
-                serde_json::json!({
-                    "node_id": n.id,
-                    "name": n.name,
-                    "node_type": format!("{:?}", n.node_type),
-                    "field_path": e.field_path,
-                    "source_file": n.path,
-                    "edge_type": format!("{:?}", e.edge_type),
-                })
-            })
-            .collect::<Vec<_>>();
-        let produced_by = graph
-            .find_produced_by(model_id)
-            .into_iter()
-            .map(|(n, e)| {
-                serde_json::json!({
-                    "node_id": n.id,
-                    "name": n.name,
-                    "node_type": format!("{:?}", n.node_type),
-                    "field_path": e.field_path,
-                    "source_file": n.path,
-                    "edge_type": format!("{:?}", e.edge_type),
-                })
-            })
-            .collect::<Vec<_>>();
-        let consumed_by_dataflows = graph
-            .find_consumed_by_dataflows(model_id)
-            .into_iter()
-            .map(|(n, e)| {
-                serde_json::json!({
-                    "node_id": n.id,
-                    "name": n.name,
-                    "node_type": format!("{:?}", n.node_type),
-                    "field_path": e.field_path,
-                    "source_file": n.path,
-                    "edge_type": format!("{:?}", e.edge_type),
-                })
-            })
-            .collect::<Vec<_>>();
-        // 兼容性保留字段
-        let upstream = graph
-            .find_upstream_dependencies(model_id)
-            .into_iter()
-            .map(|(n, e)| {
-                serde_json::json!({
-                    "node_id": n.id,
-                    "name": n.name,
-                    "node_type": format!("{:?}", n.node_type),
-                    "field_path": e.field_path,
-                    "source_file": n.path,
-                    "edge_type": format!("{:?}", e.edge_type),
-                })
-            })
-            .collect::<Vec<_>>();
-        let downstream = graph
-            .find_downstream_outputs(model_id)
-            .into_iter()
-            .map(|(n, e)| {
-                serde_json::json!({
-                    "node_id": n.id,
-                    "name": n.name,
-                    "node_type": format!("{:?}", n.node_type),
-                    "field_path": e.field_path,
-                    "source_file": n.path,
-                    "edge_type": format!("{:?}", e.edge_type),
-                })
-            })
-            .collect::<Vec<_>>();
-        let consumed_by_dataflow_count = consumed_by_dataflows.len();
-        let produced_by_count = produced_by.len();
-        let dataflow_input_count = dataflow_inputs.len();
-        let dataflow_output_count = dataflow_outputs.len();
-
-        let mut what_is_it = format!(
-            "模型 {}，被 {} 个节点读取，被 {} 个节点写入",
-            model_id,
-            readers.len(),
-            writers.len()
-        );
-        if readers.is_empty()
-            && writers.is_empty()
-            && (dataflow_input_count > 0 || dataflow_output_count > 0)
-        {
-            what_is_it = format!(
-                "模型 {} 主要通过 DataFlow 被消费/产出（输入 {} 个，输出 {} 个）",
-                model_id, dataflow_input_count, dataflow_output_count
-            );
-        }
-
-        let summary = serde_json::json!({
-            "model_id": model_id,
-            "what_is_it": what_is_it,
-            "read_by_count": readers.len(),
-            "written_by_count": writers.len(),
-            "consumed_by_dataflow_count": consumed_by_dataflow_count,
-            "produced_by_count": produced_by_count,
-            "dataflow_input_count": dataflow_input_count,
-            "dataflow_output_count": dataflow_output_count,
-            "dataflow_role": if dataflow_input_count > 0 || dataflow_output_count > 0 { "DataFlowParticipant" } else { "Unknown" },
-        });
-
-        let details = if is_compact {
-            serde_json::json!({
-                "readers": crate::output::brief::truncated_array(&readers, 5),
-                "writers": crate::output::brief::truncated_array(&writers, 5),
-                "dataflow_inputs": crate::output::brief::truncated_array(&dataflow_inputs, 5),
-                "dataflow_outputs": crate::output::brief::truncated_array(&dataflow_outputs, 5),
-                "produced_by": crate::output::brief::truncated_array(&produced_by, 5),
-                "consumed_by_dataflows": crate::output::brief::truncated_array(&consumed_by_dataflows, 5),
-                "upstream_dependencies": crate::output::brief::truncated_array(&upstream, 5),
-                "downstream_outputs": crate::output::brief::truncated_array(&downstream, 5),
-            })
-        } else {
-            serde_json::json!({
-                "readers": readers,
-                "writers": writers,
-                "dataflow_inputs": dataflow_inputs,
-                "dataflow_outputs": dataflow_outputs,
-                "produced_by": produced_by,
-                "consumed_by_dataflows": consumed_by_dataflows,
-                "upstream_dependencies": upstream,
-                "downstream_outputs": downstream,
-            })
-        };
-
-        let mut output =
-            crate::output::AiOutput::new(crate::output::OutputKind::ModelQuery, summary);
-        output.query_target = Some(model_id.to_string());
-        output.details = Some(details);
-        // 为 summary 中每个计数和 details 中每个主要数组提供独立 evidence
-        output.evidence.push(
-            crate::output::Evidence::new(
-                format!("Model {} has {} readers", model_id, readers.len()),
-                "Graph traversal: find_readers",
-            )
-            .with_confidence(crate::output::Confidence::High)
-            .with_node_id(model_id),
-        );
-        output.evidence.push(
-            crate::output::Evidence::new(
-                format!("Model {} has {} writers", model_id, writers.len()),
-                "Graph traversal: find_writers",
-            )
-            .with_confidence(crate::output::Confidence::High)
-            .with_node_id(model_id),
-        );
-        if !dataflow_inputs.is_empty() {
-            output.evidence.push(
-                crate::output::Evidence::new(
-                    format!(
-                        "Model {} is input to {} dataflows",
-                        model_id,
-                        dataflow_inputs.len()
-                    ),
-                    "Graph traversal: find_dataflow_inputs",
-                )
-                .with_confidence(crate::output::Confidence::High)
-                .with_node_id(model_id),
-            );
-        }
-        if !dataflow_outputs.is_empty() {
-            output.evidence.push(
-                crate::output::Evidence::new(
-                    format!(
-                        "Model {} is output from {} dataflows",
-                        model_id,
-                        dataflow_outputs.len()
-                    ),
-                    "Graph traversal: find_dataflow_outputs",
-                )
-                .with_confidence(crate::output::Confidence::High)
-                .with_node_id(model_id),
-            );
-        }
-        if !produced_by.is_empty() {
-            output.evidence.push(
-                crate::output::Evidence::new(
-                    format!(
-                        "Model {} is produced by {} nodes",
-                        model_id,
-                        produced_by.len()
-                    ),
-                    "Graph traversal: find_produced_by",
-                )
-                .with_confidence(crate::output::Confidence::High)
-                .with_node_id(model_id),
-            );
-        }
-        if !consumed_by_dataflows.is_empty() {
-            output.evidence.push(
-                crate::output::Evidence::new(
-                    format!(
-                        "Model {} is consumed by {} dataflows",
-                        model_id,
-                        consumed_by_dataflows.len()
-                    ),
-                    "Graph traversal: find_consumed_by_dataflows",
-                )
-                .with_confidence(crate::output::Confidence::High)
-                .with_node_id(model_id),
-            );
-        }
-        output.next_queries = vec![
-            format_next_query("--explain {} for full semantic summary", model_id),
-            format_next_query("--query-dataflow {} for internal subgraph", model_id),
-        ];
-
-        // Compact mode: add OUTPUT_TRUNCATED diagnostic and evidence_summary
-        if is_compact {
-            let truncated_arrays = [
-                ("readers", readers.len(), 5),
-                ("writers", writers.len(), 5),
-                ("dataflow_inputs", dataflow_inputs.len(), 5),
-                ("dataflow_outputs", dataflow_outputs.len(), 5),
-                ("produced_by", produced_by.len(), 5),
-                ("consumed_by_dataflows", consumed_by_dataflows.len(), 5),
-                ("upstream_dependencies", upstream.len(), 5),
-                ("downstream_outputs", downstream.len(), 5),
-            ];
-            let truncated_parts: Vec<String> = truncated_arrays
-                .iter()
-                .filter(|(_, size, limit)| *size > *limit)
-                .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
-                .collect();
-            if !truncated_parts.is_empty() {
-                output.diagnostics.push(crate::output::Diagnostic {
-                    severity: crate::output::DiagnosticSeverity::Info,
-                    code: "OUTPUT_TRUNCATED".to_string(),
-                    message: format!(
-                        "Compact budget: arrays truncated for: {}",
-                        truncated_parts.join(", ")
-                    ),
-                    location: crate::output::Location {
-                        source_file: None,
-                        node_id: Some(model_id.to_string()),
-                        json_path: None,
-                    },
-                    suggestion: Some(
-                        "Use --budget normal or --budget full to see complete arrays".to_string(),
-                    ),
-                });
-            }
-
-            let evidence_summary = crate::output::brief::evidence_summary(&output.evidence, 5);
-            let key_findings =
-                crate::output::brief::build_key_findings(&output.summary, &output.diagnostics);
-            if let Some(obj) = output.summary.as_object_mut() {
-                obj.insert("evidence_summary".to_string(), evidence_summary);
-                obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
-            }
-            output.evidence.truncate(5);
-        }
-
-        let output = output.validate();
+        let output = build_query_model_output(graph, model_id, budget)?;
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
@@ -601,13 +616,12 @@ pub use dataflow::query_dataflow;
 /// 查询页面级逻辑摘要
 ///
 /// 输出 page_inputs、data_sources、write_targets、entrypoints、action_flows、visibility_rules、navigation、risk_diagnostics。
-pub fn query_page_logic(
+pub fn build_query_page_logic_output(
     graph: &GraphDB,
     page_id: &str,
     project_dir: Option<&std::path::Path>,
-    human: bool,
     budget: &str,
-) -> Result<()> {
+) -> Result<serde_json::Value> {
     let is_compact = budget == "compact";
     let is_full = budget == "full";
     let page_node = match graph.get_node(page_id) {
@@ -619,8 +633,7 @@ pub fn query_page_logic(
                 page_id,
                 &candidates,
             );
-            println!("{}", serde_json::to_string_pretty(&out)?);
-            return Ok(());
+            return Ok(serde_json::to_value(out)?);
         }
     };
 
@@ -2362,130 +2375,100 @@ pub fn query_page_logic(
         output.evidence.truncate(evidence_sample_limit);
     }
     let output = output.validate();
+    Ok(serde_json::to_value(output)?)
+}
 
-    // ---- 8. Human 模式 ----
+/// 查询页面级逻辑摘要
+///
+/// CLI 包装器，负责调用 `build_query_page_logic_output` 并按 `human` 参数决定输出格式。
+pub fn query_page_logic(
+    graph: &GraphDB,
+    page_id: &str,
+    project_dir: Option<&std::path::Path>,
+    human: bool,
+    budget: &str,
+) -> Result<()> {
+    let output = build_query_page_logic_output(graph, page_id, project_dir, budget)?;
     if human {
         let mut out = io::stdout();
         writeln!(out, "=== Page Logic: {} ===", page_id)?;
-        writeln!(out, "Name: {} | Role: {}", page_node.name, page_role)?;
-        writeln!(out, "{}", what_is_it)?;
-        writeln!(out, "\n--- Entrypoints ({}) ---", entrypoints.len())?;
-        for ep in &entrypoints {
-            let name = ep.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-            let ep_type = ep.get("type").and_then(|v| v.as_str()).unwrap_or("?");
-            writeln!(
-                out,
-                "  [{}] {} ({})",
-                ep.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
-                name,
-                ep_type
-            )?;
-        }
-        writeln!(out, "\n--- Data Sources ({}) ---", data_sources.len())?;
-        for ds in &data_sources {
-            let fp = ds.get("field_path").and_then(|v| v.as_str()).unwrap_or("?");
-            // field_path 已包含 model 前缀（如 model1.fieldB），避免重复输出 model.model.field
-            let model = ds.get("model").and_then(|v| v.as_str()).unwrap_or("?");
-            if fp.starts_with(model) {
-                writeln!(out, "  {}", fp)?;
-            } else {
-                writeln!(out, "  {}.{}", model, fp)?;
+        if let Some(summary) = output.get("summary").and_then(|s| s.as_object()) {
+            if let Some(name) = summary.get("page_name").and_then(|v| v.as_str()) {
+                writeln!(out, "Name: {}", name)?;
+            }
+            if let Some(role) = summary.get("page_role").and_then(|v| v.as_str()) {
+                writeln!(out, "Role: {}", role)?;
+            }
+            if let Some(what) = summary.get("what_is_it").and_then(|v| v.as_str()) {
+                writeln!(out, "{}", what)?;
             }
         }
-        writeln!(out, "\n--- Write Targets ({}) ---", write_targets.len())?;
-        for wt in &write_targets {
-            let fp = wt.get("field_path").and_then(|v| v.as_str()).unwrap_or("?");
-            let model = wt.get("model").and_then(|v| v.as_str()).unwrap_or("?");
-            if fp.starts_with(model) {
-                writeln!(out, "  {}", fp)?;
-            } else {
-                writeln!(out, "  {}.{}", model, fp)?;
+        if let Some(details) = output.get("details").and_then(|d| d.as_object()) {
+            if let Some(eps) = details.get("entrypoints").and_then(|v| v.as_array()) {
+                writeln!(out, "
+--- Entrypoints ({}) ---", eps.len())?;
+                for ep in eps {
+                    let id = ep.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                    let name = ep.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let t = ep.get("type").and_then(|v| v.as_str()).unwrap_or("?");
+                    writeln!(out, "  [{}] {} ({})", id, name, t)?;
+                }
             }
-        }
-        writeln!(out, "\n--- Action Flows ({}) ---", action_flows.len())?;
-        for flow in &action_flows {
-            let aid = flow
-                .get("action_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let atype = flow
-                .get("action_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let cid = flow
-                .get("component_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let acat = flow
-                .get("action_category")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let summary = flow
-                .get("semantic_summary")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            writeln!(out, "  {} [{} | {}]", aid, atype, acat)?;
-            if !summary.is_empty() {
-                writeln!(out, "    summary: {}", summary)?;
+            if let Some(dss) = details.get("data_sources").and_then(|v| v.as_array()) {
+                writeln!(out, "
+--- Data Sources ({}) ---", dss.len())?;
+                for ds in dss {
+                    let fp = ds.get("field_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    writeln!(out, "  {}", fp)?;
+                }
             }
-            writeln!(out, "    triggered by {}", cid)?;
-            if let Some(raw) = flow
-                .get("blocks_on")
-                .and_then(|b| b.get("raw"))
-                .and_then(|v| v.as_str())
-            {
-                writeln!(out, "    waits for: {}", raw)?;
+            if let Some(wts) = details.get("write_targets").and_then(|v| v.as_array()) {
+                writeln!(out, "
+--- Write Targets ({}) ---", wts.len())?;
+                for wt in wts {
+                    let fp = wt.get("field_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    writeln!(out, "  {}", fp)?;
+                }
             }
-            if let Some(raw) = flow
-                .get("condition")
-                .and_then(|c| c.get("raw_expr"))
-                .and_then(|v| v.as_str())
-            {
-                writeln!(out, "    condition: {}", raw)?;
+            if let Some(flows) = details.get("action_flows").and_then(|v| v.as_array()) {
+                writeln!(out, "
+--- Action Flows ({}) ---", flows.len())?;
+                for flow in flows {
+                    let aid = flow.get("action_id").and_then(|v| v.as_str()).unwrap_or("?");
+                    let atype = flow.get("action_type").and_then(|v| v.as_str()).unwrap_or("?");
+                    let acat = flow.get("action_category").and_then(|v| v.as_str()).unwrap_or("?");
+                    let summary = flow.get("semantic_summary").and_then(|v| v.as_str()).unwrap_or("");
+                    let cid = flow.get("component_id").and_then(|v| v.as_str()).unwrap_or("?");
+                    writeln!(out, "  {} [{} | {}]", aid, atype, acat)?;
+                    if !summary.is_empty() {
+                        writeln!(out, "    summary: {}", summary)?;
+                    }
+                    writeln!(out, "    triggered by {}", cid)?;
+                    if let Some(raw) = flow.get("blocks_on").and_then(|b| b.get("raw")).and_then(|v| v.as_str()) {
+                        writeln!(out, "    waits for: {}", raw)?;
+                    }
+                    if let Some(raw) = flow.get("condition").and_then(|c| c.get("raw_expr")).and_then(|v| v.as_str()) {
+                        writeln!(out, "    condition: {}", raw)?;
+                    }
+                    let writes = flow.get("writes").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                    let nav = flow.get("navigation").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                    if writes > 0 {
+                        writeln!(out, "    writes: {} target(s)", writes)?;
+                    }
+                    if nav > 0 {
+                        writeln!(out, "    navigation: {} target(s)", nav)?;
+                    }
+                }
             }
-            let writes = flow
-                .get("writes")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
-            let nav = flow
-                .get("navigation")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
-            if writes > 0 {
-                writeln!(out, "    writes: {} target(s)", writes)?;
-            }
-            if nav > 0 {
-                writeln!(out, "    navigation: {} target(s)", nav)?;
-            }
-        }
-        writeln!(out, "\n--- Navigation ({}) ---", navigation.len())?;
-        for nav in &navigation {
-            let from = nav.get("from").and_then(|v| v.as_str()).unwrap_or("?");
-            let to = nav.get("to").and_then(|v| v.as_str()).unwrap_or("?");
-            let nav_type = nav.get("type").and_then(|v| v.as_str()).unwrap_or("?");
-            writeln!(out, "  {} -> {} ({})", from, to, nav_type)?;
-        }
-        if !visibility_rules.is_empty() {
-            writeln!(
-                out,
-                "\n--- Visibility Rules ({}) ---",
-                visibility_rules.len()
-            )?;
-            for rule in &visibility_rules {
-                let cid = rule
-                    .get("component_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                let r = rule.get("rule").and_then(|v| v.as_str()).unwrap_or("?");
-                writeln!(out, "  {}: {}", cid, r)?;
-            }
-        }
-        if !output.diagnostics.is_empty() {
-            writeln!(out, "\n⚠️  Risk Diagnostics:")?;
-            for diag in &output.diagnostics {
-                writeln!(out, "  [{}] {}", diag.code, diag.message)?;
+            if let Some(nav) = details.get("navigation").and_then(|v| v.as_array()) {
+                writeln!(out, "
+--- Navigation ({}) ---", nav.len())?;
+                for n in nav {
+                    let from = n.get("from").and_then(|v| v.as_str()).unwrap_or("?");
+                    let to = n.get("to").and_then(|v| v.as_str()).unwrap_or("?");
+                    let t = n.get("type").and_then(|v| v.as_str()).unwrap_or("?");
+                    writeln!(out, "  {} -> {} ({})", from, to, t)?;
+                }
             }
         }
         out.flush()?;
@@ -2493,11 +2476,7 @@ pub fn query_page_logic(
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
-}
-
-/// 按关键词搜索图节点
-///
-/// 返回匹配节点列表，按名称相似度排序。
+}/// 返回匹配节点列表，按名称相似度排序。
 pub fn find_nodes(
     graph: &GraphDB,
     keyword: &str,
