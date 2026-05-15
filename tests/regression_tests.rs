@@ -340,6 +340,136 @@ fn test_query_page_logic_contract() {
     );
 }
 
+#[test]
+fn test_m31_explain_condition_inherits_parent_total_row_count_gate() {
+    let (_db_path, graph) = setup_graph_db("m31_parent_gate");
+    let result = metadata_checker::explain::build_explain_condition_output(
+        &graph,
+        "comp:app/actions_test.spg|text_total_child",
+        "normal",
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+
+    let blocking = details
+        .get("blocking_conditions")
+        .and_then(|v| v.as_array())
+        .expect("blocking_conditions must be array");
+    assert!(
+        blocking.iter().any(|c| {
+            c.get("condition_scope").and_then(|v| v.as_str()) == Some("inherited")
+                && c.get("inherited_from")
+                    .and_then(|v| v.as_str())
+                    == Some("comp:app/actions_test.spg|panel_total_gate")
+                && c.get("raw_expr")
+                    .and_then(|v| v.as_str())
+                    .map_or(false, |s| s.contains("model1.totalRowCount__ > 0"))
+        }),
+        "子组件必须继承父容器的 totalRowCount__ 显示门控"
+    );
+
+    let gates = details
+        .get("data_empty_gates")
+        .and_then(|v| v.as_array())
+        .expect("data_empty_gates must be array");
+    assert!(
+        gates.iter().any(|g| {
+            g.get("condition_scope").and_then(|v| v.as_str())
+                == Some("expanded_from_total_row_count")
+                && g.get("raw_expr")
+                    .and_then(|v| v.as_str())
+                    .map_or(false, |s| s.contains("param1"))
+        }),
+        "totalRowCount__ 门控必须展开当前页面 model1 的 param1 filter"
+    );
+    assert!(
+        gates.iter().any(|g| {
+            g.get("condition_scope").and_then(|v| v.as_str())
+                == Some("expanded_from_total_row_count")
+                && g.get("raw_expr")
+                    .and_then(|v| v.as_str())
+                    .map_or(false, |s| s.contains("WXWORK_USER_ID"))
+        }),
+        "totalRowCount__ 门控必须展开当前页面 model1 的用户 filter"
+    );
+}
+
+#[test]
+fn test_m31_explain_condition_dedupes_same_child_and_parent_gate() {
+    let (_db_path, graph) = setup_graph_db("m31_dedupe_gate");
+    let result = metadata_checker::explain::build_explain_condition_output(
+        &graph,
+        "comp:app/actions_test.spg|text_total_child_duplicate",
+        "normal",
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+
+    let blocking = details
+        .get("blocking_conditions")
+        .and_then(|v| v.as_array())
+        .expect("blocking_conditions must be array");
+    let same_gate_count = blocking
+        .iter()
+        .filter(|c| {
+            c.get("raw_expr")
+                .and_then(|v| v.as_str())
+                .map_or(false, |s| s.contains("model1.totalRowCount__ > 0"))
+        })
+        .count();
+    assert_eq!(
+        same_gate_count, 1,
+        "子组件和父组件相同 visibleCondition 必须去重为一条"
+    );
+    let gate = blocking
+        .iter()
+        .find(|c| {
+            c.get("raw_expr")
+                .and_then(|v| v.as_str())
+                .map_or(false, |s| s.contains("model1.totalRowCount__ > 0"))
+        })
+        .expect("deduped gate must exist");
+    assert!(
+        gate.get("deduped_condition_ids")
+            .and_then(|v| v.as_array())
+            .map_or(false, |arr| !arr.is_empty()),
+        "去重后必须保留重复条件来源证据"
+    );
+}
+
+#[test]
+fn test_m31_docs_define_condition_scope_contract() {
+    let schema = std::fs::read_to_string("docs/schema.md").expect("schema doc must be readable");
+    for term in [
+        "condition_scope",
+        "direct",
+        "inherited",
+        "expanded_from_total_row_count",
+        "referenced_by_model_filter",
+        "deduped_condition_ids",
+    ] {
+        assert!(schema.contains(term), "docs/schema.md 缺少 M31 条件作用域契约: {}", term);
+    }
+
+    for skill_path in skill_md_paths_for_protocol_check() {
+        let skill_md = std::fs::read_to_string(&skill_path)
+            .unwrap_or_else(|err| panic!("{} must be readable: {}", skill_path.display(), err));
+        assert!(
+            skill_md.contains("condition_scope")
+                && skill_md.contains("expanded_from_total_row_count")
+                && skill_md.contains("referenced_by_model_filter"),
+            "{} 必须说明 M31 条件作用域读取规则",
+            skill_path.display()
+        );
+    }
+}
+
 /// 通过编译后的二进制 CLI 捕获 JSON 输出
 fn run_cli(args: &[&str]) -> String {
     let _guard = CLI_LOCK.lock().unwrap();
@@ -4690,6 +4820,75 @@ fn test_real_project_explain_condition_model22_filter() {
             r
         );
     }
+}
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_m31_text41_display_chain_expands_model11_filter() {
+    let graph_db_path = "/tmp/m31_test_xiaoshouyi_text41.db";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain-condition",
+        "comp:app/售后.app/绑定车辆/会员已注册.spg|text41",
+        "--budget",
+        "normal",
+    ]);
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    assert_eq!(ai.kind, OutputKind::Explain);
+
+    let details_val = ai.details.as_ref().expect("details must exist");
+    let details = details_val.as_object().expect("details must be object");
+    let blocking = details
+        .get("blocking_conditions")
+        .and_then(|v| v.as_array())
+        .expect("blocking_conditions must be array");
+    assert!(
+        blocking.iter().any(|c| {
+            c.get("condition_scope").and_then(|v| v.as_str()) == Some("inherited")
+                && c.get("condition_id")
+                    .and_then(|v| v.as_str())
+                    .map_or(false, |id| id.contains("panel35#visibleCondition"))
+                && c.get("raw_expr")
+                    .and_then(|v| v.as_str())
+                    .map_or(false, |raw| raw.contains("model11.totalRowCount__ > 0"))
+        }),
+        "text41 必须继承 panel35 的 model11.totalRowCount__ 显示门控"
+    );
+
+    let gates = details
+        .get("data_empty_gates")
+        .and_then(|v| v.as_array())
+        .expect("data_empty_gates must be array");
+    assert!(
+        gates.iter().any(|g| {
+            g.get("condition_scope").and_then(|v| v.as_str())
+                == Some("expanded_from_total_row_count")
+                && g.get("condition_id")
+                    .and_then(|v| v.as_str())
+                    .map_or(false, |id| id.contains("model11#filter"))
+        }),
+        "text41 的 totalRowCount__ 门控必须展开当前页面 model11 filter"
+    );
+    assert!(
+        !gates.iter().any(|g| {
+            g.get("condition_id")
+                .and_then(|v| v.as_str())
+                .map_or(false, |id| id.contains("model2#filter"))
+        }),
+        "model2.name=text41 是引用 text41 的旁路 filter，不应作为 text41 显示必要门控"
+    );
 }
 
 

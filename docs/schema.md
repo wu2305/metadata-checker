@@ -178,9 +178,9 @@ pub struct AiOutput {
 |------|------|------|
 | `target` | object | 目标节点信息：`node_id`、`node_type`、`name`、`path` |
 | `primary_path` | array | 字段级主链路（M19-FIX PathSegment），含 Reads / FieldAlias / FieldWrite 三段 |
-| `blocking_conditions` | array | 阻塞条件列表，每项包含 `condition_id`、`condition_type`、`raw_expr`、`json_path`、`source_file` |
-| `data_empty_gates` | array | 数据门控列表，包含 filter / totalRowCount__ 条件 |
-| `supporting_context` | array | 辅助上下文条件 |
+| `blocking_conditions` | array | 阻塞条件列表，每项包含 `condition_id`、`condition_type`、`raw_expr`、`json_path`、`source_file`，M31 起包含 `condition_scope` |
+| `data_empty_gates` | array | 数据门控列表，包含 filter / totalRowCount__ 条件，M31 起可包含 `expanded_from_total_row_count` 展开结果 |
+| `supporting_context` | array | 辅助上下文条件，例如 `referenced_by_model_filter` |
 | `related_context` | array | 相关但非必要条件，含 `note: "非当前页面必要条件"` |
 
 ### AI 读取策略
@@ -201,6 +201,20 @@ pub struct AiOutput {
 | 含 `totalRowCount__` 的表达式 | `data_empty_gates` | 数据命中行数门控 |
 | 其他条件 | `supporting_context` | 辅助计算/验证条件 |
 
+### M31 条件作用域
+
+| 字段/取值 | 说明 |
+|---|---|
+| `condition_scope = direct` | 目标节点自身声明的条件 |
+| `condition_scope = inherited` | 祖先容器声明、会影响目标组件显示/隐藏的条件 |
+| `condition_scope = expanded_from_total_row_count` | 由 `modelX.totalRowCount__` 显示门控展开出的当前页面模型 filter |
+| `condition_scope = referenced_by_model_filter` | 其他模型 filter 引用了目标组件；它不是目标组件自身或祖先显示条件 |
+| `owner_node_id` | 条件声明者 |
+| `inherited_from` / `ancestor_distance` | 继承条件来源 |
+| `expanded_from_condition` | 数据门控由哪条 `totalRowCount__` 条件展开 |
+| `condition_key` | 条件去重 key |
+| `deduped_condition_ids` / `deduped_owner_node_ids` | 等价条件被去重后保留的来源证据 |
+
 ### 页面作用域规则
 
 - `comp:` / `field:` / `page:` 目标：只收集**当前页面**的条件
@@ -209,7 +223,8 @@ pub struct AiOutput {
 
 ### 边界说明
 
-- 当前 `--explain-condition` 组件条件解释**默认只输出直接条件引用**，不展开被引用组件的上游值来源。
+- 当前 `--explain-condition` 组件显示解释会输出直接条件、祖先继承条件，并自动把 `modelX.totalRowCount__` 展开为当前页面 `modelX` filter。
+- 普通链式组件值来源仍不自动递归展开。
 - 例如 `A.visibleCondition = B.value != ''` 只输出 `B` 的引用，不输出 `B.value` 来自哪个 param/model/user。
 - 如需展开链式上游，需继续对被引用组件执行 `--explain-condition 'comp:...|B'`。
 - 链式条件展开能力已列入后续里程碑规划，当前版本不支持自动递归展开。

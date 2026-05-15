@@ -550,6 +550,368 @@ fn build_cond_obj(source: &crate::graph::Node) -> serde_json::Value {
     })
 }
 
+/// 从条件对象推断条件所属节点，用于区分直接条件、继承条件和去重来源
+fn condition_owner_node_id(cond_obj: &serde_json::Value) -> Option<String> {
+    let condition_id = cond_obj.get("condition_id").and_then(|v| v.as_str())?;
+    let source_file = cond_obj.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
+    let owner_type = cond_obj.get("owner_type").and_then(|v| v.as_str()).unwrap_or("");
+    let owner_token = condition_id
+        .split('|')
+        .nth(1)
+        .and_then(|s| s.split('#').next())?;
+
+    match owner_type {
+        "Component" | "FieldDefault" => Some(format!("comp:{}|{}", source_file, owner_token)),
+        "ModelSource" => Some(format!("model:{}", owner_token)),
+        "Page" => Some(format!("page:{}", source_file)),
+        "Action" => Some(format!("action:{}|{}", source_file, owner_token)),
+        _ => Some(owner_token.to_string()),
+    }
+}
+
+/// 给条件打上面向解释的作用域标签
+fn annotate_condition_scope(
+    mut cond_obj: serde_json::Value,
+    scope: &str,
+    inherited_from: Option<&str>,
+    ancestor_distance: Option<usize>,
+    expanded_from: Option<&str>,
+) -> serde_json::Value {
+    let owner_node_id = condition_owner_node_id(&cond_obj);
+    if let Some(obj) = cond_obj.as_object_mut() {
+        obj.insert("condition_scope".to_string(), serde_json::json!(scope));
+        if let Some(owner_node_id) = owner_node_id {
+            obj.insert("owner_node_id".to_string(), serde_json::json!(owner_node_id));
+        }
+        if let Some(inherited_from) = inherited_from {
+            obj.insert("inherited_from".to_string(), serde_json::json!(inherited_from));
+        }
+        if let Some(ancestor_distance) = ancestor_distance {
+            obj.insert("ancestor_distance".to_string(), serde_json::json!(ancestor_distance));
+        }
+        if let Some(expanded_from) = expanded_from {
+            obj.insert("expanded_from_condition".to_string(), serde_json::json!(expanded_from));
+            obj.insert(
+                "expansion_reason".to_string(),
+                serde_json::json!("totalRowCount__ 显示门控需要展开当前页面模型过滤条件"),
+            );
+        }
+    }
+    cond_obj
+}
+
+fn condition_owned_by_node(cond_obj: &serde_json::Value, node_id: &str) -> bool {
+    cond_obj
+        .get("owner_node_id")
+        .and_then(|v| v.as_str())
+        .map_or(false, |owner| owner == node_id)
+}
+
+/// 生成条件去重 key：同一页面、同一作用、同一归一化表达式和同一引用集合视为等价
+fn condition_dedupe_key(cond_obj: &serde_json::Value) -> String {
+    let condition_type = cond_obj
+        .get("condition_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let effect_type = cond_obj
+        .get("effect_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let source_file = cond_obj
+        .get("source_file")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let expr = cond_obj
+        .get("normalized_expr")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .or_else(|| cond_obj.get("raw_expr").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    let mut refs: Vec<String> = cond_obj
+        .get("referenced_symbols")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    refs.sort();
+    refs.dedup();
+    format!(
+        "{}|{}|{}|{}|{}",
+        source_file,
+        condition_type,
+        effect_type,
+        expr,
+        refs.join(",")
+    )
+}
+
+/// 对条件数组去重，同时保留重复声明的证据来源
+fn dedupe_conditions(conditions: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut index_by_key: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut result: Vec<serde_json::Value> = Vec::new();
+
+    for cond in conditions {
+        let key = condition_dedupe_key(&cond);
+        if let Some(idx) = index_by_key.get(&key).copied() {
+            let duplicate_id = cond
+                .get("condition_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let duplicate_scope = cond
+                .get("condition_scope")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let duplicate_owner = cond
+                .get("owner_node_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            if let Some(obj) = result[idx].as_object_mut() {
+                let ids = obj
+                    .entry("deduped_condition_ids".to_string())
+                    .or_insert_with(|| serde_json::json!([]));
+                if let Some(arr) = ids.as_array_mut() {
+                    if !duplicate_id.is_empty() && !arr.iter().any(|v| v.as_str() == Some(&duplicate_id)) {
+                        arr.push(serde_json::json!(duplicate_id));
+                    }
+                }
+
+                let scopes = obj
+                    .entry("deduped_scopes".to_string())
+                    .or_insert_with(|| serde_json::json!([]));
+                if let Some(arr) = scopes.as_array_mut() {
+                    if !duplicate_scope.is_empty() && !arr.iter().any(|v| v.as_str() == Some(&duplicate_scope)) {
+                        arr.push(serde_json::json!(duplicate_scope));
+                    }
+                }
+
+                let owners = obj
+                    .entry("deduped_owner_node_ids".to_string())
+                    .or_insert_with(|| serde_json::json!([]));
+                if let Some(arr) = owners.as_array_mut() {
+                    if !duplicate_owner.is_empty() && !arr.iter().any(|v| v.as_str() == Some(&duplicate_owner)) {
+                        arr.push(serde_json::json!(duplicate_owner));
+                    }
+                }
+            }
+        } else {
+            let idx = result.len();
+            index_by_key.insert(key.clone(), idx);
+            let mut cond = cond;
+            if let Some(obj) = cond.as_object_mut() {
+                obj.insert("condition_key".to_string(), serde_json::json!(key));
+            }
+            result.push(cond);
+        }
+    }
+
+    result
+}
+
+/// 沿 Contains 入边查找组件祖先，返回从近到远的祖先组件
+fn component_ancestor_chain(graph: &GraphDB, component_id: &str) -> Vec<(String, usize)> {
+    let mut ancestors = Vec::new();
+    let mut current = component_id.to_string();
+    let mut seen = std::collections::HashSet::new();
+    let mut distance = 0usize;
+
+    while seen.insert(current.clone()) {
+        let Some((_outgoing, incoming)) = graph.get_node_edges(&current) else {
+            break;
+        };
+        let parent = incoming
+            .iter()
+            .find(|(source, edge)| {
+                matches!(edge.edge_type, crate::graph::EdgeType::Contains)
+                    && matches!(
+                        source.node_type,
+                        crate::graph::NodeType::Component | crate::graph::NodeType::Page
+                    )
+            })
+            .map(|(source, _)| (*source).clone());
+
+        let Some(parent) = parent else {
+            break;
+        };
+        if parent.node_type == crate::graph::NodeType::Page {
+            break;
+        }
+
+        distance += 1;
+        ancestors.push((parent.id.clone(), distance));
+        current = parent.id;
+    }
+
+    ancestors
+}
+
+/// 从条件引用中抽取 `modelX.totalRowCount__` 的模型名
+fn total_row_count_models(cond_obj: &serde_json::Value) -> Vec<String> {
+    let mut models = Vec::new();
+    if let Some(refs) = cond_obj.get("referenced_symbols").and_then(|v| v.as_array()) {
+        for r in refs.iter().filter_map(|v| v.as_str()) {
+            if let Some(rest) = r.strip_prefix("model:") {
+                if let Some(model) = rest.strip_suffix(".totalRowCount__") {
+                    models.push(model.to_string());
+                }
+            }
+        }
+    }
+
+    let raw_expr = cond_obj.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
+    if models.is_empty() && raw_expr.contains("totalRowCount__") {
+        for token in raw_expr.split(|c: char| {
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    '>' | '<' | '=' | '!' | '(' | ')' | '+' | '-' | '*' | '/' | ',' | '\'' | '"'
+                )
+        }) {
+            if let Some(model) = token.strip_suffix(".totalRowCount__") {
+                if !model.is_empty() {
+                    models.push(model.to_string());
+                }
+            }
+        }
+    }
+
+    models.sort();
+    models.dedup();
+    models
+}
+
+/// 收集组件自身表达式所在 JSON path，用于通过 JSON 层级推断祖先容器
+fn component_json_paths(graph: &GraphDB, component_id: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Some((outgoing, incoming)) = graph.get_node_edges(component_id) {
+        for (source, edge) in &incoming {
+            if matches!(source.node_type, crate::graph::NodeType::Condition)
+                && matches!(edge.edge_type, crate::graph::EdgeType::DependsOn)
+            {
+                if let Some(path) = source
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("json_path"))
+                    .and_then(|v| v.as_str())
+                {
+                    paths.push(path.to_string());
+                }
+            }
+        }
+        for (_target, edge) in &outgoing {
+            if let Some(path) = edge
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("json_path"))
+                .and_then(|v| v.as_str())
+            {
+                paths.push(path.to_string());
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn condition_component_json_path(cond_obj: &serde_json::Value) -> Option<String> {
+    let json_path = cond_obj.get("json_path").and_then(|v| v.as_str())?;
+    json_path.rsplit_once('.').map(|(prefix, _)| prefix.to_string())
+}
+
+fn is_ancestor_json_path(ancestor_component_path: &str, target_json_path: &str) -> bool {
+    target_json_path.starts_with(&format!("{}.components[", ancestor_component_path))
+}
+
+/// 低代码组件图当前只保证 page -> component Contains；嵌套父子关系用 json_path 前缀补足
+fn collect_inherited_conditions_by_json_path(
+    graph: &GraphDB,
+    page_path: &str,
+    target_paths: &[String],
+    seen_conditions: &mut std::collections::HashSet<String>,
+) -> Vec<serde_json::Value> {
+    let mut inherited = Vec::new();
+    for (_id, idx) in &graph.node_indices {
+        let Some(node) = graph.graph.node_weight(*idx) else {
+            continue;
+        };
+        if !matches!(node.node_type, crate::graph::NodeType::Condition) || node.path != page_path {
+            continue;
+        }
+        let cond_obj = build_cond_obj(node);
+        if classify_condition(&cond_obj) != "blocking" {
+            continue;
+        }
+        let Some(component_path) = condition_component_json_path(&cond_obj) else {
+            continue;
+        };
+        if !target_paths
+            .iter()
+            .any(|target_path| is_ancestor_json_path(&component_path, target_path))
+        {
+            continue;
+        }
+        if !seen_conditions.insert(node.id.clone()) {
+            continue;
+        }
+        let inherited_from = condition_owner_node_id(&cond_obj);
+        inherited.push(annotate_condition_scope(
+            cond_obj,
+            "inherited",
+            inherited_from.as_deref(),
+            None,
+            None,
+        ));
+    }
+    inherited
+}
+
+/// 对 `model.totalRowCount__` 门控展开当前页面模型 filter
+fn expand_total_row_count_gates(
+    graph: &GraphDB,
+    blocking_conditions: &[serde_json::Value],
+    page_path: &str,
+    seen_conditions: &mut std::collections::HashSet<String>,
+) -> Vec<serde_json::Value> {
+    let mut expanded = Vec::new();
+    for blocking in blocking_conditions {
+        let from_condition = blocking
+            .get("condition_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        for model in total_row_count_models(blocking) {
+            let model_id = format!("model:{}", model);
+            let conds = collect_conditions_for_node(graph, &model_id, page_path, seen_conditions);
+            for cond_obj in conds {
+                let source_file = cond_obj.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
+                if source_file != page_path {
+                    continue;
+                }
+                if cond_obj.get("owner_type").and_then(|v| v.as_str()) != Some("ModelSource") {
+                    continue;
+                }
+                if classify_condition(&cond_obj) != "data_empty" {
+                    continue;
+                }
+                expanded.push(annotate_condition_scope(
+                    cond_obj,
+                    "expanded_from_total_row_count",
+                    Some(&model_id),
+                    None,
+                    Some(from_condition),
+                ));
+            }
+        }
+    }
+    expanded
+}
+
 /// 辅助：分类条件
 fn classify_condition(cond_obj: &serde_json::Value) -> &'static str {
     let condition_type = cond_obj.get("condition_type").and_then(|v| v.as_str()).unwrap_or("unknown");
@@ -737,8 +1099,34 @@ pub fn build_explain_condition_output(
     for node_id in &target_node_ids {
         let conds = collect_conditions_for_node(graph, node_id, &page_path, &mut seen_conditions);
         for cond_obj in conds {
-            let source_file = cond_obj.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
+            let source_file = cond_obj
+                .get("source_file")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let cond_obj = annotate_condition_scope(cond_obj, "direct", None, None, None);
             if source_file == page_path {
+                let is_model_filter_dependency = cond_obj
+                    .get("owner_type")
+                    .and_then(|v| v.as_str())
+                    == Some("ModelSource")
+                    && !condition_owned_by_node(&cond_obj, node_id);
+                if is_model_filter_dependency {
+                    let mut ctx = cond_obj;
+                    if let Some(obj) = ctx.as_object_mut() {
+                        obj.insert(
+                            "condition_scope".to_string(),
+                            serde_json::json!("referenced_by_model_filter"),
+                        );
+                        obj.insert(
+                            "note".to_string(),
+                            serde_json::json!("该模型过滤条件引用目标组件，但不是目标组件自身或祖先显示条件"),
+                        );
+                    }
+                    supporting_context.push(ctx);
+                    continue;
+                }
+
                 match classify_condition(&cond_obj) {
                     "blocking" => blocking_conditions.push(cond_obj),
                     "data_empty" => data_empty_gates.push(cond_obj),
@@ -750,6 +1138,53 @@ pub fn build_explain_condition_output(
                     obj.insert("note".to_string(), serde_json::json!("非当前页面必要条件"));
                 }
                 related_context.push(rc);
+            }
+        }
+    }
+
+    if target_node.node_type == crate::graph::NodeType::Component {
+        for (ancestor_id, distance) in component_ancestor_chain(graph, &target_node.id) {
+            let conds = collect_conditions_for_node(graph, &ancestor_id, &page_path, &mut seen_conditions);
+            for cond_obj in conds {
+                let source_file = cond_obj
+                    .get("source_file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let cond_obj = annotate_condition_scope(
+                    cond_obj,
+                    "inherited",
+                    Some(&ancestor_id),
+                    Some(distance),
+                    None,
+                );
+                if source_file == page_path {
+                    match classify_condition(&cond_obj) {
+                        "blocking" => blocking_conditions.push(cond_obj),
+                        "data_empty" => data_empty_gates.push(cond_obj),
+                        _ => supporting_context.push(cond_obj),
+                    }
+                } else {
+                    let mut rc = cond_obj.clone();
+                    if let Some(obj) = rc.as_object_mut() {
+                        obj.insert("note".to_string(), serde_json::json!("非当前页面必要条件"));
+                    }
+                    related_context.push(rc);
+                }
+            }
+        }
+
+        let target_paths = component_json_paths(graph, &target_node.id);
+        for cond_obj in collect_inherited_conditions_by_json_path(
+            graph,
+            &page_path,
+            &target_paths,
+            &mut seen_conditions,
+        ) {
+            match classify_condition(&cond_obj) {
+                "blocking" => blocking_conditions.push(cond_obj),
+                "data_empty" => data_empty_gates.push(cond_obj),
+                _ => supporting_context.push(cond_obj),
             }
         }
     }
@@ -789,6 +1224,17 @@ pub fn build_explain_condition_output(
             related_context = remaining_related;
         }
     }
+
+    let expanded_gates = expand_total_row_count_gates(
+        graph,
+        &blocking_conditions,
+        &page_path,
+        &mut seen_conditions,
+    );
+    data_empty_gates.extend(expanded_gates);
+    blocking_conditions = dedupe_conditions(blocking_conditions);
+    data_empty_gates = dedupe_conditions(data_empty_gates);
+    supporting_context = dedupe_conditions(supporting_context);
 
     let mut primary_path: Vec<serde_json::Value> = Vec::new();
     if target_node.id.starts_with("field:") || target_node.id.starts_with("comp:") {

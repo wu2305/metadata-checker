@@ -298,6 +298,24 @@
                 "type": "panel",
                 "visibleCondition": "hidden_customer_id.value != ''",
                 "components": []
+            },
+            {
+                "id": "panel_total_gate",
+                "type": "panel",
+                "visibleCondition": "model1.totalRowCount__ > 0",
+                "components": [
+                    {
+                        "id": "text_total_child",
+                        "type": "text",
+                        "value": "${model1.name}"
+                    },
+                    {
+                        "id": "text_total_child_duplicate",
+                        "type": "text",
+                        "visibleCondition": "model1.totalRowCount__ > 0",
+                        "value": "${model1.name}"
+                    }
+                ]
             }
         ]
     }

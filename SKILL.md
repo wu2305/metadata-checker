@@ -209,6 +209,7 @@ All machine outputs (`--non-human`, default) follow a unified top-level structur
 - 业务回答优先读取 `result.summary`。
 - 证据核查读取 `result.details.primary_path` / `result.summary.key_primary_paths` / `result.evidence`。
 - `related_context` 默认不是必要条件，只能作为相关上下文表述。
+- M31 显示/隐藏问题需区分 `condition_scope`: `direct` 是自身条件，`inherited` 是祖先容器必要条件，`expanded_from_total_row_count` 是当前页面模型 filter 展开，`referenced_by_model_filter` 不是目标显示条件。
 - `metadata_runtime_status` / `metadata_runtime_reload` 不能回答业务来源链路。
 
 ## Important Constraints
