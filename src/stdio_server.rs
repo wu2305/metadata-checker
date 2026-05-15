@@ -84,7 +84,6 @@ pub struct StdioResponse {
     pub result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<StdioError>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<crate::runtime::RuntimeTiming>,
@@ -605,4 +604,43 @@ fn write_response(stdout: &mut io::StdoutLock, resp: &StdioResponse) -> Result<(
     writeln!(stdout, "{}", json)?;
     stdout.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_query_failed_error_response_keeps_fixed_envelope() {
+        let resp = error_response(
+            "req-query-failed".to_string(),
+            "QUERY_FAILED",
+            "Query failed: synthetic failure",
+            vec![],
+        );
+
+        let value = serde_json::to_value(resp).expect("stdio response must serialize");
+        assert_eq!(value["request_id"].as_str(), Some("req-query-failed"));
+        assert_eq!(value["ok"].as_bool(), Some(false));
+        assert_eq!(value["error"]["code"].as_str(), Some("QUERY_FAILED"));
+        assert_eq!(
+            value["error"]["message"].as_str(),
+            Some("Query failed: synthetic failure")
+        );
+        assert!(
+            value
+                .as_object()
+                .expect("response must be object")
+                .contains_key("diagnostics"),
+            "diagnostics must be present even when empty"
+        );
+        assert!(value["diagnostics"]
+            .as_array()
+            .expect("diagnostics must be array")
+            .is_empty());
+        assert!(
+            value["timing"].is_object(),
+            "timing must be present on error response"
+        );
+    }
 }

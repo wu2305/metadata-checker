@@ -23,6 +23,51 @@ fn stdio_error_message(resp: &serde_json::Value) -> &str {
     resp["error"]["message"].as_str().unwrap_or("")
 }
 
+/// 断言 stdio 固定响应 envelope
+fn assert_stdio_envelope(resp: &serde_json::Value, ok: bool) {
+    let obj = resp
+        .as_object()
+        .expect("stdio response must be JSON object");
+    assert!(
+        obj.contains_key("request_id"),
+        "stdio response must contain request_id"
+    );
+    assert!(obj.contains_key("ok"), "stdio response must contain ok");
+    assert!(
+        obj.contains_key("diagnostics"),
+        "stdio response must contain diagnostics even when empty"
+    );
+    assert!(
+        obj.contains_key("timing"),
+        "stdio response must contain timing"
+    );
+    assert_eq!(resp["ok"].as_bool(), Some(ok), "stdio ok flag must match");
+    assert!(
+        resp["diagnostics"].is_array(),
+        "stdio diagnostics must be an array"
+    );
+    assert!(resp["timing"].is_object(), "stdio timing must be an object");
+    if ok {
+        assert!(
+            obj.contains_key("result"),
+            "success response must contain result"
+        );
+    } else {
+        assert!(
+            obj.contains_key("error"),
+            "error response must contain error"
+        );
+        assert!(
+            resp["error"]["code"].is_string(),
+            "error response must contain error.code"
+        );
+        assert!(
+            resp["error"]["message"].is_string(),
+            "error response must contain error.message"
+        );
+    }
+}
+
 /// 判断 query_page_logic 是否读取到了原始 .spg 文件中的索引式 action json_path
 fn has_raw_index_action_json_path(result: &serde_json::Value) -> bool {
     let Some(action_flows) = result["details"]["action_flows"]["items"].as_array() else {
@@ -156,6 +201,7 @@ fn test_stdio_server_invalid_json() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, false);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(false),
@@ -210,6 +256,7 @@ fn test_stdio_server_unknown_command() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, false);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(false),
@@ -469,6 +516,7 @@ fn test_stdio_server_status() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(true),
