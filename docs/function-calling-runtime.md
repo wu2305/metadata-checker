@@ -37,10 +37,11 @@ stdin 每行一个 JSON 对象：
 | 字段 | 类型 | 必需 | 说明 |
 |---|---|---|---|
 | `request_id` | string | 是 | 请求标识，响应原样返回 |
-| `command` | string | 是 | `explain_condition` / `status` / `reload` |
-| `target` | string | explain_condition 必需 | 查询目标 |
+| `command` | string | 是 | `explain_condition` / `explain` / `query_model` / `query_page_logic` / `context` / `status` / `reload` |
+| `target` | string | 查询类命令必需 | 查询目标 |
 | `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal` |
-| `human` | bool | 否 | 是否生成 human_summary，默认 `false` |
+| `human` | bool | 否 | 是否生成 human_summary，默认 `false`（目前仅 `explain_condition` 支持） |
+| `depth` | usize | 否 | `context` 命令专用，默认 `1` |
 | `check_reload` | bool | 否 | 查询前检测 graphdb 变更，默认 `false` |
 
 ## 读取 JSONL 响应
@@ -138,8 +139,9 @@ runtime.close()
 
 适用：同一项目内多个相关条件解释问题、AI 连续追问字段来源/显示条件/数据为空原因的场景。
 
-当前 stdio server 仅支持 `explain_condition` / `status` / `reload`。
-`--context` / `--query-model` / `--query-page-logic` 仍需通过 CLI 执行，不能把这些命令包装成 stdio 请求。
+M27 起 stdio server 支持全部核心查询命令：
+`explain_condition`、`explain`、`query_model`、`query_page_logic`、`context`、`status`、`reload`。
+所有项目级查询均可通过 stdio 执行，享受热 graph 复用。
 
 ### 模式 3：graphdb 变更后刷新
 

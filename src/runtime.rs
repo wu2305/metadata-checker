@@ -14,6 +14,8 @@ pub struct GraphRuntime {
     pub graph: GraphDB,
     /// graphdb 文件路径
     pub graph_db_path: PathBuf,
+    /// 项目目录路径（从 graph_db_path 推导）
+    pub project_dir: Option<PathBuf>,
     /// 加载时间戳
     pub loaded_at: SystemTime,
     /// graphdb 文件 mtime（用于后续增量检测）
@@ -155,9 +157,12 @@ impl GraphRuntime {
             content_prefix_hash: prefix_hash,
         };
 
+        let project_dir = path.parent().map(|p| p.to_path_buf());
+
         Ok(GraphRuntime {
             graph,
             graph_db_path: path,
+            project_dir,
             loaded_at: SystemTime::now(),
             graph_file_mtime,
             graph_file_size,
@@ -270,6 +275,7 @@ impl GraphRuntime {
                 self.load_count = new_runtime.load_count;
                 self.graph_load_ms = new_runtime.graph_load_ms;
                 self.graph_fingerprint = new_runtime.graph_fingerprint;
+                self.project_dir = new_runtime.project_dir;
                 self.reload_count += 1;
                 self.last_reload_error = None;
                 Ok(())

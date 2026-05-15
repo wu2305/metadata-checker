@@ -4,6 +4,49 @@ use std::io::{self, BufRead, Write};
 
 use crate::runtime::{GraphRuntime, RuntimeQueryCommand, RuntimeQueryRequest};
 
+/// Stdio 支持的命令枚举
+///
+/// 将字符串命令解析为类型安全枚举，避免大 match 中散落字符串字面量。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StdioCommand {
+    ExplainCondition,
+    Explain,
+    QueryModel,
+    QueryPageLogic,
+    Context,
+    Status,
+    Reload,
+    Unknown(String),
+}
+
+impl StdioCommand {
+    fn parse(s: &str) -> Self {
+        match s {
+            "explain_condition" => StdioCommand::ExplainCondition,
+            "explain" => StdioCommand::Explain,
+            "query_model" => StdioCommand::QueryModel,
+            "query_page_logic" => StdioCommand::QueryPageLogic,
+            "context" => StdioCommand::Context,
+            "status" => StdioCommand::Status,
+            "reload" => StdioCommand::Reload,
+            other => StdioCommand::Unknown(other.to_string()),
+        }
+    }
+
+    fn command_name(&self) -> String {
+        match self {
+            StdioCommand::ExplainCondition => "explain_condition".to_string(),
+            StdioCommand::Explain => "explain".to_string(),
+            StdioCommand::QueryModel => "query_model".to_string(),
+            StdioCommand::QueryPageLogic => "query_page_logic".to_string(),
+            StdioCommand::Context => "context".to_string(),
+            StdioCommand::Status => "status".to_string(),
+            StdioCommand::Reload => "reload".to_string(),
+            StdioCommand::Unknown(s) => s.clone(),
+        }
+    }
+}
+
 /// Stdio JSONL 请求
 ///
 /// 每行一个 JSON 对象，stdin 逐行读取
@@ -102,8 +145,10 @@ pub fn run_stdio_server(graph_db_path: &std::path::Path) -> Result<()> {
 fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioResponse {
     let mut diagnostics = Vec::new();
 
+    let command = StdioCommand::parse(&request.command);
+
     // 处理 status 命令（不需要 target）
-    if request.command == "status" {
+    if command == StdioCommand::Status {
         let status = runtime.status();
         return StdioResponse {
             request_id: request.request_id.clone(),
@@ -116,7 +161,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
     }
 
     // 处理 reload 命令（不需要 target）
-    if request.command == "reload" {
+    if command == StdioCommand::Reload {
         match runtime.reload() {
             Ok(()) => {
                 diagnostics.push("GRAPH_RELOADED".to_string());
@@ -160,9 +205,12 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
 
     let budget = request.budget.clone().unwrap_or_else(|| "normal".to_string());
     let human = request.human.unwrap_or(false);
+    if human && request.command.as_str() != "explain_condition" {
+        diagnostics.push("HUMAN_MODE_NOT_SUPPORTED".to_string());
+    }
 
-    match request.command.as_str() {
-        "explain_condition" => {
+    match command {
+        StdioCommand::ExplainCondition => {
             if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
                 return StdioResponse {
                     request_id: request.request_id.clone(),
@@ -204,7 +252,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
             }
         }
-        "query_model" => {
+        StdioCommand::QueryModel => {
             if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
                 return StdioResponse {
                     request_id: request.request_id.clone(),
@@ -250,7 +298,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
             }
         }
-        "context" => {
+        StdioCommand::Context => {
             if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
                 return StdioResponse {
                     request_id: request.request_id.clone(),
@@ -298,7 +346,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
             }
         }
-        "explain" => {
+        StdioCommand::Explain => {
             if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
                 return StdioResponse {
                     request_id: request.request_id.clone(),
@@ -343,7 +391,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
             }
         }
-        "query_page_logic" => {
+        StdioCommand::QueryPageLogic => {
             if request.target.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
                 return StdioResponse {
                     request_id: request.request_id.clone(),
@@ -355,10 +403,11 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 };
             }
             let start = std::time::Instant::now();
+            let project_dir = runtime.project_dir.as_deref();
             match crate::query::build_query_page_logic_output(
                 &runtime.graph,
                 &request.target.clone().unwrap_or_default(),
-                None,
+                project_dir,
                 &budget,
             ) {
                 Ok(result) => {
@@ -390,7 +439,18 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 }
             }
         }
-        other => {
+        StdioCommand::Status | StdioCommand::Reload => {
+            // Status 和 Reload 已在 match 前处理，此处不应到达
+            StdioResponse {
+                request_id: request.request_id.clone(),
+                ok: false,
+                result: None,
+                error: Some(format!("Internal error: {} should have been handled earlier", command.command_name())),
+                diagnostics,
+                timing: None,
+            }
+        }
+        StdioCommand::Unknown(other) => {
             StdioResponse {
                 request_id: request.request_id.clone(),
                 ok: false,

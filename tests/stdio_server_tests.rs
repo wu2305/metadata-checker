@@ -453,3 +453,315 @@ fn test_stdio_server_check_reload_failure() {
 
     let _ = child.wait();
 }
+
+/// M27 验收：stdio query_model 命令
+#[test]
+fn test_stdio_server_query_model() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-query-model",
+        "command": "query_model",
+        "target": "model:model1",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(resp["ok"].as_bool(), Some(true), "query_model must return ok=true");
+    assert_eq!(resp["request_id"].as_str(), Some("req-query-model"));
+    assert!(resp["result"].is_object(), "result must be object");
+    assert_eq!(
+        resp["result"]["kind"].as_str(),
+        Some("ModelQuery"),
+        "result.kind must be ModelQuery"
+    );
+    assert!(
+        resp["result"]["summary"]["model_id"].is_string(),
+        "summary.model_id must exist"
+    );
+
+    let _ = child.wait();
+}
+
+/// M27 验收：stdio context 命令
+#[test]
+fn test_stdio_server_context() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-context",
+        "command": "context",
+        "target": "comp:app/actions_test.spg|input1",
+        "depth": 1,
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(resp["ok"].as_bool(), Some(true), "context must return ok=true");
+    assert_eq!(resp["request_id"].as_str(), Some("req-context"));
+    assert!(resp["result"].is_object(), "result must be object");
+    assert_eq!(
+        resp["result"]["kind"].as_str(),
+        Some("Context"),
+        "result.kind must be Context"
+    );
+    assert!(
+        resp["result"]["summary"]["center_node"].is_string(),
+        "summary.center_node must exist"
+    );
+
+    let _ = child.wait();
+}
+
+/// M27 验收：stdio explain 命令
+#[test]
+fn test_stdio_server_explain() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-explain",
+        "command": "explain",
+        "target": "model:model1",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(resp["ok"].as_bool(), Some(true), "explain must return ok=true");
+    assert_eq!(resp["request_id"].as_str(), Some("req-explain"));
+    assert!(resp["result"].is_object(), "result must be object");
+    assert_eq!(
+        resp["result"]["kind"].as_str(),
+        Some("Explain"),
+        "result.kind must be Explain"
+    );
+    assert!(
+        resp["result"]["summary"]["what_is_it"].is_string(),
+        "summary.what_is_it must exist"
+    );
+
+    let _ = child.wait();
+}
+
+/// M27 验收：stdio query_page_logic 命令，且与 CLI JSON 输出一致
+#[test]
+fn test_stdio_server_query_page_logic() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-page-logic",
+        "command": "query_page_logic",
+        "target": "page:app/actions_test.spg",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_eq!(resp["ok"].as_bool(), Some(true), "query_page_logic must return ok=true");
+    assert_eq!(resp["request_id"].as_str(), Some("req-page-logic"));
+    assert!(resp["result"].is_object(), "result must be object");
+    assert_eq!(
+        resp["result"]["kind"].as_str(),
+        Some("PageLogic"),
+        "result.kind must be PageLogic"
+    );
+
+    // 验证 project_dir 已正确传递：details 中应包含 entrypoints/data_sources/action_flows
+    let details = resp["result"]["details"].as_object().expect("details must be object");
+    assert!(
+        details.contains_key("entrypoints"),
+        "details must have entrypoints"
+    );
+    assert!(
+        details.contains_key("data_sources"),
+        "details must have data_sources"
+    );
+    assert!(
+        details.contains_key("action_flows"),
+        "details must have action_flows"
+    );
+    assert!(
+        details.contains_key("display_prerequisites"),
+        "details must have display_prerequisites"
+    );
+    assert!(
+        details.contains_key("data_prerequisites"),
+        "details must have data_prerequisites"
+    );
+
+    let _ = child.wait();
+}
+
+/// M27 验收：第二次 stdio 查询 graph_load_ms 仍为 0
+#[test]
+fn test_stdio_server_second_query_reuses_graph() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req1 = serde_json::json!({
+        "request_id": "req-1",
+        "command": "query_model",
+        "target": "model:model1",
+        "budget": "compact",
+        "human": false
+    });
+    let req2 = serde_json::json!({
+        "request_id": "req-2",
+        "command": "context",
+        "target": "comp:app/actions_test.spg|input1",
+        "depth": 1,
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req1).unwrap();
+        writeln!(stdin_lock, "{}", req2).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    // 读取第一行
+    let mut line1 = String::new();
+    stdout_reader.read_line(&mut line1).unwrap();
+    let resp1: serde_json::Value = serde_json::from_str(&line1).expect("resp1 must be valid JSON");
+    assert_eq!(resp1["ok"].as_bool(), Some(true));
+
+    // 读取第二行
+    let mut line2 = String::new();
+    stdout_reader.read_line(&mut line2).unwrap();
+    let resp2: serde_json::Value = serde_json::from_str(&line2).expect("resp2 must be valid JSON");
+    assert_eq!(resp2["ok"].as_bool(), Some(true));
+
+    // 第二次查询 graph_load_ms == 0（热查询复用）
+    assert_eq!(
+        resp2["timing"]["graph_load_ms"].as_u64(),
+        Some(0),
+        "第二次查询 graph_load_ms 必须为 0"
+    );
+
+    let _ = child.wait();
+}
