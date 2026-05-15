@@ -205,6 +205,7 @@ All machine outputs (`--non-human`, default) follow a unified top-level structur
 
 **Function Calling anti-drift 规则**：
 - `timing` 只能用于性能判断，不能作为业务证据。
+- `timing.output_size_bytes` 用于容量治理，表示最终 stdout JSON 行字节数。
 - 业务回答优先读取 `result.summary`。
 - 证据核查读取 `result.details.primary_path` / `result.summary.key_primary_paths` / `result.evidence`。
 - `related_context` 默认不是必要条件，只能作为相关上下文表述。

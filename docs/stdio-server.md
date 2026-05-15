@@ -73,8 +73,9 @@ metadata-checker --serve-stdio --project-dir /path/to/project
   "timing": {
     "graph_load_ms": 0,
     "query_compute_ms": 5,
-    "serialize_ms": 0,
-    "total_ms": 5
+    "serialize_ms": 1,
+    "total_ms": 6,
+    "output_size_bytes": 76000
   }
 }
 ```
@@ -85,9 +86,15 @@ metadata-checker --serve-stdio --project-dir /path/to/project
 {
   "request_id": "",
   "ok": false,
-  "error": "JSON parse error: ...",
+  "error": {"code": "INVALID_JSON", "message": "JSON parse error: ..."},
   "diagnostics": [],
-  "timing": null
+  "timing": {
+    "graph_load_ms": 0,
+    "query_compute_ms": 0,
+    "serialize_ms": 0,
+    "total_ms": 0,
+    "output_size_bytes": 180
+  }
 }
 ```
 
@@ -98,9 +105,9 @@ metadata-checker --serve-stdio --project-dir /path/to/project
 | `request_id` | string | 原始请求标识 |
 | `ok` | bool | 是否成功 |
 | `result` | object / null | 查询结果 |
-| `error` | string / null | 错误描述 |
+| `error` | object / null | 结构化错误，包含 `code` 和 `message` |
 | `diagnostics` | string[] | 诊断信息 |
-| `timing` | object / null | 阶段耗时 |
+| `timing` | object | 阶段耗时与 `output_size_bytes`，其中 `output_size_bytes` 是最终 stdout JSON 行字节数 |
 
 ## stdout / stderr 边界
 

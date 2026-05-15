@@ -47,6 +47,10 @@ fn assert_stdio_envelope(resp: &serde_json::Value, ok: bool) {
         "stdio diagnostics must be an array"
     );
     assert!(resp["timing"].is_object(), "stdio timing must be an object");
+    assert!(
+        resp["timing"]["output_size_bytes"].as_u64().unwrap_or(0) > 0,
+        "stdio timing.output_size_bytes must be recorded"
+    );
     if ok {
         assert!(
             obj.contains_key("result"),
@@ -66,6 +70,15 @@ fn assert_stdio_envelope(resp: &serde_json::Value, ok: bool) {
             "error response must contain error.message"
         );
     }
+}
+
+/// 断言 timing.output_size_bytes 与实际 stdout 行长度一致
+fn assert_output_size_matches_line(resp: &serde_json::Value, line: &str) {
+    assert_eq!(
+        resp["timing"]["output_size_bytes"].as_u64(),
+        Some(line.trim_end_matches(&['\r', '\n'][..]).len() as u64),
+        "timing.output_size_bytes must match serialized stdout response size"
+    );
 }
 
 /// 判断 query_page_logic 是否读取到了原始 .spg 文件中的索引式 action json_path
@@ -202,6 +215,7 @@ fn test_stdio_server_invalid_json() {
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
     assert_stdio_envelope(&resp, false);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(false),
@@ -257,6 +271,7 @@ fn test_stdio_server_unknown_command() {
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
     assert_stdio_envelope(&resp, false);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(false),
@@ -310,6 +325,8 @@ fn test_stdio_server_missing_target() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, false);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(false),
@@ -365,6 +382,8 @@ fn test_stdio_server_invalid_budget() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, false);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(false),
@@ -416,6 +435,8 @@ fn test_stdio_server_invalid_target() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, false);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(false),
@@ -468,6 +489,8 @@ fn test_stdio_server_invalid_depth() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, false);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(false),
@@ -517,6 +540,7 @@ fn test_stdio_server_status() {
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
     assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(true),
@@ -585,6 +609,8 @@ fn test_stdio_server_reload_success() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(true),
@@ -653,6 +679,8 @@ fn test_stdio_server_reload_failure() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, false);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(false),
@@ -858,6 +886,8 @@ fn test_stdio_server_query_model() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(true),
@@ -919,6 +949,8 @@ fn test_stdio_server_context() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(true),
@@ -979,6 +1011,8 @@ fn test_stdio_server_explain() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(true),
@@ -1039,6 +1073,8 @@ fn test_stdio_server_query_page_logic() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(true),
@@ -1380,6 +1416,8 @@ fn test_stdio_server_human_not_supported_diagnostic() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(true),
@@ -1455,6 +1493,8 @@ fn test_stdio_server_external_graphdb_with_project_dir() {
     let mut line = String::new();
     stdout_reader.read_line(&mut line).unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
     assert_eq!(
         resp["ok"].as_bool(),
         Some(true),

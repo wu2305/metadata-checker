@@ -359,14 +359,16 @@ pub struct AiOutput {
 成功响应：
 
 ```json
-{"request_id": "r1", "ok": true, "result": {}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 1, "serialize_ms": 0, "total_ms": 1}}
+{"request_id": "r1", "ok": true, "result": {}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 1, "serialize_ms": 0, "total_ms": 1, "output_size_bytes": 240}}
 ```
 
 错误响应：
 
 ```json
-{"request_id": "r1", "ok": false, "error": {"code": "MISSING_TARGET", "message": "Missing target for explain_condition"}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 0, "serialize_ms": 0, "total_ms": 0}}
+{"request_id": "r1", "ok": false, "error": {"code": "MISSING_TARGET", "message": "Missing target for explain_condition"}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 0, "serialize_ms": 0, "total_ms": 0, "output_size_bytes": 210}}
 ```
+
+`timing.output_size_bytes` 为最终 stdout JSON 行的字节数，不包含换行符。
 
 错误码：
 

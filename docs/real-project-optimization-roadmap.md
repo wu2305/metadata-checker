@@ -1254,28 +1254,28 @@ M27 只扩展 stdio command surface，不改变各查询本身的业务语义和
 
 ### 工作清单
 
-- 所有 stdio 查询记录统一 timing：
+- [x] 所有 stdio 查询记录统一 timing：
   - `graph_load_ms`
   - `query_compute_ms`
   - `serialize_ms`
   - `total_ms`
   - `output_size_bytes`
-- 输出预算治理：
+- [x] 输出预算治理：
   - 默认 compact 或 normal，禁止默认 full。
   - full 必须显式指定。
   - 超预算返回 `OUTPUT_TRUNCATED` diagnostics。
   - 截断不能删除 primary path。
-- 建立真实项目性能基线：
+- [x] 建立真实项目性能基线：
   - `explain_condition input3`
   - `context input3 depth=2`
   - `query_model fact_qwSidebar`
   - `query_page_logic 合同协议.spg`
   - 对比 CLI 冷启动与 stdio 第二次请求。
-- 热点分析：
+- [x] 热点分析：
   - stdio 第二次查询不得进入 `GraphDB::load_from_db`。
   - 若慢，优先检查 pathfinder、evidence 组装、JSON serialize、大数组排序和 clone。
   - 可选使用 `samply` 对真实项目第二次查询采样。
-- 回归门槛：
+- [x] 回归门槛：
   - 第二次 stdio 查询 `graph_load_ms == 0`。
   - 小查询 `total_ms < 50ms`。
   - 中等查询 `total_ms < 300ms`。

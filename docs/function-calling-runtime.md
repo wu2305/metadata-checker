@@ -50,12 +50,12 @@ stdout 每行一个 JSON 对象：
 
 成功响应：
 ```json
-{"request_id": "r1", "ok": true, "result": {...}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 5, "serialize_ms": 0, "total_ms": 5}}
+{"request_id": "r1", "ok": true, "result": {...}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 5, "serialize_ms": 1, "total_ms": 6, "output_size_bytes": 76000}}
 ```
 
 错误响应：
 ```json
-{"request_id": "r1", "ok": false, "error": {"code": "UNKNOWN_COMMAND", "message": "Unknown command: magic"}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 0, "serialize_ms": 0, "total_ms": 0}}
+{"request_id": "r1", "ok": false, "error": {"code": "UNKNOWN_COMMAND", "message": "Unknown command: magic"}, "diagnostics": [], "timing": {"graph_load_ms": 0, "query_compute_ms": 0, "serialize_ms": 0, "total_ms": 0, "output_size_bytes": 190}}
 ```
 
 错误响应固定使用 `error.code` / `error.message`，function calling wrapper 不应解析错误字符串。
@@ -96,6 +96,7 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 - “模型读写全貌 / 谁写了这个表” → `metadata_query_model`。
 - “页面整体逻辑 / 入口 / 写入 / 跳转 / 可见性” → `metadata_query_page_logic`。
 - `metadata_runtime_status` 和 `metadata_runtime_reload` 只能用于运行时健康与刷新判断，不能作为业务结论证据。
+- 每个 stdio 响应的 `timing.output_size_bytes` 记录最终 stdout JSON 行的字节数，用于容量治理和性能基线。
 
 Anti-drift 约束：
 

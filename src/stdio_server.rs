@@ -95,6 +95,17 @@ fn zero_timing() -> crate::runtime::RuntimeTiming {
         query_compute_ms: 0,
         serialize_ms: 0,
         total_ms: 0,
+        output_size_bytes: 0,
+    }
+}
+
+fn query_timing(query_compute_ms: u128) -> crate::runtime::RuntimeTiming {
+    crate::runtime::RuntimeTiming {
+        graph_load_ms: 0,
+        query_compute_ms,
+        serialize_ms: 0,
+        total_ms: query_compute_ms,
+        output_size_bytes: 0,
     }
 }
 
@@ -209,7 +220,7 @@ pub fn run_stdio_server(
                     format!("stdin read error: {}", e),
                     vec![],
                 );
-                write_response(&mut stdout_lock, &resp)?;
+                write_response(&mut stdout_lock, resp)?;
                 continue;
             }
         };
@@ -227,13 +238,13 @@ pub fn run_stdio_server(
                     format!("JSON parse error: {}", e),
                     vec![],
                 );
-                write_response(&mut stdout_lock, &resp)?;
+                write_response(&mut stdout_lock, resp)?;
                 continue;
             }
         };
 
         let resp = handle_request(&mut runtime, &request);
-        write_response(&mut stdout_lock, &resp)?;
+        write_response(&mut stdout_lock, resp)?;
     }
 
     eprintln!("[stdio-server] stdin closed, shutting down");
@@ -407,12 +418,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                         result: Some(result),
                         error: None,
                         diagnostics,
-                        timing: Some(crate::runtime::RuntimeTiming {
-                            graph_load_ms: 0,
-                            query_compute_ms: total_ms,
-                            serialize_ms: 0,
-                            total_ms,
-                        }),
+                        timing: Some(query_timing(total_ms)),
                     }
                 }
                 Err(e) => {
@@ -462,12 +468,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                         result: Some(result),
                         error: None,
                         diagnostics,
-                        timing: Some(crate::runtime::RuntimeTiming {
-                            graph_load_ms: 0,
-                            query_compute_ms: total_ms,
-                            serialize_ms: 0,
-                            total_ms,
-                        }),
+                        timing: Some(query_timing(total_ms)),
                     }
                 }
                 Err(e) => {
@@ -508,12 +509,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                         result: Some(result),
                         error: None,
                         diagnostics,
-                        timing: Some(crate::runtime::RuntimeTiming {
-                            graph_load_ms: 0,
-                            query_compute_ms: total_ms,
-                            serialize_ms: 0,
-                            total_ms,
-                        }),
+                        timing: Some(query_timing(total_ms)),
                     }
                 }
                 Err(e) => {
@@ -557,12 +553,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                         result: Some(result),
                         error: None,
                         diagnostics,
-                        timing: Some(crate::runtime::RuntimeTiming {
-                            graph_load_ms: 0,
-                            query_compute_ms: total_ms,
-                            serialize_ms: 0,
-                            total_ms,
-                        }),
+                        timing: Some(query_timing(total_ms)),
                     }
                 }
                 Err(e) => {
@@ -598,12 +589,41 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
 }
 
 /// 向 stdout 写入单行 JSON 响应并 flush
-fn write_response(stdout: &mut io::StdoutLock, resp: &StdioResponse) -> Result<()> {
-    let json = serde_json::to_string(resp)
+fn write_response(stdout: &mut io::StdoutLock, mut resp: StdioResponse) -> Result<()> {
+    let json = serialize_response_with_timing(&mut resp)
         .map_err(|e| anyhow::anyhow!("serialize response failed: {}", e))?;
     writeln!(stdout, "{}", json)?;
     stdout.flush()?;
     Ok(())
+}
+
+fn serialize_response_with_timing(resp: &mut StdioResponse) -> serde_json::Result<String> {
+    let serialize_start = std::time::Instant::now();
+    let mut json = serde_json::to_string(resp)?;
+
+    for _ in 0..8 {
+        let output_size_bytes = json.len() as u64;
+        let serialize_ms = serialize_start.elapsed().as_millis();
+        let mut changed = false;
+
+        if let Some(timing) = resp.timing.as_mut() {
+            let total_ms = timing.graph_load_ms + timing.query_compute_ms + serialize_ms;
+            changed = timing.output_size_bytes != output_size_bytes
+                || timing.serialize_ms != serialize_ms
+                || timing.total_ms != total_ms;
+            timing.output_size_bytes = output_size_bytes;
+            timing.serialize_ms = serialize_ms;
+            timing.total_ms = total_ms;
+        }
+
+        if !changed {
+            return Ok(json);
+        }
+
+        json = serde_json::to_string(resp)?;
+    }
+
+    Ok(json)
 }
 
 #[cfg(test)]
@@ -612,14 +632,16 @@ mod tests {
 
     #[test]
     fn test_query_failed_error_response_keeps_fixed_envelope() {
-        let resp = error_response(
+        let mut resp = error_response(
             "req-query-failed".to_string(),
             "QUERY_FAILED",
             "Query failed: synthetic failure",
             vec![],
         );
 
-        let value = serde_json::to_value(resp).expect("stdio response must serialize");
+        let json = serialize_response_with_timing(&mut resp).expect("stdio response must serialize");
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("stdio response must be valid JSON");
         assert_eq!(value["request_id"].as_str(), Some("req-query-failed"));
         assert_eq!(value["ok"].as_bool(), Some(false));
         assert_eq!(value["error"]["code"].as_str(), Some("QUERY_FAILED"));
@@ -641,6 +663,11 @@ mod tests {
         assert!(
             value["timing"].is_object(),
             "timing must be present on error response"
+        );
+        assert_eq!(
+            value["timing"]["output_size_bytes"].as_u64(),
+            Some(json.len() as u64),
+            "output_size_bytes must match serialized response size"
         );
     }
 }

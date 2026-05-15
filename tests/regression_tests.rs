@@ -4264,6 +4264,52 @@ fn test_skill_md_has_m29_function_calling_rules() {
 }
 
 #[test]
+fn test_m30_docs_define_stdio_timing_and_capacity_contract() {
+    let schema = std::fs::read_to_string("docs/schema.md").expect("schema doc must be readable");
+    let runtime_doc = std::fs::read_to_string("docs/function-calling-runtime.md")
+        .expect("function calling runtime doc must be readable");
+    let baseline =
+        std::fs::read_to_string("docs/performance-baseline.md").expect("baseline doc must be readable");
+
+    for (name, doc) in [
+        ("docs/schema.md", schema.as_str()),
+        ("docs/function-calling-runtime.md", runtime_doc.as_str()),
+        ("docs/performance-baseline.md", baseline.as_str()),
+    ] {
+        for term in [
+            "output_size_bytes",
+            "graph_load_ms",
+            "query_compute_ms",
+            "serialize_ms",
+            "total_ms",
+        ] {
+            assert!(doc.contains(term), "{} 缺少 M30 timing 字段: {}", name, term);
+        }
+    }
+
+    assert!(
+        baseline.contains("explain_condition input3")
+            && baseline.contains("context input3 depth=2")
+            && baseline.contains("query_model fact_qwSidebar")
+            && baseline.contains("query_page_logic 合同协议.spg"),
+        "performance baseline 必须列出 M30 真实项目基线查询"
+    );
+}
+
+#[test]
+fn test_skill_md_mentions_m30_output_size_capacity_rule() {
+    for skill_path in skill_md_paths_for_protocol_check() {
+        let skill_md = std::fs::read_to_string(&skill_path)
+            .unwrap_or_else(|err| panic!("{} must be readable: {}", skill_path.display(), err));
+        assert!(
+            skill_md.contains("timing.output_size_bytes") && skill_md.contains("容量治理"),
+            "{} 必须说明 timing.output_size_bytes 的容量治理用途",
+            skill_path.display()
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
 fn test_real_project_query_page_logic_input3_chain() {
     let graph_db_path = "/tmp/m19_test_xiaoshouyi.graphdb";

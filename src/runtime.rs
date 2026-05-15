@@ -70,6 +70,8 @@ pub struct RuntimeTiming {
     pub serialize_ms: u128,
     /// 总耗时
     pub total_ms: u128,
+    /// stdio 响应 JSON 字节数
+    pub output_size_bytes: u64,
 }
 
 /// GraphDB 文件指纹，用于变更检测
@@ -213,7 +215,7 @@ impl GraphRuntime {
 
         let serialize_start = Instant::now();
         // 预序列化以统计耗时，但不改变返回的 result
-        let _ = serde_json::to_vec(&result)?;
+        let output_size_bytes = serde_json::to_vec(&result)?.len() as u64;
         let serialize_ms = serialize_start.elapsed().as_millis();
 
         let total_ms = total_start.elapsed().as_millis();
@@ -230,6 +232,7 @@ impl GraphRuntime {
                 query_compute_ms,
                 serialize_ms,
                 total_ms,
+                output_size_bytes,
             },
             diagnostics,
         })
