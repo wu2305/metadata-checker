@@ -40,7 +40,8 @@ fn main() -> Result<()> {
             Some(p) => p,
             None => anyhow::bail!("--serve-stdio requires --graph-db-path or --project-dir"),
         };
-        metadata_checker::stdio_server::run_stdio_server(&db_path)?;
+        let project_dir = args.project_dir.as_deref();
+        metadata_checker::stdio_server::run_stdio_server(&db_path, project_dir)?;
         return Ok(());
     }
 

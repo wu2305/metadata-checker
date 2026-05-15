@@ -134,8 +134,12 @@ pub struct RuntimeStatus {
 impl GraphRuntime {
     /// 加载 graphdb 并构建 Runtime
     ///
-    /// 记录文件 metadata，初始化 load_count = 1
-    pub fn load(graph_db_path: impl AsRef<Path>) -> Result<Self> {
+    /// 记录文件 metadata，初始化 load_count = 1。
+    /// 当显式提供 `project_dir` 时优先使用，否则从 `graph_db_path.parent()` 推导。
+    pub fn load_with_project_dir(
+        graph_db_path: impl AsRef<Path>,
+        project_dir: Option<impl AsRef<Path>>,
+    ) -> Result<Self> {
         let path = graph_db_path.as_ref().to_path_buf();
         let start = Instant::now();
         let graph = GraphDB::open_or_diagnostic(&path)
@@ -157,7 +161,9 @@ impl GraphRuntime {
             content_prefix_hash: prefix_hash,
         };
 
-        let project_dir = path.parent().map(|p| p.to_path_buf());
+        let project_dir = project_dir
+            .map(|p| p.as_ref().to_path_buf())
+            .or_else(|| path.parent().map(|p| p.to_path_buf()));
 
         Ok(GraphRuntime {
             graph,
@@ -172,6 +178,11 @@ impl GraphRuntime {
             last_reload_error: None,
             graph_fingerprint: fingerprint,
         })
+    }
+
+    /// 兼容旧签名：从 graph_db_path.parent() 推导 project_dir
+    pub fn load(graph_db_path: impl AsRef<Path>) -> Result<Self> {
+        Self::load_with_project_dir(graph_db_path, None::<&Path>)
     }
 
     /// 执行查询，复用内存中的 graph

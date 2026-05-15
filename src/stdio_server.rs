@@ -87,8 +87,11 @@ pub struct StdioResponse {
 ///
 /// 加载 graphdb 一次，进入 stdin/stdout 循环处理请求。
 /// stderr 输出运行日志，stdout 只输出 JSONL 响应。
-pub fn run_stdio_server(graph_db_path: &std::path::Path) -> Result<()> {
-    let mut runtime = GraphRuntime::load(graph_db_path)
+pub fn run_stdio_server(
+    graph_db_path: &std::path::Path,
+    project_dir: Option<&std::path::Path>,
+) -> Result<()> {
+    let mut runtime = GraphRuntime::load_with_project_dir(graph_db_path, project_dir)
         .map_err(|e| anyhow::anyhow!("Failed to load graphdb: {}", e))?;
     eprintln!("[stdio-server] Graph loaded, {} nodes, ready", runtime.graph.graph.node_count());
 
