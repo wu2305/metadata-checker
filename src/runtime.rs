@@ -277,7 +277,8 @@ impl GraphRuntime {
 
     /// 安全 reload：先加载新图，成功后再替换旧图
     pub fn reload(&mut self) -> Result<()> {
-        match Self::load(&self.graph_db_path) {
+        let project_dir = self.project_dir.clone();
+        match Self::load_with_project_dir(&self.graph_db_path, project_dir.as_deref()) {
             Ok(new_runtime) => {
                 self.graph = new_runtime.graph;
                 self.loaded_at = new_runtime.loaded_at;

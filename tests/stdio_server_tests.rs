@@ -13,6 +13,19 @@ fn json_contains_str(value: &serde_json::Value, needle: &str) -> bool {
     }
 }
 
+/// 判断 query_page_logic 是否读取到了原始 .spg 文件中的索引式 action json_path
+fn has_raw_index_action_json_path(result: &serde_json::Value) -> bool {
+    let Some(action_flows) = result["details"]["action_flows"]["items"].as_array() else {
+        return false;
+    };
+    action_flows.iter().any(|flow| {
+        let json_path = flow["json_path"].as_str().unwrap_or("");
+        json_path.starts_with("canvas.components[")
+            && json_path.contains("].actions[")
+            && !json_path.contains("[id='")
+    })
+}
+
 /// M24 核心验收：启动 stdio server，连续两次 explain_condition，
 /// 第二次 graph_load_ms == 0
 #[test]
@@ -1089,23 +1102,191 @@ fn test_stdio_server_external_graphdb_with_project_dir() {
         "details must have action_flows"
     );
 
-    let action_flows = details["action_flows"]["items"]
-        .as_array()
-        .expect("action_flows.items must be array");
-    let has_raw_index_json_path = action_flows.iter().any(|flow| {
-        let json_path = flow["json_path"].as_str().unwrap_or("");
-        json_path.starts_with("canvas.components[")
-            && json_path.contains("].actions[")
-            && !json_path.contains("[id='")
-    });
     assert!(
-        has_raw_index_json_path,
+        has_raw_index_action_json_path(&resp["result"]),
         "external graphdb + explicit project_dir must read raw .spg json_path, not graph-derived id fallback"
     );
 
     // 清理外部 graphdb
     let _ = std::fs::remove_file(&external_db);
     let _ = child.wait();
+}
+
+/// M27 回归：外部 graphdb reload 后仍保留显式 project_dir
+#[test]
+fn test_stdio_server_reload_preserves_project_dir_for_external_graphdb() {
+    let (project_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let external_db = std::env::temp_dir().join(format!(
+        "m27-reload-external-{}.graphdb",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::copy(&db_path, &external_db).expect("copy graphdb must succeed");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            external_db.to_str().unwrap(),
+            "--project-dir",
+            project_dir.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let before = serde_json::json!({
+        "request_id": "before",
+        "command": "query_page_logic",
+        "target": "page:app/actions_test.spg",
+        "budget": "compact",
+        "human": false
+    });
+    let reload = serde_json::json!({
+        "request_id": "reload",
+        "command": "reload"
+    });
+    let after = serde_json::json!({
+        "request_id": "after",
+        "command": "query_page_logic",
+        "target": "page:app/actions_test.spg",
+        "budget": "compact",
+        "human": false
+    });
+
+    writeln!(stdin, "{}", before).unwrap();
+    writeln!(stdin, "{}", reload).unwrap();
+    writeln!(stdin, "{}", after).unwrap();
+    stdin.flush().unwrap();
+
+    let mut line1 = String::new();
+    stdout_reader.read_line(&mut line1).unwrap();
+    let resp1: serde_json::Value = serde_json::from_str(&line1).expect("resp1 must be valid JSON");
+    assert_eq!(resp1["ok"].as_bool(), Some(true));
+    assert!(
+        has_raw_index_action_json_path(&resp1["result"]),
+        "before reload must read raw .spg json_path"
+    );
+
+    let mut line2 = String::new();
+    stdout_reader.read_line(&mut line2).unwrap();
+    let resp2: serde_json::Value = serde_json::from_str(&line2).expect("resp2 must be valid JSON");
+    assert_eq!(resp2["ok"].as_bool(), Some(true));
+    assert!(
+        resp2["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
+            d.as_str().unwrap_or("").contains("GRAPH_RELOADED")
+        ),
+        "reload diagnostics must contain GRAPH_RELOADED"
+    );
+
+    let mut line3 = String::new();
+    stdout_reader.read_line(&mut line3).unwrap();
+    let resp3: serde_json::Value = serde_json::from_str(&line3).expect("resp3 must be valid JSON");
+    assert_eq!(resp3["ok"].as_bool(), Some(true));
+    assert!(
+        has_raw_index_action_json_path(&resp3["result"]),
+        "after reload must still read raw .spg json_path; project_dir must be preserved"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+    let _ = std::fs::remove_file(&external_db);
+}
+
+/// M27 回归：check_reload 成功 reload 后仍保留显式 project_dir
+#[test]
+fn test_stdio_server_check_reload_preserves_project_dir_for_external_graphdb() {
+    let (project_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let external_db = std::env::temp_dir().join(format!(
+        "m27-check-reload-external-{}.graphdb",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::copy(&db_path, &external_db).expect("copy graphdb must succeed");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            external_db.to_str().unwrap(),
+            "--project-dir",
+            project_dir.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let before = serde_json::json!({
+        "request_id": "before",
+        "command": "query_page_logic",
+        "target": "page:app/actions_test.spg",
+        "budget": "compact",
+        "human": false
+    });
+    writeln!(stdin, "{}", before).unwrap();
+    stdin.flush().unwrap();
+
+    let mut line1 = String::new();
+    stdout_reader.read_line(&mut line1).unwrap();
+    let resp1: serde_json::Value = serde_json::from_str(&line1).expect("resp1 must be valid JSON");
+    assert_eq!(resp1["ok"].as_bool(), Some(true));
+    assert!(
+        has_raw_index_action_json_path(&resp1["result"]),
+        "before check_reload must read raw .spg json_path"
+    );
+
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::copy(&db_path, &external_db).expect("touch external graphdb by copying valid db");
+
+    let after = serde_json::json!({
+        "request_id": "after",
+        "command": "query_page_logic",
+        "target": "page:app/actions_test.spg",
+        "budget": "compact",
+        "human": false,
+        "check_reload": true
+    });
+    writeln!(stdin, "{}", after).unwrap();
+    stdin.flush().unwrap();
+
+    let mut line2 = String::new();
+    stdout_reader.read_line(&mut line2).unwrap();
+    let resp2: serde_json::Value = serde_json::from_str(&line2).expect("resp2 must be valid JSON");
+    assert_eq!(resp2["ok"].as_bool(), Some(true));
+    assert!(
+        resp2["diagnostics"].as_array().unwrap_or(&vec![]).iter().any(|d|
+            d.as_str().unwrap_or("").contains("GRAPH_RELOADED")
+        ),
+        "check_reload diagnostics must contain GRAPH_RELOADED"
+    );
+    assert!(
+        has_raw_index_action_json_path(&resp2["result"]),
+        "after check_reload reload must still read raw .spg json_path; project_dir must be preserved"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+    let _ = std::fs::remove_file(&external_db);
 }
 
 /// M27 真实项目回归：stdio query_model fact_qwSidebar 必须包含跨页 writer

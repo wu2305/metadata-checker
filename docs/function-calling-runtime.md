@@ -15,8 +15,8 @@ M26 文档：如何把 metadata-checker 的 stdio server 接入 AI Function Call
 ## 启动 stdio server
 
 ```bash
-# 方式 1：指定 graphdb 路径
-metadata-checker --serve-stdio --graph-db-path /tmp/project.graphdb
+# 方式 1：外置 graphdb 路径 + 项目目录
+metadata-checker --serve-stdio --graph-db-path /tmp/project.graphdb --project-dir /path/to/project
 
 # 方式 2：指定项目目录（自动使用 project-dir/.metadata-checker.graphdb）
 metadata-checker --serve-stdio --project-dir /path/to/project
@@ -65,9 +65,12 @@ import subprocess
 import json
 
 class MetadataCheckerRuntime:
-    def __init__(self, graph_db_path: str):
+    def __init__(self, graph_db_path: str, project_dir: str | None = None):
+        args = ["metadata-checker", "--serve-stdio", "--graph-db-path", graph_db_path]
+        if project_dir is not None:
+            args.extend(["--project-dir", project_dir])
         self.proc = subprocess.Popen(
-            ["metadata-checker", "--serve-stdio", "--graph-db-path", graph_db_path],
+            args,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -80,28 +83,60 @@ class MetadataCheckerRuntime:
         return f"req-{self._counter}"
 
     def explain_condition(self, target: str, budget: str = "compact", check_reload: bool = False) -> dict:
-        req = {
+        return self._request({
             "request_id": self._next_id(),
             "command": "explain_condition",
             "target": target,
             "budget": budget,
             "human": False,
             "check_reload": check_reload,
-        }
-        self.proc.stdin.write(json.dumps(req) + "\n")
-        self.proc.stdin.flush()
-        line = self.proc.stdout.readline()
-        return json.loads(line)
+        })
+
+    def explain(self, target: str, budget: str = "compact") -> dict:
+        return self._request({
+            "request_id": self._next_id(),
+            "command": "explain",
+            "target": target,
+            "budget": budget,
+            "human": False,
+        })
+
+    def query_model(self, target: str, budget: str = "compact") -> dict:
+        return self._request({
+            "request_id": self._next_id(),
+            "command": "query_model",
+            "target": target,
+            "budget": budget,
+            "human": False,
+        })
+
+    def query_page_logic(self, target: str, budget: str = "compact", check_reload: bool = False) -> dict:
+        return self._request({
+            "request_id": self._next_id(),
+            "command": "query_page_logic",
+            "target": target,
+            "budget": budget,
+            "human": False,
+            "check_reload": check_reload,
+        })
+
+    def context(self, target: str, depth: int = 1, budget: str = "normal") -> dict:
+        return self._request({
+            "request_id": self._next_id(),
+            "command": "context",
+            "target": target,
+            "depth": depth,
+            "budget": budget,
+            "human": False,
+        })
 
     def status(self) -> dict:
-        req = {"request_id": self._next_id(), "command": "status"}
-        self.proc.stdin.write(json.dumps(req) + "\n")
-        self.proc.stdin.flush()
-        line = self.proc.stdout.readline()
-        return json.loads(line)
+        return self._request({"request_id": self._next_id(), "command": "status"})
 
     def reload(self) -> dict:
-        req = {"request_id": self._next_id(), "command": "reload"}
+        return self._request({"request_id": self._next_id(), "command": "reload"})
+
+    def _request(self, req: dict) -> dict:
         self.proc.stdin.write(json.dumps(req) + "\n")
         self.proc.stdin.flush()
         line = self.proc.stdout.readline()
@@ -125,14 +160,16 @@ metadata-checker --project-dir /path/to/project --explain-condition 'comp:app/�
 ### 模式 2：连续追问（stdio server）
 
 ```python
-runtime = MetadataCheckerRuntime("/tmp/project.graphdb")
+runtime = MetadataCheckerRuntime("/tmp/project.graphdb", "/path/to/project")
 
 # 第一次：解释 input3
 r1 = runtime.explain_condition("comp:app/销售.app/销售/合同协议.spg|input3")
-# 第二次：解释关联模型
-r2 = runtime.explain_condition("model:model22")
-# 第三次：解释物理表字段或关联模型
-r3 = runtime.explain_condition("field:fact_qwSidebar.phoneNumber")
+# 第二次：查询物理表读写
+r2 = runtime.query_model("model:fact_qwSidebar")
+# 第三次：查询页面逻辑
+r3 = runtime.query_page_logic("page:app/销售.app/销售/合同协议.spg")
+# 第四次：按需看上下文
+r4 = runtime.context("comp:app/销售.app/销售/合同协议.spg|input3", depth=2)
 
 runtime.close()
 ```
