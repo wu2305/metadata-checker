@@ -316,6 +316,19 @@
                         "value": "${model1.name}"
                     }
                 ]
+            },
+            {
+                "id": "slider_data_context",
+                "type": "sliderpanel",
+                "source": "data",
+                "dataSet": "model1",
+                "components": [
+                    {
+                        "id": "text_bare_field_child",
+                        "type": "text",
+                        "value": "${name}"
+                    }
+                ]
             }
         ]
     }

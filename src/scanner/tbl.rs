@@ -213,6 +213,7 @@ pub fn process_tbl_file_from_string(
         let mut alias_map: HashMap<String, String> = HashMap::new();
         let mut node_fields: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
         let mut node_types: HashMap<String, String> = HashMap::new();
+        let mut node_table_paths: HashMap<String, String> = HashMap::new();
 
         for (node_id, node) in nodes {
             // Record alias -> node_id mapping
@@ -222,6 +223,9 @@ pub fn process_tbl_file_from_string(
             // Record node type
             if let Some(node_type) = node.get("type").and_then(|v| v.as_str()) {
                 node_types.insert(node_id.clone(), node_type.to_string());
+            }
+            if let Some(module_table_path) = node.get("moduleTablePath").and_then(|v| v.as_str()) {
+                node_table_paths.insert(node_id.clone(), module_table_path.to_string());
             }
             // Record inputNodes dependencies
             if let Some(input_nodes) = node.get("inputNodes").and_then(|v| v.as_array()) {
@@ -305,6 +309,10 @@ pub fn process_tbl_file_from_string(
                     obj.insert(
                         "nodeTypes".to_string(),
                         serde_json::to_value(&node_types).unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert(
+                        "nodeTablePaths".to_string(),
+                        serde_json::to_value(&node_table_paths).unwrap_or(serde_json::Value::Null),
                     );
                     // Store dimensions for fallback when nodeFields is absent
                     if let Some(dims) = value.get("dimensions") {

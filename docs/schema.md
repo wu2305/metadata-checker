@@ -178,6 +178,7 @@ pub struct AiOutput {
 |------|------|------|
 | `target` | object | 目标节点信息：`node_id`、`node_type`、`name`、`path` |
 | `primary_path` | array | 字段级主链路（M19-FIX PathSegment），含 Reads / FieldAlias / FieldWrite 三段 |
+| `value_source_context` | object/null | M32 起用于解释组件 `value = ${FIELD}` 这类裸字段：通过最近数据容器解析 `FIELD` 属于哪个 `dataSet` / 表 |
 | `blocking_conditions` | array | 阻塞条件列表，每项包含 `condition_id`、`condition_type`、`raw_expr`、`json_path`、`source_file`，M31 起包含 `condition_scope` |
 | `data_empty_gates` | array | 数据门控列表，包含 filter / totalRowCount__ 条件，M31 起可包含 `expanded_from_total_row_count` 展开结果 |
 | `supporting_context` | array | 辅助上下文条件，例如 `referenced_by_model_filter` |
@@ -189,6 +190,7 @@ pub struct AiOutput {
 2. 需要具体条件时读取 `details.blocking_conditions` 或 `details.data_empty_gates`
 3. `details.related_context` 不是必要条件，默认不深入
 4. `details.primary_path` 用于回答 "值从哪里来 / 被谁写入"
+5. M32 起，若组件值是 `${FIELD}` 且不含模型名前缀，优先读取 `details.value_source_context`，不要把 `FIELD` 直接当成表名或模型名
 
 ### 条件分类规则
 
@@ -214,6 +216,20 @@ pub struct AiOutput {
 | `expanded_from_condition` | 数据门控由哪条 `totalRowCount__` 条件展开 |
 | `condition_key` | 条件去重 key |
 | `deduped_condition_ids` / `deduped_owner_node_ids` | 等价条件被去重后保留的来源证据 |
+
+### M32 裸字段值来源上下文
+
+| 字段 | 说明 |
+|---|---|
+| `value_source_context.raw_expr` | 目标组件 `value` 原始表达式，例如 `${CUSTOMAUTOMYAUTOLIST}` |
+| `value_source_context.bare_symbol` | 从 `${FIELD}` 中识别出的裸字段名 |
+| `value_source_context.resolution` | 解析策略，当前为 `nearest_data_context_container` |
+| `value_source_context.nearest_data_context` | 最近带 `source` / `dataSet` 的祖先容器，包含 `component_id`、`component_type`、`json_path`、`dataSet` |
+| `value_source_context.field_path` | 归一后的 `dataSet.field`，例如 `model11.CUSTOMAUTOMYAUTOLIST` |
+| `value_source_context.table_source_path` | `dataSet` 对应页面 source 的表路径 |
+| `value_source_context.dataflow_model` | 当 `table_source_path` 指向加工表/DataFlow 时的 DataFlow 节点 |
+| `value_source_context.dataflow_field_origin` | 若 DataFlow 字段元数据能证明来源，输出匹配字段与 `module_table_path` |
+| `value_source_context.dataflow_inputs` | DataFlow 的输入表候选；字段级来源不能证明时只能作为候选，不可直接断言 |
 
 ### 页面作用域规则
 

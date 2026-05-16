@@ -4,6 +4,138 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
+#[derive(Debug, Clone, Default)]
+struct ComponentContext {
+    json_path: String,
+    parent_id: Option<String>,
+    source: Option<String>,
+    data_set: Option<String>,
+    inherited_data_context_component_id: Option<String>,
+    inherited_data_context_json_path: Option<String>,
+    inherited_data_context_source: Option<String>,
+    inherited_data_context_data_set: Option<String>,
+}
+
+fn json_scalar_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .find_map(|item| item.as_str().map(|s| s.to_string())),
+        _ => None,
+    }
+}
+
+fn collect_component_contexts(
+    value: &serde_json::Value,
+) -> std::collections::HashMap<String, ComponentContext> {
+    let mut contexts = std::collections::HashMap::new();
+    if let Some(canvas) = value.get("canvas") {
+        collect_component_contexts_inner(canvas, "canvas", None, &mut contexts);
+    }
+    contexts
+}
+
+fn collect_component_contexts_inner(
+    node: &serde_json::Value,
+    json_path: &str,
+    parent_id: Option<String>,
+    contexts: &mut std::collections::HashMap<String, ComponentContext>,
+) {
+    collect_component_contexts_inner_with_context(node, json_path, parent_id, None, contexts);
+}
+
+fn collect_component_contexts_inner_with_context(
+    node: &serde_json::Value,
+    json_path: &str,
+    parent_id: Option<String>,
+    inherited_context: Option<ComponentContext>,
+    contexts: &mut std::collections::HashMap<String, ComponentContext>,
+) {
+    let current_id = node
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let source = node.get("source").and_then(json_scalar_to_string);
+    let data_set = node.get("dataSet").and_then(json_scalar_to_string);
+    let own_context = if source.is_some() || data_set.is_some() {
+        current_id.as_ref().map(|id| ComponentContext {
+            json_path: json_path.to_string(),
+            parent_id: parent_id.clone(),
+            source: source.clone(),
+            data_set: data_set.clone(),
+            inherited_data_context_component_id: Some(id.clone()),
+            inherited_data_context_json_path: Some(json_path.to_string()),
+            inherited_data_context_source: source.clone(),
+            inherited_data_context_data_set: data_set.clone(),
+        })
+    } else {
+        None
+    };
+    let active_context = own_context.or(inherited_context);
+
+    if let Some(id) = &current_id {
+        contexts.insert(
+            id.clone(),
+            ComponentContext {
+                json_path: json_path.to_string(),
+                parent_id: parent_id.clone(),
+                source: source.clone(),
+                data_set: data_set.clone(),
+                inherited_data_context_component_id: active_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.inherited_data_context_component_id.clone()),
+                inherited_data_context_json_path: active_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.inherited_data_context_json_path.clone()),
+                inherited_data_context_source: active_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.inherited_data_context_source.clone()),
+                inherited_data_context_data_set: active_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.inherited_data_context_data_set.clone()),
+            },
+        );
+    }
+
+    let child_parent = current_id.or(parent_id);
+    for child_key in ["components", "panels", "steps", "comps"] {
+        if let Some(children) = node.get(child_key).and_then(|v| v.as_array()) {
+            for (idx, child) in children.iter().enumerate() {
+                let child_path = format!("{}.{}[{}]", json_path, child_key, idx);
+                collect_component_contexts_inner_with_context(
+                    child,
+                    &child_path,
+                    child_parent.clone(),
+                    active_context.clone(),
+                    contexts,
+                );
+            }
+        }
+    }
+}
+
+/// 识别 `${FIELD}` 这种由数据容器上下文补全的裸字段引用
+fn extract_single_bare_symbol(raw_expr: &str) -> Option<String> {
+    let trimmed = raw_expr.trim();
+    let inner = trimmed
+        .strip_prefix("${")
+        .and_then(|s| s.strip_suffix('}'))?
+        .trim();
+    if inner.is_empty() || inner.contains('.') {
+        return None;
+    }
+    if inner.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        Some(inner.to_string())
+    } else {
+        None
+    }
+}
+
 /// 确保 model 和 field 节点存在，并建立 Contains 关系。
 /// 返回 (model_id, field_id)。
 fn ensure_model_field(
@@ -168,6 +300,7 @@ pub fn process_spg_file_from_value(
     rel_path: &str,
     raw_value: serde_json::Value,
 ) -> Result<Vec<String>> {
+    let component_contexts = collect_component_contexts(&raw_value);
     let meta = crate::superpage::parse_superpage_from_value(raw_value)?;
     let mut node_ids = std::collections::HashSet::new();
 
@@ -289,15 +422,60 @@ pub fn process_spg_file_from_value(
     for expr in &meta.expressions {
         expr_map.entry(&expr.component_id).or_default().push(expr);
     }
+    let component_id_set: std::collections::HashSet<&str> =
+        meta.components.iter().map(|c| c.id.as_str()).collect();
     // Process components and their expressions
     for comp in &meta.components {
         let comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), comp.id);
+        let ctx = component_contexts.get(&comp.id);
+        let mut comp_meta = serde_json::json!({
+            "component_type": comp.component_type,
+            "properties": comp.properties,
+        });
+        if let Some(ctx) = ctx
+            && let Some(obj) = comp_meta.as_object_mut()
+        {
+            obj.insert("json_path".to_string(), serde_json::json!(ctx.json_path));
+            if let Some(parent_id) = &ctx.parent_id {
+                obj.insert("parent_id".to_string(), serde_json::json!(parent_id));
+            }
+            if let Some(source) = &ctx.source {
+                obj.insert("source".to_string(), serde_json::json!(source));
+            }
+            if let Some(data_set) = &ctx.data_set {
+                obj.insert("dataSet".to_string(), serde_json::json!(data_set));
+            }
+            if let Some(context_component_id) = &ctx.inherited_data_context_component_id {
+                obj.insert(
+                    "data_context_component_id".to_string(),
+                    serde_json::json!(context_component_id),
+                );
+            }
+            if let Some(context_json_path) = &ctx.inherited_data_context_json_path {
+                obj.insert(
+                    "data_context_json_path".to_string(),
+                    serde_json::json!(context_json_path),
+                );
+            }
+            if let Some(context_source) = &ctx.inherited_data_context_source {
+                obj.insert(
+                    "data_context_source".to_string(),
+                    serde_json::json!(context_source),
+                );
+            }
+            if let Some(context_data_set) = &ctx.inherited_data_context_data_set {
+                obj.insert(
+                    "data_context_dataSet".to_string(),
+                    serde_json::json!(context_data_set),
+                );
+            }
+        }
         graph.add_node(
             comp_id.clone(),
             NodeType::Component,
             rel_path.to_string(),
             comp.id.clone(),
-            Some(serde_json::json!({"component_type": comp.component_type})),
+            Some(comp_meta),
         );
         node_ids.insert(comp_id.clone());
         graph.add_edge(&page_id, &comp_id, EdgeType::Contains, None);
@@ -305,6 +483,48 @@ pub fn process_spg_file_from_value(
         // Process expressions (reads)
         if let Some(exprs) = expr_map.get(comp.id.as_str()) {
             for expr in exprs {
+                if expr.field == "value"
+                    && let Some(bare_symbol) = extract_single_bare_symbol(&expr.raw_expr)
+                    && !source_path_map.contains_key(bare_symbol.as_str())
+                    && !component_id_set.contains(bare_symbol.as_str())
+                    && let Some(ctx) = ctx
+                    && let Some(data_set) = &ctx.inherited_data_context_data_set
+                {
+                    let model_path = source_path_map
+                        .get(data_set.as_str())
+                        .map(|p| p.to_string())
+                        .unwrap_or_else(|| format!("{}.tbl", data_set));
+                    let edge_meta = serde_json::json!({
+                        "reason": format!(
+                            "Component '{}' reads bare field '{}' from inherited dataSet '{}'",
+                            comp.id, bare_symbol, data_set
+                        ),
+                        "actor_kind": "component",
+                        "actor_id": comp.id,
+                        "operation": "Reads",
+                        "source_expr": expr.raw_expr,
+                        "source_field": expr.field,
+                        "json_path": format!("{}.{}", ctx.json_path, expr.field),
+                        "bare_symbol": bare_symbol,
+                        "resolution": "inherited_container_data_context",
+                        "target_model": data_set,
+                        "target_field": bare_symbol,
+                        "target_model_path": model_path,
+                        "data_context_component_id": ctx.inherited_data_context_component_id.as_deref(),
+                        "data_context_json_path": ctx.inherited_data_context_json_path.as_deref(),
+                        "data_context_source": ctx.inherited_data_context_source.as_deref(),
+                        "data_context_dataSet": data_set,
+                    });
+                    add_model_read(
+                        graph,
+                        &comp_id,
+                        data_set,
+                        &bare_symbol,
+                        &model_path,
+                        edge_meta,
+                        EdgeType::Reads,
+                    );
+                }
                 for ref_type in &expr.refs {
                     match ref_type {
                         crate::superpage::RefType::ModelField(model, field) => {
@@ -320,6 +540,8 @@ pub fn process_spg_file_from_value(
                                 "target_model": model,
                                 "target_field": field,
                                 "source_expr": expr.raw_expr,
+                                "source_field": expr.field,
+                                "json_path": ctx.map(|c| format!("{}.{}", c.json_path, expr.field)),
                             });
                             add_model_read(
                                 graph,
@@ -332,11 +554,8 @@ pub fn process_spg_file_from_value(
                             );
                         }
                         crate::superpage::RefType::ComponentValue(target_id) => {
-                            let target_comp_id = format!(
-                                "comp:{}|{}",
-                                rel_path.replace(r"\", "/"),
-                                target_id
-                            );
+                            let target_comp_id =
+                                format!("comp:{}|{}", rel_path.replace(r"\", "/"), target_id);
                             let edge_meta = serde_json::json!({
                                 "reason": format!(
                                     "Component '{}' depends on component '{}' via field '{}'",
@@ -358,11 +577,8 @@ pub fn process_spg_file_from_value(
                             );
                         }
                         crate::superpage::RefType::Param(param_name) => {
-                            let param_id = format!(
-                                "param:{}|{}",
-                                rel_path.replace(r"\", "/"),
-                                param_name
-                            );
+                            let param_id =
+                                format!("param:{}|{}", rel_path.replace(r"\", "/"), param_name);
                             graph.add_node(
                                 param_id.clone(),
                                 NodeType::Field,
@@ -1032,11 +1248,7 @@ pub fn process_spg_file_from_value(
     // 写入 condition 节点和依赖边
     let conditions = crate::conditions::scan_conditions(&meta, Some(rel_path));
     for cond in &conditions {
-        let cond_node_id = format!(
-            "cond:{}|{}",
-            rel_path.replace(r"\", "/"),
-            cond.condition_id
-        );
+        let cond_node_id = format!("cond:{}|{}", rel_path.replace(r"\", "/"), cond.condition_id);
         let cond_name = format!("{:?}:{}", cond.condition_type, cond.condition_id);
         let cond_meta = serde_json::json!({
             "condition_type": format!("{:?}", cond.condition_type),
@@ -1084,9 +1296,7 @@ pub fn process_spg_file_from_value(
             crate::conditions::OwnerType::FieldDefault => {
                 format!("comp:{}|{}", rel_path.replace(r"\", "/"), cond.owner_id)
             }
-            crate::conditions::OwnerType::Page => {
-                page_id.clone()
-            }
+            crate::conditions::OwnerType::Page => page_id.clone(),
         };
         let owner_edge_meta = serde_json::json!({
             "reason": format!("Condition '{}' belongs to owner '{}'", cond.condition_id, cond.owner_id),
@@ -1142,8 +1352,10 @@ pub fn process_spg_file_from_value(
 
     // 建立 model.filter 与 model.totalRowCount__ 的隐式关系
     for cond in &conditions {
-        if matches!(cond.condition_type, crate::conditions::ConditionType::SourceFilterExp)
-            && matches!(cond.owner_type, crate::conditions::OwnerType::ModelSource)
+        if matches!(
+            cond.condition_type,
+            crate::conditions::ConditionType::SourceFilterExp
+        ) && matches!(cond.owner_type, crate::conditions::OwnerType::ModelSource)
         {
             let model_name = &cond.owner_id;
             let trc_field_id = format!("field:{}.totalRowCount__", model_name);
@@ -1160,11 +1372,8 @@ pub fn process_spg_file_from_value(
             );
             graph.add_edge(&trc_model_id, &trc_field_id, EdgeType::Contains, None);
 
-            let cond_node_id = format!(
-                "cond:{}|{}",
-                rel_path.replace(r"\", "/"),
-                cond.condition_id
-            );
+            let cond_node_id =
+                format!("cond:{}|{}", rel_path.replace(r"\", "/"), cond.condition_id);
             let trc_edge_meta = serde_json::json!({
                 "reason": format!("Filter condition determines {}.totalRowCount__", model_name),
                 "actor_kind": "condition",
@@ -1199,6 +1408,19 @@ pub fn process_spg_file_from_value(
             .unwrap_or(path);
         let model_id = format!("model:{}", source.id);
         let physical_model_id = format!("model:{}", physical_table);
+        graph.add_node(
+            model_id.clone(),
+            NodeType::Model,
+            path.clone(),
+            source.id.clone(),
+            Some(serde_json::json!({
+                "modelType": "dwtable",
+                "sourcePath": path,
+            })),
+        );
+        if !node_ids.contains(&model_id) {
+            node_ids.insert(model_id.clone());
+        }
         // 避免覆盖已有节点（如 App/DataFlow 表）的 modelType
         if graph.get_node(&physical_model_id).is_none() {
             graph.add_node(

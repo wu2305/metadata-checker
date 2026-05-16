@@ -361,8 +361,7 @@ fn test_m31_explain_condition_inherits_parent_total_row_count_gate() {
     assert!(
         blocking.iter().any(|c| {
             c.get("condition_scope").and_then(|v| v.as_str()) == Some("inherited")
-                && c.get("inherited_from")
-                    .and_then(|v| v.as_str())
+                && c.get("inherited_from").and_then(|v| v.as_str())
                     == Some("comp:app/actions_test.spg|panel_total_gate")
                 && c.get("raw_expr")
                     .and_then(|v| v.as_str())
@@ -444,7 +443,91 @@ fn test_m31_explain_condition_dedupes_same_child_and_parent_gate() {
 }
 
 #[test]
-fn test_m31_docs_define_condition_scope_contract() {
+fn test_m32_explain_condition_resolves_bare_value_from_nearest_data_context() {
+    let (_db_path, graph) = setup_graph_db("m32_bare_value_context");
+    let (outgoing, _) = graph
+        .get_node_edges("comp:app/actions_test.spg|text_bare_field_child")
+        .expect("text_bare_field_child must have graph edges");
+    assert!(
+        outgoing.iter().any(|(node, edge)| {
+            node.id == "field:model1.name"
+                && edge.edge_type == metadata_checker::graph::EdgeType::Reads
+                && edge
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("resolution"))
+                    .and_then(|v| v.as_str())
+                    == Some("inherited_container_data_context")
+        }),
+        "扫描阶段必须把裸字段 ${{name}} 直接打平成 field:model1.name Reads 边"
+    );
+
+    let result = metadata_checker::explain::build_explain_condition_output(
+        &graph,
+        "comp:app/actions_test.spg|text_bare_field_child",
+        "normal",
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+    let value_context = details
+        .get("value_source_context")
+        .and_then(|v| v.as_object())
+        .expect("value_source_context must exist for bare field value");
+
+    assert_eq!(
+        value_context.get("raw_expr").and_then(|v| v.as_str()),
+        Some("${name}"),
+        "裸字段值来源必须保留原始 value 表达式"
+    );
+    assert_eq!(
+        value_context.get("bare_symbol").and_then(|v| v.as_str()),
+        Some("name"),
+        "必须识别裸字段名"
+    );
+    assert_eq!(
+        value_context
+            .get("nearest_data_context")
+            .and_then(|v| v.get("component_id"))
+            .and_then(|v| v.as_str()),
+        Some("slider_data_context"),
+        "必须解析到最近带 dataSet 的祖先容器"
+    );
+    assert_eq!(
+        value_context
+            .get("nearest_data_context")
+            .and_then(|v| v.get("dataSet"))
+            .and_then(|v| v.as_str()),
+        Some("model1"),
+        "裸字段必须继承容器 dataSet"
+    );
+    assert_eq!(
+        value_context.get("field_path").and_then(|v| v.as_str()),
+        Some("model1.name"),
+        "裸字段最终应被解释为 dataSet.field"
+    );
+    assert_eq!(
+        value_context
+            .get("data_set_model")
+            .and_then(|v| v.get("path"))
+            .and_then(|v| v.as_str()),
+        Some("data/table1.tbl"),
+        "dataSet model 必须指向页面 source 声明的表路径"
+    );
+    assert_eq!(
+        value_context
+            .get("graph_edge")
+            .and_then(|v| v.get("target_id"))
+            .and_then(|v| v.as_str()),
+        Some("field:model1.name"),
+        "value_source_context 必须来自扫描阶段派生出的字段 Reads 边"
+    );
+}
+
+#[test]
+fn test_m31_m32_docs_define_condition_and_value_source_contract() {
     let schema = std::fs::read_to_string("docs/schema.md").expect("schema doc must be readable");
     for term in [
         "condition_scope",
@@ -453,8 +536,15 @@ fn test_m31_docs_define_condition_scope_contract() {
         "expanded_from_total_row_count",
         "referenced_by_model_filter",
         "deduped_condition_ids",
+        "value_source_context",
+        "nearest_data_context",
+        "bare_symbol",
     ] {
-        assert!(schema.contains(term), "docs/schema.md 缺少 M31 条件作用域契约: {}", term);
+        assert!(
+            schema.contains(term),
+            "docs/schema.md 缺少 explain-condition 契约: {}",
+            term
+        );
     }
 
     for skill_path in skill_md_paths_for_protocol_check() {
@@ -463,8 +553,10 @@ fn test_m31_docs_define_condition_scope_contract() {
         assert!(
             skill_md.contains("condition_scope")
                 && skill_md.contains("expanded_from_total_row_count")
-                && skill_md.contains("referenced_by_model_filter"),
-            "{} 必须说明 M31 条件作用域读取规则",
+                && skill_md.contains("referenced_by_model_filter")
+                && skill_md.contains("value_source_context")
+                && skill_md.contains("nearest_data_context"),
+            "{} 必须说明 M31/M32 explain-condition 读取规则",
             skill_path.display()
         );
     }
@@ -2606,7 +2698,8 @@ fn test_cli_query_page_logic_unknown_action_type() {
     );
 
     // script/webAPI/showMessage/showFilesGallary 不应产生 UNKNOWN_ACTION_TYPE
-    let unknown_types: Vec<&str> = ai.diagnostics
+    let unknown_types: Vec<&str> = ai
+        .diagnostics
         .iter()
         .filter(|d| d.code == "UNKNOWN_ACTION_TYPE")
         .filter_map(|d| d.message.split("'").nth(1))
@@ -2714,7 +2807,10 @@ fn test_cli_query_page_logic_new_action_types() {
         .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("script"));
     assert!(script.is_some(), "script action should exist");
     assert_eq!(
-        script.unwrap().get("action_category").and_then(|v| v.as_str()),
+        script
+            .unwrap()
+            .get("action_category")
+            .and_then(|v| v.as_str()),
         Some("script_execution")
     );
 
@@ -2724,7 +2820,10 @@ fn test_cli_query_page_logic_new_action_types() {
         .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("webAPI"));
     assert!(web_api.is_some(), "webAPI action should exist");
     assert_eq!(
-        web_api.unwrap().get("action_category").and_then(|v| v.as_str()),
+        web_api
+            .unwrap()
+            .get("action_category")
+            .and_then(|v| v.as_str()),
         Some("api_call")
     );
 
@@ -2734,7 +2833,10 @@ fn test_cli_query_page_logic_new_action_types() {
         .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("showMessage"));
     assert!(show_msg.is_some(), "showMessage action should exist");
     assert_eq!(
-        show_msg.unwrap().get("action_category").and_then(|v| v.as_str()),
+        show_msg
+            .unwrap()
+            .get("action_category")
+            .and_then(|v| v.as_str()),
         Some("message_prompt")
     );
 
@@ -2742,9 +2844,15 @@ fn test_cli_query_page_logic_new_action_types() {
     let file_gallery = flows
         .iter()
         .find(|f| f.get("action_type").and_then(|v| v.as_str()) == Some("showFilesGallary"));
-    assert!(file_gallery.is_some(), "showFilesGallary action should exist");
+    assert!(
+        file_gallery.is_some(),
+        "showFilesGallary action should exist"
+    );
     assert_eq!(
-        file_gallery.unwrap().get("action_category").and_then(|v| v.as_str()),
+        file_gallery
+            .unwrap()
+            .get("action_category")
+            .and_then(|v| v.as_str()),
         Some("file_gallery")
     );
 }
@@ -4398,8 +4506,8 @@ fn test_m30_docs_define_stdio_timing_and_capacity_contract() {
     let schema = std::fs::read_to_string("docs/schema.md").expect("schema doc must be readable");
     let runtime_doc = std::fs::read_to_string("docs/function-calling-runtime.md")
         .expect("function calling runtime doc must be readable");
-    let baseline =
-        std::fs::read_to_string("docs/performance-baseline.md").expect("baseline doc must be readable");
+    let baseline = std::fs::read_to_string("docs/performance-baseline.md")
+        .expect("baseline doc must be readable");
 
     for (name, doc) in [
         ("docs/schema.md", schema.as_str()),
@@ -4413,7 +4521,12 @@ fn test_m30_docs_define_stdio_timing_and_capacity_contract() {
             "serialize_ms",
             "total_ms",
         ] {
-            assert!(doc.contains(term), "{} 缺少 M30 timing 字段: {}", name, term);
+            assert!(
+                doc.contains(term),
+                "{} 缺少 M30 timing 字段: {}",
+                name,
+                term
+            );
         }
     }
 
@@ -4494,12 +4607,36 @@ fn test_real_project_query_page_logic_input3_chain() {
             .unwrap_or(&empty);
         // 找 input3 主链路
         if segs.len() >= 3 {
-            let to0 = segs[0].get("to").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
-            let et1 = segs[1].get("edge").and_then(|v| v.get("edge_type")).and_then(|v| v.as_str()).unwrap_or("");
-            let to1 = segs[1].get("to").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
-            let from2 = segs[2].get("from").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
-            let et2 = segs[2].get("edge").and_then(|v| v.get("edge_type")).and_then(|v| v.as_str()).unwrap_or("");
-            let fp2 = segs[2].get("edge").and_then(|v| v.get("field_path")).and_then(|v| v.as_str()).unwrap_or("");
+            let to0 = segs[0]
+                .get("to")
+                .and_then(|v| v.get("node_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let et1 = segs[1]
+                .get("edge")
+                .and_then(|v| v.get("edge_type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let to1 = segs[1]
+                .get("to")
+                .and_then(|v| v.get("node_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let from2 = segs[2]
+                .get("from")
+                .and_then(|v| v.get("node_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let et2 = segs[2]
+                .get("edge")
+                .and_then(|v| v.get("edge_type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let fp2 = segs[2]
+                .get("edge")
+                .and_then(|v| v.get("field_path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if to0 == "field:model22.phoneNumber"
                 && et1 == "FieldAlias"
                 && to1 == "field:fact_qwSidebar.phoneNumber"
@@ -4508,7 +4645,11 @@ fn test_real_project_query_page_logic_input3_chain() {
                 && fp2.ends_with("phoneNumber")
             {
                 found_input3_chain = true;
-                let action_id = segs[2].get("to").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
+                let action_id = segs[2]
+                    .get("to")
+                    .and_then(|v| v.get("node_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if action_id.contains("action4") {
                     found_action4_write = true;
                 }
@@ -4538,11 +4679,25 @@ fn test_real_project_query_page_logic_input3_chain() {
     let mut cross_page_writer_true = false;
     for p in key_primary_paths.iter() {
         let empty: Vec<serde_json::Value> = Vec::new();
-        let segs = p.get("segments").and_then(|v| v.as_array()).unwrap_or(&empty);
+        let segs = p
+            .get("segments")
+            .and_then(|v| v.as_array())
+            .unwrap_or(&empty);
         for s in segs.iter() {
-            let action_id = s.get("to").and_then(|v| v.get("node_id")).and_then(|v| v.as_str()).unwrap_or("");
-            let source_expr = s.get("edge").and_then(|v| v.get("source_expr")).and_then(|v| v.as_str());
-            let fp = s.get("edge").and_then(|v| v.get("field_path")).and_then(|v| v.as_str()).unwrap_or("");
+            let action_id = s
+                .get("to")
+                .and_then(|v| v.get("node_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let source_expr = s
+                .get("edge")
+                .and_then(|v| v.get("source_expr"))
+                .and_then(|v| v.as_str());
+            let fp = s
+                .get("edge")
+                .and_then(|v| v.get("field_path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if action_id.contains("action1") && fp.ends_with("phoneNumber") {
                 action1_source_expr = source_expr.map(|s| s.to_string());
             }
@@ -4554,7 +4709,11 @@ fn test_real_project_query_page_logic_input3_chain() {
             }
         }
         if let Some(rf) = p.get("rank_features") {
-            if rf.get("contains_cross_page_writer").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if rf
+                .get("contains_cross_page_writer")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 cross_page_writer_true = true;
             }
         }
@@ -4569,10 +4728,7 @@ fn test_real_project_query_page_logic_input3_chain() {
         Some("NULL"),
         "action4 FieldWrite 的 source_expr 应为 NULL"
     );
-    assert!(
-        !phone_time_in_chain,
-        "input3 主链路不应包含 phone_time"
-    );
+    assert!(!phone_time_in_chain, "input3 主链路不应包含 phone_time");
     assert!(
         cross_page_writer_true,
         "至少一条 key_primary_paths 的 rank_features.contains_cross_page_writer 应为 true"
@@ -4581,7 +4737,10 @@ fn test_real_project_query_page_logic_input3_chain() {
     // 前 3 条中至少有一条是 input3 链路
     let top3_has_input3 = key_primary_paths.iter().take(3).any(|p| {
         let empty: Vec<serde_json::Value> = Vec::new();
-        let segs = p.get("segments").and_then(|v| v.as_array()).unwrap_or(&empty);
+        let segs = p
+            .get("segments")
+            .and_then(|v| v.as_array())
+            .unwrap_or(&empty);
         segs.iter().any(|s| {
             s.get("to")
                 .and_then(|v| v.get("node_id"))
@@ -4595,7 +4754,10 @@ fn test_real_project_query_page_logic_input3_chain() {
     );
 
     // summary.related_context_count 与 details.related_context_summary.total_count 必须一致
-    let summary_rc = summary.get("related_context_count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let summary_rc = summary
+        .get("related_context_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let details_val = ai.details.as_ref().expect("details must exist");
     let details_obj = details_val.as_object().expect("details must be object");
     let details_rc_total = details_obj
@@ -4653,7 +4815,9 @@ fn test_real_project_explain_condition_input3() {
         .expect("primary_path must be array");
     let has_input3_chain = primary_path.iter().any(|p| {
         let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
-        path_id.contains("input3") && path_id.contains("model22.phoneNumber") && path_id.contains("fact_qwSidebar.phoneNumber")
+        path_id.contains("input3")
+            && path_id.contains("model22.phoneNumber")
+            && path_id.contains("fact_qwSidebar.phoneNumber")
     });
     assert!(
         has_input3_chain,
@@ -4678,7 +4842,10 @@ fn test_real_project_explain_condition_input3() {
         .and_then(|v| v.as_array())
         .unwrap_or(&empty);
     let has_visible_condition = blocking.iter().any(|c| {
-        let ct = c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("");
+        let ct = c
+            .get("condition_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         ct == "VisibleCondition"
     });
     assert!(
@@ -4752,7 +4919,10 @@ fn test_real_project_explain_condition_model22_filter() {
 
     // 至少有一个 filter 条件是 SourceFilterExp
     let has_source_filter = data_empty_gates.iter().any(|c| {
-        let ct = c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("");
+        let ct = c
+            .get("condition_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         ct == "SourceFilterExp"
     });
     assert!(
@@ -4889,8 +5059,50 @@ fn test_real_project_m31_text41_display_chain_expands_model11_filter() {
         }),
         "model2.name=text41 是引用 text41 的旁路 filter，不应作为 text41 显示必要门控"
     );
-}
 
+    let value_context = details
+        .get("value_source_context")
+        .and_then(|v| v.as_object())
+        .expect("text41 必须输出裸字段值来源上下文");
+    assert_eq!(
+        value_context.get("bare_symbol").and_then(|v| v.as_str()),
+        Some("CUSTOMAUTOMYAUTOLIST"),
+        "text41.value 的裸字段名必须被识别"
+    );
+    assert_eq!(
+        value_context
+            .get("nearest_data_context")
+            .and_then(|v| v.get("component_id"))
+            .and_then(|v| v.as_str()),
+        Some("sliderpanel2"),
+        "text41.value 必须继承 sliderpanel2 的 dataSet 上下文"
+    );
+    assert_eq!(
+        value_context
+            .get("nearest_data_context")
+            .and_then(|v| v.get("dataSet"))
+            .and_then(|v| v.as_str()),
+        Some("model11"),
+        "sliderpanel2 的 dataSet 必须解析为 model11"
+    );
+    assert!(
+        value_context
+            .get("table_source_path")
+            .and_then(|v| v.as_str())
+            .map_or(false, |path| path.contains("加工表/小程序/绑车.tbl")),
+        "text41 的 dataSet 表路径必须来自 model11 的 绑车.tbl，实际: {:?}",
+        value_context.get("table_source_path")
+    );
+    assert!(
+        value_context
+            .get("dataflow_field_origin")
+            .and_then(|v| v.get("module_table_path"))
+            .and_then(|v| v.as_str())
+            .map_or(false, |path| path.contains("fact_autoCustomerAutoRel.tbl")),
+        "CUSTOMAUTOMYAUTOLIST 字段来源应追到 DataFlow 原始输入 fact_autoCustomerAutoRel.tbl，实际: {:?}",
+        value_context.get("dataflow_field_origin")
+    );
+}
 
 #[test]
 #[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
@@ -4943,7 +5155,10 @@ fn test_real_project_explain_condition_page_合同协议() {
         .and_then(|v| v.as_array())
         .unwrap_or(&empty);
     let has_filter = gates.iter().any(|c| {
-        let ct = c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("");
+        let ct = c
+            .get("condition_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         ct == "SourceFilterExp"
     });
     assert!(
@@ -4957,7 +5172,10 @@ fn test_real_project_explain_condition_page_合同协议() {
         .and_then(|v| v.as_array())
         .unwrap_or(&empty);
     let has_visible = blocking.iter().any(|c| {
-        let ct = c.get("condition_type").and_then(|v| v.as_str()).unwrap_or("");
+        let ct = c
+            .get("condition_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         ct == "VisibleCondition"
     });
     assert!(

@@ -1,7 +1,7 @@
 {
   "details_counts": {
     "action_flows_count": 14,
-    "data_sources_count": 6,
+    "data_sources_count": 28,
     "entrypoints_count": 14,
     "navigation_count": 3,
     "page_inputs_count": 2,
@@ -100,7 +100,7 @@
       "edge_type": "Navigation"
     },
     {
-      "claim": "Page page:app/actions_test.spg reads from 6 data sources",
+      "claim": "Page page:app/actions_test.spg reads from 28 data sources",
       "confidence": "High",
       "edge_type": "Reads/ActionReads"
     },
@@ -110,27 +110,27 @@
       "edge_type": "Writes/ActionWrites"
     },
     {
-      "claim": "Read model1.totalRowCount__ via comp:app/actions_test.spg|input1",
+      "claim": "Read model1.name via comp:app/actions_test.spg|text_total_child",
       "confidence": "High",
       "edge_type": "Reads"
     },
     {
-      "claim": "Read model1.totalRowCount__ via comp:app/actions_test.spg|input1",
+      "claim": "Read model1.name via comp:app/actions_test.spg|text_total_child",
       "confidence": "High",
       "edge_type": "Reads"
     },
     {
-      "claim": "Read table1.name via action:app/actions_test.spg|buttonValidate|actionValidate",
-      "confidence": "High",
-      "edge_type": "ActionValidates"
-    },
-    {
-      "claim": "Read table1.totalRowCount__ via comp:app/actions_test.spg|input1",
+      "claim": "Read table1.name via comp:app/actions_test.spg|text_total_child",
       "confidence": "High",
       "edge_type": "Reads"
     },
     {
-      "claim": "Read table1.totalRowCount__ via comp:app/actions_test.spg|input1",
+      "claim": "Read table1.name via comp:app/actions_test.spg|text_total_child",
+      "confidence": "High",
+      "edge_type": "Reads"
+    },
+    {
+      "claim": "Read table1.totalRowCount__ via comp:app/actions_test.spg|text_total_child_duplicate",
       "confidence": "High",
       "edge_type": "Reads"
     },
@@ -165,16 +165,16 @@
   "schema_version": "1.0",
   "summary": {
     "action_prerequisites_count": 1,
-    "data_prerequisites_count": 4,
-    "data_source_count": 6,
-    "display_prerequisites_count": 4,
+    "data_prerequisites_count": 7,
+    "data_source_count": 28,
+    "display_prerequisites_count": 6,
     "entrypoint_count": 14,
     "navigation_count": 3,
     "page_id": "page:app/actions_test.spg",
     "page_name": "actions_test",
     "page_role": "mixed_interaction_page",
-    "primary_paths_count": 24,
-    "related_context_count": 39,
+    "primary_paths_count": 35,
+    "related_context_count": 85,
     "risk_count": 2,
     "top_action_prerequisites": [
       {
@@ -213,14 +213,144 @@
       {
         "confidence": "high",
         "depends_on": [
-          "model:model1.totalRowCount__"
+          "model:model1.name"
         ],
         "diagnostics": [],
         "effect_type": "Compute",
         "evidence": {
           "edge_type": "DependsOn",
-          "json_path": "canvas.components[0].exp",
-          "node_id": "cond:app/actions_test.spg|input1#exp#0",
+          "json_path": "canvas.components[20].components[0].value",
+          "node_id": "cond:app/actions_test.spg|text_total_child#value#7",
+          "raw_expr": "${model1.name}",
+          "source_file": "app/actions_test.spg"
+        },
+        "impact": {
+          "affected_component_count": 0,
+          "affected_model_count": 1,
+          "affects_row_count": false,
+          "impact_score": 2,
+          "is_entrypoint": false,
+          "is_main_panel": false
+        },
+        "json_path": "canvas.components[20].components[0].value",
+        "kind": "FieldExp",
+        "normalized_expr": "${model1.name}",
+        "owner_type": "Component",
+        "raw_expr": "${model1.name}",
+        "source_file": "app/actions_test.spg",
+        "subject_type": "Component",
+        "target": "text_total_child"
+      },
+      {
+        "confidence": "high",
+        "depends_on": [
+          "model:model1.name"
+        ],
+        "diagnostics": [],
+        "effect_type": "Compute",
+        "evidence": {
+          "edge_type": "DependsOn",
+          "json_path": "canvas.components[20].components[1].value",
+          "node_id": "cond:app/actions_test.spg|text_total_child_duplicate#value#8",
+          "raw_expr": "${model1.name}",
+          "source_file": "app/actions_test.spg"
+        },
+        "impact": {
+          "affected_component_count": 0,
+          "affected_model_count": 1,
+          "affects_row_count": false,
+          "impact_score": 2,
+          "is_entrypoint": false,
+          "is_main_panel": false
+        },
+        "json_path": "canvas.components[20].components[1].value",
+        "kind": "FieldExp",
+        "normalized_expr": "${model1.name}",
+        "owner_type": "Component",
+        "raw_expr": "${model1.name}",
+        "source_file": "app/actions_test.spg",
+        "subject_type": "Component",
+        "target": "text_total_child_duplicate"
+      },
+      {
+        "confidence": "high",
+        "depends_on": [
+          "model:name."
+        ],
+        "diagnostics": [],
+        "effect_type": "Compute",
+        "evidence": {
+          "edge_type": "DependsOn",
+          "json_path": "canvas.components[21].components[0].value",
+          "node_id": "cond:app/actions_test.spg|text_bare_field_child#value#10",
+          "raw_expr": "${name}",
+          "source_file": "app/actions_test.spg"
+        },
+        "impact": {
+          "affected_component_count": 0,
+          "affected_model_count": 1,
+          "affects_row_count": false,
+          "impact_score": 2,
+          "is_entrypoint": false,
+          "is_main_panel": false
+        },
+        "json_path": "canvas.components[21].components[0].value",
+        "kind": "FieldExp",
+        "normalized_expr": "${name}",
+        "owner_type": "Component",
+        "raw_expr": "${name}",
+        "source_file": "app/actions_test.spg",
+        "subject_type": "Component",
+        "target": "text_bare_field_child"
+      }
+    ],
+    "top_data_sources": [
+      {
+        "edge_type": "Reads",
+        "field_path": "table1.name",
+        "json_path": "canvas.components[20].components[0].value",
+        "model": "table1",
+        "raw_expr": "${model1.name}",
+        "source_action": null,
+        "source_component": "comp:app/actions_test.spg|text_total_child",
+        "source_file": "app/actions_test.spg",
+        "target_id": "model:table1"
+      },
+      {
+        "edge_type": "Reads",
+        "field_path": "model1.name",
+        "json_path": "canvas.components[20].components[0].value",
+        "model": "model1",
+        "raw_expr": "${model1.name}",
+        "source_action": null,
+        "source_component": "comp:app/actions_test.spg|text_total_child",
+        "source_file": "app/actions_test.spg",
+        "target_id": "model:model1"
+      },
+      {
+        "edge_type": "Reads",
+        "field_path": "table1.name",
+        "json_path": "canvas.components[20].components[0].value",
+        "model": "name",
+        "raw_expr": "${model1.name}",
+        "source_action": null,
+        "source_component": "comp:app/actions_test.spg|text_total_child",
+        "source_file": "app/actions_test.spg",
+        "target_id": "field:table1.name"
+      }
+    ],
+    "top_display_prerequisites": [
+      {
+        "confidence": "high",
+        "depends_on": [
+          "model:model1.totalRowCount__"
+        ],
+        "diagnostics": [],
+        "effect_type": "Show",
+        "evidence": {
+          "edge_type": "DependsOn",
+          "json_path": "canvas.components[20].components[1].visibleCondition",
+          "node_id": "cond:app/actions_test.spg|text_total_child_duplicate#visibleCondition#9",
           "raw_expr": "model1.totalRowCount__ > 0",
           "source_file": "app/actions_test.spg"
         },
@@ -232,114 +362,46 @@
           "is_entrypoint": false,
           "is_main_panel": false
         },
-        "json_path": "canvas.components[0].exp",
-        "kind": "FieldExp",
+        "json_path": "canvas.components[20].components[1].visibleCondition",
+        "kind": "VisibleCondition",
         "normalized_expr": "model1.totalRowCount__ > 0",
         "owner_type": "Component",
         "raw_expr": "model1.totalRowCount__ > 0",
         "source_file": "app/actions_test.spg",
         "subject_type": "Component",
-        "target": "input1"
+        "target": "text_total_child_duplicate"
       },
       {
         "confidence": "high",
         "depends_on": [
-          "param:param1"
+          "model:model1.totalRowCount__"
         ],
         "diagnostics": [],
-        "effect_type": "Compute",
+        "effect_type": "Show",
         "evidence": {
           "edge_type": "DependsOn",
-          "json_path": "canvas.components[16].exp",
-          "node_id": "cond:app/actions_test.spg|input_chain_b#exp#3",
-          "raw_expr": "param1",
+          "json_path": "canvas.components[20].visibleCondition",
+          "node_id": "cond:app/actions_test.spg|panel_total_gate#visibleCondition#6",
+          "raw_expr": "model1.totalRowCount__ > 0",
           "source_file": "app/actions_test.spg"
         },
         "impact": {
           "affected_component_count": 0,
-          "affected_model_count": 0,
+          "affected_model_count": 1,
           "affects_row_count": false,
-          "impact_score": 1,
+          "impact_score": 2,
           "is_entrypoint": false,
           "is_main_panel": false
         },
-        "json_path": "canvas.components[16].exp",
-        "kind": "FieldExp",
-        "normalized_expr": "param1",
+        "json_path": "canvas.components[20].visibleCondition",
+        "kind": "VisibleCondition",
+        "normalized_expr": "model1.totalRowCount__ > 0",
         "owner_type": "Component",
-        "raw_expr": "param1",
+        "raw_expr": "model1.totalRowCount__ > 0",
         "source_file": "app/actions_test.spg",
         "subject_type": "Component",
-        "target": "input_chain_b"
+        "target": "panel_total_gate"
       },
-      {
-        "confidence": "high",
-        "depends_on": [
-          "user:user.WXWORK_USER_ID"
-        ],
-        "diagnostics": [],
-        "effect_type": "Filter",
-        "evidence": {
-          "edge_type": "DependsOn",
-          "json_path": "sources[0].filter.clauses[1].exp",
-          "node_id": "cond:app/actions_test.spg|model1#filter#1#exp",
-          "raw_expr": "$user.WXWORK_USER_ID",
-          "source_file": "app/actions_test.spg"
-        },
-        "impact": {
-          "affected_component_count": 0,
-          "affected_model_count": 0,
-          "affects_row_count": true,
-          "impact_score": 1,
-          "is_entrypoint": false,
-          "is_main_panel": false
-        },
-        "json_path": "sources[0].filter.clauses[1].exp",
-        "kind": "SourceFilterExp",
-        "normalized_expr": "$user.WXWORK_USER_ID",
-        "owner_type": "ModelSource",
-        "raw_expr": "$user.WXWORK_USER_ID",
-        "source_file": "app/actions_test.spg",
-        "subject_type": "ModelSource",
-        "target": "model1"
-      }
-    ],
-    "top_data_sources": [
-      {
-        "edge_type": "Reads",
-        "field_path": "table1.totalRowCount__",
-        "json_path": "canvas.components[id='input1'].<expression>",
-        "model": "table1",
-        "raw_expr": "model1.totalRowCount__ > 0",
-        "source_action": null,
-        "source_component": "comp:app/actions_test.spg|input1",
-        "source_file": "app/actions_test.spg",
-        "target_id": "model:table1"
-      },
-      {
-        "edge_type": "Reads",
-        "field_path": "model1.totalRowCount__",
-        "json_path": "canvas.components[id='input1'].<expression>",
-        "model": "model1",
-        "raw_expr": "model1.totalRowCount__ > 0",
-        "source_action": null,
-        "source_component": "comp:app/actions_test.spg|input1",
-        "source_file": "app/actions_test.spg",
-        "target_id": "model:model1"
-      },
-      {
-        "edge_type": "Reads",
-        "field_path": "table1.totalRowCount__",
-        "json_path": "canvas.components[id='input1'].<expression>",
-        "model": "totalRowCount__",
-        "raw_expr": "model1.totalRowCount__ > 0",
-        "source_action": null,
-        "source_component": "comp:app/actions_test.spg|input1",
-        "source_file": "app/actions_test.spg",
-        "target_id": "field:table1.totalRowCount__"
-      }
-    ],
-    "top_display_prerequisites": [
       {
         "confidence": "high",
         "depends_on": [
@@ -370,68 +432,6 @@
         "source_file": "app/actions_test.spg",
         "subject_type": "Component",
         "target": "panel_test"
-      },
-      {
-        "confidence": "high",
-        "depends_on": [
-          "component:input_chain_b"
-        ],
-        "diagnostics": [],
-        "effect_type": "Show",
-        "evidence": {
-          "edge_type": "DependsOn",
-          "json_path": "canvas.components[17].visibleCondition",
-          "node_id": "cond:app/actions_test.spg|input_chain_a#visibleCondition#4",
-          "raw_expr": "input_chain_b.value != ''",
-          "source_file": "app/actions_test.spg"
-        },
-        "impact": {
-          "affected_component_count": 0,
-          "affected_model_count": 0,
-          "affects_row_count": false,
-          "impact_score": 1,
-          "is_entrypoint": false,
-          "is_main_panel": false
-        },
-        "json_path": "canvas.components[17].visibleCondition",
-        "kind": "VisibleCondition",
-        "normalized_expr": "input_chain_b.value != ''",
-        "owner_type": "Component",
-        "raw_expr": "input_chain_b.value != ''",
-        "source_file": "app/actions_test.spg",
-        "subject_type": "Component",
-        "target": "input_chain_a"
-      },
-      {
-        "confidence": "high",
-        "depends_on": [
-          "component:input2"
-        ],
-        "diagnostics": [],
-        "effect_type": "Show",
-        "evidence": {
-          "edge_type": "DependsOn",
-          "json_path": "canvas.components[0].visibleCondition",
-          "node_id": "cond:app/actions_test.spg|input1#visibleCondition#1",
-          "raw_expr": "input2.value != ''",
-          "source_file": "app/actions_test.spg"
-        },
-        "impact": {
-          "affected_component_count": 0,
-          "affected_model_count": 0,
-          "affects_row_count": false,
-          "impact_score": 1,
-          "is_entrypoint": false,
-          "is_main_panel": false
-        },
-        "json_path": "canvas.components[0].visibleCondition",
-        "kind": "VisibleCondition",
-        "normalized_expr": "input2.value != ''",
-        "owner_type": "Component",
-        "raw_expr": "input2.value != ''",
-        "source_file": "app/actions_test.spg",
-        "subject_type": "Component",
-        "target": "input1"
       }
     ],
     "top_entrypoints": [
@@ -536,7 +536,6 @@
         "target_id": "model:table1"
       }
     ],
-    "what_is_it": "页面 actions_test，14 个用户入口，读取 6 个数据源，写入 18 个目标，3 个跳转",
     "write_target_count": 18
   }
 }

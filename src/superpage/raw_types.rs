@@ -124,6 +124,10 @@ pub struct RawComponent {
     #[serde(rename = "resPath", default)]
     pub res_path: Option<serde_json::Value>,
     #[serde(default)]
+    pub source: Option<serde_json::Value>,
+    #[serde(rename = "dataSet", default)]
+    pub data_set: Option<serde_json::Value>,
+    #[serde(default)]
     pub value: Option<serde_json::Value>,
     #[serde(rename = "defaultValue", default)]
     pub default_value: Option<serde_json::Value>,

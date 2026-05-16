@@ -547,6 +547,15 @@ fn extract_components(
         }
     }
 
+    for (field_name, field_value) in [("source", &raw.source), ("dataSet", &raw.data_set)] {
+        if let Some(val) = field_value
+            && let Some(val_str) = json_scalar_to_string(val)
+            && !val_str.is_empty()
+        {
+            comp.properties.insert(field_name.to_string(), val_str);
+        }
+    }
+
     // Handle submitField separately (always a string, no expression parsing needed)
     if let Some(ref submit_field) = raw.submit_field {
         comp.properties
@@ -629,6 +638,19 @@ fn extract_components(
     }
     for child in &raw.comps {
         extract_components(child, parent.clone(), components, expressions);
+    }
+}
+
+/// 将组件属性中的标量 JSON 值转换为字符串，数组取第一个字符串项
+fn json_scalar_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .find_map(|item| item.as_str().map(|s| s.to_string())),
+        _ => None,
     }
 }
 

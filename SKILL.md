@@ -121,7 +121,7 @@ Supported target formats:
 1. Read `summary.primary_reason`.
 2. For display/disable/action gates, read `details.blocking_conditions`.
 3. For row-count/data availability gates, read `details.data_empty_gates`.
-4. For value lineage, read `details.primary_path`.
+4. For value lineage, read `details.value_source_context` first when the value is a bare `${FIELD}`, otherwise read `details.primary_path`.
 5. Treat `details.supporting_context` as explanatory context only.
 6. Treat `details.related_context` as related but not necessary unless the user explicitly asks to broaden scope.
 
@@ -131,6 +131,14 @@ Supported target formats:
 - If an inherited/direct condition references `modelX.totalRowCount__`, read `condition_scope = expanded_from_total_row_count` in `data_empty_gates`; this is the current page's `modelX` filter.
 - `condition_scope = referenced_by_model_filter` means another model filter references the target component. It is not the target component's display condition.
 - If the same condition appears on both child and parent, it is deduped by `condition_key`; use `deduped_condition_ids` / `deduped_owner_node_ids` only when auditing evidence.
+
+**Bare value source rule (M32)**:
+- If a component value is `${FIELD}` with no model prefix, do not treat `FIELD` as a table/model name.
+- Read `details.value_source_context` first.
+- `value_source_context.nearest_data_context` identifies the nearest ancestor container with `source` / `dataSet`.
+- `value_source_context.field_path` is the resolved `dataSet.FIELD`.
+- `value_source_context.table_source_path` is the page source table/DataFlow path.
+- If `value_source_context.dataflow_field_origin.module_table_path` exists, it is the proven field-level physical input; otherwise only list `dataflow_inputs` as candidates.
 
 **Example answer shape for display questions**:
 ```text
@@ -267,6 +275,7 @@ All machine outputs (`--non-human`, default) follow a unified top-level structur
 - 证据核查读取 `result.details.primary_path` / `result.summary.key_primary_paths` / `result.evidence`。
 - `related_context` 默认不是必要条件，只能作为相关上下文表述。
 - M31 显示/隐藏问题需区分 `condition_scope`: `direct` 是自身条件，`inherited` 是祖先容器必要条件，`expanded_from_total_row_count` 是当前页面模型 filter 展开，`referenced_by_model_filter` 不是目标显示条件。
+- M32 值来源问题遇到 `${FIELD}` 这类裸字段时必须读取 `value_source_context`: 先找 `nearest_data_context`，再用 `field_path` / `table_source_path` / `dataflow_field_origin` 回答来源表。
 - `metadata_runtime_status` / `metadata_runtime_reload` 不能回答业务来源链路。
 
 ## Important Constraints
