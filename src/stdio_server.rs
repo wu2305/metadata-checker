@@ -59,6 +59,8 @@ pub struct StdioRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub intent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub human: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check_reload: Option<bool>,
@@ -135,6 +137,20 @@ fn validate_budget(budget: &str) -> Result<(), StdioError> {
             code: "INVALID_BUDGET".to_string(),
             message: format!(
                 "Invalid budget '{}'. Expected: compact | normal | full",
+                other
+            ),
+        }),
+    }
+}
+
+fn validate_intent(intent: &str) -> Result<(), StdioError> {
+    match intent {
+        "auto" | "display" | "value-source" | "value_source" | "writer" | "availability"
+        | "context" => Ok(()),
+        other => Err(StdioError {
+            code: "INVALID_INTENT".to_string(),
+            message: format!(
+                "Invalid intent '{}'. Expected: auto | display | value-source | writer | availability | context",
                 other
             ),
         }),
@@ -329,6 +345,17 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
     if human && request.command.as_str() != "explain_condition" {
         diagnostics.push("HUMAN_MODE_NOT_SUPPORTED".to_string());
     }
+    let intent = request.intent.clone().unwrap_or_else(|| "auto".to_string());
+    if command == StdioCommand::ExplainCondition {
+        if let Err(err) = validate_intent(&intent) {
+            return error_response(
+                request.request_id.clone(),
+                &err.code,
+                err.message,
+                diagnostics,
+            );
+        }
+    }
 
     if command_requires_target(&command) {
         let target = request.target.as_deref().unwrap_or("");
@@ -366,6 +393,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 target: request.target.clone().unwrap_or_default(),
                 budget: budget.clone(),
                 human,
+                intent: Some(intent),
             };
             match runtime.query(req) {
                 Ok(response) => {

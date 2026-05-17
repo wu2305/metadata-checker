@@ -49,6 +49,8 @@ pub struct RuntimeQueryRequest {
     pub target: String,
     pub budget: String,
     pub human: bool,
+    #[serde(default)]
+    pub intent: Option<String>,
 }
 
 /// Runtime 查询响应
@@ -197,10 +199,14 @@ impl GraphRuntime {
         let query_start = Instant::now();
         let mut result = match request.command {
             RuntimeQueryCommand::ExplainCondition => {
-                crate::explain::build_explain_condition_output(
+                let intent = crate::explain::TraversalIntent::parse(
+                    request.intent.as_deref().unwrap_or("auto"),
+                )?;
+                crate::explain::build_explain_condition_output_with_intent(
                     &self.graph,
                     &request.target,
                     &request.budget,
+                    intent,
                 )?
             }
         };

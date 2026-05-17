@@ -22,6 +22,7 @@ fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
         target: "comp:app/actions_test.spg|input1".to_string(),
         budget: "compact".to_string(),
         human: false,
+        intent: None,
     };
 
     // 第一次查询
@@ -91,6 +92,7 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
         target: "comp:app/销售.app/销售/合同协议.spg|input3".to_string(),
         budget: "compact".to_string(),
         human: false,
+        intent: None,
     };
 
     // 第一次查询
@@ -230,6 +232,7 @@ fn test_runtime_reload_failure_preserves_old_graph() {
         target: "comp:app/actions_test.spg|input1".to_string(),
         budget: "compact".to_string(),
         human: false,
+        intent: None,
     };
     let resp = runtime.query(request).expect("旧 graph 仍可查询");
     assert_eq!(resp.result.get("kind").and_then(|v| v.as_str()), Some("Explain"));

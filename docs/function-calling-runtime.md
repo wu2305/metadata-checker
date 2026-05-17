@@ -40,6 +40,7 @@ stdin 每行一个 JSON 对象：
 | `command` | string | 是 | `explain_condition` / `explain` / `query_model` / `query_page_logic` / `context` / `status` / `reload` |
 | `target` | string | 查询类命令必需 | 查询目标 |
 | `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal`；非法值返回 `INVALID_BUDGET` |
+| `intent` | string | 否 | `explain_condition` 专用：`auto` / `display` / `value-source` / `writer` / `availability` / `context`，非法值返回 `INVALID_INTENT` |
 | `human` | bool | 否 | 是否生成 human_summary，默认 `false`（目前仅 `explain_condition` 支持） |
 | `depth` | usize | 否 | `context` 命令专用，默认 `1`；非法值返回 `INVALID_DEPTH` |
 | `check_reload` | bool | 否 | 查询前检测 graphdb 变更，默认 `false` |
@@ -68,7 +69,7 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 
 | Tool | stdio command | 必需参数 | 默认 budget | 适用问题 | 主要读取位置 |
 |---|---|---|---|---|---|
-| `metadata_explain_condition` | `explain_condition` | `target` | `compact` | 为什么不显示、为什么没数据、值从哪来、组件/页面可用性 | `result.summary`、`result.summary.key_primary_paths`、`result.details.primary_path`、`result.evidence` |
+| `metadata_explain_condition` | `explain_condition` | `target` | `compact` | 为什么不显示、为什么没数据、值从哪来、组件/页面可用性 | `result.summary`、`result.details.answer_facts`；核查时再读 details/evidence |
 | `metadata_explain` | `explain` | `target` | `compact` | 这个对象是什么、它读写/跳转/影响什么 | `result.summary`、`result.details`、`result.evidence` |
 | `metadata_context` | `context` | `target`, `depth` | `normal` | 周围关系是什么、需要扩展核查上下游 | `result.summary`、`result.details.upstream`、`result.details.downstream` |
 | `metadata_query_model` | `query_model` | `target` | `compact` | 模型读写全貌、谁读/谁写、跨页 writer | `result.summary`、`result.details.readers`、`result.details.writers`、`result.evidence` |
@@ -80,7 +81,7 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 
 | Tool | 参数 |
 |---|---|
-| `metadata_explain_condition` | `target: string`, `budget?: compact|normal|full`, `human?: false`, `check_reload?: boolean` |
+| `metadata_explain_condition` | `target: string`, `intent?: auto|display|value-source|writer|availability|context`, `budget?: compact|normal|full`, `human?: false`, `check_reload?: boolean` |
 | `metadata_explain` | `target: string`, `budget?: compact|normal|full` |
 | `metadata_context` | `target: string`, `depth?: number`, `budget?: compact|normal|full` |
 | `metadata_query_model` | `target: string`, `budget?: compact|normal|full` |
@@ -91,6 +92,7 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 选择规则：
 
 - “为什么不显示 / 为什么没数据 / 值从哪来” → `metadata_explain_condition`。
+- wrapper 能判断问题类型时应传入 `intent`：显示/隐藏/禁用用 `display`，值来源/来源表用 `value-source`，谁写入/怎么生成用 `writer`，数据为空用 `availability`。
 - “这个对象是什么” → `metadata_explain`。
 - “周围关系是什么 / 需要补看上下游” → `metadata_context`。
 - “模型读写全貌 / 谁写了这个表” → `metadata_query_model`。
@@ -101,8 +103,9 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 Anti-drift 约束：
 
 - `timing` 只能用于性能判断，不能解释业务数据来源、显示条件或写入链路。
-- 业务回答优先读取 `result.summary`。
-- 证据核查读取 `result.details.primary_path` / `result.summary.key_primary_paths` / `result.evidence`。
+- 业务回答优先读取 `result.summary` 和 `result.details.answer_facts`。
+- 证据核查读取 `result.details.primary_path` / `result.details.blocking_conditions` / `result.details.data_empty_gates` / `result.evidence`。
+- compact 模式默认隐藏 `result.details.supporting_context` / `result.details.related_context` 明细，只保留对应 `*_summary`；需要审计旁路明细时再提高到 `normal` 或 `full`。
 - `related_context` 默认只是相关上下文，不是必要条件；只有输出明确标为阻塞条件或主路径证据时才可作为必要条件表述。
 - 不默认使用 `budget=full`；先 `compact`，证据不足再升到 `normal`，只有审计长数组时才用 `full`。
 
@@ -128,11 +131,18 @@ class MetadataCheckerRuntime:
         self._counter += 1
         return f"req-{self._counter}"
 
-    def explain_condition(self, target: str, budget: str = "compact", check_reload: bool = False) -> dict:
+    def explain_condition(
+        self,
+        target: str,
+        budget: str = "compact",
+        intent: str = "auto",
+        check_reload: bool = False,
+    ) -> dict:
         return self._request({
             "request_id": self._next_id(),
             "command": "explain_condition",
             "target": target,
+            "intent": intent,
             "budget": budget,
             "human": False,
             "check_reload": check_reload,

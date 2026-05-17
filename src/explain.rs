@@ -8,6 +8,45 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::io::{self, Write};
 
+/// M33 目标节点因果遍历意图
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraversalIntent {
+    Auto,
+    Display,
+    ValueSource,
+    Writer,
+    Availability,
+    Context,
+}
+
+impl TraversalIntent {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "auto" | "" => Ok(Self::Auto),
+            "display" => Ok(Self::Display),
+            "value-source" | "value_source" => Ok(Self::ValueSource),
+            "writer" => Ok(Self::Writer),
+            "availability" => Ok(Self::Availability),
+            "context" => Ok(Self::Context),
+            other => anyhow::bail!(
+                "Invalid intent '{}'. Expected: auto | display | value-source | writer | availability | context",
+                other
+            ),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Display => "display",
+            Self::ValueSource => "value-source",
+            Self::Writer => "writer",
+            Self::Availability => "availability",
+            Self::Context => "context",
+        }
+    }
+}
+
 /// 解释单文件 .spg 中的组件
 ///
 /// 对单文件 .spg 支持组件 ID 简写，例如 --explain input1。
@@ -1263,6 +1302,505 @@ fn build_value_source_context(
     }))
 }
 
+fn answer_path_step(
+    step: usize,
+    node_id: impl Into<String>,
+    node_type: impl Into<String>,
+    edge_type: impl Into<String>,
+    direction: impl Into<String>,
+    field_path: Option<&str>,
+    source_file: Option<&str>,
+    json_path: Option<&str>,
+    why_included: impl Into<String>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "step": step,
+        "node_id": node_id.into(),
+        "node_type": node_type.into(),
+        "edge_type": edge_type.into(),
+        "direction": direction.into(),
+        "field_path": field_path,
+        "source_file": source_file,
+        "json_path": json_path,
+        "why_included": why_included.into(),
+    })
+}
+
+fn evidence_ref_from_condition(cond: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "node_id": cond.get("condition_id").and_then(|v| v.as_str()),
+        "source_file": cond.get("source_file").and_then(|v| v.as_str()),
+        "json_path": cond.get("json_path").and_then(|v| v.as_str()),
+    })
+}
+
+fn compact_condition_fact(cond: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "condition_id": cond.get("condition_id").and_then(|v| v.as_str()),
+        "condition_type": cond.get("condition_type").and_then(|v| v.as_str()),
+        "condition_scope": cond.get("condition_scope").and_then(|v| v.as_str()),
+        "raw_expr": cond.get("raw_expr").and_then(|v| v.as_str()),
+        "owner_node_id": cond.get("owner_node_id").and_then(|v| v.as_str()),
+        "inherited_from": cond.get("inherited_from").and_then(|v| v.as_str()),
+        "expanded_from_condition": cond.get("expanded_from_condition").and_then(|v| v.as_str()),
+        "source_file": cond.get("source_file").and_then(|v| v.as_str()),
+        "json_path": cond.get("json_path").and_then(|v| v.as_str()),
+    })
+}
+
+fn build_display_facts(
+    target_node: &crate::graph::Node,
+    blocking_conditions: &[serde_json::Value],
+    data_empty_gates: &[serde_json::Value],
+) -> serde_json::Value {
+    let direct_conditions: Vec<_> = blocking_conditions
+        .iter()
+        .filter(|c| c.get("condition_scope").and_then(|v| v.as_str()) == Some("direct"))
+        .map(compact_condition_fact)
+        .collect();
+    let inherited_conditions: Vec<_> = blocking_conditions
+        .iter()
+        .filter(|c| c.get("condition_scope").and_then(|v| v.as_str()) == Some("inherited"))
+        .map(compact_condition_fact)
+        .collect();
+    let expanded_data_gates: Vec<_> = data_empty_gates
+        .iter()
+        .filter(|c| {
+            c.get("condition_scope").and_then(|v| v.as_str())
+                == Some("expanded_from_total_row_count")
+        })
+        .map(compact_condition_fact)
+        .collect();
+
+    let mut evidence_refs: Vec<serde_json::Value> = blocking_conditions
+        .iter()
+        .chain(data_empty_gates.iter())
+        .map(evidence_ref_from_condition)
+        .collect();
+    evidence_refs.truncate(8);
+
+    let mut paths = Vec::new();
+    for cond in blocking_conditions.iter().take(3) {
+        paths.push(serde_json::json!({
+            "intent": "display",
+            "result": cond.get("raw_expr").and_then(|v| v.as_str()),
+            "confidence": "high",
+            "why_complete": "display gate condition found",
+            "stop_condition_hit": "display_condition_found",
+            "evidence_refs": [evidence_ref_from_condition(cond)],
+            "steps": [
+                answer_path_step(
+                    1,
+                    cond.get("condition_id").and_then(|v| v.as_str()).unwrap_or(""),
+                    "Condition",
+                    "DependsOn",
+                    "incoming",
+                    None,
+                    cond.get("source_file").and_then(|v| v.as_str()),
+                    cond.get("json_path").and_then(|v| v.as_str()),
+                    "condition controls target display or inherited container display",
+                )
+            ]
+        }));
+    }
+
+    serde_json::json!({
+        "result": if !direct_conditions.is_empty() || !inherited_conditions.is_empty() {
+            "display_conditions_found"
+        } else {
+            "no_display_condition_found"
+        },
+        "confidence": if !direct_conditions.is_empty() || !inherited_conditions.is_empty() {
+            "high"
+        } else {
+            "medium"
+        },
+        "target": target_node.id,
+        "has_direct_condition": !direct_conditions.is_empty(),
+        "direct_conditions": direct_conditions,
+        "inherited_conditions": inherited_conditions,
+        "expanded_data_gates": expanded_data_gates,
+        "evidence_refs": evidence_refs,
+        "paths": paths,
+        "missing_evidence": if blocking_conditions.is_empty() {
+            serde_json::json!(["no direct or inherited display gate found"])
+        } else {
+            serde_json::json!([])
+        },
+    })
+}
+
+fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) -> serde_json::Value {
+    let Some(ctx) = value_source_context.as_ref() else {
+        return serde_json::json!({
+            "result": null,
+            "confidence": "low",
+            "paths": [],
+            "evidence_refs": [],
+            "missing_evidence": ["value_source_context not available"],
+        });
+    };
+
+    let origin_path = ctx
+        .get("dataflow_field_origin")
+        .and_then(|v| v.get("module_table_path"))
+        .and_then(|v| v.as_str());
+    let table_source_path = ctx.get("table_source_path").and_then(|v| v.as_str());
+    let result = origin_path.or(table_source_path);
+    let raw_expr = ctx.get("raw_expr").and_then(|v| v.as_str());
+    let bare_symbol = ctx.get("bare_symbol").and_then(|v| v.as_str());
+    let field_path = ctx.get("field_path").and_then(|v| v.as_str());
+    let context_component = ctx
+        .get("nearest_data_context")
+        .and_then(|v| v.get("component_id"))
+        .and_then(|v| v.as_str());
+    let data_set = ctx
+        .get("nearest_data_context")
+        .and_then(|v| v.get("dataSet"))
+        .and_then(|v| v.as_str());
+    let graph_target = ctx
+        .get("graph_edge")
+        .and_then(|v| v.get("target_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let graph_edge_type = ctx
+        .get("graph_edge")
+        .and_then(|v| v.get("edge_type"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Reads");
+
+    let mut steps = Vec::new();
+    steps.push(answer_path_step(
+        1,
+        ctx.get("source_component")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+        "Component",
+        graph_edge_type,
+        "outgoing",
+        field_path,
+        None,
+        ctx.get("nearest_data_context")
+            .and_then(|v| v.get("json_path"))
+            .and_then(|v| v.as_str()),
+        "target value expression reads a field",
+    ));
+    if let Some(component) = context_component {
+        steps.push(answer_path_step(
+            2,
+            component,
+            "Component",
+            "inherited_container_data_context",
+            "ancestor",
+            field_path,
+            None,
+            ctx.get("nearest_data_context")
+                .and_then(|v| v.get("json_path"))
+                .and_then(|v| v.as_str()),
+            "bare field resolved through nearest data context container",
+        ));
+    }
+    if !graph_target.is_empty() {
+        steps.push(answer_path_step(
+            3,
+            graph_target,
+            "Field",
+            graph_edge_type,
+            "outgoing",
+            field_path,
+            table_source_path,
+            None,
+            "resolved dataSet field",
+        ));
+    }
+    if let Some(origin) = origin_path {
+        steps.push(answer_path_step(
+            4,
+            origin,
+            "Model",
+            "dataflow_field_origin",
+            "upstream",
+            field_path,
+            Some(origin),
+            None,
+            "DataFlow field origin matched original input table",
+        ));
+    }
+
+    serde_json::json!({
+        "result": result,
+        "confidence": if origin_path.is_some() || table_source_path.is_some() { "high" } else { "low" },
+        "raw_expr": raw_expr,
+        "bare_symbol": bare_symbol,
+        "nearest_data_context": context_component,
+        "data_set": data_set,
+        "field_path": field_path,
+        "table_source_path": table_source_path,
+        "proven_physical_input": origin_path,
+        "paths": [{
+            "intent": "value-source",
+            "result": result,
+            "confidence": if origin_path.is_some() || table_source_path.is_some() { "high" } else { "low" },
+            "why_complete": if origin_path.is_some() {
+                "field-level DataFlow origin found"
+            } else {
+                "stopped at page source table path"
+            },
+            "stop_condition_hit": if origin_path.is_some() {
+                "proven_physical_input_found"
+            } else {
+                "table_source_path_found"
+            },
+            "evidence_refs": [{
+                "node_id": graph_target,
+                "field_path": field_path,
+                "raw_expr": raw_expr,
+            }],
+            "steps": steps,
+        }],
+        "evidence_refs": [{
+            "node_id": graph_target,
+            "field_path": field_path,
+            "raw_expr": raw_expr,
+        }],
+        "missing_evidence": if result.is_none() {
+            serde_json::json!(["no table source path or DataFlow field origin found"])
+        } else {
+            serde_json::json!([])
+        },
+    })
+}
+
+fn build_writer_facts(primary_path: &[serde_json::Value]) -> serde_json::Value {
+    let writer_paths: Vec<_> = primary_path
+        .iter()
+        .filter(|p| {
+            let path_text = p.to_string();
+            path_text.contains("ActionWrites")
+                || path_text.contains("FieldWrite")
+                || path_text.contains("Writes")
+        })
+        .take(5)
+        .cloned()
+        .collect();
+
+    let paths: Vec<_> = writer_paths
+        .iter()
+        .enumerate()
+        .map(|(idx, path)| {
+            let path_id = path.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
+            let steps = path
+                .get("segments")
+                .and_then(|v| v.as_array())
+                .map(|segments| {
+                    segments
+                        .iter()
+                        .enumerate()
+                        .map(|(step_idx, segment)| {
+                            let to_node = segment.get("to").unwrap_or(&serde_json::Value::Null);
+                            let edge = segment.get("edge").unwrap_or(&serde_json::Value::Null);
+                            answer_path_step(
+                                step_idx + 1,
+                                to_node
+                                    .get("node_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(path_id),
+                                to_node
+                                    .get("node_type")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Node"),
+                                edge.get("edge_type")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Unknown"),
+                                "causal",
+                                edge.get("field_path").and_then(|v| v.as_str()),
+                                to_node.get("path").and_then(|v| v.as_str()),
+                                edge.get("json_path").and_then(|v| v.as_str()),
+                                "selected primary path segment contributes to writer lineage",
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .filter(|steps| !steps.is_empty())
+                .unwrap_or_else(|| {
+                    vec![answer_path_step(
+                        idx + 1,
+                        path_id,
+                        "Path",
+                        "Writes/ActionWrites/FieldWrite",
+                        "incoming",
+                        None,
+                        None,
+                        None,
+                        "primary path contains a writer edge",
+                    )]
+                });
+            serde_json::json!({
+                "intent": "writer",
+                "result": path_id,
+                "confidence": "high",
+                "why_complete": "writer edge found in selected primary path",
+                "stop_condition_hit": "writer_path_found",
+                "evidence_refs": [{
+                    "path_id": path_id,
+                }],
+                "steps": steps,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "result": if writer_paths.is_empty() { serde_json::Value::Null } else { serde_json::json!("writer_paths_found") },
+        "confidence": if writer_paths.is_empty() { "low" } else { "high" },
+        "paths": paths,
+        "evidence_refs": writer_paths.iter().map(|p| serde_json::json!({
+            "path_id": p.get("path_id").and_then(|v| v.as_str()),
+        })).collect::<Vec<_>>(),
+        "missing_evidence": if writer_paths.is_empty() {
+            serde_json::json!(["no writer path selected"])
+        } else {
+            serde_json::json!([])
+        },
+    })
+}
+
+fn build_availability_facts(data_empty_gates: &[serde_json::Value]) -> serde_json::Value {
+    let gates: Vec<_> = data_empty_gates.iter().map(compact_condition_fact).collect();
+    serde_json::json!({
+        "result": if gates.is_empty() { "no_data_gate_found" } else { "data_gates_found" },
+        "confidence": if gates.is_empty() { "medium" } else { "high" },
+        "gates": gates,
+        "paths": data_empty_gates.iter().take(3).map(|gate| serde_json::json!({
+            "intent": "availability",
+            "result": gate.get("raw_expr").and_then(|v| v.as_str()),
+            "confidence": "high",
+            "why_complete": "data availability gate found",
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "evidence_refs": [evidence_ref_from_condition(gate)],
+            "steps": [
+                answer_path_step(
+                    1,
+                    gate.get("condition_id").and_then(|v| v.as_str()).unwrap_or(""),
+                    "Condition",
+                    "DependsOn",
+                    "incoming",
+                    None,
+                    gate.get("source_file").and_then(|v| v.as_str()),
+                    gate.get("json_path").and_then(|v| v.as_str()),
+                    "filter or totalRowCount condition controls data availability",
+                )
+            ]
+        })).collect::<Vec<_>>(),
+        "evidence_refs": data_empty_gates.iter().map(evidence_ref_from_condition).collect::<Vec<_>>(),
+        "missing_evidence": if data_empty_gates.is_empty() {
+            serde_json::json!(["no data availability gate found"])
+        } else {
+            serde_json::json!([])
+        },
+    })
+}
+
+fn build_traversal_policy(intent: TraversalIntent, budget: &str) -> serde_json::Value {
+    let (max_paths, max_steps_per_path) = match budget {
+        "compact" => (3, 6),
+        "full" => (10, 12),
+        _ => (5, 8),
+    };
+    serde_json::json!({
+        "intent": intent.as_str(),
+        "max_paths": max_paths,
+        "max_steps_per_path": max_steps_per_path,
+        "allowed_edge_types": match intent {
+            TraversalIntent::Display => serde_json::json!(["DependsOn", "Contains"]),
+            TraversalIntent::ValueSource => serde_json::json!(["Reads", "FieldAlias", "DataflowOutput", "DataflowInput"]),
+            TraversalIntent::Writer => serde_json::json!(["Writes", "ActionWrites", "FieldWrite", "FieldAlias"]),
+            TraversalIntent::Availability => serde_json::json!(["DependsOn", "DataflowInput"]),
+            TraversalIntent::Context | TraversalIntent::Auto => serde_json::json!(["Reads", "Writes", "ActionWrites", "FieldWrite", "DependsOn", "Contains"]),
+        },
+        "directions": match intent {
+            TraversalIntent::Writer => serde_json::json!(["incoming", "reverse_alias"]),
+            TraversalIntent::Display => serde_json::json!(["incoming", "ancestor"]),
+            TraversalIntent::ValueSource => serde_json::json!(["outgoing", "upstream"]),
+            TraversalIntent::Availability => serde_json::json!(["incoming", "filter_refs"]),
+            TraversalIntent::Context | TraversalIntent::Auto => serde_json::json!(["incoming", "outgoing"]),
+        },
+        "stop_conditions": match intent {
+            TraversalIntent::Display => serde_json::json!(["display_condition_found", "expanded_model_filter_found"]),
+            TraversalIntent::ValueSource => serde_json::json!(["proven_physical_input_found", "table_source_path_found", "field_origin_unprovable"]),
+            TraversalIntent::Writer => serde_json::json!(["writer_path_found"]),
+            TraversalIntent::Availability => serde_json::json!(["filter_or_total_row_count_gate_found"]),
+            TraversalIntent::Context | TraversalIntent::Auto => serde_json::json!(["path_budget_exhausted"]),
+        },
+        "rank_rules": ["field-level paths before model-level paths", "proven paths before candidates", "paths with evidence before inferred paths"],
+    })
+}
+
+fn build_answer_facts(
+    intent: TraversalIntent,
+    target_node: &crate::graph::Node,
+    blocking_conditions: &[serde_json::Value],
+    data_empty_gates: &[serde_json::Value],
+    value_source_context: &Option<serde_json::Value>,
+    primary_path: &[serde_json::Value],
+    budget: &str,
+) -> serde_json::Value {
+    let display_facts = build_display_facts(target_node, blocking_conditions, data_empty_gates);
+    let value_source_facts = build_value_source_facts(value_source_context);
+    let writer_facts = build_writer_facts(primary_path);
+    let availability_facts = build_availability_facts(data_empty_gates);
+    let traversal_policy = build_traversal_policy(intent, budget);
+
+    serde_json::json!({
+        "intent": intent.as_str(),
+        "display_facts": display_facts,
+        "value_source_facts": value_source_facts,
+        "writer_facts": writer_facts,
+        "availability_facts": availability_facts,
+        "context_facts": {
+            "result": "not_expanded_in_explain_condition",
+            "confidence": "medium",
+            "paths": [],
+            "evidence_refs": [],
+            "missing_evidence": ["use --context for broad surrounding context"],
+        },
+        "traversal_policy": traversal_policy,
+    })
+}
+
+/// 构建上下文数组摘要，用于 compact 模式隐藏大体量旁路明细
+fn build_context_summary(
+    items: &[serde_json::Value],
+    emitted_count: usize,
+    hidden: bool,
+    note: &str,
+) -> serde_json::Value {
+    let mut by_scope: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut by_source_file: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+
+    for item in items {
+        let scope = item
+            .get("condition_scope")
+            .or_else(|| item.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        *by_scope.entry(scope.to_string()).or_insert(0) += 1;
+
+        if let Some(source_file) = item.get("source_file").and_then(|v| v.as_str()) {
+            *by_source_file.entry(source_file.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    serde_json::json!({
+        "total_count": items.len(),
+        "emitted_count": emitted_count,
+        "hidden": hidden,
+        "note": note,
+        "by_scope": by_scope,
+        "by_source_file": by_source_file,
+    })
+}
+
 /// 对 `model.totalRowCount__` 门控展开当前页面模型 filter
 fn expand_total_row_count_gates(
     graph: &GraphDB,
@@ -1445,8 +1983,9 @@ pub fn explain_condition_target(
     target_id: &str,
     human: bool,
     budget: &str,
+    intent: TraversalIntent,
 ) -> Result<()> {
-    let result = build_explain_condition_output(graph, target_id, budget)?;
+    let result = build_explain_condition_output_with_intent(graph, target_id, budget, intent)?;
 
     if human {
         let text = render_explain_condition_human(&result, target_id);
@@ -1466,6 +2005,16 @@ pub fn build_explain_condition_output(
     target_id: &str,
     _budget: &str,
 ) -> Result<serde_json::Value> {
+    build_explain_condition_output_with_intent(graph, target_id, _budget, TraversalIntent::Auto)
+}
+
+/// 构建带 M33 intent 的 explain-condition 结构化 JSON 输出，不直接打印
+pub fn build_explain_condition_output_with_intent(
+    graph: &GraphDB,
+    target_id: &str,
+    _budget: &str,
+    intent: TraversalIntent,
+) -> Result<serde_json::Value> {
     let target_node = match graph.get_node(target_id) {
         Some(n) => n,
         None => {
@@ -1477,6 +2026,18 @@ pub fn build_explain_condition_output(
             );
             return Ok(serde_json::to_value(out)?);
         }
+    };
+
+    let effective_intent = if intent == TraversalIntent::Auto {
+        if target_node.id.starts_with("field:") {
+            TraversalIntent::Writer
+        } else if target_node.id.starts_with("model:") {
+            TraversalIntent::Availability
+        } else {
+            TraversalIntent::Auto
+        }
+    } else {
+        intent
     };
 
     let page_node = match target_node.node_type {
@@ -1750,6 +2311,20 @@ pub fn build_explain_condition_output(
         }
     }
 
+    let answer_facts = build_answer_facts(
+        effective_intent,
+        &target_node,
+        &blocking_conditions,
+        &data_empty_gates,
+        &value_source_context,
+        &primary_path,
+        _budget,
+    );
+    let traversal_policy = answer_facts
+        .get("traversal_policy")
+        .cloned()
+        .unwrap_or_else(|| build_traversal_policy(effective_intent, _budget));
+
     let primary_reason = if target_node.node_type == crate::graph::NodeType::Page {
         if !blocking_conditions.is_empty() {
             format!(
@@ -1790,12 +2365,49 @@ pub fn build_explain_condition_output(
         format!("目标 {} 未发现明确的阻塞条件或数据链路", target_node.id)
     };
 
+    let compact_budget = _budget == "compact";
+    let details_supporting_context = if compact_budget {
+        Vec::new()
+    } else {
+        supporting_context.clone()
+    };
+    let details_related_context = if compact_budget {
+        Vec::new()
+    } else {
+        related_context.clone()
+    };
+    let supporting_context_summary = build_context_summary(
+        &supporting_context,
+        details_supporting_context.len(),
+        compact_budget && !supporting_context.is_empty(),
+        if compact_budget {
+            "compact 模式隐藏 supporting_context 明细；需要核查时使用 --budget normal 或 full"
+        } else {
+            "supporting_context 明细已展开"
+        },
+    );
+    let related_context_summary = build_context_summary(
+        &related_context,
+        details_related_context.len(),
+        compact_budget && !related_context.is_empty(),
+        if compact_budget {
+            "compact 模式隐藏 related_context 明细；它们是相关但非必要上下文"
+        } else {
+            "related_context 是相关但非必要上下文"
+        },
+    );
+
     let summary = serde_json::json!({
         "what_is_it": format!("Why 解释: {}", target_node.id),
         "target_id": target_node.id,
         "target_type": format!("{:?}", target_node.node_type),
         "target_name": target_node.name,
+        "intent": effective_intent.as_str(),
         "primary_reason": primary_reason,
+        "answer_facts_count": answer_facts
+            .as_object()
+            .map(|obj| obj.keys().filter(|k| k.ends_with("_facts")).count())
+            .unwrap_or(0),
         "blocking_conditions_count": blocking_conditions.len(),
         "data_empty_gates_count": data_empty_gates.len(),
         "primary_paths_count": primary_path.len(),
@@ -1812,11 +2424,18 @@ pub fn build_explain_condition_output(
             "path": target_node.path,
         },
         "primary_path": primary_path,
+        "answer_facts": answer_facts,
+        "traversal_policy": traversal_policy,
+        "proven_paths": [],
+        "candidate_paths": [],
+        "rejected_paths": [],
         "value_source_context": value_source_context,
         "blocking_conditions": blocking_conditions,
         "data_empty_gates": data_empty_gates,
-        "supporting_context": supporting_context,
-        "related_context": related_context,
+        "supporting_context": details_supporting_context,
+        "supporting_context_summary": supporting_context_summary,
+        "related_context": details_related_context,
+        "related_context_summary": related_context_summary,
     });
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);

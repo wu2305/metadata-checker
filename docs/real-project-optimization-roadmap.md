@@ -1487,13 +1487,13 @@ target node
 
 ### 功能要求
 
-- [ ] 新增 `TraversalIntent`：
+- [x] 新增 `TraversalIntent`：
   - `Display`：回答显示/隐藏/禁用条件。
   - `ValueSource`：回答组件值、字段值、来源表。
   - `Writer`：回答字段/模型被谁写入或生成。
   - `Availability`：回答数据源为什么可能为空、row count 门控。
   - `Context`：回答周边关系，允许更宽但仍受 budget 控制。
-- [ ] 新增 `TraversalPolicy`：
+- [x] 新增 `TraversalPolicy`：
   - `intent`
   - `allowed_edge_types`
   - `directions`
@@ -1501,7 +1501,7 @@ target node
   - `max_steps_per_path`
   - `stop_conditions`
   - `rank_rules`
-- [ ] 新增 `AnswerPath`：
+- [x] 新增 `AnswerPath`：
   - `intent`
   - `result`
   - `confidence`
@@ -1509,13 +1509,13 @@ target node
   - `evidence_refs[]`
   - `why_complete`
   - `stop_condition_hit`
-- [ ] 新增 `answer_facts` 输出层：
+- [x] 新增 `answer_facts` 输出层：
   - `display_facts`
   - `value_source_facts`
   - `writer_facts`
   - `availability_facts`
   - `context_facts`
-- [ ] compact budget 默认输出：
+- [x] compact budget 默认输出：
   - `summary`
   - `answer_facts`
   - 少量 `evidence_refs`
@@ -1627,16 +1627,16 @@ target node
 
 ### CLI / Runtime 要求
 
-- [ ] `--explain-condition` 新增可选参数：
+- [x] `--explain-condition` 新增可选参数：
   - `--intent auto|display|value-source|writer|availability|context`
   - 默认 `auto`
-- [ ] function-calling / stdio command 支持 `intent` 字段。
+- [x] function-calling / stdio command 支持 `intent` 字段。
 - [ ] `auto` 模式下：
   - 如果 target 是 `comp:`，默认同时生成短小 `display_facts` 与 `value_source_facts`。
   - 如果 target 是 `field:`，默认生成 `value_source_facts` 与 `writer_facts`。
   - 如果 target 是 `model:`，默认生成 `availability_facts` 与 writer/read summary。
   - 如果用户问题由 wrapper 可传入 intent，则优先使用 wrapper intent。
-- [ ] compact budget：
+- [x] compact budget：
   - 默认隐藏 `related_context` 大数组。
   - 默认隐藏 traversal debug。
   - 保留 `answer_facts.paths[].steps[]` 的短证据。
@@ -1646,7 +1646,7 @@ target node
 
 ### Schema 要求
 
-- [ ] 更新 `docs/schema.md`：
+- [x] 更新 `docs/schema.md`：
   - `summary.intent`
   - `summary.answer_facts_count`
   - `details.answer_facts`
@@ -1654,7 +1654,7 @@ target node
   - `details.proven_paths`
   - `details.candidate_paths`
   - `details.rejected_paths`
-- [ ] `AnswerPath.steps[]` 至少包含：
+- [x] `AnswerPath.steps[]` 至少包含：
   - `step`
   - `node_id`
   - `node_type`
@@ -1664,7 +1664,7 @@ target node
   - `source_file`
   - `json_path`
   - `why_included`
-- [ ] 每个 fact 必须包含：
+- [x] 每个 fact 必须包含：
   - `result`
   - `confidence`
   - `evidence_refs`
@@ -1677,7 +1677,7 @@ target node
   - 目标组件自身无 visible，但祖先有 `visibleCondition`。
   - compact `display_facts` 只包含 direct/inherited/expanded gates。
   - 不包含 value source。
-- [ ] Fixture：ValueSource intent
+- [x] Fixture：ValueSource intent
   - 子组件 `${name}` 继承容器 `dataSet=model1`。
   - `value_source_facts.result` 指向 `data/table1.tbl`。
   - 路径 steps 包含 `inherited_container_data_context`。
@@ -1691,7 +1691,7 @@ target node
 - [ ] Fixture：候选/证明分离
   - DataFlow 字段级 origin 不可证明时，只输出 `candidate_paths`。
   - 不得把 DataFlow input candidate 放进 proven result。
-- [ ] 真实项目回归：`text41`
+- [x] 真实项目回归：`text41`
   - target：`comp:app/售后.app/绑定车辆/会员已注册.spg|text41`
   - `display_facts` 只包含：
     - 无 direct visibleCondition。
@@ -1705,12 +1705,12 @@ target node
     - `proven_physical_input = $DATA:/主数据/fact_autoCustomerAutoRel.tbl`
   - 不得把 `model2.name=text41` 当必要显示条件。
   - 不得把 `CUSTOMAUTOMYAUTOLIST` 当模型或表。
-- [ ] 真实项目回归：`input3`
+- [x] 真实项目回归：`input3`
   - target：`comp:app/销售.app/销售/合同协议.spg|input3`
   - `value_source_facts` / `writer_facts` 保留跨页 writer 链路。
   - 必须包含 `model22.phoneNumber`、`fact_qwSidebar.phoneNumber`、`action1`、`action4`。
   - compact 输出不得包含大量无关页面 related_context。
-- [ ] stdio / function-calling 回归
+- [x] stdio / function-calling 回归
   - `explain_condition` 支持 `intent`。
   - `human=true` 行为不回退。
   - 外部 graphdb + project_dir 不回退。
@@ -1720,14 +1720,14 @@ target node
 
 ### Skill / 文档任务
 
-- [ ] `SKILL.md` 改为更薄的默认协议：
+- [x] `SKILL.md` 改为更薄的默认协议：
   - 默认读 `summary` + `answer_facts`。
   - 只有核查时读 `details`。
   - 只有争议或缺证时读 `evidence` / `rejected_paths`。
-- [ ] function-calling 文档更新：
+- [x] function-calling 文档更新：
   - wrapper 应传入 `intent`。
   - 小模型默认不读 `related_context`。
-- [ ] `docs/schema.md` 更新 M33 字段契约。
+- [x] `docs/schema.md` 更新 M33 字段契约。
 - [ ] `docs/performance-baseline.md` 增加 M33 compact 输出体积基线。
 
 ### 验收目标

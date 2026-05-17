@@ -395,6 +395,111 @@ fn test_stdio_server_invalid_budget() {
     let _ = child.wait();
 }
 
+/// M33：stdio explain_condition 支持 intent，并返回 answer_facts
+#[test]
+fn test_stdio_server_explain_condition_intent_answer_facts() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-m33-intent",
+        "command": "explain_condition",
+        "target": "comp:app/actions_test.spg|text_bare_field_child",
+        "budget": "compact",
+        "intent": "value-source",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
+    assert_eq!(resp["ok"].as_bool(), Some(true));
+    assert_eq!(
+        resp["result"]["summary"]["intent"].as_str(),
+        Some("value-source")
+    );
+    assert_eq!(
+        resp["result"]["details"]["answer_facts"]["value_source_facts"]["result"].as_str(),
+        Some("data/table1.tbl")
+    );
+
+    let _ = child.wait();
+}
+
+/// M33：非法 intent 返回结构化 INVALID_INTENT
+#[test]
+fn test_stdio_server_invalid_intent() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-invalid-intent",
+        "command": "explain_condition",
+        "target": "comp:app/actions_test.spg|input1",
+        "budget": "compact",
+        "intent": "everything",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, false);
+    assert_output_size_matches_line(&resp, &line);
+    assert_eq!(stdio_error_code(&resp), Some("INVALID_INTENT"));
+    assert!(stdio_error_message(&resp).contains("Invalid intent"));
+
+    let _ = child.wait();
+}
+
 /// M28 负例：命令不接受的 target 形态返回结构化 INVALID_TARGET
 #[test]
 fn test_stdio_server_invalid_target() {

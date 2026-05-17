@@ -192,6 +192,14 @@ pub struct Cli {
 
     #[arg(
         long,
+        value_name = "INTENT",
+        default_value = "auto",
+        help = "Traversal intent for --explain-condition: auto | display | value-source | writer | availability | context"
+    )]
+    pub intent: String,
+
+    #[arg(
+        long,
         help = "启动 JSONL stdin/stdout 长驻查询服务（机器协议，非人类 REPL）"
     )]
     pub serve_stdio: bool,

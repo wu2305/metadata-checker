@@ -524,6 +524,125 @@ fn test_m32_explain_condition_resolves_bare_value_from_nearest_data_context() {
         Some("field:model1.name"),
         "value_source_context 必须来自扫描阶段派生出的字段 Reads 边"
     );
+
+    let answer_facts = details
+        .get("answer_facts")
+        .and_then(|v| v.as_object())
+        .expect("M33 answer_facts must exist");
+    let value_facts = answer_facts
+        .get("value_source_facts")
+        .and_then(|v| v.as_object())
+        .expect("value_source_facts must exist");
+    assert_eq!(
+        value_facts.get("result").and_then(|v| v.as_str()),
+        Some("data/table1.tbl"),
+        "M33 value_source_facts.result 应直接给出表路径"
+    );
+    assert_eq!(
+        value_facts
+            .get("nearest_data_context")
+            .and_then(|v| v.as_str()),
+        Some("slider_data_context"),
+        "M33 value_source_facts 必须保留最近数据容器"
+    );
+    assert!(
+        value_facts
+            .get("paths")
+            .and_then(|v| v.as_array())
+            .map_or(false, |paths| paths.iter().any(|p| {
+                p.get("steps")
+                    .and_then(|v| v.as_array())
+                    .map_or(false, |steps| steps.iter().any(|s| {
+                        s.get("why_included")
+                            .and_then(|v| v.as_str())
+                            .map_or(false, |why| why.contains("bare field"))
+                    }))
+            })),
+        "M33 value_source_facts.paths.steps 必须说明 why_included"
+    );
+}
+
+#[test]
+fn test_m33_compact_explain_condition_hides_large_context_arrays() {
+    let (_db_path, graph) = setup_graph_db("m33_compact_context_budget");
+    let result = metadata_checker::explain::build_explain_condition_output(
+        &graph,
+        "comp:app/actions_test.spg|text_total_child",
+        "compact",
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+
+    assert!(
+        details
+            .get("answer_facts")
+            .and_then(|v| v.as_object())
+            .is_some(),
+        "compact 输出必须保留 answer_facts 作为 AI 默认入口"
+    );
+    assert_eq!(
+        details
+            .get("supporting_context")
+            .and_then(|v| v.as_array())
+            .map(|items| items.len()),
+        Some(0),
+        "compact 输出不应展开 supporting_context 大数组"
+    );
+    assert!(
+        details
+            .get("supporting_context_summary")
+            .and_then(|v| v.as_object())
+            .is_some(),
+        "compact 输出必须用 supporting_context_summary 保留计数"
+    );
+    assert_eq!(
+        details
+            .get("related_context")
+            .and_then(|v| v.as_array())
+            .map(|items| items.len()),
+        Some(0),
+        "compact 输出不应展开 related_context 大数组"
+    );
+    assert!(
+        details
+            .get("related_context_summary")
+            .and_then(|v| v.as_object())
+            .is_some(),
+        "compact 输出必须用 related_context_summary 保留计数"
+    );
+}
+
+#[test]
+fn test_m33_normal_explain_condition_keeps_context_arrays_for_audit() {
+    let (_db_path, graph) = setup_graph_db("m33_normal_context_budget");
+    let result = metadata_checker::explain::build_explain_condition_output(
+        &graph,
+        "comp:app/actions_test.spg|text_total_child",
+        "normal",
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+
+    let supporting_len = details
+        .get("supporting_context")
+        .and_then(|v| v.as_array())
+        .map(|items| items.len())
+        .expect("supporting_context must be array");
+    let emitted_count = details
+        .get("supporting_context_summary")
+        .and_then(|v| v.get("emitted_count"))
+        .and_then(|v| v.as_u64())
+        .expect("supporting_context_summary.emitted_count must exist");
+    assert_eq!(
+        emitted_count as usize, supporting_len,
+        "normal 输出的 supporting_context_summary 必须与展开数组一致"
+    );
 }
 
 #[test]
@@ -537,6 +656,8 @@ fn test_m31_m32_docs_define_condition_and_value_source_contract() {
         "referenced_by_model_filter",
         "deduped_condition_ids",
         "value_source_context",
+        "answer_facts",
+        "why_included",
         "nearest_data_context",
         "bare_symbol",
     ] {
@@ -555,6 +676,8 @@ fn test_m31_m32_docs_define_condition_and_value_source_contract() {
                 && skill_md.contains("expanded_from_total_row_count")
                 && skill_md.contains("referenced_by_model_filter")
                 && skill_md.contains("value_source_context")
+                && skill_md.contains("answer_facts")
+                && skill_md.contains("why_included")
                 && skill_md.contains("nearest_data_context"),
             "{} 必须说明 M31/M32 explain-condition 读取规则",
             skill_path.display()
@@ -4875,6 +4998,24 @@ fn test_real_project_explain_condition_input3() {
             );
         }
     }
+
+    let related_len = details
+        .get("related_context")
+        .and_then(|v| v.as_array())
+        .map(|items| items.len())
+        .unwrap_or(0);
+    assert_eq!(
+        related_len, 0,
+        "M33 compact 输出不应展开大量 related_context 明细"
+    );
+    assert!(
+        details
+            .get("related_context_summary")
+            .and_then(|v| v.get("hidden"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        "M33 compact 输出必须用 related_context_summary 标明旁路明细已隐藏"
+    );
 }
 
 #[test]
@@ -4898,7 +5039,7 @@ fn test_real_project_explain_condition_model22_filter() {
         "--explain-condition",
         "model:model22",
         "--budget",
-        "compact",
+        "normal",
     ]);
     let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
     assert_eq!(ai.kind, OutputKind::Explain);
@@ -5101,6 +5242,64 @@ fn test_real_project_m31_text41_display_chain_expands_model11_filter() {
             .map_or(false, |path| path.contains("fact_autoCustomerAutoRel.tbl")),
         "CUSTOMAUTOMYAUTOLIST 字段来源应追到 DataFlow 原始输入 fact_autoCustomerAutoRel.tbl，实际: {:?}",
         value_context.get("dataflow_field_origin")
+    );
+
+    let answer_facts = details
+        .get("answer_facts")
+        .and_then(|v| v.as_object())
+        .expect("M33 answer_facts must exist");
+    let display_facts = answer_facts
+        .get("display_facts")
+        .and_then(|v| v.as_object())
+        .expect("display_facts must exist");
+    assert_eq!(
+        display_facts
+            .get("has_direct_condition")
+            .and_then(|v| v.as_bool()),
+        Some(false),
+        "text41 自身没有 direct visibleCondition"
+    );
+    assert!(
+        display_facts
+            .get("inherited_conditions")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| serde_json::Value::Array(items.clone())
+                .to_string()
+                .contains("panel35#visibleCondition")),
+        "display_facts 必须包含 panel35 inherited condition"
+    );
+    assert!(
+        display_facts
+            .get("expanded_data_gates")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| serde_json::Value::Array(items.clone())
+                .to_string()
+                .contains("model11.ISSHOW == 1")),
+        "display_facts 必须包含 model11.ISSHOW == 1 展开门控"
+    );
+
+    let value_facts = answer_facts
+        .get("value_source_facts")
+        .and_then(|v| v.as_object())
+        .expect("value_source_facts must exist");
+    assert_eq!(
+        value_facts.get("bare_symbol").and_then(|v| v.as_str()),
+        Some("CUSTOMAUTOMYAUTOLIST"),
+        "value_source_facts 必须保留裸字段名"
+    );
+    assert_eq!(
+        value_facts
+            .get("nearest_data_context")
+            .and_then(|v| v.as_str()),
+        Some("sliderpanel2"),
+        "value_source_facts 必须保留 sliderpanel2 数据容器"
+    );
+    assert!(
+        value_facts
+            .get("proven_physical_input")
+            .and_then(|v| v.as_str())
+            .map_or(false, |path| path.contains("fact_autoCustomerAutoRel.tbl")),
+        "value_source_facts 必须直接给出 proven physical input"
     );
 }
 

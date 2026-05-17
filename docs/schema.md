@@ -165,7 +165,9 @@ pub struct AiOutput {
 | `target_id` | string | 目标节点 ID |
 | `target_type` | string | `Component` / `Model` / `Field` / `Page` |
 | `target_name` | string | 目标名称 |
+| `intent` | string | M33 起的遍历意图：`auto` / `display` / `value-source` / `writer` / `availability` / `context` |
 | `primary_reason` | string | 主因一句话说明 |
+| `answer_facts_count` | number | M33 `answer_facts` 中 fact block 数量 |
 | `blocking_conditions_count` | number | 阻塞条件数量（visible/disable/action condition） |
 | `data_empty_gates_count` | number | 数据门控数量（filter / totalRowCount__） |
 | `primary_paths_count` | number | 字段级主链路数量（comp/field 目标有） |
@@ -177,20 +179,29 @@ pub struct AiOutput {
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `target` | object | 目标节点信息：`node_id`、`node_type`、`name`、`path` |
+| `answer_facts` | object | M33 起面向 AI 直接回答的目标节点事实层，包含 display/value_source/writer/availability/context facts |
+| `traversal_policy` | object | M33 起记录当前 intent 的允许边类型、方向、path budget 和停止条件 |
+| `proven_paths` | array | M33 预留：已证明路径 |
+| `candidate_paths` | array | M33 预留：候选路径 |
+| `rejected_paths` | array | M33 预留：被排除路径及原因 |
 | `primary_path` | array | 字段级主链路（M19-FIX PathSegment），含 Reads / FieldAlias / FieldWrite 三段 |
 | `value_source_context` | object/null | M32 起用于解释组件 `value = ${FIELD}` 这类裸字段：通过最近数据容器解析 `FIELD` 属于哪个 `dataSet` / 表 |
 | `blocking_conditions` | array | 阻塞条件列表，每项包含 `condition_id`、`condition_type`、`raw_expr`、`json_path`、`source_file`，M31 起包含 `condition_scope` |
 | `data_empty_gates` | array | 数据门控列表，包含 filter / totalRowCount__ 条件，M31 起可包含 `expanded_from_total_row_count` 展开结果 |
 | `supporting_context` | array | 辅助上下文条件，例如 `referenced_by_model_filter` |
+| `supporting_context_summary` | object | `supporting_context` 的计数摘要；compact 模式默认用它替代明细 |
 | `related_context` | array | 相关但非必要条件，含 `note: "非当前页面必要条件"` |
+| `related_context_summary` | object | `related_context` 的计数摘要；compact 模式默认用它替代明细，避免注意力漂移 |
 
 ### AI 读取策略
 
-1. **优先读取 `summary.primary_reason`**：它直接回答 "为什么"
-2. 需要具体条件时读取 `details.blocking_conditions` 或 `details.data_empty_gates`
-3. `details.related_context` 不是必要条件，默认不深入
-4. `details.primary_path` 用于回答 "值从哪里来 / 被谁写入"
-5. M32 起，若组件值是 `${FIELD}` 且不含模型名前缀，优先读取 `details.value_source_context`，不要把 `FIELD` 直接当成表名或模型名
+1. **优先读取 `summary.primary_reason` 和 `details.answer_facts`**：M33 起这两处是小模型默认入口
+2. 显示/隐藏问题读取 `details.answer_facts.display_facts`
+3. 值来源/来源表问题读取 `details.answer_facts.value_source_facts`
+4. 字段写入/生成问题读取 `details.answer_facts.writer_facts`
+5. 需要核查时再读取 `details.blocking_conditions`、`details.data_empty_gates`、`details.primary_path`
+6. compact 模式下默认读取 `details.related_context_summary` / `details.supporting_context_summary`，不要把隐藏的旁路上下文当作必要条件
+7. `details.related_context` 不是必要条件，默认不深入；需要明细时改用 `--budget normal` 或 `--budget full`
 
 ### 条件分类规则
 
@@ -230,6 +241,44 @@ pub struct AiOutput {
 | `value_source_context.dataflow_model` | 当 `table_source_path` 指向加工表/DataFlow 时的 DataFlow 节点 |
 | `value_source_context.dataflow_field_origin` | 若 DataFlow 字段元数据能证明来源，输出匹配字段与 `module_table_path` |
 | `value_source_context.dataflow_inputs` | DataFlow 的输入表候选；字段级来源不能证明时只能作为候选，不可直接断言 |
+
+### M33 answer_facts
+
+`answer_facts` 是目标节点中心的受控多跳事实层。它不替代 details 证据，而是把最常见问题的答案组织成少量稳定字段。
+
+| 字段 | 说明 |
+|---|---|
+| `answer_facts.intent` | 本次 explain-condition 的遍历意图 |
+| `answer_facts.display_facts` | 显示/隐藏/禁用条件事实，包含 `has_direct_condition`、`direct_conditions`、`inherited_conditions`、`expanded_data_gates` |
+| `answer_facts.value_source_facts` | 值来源事实，包含 `raw_expr`、`bare_symbol`、`nearest_data_context`、`field_path`、`table_source_path`、`proven_physical_input` |
+| `answer_facts.writer_facts` | 写入/生成事实，包含 writer path 摘要；无写入证明时 `missing_evidence` 必须说明 |
+| `answer_facts.availability_facts` | 数据可用性事实，包含 filter / totalRowCount__ gates |
+| `answer_facts.context_facts` | 周边关系事实；宽上下文仍建议用 `--context` |
+| `answer_facts.traversal_policy` | intent 对应的 `allowed_edge_types`、`directions`、`max_paths`、`max_steps_per_path`、`stop_conditions` |
+
+每个 fact block 至少包含：
+
+| 字段 | 说明 |
+|---|---|
+| `result` | 可直接回答用户的结果；无证明时为 `null` 或明确状态 |
+| `confidence` | `high` / `medium` / `low` |
+| `paths` | 进入 answer 的少量路径 |
+| `evidence_refs` | 可回查的证据引用 |
+| `missing_evidence` | 缺证说明；空数组表示当前事实有足够证明 |
+
+`paths[].steps[]` 至少包含：
+
+| 字段 | 说明 |
+|---|---|
+| `step` | 路径步序号 |
+| `node_id` | 当前节点或路径片段标识 |
+| `node_type` | 节点类型 |
+| `edge_type` | 使用的边/关系类型 |
+| `direction` | `incoming` / `outgoing` / `ancestor` / `upstream` 等 |
+| `field_path` | 字段路径（如适用） |
+| `source_file` | 证据文件（如适用） |
+| `json_path` | 元数据 JSON 路径（如适用） |
+| `why_included` | 该路径步骤为什么与当前 intent 有关 |
 
 ### 页面作用域规则
 

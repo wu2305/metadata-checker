@@ -120,11 +120,13 @@ fn main() -> Result<()> {
         }
 
         if let Some(ref explain_target) = args.explain_condition {
+            let intent = explain::TraversalIntent::parse(&args.intent)?;
             explain::explain_condition_target(
                 &graph,
                 explain_target,
                 args.is_human(),
                 &args.budget,
+                intent,
             )?;
             return Ok(());
         }
