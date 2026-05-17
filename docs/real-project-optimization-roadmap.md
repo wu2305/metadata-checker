@@ -1521,7 +1521,7 @@ target node
   - 少量 `evidence_refs`
   - 必要 diagnostics
   - 不默认输出大体量 `related_context` / `candidate_paths`
-- [ ] normal/full budget 保留现有 details，并增加 traversal debug 信息：
+- [x] normal/full budget 保留现有 details，并增加 traversal debug 信息：
   - `traversal_policy`
   - `rejected_paths`
   - `candidate_paths`
@@ -1531,18 +1531,18 @@ target node
 
 #### Display
 
-- [ ] 允许边/关系：
+- [x] 允许边/关系：
   - `Condition -> Component`
   - `Condition -> Action`
   - `Condition -> Model`
   - `Condition -> Field totalRowCount__`
   - 祖先容器条件（通过 `Contains` 或 `json_path` 前缀）
   - 当前页面 model filter 展开
-- [ ] 停止条件：
+- [x] 停止条件：
   - 找到 direct/inherited display/disable/action condition。
   - 若 condition 引用 `modelX.totalRowCount__`，只继续展开当前页面 `modelX` filter。
   - 展开到当前页面 filter 后停止，不进入 DataFlow、action writer、value reads。
-- [ ] 明确排除：
+- [x] 明确排除：
   - `value` / `exp` 作为显示证据。
   - `value_source_context`。
   - 其他页面同名 model 条件。
@@ -1550,18 +1550,18 @@ target node
 
 #### ValueSource
 
-- [ ] 允许边/关系：
+- [x] 允许边/关系：
   - target outgoing `Reads`
   - M32 派生 Reads：`resolution = inherited_container_data_context`
   - `FieldAlias`
   - `DataflowOutput`
   - DataFlow `nodeFields` / `dimensions` 字段来源
   - `DataflowInput` 仅作为字段级来源不可证明时的候选
-- [ ] 停止条件：
+- [x] 停止条件：
   - 找到非 DataFlow 物理表字段。
   - 找到 `dataflow_field_origin.module_table_path`。
   - 无字段级证明时停在 `dataflow_inputs` candidates。
-- [ ] 明确排除：
+- [x] 明确排除：
   - visible/disable/action conditions。
   - 页面其它组件 reads。
   - unrelated model filters。
@@ -1569,18 +1569,18 @@ target node
 
 #### Writer
 
-- [ ] 允许边/关系：
+- [x] 允许边/关系：
   - incoming `Writes`
   - incoming `ActionWrites`
   - incoming `FieldWrite`
   - reverse `FieldAlias`
   - cross-page writer action。
   - writer action 的触发组件和证据页面。
-- [ ] 停止条件：
+- [x] 停止条件：
   - 找到具体 action writer + field evidence。
   - 找到组件 submitField 写入证据。
   - 找到跨页 writer 页面和 action 后停止。
-- [ ] 明确排除：
+- [x] 明确排除：
   - writer action 的 unrelated reads / navigation。
   - 同页其它 action flows。
   - 与目标字段无关的同 model 写入。
@@ -1615,11 +1615,11 @@ target node
 - [ ] proven path 优先于 candidate path。
 - [ ] 同一 `result` 只保留最短高置信路径。
 - [ ] 同一 action/page/source_file 的重复证据合并。
-- [ ] 候选和证明必须分开：
+- [x] 候选和证明必须分开：
   - `proven_paths`
   - `candidate_paths`
   - `rejected_paths`
-- [ ] 每个 rejected path 必须有 `reject_reason`，例如：
+- [x] 每个 rejected path 必须有 `reject_reason`，例如：
   - `edge_type_not_allowed_for_intent`
   - `outside_current_page_scope`
   - `candidate_only_without_field_origin`
@@ -1631,16 +1631,16 @@ target node
   - `--intent auto|display|value-source|writer|availability|context`
   - 默认 `auto`
 - [x] function-calling / stdio command 支持 `intent` 字段。
-- [ ] `auto` 模式下：
+- [x] `auto` 模式下：
   - 如果 target 是 `comp:`，默认同时生成短小 `display_facts` 与 `value_source_facts`。
   - 如果 target 是 `field:`，默认生成 `value_source_facts` 与 `writer_facts`。
   - 如果 target 是 `model:`，默认生成 `availability_facts` 与 writer/read summary。
   - 如果用户问题由 wrapper 可传入 intent，则优先使用 wrapper intent。
 - [x] compact budget：
   - 默认隐藏 `related_context` 大数组。
-  - 默认隐藏 traversal debug。
+  - 默认隐藏 `primary_path`、`value_source_context` 和 traversal debug 明细。
   - 保留 `answer_facts.paths[].steps[]` 的短证据。
-- [ ] normal/full budget：
+- [x] normal/full budget：
   - 输出完整 details。
   - 输出 traversal debug，便于冷脸验收。
 
@@ -1673,7 +1673,7 @@ target node
 
 ### 测试任务清单
 
-- [ ] Fixture：Display intent
+- [x] Fixture：Display intent
   - 目标组件自身无 visible，但祖先有 `visibleCondition`。
   - compact `display_facts` 只包含 direct/inherited/expanded gates。
   - 不包含 value source。
@@ -1714,9 +1714,10 @@ target node
   - `explain_condition` 支持 `intent`。
   - `human=true` 行为不回退。
   - 外部 graphdb + project_dir 不回退。
-- [ ] Snapshot 回归
+- [ ] Snapshot / 体积基线回归
   - 更新 compact 输出 snapshot。
   - 确认 `answer_facts` 稳定，不因数组顺序随机漂移。
+  - `text41 --intent display --budget compact` 已增加真实项目低噪声断言；仍需写入 `docs/performance-baseline.md` 作为长期基线。
 
 ### Skill / 文档任务
 

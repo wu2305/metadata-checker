@@ -26,7 +26,9 @@ fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
     };
 
     // 第一次查询
-    let resp1 = runtime.query(request.clone()).expect("第一次 query 必须成功");
+    let resp1 = runtime
+        .query(request.clone())
+        .expect("第一次 query 必须成功");
     let result1 = resp1.result.clone();
     assert!(
         result1.get("summary").is_some(),
@@ -51,8 +53,14 @@ fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
         "两次查询的 query_target 必须一致"
     );
     assert_eq!(
-        result1.get("summary").unwrap().get("blocking_conditions_count"),
-        result2.get("summary").unwrap().get("blocking_conditions_count"),
+        result1
+            .get("summary")
+            .unwrap()
+            .get("blocking_conditions_count"),
+        result2
+            .get("summary")
+            .unwrap()
+            .get("blocking_conditions_count"),
         "两次查询的 blocking_conditions_count 必须一致"
     );
 
@@ -63,10 +71,7 @@ fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
     );
 
     // load_count 仍为 1
-    assert_eq!(
-        runtime.load_count, 1,
-        "连续两次查询后 load_count 仍为 1"
-    );
+    assert_eq!(runtime.load_count, 1, "连续两次查询后 load_count 仍为 1");
 }
 
 /// M23 验收：真实项目 input3  explain-condition
@@ -77,7 +82,8 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
     let project_dir = "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi";
     let db_path = std::path::PathBuf::from("/tmp/m23_runtime_test.graphdb");
     let _ = std::fs::remove_file(&db_path);
-    scanner::scan_project(std::path::Path::new(project_dir), &db_path).expect("scan real project must succeed");
+    scanner::scan_project(std::path::Path::new(project_dir), &db_path)
+        .expect("scan real project must succeed");
 
     let runtime = GraphRuntime::load(&db_path).expect("load real project graph must succeed");
     assert_eq!(runtime.load_count, 1);
@@ -92,11 +98,13 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
         target: "comp:app/销售.app/销售/合同协议.spg|input3".to_string(),
         budget: "compact".to_string(),
         human: false,
-        intent: None,
+        intent: Some("writer".to_string()),
     };
 
     // 第一次查询
-    let resp1 = runtime.query(request.clone()).expect("第一次 query 必须成功");
+    let resp1 = runtime
+        .query(request.clone())
+        .expect("第一次 query 必须成功");
     let result1 = resp1.result;
 
     // 第二次查询（复用 graph）
@@ -115,46 +123,48 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
         "两次查询 query_target 必须一致"
     );
 
-    // primary_path 非空
-    let primary_path = result1
+    // compact 模式隐藏 primary_path，writer_facts 保留短证据
+    let writer_paths = result1
         .get("details")
-        .and_then(|d| d.get("primary_path"))
+        .and_then(|d| d.get("answer_facts"))
+        .and_then(|f| f.get("writer_facts"))
+        .and_then(|f| f.get("paths"))
         .and_then(|v| v.as_array())
-        .expect("primary_path must be array");
-    assert!(!primary_path.is_empty(), "primary_path must not be empty");
+        .expect("writer_facts.paths must be array");
+    assert!(
+        !writer_paths.is_empty(),
+        "writer_facts.paths must not be empty"
+    );
 
     // 必须包含 model22.phoneNumber
-    let has_model22 = primary_path.iter().any(|p| {
-        p.get("path_id")
+    let has_model22 = writer_paths.iter().any(|p| {
+        p.get("result")
             .and_then(|v| v.as_str())
             .map(|s| s.contains("model22.phoneNumber"))
             .unwrap_or(false)
     });
-    assert!(has_model22, "primary_path must contain model22.phoneNumber");
+    assert!(has_model22, "writer_facts must contain model22.phoneNumber");
 
     // 必须包含 fact_qwSidebar.phoneNumber
-    let has_fact = primary_path.iter().any(|p| {
-        p.get("path_id")
+    let has_fact = writer_paths.iter().any(|p| {
+        p.get("result")
             .and_then(|v| v.as_str())
             .map(|s| s.contains("fact_qwSidebar.phoneNumber"))
             .unwrap_or(false)
     });
     assert!(
         has_fact,
-        "primary_path must contain fact_qwSidebar.phoneNumber"
+        "writer_facts must contain fact_qwSidebar.phoneNumber"
     );
 
     // 必须包含 action1 或 action4
-    let has_writer = primary_path.iter().any(|p| {
-        p.get("path_id")
+    let has_writer = writer_paths.iter().any(|p| {
+        p.get("result")
             .and_then(|v| v.as_str())
             .map(|s| s.contains("action1") || s.contains("action4"))
             .unwrap_or(false)
     });
-    assert!(
-        has_writer,
-        "primary_path must contain action1 or action4"
-    );
+    assert!(has_writer, "writer_facts must contain action1 or action4");
 
     // 第二次 graph_load_ms == 0（热查询复用）
     assert_eq!(
@@ -186,8 +196,14 @@ fn test_runtime_reload_if_changed_no_change() {
     let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let mut runtime = GraphRuntime::load(&db_path).expect("load must succeed");
 
-    let result = runtime.reload_if_changed().expect("reload_if_changed must succeed");
-    assert_eq!(result, metadata_checker::runtime::ReloadResult::Unchanged, "未变更时应返回 Unchanged");
+    let result = runtime
+        .reload_if_changed()
+        .expect("reload_if_changed must succeed");
+    assert_eq!(
+        result,
+        metadata_checker::runtime::ReloadResult::Unchanged,
+        "未变更时应返回 Unchanged"
+    );
     assert_eq!(runtime.reload_count, 0, "未变更时 reload_count 仍为 0");
 }
 
@@ -200,13 +216,22 @@ fn test_runtime_reload_if_changed_after_replace() {
 
     // 重建 graphdb（模拟外部更新）
     let _ = std::fs::remove_file(&db_path);
-    scanner::scan_project(&temp_dir, &db_path,
-    ).expect("re-scan must succeed");
+    scanner::scan_project(&temp_dir, &db_path).expect("re-scan must succeed");
 
-    let result = runtime.reload_if_changed().expect("reload_if_changed must succeed");
-    assert_eq!(result, metadata_checker::runtime::ReloadResult::Reloaded, "文件变更后应返回 Reloaded");
+    let result = runtime
+        .reload_if_changed()
+        .expect("reload_if_changed must succeed");
+    assert_eq!(
+        result,
+        metadata_checker::runtime::ReloadResult::Reloaded,
+        "文件变更后应返回 Reloaded"
+    );
     assert_eq!(runtime.reload_count, 1, "reload_count 应增加到 1");
-    assert_eq!(runtime.status().node_count, old_node_count, "reload 后 node_count 应一致");
+    assert_eq!(
+        runtime.status().node_count,
+        old_node_count,
+        "reload 后 node_count 应一致"
+    );
     assert!(runtime.last_reload_error.is_none());
 }
 
@@ -222,8 +247,15 @@ fn test_runtime_reload_failure_preserves_old_graph() {
 
     let result = runtime.reload();
     assert!(result.is_err(), "损坏的 graphdb reload 必须失败");
-    assert!(runtime.last_reload_error.is_some(), "失败时应记录 last_reload_error");
-    assert_eq!(runtime.status().node_count, old_node_count, "失败时应保留旧 graph");
+    assert!(
+        runtime.last_reload_error.is_some(),
+        "失败时应记录 last_reload_error"
+    );
+    assert_eq!(
+        runtime.status().node_count,
+        old_node_count,
+        "失败时应保留旧 graph"
+    );
     assert_eq!(runtime.reload_count, 0, "失败时 reload_count 不应增加");
 
     // 旧 graph 仍可查询
@@ -235,5 +267,8 @@ fn test_runtime_reload_failure_preserves_old_graph() {
         intent: None,
     };
     let resp = runtime.query(request).expect("旧 graph 仍可查询");
-    assert_eq!(resp.result.get("kind").and_then(|v| v.as_str()), Some("Explain"));
+    assert_eq!(
+        resp.result.get("kind").and_then(|v| v.as_str()),
+        Some("Explain")
+    );
 }

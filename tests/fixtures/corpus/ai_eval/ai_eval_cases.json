@@ -2642,7 +2642,7 @@
       "real_project_target": "comp:app/销售.app/销售/合同协议.spg|input3",
       "source_path": "app/销售.app/销售/合同协议.spg",
       "required_commands": [
-        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain-condition 'comp:app/销售.app/销售/合同协议.spg|input3' --budget compact"
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain-condition 'comp:app/销售.app/销售/合同协议.spg|input3' --intent writer --budget compact"
       ],
       "expected_facts": [
         "input3 的值读取自 model22.phoneNumber",
@@ -2660,9 +2660,9 @@
       ],
       "evidence_requirements": [
         {
-          "path": "details.primary_path",
+          "path": "details.answer_facts.writer_facts.paths",
           "op": "not_empty",
-          "description": "必须有字段级主链路"
+          "description": "必须有字段级 writer 链路"
         },
         {
           "path": "summary.primary_paths_count",
@@ -2694,6 +2694,8 @@
           "command_kind": "--explain-condition",
           "target": "comp:app/销售.app/销售/合同协议.spg|input3",
           "args": [
+            "--intent",
+            "writer",
             "--budget",
             "compact"
           ],
@@ -2703,9 +2705,9 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "details.primary_path",
+          "path": "details.answer_facts.writer_facts.paths",
           "op": "not_empty",
-          "description": "必须有字段级主链路"
+          "description": "必须有字段级 writer 链路"
         },
         {
           "path": "summary.primary_paths_count",
@@ -2714,32 +2716,32 @@
           "description": "主链路数量大于 0"
         },
         {
-          "path": "details.primary_path",
+          "path": "details.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
-          "field": "evidence",
+          "field": "result",
           "value": "model22.phoneNumber",
-          "description": "主链路必须包含 model22.phoneNumber"
+          "description": "writer 链路必须包含 model22.phoneNumber"
         },
         {
-          "path": "details.primary_path",
+          "path": "details.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
-          "field": "evidence",
+          "field": "result",
           "value": "fact_qwSidebar.phoneNumber",
-          "description": "主链路必须包含 fact_qwSidebar.phoneNumber"
+          "description": "writer 链路必须包含 fact_qwSidebar.phoneNumber"
         },
         {
-          "path": "details.primary_path",
+          "path": "details.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
-          "field": "evidence",
+          "field": "result",
           "value": "action1",
-          "description": "主链路必须包含 action1"
+          "description": "writer 链路必须包含 action1"
         },
         {
-          "path": "details.primary_path",
+          "path": "details.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
-          "field": "evidence",
+          "field": "result",
           "value": "action4",
-          "description": "主链路必须包含 action4"
+          "description": "writer 链路必须包含 action4"
         }
       ],
       "risk_tags": [
@@ -2777,12 +2779,12 @@
       "answer_style_policy": {
         "principles": [
           "先给出主链路结论：input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber",
-          "引用 CLI 输出的 primary_path 和 segments 作为证据",
+          "引用 CLI 输出的 answer_facts.writer_facts.paths 和 steps 作为证据",
           "明确区分主链路和 related_context"
         ],
         "forbidden_practices": [
           "把 related_context 中的旁路关系当作必要条件",
-          "忽略 primary_path 直接说来源不明",
+          "忽略 writer_facts 直接说来源不明",
           "把高扇出读边当成主链路"
         ]
       }

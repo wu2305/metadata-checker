@@ -143,6 +143,8 @@ Supported target formats:
   - value source / source table → `--intent value-source`
   - who writes / how generated → `--intent writer`
   - why data source empty → `--intent availability`
+- Only read the fact block activated by the intent. For example, `--intent display` should use `display_facts`; do not infer value sources from hidden `value_source_context`.
+- Compact output hides `primary_path` and `value_source_context`; use `answer_facts.*.paths[]` first, and rerun with `--budget normal` only for path audit.
 - `answer_facts.*.paths[].steps[].why_included` explains why each hop is relevant. Use it to avoid treating ordinary graph neighbors as necessary evidence.
 
 **Display / hidden rule (M31)**:

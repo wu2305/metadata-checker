@@ -552,11 +552,13 @@ fn test_m32_explain_condition_resolves_bare_value_from_nearest_data_context() {
             .map_or(false, |paths| paths.iter().any(|p| {
                 p.get("steps")
                     .and_then(|v| v.as_array())
-                    .map_or(false, |steps| steps.iter().any(|s| {
-                        s.get("why_included")
-                            .and_then(|v| v.as_str())
-                            .map_or(false, |why| why.contains("bare field"))
-                    }))
+                    .map_or(false, |steps| {
+                        steps.iter().any(|s| {
+                            s.get("why_included")
+                                .and_then(|v| v.as_str())
+                                .map_or(false, |why| why.contains("bare field"))
+                        })
+                    })
             })),
         "M33 value_source_facts.paths.steps 必须说明 why_included"
     );
@@ -642,6 +644,98 @@ fn test_m33_normal_explain_condition_keeps_context_arrays_for_audit() {
     assert_eq!(
         emitted_count as usize, supporting_len,
         "normal 输出的 supporting_context_summary 必须与展开数组一致"
+    );
+}
+
+#[test]
+fn test_m33_display_intent_rejects_value_source_paths() {
+    let (_db_path, graph) = setup_graph_db("m33_display_intent_rejects_value_paths");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/actions_test.spg|text_bare_field_child",
+        "normal",
+        metadata_checker::explain::TraversalIntent::Display,
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+    let answer_facts = details
+        .get("answer_facts")
+        .and_then(|v| v.as_object())
+        .expect("answer_facts must exist");
+
+    assert!(
+        answer_facts.get("display_facts").is_some(),
+        "display intent 必须输出 display_facts"
+    );
+    assert!(
+        answer_facts.get("value_source_facts").is_none(),
+        "display intent 不应输出 active value_source_facts"
+    );
+    assert_eq!(
+        details
+            .get("primary_path")
+            .and_then(|v| v.as_array())
+            .map(|items| items.len()),
+        Some(0),
+        "display intent 不应把 Reads/DataflowInput 路径放入 primary_path"
+    );
+    assert!(
+        details
+            .get("rejected_paths")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| {
+                items.iter().any(|p| {
+                    p.get("reject_reason").and_then(|v| v.as_str())
+                        == Some("edge_type_not_allowed_for_display_intent")
+                })
+            }),
+        "display intent 必须把值来源路径放入 rejected_paths 并说明 reject_reason"
+    );
+}
+
+#[test]
+fn test_m33_compact_hides_primary_and_value_context_details() {
+    let (_db_path, graph) = setup_graph_db("m33_compact_hides_path_details");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/actions_test.spg|text_bare_field_child",
+        "compact",
+        metadata_checker::explain::TraversalIntent::ValueSource,
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+
+    assert_eq!(
+        details
+            .get("primary_path")
+            .and_then(|v| v.as_array())
+            .map(|items| items.len()),
+        Some(0),
+        "compact 输出不应展开 primary_path 明细"
+    );
+    assert!(
+        details
+            .get("primary_path_summary")
+            .and_then(|v| v.as_object())
+            .is_some(),
+        "compact 输出必须保留 primary_path_summary"
+    );
+    assert!(
+        details
+            .get("value_source_context")
+            .map_or(false, |v| v.is_null()),
+        "compact 输出不应展开 value_source_context 大对象"
+    );
+    assert_eq!(
+        details["answer_facts"]["value_source_facts"]["result"].as_str(),
+        Some("data/table1.tbl"),
+        "compact 输出必须通过 answer_facts 直接回答值来源"
     );
 }
 
@@ -4915,6 +5009,8 @@ fn test_real_project_explain_condition_input3() {
         graph_db_path,
         "--explain-condition",
         "comp:app/销售.app/销售/合同协议.spg|input3",
+        "--intent",
+        "writer",
         "--budget",
         "compact",
     ]);
@@ -4931,31 +5027,42 @@ fn test_real_project_explain_condition_input3() {
         "summary 必须包含 primary_reason"
     );
 
-    // primary_path 必须包含 input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber 链路
-    let primary_path = details
+    // compact 模式不展开 primary_path，writer_facts 必须包含 input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber 链路
+    let primary_path_len = details
         .get("primary_path")
         .and_then(|v| v.as_array())
-        .expect("primary_path must be array");
-    let has_input3_chain = primary_path.iter().any(|p| {
-        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
+        .map(|items| items.len())
+        .unwrap_or(usize::MAX);
+    assert_eq!(
+        primary_path_len, 0,
+        "M33 compact 输出不应展开 primary_path 明细"
+    );
+    let writer_paths = details
+        .get("answer_facts")
+        .and_then(|v| v.get("writer_facts"))
+        .and_then(|v| v.get("paths"))
+        .and_then(|v| v.as_array())
+        .expect("writer_facts.paths must be array");
+    let has_input3_chain = writer_paths.iter().any(|p| {
+        let path_id = p.get("result").and_then(|v| v.as_str()).unwrap_or("");
         path_id.contains("input3")
             && path_id.contains("model22.phoneNumber")
             && path_id.contains("fact_qwSidebar.phoneNumber")
     });
     assert!(
         has_input3_chain,
-        "primary_path 必须包含 input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber 链路"
+        "writer_facts 必须包含 input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber 链路"
     );
 
-    // primary_path 前 5 条不能全是无关模型（如 model19.brand）
-    let top5 = primary_path.iter().take(5).collect::<Vec<_>>();
+    // writer_facts 前 5 条不能全是无关模型（如 model19.brand）
+    let top5 = writer_paths.iter().take(5).collect::<Vec<_>>();
     let all_noise = top5.iter().all(|p| {
-        let path_id = p.get("path_id").and_then(|v| v.as_str()).unwrap_or("");
+        let path_id = p.get("result").and_then(|v| v.as_str()).unwrap_or("");
         !path_id.contains("input3") && !path_id.contains("model22")
     });
     assert!(
         !all_noise,
-        "primary_path 前 5 条不能全部是无关噪声，至少应包含 input3 链路"
+        "writer_facts 前 5 条不能全部是无关噪声，至少应包含 input3 链路"
     );
 
     // blocking_conditions 应包含 visibleCondition（input3 影响 text45 显示）
@@ -5010,11 +5117,11 @@ fn test_real_project_explain_condition_input3() {
     );
     assert!(
         details
-            .get("related_context_summary")
+            .get("primary_path_summary")
             .and_then(|v| v.get("hidden"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
-        "M33 compact 输出必须用 related_context_summary 标明旁路明细已隐藏"
+        "M33 compact 输出必须用 primary_path_summary 标明主路径明细已隐藏"
     );
 }
 
@@ -5300,6 +5407,86 @@ fn test_real_project_m31_text41_display_chain_expands_model11_filter() {
             .and_then(|v| v.as_str())
             .map_or(false, |path| path.contains("fact_autoCustomerAutoRel.tbl")),
         "value_source_facts 必须直接给出 proven physical input"
+    );
+}
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_m33_text41_compact_display_intent_is_low_noise() {
+    let graph_db_path = "/tmp/m33_text41_display.graphdb";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain-condition",
+        "comp:app/售后.app/绑定车辆/会员已注册.spg|text41",
+        "--intent",
+        "display",
+        "--budget",
+        "compact",
+    ]);
+    assert!(
+        out.len() < 12_000,
+        "text41 display compact 输出应保持低噪声，实际 {} bytes",
+        out.len()
+    );
+
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let details = ai
+        .details
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+    assert_eq!(
+        summary.get("intent").and_then(|v| v.as_str()),
+        Some("display")
+    );
+    assert_eq!(
+        summary.get("answer_facts_count").and_then(|v| v.as_u64()),
+        Some(1),
+        "display intent 只能激活 display_facts"
+    );
+    let facts = details
+        .get("answer_facts")
+        .and_then(|v| v.as_object())
+        .expect("answer_facts must be object");
+    assert!(facts.get("display_facts").is_some());
+    assert!(
+        facts.get("value_source_facts").is_none(),
+        "display intent 不应输出 active value_source_facts"
+    );
+    assert_eq!(
+        details
+            .get("primary_path")
+            .and_then(|v| v.as_array())
+            .map(|items| items.len()),
+        Some(0),
+        "compact display intent 不应展开 primary_path"
+    );
+    assert!(
+        details
+            .get("value_source_context")
+            .map_or(false, |v| v.is_null()),
+        "compact display intent 不应展开 value_source_context"
+    );
+    assert!(
+        details
+            .get("rejected_paths_summary")
+            .and_then(|v| v.get("total_count"))
+            .and_then(|v| v.as_u64())
+            .map_or(false, |count| count > 0),
+        "display intent 应把非显示路径计入 rejected_paths_summary"
     );
 }
 

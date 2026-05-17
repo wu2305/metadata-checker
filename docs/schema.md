@@ -179,13 +179,14 @@ pub struct AiOutput {
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `target` | object | 目标节点信息：`node_id`、`node_type`、`name`、`path` |
-| `answer_facts` | object | M33 起面向 AI 直接回答的目标节点事实层，包含 display/value_source/writer/availability/context facts |
+| `answer_facts` | object | M33 起面向 AI 直接回答的目标节点事实层，只展开当前 intent 激活的 display/value_source/writer/availability/context facts |
 | `traversal_policy` | object | M33 起记录当前 intent 的允许边类型、方向、path budget 和停止条件 |
-| `proven_paths` | array | M33 预留：已证明路径 |
-| `candidate_paths` | array | M33 预留：候选路径 |
-| `rejected_paths` | array | M33 预留：被排除路径及原因 |
-| `primary_path` | array | 字段级主链路（M19-FIX PathSegment），含 Reads / FieldAlias / FieldWrite 三段 |
-| `value_source_context` | object/null | M32 起用于解释组件 `value = ${FIELD}` 这类裸字段：通过最近数据容器解析 `FIELD` 属于哪个 `dataSet` / 表 |
+| `proven_paths` | array | M33 已证明路径；compact 模式默认隐藏明细 |
+| `candidate_paths` | array | M33 候选路径；compact 模式默认隐藏明细 |
+| `rejected_paths` | array | M33 被排除路径及 `reject_reason`；compact 模式默认隐藏明细 |
+| `primary_path` | array | 字段级主链路（M19-FIX PathSegment）；compact 模式默认隐藏，优先读 `answer_facts.*.paths` |
+| `primary_path_summary` | object | compact 模式下的主链路计数与隐藏状态 |
+| `value_source_context` | object/null | M32 起用于解释组件 `value = ${FIELD}` 这类裸字段；compact 模式默认隐藏，优先读 `answer_facts.value_source_facts` |
 | `blocking_conditions` | array | 阻塞条件列表，每项包含 `condition_id`、`condition_type`、`raw_expr`、`json_path`、`source_file`，M31 起包含 `condition_scope` |
 | `data_empty_gates` | array | 数据门控列表，包含 filter / totalRowCount__ 条件，M31 起可包含 `expanded_from_total_row_count` 展开结果 |
 | `supporting_context` | array | 辅助上下文条件，例如 `referenced_by_model_filter` |
@@ -199,7 +200,7 @@ pub struct AiOutput {
 2. 显示/隐藏问题读取 `details.answer_facts.display_facts`
 3. 值来源/来源表问题读取 `details.answer_facts.value_source_facts`
 4. 字段写入/生成问题读取 `details.answer_facts.writer_facts`
-5. 需要核查时再读取 `details.blocking_conditions`、`details.data_empty_gates`、`details.primary_path`
+5. 需要核查时再读取 `details.blocking_conditions`、`details.data_empty_gates`；路径审计改用 `--budget normal` 后读取 `details.primary_path` / `details.rejected_paths`
 6. compact 模式下默认读取 `details.related_context_summary` / `details.supporting_context_summary`，不要把隐藏的旁路上下文当作必要条件
 7. `details.related_context` 不是必要条件，默认不深入；需要明细时改用 `--budget normal` 或 `--budget full`
 
@@ -244,16 +245,16 @@ pub struct AiOutput {
 
 ### M33 answer_facts
 
-`answer_facts` 是目标节点中心的受控多跳事实层。它不替代 details 证据，而是把最常见问题的答案组织成少量稳定字段。
+`answer_facts` 是目标节点中心的受控多跳事实层。它不替代 details 证据，而是把最常见问题的答案组织成少量稳定字段。M33 修复后，`answer_facts` 只展开当前 intent 激活的 fact block；未激活的 `display_facts` / `value_source_facts` / `writer_facts` / `availability_facts` 不应出现在顶层。
 
 | 字段 | 说明 |
 |---|---|
 | `answer_facts.intent` | 本次 explain-condition 的遍历意图 |
-| `answer_facts.display_facts` | 显示/隐藏/禁用条件事实，包含 `has_direct_condition`、`direct_conditions`、`inherited_conditions`、`expanded_data_gates` |
-| `answer_facts.value_source_facts` | 值来源事实，包含 `raw_expr`、`bare_symbol`、`nearest_data_context`、`field_path`、`table_source_path`、`proven_physical_input` |
-| `answer_facts.writer_facts` | 写入/生成事实，包含 writer path 摘要；无写入证明时 `missing_evidence` 必须说明 |
-| `answer_facts.availability_facts` | 数据可用性事实，包含 filter / totalRowCount__ gates |
-| `answer_facts.context_facts` | 周边关系事实；宽上下文仍建议用 `--context` |
+| `answer_facts.display_facts` | 仅在 display 或适用 auto intent 中出现；显示/隐藏/禁用条件事实，包含 `has_direct_condition`、`direct_conditions`、`inherited_conditions`、`expanded_data_gates` |
+| `answer_facts.value_source_facts` | 仅在 value-source 或适用 auto intent 中出现；值来源事实，包含 `raw_expr`、`bare_symbol`、`nearest_data_context`、`field_path`、`table_source_path`、`proven_physical_input` |
+| `answer_facts.writer_facts` | 仅在 writer 或适用 auto intent 中出现；写入/生成事实，包含 writer path 摘要；无写入证明时 `missing_evidence` 必须说明 |
+| `answer_facts.availability_facts` | 仅在 availability 或适用 auto intent 中出现；数据可用性事实，包含 filter / totalRowCount__ gates |
+| `answer_facts.context_facts` | 仅在 context intent 中出现；周边关系事实；宽上下文仍建议用 `--context` |
 | `answer_facts.traversal_policy` | intent 对应的 `allowed_edge_types`、`directions`、`max_paths`、`max_steps_per_path`、`stop_conditions` |
 
 每个 fact block 至少包含：

@@ -47,6 +47,44 @@ impl TraversalIntent {
     }
 }
 
+/// M33 answer_facts 中的事实块类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnswerFactKind {
+    Display,
+    ValueSource,
+    Writer,
+    Availability,
+    Context,
+}
+
+/// 判断当前 intent 是否需要输出某类事实块
+fn answer_fact_enabled(
+    intent: TraversalIntent,
+    target_node: &crate::graph::Node,
+    kind: AnswerFactKind,
+) -> bool {
+    match intent {
+        TraversalIntent::Display => kind == AnswerFactKind::Display,
+        TraversalIntent::ValueSource => kind == AnswerFactKind::ValueSource,
+        TraversalIntent::Writer => kind == AnswerFactKind::Writer,
+        TraversalIntent::Availability => kind == AnswerFactKind::Availability,
+        TraversalIntent::Context => kind == AnswerFactKind::Context,
+        TraversalIntent::Auto => match target_node.node_type {
+            crate::graph::NodeType::Component => {
+                matches!(kind, AnswerFactKind::Display | AnswerFactKind::ValueSource)
+            }
+            crate::graph::NodeType::Field => {
+                matches!(kind, AnswerFactKind::ValueSource | AnswerFactKind::Writer)
+            }
+            crate::graph::NodeType::Model => kind == AnswerFactKind::Availability,
+            crate::graph::NodeType::Page => {
+                matches!(kind, AnswerFactKind::Display | AnswerFactKind::Availability)
+            }
+            _ => kind == AnswerFactKind::Context,
+        },
+    }
+}
+
 /// 解释单文件 .spg 中的组件
 ///
 /// 对单文件 .spg 支持组件 ID 简写，例如 --explain input1。
@@ -1665,7 +1703,10 @@ fn build_writer_facts(primary_path: &[serde_json::Value]) -> serde_json::Value {
 }
 
 fn build_availability_facts(data_empty_gates: &[serde_json::Value]) -> serde_json::Value {
-    let gates: Vec<_> = data_empty_gates.iter().map(compact_condition_fact).collect();
+    let gates: Vec<_> = data_empty_gates
+        .iter()
+        .map(compact_condition_fact)
+        .collect();
     serde_json::json!({
         "result": if gates.is_empty() { "no_data_gate_found" } else { "data_gates_found" },
         "confidence": if gates.is_empty() { "medium" } else { "high" },
@@ -1713,7 +1754,7 @@ fn build_traversal_policy(intent: TraversalIntent, budget: &str) -> serde_json::
         "allowed_edge_types": match intent {
             TraversalIntent::Display => serde_json::json!(["DependsOn", "Contains"]),
             TraversalIntent::ValueSource => serde_json::json!(["Reads", "FieldAlias", "DataflowOutput", "DataflowInput"]),
-            TraversalIntent::Writer => serde_json::json!(["Writes", "ActionWrites", "FieldWrite", "FieldAlias"]),
+            TraversalIntent::Writer => serde_json::json!(["Reads(target bridge)", "Writes", "ActionWrites", "FieldWrite", "FieldAlias"]),
             TraversalIntent::Availability => serde_json::json!(["DependsOn", "DataflowInput"]),
             TraversalIntent::Context | TraversalIntent::Auto => serde_json::json!(["Reads", "Writes", "ActionWrites", "FieldWrite", "DependsOn", "Contains"]),
         },
@@ -1744,27 +1785,46 @@ fn build_answer_facts(
     primary_path: &[serde_json::Value],
     budget: &str,
 ) -> serde_json::Value {
-    let display_facts = build_display_facts(target_node, blocking_conditions, data_empty_gates);
-    let value_source_facts = build_value_source_facts(value_source_context);
-    let writer_facts = build_writer_facts(primary_path);
-    let availability_facts = build_availability_facts(data_empty_gates);
     let traversal_policy = build_traversal_policy(intent, budget);
+    let mut facts = serde_json::Map::new();
+    facts.insert("intent".to_string(), serde_json::json!(intent.as_str()));
 
-    serde_json::json!({
-        "intent": intent.as_str(),
-        "display_facts": display_facts,
-        "value_source_facts": value_source_facts,
-        "writer_facts": writer_facts,
-        "availability_facts": availability_facts,
-        "context_facts": {
-            "result": "not_expanded_in_explain_condition",
-            "confidence": "medium",
-            "paths": [],
-            "evidence_refs": [],
-            "missing_evidence": ["use --context for broad surrounding context"],
-        },
-        "traversal_policy": traversal_policy,
-    })
+    if answer_fact_enabled(intent, target_node, AnswerFactKind::Display) {
+        facts.insert(
+            "display_facts".to_string(),
+            build_display_facts(target_node, blocking_conditions, data_empty_gates),
+        );
+    }
+    if answer_fact_enabled(intent, target_node, AnswerFactKind::ValueSource) {
+        facts.insert(
+            "value_source_facts".to_string(),
+            build_value_source_facts(value_source_context),
+        );
+    }
+    if answer_fact_enabled(intent, target_node, AnswerFactKind::Writer) {
+        facts.insert("writer_facts".to_string(), build_writer_facts(primary_path));
+    }
+    if answer_fact_enabled(intent, target_node, AnswerFactKind::Availability) {
+        facts.insert(
+            "availability_facts".to_string(),
+            build_availability_facts(data_empty_gates),
+        );
+    }
+    if answer_fact_enabled(intent, target_node, AnswerFactKind::Context) {
+        facts.insert(
+            "context_facts".to_string(),
+            serde_json::json!({
+                "result": "use_context_command_for_broad_neighbors",
+                "confidence": "medium",
+                "paths": [],
+                "evidence_refs": [],
+                "missing_evidence": ["use --context for broad surrounding context"],
+            }),
+        );
+    }
+
+    facts.insert("traversal_policy".to_string(), traversal_policy);
+    serde_json::Value::Object(facts)
 }
 
 /// 构建上下文数组摘要，用于 compact 模式隐藏大体量旁路明细
@@ -1799,6 +1859,148 @@ fn build_context_summary(
         "by_scope": by_scope,
         "by_source_file": by_source_file,
     })
+}
+
+fn path_edge_types(path: &serde_json::Value) -> Vec<String> {
+    path.get("segments")
+        .and_then(|v| v.as_array())
+        .map(|segments| {
+            segments
+                .iter()
+                .filter_map(|segment| {
+                    segment
+                        .get("edge")
+                        .and_then(|edge| edge.get("edge_type"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn path_has_any_edge(path: &serde_json::Value, edge_types: &[&str]) -> bool {
+    let edges = path_edge_types(path);
+    edges
+        .iter()
+        .any(|edge| edge_types.iter().any(|allowed| edge == allowed))
+}
+
+fn path_reject_reason_for_intent(
+    path: &serde_json::Value,
+    intent: TraversalIntent,
+) -> Option<&'static str> {
+    let edges = path_edge_types(path);
+    if edges.is_empty() {
+        return Some("missing_path_segments");
+    }
+
+    match intent {
+        TraversalIntent::Display => {
+            if edges
+                .iter()
+                .all(|edge| matches!(edge.as_str(), "DependsOn" | "Contains"))
+            {
+                None
+            } else {
+                Some("edge_type_not_allowed_for_display_intent")
+            }
+        }
+        TraversalIntent::ValueSource => {
+            if edges.iter().all(|edge| {
+                matches!(
+                    edge.as_str(),
+                    "Reads" | "ActionReads" | "FieldAlias" | "DataflowOutput" | "DataflowInput"
+                )
+            }) {
+                None
+            } else {
+                Some("edge_type_not_allowed_for_value_source_intent")
+            }
+        }
+        TraversalIntent::Writer => {
+            let has_writer_edge =
+                path_has_any_edge(path, &["Writes", "ActionWrites", "FieldWrite"]);
+            let only_writer_chain_edges = edges.iter().all(|edge| {
+                matches!(
+                    edge.as_str(),
+                    "Reads" | "FieldAlias" | "Writes" | "ActionWrites" | "FieldWrite"
+                )
+            });
+            if has_writer_edge && only_writer_chain_edges {
+                None
+            } else if !has_writer_edge {
+                Some("writer_intent_requires_write_edge")
+            } else {
+                Some("edge_type_not_allowed_for_writer_intent")
+            }
+        }
+        TraversalIntent::Availability => {
+            if edges
+                .iter()
+                .all(|edge| matches!(edge.as_str(), "DependsOn" | "DataflowInput"))
+            {
+                None
+            } else {
+                Some("edge_type_not_allowed_for_availability_intent")
+            }
+        }
+        TraversalIntent::Context | TraversalIntent::Auto => None,
+    }
+}
+
+fn rejected_path(path: serde_json::Value, reject_reason: &str) -> serde_json::Value {
+    let mut value = path;
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert(
+            "reject_reason".to_string(),
+            serde_json::json!(reject_reason),
+        );
+    }
+    value
+}
+
+/// 将路径选择结果按当前 intent 分为证明、候选、拒绝三类
+fn partition_paths_for_intent(
+    selection: crate::path::PathSelectionResult,
+    intent: TraversalIntent,
+) -> (
+    Vec<serde_json::Value>,
+    Vec<serde_json::Value>,
+    Vec<serde_json::Value>,
+) {
+    let mut proven_paths = Vec::new();
+    let mut candidate_paths = Vec::new();
+    let mut rejected_paths = Vec::new();
+
+    for path in selection.primary_paths {
+        let path_json = path.to_json();
+        if let Some(reason) = path_reject_reason_for_intent(&path_json, intent) {
+            rejected_paths.push(rejected_path(path_json, reason));
+        } else {
+            proven_paths.push(path_json);
+        }
+    }
+
+    for path in selection
+        .candidate_paths
+        .into_iter()
+        .chain(selection.supporting_paths)
+        .chain(selection.related_context)
+    {
+        let path_json = path.to_json();
+        if let Some(reason) = path_reject_reason_for_intent(&path_json, intent) {
+            rejected_paths.push(rejected_path(path_json, reason));
+        } else {
+            candidate_paths.push(path_json);
+        }
+    }
+
+    for path in selection.rejected_paths {
+        rejected_paths.push(rejected_path(path.to_json(), "path_selector_rejected"));
+    }
+
+    (proven_paths, candidate_paths, rejected_paths)
 }
 
 /// 对 `model.totalRowCount__` 门控展开当前页面模型 filter
@@ -2233,6 +2435,8 @@ pub fn build_explain_condition_output_with_intent(
     supporting_context = dedupe_conditions(supporting_context);
 
     let mut primary_path: Vec<serde_json::Value> = Vec::new();
+    let mut candidate_paths: Vec<serde_json::Value> = Vec::new();
+    let mut rejected_paths: Vec<serde_json::Value> = Vec::new();
     if target_node.id.starts_with("field:") || target_node.id.starts_with("comp:") {
         let path_query = crate::path::PathQuery {
             page_id: format!("page:{}", page_path),
@@ -2299,16 +2503,11 @@ pub fn build_explain_condition_output_with_intent(
 
         let selector = crate::path::RuleBasedPathSelector;
         let selection = selector.select(&path_query, candidates);
-        for p in selection.primary_paths {
-            primary_path.push(p.to_json());
-        }
-        for p in selection.candidate_paths {
-            related_context.push(serde_json::json!({
-                "type": "candidate_path",
-                "path": p.to_json(),
-                "note": "非当前页面必要条件",
-            }));
-        }
+        let (proven, candidates, rejected) =
+            partition_paths_for_intent(selection, effective_intent);
+        primary_path = proven;
+        candidate_paths = candidates;
+        rejected_paths = rejected;
     }
 
     let answer_facts = build_answer_facts(
@@ -2366,6 +2565,63 @@ pub fn build_explain_condition_output_with_intent(
     };
 
     let compact_budget = _budget == "compact";
+    let details_primary_path = if compact_budget {
+        Vec::new()
+    } else {
+        primary_path.clone()
+    };
+    let details_proven_paths = if compact_budget {
+        Vec::new()
+    } else {
+        primary_path.clone()
+    };
+    let details_candidate_paths = if compact_budget {
+        Vec::new()
+    } else {
+        candidate_paths.clone()
+    };
+    let details_rejected_paths = if compact_budget {
+        Vec::new()
+    } else {
+        rejected_paths.clone()
+    };
+    let primary_path_summary = build_context_summary(
+        &primary_path,
+        details_primary_path.len(),
+        compact_budget && !primary_path.is_empty(),
+        if compact_budget {
+            "compact 模式隐藏 primary_path 明细；answer_facts.paths 已保留短证据"
+        } else {
+            "primary_path 明细已展开"
+        },
+    );
+    let candidate_path_summary = build_context_summary(
+        &candidate_paths,
+        details_candidate_paths.len(),
+        compact_budget && !candidate_paths.is_empty(),
+        if compact_budget {
+            "compact 模式隐藏 candidate_paths 明细；需要核查时使用 --budget normal 或 full"
+        } else {
+            "candidate_paths 明细已展开"
+        },
+    );
+    let rejected_path_summary = build_context_summary(
+        &rejected_paths,
+        details_rejected_paths.len(),
+        compact_budget && !rejected_paths.is_empty(),
+        if compact_budget {
+            "compact 模式隐藏 rejected_paths 明细；需要排查路径拒绝原因时使用 --budget normal 或 full"
+        } else {
+            "rejected_paths 明细已展开"
+        },
+    );
+    let details_value_source_context = if compact_budget {
+        serde_json::Value::Null
+    } else {
+        value_source_context
+            .clone()
+            .unwrap_or(serde_json::Value::Null)
+    };
     let details_supporting_context = if compact_budget {
         Vec::new()
     } else {
@@ -2406,11 +2662,17 @@ pub fn build_explain_condition_output_with_intent(
         "primary_reason": primary_reason,
         "answer_facts_count": answer_facts
             .as_object()
-            .map(|obj| obj.keys().filter(|k| k.ends_with("_facts")).count())
+            .map(|obj| {
+                obj.keys()
+                    .filter(|k| k.ends_with("_facts") && k.as_str() != "inactive_facts")
+                    .count()
+            })
             .unwrap_or(0),
         "blocking_conditions_count": blocking_conditions.len(),
         "data_empty_gates_count": data_empty_gates.len(),
         "primary_paths_count": primary_path.len(),
+        "candidate_paths_count": candidate_paths.len(),
+        "rejected_paths_count": rejected_paths.len(),
         "value_source_context_count": usize::from(value_source_context.is_some()),
         "supporting_context_count": supporting_context.len(),
         "related_context_count": related_context.len(),
@@ -2423,13 +2685,16 @@ pub fn build_explain_condition_output_with_intent(
             "name": target_node.name,
             "path": target_node.path,
         },
-        "primary_path": primary_path,
+        "primary_path": details_primary_path,
+        "primary_path_summary": primary_path_summary,
         "answer_facts": answer_facts,
         "traversal_policy": traversal_policy,
-        "proven_paths": [],
-        "candidate_paths": [],
-        "rejected_paths": [],
-        "value_source_context": value_source_context,
+        "proven_paths": details_proven_paths,
+        "candidate_paths": details_candidate_paths,
+        "candidate_paths_summary": candidate_path_summary,
+        "rejected_paths": details_rejected_paths,
+        "rejected_paths_summary": rejected_path_summary,
+        "value_source_context": details_value_source_context,
         "blocking_conditions": blocking_conditions,
         "data_empty_gates": data_empty_gates,
         "supporting_context": details_supporting_context,

@@ -104,8 +104,9 @@ Anti-drift 约束：
 
 - `timing` 只能用于性能判断，不能解释业务数据来源、显示条件或写入链路。
 - 业务回答优先读取 `result.summary` 和 `result.details.answer_facts`。
-- 证据核查读取 `result.details.primary_path` / `result.details.blocking_conditions` / `result.details.data_empty_gates` / `result.evidence`。
-- compact 模式默认隐藏 `result.details.supporting_context` / `result.details.related_context` 明细，只保留对应 `*_summary`；需要审计旁路明细时再提高到 `normal` 或 `full`。
+- `answer_facts` 只展开当前 `intent` 激活的 fact block；例如 `intent=display` 不应读取或推断 `value_source_facts`。
+- 证据核查读取 `result.details.blocking_conditions` / `result.details.data_empty_gates` / `result.evidence`；路径审计再升到 `normal` 读取 `primary_path` / `candidate_paths` / `rejected_paths`。
+- compact 模式默认隐藏 `result.details.primary_path` / `result.details.value_source_context` / `result.details.supporting_context` / `result.details.related_context` 明细，只保留对应 `*_summary` 或 `answer_facts` 短证据；需要审计旁路明细时再提高到 `normal` 或 `full`。
 - `related_context` 默认只是相关上下文，不是必要条件；只有输出明确标为阻塞条件或主路径证据时才可作为必要条件表述。
 - 不默认使用 `budget=full`；先 `compact`，证据不足再升到 `normal`，只有审计长数组时才用 `full`。
 
