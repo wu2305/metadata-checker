@@ -55,6 +55,7 @@ enum AnswerFactKind {
     Writer,
     Availability,
     Context,
+    ModelIo,
 }
 
 /// 判断当前 intent 是否需要输出某类事实块
@@ -74,9 +75,14 @@ fn answer_fact_enabled(
                 matches!(kind, AnswerFactKind::Display | AnswerFactKind::ValueSource)
             }
             crate::graph::NodeType::Field => {
-                matches!(kind, AnswerFactKind::ValueSource | AnswerFactKind::Writer)
+                matches!(
+                    kind,
+                    AnswerFactKind::ValueSource | AnswerFactKind::Writer
+                )
             }
-            crate::graph::NodeType::Model => kind == AnswerFactKind::Availability,
+            crate::graph::NodeType::Model => {
+                matches!(kind, AnswerFactKind::Availability | AnswerFactKind::ModelIo)
+            }
             crate::graph::NodeType::Page => {
                 matches!(kind, AnswerFactKind::Display | AnswerFactKind::Availability)
             }
@@ -1741,6 +1747,177 @@ fn build_availability_facts(data_empty_gates: &[serde_json::Value]) -> serde_jso
     })
 }
 
+fn graph_edge_ref(node: &crate::graph::Node, edge: &crate::graph::Edge) -> serde_json::Value {
+    serde_json::json!({
+        "node_id": node.id,
+        "node_type": format!("{:?}", node.node_type),
+        "name": node.name,
+        "source_file": edge.meta.as_ref().and_then(|m| m.get("source_file")).and_then(|v| v.as_str()).or(Some(node.path.as_str())),
+        "edge_type": format!("{:?}", edge.edge_type),
+        "field_path": edge.field_path.clone(),
+        "json_path": edge.meta.as_ref().and_then(|m| m.get("json_path")).and_then(|v| v.as_str()),
+    })
+}
+
+fn build_model_io_facts(graph: &GraphDB, target_node: &crate::graph::Node) -> serde_json::Value {
+    if target_node.node_type != crate::graph::NodeType::Model {
+        return serde_json::json!({
+            "result": null,
+            "confidence": "none",
+            "reads": [],
+            "writes": [],
+            "paths": [],
+            "evidence_refs": [],
+            "missing_evidence": ["model_io_facts only applies to model targets"],
+        });
+    }
+
+    let mut reads = Vec::new();
+    let mut writes = Vec::new();
+    if let Some((outgoing, incoming)) = graph.get_node_edges(&target_node.id) {
+        for (node, edge) in outgoing.iter().chain(incoming.iter()) {
+            match edge.edge_type {
+                crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
+                    reads.push(graph_edge_ref(node, edge));
+                }
+                crate::graph::EdgeType::Writes
+                | crate::graph::EdgeType::ActionWrites
+                | crate::graph::EdgeType::FieldWrite => {
+                    writes.push(graph_edge_ref(node, edge));
+                }
+                _ => {}
+            }
+        }
+    }
+    reads.truncate(5);
+    writes.truncate(5);
+    let has_io = !reads.is_empty() || !writes.is_empty();
+
+    serde_json::json!({
+        "result": if has_io {
+            "model_io_summary_found"
+        } else {
+            "no_model_io_edges_found"
+        },
+        "confidence": if has_io { "medium" } else { "low" },
+        "reads": reads,
+        "writes": writes,
+        "paths": [],
+        "evidence_refs": [],
+        "missing_evidence": if has_io {
+            serde_json::json!([])
+        } else {
+            serde_json::json!(["no read/write graph edges found for model target"])
+        },
+    })
+}
+
+fn build_primary_reason_for_intent(
+    intent: TraversalIntent,
+    target_node: &crate::graph::Node,
+    blocking_conditions: &[serde_json::Value],
+    data_empty_gates: &[serde_json::Value],
+    primary_path: &[serde_json::Value],
+    value_source_context: &Option<serde_json::Value>,
+    answer_facts: &serde_json::Value,
+) -> String {
+    match intent {
+        TraversalIntent::Writer => {
+            let writer_paths = answer_facts
+                .get("writer_facts")
+                .and_then(|v| v.get("paths"))
+                .and_then(|v| v.as_array())
+                .map(|items| items.len())
+                .unwrap_or(0);
+            if writer_paths > 0 {
+                return format!(
+                    "目标 {} 的写入/生成链路已找到，共 {} 条 writer 路径",
+                    target_node.id, writer_paths
+                );
+            }
+            return format!("目标 {} 未发现明确 writer 链路", target_node.id);
+        }
+        TraversalIntent::ValueSource => {
+            if let Some(result) = answer_facts
+                .get("value_source_facts")
+                .and_then(|v| v.get("result"))
+                .and_then(|v| v.as_str())
+            {
+                return format!("目标 {} 的值来源已解析到 {}", target_node.id, result);
+            }
+            return format!("目标 {} 未发现明确值来源", target_node.id);
+        }
+        TraversalIntent::Display => {
+            if !blocking_conditions.is_empty() {
+                return format!(
+                    "目标 {} 受 {} 个显示/启用条件影响",
+                    target_node.id,
+                    blocking_conditions.len()
+                );
+            }
+            if !data_empty_gates.is_empty() {
+                return format!(
+                    "目标 {} 的显示受 {} 个数据门控展开条件影响",
+                    target_node.id,
+                    data_empty_gates.len()
+                );
+            }
+            return format!("目标 {} 未发现明确显示条件", target_node.id);
+        }
+        TraversalIntent::Availability => {
+            if !data_empty_gates.is_empty() {
+                return format!(
+                    "目标 {} 受 {} 个数据门控影响（filter/totalRowCount__）",
+                    target_node.id,
+                    data_empty_gates.len()
+                );
+            }
+            return format!("目标 {} 未发现明确数据可用性门控", target_node.id);
+        }
+        TraversalIntent::Context | TraversalIntent::Auto => {}
+    }
+
+    if target_node.node_type == crate::graph::NodeType::Page {
+        if !blocking_conditions.is_empty() {
+            format!(
+                "页面 {} 有 {} 个阻塞条件（visible/disable/action condition）",
+                target_node.name,
+                blocking_conditions.len()
+            )
+        } else if !data_empty_gates.is_empty() {
+            format!(
+                "页面 {} 有 {} 个数据门控（filter/totalRowCount__）",
+                target_node.name,
+                data_empty_gates.len()
+            )
+        } else {
+            format!("页面 {} 未发现明确的阻塞条件或数据门控", target_node.name)
+        }
+    } else if !blocking_conditions.is_empty() {
+        format!(
+            "目标 {} 受 {} 个阻塞条件影响（visible/disable/action condition）",
+            target_node.id,
+            blocking_conditions.len()
+        )
+    } else if !data_empty_gates.is_empty() {
+        format!(
+            "目标 {} 受 {} 个数据门控影响（filter/totalRowCount__）",
+            target_node.id,
+            data_empty_gates.len()
+        )
+    } else if !primary_path.is_empty() {
+        format!(
+            "目标 {} 的数据链路已找到，共 {} 条主路径",
+            target_node.id,
+            primary_path.len()
+        )
+    } else if value_source_context.is_some() {
+        format!("目标 {} 的裸字段值来源已解析到最近数据容器", target_node.id)
+    } else {
+        format!("目标 {} 未发现明确的阻塞条件或数据链路", target_node.id)
+    }
+}
+
 fn build_traversal_policy(intent: TraversalIntent, budget: &str) -> serde_json::Value {
     let (max_paths, max_steps_per_path) = match budget {
         "compact" => (3, 6),
@@ -1777,6 +1954,7 @@ fn build_traversal_policy(intent: TraversalIntent, budget: &str) -> serde_json::
 }
 
 fn build_answer_facts(
+    graph: &GraphDB,
     intent: TraversalIntent,
     target_node: &crate::graph::Node,
     blocking_conditions: &[serde_json::Value],
@@ -1820,6 +1998,12 @@ fn build_answer_facts(
                 "evidence_refs": [],
                 "missing_evidence": ["use --context for broad surrounding context"],
             }),
+        );
+    }
+    if answer_fact_enabled(intent, target_node, AnswerFactKind::ModelIo) {
+        facts.insert(
+            "model_io_facts".to_string(),
+            build_model_io_facts(graph, target_node),
         );
     }
 
@@ -2230,17 +2414,7 @@ pub fn build_explain_condition_output_with_intent(
         }
     };
 
-    let effective_intent = if intent == TraversalIntent::Auto {
-        if target_node.id.starts_with("field:") {
-            TraversalIntent::Writer
-        } else if target_node.id.starts_with("model:") {
-            TraversalIntent::Availability
-        } else {
-            TraversalIntent::Auto
-        }
-    } else {
-        intent
-    };
+    let effective_intent = intent;
 
     let page_node = match target_node.node_type {
         crate::graph::NodeType::Page => target_node.clone(),
@@ -2511,6 +2685,7 @@ pub fn build_explain_condition_output_with_intent(
     }
 
     let answer_facts = build_answer_facts(
+        graph,
         effective_intent,
         &target_node,
         &blocking_conditions,
@@ -2524,45 +2699,15 @@ pub fn build_explain_condition_output_with_intent(
         .cloned()
         .unwrap_or_else(|| build_traversal_policy(effective_intent, _budget));
 
-    let primary_reason = if target_node.node_type == crate::graph::NodeType::Page {
-        if !blocking_conditions.is_empty() {
-            format!(
-                "页面 {} 有 {} 个阻塞条件（visible/disable/action condition）",
-                target_node.name,
-                blocking_conditions.len()
-            )
-        } else if !data_empty_gates.is_empty() {
-            format!(
-                "页面 {} 有 {} 个数据门控（filter/totalRowCount__）",
-                target_node.name,
-                data_empty_gates.len()
-            )
-        } else {
-            format!("页面 {} 未发现明确的阻塞条件或数据门控", target_node.name)
-        }
-    } else if !blocking_conditions.is_empty() {
-        format!(
-            "目标 {} 受 {} 个阻塞条件影响（visible/disable/action condition）",
-            target_node.id,
-            blocking_conditions.len()
-        )
-    } else if !data_empty_gates.is_empty() {
-        format!(
-            "目标 {} 受 {} 个数据门控影响（filter/totalRowCount__）",
-            target_node.id,
-            data_empty_gates.len()
-        )
-    } else if !primary_path.is_empty() {
-        format!(
-            "目标 {} 的数据链路已找到，共 {} 条主路径",
-            target_node.id,
-            primary_path.len()
-        )
-    } else if value_source_context.is_some() {
-        format!("目标 {} 的裸字段值来源已解析到最近数据容器", target_node.id)
-    } else {
-        format!("目标 {} 未发现明确的阻塞条件或数据链路", target_node.id)
-    };
+    let primary_reason = build_primary_reason_for_intent(
+        effective_intent,
+        &target_node,
+        &blocking_conditions,
+        &data_empty_gates,
+        &primary_path,
+        &value_source_context,
+        &answer_facts,
+    );
 
     let compact_budget = _budget == "compact";
     let details_primary_path = if compact_budget {

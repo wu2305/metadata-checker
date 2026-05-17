@@ -182,8 +182,42 @@ input3
 
 **抗漂移验证**：
 - `timing` 字段只出现在根级，不在 `summary` / `details` / `evidence` 中。
-- AI 读取策略：`summary.primary_reason` > `details.blocking_conditions` > `details.primary_path` > `details.related_context`。
+- M33 起 AI 读取策略：`summary.primary_reason` > `details.answer_facts`；路径审计再用 `--budget normal` 读取 `details.primary_path` / `details.rejected_paths`。
 - `timing` 仅用于性能判断，不作为业务证据。
+
+---
+
+## M33 Compact 输出体积基线
+
+验收时间：2026-05-18
+
+目标：显式 intent 下，compact 输出不再展开整页/全图大数组，优先交付 `summary + answer_facts`。
+
+采集命令：
+```bash
+./target/debug/metadata-checker \
+  --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi \
+  --graph-db-path /tmp/m20_test_xiaoshouyi.graphdb \
+  --explain-condition 'comp:app/售后.app/绑定车辆/会员已注册.spg|text41' \
+  --intent display \
+  --budget compact | wc -c
+
+./target/debug/metadata-checker \
+  --project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi \
+  --graph-db-path /tmp/m20_test_xiaoshouyi.graphdb \
+  --explain-condition 'comp:app/销售.app/销售/合同协议.spg|input3' \
+  --intent writer \
+  --budget compact | wc -c
+```
+
+实测值：
+
+| 场景 | 输出字节数 | 验收口径 |
+|---|---:|---|
+| `text41 --intent display --budget compact` | 9852 | 只展开 `display_facts`，隐藏 `primary_path` / `value_source_context` / rejected 明细 |
+| `input3 --intent writer --budget compact` | 15492 | 通过 `writer_facts.paths` 保留 `model22.phoneNumber -> fact_qwSidebar.phoneNumber -> action1/action4` |
+
+后续若 `text41 display compact` 超过 12KB，或重新出现 active `value_source_facts` / 展开的 `primary_path`，应视为 M33 注意力漂移回退。
 
 ---
 

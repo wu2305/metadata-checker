@@ -1587,12 +1587,12 @@ target node
 
 #### Availability
 
-- [ ] 允许边/关系：
+- [x] 允许边/关系：
   - model filter condition。
   - `totalRowCount__` gate。
   - filter 中引用的 param/user/system var。
   - 当前 model 若是 DataFlow，可列出上游 input candidates。
-- [ ] 停止条件：
+- [x] 停止条件：
   - 已列出决定数据为空/非空的 filter 条件。
   - param/user/system var 只列名称和表达式，不继续扩到所有使用处。
   - DataFlow 上游仅列候选，不展开到全链路，除非用户追问来源。
@@ -1681,11 +1681,11 @@ target node
   - 子组件 `${name}` 继承容器 `dataSet=model1`。
   - `value_source_facts.result` 指向 `data/table1.tbl`。
   - 路径 steps 包含 `inherited_container_data_context`。
-- [ ] Fixture：Writer intent
+- [x] Fixture：Writer intent
   - 字段被 action 写入。
   - `writer_facts` 包含 action id、component trigger、field path。
   - 不包含同 model 其它字段写入。
-- [ ] Fixture：Availability intent
+- [x] Fixture：Availability intent
   - model filter 引用 param/user/system。
   - 输出 filter 条件与引用变量，不扩散到变量所有使用处。
 - [ ] Fixture：候选/证明分离
@@ -1714,10 +1714,10 @@ target node
   - `explain_condition` 支持 `intent`。
   - `human=true` 行为不回退。
   - 外部 graphdb + project_dir 不回退。
-- [ ] Snapshot / 体积基线回归
+- [x] Snapshot / 体积基线回归
   - 更新 compact 输出 snapshot。
   - 确认 `answer_facts` 稳定，不因数组顺序随机漂移。
-  - `text41 --intent display --budget compact` 已增加真实项目低噪声断言；仍需写入 `docs/performance-baseline.md` 作为长期基线。
+  - `text41 --intent display --budget compact` 已增加真实项目低噪声断言，并已写入 `docs/performance-baseline.md` 作为长期基线。
 
 ### Skill / 文档任务
 
@@ -1729,7 +1729,7 @@ target node
   - wrapper 应传入 `intent`。
   - 小模型默认不读 `related_context`。
 - [x] `docs/schema.md` 更新 M33 字段契约。
-- [ ] `docs/performance-baseline.md` 增加 M33 compact 输出体积基线。
+- [x] `docs/performance-baseline.md` 增加 M33 compact 输出体积基线。
 
 ### 验收目标
 

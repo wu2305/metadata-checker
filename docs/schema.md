@@ -255,6 +255,7 @@ pub struct AiOutput {
 | `answer_facts.writer_facts` | 仅在 writer 或适用 auto intent 中出现；写入/生成事实，包含 writer path 摘要；无写入证明时 `missing_evidence` 必须说明 |
 | `answer_facts.availability_facts` | 仅在 availability 或适用 auto intent 中出现；数据可用性事实，包含 filter / totalRowCount__ gates |
 | `answer_facts.context_facts` | 仅在 context intent 中出现；周边关系事实；宽上下文仍建议用 `--context` |
+| `answer_facts.model_io_facts` | 仅在 `model:` auto intent 中出现；给出模型读写摘要，避免模型 auto 只有 availability facts |
 | `answer_facts.traversal_policy` | intent 对应的 `allowed_edge_types`、`directions`、`max_paths`、`max_steps_per_path`、`stop_conditions` |
 
 每个 fact block 至少包含：

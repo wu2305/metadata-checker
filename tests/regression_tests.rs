@@ -241,6 +241,18 @@ fn setup_graph_db(suffix: &str) -> (std::path::PathBuf, GraphDB) {
     (db_path, graph)
 }
 
+fn setup_cross_page_graph_db(suffix: &str) -> (std::path::PathBuf, GraphDB) {
+    let db_path = std::env::temp_dir().join(format!(
+        "metadata-checker-cross-page-contract-test-{}.db",
+        suffix
+    ));
+    let _ = std::fs::remove_file(&db_path);
+    let project_dir = Path::new("tests/fixtures/cross_page_project");
+    scan_project(project_dir, &db_path).expect("scan_project failed");
+    let graph = GraphDB::open(&db_path).expect("Failed to open graph db");
+    (db_path, graph)
+}
+
 #[test]
 fn test_query_model_contract() {
     let (_db_path, graph) = setup_graph_db("model");
@@ -736,6 +748,186 @@ fn test_m33_compact_hides_primary_and_value_context_details() {
         details["answer_facts"]["value_source_facts"]["result"].as_str(),
         Some("data/table1.tbl"),
         "compact 输出必须通过 answer_facts 直接回答值来源"
+    );
+}
+
+#[test]
+fn test_m33_auto_field_enables_value_source_and_writer_facts() {
+    let (_db_path, graph) = setup_graph_db("m33_auto_field_facts");
+    let result = metadata_checker::explain::build_explain_condition_output(
+        &graph,
+        "field:model1.name",
+        "compact",
+    )
+    .expect("explain-condition must succeed");
+    let summary = result
+        .get("summary")
+        .and_then(|v| v.as_object())
+        .expect("summary must be object");
+    let facts = result
+        .get("details")
+        .and_then(|v| v.get("answer_facts"))
+        .and_then(|v| v.as_object())
+        .expect("answer_facts must be object");
+
+    assert_eq!(summary.get("intent").and_then(|v| v.as_str()), Some("auto"));
+    assert!(
+        facts.get("value_source_facts").is_some(),
+        "field auto 必须激活 value_source_facts"
+    );
+    assert!(
+        facts.get("writer_facts").is_some(),
+        "field auto 必须激活 writer_facts"
+    );
+    assert!(
+        facts.get("display_facts").is_none(),
+        "field auto 不应激活 display_facts"
+    );
+}
+
+#[test]
+fn test_m33_auto_model_enables_availability_and_model_io_facts() {
+    let (_db_path, graph) = setup_graph_db("m33_auto_model_facts");
+    let result = metadata_checker::explain::build_explain_condition_output(
+        &graph,
+        "model:model1",
+        "compact",
+    )
+    .expect("explain-condition must succeed");
+    let facts = result
+        .get("details")
+        .and_then(|v| v.get("answer_facts"))
+        .and_then(|v| v.as_object())
+        .expect("answer_facts must be object");
+
+    assert!(
+        facts.get("availability_facts").is_some(),
+        "model auto 必须激活 availability_facts"
+    );
+    let model_io = facts
+        .get("model_io_facts")
+        .and_then(|v| v.as_object())
+        .expect("model auto 必须激活 model_io_facts");
+    assert!(
+        model_io
+            .get("reads")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| !items.is_empty()),
+        "model_io_facts 必须包含 read summary"
+    );
+    assert!(
+        model_io
+            .get("writes")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| !items.is_empty()),
+        "model_io_facts 必须包含 write summary"
+    );
+}
+
+#[test]
+fn test_m33_writer_intent_fixture_outputs_writer_paths() {
+    let (_db_path, graph) = setup_cross_page_graph_db("m33_writer_fixture");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/reader_page.spg|inputB",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Writer,
+    )
+    .expect("explain-condition must succeed");
+    let writer_paths = result
+        .get("details")
+        .and_then(|v| v.get("answer_facts"))
+        .and_then(|v| v.get("writer_facts"))
+        .and_then(|v| v.get("paths"))
+        .and_then(|v| v.as_array())
+        .expect("writer_facts.paths must be array");
+
+    assert!(
+        writer_paths.iter().any(|p| p
+            .get("result")
+            .and_then(|v| v.as_str())
+            .map_or(false, |s| s.contains("fact_qwSidebar.phoneNumber")
+                && (s.contains("actionWrite") || s.contains("actionUpdate")))),
+        "writer fixture 必须输出字段级 writer path"
+    );
+}
+
+#[test]
+fn test_m33_availability_intent_fixture_stops_at_filter_vars() {
+    let (_db_path, graph) = setup_graph_db("m33_availability_fixture");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "model:model1",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Availability,
+    )
+    .expect("explain-condition must succeed");
+    let facts = result
+        .get("details")
+        .and_then(|v| v.get("answer_facts"))
+        .and_then(|v| v.as_object())
+        .expect("answer_facts must be object");
+    let availability = facts
+        .get("availability_facts")
+        .and_then(|v| v.as_object())
+        .expect("availability_facts must exist");
+    let gates_text = availability
+        .get("gates")
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+
+    assert!(gates_text.contains("param1"), "必须输出 param1 filter");
+    assert!(
+        gates_text.contains("WXWORK_USER_ID"),
+        "必须输出系统用户变量 filter"
+    );
+    assert!(
+        facts.get("model_io_facts").is_none(),
+        "availability intent 不应扩散到 model_io_facts"
+    );
+}
+
+#[test]
+fn test_m33_fixture_separates_proven_candidate_and_rejected_paths() {
+    let (_db_path, graph) = setup_cross_page_graph_db("m33_path_partition_fixture");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/reader_page.spg|inputB",
+        "normal",
+        metadata_checker::explain::TraversalIntent::Writer,
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+
+    assert!(
+        details
+            .get("proven_paths")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| !items.is_empty()),
+        "normal writer 输出必须保留 proven_paths"
+    );
+    assert!(
+        details
+            .get("candidate_paths")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| !items.is_empty()),
+        "normal writer 输出必须把未入选路径保留为 candidate_paths"
+    );
+    assert!(
+        details
+            .get("rejected_paths")
+            .and_then(|v| v.as_array())
+            .map_or(true, |items| {
+                items.iter().all(|p| {
+                    p.get("reject_reason")
+                        .and_then(|v| v.as_str())
+                        .map_or(false, |reason| !reason.is_empty())
+                })
+            }),
+        "如有 rejected_paths，每条都必须包含 reject_reason"
     );
 }
 
