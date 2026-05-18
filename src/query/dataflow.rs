@@ -21,6 +21,8 @@ struct FieldRecord {
     exp: Option<String>,
     #[serde(rename = "inputField")]
     input_field: Option<String>,
+    #[serde(rename = "inputNode")]
+    input_node: Option<String>,
 }
 
 /// DataFlow 预解析元数据（一次性反序列化 + 预建索引）
@@ -36,6 +38,8 @@ struct DataFlowMeta {
     internal_deps: HashMap<String, Vec<String>>,
     /// 预建索引：node_id -> field_name -> FieldRecord
     field_index: HashMap<String, HashMap<String, FieldRecord>>,
+    /// node_id -> moduleTablePath
+    module_table_paths: HashMap<String, String>,
 }
 
 impl DataFlowMeta {
@@ -60,8 +64,19 @@ impl DataFlowMeta {
             .get("nodeTypes")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
+        let module_table_paths: HashMap<String, String> = meta
+            .get("nodeTablePaths")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
 
-        // Parse dimensions for fallback
+        let add_field_record = |idx: &mut HashMap<String, FieldRecord>, rec: FieldRecord| {
+            idx.insert(rec.name.clone(), rec.clone());
+            if rec.dbfield != rec.name {
+                idx.insert(rec.dbfield.clone(), rec);
+            }
+        };
+
+        // 备用解析：当 nodeFields 不足时，使用 dimensions 做兼容性字段来源
         let dimensions: Vec<FieldRecord> = meta
             .get("dimensions")
             .and_then(|v| v.as_array())
@@ -85,6 +100,7 @@ impl DataFlowMeta {
                             original_node: None,
                             exp,
                             input_field,
+                            input_node: None,
                         })
                     })
                     .collect()
@@ -101,22 +117,22 @@ impl DataFlowMeta {
                 .collect();
             let mut idx = HashMap::new();
             for rec in &records {
-                idx.insert(rec.name.clone(), rec.clone());
+                add_field_record(&mut idx, rec.clone());
             }
             field_index.insert(node_id.clone(), idx);
         }
 
-        // Fallback: if nodeFields is empty but dimensions exist, use dimensions as default output
+        // 兼容回退：若 nodeFields 为空但 dimensions 存在，则将 dimensions 作为默认输出索引
         if field_index.is_empty() && !dimensions.is_empty() {
             let mut idx = HashMap::new();
             for dim in &dimensions {
-                idx.insert(dim.name.clone(), dim.clone());
+                add_field_record(&mut idx, dim.clone());
             }
             field_index.insert("default".to_string(), idx);
         }
 
-        // Fallback: if Output nodes have empty nodeFields, populate with dimensions
-        // Also merge dimensions inputField/exp into existing Output node fields
+        // 兼容回退：Output 节点若缺少 nodeFields，使用 dimensions 补齐
+        // 同时把 dimensions 的 inputField/exp 合并回已存在的 Output 字段
         let output_nodes: Vec<String> = node_types
             .iter()
             .filter(|(_, t)| *t == "Output")
@@ -130,7 +146,7 @@ impl DataFlowMeta {
                 }
                 field_index.insert(out_id.clone(), idx);
             } else if let Some(existing_idx) = field_index.get(&out_id) {
-                // Merge dimensions inputField/exp into existing Output fields
+                // 将 dimensions 的 inputField/exp 合并到已有 Output 字段定义
                 let dim_map: HashMap<String, &FieldRecord> =
                     dimensions.iter().map(|d| (d.name.clone(), d)).collect();
                 let mut merged_idx = existing_idx.clone();
@@ -161,6 +177,7 @@ impl DataFlowMeta {
             node_types,
             internal_deps,
             field_index,
+            module_table_paths,
         }
     }
 
@@ -185,6 +202,13 @@ impl DataFlowMeta {
     /// 根据 node_id 获取 alias
     fn get_alias(&self, node_id: &str) -> Option<&String> {
         self.id_to_alias.get(node_id)
+    }
+
+    /// 根据 node_id 获取 moduleTablePath
+    fn get_node_module_table_path(&self, node_id: &str) -> Option<&str> {
+        self.module_table_paths
+            .get(node_id)
+            .map(std::string::String::as_str)
     }
 
     /// 获取 Output 类型节点的字段索引；如果没有 Output 节点，fallback 到 "default"
@@ -273,7 +297,13 @@ fn trace_field_source(
 
         let field_rec = field_records.get(&current_field_name).or_else(|| {
             field_records.values().find(|f| {
-                f.original_field.as_ref() == Some(&current_field_name)
+                f.dbfield == current_field_name
+                    || f.original_field
+                        .as_ref()
+                        .map_or(false, |value| value == &current_field_name)
+                    || f.input_field
+                        .as_ref()
+                        .map_or(false, |value| value == &current_field_name)
                     || f.name == current_field_name
             })
         });
@@ -568,4 +598,114 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dataflow_meta_indexes_output_field_by_name_and_dbfield() {
+        let raw_meta = serde_json::json!({
+            "aliasMap": {
+                "FACT_AUTOCUSTOMERAUTOREL": "node_source",
+                "模型输出": "output1"
+            },
+            "nodeTablePaths": {
+                "node_source": "$DATA:/主数据/fact_autoCustomerAutoRel.tbl",
+                "output1": "$DATA:/加工表/小程序/绑车.tbl"
+            },
+            "nodeTypes": {
+                "node_source": "ModelTable",
+                "output1": "Output"
+            },
+            "nodeFields": {
+                "output1": [
+                    {
+                        "name": "车辆VIN",
+                        "dbfield": "CUSTOMAUTOMYAUTOLIST",
+                        "originalNode": "FACT_AUTOCUSTOMERAUTOREL",
+                        "originalField": "车辆VIN",
+                        "inputNode": "node_source"
+                    }
+                ]
+            }
+        });
+
+        let meta = DataFlowMeta::from_meta(&raw_meta);
+
+        let module_path = meta
+            .get_node_module_table_path("node_source")
+            .expect("moduleTablePath 应该被索引");
+        assert_eq!(module_path, "$DATA:/主数据/fact_autoCustomerAutoRel.tbl");
+
+        let output_fields = meta.get_fields("output1").expect("output1 字段索引应存在");
+
+        let by_dbfield = output_fields
+            .get("CUSTOMAUTOMYAUTOLIST")
+            .expect("按 dbfield 匹配 CUSTOMAUTOMYAUTOLIST 应该命中字段");
+        assert_eq!(
+            by_dbfield.original_node.as_deref(),
+            Some("FACT_AUTOCUSTOMERAUTOREL")
+        );
+        assert_eq!(by_dbfield.original_field.as_deref(), Some("车辆VIN"));
+
+        let by_name = output_fields
+            .get("车辆VIN")
+            .expect("按 name 匹配 车辆VIN 应该命中同一条字段");
+        assert_eq!(by_name.input_node.as_deref(), Some("node_source"));
+    }
+
+    #[test]
+    fn test_dataflow_trace_field_source_keeps_original_node_and_field() {
+        let raw_meta = serde_json::json!({
+            "aliasMap": {
+                "FACT_AUTOCUSTOMERAUTOREL": "node_source",
+                "模型输出": "output1"
+            },
+            "nodeTablePaths": {
+                "node_source": "$DATA:/主数据/fact_autoCustomerAutoRel.tbl",
+                "output1": "$DATA:/加工表/小程序/绑车.tbl"
+            },
+            "nodeTypes": {
+                "node_source": "ModelTable",
+                "output1": "Output"
+            },
+            "nodeFields": {
+                "output1": [
+                    {
+                        "name": "CUSTOMAUTOMYAUTOLIST",
+                        "dbfield": "CUSTOMAUTOMYAUTOLIST",
+                        "originalNode": "FACT_AUTOCUSTOMERAUTOREL",
+                        "originalField": "车辆VIN",
+                        "inputNode": "node_source"
+                    }
+                ]
+            }
+        });
+        let meta = DataFlowMeta::from_meta(&raw_meta);
+        let output_field = meta
+            .get_fields("output1")
+            .and_then(|fields| fields.get("CUSTOMAUTOMYAUTOLIST"))
+            .expect("字段应存在");
+        let mut visited = Vec::new();
+        let trace = trace_field_source("CUSTOMAUTOMYAUTOLIST", output_field, &meta, &mut visited);
+
+        assert!(
+            trace.iter().any(|step| step.node_alias == "模型输出"),
+            "第一步应仍为输出节点别名"
+        );
+        assert!(
+            trace
+                .iter()
+                .any(|step| step.node_alias == "FACT_AUTOCUSTOMERAUTOREL"),
+            "字段追溯应沿 originalNode 继续展开"
+        );
+        assert!(trace
+            .iter()
+            .any(|step| step.field_name == "CUSTOMAUTOMYAUTOLIST"));
+        assert!(trace
+            .iter()
+            .any(|step| step.dbfield == "CUSTOMAUTOMYAUTOLIST"));
+    }
 }
