@@ -239,8 +239,10 @@ impl DataFlowMeta {
 struct TraceStep {
     node_alias: String,
     node_type: String,
+    module_table_path: Option<String>,
     field_name: String,
     dbfield: String,
+    input_node: Option<String>,
     exp: Option<String>,
 }
 
@@ -261,8 +263,10 @@ fn trace_field_source(
     steps.push(TraceStep {
         node_alias: "模型输出".to_string(),
         node_type: "Output".to_string(),
+        module_table_path: None,
         field_name: current_field_name.clone(),
         dbfield: current_field_dbfield.clone(),
+        input_node: output_field.input_node.clone(),
         exp: current_exp.clone(),
     });
 
@@ -287,8 +291,10 @@ fn trace_field_source(
                 steps.push(TraceStep {
                     node_alias: node_alias.clone(),
                     node_type: node_type.clone(),
+                    module_table_path: meta.get_node_module_table_path(node_id).map(str::to_string),
                     field_name: format!("{} (字段未在当前节点声明)", current_field_name),
                     dbfield: "-".to_string(),
+                    input_node: None,
                     exp: None,
                 });
                 break;
@@ -317,16 +323,20 @@ fn trace_field_source(
             steps.push(TraceStep {
                 node_alias: node_alias.clone(),
                 node_type: node_type.clone(),
+                module_table_path: meta.get_node_module_table_path(node_id).map(str::to_string),
                 field_name: current_field_name.clone(),
                 dbfield: current_field_dbfield.clone(),
+                input_node: rec.input_node.clone(),
                 exp: current_exp.clone(),
             });
         } else {
             steps.push(TraceStep {
                 node_alias: node_alias.clone(),
                 node_type: node_type.clone(),
+                module_table_path: meta.get_node_module_table_path(node_id).map(str::to_string),
                 field_name: format!("{} (字段未在当前节点声明)", current_field_name),
                 dbfield: "-".to_string(),
+                input_node: None,
                 exp: None,
             });
             break;
@@ -453,6 +463,16 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                             .as_ref()
                             .map(|e| format!(" [exp: {}]", e))
                             .unwrap_or_default();
+                        let module_info = step
+                            .module_table_path
+                            .as_ref()
+                            .map(|path| format!(" [table: {}]", path))
+                            .unwrap_or_default();
+                        let input_info = step
+                            .input_node
+                            .as_ref()
+                            .map(|input| format!(" [inputNode: {}]", input))
+                            .unwrap_or_default();
                         let type_label = match step.node_type.as_str() {
                             "ModelTable" => "[数据表]",
                             "Select" => "[列加工]",
@@ -464,12 +484,14 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                         };
                         writeln!(
                             out,
-                            "{} {} {}.{} (db={}){}",
+                            "{} {} {}.{} (db={}){}{}{}",
                             prefix,
                             type_label,
                             step.node_alias,
                             step.field_name,
                             step.dbfield,
+                            module_info,
+                            input_info,
                             exp_info
                         )?;
                     }
@@ -532,8 +554,10 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                         "trace": trace.iter().map(|s| serde_json::json!({
                             "node_alias": s.node_alias,
                             "node_type": s.node_type,
+                            "module_table_path": s.module_table_path,
                             "field_name": s.field_name,
                             "dbfield": s.dbfield,
+                            "input_node": s.input_node,
                             "exp": s.exp,
                         })).collect::<Vec<_>>(),
                     }));
