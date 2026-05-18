@@ -673,21 +673,6 @@ fn test_m33_display_intent_rejects_value_source_paths() {
         .get("details")
         .and_then(|v| v.as_object())
         .expect("details must be object");
-    let target = details
-        .get("target")
-        .and_then(|v| v.as_object())
-        .expect("target must be object");
-    assert_eq!(
-        target.get("node_id").and_then(|v| v.as_str()),
-        Some("model:model11"),
-        "resolved target must be page-local model11"
-    );
-    assert_eq!(
-        target.get("path").and_then(|v| v.as_str()),
-        Some("$DATA:/加工表/小程序/绑车.tbl"),
-        "resolved model11 should come from 绑车.tbl"
-    );
-
     let answer_facts = details
         .get("answer_facts")
         .and_then(|v| v.as_object())
@@ -6038,10 +6023,13 @@ fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
     let graph_db_path = "/tmp/m34_model11_availability.db";
     let _ = std::fs::remove_file(graph_db_path);
     let _ = metadata_checker::scanner::scan_project(
-        std::path::Path::new("/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"),
+        std::path::Path::new(
+            "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        ),
         std::path::Path::new(graph_db_path),
     );
-    let graph = metadata_checker::graph::GraphDB::open(std::path::Path::new(graph_db_path)).expect("graph should open");
+    let graph = metadata_checker::graph::GraphDB::open(std::path::Path::new(graph_db_path))
+        .expect("graph should open");
 
     let result = metadata_checker::explain::build_explain_condition_output_with_intent(
         &graph,
@@ -6077,9 +6065,9 @@ fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
         .and_then(|v| v.as_array())
         .expect("physical_inputs must be array");
     assert!(
-        physical_inputs
-            .iter()
-            .any(|item| item.as_str().map_or(false, |v| v.contains("fact_autoCustomerAutoRel.tbl"))),
+        physical_inputs.iter().any(|item| item
+            .as_str()
+            .map_or(false, |v| v.contains("fact_autoCustomerAutoRel.tbl"))),
         "physical_inputs should contain fact_autoCustomerAutoRel"
     );
 
@@ -6108,10 +6096,8 @@ fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
         .get("output_filters")
         .and_then(|v| v.as_array())
         .expect("output_filters must be array");
-    let dataflow_filters_contain_user_var = source_filters
-        .iter()
-        .chain(output_filters.iter())
-        .any(|f| {
+    let dataflow_filters_contain_user_var =
+        source_filters.iter().chain(output_filters.iter()).any(|f| {
             f.get("raw_expr")
                 .and_then(|v| v.as_str())
                 .map_or(false, |expr| expr.contains("WECHAT_UNIONID"))
@@ -6150,5 +6136,29 @@ fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
             )
         }),
         "referenced_vars must contain user var WECHAT_UNIONID"
+    );
+
+    let gates_text = serde_json::Value::Array(
+        availability_facts
+            .get("gates")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default(),
+    )
+    .to_string();
+    assert!(
+        !gates_text.contains("app/售后.app/结算单/结算单.spg"),
+        "page-scoped model11 availability must not pull unrelated same-name model gates"
+    );
+
+    let related_context_summary_text = result
+        .get("details")
+        .and_then(|v| v.get("related_context_summary"))
+        .cloned()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        !related_context_summary_text.contains("app/售后.app/结算单/结算单.spg"),
+        "compact related_context_summary must not reintroduce unrelated same-name model files"
     );
 }

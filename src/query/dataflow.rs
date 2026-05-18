@@ -317,6 +317,22 @@ impl DataFlowMeta {
 
     /// 输出全部可解析 filter 投影
     pub fn project_filters(&self) -> Vec<DataflowFilterProjection> {
+        // M34: 识别输出路径上的最终过滤节点（Output 节点的直接上游）
+        let output_node_ids: std::collections::HashSet<&str> = self
+            .node_types
+            .iter()
+            .filter(|(_, t)| *t == "Output")
+            .map(|(id, _)| id.as_str())
+            .collect();
+        let mut output_upstream: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (node_id, deps) in &self.internal_deps {
+            if output_node_ids.contains(node_id.as_str()) {
+                for dep in deps {
+                    output_upstream.insert(dep.as_str());
+                }
+            }
+        }
+
         let mut entries: Vec<(String, String)> = self
             .node_filters
             .keys()
@@ -333,9 +349,13 @@ impl DataFlowMeta {
         let mut projections = Vec::new();
         for (node_alias, node_id) in entries {
             let node_type = self.get_node_type(&node_id).to_string();
+            let is_output = output_node_ids.contains(node_id.as_str());
+            let is_output_upstream = output_upstream.contains(node_id.as_str());
             let role = match node_type.as_str() {
                 "ModelTable" => "source_filter",
                 "Output" => "output_filter",
+                "Union" => "branch_filter",
+                _ if is_output || is_output_upstream => "output_filter",
                 _ => "node_filter",
             }
             .to_string();

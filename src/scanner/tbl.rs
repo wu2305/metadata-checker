@@ -306,13 +306,19 @@ pub fn process_tbl_file_from_string(
 
             if let Some(join_conditions) = node.get("joinConditions").and_then(|v| v.as_array()) {
                 if !join_conditions.is_empty() {
-                    node_join_conditions.insert(node_id.clone(), join_conditions.iter().cloned().collect::<Vec<_>>());
+                    node_join_conditions.insert(
+                        node_id.clone(),
+                        join_conditions.iter().cloned().collect::<Vec<_>>(),
+                    );
                 }
             }
 
             if let Some(union_map_array) = node.get("unionMapArray").and_then(|v| v.as_array()) {
                 if !union_map_array.is_empty() {
-                    node_union_maps.insert(node_id.clone(), union_map_array.iter().cloned().collect::<Vec<_>>());
+                    node_union_maps.insert(
+                        node_id.clone(),
+                        union_map_array.iter().cloned().collect::<Vec<_>>(),
+                    );
                 }
             }
 
@@ -349,7 +355,8 @@ pub fn process_tbl_file_from_string(
                     );
                     obj.insert(
                         "nodeJoinConditions".to_string(),
-                        serde_json::to_value(&node_join_conditions).unwrap_or(serde_json::Value::Null),
+                        serde_json::to_value(&node_join_conditions)
+                            .unwrap_or(serde_json::Value::Null),
                     );
                     obj.insert(
                         "nodeUnionMaps".to_string(),

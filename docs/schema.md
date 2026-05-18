@@ -282,6 +282,48 @@ pub struct AiOutput {
 | `json_path` | 元数据 JSON 路径（如适用） |
 | `why_included` | 该路径步骤为什么与当前 intent 有关 |
 
+### M34 DataFlow projection 字段补充
+
+M34 在 \`answer_facts\` 中增加 DataFlow 内部字段级来源和可用性投影，不输出完整 DataFlow 节点树。
+
+#### value_source_facts 新增字段
+
+| 字段 | 说明 |
+|---|---|
+| \`dataflow_table\` | DataFlow 加工表路径，如 \`$DATA:/加工表/小程序/绑车.tbl\` |
+| \`dataflow_output_field\` | DataFlow 输出字段名，如 \`CUSTOMAUTOMYAUTOLIST\` |
+| \`physical_source_fields[]\` | 字段级物理来源证明，如 \`$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN\` |
+| \`candidate_inputs[]\` | DataFlow 输入表候选，当字段级来源不能证明时作为降级证据 |
+| \`via\` | 来源方式，如 \`originalNode/originalField\` / \`originalNode\` / \`originalField\` / \`unknown\` |
+| \`original_node\` | DataFlow 内部 originalNode alias |
+| \`original_field\` | DataFlow 内部 originalField |
+
+#### availability_facts 新增字段
+
+| 字段 | 说明 |
+|---|---|
+| \`dataflow_availability\` | \`dataflow_filters_present\` / \`no_dataflow_filters\` |
+| \`source_filters[]\` | DataFlow ModelTable 上的 source filter，如 \`[是否展示] == 1\` |
+| \`output_filters[]\` | DataFlow 输出路径上的最终 filter，如 \`$user.WECHAT_UNIONID\` 过滤 |
+| \`join_rules[]\` | Join 行语义，包含 \`join_type\`、\`left_table\`、\`right_table\`、\`row_semantic\`、\`clauses\` |
+| \`union_rules[]\` | Union 行语义，包含 \`field_mappings\`、\`row_semantic\` |
+| \`referenced_vars[]\` | DataFlow filter 中引用的变量列表，如 \`$user.WECHAT_UNIONID\` |
+
+#### DataFlow filter role 分类
+
+| role | 节点类型 | 说明 |
+|---|---|---|
+| \`source_filter\` | ModelTable | 输入表上的过滤条件 |
+| \`output_filter\` | Output 节点或其直接上游（Join/Select/Distinct 等） | 输出前最终过滤条件 |
+| \`branch_filter\` | Union 节点 | 分支级过滤 |
+| \`node_filter\` | 其它中间节点 | 普通节点过滤 |
+
+#### candidate/proven 边界
+
+- \`physical_source_fields[]\` 非空时，\`proven_physical_input\` 才允许写入，confidence 为 \`high\`。
+- 只有 \`table_source_path\` 而无字段级来源时，confidence 为 \`medium\`，\`proven_physical_input\` 为 \`null\`。
+- \`candidate_inputs[]\` 始终保留，作为降级证据。
+
 ### 页面作用域规则
 
 - `comp:` / `field:` / `page:` 目标：只收集**当前页面**的条件

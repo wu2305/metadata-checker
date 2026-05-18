@@ -591,3 +591,24 @@ CLI 在 `details.value_trace[]` 或 `details.lineage[]` 中提供 `source_type`�
 - 禁止在没有 `value_trace` 或 `lineage` 时凭空推断来源。
 - 禁止将 `Computed` 误判为 `UserInput`（例如 input 组件有表达式时是计算产生，不是用户输入）。
 - 禁止忽略 `Unknown` 标记做空洞确定性结论。
+
+## M34 DataFlow projection
+
+当目标字段或页面 model 指向 DataFlow 加工表时，`explain_condition` 会在 `details.answer_facts.<fact_block>` 下输出 DataFlow 内部投影短事实。
+
+### value-source intent
+
+- 读取 `details.answer_facts.value_source_facts.dataflow_table` / `dataflow_output_field` / `physical_source_fields[]` / `via` / `original_node` / `original_field` / `candidate_inputs[]`。
+- `physical_source_fields[]` 非空时才可把 `proven_physical_input` 当作字段级物理来源证明。
+- 如果只有 `candidate_inputs[]` 或 `table_source_path`，只能说候选来源，不能断言 proven physical source。
+
+### availability intent
+
+- 页面局部 model 必须优先使用 page-scoped target，例如 `model:app/售后.app/绑定车辆/会员已注册.spg|model11`。
+- 读取 `details.answer_facts.availability_facts.dataflow_availability` / `dataflow_table` / `physical_inputs[]` / `source_filters[]` / `output_filters[]` / `join_rules[]` / `union_rules[]` / `referenced_vars[]`。
+- DataFlow filter 描述的是 model 数据可用性，不是组件自身 direct/inherited visibleCondition。
+
+### compact 约束
+
+- compact 模式不展开完整 DataFlow 节点树；优先读取 `answer_facts` 中的短事实。
+- 如果 compact availability 混入其他页面同名局部 model gates，应改用 page-scoped target 或视为输出回退。

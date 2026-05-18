@@ -381,7 +381,10 @@ fn collect_page_descendants(graph: &GraphDB, root_id: &str) -> Vec<String> {
         ids.push(node_id.clone());
         if let Some((outgoing, _incoming)) = graph.get_node_edges(&node_id) {
             for (child, edge) in &outgoing {
-                if matches!(edge.edge_type, crate::graph::EdgeType::Contains | crate::graph::EdgeType::Triggers) {
+                if matches!(
+                    edge.edge_type,
+                    crate::graph::EdgeType::Contains | crate::graph::EdgeType::Triggers
+                ) {
                     stack.push(child.id.clone());
                 }
             }
@@ -439,12 +442,11 @@ fn score_dataflow_candidate(
         .and_then(|v| v.as_str())
         == Some("DataFlow");
     let input_paths = collect_dataflow_input_paths_by_model(graph, &node.id);
-    let has_preferred_input = preferred_input
-        .is_some_and(|preferred| {
-            input_paths
-                .iter()
-                .any(|path| is_same_dataflow_path(path, preferred))
-        });
+    let has_preferred_input = preferred_input.is_some_and(|preferred| {
+        input_paths
+            .iter()
+            .any(|path| is_same_dataflow_path(path, preferred))
+    });
 
     (
         if is_dataflow_model { 2 } else { 1 },
@@ -505,9 +507,7 @@ fn resolve_dataflow_model_by_path(
         })
     {
         let node_path = normalize_dataflow_path(&node.path);
-        if is_same_dataflow_path(&node.path, dataflow_path)
-            || normalized_path == node_path
-        {
+        if is_same_dataflow_path(&node.path, dataflow_path) || normalized_path == node_path {
             exact_candidates.push(node.clone());
             continue;
         }
@@ -516,7 +516,10 @@ fn resolve_dataflow_model_by_path(
             .file_stem()
             .and_then(|s| s.to_str())
             .map(std::string::ToString::to_string);
-        if target_stem.as_ref().map_or(false, |stem| Some(stem) == node_stem.as_ref()) {
+        if target_stem
+            .as_ref()
+            .map_or(false, |stem| Some(stem) == node_stem.as_ref())
+        {
             stem_candidates.push(node.clone());
         }
     }
@@ -634,13 +637,16 @@ fn resolve_model_target_in_page(
 
     let mut scoped_model = model_node.clone();
     scoped_model.path = target_path;
-    let dataflow_model_id = resolve_dataflow_model_by_input_path(graph, &model_node.id, &scoped_model.path)
-        .or_else(|| resolve_dataflow_model_by_path(
-            graph,
-            &scoped_model.path,
-            Some(FACT_AUTO_CUSTOMER_AUTO_REL_TABLE),
-        ))
-        .map(|n| n.id);
+    let dataflow_model_id =
+        resolve_dataflow_model_by_input_path(graph, &model_node.id, &scoped_model.path)
+            .or_else(|| {
+                resolve_dataflow_model_by_path(
+                    graph,
+                    &scoped_model.path,
+                    Some(FACT_AUTO_CUSTOMER_AUTO_REL_TABLE),
+                )
+            })
+            .map(|n| n.id);
     if let Some(dataflow_model_id) = &dataflow_model_id
         && let Some(dataflow_meta) = graph.get_node(dataflow_model_id).and_then(|n| n.meta)
     {
@@ -1775,17 +1781,25 @@ fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) ->
         .unwrap_or("");
 
     let physical_source_fields: Vec<String> = dataflow_origin
-        .and_then(|origin| origin.get("physical_source_fields").and_then(|v| v.as_array()))
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .and_then(|origin| {
+            origin
+                .get("physical_source_fields")
+                .and_then(|v| v.as_array())
+        })
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     let via = dataflow_origin
         .and_then(|origin| origin.get("via").and_then(|v| v.as_str()))
         .unwrap_or("");
-    let original_node = dataflow_origin
-        .and_then(|origin| origin.get("original_node").and_then(|v| v.as_str()));
-    let original_field = dataflow_origin
-        .and_then(|origin| origin.get("original_field").and_then(|v| v.as_str()));
+    let original_node =
+        dataflow_origin.and_then(|origin| origin.get("original_node").and_then(|v| v.as_str()));
+    let original_field =
+        dataflow_origin.and_then(|origin| origin.get("original_field").and_then(|v| v.as_str()));
 
     let candidate_inputs: Vec<String> = ctx
         .get("dataflow_inputs")
@@ -1807,7 +1821,7 @@ fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) ->
     let origin_path = if !physical_source_fields.is_empty() {
         Some(physical_source_fields[0].as_str())
     } else {
-        ctx.get("table_source_path").and_then(|v| v.as_str())
+        None
     };
     let table_source_path = ctx.get("table_source_path").and_then(|v| v.as_str());
     let result = origin_path.or(table_source_path);
@@ -1893,7 +1907,7 @@ fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) ->
 
     serde_json::json!({
         "result": result,
-        "confidence": if origin_path.is_some() || table_source_path.is_some() { "high" } else { "low" },
+        "confidence": if origin_path.is_some() { "high" } else if table_source_path.is_some() { "medium" } else { "low" },
         "raw_expr": raw_expr,
         "bare_symbol": bare_symbol,
         "dataflow_table": if dataflow_table.is_empty() {
@@ -1919,7 +1933,7 @@ fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) ->
         "paths": [{
             "intent": "value-source",
             "result": result,
-            "confidence": if origin_path.is_some() || table_source_path.is_some() { "high" } else { "low" },
+            "confidence": if origin_path.is_some() { "high" } else if table_source_path.is_some() { "medium" } else { "low" },
             "why_complete": if origin_path.is_some() {
                 "field-level DataFlow origin found"
             } else {
@@ -2084,7 +2098,10 @@ fn build_availability_facts(
 
     let mut referenced_vars: Vec<String> = Vec::new();
     let mut seen_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for g in data_empty_gates.iter().filter(|g| g.get("condition_type").and_then(|v| v.as_str()) == Some("DataFlowFilter")) {
+    for g in data_empty_gates
+        .iter()
+        .filter(|g| g.get("condition_type").and_then(|v| v.as_str()) == Some("DataFlowFilter"))
+    {
         if let Some(arr) = g.get("referenced_vars").and_then(|v| v.as_array()) {
             for v in arr {
                 if let Some(s) = v.as_str() {
@@ -2096,7 +2113,9 @@ fn build_availability_facts(
         }
     }
 
-    let has_dataflow_filters = data_empty_gates.iter().any(|g| g.get("condition_type").and_then(|v| v.as_str()) == Some("DataFlowFilter"));
+    let has_dataflow_filters = data_empty_gates
+        .iter()
+        .any(|g| g.get("condition_type").and_then(|v| v.as_str()) == Some("DataFlowFilter"));
 
     let mut physical_inputs: Vec<String> = if !dataflow_input_paths.is_empty() {
         dataflow_input_paths.to_vec()
@@ -2112,7 +2131,10 @@ fn build_availability_facts(
     let mut union_rules: Vec<serde_json::Value> = Vec::new();
     if let Some(dfm) = dataflow_meta {
         for (node_id, conditions) in &dfm.node_join_conditions {
-            let alias = dfm.get_alias(node_id).map(|s| s.as_str()).unwrap_or(node_id.as_str());
+            let alias = dfm
+                .get_alias(node_id)
+                .map(|s| s.as_str())
+                .unwrap_or(node_id.as_str());
             for jc in conditions {
                 let row_semantic = match jc.join_type.as_str() {
                     "LeftJoin" | "Left Outer Join" => "left_rows_preserved_right_fields_nullable",
@@ -2121,11 +2143,17 @@ fn build_availability_facts(
                     "FullJoin" | "Full Outer Join" => "all_rows_preserved_nullable",
                     _ => "join_rows_filtered_by_condition",
                 };
-                let clauses_json: Vec<serde_json::Value> = jc.clauses.iter().map(|c| serde_json::json!({
-                    "left": c.left_exp,
-                    "operator": c.operator,
-                    "right": c.right_exp,
-                })).collect();
+                let clauses_json: Vec<serde_json::Value> = jc
+                    .clauses
+                    .iter()
+                    .map(|c| {
+                        serde_json::json!({
+                            "left": c.left_exp,
+                            "operator": c.operator,
+                            "right": c.right_exp,
+                        })
+                    })
+                    .collect();
                 join_rules.push(serde_json::json!({
                     "node_alias": alias,
                     "join_type": &jc.join_type,
@@ -2137,11 +2165,19 @@ fn build_availability_facts(
             }
         }
         for (node_id, entries) in &dfm.node_union_maps {
-            let alias = dfm.get_alias(node_id).map(|s| s.as_str()).unwrap_or(node_id.as_str());
-            let field_mappings: Vec<serde_json::Value> = entries.iter().map(|e| serde_json::json!({
-                "fields": e.values,
-                "visible": e.visible,
-            })).collect();
+            let alias = dfm
+                .get_alias(node_id)
+                .map(|s| s.as_str())
+                .unwrap_or(node_id.as_str());
+            let field_mappings: Vec<serde_json::Value> = entries
+                .iter()
+                .map(|e| {
+                    serde_json::json!({
+                        "fields": e.values,
+                        "visible": e.visible,
+                    })
+                })
+                .collect();
             union_rules.push(serde_json::json!({
                 "node_alias": alias,
                 "row_semantic": "any_branch_can_output",
@@ -2467,10 +2503,7 @@ fn build_answer_facts(
     serde_json::Value::Object(facts)
 }
 
-fn collect_dataflow_input_paths(
-    graph: &GraphDB,
-    target_model_id: Option<&str>,
-) -> Vec<String> {
+fn collect_dataflow_input_paths(graph: &GraphDB, target_model_id: Option<&str>) -> Vec<String> {
     let target_model_id = match target_model_id {
         Some(id) => id,
         None => return Vec::new(),
@@ -2529,6 +2562,13 @@ fn build_context_summary(
         }
     }
 
+    let source_file_distinct_count = by_source_file.len();
+    let by_source_file = if hidden {
+        std::collections::BTreeMap::new()
+    } else {
+        by_source_file
+    };
+
     serde_json::json!({
         "total_count": items.len(),
         "emitted_count": emitted_count,
@@ -2536,6 +2576,7 @@ fn build_context_summary(
         "note": note,
         "by_scope": by_scope,
         "by_source_file": by_source_file,
+        "source_file_distinct_count": source_file_distinct_count,
     })
 }
 
@@ -2923,13 +2964,14 @@ pub fn build_explain_condition_output_with_intent(
         };
 
     let effective_intent = intent;
+    let is_page_scoped_target = scoped_page_node.is_some();
 
     let page_node = if let Some(page_node) = scoped_page_node {
         page_node
     } else {
         match target_node.node_type {
-        crate::graph::NodeType::Page => target_node.clone(),
-        _ => find_parent_page(graph, &target_node.id).unwrap_or(target_node.clone()),
+            crate::graph::NodeType::Page => target_node.clone(),
+            _ => find_parent_page(graph, &target_node.id).unwrap_or(target_node.clone()),
         }
     };
     let page_path = page_node.path.clone();
@@ -3071,7 +3113,7 @@ pub fn build_explain_condition_output_with_intent(
         }
     }
 
-    if target_node.node_type == crate::graph::NodeType::Model {
+    if target_node.node_type == crate::graph::NodeType::Model && !is_page_scoped_target {
         let mut page_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for rc in &related_context {
@@ -3240,7 +3282,10 @@ pub fn build_explain_condition_output_with_intent(
     }
 
     let dataflow_meta = if is_dataflow_model(&target_node) {
-        target_node.meta.as_ref().map(crate::query::DataFlowMeta::from_meta)
+        target_node
+            .meta
+            .as_ref()
+            .map(crate::query::DataFlowMeta::from_meta)
     } else {
         None
     };

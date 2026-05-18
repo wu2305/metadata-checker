@@ -283,3 +283,24 @@ else:
 - 首次查询 `timing.graph_load_ms == 0`（graph 已在内存中）。
 - 连续查询无 graph 加载开销。
 - 详细性能基线见 `docs/performance-baseline.md`。
+
+## M34 DataFlow projection 补充
+
+### intent 传参规则
+
+| 问题类型 | intent | 说明 |
+|---|---|---|
+| 字段值从哪来 | `value-source` | 返回 `answer_facts.value_source_facts`，含 DataFlow 字段级来源 |
+| model 是否有数据 | `availability` | 返回 `answer_facts.availability_facts`，含 DataFlow filter/Join/Union 规则 |
+| 显示/隐藏原因 | `display` | 保留 M33 display 结论；若 display 依赖 totalRowCount__，compact 中不额外展开 DataFlow availability |
+
+### compact 读取策略
+
+- `value-source` compact 只读取 `dataflow_table`、`dataflow_output_field`、`physical_source_fields[]`、`via`、`original_node`、`original_field`。不展开 `value_source_context` 大对象。
+- `availability` compact 只读取 `dataflow_availability`、`source_filters[]`、`output_filters[]`、`join_rules[]`、`union_rules[]`、`referenced_vars[]`。不展开完整 DataFlow 节点树。
+- `display` compact 不额外展开 DataFlow availability，避免注意力漂移。
+
+### DataFlow filter 不是组件 direct visibleCondition
+
+- `source_filters[]` / `output_filters[]` 描述的是 DataFlow 内部数据可用性，不是组件自身的显示条件。
+- 不要把 DataFlow filter 改写为组件 direct `visibleCondition`。
