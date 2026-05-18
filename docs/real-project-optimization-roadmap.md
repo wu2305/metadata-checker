@@ -2284,6 +2284,18 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
 - 不把完整 DataFlow JSON 或全量图邻居塞回 compact。
 - 不把所有相关上下文都提升为主证据；仍遵守 M33/M34 的 target-centric、low-noise 输出原则。
 - 不用 Skill 文本替代代码层契约；Skill 只描述如何消费契约。
+- 不对 `model11`、`model22`、`model6` 等局部 model id 做硬编码特殊处理；这些 id 只作为真实项目回归样本。
+
+### 术语与边界说明
+
+- **局部 model id**：页面 `sources[]` 内定义的 id，例如 `model1`、`model6`、`model11`、`model22`。这些 id 在不同页面会重复，单独的 `model11` 没有全局业务语义。
+- **page-scoped model target**：由“页面路径 + 局部 model id”组成的稳定目标，例如 `model:app/售后.app/绑定车辆/会员已注册.spg|model11`。凡是问题或证据来自某个页面，都应优先输出这个 target。
+- **resolved_model_target**：图内兼容旧查询或规范化后的节点 id，例如 `model:model11`。它只能作为内部定位结果或兼容字段，不应鼓励 AI 在缺少页面上下文时直接查询它。
+- **physical_or_dataflow_path**：局部 model 在当前页面实际绑定的数据来源路径，可能是物理表，也可能是 DataFlow `.tbl`。它来自当前页面 metadata 的 source 定义，不来自 model 数字本身。
+- **特别覆盖/真实样本**：路线图中提到的 `会员已注册.spg|model11`、`合同协议.spg|model22`、`潜客信息跟进.spg|model6` 只表示这些真实案例必须进入回归测试，不能在代码中写成 `if model_id == "model11"` 这类特殊分支。
+- **关键模型**：`key_model_availability` 中的模型不是人工白名单，而是从当前页面条件、显示门控、数据门控、Action 条件、组件读写引用中自动发现。发现规则必须基于当前页面上下文。
+- **followup**：`required_followups` 是“当前输出不足以完整回答时必须继续执行的查询”，不是普通 next query 推荐；`must_run_for_complete_answer=true` 时，模型不应直接给最终确定结论。
+- **compact 摘要**：compact 可以给方向性结论，但当 `truncation_guard.safe_to_answer_full_relationships=false` 时，不能回答“全部/有哪些完整关系”。此时必须升级到建议 budget。
 
 ### 任务清单
 
@@ -2330,9 +2342,10 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
 - [ ] M35.3：`required_followups` 生成器
   - 触发条件：
     - display 条件引用 `modelX.totalRowCount__`。
-    - availability 目标是 page-local model 或可解析到 DataFlow。
-    - value-source 遇到裸字段 `${FIELD}` 且未完成 dataSet 解析。
-    - value-source 遇到 DataFlow table 但缺字段级 origin。
+    - availability 目标是 page-local model，且当前输出尚未包含其完整 availability facts。
+    - page-local model 可解析到 DataFlow，但当前输出尚未包含 DataFlow filters / physical inputs / Join/Union 摘要。
+    - value-source 遇到裸字段 `${FIELD}` 且未完成最近数据容器 `dataSet` 解析。
+    - value-source 遇到 DataFlow table 但缺字段级 proven origin。
     - writer 链路只到 page-local model，未到物理表字段。
     - compact 输出发生截断且用户问题需要全量关系。
   - 每条 followup 包含：
@@ -2355,13 +2368,22 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - answer contract 的 forbidden path 与实际输出位置一致。
 
 - [ ] M35.5：page-scoped model resolver 标准化
+  - 解析原则：
+    - 从表达式提取 `modelX.field` 或 `modelX.totalRowCount__`。
+    - 读取该表达式所属的 `source_file` / page path。
+    - 在该页面 metadata 的 `sources[]` 中查找 `id == modelX`。
+    - 生成 `page_scoped_target = model:{page_path}|{modelX}`。
+    - 再解析该 source 的物理表或 DataFlow 表路径。
+  - 禁止：
+    - 禁止按 `model11`、`model22`、`model6` 等具体字符串分支。
+    - 禁止在缺少 page path 时把 `model:model11` 视为唯一可靠目标。
   - 所有出现局部 model 引用的位置补充：
     - `local_model_id`
     - `page_scoped_target`
     - `resolved_model_target`
     - `physical_or_dataflow_path`
     - `scope_warning`
-  - `model11.totalRowCount__`、`model22.phoneNumber`、`model6.phoneNumber` 等应能稳定生成 page-scoped target。
+  - 真实项目回归样本应覆盖 `model11.totalRowCount__`、`model22.phoneNumber`、`model6.phoneNumber`，但实现必须适用于任意页面局部 model id。
   - 测试：
     - `text41 display` 中 `model11.totalRowCount__` 能给出 `model:app/售后.app/绑定车辆/会员已注册.spg|model11`。
     - `input3 writer` 中 `model22.phoneNumber` 能保留 page-local 到 physical field 的别名链。
@@ -2382,7 +2404,12 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
 
 - [ ] M35.7：`--query-page-logic` 内嵌 `key_model_availability`
   - 页面级输出增加 `key_model_availability[]`。
-  - 对由 display/action/data gate 引用的关键模型，输出：
+  - 关键模型发现规则：
+    - display / hidden / disabled 条件中引用 `modelX.totalRowCount__` 或模型字段。
+    - data source filter 中引用模型字段或组件字段。
+    - action condition / conditionExp 中引用模型字段。
+    - 页面组件 value/exp 明确读取 page-local model 字段。
+  - 对由上述规则自动发现的模型，输出：
     - `page_scoped_target`
     - `direct_filters[]`
     - `dataflow_table`
@@ -2392,6 +2419,9 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - `join_rules[]`
     - `union_rules[]`
     - `row_semantics`
+  - 边界：
+    - 不输出全页面所有 sources；只输出与页面关键条件、数据门控或用户目标相关的模型。
+    - 不把同名局部 model 的其他页面条件混入当前页面。
   - 测试：
     - `会员已注册.spg` page logic 中必须包含 `model11` availability 摘要。
     - 摘要必须包含 `$DATA:/加工表/小程序/绑车.tbl`、`[是否展示] == 1`、`$user.WECHAT_UNIONID`。
@@ -2419,6 +2449,10 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - `truncation_guard.required_budget_for_complete_answer`
     - `truncation_guard.truncated_sections[]`
     - `recommended_rerun`
+  - high-fanout 判定建议：
+    - 任一 readers/writers/related/dataflow 数组超过 compact limit。
+    - 或同一模型跨页面读写数量超过普通样本展示能力。
+    - 具体阈值应复用现有 budget/limit 配置，不另造散落常量。
   - 高扇出模型 compact 改为分组摘要：
     - `readers_by_page`
     - `writers_by_page`
@@ -2426,6 +2460,9 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - `consumed_by_dataflow_summary`
     - `sample_readers`
     - `sample_writers`
+  - 边界：
+    - 分组摘要用于方向判断，不等价于完整明细。
+    - `safe_to_answer_full_relationships=false` 时，回答“有哪些全部关系”必须 rerun normal/full。
   - 测试：
     - `fact_qwSidebar --budget compact` 必须标记不能回答全量关系。
     - `fact_qwSidebar --budget normal` 可用于完整关键读写验收。
@@ -2436,6 +2473,10 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - `--page <PAGE>`
     - `--target <TARGET>`
     - `--question-kind <display|value-source|availability|writer|page-logic|model-relationships>`
+  - target 语义：
+    - 如果 target 是组件 id，必须结合 `--page` 生成 `comp:{page}|{component}`。
+    - 如果 target 是局部 model id，必须结合 `--page` 生成 page-scoped model target。
+    - 如果 target 是物理表/model 名，允许生成 `--query-model`，但应标注它不是页面局部模型。
   - 输出：
     - 推荐主命令。
     - 推荐 budget。
