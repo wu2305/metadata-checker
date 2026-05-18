@@ -1,0 +1,237 @@
+use crate::graph::{GraphDB, Node};
+
+/// 页面级条件前置条件分组
+pub(super) struct PagePrerequisites {
+    pub(super) display_prerequisites: Vec<serde_json::Value>,
+    pub(super) data_prerequisites: Vec<serde_json::Value>,
+    pub(super) action_prerequisites: Vec<serde_json::Value>,
+}
+
+/// 收集组件、动作和数据源模型关联的条件前置条件
+pub(super) fn collect_page_prerequisites(
+    graph: &GraphDB,
+    page_path: &str,
+    child_components: &[&Node],
+    child_actions: &[&Node],
+    data_sources: &[serde_json::Value],
+) -> PagePrerequisites {
+    let mut display_prerequisites = Vec::new();
+    let mut data_prerequisites = Vec::new();
+    let mut action_prerequisites = Vec::new();
+    let mut seen_conditions: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for comp in child_components {
+        collect_from_node(
+            graph,
+            page_path,
+            &comp.id,
+            &mut seen_conditions,
+            &mut display_prerequisites,
+            &mut data_prerequisites,
+            &mut action_prerequisites,
+        );
+    }
+    for action in child_actions {
+        collect_from_node(
+            graph,
+            page_path,
+            &action.id,
+            &mut seen_conditions,
+            &mut display_prerequisites,
+            &mut data_prerequisites,
+            &mut action_prerequisites,
+        );
+    }
+    for ds in data_sources {
+        if let Some(target_id) = ds.get("target_id").and_then(|v| v.as_str()) {
+            collect_from_node(
+                graph,
+                page_path,
+                target_id,
+                &mut seen_conditions,
+                &mut display_prerequisites,
+                &mut data_prerequisites,
+                &mut action_prerequisites,
+            );
+        }
+    }
+
+    sort_by_impact(&mut display_prerequisites);
+    sort_by_impact(&mut data_prerequisites);
+    sort_by_impact(&mut action_prerequisites);
+
+    PagePrerequisites {
+        display_prerequisites,
+        data_prerequisites,
+        action_prerequisites,
+    }
+}
+
+fn collect_from_node(
+    graph: &GraphDB,
+    page_path: &str,
+    node_id: &str,
+    seen_conditions: &mut std::collections::HashSet<String>,
+    display_prerequisites: &mut Vec<serde_json::Value>,
+    data_prerequisites: &mut Vec<serde_json::Value>,
+    action_prerequisites: &mut Vec<serde_json::Value>,
+) {
+    if let Some((_out, incoming)) = graph.get_node_edges(node_id) {
+        for (source, edge) in &incoming {
+            if matches!(source.node_type, crate::graph::NodeType::Condition)
+                && matches!(edge.edge_type, crate::graph::EdgeType::DependsOn)
+                && !seen_conditions.contains(&source.id)
+                && source.path == page_path
+            {
+                seen_conditions.insert(source.id.clone());
+                if let Some(prereq) = build_prerequisite(source, edge) {
+                    push_prerequisite(
+                        prereq,
+                        display_prerequisites,
+                        data_prerequisites,
+                        action_prerequisites,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn push_prerequisite(
+    prereq: serde_json::Value,
+    display_prerequisites: &mut Vec<serde_json::Value>,
+    data_prerequisites: &mut Vec<serde_json::Value>,
+    action_prerequisites: &mut Vec<serde_json::Value>,
+) {
+    let kind = prereq
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    match kind {
+        "VisibleCondition" | "EnableCondition" | "MaskCondition" => {
+            display_prerequisites.push(prereq);
+        }
+        "SourceFilterExp" | "SourceFilterClause" | "ItemFilter" | "CalcCondition" | "CalcExp"
+        | "DefaultValueExp" | "FieldExp" => {
+            data_prerequisites.push(prereq);
+        }
+        "ActionConditionExp" | "ActionCondition" | "SubmitCondition" | "SubmitPageCondition" => {
+            action_prerequisites.push(prereq);
+        }
+        _ => {
+            display_prerequisites.push(prereq);
+        }
+    }
+}
+
+fn build_prerequisite(
+    cond_node: &crate::graph::Node,
+    edge: &crate::graph::Edge,
+) -> Option<serde_json::Value> {
+    let meta = cond_node.meta.as_ref()?;
+    let condition_type = meta
+        .get("condition_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let raw_expr = meta.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
+    let normalized_expr = meta
+        .get("normalized_expr")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let json_path = meta.get("json_path").and_then(|v| v.as_str()).unwrap_or("");
+    let owner_type = meta
+        .get("owner_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let owner_id = meta.get("owner_id").and_then(|v| v.as_str()).unwrap_or("");
+    let effect_type = meta
+        .get("effect_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let subject_type = meta
+        .get("subject_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let referenced_symbols: Vec<String> = meta
+        .get("referenced_symbols")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let source_file = cond_node.path.clone();
+
+    let affected_model_count = referenced_symbols
+        .iter()
+        .filter(|s| s.starts_with("model:"))
+        .count();
+    let affected_component_count = referenced_symbols
+        .iter()
+        .filter(|s| s.starts_with("comp:"))
+        .count();
+    let is_entrypoint = matches!(subject_type, "action") || matches!(effect_type, "execute");
+    let is_main_panel = matches!(subject_type, "component") && !matches!(effect_type, "execute");
+    let affects_row_count = matches!(effect_type, "Filter") || condition_type.contains("Filter");
+
+    let confidence = if !json_path.is_empty() && !raw_expr.is_empty() {
+        "high"
+    } else {
+        "medium"
+    };
+
+    let mut diagnostics: Vec<serde_json::Value> = Vec::new();
+    if raw_expr.trim().is_empty() {
+        diagnostics.push(serde_json::json!({
+            "code": "EMPTY_CONDITION",
+            "message": "条件表达式为空",
+        }));
+    }
+
+    Some(serde_json::json!({
+        "kind": condition_type,
+        "target": owner_id,
+        "owner_type": owner_type,
+        "subject_type": subject_type,
+        "effect_type": effect_type,
+        "raw_expr": raw_expr,
+        "normalized_expr": normalized_expr,
+        "json_path": json_path,
+        "source_file": source_file,
+        "depends_on": referenced_symbols,
+        "impact": {
+            "affected_component_count": affected_component_count,
+            "affected_model_count": affected_model_count,
+            "is_entrypoint": is_entrypoint,
+            "is_main_panel": is_main_panel,
+            "affects_row_count": affects_row_count,
+            "impact_score": affected_model_count + affected_component_count + if is_entrypoint { 3 } else if is_main_panel { 2 } else { 1 },
+        },
+        "evidence": {
+            "node_id": cond_node.id,
+            "edge_type": format!("{:?}", edge.edge_type),
+            "json_path": json_path,
+            "raw_expr": raw_expr,
+            "source_file": cond_node.path,
+        },
+        "confidence": confidence,
+        "diagnostics": diagnostics,
+    }))
+}
+
+fn sort_by_impact(prereqs: &mut Vec<serde_json::Value>) {
+    prereqs.sort_by(|a, b| {
+        let a_score = a
+            .get("impact")
+            .and_then(|v| v.get("impact_score"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let b_score = b
+            .get("impact")
+            .and_then(|v| v.get("impact_score"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        b_score.cmp(&a_score)
+    });
+}
