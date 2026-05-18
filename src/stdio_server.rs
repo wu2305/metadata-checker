@@ -13,6 +13,7 @@ enum StdioCommand {
     Explain,
     QueryModel,
     QueryPageLogic,
+    AdviseQuery,
     Context,
     Status,
     Reload,
@@ -26,6 +27,7 @@ impl StdioCommand {
             "explain" => StdioCommand::Explain,
             "query_model" => StdioCommand::QueryModel,
             "query_page_logic" => StdioCommand::QueryPageLogic,
+            "advise_query" => StdioCommand::AdviseQuery,
             "context" => StdioCommand::Context,
             "status" => StdioCommand::Status,
             "reload" => StdioCommand::Reload,
@@ -39,6 +41,7 @@ impl StdioCommand {
             StdioCommand::Explain => "explain".to_string(),
             StdioCommand::QueryModel => "query_model".to_string(),
             StdioCommand::QueryPageLogic => "query_page_logic".to_string(),
+            StdioCommand::AdviseQuery => "advise_query".to_string(),
             StdioCommand::Context => "context".to_string(),
             StdioCommand::Status => "status".to_string(),
             StdioCommand::Reload => "reload".to_string(),
@@ -66,6 +69,8 @@ pub struct StdioRequest {
     pub check_reload: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depth: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_scope: Option<String>,
 }
 
 /// Stdio 结构化错误
@@ -183,6 +188,9 @@ fn validate_target_for_command(command: &StdioCommand, target: &str) -> Result<(
         StdioCommand::QueryModel => &["model:"],
         StdioCommand::QueryPageLogic => &["page:"],
         StdioCommand::ExplainCondition | StdioCommand::Explain | StdioCommand::Context => {
+            &["comp:", "action:", "model:", "field:", "page:", "dataflow:"]
+        }
+        StdioCommand::AdviseQuery => {
             &["comp:", "action:", "model:", "field:", "page:", "dataflow:"]
         }
         StdioCommand::Status | StdioCommand::Reload | StdioCommand::Unknown(_) => return Ok(()),
@@ -374,6 +382,51 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
     }
 
     match command {
+        StdioCommand::AdviseQuery => {
+            if request
+                .target
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+            {
+                return error_response(
+                    request.request_id.clone(),
+                    "MISSING_TARGET",
+                    "Missing target for advise_query",
+                    diagnostics,
+                );
+            }
+            let req = RuntimeQueryRequest {
+                command: RuntimeQueryCommand::AdviseQuery,
+                target: request.target.clone().unwrap_or_default(),
+                budget: budget.clone(),
+                human,
+                intent: Some(intent),
+                page_scope: request.page_scope.clone(),
+            };
+            match runtime.query(req) {
+                Ok(response) => {
+                    diagnostics.extend(response.diagnostics);
+                    StdioResponse {
+                        request_id: request.request_id.clone(),
+                        ok: true,
+                        result: Some(response.result),
+                        error: None,
+                        diagnostics,
+                        timing: Some(response.timing),
+                    }
+                }
+                Err(e) => {
+                    diagnostics.push(format!("Query error: {}", e));
+                    error_response(
+                        request.request_id.clone(),
+                        "QUERY_FAILED",
+                        format!("Query failed: {}", e),
+                        diagnostics,
+                    )
+                }
+            }
+        }
         StdioCommand::ExplainCondition => {
             if request
                 .target
@@ -394,6 +447,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 budget: budget.clone(),
                 human,
                 intent: Some(intent),
+                page_scope: request.page_scope.clone(),
             };
             match runtime.query(req) {
                 Ok(response) => {

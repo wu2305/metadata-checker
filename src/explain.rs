@@ -1,4 +1,7 @@
 pub use crate::answer_contract::TraversalIntent;
+use crate::answer_contract::{
+    build_answer_contract, build_required_followups, build_thinking_frame, build_truncation_guard,
+};
 use crate::dependency::DependencyGraph;
 use crate::explain::condition_facts::{
     annotate_condition_scope, build_answer_facts, build_context_summary,
@@ -895,6 +898,47 @@ pub fn build_explain_condition_output_with_intent(
         },
     );
 
+    let answer_contract = build_answer_contract(
+        effective_intent,
+        &target_node,
+        primary_path.len(),
+        candidate_paths.len(),
+        rejected_paths.len(),
+        _budget,
+        is_page_scoped_target,
+        dataflow_model_id.as_deref(),
+        dataflow_model_id.as_deref(),
+    );
+    let thinking_frame = build_thinking_frame(
+        effective_intent,
+        &target_node,
+        primary_path.len(),
+        candidate_paths.len(),
+        &value_source_context,
+    );
+    let truncation_guard = build_truncation_guard(
+        _budget,
+        primary_path.len(),
+        candidate_paths.len(),
+        rejected_paths.len(),
+        supporting_context.len(),
+        related_context.len(),
+    );
+    let required_followups = build_required_followups(
+        effective_intent,
+        target_id,
+        _budget,
+        primary_path.len(),
+        candidate_paths.len(),
+        &value_source_context,
+        is_page_scoped_target,
+        dataflow_model_id.as_deref(),
+        truncation_guard
+            .get("safe_to_answer_full_relationships")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+    );
+
     let summary = serde_json::json!({
         "what_is_it": format!("Why 解释: {}", target_node.id),
         "target_id": target_node.id,
@@ -943,6 +987,10 @@ pub fn build_explain_condition_output_with_intent(
         "supporting_context_summary": supporting_context_summary,
         "related_context": details_related_context,
         "related_context_summary": related_context_summary,
+        "answer_contract": answer_contract,
+        "thinking_frame": thinking_frame,
+        "truncation_guard": truncation_guard,
+        "required_followups": required_followups,
     });
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);

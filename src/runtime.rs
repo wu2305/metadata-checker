@@ -40,6 +40,7 @@ pub struct GraphRuntime {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RuntimeQueryCommand {
     ExplainCondition,
+    AdviseQuery,
 }
 
 /// Runtime 查询请求
@@ -51,6 +52,7 @@ pub struct RuntimeQueryRequest {
     pub human: bool,
     #[serde(default)]
     pub intent: Option<String>,
+    pub page_scope: Option<String>,
 }
 
 /// Runtime 查询响应
@@ -204,6 +206,16 @@ impl GraphRuntime {
 
         let query_start = Instant::now();
         let mut result = match request.command {
+            RuntimeQueryCommand::AdviseQuery => {
+                let question_kind = request.intent.as_deref().unwrap_or("auto");
+                let page_scope = request.page_scope.as_deref();
+                crate::answer_contract::build_advise_query_output(
+                    &request.target,
+                    page_scope,
+                    question_kind,
+                    &request.budget,
+                )
+            }
             RuntimeQueryCommand::ExplainCondition => {
                 let intent = crate::explain::TraversalIntent::parse(
                     request.intent.as_deref().unwrap_or("auto"),

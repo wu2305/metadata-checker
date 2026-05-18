@@ -1,3 +1,4 @@
+use metadata_checker::answer_contract;
 use metadata_checker::cli;
 use metadata_checker::context;
 use metadata_checker::dependency::DependencyGraph;
@@ -178,8 +179,21 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
+        if let Some(ref advise_target) = args.advise_query {
+            let question_kind = args.question_kind.as_deref().unwrap_or("auto");
+            let page_scope = args.advise_query_page.as_deref();
+            let advice = answer_contract::build_advise_query_output(
+                advise_target,
+                page_scope,
+                question_kind,
+                &args.budget,
+            );
+            println!("{}", serde_json::to_string_pretty(&advice)?);
+            return Ok(());
+        }
+
         println!(
-            "No query specified. Use --query-model, --query-page, --query-cross, --query-dataflow, --query-page-logic, --explain, --context, --find-page, --find-model, --find-component, or --resolve-model."
+            "No query specified. Use --query-model, --query-page, --query-cross, --query-dataflow, --query-page-logic, --explain, --context, --find-page, --find-model, --find-component, --resolve-model, or --advise-query."
         );
         return Ok(());
     }

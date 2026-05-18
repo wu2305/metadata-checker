@@ -614,6 +614,61 @@ pub fn build_query_page_logic_output(
     let key_primary_paths: Vec<serde_json::Value> =
         primary_paths.iter().take(10).cloned().collect();
 
+    // M35.7: 从 data_sources 和 write_targets 中自动发现关键模型，
+    // 并内嵌每个模型的 availability 摘要。
+    let mut key_model_ids: Vec<String> = Vec::new();
+    let mut seen_models: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for ds in &data_sources {
+        if let Some(target_id) = ds.get("target_id").and_then(|v| v.as_str()) {
+            if target_id.starts_with("model:") && seen_models.insert(target_id.to_string()) {
+                key_model_ids.push(target_id.to_string());
+            }
+        }
+    }
+    for wt in &write_targets {
+        if let Some(target_id) = wt.get("target_id").and_then(|v| v.as_str()) {
+            if target_id.starts_with("model:") && seen_models.insert(target_id.to_string()) {
+                key_model_ids.push(target_id.to_string());
+            }
+        }
+    }
+    // Also include models referenced by display_prerequisites and data_prerequisites
+    for prereq in display_prerequisites.iter().chain(data_prerequisites.iter()) {
+        if let Some(ref model_id) = prereq.get("model_id").and_then(|v| v.as_str()) {
+            let full_id = if model_id.starts_with("model:") {
+                model_id.to_string()
+            } else {
+                format!("model:{}", model_id)
+            };
+            if seen_models.insert(full_id.clone()) {
+                key_model_ids.push(full_id);
+            }
+        }
+    }
+
+    let mut key_model_availability: Vec<serde_json::Value> = Vec::new();
+    for model_id in &key_model_ids {
+        if let Ok(result) = crate::explain::build_explain_condition_output_with_intent(
+            graph,
+            model_id,
+            "compact",
+            crate::explain::TraversalIntent::Availability,
+        ) {
+            let af = result
+                .get("details")
+                .and_then(|d| d.get("answer_facts"))
+                .and_then(|a| a.get("availability_facts"));
+            let truncation = result
+                .get("details")
+                .and_then(|d| d.get("truncation_guard"));
+            key_model_availability.push(serde_json::json!({
+                "model_id": model_id,
+                "availability_summary": af.cloned().unwrap_or(serde_json::Value::Null),
+                "truncation_guard": truncation.cloned().unwrap_or(serde_json::Value::Null),
+            }));
+        }
+    }
+
     let summary = serde_json::json!({
         "page_id": page_id,
         "page_name": page_node.name,
@@ -637,6 +692,7 @@ pub fn build_query_page_logic_output(
         "top_data_prerequisites": top_data_prerequisites,
         "top_action_prerequisites": top_action_prerequisites,
         "key_primary_paths": key_primary_paths,
+        "key_model_count": key_model_ids.len(),
     });
 
     let risk_diagnostics: Vec<serde_json::Value> = diagnostics
@@ -669,6 +725,7 @@ pub fn build_query_page_logic_output(
             "primary_paths": crate::output::brief::truncated_array(&primary_paths, 5),
             "related_context": crate::output::brief::truncated_array(&related_context, 3),
             "related_context_summary": related_context_summary.clone(),
+            "key_model_availability": crate::output::brief::truncated_array(&key_model_availability, 3),
         })
     } else if is_full {
         // full 模式：输出完整路径分类 + rejected + diagnostics
@@ -691,6 +748,7 @@ pub fn build_query_page_logic_output(
             "rejected_paths": rejected_paths.clone(),
             "path_selection_diagnostics": path_selection_diagnostics.clone(),
             "related_context_summary": related_context_summary.clone(),
+            "key_model_availability": key_model_availability.clone(),
         })
     } else {
         // normal 模式：输出 primary + supporting，不输出 rejected
@@ -710,6 +768,7 @@ pub fn build_query_page_logic_output(
             "supporting_paths": supporting_paths.clone(),
             "related_context": related_context.clone(),
             "related_context_summary": related_context_summary.clone(),
+            "key_model_availability": key_model_availability.clone(),
         })
     };
 

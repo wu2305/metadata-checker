@@ -193,6 +193,10 @@ pub struct AiOutput {
 | `supporting_context_summary` | object | `supporting_context` 的计数摘要；compact 模式默认用它替代明细 |
 | `related_context` | array | 相关但非必要条件，含 `note: "非当前页面必要条件"` |
 | `related_context_summary` | object | `related_context` 的计数摘要；compact 模式默认用它替代明细，避免注意力漂移 |
+| `answer_contract` | object | M35.1 契约块：primary_fact_path、forbidden_fact_paths、proven_path_count、budget_used、is_page_scoped_target |
+| `thinking_frame` | object | M35.2 分析框架：primary_question_type、why_this_intent、what_is_missing、what_to_avoid、next_best_action |
+| `truncation_guard` | object | M35.9 截断护栏：is_complete、safe_to_answer_full_relationships、required_budget_for_complete_answer、truncated_sections |
+| `required_followups` | array | M35.3 必须执行的后续查询：command、target、budget、intent、reason、must_run_for_complete_answer |
 
 ### AI 读取策略
 
@@ -699,6 +703,19 @@ Anti-drift 读取规则：
 - `--query-model <MODEL> for model details`（对涉及的模型）
 
 **注意**：next_queries 中的 `--query-model` 不带 `model:` 前缀，CLI 会自动添加。
+
+### details.key_model_availability
+
+M35.7 从页面 data_sources / write_targets / prerequisites 中自动发现的关键局部模型，
+对每个模型内嵌 availability 摘要：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `model_id` | string | 局部 model ID，如 `model:model11` |
+| `availability_summary` | object | 模型的 availability_facts  compact 摘要 |
+| `truncation_guard` | object | 该模型 availability 查询的截断状态 |
+
+ compact 模式下最多输出 3 个 key model；normal/full 输出全部。
 
 ## M4 补充字段（PageLogic）
 

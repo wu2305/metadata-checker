@@ -2328,7 +2328,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
   - 提交：
     - `refactor: split answer contract primitives`
 
-- [ ] M35.1：统一 `answer_contract` schema
+- [x] M35.1：统一 `answer_contract` schema
   - 所有核心查询输出增加顶层或 `details` 内稳定字段 `answer_contract`。
   - 最小字段：
     - `intent`
@@ -2354,7 +2354,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - display intent 的 `forbidden_fact_paths` 包含 value-source 相关路径。
     - writer intent 的 `primary_fact_path` 指向 `details.answer_facts.writer_facts`。
 
-- [ ] M35.2：`thinking_frame` 输出
+- [x] M35.2：`thinking_frame` 输出
   - 输出模型可直接照读的分析框架：
     - `question_kind`
     - `target_scope`
@@ -2368,7 +2368,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - `text41 --intent value-source` 的 `thinking_frame.answer_with` 必须是 value-source facts。
     - 不同 intent 下 `do_not_use_as_primary_evidence` 不同。
 
-- [ ] M35.3：`required_followups` 生成器
+- [x] M35.3：`required_followups` 生成器
   - 触发条件：
     - display 条件引用 `modelX.totalRowCount__`。
     - availability 目标是 page-local model，且当前输出尚未包含其完整 availability facts。
@@ -2431,7 +2431,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - `model11 availability` 包含 DataFlow filters、Join/Union、physical inputs。
     - DataFlow filters 不得被标成 direct visibleCondition。
 
-- [ ] M35.7：`--query-page-logic` 内嵌 `key_model_availability`
+- [x] M35.7：`--query-page-logic` 内嵌 `key_model_availability`
   - 页面级输出增加 `key_model_availability[]`。
   - 关键模型发现规则：
     - display / hidden / disabled 条件中引用 `modelX.totalRowCount__` 或模型字段。
@@ -2471,7 +2471,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - `text41 value-source` 必须从 `CUSTOMAUTOMYAUTOLIST` 追到 `sliderpanel2 -> model11 -> fact_autoCustomerAutoRel.tbl.车辆VIN`。
     - candidate-only fixture 不得输出 proven physical input。
 
-- [ ] M35.9：high-fanout `truncation_guard`
+- [x] M35.9：high-fanout `truncation_guard`
   - compact 输出增加：
     - `truncation_guard.is_complete`
     - `truncation_guard.safe_to_answer_full_relationships`
@@ -2496,7 +2496,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - `fact_qwSidebar --budget compact` 必须标记不能回答全量关系。
     - `fact_qwSidebar --budget normal` 可用于完整关键读写验收。
 
-- [ ] M35.10：轻量 `--advise-query`
+- [x] M35.10：轻量 `--advise-query`
   - 新增结构化规划命令：
     - `--advise-query`
     - `--page <PAGE>`
@@ -2519,7 +2519,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - `model11 + availability` 推荐 page-scoped model availability。
     - `fact_qwSidebar + model-relationships` 推荐 query-model normal 或 compact+guard。
 
-- [ ] M35.11：stdio/function-calling 同步
+- [~] M35.11：stdio/function-calling 同步（explain-condition / advise-query 已同步，query-page-logic / query-model / context 待同步）
   - stdio 输出同步包含：
     - `answer_contract`
     - `thinking_frame`

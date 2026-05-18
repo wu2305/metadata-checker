@@ -200,6 +200,26 @@ pub struct Cli {
 
     #[arg(
         long,
+        value_name = "TARGET",
+        help = "M35: Generate structured query advice for a target. Combines with --advise-query-page and --question-kind."
+    )]
+    pub advise_query: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "PAGE",
+        help = "Page ID for --advise-query scope"
+    )]
+    pub advise_query_page: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "KIND",
+        help = "Question kind for --advise-query: display | value-source | availability | writer | page-logic | model-relationships"
+    )]
+    pub question_kind: Option<String>,
+    #[arg(
+        long,
         help = "启动 JSONL stdin/stdout 长驻查询服务（机器协议，非人类 REPL）"
     )]
     pub serve_stdio: bool,
