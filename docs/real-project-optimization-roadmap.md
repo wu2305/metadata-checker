@@ -2308,6 +2308,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - [ ] M35.0c：新增 `src/followup.rs`，在 required followup 生成器有实际调用点时落代码。
     - [x] M35.0d：拆分 `src/query/page_logic.rs` 与 `src/query/model.rs`，避免 `src/query.rs` 继续膨胀。
     - [x] M35.0e：拆分 `src/explain/importance.rs` 与 `src/explain/evidence.rs`，迁移重要性分类与 evidence 提升 helper。
+    - [x] M35.0f：拆分 `src/explain/condition_facts.rs`，迁移条件收集、条件去重、值来源上下文、answer facts 与路径分区 helper。
   - 拆分原则：
     - 先迁移纯类型和纯函数。
     - 每次迁移都必须有调用点，避免新增未消费代码。
