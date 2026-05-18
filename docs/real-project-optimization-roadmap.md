@@ -2316,6 +2316,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - [x] M35.0k：拆分 `src/query/page_logic/path_summary.rs`，迁移主链路发现、字段因果路径保底、路径选择和跨页旁路上下文补充。
     - [x] M35.0l：拆分 `src/query/page_logic/prerequisites.rs`，迁移页面级条件 prerequisite 构建、分类和 impact 排序。
     - [x] M35.0m：拆分 `src/query/page_logic/diagnostics.rs`，迁移风险诊断、主路径截断降级、旁路统计和 evidence 采样上限。
+    - [x] M35.0n：拆分 `src/query/page_logic/evidence.rs`，迁移 PageLogic evidence 采样和 next_queries 生成。
   - 拆分原则：
     - 先迁移纯类型和纯函数。
     - 每次迁移都必须有调用点，避免新增未消费代码。
