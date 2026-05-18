@@ -1739,3 +1739,280 @@ target node
 - 小模型无需理解全图即可回答 `text41` 显示条件和值来源。
 - 候选不会被误报为证明。
 - `related_context` 不再成为 compact 输出中的注意力漂移来源。
+
+## M34：DataFlow 内部投影与字段级来源展开
+
+### 背景
+
+M32/M33 已经能处理页面组件裸字段来源：
+
+```text
+text41.value = ${CUSTOMAUTOMYAUTOLIST}
+→ 最近数据容器 sliderpanel2.dataSet = model11
+→ model11.CUSTOMAUTOMYAUTOLIST
+→ $DATA:/加工表/小程序/绑车.tbl
+→ $DATA:/主数据/fact_autoCustomerAutoRel.tbl
+```
+
+但真实项目中，页面 model 经常指向 `modelDataType=DataFlow` 的 `.tbl`。这类 `.tbl` 内部存在 `ModelTable`、`Join`、`Union`、`Filter`、`Output` 等节点，实际字段来源、行可用性条件和输出前过滤条件隐藏在 DataFlow 内部。若只输出 DataFlow 输入表候选，小模型仍会遗漏：
+
+- 字段到底来自哪一个输入节点、哪张物理表。
+- Join 只是匹配上下文，还是会过滤行。
+- Union 是多分支任一输出，还是字段只来自某一分支。
+- DataFlow filter 是 model 数据可用性条件，不是组件 direct visibleCondition。
+
+同时，M33 已经证明 compact 输出必须低噪，不能把完整 DataFlow JSON 或全量内部拓扑交给 AI。M34 因此要实现 **target-relevant DataFlow projection**：按 `intent + target field/model` 只展开和当前问题有关的 DataFlow 事实。
+
+### 核心原则
+
+- `originalNode` / `originalField` 是字段级来源的最高优先级证明。
+- `originalNode` 必须先解析为 DataFlow 内部节点 alias，再由该节点的 `moduleTablePath` 落到真实物理表。
+- `inputNode` / `inputField` / `exp` / `unionMapArray` / join clauses 只能作为递归或降级证据；缺少字段级 origin 时不得把输入表候选当成 proven。
+- Join / Union / filter 必须被压缩成 AI 可读的事实，不输出完整 DataFlow 节点树。
+- `value-source` 只解释目标字段来源；`availability` 只解释目标 model 是否有数据；`display` 只在 `totalRowCount__` gate 依赖 model 时引用 availability 摘要。
+- compact 输出只能进入 `details.answer_facts` 的短事实；normal/full 才允许审计路径和 rejected/candidate 细节。
+
+### 非目标
+
+- 不做完整 DataFlow 执行器。
+- 不模拟聚合、排序、窗口函数、脚本表达式的业务含义。
+- 不把所有 DataFlow 节点默认展开给 AI。
+- 不把 DataFlow filter 改写成组件自身显示条件。
+- 不要求第一阶段覆盖所有复杂表达式；无法证明时必须降级为 candidate，并说明缺失证据。
+
+### 真实项目锚点
+
+- 页面：`app/售后.app/绑定车辆/会员已注册.spg`
+- 组件：`text41`
+- 容器：`sliderpanel2`
+- 页面 model：`model11`
+- DataFlow 表：`$DATA:/加工表/小程序/绑车.tbl`
+- 目标字段：`CUSTOMAUTOMYAUTOLIST`
+- 已验证字段 origin：
+  - `dbfield = CUSTOMAUTOMYAUTOLIST`
+  - `originalField = 车辆VIN`
+  - `originalNode = FACT_AUTOCUSTOMERAUTOREL`
+  - `FACT_AUTOCUSTOMERAUTOREL.moduleTablePath = $DATA:/主数据/fact_autoCustomerAutoRel.tbl`
+- 已验证输入过滤：
+  - `[是否展示] == 1`
+  - `[关系类型] == 车主关系`
+- 已验证输出前过滤：
+  - `[粉丝ID]=$user.WECHAT_UNIONID OR ([使用人粉丝ID] = $user.WECHAT_UNIONID and [人员手机号] = [使用人手机])`
+
+### 数据结构解析任务
+
+- [ ] 扩展 DataFlow meta 预解析结构：
+  - `alias_map`: alias -> node_id。
+  - `id_to_alias`: node_id -> alias。
+  - `node_types`: node_id -> `ModelTable` / `Join` / `Union` / `Output` / 其它。
+  - `module_table_paths`: node_id -> `moduleTablePath`。
+  - `node_fields`: node_id -> field name/dbfield/inputField/inputNode/originalNode/originalField/exp/dimensionPath。
+  - `node_filters`: node_id -> filter clauses / exp。
+  - `join_clauses`: node_id -> joinType / leftTable / rightTable / clauses。
+  - `union_maps`: node_id -> unionMapArray / inputNodes。
+  - `output_nodes`: Output 节点及其 inputNodes。
+- [ ] 字段索引必须同时支持：
+  - `name` 匹配，如 `车辆VIN`。
+  - `dbfield` 匹配，如 `CUSTOMAUTOMYAUTOLIST`。
+  - `inputField` 匹配。
+  - 大小写不敏感的 `dbfield` fallback。
+- [ ] `originalNode` 解析规则：
+  - 先按 alias 精确匹配。
+  - 再按 node_id 匹配。
+  - 支持别名中带括号或重复后缀的情况，匹配失败时进入 candidate。
+- [ ] `originalField` 解析规则：
+  - 优先用 `originalField` 找原始节点字段。
+  - 若原始节点是 `ModelTable` 且字段不存在于 node fields，可用 `originalField` 直接作为物理表字段名。
+  - 若 `originalField` 缺失，降级到 `inputField` / `name` / `dbfield`。
+- [ ] filter 字段引用解析：
+  - 支持 `[字段]`。
+  - 支持 `[节点].[字段]`。
+  - 支持 filter `clauses[]` 的 `leftExp` / `rightExp` / `rightValue`。
+  - 支持 filter `clauses[]` 的自由 `exp`。
+  - 识别 `$user.*`、`$param.*`、`param*` 等变量引用，只列引用，不递归扩散。
+
+### 字段来源 projection 任务
+
+- [ ] 新增或扩展 DataFlow 字段来源追踪函数，输入：
+  - DataFlow model/table path。
+  - target output field name/dbfield。
+  - intent。
+  - budget。
+- [ ] 输出 `DataflowFieldOrigin`：
+  - `target_field`
+  - `dataflow_table_path`
+  - `output_node`
+  - `output_field`
+  - `source_node_alias`
+  - `source_node_type`
+  - `source_module_table_path`
+  - `source_field`
+  - `source_dbfield`（能解析则填）
+  - `via`: `originalNode/originalField` / `inputNode/inputField` / `unionMapArray` / `expression`
+  - `confidence`: `proven` / `candidate`
+  - `missing_evidence`
+- [ ] `value-source` intent 行为：
+  - 只追目标字段相关路径。
+  - 遇到 `Join`，只说明目标字段来自左/右/中间输入；Join 条件进入 `join_context`，不抢占 value result。
+  - 遇到 `Union`，只列能产生目标字段的分支；每个分支独立标注 proven/candidate。
+  - 找到 `ModelTable.moduleTablePath` 后停止字段来源递归。
+  - 无字段级 origin 时，只输出 `dataflow_inputs` candidates，不得写入 `proven_physical_input`。
+- [ ] `details.answer_facts.value_source_facts` 增加短事实：
+  - `dataflow_table`
+  - `dataflow_output_field`
+  - `physical_source_fields[]`
+  - `dataflow_branches[]`
+  - `join_context[]`
+  - `candidate_inputs[]`
+
+### 可用性 projection 任务
+
+- [ ] 新增或扩展 DataFlow availability 追踪函数，输入：
+  - DataFlow model/table path。
+  - target model。
+  - 当前页面 filter / totalRowCount gate 上下文。
+- [ ] 输出 `DataflowAvailabilityFacts`：
+  - `source_filters[]`
+  - `output_filters[]`
+  - `join_rules[]`
+  - `union_rules[]`
+  - `referenced_vars[]`
+  - `physical_input_tables[]`
+- [ ] filter role 分类：
+  - `source_filter`: ModelTable 输入节点 filter。
+  - `join_condition`: Join 匹配条件。
+  - `output_filter`: Output 或输出前节点 filter。
+  - `branch_filter`: Union 分支内部 filter。
+  - `field_expression`: 字段表达式引用，不直接作为行可用性条件。
+- [ ] Join 行语义：
+  - `InnerJoin`: 左右都必须匹配，影响 row availability。
+  - `LeftJoin`: 左表行保留，右表字段可能为空。
+  - `RightJoin`: 右表行保留，左表字段可能为空。
+  - `FullJoin`: 任一侧可保留，字段可能为空。
+  - 未识别类型进入 candidate，并保留原始 joinType。
+- [ ] Union 行语义：
+  - `Union`: 任一分支有数据即可输出。
+  - 字段按 `unionMapArray` 标注来自哪些分支。
+  - 分支内 filter 必须保留为 branch_filter。
+- [ ] `display` intent 行为：
+  - 只有当 direct/inherited condition 引用 `model.totalRowCount__` 时，才引用 DataFlow availability 摘要。
+  - 不把 DataFlow filter 写成组件 direct/inherited visibleCondition。
+  - `data_empty_gates` 可包含展开后的 DataFlow source/output filters，但必须标注 `condition_scope = expanded_from_total_row_count` 或等价字段。
+
+### 图模型与边任务
+
+- [ ] 评估是否新增边类型；若新增，必须同步 `graph.rs` 序列化和测试：
+  - `DataflowFieldOrigin`
+  - `DataflowFilter`
+  - `DataflowJoinCondition`
+  - `DataflowUnionBranch`
+- [ ] 若第一阶段不新增边类型，也必须在 node meta 中持久化足够 projection 所需字段，确保冷启动 graphdb 查询无需重新读全项目文件。
+- [ ] 图节点/边不得把 DataFlow 内部节点污染为普通页面 model。
+- [ ] DataFlow 内部字段节点命名必须稳定：
+  - 推荐：`dataflow-field:<table_path>|<node_alias>|<field_name_or_dbfield>`。
+  - 物理表字段继续使用既有 `field:<model>.<field>` 或 canonical 字段节点。
+- [ ] `--context` 可看到 DataFlow 内部相关边，但 compact explain-condition 不默认展开。
+
+### 输出契约任务
+
+- [ ] 更新 `docs/schema.md`：
+  - `details.answer_facts.value_source_facts.dataflow_table`
+  - `physical_source_fields[]`
+  - `dataflow_branches[]`
+  - `join_context[]`
+  - `candidate_inputs[]`
+  - `details.answer_facts.availability_facts.dataflow_availability`
+  - `source_filters[]`
+  - `output_filters[]`
+  - `join_rules[]`
+  - `union_rules[]`
+  - `referenced_vars[]`
+- [ ] 更新 `docs/function-calling-runtime.md`：
+  - function calling 问值来源时传 `intent=value-source`。
+  - 问 model 是否有数据或显示条件中有 `totalRowCount__` 时传 `intent=availability` 或 `intent=display`。
+  - compact 默认只读 `answer_facts` 的 DataFlow projection。
+- [ ] 更新 `SKILL.md` 和已安装 skill：
+  - 明确 DataFlow projection 读取顺序。
+  - 明确 `details.answer_facts.<fact_block>` 路径，不允许写成 `details.value_source_facts`。
+  - 明确 Join/Union/filter 的解释模板。
+- [ ] compact 输出体积基线：
+  - `text41 --intent value-source --budget compact`。
+  - `text41 --intent display --budget compact`。
+  - `model11 --intent availability --budget compact`。
+
+### 测试任务清单
+
+- [ ] Fixture：`originalNode/originalField` 直连 `ModelTable`
+  - 输出字段 `CUSTOMAUTOMYAUTOLIST` 证明到 `fact_autoCustomerAutoRel.tbl.车辆VIN`。
+  - `confidence = proven`。
+- [ ] Fixture：`originalNode` 指向中间节点
+  - 递归追到上游 `ModelTable`。
+  - steps 中保留中间节点 alias/type。
+- [ ] Fixture：缺少 `originalNode/originalField`
+  - 只能输出 candidate input，不得输出 proven physical source。
+- [ ] Fixture：LeftJoin 字段来自左表
+  - value-source result 来自左表。
+  - join_context 标注右表只参与匹配或补充字段。
+  - availability 标注 `left_rows_preserved_right_fields_nullable`。
+- [ ] Fixture：InnerJoin
+  - availability 标注左右都必须匹配。
+  - join_condition 进入 row rule。
+- [ ] Fixture：Union
+  - value-source 按目标字段列出分支来源。
+  - availability 标注 `any_branch_can_output`。
+  - 不把无目标字段的分支写入 value-source proven。
+- [ ] Fixture：source/output/branch filters
+  - source_filter、output_filter、branch_filter 分类正确。
+  - `$user.*` / param 引用只列名，不递归扩散。
+- [ ] 真实项目回归：`text41 value-source`
+  - 必须输出：
+    - `dataflow_table = $DATA:/加工表/小程序/绑车.tbl`
+    - `physical_source_fields` 包含 `$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN`
+    - `via = originalNode/originalField`
+    - `originalNode = FACT_AUTOCUSTOMERAUTOREL`
+    - `originalField = 车辆VIN`
+  - 不得把 `CUSTOMAUTOMYAUTOLIST` 当表名。
+- [ ] 真实项目回归：`text41 display`
+  - 仍保留 M31/M33 display 结论。
+  - `model11.totalRowCount__ > 0` 展开后补充 DataFlow availability 摘要。
+  - DataFlow filter 不得冒充组件 direct visibleCondition。
+- [ ] 真实项目回归：`model11 availability`
+  - 必须包含：
+    - `$DATA:/主数据/fact_autoCustomerAutoRel.tbl`
+    - `[是否展示] == 1`
+    - `[关系类型] == 车主关系`
+    - 输出前 `$user.WECHAT_UNIONID` 过滤。
+- [ ] stdio 回归：
+  - `explain_condition` + `intent=value-source` 返回 DataFlow projection。
+  - `explain_condition` + `intent=availability` 返回 DataFlow availability。
+  - compact 不返回完整 internal topology。
+
+### 实施切分
+
+- [ ] M34.1：DataFlow meta 解析增强
+  - 在现有 `DataFlowMeta` 或独立模块中补齐 node/module/filter/join/union 索引。
+  - 增加 fixture 单元测试。
+- [ ] M34.2：字段级 origin projection
+  - 实现 `originalNode/originalField` 优先追踪。
+  - 接入 `value_source_facts`。
+  - 覆盖 `text41 value-source`。
+- [ ] M34.3：availability projection
+  - 收集 source/output/branch filters。
+  - 收集 Join/Union 行规则。
+  - 接入 `availability_facts` 和 display 的 row-count gate 展开。
+- [ ] M34.4：输出契约与 skill 同步
+  - 更新 schema/function-calling/SKILL/performance baseline。
+  - 确保小模型读取路径稳定。
+- [ ] M34.5：冷脸验收与性能检查
+  - 跑普通全量测试。
+  - 跑 ignored 真实项目测试。
+  - 检查 compact 输出体积不回退。
+
+### 验收目标
+
+- `text41` 值来源能够从裸字段稳定追到 `fact_autoCustomerAutoRel.tbl.车辆VIN`，并注明 `originalNode/originalField` 证据。
+- `text41` 显示条件仍以组件 direct/inherited/row-count gate 为主，不把 DataFlow filter 混成显示条件。
+- `model11 availability` 能解释 DataFlow 输入过滤、输出前过滤、Join/Union 行语义。
+- Join/Union 只作为 target-relevant projection 输出，小模型无需读完整 DataFlow JSON。
+- 字段级来源不可证明时，输出 candidate，不输出 proven。
+- compact 输出继续遵守 M33 低噪策略。
