@@ -2257,3 +2257,250 @@ text41.value = ${CUSTOMAUTOMYAUTOLIST}
 - Join/Union 只作为 target-relevant projection 输出，小模型无需读完整 DataFlow JSON。
 - 字段级来源不可证明时，输出 candidate，不输出 proven。
 - compact 输出继续遵守 M33 低噪策略。
+
+## M35：Answer Contract 与工具内思考护栏
+
+### 背景
+
+空上下文 5.4-mini 已能在 `text41 value-source`、`input3 writer` 这类目标明确问题中读懂关键链路，但在弱指向、多跳、需主动追问的问题上仍不稳定：
+
+- `text41 display` 虽然回答了 `panel35.visibleCondition` 与 `model11.ISSHOW == 1`，但混入了 value-source 相关证据，说明只靠 Skill 文字无法稳定隔离证据用途。
+- `model11 什么时候有数据` 没有主动执行 page-scoped model availability 查询，漏掉 DataFlow 内部 filters、Join/Union 语义和物理输入表。
+- `fact_qwSidebar` 高扇出关系使用 compact 输出后，没有按截断风险升级到 normal，仍倾向给全量结论。
+
+M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式固化到 CLI/stdio 输出协议里，让模型每次都先读结构化 `answer_contract` / `thinking_frame`，再按工具给出的 `required_followups` 和 `truncation_guard` 行动。
+
+### 目标
+
+- CLI 输出直接告诉模型：当前问题应读哪个 fact block、哪些字段禁止作为主证据、是否必须继续追问。
+- 当出现 `totalRowCount__`、裸字段、DataFlow origin 缺失、page-local model、高扇出截断时，工具自动给出下一步命令或完整性状态。
+- `--query-page-logic` 对页面关键模型内嵌 availability 摘要，降低弱指向问题对模型主动探索能力的依赖。
+- Skill 从命令说明书收敛为“元数据分析思考协议”：先读 contract，再读 facts，再执行 followup。
+- CLI 与 stdio/function-calling 字段保持一致。
+
+### 非目标
+
+- 不做自然语言问题理解器；`--advise-query` 只接受结构化 `question-kind`。
+- 不把完整 DataFlow JSON 或全量图邻居塞回 compact。
+- 不把所有相关上下文都提升为主证据；仍遵守 M33/M34 的 target-centric、low-noise 输出原则。
+- 不用 Skill 文本替代代码层契约；Skill 只描述如何消费契约。
+
+### 任务清单
+
+- [ ] M35.1：统一 `answer_contract` schema
+  - 所有核心查询输出增加顶层或 `details` 内稳定字段 `answer_contract`。
+  - 最小字段：
+    - `intent`
+    - `target_scope`
+    - `primary_fact_path`
+    - `forbidden_fact_paths[]`
+    - `completion.status`
+    - `completion.missing[]`
+    - `completion.next_commands[]`
+  - `completion.status` 枚举：
+    - `complete`
+    - `needs_followup`
+    - `partial_due_to_truncation`
+    - `partial_due_to_unresolved_target`
+    - `partial_due_to_missing_origin`
+  - 覆盖命令：
+    - `--explain-condition`
+    - `--query-page-logic`
+    - `--query-model`
+    - `--context`
+  - 测试：
+    - fixture JSON 断言 `primary_fact_path` 指向当前 intent 的 fact block。
+    - display intent 的 `forbidden_fact_paths` 包含 value-source 相关路径。
+    - writer intent 的 `primary_fact_path` 指向 `details.answer_facts.writer_facts`。
+
+- [ ] M35.2：`thinking_frame` 输出
+  - 输出模型可直接照读的分析框架：
+    - `question_kind`
+    - `target_scope`
+    - `answer_with`
+    - `do_not_use_as_primary_evidence[]`
+    - `required_followups[]`
+    - `completion_status`
+  - 与 `answer_contract` 保持语义一致，但面向 AI 可读。
+  - 测试：
+    - `text41 --intent display` 的 `thinking_frame.answer_with` 必须是 display facts。
+    - `text41 --intent value-source` 的 `thinking_frame.answer_with` 必须是 value-source facts。
+    - 不同 intent 下 `do_not_use_as_primary_evidence` 不同。
+
+- [ ] M35.3：`required_followups` 生成器
+  - 触发条件：
+    - display 条件引用 `modelX.totalRowCount__`。
+    - availability 目标是 page-local model 或可解析到 DataFlow。
+    - value-source 遇到裸字段 `${FIELD}` 且未完成 dataSet 解析。
+    - value-source 遇到 DataFlow table 但缺字段级 origin。
+    - writer 链路只到 page-local model，未到物理表字段。
+    - compact 输出发生截断且用户问题需要全量关系。
+  - 每条 followup 包含：
+    - `reason`
+    - `command`
+    - `must_run_for_complete_answer`
+    - `expected_fact_path`
+  - 测试：
+    - `text41 display` 必须生成 page-scoped `model11 availability` followup。
+    - 裸字段无法证明 origin 的 fixture 必须生成 value-source followup 或 missing origin 状态。
+    - compact 截断的 model query 必须生成 normal budget rerun。
+
+- [ ] M35.4：intent 证据隔离硬化
+  - `display` intent 默认不输出 value-source 细节，或仅以 `answer_usage=not_primary_evidence` 放入 related/supporting summary。
+  - `value-source` intent 不把 blocking/display condition 当主证据。
+  - `availability` intent 不把 unrelated same-name model 条件当主证据。
+  - `writer` intent 不把普通 Reads 当生成动作，除非后续有 FieldAlias/FieldWrite/ActionWrites。
+  - 测试：
+    - `text41 display` 输出不得让 value-source 路径进入 primary evidence。
+    - answer contract 的 forbidden path 与实际输出位置一致。
+
+- [ ] M35.5：page-scoped model resolver 标准化
+  - 所有出现局部 model 引用的位置补充：
+    - `local_model_id`
+    - `page_scoped_target`
+    - `resolved_model_target`
+    - `physical_or_dataflow_path`
+    - `scope_warning`
+  - `model11.totalRowCount__`、`model22.phoneNumber`、`model6.phoneNumber` 等应能稳定生成 page-scoped target。
+  - 测试：
+    - `text41 display` 中 `model11.totalRowCount__` 能给出 `model:app/售后.app/绑定车辆/会员已注册.spg|model11`。
+    - `input3 writer` 中 `model22.phoneNumber` 能保留 page-local 到 physical field 的别名链。
+
+- [ ] M35.6：`totalRowCount__` availability 自动展开
+  - 当 display/condition 中引用 `modelX.totalRowCount__`：
+    - 自动展开当前页面 model filter。
+    - 自动生成 model availability followup。
+    - 如果 model 指向 DataFlow，输出 target-relevant DataFlow availability 摘要。
+  - 必须区分：
+    - inherited display gate
+    - expanded data gate
+    - DataFlow availability context
+  - 测试：
+    - `text41 display` 包含 inherited `panel35` 与 expanded `model11.ISSHOW == 1`。
+    - `model11 availability` 包含 DataFlow filters、Join/Union、physical inputs。
+    - DataFlow filters 不得被标成 direct visibleCondition。
+
+- [ ] M35.7：`--query-page-logic` 内嵌 `key_model_availability`
+  - 页面级输出增加 `key_model_availability[]`。
+  - 对由 display/action/data gate 引用的关键模型，输出：
+    - `page_scoped_target`
+    - `direct_filters[]`
+    - `dataflow_table`
+    - `source_filters[]`
+    - `output_filters[]`
+    - `physical_inputs[]`
+    - `join_rules[]`
+    - `union_rules[]`
+    - `row_semantics`
+  - 测试：
+    - `会员已注册.spg` page logic 中必须包含 `model11` availability 摘要。
+    - 摘要必须包含 `$DATA:/加工表/小程序/绑车.tbl`、`[是否展示] == 1`、`$user.WECHAT_UNIONID`。
+
+- [ ] M35.8：裸字段与 DataFlow origin contract
+  - 对 `${FIELD}` 输出硬护栏：
+    - `bare_symbol_is_not_table=true`
+    - `candidate_inputs_are_not_proven=true`
+  - DataFlow 字段来源统一输出：
+    - `dataflow_table`
+    - `dataflow_output_field`
+    - `original_node`
+    - `original_field`
+    - `proven_physical_input`
+    - `candidate_inputs[]`
+    - `origin_confidence`
+  - 测试：
+    - `text41 value-source` 必须从 `CUSTOMAUTOMYAUTOLIST` 追到 `sliderpanel2 -> model11 -> fact_autoCustomerAutoRel.tbl.车辆VIN`。
+    - candidate-only fixture 不得输出 proven physical input。
+
+- [ ] M35.9：high-fanout `truncation_guard`
+  - compact 输出增加：
+    - `truncation_guard.is_complete`
+    - `truncation_guard.safe_to_answer_full_relationships`
+    - `truncation_guard.required_budget_for_complete_answer`
+    - `truncation_guard.truncated_sections[]`
+    - `recommended_rerun`
+  - 高扇出模型 compact 改为分组摘要：
+    - `readers_by_page`
+    - `writers_by_page`
+    - `writes_by_field`
+    - `consumed_by_dataflow_summary`
+    - `sample_readers`
+    - `sample_writers`
+  - 测试：
+    - `fact_qwSidebar --budget compact` 必须标记不能回答全量关系。
+    - `fact_qwSidebar --budget normal` 可用于完整关键读写验收。
+
+- [ ] M35.10：轻量 `--advise-query`
+  - 新增结构化规划命令：
+    - `--advise-query`
+    - `--page <PAGE>`
+    - `--target <TARGET>`
+    - `--question-kind <display|value-source|availability|writer|page-logic|model-relationships>`
+  - 输出：
+    - 推荐主命令。
+    - 推荐 budget。
+    - 是否需要 graphdb。
+    - `primary_fact_path`。
+    - `forbidden_fact_paths[]`。
+    - followup 规则。
+  - 不做自然语言问题分类，只消费结构化参数。
+  - 测试：
+    - `text41 + display` 推荐 explain-condition display。
+    - `model11 + availability` 推荐 page-scoped model availability。
+    - `fact_qwSidebar + model-relationships` 推荐 query-model normal 或 compact+guard。
+
+- [ ] M35.11：stdio/function-calling 同步
+  - stdio 输出同步包含：
+    - `answer_contract`
+    - `thinking_frame`
+    - `required_followups`
+    - `truncation_guard`
+  - function-calling 文档同步更新。
+  - CLI/stdio 字段一致，不能出现 CLI 有 contract、stdio 缺 contract。
+  - 测试：
+    - stdio `query_page_logic` 与 CLI 在 contract 关键字段上等价。
+    - stdio `query_model fact_qwSidebar` 能输出 truncation guard。
+    - stdio `explain_condition text41 display` 能输出 forbidden fact paths。
+
+- [ ] M35.12：Skill 重写为“元数据分析思考协议”
+  - 压缩命令说明，突出固定流程：
+    - 识别 intent。
+    - 读取 `answer_contract`。
+    - 只读 `primary_fact_path`。
+    - 执行 `required_followups`。
+    - 遇到 `truncation_guard.safe_to_answer_full_relationships=false` 必须升级 budget。
+    - 回答中声明使用的 evidence block。
+  - 明确禁止：
+    - value-source 回答 display。
+    - related_context 回答必要条件。
+    - candidate_inputs 回答 proven source。
+    - compact sample 回答全量 readers/writers。
+  - 同步：
+    - 仓库 `SKILL.md`
+    - `/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md`
+    - `docs/schema.md`
+    - `docs/function-calling-runtime.md`
+
+- [ ] M35.13：真实项目评测与失败分类
+  - 使用 `tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json` 作为验收集。
+  - 增加或记录失败分类：
+    - `wrong_intent`
+    - `missed_followup`
+    - `used_forbidden_fact_path`
+    - `ignored_truncation_guard`
+    - `confused_page_scoped_model`
+  - 5.4-mini 空上下文验收重点：
+    - `text41 display` 不再混用 value-source 证据。
+    - `model11 availability` 必须拿到 DataFlow filters、Join/Union、physical inputs。
+    - `fact_qwSidebar` high-fanout 不得在 compact 截断上给全量结论。
+
+### 验收目标
+
+- 空上下文 5.4-mini 能按 `answer_contract` 选择证据域，回答中不再把 value-source 当 display evidence。
+- `text41 display` 输出明确：自身无 direct visibleCondition，继承 `panel35.visibleCondition = model11.totalRowCount__ > 0`，并展开 `model11.ISSHOW == 1`。
+- `text41 value-source` 输出明确：裸字段不是表名，链路为 `sliderpanel2 -> model11.CUSTOMAUTOMYAUTOLIST -> $DATA:/加工表/小程序/绑车.tbl -> fact_autoCustomerAutoRel.tbl.车辆VIN`。
+- `model11 availability` 即使从 page logic 弱指向问题进入，也能拿到 DataFlow filters、output filters、physical inputs、Join/Union 语义。
+- `input3 writer` 保留 `model22.phoneNumber -> fact_qwSidebar.phoneNumber -> 潜客信息跟进.spg action1/action4` 字段级跨页链路。
+- `fact_qwSidebar` compact 输出能阻止模型给全量关系结论，并明确推荐 normal budget。
+- CLI 与 stdio/function-calling 的 contract 字段一致。
+- docs/schema、function-calling 文档、Skill 与测试同步更新。
