@@ -246,6 +246,145 @@ struct TraceStep {
     exp: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct DataflowFieldOriginProjection {
+    dataflow_table: String,
+    dataflow_output_field: String,
+    physical_source_fields: Vec<String>,
+    original_node: Option<String>,
+    original_field: Option<String>,
+    via: String,
+    confidence: String,
+    missing_evidence: Vec<String>,
+}
+
+fn build_via_value(original_node: Option<&str>, original_field: Option<&str>) -> String {
+    match (original_node, original_field) {
+        (Some(node), Some(field)) => format!("{}/{}", node, field),
+        (Some(node), None) => format!("{}/", node),
+        (None, Some(field)) => format!("/{}", field),
+        (None, None) => String::new(),
+    }
+}
+
+fn lookup_output_field<'a>(
+    fields: &'a HashMap<String, FieldRecord>,
+    target_field: &str,
+) -> Option<&'a FieldRecord> {
+    fields.get(target_field).or_else(|| {
+        fields.values().find(|f| {
+            f.dbfield == target_field
+                || f.original_field
+                    .as_ref()
+                    .map_or(false, |value| value == target_field)
+                || f.input_field
+                    .as_ref()
+                    .map_or(false, |value| value == target_field)
+                || f.name == target_field
+        })
+    })
+}
+
+fn project_output_field_origin(
+    meta: &DataFlowMeta,
+    target_field: &str,
+) -> DataflowFieldOriginProjection {
+    let mut missing_evidence = Vec::new();
+    let mut dataflow_output_field = target_field.to_string();
+
+    let output_entry = meta
+        .get_output_fields()
+        .into_iter()
+        .find_map(|(node_id, fields)| {
+            lookup_output_field(fields, target_field).map(|field_record| (node_id, field_record))
+        });
+
+    let (output_node_id, output_field) = match output_entry {
+        Some(entry) => entry,
+        None => {
+            return DataflowFieldOriginProjection {
+                dataflow_table: String::new(),
+                dataflow_output_field,
+                physical_source_fields: vec![],
+                original_node: None,
+                original_field: None,
+                via: String::new(),
+                confidence: "candidate".to_string(),
+                missing_evidence: vec!["output field not found in DataFlow outputs".to_string()],
+            };
+        }
+    };
+
+    dataflow_output_field = output_field.dbfield.clone();
+
+    let original_node = output_field.original_node.clone();
+    let original_field = output_field.original_field.clone();
+    let dataflow_table = meta
+        .get_alias(output_node_id)
+        .cloned()
+        .unwrap_or_else(|| output_node_id.to_string());
+
+    let mut projection = DataflowFieldOriginProjection {
+        dataflow_table,
+        dataflow_output_field,
+        physical_source_fields: Vec::new(),
+        original_node: original_node.clone(),
+        original_field: original_field.clone(),
+        via: build_via_value(original_node.as_deref(), original_field.as_deref()),
+        confidence: "candidate".to_string(),
+        missing_evidence: Vec::new(),
+    };
+
+    if let Some(ref original_field_name) = original_field {
+        projection
+            .physical_source_fields
+            .push(original_field_name.clone());
+    }
+
+    let Some(output_node) = original_node
+        .as_deref()
+        .and_then(|alias| meta.get_node_id(alias))
+    else {
+        missing_evidence.push("missing originalNode alias in aliasMap".to_string());
+        projection.missing_evidence = missing_evidence;
+        return projection;
+    };
+
+    let Some(module_table_path) = meta.get_node_module_table_path(output_node) else {
+        missing_evidence.push(format!(
+            "original node {} has no moduleTablePath",
+            original_node.as_deref().unwrap_or_default()
+        ));
+        projection.missing_evidence = missing_evidence;
+        return projection;
+    };
+
+    if module_table_path.is_empty() {
+        missing_evidence.push("moduleTablePath is empty".to_string());
+        projection.missing_evidence = missing_evidence;
+        return projection;
+    }
+
+    projection.confidence = "proven".to_string();
+    projection.missing_evidence = Vec::new();
+    projection
+}
+
+impl DataflowFieldOriginProjection {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "dataflow_table": self.dataflow_table,
+            "dataflow_output_field": self.dataflow_output_field,
+            "physical_source_fields": self.physical_source_fields,
+            "original_node": self.original_node,
+            "original_field": self.original_field,
+            "via": self.via,
+            "confidence": self.confidence,
+            "missing_evidence": self.missing_evidence,
+        })
+    }
+}
+
 /// 递归追溯字段的数据来源链
 fn trace_field_source(
     output_field_name: &str,
@@ -434,7 +573,6 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                 for (field_name, field_rec) in fields {
                     let mut visited: Vec<(String, String)> = Vec::new();
                     let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
-
                     writeln!(out, "\n[字段] {}", field_name)?;
 
                     if trace.len() <= 1 {
@@ -544,6 +682,7 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                 for (field_name, field_rec) in fields {
                     let mut visited: Vec<(String, String)> = Vec::new();
                     let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
+                    let origin_projection = project_output_field_origin(&dfm, field_name);
 
                     field_traces.push(serde_json::json!({
                         "field": field_name,
@@ -551,6 +690,7 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                         "output_node_id": node_id,
                         "output_node_alias": alias,
                         "trace_source": trace_source,
+                        "origin_projection": origin_projection.to_json(),
                         "trace": trace.iter().map(|s| serde_json::json!({
                             "node_alias": s.node_alias,
                             "node_type": s.node_type,
@@ -731,5 +871,94 @@ mod tests {
         assert!(trace
             .iter()
             .any(|step| step.dbfield == "CUSTOMAUTOMYAUTOLIST"));
+    }
+
+    #[test]
+    fn test_project_output_field_origin_proven_model_table() {
+        let raw_meta = serde_json::json!({
+            "aliasMap": {
+                "FACT_AUTOCUSTOMERAUTOREL": "node_source",
+                "模型输出": "output1"
+            },
+            "nodeTablePaths": {
+                "node_source": "$DATA:/主数据/fact_autoCustomerAutoRel.tbl",
+                "output1": "$DATA:/加工表/小程序/绑车.tbl"
+            },
+            "nodeTypes": {
+                "node_source": "ModelTable",
+                "output1": "Output"
+            },
+            "nodeFields": {
+                "output1": [
+                    {
+                        "name": "CUSTOMAUTOMYAUTOLIST",
+                        "dbfield": "CUSTOMAUTOMYAUTOLIST",
+                        "originalNode": "FACT_AUTOCUSTOMERAUTOREL",
+                        "originalField": "车辆VIN",
+                        "inputNode": "node_source"
+                    }
+                ]
+            }
+        });
+        let meta = DataFlowMeta::from_meta(&raw_meta);
+        let projection = project_output_field_origin(&meta, "CUSTOMAUTOMYAUTOLIST");
+
+        assert_eq!(projection.dataflow_table, "模型输出");
+        assert_eq!(
+            projection.dataflow_output_field,
+            "CUSTOMAUTOMYAUTOLIST".to_string()
+        );
+        assert_eq!(
+            projection.physical_source_fields,
+            vec!["车辆VIN".to_string()]
+        );
+        assert_eq!(
+            projection.original_node.as_deref(),
+            Some("FACT_AUTOCUSTOMERAUTOREL")
+        );
+        assert_eq!(projection.original_field.as_deref(), Some("车辆VIN"));
+        assert_eq!(projection.via, "FACT_AUTOCUSTOMERAUTOREL/车辆VIN");
+        assert_eq!(projection.confidence, "proven");
+        assert!(projection.missing_evidence.is_empty());
+    }
+
+    #[test]
+    fn test_project_output_field_origin_candidate_when_module_table_path_missing() {
+        let raw_meta = serde_json::json!({
+            "aliasMap": {
+                "FACT_MISS_TABLE": "node_source",
+                "模型输出": "output1"
+            },
+            "nodeTypes": {
+                "node_source": "ModelTable",
+                "output1": "Output"
+            },
+            "nodeFields": {
+                "output1": [
+                    {
+                        "name": "CUSTOMAUTOMYAUTOLIST",
+                        "dbfield": "CUSTOMAUTOMYAUTOLIST",
+                        "originalNode": "FACT_MISS_TABLE",
+                        "originalField": "车辆VIN"
+                    }
+                ]
+            }
+        });
+        let meta = DataFlowMeta::from_meta(&raw_meta);
+        let projection = project_output_field_origin(&meta, "CUSTOMAUTOMYAUTOLIST");
+
+        assert_eq!(projection.dataflow_table, "模型输出");
+        assert_eq!(projection.confidence, "candidate");
+        assert_eq!(projection.original_node.as_deref(), Some("FACT_MISS_TABLE"));
+        assert_eq!(projection.original_field.as_deref(), Some("车辆VIN"));
+        assert_eq!(projection.via, "FACT_MISS_TABLE/车辆VIN");
+        assert!(projection
+            .missing_evidence
+            .iter()
+            .any(|item| item.contains("moduleTablePath")));
+        assert_eq!(
+            projection.physical_source_fields,
+            vec!["车辆VIN".to_string()]
+        );
     }
 }
