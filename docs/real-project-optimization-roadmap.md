@@ -2008,6 +2008,247 @@ text41.value = ${CUSTOMAUTOMYAUTOLIST}
   - 跑 ignored 真实项目测试。
   - 检查 compact 输出体积不回退。
 
+### 小模型执行微任务包
+
+> 下面任务包供 5.3-codex-spark 这类小上下文模型逐包执行。每包只处理一个能力面，必须完成测试和提交后再进入下一包。不要一次性实现 M34 全部内容。
+
+#### M34-P0：只读定位包
+
+- 目标：不改代码，只确认现有入口。
+- 允许读取文件：
+  - `src/query/dataflow.rs`
+  - `src/explain.rs`
+  - `src/scanner/tbl.rs`
+  - `tests/regression_tests.rs`
+- 必须输出：
+  - 现有 DataFlow meta 从哪里来。
+  - `value_source_context.dataflow_field_origin` 当前在哪里生成。
+  - `answer_facts.value_source_facts` 当前在哪里组装。
+  - 最小改动应落在哪些函数。
+- 禁止：
+  - 修改文件。
+  - 重构。
+  - 新增边类型。
+
+#### M34-P1：DataFlow meta 最小索引包
+
+- 目标：只让已有 DataFlow meta 能解析 `moduleTablePath` 与 output 字段 `originalNode/originalField`。
+- 允许修改文件：
+  - `src/query/dataflow.rs`
+  - 如现有 explain 侧有独立解析逻辑，可只修改 `src/explain.rs` 中对应私有结构。
+  - `tests/regression_tests.rs` 或更合适的现有测试文件。
+- 必须实现：
+  - 字段记录保留 `originalField`、`originalNode`、`inputNode`。
+  - DataFlow 节点索引保留 `moduleTablePath`。
+  - 支持 output 字段按 `dbfield` 匹配，例如 `CUSTOMAUTOMYAUTOLIST`。
+  - 支持 output 字段按 `name` 匹配，例如 `车辆VIN`。
+- 暂不实现：
+  - filter。
+  - Join。
+  - Union。
+  - availability。
+  - schema 文档。
+- 测试要求：
+  - 增加一个 fixture 或现有 fixture 用例，证明 output field 可读到 `originalNode/originalField`。
+  - `cargo check`。
+  - 相关测试。
+- 提交：
+  - `feat: index dataflow field origins`
+
+#### M34-P2：originalNode 直连 ModelTable 来源包
+
+- 目标：把 output 字段通过 `originalNode/originalField` 追到 `ModelTable.moduleTablePath`。
+- 允许修改文件：
+  - `src/query/dataflow.rs` 或新增 `src/query/dataflow_projection.rs`。
+  - `src/explain.rs` 中接入点。
+  - 对应测试文件。
+- 必须实现：
+  - 输入：DataFlow meta + target field。
+  - 若 output field 有 `originalNode`：
+    - 用 `originalNode` 匹配 node alias。
+    - 找到该 node 的 `moduleTablePath`。
+    - 输出 proven origin。
+  - 若 `originalField` 存在：
+    - 作为物理表字段名输出。
+  - 若找不到 node 或 moduleTablePath：
+    - 输出 candidate/missing_evidence，不得输出 proven。
+- 输出字段最小要求：
+  - `dataflow_table`
+  - `dataflow_output_field`
+  - `physical_source_fields[]`
+  - `original_node`
+  - `original_field`
+  - `via = originalNode/originalField`
+  - `confidence = proven`
+- 暂不实现：
+  - 中间节点递归。
+  - Join/Union。
+  - filter。
+- 测试要求：
+  - 直连 `ModelTable` proven case。
+  - 找不到 `originalNode` candidate case。
+  - `cargo check`。
+  - 相关测试。
+- 提交：
+  - `feat: project dataflow original field origins`
+
+#### M34-P3：接入 `value_source_facts` 包
+
+- 目标：让 `--explain-condition ... --intent value-source --budget compact` 在 `details.answer_facts.value_source_facts` 中暴露 DataFlow projection 短事实。
+- 允许修改文件：
+  - `src/explain.rs`
+  - 可能需要引用 P2 的 projection helper。
+  - `tests/regression_tests.rs`
+- 必须实现：
+  - 保留 M33 既有字段：
+    - `raw_expr`
+    - `bare_symbol`
+    - `nearest_data_context`
+    - `field_path`
+    - `table_source_path`
+    - `proven_physical_input`
+  - 增加 DataFlow 短事实：
+    - `dataflow_table`
+    - `dataflow_output_field`
+    - `physical_source_fields[]`
+    - `candidate_inputs[]`
+  - compact 仍不输出完整 DataFlow internal topology。
+  - `details.answer_facts.value_source_facts` 是唯一 AI 直读位置；不要新增 `details.value_source_facts`。
+- 测试要求：
+  - fixture compact value-source 包含新增字段。
+  - 真实项目 ignored：`text41 value-source` 包含 `$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN`。
+  - `cargo check`。
+  - 相关测试。
+- 提交：
+  - `feat: expose dataflow origins in value facts`
+
+#### M34-P4：DataFlow filter 解析包
+
+- 目标：只解析 filter，不接 Join/Union。
+- 允许修改文件：
+  - DataFlow projection helper 文件。
+  - `src/explain.rs`
+  - 测试文件。
+- 必须实现：
+  - ModelTable 节点 filter clauses：
+    - `leftExp`
+    - `operator`
+    - `rightValue`
+    - `rightExp`
+  - 自由 `exp` filter。
+  - 字段引用提取：
+    - `[字段]`
+    - `[节点].[字段]`
+  - 变量引用提取：
+    - `$user.*`
+    - `$param.*`
+    - `param*`
+  - role：
+    - `source_filter`
+    - `output_filter`
+- 暂不实现：
+  - Join 行语义。
+  - Union 分支语义。
+- 测试要求：
+  - fixture source_filter。
+  - fixture output_filter + `$user.*`。
+  - 真实项目可选：`绑车.tbl` 包含 `[是否展示] == 1`。
+- 提交：
+  - `feat: parse dataflow filters`
+
+#### M34-P5：接入 `availability_facts` 包
+
+- 目标：让 model availability 或 display row-count gate 能看到 DataFlow filter 摘要。
+- 允许修改文件：
+  - `src/explain.rs`
+  - DataFlow projection helper 文件。
+  - `tests/regression_tests.rs`
+- 必须实现：
+  - `details.answer_facts.availability_facts.dataflow_availability`。
+  - 包含：
+    - `physical_input_tables[]`
+    - `source_filters[]`
+    - `output_filters[]`
+    - `referenced_vars[]`
+  - display intent 中，如果组件显示条件引用 `model.totalRowCount__`：
+    - 可在 data_empty_gates 或 display_facts 中补充 DataFlow availability 摘要。
+    - 必须标注它来自 row-count expansion。
+    - 不得标注为 direct/inherited visibleCondition。
+- 测试要求：
+  - fixture availability。
+  - 真实项目 ignored：`model11 availability` 包含 `fact_autoCustomerAutoRel.tbl`、`[是否展示] == 1`、`[关系类型] == 车主关系`、`$user.WECHAT_UNIONID`。
+- 提交：
+  - `feat: add dataflow availability facts`
+
+#### M34-P6：Join 最小语义包
+
+- 目标：只做 Join 摘要，不改变字段来源主结果。
+- 必须实现：
+  - 解析 Join node 的 `joinType`、`leftTable`、`rightTable`、`clauses`。
+  - 输出 `join_context[]` 到 value-source。
+  - 输出 `join_rules[]` 到 availability。
+  - 行语义：
+    - `InnerJoin` -> `both_sides_required`
+    - `LeftJoin` -> `left_rows_preserved_right_fields_nullable`
+    - `RightJoin` -> `right_rows_preserved_left_fields_nullable`
+    - `FullJoin` -> `either_side_preserved_fields_nullable`
+- 测试要求：
+  - LeftJoin 字段来自左表。
+  - InnerJoin availability。
+- 提交：
+  - `feat: summarize dataflow join rules`
+
+#### M34-P7：Union 最小语义包
+
+- 目标：只做 Union 分支摘要。
+- 必须实现：
+  - 解析 `inputNodes` 与 `unionMapArray`。
+  - value-source 只列目标字段相关分支。
+  - availability 输出 `union_rules[]`，语义为 `any_branch_can_output`。
+  - 没有目标字段的分支不得进入 proven value source。
+- 测试要求：
+  - Union 两分支字段来源。
+  - 无目标字段分支被排除。
+- 提交：
+  - `feat: summarize dataflow union branches`
+
+#### M34-P8：文档与 skill 包
+
+- 目标：同步 AI-facing contract。
+- 允许修改文件：
+  - `docs/schema.md`
+  - `docs/function-calling-runtime.md`
+  - `docs/performance-baseline.md`
+  - `SKILL.md`
+  - `/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md`
+- 必须写清：
+  - DataFlow projection 字段都在 `details.answer_facts.<fact_block>` 下。
+  - `value-source` 读 `value_source_facts.physical_source_fields[]`。
+  - `availability` 读 `availability_facts.dataflow_availability`。
+  - Join/Union/filter 是 DataFlow row/value context，不是组件 direct visibleCondition。
+- 测试要求：
+  - 如有 skill/docs 测试则跑。
+  - `cargo check`。
+- 提交：
+  - `docs: document dataflow projection facts`
+
+#### M34-P9：验收与清理包
+
+- 目标：冷脸验收前自检。
+- 必须运行：
+  - `cargo check`
+  - `cargo test`
+  - M34 ignored 真实项目测试。
+  - M33 关键 ignored 真实项目测试，防止回退。
+- 必须检查：
+  - compact 输出未恢复大数组。
+  - candidate 不会被写成 proven。
+  - `text41 display` 没把 DataFlow filter 当 direct visibleCondition。
+  - `text41 value-source` 能说明 `originalNode/originalField`。
+- 提交：
+  - 若只有测试/文档修正，用 `test:` 或 `docs:`。
+  - 若无改动，只输出验收报告，不提交。
+
 ### 验收目标
 
 - `text41` 值来源能够从裸字段稳定追到 `fact_autoCustomerAutoRel.tbl.车辆VIN`，并注明 `originalNode/originalField` 证据。
