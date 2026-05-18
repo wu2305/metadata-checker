@@ -2299,6 +2299,25 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
 
 ### 任务清单
 
+- [ ] M35.0：模块化拆分前置包
+  - 目标：先拆低耦合模块，避免 M35 新字段继续堆入 `src/explain.rs` / `src/query.rs`。
+  - 第一阶段只做无行为变更拆分，不改变 JSON 输出契约。
+  - 拆分阶段：
+    - [x] M35.0a：新增 `src/answer_contract.rs`，迁移 `TraversalIntent` 与 fact block 启用规则，并通过 `explain` re-export 保持旧调用路径。
+    - [ ] M35.0b：新增 `src/model_scope.rs`，在 page-scoped model resolver 有实际调用点时落代码。
+    - [ ] M35.0c：新增 `src/followup.rs`，在 required followup 生成器有实际调用点时落代码。
+    - [ ] M35.0d：拆分 `src/query/page_logic.rs` 与 `src/query/model.rs`，避免 `src/query.rs` 继续膨胀。
+  - 拆分原则：
+    - 先迁移纯类型和纯函数。
+    - 每次迁移都必须有调用点，避免新增未消费代码。
+    - 不为拆分而改变输出字段。
+    - 不引入循环依赖。
+  - 验证：
+    - `cargo check` 0 warning。
+    - 相关 regression tests 通过。
+  - 提交：
+    - `refactor: split answer contract primitives`
+
 - [ ] M35.1：统一 `answer_contract` schema
   - 所有核心查询输出增加顶层或 `details` 内稳定字段 `answer_contract`。
   - 最小字段：

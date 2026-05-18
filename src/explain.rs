@@ -1,3 +1,5 @@
+pub use crate::answer_contract::TraversalIntent;
+use crate::answer_contract::{AnswerFactKind, answer_fact_enabled};
 use crate::dependency::DependencyGraph;
 use crate::graph::GraphDB;
 use crate::output::schema::format_next_query;
@@ -23,86 +25,6 @@ fn normalize_dataflow_path(path: &str) -> String {
 
 fn is_same_dataflow_path(left: &str, right: &str) -> bool {
     normalize_dataflow_path(left) == normalize_dataflow_path(right)
-}
-
-/// M33 目标节点因果遍历意图
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TraversalIntent {
-    Auto,
-    Display,
-    ValueSource,
-    Writer,
-    Availability,
-    Context,
-}
-
-impl TraversalIntent {
-    pub fn parse(value: &str) -> Result<Self> {
-        match value {
-            "auto" | "" => Ok(Self::Auto),
-            "display" => Ok(Self::Display),
-            "value-source" | "value_source" => Ok(Self::ValueSource),
-            "writer" => Ok(Self::Writer),
-            "availability" => Ok(Self::Availability),
-            "context" => Ok(Self::Context),
-            other => anyhow::bail!(
-                "Invalid intent '{}'. Expected: auto | display | value-source | writer | availability | context",
-                other
-            ),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::Display => "display",
-            Self::ValueSource => "value-source",
-            Self::Writer => "writer",
-            Self::Availability => "availability",
-            Self::Context => "context",
-        }
-    }
-}
-
-/// M33 answer_facts 中的事实块类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AnswerFactKind {
-    Display,
-    ValueSource,
-    Writer,
-    Availability,
-    Context,
-    ModelIo,
-}
-
-/// 判断当前 intent 是否需要输出某类事实块
-fn answer_fact_enabled(
-    intent: TraversalIntent,
-    target_node: &crate::graph::Node,
-    kind: AnswerFactKind,
-) -> bool {
-    match intent {
-        TraversalIntent::Display => kind == AnswerFactKind::Display,
-        TraversalIntent::ValueSource => kind == AnswerFactKind::ValueSource,
-        TraversalIntent::Writer => kind == AnswerFactKind::Writer,
-        TraversalIntent::Availability => kind == AnswerFactKind::Availability,
-        TraversalIntent::Context => kind == AnswerFactKind::Context,
-        TraversalIntent::Auto => match target_node.node_type {
-            crate::graph::NodeType::Component => {
-                matches!(kind, AnswerFactKind::Display | AnswerFactKind::ValueSource)
-            }
-            crate::graph::NodeType::Field => {
-                matches!(kind, AnswerFactKind::ValueSource | AnswerFactKind::Writer)
-            }
-            crate::graph::NodeType::Model => {
-                matches!(kind, AnswerFactKind::Availability | AnswerFactKind::ModelIo)
-            }
-            crate::graph::NodeType::Page => {
-                matches!(kind, AnswerFactKind::Display | AnswerFactKind::Availability)
-            }
-            _ => kind == AnswerFactKind::Context,
-        },
-    }
 }
 
 /// 解释单文件 .spg 中的组件
