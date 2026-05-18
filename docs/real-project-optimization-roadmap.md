@@ -2304,7 +2304,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
   - 第一阶段只做无行为变更拆分，不改变 JSON 输出契约。
   - 拆分阶段：
     - [x] M35.0a：新增 `src/answer_contract.rs`，迁移 `TraversalIntent` 与 fact block 启用规则，并通过 `explain` re-export 保持旧调用路径。
-    - [ ] M35.0b：新增 `src/model_scope.rs`，在 page-scoped model resolver 有实际调用点时落代码。
+    - [x] M35.0b：新增 `src/model_scope.rs`，迁移 page-scoped model target 解析、页面后代扫描、DataFlow path 匹配和页面内局部 model resolver。
     - [ ] M35.0c：新增 `src/followup.rs`，在 required followup 生成器有实际调用点时落代码。
     - [ ] M35.0d：拆分 `src/query/page_logic.rs` 与 `src/query/model.rs`，避免 `src/query.rs` 继续膨胀。
   - 拆分原则：
