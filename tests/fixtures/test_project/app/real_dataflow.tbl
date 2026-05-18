@@ -34,6 +34,7 @@
 				"type": "FileInput",
 				"fileName": "售后进场车架号20240121.xlsx#售后有过进场记录",
 				"alias": "售后有过进场记录",
+				"moduleTablePath": "$DATA:/售后/fact_serviceappointments.tbl",
 				"id": "2e35e1c3d38a4d4687730626002368e0",
 				"projectName": "xiaoshouyi",
 				"devQueryFixedRows": true,

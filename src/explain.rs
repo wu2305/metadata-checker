@@ -1485,6 +1485,51 @@ fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) ->
         });
     };
 
+    let dataflow_origin = ctx.get("dataflow_field_origin");
+    let dataflow_table = ctx
+        .get("table_source_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let dataflow_output_field = dataflow_origin
+        .and_then(|origin| {
+            origin
+                .get("matched_field")
+                .and_then(|field| field.get("dbfield"))
+                .or_else(|| origin.get("matched_field").and_then(|field| field.get("name")))
+                .and_then(|v| v.as_str())
+        })
+        .unwrap_or("");
+
+    let physical_source_fields: Vec<String> = dataflow_origin
+        .and_then(|origin| {
+            let module_table_path = origin.get("module_table_path").and_then(|v| v.as_str())?;
+            let original_field = origin
+                .get("matched_field")
+                .and_then(|field| field.get("originalField").or_else(|| field.get("inputField")))
+                .and_then(|v| v.as_str())?;
+            Some(vec![format!("{}.{}", module_table_path, original_field)])
+        })
+        .unwrap_or_default();
+
+    let candidate_inputs: Vec<String> = ctx
+        .get("dataflow_inputs")
+        .and_then(|inputs| inputs.as_array())
+        .map(|inputs| {
+            inputs
+                .iter()
+                .filter_map(|item| {
+                    item.get("node_id")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| item.get("name").and_then(|v| v.as_str()))
+                        .or_else(|| item.get("source_file").and_then(|v| v.as_str()))
+                        .map(ToString::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     let origin_path = ctx
         .get("dataflow_field_origin")
         .and_then(|v| v.get("module_table_path"))
@@ -1576,6 +1621,18 @@ fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) ->
         "confidence": if origin_path.is_some() || table_source_path.is_some() { "high" } else { "low" },
         "raw_expr": raw_expr,
         "bare_symbol": bare_symbol,
+        "dataflow_table": if dataflow_table.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(dataflow_table)
+        },
+        "dataflow_output_field": if dataflow_output_field.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(dataflow_output_field.to_string())
+        },
+        "physical_source_fields": physical_source_fields,
+        "candidate_inputs": candidate_inputs,
         "nearest_data_context": context_component,
         "data_set": data_set,
         "field_path": field_path,

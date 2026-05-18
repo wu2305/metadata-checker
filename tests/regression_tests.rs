@@ -752,6 +752,81 @@ fn test_m33_compact_hides_primary_and_value_context_details() {
 }
 
 #[test]
+fn test_m33_compact_value_source_includes_dataflow_projection_fields() {
+    let (_db_path, graph) = setup_graph_db("m33_compact_value_source_dataflow_projection");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/p34_value_source_dataflow.spg|text_dataflow",
+        "compact",
+        metadata_checker::explain::TraversalIntent::ValueSource,
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+    assert_eq!(
+        result
+            .get("summary")
+            .and_then(|v| v.get("intent"))
+            .and_then(|v| v.as_str()),
+        Some("value-source")
+    );
+    let answer_facts = details
+        .get("answer_facts")
+        .and_then(|v| v.as_object())
+        .expect("answer_facts must exist");
+    let value_facts = answer_facts
+        .get("value_source_facts")
+        .and_then(|v| v.as_object())
+        .expect("value_source_facts must exist");
+    assert_eq!(
+        value_facts
+            .get("dataflow_table")
+            .and_then(|v| v.as_str()),
+        Some("app/real_dataflow.tbl"),
+        "value_source_facts 必须输出 dataflow_table"
+    );
+    assert_eq!(
+        value_facts
+            .get("dataflow_output_field")
+            .and_then(|v| v.as_str()),
+        Some("CJH"),
+        "value_source_facts 必须输出 dataflow_output_field"
+    );
+    assert!(
+        value_facts
+            .get("physical_source_fields")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| items.iter().any(|item| {
+                item.as_str()
+                    .map_or(false, |field| field.contains("fact_serviceappointments"))
+            })),
+        "value_source_facts 应包含物理来源字段"
+    );
+    let candidate_inputs = value_facts
+        .get("candidate_inputs")
+        .and_then(|v| v.as_array())
+        .expect("candidate_inputs must be array");
+    assert!(
+        candidate_inputs
+            .iter()
+            .any(|item| item.as_str() == Some("model:fact_serviceappointments")),
+        "value_source_facts 应包含 Dataflow 输入模型候选"
+    );
+    assert!(
+        details
+            .get("value_source_context")
+            .map_or(false, |v| v.is_null()),
+        "compact 输出不应展开 value_source_context"
+    );
+    assert!(
+        details.get("value_source_facts").is_none(),
+        "compact 时不应新增 details.value_source_facts"
+    );
+}
+
+#[test]
 fn test_m33_auto_field_enables_value_source_and_writer_facts() {
     let (_db_path, graph) = setup_graph_db("m33_auto_field_facts");
     let result = metadata_checker::explain::build_explain_condition_output(
@@ -5679,6 +5754,96 @@ fn test_real_project_m33_text41_compact_display_intent_is_low_noise() {
             .and_then(|v| v.as_u64())
             .map_or(false, |count| count > 0),
         "display intent 应把非显示路径计入 rejected_paths_summary"
+    );
+}
+
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_text41_compact_value_source_includes_dataflow_projection() {
+    let graph_db_path = "/tmp/m34_text41_value_source.graphdb";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--build-graph",
+    ]);
+
+    let out = run_cli(&[
+        "--project-dir",
+        "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+        "--graph-db-path",
+        graph_db_path,
+        "--explain-condition",
+        "comp:app/售后.app/绑定车辆/会员已注册.spg|text41",
+        "--intent",
+        "value-source",
+        "--budget",
+        "compact",
+    ]);
+
+    let ai: AiOutput = serde_json::from_str(&out).expect("must be AiOutput");
+    let summary = ai.summary.as_object().expect("summary must be object");
+    let details = ai
+        .details
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+    assert_eq!(
+        summary.get("intent").and_then(|v| v.as_str()),
+        Some("value-source")
+    );
+    assert_eq!(
+        summary.get("answer_facts_count").and_then(|v| v.as_u64()),
+        Some(1)
+    );
+
+    let value_facts = details
+        .get("answer_facts")
+        .and_then(|v| v.get("value_source_facts"))
+        .and_then(|v| v.as_object())
+        .expect("value_source_facts must exist");
+
+    let physical_fields = value_facts
+        .get("physical_source_fields")
+        .and_then(|v| v.as_array())
+        .expect("physical_source_fields must be array");
+    assert!(
+        physical_fields
+            .iter()
+            .any(|item| {
+                item.as_str()
+                    .map_or(false, |field| {
+                        field.contains("$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN")
+                    })
+            }),
+        "text41 value-source 必须包含 fact_autoCustomerAutoRel 的物理来源字段"
+    );
+
+    assert_eq!(
+        value_facts
+            .get("dataflow_table")
+            .and_then(|v| v.as_str()),
+        Some("$DATA:/加工表/小程序/绑车.tbl"),
+        "value_source_facts 必须保留 dataflow_table"
+    );
+    assert_eq!(
+        value_facts
+            .get("dataflow_output_field")
+            .and_then(|v| v.as_str()),
+        Some("CUSTOMAUTOMYAUTOLIST"),
+        "value_source_facts 必须输出目标 dataflow 输出字段"
+    );
+    assert!(
+        details
+            .get("value_source_context")
+            .map_or(false, |v| v.is_null()),
+        "compact value-source 不应展开 value_source_context"
+    );
+    assert!(
+        details.get("value_source_facts").is_none(),
+        "compact value-source 不应新增顶层 value_source_facts"
     );
 }
 

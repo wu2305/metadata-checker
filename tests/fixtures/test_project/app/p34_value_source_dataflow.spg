@@ -1,0 +1,30 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "sources": [
+    {
+      "id": "model1",
+      "modelType": "dataflow",
+      "path": "app/real_dataflow.tbl"
+    }
+  ],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {
+        "id": "sliderpanel2",
+        "type": "sliderpanel",
+        "source": "data",
+        "dataSet": "model1",
+        "components": [
+          {
+            "id": "text_dataflow",
+            "type": "text",
+            "value": "${CJH}"
+          }
+        ]
+      }
+    ]
+  }
+}
