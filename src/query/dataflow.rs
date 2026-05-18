@@ -260,10 +260,10 @@ struct DataflowFieldOriginProjection {
 
 fn build_via_value(original_node: Option<&str>, original_field: Option<&str>) -> String {
     match (original_node, original_field) {
-        (Some(node), Some(field)) => format!("{}/{}", node, field),
-        (Some(node), None) => format!("{}/", node),
-        (None, Some(field)) => format!("/{}", field),
-        (None, None) => String::new(),
+        (Some(_), Some(_)) => "originalNode/originalField".to_string(),
+        (Some(_), None) => "originalNode".to_string(),
+        (None, Some(_)) => "originalField".to_string(),
+        (None, None) => "unknown".to_string(),
     }
 }
 
@@ -320,8 +320,9 @@ fn project_output_field_origin(
     let original_node = output_field.original_node.clone();
     let original_field = output_field.original_field.clone();
     let dataflow_table = meta
-        .get_alias(output_node_id)
-        .cloned()
+        .get_node_module_table_path(output_node_id)
+        .map(str::to_string)
+        .or_else(|| meta.get_alias(output_node_id).cloned())
         .unwrap_or_else(|| output_node_id.to_string());
 
     let mut projection = DataflowFieldOriginProjection {
@@ -334,12 +335,6 @@ fn project_output_field_origin(
         confidence: "candidate".to_string(),
         missing_evidence: Vec::new(),
     };
-
-    if let Some(ref original_field_name) = original_field {
-        projection
-            .physical_source_fields
-            .push(original_field_name.clone());
-    }
 
     let Some(output_node) = original_node
         .as_deref()
@@ -366,6 +361,11 @@ fn project_output_field_origin(
     }
 
     projection.confidence = "proven".to_string();
+    if let Some(ref original_field_name) = original_field {
+        projection
+            .physical_source_fields
+            .push(format!("{}.{}", module_table_path, original_field_name));
+    }
     projection.missing_evidence = Vec::new();
     projection
 }
@@ -903,21 +903,24 @@ mod tests {
         let meta = DataFlowMeta::from_meta(&raw_meta);
         let projection = project_output_field_origin(&meta, "CUSTOMAUTOMYAUTOLIST");
 
-        assert_eq!(projection.dataflow_table, "模型输出");
+        assert_eq!(
+            projection.dataflow_table,
+            "$DATA:/加工表/小程序/绑车.tbl"
+        );
         assert_eq!(
             projection.dataflow_output_field,
             "CUSTOMAUTOMYAUTOLIST".to_string()
         );
         assert_eq!(
             projection.physical_source_fields,
-            vec!["车辆VIN".to_string()]
+            vec!["$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN".to_string()]
         );
         assert_eq!(
             projection.original_node.as_deref(),
             Some("FACT_AUTOCUSTOMERAUTOREL")
         );
         assert_eq!(projection.original_field.as_deref(), Some("车辆VIN"));
-        assert_eq!(projection.via, "FACT_AUTOCUSTOMERAUTOREL/车辆VIN");
+        assert_eq!(projection.via, "originalNode/originalField");
         assert_eq!(projection.confidence, "proven");
         assert!(projection.missing_evidence.is_empty());
     }
@@ -951,14 +954,11 @@ mod tests {
         assert_eq!(projection.confidence, "candidate");
         assert_eq!(projection.original_node.as_deref(), Some("FACT_MISS_TABLE"));
         assert_eq!(projection.original_field.as_deref(), Some("车辆VIN"));
-        assert_eq!(projection.via, "FACT_MISS_TABLE/车辆VIN");
+        assert_eq!(projection.via, "originalNode/originalField");
         assert!(projection
             .missing_evidence
             .iter()
             .any(|item| item.contains("moduleTablePath")));
-        assert_eq!(
-            projection.physical_source_fields,
-            vec!["车辆VIN".to_string()]
-        );
+        assert!(projection.physical_source_fields.is_empty());
     }
 }
