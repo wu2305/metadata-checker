@@ -1,12 +1,12 @@
 use crate::graph::GraphDB;
 use crate::output::schema::{format_next_query, format_next_query_multi};
-use crate::path::{PathFinder, PathSelector};
 use anyhow::Result;
 use serde_json::json;
 use std::io::{self, Write};
 
 mod graph_collect;
 mod metadata;
+mod path_summary;
 
 /// 提取完整节点 ID 中的组件裸 ID（如 comp:app/a.spg|button1 -> button1）
 fn component_short_id(node_id: &str) -> &str {
@@ -705,15 +705,14 @@ pub fn build_query_page_logic_output(
     sort_by_impact(&mut action_prerequisites);
 
     // ---- 5.6 主链路抽取（M19.5）—— 使用路径计算领域模型 ----
-    let mut primary_paths: Vec<serde_json::Value> = Vec::new();
-    let mut related_context: Vec<serde_json::Value> = Vec::new();
-    let mut candidate_paths: Vec<serde_json::Value> = Vec::new();
-    let mut supporting_paths: Vec<serde_json::Value> = Vec::new();
-    let mut rejected_paths: Vec<serde_json::Value> = Vec::new();
-    let mut path_selection_diagnostics: Vec<String> = Vec::new();
-
-    // 1. 提取锚点
-    let path_query = crate::path::AnchorExtractor::extract(
+    let path_summary::PageLogicPaths {
+        mut primary_paths,
+        mut related_context,
+        candidate_paths,
+        supporting_paths,
+        rejected_paths,
+        path_selection_diagnostics,
+    } = path_summary::build_page_logic_paths(
         graph,
         page_id,
         &page_node,
@@ -723,88 +722,6 @@ pub fn build_query_page_logic_output(
         &write_targets,
         &entrypoints,
     );
-
-    // 2. 路径发现（有界 BFS）
-    let finder = crate::path::BoundedCausalPathFinder::default();
-    let mut candidates = finder.find_candidates(graph, &path_query);
-
-    // 2.5 字段级主链路保底：为每个 data_source 构造精确的字段因果路径
-    for ds in &data_sources {
-        let field_candidates =
-            crate::path::build_field_causal_paths_for_data_source(graph, &page_node, ds);
-        candidates.extend(field_candidates);
-    }
-
-    // 去重：按 path_id 保留第一个，后续重复丢弃
-    {
-        let mut seen = std::collections::HashSet::new();
-        candidates.retain(|c| seen.insert(c.path_id.clone()));
-    }
-
-    // 3. 路径选择（分组保底）
-    let selector = crate::path::RuleBasedPathSelector;
-    let selection = selector.select(&path_query, candidates);
-
-    // 4. 转换回兼容格式，同时保留新结构
-    for p in selection.primary_paths {
-        primary_paths.push(p.to_json());
-    }
-    for p in selection.candidate_paths {
-        candidate_paths.push(p.to_json());
-    }
-    for p in selection.supporting_paths {
-        supporting_paths.push(p.to_json());
-    }
-    for p in selection.related_context {
-        related_context.push(p.to_json());
-    }
-    for p in selection.rejected_paths {
-        rejected_paths.push(p.to_json());
-    }
-    for d in selection.selection_diagnostics {
-        path_selection_diagnostics.push(d);
-    }
-
-    // 旁路关系：收集非本页面的跨页关系（保留旧逻辑作为补充）
-    let mut seen_ctx: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for comp in &child_components {
-        if let Some((comp_out, _comp_in)) = graph.get_node_edges(&comp.id) {
-            for (target, edge) in comp_out {
-                if target.id.starts_with("page:") && target.id != page_id {
-                    let ctx_key = format!("{}->{}", comp.id, target.id);
-                    if !seen_ctx.contains(&ctx_key) {
-                        seen_ctx.insert(ctx_key.clone());
-                        related_context.push(serde_json::json!({
-                            "from": comp.id,
-                            "to": target.id,
-                            "edge_type": format!("{:?}", edge.edge_type),
-                            "field_path": edge.field_path,
-                            "source_file": comp.path.clone(),
-                            "confidence": "low",
-                            "reason": "跨页面旁路关系",
-                        }));
-                    }
-                }
-            }
-        }
-    }
-
-    // primary_paths 按 confidence 排序，高 confidence 优先
-    primary_paths.sort_by(|a, b| {
-        let a_conf = a
-            .get("confidence")
-            .and_then(|v| v.as_str())
-            .unwrap_or("medium");
-        let b_conf = b
-            .get("confidence")
-            .and_then(|v| v.as_str())
-            .unwrap_or("medium");
-        match (a_conf, b_conf) {
-            ("high", "medium") | ("high", "low") | ("medium", "low") => std::cmp::Ordering::Less,
-            ("medium", "high") | ("low", "high") | ("low", "medium") => std::cmp::Ordering::Greater,
-            _ => std::cmp::Ordering::Equal,
-        }
-    });
 
     // ---- 6. Risk diagnostics ----
     let mut diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
