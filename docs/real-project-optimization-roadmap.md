@@ -2312,6 +2312,7 @@ M35 的目标不是继续堆长 Skill，而是把 Skill 中的分析思考模式
     - [x] M35.0g：拆分 `src/explain/handlers.rs`，迁移图节点 explain handler；`src/explain.rs` 只保留单文件解释、条件输出装配和 handler 分发。
     - [x] M35.0h：继续拆分 `src/explain/handlers/` 子模块，将 condition、component/action、model/field、page/dataflow handler 分组维护。
     - [x] M35.0i：继续拆分 `src/explain/condition_facts/` 子模块，将 conditions、value_source、answer_facts、path_partition 分组维护。
+    - [x] M35.0j：拆分 `src/query/page_logic/graph_collect.rs` 与 `src/query/page_logic/metadata.rs`，迁移页面节点递归收集和原始 `.spg` 文件补充元数据读取。
   - 拆分原则：
     - 先迁移纯类型和纯函数。
     - 每次迁移都必须有调用点，避免新增未消费代码。

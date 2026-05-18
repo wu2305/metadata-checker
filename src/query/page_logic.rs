@@ -5,6 +5,9 @@ use anyhow::Result;
 use serde_json::json;
 use std::io::{self, Write};
 
+mod graph_collect;
+mod metadata;
+
 /// 提取完整节点 ID 中的组件裸 ID（如 comp:app/a.spg|button1 -> button1）
 fn component_short_id(node_id: &str) -> &str {
     node_id.split('|').next_back().unwrap_or(node_id)
@@ -59,187 +62,19 @@ pub fn build_query_page_logic_output(
     };
 
     // ---- 1. 递归收集页面下所有 Component 节点，再收集它们 Triggers 出的 Action 节点 ----
-    let mut child_components: Vec<&crate::graph::Node> = Vec::new();
-    let mut child_actions: Vec<&crate::graph::Node> = Vec::new();
-    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    fn collect_components_recursive<'a>(
-        graph: &'a crate::graph::GraphDB,
-        parent_id: &str,
-        child_components: &mut Vec<&'a crate::graph::Node>,
-        child_actions: &mut Vec<&'a crate::graph::Node>,
-        visited: &mut std::collections::HashSet<String>,
-    ) {
-        if let Some((outgoing, _)) = graph.get_node_edges(parent_id) {
-            for (target, edge) in &outgoing {
-                if matches!(edge.edge_type, crate::graph::EdgeType::Contains)
-                    && matches!(target.node_type, crate::graph::NodeType::Component)
-                    && !visited.contains(&target.id)
-                {
-                    visited.insert(target.id.clone());
-                    child_components.push(target);
-                    if let Some((comp_out, _)) = graph.get_node_edges(&target.id) {
-                        for (act, e) in &comp_out {
-                            if matches!(e.edge_type, crate::graph::EdgeType::Triggers)
-                                && matches!(act.node_type, crate::graph::NodeType::Action)
-                                && !visited.contains(&act.id)
-                            {
-                                visited.insert(act.id.clone());
-                                child_actions.push(act);
-                            }
-                        }
-                    }
-                    collect_components_recursive(
-                        graph,
-                        &target.id,
-                        child_components,
-                        child_actions,
-                        visited,
-                    );
-                }
-            }
-        }
-    }
-
-    collect_components_recursive(
-        graph,
-        page_id,
-        &mut child_components,
-        &mut child_actions,
-        &mut visited,
-    );
+    let graph_collect::PageLogicNodes {
+        child_components,
+        child_actions,
+    } = graph_collect::collect_page_logic_nodes(graph, page_id);
 
     // ---- 2. 从原始文件读取：递归收集组件元数据、action 元数据、visibility_rules ----
-    let mut page_inputs: Vec<serde_json::Value> = Vec::new();
-    let mut visibility_rules: Vec<serde_json::Value> = Vec::new();
-    let mut from_file = false;
-    let mut component_json_paths: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    // action_id (裸 id，不含前缀) -> { trigger_type, wait_prev, condition }
-    let mut action_meta: std::collections::HashMap<String, serde_json::Value> =
-        std::collections::HashMap::new();
-
-    if let Some(proj_dir) = project_dir {
-        let file_path = proj_dir.join(&page_node.path);
-        if file_path.exists()
-            && let Ok(content) = std::fs::read_to_string(&file_path)
-            && let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content)
-        {
-            from_file = true;
-            // page_inputs: params
-            if let Some(params) = json_val.get("params").and_then(|p| p.as_array()) {
-                for p in params {
-                    page_inputs.push(json!({
-                        "id": p.get("id"),
-                        "name": p.get("name"),
-                        "type": "page_param",
-                    }));
-                }
-            }
-
-            // 递归收集组件和 action 元数据
-            fn collect_components(
-                arr: &[serde_json::Value],
-                path_prefix: &str,
-                source_file: &str,
-                component_json_paths: &mut std::collections::HashMap<String, String>,
-                visibility_rules: &mut Vec<serde_json::Value>,
-                action_meta: &mut std::collections::HashMap<String, serde_json::Value>,
-            ) {
-                for (index, comp) in arr.iter().enumerate() {
-                    let comp_id = comp.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let component_path = format!("{}[{}]", path_prefix, index);
-                    if !comp_id.is_empty() {
-                        component_json_paths.insert(comp_id.to_string(), component_path.clone());
-                    }
-                    for prop in ["visible", "hidden", "disabled", "readonly"] {
-                        if let Some(val) = comp.get(prop) {
-                            let mut expr_struct =
-                                crate::action_semantics::build_expression_struct(val.as_str());
-                            let mut rule = json!({
-                                "component_id": comp_id,
-                                "rule": prop,
-                                "expression": val,
-                                "source_file": source_file,
-                                "json_path": format!("{}.{}", component_path, prop),
-                            });
-                            if let Some(obj) = expr_struct.as_object_mut() {
-                                for key in [
-                                    "raw_expr",
-                                    "refs",
-                                    "resolved_refs",
-                                    "unresolved_refs",
-                                    "ambiguous_refs",
-                                    "diagnostics",
-                                    "confidence",
-                                ] {
-                                    rule[key] = obj.remove(key).unwrap_or(serde_json::Value::Null);
-                                }
-                            }
-                            visibility_rules.push(rule);
-                        }
-                    }
-                    // 收集 action 元数据，key 用 comp_id + "|" + action_id 防止同名 action 串线
-                    if let Some(actions) = comp.get("actions").and_then(|a| a.as_array()) {
-                        for (action_index, act) in actions.iter().enumerate() {
-                            if let Some(aid) = act.get("id").and_then(|v| v.as_str()) {
-                                let trigger_type = act
-                                    .get("triggerType")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("click");
-                                let wait_prev = act.get("waitPrev").cloned();
-                                // condition: condition 字段或 conditionExp 字段
-                                let condition = act
-                                    .get("condition")
-                                    .or_else(|| act.get("conditionExp"))
-                                    .cloned();
-                                let action_path =
-                                    format!("{}.actions[{}]", component_path, action_index);
-                                action_meta.insert(
-                                    format!("{}|{}", comp_id, aid),
-                                    json!({
-                                        "trigger_type": trigger_type,
-                                        "wait_prev": wait_prev,
-                                        "condition": condition,
-                                        "json_path": action_path,
-                                        "source_file": source_file,
-                                    }),
-                                );
-                            }
-                        }
-                    }
-                    // 递归嵌套组件
-                    for nested_key in ["components", "panels", "steps", "comps"] {
-                        if let Some(nested) = comp.get(nested_key).and_then(|v| v.as_array()) {
-                            collect_components(
-                                nested,
-                                &format!("{}.{}", component_path, nested_key),
-                                source_file,
-                                component_json_paths,
-                                visibility_rules,
-                                action_meta,
-                            );
-                        }
-                    }
-                }
-            }
-
-            if let Some(components) = json_val
-                .get("canvas")
-                .and_then(|c| c.get("components"))
-                .and_then(|c| c.as_array())
-            {
-                collect_components(
-                    components,
-                    "canvas.components",
-                    &page_node.path,
-                    &mut component_json_paths,
-                    &mut visibility_rules,
-                    &mut action_meta,
-                );
-            }
-        }
-    }
+    let metadata::PageFileMetadata {
+        page_inputs,
+        visibility_rules,
+        from_file,
+        component_json_paths,
+        action_meta,
+    } = metadata::load_page_file_metadata(project_dir, &page_node.path);
 
     // ---- 3. Entrypoints：只包含用户可触发组件（有 action 的 button/link 等） ----
     let mut entrypoints: Vec<serde_json::Value> = Vec::new();
