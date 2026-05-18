@@ -1,0 +1,63 @@
+{
+  "version": "1.0",
+  "properties": {
+    "modelDataType": "DataFlow",
+    "dbTableName": "dataflow_filter_output",
+    "name": "p34_dataflow_filter_output"
+  },
+  "dimensions": [
+    {
+      "name": "粉丝ID",
+      "dbfield": "FANID",
+      "dataType": "C",
+      "length": 50,
+      "isDimension": true,
+      "inputField": "粉丝ID"
+    }
+  ],
+  "dataFlow": {
+    "nodes": {
+      "node_source": {
+        "id": "node_source",
+        "alias": "FACT_AUTOCUSTOMERAUTOREL",
+        "type": "ModelTable",
+        "moduleTablePath": "$DATA:/主数据/fact_autoCustomerAutoRel.tbl",
+        "fields": [
+          {
+            "name": "粉丝ID",
+            "dbfield": "FANID",
+            "inputField": "粉丝ID",
+            "originalField": "粉丝ID",
+            "originalNode": "FACT_AUTOCUSTOMERAUTOREL"
+          }
+        ]
+      },
+      "default": {
+        "id": "default",
+        "alias": "模型输出",
+        "type": "Output",
+        "inputNodes": [
+          "node_source"
+        ],
+        "filter": {
+          "matchAll": true,
+          "enabled": true,
+          "clauses": [
+            {
+              "exp": "[FACT_AUTOCUSTOMERAUTOREL].[粉丝ID]=$user.WECHAT_UNIONID and [粉丝ID]=param1"
+            }
+          ]
+        },
+        "fields": [
+          {
+            "name": "粉丝ID",
+            "dbfield": "FANID",
+            "inputField": "粉丝ID",
+            "originalField": "粉丝ID",
+            "originalNode": "FACT_AUTOCUSTOMERAUTOREL"
+          }
+        ]
+      }
+    }
+  }
+}

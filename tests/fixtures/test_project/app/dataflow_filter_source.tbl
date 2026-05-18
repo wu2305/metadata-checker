@@ -1,0 +1,66 @@
+{
+  "version": "1.0",
+  "properties": {
+    "modelDataType": "DataFlow",
+    "dbTableName": "dataflow_filter_source",
+    "name": "p34_dataflow_filter_source"
+  },
+  "dimensions": [
+    {
+      "name": "车辆VIN",
+      "dbfield": "CUSTOMAUTOMYAUTOLIST",
+      "dataType": "C",
+      "length": 50,
+      "isDimension": true,
+      "inputField": "车辆VIN",
+      "originalField": "车辆VIN",
+      "originalNode": "FACT_AUTOCUSTOMERAUTOREL"
+    }
+  ],
+  "dataFlow": {
+    "nodes": {
+      "node_source": {
+        "id": "node_source",
+        "alias": "FACT_AUTOCUSTOMERAUTOREL",
+        "type": "ModelTable",
+        "moduleTablePath": "$DATA:/主数据/fact_autoCustomerAutoRel.tbl",
+        "fields": [
+          {
+            "name": "车辆VIN",
+            "dbfield": "CUSTOMAUTOMYAUTOLIST",
+            "inputField": "车辆VIN",
+            "originalField": "车辆VIN",
+            "originalNode": "FACT_AUTOCUSTOMERAUTOREL"
+          }
+        ],
+        "filter": {
+          "matchAll": true,
+          "enabled": true,
+          "clauses": [
+            {
+              "leftExp": "[是否展示]",
+              "operator": "==",
+              "rightValue": 1
+            }
+          ]
+        }
+      },
+      "default": {
+        "id": "default",
+        "alias": "模型输出",
+        "type": "Output",
+        "inputNodes": [
+          "node_source"
+        ],
+        "fields": [
+          {
+            "name": "CUSTOMAUTOMYAUTOLIST",
+            "dbfield": "CUSTOMAUTOMYAUTOLIST",
+            "originalField": "车辆VIN",
+            "originalNode": "FACT_AUTOCUSTOMERAUTOREL"
+          }
+        ]
+      }
+    }
+  }
+}

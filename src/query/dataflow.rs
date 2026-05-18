@@ -1,8 +1,9 @@
 use crate::graph::GraphDB;
 use crate::output::schema::format_next_query;
 use anyhow::Result;
+use regex::Regex;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
 // ============================================================
@@ -25,6 +26,19 @@ struct FieldRecord {
     input_node: Option<String>,
 }
 
+/// DataFlow 过滤器子句（支持 serde 反序列化）
+#[derive(Debug, Clone, Deserialize)]
+struct DataflowFilterClause {
+    #[serde(rename = "leftExp")]
+    left_exp: Option<String>,
+    operator: Option<String>,
+    #[serde(rename = "rightValue")]
+    right_value: Option<serde_json::Value>,
+    #[serde(rename = "rightExp")]
+    right_exp: Option<String>,
+    exp: Option<String>,
+}
+
 /// DataFlow 预解析元数据（一次性反序列化 + 预建索引）
 #[derive(Debug, Clone, Default)]
 struct DataFlowMeta {
@@ -38,6 +52,8 @@ struct DataFlowMeta {
     internal_deps: HashMap<String, Vec<String>>,
     /// 预建索引：node_id -> field_name -> FieldRecord
     field_index: HashMap<String, HashMap<String, FieldRecord>>,
+    /// node_id -> 过滤器子句
+    node_filters: HashMap<String, Vec<DataflowFilterClause>>,
     /// node_id -> moduleTablePath
     module_table_paths: HashMap<String, String>,
 }
@@ -62,6 +78,10 @@ impl DataFlowMeta {
 
         let node_types: HashMap<String, String> = meta
             .get("nodeTypes")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let node_filters: HashMap<String, Vec<DataflowFilterClause>> = meta
+            .get("nodeFilters")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
         let module_table_paths: HashMap<String, String> = meta
@@ -177,6 +197,7 @@ impl DataFlowMeta {
             node_types,
             internal_deps,
             field_index,
+            node_filters,
             module_table_paths,
         }
     }
@@ -184,6 +205,11 @@ impl DataFlowMeta {
     /// 根据 node_id 获取字段索引（预建，O(1)）
     fn get_fields(&self, node_id: &str) -> Option<&HashMap<String, FieldRecord>> {
         self.field_index.get(node_id)
+    }
+
+    /// 根据 node_id 获取过滤器子句
+    fn get_node_filters(&self, node_id: &str) -> Option<&Vec<DataflowFilterClause>> {
+        self.node_filters.get(node_id)
     }
 
     /// 根据 node_id 获取节点类型
@@ -232,6 +258,46 @@ impl DataFlowMeta {
                 .unwrap_or_default()
         }
     }
+
+    /// 输出全部可解析 filter 投影
+    fn project_filters(&self) -> Vec<DataflowFilterProjection> {
+        let mut entries: Vec<(String, String)> = self
+            .node_filters
+            .keys()
+            .map(|node_id| {
+                let alias = self
+                    .get_alias(node_id)
+                    .cloned()
+                    .unwrap_or_else(|| node_id.clone());
+                (alias, node_id.clone())
+            })
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut projections = Vec::new();
+        for (node_alias, node_id) in entries {
+            let node_type = self.get_node_type(&node_id).to_string();
+            let role = match node_type.as_str() {
+                "ModelTable" => "source_filter",
+                "Output" => "output_filter",
+                _ => "node_filter",
+            }
+            .to_string();
+
+            let Some(clauses) = self.get_node_filters(&node_id) else {
+                continue;
+            };
+            for clause in clauses {
+                projections.push(project_filter_clause(
+                    &node_alias,
+                    &node_type,
+                    &role,
+                    clause,
+                ));
+            }
+        }
+        projections
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -256,6 +322,142 @@ struct DataflowFieldOriginProjection {
     via: String,
     confidence: String,
     missing_evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct DataflowFilterProjection {
+    node_alias: String,
+    node_type: String,
+    role: String,
+    expr: Option<String>,
+    left: Option<String>,
+    operator: Option<String>,
+    right: Option<String>,
+    referenced_fields: Vec<String>,
+    referenced_vars: Vec<String>,
+}
+
+fn format_filter_right_value(right_value: &serde_json::Value) -> Option<String> {
+    if right_value.is_null() {
+        return None;
+    }
+    right_value.as_str().map(str::to_string).or_else(|| {
+        right_value
+            .as_f64()
+            .map(|value| value.to_string())
+            .or_else(|| {
+                if right_value.is_boolean() {
+                    right_value.as_bool().map(|value| value.to_string())
+                } else {
+                    Some(right_value.to_string())
+                }
+            })
+    })
+}
+
+fn collect_ordered_unique(target: &mut Vec<String>, seen: &mut HashSet<String>, item: String) {
+    if seen.insert(item.clone()) {
+        target.push(item);
+    }
+}
+
+fn extract_filter_refs(expr: &str, fields: &mut Vec<String>, vars: &mut Vec<String>) {
+    let mut seen_fields: HashSet<String> = HashSet::new();
+    let mut seen_vars: HashSet<String> = HashSet::new();
+
+    let node_field_regex =
+        Regex::new(r"\[([^\[\].\n]+)\]\.\[([^\[\].\n]+)\]").expect("valid regex");
+    let field_regex = Regex::new(r"\[([^\[\]\n]+)\]").expect("valid regex");
+    let var_regex = Regex::new(r"\$(?:user|param)\.[A-Za-z0-9_]+").expect("valid regex");
+    let param_regex = Regex::new(r"\bparam\d+\b").expect("valid regex");
+
+    let node_field_ranges: Vec<(usize, usize)> = node_field_regex
+        .captures_iter(expr)
+        .map(|cap| {
+            let field_name = format!("{}.{}", &cap[1], &cap[2]);
+            collect_ordered_unique(fields, &mut seen_fields, field_name);
+            let range = cap
+                .get(0)
+                .expect("regex capture should have full match")
+                .range();
+            (range.start, range.end)
+        })
+        .collect();
+
+    for cap in field_regex.captures_iter(expr) {
+        let Some(full_match) = cap.get(0) else {
+            continue;
+        };
+        let in_node_field = node_field_ranges
+            .iter()
+            .any(|(start, end)| full_match.start() >= *start && full_match.end() <= *end);
+        if in_node_field {
+            continue;
+        }
+        collect_ordered_unique(fields, &mut seen_fields, cap[1].to_string());
+    }
+
+    for cap in var_regex.captures_iter(expr) {
+        collect_ordered_unique(vars, &mut seen_vars, cap[0].to_string());
+    }
+    for cap in param_regex.captures_iter(expr) {
+        collect_ordered_unique(vars, &mut seen_vars, cap[0].to_string());
+    }
+}
+
+fn project_filter_clause(
+    node_alias: &str,
+    node_type: &str,
+    role: &str,
+    clause: &DataflowFilterClause,
+) -> DataflowFilterProjection {
+    let mut referenced_fields = Vec::new();
+    let mut referenced_vars = Vec::new();
+
+    if let Some(left_exp) = clause.left_exp.as_deref() {
+        extract_filter_refs(left_exp, &mut referenced_fields, &mut referenced_vars);
+    }
+    if let Some(right_exp) = clause.right_exp.as_deref() {
+        extract_filter_refs(right_exp, &mut referenced_fields, &mut referenced_vars);
+    }
+    if let Some(exp) = clause.exp.as_deref() {
+        extract_filter_refs(exp, &mut referenced_fields, &mut referenced_vars);
+    }
+
+    let right = clause.right_exp.clone().or_else(|| {
+        clause
+            .right_value
+            .as_ref()
+            .and_then(format_filter_right_value)
+    });
+
+    DataflowFilterProjection {
+        node_alias: node_alias.to_string(),
+        node_type: node_type.to_string(),
+        role: role.to_string(),
+        expr: clause.exp.clone(),
+        left: clause.left_exp.clone(),
+        operator: clause.operator.clone(),
+        right,
+        referenced_fields,
+        referenced_vars,
+    }
+}
+
+impl DataflowFilterProjection {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "node_alias": self.node_alias,
+            "node_type": self.node_type,
+            "role": self.role,
+            "expr": self.expr,
+            "left": self.left,
+            "operator": self.operator,
+            "right": self.right,
+            "referenced_fields": self.referenced_fields,
+            "referenced_vars": self.referenced_vars,
+        })
+    }
 }
 
 fn build_via_value(original_node: Option<&str>, original_field: Option<&str>) -> String {
@@ -502,6 +704,7 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
 
     let raw_meta = node.meta.as_ref();
     let dfm = raw_meta.map(DataFlowMeta::from_meta).unwrap_or_default();
+    let dataflow_filters = dfm.project_filters();
 
     let outgoing = graph
         .get_node_edges(dataflow_id)
@@ -731,6 +934,7 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
                 "node_id": id,
                 "depends_on": deps,
             })).collect::<Vec<_>>(),
+            "dataflow_filters": dataflow_filters.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
         });
 
         let mut output =
@@ -865,12 +1069,16 @@ mod tests {
                 .any(|step| step.node_alias == "FACT_AUTOCUSTOMERAUTOREL"),
             "字段追溯应沿 originalNode 继续展开"
         );
-        assert!(trace
-            .iter()
-            .any(|step| step.field_name == "CUSTOMAUTOMYAUTOLIST"));
-        assert!(trace
-            .iter()
-            .any(|step| step.dbfield == "CUSTOMAUTOMYAUTOLIST"));
+        assert!(
+            trace
+                .iter()
+                .any(|step| step.field_name == "CUSTOMAUTOMYAUTOLIST")
+        );
+        assert!(
+            trace
+                .iter()
+                .any(|step| step.dbfield == "CUSTOMAUTOMYAUTOLIST")
+        );
     }
 
     #[test]
@@ -903,10 +1111,7 @@ mod tests {
         let meta = DataFlowMeta::from_meta(&raw_meta);
         let projection = project_output_field_origin(&meta, "CUSTOMAUTOMYAUTOLIST");
 
-        assert_eq!(
-            projection.dataflow_table,
-            "$DATA:/加工表/小程序/绑车.tbl"
-        );
+        assert_eq!(projection.dataflow_table, "$DATA:/加工表/小程序/绑车.tbl");
         assert_eq!(
             projection.dataflow_output_field,
             "CUSTOMAUTOMYAUTOLIST".to_string()
@@ -955,10 +1160,131 @@ mod tests {
         assert_eq!(projection.original_node.as_deref(), Some("FACT_MISS_TABLE"));
         assert_eq!(projection.original_field.as_deref(), Some("车辆VIN"));
         assert_eq!(projection.via, "originalNode/originalField");
-        assert!(projection
-            .missing_evidence
-            .iter()
-            .any(|item| item.contains("moduleTablePath")));
+        assert!(
+            projection
+                .missing_evidence
+                .iter()
+                .any(|item| item.contains("moduleTablePath"))
+        );
         assert!(projection.physical_source_fields.is_empty());
+    }
+
+    fn load_filter_fixture_meta(path: &str) -> DataFlowMeta {
+        let raw_content = match path {
+            "source" => {
+                include_str!("../../tests/fixtures/test_project/app/dataflow_filter_source.tbl")
+            }
+            "output" => {
+                include_str!("../../tests/fixtures/test_project/app/dataflow_filter_output.tbl")
+            }
+            _ => panic!("unknown fixture key: {path}"),
+        };
+        let raw_json: serde_json::Value =
+            serde_json::from_str(raw_content).expect("fixture JSON should parse");
+
+        let mut alias_map = HashMap::new();
+        let mut node_fields = HashMap::new();
+        let mut node_types = HashMap::new();
+        let mut node_filters = HashMap::new();
+        let mut node_table_paths = HashMap::new();
+
+        let nodes = raw_json
+            .get("dataFlow")
+            .and_then(|v| v.get("nodes"))
+            .and_then(|v| v.as_object())
+            .expect("fixture should contain dataFlow.nodes");
+
+        for (node_id, node) in nodes {
+            if let Some(alias) = node.get("alias").and_then(|v| v.as_str()) {
+                alias_map.insert(alias.to_string(), node_id.clone());
+            }
+            if let Some(node_type) = node.get("type").and_then(|v| v.as_str()) {
+                node_types.insert(node_id.clone(), node_type.to_string());
+            }
+            if let Some(module_table_path) = node.get("moduleTablePath").and_then(|v| v.as_str()) {
+                node_table_paths.insert(node_id.clone(), module_table_path.to_string());
+            }
+            if let Some(fields) = node.get("fields").and_then(|v| v.as_array()) {
+                node_fields.insert(node_id.clone(), fields.clone());
+            }
+            if let Some(clauses) = node
+                .get("filter")
+                .and_then(|v| v.get("clauses"))
+                .and_then(|v| v.as_array())
+            {
+                node_filters.insert(node_id.clone(), clauses.to_vec());
+            }
+        }
+
+        let meta = serde_json::json!({
+            "aliasMap": alias_map,
+            "nodeFields": node_fields,
+            "nodeTypes": node_types,
+            "nodeFilters": node_filters,
+            "nodeTablePaths": node_table_paths,
+        });
+        DataFlowMeta::from_meta(&meta)
+    }
+
+    #[test]
+    fn test_dataflow_filter_projection_source_filter_extracts_node_fields() {
+        let meta = load_filter_fixture_meta("source");
+        let projections = meta.project_filters();
+        let source_filter = projections
+            .iter()
+            .find(|item| item.role == "source_filter")
+            .expect("should expose source filter projection");
+
+        assert_eq!(source_filter.node_alias, "FACT_AUTOCUSTOMERAUTOREL");
+        assert_eq!(source_filter.left.as_deref(), Some("[是否展示]"));
+        assert_eq!(source_filter.right.as_deref(), Some("1"));
+        assert_eq!(source_filter.operator.as_deref(), Some("=="));
+        assert_eq!(
+            source_filter.referenced_fields.len(),
+            1,
+            "source filter 应只抽到 [是否展示] 一个字段"
+        );
+        assert!(
+            source_filter
+                .referenced_fields
+                .contains(&"是否展示".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dataflow_filter_projection_output_filter_extracts_vars_and_node_fields() {
+        let meta = load_filter_fixture_meta("output");
+        let projections = meta.project_filters();
+        let output_filter = projections
+            .iter()
+            .find(|item| item.role == "output_filter")
+            .expect("should expose output filter projection");
+
+        assert_eq!(output_filter.node_alias, "模型输出");
+        assert_eq!(
+            output_filter.expr.as_deref(),
+            Some("[FACT_AUTOCUSTOMERAUTOREL].[粉丝ID]=$user.WECHAT_UNIONID and [粉丝ID]=param1")
+        );
+
+        assert!(
+            output_filter
+                .referenced_fields
+                .contains(&"FACT_AUTOCUSTOMERAUTOREL.粉丝ID".to_string())
+        );
+        assert!(
+            output_filter
+                .referenced_fields
+                .contains(&"粉丝ID".to_string())
+        );
+        assert!(
+            output_filter
+                .referenced_vars
+                .contains(&"$user.WECHAT_UNIONID".to_string())
+        );
+        assert!(
+            output_filter
+                .referenced_vars
+                .contains(&"param1".to_string())
+        );
     }
 }

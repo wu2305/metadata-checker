@@ -213,6 +213,7 @@ pub fn process_tbl_file_from_string(
         let mut alias_map: HashMap<String, String> = HashMap::new();
         let mut node_fields: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
         let mut node_types: HashMap<String, String> = HashMap::new();
+        let mut node_filters: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
         let mut node_table_paths: HashMap<String, String> = HashMap::new();
 
         for (node_id, node) in nodes {
@@ -287,6 +288,16 @@ pub fn process_tbl_file_from_string(
                 }
             }
 
+            if let Some(filter) = node.get("filter").and_then(|v| v.as_object()) {
+                if let Some(clauses) = filter.get("clauses").and_then(|v| v.as_array()) {
+                    let has_filter = !clauses.is_empty();
+                    if has_filter {
+                        node_filters
+                            .insert(node_id.clone(), clauses.iter().cloned().collect::<Vec<_>>());
+                    }
+                }
+            }
+
             // Store all DataFlow metadata for subGraph expansion
             if let Some(model_node) = graph
                 .graph
@@ -313,6 +324,10 @@ pub fn process_tbl_file_from_string(
                     obj.insert(
                         "nodeTablePaths".to_string(),
                         serde_json::to_value(&node_table_paths).unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert(
+                        "nodeFilters".to_string(),
+                        serde_json::to_value(&node_filters).unwrap_or(serde_json::Value::Null),
                     );
                     // Store dimensions for fallback when nodeFields is absent
                     if let Some(dims) = value.get("dimensions") {
