@@ -1,6 +1,8 @@
 pub use crate::answer_contract::TraversalIntent;
 use crate::answer_contract::{AnswerFactKind, answer_fact_enabled};
 use crate::dependency::DependencyGraph;
+use crate::explain::evidence::{push_lineage_evidence, push_relation_evidence};
+use crate::explain::importance::{classify_importance, component_type_from_meta};
 use crate::graph::GraphDB;
 use crate::model_scope::{
     is_dataflow_model, parse_scoped_model_target, resolve_model_target_in_page,
@@ -12,6 +14,9 @@ use crate::superpage::{RefType, SuperPageMetadata};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::io::{self, Write};
+
+mod evidence;
+mod importance;
 
 /// 解释单文件 .spg 中的组件
 ///
@@ -285,223 +290,6 @@ fn make_ref(
         obj["json_path"] = serde_json::json!(path);
     }
     obj
-}
-
-/// 从详情项中提取字符串字段
-fn detail_str<'a>(item: &'a serde_json::Value, key: &str) -> Option<&'a str> {
-    item.get(key).and_then(|v| v.as_str())
-}
-
-/// 将 reads/writes/triggered_by/affects 之类的详情项转换为 evidence
-fn push_relation_evidence(
-    output: &mut crate::output::AiOutput,
-    relation: &str,
-    items: &[serde_json::Value],
-) {
-    for item in items.iter().take(5) {
-        let node_id = detail_str(item, "id")
-            .or_else(|| detail_str(item, "from"))
-            .or_else(|| detail_str(item, "to"));
-        let edge_type = detail_str(item, "edge_type")
-            .or_else(|| detail_str(item, "type"))
-            .unwrap_or("unknown");
-        let raw_expr = detail_str(item, "raw_expr").or_else(|| detail_str(item, "field_path"));
-        let source_file = detail_str(item, "source_file");
-        let json_path = detail_str(item, "json_path");
-        let json_path_str = json_path.unwrap_or("<graph-edge-derived>");
-
-        let has_real_path = json_path.is_some() && json_path != Some("<graph-edge-derived>");
-        let (confidence, reason) = if has_real_path && source_file.is_some() {
-            (
-                crate::output::Confidence::High,
-                "Relation extracted from graph edge with source metadata and json_path",
-            )
-        } else if source_file.is_some() {
-            (
-                crate::output::Confidence::Medium,
-                "Relation extracted from graph edge; raw json_path is not available",
-            )
-        } else {
-            (
-                crate::output::Confidence::Low,
-                "Relation inferred from graph traversal without direct JSON path",
-            )
-        };
-
-        let claim = if let Some(id) = node_id {
-            format!("{} relation on {}", relation, id)
-        } else {
-            format!("{} relation (target unidentified)", relation)
-        };
-
-        let mut ev = crate::output::Evidence::new(claim, reason)
-            .with_confidence(confidence)
-            .with_edge_type(edge_type);
-        if let Some(id) = node_id {
-            ev = ev.with_node_id(id);
-        }
-        if let Some(expr) = raw_expr {
-            ev = ev.with_raw_expr(expr);
-        }
-        ev = ev.with_json_path(json_path_str);
-        if let Some(sf) = source_file {
-            ev = ev.with_source_file(sf);
-        }
-        output.evidence.push(ev);
-
-        if node_id.is_none() || source_file.is_none() {
-            output.diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "EVIDENCE_LOCATION_MISSING".to_string(),
-                message: format!(
-                    "Evidence for {} relation lacks node_id or source_file; confidence reduced",
-                    relation
-                ),
-                location: crate::output::Location::new(),
-                suggestion: Some("Verify graph edge metadata completeness".to_string()),
-            });
-        }
-    }
-}
-
-/// 将 lineage 中内嵌 evidence 提升为顶层 evidence
-fn push_lineage_evidence(output: &mut crate::output::AiOutput, lineage: &[serde_json::Value]) {
-    for item in lineage.iter().take(5) {
-        let target_field = detail_str(item, "target_field").unwrap_or("?");
-        let evidence = item.get("evidence");
-        let source_file = evidence
-            .and_then(|e| e.get("source_file"))
-            .and_then(|v| v.as_str());
-        let node_id = evidence
-            .and_then(|e| e.get("node_id"))
-            .and_then(|v| v.as_str());
-        let edge_type = evidence
-            .and_then(|e| e.get("edge_type"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("Contains");
-        let raw_expr = evidence
-            .and_then(|e| e.get("raw_expr"))
-            .and_then(|v| v.as_str())
-            .or_else(|| detail_str(item, "source_expr"));
-        let json_path = evidence
-            .and_then(|e| e.get("json_path"))
-            .and_then(|v| v.as_str());
-
-        let is_graph_derived = node_id.is_none() || json_path.is_none() || raw_expr.is_none();
-        let confidence = if is_graph_derived {
-            crate::output::Confidence::Medium
-        } else {
-            match detail_str(item, "confidence") {
-                Some("high") => crate::output::Confidence::High,
-                Some("low") => crate::output::Confidence::Low,
-                _ => crate::output::Confidence::Medium,
-            }
-        };
-
-        let reason = if is_graph_derived {
-            "Field lineage partially derived from graph traversal; some metadata missing"
-        } else {
-            "Field lineage derived from metadata/source expressions"
-        };
-
-        let mut ev = crate::output::Evidence::new(format!("Lineage for {}", target_field), reason)
-            .with_confidence(confidence)
-            .with_edge_type(edge_type);
-        if let Some(id) = node_id {
-            ev = ev.with_node_id(id);
-        }
-        if let Some(expr) = raw_expr {
-            ev = ev.with_raw_expr(expr);
-        }
-        if let Some(path) = json_path {
-            ev = ev.with_json_path(path);
-        }
-        if let Some(sf) = source_file {
-            ev = ev.with_source_file(sf);
-        }
-        output.evidence.push(ev);
-    }
-}
-
-/// 辅助：从节点元数据提取组件真实类型
-fn component_type_from_meta(node: &crate::graph::Node) -> String {
-    node.meta
-        .as_ref()
-        .and_then(|m| m.get("component_type"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| node.name.clone())
-}
-
-/// 辅助：判断是否为容器类型
-fn is_container_type(comp_type: &str) -> bool {
-    matches!(comp_type, "dialog" | "panel" | "embedsuperpage" | "form")
-}
-
-/// 辅助：判断是否为表单输入类型
-fn is_form_input_type(comp_type: &str) -> bool {
-    matches!(
-        comp_type,
-        "input" | "textarea" | "select" | "radio" | "checkbox" | "datePicker" | "number" | "search"
-    )
-}
-
-/// 辅助：按重要性分类
-fn classify_importance(
-    has_nav: bool,
-    has_write: bool,
-    has_read: bool,
-    has_action: bool,
-    comp_type: &str,
-    node_type: &crate::graph::NodeType,
-) -> String {
-    match node_type {
-        crate::graph::NodeType::Page => {
-            if has_nav || has_write {
-                "entrypoint".to_string()
-            } else {
-                "container".to_string()
-            }
-        }
-        crate::graph::NodeType::Component => {
-            if is_container_type(comp_type) {
-                "container".to_string()
-            } else if is_form_input_type(comp_type) {
-                "form_input".to_string()
-            } else if comp_type == "text" && has_read {
-                "data_source_display".to_string()
-            } else if has_action {
-                "entrypoint".to_string()
-            } else if has_write {
-                "action_target".to_string()
-            } else if has_read {
-                "data_source_display".to_string()
-            } else {
-                "static_display".to_string()
-            }
-        }
-        crate::graph::NodeType::Action => {
-            if has_nav {
-                "entrypoint".to_string()
-            } else if has_write {
-                "action_target".to_string()
-            } else if has_read {
-                "data_source_display".to_string()
-            } else {
-                "static_display".to_string()
-            }
-        }
-        crate::graph::NodeType::Model | crate::graph::NodeType::Field => {
-            if has_write {
-                "action_target".to_string()
-            } else if has_read {
-                "data_source_display".to_string()
-            } else {
-                "unknown".to_string()
-            }
-        }
-        crate::graph::NodeType::Condition => "condition".to_string(),
-    }
 }
 
 /// 解释项目图中的节点
