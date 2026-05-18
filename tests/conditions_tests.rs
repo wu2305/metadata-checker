@@ -263,7 +263,8 @@ fn test_default_value_exp_extraction() {
     let dv_exp = records
         .iter()
         .filter(|r| {
-            r.owner_id == "input2" && r.condition_type == ConditionType::DefaultValueExp
+            r.owner_id == "input2"
+                && r.condition_type == ConditionType::DefaultValueExp
                 && r.raw_expr.contains("IF")
         })
         .collect::<Vec<_>>();
@@ -322,7 +323,8 @@ fn test_nested_action_extraction() {
         "nested action subject should be Action"
     );
     assert!(
-        ce.json_path.starts_with("canvas.components[3].components[1]")
+        ce.json_path
+            .starts_with("canvas.components[3].components[1]")
             && ce.json_path.contains("actions")
             && ce.json_path.contains("conditionExp"),
         "nested action json_path should traverse nested structure into nestedPanel: {}",
@@ -353,8 +355,7 @@ fn test_nested_action_extraction() {
         cond.json_path
     );
     assert_eq!(
-        cond.raw_expr,
-        "=nestedButton.value != ''",
+        cond.raw_expr, "=nestedButton.value != ''",
         "nested action condition raw_expr should be preserved"
     );
 }

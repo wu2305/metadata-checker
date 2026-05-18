@@ -75,10 +75,7 @@ fn answer_fact_enabled(
                 matches!(kind, AnswerFactKind::Display | AnswerFactKind::ValueSource)
             }
             crate::graph::NodeType::Field => {
-                matches!(
-                    kind,
-                    AnswerFactKind::ValueSource | AnswerFactKind::Writer
-                )
+                matches!(kind, AnswerFactKind::ValueSource | AnswerFactKind::Writer)
             }
             crate::graph::NodeType::Model => {
                 matches!(kind, AnswerFactKind::Availability | AnswerFactKind::ModelIo)
@@ -1090,52 +1087,9 @@ fn dataflow_field_origin(
     bare_symbol: &str,
 ) -> Option<serde_json::Value> {
     let meta = dataflow_node.meta.as_ref()?;
-    let node_fields = meta.get("nodeFields").and_then(|v| v.as_object())?;
-    let alias_map = meta.get("aliasMap").and_then(|v| v.as_object());
-    let node_table_paths = meta.get("nodeTablePaths").and_then(|v| v.as_object());
-
-    for (_node_id, fields) in node_fields {
-        let Some(arr) = fields.as_array() else {
-            continue;
-        };
-        for field in arr {
-            let matches_symbol = field
-                .get("dbfield")
-                .and_then(|v| v.as_str())
-                .map_or(false, |v| v == bare_symbol)
-                || field
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map_or(false, |v| v == bare_symbol);
-            if !matches_symbol {
-                continue;
-            }
-
-            let original_node_alias = field.get("originalNode").and_then(|v| v.as_str());
-            let original_node_id = original_node_alias.and_then(|alias| {
-                alias_map
-                    .and_then(|m| m.get(alias))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| Some(alias.to_string()))
-            });
-            let module_table_path = original_node_id.as_ref().and_then(|node_id| {
-                node_table_paths
-                    .and_then(|m| m.get(node_id))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-            });
-
-            return Some(serde_json::json!({
-                "dataflow_node_id": dataflow_node.id,
-                "matched_field": field,
-                "original_node_alias": original_node_alias,
-                "original_node_id": original_node_id,
-                "module_table_path": module_table_path,
-            }));
-        }
-    }
-    None
+    let dfm = crate::query::DataFlowMeta::from_meta(meta);
+    let projection = crate::query::project_output_field_origin(&dfm, bare_symbol);
+    Some(projection.to_json())
 }
 
 fn build_value_source_context_from_derived_edge(
@@ -1493,25 +1447,21 @@ fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) ->
         .to_string();
 
     let dataflow_output_field = dataflow_origin
-        .and_then(|origin| {
-            origin
-                .get("matched_field")
-                .and_then(|field| field.get("dbfield"))
-                .or_else(|| origin.get("matched_field").and_then(|field| field.get("name")))
-                .and_then(|v| v.as_str())
-        })
+        .and_then(|origin| origin.get("dataflow_output_field").and_then(|v| v.as_str()))
         .unwrap_or("");
 
     let physical_source_fields: Vec<String> = dataflow_origin
-        .and_then(|origin| {
-            let module_table_path = origin.get("module_table_path").and_then(|v| v.as_str())?;
-            let original_field = origin
-                .get("matched_field")
-                .and_then(|field| field.get("originalField").or_else(|| field.get("inputField")))
-                .and_then(|v| v.as_str())?;
-            Some(vec![format!("{}.{}", module_table_path, original_field)])
-        })
+        .and_then(|origin| origin.get("physical_source_fields").and_then(|v| v.as_array()))
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
+
+    let via = dataflow_origin
+        .and_then(|origin| origin.get("via").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    let original_node = dataflow_origin
+        .and_then(|origin| origin.get("original_node").and_then(|v| v.as_str()));
+    let original_field = dataflow_origin
+        .and_then(|origin| origin.get("original_field").and_then(|v| v.as_str()));
 
     let candidate_inputs: Vec<String> = ctx
         .get("dataflow_inputs")
@@ -1530,10 +1480,11 @@ fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) ->
         })
         .unwrap_or_default();
 
-    let origin_path = ctx
-        .get("dataflow_field_origin")
-        .and_then(|v| v.get("module_table_path"))
-        .and_then(|v| v.as_str());
+    let origin_path = if !physical_source_fields.is_empty() {
+        Some(physical_source_fields[0].as_str())
+    } else {
+        ctx.get("table_source_path").and_then(|v| v.as_str())
+    };
     let table_source_path = ctx.get("table_source_path").and_then(|v| v.as_str());
     let result = origin_path.or(table_source_path);
     let raw_expr = ctx.get("raw_expr").and_then(|v| v.as_str());
@@ -1633,6 +1584,9 @@ fn build_value_source_facts(value_source_context: &Option<serde_json::Value>) ->
         },
         "physical_source_fields": physical_source_fields,
         "candidate_inputs": candidate_inputs,
+        "via": via,
+        "original_node": original_node,
+        "original_field": original_field,
         "nearest_data_context": context_component,
         "data_set": data_set,
         "field_path": field_path,
@@ -1765,15 +1719,111 @@ fn build_writer_facts(primary_path: &[serde_json::Value]) -> serde_json::Value {
     })
 }
 
-fn build_availability_facts(data_empty_gates: &[serde_json::Value]) -> serde_json::Value {
+fn build_availability_facts(
+    data_empty_gates: &[serde_json::Value],
+    dataflow_meta: Option<&crate::query::DataFlowMeta>,
+) -> serde_json::Value {
     let gates: Vec<_> = data_empty_gates
         .iter()
         .map(compact_condition_fact)
         .collect();
+
+    let source_filters: Vec<serde_json::Value> = data_empty_gates
+        .iter()
+        .filter(|g| g.get("role").and_then(|v| v.as_str()) == Some("source_filter"))
+        .map(|g| serde_json::json!({
+            "node_alias": g.get("node_alias").and_then(|v| v.as_str()),
+            "raw_expr": g.get("raw_expr").and_then(|v| v.as_str()),
+            "left": g.get("left").and_then(|v| v.as_str()),
+            "operator": g.get("operator").and_then(|v| v.as_str()),
+            "right": g.get("right").and_then(|v| v.as_str()),
+            "referenced_fields": g.get("referenced_fields").cloned().unwrap_or(serde_json::Value::Null),
+            "referenced_vars": g.get("referenced_vars").cloned().unwrap_or(serde_json::Value::Null),
+        }))
+        .collect();
+
+    let output_filters: Vec<serde_json::Value> = data_empty_gates
+        .iter()
+        .filter(|g| g.get("role").and_then(|v| v.as_str()) == Some("output_filter"))
+        .map(|g| serde_json::json!({
+            "node_alias": g.get("node_alias").and_then(|v| v.as_str()),
+            "raw_expr": g.get("raw_expr").and_then(|v| v.as_str()),
+            "left": g.get("left").and_then(|v| v.as_str()),
+            "operator": g.get("operator").and_then(|v| v.as_str()),
+            "right": g.get("right").and_then(|v| v.as_str()),
+            "referenced_fields": g.get("referenced_fields").cloned().unwrap_or(serde_json::Value::Null),
+            "referenced_vars": g.get("referenced_vars").cloned().unwrap_or(serde_json::Value::Null),
+        }))
+        .collect();
+
+    let mut referenced_vars: Vec<String> = Vec::new();
+    let mut seen_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for g in data_empty_gates.iter().filter(|g| g.get("condition_type").and_then(|v| v.as_str()) == Some("DataFlowFilter")) {
+        if let Some(arr) = g.get("referenced_vars").and_then(|v| v.as_array()) {
+            for v in arr {
+                if let Some(s) = v.as_str() {
+                    if seen_vars.insert(s.to_string()) {
+                        referenced_vars.push(s.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let has_dataflow_filters = data_empty_gates.iter().any(|g| g.get("condition_type").and_then(|v| v.as_str()) == Some("DataFlowFilter"));
+
+    let mut join_rules: Vec<serde_json::Value> = Vec::new();
+    let mut union_rules: Vec<serde_json::Value> = Vec::new();
+    if let Some(dfm) = dataflow_meta {
+        for (node_id, conditions) in &dfm.node_join_conditions {
+            let alias = dfm.get_alias(node_id).map(|s| s.as_str()).unwrap_or(node_id.as_str());
+            for jc in conditions {
+                let row_semantic = match jc.join_type.as_str() {
+                    "LeftJoin" | "Left Outer Join" => "left_rows_preserved_right_fields_nullable",
+                    "RightJoin" | "Right Outer Join" => "right_rows_preserved_left_fields_nullable",
+                    "InnerJoin" | "Inner Join" => "both_tables_must_match",
+                    "FullJoin" | "Full Outer Join" => "all_rows_preserved_nullable",
+                    _ => "join_rows_filtered_by_condition",
+                };
+                let clauses_json: Vec<serde_json::Value> = jc.clauses.iter().map(|c| serde_json::json!({
+                    "left": c.left_exp,
+                    "operator": c.operator,
+                    "right": c.right_exp,
+                })).collect();
+                join_rules.push(serde_json::json!({
+                    "node_alias": alias,
+                    "join_type": &jc.join_type,
+                    "left_table": &jc.left_table,
+                    "right_table": &jc.right_table,
+                    "row_semantic": row_semantic,
+                    "clauses": clauses_json,
+                }));
+            }
+        }
+        for (node_id, entries) in &dfm.node_union_maps {
+            let alias = dfm.get_alias(node_id).map(|s| s.as_str()).unwrap_or(node_id.as_str());
+            let field_mappings: Vec<serde_json::Value> = entries.iter().map(|e| serde_json::json!({
+                "fields": e.values,
+                "visible": e.visible,
+            })).collect();
+            union_rules.push(serde_json::json!({
+                "node_alias": alias,
+                "row_semantic": "any_branch_can_output",
+                "field_mappings": field_mappings,
+            }));
+        }
+    }
+
     serde_json::json!({
         "result": if gates.is_empty() { "no_data_gate_found" } else { "data_gates_found" },
         "confidence": if gates.is_empty() { "medium" } else { "high" },
         "gates": gates,
+        "dataflow_availability": if has_dataflow_filters { "dataflow_filters_present" } else { "no_dataflow_filters" },
+        "source_filters": source_filters,
+        "output_filters": output_filters,
+        "join_rules": join_rules,
+        "union_rules": union_rules,
+        "referenced_vars": referenced_vars,
         "paths": data_empty_gates.iter().take(3).map(|gate| serde_json::json!({
             "intent": "availability",
             "result": gate.get("raw_expr").and_then(|v| v.as_str()),
@@ -2019,6 +2069,7 @@ fn build_answer_facts(
     value_source_context: &Option<serde_json::Value>,
     primary_path: &[serde_json::Value],
     budget: &str,
+    dataflow_meta: Option<&crate::query::DataFlowMeta>,
 ) -> serde_json::Value {
     let traversal_policy = build_traversal_policy(intent, budget);
     let mut facts = serde_json::Map::new();
@@ -2042,7 +2093,7 @@ fn build_answer_facts(
     if answer_fact_enabled(intent, target_node, AnswerFactKind::Availability) {
         facts.insert(
             "availability_facts".to_string(),
-            build_availability_facts(data_empty_gates),
+            build_availability_facts(data_empty_gates, dataflow_meta),
         );
     }
     if answer_fact_enabled(intent, target_node, AnswerFactKind::Context) {
@@ -2660,6 +2711,49 @@ pub fn build_explain_condition_output_with_intent(
         &mut seen_conditions,
     );
     data_empty_gates.extend(expanded_gates);
+
+    // M34: DataFlow availability projection — inject internal filters into data_empty_gates
+    if is_dataflow_model(&target_node) {
+        if let Some(meta) = target_node.meta.as_ref() {
+            let dfm = crate::query::DataFlowMeta::from_meta(meta);
+            for (idx, projection) in dfm.project_filters().iter().enumerate() {
+                let condition_id = format!(
+                    "{}|{}|{}|{}",
+                    target_node.id, projection.node_alias, projection.role, idx
+                );
+                let raw_expr = projection
+                    .expr
+                    .clone()
+                    .or_else(|| {
+                        Some(format!(
+                            "{} {} {}",
+                            projection.left.as_deref().unwrap_or(""),
+                            projection.operator.as_deref().unwrap_or(""),
+                            projection.right.as_deref().unwrap_or("")
+                        ))
+                    })
+                    .unwrap_or_default();
+                data_empty_gates.push(serde_json::json!({
+                    "condition_id": condition_id,
+                    "condition_type": "DataFlowFilter",
+                    "condition_scope": "dataflow_internal",
+                    "raw_expr": raw_expr,
+                    "owner_node_id": target_node.id,
+                    "node_alias": projection.node_alias,
+                    "node_type": projection.node_type,
+                    "role": projection.role,
+                    "left": projection.left,
+                    "operator": projection.operator,
+                    "right": projection.right,
+                    "referenced_fields": projection.referenced_fields,
+                    "referenced_vars": projection.referenced_vars,
+                    "source_file": target_node.path,
+                    "json_path": format!("dataFlow.nodes.{}.filters", projection.node_alias),
+                }));
+            }
+        }
+    }
+
     let value_source_context = build_value_source_context(graph, &target_node, &page_path);
     blocking_conditions = dedupe_conditions(blocking_conditions);
     data_empty_gates = dedupe_conditions(data_empty_gates);
@@ -2741,6 +2835,11 @@ pub fn build_explain_condition_output_with_intent(
         rejected_paths = rejected;
     }
 
+    let dataflow_meta = if is_dataflow_model(&target_node) {
+        target_node.meta.as_ref().map(crate::query::DataFlowMeta::from_meta)
+    } else {
+        None
+    };
     let answer_facts = build_answer_facts(
         graph,
         effective_intent,
@@ -2750,6 +2849,7 @@ pub fn build_explain_condition_output_with_intent(
         &value_source_context,
         &primary_path,
         _budget,
+        dataflow_meta.as_ref(),
     );
     let traversal_policy = answer_facts
         .get("traversal_policy")

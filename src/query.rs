@@ -1,6 +1,6 @@
-use crate::path::{PathFinder, PathSelector};
 use crate::graph::GraphDB;
 use crate::output::schema::{format_next_query, format_next_query_multi};
+use crate::path::{PathFinder, PathSelector};
 use anyhow::Result;
 use serde_json::json;
 use std::io::{self, Write};
@@ -65,7 +65,11 @@ fn pick_str_field<'a>(obj: &'a serde_json::Value, keys: &[&str]) -> Option<&'a s
 }
 
 /// 构建 query_model JSON 输出，不直接打印
-pub fn build_query_model_output(graph: &GraphDB, model_id: &str, budget: &str) -> Result<serde_json::Value> {
+pub fn build_query_model_output(
+    graph: &GraphDB,
+    model_id: &str,
+    budget: &str,
+) -> Result<serde_json::Value> {
     let is_compact = budget == "compact";
     if graph.get_node(model_id).is_none() {
         let candidates = graph.find_candidates(model_id, 5);
@@ -254,8 +258,7 @@ pub fn build_query_model_output(graph: &GraphDB, model_id: &str, budget: &str) -
         })
     };
 
-    let mut output =
-        crate::output::AiOutput::new(crate::output::OutputKind::ModelQuery, summary);
+    let mut output = crate::output::AiOutput::new(crate::output::OutputKind::ModelQuery, summary);
     output.query_target = Some(model_id.to_string());
     output.details = Some(details);
     // 为 summary 中每个计数和 details 中每个主要数组提供独立 evidence
@@ -609,6 +612,14 @@ pub fn query_cross(graph: &GraphDB, page_a: &str, page_b: &str, human: bool) -> 
 
 mod dataflow;
 pub use dataflow::query_dataflow;
+pub use dataflow::DataFlowMeta;
+pub use dataflow::DataflowFieldOriginProjection;
+pub use dataflow::project_output_field_origin;
+pub use dataflow::build_via_value;
+pub use dataflow::DataflowJoinCondition;
+pub use dataflow::DataflowUnionMapEntry;
+pub use dataflow::DataflowFilterClause;
+pub use dataflow::DataflowFilterProjection;
 
 /// 查询页面级逻辑摘要
 ///
@@ -668,14 +679,25 @@ pub fn build_query_page_logic_output(
                             }
                         }
                     }
-                    collect_components_recursive(graph, &target.id, child_components, child_actions, visited);
+                    collect_components_recursive(
+                        graph,
+                        &target.id,
+                        child_components,
+                        child_actions,
+                        visited,
+                    );
                 }
             }
         }
     }
 
-    collect_components_recursive(graph, page_id, &mut child_components, &mut child_actions, &mut visited);
-
+    collect_components_recursive(
+        graph,
+        page_id,
+        &mut child_components,
+        &mut child_actions,
+        &mut visited,
+    );
 
     // ---- 2. 从原始文件读取：递归收集组件元数据、action 元数据、visibility_rules ----
     let mut page_inputs: Vec<serde_json::Value> = Vec::new();
@@ -1266,14 +1288,29 @@ pub fn build_query_page_logic_output(
         edge: &crate::graph::Edge,
     ) -> Option<serde_json::Value> {
         let meta = cond_node.meta.as_ref()?;
-        let condition_type = meta.get("condition_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let condition_type = meta
+            .get("condition_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let raw_expr = meta.get("raw_expr").and_then(|v| v.as_str()).unwrap_or("");
-        let normalized_expr = meta.get("normalized_expr").and_then(|v| v.as_str()).unwrap_or("");
+        let normalized_expr = meta
+            .get("normalized_expr")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let json_path = meta.get("json_path").and_then(|v| v.as_str()).unwrap_or("");
-        let owner_type = meta.get("owner_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let owner_type = meta
+            .get("owner_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let owner_id = meta.get("owner_id").and_then(|v| v.as_str()).unwrap_or("");
-        let effect_type = meta.get("effect_type").and_then(|v| v.as_str()).unwrap_or("");
-        let subject_type = meta.get("subject_type").and_then(|v| v.as_str()).unwrap_or("");
+        let effect_type = meta
+            .get("effect_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let subject_type = meta
+            .get("subject_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let referenced_symbols: Vec<String> = meta
             .get("referenced_symbols")
             .and_then(|v| v.as_array())
@@ -1286,11 +1323,19 @@ pub fn build_query_page_logic_output(
         let source_file = cond_node.path.clone();
 
         // 影响范围计算：统计引用的模型数量和组件数量
-        let affected_model_count = referenced_symbols.iter().filter(|s| s.starts_with("model:")).count();
-        let affected_component_count = referenced_symbols.iter().filter(|s| s.starts_with("comp:")).count();
+        let affected_model_count = referenced_symbols
+            .iter()
+            .filter(|s| s.starts_with("model:"))
+            .count();
+        let affected_component_count = referenced_symbols
+            .iter()
+            .filter(|s| s.starts_with("comp:"))
+            .count();
         let is_entrypoint = matches!(subject_type, "action") || matches!(effect_type, "execute");
-        let is_main_panel = matches!(subject_type, "component") && !matches!(effect_type, "execute");
-        let affects_row_count = matches!(effect_type, "Filter") || condition_type.contains("Filter");
+        let is_main_panel =
+            matches!(subject_type, "component") && !matches!(effect_type, "execute");
+        let affects_row_count =
+            matches!(effect_type, "Filter") || condition_type.contains("Filter");
 
         // confidence：有原始表达式和 JSON 路径时为 high
         let confidence = if !json_path.is_empty() && !raw_expr.is_empty() {
@@ -1350,15 +1395,22 @@ pub fn build_query_page_logic_output(
                 {
                     seen_conditions.insert(source.id.clone());
                     if let Some(prereq) = build_prerequisite(source, edge) {
-                        let kind = prereq.get("kind").and_then(|v| v.as_str()).unwrap_or("unknown");
+                        let kind = prereq
+                            .get("kind")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
                         match kind {
                             "VisibleCondition" | "EnableCondition" | "MaskCondition" => {
                                 display_prerequisites.push(prereq);
                             }
-                            "SourceFilterExp" | "SourceFilterClause" | "ItemFilter" | "CalcCondition" | "CalcExp" | "DefaultValueExp" | "FieldExp" => {
+                            "SourceFilterExp" | "SourceFilterClause" | "ItemFilter"
+                            | "CalcCondition" | "CalcExp" | "DefaultValueExp" | "FieldExp" => {
                                 data_prerequisites.push(prereq);
                             }
-                            "ActionConditionExp" | "ActionCondition" | "SubmitCondition" | "SubmitPageCondition" => {
+                            "ActionConditionExp"
+                            | "ActionCondition"
+                            | "SubmitCondition"
+                            | "SubmitPageCondition" => {
                                 action_prerequisites.push(prereq);
                             }
                             _ => {
@@ -1417,9 +1469,14 @@ pub fn build_query_page_logic_output(
 
     // 1. 提取锚点
     let path_query = crate::path::AnchorExtractor::extract(
-        graph, page_id, &page_node,
-        &child_components, &child_actions,
-        &data_sources, &write_targets, &entrypoints,
+        graph,
+        page_id,
+        &page_node,
+        &child_components,
+        &child_actions,
+        &data_sources,
+        &write_targets,
+        &entrypoints,
     );
 
     // 2. 路径发现（有界 BFS）
@@ -1428,9 +1485,8 @@ pub fn build_query_page_logic_output(
 
     // 2.5 字段级主链路保底：为每个 data_source 构造精确的字段因果路径
     for ds in &data_sources {
-        let field_candidates = crate::path::build_field_causal_paths_for_data_source(
-            graph, &page_node, ds,
-        );
+        let field_candidates =
+            crate::path::build_field_causal_paths_for_data_source(graph, &page_node, ds);
         candidates.extend(field_candidates);
     }
 
@@ -1490,8 +1546,14 @@ pub fn build_query_page_logic_output(
 
     // primary_paths 按 confidence 排序，高 confidence 优先
     primary_paths.sort_by(|a, b| {
-        let a_conf = a.get("confidence").and_then(|v| v.as_str()).unwrap_or("medium");
-        let b_conf = b.get("confidence").and_then(|v| v.as_str()).unwrap_or("medium");
+        let a_conf = a
+            .get("confidence")
+            .and_then(|v| v.as_str())
+            .unwrap_or("medium");
+        let b_conf = b
+            .get("confidence")
+            .and_then(|v| v.as_str())
+            .unwrap_or("medium");
         match (a_conf, b_conf) {
             ("high", "medium") | ("high", "low") | ("medium", "low") => std::cmp::Ordering::Less,
             ("medium", "high") | ("low", "high") | ("low", "medium") => std::cmp::Ordering::Greater,
@@ -1508,7 +1570,10 @@ pub fn build_query_page_logic_output(
         let overflow_count = overflow.len();
         for mut path in overflow {
             if let Some(obj) = path.as_object_mut() {
-                obj.insert("reason".to_string(), serde_json::json!("旁路关系：超出主链路限制"));
+                obj.insert(
+                    "reason".to_string(),
+                    serde_json::json!("旁路关系：超出主链路限制"),
+                );
                 obj.insert("confidence".to_string(), serde_json::json!("low"));
             }
             related_context.push(path);
@@ -1518,15 +1583,17 @@ pub fn build_query_page_logic_output(
             code: "PRIMARY_PATHS_TRUNCATED".to_string(),
             message: format!(
                 "Primary paths limited to {}; {} overflow relations moved to related_context",
-                PRIMARY_PATH_LIMIT,
-                overflow_count
+                PRIMARY_PATH_LIMIT, overflow_count
             ),
             location: crate::output::Location {
                 source_file: Some(page_node.path.clone()),
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some("Use --budget full to see more relations, or focus on key_primary_paths in summary".to_string()),
+            suggestion: Some(
+                "Use --budget full to see more relations, or focus on key_primary_paths in summary"
+                    .to_string(),
+            ),
         });
     }
     // ---- 5.7 注意力漂移治理：旁路关系统计（必须在 truncation 之后）
@@ -1542,8 +1609,6 @@ pub fn build_query_page_logic_output(
         },
         "note": "related_context 不是必要条件，仅作参考",
     });
-
-
 
     if write_targets.is_empty() {
         diagnostics.push(crate::output::Diagnostic {
@@ -1770,8 +1835,12 @@ pub fn build_query_page_logic_output(
 
     // UNKNOWN_ACTION_TYPE：存在未识别的 action 类型（聚合同类，避免刷屏）
     {
-        let mut unknown_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let mut unknown_examples: std::collections::HashMap<String, (String, Option<String>, Option<String>, Option<String>)> = std::collections::HashMap::new();
+        let mut unknown_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut unknown_examples: std::collections::HashMap<
+            String,
+            (String, Option<String>, Option<String>, Option<String>),
+        > = std::collections::HashMap::new();
         for flow in &action_flows {
             if flow.get("action_category").and_then(|v| v.as_str()) == Some("unknown") {
                 let atype = flow
@@ -1788,21 +1857,31 @@ pub fn build_query_page_logic_output(
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string(),
-                            flow.get("component_id").and_then(|v| v.as_str()).map(ToString::to_string),
-                            flow.get("json_path").and_then(|v| v.as_str()).map(ToString::to_string),
-                            flow.get("action_id").and_then(|v| v.as_str()).map(ToString::to_string),
+                            flow.get("component_id")
+                                .and_then(|v| v.as_str())
+                                .map(ToString::to_string),
+                            flow.get("json_path")
+                                .and_then(|v| v.as_str())
+                                .map(ToString::to_string),
+                            flow.get("action_id")
+                                .and_then(|v| v.as_str())
+                                .map(ToString::to_string),
                         ),
                     );
                 }
             }
         }
         for (atype, count) in unknown_counts {
-            let (source_file, node_id, json_path, _action_id) = unknown_examples.get(&atype).cloned().unwrap_or_default();
+            let (source_file, node_id, json_path, _action_id) =
+                unknown_examples.get(&atype).cloned().unwrap_or_default();
             diagnostics.push(crate::output::Diagnostic {
                 severity: crate::output::DiagnosticSeverity::Warning,
                 code: "UNKNOWN_ACTION_TYPE".to_string(),
                 message: if count > 1 {
-                    format!("Unknown action type '{}' encountered ({} occurrences)", atype, count)
+                    format!(
+                        "Unknown action type '{}' encountered ({} occurrences)",
+                        atype, count
+                    )
                 } else {
                     format!("Unknown action type '{}' encountered", atype)
                 },
@@ -1882,11 +1961,15 @@ pub fn build_query_page_logic_output(
     let top_navigation: Vec<serde_json::Value> = navigation.iter().take(3).cloned().collect();
 
     // Build top-N prerequisite lists for readable summary
-    let top_display_prerequisites: Vec<serde_json::Value> = display_prerequisites.iter().take(3).cloned().collect();
-    let top_data_prerequisites: Vec<serde_json::Value> = data_prerequisites.iter().take(3).cloned().collect();
-    let top_action_prerequisites: Vec<serde_json::Value> = action_prerequisites.iter().take(3).cloned().collect();
+    let top_display_prerequisites: Vec<serde_json::Value> =
+        display_prerequisites.iter().take(3).cloned().collect();
+    let top_data_prerequisites: Vec<serde_json::Value> =
+        data_prerequisites.iter().take(3).cloned().collect();
+    let top_action_prerequisites: Vec<serde_json::Value> =
+        action_prerequisites.iter().take(3).cloned().collect();
     // key_primary_paths 从已排序的 primary_paths 中取前 10 条（已按重要性排序）
-    let key_primary_paths: Vec<serde_json::Value> = primary_paths.iter().take(10).cloned().collect();
+    let key_primary_paths: Vec<serde_json::Value> =
+        primary_paths.iter().take(10).cloned().collect();
 
     let summary = serde_json::json!({
         "page_id": page_id,
@@ -2405,8 +2488,12 @@ pub fn query_page_logic(
         }
         if let Some(details) = output.get("details").and_then(|d| d.as_object()) {
             if let Some(eps) = details.get("entrypoints").and_then(|v| v.as_array()) {
-                writeln!(out, "
---- Entrypoints ({}) ---", eps.len())?;
+                writeln!(
+                    out,
+                    "
+--- Entrypoints ({}) ---",
+                    eps.len()
+                )?;
                 for ep in eps {
                     let id = ep.get("id").and_then(|v| v.as_str()).unwrap_or("?");
                     let name = ep.get("name").and_then(|v| v.as_str()).unwrap_or("?");
@@ -2415,43 +2502,86 @@ pub fn query_page_logic(
                 }
             }
             if let Some(dss) = details.get("data_sources").and_then(|v| v.as_array()) {
-                writeln!(out, "
---- Data Sources ({}) ---", dss.len())?;
+                writeln!(
+                    out,
+                    "
+--- Data Sources ({}) ---",
+                    dss.len()
+                )?;
                 for ds in dss {
                     let fp = ds.get("field_path").and_then(|v| v.as_str()).unwrap_or("?");
                     writeln!(out, "  {}", fp)?;
                 }
             }
             if let Some(wts) = details.get("write_targets").and_then(|v| v.as_array()) {
-                writeln!(out, "
---- Write Targets ({}) ---", wts.len())?;
+                writeln!(
+                    out,
+                    "
+--- Write Targets ({}) ---",
+                    wts.len()
+                )?;
                 for wt in wts {
                     let fp = wt.get("field_path").and_then(|v| v.as_str()).unwrap_or("?");
                     writeln!(out, "  {}", fp)?;
                 }
             }
             if let Some(flows) = details.get("action_flows").and_then(|v| v.as_array()) {
-                writeln!(out, "
---- Action Flows ({}) ---", flows.len())?;
+                writeln!(
+                    out,
+                    "
+--- Action Flows ({}) ---",
+                    flows.len()
+                )?;
                 for flow in flows {
-                    let aid = flow.get("action_id").and_then(|v| v.as_str()).unwrap_or("?");
-                    let atype = flow.get("action_type").and_then(|v| v.as_str()).unwrap_or("?");
-                    let acat = flow.get("action_category").and_then(|v| v.as_str()).unwrap_or("?");
-                    let summary = flow.get("semantic_summary").and_then(|v| v.as_str()).unwrap_or("");
-                    let cid = flow.get("component_id").and_then(|v| v.as_str()).unwrap_or("?");
+                    let aid = flow
+                        .get("action_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    let atype = flow
+                        .get("action_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    let acat = flow
+                        .get("action_category")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    let summary = flow
+                        .get("semantic_summary")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let cid = flow
+                        .get("component_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
                     writeln!(out, "  {} [{} | {}]", aid, atype, acat)?;
                     if !summary.is_empty() {
                         writeln!(out, "    summary: {}", summary)?;
                     }
                     writeln!(out, "    triggered by {}", cid)?;
-                    if let Some(raw) = flow.get("blocks_on").and_then(|b| b.get("raw")).and_then(|v| v.as_str()) {
+                    if let Some(raw) = flow
+                        .get("blocks_on")
+                        .and_then(|b| b.get("raw"))
+                        .and_then(|v| v.as_str())
+                    {
                         writeln!(out, "    waits for: {}", raw)?;
                     }
-                    if let Some(raw) = flow.get("condition").and_then(|c| c.get("raw_expr")).and_then(|v| v.as_str()) {
+                    if let Some(raw) = flow
+                        .get("condition")
+                        .and_then(|c| c.get("raw_expr"))
+                        .and_then(|v| v.as_str())
+                    {
                         writeln!(out, "    condition: {}", raw)?;
                     }
-                    let writes = flow.get("writes").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                    let nav = flow.get("navigation").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                    let writes = flow
+                        .get("writes")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    let nav = flow
+                        .get("navigation")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
                     if writes > 0 {
                         writeln!(out, "    writes: {} target(s)", writes)?;
                     }
@@ -2461,8 +2591,12 @@ pub fn query_page_logic(
                 }
             }
             if let Some(nav) = details.get("navigation").and_then(|v| v.as_array()) {
-                writeln!(out, "
---- Navigation ({}) ---", nav.len())?;
+                writeln!(
+                    out,
+                    "
+--- Navigation ({}) ---",
+                    nav.len()
+                )?;
                 for n in nav {
                     let from = n.get("from").and_then(|v| v.as_str()).unwrap_or("?");
                     let to = n.get("to").and_then(|v| v.as_str()).unwrap_or("?");
@@ -2476,7 +2610,8 @@ pub fn query_page_logic(
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
-}/// 返回匹配节点列表，按名称相似度排序。
+}
+/// 返回匹配节点列表，按名称相似度排序。
 pub fn find_nodes(
     graph: &GraphDB,
     keyword: &str,

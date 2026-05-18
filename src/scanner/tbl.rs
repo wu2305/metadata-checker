@@ -104,7 +104,11 @@ pub fn process_tbl_file_from_string(
         let output_meta = if let Some(existing) = graph.get_node(&output_model_id) {
             let mut merged = existing.meta.clone().unwrap_or(serde_json::json!({}));
             if let Some(obj) = merged.as_object_mut() {
-                obj.insert("modelType".to_string(), serde_json::json!("PhysicalTable"));
+                // M34 fix: do not overwrite DataFlow modelType with PhysicalTable
+                let existing_model_type = obj.get("modelType").and_then(|v| v.as_str());
+                if existing_model_type != Some("DataFlow") {
+                    obj.insert("modelType".to_string(), serde_json::json!("PhysicalTable"));
+                }
             }
             Some(merged)
         } else {
@@ -214,6 +218,8 @@ pub fn process_tbl_file_from_string(
         let mut node_fields: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
         let mut node_types: HashMap<String, String> = HashMap::new();
         let mut node_filters: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+        let mut node_join_conditions: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+        let mut node_union_maps: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
         let mut node_table_paths: HashMap<String, String> = HashMap::new();
 
         for (node_id, node) in nodes {
@@ -298,6 +304,18 @@ pub fn process_tbl_file_from_string(
                 }
             }
 
+            if let Some(join_conditions) = node.get("joinConditions").and_then(|v| v.as_array()) {
+                if !join_conditions.is_empty() {
+                    node_join_conditions.insert(node_id.clone(), join_conditions.iter().cloned().collect::<Vec<_>>());
+                }
+            }
+
+            if let Some(union_map_array) = node.get("unionMapArray").and_then(|v| v.as_array()) {
+                if !union_map_array.is_empty() {
+                    node_union_maps.insert(node_id.clone(), union_map_array.iter().cloned().collect::<Vec<_>>());
+                }
+            }
+
             // Store all DataFlow metadata for subGraph expansion
             if let Some(model_node) = graph
                 .graph
@@ -328,6 +346,14 @@ pub fn process_tbl_file_from_string(
                     obj.insert(
                         "nodeFilters".to_string(),
                         serde_json::to_value(&node_filters).unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert(
+                        "nodeJoinConditions".to_string(),
+                        serde_json::to_value(&node_join_conditions).unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert(
+                        "nodeUnionMaps".to_string(),
+                        serde_json::to_value(&node_union_maps).unwrap_or(serde_json::Value::Null),
                     );
                     // Store dimensions for fallback when nodeFields is absent
                     if let Some(dims) = value.get("dimensions") {

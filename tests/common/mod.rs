@@ -15,16 +15,14 @@ pub fn build_fixture_graphdb() -> (PathBuf, PathBuf) {
     let unique = format!("metadata-checker-fixture-{}-{}", nanos, seq);
     let temp_dir = std::env::temp_dir().join(unique);
     let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(&temp_dir)
-        .expect("create temp dir must succeed");
+    std::fs::create_dir_all(&temp_dir).expect("create temp dir must succeed");
 
     let src = std::path::Path::new("tests/fixtures/test_project");
-    copy_dir_all(src, &temp_dir)
-        .expect("copy fixture dir must succeed");
+    copy_dir_all(src, &temp_dir).expect("copy fixture dir must succeed");
 
     let db_path = temp_dir.join(".metadata-checker.graphdb");
-    metadata_checker::scanner::scan_project(&temp_dir, &db_path,
-    ).expect("scan_project must succeed");
+    metadata_checker::scanner::scan_project(&temp_dir, &db_path)
+        .expect("scan_project must succeed");
     (temp_dir, db_path)
 }
 
@@ -43,19 +41,45 @@ fn copy_dir_all(
 ) -> std::io::Result<()> {
     std::fs::create_dir_all(&dst)?;
     for entry_result in std::fs::read_dir(src)? {
-        let entry = entry_result
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("read_dir entry failed: {}", e)))?;
+        let entry = entry_result.map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("read_dir entry failed: {}", e),
+            )
+        })?;
         if should_skip_fixture_artifact(&entry.path()) {
             continue;
         }
-        let ty = entry.file_type()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("file_type failed for {:?}: {}", entry.path(), e)))?;
+        let ty = entry.file_type().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("file_type failed for {:?}: {}", entry.path(), e),
+            )
+        })?;
         if ty.is_dir() {
-            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("copy_dir_all {:?} -> {:?}: {}", entry.path(), dst.as_ref().join(entry.file_name()), e)))?;
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name())).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "copy_dir_all {:?} -> {:?}: {}",
+                        entry.path(),
+                        dst.as_ref().join(entry.file_name()),
+                        e
+                    ),
+                )
+            })?;
         } else {
-            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("copy {:?} -> {:?}: {}", entry.path(), dst.as_ref().join(entry.file_name()), e)))?;
+            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name())).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "copy {:?} -> {:?}: {}",
+                        entry.path(),
+                        dst.as_ref().join(entry.file_name()),
+                        e
+                    ),
+                )
+            })?;
         }
     }
     Ok(())

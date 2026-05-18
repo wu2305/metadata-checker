@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, Instant};
+use std::time::{Instant, SystemTime};
 
 use crate::graph::GraphDB;
 
@@ -91,12 +91,14 @@ pub struct GraphFingerprint {
 
 /// 计算文件前 prefix_len 字节的内容 hash
 fn compute_prefix_hash(path: &std::path::Path, prefix_len: usize) -> u64 {
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
     let mut hasher = DefaultHasher::new();
     if let Ok(data) = std::fs::read(path) {
-        data.iter().take(prefix_len).for_each(|b| b.hash(&mut hasher));
+        data.iter()
+            .take(prefix_len)
+            .for_each(|b| b.hash(&mut hasher));
     }
     hasher.finish()
 }
@@ -146,8 +148,12 @@ impl GraphRuntime {
     ) -> Result<Self> {
         let path = graph_db_path.as_ref().to_path_buf();
         let start = Instant::now();
-        let graph = GraphDB::open_or_diagnostic(&path)
-            .map_err(|e| anyhow::anyhow!("GraphDB open failed: {}", serde_json::to_string(&e).unwrap_or_default()))?;
+        let graph = GraphDB::open_or_diagnostic(&path).map_err(|e| {
+            anyhow::anyhow!(
+                "GraphDB open failed: {}",
+                serde_json::to_string(&e).unwrap_or_default()
+            )
+        })?;
         let graph_load_ms = start.elapsed().as_millis();
 
         let (graph_file_mtime, graph_file_size) = std::fs::metadata(&path)
@@ -213,9 +219,13 @@ impl GraphRuntime {
         let query_compute_ms = query_start.elapsed().as_millis();
 
         if request.human {
-            let human_text = crate::explain::render_explain_condition_human(&result, &request.target);
+            let human_text =
+                crate::explain::render_explain_condition_human(&result, &request.target);
             if let Some(obj) = result.as_object_mut() {
-                obj.insert("human_summary".to_string(), serde_json::Value::String(human_text));
+                obj.insert(
+                    "human_summary".to_string(),
+                    serde_json::Value::String(human_text),
+                );
             }
         }
 
@@ -311,7 +321,8 @@ impl GraphRuntime {
 
     /// 获取当前 runtime 状态快照
     pub fn status(&self) -> RuntimeStatus {
-        let loaded_at_secs = self.loaded_at
+        let loaded_at_secs = self
+            .loaded_at
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);

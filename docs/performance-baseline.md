@@ -224,3 +224,45 @@ input3
 ## 维护
 
 每次重大版本更新后重新采集基线，更新本文档中的"实测值"。
+
+---
+
+## M34 Compact 输出体积基线
+
+验收时间：2026-05-18
+
+目标：DataFlow projection 接入 compact 输出，不输出完整内部拓扑，只交付 answer_facts 中的短事实。
+
+采集命令：
+
+
+实测值：
+
+| 场景 | 输出字节数 | 验收口径 |
+|---|---:|---|
+| text41 --intent value-source --budget compact | 10647 | 包含 dataflow_table、physical_source_fields、via、original_node/original_field，不展开完整 DataFlow 拓扑 |
+| text41 --intent display --budget compact | 9852 | 保留 M33 display 结论，compact 不额外展开 DataFlow availability |
+| model11 --intent availability --budget compact | 22110 | 当前 model11 为 dwtable，未展开背后 DataFlow；后续 dwtable->DataFlow 解析接入后需重新测量 |
+
+后续若 text41 value-source compact 超过 15KB，或 compact 中回退到输出完整 value_source_context / DataFlow 节点树，应视为 M34 注意力漂移回退。
+
+---
+
+## M34 Compact 输出体积基线
+
+验收时间：2026-05-18
+
+目标：DataFlow projection 接入 compact 输出，不输出完整内部拓扑，只交付 answer_facts 中的短事实。
+
+采集命令：
+
+
+实测值：
+
+| 场景 | 输出字节数 | 验收口径 |
+|---|---:|---|
+| text41 --intent value-source --budget compact | 10647 | 包含 dataflow_table、physical_source_fields、via、original_node/original_field，不展开完整 DataFlow 拓扑 |
+| text41 --intent display --budget compact | 9852 | 保留 M33 display 结论，compact 不额外展开 DataFlow availability |
+| model11 --intent availability --budget compact | 22110 | 当前 model11 为 dwtable，未展开背后 DataFlow；后续 dwtable->DataFlow 解析接入后需重新测量 |
+
+后续若 text41 value-source compact 超过 15KB，或 compact 中回退到输出完整 value_source_context / DataFlow 节点树，应视为 M34 注意力漂移回退。

@@ -806,7 +806,9 @@ fn evaluate_assertion(
                         s.contains(expected_val)
                     } else if let Some(a) = v.as_array() {
                         a.iter().any(|sub| {
-                            sub.as_str().map(|s| s.contains(expected_val)).unwrap_or(false)
+                            sub.as_str()
+                                .map(|s| s.contains(expected_val))
+                                .unwrap_or(false)
                         })
                     } else {
                         false
@@ -1440,7 +1442,11 @@ fn test_array_any_contains_substring_evaluator() {
         let field_value = item.get("evidence");
         if let Some(v) = field_value {
             if let Some(a) = v.as_array() {
-                a.iter().any(|sub| sub.as_str().map(|s| s.contains("model22.phoneNumber")).unwrap_or(false))
+                a.iter().any(|sub| {
+                    sub.as_str()
+                        .map(|s| s.contains("model22.phoneNumber"))
+                        .unwrap_or(false)
+                })
             } else {
                 false
             }

@@ -353,7 +353,11 @@ pub fn scan_conditions(spg: &SuperPageMetadata, source_file: Option<&str>) -> Ve
         .and_then(|c| c.get("components"))
         .and_then(|v| v.as_array())
     {
-        records.extend(scan_actions_recursive(components, "canvas.components", source_file));
+        records.extend(scan_actions_recursive(
+            components,
+            "canvas.components",
+            source_file,
+        ));
     }
 
     // 3. 从 sources 提取 filter

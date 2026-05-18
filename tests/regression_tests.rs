@@ -781,9 +781,7 @@ fn test_m33_compact_value_source_includes_dataflow_projection_fields() {
         .and_then(|v| v.as_object())
         .expect("value_source_facts must exist");
     assert_eq!(
-        value_facts
-            .get("dataflow_table")
-            .and_then(|v| v.as_str()),
+        value_facts.get("dataflow_table").and_then(|v| v.as_str()),
         Some("app/real_dataflow.tbl"),
         "value_source_facts 必须输出 dataflow_table"
     );
@@ -5810,21 +5808,16 @@ fn test_real_project_text41_compact_value_source_includes_dataflow_projection() 
         .and_then(|v| v.as_array())
         .expect("physical_source_fields must be array");
     assert!(
-        physical_fields
-            .iter()
-            .any(|item| {
-                item.as_str()
-                    .map_or(false, |field| {
-                        field.contains("$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN")
-                    })
-            }),
+        physical_fields.iter().any(|item| {
+            item.as_str().map_or(false, |field| {
+                field.contains("$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN")
+            })
+        }),
         "text41 value-source 必须包含 fact_autoCustomerAutoRel 的物理来源字段"
     );
 
     assert_eq!(
-        value_facts
-            .get("dataflow_table")
-            .and_then(|v| v.as_str()),
+        value_facts.get("dataflow_table").and_then(|v| v.as_str()),
         Some("$DATA:/加工表/小程序/绑车.tbl"),
         "value_source_facts 必须保留 dataflow_table"
     );
@@ -5984,4 +5977,160 @@ fn test_real_project_explain_condition_input33_candidates() {
             q
         );
     }
+}
+#[test]
+fn test_m34_dataflow_availability_injects_source_and_output_filters() {
+    let (_db_path, graph) = setup_graph_db("m34_dataflow_availability");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "model:dataflow_filter_source",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Availability,
+    )
+    .expect("explain-condition must succeed");
+
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+    let answer_facts = details
+        .get("answer_facts")
+        .and_then(|v| v.as_object())
+        .expect("answer_facts must exist");
+    let availability_facts = answer_facts
+        .get("availability_facts")
+        .and_then(|v| v.as_object())
+        .expect("availability_facts must exist");
+
+    assert_eq!(
+        availability_facts
+            .get("dataflow_availability")
+            .and_then(|v| v.as_str()),
+        Some("dataflow_filters_present"),
+        "DataFlow model availability must detect dataflow_filters_present"
+    );
+
+    let source_filters = availability_facts
+        .get("source_filters")
+        .and_then(|v| v.as_array())
+        .expect("source_filters must be array");
+    assert!(
+        !source_filters.is_empty(),
+        "source_filters should not be empty"
+    );
+    assert!(
+        source_filters.iter().any(|f| {
+            f.get("raw_expr")
+                .and_then(|v| v.as_str())
+                .map_or(false, |expr| expr.contains("是否展示"))
+        }),
+        "source_filters must contain filter clause"
+    );
+
+    let output_filters = availability_facts
+        .get("output_filters")
+        .and_then(|v| v.as_array())
+        .expect("output_filters must be array");
+    assert!(
+        output_filters.is_empty(),
+        "output_filters should be empty for this fixture"
+    );
+
+    let referenced_vars = availability_facts
+        .get("referenced_vars")
+        .and_then(|v| v.as_array())
+        .expect("referenced_vars must be array");
+    assert_eq!(referenced_vars.len(), 0, "fixture has no variable refs");
+}
+#[test]
+#[ignore = "requires real project path at /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"]
+fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
+    let graph_db_path = "/tmp/m34_model11_availability.db";
+    let _ = std::fs::remove_file(graph_db_path);
+    let _ = metadata_checker::scanner::scan_project(
+        std::path::Path::new("/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi"),
+        std::path::Path::new(graph_db_path),
+    );
+    let graph = metadata_checker::graph::GraphDB::open(std::path::Path::new(graph_db_path)).expect("graph should open");
+
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "model:model11",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Availability,
+    )
+    .expect("explain-condition must succeed");
+
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+    let answer_facts = details
+        .get("answer_facts")
+        .and_then(|v| v.as_object())
+        .expect("answer_facts must exist");
+    let availability_facts = answer_facts
+        .get("availability_facts")
+        .and_then(|v| v.as_object())
+        .expect("availability_facts must exist");
+
+    assert_eq!(
+        availability_facts
+            .get("dataflow_availability")
+            .and_then(|v| v.as_str()),
+        Some("dataflow_filters_present"),
+        "model11 availability must detect dataflow_filters_present"
+    );
+
+    let source_filters = availability_facts
+        .get("source_filters")
+        .and_then(|v| v.as_array())
+        .expect("source_filters must be array");
+    assert!(
+        source_filters.iter().any(|f| {
+            f.get("raw_expr")
+                .and_then(|v| v.as_str())
+                .map_or(false, |expr| expr.contains("是否展示"))
+        }),
+        "source_filters must contain [是否展示]"
+    );
+    assert!(
+        source_filters.iter().any(|f| {
+            f.get("raw_expr")
+                .and_then(|v| v.as_str())
+                .map_or(false, |expr| expr.contains("关系类型"))
+        }),
+        "source_filters must contain [关系类型]"
+    );
+
+    let output_filters = availability_facts
+        .get("output_filters")
+        .and_then(|v| v.as_array())
+        .expect("output_filters must be array");
+    assert!(
+        output_filters.iter().any(|f| {
+            f.get("raw_expr")
+                .and_then(|v| v.as_str())
+                .map_or(false, |expr| expr.contains("WECHAT_UNIONID"))
+        }),
+        "output_filters must contain WECHAT_UNIONID"
+    );
+
+    let join_rules = availability_facts
+        .get("join_rules")
+        .and_then(|v| v.as_array())
+        .expect("join_rules must be array");
+    assert!(
+        !join_rules.is_empty(),
+        "join_rules should not be empty for model11 DataFlow"
+    );
+
+    let referenced_vars = availability_facts
+        .get("referenced_vars")
+        .and_then(|v| v.as_array())
+        .expect("referenced_vars must be array");
+    assert!(
+        referenced_vars.iter().any(|v| v.as_str() == Some(".WECHAT_UNIONID")),
+        "referenced_vars must contain $user.WECHAT_UNIONID"
+    );
 }

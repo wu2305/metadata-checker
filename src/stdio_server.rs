@@ -667,7 +667,8 @@ mod tests {
             vec![],
         );
 
-        let json = serialize_response_with_timing(&mut resp).expect("stdio response must serialize");
+        let json =
+            serialize_response_with_timing(&mut resp).expect("stdio response must serialize");
         let value: serde_json::Value =
             serde_json::from_str(&json).expect("stdio response must be valid JSON");
         assert_eq!(value["request_id"].as_str(), Some("req-query-failed"));
@@ -684,10 +685,12 @@ mod tests {
                 .contains_key("diagnostics"),
             "diagnostics must be present even when empty"
         );
-        assert!(value["diagnostics"]
-            .as_array()
-            .expect("diagnostics must be array")
-            .is_empty());
+        assert!(
+            value["diagnostics"]
+                .as_array()
+                .expect("diagnostics must be array")
+                .is_empty()
+        );
         assert!(
             value["timing"].is_object(),
             "timing must be present on error response"

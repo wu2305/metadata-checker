@@ -52,11 +52,15 @@ impl From<&Edge> for PathEdgeRef {
             to: edge.to.clone(),
             edge_type: format!("{:?}", edge.edge_type),
             field_path: edge.field_path.clone(),
-            json_path: edge.meta.as_ref()
+            json_path: edge
+                .meta
+                .as_ref()
                 .and_then(|m| m.get("json_path"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            source_expr: edge.meta.as_ref()
+            source_expr: edge
+                .meta
+                .as_ref()
                 .and_then(|m| m.get("source_expr"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
@@ -72,11 +76,15 @@ impl From<Edge> for PathEdgeRef {
             to: edge.to,
             edge_type: format!("{:?}", edge.edge_type),
             field_path: edge.field_path,
-            json_path: edge.meta.as_ref()
+            json_path: edge
+                .meta
+                .as_ref()
                 .and_then(|m| m.get("json_path"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            source_expr: edge.meta.as_ref()
+            source_expr: edge
+                .meta
+                .as_ref()
                 .and_then(|m| m.get("source_expr"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
@@ -210,11 +218,7 @@ pub struct PathSelectionResult {
 
 /// 路径选择器 trait
 pub trait PathSelector {
-    fn select(
-        &self,
-        query: &PathQuery,
-        candidates: Vec<PathCandidate>,
-    ) -> PathSelectionResult;
+    fn select(&self, query: &PathQuery, candidates: Vec<PathCandidate>) -> PathSelectionResult;
 }
 
 /// 路径发现器 trait
@@ -303,7 +307,7 @@ impl AnchorExtractor {
             if let Some(expr) = ds.get("raw_expr").and_then(|v| v.as_str()) {
                 if let Some(dot) = expr.find('.') {
                     let model = &expr[..dot];
-                    let field = &expr[dot+1..];
+                    let field = &expr[dot + 1..];
                     if !model.is_empty() && !field.is_empty() && !model.starts_with('$') {
                         source_anchors.push(format!("field:{}.{}", model, field));
                     }
@@ -323,8 +327,12 @@ impl AnchorExtractor {
         for model_id in &model_targets {
             if let Some((_out, incoming)) = graph.get_node_edges(model_id) {
                 for (source, edge) in &incoming {
-                    if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::Writes | crate::graph::EdgeType::FieldWrite)
-                        && source.path != page_node.path
+                    if matches!(
+                        edge.edge_type,
+                        crate::graph::EdgeType::ActionWrites
+                            | crate::graph::EdgeType::Writes
+                            | crate::graph::EdgeType::FieldWrite
+                    ) && source.path != page_node.path
                     {
                         bridge_anchors.push(source.id.clone());
                     }
@@ -447,23 +455,22 @@ impl PathFinder for BoundedCausalPathFinder {
                         }
 
                         let next_id = target.id.clone();
-                        if visited_nodes.contains(&next_id) && edge.edge_type != EdgeType::FieldAlias {
+                        if visited_nodes.contains(&next_id)
+                            && edge.edge_type != EdgeType::FieldAlias
+                        {
                             continue; // 防止环，但允许 FieldAlias 回退
                         }
 
                         let segment = PathSegment {
-                            from: PathNodeRef::from(
-                                graph
-                                    .get_node(current_node)
-                                    .unwrap_or(crate::graph::Node {
-                                        id: current_node.clone(),
-                                        node_type: NodeType::Component,
-                                        path: query.page_path.clone(),
-                                        name: current_node.clone(),
-                                        meta: None,
-                                    },
-                                    ),
-                            ),
+                            from: PathNodeRef::from(graph.get_node(current_node).unwrap_or(
+                                crate::graph::Node {
+                                    id: current_node.clone(),
+                                    node_type: NodeType::Component,
+                                    path: query.page_path.clone(),
+                                    name: current_node.clone(),
+                                    meta: None,
+                                },
+                            )),
                             to: PathNodeRef::from(target),
                             edge: PathEdgeRef::from((*edge).clone()),
                             evidence: format!(
@@ -489,21 +496,16 @@ impl PathFinder for BoundedCausalPathFinder {
                             || query.target_anchors.contains(&next_id);
 
                         // 检查是否连接了两个有意义的锚点
-                        let connects_anchors =
-                            query.target_anchors.contains(anchor)
-                                && (query.sink_anchors.contains(&next_id)
-                                    || query.bridge_anchors.contains(&next_id));
+                        let connects_anchors = query.target_anchors.contains(anchor)
+                            && (query.sink_anchors.contains(&next_id)
+                                || query.bridge_anchors.contains(&next_id));
 
                         if is_target_reached || connects_anchors || new_segments.len() >= 2 {
                             let path_key = new_visited.join(">");
                             if !visited_paths.contains(&path_key) {
                                 visited_paths.insert(path_key.clone());
-                                let candidate = build_candidate(
-                                    &path_key,
-                                    &new_segments,
-                                    query,
-                                    &diagnostics,
-                                );
+                                let candidate =
+                                    build_candidate(&path_key, &new_segments, query, &diagnostics);
                                 candidates.push(candidate);
                                 anchor_candidate_count += 1;
                             }
@@ -522,24 +524,30 @@ impl PathFinder for BoundedCausalPathFinder {
                     // 对 Model 节点反向遍历 incoming ActionWrites/Writes 边，找到写入者 action
                     if current_node.starts_with("model:") || current_node.starts_with("field:") {
                         for (source, edge) in &incoming {
-                            if matches!(edge.edge_type, crate::graph::EdgeType::ActionWrites | crate::graph::EdgeType::Writes | crate::graph::EdgeType::FieldWrite)
-                                && self.allowed_edge_types.contains(&edge.edge_type)
+                            if matches!(
+                                edge.edge_type,
+                                crate::graph::EdgeType::ActionWrites
+                                    | crate::graph::EdgeType::Writes
+                                    | crate::graph::EdgeType::FieldWrite
+                            ) && self.allowed_edge_types.contains(&edge.edge_type)
                             {
                                 let next_id = source.id.clone();
-                                if visited_nodes.contains(&next_id) && edge.edge_type != crate::graph::EdgeType::FieldWrite {
+                                if visited_nodes.contains(&next_id)
+                                    && edge.edge_type != crate::graph::EdgeType::FieldWrite
+                                {
                                     continue;
                                 }
                                 let segment = PathSegment {
                                     from: PathNodeRef::from(
-                                        graph
-                                            .get_node(current_node)
-                                            .unwrap_or(crate::graph::Node {
+                                        graph.get_node(current_node).unwrap_or(
+                                            crate::graph::Node {
                                                 id: current_node.clone(),
                                                 node_type: NodeType::Component,
                                                 path: query.page_path.clone(),
                                                 name: current_node.clone(),
                                                 meta: None,
-                                            }),
+                                            },
+                                        ),
                                     ),
                                     to: PathNodeRef::from((*source).clone()),
                                     edge: PathEdgeRef::from((*edge).clone()),
@@ -561,11 +569,11 @@ impl PathFinder for BoundedCausalPathFinder {
                                     || query.source_anchors.contains(&next_id)
                                     || query.bridge_anchors.contains(&next_id)
                                     || query.target_anchors.contains(&next_id);
-                                let connects_anchors =
-                                    query.target_anchors.contains(anchor)
-                                        && (query.sink_anchors.contains(&next_id)
-                                            || query.bridge_anchors.contains(&next_id));
-                                if is_target_reached || connects_anchors || new_segments.len() >= 2 {
+                                let connects_anchors = query.target_anchors.contains(anchor)
+                                    && (query.sink_anchors.contains(&next_id)
+                                        || query.bridge_anchors.contains(&next_id));
+                                if is_target_reached || connects_anchors || new_segments.len() >= 2
+                                {
                                     let path_key = new_visited.join(">");
                                     if !visited_paths.contains(&path_key) {
                                         visited_paths.insert(path_key.clone());
@@ -625,8 +633,10 @@ pub fn build_field_causal_paths_for_data_source(
     // 解析 raw_expr 得到局部模型字段，例如 model22.phoneNumber
     // 去掉 ${} 包装，例如 ${model22.phoneNumber} -> model22.phoneNumber
     let stripped_expr = raw_expr.map(|e| {
-        e.strip_prefix("${").unwrap_or(e)
-            .strip_suffix("}").unwrap_or(e)
+        e.strip_prefix("${")
+            .unwrap_or(e)
+            .strip_suffix("}")
+            .unwrap_or(e)
     });
     let local_field_id = match stripped_expr {
         Some(expr) => {
@@ -676,7 +686,10 @@ pub fn build_field_causal_paths_for_data_source(
             to: local_field_id.clone(),
             edge_type: "Reads".to_string(),
             field_path: fp.map(|s| s.to_string()),
-            json_path: data_source.get("json_path").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            json_path: data_source
+                .get("json_path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             source_expr: raw_expr.map(|s| s.to_string()),
             source_file: Some(page_node.path.clone()),
         },
@@ -700,7 +713,11 @@ pub fn build_field_causal_paths_for_data_source(
                         node_id: canonical_field_id.clone(),
                         node_type: "Field".to_string(),
                         path: target.path.clone(),
-                        name: canonical_field_id.split('.').last().unwrap_or("").to_string(),
+                        name: canonical_field_id
+                            .split('.')
+                            .last()
+                            .unwrap_or("")
+                            .to_string(),
                     },
                     edge: PathEdgeRef {
                         from: local_field_id.clone(),
@@ -711,7 +728,10 @@ pub fn build_field_causal_paths_for_data_source(
                         source_expr: None,
                         source_file: Some(page_node.path.clone()),
                     },
-                    evidence: format!("{} -> {} via FieldAlias", local_field_id, canonical_field_id),
+                    evidence: format!(
+                        "{} -> {} via FieldAlias",
+                        local_field_id, canonical_field_id
+                    ),
                     confidence: "high".to_string(),
                 };
 
@@ -723,7 +743,8 @@ pub fn build_field_causal_paths_for_data_source(
                         {
                             // 只接受字段匹配的 writer
                             let edge_fp = edge.field_path.as_deref().unwrap_or("");
-                            let canonical_field_name = canonical_field_id.split('.').last().unwrap_or("");
+                            let canonical_field_name =
+                                canonical_field_id.split('.').last().unwrap_or("");
                             if edge_fp.ends_with(canonical_field_name) {
                                 let canonical_to_action_seg = PathSegment {
                                     from: PathNodeRef {
@@ -744,10 +765,18 @@ pub fn build_field_causal_paths_for_data_source(
                                         edge_type: "FieldWrite".to_string(),
                                         field_path: edge.field_path.clone(),
                                         json_path: None,
-                                        source_expr: edge.meta.as_ref().and_then(|m| m.get("source_expr")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        source_expr: edge
+                                            .meta
+                                            .as_ref()
+                                            .and_then(|m| m.get("source_expr"))
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string()),
                                         source_file: Some(source.path.clone()),
                                     },
-                                    evidence: format!("{} <- {} via FieldWrite", canonical_field_id, source.id),
+                                    evidence: format!(
+                                        "{} <- {} via FieldWrite",
+                                        canonical_field_id, source.id
+                                    ),
                                     confidence: "high".to_string(),
                                 };
 
@@ -756,10 +785,12 @@ pub fn build_field_causal_paths_for_data_source(
                                 segs.push(local_to_canonical_seg.clone());
                                 segs.push(canonical_to_action_seg);
 
-                                let path_id = format!("{}>{}>{}>{}", src, local_field_id, canonical_field_id, source.id);
-                                let candidate = build_candidate(
-                                    &path_id, &segs, &query, &Vec::new()
+                                let path_id = format!(
+                                    "{}>{}>{}>{}",
+                                    src, local_field_id, canonical_field_id, source.id
                                 );
+                                let candidate =
+                                    build_candidate(&path_id, &segs, &query, &Vec::new());
                                 candidates.push(candidate);
                             }
                         }
@@ -780,16 +811,15 @@ fn build_candidate(
 ) -> PathCandidate {
     let rank_features = compute_rank_features(segments, query);
     let (classification, classification_reason) = classify_path(segments, &rank_features, query);
-    let confidence = if rank_features.contains_physical_field
-        && rank_features.contains_target_component
-    {
-        "high"
-    } else if rank_features.contains_model_read || rank_features.contains_model_write {
-        "medium"
-    } else {
-        "low"
-    }
-    .to_string();
+    let confidence =
+        if rank_features.contains_physical_field && rank_features.contains_target_component {
+            "high"
+        } else if rank_features.contains_model_read || rank_features.contains_model_write {
+            "medium"
+        } else {
+            "low"
+        }
+        .to_string();
 
     let mut terminals = Vec::new();
     if rank_features.contains_target_component {
@@ -816,10 +846,7 @@ fn build_candidate(
         purpose: "自动发现路径".to_string(),
         terminals,
         segments: segments.to_vec(),
-        evidence: segments
-            .iter()
-            .map(|s| s.evidence.clone())
-            .collect(),
+        evidence: segments.iter().map(|s| s.evidence.clone()).collect(),
         selection_reason: classification_reason.clone(),
         classification,
         classification_reason,
@@ -872,8 +899,10 @@ fn compute_rank_features(segments: &[PathSegment], query: &PathQuery) -> PathRan
         }
 
         // 跨页 writer 检测：边类型为写边，且目标节点路径不等于当前页面
-        if matches!(seg.edge.edge_type.as_str(), "FieldWrite" | "ActionWrites" | "Writes")
-            && seg.to.path != query.page_path
+        if matches!(
+            seg.edge.edge_type.as_str(),
+            "FieldWrite" | "ActionWrites" | "Writes"
+        ) && seg.to.path != query.page_path
         {
             features.contains_cross_page_writer = true;
         }
@@ -1043,11 +1072,7 @@ fn classify_path(
 pub struct RuleBasedPathSelector;
 
 impl PathSelector for RuleBasedPathSelector {
-    fn select(
-        &self,
-        query: &PathQuery,
-        candidates: Vec<PathCandidate>,
-    ) -> PathSelectionResult {
+    fn select(&self, query: &PathQuery, candidates: Vec<PathCandidate>) -> PathSelectionResult {
         let mut primary_paths: Vec<PathCandidate> = Vec::new();
         let mut candidate_paths: Vec<PathCandidate> = Vec::new();
         let mut supporting_paths: Vec<PathCandidate> = Vec::new();
@@ -1097,7 +1122,10 @@ impl PathSelector for RuleBasedPathSelector {
             }
             // 检查是否包含目标组件
             for anchor in &query.target_anchors {
-                if p.segments.iter().any(|s| s.from.node_id == *anchor || s.to.node_id == *anchor) {
+                if p.segments
+                    .iter()
+                    .any(|s| s.from.node_id == *anchor || s.to.node_id == *anchor)
+                {
                     guarantees.insert("target_component".to_string(), true);
                 }
             }
@@ -1128,13 +1156,11 @@ impl PathSelector for RuleBasedPathSelector {
                                 || c.rank_features.contains_entrypoint
                         }
                         "cross_page_writer" => c.rank_features.contains_cross_page_writer,
-                        "target_component" => {
-                            query.target_anchors.iter().any(|anchor| {
-                                c.segments
-                                    .iter()
-                                    .any(|s| s.from.node_id == *anchor || s.to.node_id == *anchor)
-                            })
-                        }
+                        "target_component" => query.target_anchors.iter().any(|anchor| {
+                            c.segments
+                                .iter()
+                                .any(|s| s.from.node_id == *anchor || s.to.node_id == *anchor)
+                        }),
                         _ => false,
                     }) {
                         let mut promoted = pool.remove(idx);
@@ -1162,26 +1188,47 @@ impl PathSelector for RuleBasedPathSelector {
         primary_paths.sort_by(|a, b| {
             fn score(p: &PathCandidate) -> i32 {
                 let mut s = 0;
-                if p.rank_features.contains_physical_field { s += 3; }
-                if p.rank_features.contains_target_component { s += 2; }
-                if p.rank_features.contains_cross_page_writer { s += 2; }
-                if p.rank_features.path_length <= 2 { s += 2; }
-                else if p.rank_features.path_length <= 3 { s += 1; }
-                if p.rank_features.contains_model_filter { s += 1; }
+                if p.rank_features.contains_physical_field {
+                    s += 3;
+                }
+                if p.rank_features.contains_target_component {
+                    s += 2;
+                }
+                if p.rank_features.contains_cross_page_writer {
+                    s += 2;
+                }
+                if p.rank_features.path_length <= 2 {
+                    s += 2;
+                } else if p.rank_features.path_length <= 3 {
+                    s += 1;
+                }
+                if p.rank_features.contains_model_filter {
+                    s += 1;
+                }
                 // 关键字段加分：phoneNumber 是用户明确关注的目标字段
                 let has_phone = p.segments.iter().any(|seg| {
-                    seg.edge.field_path.as_ref().map_or(false, |fp| fp.contains("phoneNumber"))
+                    seg.edge
+                        .field_path
+                        .as_ref()
+                        .map_or(false, |fp| fp.contains("phoneNumber"))
                 });
-                if has_phone { s += 5; }
+                if has_phone {
+                    s += 5;
+                }
                 // 字段级 alias 路径优先：三段路径（含 FieldAlias）高于两段短路径
-                if p.rank_features.contains_field_alias { s += 4; }
+                if p.rank_features.contains_field_alias {
+                    s += 4;
+                }
                 s
             }
             let score_ord = score(b).cmp(&score(a));
             if score_ord != std::cmp::Ordering::Equal {
                 return score_ord;
             }
-            let len_ord = a.rank_features.path_length.cmp(&b.rank_features.path_length);
+            let len_ord = a
+                .rank_features
+                .path_length
+                .cmp(&b.rank_features.path_length);
             if len_ord != std::cmp::Ordering::Equal {
                 return len_ord;
             }
@@ -1191,7 +1238,8 @@ impl PathSelector for RuleBasedPathSelector {
         // 限制 primary_paths 数量，同时确保多样性：每个 anchor 最多保留 3 条
         const PRIMARY_LIMIT: usize = 100;
         const MAX_PER_ANCHOR: usize = 3;
-        let mut anchor_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut anchor_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         let mut diverse_primary: Vec<PathCandidate> = Vec::new();
         let mut overflow: Vec<PathCandidate> = Vec::new();
         for p in primary_paths {
@@ -1231,8 +1279,7 @@ impl PathSelector for RuleBasedPathSelector {
 
 /// 将 PathCandidate 转换为 JSON 值，供 output.rs 使用
 impl PathCandidate {
-    pub fn to_json(&self,
-    ) -> serde_json::Value {
+    pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "path_id": self.path_id,
             "purpose": self.purpose,
@@ -1291,11 +1338,7 @@ impl PathCandidate {
 pub struct NoScorePathSelector;
 
 impl PathSelector for NoScorePathSelector {
-    fn select(
-        &self,
-        _query: &PathQuery,
-        candidates: Vec<PathCandidate>,
-    ) -> PathSelectionResult {
+    fn select(&self, _query: &PathQuery, candidates: Vec<PathCandidate>) -> PathSelectionResult {
         PathSelectionResult {
             primary_paths: candidates.clone(),
             candidate_paths: Vec::new(),
@@ -1311,11 +1354,7 @@ impl PathSelector for NoScorePathSelector {
 pub struct DebugAllPathSelector;
 
 impl PathSelector for DebugAllPathSelector {
-    fn select(
-        &self,
-        _query: &PathQuery,
-        candidates: Vec<PathCandidate>,
-    ) -> PathSelectionResult {
+    fn select(&self, _query: &PathQuery, candidates: Vec<PathCandidate>) -> PathSelectionResult {
         let mut primary: Vec<PathCandidate> = Vec::new();
         let mut candidate: Vec<PathCandidate> = Vec::new();
         let mut supporting: Vec<PathCandidate> = Vec::new();

@@ -244,5 +244,9 @@ fn test_parse_expression_refs_model22_phonenumber() {
     let has_model22 = refs
         .iter()
         .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model22" && f == "phoneNumber"));
-    assert!(has_model22, "Expected model22.phoneNumber reference, got: {:?}", refs);
+    assert!(
+        has_model22,
+        "Expected model22.phoneNumber reference, got: {:?}",
+        refs
+    );
 }

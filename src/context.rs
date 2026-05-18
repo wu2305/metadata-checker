@@ -807,30 +807,58 @@ pub fn context_node_graph(
             "Depth: {} | Budget: {} | Related Nodes: {}",
             depth,
             budget,
-            output.get("summary")
+            output
+                .get("summary")
                 .and_then(|s| s.get("related_nodes_count"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0)
         )?;
-        if output.get("summary")
+        if output
+            .get("summary")
             .and_then(|s| s.get("truncated"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
         {
             writeln!(out, "⚠️  Output truncated due to budget limit")?;
         }
-        let upstream = output.get("details").and_then(|d| d.get("upstream")).and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-        let downstream = output.get("details").and_then(|d| d.get("downstream")).and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-        writeln!(out, "
---- Upstream ({}) ---", upstream)?;
-        if let Some(arr) = output.get("details").and_then(|d| d.get("upstream")).and_then(|v| v.as_array()) {
+        let upstream = output
+            .get("details")
+            .and_then(|d| d.get("upstream"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let downstream = output
+            .get("details")
+            .and_then(|d| d.get("downstream"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        writeln!(
+            out,
+            "
+--- Upstream ({}) ---",
+            upstream
+        )?;
+        if let Some(arr) = output
+            .get("details")
+            .and_then(|d| d.get("upstream"))
+            .and_then(|v| v.as_array())
+        {
             for u in arr {
                 writeln!(out, "  {:?}", u)?;
             }
         }
-        writeln!(out, "
---- Downstream ({}) ---", downstream)?;
-        if let Some(arr) = output.get("details").and_then(|d| d.get("downstream")).and_then(|v| v.as_array()) {
+        writeln!(
+            out,
+            "
+--- Downstream ({}) ---",
+            downstream
+        )?;
+        if let Some(arr) = output
+            .get("details")
+            .and_then(|d| d.get("downstream"))
+            .and_then(|v| v.as_array())
+        {
             for d_item in arr {
                 writeln!(out, "  {:?}", d_item)?;
             }

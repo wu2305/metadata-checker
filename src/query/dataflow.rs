@@ -12,7 +12,7 @@ use std::io::{self, Write};
 
 /// DataFlow 节点字段记录（支持 serde 反序列化）
 #[derive(Debug, Clone, Deserialize)]
-struct FieldRecord {
+pub struct FieldRecord {
     name: String,
     dbfield: String,
     #[serde(rename = "originalField")]
@@ -28,20 +28,39 @@ struct FieldRecord {
 
 /// DataFlow 过滤器子句（支持 serde 反序列化）
 #[derive(Debug, Clone, Deserialize)]
-struct DataflowFilterClause {
+pub struct DataflowFilterClause {
     #[serde(rename = "leftExp")]
-    left_exp: Option<String>,
-    operator: Option<String>,
+    pub left_exp: Option<String>,
+    pub operator: Option<String>,
     #[serde(rename = "rightValue")]
-    right_value: Option<serde_json::Value>,
+    pub right_value: Option<serde_json::Value>,
     #[serde(rename = "rightExp")]
-    right_exp: Option<String>,
-    exp: Option<String>,
+    pub right_exp: Option<String>,
+    pub exp: Option<String>,
+}
+
+/// DataFlow Join 条件（支持 serde 反序列化）
+#[derive(Debug, Clone, Deserialize)]
+pub struct DataflowJoinCondition {
+    #[serde(rename = "joinType")]
+    pub join_type: String,
+    #[serde(rename = "leftTable")]
+    pub left_table: String,
+    #[serde(rename = "rightTable")]
+    pub right_table: String,
+    pub clauses: Vec<DataflowFilterClause>,
+}
+
+/// DataFlow Union 字段映射条目（支持 serde 反序列化）
+#[derive(Debug, Clone, Deserialize)]
+pub struct DataflowUnionMapEntry {
+    pub visible: bool,
+    pub values: Vec<Option<String>>,
 }
 
 /// DataFlow 预解析元数据（一次性反序列化 + 预建索引）
 #[derive(Debug, Clone, Default)]
-struct DataFlowMeta {
+pub struct DataFlowMeta {
     /// alias -> node_id
     alias_map: HashMap<String, String>,
     /// node_id -> alias
@@ -56,11 +75,15 @@ struct DataFlowMeta {
     node_filters: HashMap<String, Vec<DataflowFilterClause>>,
     /// node_id -> moduleTablePath
     module_table_paths: HashMap<String, String>,
+    /// node_id -> Join 条件
+    pub node_join_conditions: HashMap<String, Vec<DataflowJoinCondition>>,
+    /// node_id -> Union 字段映射
+    pub node_union_maps: HashMap<String, Vec<DataflowUnionMapEntry>>,
 }
 
 impl DataFlowMeta {
     /// 从 node.meta 的 serde_json::Value 一次性构建
-    fn from_meta(meta: &serde_json::Value) -> Self {
+    pub fn from_meta(meta: &serde_json::Value) -> Self {
         let alias_map: HashMap<String, String> = meta
             .get("aliasMap")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -86,6 +109,16 @@ impl DataFlowMeta {
             .unwrap_or_default();
         let module_table_paths: HashMap<String, String> = meta
             .get("nodeTablePaths")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let node_join_conditions: HashMap<String, Vec<DataflowJoinCondition>> = meta
+            .get("nodeJoinConditions")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let node_union_maps: HashMap<String, Vec<DataflowUnionMapEntry>> = meta
+            .get("nodeUnionMaps")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
@@ -199,21 +232,23 @@ impl DataFlowMeta {
             field_index,
             node_filters,
             module_table_paths,
+            node_join_conditions,
+            node_union_maps,
         }
     }
 
     /// 根据 node_id 获取字段索引（预建，O(1)）
-    fn get_fields(&self, node_id: &str) -> Option<&HashMap<String, FieldRecord>> {
+    pub fn get_fields(&self, node_id: &str) -> Option<&HashMap<String, FieldRecord>> {
         self.field_index.get(node_id)
     }
 
     /// 根据 node_id 获取过滤器子句
-    fn get_node_filters(&self, node_id: &str) -> Option<&Vec<DataflowFilterClause>> {
+    pub fn get_node_filters(&self, node_id: &str) -> Option<&Vec<DataflowFilterClause>> {
         self.node_filters.get(node_id)
     }
 
     /// 根据 node_id 获取节点类型
-    fn get_node_type(&self, node_id: &str) -> &str {
+    pub fn get_node_type(&self, node_id: &str) -> &str {
         self.node_types
             .get(node_id)
             .map(|s| s.as_str())
@@ -221,24 +256,24 @@ impl DataFlowMeta {
     }
 
     /// 根据 alias 获取 node_id
-    fn get_node_id(&self, alias: &str) -> Option<&String> {
+    pub fn get_node_id(&self, alias: &str) -> Option<&String> {
         self.alias_map.get(alias)
     }
 
     /// 根据 node_id 获取 alias
-    fn get_alias(&self, node_id: &str) -> Option<&String> {
+    pub fn get_alias(&self, node_id: &str) -> Option<&String> {
         self.id_to_alias.get(node_id)
     }
 
     /// 根据 node_id 获取 moduleTablePath
-    fn get_node_module_table_path(&self, node_id: &str) -> Option<&str> {
+    pub fn get_node_module_table_path(&self, node_id: &str) -> Option<&str> {
         self.module_table_paths
             .get(node_id)
             .map(std::string::String::as_str)
     }
 
     /// 获取 Output 类型节点的字段索引；如果没有 Output 节点，fallback 到 "default"
-    fn get_output_fields(&self) -> Vec<(&str, &HashMap<String, FieldRecord>)> {
+    pub fn get_output_fields(&self) -> Vec<(&str, &HashMap<String, FieldRecord>)> {
         let output_nodes: Vec<&str> = self
             .node_types
             .iter()
@@ -260,7 +295,7 @@ impl DataFlowMeta {
     }
 
     /// 输出全部可解析 filter 投影
-    fn project_filters(&self) -> Vec<DataflowFilterProjection> {
+    pub fn project_filters(&self) -> Vec<DataflowFilterProjection> {
         let mut entries: Vec<(String, String)> = self
             .node_filters
             .keys()
@@ -302,7 +337,7 @@ impl DataFlowMeta {
 
 #[derive(Debug, Clone)]
 /// 字段追溯链中的单步信息
-struct TraceStep {
+pub struct TraceStep {
     node_alias: String,
     node_type: String,
     module_table_path: Option<String>,
@@ -313,28 +348,28 @@ struct TraceStep {
 }
 
 #[derive(Debug, Clone)]
-struct DataflowFieldOriginProjection {
-    dataflow_table: String,
-    dataflow_output_field: String,
-    physical_source_fields: Vec<String>,
-    original_node: Option<String>,
-    original_field: Option<String>,
-    via: String,
-    confidence: String,
-    missing_evidence: Vec<String>,
+pub struct DataflowFieldOriginProjection {
+    pub dataflow_table: String,
+    pub dataflow_output_field: String,
+    pub physical_source_fields: Vec<String>,
+    pub original_node: Option<String>,
+    pub original_field: Option<String>,
+    pub via: String,
+    pub confidence: String,
+    pub missing_evidence: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
-struct DataflowFilterProjection {
-    node_alias: String,
-    node_type: String,
-    role: String,
-    expr: Option<String>,
-    left: Option<String>,
-    operator: Option<String>,
-    right: Option<String>,
-    referenced_fields: Vec<String>,
-    referenced_vars: Vec<String>,
+pub struct DataflowFilterProjection {
+    pub node_alias: String,
+    pub node_type: String,
+    pub role: String,
+    pub expr: Option<String>,
+    pub left: Option<String>,
+    pub operator: Option<String>,
+    pub right: Option<String>,
+    pub referenced_fields: Vec<String>,
+    pub referenced_vars: Vec<String>,
 }
 
 fn format_filter_right_value(right_value: &serde_json::Value) -> Option<String> {
@@ -445,7 +480,7 @@ fn project_filter_clause(
 }
 
 impl DataflowFilterProjection {
-    fn to_json(&self) -> serde_json::Value {
+    pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "node_alias": self.node_alias,
             "node_type": self.node_type,
@@ -460,7 +495,7 @@ impl DataflowFilterProjection {
     }
 }
 
-fn build_via_value(original_node: Option<&str>, original_field: Option<&str>) -> String {
+pub fn build_via_value(original_node: Option<&str>, original_field: Option<&str>) -> String {
     match (original_node, original_field) {
         (Some(_), Some(_)) => "originalNode/originalField".to_string(),
         (Some(_), None) => "originalNode".to_string(),
@@ -487,7 +522,7 @@ fn lookup_output_field<'a>(
     })
 }
 
-fn project_output_field_origin(
+pub fn project_output_field_origin(
     meta: &DataFlowMeta,
     target_field: &str,
 ) -> DataflowFieldOriginProjection {
@@ -573,7 +608,7 @@ fn project_output_field_origin(
 }
 
 impl DataflowFieldOriginProjection {
-    fn to_json(&self) -> serde_json::Value {
+    pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "dataflow_table": self.dataflow_table,
             "dataflow_output_field": self.dataflow_output_field,

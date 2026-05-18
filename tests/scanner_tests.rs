@@ -868,11 +868,9 @@ fn test_edge_meta_schema_unified() {
     let _ = std::fs::remove_file(&db_path);
 }
 
-
 #[test]
 fn test_cross_page_physical_table_writer_discovery() {
-    let db_path =
-        std::env::temp_dir().join("metadata-checker-test-cross-page.db");
+    let db_path = std::env::temp_dir().join("metadata-checker-test-cross-page.db");
     let _ = std::fs::remove_file(&db_path);
     let project_dir = Path::new("tests/fixtures/cross_page_project");
 
@@ -890,9 +888,7 @@ fn test_cross_page_physical_table_writer_discovery() {
 
     // 验证 writer_page 的 actionWrite 被列为物理表的 writer
     let writers = graph.find_writers(physical_id);
-    let writer_action = writers
-        .iter()
-        .find(|(n, _)| n.id.contains("actionWrite"));
+    let writer_action = writers.iter().find(|(n, _)| n.id.contains("actionWrite"));
     assert!(
         writer_action.is_some(),
         "actionWrite should be a writer of {}",
@@ -921,11 +917,9 @@ fn test_cross_page_physical_table_writer_discovery() {
     let _ = std::fs::remove_file(&db_path);
 }
 
-
 #[test]
 fn test_cross_page_update_data_physical_table_writer() {
-    let db_path =
-        std::env::temp_dir().join("metadata-checker-test-cross-page-update.db");
+    let db_path = std::env::temp_dir().join("metadata-checker-test-cross-page-update.db");
     let _ = std::fs::remove_file(&db_path);
     let project_dir = Path::new("tests/fixtures/cross_page_project");
 
@@ -937,14 +931,15 @@ fn test_cross_page_update_data_physical_table_writer() {
 
     // 验证 update_writer_page 的 actionUpdate 被列为物理表的 writer
     let writers = graph.find_writers(physical_id);
-    let writer_action = writers
-        .iter()
-        .find(|(n, _)| n.id.contains("actionUpdate"));
+    let writer_action = writers.iter().find(|(n, _)| n.id.contains("actionUpdate"));
     assert!(
         writer_action.is_some(),
         "actionUpdate (updateData with dataSet=model6) should be a writer of {}. Found writers: {:?}",
         physical_id,
-        writers.iter().map(|(n, _)| n.id.clone()).collect::<Vec<_>>()
+        writers
+            .iter()
+            .map(|(n, _)| n.id.clone())
+            .collect::<Vec<_>>()
     );
 
     let (_, writer_edge) = writer_action.unwrap();
@@ -962,11 +957,9 @@ fn test_cross_page_update_data_physical_table_writer() {
     let _ = std::fs::remove_file(&db_path);
 }
 
-
 #[test]
 fn test_condition_nodes_in_graph() {
-    let db_path =
-        std::env::temp_dir().join("metadata-checker-test-cond-nodes.db");
+    let db_path = std::env::temp_dir().join("metadata-checker-test-cond-nodes.db");
     let _ = std::fs::remove_file(&db_path);
     let project_dir = Path::new("tests/fixtures/cross_page_project");
 
@@ -977,7 +970,11 @@ fn test_condition_nodes_in_graph() {
     // writer_page inputA value 条件节点
     let cond_id = "cond:app/writer_page.spg|inputA#value#0";
     let node = graph.get_node(cond_id);
-    assert!(node.is_some(), "Graph should contain Condition node {}", cond_id);
+    assert!(
+        node.is_some(),
+        "Graph should contain Condition node {}",
+        cond_id
+    );
 
     let cond = node.unwrap();
     assert!(
@@ -995,9 +992,7 @@ fn test_condition_nodes_in_graph() {
     );
 
     // condition -> upstream model 依赖边
-    let model_dep = outgoing
-        .iter()
-        .find(|(n, _)| n.id == "model:model6");
+    let model_dep = outgoing.iter().find(|(n, _)| n.id == "model:model6");
     assert!(
         model_dep.is_some(),
         "Condition should have outgoing edge to model:model6"
