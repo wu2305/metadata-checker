@@ -44,6 +44,7 @@ M9-A/B/C 保证**语料和输出契约稳定**；M9-D 保证**AI 能基于稳定
 ## 维护
 
 - 新增 eval case：编辑 `ai_eval_cases.json`，同步更新 `tests/ai_eval_tests.rs`。
+- 大型真实项目探究 case：优先放入 `tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json`，它用于人工/Agent 评估小模型能否理解真实项目多跳关系，不默认纳入普通 CI。
 - 发现模型在某 case 持续失败：先检查 M9-C snapshot 是否已捕获输出变化；再检查 SKILL.md 协议是否足够明确；最后考虑补充 minimal_command_plan 或修改 expected_facts。
 - 不要把模型的大段回答提交进仓库，只在 `ai_eval_runs/`（如有）记录结论和分类。
 
@@ -73,6 +74,16 @@ ai_eval_cases.json 支持两类 case：
 - 拼写错误候选（typo + candidate_targets）
 - `.tbl` 单文件理解（PhysicalTable，不当成 SuperPage 或 DataFlow）
 - DataFlow .tbl 理解（dataflow + input/output）
+
+### 大型真实项目探究集
+
+`tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json` 是面向 5.4-mini 等小模型的高难度人工评测集。它不追求覆盖所有 CLI schema，而是验证模型能否在真实 xiaoshouyi 项目中完成以下探究任务：
+
+- 区分显示条件、数据可用性和值来源，不把 DataFlow 物理来源误当 visibleCondition。
+- 对裸字段值表达式向上寻找最近数据容器的 `dataSet`，再追踪 DataFlow 字段级 `originalNode` / `originalField`。
+- 使用 page-scoped model target 解释页面内模型的数据门控，避免混入其他页面同名 model。
+- 通过字段别名和物理表规范化找到跨页面 writer，例如 `合同协议.spg|input3 -> model22.phoneNumber -> fact_qwSidebar.phoneNumber -> 潜客信息跟进.spg`。
+- 遇到高扇出模型和截断输出时升级到 `--budget normal`，避免在 compact 截断输出上做全量结论。
 
 ## 串行执行要求
 

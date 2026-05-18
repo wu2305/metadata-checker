@@ -1,0 +1,533 @@
+{
+  "schema_version": "1.0.0",
+  "scope": "xiaoshouyi 大型真实项目 AI 阅读评测集",
+  "purpose": "用于评估小模型是否能只依赖 metadata-checker Skill 与 CLI 输出，在真实低代码项目中追踪多跳元数据关系、DataFlow 展开、容器 dataSet 继承、跨页写入链路，并避免把相关上下文误当必要证据。",
+  "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "requires_real_project": true,
+  "graph_db_path_strategy": "temp_per_run_or_shared_readonly",
+  "recommended_graph_db_path": "/tmp/xiaoshouyi-large-real-cases.graphdb",
+  "execution_notes": [
+    "评测前先使用当前 metadata-checker 二进制构建 graphdb。",
+    "真实项目 graphdb 较大，串行运行 case；并发运行容易触发 redb lock。",
+    "建议命令追加 --graph-lock-timeout-ms 30000。",
+    "模型只应读取 SKILL.md、CLI 输出和本文件中的问题，不应读取源码或历史对话。"
+  ],
+  "verified_with": {
+    "date": "2026-05-18",
+    "command_style": "cargo run -- <args>",
+    "graph_db_path": "/tmp/xiaoshouyi-large-real-cases.graphdb"
+  },
+  "eval_count": 5,
+  "cases": [
+    {
+      "case_id": "xiaoshouyi_text41_display_conditions",
+      "difficulty": "hard",
+      "risk_tags": [
+        "display_condition",
+        "ancestor_condition",
+        "total_row_count_expansion",
+        "avoid_value_source_drift"
+      ],
+      "question": "/xiaoshouyi/app/售后.app/绑定车辆/会员已注册.spg 这个页面中，text41 哪些情况下会显示？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "source_path": "app/售后.app/绑定车辆/会员已注册.spg",
+      "real_project_target": "comp:app/售后.app/绑定车辆/会员已注册.spg|text41",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --explain-condition 'comp:app/售后.app/绑定车辆/会员已注册.spg|text41' --intent display --budget compact"
+      ],
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "comp:app/售后.app/绑定车辆/会员已注册.spg|text41",
+          "args": [
+            "--intent",
+            "display",
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "standard_answer": {
+        "summary": "text41 自身没有 direct visibleCondition。它继承祖先容器 panel35 的 visibleCondition：model11.totalRowCount__ > 0；这个 row-count 门控继续展开为当前页面 model11 的 filter：model11.ISSHOW == 1。因此 text41 有机会显示的条件是：祖先容器 panel35 可显示，并且 model11 在当前页面过滤后存在数据。",
+        "must_mention": [
+          "text41 自身没有直接显示条件",
+          "继承 panel35.visibleCondition",
+          "model11.totalRowCount__ > 0",
+          "model11.ISSHOW == 1",
+          "totalRowCount__ 需要展开为 model11 的当前页面 filter"
+        ],
+        "should_mention": [
+          "display 问题不要使用 value-source 证据回答",
+          "supporting_context 不是必要显示门控"
+        ],
+        "must_not_mention": [
+          "text41 因为 CUSTOMAUTOMYAUTOLIST 有值就显示",
+          "fact_autoCustomerAutoRel 是 text41 的直接显示条件",
+          "DataFlow 字段来源就是显示条件",
+          "text41 自己配置了 visibleCondition"
+        ]
+      },
+      "expected_facts": [
+        "has_direct_condition=false",
+        "inherited_conditions 包含 panel35",
+        "inherited condition raw_expr 为 model11.totalRowCount__ > 0",
+        "expanded_data_gates 包含 model11.ISSHOW == 1",
+        "value_source_context 不应作为显示条件证据"
+      ],
+      "forbidden_claims": [
+        "把 value/source 当成显示条件",
+        "只回答 text41.value",
+        "忽略祖先容器 panel35",
+        "忽略 totalRowCount__ 的 filter 展开"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.answer_facts.display_facts.has_direct_condition",
+          "op": "eq",
+          "value": false,
+          "description": "text41 不应被判定为自身有 direct visibleCondition"
+        },
+        {
+          "path": "details.answer_facts.display_facts.inherited_conditions",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "model11.totalRowCount__ > 0",
+          "description": "继承祖先容器的 totalRowCount__ 显示门控"
+        },
+        {
+          "path": "details.answer_facts.display_facts.expanded_data_gates",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "model11.ISSHOW == 1",
+          "description": "totalRowCount__ 展开为当前页面 model11 filter"
+        }
+      ],
+      "answer_style_policy": {
+        "principles": [
+          "先给显示结论，再列 evidence 字段",
+          "区分 direct condition、inherited condition、expanded data gate",
+          "不要主动扩展到值来源，除非用户追问"
+        ],
+        "forbidden_practices": [
+          "读到 DataFlow 物理表后把它写成显示条件",
+          "把 related_context 或 supporting_context 说成必要门控"
+        ]
+      }
+    },
+    {
+      "case_id": "xiaoshouyi_text41_value_source_dataflow_origin",
+      "difficulty": "hard",
+      "risk_tags": [
+        "value_source",
+        "bare_field",
+        "container_dataset",
+        "dataflow_projection",
+        "physical_table_origin"
+      ],
+      "question": "/xiaoshouyi/app/售后.app/绑定车辆/会员已注册.spg 这个页面中，text41 如果显示，显示的数据来源于哪一张物理表？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "source_path": "app/售后.app/绑定车辆/会员已注册.spg",
+      "real_project_target": "comp:app/售后.app/绑定车辆/会员已注册.spg|text41",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --explain-condition 'comp:app/售后.app/绑定车辆/会员已注册.spg|text41' --intent value-source --budget compact"
+      ],
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "comp:app/售后.app/绑定车辆/会员已注册.spg|text41",
+          "args": [
+            "--intent",
+            "value-source",
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "standard_answer": {
+        "summary": "text41.value 是裸字段 ${CUSTOMAUTOMYAUTOLIST}，CUSTOMAUTOMYAUTOLIST 不是表名。它通过最近数据容器 sliderpanel2 继承 dataSet=model11，因此字段定位为 model11.CUSTOMAUTOMYAUTOLIST。model11 来自 DataFlow 表 $DATA:/加工表/小程序/绑车.tbl；字段级 originalNode/originalField 显示该输出字段来自 FACT_AUTOCUSTOMERAUTOREL 的 车辆VIN，最终物理来源是 $DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN。",
+        "must_mention": [
+          "${CUSTOMAUTOMYAUTOLIST}",
+          "裸字段不是表名",
+          "nearest_data_context=sliderpanel2",
+          "data_set=model11",
+          "field_path=model11.CUSTOMAUTOMYAUTOLIST",
+          "$DATA:/加工表/小程序/绑车.tbl",
+          "original_node=FACT_AUTOCUSTOMERAUTOREL",
+          "original_field=车辆VIN",
+          "$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN"
+        ],
+        "should_mention": [
+          "candidate_inputs 有多个，只能把 proven_physical_input 当标准来源",
+          "display 条件和 value-source 是两个不同问题"
+        ],
+        "must_not_mention": [
+          "CUSTOMAUTOMYAUTOLIST 是物理表",
+          "text41 直接读取 fact_customAutoMyAutoListStore",
+          "只列 candidate_inputs 而不指出 proven_physical_input",
+          "把 panel35 的 visibleCondition 当作值来源"
+        ]
+      },
+      "expected_facts": [
+        "raw_expr=${CUSTOMAUTOMYAUTOLIST}",
+        "bare_symbol=CUSTOMAUTOMYAUTOLIST",
+        "nearest_data_context=sliderpanel2",
+        "data_set=model11",
+        "dataflow_table=$DATA:/加工表/小程序/绑车.tbl",
+        "original_node=FACT_AUTOCUSTOMERAUTOREL",
+        "original_field=车辆VIN",
+        "proven_physical_input=$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN"
+      ],
+      "forbidden_claims": [
+        "CUSTOMAUTOMYAUTOLIST 是表",
+        "只根据 text41 自身判断表来源",
+        "忽略 sliderpanel2 dataSet",
+        "把候选输入表当成已证明来源"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.answer_facts.value_source_facts.nearest_data_context",
+          "op": "eq",
+          "value": "sliderpanel2",
+          "description": "裸字段必须通过最近数据容器解析"
+        },
+        {
+          "path": "details.answer_facts.value_source_facts.field_path",
+          "op": "eq",
+          "value": "model11.CUSTOMAUTOMYAUTOLIST",
+          "description": "裸字段应被归一为 model11.CUSTOMAUTOMYAUTOLIST"
+        },
+        {
+          "path": "details.answer_facts.value_source_facts.proven_physical_input",
+          "op": "eq",
+          "value": "$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN",
+          "description": "必须输出已证明的字段级物理来源"
+        }
+      ],
+      "answer_style_policy": {
+        "principles": [
+          "回答物理表时必须给出从裸字段到容器 dataSet 再到 DataFlow origin 的链路",
+          "候选输入只能作为补充，不应替代 proven_physical_input"
+        ],
+        "forbidden_practices": [
+          "把字段名误读成表名",
+          "跳过 sliderpanel2 直接猜表"
+        ]
+      }
+    },
+    {
+      "case_id": "xiaoshouyi_model11_availability_dataflow_filters",
+      "difficulty": "expert",
+      "risk_tags": [
+        "data_availability",
+        "page_scoped_model",
+        "dataflow_internal_filters",
+        "join_union_semantics",
+        "same_model_name_noise"
+      ],
+      "question": "/xiaoshouyi/app/售后.app/绑定车辆/会员已注册.spg 中 model11 什么时候有数据？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "source_path": "app/售后.app/绑定车辆/会员已注册.spg",
+      "real_project_target": "model:app/售后.app/绑定车辆/会员已注册.spg|model11",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --explain-condition 'model:app/售后.app/绑定车辆/会员已注册.spg|model11' --intent availability --budget compact"
+      ],
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "model:app/售后.app/绑定车辆/会员已注册.spg|model11",
+          "args": [
+            "--intent",
+            "availability",
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "standard_answer": {
+        "summary": "这个问题要按页面内 model11 的 availability 回答。页面自身先有 filter：model11.ISSHOW == 1。model11 实际指向 DataFlow 表 $DATA:/加工表/小程序/绑车.tbl，内部还存在源节点过滤：[是否展示] == 1、[关系类型] == 车主关系、[使用人粉丝ID] is not null、[粉丝ID]=$user.WECHAT_UNIONID；Join 节点“关联”还有输出过滤：[粉丝ID]=$user.WECHAT_UNIONID OR ([使用人粉丝ID] = $user.WECHAT_UNIONID and [人员手机号] = [使用人手机])。物理输入包括 fact_autoCustomerAutoRel.tbl、fact_cusAutoRelExt.tbl、fact_customAutoMyAutoListStore.tbl、fact_Unbound_Vehicle.tbl。LeftJoin 表示保留左表行、右表字段可空；Union 的行语义是任一分支可输出。",
+        "must_mention": [
+          "页面内 model11，而不是其他页面同名 model11",
+          "model11.ISSHOW == 1",
+          "$DATA:/加工表/小程序/绑车.tbl",
+          "[是否展示] == 1",
+          "[关系类型] == 车主关系",
+          "[使用人粉丝ID] is not null",
+          "[粉丝ID]=$user.WECHAT_UNIONID",
+          "[粉丝ID]=$user.WECHAT_UNIONID OR ([使用人粉丝ID] = $user.WECHAT_UNIONID and [人员手机号] = [使用人手机])",
+          "$DATA:/主数据/fact_autoCustomerAutoRel.tbl",
+          "$DATA:/主数据/fact_cusAutoRelExt.tbl",
+          "$DATA:/主数据/fact_customAutoMyAutoListStore.tbl",
+          "$DATA:/会员/粉丝未认证车辆/fact_Unbound_Vehicle.tbl",
+          "LeftJoin",
+          "any_branch_can_output"
+        ],
+        "should_mention": [
+          "DataFlow filter 是可用性条件的一部分",
+          "related_context 中大量同名关系不是当前问题的主证据"
+        ],
+        "must_not_mention": [
+          "只要 model11.ISSHOW == 1 就完整回答了",
+          "把其他页面同名 model11 的条件混入当前页面",
+          "忽略 DataFlow 内部 filters",
+          "把 Union 解释成所有分支必须同时命中"
+        ]
+      },
+      "expected_facts": [
+        "availability_facts.dataflow_availability=dataflow_filters_present",
+        "dataflow_table=$DATA:/加工表/小程序/绑车.tbl",
+        "gates/source_filters 包含页面 filter 和 DataFlow 内部 filter",
+        "referenced_vars 包含 $user.WECHAT_UNIONID",
+        "join_rules 包含 LeftJoin",
+        "union_rules row_semantic=any_branch_can_output"
+      ],
+      "forbidden_claims": [
+        "只读取 current page filter 后停止",
+        "忽略 DataFlow tbl",
+        "混入其他页面的 model11 条件",
+        "把 LeftJoin 说成 InnerJoin"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.answer_facts.availability_facts.dataflow_table",
+          "op": "eq",
+          "value": "$DATA:/加工表/小程序/绑车.tbl",
+          "description": "page-scoped model11 必须解析到 DataFlow 表"
+        },
+        {
+          "path": "details.answer_facts.availability_facts.gates",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "[是否展示] == 1",
+          "description": "必须包含 DataFlow 源过滤"
+        },
+        {
+          "path": "details.answer_facts.availability_facts.gates",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "$user.WECHAT_UNIONID",
+          "description": "必须包含用户变量过滤"
+        }
+      ],
+      "answer_style_policy": {
+        "principles": [
+          "先说明页面 filter，再说明 DataFlow 内部 filter、输出 filter、Join/Union 语义",
+          "对 page-scoped target 保持当前页面边界"
+        ],
+        "forbidden_practices": [
+          "只看 summary.primary_reason",
+          "把 related_context 当主结论"
+        ]
+      }
+    },
+    {
+      "case_id": "xiaoshouyi_contract_input3_writer_chain",
+      "difficulty": "expert",
+      "risk_tags": [
+        "cross_page_writer",
+        "field_alias",
+        "physical_table_canonicalization",
+        "writer_intent",
+        "avoid_current_page_only"
+      ],
+      "question": "/xiaoshouyi/app/销售.app/销售/合同协议.spg 中 input3 这个值是怎么生成或写入系统的？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "source_path": "app/销售.app/销售/合同协议.spg",
+      "real_project_target": "comp:app/销售.app/销售/合同协议.spg|input3",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --explain-condition 'comp:app/销售.app/销售/合同协议.spg|input3' --intent writer --budget compact"
+      ],
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain-condition",
+          "target": "comp:app/销售.app/销售/合同协议.spg|input3",
+          "args": [
+            "--intent",
+            "writer",
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "standard_answer": {
+        "summary": "input3 在合同协议页面不是本页计算出来的值。writer 链路显示：input3 读取 model22.phoneNumber，model22.phoneNumber 通过 FieldAlias 对应物理表字段 fact_qwSidebar.phoneNumber。该物理字段存在跨页写入动作，关键路径包括 app/销售.app/销售/潜客信息跟进.spg 的 button1.action1 写入 fact_qwSidebar.phoneNumber（source_expr=input2），button1.action4 写入 fact_qwSidebar.phoneNumber（source_expr=NULL）；另外 app/销售.app/销售/保客信息.spg 的 button3.action4 也会写入同一物理字段。回答时必须说明这是跨页 writer 链路，不是只在合同协议页面内生成。",
+        "must_mention": [
+          "input3",
+          "model22.phoneNumber",
+          "fact_qwSidebar.phoneNumber",
+          "FieldAlias",
+          "潜客信息跟进.spg",
+          "button1|action1",
+          "button1|action4",
+          "action1 source_expr=input2",
+          "action4 source_expr=NULL",
+          "跨页写入"
+        ],
+        "should_mention": [
+          "保客信息.spg button3 action4 也是同一字段的 writer",
+          "writer intent 与 display/value-source intent 不同"
+        ],
+        "must_not_mention": [
+          "input3 是合同协议页面本地计算生成",
+          "只来自 model22 而没有物理表字段",
+          "没有跨页写入动作",
+          "潜客信息跟进.spg 与 input3 无关"
+        ]
+      },
+      "expected_facts": [
+        "writer_facts.result=writer_paths_found",
+        "路径包含 field:model22.phoneNumber",
+        "路径包含 field:fact_qwSidebar.phoneNumber",
+        "路径包含 action:app/销售.app/销售/潜客信息跟进.spg|button1|action1",
+        "路径包含 action:app/销售.app/销售/潜客信息跟进.spg|button1|action4"
+      ],
+      "forbidden_claims": [
+        "只查询合同协议页面后断言没有写入",
+        "把 Reads 当成生成动作",
+        "跳过 fact_qwSidebar 物理字段",
+        "忽略 潜客信息跟进.spg"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.answer_facts.writer_facts.paths",
+          "op": "array_any_contains_substring",
+          "field": "result",
+          "value": "field:model22.phoneNumber>field:fact_qwSidebar.phoneNumber>action:app/销售.app/销售/潜客信息跟进.spg|button1|action1",
+          "description": "必须有 action1 跨页写入路径"
+        },
+        {
+          "path": "details.answer_facts.writer_facts.paths",
+          "op": "array_any_contains_substring",
+          "field": "result",
+          "value": "field:model22.phoneNumber>field:fact_qwSidebar.phoneNumber>action:app/销售.app/销售/潜客信息跟进.spg|button1|action4",
+          "description": "必须有 action4 跨页写入路径"
+        }
+      ],
+      "answer_style_policy": {
+        "principles": [
+          "用 writer_facts.paths 回答生成/写入问题",
+          "必须把 page-local model 字段和物理表字段都说清楚"
+        ],
+        "forbidden_practices": [
+          "只回答 input3 的读路径",
+          "把没有查到当前页 writer 解释成系统没有 writer"
+        ]
+      }
+    },
+    {
+      "case_id": "xiaoshouyi_fact_qwsidebar_model_relationships",
+      "difficulty": "expert",
+      "risk_tags": [
+        "model_query",
+        "cross_page_read_write",
+        "high_fanout_model",
+        "output_truncation",
+        "normal_budget"
+      ],
+      "question": "xiaoshouyi 项目中 fact_qwSidebar 这张表有哪些关键读写关系？尤其说明 合同协议.spg 的 input3 和 潜客信息跟进.spg 的写入是否都能查到。",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "source_path": "data/tables/主数据/fact_qwSidebar.tbl",
+      "real_project_target": "model:fact_qwSidebar",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --query-model fact_qwSidebar --budget normal"
+      ],
+      "minimal_command_plan": [
+        {
+          "command_kind": "--query-model",
+          "target": "fact_qwSidebar",
+          "args": [
+            "--budget",
+            "normal"
+          ],
+          "requires_project_dir": true,
+          "budget": "normal"
+        }
+      ],
+      "standard_answer": {
+        "summary": "fact_qwSidebar 是高扇出模型：summary 显示 read_by_count=13、written_by_count=6、consumed_by_dataflow_count=10，并且是 DataFlowParticipant。读关系中可以看到 合同协议.spg 的 input3 读取 fact_qwSidebar.phoneNumber，source_expr=model22.phoneNumber。写关系中可以看到 潜客信息跟进.spg 的 button1.action1/action4：action1 写 fact_qwSidebar.phoneNumber，source_expr=input2；action4 写 fact_qwSidebar.phoneNumber，source_expr=NULL；同页 action1 还写 phone_time=NOW()。同时 保客信息.spg 的 button3.action1/action4 也会写 phoneNumber/phone_time。应使用 normal budget 避免 compact 截断关键 writer。",
+        "must_mention": [
+          "read_by_count=13",
+          "written_by_count=6",
+          "consumed_by_dataflow_count=10",
+          "DataFlowParticipant",
+          "合同协议.spg input3 reads fact_qwSidebar.phoneNumber",
+          "source_expr=model22.phoneNumber",
+          "潜客信息跟进.spg button1 action1 writes fact_qwSidebar.phoneNumber",
+          "source_expr=input2",
+          "潜客信息跟进.spg button1 action4 writes fact_qwSidebar.phoneNumber",
+          "source_expr=NULL",
+          "normal budget 避免截断"
+        ],
+        "should_mention": [
+          "保客信息.spg button3 action1/action4 也写同一表字段",
+          "consumed_by_dataflows 包含多个 DataFlow 输入"
+        ],
+        "must_not_mention": [
+          "fact_qwSidebar 没有 writer",
+          "合同协议.spg input3 不读 fact_qwSidebar",
+          "潜客信息跟进.spg 不写 fact_qwSidebar",
+          "compact 截断后仍声称已经看完整全部关系"
+        ]
+      },
+      "expected_facts": [
+        "summary.read_by_count=13",
+        "summary.written_by_count=6",
+        "summary.consumed_by_dataflow_count=10",
+        "readers 包含 app/销售.app/销售/合同协议.spg 的 input3",
+        "writers 包含 app/销售.app/销售/潜客信息跟进.spg button1 action1/action4",
+        "writers 的 phoneNumber 写入 source_expr 分别包含 input2 和 NULL"
+      ],
+      "forbidden_claims": [
+        "没有跨页 writer",
+        "只看 compact 前 5 条后断言完整",
+        "忽略 OUTPUT_TRUNCATED 风险",
+        "把 fact_qwSidebar 只当 DataFlow 输出，不看 readers/writers"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.read_by_count",
+          "op": "eq",
+          "value": 13,
+          "description": "fact_qwSidebar 应有 13 个读取节点"
+        },
+        {
+          "path": "summary.written_by_count",
+          "op": "eq",
+          "value": 6,
+          "description": "fact_qwSidebar 应有 6 个写入节点"
+        },
+        {
+          "path": "details.readers",
+          "op": "array_any_contains_substring",
+          "field": "node_id",
+          "value": "comp:app/销售.app/销售/合同协议.spg|input3",
+          "description": "必须能查到合同协议 input3 的读取"
+        },
+        {
+          "path": "details.writers",
+          "op": "array_any_contains_substring",
+          "field": "node_id",
+          "value": "action:app/销售.app/销售/潜客信息跟进.spg|button1|action1",
+          "description": "必须能查到潜客信息跟进 action1 写入"
+        }
+      ],
+      "answer_style_policy": {
+        "principles": [
+          "先说明模型整体读写数量，再列关键跨页读写证据",
+          "如果使用 compact 出现 OUTPUT_TRUNCATED，必须改用 normal 复核"
+        ],
+        "forbidden_practices": [
+          "在截断输出上做全量结论",
+          "把 consumed_by_dataflows 当作 readers/writers 的替代证据"
+        ]
+      }
+    }
+  ]
+}
