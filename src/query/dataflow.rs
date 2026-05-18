@@ -272,6 +272,27 @@ impl DataFlowMeta {
             .map(std::string::String::as_str)
     }
 
+    /// 获取 DataFlow 中所有 ModelTable 节点的 moduleTablePath
+    pub fn get_model_table_paths(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self
+            .node_types
+            .iter()
+            .filter_map(|(node_id, node_type)| {
+                if node_type == "ModelTable" {
+                    self.module_table_paths
+                        .get(node_id)
+                        .filter(|p| !p.is_empty())
+                        .cloned()
+                } else {
+                    None
+                }
+            })
+            .collect();
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
     /// 获取 Output 类型节点的字段索引；如果没有 Output 节点，fallback 到 "default"
     pub fn get_output_fields(&self) -> Vec<(&str, &HashMap<String, FieldRecord>)> {
         let output_nodes: Vec<&str> = self

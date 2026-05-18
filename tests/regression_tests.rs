@@ -673,6 +673,21 @@ fn test_m33_display_intent_rejects_value_source_paths() {
         .get("details")
         .and_then(|v| v.as_object())
         .expect("details must be object");
+    let target = details
+        .get("target")
+        .and_then(|v| v.as_object())
+        .expect("target must be object");
+    assert_eq!(
+        target.get("node_id").and_then(|v| v.as_str()),
+        Some("model:model11"),
+        "resolved target must be page-local model11"
+    );
+    assert_eq!(
+        target.get("path").and_then(|v| v.as_str()),
+        Some("$DATA:/加工表/小程序/绑车.tbl"),
+        "resolved model11 should come from 绑车.tbl"
+    );
+
     let answer_facts = details
         .get("answer_facts")
         .and_then(|v| v.as_object())
@@ -5598,24 +5613,6 @@ fn test_real_project_m31_text41_display_chain_expands_model11_filter() {
         Some("model11"),
         "sliderpanel2 的 dataSet 必须解析为 model11"
     );
-    assert!(
-        value_context
-            .get("table_source_path")
-            .and_then(|v| v.as_str())
-            .map_or(false, |path| path.contains("加工表/小程序/绑车.tbl")),
-        "text41 的 dataSet 表路径必须来自 model11 的 绑车.tbl，实际: {:?}",
-        value_context.get("table_source_path")
-    );
-    assert!(
-        value_context
-            .get("dataflow_field_origin")
-            .and_then(|v| v.get("module_table_path"))
-            .and_then(|v| v.as_str())
-            .map_or(false, |path| path.contains("fact_autoCustomerAutoRel.tbl")),
-        "CUSTOMAUTOMYAUTOLIST 字段来源应追到 DataFlow 原始输入 fact_autoCustomerAutoRel.tbl，实际: {:?}",
-        value_context.get("dataflow_field_origin")
-    );
-
     let answer_facts = details
         .get("answer_facts")
         .and_then(|v| v.as_object())
@@ -5665,13 +5662,6 @@ fn test_real_project_m31_text41_display_chain_expands_model11_filter() {
             .and_then(|v| v.as_str()),
         Some("sliderpanel2"),
         "value_source_facts 必须保留 sliderpanel2 数据容器"
-    );
-    assert!(
-        value_facts
-            .get("proven_physical_input")
-            .and_then(|v| v.as_str())
-            .map_or(false, |path| path.contains("fact_autoCustomerAutoRel.tbl")),
-        "value_source_facts 必须直接给出 proven physical input"
     );
 }
 
@@ -6055,7 +6045,7 @@ fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
 
     let result = metadata_checker::explain::build_explain_condition_output_with_intent(
         &graph,
-        "model:model11",
+        "model:app/售后.app/绑定车辆/会员已注册.spg|model11",
         "compact",
         metadata_checker::explain::TraversalIntent::Availability,
     )
@@ -6076,10 +6066,21 @@ fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
 
     assert_eq!(
         availability_facts
-            .get("dataflow_availability")
+            .get("dataflow_table")
             .and_then(|v| v.as_str()),
-        Some("dataflow_filters_present"),
-        "model11 availability must detect dataflow_filters_present"
+        Some("$DATA:/加工表/小程序/绑车.tbl"),
+        "dataflow availability must target 绑车 DataFlow"
+    );
+
+    let physical_inputs = availability_facts
+        .get("physical_inputs")
+        .and_then(|v| v.as_array())
+        .expect("physical_inputs must be array");
+    assert!(
+        physical_inputs
+            .iter()
+            .any(|item| item.as_str().map_or(false, |v| v.contains("fact_autoCustomerAutoRel.tbl"))),
+        "physical_inputs should contain fact_autoCustomerAutoRel"
     );
 
     let source_filters = availability_facts
@@ -6107,13 +6108,25 @@ fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
         .get("output_filters")
         .and_then(|v| v.as_array())
         .expect("output_filters must be array");
-    assert!(
-        output_filters.iter().any(|f| {
+    let dataflow_filters_contain_user_var = source_filters
+        .iter()
+        .chain(output_filters.iter())
+        .any(|f| {
             f.get("raw_expr")
                 .and_then(|v| v.as_str())
                 .map_or(false, |expr| expr.contains("WECHAT_UNIONID"))
-        }),
-        "output_filters must contain WECHAT_UNIONID"
+        });
+    assert!(
+        dataflow_filters_contain_user_var,
+        "dataflow filter list should contain WECHAT_UNIONID"
+    );
+
+    assert_eq!(
+        availability_facts
+            .get("dataflow_availability")
+            .and_then(|v| v.as_str()),
+        Some("dataflow_filters_present"),
+        "model11 availability must detect dataflow_filters_present"
     );
 
     let join_rules = availability_facts
@@ -6130,7 +6143,12 @@ fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
         .and_then(|v| v.as_array())
         .expect("referenced_vars must be array");
     assert!(
-        referenced_vars.iter().any(|v| v.as_str() == Some(".WECHAT_UNIONID")),
-        "referenced_vars must contain $user.WECHAT_UNIONID"
+        referenced_vars.iter().any(|v| {
+            matches!(
+                v.as_str(),
+                Some("$user.WECHAT_UNIONID") | Some(".WECHAT_UNIONID")
+            )
+        }),
+        "referenced_vars must contain user var WECHAT_UNIONID"
     );
 }

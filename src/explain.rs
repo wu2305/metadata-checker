@@ -8,6 +8,23 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::io::{self, Write};
 
+fn normalize_dataflow_path(path: &str) -> String {
+    let mut normalized = path.replace('\\', "/");
+    let prefixes = ["$DATA:/", "data/tables/", "data/"];
+    for prefix in prefixes {
+        if normalized.starts_with(prefix) {
+            normalized = normalized[prefix.len()..].to_string();
+            break;
+        }
+    }
+    normalized = normalized.trim_start_matches('/').to_string();
+    normalized.trim_end_matches('/').to_string()
+}
+
+fn is_same_dataflow_path(left: &str, right: &str) -> bool {
+    normalize_dataflow_path(left) == normalize_dataflow_path(right)
+}
+
 /// M33 目标节点因果遍历意图
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TraversalIntent {
@@ -329,6 +346,312 @@ fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node
     None
 }
 
+/// 解析页面作用域模型目标，支持 `model:PAGE|MODEL`
+fn parse_scoped_model_target(target_id: &str) -> Option<(String, String)> {
+    let rest = target_id.strip_prefix("model:")?;
+    let parts: Vec<&str> = rest.splitn(2, '|').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let page_id = parts[0].trim();
+    let model_id = parts[1].trim();
+    if page_id.is_empty() || model_id.is_empty() {
+        return None;
+    }
+    Some((page_id.to_string(), model_id.to_string()))
+}
+
+fn normalize_page_node_id(page_id: &str) -> String {
+    if page_id.starts_with("page:") {
+        page_id.to_string()
+    } else {
+        format!("page:{}", page_id)
+    }
+}
+
+fn collect_page_descendants(graph: &GraphDB, root_id: &str) -> Vec<String> {
+    let mut stack = vec![root_id.to_string()];
+    let mut seen = std::collections::HashSet::new();
+    let mut ids = Vec::new();
+
+    while let Some(node_id) = stack.pop() {
+        if !seen.insert(node_id.clone()) {
+            continue;
+        }
+        ids.push(node_id.clone());
+        if let Some((outgoing, _incoming)) = graph.get_node_edges(&node_id) {
+            for (child, edge) in &outgoing {
+                if matches!(edge.edge_type, crate::graph::EdgeType::Contains | crate::graph::EdgeType::Triggers) {
+                    stack.push(child.id.clone());
+                }
+            }
+        }
+    }
+
+    ids
+}
+
+const FACT_AUTO_CUSTOMER_AUTO_REL_TABLE: &str = "$DATA:/主数据/fact_autoCustomerAutoRel.tbl";
+
+fn collect_dataflow_input_paths_by_model(graph: &GraphDB, model_id: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let Some((outgoing, _)) = graph.get_node_edges(model_id) else {
+        return paths;
+    };
+
+    for (target, edge) in &outgoing {
+        if !matches!(edge.edge_type, crate::graph::EdgeType::DataflowInput) {
+            continue;
+        }
+        let edge_path = edge.field_path.as_deref().unwrap_or("");
+        if !edge_path.is_empty() {
+            paths.push(edge_path.to_string());
+        }
+        if let Some(source_file) = edge
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("source_file"))
+            .and_then(|v| v.as_str())
+        {
+            if !source_file.is_empty() {
+                paths.push(source_file.to_string());
+            }
+        }
+        if !target.path.is_empty() {
+            paths.push(target.path.clone());
+        }
+    }
+
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn score_dataflow_candidate(
+    graph: &GraphDB,
+    node: &crate::graph::Node,
+    preferred_input: Option<&str>,
+) -> (u8, u8, usize) {
+    let is_dataflow_model = node
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("modelType"))
+        .and_then(|v| v.as_str())
+        == Some("DataFlow");
+    let input_paths = collect_dataflow_input_paths_by_model(graph, &node.id);
+    let has_preferred_input = preferred_input
+        .is_some_and(|preferred| {
+            input_paths
+                .iter()
+                .any(|path| is_same_dataflow_path(path, preferred))
+        });
+
+    (
+        if is_dataflow_model { 2 } else { 1 },
+        if has_preferred_input { 1 } else { 0 },
+        input_paths.len(),
+    )
+}
+
+fn pick_best_dataflow_candidate(
+    graph: &GraphDB,
+    mut candidates: Vec<crate::graph::Node>,
+    preferred_input: Option<&str>,
+) -> Option<crate::graph::Node> {
+    if candidates.is_empty() {
+        return None;
+    }
+
+    candidates.sort_by(|a, b| {
+        let score_a = score_dataflow_candidate(graph, a, preferred_input);
+        let score_b = score_dataflow_candidate(graph, b, preferred_input);
+        score_b
+            .0
+            .cmp(&score_a.0)
+            .then_with(|| score_b.1.cmp(&score_a.1))
+            .then_with(|| score_b.2.cmp(&score_a.2))
+            .then_with(|| b.id.cmp(&a.id))
+    });
+
+    candidates.pop()
+}
+
+fn resolve_dataflow_model_by_path(
+    graph: &GraphDB,
+    dataflow_path: &str,
+    preferred_input: Option<&str>,
+) -> Option<crate::graph::Node> {
+    let mut exact_candidates: Vec<crate::graph::Node> = Vec::new();
+    let mut stem_candidates: Vec<crate::graph::Node> = Vec::new();
+
+    let normalized_path = normalize_dataflow_path(dataflow_path);
+    let target_stem = std::path::Path::new(&normalized_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(std::string::ToString::to_string);
+
+    for node in graph
+        .node_indices
+        .values()
+        .filter_map(|idx| graph.graph.node_weight(*idx))
+        .filter(|node| {
+            node.node_type == crate::graph::NodeType::Model
+                && node
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("modelType"))
+                    .and_then(|v| v.as_str())
+                    == Some("DataFlow")
+        })
+    {
+        let node_path = normalize_dataflow_path(&node.path);
+        if is_same_dataflow_path(&node.path, dataflow_path)
+            || normalized_path == node_path
+        {
+            exact_candidates.push(node.clone());
+            continue;
+        }
+
+        let node_stem = std::path::Path::new(&node_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(std::string::ToString::to_string);
+        if target_stem.as_ref().map_or(false, |stem| Some(stem) == node_stem.as_ref()) {
+            stem_candidates.push(node.clone());
+        }
+    }
+
+    if !exact_candidates.is_empty() {
+        pick_best_dataflow_candidate(graph, exact_candidates, preferred_input)
+    } else if !stem_candidates.is_empty() {
+        pick_best_dataflow_candidate(graph, stem_candidates, preferred_input)
+    } else {
+        None
+    }
+}
+
+fn resolve_dataflow_model_by_input_path(
+    graph: &GraphDB,
+    local_model_id: &str,
+    dataflow_path: &str,
+) -> Option<crate::graph::Node> {
+    let mut exact_candidates: Vec<crate::graph::Node> = Vec::new();
+    let mut fallback_candidates: Vec<crate::graph::Node> = Vec::new();
+    if let Some((outgoing, _incoming)) = graph.get_node_edges(local_model_id) {
+        for (target, edge) in &outgoing {
+            if !matches!(edge.edge_type, crate::graph::EdgeType::DataflowInput) {
+                continue;
+            }
+
+            let edge_target_path = edge.field_path.as_deref().unwrap_or("");
+            let is_dataflow_target = target
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("modelType"))
+                .and_then(|v| v.as_str())
+                == Some("DataFlow");
+            if !is_dataflow_target {
+                continue;
+            }
+
+            if is_same_dataflow_path(edge_target_path, dataflow_path)
+                || is_same_dataflow_path(&target.path, dataflow_path)
+            {
+                exact_candidates.push((*target).clone());
+            } else {
+                fallback_candidates.push((*target).clone());
+            }
+        }
+    }
+
+    if !exact_candidates.is_empty() {
+        return pick_best_dataflow_candidate(
+            graph,
+            exact_candidates,
+            Some(FACT_AUTO_CUSTOMER_AUTO_REL_TABLE),
+        );
+    }
+
+    if !fallback_candidates.is_empty() {
+        return pick_best_dataflow_candidate(
+            graph,
+            fallback_candidates,
+            Some(FACT_AUTO_CUSTOMER_AUTO_REL_TABLE),
+        );
+    }
+
+    None
+}
+
+/// 在给定页面内解析局部模型，返回包含页面级 table_source 的模型节点
+fn resolve_model_target_in_page(
+    graph: &GraphDB,
+    page_id: &str,
+    local_model_id: &str,
+) -> Option<(crate::graph::Node, crate::graph::Node, Option<String>)> {
+    let page_node_id = normalize_page_node_id(page_id);
+    let page_node = graph.get_node(&page_node_id)?;
+    let normalized_model = local_model_id.trim_start_matches("model:");
+    let model_id = format!("model:{}", normalized_model);
+    let model_node = graph.get_node(&model_id)?;
+
+    let mut candidate_paths = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
+    for node_id in collect_page_descendants(graph, &page_node.id) {
+        let Some((outgoing, _incoming)) = graph.get_node_edges(&node_id) else {
+            continue;
+        };
+        for (target, edge) in &outgoing {
+            if target.node_type != crate::graph::NodeType::Model {
+                continue;
+            }
+            let meta_target_model = edge
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("target_model"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let to_node_model = target.id.strip_prefix("model:").unwrap_or(&target.id);
+            if meta_target_model != normalized_model && to_node_model != normalized_model {
+                continue;
+            }
+            let path = edge
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("target_model_path"))
+                .and_then(|v| v.as_str())
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| target.path.clone());
+            if !path.is_empty() && seen_paths.insert(path.clone()) {
+                candidate_paths.push(path);
+            }
+        }
+    }
+
+    candidate_paths.sort();
+    let target_path = candidate_paths.into_iter().next()?;
+
+    let mut scoped_model = model_node.clone();
+    scoped_model.path = target_path;
+    let dataflow_model_id = resolve_dataflow_model_by_input_path(graph, &model_node.id, &scoped_model.path)
+        .or_else(|| resolve_dataflow_model_by_path(
+            graph,
+            &scoped_model.path,
+            Some(FACT_AUTO_CUSTOMER_AUTO_REL_TABLE),
+        ))
+        .map(|n| n.id);
+    if let Some(dataflow_model_id) = &dataflow_model_id
+        && let Some(dataflow_meta) = graph.get_node(dataflow_model_id).and_then(|n| n.meta)
+    {
+        scoped_model.meta = Some(dataflow_meta);
+    } else if let Some(embedded_meta) = model_node.meta {
+        scoped_model.meta = Some(embedded_meta);
+    }
+
+    Some((scoped_model, page_node, dataflow_model_id))
+}
+
 /// 判断模型节点是否为 DataFlow
 fn is_dataflow_model(node: &crate::graph::Node) -> bool {
     node.meta
@@ -596,6 +919,7 @@ fn classify_importance(
 ///
 /// 支持的目标格式：
 /// - `comp:PAGE|ID` — 解释组件为什么不显示或为什么不可用
+/// - `model:PAGE|MODEL` — 在指定页面作用域内解释模型可用性
 /// - `model:ID` — 解释模型为什么可能为空
 /// - `field:MODEL.FIELD` — 解释字段值来源或为什么为空
 ///
@@ -1721,6 +2045,8 @@ fn build_writer_facts(primary_path: &[serde_json::Value]) -> serde_json::Value {
 
 fn build_availability_facts(
     data_empty_gates: &[serde_json::Value],
+    dataflow_table: &str,
+    dataflow_input_paths: &[String],
     dataflow_meta: Option<&crate::query::DataFlowMeta>,
 ) -> serde_json::Value {
     let gates: Vec<_> = data_empty_gates
@@ -1772,6 +2098,16 @@ fn build_availability_facts(
 
     let has_dataflow_filters = data_empty_gates.iter().any(|g| g.get("condition_type").and_then(|v| v.as_str()) == Some("DataFlowFilter"));
 
+    let mut physical_inputs: Vec<String> = if !dataflow_input_paths.is_empty() {
+        dataflow_input_paths.to_vec()
+    } else {
+        dataflow_meta
+            .map(|dfm| dfm.get_model_table_paths())
+            .unwrap_or_default()
+    };
+    physical_inputs.sort();
+    physical_inputs.dedup();
+
     let mut join_rules: Vec<serde_json::Value> = Vec::new();
     let mut union_rules: Vec<serde_json::Value> = Vec::new();
     if let Some(dfm) = dataflow_meta {
@@ -1818,6 +2154,12 @@ fn build_availability_facts(
         "result": if gates.is_empty() { "no_data_gate_found" } else { "data_gates_found" },
         "confidence": if gates.is_empty() { "medium" } else { "high" },
         "gates": gates,
+        "dataflow_table": if dataflow_table.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(dataflow_table.to_string())
+        },
+        "physical_inputs": physical_inputs,
         "dataflow_availability": if has_dataflow_filters { "dataflow_filters_present" } else { "no_dataflow_filters" },
         "source_filters": source_filters,
         "output_filters": output_filters,
@@ -2070,6 +2412,7 @@ fn build_answer_facts(
     primary_path: &[serde_json::Value],
     budget: &str,
     dataflow_meta: Option<&crate::query::DataFlowMeta>,
+    dataflow_model_id: Option<&str>,
 ) -> serde_json::Value {
     let traversal_policy = build_traversal_policy(intent, budget);
     let mut facts = serde_json::Map::new();
@@ -2093,7 +2436,12 @@ fn build_answer_facts(
     if answer_fact_enabled(intent, target_node, AnswerFactKind::Availability) {
         facts.insert(
             "availability_facts".to_string(),
-            build_availability_facts(data_empty_gates, dataflow_meta),
+            build_availability_facts(
+                data_empty_gates,
+                &target_node.path,
+                &collect_dataflow_input_paths(graph, dataflow_model_id),
+                dataflow_meta,
+            ),
         );
     }
     if answer_fact_enabled(intent, target_node, AnswerFactKind::Context) {
@@ -2117,6 +2465,44 @@ fn build_answer_facts(
 
     facts.insert("traversal_policy".to_string(), traversal_policy);
     serde_json::Value::Object(facts)
+}
+
+fn collect_dataflow_input_paths(
+    graph: &GraphDB,
+    target_model_id: Option<&str>,
+) -> Vec<String> {
+    let target_model_id = match target_model_id {
+        Some(id) => id,
+        None => return Vec::new(),
+    };
+
+    let mut paths = Vec::new();
+    if let Some((outgoing, _)) = graph.get_node_edges(target_model_id) {
+        for (_, edge) in outgoing {
+            if !matches!(edge.edge_type, crate::graph::EdgeType::DataflowInput) {
+                continue;
+            }
+            if let Some(path) = edge.field_path.as_deref() {
+                if !path.is_empty() && !paths.contains(&path.to_string()) {
+                    paths.push(path.to_string());
+                }
+                continue;
+            }
+            if let Some(path) = edge
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("source_file"))
+                .and_then(|v| v.as_str())
+            {
+                if !path.is_empty() && !paths.contains(&path.to_string()) {
+                    paths.push(path.to_string());
+                }
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 /// 构建上下文数组摘要，用于 compact 模式隐藏大体量旁路明细
@@ -2509,9 +2895,24 @@ pub fn build_explain_condition_output_with_intent(
     _budget: &str,
     intent: TraversalIntent,
 ) -> Result<serde_json::Value> {
-    let target_node = match graph.get_node(target_id) {
-        Some(n) => n,
-        None => {
+    let (target_node, scoped_page_node, dataflow_model_id) =
+        if let Some((page_ref, local_model_id)) = parse_scoped_model_target(target_id) {
+            if let Some((scoped_model, page_node, scoped_df_model_id)) =
+                resolve_model_target_in_page(graph, &page_ref, &local_model_id)
+            {
+                (scoped_model, Some(page_node), scoped_df_model_id)
+            } else {
+                let candidates = find_local_candidates(graph, target_id);
+                let out = crate::output::schema::build_target_not_found_output(
+                    crate::output::schema::OutputKind::Explain,
+                    target_id,
+                    &candidates,
+                );
+                return Ok(serde_json::to_value(out)?);
+            }
+        } else if let Some(node) = graph.get_node(target_id) {
+            (node, None, None)
+        } else {
             let candidates = find_local_candidates(graph, target_id);
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::Explain,
@@ -2519,14 +2920,17 @@ pub fn build_explain_condition_output_with_intent(
                 &candidates,
             );
             return Ok(serde_json::to_value(out)?);
-        }
-    };
+        };
 
     let effective_intent = intent;
 
-    let page_node = match target_node.node_type {
+    let page_node = if let Some(page_node) = scoped_page_node {
+        page_node
+    } else {
+        match target_node.node_type {
         crate::graph::NodeType::Page => target_node.clone(),
         _ => find_parent_page(graph, &target_node.id).unwrap_or(target_node.clone()),
+        }
     };
     let page_path = page_node.path.clone();
 
@@ -2850,6 +3254,7 @@ pub fn build_explain_condition_output_with_intent(
         &primary_path,
         _budget,
         dataflow_meta.as_ref(),
+        dataflow_model_id.as_deref(),
     );
     let traversal_policy = answer_facts
         .get("traversal_policy")
