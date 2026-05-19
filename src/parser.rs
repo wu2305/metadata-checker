@@ -48,9 +48,11 @@ pub struct DataBinding {
     pub filter: Option<String>,
 }
 
-/// 根据文件类型自动选择解析器
+/// 根据文件类型自动选择解析器。
+///
+/// M36 起默认使用 DocumentProvider 入口；旧 parse_file_with_storage 保留兼容。
 pub fn parse_file(path: &Path) -> Result<PageMetadata> {
-    parse_file_with_storage(path, &LocalStorageProvider)
+    parse_file_with_document_provider(path, &LocalStorageProvider, None)
 }
 
 /// 使用指定文档读取层解析文件。
@@ -66,7 +68,7 @@ pub fn parse_file_with_document_provider(
         crate::source_id::ProjectRef::new("default"),
         path,
         project_dir,
-    );
+    )?;
     let parsed = ParsedContent::from_text(source, text);
     parse_content(&parsed)
 }
@@ -341,12 +343,8 @@ fn test_parse_file_with_document_provider_reads_via_provider() {
     let provider = TestProvider {
         content: r#"{"canvas": {"components": [{"id": "input1", "type": "text"}]}}"#.to_string(),
     };
-    let meta = parse_file_with_document_provider(
-        Path::new("app/page.spg"),
-        &provider,
-        Some(Path::new(".")),
-    )
-    .expect("parse_file_with_document_provider should succeed");
+    let meta = parse_file_with_document_provider(Path::new("app/page.spg"), &provider, None)
+        .expect("parse_file_with_document_provider should succeed");
 
     assert!(meta.superpage.is_some());
     assert_eq!(meta.input_path, Some("app/page.spg".to_string()));

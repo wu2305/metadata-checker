@@ -1202,21 +1202,21 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 - `ParsedContent` 是反序列化缓存容器，不是 graph node，不进入 query 层。
 - `ParsedContent::json()` 首次调用时反序列化并缓存 `Arc<Value>`，后续调用复用同一 Arc。
 - `ParsedContent` 不负责判断 `.spg/.tbl`、不建图、不查询、不输出。
-- 预留 `CompressedBytes` 但不实现完整压缩流解析。
+- ~~预留 `CompressedBytes`~~（M36 收敛后已删除该 variant，未实现压缩流解析）。
 
 ### DocumentProvider vs GraphStore / IndexStore
 
 - `DocumentProvider`（旧名 `StorageProvider`）只负责内容读取：`read_bytes` / `read_to_string` / `metadata`。
 - M36 不增加 `write_bytes`；写入 session/cache 放到 M40。
 - 不抽目录遍历；`discover files` 放到 M39 `ProjectIndexer`。
-- `GraphStore` / `IndexStore` 是 M36 占位 trait，为 redb / IndexedDB / memory index 等后端预留。
+- ~~`GraphStore` / `IndexStore` 占位 trait~~（M36 收敛后已删除，待 M39/M99 再引入真正的存储后端抽象）。
 - M36 不大规模替换现有 redb 实现。
 
 ### ResponseProcessor 边界
 
 - `ResponseProcessor` 定位为 renderer facade 前置骨架。
 - 当前继续复用 `RuntimeQueryResponse` / `RuntimeTiming`，不改现有 JSON schema。
-- `ResponseRenderer` trait 已预留：`AiJsonRenderer`、`StdioRenderer`、`HumanRenderer`、`McpRenderer`、`MermaidRenderer`。
+- `ResponseRenderer` trait 已预留，但 M36 只保留 trait 定义，不放入具体 renderer 实现（避免语义不真实占位）。
 - M36 不迁移 human/mermaid/REPL 输出。
 - `timing.output_size_bytes` 在 stdio 中表示最终 envelope JSON 行的序列化大小，不是 runtime 内部 result 的预估大小。
 

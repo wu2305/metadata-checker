@@ -89,7 +89,7 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
 
         let node_ids = if path.extension().map(|e| e == "spg").unwrap_or(false) {
             let source =
-                SourceId::from_local_path(ProjectRef::new("default"), path, Some(project_dir));
+                SourceId::from_local_path(ProjectRef::new("default"), path, Some(project_dir))?;
             let parsed = ParsedContent::from_bytes(source, content_bytes.clone());
             let raw_value = parsed
                 .json()

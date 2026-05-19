@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -79,18 +80,41 @@ impl SourceId {
     ///
     /// 若 `project_dir` 提供，则把绝对路径裁剪为相对 `source_path`；
     /// 否则保留原样（但仍建议调用方保证传入的是相对路径）。
+    /// 从本地文件路径构造 SourceId。
+    ///
+    /// `source_path` 必须是项目内逻辑路径：
+    /// - 提供 `project_dir` 时，从绝对路径裁剪出相对路径。
+    /// - 未提供 `project_dir` 时，只允许相对路径；绝对路径被拒绝。
     pub fn from_local_path(
         project_ref: ProjectRef,
         path: &Path,
         project_dir: Option<&Path>,
-    ) -> Self {
+    ) -> Result<Self> {
         let source_path = if let Some(base) = project_dir {
             path.strip_prefix(base)
                 .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| path.to_string_lossy().to_string())
+                .with_context(|| {
+                    format!(
+                        "path {} is not inside project_dir {}",
+                        path.display(),
+                        base.display()
+                    )
+                })?
+        } else if path.is_absolute() {
+            anyhow::bail!(
+                "absolute path {} cannot be used as source_path without project_dir. Use SourceId::from_memory for out-of-project sources or provide project_dir.",
+                path.display()
+            )
         } else {
             path.to_string_lossy().to_string()
         };
+
+        if !is_project_internal_path(&source_path) {
+            anyhow::bail!(
+                "source_path '{}' is not a project-internal relative path",
+                source_path
+            );
+        }
 
         let source_kind = if path.extension().map(|e| e == "spg").unwrap_or(false) {
             SourceKind::Spg
@@ -100,16 +124,15 @@ impl SourceId {
             SourceKind::Unknown
         };
 
-        Self {
+        Ok(Self {
             project_ref,
             source_path,
             source_kind,
             origin: SourceOrigin::Local,
             revision: None,
-        }
+        })
     }
 
-    /// 从内存字节构造 SourceId，用于 WASM 或测试 fixture。
     pub fn from_memory(project_ref: ProjectRef, source_path: impl Into<String>) -> Self {
         Self {
             project_ref,
@@ -161,8 +184,7 @@ mod tests {
     #[test]
     fn test_source_id_from_local_path_relative() {
         let pr = ProjectRef::new("p1");
-        let sid =
-            SourceId::from_local_path(pr.clone(), Path::new("app/page.spg"), Some(Path::new(".")));
+        let sid = SourceId::from_local_path(pr.clone(), Path::new("app/page.spg"), None).unwrap();
         assert_eq!(sid.source_path, "app/page.spg");
         assert_eq!(sid.source_kind, SourceKind::Spg);
         assert_eq!(sid.origin, SourceOrigin::Local);
@@ -176,7 +198,8 @@ mod tests {
             pr,
             Path::new("/tmp/proj/app/page.spg"),
             Some(Path::new("/tmp/proj")),
-        );
+        )
+        .unwrap();
         assert_eq!(sid.source_path, "app/page.spg");
     }
 
@@ -210,7 +233,7 @@ mod tests {
 #[test]
 fn test_source_id_from_local_path_accepts_relative_without_project_dir() {
     let pr = ProjectRef::new("p1");
-    let sid = SourceId::from_local_path(pr, Path::new("app/page.spg"), None);
+    let sid = SourceId::from_local_path(pr, Path::new("app/page.spg"), None).unwrap();
     assert_eq!(sid.source_path, "app/page.spg");
 }
 
@@ -221,6 +244,22 @@ fn test_source_id_from_local_path_strips_prefix_with_project_dir() {
         pr,
         Path::new("/tmp/proj/app/page.spg"),
         Some(Path::new("/tmp/proj")),
-    );
+    )
+    .unwrap();
     assert_eq!(sid.source_path, "app/page.spg");
+}
+
+#[test]
+fn test_source_id_from_local_path_rejects_absolute_without_project_dir() {
+    let pr = ProjectRef::new("p1");
+    let result = SourceId::from_local_path(pr, Path::new("/tmp/page.spg"), None);
+    assert!(
+        result.is_err(),
+        "absolute path without project_dir must be rejected"
+    );
+    let msg = format!("{}", result.unwrap_err());
+    assert!(
+        msg.contains("absolute path"),
+        "error must mention absolute path"
+    );
 }
