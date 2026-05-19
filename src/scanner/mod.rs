@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use twox_hash::XxHash64;
 
 use crate::graph::{FileState, GraphDB};
-use crate::storage_provider::{LocalStorageProvider, StorageProvider};
+use crate::storage_provider::{DocumentProvider, LocalStorageProvider, StorageProvider};
 
 /// 项目目录扫描模块
 ///

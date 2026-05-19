@@ -2894,7 +2894,7 @@ MCP resources 建议：
 
 任务清单：
 
-- [ ] M36.1：补 `SourceId` / `ProjectRef` / 路径语义
+- [x] M36.1：补 `SourceId` / `ProjectRef` / 路径语义
   - `source_path` 定义：
     - 必须是项目内逻辑路径，例如 `app/.../*.spg` 或 `data/tables/.../*.tbl`。
     - 不能是本地绝对路径。
@@ -2913,7 +2913,7 @@ MCP resources 建议：
     - evidence/meta 可逐步补 `project_ref + source_path`，为跨项目链路预留结构化身份。
     - 保留现有 `parse_file(path)` 兼容。
 
-- [ ] M36.2：新增 `ParsedContent`，替代重型 `MetadataDocument`
+- [x] M36.2：新增 `ParsedContent`，替代重型 `MetadataDocument`
   - 定位：
     - 只负责持有原始内容、`SourceId` 和懒解析缓存。
     - 不负责判断 `.spg/.tbl`。
@@ -2933,7 +2933,7 @@ MCP resources 建议：
     - 后续需要 `serde_json::Value` 的 parser/scanner 入口优先从 `ParsedContent::json()` 获取。
     - M36 可保留少量兼容 clone，但新入口必须避免重复 `serde_json::from_slice/from_str`。
 
-- [ ] M36.3：纠偏当前 `StorageProvider` 命名边界
+- [x] M36.3：纠偏当前 `StorageProvider` 命名边界
   - 背景：
     - 当前已落地的 `StorageProvider` 实际是内容读取 provider。
     - 长期意义上的 `StorageProvider` 应表示 redb / IndexedDB / memory index 等存储后端抽象。
@@ -2949,7 +2949,7 @@ MCP resources 建议：
     - memory provider fixture。
     - local provider error context。
 
-- [ ] M36.4：明确 `ResponseProcessor` 为 renderer facade 前置骨架
+- [x] M36.4：明确 `ResponseProcessor` 为 renderer facade 前置骨架
   - 定位：
     - 负责把内部结果渲染成机器可读或人类可读输出的统一入口。
     - 未来支持 MCP、STDIO、REPL、Mermaid 等 renderer。
@@ -2966,7 +2966,7 @@ MCP resources 建议：
     - runtime 内部 result 预估大小与 stdio envelope 最终 stdout JSON 行大小不是同一个概念。
     - M36 不改字段名，但文档中要写清当前 `timing.output_size_bytes` 在 stdio 中表示最终 envelope 行大小。
 
-- [ ] M36.5：ParserFacade 最小入口
+- [x] M36.5：ParserFacade 最小入口
   - 新增入口建议：
     - `parse_content(&ParsedContent)`
     - `parse_file(path)` 内部构造 `ParsedContent` 后调用 `parse_content`
@@ -2975,7 +2975,7 @@ MCP resources 建议：
     - 不引入 `ParsedMetadata` enum，放到 M37。
     - 不改 CLI 输出快照。
 
-- [ ] M36.6：文档与边界断言
+- [x] M36.6：文档与边界断言
   - 在 `docs/schema.md` 或 architecture 文档中声明：
     - `source_path` 是项目内逻辑路径。
     - `ParsedContent` 是反序列化缓存，不是 graph node，不进入 query 层。

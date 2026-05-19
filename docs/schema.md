@@ -1188,3 +1188,40 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 2. **分组保底**：key_primary_paths 采用分类保底策略，避免单一 Top-K 忽视问题。
 3. **可替换选择器**：`PathSelector` trait 允许后续接入 `WeightedPathSelector`、`FutureLearningPathSelector` 等。
 4. **related_context 不是必要条件**：明确标记为参考信息，不进入主结论。
+
+## M36 Document / Storage / Response 边界
+
+### source_path 语义
+
+- `source_path` 必须是项目内逻辑路径，例如 `app/.../*.spg` 或 `data/tables/.../*.tbl`。
+- 本地绝对路径、session local path、remote path 只能存在于 provider/session adapter 层。
+- 判断函数 `is_project_internal_path` 拒绝以 `/` 或 `\\` 开头的绝对路径，以及包含 `..` 的逃逸路径。
+
+### ParsedContent 边界
+
+- `ParsedContent` 是反序列化缓存容器，不是 graph node，不进入 query 层。
+- `ParsedContent::json()` 首次调用时反序列化并缓存 `Arc<Value>`，后续调用复用同一 Arc。
+- `ParsedContent` 不负责判断 `.spg/.tbl`、不建图、不查询、不输出。
+- 预留 `CompressedBytes` 但不实现完整压缩流解析。
+
+### DocumentProvider vs GraphStore / IndexStore
+
+- `DocumentProvider`（旧名 `StorageProvider`）只负责内容读取：`read_bytes` / `read_to_string` / `metadata`。
+- M36 不增加 `write_bytes`；写入 session/cache 放到 M40。
+- 不抽目录遍历；`discover files` 放到 M39 `ProjectIndexer`。
+- `GraphStore` / `IndexStore` 是 M36 占位 trait，为 redb / IndexedDB / memory index 等后端预留。
+- M36 不大规模替换现有 redb 实现。
+
+### ResponseProcessor 边界
+
+- `ResponseProcessor` 定位为 renderer facade 前置骨架。
+- 当前继续复用 `RuntimeQueryResponse` / `RuntimeTiming`，不改现有 JSON schema。
+- `ResponseRenderer` trait 已预留：`AiJsonRenderer`、`StdioRenderer`、`HumanRenderer`、`McpRenderer`、`MermaidRenderer`。
+- M36 不迁移 human/mermaid/REPL 输出。
+- `timing.output_size_bytes` 在 stdio 中表示最终 envelope JSON 行的序列化大小，不是 runtime 内部 result 的预估大小。
+
+### ParserFacade 边界
+
+- `parse_content(&ParsedContent)` 是 M36 新增纯解析入口，不依赖本地文件系统。
+- `parse_file(path)` 内部构造 `ParsedContent` 后调用 `parse_content`，兼容旧行为。
+- 不改变 `PageMetadata` 返回结构。

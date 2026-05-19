@@ -16,6 +16,8 @@ pub mod response_processor;
 pub mod runtime;
 pub mod scanner;
 pub mod stdio_server;
+pub mod parsed_content;
+pub mod source_id;
 pub mod storage_provider;
 pub mod superpage;
 pub mod tbl_single;

@@ -3,6 +3,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::parsed_content::ParsedContent;
+use crate::source_id::SourceKind;
 use crate::storage_provider::{LocalStorageProvider, StorageProvider};
 use crate::superpage;
 use crate::tbl_single;
@@ -56,31 +58,58 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
 /// 当前 native CLI 传入 `LocalStorageProvider`，远期远程会话或浏览器端可替换为
 /// 会话存储 / 内存存储，而不改解析逻辑。
 pub fn parse_file_with_storage(path: &Path, storage: &dyn StorageProvider) -> Result<PageMetadata> {
-    let content = storage.read_to_string(path)?;
-    let raw: Value = serde_json::from_str(&content)
-        .with_context(|| format!("Failed to parse JSON from: {}", path.display()))?;
+    let text = storage.read_to_string(path)?;
+    let source = crate::source_id::SourceId::from_local_path(
+        crate::source_id::ProjectRef::new("default"),
+        path,
+        None,
+    );
+    let parsed = ParsedContent::from_text(source, text);
+    parse_content(&parsed)
+}
+
+/// M36.5: 从 ParsedContent 解析元数据。
+///
+/// 优先从 `ParsedContent::json()` 获取已缓存的 `Arc<Value>`，避免重复反序列化。
+/// 不改变 `PageMetadata` 返回结构。
+pub fn parse_content(parsed: &ParsedContent) -> Result<PageMetadata> {
+    let raw = parsed.json()
+        .with_context(|| format!("Failed to get JSON from ParsedContent: {}", parsed.source.source_path))?;
 
     let mut meta = PageMetadata {
-        input_path: Some(path.display().to_string()),
+        input_path: Some(parsed.source.source_path.clone()),
         ..PageMetadata::default()
     };
 
-    // Detect if it's a SuperPage by checking for "canvas" field
-    let is_superpage = raw.get("canvas").is_some();
+    let is_tbl = matches!(parsed.source.source_kind, SourceKind::Tbl);
+    let is_spg = matches!(parsed.source.source_kind, SourceKind::Spg);
 
-    if is_superpage {
+    build_page_metadata_from_value(
+        &mut meta, &raw, is_spg, is_tbl)?;
+
+    meta.raw = (*raw).clone();
+    Ok(meta)
+}
+
+fn build_page_metadata_from_value(
+    meta: &mut PageMetadata,
+    raw: &serde_json::Value,
+    is_spg: bool,
+    is_tbl: bool,
+) -> Result<()> {
+    if is_spg || raw.get("canvas").is_some() {
         meta.superpage = Some(superpage::parse_superpage_from_value(raw.clone())?);
-        // Also set basic fields
         if let Some(obj) = raw.as_object() {
             meta.version = obj
                 .get("version")
                 .and_then(|v| v.as_str())
                 .map(String::from);
         }
-    } else if path.extension().map(|e| e == "tbl").unwrap_or(false)
-        || raw.get("dimensions").is_some()
-    {
-        meta.tbl = Some(tbl_single::parse_tbl(path, raw.clone())?);
+    } else if is_tbl || raw.get("dimensions").is_some() {
+        meta.tbl = Some(tbl_single::parse_tbl(
+            std::path::Path::new(meta.input_path.as_deref().unwrap_or("")),
+            raw.clone(),
+        )?);
         if let Some(obj) = raw.as_object() {
             meta.version = obj
                 .get("version")
@@ -103,7 +132,7 @@ pub fn parse_file_with_storage(path: &Path, storage: &dyn StorageProvider) -> Re
                     .get("version")
                     .and_then(|v| v.as_str())
                     .map(String::from)
-                    .or(meta.version);
+                    .or(meta.version.clone());
                 if let Some(forms_arr) = forms_obj.get("forms").and_then(|v| v.as_array()) {
                     for form in forms_arr {
                         if let Some(form_obj) = form.as_object() {
@@ -111,7 +140,7 @@ pub fn parse_file_with_storage(path: &Path, storage: &dyn StorageProvider) -> Re
                                 .get("id")
                                 .and_then(|v| v.as_str())
                                 .map(String::from);
-                            meta.page_id = meta.page_id.or(page_id);
+                            meta.page_id = meta.page_id.clone().or(page_id);
                             if let Some(components) =
                                 form_obj.get("components").and_then(|v| v.as_array())
                             {
@@ -169,8 +198,7 @@ pub fn parse_file_with_storage(path: &Path, storage: &dyn StorageProvider) -> Re
         }
     }
 
-    meta.raw = raw;
-    Ok(meta)
+    Ok(())
 }
 
 fn extract_component(value: &Value) -> ComponentInfo {
@@ -190,4 +218,73 @@ fn extract_component(value: &Value) -> ComponentInfo {
             .map(String::from);
     }
     comp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parsed_content::ParsedContent;
+    use crate::source_id::{ProjectRef, SourceId};
+
+    fn test_source(path: &str) -> SourceId {
+        SourceId::from_memory(ProjectRef::new("test"), path)
+    }
+
+    #[test]
+    fn test_parse_content_from_memory_spg() {
+        let text = r#"{"canvas": {"components": [{"id": "text1", "type": "text"}]}}"#;
+        let source = test_source("app/page.spg");
+        let parsed = ParsedContent::from_text(source, text);
+        let meta = parse_content(&parsed).expect("parse_content should succeed for spg");
+
+        assert!(meta.superpage.is_some(), "spg content should produce superpage");
+        assert_eq!(meta.input_path, Some("app/page.spg".to_string()));
+    }
+
+    #[test]
+    fn test_parse_content_from_memory_tbl() {
+        let text = r#"{"dimensions": [{"id": "dim1"}]}"#;
+        let mut source = test_source("data/table.tbl");
+        source.source_kind = crate::source_id::SourceKind::Tbl;
+        let parsed = ParsedContent::from_text(source, text);
+        let meta = parse_content(&parsed).expect("parse_content should succeed for tbl");
+
+        assert!(meta.tbl.is_some(), "tbl content should produce tbl metadata");
+    }
+
+    #[test]
+    fn test_parse_content_reuses_cached_json() {
+        let text = r#"{"version": "1.0", "canvas": {"components": []}}"#;
+        let source = test_source("app/page.spg");
+        let parsed = ParsedContent::from_text(source, text);
+
+        let meta1 = parse_content(&parsed).expect("first parse should succeed");
+        let meta2 = parse_content(&parsed).expect("second parse should reuse cached json");
+
+        // 两次解析的 raw 应该相等
+        assert_eq!(meta1.raw, meta2.raw);
+    }
+
+    #[test]
+    fn test_parse_content_invalid_json_fails_at_parse_time() {
+        let text = "not valid json";
+        let source = test_source("app/page.spg");
+        let parsed = ParsedContent::from_text(source, text);
+
+        let result = parse_content(&parsed);
+        assert!(result.is_err(), "invalid JSON should fail at parse_content time, not at construction");
+    }
+
+    #[test]
+    fn test_parse_file_compatible_with_parse_content() {
+        // 验证 parse_file_with_storage 和 parse_content 对同一份内容输出一致
+        let text = r#"{"canvas": {"components": [{"id": "btn1", "type": "button"}]}}"#;
+        let source = test_source("app/page.spg");
+        let parsed = ParsedContent::from_text(source, text);
+        let meta_from_content = parse_content(&parsed).unwrap();
+
+        // 两者都应有 superpage
+        assert!(meta_from_content.superpage.is_some());
+        assert_eq!(meta_from_content.input_path, Some("app/page.spg".to_string()));
+    }
 }
