@@ -78,13 +78,11 @@ pub enum SourceOrigin {
 impl SourceId {
     /// 从本地文件路径构造 SourceId。
     ///
-    /// 若 `project_dir` 提供，则把绝对路径裁剪为相对 `source_path`；
-    /// 否则保留原样（但仍建议调用方保证传入的是相对路径）。
-    /// 从本地文件路径构造 SourceId。
-    ///
-    /// `source_path` 必须是项目内逻辑路径：
+    /// `source_path` 必须是项目内逻辑路径，但允许通过绝对路径传入。
+    /// 本地绝对路径不进入 `source_path`，只在 provider 层用于文件读取。
     /// - 提供 `project_dir` 时，从绝对路径裁剪出相对路径。
-    /// - 未提供 `project_dir` 时，只允许相对路径；绝对路径被拒绝。
+    /// - 未提供 `project_dir` 时，相对路径直接使用；绝对路径尝试相对于当前工作目录转换，
+    ///   若仍无法转为相对路径，则退化为文件名（basename）。
     pub fn from_local_path(
         project_ref: ProjectRef,
         path: &Path,
@@ -101,10 +99,16 @@ impl SourceId {
                     )
                 })?
         } else if path.is_absolute() {
-            anyhow::bail!(
-                "absolute path {} cannot be used as source_path without project_dir. Use SourceId::from_memory for out-of-project sources or provide project_dir.",
-                path.display()
-            )
+            // 尝试相对于当前工作目录转换为相对路径
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            path.strip_prefix(&cwd)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| {
+                    // 退化为文件名，确保 source_path 不会是绝对路径
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.to_string_lossy().to_string())
+                })
         } else {
             path.to_string_lossy().to_string()
         };
@@ -250,16 +254,11 @@ fn test_source_id_from_local_path_strips_prefix_with_project_dir() {
 }
 
 #[test]
-fn test_source_id_from_local_path_rejects_absolute_without_project_dir() {
+fn test_source_id_from_local_path_absolute_outside_cwd_becomes_basename() {
     let pr = ProjectRef::new("p1");
-    let result = SourceId::from_local_path(pr, Path::new("/tmp/page.spg"), None);
-    assert!(
-        result.is_err(),
-        "absolute path without project_dir must be rejected"
-    );
-    let msg = format!("{}", result.unwrap_err());
-    assert!(
-        msg.contains("absolute path"),
-        "error must mention absolute path"
-    );
+    // 使用一个不太可能和 cwd 有前缀关系的绝对路径
+    let sid =
+        SourceId::from_local_path(pr, Path::new("/very/unlikely/path/page.spg"), None).unwrap();
+    assert_eq!(sid.source_path, "page.spg");
+    assert!(is_project_internal_path(&sid.source_path));
 }

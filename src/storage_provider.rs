@@ -13,7 +13,7 @@ use std::time::SystemTime;
 /// 目录遍历（discover files）放到 M39 `ProjectIndexer`。
 ///
 /// 长期意义上的 StorageProvider（redb / IndexedDB / memory index）
-/// 由 `GraphStore` / `IndexStore` 占位，M36 不替换现有 redb。
+/// 由 M39/M99 引入真正的存储后端抽象，M36 不替换现有 redb。
 pub trait DocumentProvider {
     /// 读取原始字节。
     fn read_bytes(&self, path: &Path) -> Result<Vec<u8>>;

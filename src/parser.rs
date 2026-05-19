@@ -361,3 +361,16 @@ fn test_parse_file_with_storage_compat_layer() {
 
     assert!(meta.superpage.is_some() || !meta.components.is_empty() || !meta.settings.is_empty());
 }
+
+#[test]
+fn test_parse_file_accepts_absolute_path_input() {
+    // M36 回归：CLI 绝对路径单文件解析必须仍然工作
+    let text = r#"{"canvas": {"components": [{"id": "btn1", "type": "button"}]}}"#;
+    let source = crate::source_id::SourceId::from_memory(
+        crate::source_id::ProjectRef::new("test"),
+        "/tmp/abs_page.spg",
+    );
+    let parsed = ParsedContent::from_text(source, text);
+    let meta = parse_content(&parsed).expect("parse_content must work for absolute path input");
+    assert!(meta.superpage.is_some());
+}
