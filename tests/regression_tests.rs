@@ -961,6 +961,220 @@ fn test_m33_availability_intent_fixture_stops_at_filter_vars() {
 }
 
 #[test]
+fn test_m35_answer_contract_contains_required_ai_contract_fields() {
+    let (_db_path, graph) = setup_graph_db("m35_answer_contract_fields");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/actions_test.spg|input1",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Display,
+    )
+    .expect("explain-condition must succeed");
+    let details = result
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details must be object");
+    let contract = details
+        .get("answer_contract")
+        .and_then(|v| v.as_object())
+        .expect("answer_contract must be object");
+
+    assert_eq!(
+        contract.get("intent").and_then(|v| v.as_str()),
+        Some("display")
+    );
+    assert_eq!(
+        contract.get("primary_fact_path").and_then(|v| v.as_str()),
+        Some("display_facts")
+    );
+    let forbidden = contract
+        .get("forbidden_fact_paths")
+        .and_then(|v| v.as_array())
+        .expect("forbidden_fact_paths must be array");
+    assert!(
+        forbidden
+            .iter()
+            .any(|v| v.as_str() == Some("value_source_facts")),
+        "display intent 必须禁止 value_source_facts 作为主证据"
+    );
+    let target_scope = contract
+        .get("target_scope")
+        .and_then(|v| v.as_object())
+        .expect("target_scope must be object");
+    assert_eq!(
+        target_scope.get("query_target").and_then(|v| v.as_str()),
+        Some("comp:app/actions_test.spg|input1")
+    );
+    let completion = contract
+        .get("completion")
+        .and_then(|v| v.as_object())
+        .expect("completion must be object");
+    assert!(
+        completion.get("status").and_then(|v| v.as_str()).is_some(),
+        "completion.status must exist"
+    );
+    assert!(
+        completion
+            .get("missing")
+            .and_then(|v| v.as_array())
+            .is_some(),
+        "completion.missing must be array"
+    );
+    assert!(
+        completion
+            .get("next_commands")
+            .and_then(|v| v.as_array())
+            .is_some(),
+        "completion.next_commands must be array"
+    );
+
+    let thinking_frame = details
+        .get("thinking_frame")
+        .and_then(|v| v.as_object())
+        .expect("thinking_frame must be object");
+    assert_eq!(
+        thinking_frame.get("question_kind").and_then(|v| v.as_str()),
+        Some("display")
+    );
+    assert_eq!(
+        thinking_frame.get("answer_with").and_then(|v| v.as_str()),
+        Some("display_facts")
+    );
+    assert!(
+        thinking_frame
+            .get("do_not_use_as_primary_evidence")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| items
+                .iter()
+                .any(|item| item.as_str() == Some("value_source_facts"))),
+        "thinking_frame 必须提醒模型不要把 value_source_facts 当显示主证据"
+    );
+}
+
+#[test]
+fn test_m35_writer_contract_uses_writer_fact_path() {
+    let (_db_path, graph) = setup_cross_page_graph_db("m35_writer_contract");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/reader_page.spg|inputB",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Writer,
+    )
+    .expect("explain-condition must succeed");
+    let contract = result
+        .get("details")
+        .and_then(|v| v.get("answer_contract"))
+        .and_then(|v| v.as_object())
+        .expect("answer_contract must be object");
+
+    assert_eq!(
+        contract.get("intent").and_then(|v| v.as_str()),
+        Some("writer")
+    );
+    assert_eq!(
+        contract.get("primary_fact_path").and_then(|v| v.as_str()),
+        Some("writer_facts"),
+        "writer intent 的主证据必须是 writer_facts"
+    );
+    assert!(
+        contract
+            .get("forbidden_fact_paths")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| items
+                .iter()
+                .any(|item| item.as_str() == Some("display_facts"))),
+        "writer intent 不应允许 display_facts 作为主证据"
+    );
+}
+
+#[test]
+fn test_m35_page_scoped_model_contract_keeps_local_model_target() {
+    let (_db_path, graph) = setup_graph_db("m35_page_scoped_contract");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "model:app/actions_test.spg|model1",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Availability,
+    )
+    .expect("page-scoped availability must succeed");
+    let target_scope = result
+        .get("details")
+        .and_then(|v| v.get("answer_contract"))
+        .and_then(|v| v.get("target_scope"))
+        .and_then(|v| v.as_object())
+        .expect("target_scope must be object");
+
+    assert_eq!(
+        target_scope
+            .get("is_page_scoped_target")
+            .and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        target_scope
+            .get("resolved_model_target")
+            .and_then(|v| v.as_str()),
+        Some("model:model1"),
+        "resolved_model_target 必须保留页面局部模型，不得误填 DataFlow 模型 ID"
+    );
+}
+
+#[test]
+fn test_m35_page_logic_key_model_availability_is_expanded_contract() {
+    let (_db_path, graph) = setup_graph_db("m35_page_logic_key_model_availability");
+    let result = metadata_checker::query::build_query_page_logic_output(
+        &graph,
+        "page:app/actions_test.spg",
+        Some(Path::new("tests/fixtures/test_project")),
+        "normal",
+    )
+    .expect("query_page_logic must succeed");
+    let key_models = result
+        .get("details")
+        .and_then(|v| v.get("key_model_availability"))
+        .and_then(|v| v.as_array())
+        .expect("key_model_availability must be array");
+    assert!(
+        !key_models.is_empty(),
+        "page logic 必须发现关键模型并输出 availability 摘要"
+    );
+    let model1 = key_models
+        .iter()
+        .find(|item| item.get("model_id").and_then(|v| v.as_str()) == Some("model:model1"))
+        .expect("key_model_availability must contain model:model1");
+    assert_eq!(
+        model1.get("page_scoped_target").and_then(|v| v.as_str()),
+        Some("model:app/actions_test.spg|model1")
+    );
+    for key in [
+        "direct_filters",
+        "dataflow_table",
+        "source_filters",
+        "output_filters",
+        "physical_inputs",
+        "join_rules",
+        "union_rules",
+        "row_semantics",
+    ] {
+        assert!(
+            model1.get(key).is_some(),
+            "key_model_availability entry must contain {}",
+            key
+        );
+    }
+    assert!(
+        model1
+            .get("direct_filters")
+            .and_then(|v| v.as_array())
+            .map_or(false, |items| items.iter().any(|item| item
+                .get("raw_expr")
+                .and_then(|v| v.as_str())
+                .map_or(false, |expr| expr.contains("WXWORK_USER_ID")))),
+        "direct_filters 必须包含页面模型自身 filter，而不是只给 DataFlow 摘要"
+    );
+}
+
+#[test]
 fn test_m33_fixture_separates_proven_candidate_and_rejected_paths() {
     let (_db_path, graph) = setup_cross_page_graph_db("m33_path_partition_fixture");
     let result = metadata_checker::explain::build_explain_condition_output_with_intent(

@@ -169,6 +169,7 @@
     "data_source_count": 28,
     "display_prerequisites_count": 6,
     "entrypoint_count": 14,
+    "key_model_count": 5,
     "navigation_count": 3,
     "page_id": "page:app/actions_test.spg",
     "page_name": "actions_test",

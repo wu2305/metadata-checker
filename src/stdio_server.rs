@@ -383,12 +383,8 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
 
     match command {
         StdioCommand::AdviseQuery => {
-            if request
-                .target
-                .as_ref()
-                .map(|s| s.is_empty())
-                .unwrap_or(true)
-            {
+            let target = request.target.as_deref().unwrap_or("");
+            if target.trim().is_empty() {
                 return error_response(
                     request.request_id.clone(),
                     "MISSING_TARGET",
@@ -396,9 +392,17 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                     diagnostics,
                 );
             }
+            if target != target.trim() || target.contains('\0') {
+                return error_response(
+                    request.request_id.clone(),
+                    "INVALID_TARGET",
+                    format!("Invalid target '{}' for command 'advise_query'", target),
+                    diagnostics,
+                );
+            }
             let req = RuntimeQueryRequest {
                 command: RuntimeQueryCommand::AdviseQuery,
-                target: request.target.clone().unwrap_or_default(),
+                target: target.to_string(),
                 budget: budget.clone(),
                 human,
                 intent: Some(intent),

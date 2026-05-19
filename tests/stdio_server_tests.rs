@@ -451,6 +451,67 @@ fn test_stdio_server_explain_condition_intent_answer_facts() {
     let _ = child.wait();
 }
 
+/// M35：advise_query 在 page_scope 下允许裸组件 ID，并生成页面作用域推荐目标
+#[test]
+fn test_stdio_server_advise_query_accepts_bare_target_with_page_scope() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-advise-bare-target",
+        "command": "advise_query",
+        "target": "text_bare_field_child",
+        "page_scope": "app/actions_test.spg",
+        "intent": "value-source",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("resp must be valid JSON");
+    assert_stdio_envelope(&resp, true);
+    assert_output_size_matches_line(&resp, &line);
+    assert_eq!(resp["ok"].as_bool(), Some(true));
+    assert_eq!(
+        resp["result"]["primary_command"].as_str(),
+        Some("--explain-condition")
+    );
+    assert_eq!(
+        resp["result"]["primary_target"].as_str(),
+        Some("comp:app/actions_test.spg|text_bare_field_child")
+    );
+    assert_eq!(
+        resp["result"]["primary_fact_path"].as_str(),
+        Some("value_source_facts")
+    );
+
+    let _ = child.wait();
+}
+
 /// M33：非法 intent 返回结构化 INVALID_INTENT
 #[test]
 fn test_stdio_server_invalid_intent() {

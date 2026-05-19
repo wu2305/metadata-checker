@@ -205,11 +205,7 @@ pub struct Cli {
     )]
     pub advise_query: Option<String>,
 
-    #[arg(
-        long,
-        value_name = "PAGE",
-        help = "Page ID for --advise-query scope"
-    )]
+    #[arg(long, value_name = "PAGE", help = "Page ID for --advise-query scope")]
     pub advise_query_page: Option<String>,
 
     #[arg(

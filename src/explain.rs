@@ -900,13 +900,14 @@ pub fn build_explain_condition_output_with_intent(
 
     let answer_contract = build_answer_contract(
         effective_intent,
+        target_id,
         &target_node,
         primary_path.len(),
         candidate_paths.len(),
         rejected_paths.len(),
         _budget,
         is_page_scoped_target,
-        dataflow_model_id.as_deref(),
+        Some(target_node.id.as_str()),
         dataflow_model_id.as_deref(),
     );
     let thinking_frame = build_thinking_frame(

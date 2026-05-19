@@ -39,6 +39,147 @@ fn pick_str_field<'a>(obj: &'a serde_json::Value, keys: &[&str]) -> Option<&'a s
         .find_map(|key| obj.get(*key).and_then(|v| v.as_str()))
 }
 
+/// 从字段引用中提取模型 ID，例如 model:model1.name -> model:model1。
+fn model_id_from_reference(reference: &str) -> Option<String> {
+    let rest = reference.strip_prefix("model:")?;
+    let model_part = rest.split('.').next().unwrap_or(rest).trim();
+    if model_part.is_empty() {
+        return None;
+    }
+    Some(format!("model:{}", model_part.trim_start_matches("model:")))
+}
+
+/// 将页面内局部模型 ID 转成 page-scoped 查询目标。
+fn page_scoped_model_target(page_path: &str, model_id: &str) -> String {
+    let model_part = model_id.strip_prefix("model:").unwrap_or(model_id);
+    if model_part.contains('|') {
+        format!("model:{}", model_part)
+    } else {
+        format!("model:{}|{}", page_path, model_part)
+    }
+}
+
+/// availability_facts 的字段提升：保持 answer_facts 为主证据，同时便于模型快速定位。
+fn build_key_model_availability_entry(
+    graph: &GraphDB,
+    page_path: &str,
+    model_id: &str,
+) -> Option<serde_json::Value> {
+    let page_scoped_target = page_scoped_model_target(page_path, model_id);
+    let scoped_result = crate::explain::build_explain_condition_output_with_intent(
+        graph,
+        &page_scoped_target,
+        "compact",
+        crate::explain::TraversalIntent::Availability,
+    )
+    .ok();
+    let scoped_has_facts = scoped_result.as_ref().is_some_and(|result| {
+        result
+            .get("details")
+            .and_then(|d| d.get("answer_facts"))
+            .and_then(|a| a.get("availability_facts"))
+            .is_some()
+    });
+    let (resolved_model_target, scope_warning, result) = if scoped_has_facts {
+        (page_scoped_target.clone(), None, scoped_result?)
+    } else {
+        let result = crate::explain::build_explain_condition_output_with_intent(
+            graph,
+            model_id,
+            "compact",
+            crate::explain::TraversalIntent::Availability,
+        )
+        .ok()?;
+        (
+            model_id.to_string(),
+            Some("page_scoped_target_not_resolved_fallback_to_global_model"),
+            result,
+        )
+    };
+
+    let direct_filters: Vec<serde_json::Value> = result
+        .get("details")
+        .and_then(|d| d.get("data_empty_gates"))
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| {
+                    item.get("condition_scope").and_then(|v| v.as_str())
+                        != Some("dataflow_internal")
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let availability_summary = result
+        .get("details")
+        .and_then(|d| d.get("answer_facts"))
+        .and_then(|a| a.get("availability_facts"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let truncation = result
+        .get("details")
+        .and_then(|d| d.get("truncation_guard"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
+    let empty_array = serde_json::Value::Array(Vec::new());
+    let source_filters = availability_summary
+        .get("source_filters")
+        .cloned()
+        .unwrap_or_else(|| empty_array.clone());
+    let output_filters = availability_summary
+        .get("output_filters")
+        .cloned()
+        .unwrap_or_else(|| empty_array.clone());
+    let physical_inputs = availability_summary
+        .get("physical_inputs")
+        .cloned()
+        .unwrap_or_else(|| empty_array.clone());
+    let join_rules = availability_summary
+        .get("join_rules")
+        .cloned()
+        .unwrap_or_else(|| empty_array.clone());
+    let union_rules = availability_summary
+        .get("union_rules")
+        .cloned()
+        .unwrap_or_else(|| empty_array.clone());
+
+    let mut row_semantics = Vec::new();
+    let mut seen_semantics = std::collections::HashSet::new();
+    for rule in join_rules
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(union_rules.as_array().into_iter().flatten())
+    {
+        if let Some(row_semantic) = rule.get("row_semantic").and_then(|v| v.as_str()) {
+            if seen_semantics.insert(row_semantic.to_string()) {
+                row_semantics.push(row_semantic.to_string());
+            }
+        }
+    }
+
+    Some(serde_json::json!({
+        "model_id": model_id,
+        "page_scoped_target": page_scoped_target,
+        "resolved_model_target": resolved_model_target,
+        "scope_warning": scope_warning,
+        "direct_filters": direct_filters,
+        "dataflow_table": availability_summary.get("dataflow_table").cloned().unwrap_or(serde_json::Value::Null),
+        "source_filters": source_filters,
+        "output_filters": output_filters,
+        "physical_inputs": physical_inputs,
+        "join_rules": join_rules,
+        "union_rules": union_rules,
+        "row_semantics": row_semantics,
+        "availability_summary": availability_summary,
+        "truncation_guard": truncation,
+    }))
+}
+
 /// 查询页面级逻辑摘要
 ///
 /// 输出 page_inputs、data_sources、write_targets、entrypoints、action_flows、visibility_rules、navigation、risk_diagnostics。
@@ -632,40 +773,30 @@ pub fn build_query_page_logic_output(
             }
         }
     }
-    // Also include models referenced by display_prerequisites and data_prerequisites
-    for prereq in display_prerequisites.iter().chain(data_prerequisites.iter()) {
-        if let Some(ref model_id) = prereq.get("model_id").and_then(|v| v.as_str()) {
-            let full_id = if model_id.starts_with("model:") {
-                model_id.to_string()
-            } else {
-                format!("model:{}", model_id)
-            };
-            if seen_models.insert(full_id.clone()) {
-                key_model_ids.push(full_id);
+    // 同时纳入显示/数据前置条件中引用的模型，避免只看 data_sources 漏掉 totalRowCount__ 类条件。
+    for prereq in display_prerequisites
+        .iter()
+        .chain(data_prerequisites.iter())
+    {
+        if let Some(depends_on) = prereq.get("depends_on").and_then(|v| v.as_array()) {
+            for dep in depends_on {
+                let Some(dep) = dep.as_str() else {
+                    continue;
+                };
+                let Some(model_id) = model_id_from_reference(dep) else {
+                    continue;
+                };
+                if seen_models.insert(model_id.clone()) {
+                    key_model_ids.push(model_id);
+                }
             }
         }
     }
 
     let mut key_model_availability: Vec<serde_json::Value> = Vec::new();
     for model_id in &key_model_ids {
-        if let Ok(result) = crate::explain::build_explain_condition_output_with_intent(
-            graph,
-            model_id,
-            "compact",
-            crate::explain::TraversalIntent::Availability,
-        ) {
-            let af = result
-                .get("details")
-                .and_then(|d| d.get("answer_facts"))
-                .and_then(|a| a.get("availability_facts"));
-            let truncation = result
-                .get("details")
-                .and_then(|d| d.get("truncation_guard"));
-            key_model_availability.push(serde_json::json!({
-                "model_id": model_id,
-                "availability_summary": af.cloned().unwrap_or(serde_json::Value::Null),
-                "truncation_guard": truncation.cloned().unwrap_or(serde_json::Value::Null),
-            }));
+        if let Some(entry) = build_key_model_availability_entry(graph, &page_node.path, model_id) {
+            key_model_availability.push(entry);
         }
     }
 

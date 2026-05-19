@@ -91,22 +91,8 @@ pub(crate) fn answer_fact_enabled(
     }
 }
 
-/// 构建 answer_contract，告诉模型当前输出中哪些 fact block 是主证据、哪些是禁止混入的。
-///
-/// M35.1 统一契约：每次 explain-condition 输出必须在 details.answer_contract 下携带此结构，
-/// 避免模型在不同 intent 下混用 display/value-source/availability/writer 证据。
-pub fn build_answer_contract(
-    intent: TraversalIntent,
-    target_node: &Node,
-    primary_path_count: usize,
-    candidate_path_count: usize,
-    rejected_path_count: usize,
-    budget: &str,
-    is_page_scoped_target: bool,
-    resolved_model_target: Option<&str>,
-    dataflow_model_id: Option<&str>,
-) -> serde_json::Value {
-    let primary_fact_path = match intent {
+fn primary_fact_path(intent: TraversalIntent, target_node: &Node) -> &'static str {
+    match intent {
         TraversalIntent::Display => "display_facts",
         TraversalIntent::ValueSource => "value_source_facts",
         TraversalIntent::Writer => "writer_facts",
@@ -119,20 +105,181 @@ pub fn build_answer_contract(
             NodeType::Page => "display_facts|availability_facts",
             _ => "context_facts",
         },
-    };
+    }
+}
 
-    let forbidden_fact_paths: Vec<&str> = match intent {
-        TraversalIntent::Display => vec!["value_source_facts", "writer_facts", "availability_facts", "model_io_facts"],
-        TraversalIntent::ValueSource => vec!["display_facts", "writer_facts", "availability_facts", "model_io_facts"],
-        TraversalIntent::Writer => vec!["display_facts", "value_source_facts", "availability_facts", "model_io_facts"],
-        TraversalIntent::Availability => vec!["display_facts", "value_source_facts", "writer_facts", "model_io_facts"],
-        TraversalIntent::Context => vec![],
-        TraversalIntent::Auto => vec![],
-    };
+fn forbidden_fact_paths(intent: TraversalIntent) -> Vec<&'static str> {
+    match intent {
+        TraversalIntent::Display => vec![
+            "value_source_facts",
+            "writer_facts",
+            "availability_facts",
+            "model_io_facts",
+        ],
+        TraversalIntent::ValueSource => vec![
+            "display_facts",
+            "writer_facts",
+            "availability_facts",
+            "model_io_facts",
+        ],
+        TraversalIntent::Writer => vec![
+            "display_facts",
+            "value_source_facts",
+            "availability_facts",
+            "model_io_facts",
+        ],
+        TraversalIntent::Availability => vec![
+            "display_facts",
+            "value_source_facts",
+            "writer_facts",
+            "model_io_facts",
+        ],
+        TraversalIntent::Context | TraversalIntent::Auto => vec![],
+    }
+}
+
+fn completion_status(
+    budget: &str,
+    primary_path_count: usize,
+    candidate_path_count: usize,
+    rejected_path_count: usize,
+) -> &'static str {
+    if budget == "compact" && rejected_path_count > 0 {
+        "partial_due_to_truncation"
+    } else if primary_path_count == 0 && candidate_path_count > 0 {
+        "needs_followup"
+    } else if primary_path_count == 0 {
+        "partial_due_to_missing_proven_path"
+    } else {
+        "complete"
+    }
+}
+
+fn completion_missing(
+    budget: &str,
+    primary_path_count: usize,
+    candidate_path_count: usize,
+    rejected_path_count: usize,
+) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if budget == "compact" && rejected_path_count > 0 {
+        missing.push("rejected_paths_expanded_detail");
+    }
+    if primary_path_count == 0 && candidate_path_count > 0 {
+        missing.push("proven_path");
+    }
+    if primary_path_count == 0 && candidate_path_count == 0 {
+        missing.push("graph_relationship_path");
+    }
+    missing
+}
+
+fn completion_next_commands(
+    intent: TraversalIntent,
+    query_target: &str,
+    budget: &str,
+    primary_path_count: usize,
+    candidate_path_count: usize,
+    rejected_path_count: usize,
+) -> Vec<serde_json::Value> {
+    let mut commands = Vec::new();
+    if budget == "compact" && rejected_path_count > 0 {
+        commands.push(serde_json::json!({
+            "command": "--explain-condition",
+            "target": query_target,
+            "budget": "normal",
+            "intent": intent.as_str(),
+            "reason": "compact 输出存在截断风险，需要 normal 展开 rejected/candidate 明细",
+        }));
+    }
+    if primary_path_count == 0 && candidate_path_count > 0 {
+        commands.push(serde_json::json!({
+            "command": "--explain-condition",
+            "target": query_target,
+            "budget": "full",
+            "intent": intent.as_str(),
+            "reason": "只有 candidate 路径，没有 proven 路径，需要 full 核查候选链路",
+        }));
+    }
+    if primary_path_count == 0 && candidate_path_count == 0 {
+        commands.push(serde_json::json!({
+            "command": "--context",
+            "target": query_target,
+            "budget": "normal",
+            "reason": "未找到路径时先查看目标相邻关系，确认目标 ID 和边方向",
+        }));
+    }
+    commands
+}
+
+fn intent_primary_fact_path(intent: TraversalIntent) -> &'static str {
+    match intent {
+        TraversalIntent::Display => "display_facts",
+        TraversalIntent::ValueSource => "value_source_facts",
+        TraversalIntent::Writer => "writer_facts",
+        TraversalIntent::Availability => "availability_facts",
+        TraversalIntent::Context => "context_facts",
+        TraversalIntent::Auto => "auto_facts",
+    }
+}
+
+/// 构建 answer_contract，告诉模型当前输出中哪些 fact block 是主证据、哪些是禁止混入的。
+///
+/// M35.1 统一契约：每次 explain-condition 输出必须在 details.answer_contract 下携带此结构，
+/// 避免模型在不同 intent 下混用 display/value-source/availability/writer 证据。
+pub fn build_answer_contract(
+    intent: TraversalIntent,
+    query_target: &str,
+    target_node: &Node,
+    primary_path_count: usize,
+    candidate_path_count: usize,
+    rejected_path_count: usize,
+    budget: &str,
+    is_page_scoped_target: bool,
+    resolved_model_target: Option<&str>,
+    dataflow_model_id: Option<&str>,
+) -> serde_json::Value {
+    let primary_fact_path = primary_fact_path(intent, target_node);
+    let forbidden_fact_paths = forbidden_fact_paths(intent);
+    let status = completion_status(
+        budget,
+        primary_path_count,
+        candidate_path_count,
+        rejected_path_count,
+    );
+    let missing = completion_missing(
+        budget,
+        primary_path_count,
+        candidate_path_count,
+        rejected_path_count,
+    );
+    let next_commands = completion_next_commands(
+        intent,
+        query_target,
+        budget,
+        primary_path_count,
+        candidate_path_count,
+        rejected_path_count,
+    );
 
     serde_json::json!({
+        "intent": intent.as_str(),
+        "target_scope": {
+            "query_target": query_target,
+            "node_id": target_node.id,
+            "node_type": format!("{:?}", target_node.node_type),
+            "source_file": target_node.path,
+            "is_page_scoped_target": is_page_scoped_target,
+            "resolved_model_target": resolved_model_target,
+            "dataflow_model_id": dataflow_model_id,
+        },
         "primary_fact_path": primary_fact_path,
         "forbidden_fact_paths": forbidden_fact_paths,
+        "completion": {
+            "status": status,
+            "missing": missing,
+            "next_commands": next_commands,
+        },
         "proven_path_count": primary_path_count,
         "candidate_path_count": candidate_path_count,
         "rejected_path_count": rejected_path_count,
@@ -166,14 +313,16 @@ pub fn build_thinking_frame(
     let why_this_intent = match intent {
         TraversalIntent::Display => {
             if target_node.node_type == NodeType::Component {
-                    "目标是一个组件，优先解释它的显示/启用条件"
-                } else {
-                    "目标是字段或模型，但用户问的是 display 条件"
-                }
+                "目标是一个组件，优先解释它的显示/启用条件"
+            } else {
+                "目标是字段或模型，但用户问的是 display 条件"
+            }
         }
         TraversalIntent::ValueSource => "用户明确追问值来源，应优先追踪 Reads/FieldAlias 链路",
         TraversalIntent::Writer => "用户明确追问写入链路，应优先追踪 Writes/ActionWrites 链路",
-        TraversalIntent::Availability => "用户追问数据可用性，应聚焦 filter、totalRowCount__ 和 DataFlow 输入",
+        TraversalIntent::Availability => {
+            "用户追问数据可用性，应聚焦 filter、totalRowCount__ 和 DataFlow 输入"
+        }
         TraversalIntent::Context => "用户请求周围上下文，应给出相关邻居和旁路信息",
         TraversalIntent::Auto => "未指定 intent，按目标节点类型自动选择默认事实块",
     };
@@ -189,9 +338,15 @@ pub fn build_thinking_frame(
     };
 
     let what_to_avoid = match intent {
-        TraversalIntent::Display => "不要把 value_source_facts 或 writer_facts 的结论当作显示条件的证据",
-        TraversalIntent::ValueSource => "不要把 display_conditions 当作值来源；candidate_inputs 不是 proven_physical_input",
-        TraversalIntent::Writer => "不要把 display_facts 或 availability_facts 的结论混为写入链路证据",
+        TraversalIntent::Display => {
+            "不要把 value_source_facts 或 writer_facts 的结论当作显示条件的证据"
+        }
+        TraversalIntent::ValueSource => {
+            "不要把 display_conditions 当作值来源；candidate_inputs 不是 proven_physical_input"
+        }
+        TraversalIntent::Writer => {
+            "不要把 display_facts 或 availability_facts 的结论混为写入链路证据"
+        }
         TraversalIntent::Availability => "不要把 source_filters 标成组件 direct visibleCondition",
         TraversalIntent::Context | TraversalIntent::Auto => "不要把 related_context 当作必要条件",
     };
@@ -204,7 +359,33 @@ pub fn build_thinking_frame(
         "先读 answer_facts 中的 primary_fact_path，再核查 proven_paths 的每一步"
     };
 
+    let completion_status = if primary_path_count == 0 && candidate_path_count > 0 {
+        "needs_followup"
+    } else if primary_path_count == 0 {
+        "partial_due_to_missing_proven_path"
+    } else {
+        "complete"
+    };
+    let required_followups = if primary_path_count == 0 {
+        vec![serde_json::json!({
+            "reason": what_is_missing,
+            "expected_fact_path": primary_fact_path(intent, target_node),
+        })]
+    } else {
+        Vec::new()
+    };
+
     serde_json::json!({
+        "question_kind": intent.as_str(),
+        "target_scope": {
+            "node_id": target_node.id,
+            "node_type": format!("{:?}", target_node.node_type),
+            "source_file": target_node.path,
+        },
+        "answer_with": primary_fact_path(intent, target_node),
+        "do_not_use_as_primary_evidence": forbidden_fact_paths(intent),
+        "required_followups": required_followups,
+        "completion_status": completion_status,
         "primary_question_type": primary_question_type,
         "why_this_intent": why_this_intent,
         "what_is_missing": what_is_missing,
@@ -265,7 +446,10 @@ pub fn build_truncation_guard(
     };
 
     let recommended_rerun = if !safe_to_answer_full_relationships {
-        format!("--explain-condition {{}} --budget {} --intent {}", required_budget_for_complete_answer, "auto")
+        format!(
+            "--explain-condition {{}} --budget {} --intent {}",
+            required_budget_for_complete_answer, "auto"
+        )
     } else {
         String::new()
     };
@@ -304,6 +488,7 @@ pub fn build_required_followups(
             "budget": "normal",
             "intent": intent.as_str(),
             "reason": "truncation_guard 标记 compact 输出不完整，需要升级到 normal 展开完整路径",
+            "expected_fact_path": intent_primary_fact_path(intent),
             "must_run_for_complete_answer": true,
         }));
     }
@@ -315,6 +500,7 @@ pub fn build_required_followups(
             "budget": "full",
             "intent": intent.as_str(),
             "reason": "只有 candidate 路径没有 proven 路径，需要 full budget 核查所有候选",
+            "expected_fact_path": intent_primary_fact_path(intent),
             "must_run_for_complete_answer": true,
         }));
     }
@@ -331,18 +517,23 @@ pub fn build_required_followups(
                 "budget": "normal",
                 "intent": "value-source",
                 "reason": "value_source_context 存在但没有 proven_physical_input，需要专门核查 value-source",
+                "expected_fact_path": "value_source_facts",
                 "must_run_for_complete_answer": false,
             }));
         }
     }
 
-    if intent == TraversalIntent::Availability && dataflow_model_id.is_some() && !is_page_scoped_target {
+    if intent == TraversalIntent::Availability
+        && dataflow_model_id.is_some()
+        && !is_page_scoped_target
+    {
         followups.push(serde_json::json!({
             "command": "--explain-condition",
             "target": format!("model:{}|{}", target_id.split('|').next().unwrap_or(target_id), dataflow_model_id.unwrap_or("")),
             "budget": "normal",
             "intent": "availability",
             "reason": "availability 查询应使用 page-scoped model target 以获取 DataFlow filter 和物理输入",
+            "expected_fact_path": "availability_facts",
             "must_run_for_complete_answer": true,
         }));
     }
@@ -353,6 +544,7 @@ pub fn build_required_followups(
             "target": target_id,
             "budget": "normal",
             "reason": "Auto intent 下未找到任何路径，建议先用 --context 探索周围关系",
+            "expected_fact_path": "context_facts",
             "must_run_for_complete_answer": false,
         }));
     }
@@ -483,4 +675,3 @@ pub fn build_advise_query_output(
         "note": "--advise-query 只消费结构化 question-kind，不做自然语言理解",
     })
 }
-
