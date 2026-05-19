@@ -2831,10 +2831,10 @@ MCP resources 建议：
 
 以下抽象不应一次性落地，但需要作为 M99 后续里程碑的技术边界：
 
-- `SourceId` / `MetadataDocument`
+- `SourceId` / `ParsedContent`
   - 问题：当前很多函数仍用 `Path` 表示来源，浏览器、远程 session、内存上传都不是稳定文件路径。
-  - 目标：用 `SourceId { project_id, source_path, source_kind }` 和 `MetadataDocument { source, content/raw }` 表达元数据输入。
-  - 价值：解析层不关心文件来自本地、远程缓存还是浏览器上传。
+  - 目标：用 `SourceId { project_ref, source_path, source_kind }` 表达项目内逻辑路径；用 `ParsedContent` 持有原始内容与懒反序列化后的 `serde_json::Value` 缓存。
+  - 价值：解析层不关心内容来自本地、远程缓存还是浏览器上传，并避免同一元数据被多次反序列化。
 
 - `ParserFacade`
   - 问题：`parser.rs` 仍是文件解析入口，不是 crate 级纯解析 API。
@@ -2878,55 +2878,126 @@ MCP resources 建议：
 
 ### M99 后续里程碑推进计划
 
-#### M36：基础抽象收敛与边界测试
+#### M36：Document / Storage / Response 边界纠偏
 
-目标：把已启动的 `StorageProvider` / `ResponseProcessor` 做到“稳定可扩展”，但不引入远程、WASM、MCP。
+目标：把已启动的输入与响应抽象纠偏为稳定边界：`source_path` 必须是项目内逻辑路径，`ParsedContent` 负责复用反序列化结果，当前“读取文件内容”的 provider 应与未来 redb/IndexedDB 存储后端抽象区分开；`ResponseProcessor` 定位为 renderer facade 的前置骨架，但不改现有 JSON 输出 schema。
+
+范围约束：
+
+- 不引入远程 API。
+- 不实现 IndexedDB / redb 新后端。
+- 不实现 MCP adapter。
+- 不实现 Mermaid / REPL renderer 迁移。
+- 不改 graphdb 文件格式。
+- 不改现有 CLI/stdio JSON 输出 schema。
+- 不改现有 graph node id；跨项目只先在结构化 `SourceId` 中预留 project scope。
 
 任务清单：
 
-- [ ] M36.1：补 `SourceId` / `MetadataDocument` 基础类型
-  - 字段建议：
-    - `source_path`
+- [ ] M36.1：补 `SourceId` / `ProjectRef` / 路径语义
+  - `source_path` 定义：
+    - 必须是项目内逻辑路径，例如 `app/.../*.spg` 或 `data/tables/.../*.tbl`。
+    - 不能是本地绝对路径。
+    - session local path、remote path、本地绝对路径只能存在于 provider/session adapter。
+  - `ProjectRef` 字段建议：
+    - `namespace: Option<String>`
+    - `project_id: String`
+  - `SourceId` 字段建议：
+    - `project_ref: ProjectRef`
+    - `source_path: String`
     - `source_kind: spg|tbl|unknown`
-    - `project_id`
-    - `display_name`
     - `origin: local|session|remote|memory`
+    - `revision: Option<String>`
   - 要求：
-    - 不替换所有调用点，只先让 parser 新 API 消费。
+    - 先不改现有 graph node id。
+    - evidence/meta 可逐步补 `project_ref + source_path`，为跨项目链路预留结构化身份。
     - 保留现有 `parse_file(path)` 兼容。
 
-- [ ] M36.2：扩展 `StorageProvider`
-  - 增加：
-    - `exists`
-    - `read_json_value`
-    - 可选 `write_bytes`（只在 session 里需要，先可不做）
+- [ ] M36.2：新增 `ParsedContent`，替代重型 `MetadataDocument`
+  - 定位：
+    - 只负责持有原始内容、`SourceId` 和懒解析缓存。
+    - 不负责判断 `.spg/.tbl`。
+    - 不负责建图、查询、输出或远程拉取。
+  - 结构建议：
+    - `source: SourceId`
+    - `content: MetadataContent`
+    - `content_hash: Option<String>`
+    - `parsed_json: OnceLock<Arc<serde_json::Value>>`
+  - `MetadataContent` 建议：
+    - `Bytes(Arc<[u8]>)`
+    - `Text(Arc<str>)`
+    - `Json(Arc<serde_json::Value>)`
+    - 可预留 `CompressedBytes { encoding, bytes }`，但 M36 不实现完整压缩流解析。
+  - 要求：
+    - `ParsedContent::json()` 连续调用必须复用同一个 `Arc<Value>`。
+    - 后续需要 `serde_json::Value` 的 parser/scanner 入口优先从 `ParsedContent::json()` 获取。
+    - M36 可保留少量兼容 clone，但新入口必须避免重复 `serde_json::from_slice/from_str`。
+
+- [ ] M36.3：纠偏当前 `StorageProvider` 命名边界
+  - 背景：
+    - 当前已落地的 `StorageProvider` 实际是内容读取 provider。
+    - 长期意义上的 `StorageProvider` 应表示 redb / IndexedDB / memory index 等存储后端抽象。
+  - 任务：
+    - 将当前只读内容接口重命名或标记为 `DocumentProvider` / `ContentProvider`。
+    - 保留 `LocalDocumentProvider` 读取本地文件内容。
+    - 为真正数据库后端抽象预留 `GraphStore` / `IndexStore`，但 M36 不大规模替换 redb。
+  - 只读原则：
+    - M36 的 document provider 只负责 `read_bytes` / `read_to_string` / `metadata`。
+    - 不增加 `write_bytes`；写入 session/cache 放到 M40。
+    - 不抽目录遍历；`discover files` 放到 M39 `ProjectIndexer`。
   - 测试：
     - memory provider fixture。
     - local provider error context。
 
-- [ ] M36.3：收敛 `ResponseProcessor`
-  - 增加：
-    - `process_ai_output`
-    - `process_stdio_response`
-    - `output_size_policy`
-  - 保持：
-    - 不改 `AiOutput` schema。
-    - 不改 existing CLI JSON 字段。
+- [ ] M36.4：明确 `ResponseProcessor` 为 renderer facade 前置骨架
+  - 定位：
+    - 负责把内部结果渲染成机器可读或人类可读输出的统一入口。
+    - 未来支持 MCP、STDIO、REPL、Mermaid 等 renderer。
+    - M36 只收敛已有 runtime/stdio timing 与 response 后处理，不迁移 human/mermaid。
+  - 结构建议：
+    - `ResponseProcessor` 作为 facade。
+    - 预留 `ResponseRenderer` trait。
+    - 预留 renderer 类型：`AiJsonRenderer`、`StdioRenderer`、`McpRenderer`、`HumanRenderer`、`MermaidRenderer`。
+  - 当前行为：
+    - 继续复用现有 `RuntimeQueryResponse` / `RuntimeTiming`。
+    - 保持 `AiOutput` schema 不变。
+    - 保持 CLI/stdio 现有 JSON 字段不变。
+  - 需要澄清并记录：
+    - runtime 内部 result 预估大小与 stdio envelope 最终 stdout JSON 行大小不是同一个概念。
+    - M36 不改字段名，但文档中要写清当前 `timing.output_size_bytes` 在 stdio 中表示最终 envelope 行大小。
 
-- [ ] M36.4：文档与边界断言
+- [ ] M36.5：ParserFacade 最小入口
+  - 新增入口建议：
+    - `parse_content(&ParsedContent)`
+    - `parse_file(path)` 内部构造 `ParsedContent` 后调用 `parse_content`
+  - 要求：
+    - 不改变 `PageMetadata` 返回结构。
+    - 不引入 `ParsedMetadata` enum，放到 M37。
+    - 不改 CLI 输出快照。
+
+- [ ] M36.6：文档与边界断言
   - 在 `docs/schema.md` 或 architecture 文档中声明：
+    - `source_path` 是项目内逻辑路径。
+    - `ParsedContent` 是反序列化缓存，不是 graph node，不进入 query 层。
+    - document provider 与真正的 graph/index storage provider 的区别。
     - core response
     - adapter envelope
-    - storage provider 责任边界
+    - response renderer 责任边界
   - 测试新增：
-    - `storage_provider` 不依赖 graphdb。
+    - `ParsedContent::json()` 连续调用复用同一个 `Arc<Value>`。
+    - invalid JSON 只在 `json()` 时返回错误。
+    - `parse_file` 输出兼容旧行为。
+    - document provider 不依赖 graphdb。
     - `response_processor` 不依赖 stdio。
 
 验收标准：
 
 - `cargo test` 全量通过。
 - `parser::parse_file` 兼容旧调用。
-- 新增纯内存 storage 测试证明解析可脱离真实文件系统。
+- 新增纯内存 document provider / `ParsedContent` 测试证明解析可脱离真实文件系统。
+- 现有 CLI/stdio JSON schema 不变。
+- `ParsedContent` 能证明同一内容不会被多次反序列化。
+- M36 结束时不得出现远程 API、IndexedDB、MCP adapter、Mermaid renderer 的实现。
 
 #### M37：Parse Core 纯解析入口
 
