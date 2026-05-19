@@ -1,12 +1,12 @@
 use anyhow::Result;
 use std::collections::HashMap;
-use std::fs;
 use std::hash::Hasher;
 use std::path::Path;
 use std::time::SystemTime;
 use twox_hash::XxHash64;
 
 use crate::graph::{FileState, GraphDB};
+use crate::storage_provider::{LocalStorageProvider, StorageProvider};
 
 /// 项目目录扫描模块
 ///
@@ -17,6 +17,7 @@ use crate::graph::{FileState, GraphDB};
 /// 支持增量更新：对比文件 mtime/size/hash，只重新处理变更文件。
 /// Scan a project directory and build/update the graph database.
 pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
+    let storage = LocalStorageProvider;
     let mut graph = GraphDB::open(db_path)?;
     let prev_states = graph.load_file_states().unwrap_or_default();
 
@@ -35,7 +36,7 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
             .to_string();
         current_paths.insert(rel.clone(), path.clone());
 
-        let content_bytes = fs::read(path)?;
+        let content_bytes = storage.read_bytes(path)?;
         let mut hasher = XxHash64::default();
         hasher.write(&content_bytes);
         let file_hash = format!("{:x}", hasher.finish());
@@ -99,13 +100,14 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
         hasher.write(content_bytes);
         let file_hash = format!("{:x}", hasher.finish());
 
-        let metadata = fs::metadata(path)?;
+        let metadata = storage.metadata(path)?;
         let mtime = metadata
-            .modified()?
+            .modified
+            .unwrap_or(SystemTime::UNIX_EPOCH)
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let size = metadata.len();
+        let size = metadata.size;
 
         new_states.insert(
             rel.clone(),

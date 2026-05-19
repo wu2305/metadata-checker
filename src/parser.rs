@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 
+use crate::storage_provider::{LocalStorageProvider, StorageProvider};
 use crate::superpage;
 use crate::tbl_single;
 
@@ -48,8 +48,15 @@ pub struct DataBinding {
 
 /// 根据文件类型自动选择解析器
 pub fn parse_file(path: &Path) -> Result<PageMetadata> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+    parse_file_with_storage(path, &LocalStorageProvider)
+}
+
+/// 使用指定存储层解析文件。
+///
+/// 当前 native CLI 传入 `LocalStorageProvider`，远期远程会话或浏览器端可替换为
+/// 会话存储 / 内存存储，而不改解析逻辑。
+pub fn parse_file_with_storage(path: &Path, storage: &dyn StorageProvider) -> Result<PageMetadata> {
+    let content = storage.read_to_string(path)?;
     let raw: Value = serde_json::from_str(&content)
         .with_context(|| format!("Failed to parse JSON from: {}", path.display()))?;
 

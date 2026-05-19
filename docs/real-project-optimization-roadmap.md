@@ -2785,3 +2785,44 @@ MCP resources 建议：
 - 不要让 WASM 版依赖 redb 或本地文件扫描。
 - 不要把 token/cookie 放进 graphdb 或 AI 输出。
 - 不要为了远程功能改写现有 `.spg/.tbl` 解析语义；远程只是另一种输入来源。
+
+### 已可先行启动的基础抽象
+
+这些调整不等于开始实现远程、WASM 或 MCP，只是为后续拆分降低耦合：
+
+- [x] `StorageProvider` 基础接口
+  - 当前范围：
+    - 抽象 `read_bytes`
+    - 抽象 `read_to_string`
+    - 抽象 `metadata`
+    - 提供 `LocalStorageProvider`
+  - 现有消费点：
+    - `parser::parse_file_with_storage`
+    - `parser::parse_file`
+    - `scanner::scan_project`
+  - 后续扩展：
+    - `SessionStorageProvider`
+    - `RemoteCachedStorageProvider`
+    - WASM 内存存储 provider
+  - 当前不做：
+    - 不改变 graphdb 格式
+    - 不改变 scanner 的目录遍历策略
+    - 不直接接远程 API
+
+- [x] `ResponseProcessor` 基础接口
+  - 当前范围：
+    - 统一 `RuntimeQueryResponse`
+    - 统一 `RuntimeTiming`
+    - 统一 runtime response 的序列化大小统计
+    - 统一 stdio 响应写出前的 timing 更新
+  - 现有消费点：
+    - `runtime::GraphRuntime::query`
+    - `stdio_server` 的 error/status/query timing
+  - 后续扩展：
+    - CLI JSON 输出统一走 response processor
+    - stdio / MCP 共用同一 response envelope adapter
+    - function calling wrapper 复用同一 output size / truncation policy
+  - 当前不做：
+    - 不修改 `AiOutput` schema
+    - 不重写 CLI 输出路径
+    - 不实现 MCP adapter

@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime};
 
 use crate::graph::GraphDB;
+use crate::response_processor::ResponseProcessor;
+pub use crate::response_processor::{RuntimeQueryResponse, RuntimeTiming};
 
 /// Hot Graph Runtime：在同一进程内复用已加载的 GraphDB
 ///
@@ -53,29 +55,6 @@ pub struct RuntimeQueryRequest {
     #[serde(default)]
     pub intent: Option<String>,
     pub page_scope: Option<String>,
-}
-
-/// Runtime 查询响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuntimeQueryResponse {
-    pub result: serde_json::Value,
-    pub timing: RuntimeTiming,
-    pub diagnostics: Vec<String>,
-}
-
-/// 阶段耗时统计
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuntimeTiming {
-    /// graph 加载耗时（热查询时为 0）
-    pub graph_load_ms: u128,
-    /// 查询计算耗时
-    pub query_compute_ms: u128,
-    /// 序列化耗时
-    pub serialize_ms: u128,
-    /// 总耗时
-    pub total_ms: u128,
-    /// stdio 响应 JSON 字节数
-    pub output_size_bytes: u64,
 }
 
 /// GraphDB 文件指纹，用于变更检测
@@ -241,29 +220,23 @@ impl GraphRuntime {
             }
         }
 
-        let serialize_start = Instant::now();
-        // 预序列化以统计耗时，但不改变返回的 result
-        let output_size_bytes = serde_json::to_vec(&result)?.len() as u64;
-        let serialize_ms = serialize_start.elapsed().as_millis();
-
-        let total_ms = total_start.elapsed().as_millis();
-
         diagnostics.push(format!(
-            "Query compute: {} ms, serialize: {} ms, total: {} ms",
-            query_compute_ms, serialize_ms, total_ms
+            "Query compute: {} ms before response processing",
+            query_compute_ms
         ));
 
-        Ok(RuntimeQueryResponse {
+        let mut response = ResponseProcessor::runtime_response(
             result,
-            timing: RuntimeTiming {
-                graph_load_ms: 0,
-                query_compute_ms,
-                serialize_ms,
-                total_ms,
-                output_size_bytes,
-            },
             diagnostics,
-        })
+            0,
+            query_compute_ms,
+            total_start,
+        )?;
+        response.diagnostics.push(format!(
+            "Response processed: serialize {} ms, total {} ms",
+            response.timing.serialize_ms, response.timing.total_ms
+        ));
+        Ok(response)
     }
 
     /// 获取当前 graphdb 文件指纹

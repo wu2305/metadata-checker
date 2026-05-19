@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
+use crate::response_processor::ResponseProcessor;
 use crate::runtime::{GraphRuntime, RuntimeQueryCommand, RuntimeQueryRequest};
 
 /// Stdio 支持的命令枚举
@@ -97,23 +98,11 @@ pub struct StdioResponse {
 }
 
 fn zero_timing() -> crate::runtime::RuntimeTiming {
-    crate::runtime::RuntimeTiming {
-        graph_load_ms: 0,
-        query_compute_ms: 0,
-        serialize_ms: 0,
-        total_ms: 0,
-        output_size_bytes: 0,
-    }
+    ResponseProcessor::zero_timing()
 }
 
 fn query_timing(query_compute_ms: u128) -> crate::runtime::RuntimeTiming {
-    crate::runtime::RuntimeTiming {
-        graph_load_ms: 0,
-        query_compute_ms,
-        serialize_ms: 0,
-        total_ms: query_compute_ms,
-        output_size_bytes: 0,
-    }
+    ResponseProcessor::query_timing(query_compute_ms)
 }
 
 fn error_response(
@@ -693,13 +682,11 @@ fn serialize_response_with_timing(resp: &mut StdioResponse) -> serde_json::Resul
         let mut changed = false;
 
         if let Some(timing) = resp.timing.as_mut() {
-            let total_ms = timing.graph_load_ms + timing.query_compute_ms + serialize_ms;
-            changed = timing.output_size_bytes != output_size_bytes
-                || timing.serialize_ms != serialize_ms
-                || timing.total_ms != total_ms;
-            timing.output_size_bytes = output_size_bytes;
-            timing.serialize_ms = serialize_ms;
-            timing.total_ms = total_ms;
+            changed = ResponseProcessor::update_timing_after_serialization(
+                timing,
+                output_size_bytes,
+                serialize_ms,
+            );
         }
 
         if !changed {
