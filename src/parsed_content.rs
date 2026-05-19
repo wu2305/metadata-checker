@@ -14,12 +14,6 @@ pub enum MetadataContent {
     Text(Arc<str>),
     /// 已解析 JSON。
     Json(Arc<Value>),
-    /// 预留压缩格式，M36 不实现完整压缩流解析。
-    #[allow(dead_code)]
-    CompressedBytes {
-        encoding: String,
-        bytes: Arc<[u8]>,
-    },
 }
 
 /// 解析后的内容容器，负责反序列化缓存。
@@ -81,19 +75,20 @@ impl ParsedContent {
         let value = match &self.content {
             MetadataContent::Json(v) => Arc::clone(v),
             MetadataContent::Text(t) => {
-                Arc::new(
-                    serde_json::from_str::<Value>(t)
-                        .with_context(|| format!("Failed to parse JSON text from: {}", self.source.source_path))?,
-                )
+                Arc::new(serde_json::from_str::<Value>(t).with_context(|| {
+                    format!(
+                        "Failed to parse JSON text from: {}",
+                        self.source.source_path
+                    )
+                })?)
             }
             MetadataContent::Bytes(b) => {
-                Arc::new(
-                    serde_json::from_slice::<Value>(b)
-                        .with_context(|| format!("Failed to parse JSON bytes from: {}", self.source.source_path))?,
-                )
-            }
-            MetadataContent::CompressedBytes { .. } => {
-                anyhow::bail!("CompressedBytes not supported in M36");
+                Arc::new(serde_json::from_slice::<Value>(b).with_context(|| {
+                    format!(
+                        "Failed to parse JSON bytes from: {}",
+                        self.source.source_path
+                    )
+                })?)
             }
         };
 
@@ -119,14 +114,21 @@ mod tests {
     #[test]
     fn test_parsed_content_from_text_json_reuse() {
         let source = test_source();
-        let parsed = ParsedContent::from_text(source, r#"{"canvas": {"components": []}}"#.to_string());
+        let parsed =
+            ParsedContent::from_text(source, r#"{"canvas": {"components": []}}"#.to_string());
 
         let v1 = parsed.json().expect("first json parse should succeed");
         let v2 = parsed.json().expect("second json parse should reuse");
 
         // 必须复用同一个 Arc
-        assert!(Arc::ptr_eq(&v1, &v2), "json() must reuse the same Arc<Value>");
-        assert_eq!(v1.get("canvas").and_then(|c| c.get("components")).is_some(), true);
+        assert!(
+            Arc::ptr_eq(&v1, &v2),
+            "json() must reuse the same Arc<Value>"
+        );
+        assert_eq!(
+            v1.get("canvas").and_then(|c| c.get("components")).is_some(),
+            true
+        );
     }
 
     #[test]
@@ -138,7 +140,10 @@ mod tests {
         let v1 = parsed.json().expect("json should be available");
         let v2 = parsed.json().expect("json should be reused");
 
-        assert!(Arc::ptr_eq(&v1, &v2), "from_json must reuse the same Arc<Value>");
+        assert!(
+            Arc::ptr_eq(&v1, &v2),
+            "from_json must reuse the same Arc<Value>"
+        );
     }
 
     #[test]

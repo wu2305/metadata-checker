@@ -23,10 +23,7 @@ impl ProjectRef {
     }
 
     /// 带命名空间的项目引用。
-    pub fn with_namespace(
-        namespace: impl Into<String>,
-        project_id: impl Into<String>,
-    ) -> Self {
+    pub fn with_namespace(namespace: impl Into<String>, project_id: impl Into<String>) -> Self {
         Self {
             namespace: Some(namespace.into()),
             project_id: project_id.into(),
@@ -164,7 +161,8 @@ mod tests {
     #[test]
     fn test_source_id_from_local_path_relative() {
         let pr = ProjectRef::new("p1");
-        let sid = SourceId::from_local_path(pr.clone(), Path::new("app/page.spg"), None);
+        let sid =
+            SourceId::from_local_path(pr.clone(), Path::new("app/page.spg"), Some(Path::new(".")));
         assert_eq!(sid.source_path, "app/page.spg");
         assert_eq!(sid.source_kind, SourceKind::Spg);
         assert_eq!(sid.origin, SourceOrigin::Local);
@@ -207,4 +205,22 @@ mod tests {
         assert!(!is_project_internal_path("../secret.spg"));
         assert!(!is_project_internal_path("app/../../../secret.spg"));
     }
+}
+
+#[test]
+fn test_source_id_from_local_path_accepts_relative_without_project_dir() {
+    let pr = ProjectRef::new("p1");
+    let sid = SourceId::from_local_path(pr, Path::new("app/page.spg"), None);
+    assert_eq!(sid.source_path, "app/page.spg");
+}
+
+#[test]
+fn test_source_id_from_local_path_strips_prefix_with_project_dir() {
+    let pr = ProjectRef::new("p1");
+    let sid = SourceId::from_local_path(
+        pr,
+        Path::new("/tmp/proj/app/page.spg"),
+        Some(Path::new("/tmp/proj")),
+    );
+    assert_eq!(sid.source_path, "app/page.spg");
 }

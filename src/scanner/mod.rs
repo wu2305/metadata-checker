@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::hash::Hasher;
 use std::path::Path;
@@ -6,7 +6,9 @@ use std::time::SystemTime;
 use twox_hash::XxHash64;
 
 use crate::graph::{FileState, GraphDB};
-use crate::storage_provider::{DocumentProvider, LocalStorageProvider, StorageProvider};
+use crate::parsed_content::ParsedContent;
+use crate::source_id::{ProjectRef, SourceId};
+use crate::storage_provider::{DocumentProvider, LocalStorageProvider};
 
 /// 项目目录扫描模块
 ///
@@ -86,8 +88,13 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
         }
 
         let node_ids = if path.extension().map(|e| e == "spg").unwrap_or(false) {
-            let raw_value: serde_json::Value = serde_json::from_slice(content_bytes)?;
-            process_spg_file_from_value(&mut graph, rel, raw_value)?
+            let source =
+                SourceId::from_local_path(ProjectRef::new("default"), path, Some(project_dir));
+            let parsed = ParsedContent::from_bytes(source, content_bytes.clone());
+            let raw_value = parsed
+                .json()
+                .with_context(|| format!("Failed to parse JSON for {}", rel))?;
+            process_spg_file_from_value(&mut graph, rel, (*raw_value).clone())?
         } else if path.extension().map(|e| e == "tbl").unwrap_or(false) {
             let content = String::from_utf8_lossy(content_bytes);
             process_tbl_file_from_string(&mut graph, rel, &content)?

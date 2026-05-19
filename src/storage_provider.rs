@@ -76,37 +76,6 @@ pub use LocalDocumentProvider as LocalStorageProvider;
 /// 兼容别名：旧代码中的 `StorageFileMetadata` 等同于 `DocumentFileMetadata`。
 pub type StorageFileMetadata = DocumentFileMetadata;
 
-// ============================================================================
-// GraphStore / IndexStore 占位：为真正数据库后端抽象预留
-// ============================================================================
-
-/// 图存储后端抽象占位。
-///
-/// M36 不实现具体后端，只定义 trait 边界。
-/// 未来 redb / IndexedDB / memory index 可实现此 trait。
-pub trait GraphStore {
-    /// 打开或初始化存储。
-    fn open(path: &Path) -> Result<Self>
-    where
-        Self: Sized;
-    /// 读取节点。
-    fn get_node(&self, id: &str) -> Result<Option<crate::graph::Node>>;
-    /// 写入节点。
-    fn put_node(&mut self, node: &crate::graph::Node) -> Result<()>;
-}
-
-/// 索引存储后端抽象占位。
-///
-/// M36 不实现具体后端。
-pub trait IndexStore {
-    /// 按关键字搜索节点候选。
-    fn find_candidates(&self,
-        keyword: &str,
-        node_type_filter: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<crate::graph::Node>>;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,22 +135,7 @@ mod tests {
         }
         let local = LocalDocumentProvider;
         takes_storage(
-            &local, &local, &local, &local,
-            &local, &local, &local, &local,
+            &local, &local, &local, &local, &local, &local, &local, &local,
         );
-    }
-
-    #[test]
-    fn test_graph_store_trait_exists() {
-        // M36 占位：只验证 trait 可编译
-        fn _assert_graph_store(&_: &dyn GraphStore,
-        ) {}
-    }
-
-    #[test]
-    fn test_index_store_trait_exists() {
-        // M36 占位：只验证 trait 可编译
-        fn _assert_index_store(&_: &dyn IndexStore,
-        ) {}
     }
 }

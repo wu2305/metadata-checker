@@ -53,19 +53,30 @@ pub fn parse_file(path: &Path) -> Result<PageMetadata> {
     parse_file_with_storage(path, &LocalStorageProvider)
 }
 
-/// 使用指定存储层解析文件。
+/// 使用指定文档读取层解析文件。
 ///
-/// 当前 native CLI 传入 `LocalStorageProvider`，远期远程会话或浏览器端可替换为
-/// 会话存储 / 内存存储，而不改解析逻辑。
-pub fn parse_file_with_storage(path: &Path, storage: &dyn StorageProvider) -> Result<PageMetadata> {
-    let text = storage.read_to_string(path)?;
+/// M36 新入口，使用 `DocumentProvider` 而非旧 `StorageProvider`。
+pub fn parse_file_with_document_provider(
+    path: &Path,
+    provider: &dyn crate::storage_provider::DocumentProvider,
+    project_dir: Option<&Path>,
+) -> Result<PageMetadata> {
+    let text = provider.read_to_string(path)?;
     let source = crate::source_id::SourceId::from_local_path(
         crate::source_id::ProjectRef::new("default"),
         path,
-        None,
+        project_dir,
     );
     let parsed = ParsedContent::from_text(source, text);
     parse_content(&parsed)
+}
+
+/// 使用指定存储层解析文件（兼容别名）。
+///
+/// M36 起，`StorageProvider` 是 `DocumentProvider` 的兼容别名。
+/// 新代码应优先使用 `parse_file_with_document_provider`。
+pub fn parse_file_with_storage(path: &Path, storage: &dyn StorageProvider) -> Result<PageMetadata> {
+    parse_file_with_document_provider(path, storage, None)
 }
 
 /// M36.5: 从 ParsedContent 解析元数据。
@@ -73,8 +84,12 @@ pub fn parse_file_with_storage(path: &Path, storage: &dyn StorageProvider) -> Re
 /// 优先从 `ParsedContent::json()` 获取已缓存的 `Arc<Value>`，避免重复反序列化。
 /// 不改变 `PageMetadata` 返回结构。
 pub fn parse_content(parsed: &ParsedContent) -> Result<PageMetadata> {
-    let raw = parsed.json()
-        .with_context(|| format!("Failed to get JSON from ParsedContent: {}", parsed.source.source_path))?;
+    let raw = parsed.json().with_context(|| {
+        format!(
+            "Failed to get JSON from ParsedContent: {}",
+            parsed.source.source_path
+        )
+    })?;
 
     let mut meta = PageMetadata {
         input_path: Some(parsed.source.source_path.clone()),
@@ -84,8 +99,7 @@ pub fn parse_content(parsed: &ParsedContent) -> Result<PageMetadata> {
     let is_tbl = matches!(parsed.source.source_kind, SourceKind::Tbl);
     let is_spg = matches!(parsed.source.source_kind, SourceKind::Spg);
 
-    build_page_metadata_from_value(
-        &mut meta, &raw, is_spg, is_tbl)?;
+    build_page_metadata_from_value(&mut meta, &raw, is_spg, is_tbl)?;
 
     meta.raw = (*raw).clone();
     Ok(meta)
@@ -237,7 +251,10 @@ mod tests {
         let parsed = ParsedContent::from_text(source, text);
         let meta = parse_content(&parsed).expect("parse_content should succeed for spg");
 
-        assert!(meta.superpage.is_some(), "spg content should produce superpage");
+        assert!(
+            meta.superpage.is_some(),
+            "spg content should produce superpage"
+        );
         assert_eq!(meta.input_path, Some("app/page.spg".to_string()));
     }
 
@@ -249,7 +266,10 @@ mod tests {
         let parsed = ParsedContent::from_text(source, text);
         let meta = parse_content(&parsed).expect("parse_content should succeed for tbl");
 
-        assert!(meta.tbl.is_some(), "tbl content should produce tbl metadata");
+        assert!(
+            meta.tbl.is_some(),
+            "tbl content should produce tbl metadata"
+        );
     }
 
     #[test]
@@ -272,7 +292,10 @@ mod tests {
         let parsed = ParsedContent::from_text(source, text);
 
         let result = parse_content(&parsed);
-        assert!(result.is_err(), "invalid JSON should fail at parse_content time, not at construction");
+        assert!(
+            result.is_err(),
+            "invalid JSON should fail at parse_content time, not at construction"
+        );
     }
 
     #[test]
@@ -285,6 +308,58 @@ mod tests {
 
         // 两者都应有 superpage
         assert!(meta_from_content.superpage.is_some());
-        assert_eq!(meta_from_content.input_path, Some("app/page.spg".to_string()));
+        assert_eq!(
+            meta_from_content.input_path,
+            Some("app/page.spg".to_string())
+        );
     }
+}
+
+#[test]
+fn test_parse_file_with_document_provider_reads_via_provider() {
+    use crate::storage_provider::DocumentProvider;
+    use std::path::Path;
+    use std::time::SystemTime;
+
+    struct TestProvider {
+        content: String,
+    }
+
+    impl DocumentProvider for TestProvider {
+        fn read_bytes(&self, _path: &Path) -> Result<Vec<u8>> {
+            Ok(self.content.as_bytes().to_vec())
+        }
+
+        fn metadata(&self, _path: &Path) -> Result<crate::storage_provider::DocumentFileMetadata> {
+            Ok(crate::storage_provider::DocumentFileMetadata {
+                modified: Some(SystemTime::UNIX_EPOCH),
+                size: self.content.len() as u64,
+            })
+        }
+    }
+
+    let provider = TestProvider {
+        content: r#"{"canvas": {"components": [{"id": "input1", "type": "text"}]}}"#.to_string(),
+    };
+    let meta = parse_file_with_document_provider(
+        Path::new("app/page.spg"),
+        &provider,
+        Some(Path::new(".")),
+    )
+    .expect("parse_file_with_document_provider should succeed");
+
+    assert!(meta.superpage.is_some());
+    assert_eq!(meta.input_path, Some("app/page.spg".to_string()));
+}
+
+#[test]
+fn test_parse_file_with_storage_compat_layer() {
+    // parse_file_with_storage 是兼容别名，内部应调用 parse_file_with_document_provider
+    let meta = parse_file_with_storage(
+        Path::new("tests/fixtures/actions_test.spg"),
+        &crate::storage_provider::LocalStorageProvider,
+    )
+    .expect("parse_file_with_storage should still work");
+
+    assert!(meta.superpage.is_some() || !meta.components.is_empty() || !meta.settings.is_empty());
 }
