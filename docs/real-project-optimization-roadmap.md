@@ -2826,3 +2826,356 @@ MCP resources 建议：
     - 不修改 `AiOutput` schema
     - 不重写 CLI 输出路径
     - 不实现 MCP adapter
+
+### 仍需抽象的边界
+
+以下抽象不应一次性落地，但需要作为 M99 后续里程碑的技术边界：
+
+- `SourceId` / `MetadataDocument`
+  - 问题：当前很多函数仍用 `Path` 表示来源，浏览器、远程 session、内存上传都不是稳定文件路径。
+  - 目标：用 `SourceId { project_id, source_path, source_kind }` 和 `MetadataDocument { source, content/raw }` 表达元数据输入。
+  - 价值：解析层不关心文件来自本地、远程缓存还是浏览器上传。
+
+- `ParserFacade`
+  - 问题：`parser.rs` 仍是文件解析入口，不是 crate 级纯解析 API。
+  - 目标：统一 `parse_metadata_from_str` / `parse_metadata_from_value` / `parse_document`。
+  - 价值：WASM、remote session、CLI 单文件解析共用同一入口。
+
+- `GraphStore`
+  - 问题：`GraphDB` 同时代表内存图和 redb 持久化。
+  - 目标：拆出 `GraphStore` trait，native redb 只是一个实现；内存图和 WASM 图可以是其他实现。
+  - 价值：query/runtime 不直接绑定 redb。
+
+- `ProjectIndexer`
+  - 问题：`scanner::scan_project` 同时做目录扫描、增量判断、解析、建图、持久化。
+  - 目标：把 `discover -> diff -> parse -> index -> persist` 分成可替换阶段。
+  - 价值：远程 session 和本地目录能共用增量建图流程。
+
+- `RuntimeCommandRegistry`
+  - 问题：CLI、runtime、stdio 的 command surface 仍有分叉。
+  - 目标：所有 command 先落成统一 `RuntimeCommand` / `RuntimeRequest` / `RuntimeResponse`。
+  - 价值：MCP 只做 adapter，不重新实现查询分发。
+
+- `ResponseEnvelopeAdapter`
+  - 问题：`AiOutput`、stdio envelope、未来 MCP tool result 的包装边界还分散。
+  - 目标：核心 response 只表达语义，CLI/stdio/MCP adapter 决定外层 envelope。
+  - 价值：避免 CLI 有 contract、stdio/MCP 缺字段。
+
+- `SessionManager`
+  - 问题：远程项目需要会话目录、manifest、cache、graphdb 生命周期。
+  - 目标：提供 session 创建、打开、同步、清理、状态查询。
+  - 价值：本地项目和远程项目统一成 session 输入。
+
+- `RemoteMetadataProvider` / `AuthProvider` / `SecretStore`
+  - 问题：远程拉取不能把登录态、token、cookie 混进 parser/scanner/graphdb。
+  - 目标：认证、远程 API、密钥存储各自分层。
+  - 价值：安全边界清楚，后续可替换不同服务端实现。
+
+- `PathResolver`
+  - 问题：当前 page path、graph node id、remote path、session local path、DataFlow path 标准化散落在多个模块。
+  - 目标：集中处理路径规范化、node id 构造、page-scoped target 构造。
+  - 价值：减少 `model:PAGE|MODEL`、`$DATA:/...`、session path 的重复分支。
+
+### M99 后续里程碑推进计划
+
+#### M36：基础抽象收敛与边界测试
+
+目标：把已启动的 `StorageProvider` / `ResponseProcessor` 做到“稳定可扩展”，但不引入远程、WASM、MCP。
+
+任务清单：
+
+- [ ] M36.1：补 `SourceId` / `MetadataDocument` 基础类型
+  - 字段建议：
+    - `source_path`
+    - `source_kind: spg|tbl|unknown`
+    - `project_id`
+    - `display_name`
+    - `origin: local|session|remote|memory`
+  - 要求：
+    - 不替换所有调用点，只先让 parser 新 API 消费。
+    - 保留现有 `parse_file(path)` 兼容。
+
+- [ ] M36.2：扩展 `StorageProvider`
+  - 增加：
+    - `exists`
+    - `read_json_value`
+    - 可选 `write_bytes`（只在 session 里需要，先可不做）
+  - 测试：
+    - memory provider fixture。
+    - local provider error context。
+
+- [ ] M36.3：收敛 `ResponseProcessor`
+  - 增加：
+    - `process_ai_output`
+    - `process_stdio_response`
+    - `output_size_policy`
+  - 保持：
+    - 不改 `AiOutput` schema。
+    - 不改 existing CLI JSON 字段。
+
+- [ ] M36.4：文档与边界断言
+  - 在 `docs/schema.md` 或 architecture 文档中声明：
+    - core response
+    - adapter envelope
+    - storage provider 责任边界
+  - 测试新增：
+    - `storage_provider` 不依赖 graphdb。
+    - `response_processor` 不依赖 stdio。
+
+验收标准：
+
+- `cargo test` 全量通过。
+- `parser::parse_file` 兼容旧调用。
+- 新增纯内存 storage 测试证明解析可脱离真实文件系统。
+
+#### M37：Parse Core 纯解析入口
+
+目标：把 `.spg/.tbl` 解析从本地文件路径中解耦，为 WASM 做准备。
+
+任务清单：
+
+- [ ] M37.1：新增纯解析 API
+  - `parse_metadata_from_str(source, content)`
+  - `parse_metadata_from_value(source, raw)`
+  - `parse_superpage_from_str`
+  - `parse_tbl_from_str`
+
+- [ ] M37.2：清理 `tbl_single` 的 `Path` 强依赖
+  - 新增 `parse_tbl_from_value_with_source(source, raw)`。
+  - `parse_tbl(path, raw)` 变成 native wrapper。
+
+- [ ] M37.3：human 输出移出解析模块
+  - `print_tbl_human` 迁到 output 或 adapter 模块。
+  - 解析模块只返回结构化对象。
+
+- [ ] M37.4：准备 feature gate
+  - 先不改 workspace。
+  - 在文档和代码注释中标记 native-only 依赖。
+  - 为后续 `default = ["native"]` / `wasm` 留接口。
+
+验收标准：
+
+- 单文件 `.spg/.tbl` fixture 可以只用字符串解析。
+- 纯解析路径不需要 `std::fs`。
+- 不改变 CLI 输出快照。
+
+#### M38：Runtime Command 与 Query Engine 统一
+
+目标：消除 runtime/stdio/CLI command 分叉，为 MCP 做前置准备。
+
+任务清单：
+
+- [ ] M38.1：扩展 `RuntimeQueryCommand`
+  - 覆盖：
+    - `explain_condition`
+    - `explain`
+    - `context`
+    - `query_model`
+    - `query_page_logic`
+    - `advise_query`
+    - `status`
+    - `reload`
+
+- [ ] M38.2：统一 `RuntimeQueryRequest`
+  - 字段覆盖：
+    - `target`
+    - `budget`
+    - `intent`
+    - `depth`
+    - `page_scope`
+    - `human`
+    - `check_reload`
+  - 目标：
+    - stdio 不再自己维护一套 command 分发大 match。
+
+- [ ] M38.3：统一错误码与 envelope 输入
+  - `MISSING_TARGET`
+  - `INVALID_TARGET`
+  - `INVALID_BUDGET`
+  - `INVALID_INTENT`
+  - `TARGET_NOT_FOUND`
+  - `GRAPH_RELOAD_FAILED`
+
+- [ ] M38.4：CLI/stdio parity 回归
+  - 同一 command 的关键字段一致。
+  - timing 与 output_size 仍稳定。
+
+验收标准：
+
+- stdio 支持命令来自同一 registry。
+- `cargo test --test stdio_server_tests` 通过。
+- CLI 与 stdio 的关键 contract 字段一致。
+
+#### M39：GraphStore 与 Indexer 分层
+
+目标：让查询层不直接绑定 redb，给 WASM 内存图和远程 session 图缓存留出口。
+
+任务清单：
+
+- [ ] M39.1：定义 `GraphStore` trait
+  - 最小接口：
+    - `get_node`
+    - `get_node_edges`
+    - `find_candidates`
+    - `node_count`
+    - `edge_count`
+
+- [ ] M39.2：让现有 `GraphDB` 实现 `GraphStore`
+  - 不改 redb 文件格式。
+  - 不改 petgraph 内部结构。
+
+- [ ] M39.3：拆 `ProjectIndexer`
+  - 拆分阶段：
+    - discover files
+    - diff file states
+    - parse dirty files
+    - update graph
+    - persist state
+
+- [ ] M39.4：补内存图测试替身
+  - 用 fixture 构造小图。
+  - 验证 query 函数可依赖 trait。
+
+验收标准：
+
+- 现有 graphdb 增量行为不变。
+- 关键 query 不直接要求 redb。
+- 真实项目 build-graph / query 回归通过。
+
+#### M40：Session Manager 本地会话
+
+目标：先实现本地 session，不接远程 API。
+
+任务清单：
+
+- [ ] M40.1：定义 session manifest schema
+  - `session_id`
+  - `created_at`
+  - `project_root`
+  - `files[]`
+  - `graph_db_path`
+  - `source_origin`
+
+- [ ] M40.2：实现 session 创建/打开
+  - 从本地 project 创建 session。
+  - session 内保存可扫描的项目镜像或路径映射。
+
+- [ ] M40.3：session-aware build graph
+  - 对 session 目录运行 build graph。
+  - 保持原 `--project-dir` 行为不变。
+
+- [ ] M40.4：清理与状态查询
+  - list sessions
+  - show manifest
+  - delete session
+
+验收标准：
+
+- 不接远程也能创建 session。
+- session project 可被现有 scanner/query 使用。
+- token/secret 字段不存在。
+
+#### M41：Remote Provider 与安全边界
+
+目标：把远程 projects/metafiles 拉取接入 session，但不改变 parser/scanner 语义。
+
+任务清单：
+
+- [ ] M41.1：定义 `RemoteMetadataProvider`
+  - `list_projects`
+  - `list_metafiles`
+  - `fetch_metafile`
+
+- [ ] M41.2：定义认证边界
+  - `AuthProvider`
+  - `SecretStore`
+  - 日志脱敏策略
+
+- [ ] M41.3：远程同步到 session
+  - 根据 remote path 写入 session project。
+  - manifest 记录 etag/version/hash。
+
+- [ ] M41.4：远程增量
+  - 未变化文件不重新下载。
+  - 删除文件在 manifest 中标记并从 session index 移除。
+
+验收标准：
+
+- token 不进入 stdout/stderr/graphdb/manifest。
+- session 同步后可用现有 build graph/query。
+- 增量同步不会全量重拉。
+
+#### M42：MCP Adapter
+
+目标：在 runtime command 统一后实现 MCP，不复制查询逻辑。
+
+任务清单：
+
+- [ ] M42.1：MCP tools adapter
+  - `metadata_open_session`
+  - `metadata_build_graph`
+  - `metadata_advise_query`
+  - `metadata_explain_condition`
+  - `metadata_query_page_logic`
+  - `metadata_query_model`
+  - `metadata_context`
+  - `metadata_status`
+  - `metadata_reload`
+
+- [ ] M42.2：MCP resources adapter
+  - `metadata://sessions`
+  - `metadata://session/{id}/manifest`
+  - `metadata://session/{id}/schema`
+  - `metadata://session/{id}/pages`
+  - `metadata://session/{id}/models`
+
+- [ ] M42.3：MCP 输出 contract
+  - MCP tool result 必须保留：
+    - `answer_contract`
+    - `thinking_frame`
+    - `required_followups`
+    - `truncation_guard`
+    - `timing`
+
+- [ ] M42.4：安全限制
+  - MCP 不暴露任意 shell。
+  - MCP 不返回 secret。
+  - MCP 不允许绕过 runtime 直接读 raw graph 作为主证据。
+
+验收标准：
+
+- MCP 与 CLI/stdio 在关键 contract 字段上等价。
+- 同一 session 连续查询复用 runtime。
+- 真实项目 `text41` / `model11` / `fact_qwSidebar` 样例可通过 MCP tools 跑通。
+
+#### M43：WASM 浏览器端人工阅读 MVP
+
+目标：把 M37 的 parse core 用于浏览器端单文件阅读，不做远程、不做全项目图查询。
+
+任务清单：
+
+- [ ] M43.1：wasm build 验证
+  - 只包含 parse core / analysis core 中可 wasm 的模块。
+  - 不包含 redb、stdio、clap。
+
+- [ ] M43.2：浏览器输入
+  - 上传 `.spg/.tbl`。
+  - 粘贴 JSON。
+
+- [ ] M43.3：浏览器输出
+  - 组件树
+  - 条件列表
+  - 表达式引用
+  - DataFlow 节点与字段来源
+  - 单文件 value trace
+
+- [ ] M43.4：容量护栏
+  - 大文件解析进 Web Worker。
+  - 输出分 summary/detail。
+  - 不默认渲染 raw JSON。
+
+验收标准：
+
+- 无服务器场景下可阅读单个 `.spg/.tbl`。
+- 与 CLI 单文件解析的关键字段一致。
+- 浏览器端不会加载 native-only crate。
