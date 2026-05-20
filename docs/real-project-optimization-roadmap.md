@@ -2999,36 +2999,148 @@ MCP resources 建议：
 - `ParsedContent` 能证明同一内容不会被多次反序列化。
 - M36 结束时不得出现远程 API、IndexedDB、MCP adapter、Mermaid renderer 的实现。
 
+M36 验收后遗留项：
+
+- [ ] M36-FOLLOW-1：真实项目 AI eval graphdb 缓存隔离
+  - 问题：
+    - `tests/ai_eval_tests.rs` 中真实项目 case 使用 `std::env::temp_dir()` 下的固定 graphdb 路径。
+    - 现有逻辑是“graphdb 文件存在就复用”，不会校验当前二进制版本、元数据 hash、schema version 或构建参数。
+    - 这会让旧 graphdb 污染后续验收，出现 `writer_facts.paths` 为空、`summary.primary_paths_count=0` 等假失败。
+  - 要求：
+    - 后续测试基础设施应保证真实项目 eval 每次使用干净 graphdb，或至少按二进制 hash / schema version / project metadata hash 失效。
+    - 不应依赖手工清理 macOS `TMPDIR`。
+    - 失败信息应能区分“当前代码输出不满足断言”和“测试复用了 stale graphdb”。
+  - 建议归属：
+    - 可放入 M38/M39 之前的测试基础设施修复，也可独立作为 `TEST-INFRA` 小任务。
+
+- [ ] M36-FOLLOW-2：正式拆分 `source_path` 与本地展示/来源路径
+  - 当前状态：
+    - `SourceId::from_local_path` 在缺少 `project_dir` 且传入项目外绝对路径时，会把 `source_path` 退化为 basename。
+    - 这保护了“`source_path` 不得是绝对路径”，也保留了单文件 CLI 绝对路径输入兼容。
+  - 风险：
+    - basename 不是完整项目内逻辑路径，只能作为单文件模式下的兼容降级。
+    - 后续远程会话、跨项目链路、浏览器上传若继续复用这个降级语义，会丢失来源身份。
+  - 要求：
+    - 后续应新增正式字段或结构表达本地/远程展示路径，例如 `display_path` / `origin_path` / `provider_path`。
+    - `source_path` 继续只表示项目内逻辑路径或单文件兼容名称。
+    - 不应把 basename fallback 扩展为跨文件、跨项目或 graph node identity 的依据。
+  - 建议归属：
+    - M37 先讨论 API 形状，不强制实现。
+    - M40 Session Manager 或 M43 WASM 单文件阅读前必须定稿。
+
 #### M37：Parse Core 纯解析入口
 
-目标：把 `.spg/.tbl` 解析从本地文件路径中解耦，为 WASM 做准备。
+目标：把 `.spg/.tbl` 的“结构化解析”稳定成不依赖本地文件系统的 core API。M37 只收敛解析入口、返回类型和 native wrapper 边界，为后续 WASM/浏览器端单文件阅读做准备；不拆 workspace、不引入 wasm target、不改变 graphdb、query、CLI/stdio 输出 schema。
+
+M37 的核心目的：
+
+- 让调用方可以直接传入 `ParsedContent` / `serde_json::Value` / `&str` 完成 `.spg` 和 `.tbl` 解析。
+- 让解析层只返回结构化元数据对象，不承担文件读取、graph 构建、query、AI 输出、人类输出。
+- 把本地文件路径相关逻辑留在 native adapter wrapper，例如 `parse_file(path)`。
+- 为未来 `metadata-parse-core` crate 提供最小可迁移 API，但 M37 不实际拆 crate。
+
+范围约束：
+
+- 不拆分 Cargo workspace。
+- 不新增 WASM 构建配置。
+- 不迁移 graphdb / scanner / query 语义。
+- 不修改现有 CLI、stdio、MCP 预备 schema。
+- 不实现远程 metadata 获取。
+- 不解决 `GraphStore` / `IndexStore`，留给 M39。
+- 不把 `basename` fallback 当作长期 source identity 方案。
 
 任务清单：
 
-- [ ] M37.1：新增纯解析 API
-  - `parse_metadata_from_str(source, content)`
-  - `parse_metadata_from_value(source, raw)`
-  - `parse_superpage_from_str`
-  - `parse_tbl_from_str`
+- [ ] M37.1：定义 Parse Core 返回类型边界
+  - 明确是否引入 `ParsedMetadata` enum：
+    - `SuperPage(superpage::SuperPageMetadata)`
+    - `Table(tbl_single::TblMetadata)`
+    - `Unknown { raw, source }`
+  - 或继续复用现有 `PageMetadata`，但必须写明这是兼容对象而不是长期 core 形态。
+  - 决策要求：
+    - 不让解析 API 返回 AI 输出结构。
+    - 不让解析 API 依赖 graph node/edge 类型。
+    - 不让解析 API 依赖本地文件系统路径。
 
-- [ ] M37.2：清理 `tbl_single` 的 `Path` 强依赖
-  - 新增 `parse_tbl_from_value_with_source(source, raw)`。
-  - `parse_tbl(path, raw)` 变成 native wrapper。
+- [ ] M37.2：新增纯解析 API
+  - 建议入口：
+    - `parse_content(&ParsedContent) -> Result<PageMetadata>` 保持兼容。
+    - `parse_metadata_from_value(source: SourceId, raw: Arc<Value>) -> Result<PageMetadata 或 ParsedMetadata>`。
+    - `parse_metadata_from_str(source: SourceId, content: &str) -> Result<PageMetadata 或 ParsedMetadata>`。
+    - `parse_superpage_from_value(source, raw)`。
+    - `parse_tbl_from_value_with_source(source, raw)`。
+  - 要求：
+    - 不读取文件。
+    - 不创建 graphdb。
+    - 不输出 JSON/human 文本。
+    - `ParsedContent::json()` 仍是反序列化缓存入口。
 
-- [ ] M37.3：human 输出移出解析模块
-  - `print_tbl_human` 迁到 output 或 adapter 模块。
-  - 解析模块只返回结构化对象。
+- [ ] M37.3：清理 `tbl_single` 的 `Path` 强依赖
+  - 当前 `tbl_single::parse_tbl(path, raw)` 把 `Path` 同时用于 query target、source file 和解析上下文。
+  - 新增 source-based 入口：
+    - `parse_tbl_from_value_with_source(source: &SourceId, raw: Value)`。
+  - `parse_tbl(path, raw)` 降级为 native wrapper：
+    - 只负责把 `Path` 转成 `SourceId` 或 display/source 信息。
+    - 不在 core API 中传播 `Path`。
+  - 保持现有 `.tbl` 输出快照不变。
 
-- [ ] M37.4：准备 feature gate
-  - 先不改 workspace。
-  - 在文档和代码注释中标记 native-only 依赖。
-  - 为后续 `default = ["native"]` / `wasm` 留接口。
+- [ ] M37.4：明确 human 输出和解析模块关系
+  - 检查 `tbl_single` 中是否仍有 human 输出函数混在解析模块。
+  - M37 不强制大迁移，但必须明确：
+    - 解析模块返回结构化对象。
+    - human 输出属于 `output` / adapter 层。
+  - 如果迁移范围小且测试稳定，可移动；否则只做 wrapper 和文档标记，迁移留给后续输出模块整理。
+
+- [ ] M37.5：梳理 native-only 依赖清单
+  - 标记解析 core 中不能进入 WASM 的依赖：
+    - `std::fs`
+    - 本地 `Path` 强依赖
+    - graphdb/redb
+    - CLI/clap
+    - stdout/stderr 输出
+  - M37 不配置 feature gate，只在代码注释和文档中明确 native wrapper 边界。
+
+- [ ] M37.6：补测试
+  - 纯字符串 `.spg` 解析。
+  - 纯字符串 `.tbl` 解析。
+  - `ParsedContent::from_json` 解析。
+  - `parse_file(path)` 旧行为兼容。
+  - 绝对路径单文件 CLI 仍输出合法 JSON。
+  - `source_path` 不包含绝对路径。
+  - CLI/stdio 输出快照不变。
+
+M37 当前不明确点，需要实施前先确认：
+
+- `ParsedMetadata` 是否现在引入：
+  - 引入的好处：parse core 边界更干净。
+  - 风险：会触碰较多旧调用点，可能扩大 M37。
+  - 保守方案：M37 先继续返回 `PageMetadata`，只新增 source-based 入口；M38/M43 前再决定是否引入 enum。
+
+- `SourceId` 是否需要马上增加 `display_path` / `origin_path`：
+  - 引入的好处：解决 M36 basename fallback 的长期语义问题。
+  - 风险：字段会沿 parser/output/schema 扩散，可能影响快照。
+  - 保守方案：M37 只在设计中记录，不改变输出；M40/M43 前定稿。
+
+- `.tbl` 的 `query_target` 应来自哪里：
+  - 现状：很多输出把 `input_path` / path display 当作 query target。
+  - 需要决定 core API 中 `query_target` 是 `SourceId.source_path`、表 id、dbTableName，还是 native wrapper 的展示字段。
+  - M37 必须避免把本地绝对路径重新带回 `source_path`。
+
+- human 输出是否在 M37 移动：
+  - 若移动，测试面会扩大。
+  - 若不移动，必须至少标注“解析模块中的 human 输出是 legacy/native adapter 行为”。
+
+- `ParsedContent` 是否应使用 `OnceLock` 替代 `Mutex<Option<Arc<Value>>>`：
+  - `OnceLock` 更符合“只初始化一次”的语义。
+  - 当前 Mutex 实现已满足行为，不是 M37 阻塞项。
 
 验收标准：
 
 - 单文件 `.spg/.tbl` fixture 可以只用字符串解析。
 - 纯解析路径不需要 `std::fs`。
 - 不改变 CLI 输出快照。
+- `cargo fmt --check`、`cargo check`、`cargo test` 全部通过。
+- 默认 `cargo test` 不受 stale graphdb 影响；若仍依赖真实项目 graphdb，必须使用隔离/失效策略。
 
 #### M38：Runtime Command 与 Query Engine 统一
 
