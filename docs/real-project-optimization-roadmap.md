@@ -3021,12 +3021,12 @@ M36 验收后遗留项：
     - basename 不是完整项目内逻辑路径，只能作为单文件模式下的兼容降级。
     - 后续远程会话、跨项目链路、浏览器上传若继续复用这个降级语义，会丢失来源身份。
   - 要求：
-    - 后续应新增正式字段或结构表达本地/远程展示路径，例如 `display_path` / `origin_path` / `provider_path`。
+    - 后续应新增正式字段或结构表达本地/远程展示路径，例如 `display_path` / `origin_path`。
     - `source_path` 继续只表示项目内逻辑路径或单文件兼容名称。
     - 不应把 basename fallback 扩展为跨文件、跨项目或 graph node identity 的依据。
   - 建议归属：
-    - M37 先讨论 API 形状，不强制实现。
-    - M40 Session Manager 或 M43 WASM 单文件阅读前必须定稿。
+    - 已并入 M37.4，M37 直接实现 `display_path` 与 `origin_path`。
+    - M40 Session Manager 或 M43 WASM 单文件阅读前继续补远程/session 场景测试。
 
 #### M37：Parse Core 纯解析入口
 
@@ -3045,6 +3045,10 @@ M37 需要实现的功能点：
 - `ParsedContent` 使用 `OnceLock<Arc<serde_json::Value>>` 管理 JSON 缓存。
 - 新增不依赖文件系统的 `.spg/.tbl` 解析入口。
 - `.tbl` 解析新增 source-based 入口，逐步移除 core API 对 `Path` 的依赖。
+- `SourceId` 一步到位拆分 `source_path`、`display_path`、`origin_path`：
+  - `source_path`：项目内逻辑路径或单文件兼容名称，参与逻辑身份。
+  - `display_path`：面向人类/AI 的安全展示路径，不能包含 token/cookie。
+  - `origin_path`：provider 内部定位用，可为本地绝对路径、session key 或远程资源 locator；不进入 graph node id，不默认进入 AI 输出。
 - `tbl_single` 中的 human 输出迁移到 output / adapter 层。
 - `AiOutput.query_target` 的语义写清楚：
   - 它是用户可读的短目标或当前输出目标。
@@ -3064,6 +3068,7 @@ M37 需要实现的功能点：
 - 不修改现有 CLI、stdio、MCP 预备 schema。
 - 不实现远程 metadata 获取。
 - 不实现 `RemoteRef` / `target_ref` 输出字段。
+- 不把 `origin_path` 写入 graph node id 或默认 AI 输出。
 - 不解决 `GraphStore` / `IndexStore`，留给 M39。
 - 不把 `basename` fallback 当作长期 source identity 方案。
 
@@ -3103,7 +3108,26 @@ M37 需要实现的功能点：
     - 不在 core API 中传播 `Path`。
   - 保持现有 `.tbl` 输出快照不变。
 
-- [ ] M37.4：明确 human 输出和解析模块关系
+- [ ] M37.4：扩展 `SourceId` 路径字段
+  - 增加字段：
+    - `display_path: Option<String>`
+    - `origin_path: Option<String>`，语义必须是 provider 内部定位。
+  - 构造规则：
+    - `from_local_path(project_ref, path, project_dir)`：
+      - 有 `project_dir`：`source_path` 为相对项目路径，`display_path` 优先同 `source_path`，`origin_path` 可保存本地绝对路径。
+      - 无 `project_dir` 且传入相对路径：`source_path` 和 `display_path` 使用该相对路径。
+      - 无 `project_dir` 且传入绝对路径：`source_path` 使用 basename 兼容单文件模式，`display_path` 使用安全展示路径，`origin_path` 保存本地绝对路径。
+    - `from_memory(project_ref, source_path)`：`origin_path` 为空，`display_path` 默认同 `source_path`。
+  - 约束：
+    - `source_path` 继续必须通过 `is_project_internal_path`。
+    - `display_path` 不参与身份判断。
+    - `origin_path` 不进入 graph node id，不作为 `query_target` 默认值，不进入默认 AI 输出。
+  - 测试：
+    - 绝对路径输入时 `source_path` 不是绝对路径。
+    - 绝对路径输入时 `origin_path` 能保留原始本地路径。
+    - `display_path` 在单文件模式下可用于展示但不污染 `source_path`。
+
+- [ ] M37.5：明确 human 输出和解析模块关系
   - 检查 `tbl_single` 中是否仍有 human 输出函数混在解析模块。
   - M37 必须迁出解析模块中的 human 输出函数，不保留 legacy/native adapter 注释作为长期解释。
   - 要求：
@@ -3112,7 +3136,7 @@ M37 需要实现的功能点：
     - `main.rs` 调用点随迁移同步更新。
     - 模型面对模块职责时不应看到“解析模块内仍可负责人类输出”的双重口径。
 
-- [ ] M37.5：梳理 native-only 依赖清单
+- [ ] M37.6：梳理 native-only 依赖清单
   - 标记解析 core 中不能进入 WASM 的依赖：
     - `std::fs`
     - 本地 `Path` 强依赖
@@ -3121,7 +3145,7 @@ M37 需要实现的功能点：
     - stdout/stderr 输出
   - M37 不配置 feature gate，只在代码注释和文档中明确 native wrapper 边界。
 
-- [ ] M37.6：明确 `query_target` 与未来全局目标身份
+- [ ] M37.7：明确 `query_target` 与未来全局目标身份
   - 这里的 `query_target` 特指 `AiOutput.query_target` 顶层字段，不是 graph 查询入口。
   - 当前单文件 `.tbl` 输出链路：
     - `tbl_single::build_tbl_output` 将 `output.query_target = meta.input_path.clone()`。
@@ -3138,26 +3162,23 @@ M37 需要实现的功能点：
     - 输出 schema 不变。
     - docs/schema.md 说明 `query_target` 不是全局唯一身份。
 
-- [ ] M37.7：补测试
+- [ ] M37.8：补测试
   - 纯字符串 `.spg` 解析。
   - 纯字符串 `.tbl` 解析。
   - `ParsedContent::from_json` 解析。
   - `parse_file(path)` 旧行为兼容。
   - 绝对路径单文件 CLI 仍输出合法 JSON。
   - `source_path` 不包含绝对路径。
+  - `origin_path` 保留绝对路径输入的定位信息。
+  - `display_path` 不参与身份判断。
   - 单文件 `.tbl` 的 `AiOutput.query_target` 不包含本地绝对路径。
   - CLI/stdio 输出快照不变。
 
-M37 当前不明确点，需要实施前先确认：
+M37 已确认决策：
 
-- `SourceId` 是否需要马上增加 `display_path` / `origin_path`：
-  - 可以增加，但不是 M37 必要条件。
-  - M37 的重点是 parse core 入口，不应为了展示路径字段扩大输出 schema。
-  - `basename` fallback 的长期归属仍记录在 M36-FOLLOW-2，M40/M43 前定稿。
-
-- `ParsedContent` 是否应使用 `OnceLock` 替代 `Mutex<Option<Arc<Value>>>`：
-  - 是，M37 应改成 `OnceLock<Arc<Value>>`。
-  - 不需要为此新增或修改 `ParsedMetadata` 类型。
+- `ParsedContent` 应使用 `OnceLock<Arc<Value>>` 替代 `Mutex<Option<Arc<Value>>>`。
+- 不新增或修改 `ParsedMetadata` 类型。
+- `SourceId` 在 M37 增加 `display_path` 与 `origin_path`，一步到位解决单文件绝对路径的展示/定位边界。
 
 验收标准：
 
