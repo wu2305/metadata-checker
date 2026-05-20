@@ -38,12 +38,8 @@ pub struct GraphRuntime {
 
 /// Runtime 查询命令枚举
 ///
-/// M23 最小范围只要求 ExplainCondition，后续里程碑可扩展
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RuntimeQueryCommand {
-    ExplainCondition,
-    AdviseQuery,
-}
+/// M38 统一为 ToolCommand，消除 CLI / stdio / MCP 分叉。
+pub type RuntimeQueryCommand = crate::tool_contract::ToolCommand;
 
 /// Runtime 查询请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +51,10 @@ pub struct RuntimeQueryRequest {
     #[serde(default)]
     pub intent: Option<String>,
     pub page_scope: Option<String>,
+    #[serde(default)]
+    pub depth: Option<usize>,
+    #[serde(default)]
+    pub check_reload: bool,
 }
 
 /// GraphDB 文件指纹，用于变更检测
@@ -178,14 +178,15 @@ impl GraphRuntime {
 
     /// 执行查询，复用内存中的 graph
     ///
-    /// M23 只支持 RuntimeQueryCommand::ExplainCondition
+    /// M38 统一入口：支持所有已加载 graphdb 后的运行期工具命令。
     pub fn query(&self, request: RuntimeQueryRequest) -> Result<RuntimeQueryResponse> {
+        use crate::tool_contract::ToolCommand;
         let total_start = Instant::now();
         let mut diagnostics = Vec::new();
 
         let query_start = Instant::now();
         let mut result = match request.command {
-            RuntimeQueryCommand::AdviseQuery => {
+            ToolCommand::AdviseQuery => {
                 let question_kind = request.intent.as_deref().unwrap_or("auto");
                 let page_scope = request.page_scope.as_deref();
                 crate::answer_contract::build_advise_query_output(
@@ -195,7 +196,7 @@ impl GraphRuntime {
                     &request.budget,
                 )
             }
-            RuntimeQueryCommand::ExplainCondition => {
+            ToolCommand::ExplainCondition => {
                 let intent = crate::explain::TraversalIntent::parse(
                     request.intent.as_deref().unwrap_or("auto"),
                 )?;
@@ -206,17 +207,102 @@ impl GraphRuntime {
                     intent,
                 )?
             }
+            ToolCommand::QueryModel => crate::query::build_query_model_output(
+                &self.graph,
+                &request.target,
+                &request.budget,
+            )?,
+            ToolCommand::QueryPageLogic => {
+                let project_dir = self.project_dir.as_deref();
+                crate::query::build_query_page_logic_output(
+                    &self.graph,
+                    &request.target,
+                    project_dir,
+                    &request.budget,
+                )?
+            }
+            ToolCommand::Explain => {
+                crate::explain::build_explain_output(&self.graph, &request.target)?
+            }
+            ToolCommand::Context => {
+                let depth = request.depth.unwrap_or(1);
+                crate::context::build_context_output(
+                    &self.graph,
+                    &request.target,
+                    depth,
+                    &request.budget,
+                )?
+            }
+            ToolCommand::FindPage => serde_json::to_value(crate::query::find_nodes(
+                &self.graph,
+                &request.target,
+                Some("page"),
+                20,
+            ))?,
+            ToolCommand::FindModel => serde_json::to_value(crate::query::find_nodes(
+                &self.graph,
+                &request.target,
+                Some("model"),
+                20,
+            ))?,
+            ToolCommand::FindComponent => serde_json::to_value(crate::query::find_nodes(
+                &self.graph,
+                &request.target,
+                Some("component"),
+                20,
+            ))?,
+            ToolCommand::QueryPage => {
+                // M38: query_page 目前直接打印 stdout，在统一入口中返回空对象
+                // TODO: 后续迁移为返回 Value 的 build_query_page_output
+                serde_json::json!({
+                    "note": "query_page not yet migrated to Value-returning API in M38",
+                    "page_id": request.target,
+                })
+            }
+            ToolCommand::QueryCross => {
+                serde_json::json!({
+                    "note": "query_cross not yet migrated to Value-returning API in M38",
+                    "target": request.target,
+                })
+            }
+            ToolCommand::QueryDataflow => {
+                serde_json::json!({
+                    "note": "query_dataflow not yet migrated to Value-returning API in M38",
+                    "target": request.target,
+                })
+            }
+            ToolCommand::Status => {
+                let status = self.status();
+                serde_json::to_value(status)?
+            }
+            ToolCommand::ReloadGraph => {
+                serde_json::json!({
+                    "note": "reload_graph should be called directly, not through query",
+                })
+            }
+            ToolCommand::CheckReload => {
+                serde_json::json!({
+                    "note": "check_reload should be called directly, not through query",
+                })
+            }
         };
         let query_compute_ms = query_start.elapsed().as_millis();
 
         if request.human {
-            let human_text =
-                crate::explain::render_explain_condition_human(&result, &request.target);
-            if let Some(obj) = result.as_object_mut() {
-                obj.insert(
-                    "human_summary".to_string(),
-                    serde_json::Value::String(human_text),
-                );
+            match request.command {
+                ToolCommand::ExplainCondition => {
+                    let human_text =
+                        crate::explain::render_explain_condition_human(&result, &request.target);
+                    if let Some(obj) = result.as_object_mut() {
+                        obj.insert(
+                            "human_summary".to_string(),
+                            serde_json::Value::String(human_text),
+                        );
+                    }
+                }
+                _ => {
+                    diagnostics.push("HUMAN_MODE_NOT_SUPPORTED".to_string());
+                }
             }
         }
 

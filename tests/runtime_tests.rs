@@ -23,6 +23,8 @@ fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
         budget: "compact".to_string(),
         human: false,
         intent: None,
+        depth: None,
+        check_reload: false,
         page_scope: None,
     };
 
@@ -100,6 +102,8 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
         budget: "compact".to_string(),
         human: false,
         intent: Some("writer".to_string()),
+        depth: None,
+        check_reload: false,
         page_scope: None,
     };
 
@@ -267,6 +271,8 @@ fn test_runtime_reload_failure_preserves_old_graph() {
         budget: "compact".to_string(),
         human: false,
         intent: None,
+        depth: None,
+        check_reload: false,
         page_scope: None,
     };
     let resp = runtime.query(request).expect("旧 graph 仍可查询");
