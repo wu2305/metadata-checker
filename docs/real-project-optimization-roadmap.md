@@ -3037,7 +3037,24 @@ M37 的核心目的：
 - 让调用方可以直接传入 `ParsedContent` / `serde_json::Value` / `&str` 完成 `.spg` 和 `.tbl` 解析。
 - 让解析层只返回结构化元数据对象，不承担文件读取、graph 构建、query、AI 输出、人类输出。
 - 把本地文件路径相关逻辑留在 native adapter wrapper，例如 `parse_file(path)`。
+- 明确单文件输出中的 `query_target` 只是“本次回答目标的展示/短标识”，不是跨项目、多远程服务器下的全局身份。
 - 为未来 `metadata-parse-core` crate 提供最小可迁移 API，但 M37 不实际拆 crate。
+
+M37 需要实现的功能点：
+
+- `ParsedContent` 使用 `OnceLock<Arc<serde_json::Value>>` 管理 JSON 缓存。
+- 新增不依赖文件系统的 `.spg/.tbl` 解析入口。
+- `.tbl` 解析新增 source-based 入口，逐步移除 core API 对 `Path` 的依赖。
+- `tbl_single` 中的 human 输出迁移到 output / adapter 层。
+- `AiOutput.query_target` 的语义写清楚：
+  - 它是用户可读的短目标或当前输出目标。
+  - 单项目内可使用表 ID / dbTableName。
+  - 单远程服务器多项目时需要配合 `ProjectRef`。
+  - 多远程服务器场景不能只依赖表 ID。
+- 为未来结构化目标身份预留设计口径，但 M37 不实现 schema 变更：
+  - `RemoteRef { remote_id, server_fingerprint, tenant_id, environment }`
+  - `ProjectRef { remote_ref, namespace, project_id, revision }`
+  - `target_ref { remote_id, project_id, source_path, table_id, db_table_name }`
 
 范围约束：
 
@@ -3046,6 +3063,7 @@ M37 的核心目的：
 - 不迁移 graphdb / scanner / query 语义。
 - 不修改现有 CLI、stdio、MCP 预备 schema。
 - 不实现远程 metadata 获取。
+- 不实现 `RemoteRef` / `target_ref` 输出字段。
 - 不解决 `GraphStore` / `IndexStore`，留给 M39。
 - 不把 `basename` fallback 当作长期 source identity 方案。
 
@@ -3103,13 +3121,31 @@ M37 的核心目的：
     - stdout/stderr 输出
   - M37 不配置 feature gate，只在代码注释和文档中明确 native wrapper 边界。
 
-- [ ] M37.6：补测试
+- [ ] M37.6：明确 `query_target` 与未来全局目标身份
+  - 这里的 `query_target` 特指 `AiOutput.query_target` 顶层字段，不是 graph 查询入口。
+  - 当前单文件 `.tbl` 输出链路：
+    - `tbl_single::build_tbl_output` 将 `output.query_target = meta.input_path.clone()`。
+    - `tbl_single::parse_tbl(path, raw)` 当前用 `path.display()` 初始化 `TblMetadata.input_path`。
+    - M36 后 `parser::parse_content` 会把 `PageMetadata.input_path` 设为 `SourceId.source_path`，再传给 `parse_tbl`。
+  - M37 需要给出稳定口径：
+    - 单文件 `.tbl` 的 `AiOutput.query_target` 可以继续使用 `source_path` 或改为表 ID / dbTableName，但必须是展示/短目标。
+    - 表 ID / dbTableName 只能作为项目内局部身份。
+    - 多项目身份需要 `ProjectRef + table_id`。
+    - 多远程服务器身份需要 `RemoteRef + ProjectRef + table_id`。
+    - M37 不新增 `target_ref` 字段，但文档要说明后续结构化身份应放在 `target_ref` / node meta / session manifest，而不是复用 `query_target`。
+  - 验收：
+    - 单文件 `.tbl` 输出不再把绝对路径作为 `query_target`。
+    - 输出 schema 不变。
+    - docs/schema.md 说明 `query_target` 不是全局唯一身份。
+
+- [ ] M37.7：补测试
   - 纯字符串 `.spg` 解析。
   - 纯字符串 `.tbl` 解析。
   - `ParsedContent::from_json` 解析。
   - `parse_file(path)` 旧行为兼容。
   - 绝对路径单文件 CLI 仍输出合法 JSON。
   - `source_path` 不包含绝对路径。
+  - 单文件 `.tbl` 的 `AiOutput.query_target` 不包含本地绝对路径。
   - CLI/stdio 输出快照不变。
 
 M37 当前不明确点，需要实施前先确认：
@@ -3118,15 +3154,6 @@ M37 当前不明确点，需要实施前先确认：
   - 可以增加，但不是 M37 必要条件。
   - M37 的重点是 parse core 入口，不应为了展示路径字段扩大输出 schema。
   - `basename` fallback 的长期归属仍记录在 M36-FOLLOW-2，M40/M43 前定稿。
-
-- `.tbl` 的 `query_target` 应来自哪里：
-  - 这里特指 `AiOutput.query_target` 顶层字段，不是 graph 查询入口。
-  - 当前单文件 `.tbl` 输出链路中：
-    - `tbl_single::build_tbl_output` 将 `output.query_target = meta.input_path.clone()`。
-    - `tbl_single::parse_tbl(path, raw)` 当前用 `path.display()` 初始化 `TblMetadata.input_path`。
-    - M36 后 `parser::parse_content` 会把 `PageMetadata.input_path` 设为 `SourceId.source_path`，再传给 `parse_tbl`。
-  - M37 需要决定的是：单文件 `.tbl` 的 `AiOutput.query_target` 是否继续使用 `input_path/source_path`，还是改成表 id / dbTableName。
-  - M37 必须避免把本地绝对路径重新带回 `source_path`。
 
 - `ParsedContent` 是否应使用 `OnceLock` 替代 `Mutex<Option<Arc<Value>>>`：
   - 是，M37 应改成 `OnceLock<Arc<Value>>`。
