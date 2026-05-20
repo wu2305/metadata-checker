@@ -3074,7 +3074,7 @@ M37 需要实现的功能点：
 
 任务清单：
 
-- [ ] M37.1：定义 Parse Core 返回类型边界
+- [x] M37.1：定义 Parse Core 返回类型边界
   - 不新增 `ParsedMetadata` enum。
   - M37 中“parsed metadata”指的是已经反序列化并缓存的 `serde_json::Value`，由 `ParsedContent::json() -> Arc<Value>` 提供。
   - 领域解析结果继续使用现有结构：
@@ -3086,7 +3086,7 @@ M37 需要实现的功能点：
     - 不让解析 API 依赖 graph node/edge 类型。
     - 不让解析 API 依赖本地文件系统路径。
 
-- [ ] M37.2：新增纯解析 API
+- [x] M37.2：新增纯解析 API
   - 建议入口：
     - `parse_content(&ParsedContent) -> Result<PageMetadata>` 保持兼容。
     - `parse_metadata_from_value(source: SourceId, raw: Arc<Value>) -> Result<PageMetadata>`。
@@ -3099,7 +3099,7 @@ M37 需要实现的功能点：
     - 不输出 JSON/human 文本。
     - `ParsedContent::json()` 仍是反序列化缓存入口。
 
-- [ ] M37.3：清理 `tbl_single` 的 `Path` 强依赖
+- [x] M37.3：清理 `tbl_single` 的 `Path` 强依赖
   - 当前 `tbl_single::parse_tbl(path, raw)` 把 `Path` 同时用于 query target、source file 和解析上下文。
   - 新增 source-based 入口：
     - `parse_tbl_from_value_with_source(source: &SourceId, raw: Value)`。
@@ -3108,7 +3108,7 @@ M37 需要实现的功能点：
     - 不在 core API 中传播 `Path`。
   - 保持现有 `.tbl` 输出快照不变。
 
-- [ ] M37.4：扩展 `SourceId` 路径字段
+- [x] M37.4：扩展 `SourceId` 路径字段
   - 增加字段：
     - `display_path: Option<String>`
     - `origin_path: Option<String>`，语义必须是 provider 内部定位。
@@ -3127,7 +3127,7 @@ M37 需要实现的功能点：
     - 绝对路径输入时 `origin_path` 能保留原始本地路径。
     - `display_path` 在单文件模式下可用于展示但不污染 `source_path`。
 
-- [ ] M37.5：明确 human 输出和解析模块关系
+- [x] M37.5：明确 human 输出和解析模块关系
   - 检查 `tbl_single` 中是否仍有 human 输出函数混在解析模块。
   - M37 必须迁出解析模块中的 human 输出函数，不保留 legacy/native adapter 注释作为长期解释。
   - 要求：
@@ -3136,7 +3136,7 @@ M37 需要实现的功能点：
     - `main.rs` 调用点随迁移同步更新。
     - 模型面对模块职责时不应看到“解析模块内仍可负责人类输出”的双重口径。
 
-- [ ] M37.6：梳理 native-only 依赖清单
+- [x] M37.6：梳理 native-only 依赖清单
   - 标记解析 core 中不能进入 WASM 的依赖：
     - `std::fs`
     - 本地 `Path` 强依赖
@@ -3145,7 +3145,7 @@ M37 需要实现的功能点：
     - stdout/stderr 输出
   - M37 不配置 feature gate，只在代码注释和文档中明确 native wrapper 边界。
 
-- [ ] M37.7：明确 `query_target` 与未来全局目标身份
+- [x] M37.7：明确 `query_target` 与未来全局目标身份
   - 这里的 `query_target` 特指 `AiOutput.query_target` 顶层字段，不是 graph 查询入口。
   - 当前单文件 `.tbl` 输出链路：
     - `tbl_single::build_tbl_output` 将 `output.query_target = meta.input_path.clone()`。
@@ -3162,7 +3162,7 @@ M37 需要实现的功能点：
     - 输出 schema 不变。
     - docs/schema.md 说明 `query_target` 不是全局唯一身份。
 
-- [ ] M37.8：补测试
+- [x] M37.8：补测试
   - 纯字符串 `.spg` 解析。
   - 纯字符串 `.tbl` 解析。
   - `ParsedContent::from_json` 解析。

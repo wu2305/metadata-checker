@@ -271,7 +271,7 @@ mod tests {
     use crate::source_id::{ProjectRef, SourceId};
 
     fn test_source(path: &str) -> SourceId {
-        SourceId::from_memory(ProjectRef::new("test"), path)
+        crate::source_id::SourceId::from_memory(ProjectRef::new("test"), path).unwrap()
     }
 
     #[test]
@@ -392,15 +392,35 @@ fn test_parse_file_with_storage_compat_layer() {
 
 #[test]
 fn test_parse_file_accepts_absolute_path_input() {
-    // M36 回归：CLI 绝对路径单文件解析必须仍然工作
-    let text = r#"{"canvas": {"components": [{"id": "btn1", "type": "button"}]}}"#;
-    let source = crate::source_id::SourceId::from_memory(
-        crate::source_id::ProjectRef::new("test"),
-        "/tmp/abs_page.spg",
-    );
-    let parsed = ParsedContent::from_text(source, text);
-    let meta = parse_content(&parsed).expect("parse_content must work for absolute path input");
+    // M37: CLI 绝对路径单文件解析必须仍然工作，且 source_path 不能是绝对路径
+    use crate::storage_provider::DocumentProvider;
+    use std::path::Path;
+    use std::time::SystemTime;
+
+    struct TestProvider {
+        content: String,
+    }
+
+    impl DocumentProvider for TestProvider {
+        fn read_bytes(&self, _path: &Path) -> Result<Vec<u8>> {
+            Ok(self.content.as_bytes().to_vec())
+        }
+        fn metadata(&self, _path: &Path) -> Result<crate::storage_provider::DocumentFileMetadata> {
+            Ok(crate::storage_provider::DocumentFileMetadata {
+                modified: Some(SystemTime::UNIX_EPOCH),
+                size: self.content.len() as u64,
+            })
+        }
+    }
+
+    let provider = TestProvider {
+        content: r#"{"canvas": {"components": [{"id": "btn1", "type": "button"}]}}"#.to_string(),
+    };
+    let meta = parse_file_with_document_provider(Path::new("/tmp/abs_page.spg"), &provider, None)
+        .expect("absolute path single file parse should succeed");
     assert!(meta.superpage.is_some());
+    // source_path 必须退化为 basename，不能是绝对路径
+    assert_eq!(meta.input_path, Some("abs_page.spg".to_string()));
 }
 
 #[test]
@@ -409,7 +429,8 @@ fn test_parse_metadata_from_str_spg() {
     let source = crate::source_id::SourceId::from_memory(
         crate::source_id::ProjectRef::new("test"),
         "app/page.spg",
-    );
+    )
+    .unwrap();
     let meta = parse_metadata_from_str(source, text)
         .expect("parse_metadata_from_str should succeed for spg");
     assert!(meta.superpage.is_some());
@@ -422,7 +443,8 @@ fn test_parse_metadata_from_str_tbl() {
     let mut source = crate::source_id::SourceId::from_memory(
         crate::source_id::ProjectRef::new("test"),
         "data/table.tbl",
-    );
+    )
+    .unwrap();
     source.source_kind = crate::source_id::SourceKind::Tbl;
     let meta = parse_metadata_from_str(source, text)
         .expect("parse_metadata_from_str should succeed for tbl");
@@ -435,7 +457,8 @@ fn test_parse_metadata_from_value() {
     let source = crate::source_id::SourceId::from_memory(
         crate::source_id::ProjectRef::new("test"),
         "app/page.spg",
-    );
+    )
+    .unwrap();
     let meta = parse_metadata_from_value(source, std::sync::Arc::new(value))
         .expect("parse_metadata_from_value should succeed");
     assert!(meta.superpage.is_some());
@@ -448,7 +471,8 @@ fn test_parse_tbl_from_value_with_source() {
     let mut source = crate::source_id::SourceId::from_memory(
         crate::source_id::ProjectRef::new("test"),
         "data/table.tbl",
-    );
+    )
+    .unwrap();
     source.source_kind = crate::source_id::SourceKind::Tbl;
     let meta = crate::tbl_single::parse_tbl_from_value_with_source(&source, raw)
         .expect("parse_tbl_from_value_with_source should succeed");

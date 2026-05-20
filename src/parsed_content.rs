@@ -1,7 +1,7 @@
 use crate::source_id::SourceId;
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, OnceLock};
 
 /// 元数据内容原始形态。
 ///
@@ -29,7 +29,7 @@ pub struct ParsedContent {
     /// 内容哈希，用于增量判断。
     pub content_hash: Option<String>,
     /// 懒解析缓存，Mutex + Option 保证线程安全且只反序列化一次。
-    parsed_json: Mutex<Option<Arc<Value>>>,
+    parsed_json: OnceLock<Arc<Value>>,
 }
 
 impl ParsedContent {
@@ -39,7 +39,7 @@ impl ParsedContent {
             source,
             content: MetadataContent::Text(Arc::from(text.into().into_boxed_str())),
             content_hash: None,
-            parsed_json: Mutex::new(None),
+            parsed_json: OnceLock::new(),
         }
     }
 
@@ -49,7 +49,7 @@ impl ParsedContent {
             source,
             content: MetadataContent::Bytes(Arc::from(bytes.into_boxed_slice())),
             content_hash: None,
-            parsed_json: Mutex::new(None),
+            parsed_json: OnceLock::new(),
         }
     }
 
@@ -59,7 +59,7 @@ impl ParsedContent {
             source,
             content: MetadataContent::Json(Arc::new(value)),
             content_hash: None,
-            parsed_json: Mutex::new(None),
+            parsed_json: OnceLock::new(),
         }
     }
 
@@ -67,9 +67,8 @@ impl ParsedContent {
     ///
     /// 连续调用保证复用同一个 `Arc<Value>`。
     pub fn json(&self) -> Result<Arc<Value>> {
-        let mut guard = self.parsed_json.lock().unwrap();
-        if let Some(ref cached) = *guard {
-            return Ok(Arc::clone(cached));
+        if let Some(v) = self.parsed_json.get() {
+            return Ok(Arc::clone(v));
         }
 
         let value = match &self.content {
@@ -92,8 +91,15 @@ impl ParsedContent {
             }
         };
 
-        *guard = Some(Arc::clone(&value));
-        Ok(value)
+        match self.parsed_json.set(Arc::clone(&value)) {
+            Ok(()) => Ok(value),
+            Err(_) => {
+                // 另一个线程已经设置了，使用缓存的值以保证 Arc 复用
+                Ok(Arc::clone(
+                    self.parsed_json.get().expect("just set by another thread"),
+                ))
+            }
+        }
     }
 
     /// 返回 content_hash，若未计算则返回 None。
@@ -108,7 +114,7 @@ mod tests {
     use crate::source_id::{ProjectRef, SourceId};
 
     fn test_source() -> SourceId {
-        SourceId::from_memory(ProjectRef::new("test"), "app/page.spg")
+        SourceId::from_memory(ProjectRef::new("test"), "app/page.spg").unwrap()
     }
 
     #[test]

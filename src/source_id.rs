@@ -160,9 +160,17 @@ impl SourceId {
     }
 
     /// 从内存字节构造 SourceId，用于 WASM 或测试 fixture。
-    pub fn from_memory(project_ref: ProjectRef, source_path: impl Into<String>) -> Self {
+    ///
+    /// source_path 仍须通过 `is_project_internal_path` 校验，不能是绝对路径。
+    pub fn from_memory(project_ref: ProjectRef, source_path: impl Into<String>) -> Result<Self> {
         let path = source_path.into();
-        Self {
+        if !is_project_internal_path(&path) {
+            anyhow::bail!(
+                "from_memory source_path {} is not a project-internal relative path",
+                path
+            );
+        }
+        Ok(Self {
             project_ref,
             source_path: path.clone(),
             display_path: Some(path.clone()),
@@ -170,7 +178,7 @@ impl SourceId {
             source_kind: SourceKind::Unknown,
             origin: SourceOrigin::Memory,
             revision: None,
-        }
+        })
     }
 
     /// 将 source_path 解析为 Path 片段，用于拼接本地绝对路径。
@@ -240,7 +248,7 @@ mod tests {
     #[test]
     fn test_source_id_from_memory() {
         let pr = ProjectRef::new("p1");
-        let sid = SourceId::from_memory(pr, "test.spg");
+        let sid = SourceId::from_memory(pr, "test.spg").unwrap();
         assert_eq!(sid.source_path, "test.spg");
         assert_eq!(sid.display_path, Some("test.spg".to_string()));
         assert!(sid.origin_path.is_none());
