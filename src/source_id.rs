@@ -34,16 +34,23 @@ impl ProjectRef {
 
 /// 来源标识。
 ///
-/// M36 的边界定义：
-/// - `source_path` 必须是项目内逻辑路径，例如 `app/.../*.spg`。
-/// - 本地绝对路径、session local path、remote path 只能存在于 provider/session adapter。
+/// M37 边界定义：
+/// - `source_path` 必须是项目内逻辑路径，参与身份判断。
+/// - `display_path` 面向人类/AI 的安全展示路径，不参与身份判断，不能包含 token/cookie。
+/// - `origin_path` 仅 provider 内部定位使用（本地绝对路径、session key、远程 locator），
+///   不进入 graph node id，不作为 `query_target` 默认值，不进入默认 AI 输出。
 /// - 先不改现有 graph node id，后续 evidence/meta 可逐步补 `project_ref + source_path`。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct SourceId {
     /// 项目引用，为跨项目链路预留结构化身份。
     pub project_ref: ProjectRef,
     /// 项目内逻辑路径，例如 `app/销售.app/销售/合同协议.spg`。
+    /// 必须通过 `is_project_internal_path` 校验。
     pub source_path: String,
+    /// 面向展示的安全路径，不参与身份判断。
+    pub display_path: Option<String>,
+    /// provider 内部定位路径，不暴露给 AI 输出。
+    pub origin_path: Option<String>,
     /// 来源类型。
     pub source_kind: SourceKind,
     /// 来源方式：本地文件、会话缓存、远程 API、内存字节。
@@ -51,6 +58,17 @@ pub struct SourceId {
     /// 可选版本/修订标识，例如 git commit 或同步版本号。
     pub revision: Option<String>,
 }
+
+impl PartialEq for SourceId {
+    fn eq(&self, other: &Self) -> bool {
+        self.project_ref == other.project_ref
+            && self.source_path == other.source_path
+            && self.source_kind == other.source_kind
+            && self.origin == other.origin
+            && self.revision == other.revision
+    }
+}
+
 
 /// 来源文件类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,16 +96,17 @@ pub enum SourceOrigin {
 impl SourceId {
     /// 从本地文件路径构造 SourceId。
     ///
-    /// `source_path` 必须是项目内逻辑路径，但允许通过绝对路径传入。
-    /// 本地绝对路径不进入 `source_path`，只在 provider 层用于文件读取。
-    /// - 提供 `project_dir` 时，从绝对路径裁剪出相对路径。
-    /// - 未提供 `project_dir` 时，相对路径直接使用；绝对路径尝试相对于当前工作目录转换，
-    ///   若仍无法转为相对路径，则退化为文件名（basename）。
+    /// `source_path` 必须是项目内逻辑路径：
+    /// - 提供 `project_dir` 时，从绝对路径裁剪出相对路径；`origin_path` 保留原始绝对路径。
+    /// - 未提供 `project_dir` 时，相对路径直接使用；绝对路径尝试 cwd-relative 转换，
+    ///   失败则退化为 basename。`origin_path` 始终保留原始路径。
     pub fn from_local_path(
         project_ref: ProjectRef,
         path: &Path,
         project_dir: Option<&Path>,
     ) -> Result<Self> {
+        let origin_path = Some(path.to_string_lossy().to_string());
+
         let source_path = if let Some(base) = project_dir {
             path.strip_prefix(base)
                 .map(|p| p.to_string_lossy().to_string())
@@ -104,7 +123,7 @@ impl SourceId {
             path.strip_prefix(&cwd)
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| {
-                    // 退化为文件名，确保 source_path 不会是绝对路径
+                    // 退化为文件名，确保 source_path 不是绝对路径
                     path.file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| path.to_string_lossy().to_string())
@@ -120,6 +139,8 @@ impl SourceId {
             );
         }
 
+        let display_path = Some(source_path.clone());
+
         let source_kind = if path.extension().map(|e| e == "spg").unwrap_or(false) {
             SourceKind::Spg
         } else if path.extension().map(|e| e == "tbl").unwrap_or(false) {
@@ -131,16 +152,22 @@ impl SourceId {
         Ok(Self {
             project_ref,
             source_path,
+            display_path,
+            origin_path,
             source_kind,
             origin: SourceOrigin::Local,
             revision: None,
         })
     }
 
+    /// 从内存字节构造 SourceId，用于 WASM 或测试 fixture。
     pub fn from_memory(project_ref: ProjectRef, source_path: impl Into<String>) -> Self {
+        let path = source_path.into();
         Self {
             project_ref,
-            source_path: source_path.into(),
+            source_path: path.clone(),
+            display_path: Some(path.clone()),
+            origin_path: None,
             source_kind: SourceKind::Unknown,
             origin: SourceOrigin::Memory,
             revision: None,
@@ -190,6 +217,8 @@ mod tests {
         let pr = ProjectRef::new("p1");
         let sid = SourceId::from_local_path(pr.clone(), Path::new("app/page.spg"), None).unwrap();
         assert_eq!(sid.source_path, "app/page.spg");
+        assert_eq!(sid.display_path, Some("app/page.spg".to_string()));
+        assert_eq!(sid.origin_path, Some("app/page.spg".to_string()));
         assert_eq!(sid.source_kind, SourceKind::Spg);
         assert_eq!(sid.origin, SourceOrigin::Local);
         assert_eq!(sid.project_ref, pr);
@@ -205,6 +234,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sid.source_path, "app/page.spg");
+        assert_eq!(sid.display_path, Some("app/page.spg".to_string()));
+        assert_eq!(sid.origin_path, Some("/tmp/proj/app/page.spg".to_string()));
     }
 
     #[test]
@@ -212,6 +243,8 @@ mod tests {
         let pr = ProjectRef::new("p1");
         let sid = SourceId::from_memory(pr, "test.spg");
         assert_eq!(sid.source_path, "test.spg");
+        assert_eq!(sid.display_path, Some("test.spg".to_string()));
+        assert!(sid.origin_path.is_none());
         assert_eq!(sid.origin, SourceOrigin::Memory);
     }
 
@@ -232,33 +265,60 @@ mod tests {
         assert!(!is_project_internal_path("../secret.spg"));
         assert!(!is_project_internal_path("app/../../../secret.spg"));
     }
-}
 
-#[test]
-fn test_source_id_from_local_path_accepts_relative_without_project_dir() {
-    let pr = ProjectRef::new("p1");
-    let sid = SourceId::from_local_path(pr, Path::new("app/page.spg"), None).unwrap();
-    assert_eq!(sid.source_path, "app/page.spg");
-}
+    #[test]
+    fn test_source_id_from_local_path_converts_absolute_without_project_dir() {
+        let pr = ProjectRef::new("p1");
+        let sid =
+            SourceId::from_local_path(pr, Path::new("/tmp/page.spg"), None).unwrap();
+        // 绝对路径无 project_dir 时，应退化为文件名，确保 source_path 不是绝对路径
+        assert_eq!(sid.source_path, "page.spg");
+        assert_eq!(sid.display_path, Some("page.spg".to_string()));
+        assert_eq!(sid.origin_path, Some("/tmp/page.spg".to_string()));
+        assert!(is_project_internal_path(&sid.source_path));
+    }
 
-#[test]
-fn test_source_id_from_local_path_strips_prefix_with_project_dir() {
-    let pr = ProjectRef::new("p1");
-    let sid = SourceId::from_local_path(
-        pr,
-        Path::new("/tmp/proj/app/page.spg"),
-        Some(Path::new("/tmp/proj")),
-    )
-    .unwrap();
-    assert_eq!(sid.source_path, "app/page.spg");
-}
+    #[test]
+    fn test_source_id_from_local_path_absolute_outside_cwd_becomes_basename() {
+        let pr = ProjectRef::new("p1");
+        let sid =
+            SourceId::from_local_path(pr, Path::new("/very/unlikely/path/page.spg"), None)
+                .unwrap();
+        assert_eq!(sid.source_path, "page.spg");
+        assert_eq!(sid.display_path, Some("page.spg".to_string()));
+        assert_eq!(sid.origin_path, Some("/very/unlikely/path/page.spg".to_string()));
+        assert!(is_project_internal_path(&sid.source_path));
+    }
 
-#[test]
-fn test_source_id_from_local_path_absolute_outside_cwd_becomes_basename() {
-    let pr = ProjectRef::new("p1");
-    // 使用一个不太可能和 cwd 有前缀关系的绝对路径
-    let sid =
-        SourceId::from_local_path(pr, Path::new("/very/unlikely/path/page.spg"), None).unwrap();
-    assert_eq!(sid.source_path, "page.spg");
-    assert!(is_project_internal_path(&sid.source_path));
+    #[test]
+    fn test_source_id_from_local_path_accepts_relative_without_project_dir() {
+        let pr = ProjectRef::new("p1");
+        let sid = SourceId::from_local_path(pr, Path::new("app/page.spg"), None).unwrap();
+        assert_eq!(sid.source_path, "app/page.spg");
+        assert_eq!(sid.display_path, Some("app/page.spg".to_string()));
+        assert_eq!(sid.origin_path, Some("app/page.spg".to_string()));
+    }
+
+    #[test]
+    fn test_source_id_from_local_path_strips_prefix_with_project_dir() {
+        let pr = ProjectRef::new("p1");
+        let sid = SourceId::from_local_path(
+            pr,
+            Path::new("/tmp/proj/app/page.spg"),
+            Some(Path::new("/tmp/proj")),
+        )
+        .unwrap();
+        assert_eq!(sid.source_path, "app/page.spg");
+        assert_eq!(sid.display_path, Some("app/page.spg".to_string()));
+        assert_eq!(sid.origin_path, Some("/tmp/proj/app/page.spg".to_string()));
+    }
+
+    #[test]
+    fn test_display_path_not_identity() {
+        let pr = ProjectRef::new("p1");
+        let sid1 = SourceId::from_local_path(pr.clone(), Path::new("app/page.spg"), None).unwrap();
+        let mut sid2 = sid1.clone();
+        sid2.display_path = Some("different".to_string());
+        assert_eq!(sid1, sid2, "display_path should not affect SourceId identity");
+    }
 }

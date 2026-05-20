@@ -35,7 +35,7 @@
 |------|------|------|------|
 | `schema_version` | string | 是 | 固定为 `"1.0"`，未来 schema 升级时递增。 |
 | `kind` | string | 是 | 输出类别，见上枚举。禁止随意字符串。 |
-| `query_target` | string \| null | 否 | 被查询对象的 ID，如 `"input1"`、`"model:physical_x"`。 |
+| `query_target` | string \| null | 否 | 被查询对象的展示/短目标，如 `"input1"`、`"model:physical_x"`。不是全局唯一身份；跨项目/多服务器场景需配合 ProjectRef / RemoteRef。 |
 | `summary` | object | 是 | 核心摘要，控制在 50 行以内。 |
 | `details` | object \| null | 否 | 详细数据，仅在 `--detail` 或相关查询中展开。 |
 | `evidence` | array | 是 | 每项结论的证据。只要 summary 有实质内容，evidence 不能为空。 |

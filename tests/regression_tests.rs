@@ -4515,7 +4515,7 @@ fn test_tbl_compact_truncated_structure() {
     let path = Path::new("tests/fixtures/test_project/app/app_table.tbl");
     let meta = parse_file(path).expect("parse should succeed");
     let tbl = meta.tbl.expect("should have tbl metadata");
-    let out = metadata_checker::tbl_single::build_tbl_output(&tbl, "compact");
+    let out = metadata_checker::output::tbl::build_tbl_output(&tbl, "compact");
     assert_eq!(out.kind, OutputKind::Table);
     let summary = out.summary.as_object().expect("summary must be object");
     let key_findings = summary.get("key_findings").and_then(|v| v.as_array());
@@ -4565,7 +4565,7 @@ fn test_dataflow_compact_truncated_structure() {
     let path = Path::new("tests/fixtures/test_project/app/dataflow_output.tbl");
     let meta = parse_file(path).expect("parse should succeed");
     let tbl = meta.tbl.expect("should have tbl metadata");
-    let out = metadata_checker::tbl_single::build_tbl_output(&tbl, "compact");
+    let out = metadata_checker::output::tbl::build_tbl_output(&tbl, "compact");
     assert_eq!(out.kind, OutputKind::DataFlow);
     let summary = out.summary.as_object().expect("summary must be object");
     let key_findings = summary.get("key_findings").and_then(|v| v.as_array());

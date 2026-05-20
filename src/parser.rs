@@ -2,9 +2,11 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::parsed_content::ParsedContent;
 use crate::source_id::SourceKind;
+use crate::source_id::SourceId;
 use crate::storage_provider::{LocalStorageProvider, StorageProvider};
 use crate::superpage;
 use crate::tbl_single;
@@ -50,6 +52,7 @@ pub struct DataBinding {
 
 /// 根据文件类型自动选择解析器。
 ///
+/// M37 native-only：依赖本地文件系统路径，不能进入 WASM core。
 /// M36 起默认使用 DocumentProvider 入口；旧 parse_file_with_storage 保留兼容。
 pub fn parse_file(path: &Path) -> Result<PageMetadata> {
     parse_file_with_document_provider(path, &LocalStorageProvider, None)
@@ -101,7 +104,7 @@ pub fn parse_content(parsed: &ParsedContent) -> Result<PageMetadata> {
     let is_tbl = matches!(parsed.source.source_kind, SourceKind::Tbl);
     let is_spg = matches!(parsed.source.source_kind, SourceKind::Spg);
 
-    build_page_metadata_from_value(&mut meta, &raw, is_spg, is_tbl)?;
+    build_page_metadata_from_value(&mut meta, &raw, is_spg, is_tbl, &parsed.source)?;
 
     meta.raw = (*raw).clone();
     Ok(meta)
@@ -112,6 +115,7 @@ fn build_page_metadata_from_value(
     raw: &serde_json::Value,
     is_spg: bool,
     is_tbl: bool,
+    source: &SourceId,
 ) -> Result<()> {
     if is_spg || raw.get("canvas").is_some() {
         meta.superpage = Some(superpage::parse_superpage_from_value(raw.clone())?);
@@ -122,8 +126,8 @@ fn build_page_metadata_from_value(
                 .map(String::from);
         }
     } else if is_tbl || raw.get("dimensions").is_some() {
-        meta.tbl = Some(tbl_single::parse_tbl(
-            std::path::Path::new(meta.input_path.as_deref().unwrap_or("")),
+        meta.tbl = Some(tbl_single::parse_tbl_from_value_with_source(
+            source,
             raw.clone(),
         )?);
         if let Some(obj) = raw.as_object() {
@@ -234,6 +238,31 @@ fn extract_component(value: &Value) -> ComponentInfo {
             .map(String::from);
     }
     comp
+}
+
+
+/// 从已反序列化的 JSON Value 解析元数据（M37 纯解析 API）。
+///
+/// 不读取文件，不创建 graphdb，不输出文本。
+/// 供 WASM/远程/测试直接调用。
+pub fn parse_metadata_from_value(source: SourceId, raw: Arc<Value>) -> Result<PageMetadata> {
+    let mut meta = PageMetadata {
+        input_path: Some(source.source_path.clone()),
+        ..PageMetadata::default()
+    };
+    let is_tbl = matches!(source.source_kind, crate::source_id::SourceKind::Tbl);
+    let is_spg = matches!(source.source_kind, crate::source_id::SourceKind::Spg);
+    build_page_metadata_from_value(&mut meta, &raw, is_spg, is_tbl, &source)?;
+    meta.raw = (*raw).clone();
+    Ok(meta)
+}
+
+/// 从字符串内容解析元数据（M37 纯解析 API）。
+///
+/// 内部通过 ParsedContent 做 JSON 反序列化与缓存。
+pub fn parse_metadata_from_str(source: SourceId, content: &str) -> Result<PageMetadata> {
+    let parsed = ParsedContent::from_text(source, content);
+    parse_content(&parsed)
 }
 
 #[cfg(test)]
@@ -373,4 +402,58 @@ fn test_parse_file_accepts_absolute_path_input() {
     let parsed = ParsedContent::from_text(source, text);
     let meta = parse_content(&parsed).expect("parse_content must work for absolute path input");
     assert!(meta.superpage.is_some());
+}
+
+#[test]
+fn test_parse_metadata_from_str_spg() {
+    let text = r#"{"canvas": {"components": [{"id": "text1", "type": "text"}]}}"#;
+    let source = crate::source_id::SourceId::from_memory(
+        crate::source_id::ProjectRef::new("test"),
+        "app/page.spg",
+    );
+    let meta = parse_metadata_from_str(source, text)
+        .expect("parse_metadata_from_str should succeed for spg");
+    assert!(meta.superpage.is_some());
+    assert_eq!(meta.input_path, Some("app/page.spg".to_string()));
+}
+
+#[test]
+fn test_parse_metadata_from_str_tbl() {
+    let text = r#"{"dimensions": [{"id": "dim1"}]}"#;
+    let mut source = crate::source_id::SourceId::from_memory(
+        crate::source_id::ProjectRef::new("test"),
+        "data/table.tbl",
+    );
+    source.source_kind = crate::source_id::SourceKind::Tbl;
+    let meta = parse_metadata_from_str(source, text)
+        .expect("parse_metadata_from_str should succeed for tbl");
+    assert!(meta.tbl.is_some());
+}
+
+#[test]
+fn test_parse_metadata_from_value() {
+    let value = serde_json::json!({"canvas": {"components": [{"id": "text1", "type": "text"}]}});
+    let source = crate::source_id::SourceId::from_memory(
+        crate::source_id::ProjectRef::new("test"),
+        "app/page.spg",
+    );
+    let meta = parse_metadata_from_value(source, std::sync::Arc::new(value))
+        .expect("parse_metadata_from_value should succeed");
+    assert!(meta.superpage.is_some());
+    assert_eq!(meta.input_path, Some("app/page.spg".to_string()));
+}
+
+#[test]
+fn test_parse_tbl_from_value_with_source() {
+    let raw = serde_json::json!({"dimensions": [{"name": "id", "dbfield": "ID"}]});
+    let mut source = crate::source_id::SourceId::from_memory(
+        crate::source_id::ProjectRef::new("test"),
+        "data/table.tbl",
+    );
+    source.source_kind = crate::source_id::SourceKind::Tbl;
+    let meta = crate::tbl_single::parse_tbl_from_value_with_source(&source, raw)
+        .expect("parse_tbl_from_value_with_source should succeed");
+    assert_eq!(meta.table_name, Some("table".to_string()));
+    assert_eq!(meta.input_path, Some("data/table.tbl".to_string()));
+    assert!(!meta.fields.is_empty());
 }

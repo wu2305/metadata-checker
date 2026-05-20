@@ -9,7 +9,7 @@ use metadata_checker::parser;
 use metadata_checker::priority;
 use metadata_checker::query;
 use metadata_checker::scanner;
-use metadata_checker::tbl_single;
+
 
 use anyhow::Result;
 use clap::Parser;
@@ -226,7 +226,7 @@ fn main() -> Result<()> {
         if let Some(spg) = &meta.superpage {
             explain::explain_component_spg(spg, explain_id, args.is_human())?;
         } else if let Some(tbl) = &meta.tbl {
-            let out = tbl_single::build_tbl_output(tbl, &args.budget);
+            let out = output::tbl::build_tbl_output(tbl, &args.budget);
             println!("{}", serde_json::to_string_pretty(&out)?);
         }
         return Ok(());
@@ -242,7 +242,7 @@ fn main() -> Result<()> {
                 output::print_component_query_json(spg, &graph, target_id, args.priority)?;
             }
         } else if let Some(tbl) = &meta.tbl {
-            let out = tbl_single::build_tbl_output(tbl, &args.budget);
+            let out = output::tbl::build_tbl_output(tbl, &args.budget);
             println!("{}", serde_json::to_string_pretty(&out)?);
         }
         return Ok(());
@@ -253,7 +253,7 @@ fn main() -> Result<()> {
         if let Some(spg) = &meta.superpage {
             run_interactive(spg, args.priority)?;
         } else if let Some(tbl) = &meta.tbl {
-            tbl_single::print_tbl_human(tbl)?;
+            output::tbl::print_tbl_human(tbl)?;
         }
         return Ok(());
     }
@@ -268,7 +268,7 @@ fn main() -> Result<()> {
     let priority_slice = priority_analyses.as_deref();
 
     if let Some(tbl) = &meta.tbl {
-        let out = tbl_single::build_tbl_output(tbl, &args.budget);
+        let out = output::tbl::build_tbl_output(tbl, &args.budget);
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else if args.detail || args.budget == "full" {
         output::print_non_human_to(&meta, priority_slice, &mut io::stdout())?;

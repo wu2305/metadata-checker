@@ -1,4 +1,5 @@
 pub mod brief;
+pub mod tbl;
 
 use crate::conditions::scan_conditions;
 use crate::dependency::DependencyGraph;
