@@ -877,6 +877,17 @@ pub fn build_explain_condition_output_with_intent(
     } else {
         related_context.clone()
     };
+    let hide_display_context = compact_budget && effective_intent == TraversalIntent::Display;
+    let details_blocking_conditions = if hide_display_context {
+        Vec::new()
+    } else {
+        blocking_conditions.clone()
+    };
+    let details_data_empty_gates = if hide_display_context {
+        Vec::new()
+    } else {
+        data_empty_gates.clone()
+    };
     let supporting_context_summary = build_context_summary(
         &supporting_context,
         details_supporting_context.len(),
@@ -982,8 +993,8 @@ pub fn build_explain_condition_output_with_intent(
         "rejected_paths": details_rejected_paths,
         "rejected_paths_summary": rejected_path_summary,
         "value_source_context": details_value_source_context,
-        "blocking_conditions": blocking_conditions,
-        "data_empty_gates": data_empty_gates,
+        "blocking_conditions": details_blocking_conditions,
+        "data_empty_gates": details_data_empty_gates,
         "supporting_context": details_supporting_context,
         "supporting_context_summary": supporting_context_summary,
         "related_context": details_related_context,

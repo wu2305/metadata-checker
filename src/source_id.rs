@@ -256,6 +256,14 @@ mod tests {
     }
 
     #[test]
+    fn test_source_id_from_memory_rejects_invalid_source_path() {
+        let pr = ProjectRef::new("p1");
+        assert!(SourceId::from_memory(pr.clone(), "/tmp/a.spg").is_err());
+        assert!(SourceId::from_memory(pr.clone(), "../a.spg").is_err());
+        assert!(SourceId::from_memory(pr, "app/../../a.spg").is_err());
+    }
+
+    #[test]
     fn test_is_project_internal_path_accepts_relative() {
         assert!(is_project_internal_path("app/page.spg"));
         assert!(is_project_internal_path("data/tables/bind.tbl"));

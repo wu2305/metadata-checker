@@ -5890,7 +5890,7 @@ fn test_real_project_m33_text41_compact_display_intent_is_low_noise() {
         "compact",
     ]);
     assert!(
-        out.len() < 16_000, // TODO: M33 compact output bloated, actual ~14566 bytes, needs root cause analysis
+        out.len() < 12_000,
         "text41 display compact 输出应保持低噪声，实际 {} bytes",
         out.len()
     );

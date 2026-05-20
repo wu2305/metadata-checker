@@ -47,20 +47,34 @@ fn compact_condition_fact(cond: &serde_json::Value) -> serde_json::Value {
     })
 }
 
+fn compact_condition_fact_for_budget(cond: &serde_json::Value, budget: &str) -> serde_json::Value {
+    if budget == "compact" {
+        return serde_json::json!({
+            "condition_id": cond.get("condition_id").and_then(|v| v.as_str()),
+            "condition_scope": cond.get("condition_scope").and_then(|v| v.as_str()),
+            "raw_expr": cond.get("raw_expr").and_then(|v| v.as_str()),
+            "source_file": cond.get("source_file").and_then(|v| v.as_str()),
+            "json_path": cond.get("json_path").and_then(|v| v.as_str()),
+        });
+    }
+    compact_condition_fact(cond)
+}
+
 fn build_display_facts(
     target_node: &crate::graph::Node,
     blocking_conditions: &[serde_json::Value],
     data_empty_gates: &[serde_json::Value],
+    budget: &str,
 ) -> serde_json::Value {
     let direct_conditions: Vec<_> = blocking_conditions
         .iter()
         .filter(|c| c.get("condition_scope").and_then(|v| v.as_str()) == Some("direct"))
-        .map(compact_condition_fact)
+        .map(|c| compact_condition_fact_for_budget(c, budget))
         .collect();
     let inherited_conditions: Vec<_> = blocking_conditions
         .iter()
         .filter(|c| c.get("condition_scope").and_then(|v| v.as_str()) == Some("inherited"))
-        .map(compact_condition_fact)
+        .map(|c| compact_condition_fact_for_budget(c, budget))
         .collect();
     let expanded_data_gates: Vec<_> = data_empty_gates
         .iter()
@@ -68,7 +82,7 @@ fn build_display_facts(
             c.get("condition_scope").and_then(|v| v.as_str())
                 == Some("expanded_from_total_row_count")
         })
-        .map(compact_condition_fact)
+        .map(|c| compact_condition_fact_for_budget(c, budget))
         .collect();
 
     let mut evidence_refs: Vec<serde_json::Value> = blocking_conditions
@@ -80,27 +94,37 @@ fn build_display_facts(
 
     let mut paths = Vec::new();
     for cond in blocking_conditions.iter().take(3) {
-        paths.push(serde_json::json!({
-            "intent": "display",
-            "result": cond.get("raw_expr").and_then(|v| v.as_str()),
-            "confidence": "high",
-            "why_complete": "display gate condition found",
-            "stop_condition_hit": "display_condition_found",
-            "evidence_refs": [evidence_ref_from_condition(cond)],
-            "steps": [
-                answer_path_step(
-                    1,
-                    cond.get("condition_id").and_then(|v| v.as_str()).unwrap_or(""),
-                    "Condition",
-                    "DependsOn",
-                    "incoming",
-                    None,
-                    cond.get("source_file").and_then(|v| v.as_str()),
-                    cond.get("json_path").and_then(|v| v.as_str()),
-                    "condition controls target display or inherited container display",
-                )
-            ]
-        }));
+        if budget == "compact" {
+            paths.push(serde_json::json!({
+                "intent": "display",
+                "result": cond.get("raw_expr").and_then(|v| v.as_str()),
+                "confidence": "high",
+                "stop_condition_hit": "display_condition_found",
+                "evidence_refs": [evidence_ref_from_condition(cond)],
+            }));
+        } else {
+            paths.push(serde_json::json!({
+                "intent": "display",
+                "result": cond.get("raw_expr").and_then(|v| v.as_str()),
+                "confidence": "high",
+                "why_complete": "display gate condition found",
+                "stop_condition_hit": "display_condition_found",
+                "evidence_refs": [evidence_ref_from_condition(cond)],
+                "steps": [
+                    answer_path_step(
+                        1,
+                        cond.get("condition_id").and_then(|v| v.as_str()).unwrap_or(""),
+                        "Condition",
+                        "DependsOn",
+                        "incoming",
+                        None,
+                        cond.get("source_file").and_then(|v| v.as_str()),
+                        cond.get("json_path").and_then(|v| v.as_str()),
+                        "condition controls target display or inherited container display",
+                    )
+                ]
+            }));
+        }
     }
 
     serde_json::json!({
@@ -831,7 +855,7 @@ pub(in crate::explain) fn build_answer_facts(
     if answer_fact_enabled(intent, target_node, AnswerFactKind::Display) {
         facts.insert(
             "display_facts".to_string(),
-            build_display_facts(target_node, blocking_conditions, data_empty_gates),
+            build_display_facts(target_node, blocking_conditions, data_empty_gates, budget),
         );
     }
     if answer_fact_enabled(intent, target_node, AnswerFactKind::ValueSource) {

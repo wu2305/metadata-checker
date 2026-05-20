@@ -28,7 +28,7 @@ pub struct ParsedContent {
     pub content: MetadataContent,
     /// 内容哈希，用于增量判断。
     pub content_hash: Option<String>,
-    /// 懒解析缓存，Mutex + Option 保证线程安全且只反序列化一次。
+    /// 懒解析缓存，保证线程安全且连续调用复用同一个解析结果。
     parsed_json: OnceLock<Arc<Value>>,
 }
 
