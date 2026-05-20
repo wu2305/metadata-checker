@@ -73,11 +73,7 @@ pub struct DataFlowNode {
 /// M37 native-only：依赖 std::path::Path，不能进入 WASM core。
 /// 本地 Path 相关逻辑只存在于本层，不进入 parse_tbl_from_value_with_source。
 pub fn parse_tbl(path: &Path, raw: Value) -> Result<TblMetadata> {
-    let source = SourceId::from_local_path(
-        ProjectRef::new("default"),
-        path,
-        None,
-    )?;
+    let source = SourceId::from_local_path(ProjectRef::new("default"), path, None)?;
     parse_tbl_from_value_with_source(&source, raw)
 }
 
@@ -87,7 +83,10 @@ pub fn parse_tbl(path: &Path, raw: Value) -> Result<TblMetadata> {
 /// M37 core API，供 WASM/远程/测试直接调用。
 pub fn parse_tbl_from_value_with_source(source: &SourceId, raw: Value) -> Result<TblMetadata> {
     let mut meta = TblMetadata {
-        input_path: source.display_path.clone().or_else(|| Some(source.source_path.clone())),
+        input_path: source
+            .display_path
+            .clone()
+            .or_else(|| Some(source.source_path.clone())),
         raw: raw.clone(),
         ..Default::default()
     };
@@ -120,10 +119,7 @@ pub fn parse_tbl_from_value_with_source(source: &SourceId, raw: Value) -> Result
         .or_else(|| basename.clone());
 
     // Table id: use dbTableName if available, else basename
-    meta.table_id = meta
-        .db_table_name
-        .clone()
-        .or_else(|| basename);
+    meta.table_id = meta.db_table_name.clone().or_else(|| basename);
 
     // Parse dimensions (fields)
     if let Some(dims) = raw.get("dimensions").and_then(|d| d.as_array()) {

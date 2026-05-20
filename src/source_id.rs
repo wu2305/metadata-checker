@@ -69,7 +69,6 @@ impl PartialEq for SourceId {
     }
 }
 
-
 /// 来源文件类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -269,8 +268,7 @@ mod tests {
     #[test]
     fn test_source_id_from_local_path_converts_absolute_without_project_dir() {
         let pr = ProjectRef::new("p1");
-        let sid =
-            SourceId::from_local_path(pr, Path::new("/tmp/page.spg"), None).unwrap();
+        let sid = SourceId::from_local_path(pr, Path::new("/tmp/page.spg"), None).unwrap();
         // 绝对路径无 project_dir 时，应退化为文件名，确保 source_path 不是绝对路径
         assert_eq!(sid.source_path, "page.spg");
         assert_eq!(sid.display_path, Some("page.spg".to_string()));
@@ -282,11 +280,13 @@ mod tests {
     fn test_source_id_from_local_path_absolute_outside_cwd_becomes_basename() {
         let pr = ProjectRef::new("p1");
         let sid =
-            SourceId::from_local_path(pr, Path::new("/very/unlikely/path/page.spg"), None)
-                .unwrap();
+            SourceId::from_local_path(pr, Path::new("/very/unlikely/path/page.spg"), None).unwrap();
         assert_eq!(sid.source_path, "page.spg");
         assert_eq!(sid.display_path, Some("page.spg".to_string()));
-        assert_eq!(sid.origin_path, Some("/very/unlikely/path/page.spg".to_string()));
+        assert_eq!(
+            sid.origin_path,
+            Some("/very/unlikely/path/page.spg".to_string())
+        );
         assert!(is_project_internal_path(&sid.source_path));
     }
 
@@ -319,6 +319,9 @@ mod tests {
         let sid1 = SourceId::from_local_path(pr.clone(), Path::new("app/page.spg"), None).unwrap();
         let mut sid2 = sid1.clone();
         sid2.display_path = Some("different".to_string());
-        assert_eq!(sid1, sid2, "display_path should not affect SourceId identity");
+        assert_eq!(
+            sid1, sid2,
+            "display_path should not affect SourceId identity"
+        );
     }
 }

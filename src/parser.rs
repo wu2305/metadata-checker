@@ -5,8 +5,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::parsed_content::ParsedContent;
-use crate::source_id::SourceKind;
 use crate::source_id::SourceId;
+use crate::source_id::SourceKind;
 use crate::storage_provider::{LocalStorageProvider, StorageProvider};
 use crate::superpage;
 use crate::tbl_single;
@@ -239,7 +239,6 @@ fn extract_component(value: &Value) -> ComponentInfo {
     }
     comp
 }
-
 
 /// 从已反序列化的 JSON Value 解析元数据（M37 纯解析 API）。
 ///

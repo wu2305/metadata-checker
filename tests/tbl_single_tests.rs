@@ -1,8 +1,8 @@
 //! M10 单文件 .tbl 解析测试
 
+use metadata_checker::output;
 use metadata_checker::output::schema::{AiOutput, OutputKind};
 use metadata_checker::parser;
-use metadata_checker::output;
 
 use std::path::Path;
 
@@ -359,10 +359,11 @@ fn test_tbl_query_target_not_absolute() {
         metadata_checker::source_id::ProjectRef::new("test"),
         std::path::Path::new("/tmp/abs/table.tbl"),
         None,
-    ).expect("SourceId from absolute path should succeed");
+    )
+    .expect("SourceId from absolute path should succeed");
     source.source_kind = metadata_checker::source_id::SourceKind::Tbl;
-    let meta = metadata_checker::tbl_single::parse_tbl_from_value_with_source(&source, raw
-    ).expect("parse should succeed");
+    let meta = metadata_checker::tbl_single::parse_tbl_from_value_with_source(&source, raw)
+        .expect("parse should succeed");
     let out = metadata_checker::output::tbl::build_tbl_output(&meta, "full");
     let qt = out.query_target.expect("query_target should be present");
     assert!(
@@ -370,7 +371,9 @@ fn test_tbl_query_target_not_absolute() {
         "query_target should not be absolute path, got: {}",
         qt
     );
-    assert_eq!(meta.input_path, Some("table.tbl".to_string()),
-        "input_path should be basename, not absolute");
+    assert_eq!(
+        meta.input_path,
+        Some("table.tbl".to_string()),
+        "input_path should be basename, not absolute"
+    );
 }
-

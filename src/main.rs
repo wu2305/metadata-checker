@@ -10,7 +10,6 @@ use metadata_checker::priority;
 use metadata_checker::query;
 use metadata_checker::scanner;
 
-
 use anyhow::Result;
 use clap::Parser;
 use std::io::{self, Write};

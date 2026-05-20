@@ -7,8 +7,8 @@ use crate::output::schema::{
     AiOutput, Confidence, Diagnostic, DiagnosticSeverity, Evidence, Location, OutputKind,
     format_next_query,
 };
-use crate::tbl_single::TblMetadata;
 use crate::superpage;
+use crate::tbl_single::TblMetadata;
 use anyhow::Result;
 use serde_json::json;
 
@@ -426,8 +426,7 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
         }
 
         let evidence_summary = super::brief::evidence_summary(&output.evidence, 5);
-        let key_findings =
-            super::brief::build_key_findings(&output.summary, &output.diagnostics);
+        let key_findings = super::brief::build_key_findings(&output.summary, &output.diagnostics);
         if let Some(obj) = output.summary.as_object_mut() {
             obj.insert("evidence_summary".to_string(), evidence_summary);
             obj.insert("key_findings".to_string(), serde_json::json!(key_findings));
