@@ -1,4 +1,3 @@
-use metadata_checker::answer_contract;
 use metadata_checker::cli;
 use metadata_checker::context;
 use metadata_checker::dependency::DependencyGraph;
@@ -9,6 +8,7 @@ use metadata_checker::parser;
 use metadata_checker::priority;
 use metadata_checker::query;
 use metadata_checker::scanner;
+use metadata_checker::tool_contract;
 
 use anyhow::Result;
 use clap::Parser;
@@ -26,12 +26,9 @@ fn main() -> Result<()> {
     let args = cli::Cli::parse();
     metadata_checker::graph::set_graph_lock_timeout_ms(args.graph_lock_timeout_ms);
 
-    // Validate budget early for all paths
-    if args.budget != "compact" && args.budget != "normal" && args.budget != "full" {
-        anyhow::bail!(
-            "Invalid budget '{}'. Expected: compact | normal | full",
-            args.budget
-        );
+    // M38: 统一参数校验
+    if let Err(err) = tool_contract::validate_budget(&args.budget) {
+        anyhow::bail!("{}", err);
     }
 
     // Stdio server mode (M24)
@@ -63,13 +60,18 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        let graph = match GraphDB::open_or_diagnostic(&db_path) {
-            Ok(g) => g,
-            Err(out) => {
+        let runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir(
+            &db_path,
+            Some(project_dir),
+        ) {
+            Ok(r) => r,
+            Err(_e) => {
+                let out = metadata_checker::graph::GraphDB::check_graph_db(&db_path);
                 println!("{}", serde_json::to_string_pretty(&out)?);
                 return Ok(());
             }
         };
+        let graph = &runtime.graph;
 
         if let Some(ref model_id) = args.query_model {
             let model_node_id = if model_id.starts_with("model:") {
@@ -121,13 +123,18 @@ fn main() -> Result<()> {
 
         if let Some(ref explain_target) = args.explain_condition {
             let intent = explain::TraversalIntent::parse(&args.intent)?;
-            explain::explain_condition_target(
-                &graph,
-                explain_target,
-                args.is_human(),
-                &args.budget,
-                intent,
-            )?;
+            let req = metadata_checker::runtime::RuntimeQueryRequest {
+                command: metadata_checker::tool_contract::ToolCommand::ExplainCondition,
+                target: explain_target.clone(),
+                budget: args.budget.clone(),
+                human: args.is_human(),
+                intent: Some(intent.as_str().to_string()),
+                page_scope: None,
+                depth: None,
+                check_reload: false,
+            };
+            let response = runtime.query(req)?;
+            println!("{}", serde_json::to_string_pretty(&response.result)?);
             return Ok(());
         }
 
@@ -179,15 +186,22 @@ fn main() -> Result<()> {
         }
 
         if let Some(ref advise_target) = args.advise_query {
-            let question_kind = args.question_kind.as_deref().unwrap_or("auto");
-            let page_scope = args.advise_query_page.as_deref();
-            let advice = answer_contract::build_advise_query_output(
-                advise_target,
-                page_scope,
-                question_kind,
-                &args.budget,
-            );
-            println!("{}", serde_json::to_string_pretty(&advice)?);
+            let req = metadata_checker::runtime::RuntimeQueryRequest {
+                command: metadata_checker::tool_contract::ToolCommand::AdviseQuery,
+                target: advise_target.clone(),
+                budget: args.budget.clone(),
+                human: false,
+                intent: Some(
+                    args.question_kind
+                        .clone()
+                        .unwrap_or_else(|| "auto".to_string()),
+                ),
+                page_scope: args.advise_query_page.clone(),
+                depth: None,
+                check_reload: false,
+            };
+            let response = runtime.query(req)?;
+            println!("{}", serde_json::to_string_pretty(&response.result)?);
             return Ok(());
         }
 
