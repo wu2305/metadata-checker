@@ -2972,7 +2972,7 @@ MCP resources 建议：
     - `parse_file(path)` 内部构造 `ParsedContent` 后调用 `parse_content`
   - 要求：
     - 不改变 `PageMetadata` 返回结构。
-    - 不引入 `ParsedMetadata` enum，放到 M37。
+    - 不引入 `ParsedMetadata` enum；parsed JSON 由 `ParsedContent::json()` 负责。
     - 不改 CLI 输出快照。
 
 - [x] M36.6：文档与边界断言
@@ -3052,11 +3052,12 @@ M37 的核心目的：
 任务清单：
 
 - [ ] M37.1：定义 Parse Core 返回类型边界
-  - 明确是否引入 `ParsedMetadata` enum：
-    - `SuperPage(superpage::SuperPageMetadata)`
-    - `Table(tbl_single::TblMetadata)`
-    - `Unknown { raw, source }`
-  - 或继续复用现有 `PageMetadata`，但必须写明这是兼容对象而不是长期 core 形态。
+  - 不新增 `ParsedMetadata` enum。
+  - M37 中“parsed metadata”指的是已经反序列化并缓存的 `serde_json::Value`，由 `ParsedContent::json() -> Arc<Value>` 提供。
+  - 领域解析结果继续使用现有结构：
+    - `.spg`：`superpage::SuperPageMetadata`
+    - `.tbl`：`tbl_single::TblMetadata`
+    - 兼容聚合入口：`PageMetadata`
   - 决策要求：
     - 不让解析 API 返回 AI 输出结构。
     - 不让解析 API 依赖 graph node/edge 类型。
@@ -3065,8 +3066,8 @@ M37 的核心目的：
 - [ ] M37.2：新增纯解析 API
   - 建议入口：
     - `parse_content(&ParsedContent) -> Result<PageMetadata>` 保持兼容。
-    - `parse_metadata_from_value(source: SourceId, raw: Arc<Value>) -> Result<PageMetadata 或 ParsedMetadata>`。
-    - `parse_metadata_from_str(source: SourceId, content: &str) -> Result<PageMetadata 或 ParsedMetadata>`。
+    - `parse_metadata_from_value(source: SourceId, raw: Arc<Value>) -> Result<PageMetadata>`。
+    - `parse_metadata_from_str(source: SourceId, content: &str) -> Result<PageMetadata>`。
     - `parse_superpage_from_value(source, raw)`。
     - `parse_tbl_from_value_with_source(source, raw)`。
   - 要求：
@@ -3086,10 +3087,12 @@ M37 的核心目的：
 
 - [ ] M37.4：明确 human 输出和解析模块关系
   - 检查 `tbl_single` 中是否仍有 human 输出函数混在解析模块。
-  - M37 不强制大迁移，但必须明确：
-    - 解析模块返回结构化对象。
+  - M37 必须迁出解析模块中的 human 输出函数，不保留 legacy/native adapter 注释作为长期解释。
+  - 要求：
+    - 解析模块只返回结构化对象。
     - human 输出属于 `output` / adapter 层。
-  - 如果迁移范围小且测试稳定，可移动；否则只做 wrapper 和文档标记，迁移留给后续输出模块整理。
+    - `main.rs` 调用点随迁移同步更新。
+    - 模型面对模块职责时不应看到“解析模块内仍可负责人类输出”的双重口径。
 
 - [ ] M37.5：梳理 native-only 依赖清单
   - 标记解析 core 中不能进入 WASM 的依赖：
@@ -3111,28 +3114,23 @@ M37 的核心目的：
 
 M37 当前不明确点，需要实施前先确认：
 
-- `ParsedMetadata` 是否现在引入：
-  - 引入的好处：parse core 边界更干净。
-  - 风险：会触碰较多旧调用点，可能扩大 M37。
-  - 保守方案：M37 先继续返回 `PageMetadata`，只新增 source-based 入口；M38/M43 前再决定是否引入 enum。
-
 - `SourceId` 是否需要马上增加 `display_path` / `origin_path`：
-  - 引入的好处：解决 M36 basename fallback 的长期语义问题。
-  - 风险：字段会沿 parser/output/schema 扩散，可能影响快照。
-  - 保守方案：M37 只在设计中记录，不改变输出；M40/M43 前定稿。
+  - 可以增加，但不是 M37 必要条件。
+  - M37 的重点是 parse core 入口，不应为了展示路径字段扩大输出 schema。
+  - `basename` fallback 的长期归属仍记录在 M36-FOLLOW-2，M40/M43 前定稿。
 
 - `.tbl` 的 `query_target` 应来自哪里：
-  - 现状：很多输出把 `input_path` / path display 当作 query target。
-  - 需要决定 core API 中 `query_target` 是 `SourceId.source_path`、表 id、dbTableName，还是 native wrapper 的展示字段。
+  - 这里特指 `AiOutput.query_target` 顶层字段，不是 graph 查询入口。
+  - 当前单文件 `.tbl` 输出链路中：
+    - `tbl_single::build_tbl_output` 将 `output.query_target = meta.input_path.clone()`。
+    - `tbl_single::parse_tbl(path, raw)` 当前用 `path.display()` 初始化 `TblMetadata.input_path`。
+    - M36 后 `parser::parse_content` 会把 `PageMetadata.input_path` 设为 `SourceId.source_path`，再传给 `parse_tbl`。
+  - M37 需要决定的是：单文件 `.tbl` 的 `AiOutput.query_target` 是否继续使用 `input_path/source_path`，还是改成表 id / dbTableName。
   - M37 必须避免把本地绝对路径重新带回 `source_path`。
 
-- human 输出是否在 M37 移动：
-  - 若移动，测试面会扩大。
-  - 若不移动，必须至少标注“解析模块中的 human 输出是 legacy/native adapter 行为”。
-
 - `ParsedContent` 是否应使用 `OnceLock` 替代 `Mutex<Option<Arc<Value>>>`：
-  - `OnceLock` 更符合“只初始化一次”的语义。
-  - 当前 Mutex 实现已满足行为，不是 M37 阻塞项。
+  - 是，M37 应改成 `OnceLock<Arc<Value>>`。
+  - 不需要为此新增或修改 `ParsedMetadata` 类型。
 
 验收标准：
 
