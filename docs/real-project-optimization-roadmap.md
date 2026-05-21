@@ -3460,8 +3460,12 @@ pub trait InvocationAdapter {
 设计边界：
 
 - `GraphReadStore` 只表达低语义图读取能力，不包含 reader/writer/dataflow 这类业务 helper。
-- `GraphWriteStore` 与 `GraphReadStore` 分离，写接口接收完整 `Node` / `Edge`，方便后续自定义新增节点和边。
-- `IndexStateStore` 负责 file states 与一次索引结果提交，`persist_index` 放在 index 层。
+- `GraphReadStore` 必须提供节点遍历原语，避免 `query::find_nodes` 继续泄漏 `GraphDB` 内部索引。
+- `find_candidates` 属于 query/diagnostic 层策略，不进入 `GraphReadStore`。
+- `GraphWriteStore` 与 `GraphReadStore` 真正分离，写接口接收完整 `Node` / `Edge`，方便后续自定义新增节点和边。
+- 需要同时读写的索引流程使用组合边界（例如 `GraphIndexStore` 或函数泛型 `GraphReadStore + GraphWriteStore + IndexStateStore`），不要通过 `GraphWriteStore: GraphReadStore` 伪装分离。
+- `IndexStateStore` 负责 file states 与一次索引结果提交，`persist_index` 放在 index 层，并明确提交当前 dirty graph 与 file states 的一致性边界。
+- `DocumentProvider` 只负责读取文件内容与 metadata，不负责目录遍历；文件发现由 M39 独立的本地 `ProjectFileDiscoverer` / `discover_files` 完成。
 - `Arc` / `Mutex` 不进入 trait 定义；未来 runtime/session 可在外层用 `Arc<dyn GraphReadStore + Send + Sync>` 或 `Arc<Mutex<dyn GraphWriteStore + Send>>` 包装。
 - `MemoryGraphStore` 在 M39 仅作为 test-only 替身和调试雏形，不暴露 CLI / stdio / runtime tool。
 - `GraphStoreError` 提供固定枚举和稳定 `code()`，保持错误信息来源统一；具体映射到 `ToolError` / diagnostics 由 runtime/adapter 统一处理。
@@ -3492,26 +3496,32 @@ pub trait InvocationAdapter {
     - `GraphEdgeView` 使用 owned `Node` / `Edge`，避免 trait 生命周期复杂化。
     - 不直接复用 `ToolErrorCode`，但预留统一映射函数。
 
-- [ ] M39.2：定义读写分离 trait
+- [ ] M39.2：定义读写分离 trait（冷脸验收修正）
   - `GraphReadStore`：
     - `get_node(&self, node_id: &str) -> GraphStoreResult<Option<Node>>`
     - `get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>>`
-    - `find_candidates(&self, target_id: &str, limit: usize) -> GraphStoreResult<Vec<(Node, String)>>`
+    - `iter_nodes(&self) -> GraphStoreResult<Box<dyn Iterator<Item = Node> + '_>>`
     - `node_count(&self) -> GraphStoreResult<usize>`
     - `edge_count(&self) -> GraphStoreResult<usize>`
-  - `GraphWriteStore: GraphReadStore`：
+  - `GraphWriteStore`：
     - `upsert_node(&mut self, node: Node) -> GraphStoreResult<()>`
     - `add_edge(&mut self, edge: Edge) -> GraphStoreResult<()>`
     - `remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()>`
   - `IndexStateStore`：
     - `load_file_states(&self) -> GraphStoreResult<HashMap<String, FileState>>`
-    - `persist_index(&mut self, file_states: &HashMap<String, FileState>) -> GraphStoreResult<()>`
+    - `persist_index(&mut self, commit: IndexCommit) -> GraphStoreResult<IndexReport>`
+  - `IndexCommit`：
+    - `file_states: HashMap<String, FileState>`
+    - `summary` / `report` 所需的 dirty / deleted / unchanged 计数
+    - 语义：提交调用时 store 内存中的 dirty graph 与 commit 中的 file states 必须一起落盘或一起失败。
   - 要求：
     - trait 不包含 `Arc` / `Mutex`。
     - read trait 不包含写入、事务、持久化、file state。
     - write trait 接收完整 `Node` / `Edge`，不要固化当前 `GraphDB::add_node` 的长参数形态。
+    - `find_candidates` 不在 trait 内；改由 query/diagnostic helper 基于 `iter_nodes` 实现。
+    - `GraphWriteStore` 不继承 `GraphReadStore`；需要组合能力时在调用处显式写出组合约束。
 
-- [ ] M39.3：让现有 `GraphDB` 实现 trait
+- [ ] M39.3：让现有 `GraphDB` 实现 trait（冷脸验收修正：按 M39.2 新边界复核）
   - 实现：
     - `GraphReadStore for GraphDB`
     - `GraphWriteStore for GraphDB`
@@ -3521,9 +3531,10 @@ pub trait InvocationAdapter {
     - 不改 petgraph 内部结构。
     - 不删除现有 `GraphDB` public 方法。
     - trait 方法内部可调用现有方法。
-    - `IndexStateStore::persist_index` 调用现有 `GraphDB::persist` 或等价逻辑。
+    - `GraphReadStore::iter_nodes` 返回 owned `Node` 迭代，不能暴露 `node_indices` / `petgraph::NodeIndex`。
+    - `IndexStateStore::persist_index` 调用现有 `GraphDB::persist` 或等价逻辑，但必须明确当前 dirty graph 与 file states 的提交一致性。
 
-- [ ] M39.4：迁移 query 层到 `GraphReadStore`
+- [ ] M39.4：迁移 query 层到 `GraphReadStore`（冷脸验收修正：补 `iter_nodes` 与 candidates 外移）
   - 必须迁移：
     - `query::build_query_page_output`
     - `query::query_page`
@@ -3545,12 +3556,16 @@ pub trait InvocationAdapter {
     - `answer_facts`
     - `condition_facts`
     - `page_logic` 子模块
+  - candidates 迁移：
+    - 新增 query/diagnostic 层 `find_candidates(graph: &dyn GraphReadStore, target_id, limit)`。
+    - 所有原 `graph.find_candidates(...)` 调用改为 query/helper 调用。
+    - helper 只能依赖 `iter_nodes`，不得访问 `GraphDB` 内部索引。
   - 要求：
     - 新增查询入口不得继续要求 `&GraphDB`。
     - 迁移后使用 `&dyn GraphReadStore` 或泛型 `G: GraphReadStore`。
     - 不改变 AI 输出 schema。
 
-- [ ] M39.5：业务 helper 从 GraphDB 下沉到 query/domain 层
+- [ ] M39.5：业务 helper 从 GraphDB 下沉到 query/domain 层（冷脸验收修正：包含 candidates 外移）
   - 从 `GraphDB` 调用路径迁出：
     - `find_readers`
     - `find_writers`
@@ -3561,10 +3576,11 @@ pub trait InvocationAdapter {
     - `find_consumed_by_dataflows`
     - `find_upstream_dependencies`
     - `find_downstream_outputs`
+    - `find_candidates`
   - 要求：
     - 新 helper 接收 `&dyn GraphReadStore`。
     - `GraphDB` 旧方法可暂时保留兼容，但新 query 代码不再依赖旧方法。
-    - reader/writer/dataflow 语义集中在 query/domain 层，不下沉到 storage trait。
+    - reader/writer/dataflow/candidate 语义集中在 query/domain 层，不下沉到 storage trait。
 
 - [ ] M39.6：新增 test-only `MemoryGraphStore`
   - 位置建议：
@@ -3582,7 +3598,7 @@ pub trait InvocationAdapter {
     - 不作为正式 runtime backend。
     - 不暴露给 stdio / function calling。
 
-- [ ] M39.7：拆 `ProjectIndexer`
+- [ ] M39.7：拆 `ProjectIndexer`（冷脸验收修正：拆清文件发现与 DocumentProvider）
   - 新增位置建议：
     - `src/indexer.rs`
     - 或 `src/scanner/indexer.rs`
@@ -3598,14 +3614,20 @@ pub trait InvocationAdapter {
     - `DirtyFile`
     - `IndexPlan`
     - `IndexReport`
+    - `ProjectFileDiscoverer` 或等价本地文件发现函数
   - 要求：
     - `scan_project(project_dir, db_path)` 继续作为对外入口。
     - `scan_project` 内部改为调用 `ProjectIndexer`。
+    - `ProjectIndexer` 不应要求 `DocumentProvider` 负责目录遍历。
+    - `discover_files` 只做本地项目目录发现；远程/session 文件发现留给后续里程碑。
+    - `parse_dirty_files` 使用 `DocumentProvider` 读取已发现文件。
+    - `apply_graph_updates` 只修改内存中的 `GraphWriteStore`，不落盘。
+    - `persist_index` 是唯一落盘提交点，提交 dirty graph 与 file states。
     - 不改变现有增量行为。
     - 不引入远程 provider。
     - 不引入 session。
 
-- [ ] M39.8：错误转换统一
+- [ ] M39.8：错误转换统一（冷脸验收修正：补 code 映射反向测试）
   - 实现：
     - `GraphStoreError::code()`
     - `GraphStoreError` 到 `ToolError` / diagnostics 的统一映射函数。
@@ -3613,21 +3635,36 @@ pub trait InvocationAdapter {
     - runtime / stdio / CLI 不再各自猜测 graph store 错误字符串。
     - `ToolErrorCode` 保持不动。
     - redb lock、permission、corruption、serde 错误应尽量映射到稳定 `GraphStoreError`。
+    - 必须有反向测试覆盖 lock、permission、corruption、serialize、deserialize、read、write 的 code 映射。
 
-- [ ] M39.9：补测试覆盖
+- [ ] M39.9：补测试覆盖（冷脸验收修正）
   - 必须新增：
     - `test_graphdb_implements_graph_read_store`
     - `test_graphdb_implements_graph_write_store`
     - `test_graphdb_index_state_store_load_persist`
+    - `test_graph_read_store_iter_nodes_supports_find_nodes`
     - `test_memory_graph_store_query_page`
     - `test_memory_graph_store_query_cross`
     - `test_memory_graph_store_candidates`
     - `test_query_functions_do_not_require_graphdb`
+    - `test_find_candidates_lives_outside_graph_store`
     - `test_project_indexer_discovers_spg_tbl`
     - `test_project_indexer_diff_detects_dirty_deleted_unchanged`
+    - `test_project_indexer_does_not_require_document_provider_for_discovery`
+    - `test_persist_index_commits_graph_and_file_states_together`
     - `test_scan_project_behavior_unchanged`
+    - `test_query_model_graph_store_schema_parity`
+    - `test_query_dataflow_graph_store_schema_parity`
+    - `test_query_page_logic_graph_store_schema_parity`
+    - `test_explain_condition_graph_store_schema_parity`
+    - `test_explain_graph_store_schema_parity`
+    - `test_context_graph_store_schema_parity`
+    - `test_graph_store_error_code_lock_timeout`
+    - `test_graph_store_error_code_permission_denied`
+    - `test_graph_store_error_code_corrupted`
+    - `test_graph_store_error_code_serde_and_read_write`
 
-- [ ] M39.10：文档同步
+- [x] M39.10：文档同步
   - 更新：
     - `docs/real-project-optimization-roadmap.md`
     - `docs/schema.md` 中 M36/M39 边界说明

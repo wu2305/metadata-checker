@@ -1239,6 +1239,16 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 - ~~`GraphStore` / `IndexStore` 占位 trait~~（M36 收敛后已删除，待 M39/M99 再引入真正的存储后端抽象）。
 - M36 不大规模替换现有 redb 实现。
 
+### M39 GraphStore / ProjectIndexer 边界
+
+- `GraphReadStore` 只表达低语义图读取能力：按 ID 取节点、按 ID 取出入边、遍历节点、节点/边计数。
+- `find_candidates`、reader/writer、DataFlow input/output 等属于 query/domain 层策略，不进入 `GraphReadStore`。
+- `GraphWriteStore` 不继承 `GraphReadStore`；需要读写组合时由调用方显式组合 trait bound。
+- `IndexStateStore::persist_index` 是索引落盘提交点，必须明确 dirty graph 与 file states 的一致性边界。
+- `DocumentProvider` 不负责目录遍历；M39 的 `discover_files` / `ProjectFileDiscoverer` 只做本地项目文件发现。
+- `MemoryGraphStore` 在 M39 仅作为 test-only 替身，不暴露 CLI / stdio / function calling。
+- M39 不改 AI 输出 schema、stdio/function-calling 工具协议、graphdb 文件格式，不实现 MCP、远程、session 或 WASM 正式后端。
+
 ### ResponseProcessor 边界
 
 - `ResponseProcessor` 定位为 renderer facade 前置骨架。
