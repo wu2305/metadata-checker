@@ -2106,6 +2106,104 @@ fn test_stdio_server_all_registry_commands_accepted() {
 }
 
 #[test]
+fn test_stdio_server_query_cross_invalid_target_returns_invalid_argument() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-query-cross-invalid",
+        "command": "query_cross",
+        "target": "page:app/actions_test.spg",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).expect("read line");
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("valid JSON");
+    assert_stdio_envelope(&resp, false);
+    assert_eq!(stdio_error_code(&resp), Some("INVALID_ARGUMENT"));
+
+    let _ = child.kill();
+}
+
+#[test]
+fn test_stdio_server_initializer_commands_are_unknown() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+    let commands = ["build_graph", "refresh_index", "rebuild_graph"];
+
+    {
+        let mut stdin_lock = stdin;
+        for command in commands {
+            let req = serde_json::json!({
+                "request_id": format!("req-{}", command),
+                "command": command,
+                "budget": "compact",
+                "human": false
+            });
+            writeln!(stdin_lock, "{}", req).unwrap();
+        }
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    for command in commands {
+        let mut line = String::new();
+        stdout_reader.read_line(&mut line).expect("read line");
+        let resp: serde_json::Value = serde_json::from_str(&line).expect("valid JSON");
+        assert_stdio_envelope(&resp, false);
+        assert_eq!(
+            stdio_error_code(&resp),
+            Some("UNKNOWN_COMMAND"),
+            "initializer command '{}' must not be exposed as runtime tool",
+            command
+        );
+    }
+
+    let _ = child.kill();
+}
+
+#[test]
 fn test_stdio_server_check_reload_command_returns_unchanged_or_reloaded() {
     let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let bin = env!("CARGO_BIN_EXE_metadata-checker");

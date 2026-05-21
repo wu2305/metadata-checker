@@ -481,7 +481,7 @@ M34 在 \`answer_facts\` 中增加 DataFlow 内部字段级来源和可用性投
 | `target` | string | 查询类命令必需 | 查询目标节点、模型或页面 |
 | `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal` |
 | `depth` | number | `context` 可选 | 非负整数，默认 `1` |
-| `human` | boolean | 否 | 仅 `explain_condition` / `explain` / `context` 支持；不支持 human 的命令会返回 `HUMAN_MODE_NOT_SUPPORTED` 诊断 |
+| `human` | boolean | 否 | 目前仅 `explain_condition` 支持；不支持 human 的命令会返回 `HUMAN_MODE_NOT_SUPPORTED` 诊断 |
 | `check_reload` | boolean | 否 | 查询前检测 graphdb 是否需要 reload |
 | `intent` | string | 否 | `explain_condition` 专用：`auto` / `display` / `value-source` / `writer` / `availability` / `context`，默认 `auto` |
 | `page_scope` | string | 否 | `advise_query` 专用：限定查询建议的页面范围 |
@@ -558,7 +558,7 @@ Anti-drift 读取规则：
 - 业务回答优先读取 `result.summary`。
 - 证据核查读取 `result.details.primary_path` / `result.summary.key_primary_paths` / `result.evidence`。
 - `related_context` 默认不是必要条件，只能作为相关上下文表述。
-- `metadata_runtime_status` / `metadata_runtime_reload` 只回答运行时健康状态，不回答业务来源链路。
+- `metadata_runtime_status` / `metadata_runtime_reload` / `metadata_runtime_check_reload` 只回答运行时健康状态，不回答业务来源链路。
 
 ## 查询不存在目标的行为
 

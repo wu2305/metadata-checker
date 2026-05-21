@@ -60,6 +60,36 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // graphdb-only runtime lifecycle commands do not need a project directory.
+    if args.project_dir.is_none() && (args.status || args.reload_graph || args.check_reload) {
+        let db_path = args.graph_db_path.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("--status/--reload-graph/--check-reload requires --graph-db-path when --project-dir is absent")
+        })?;
+        let mut runtime = metadata_checker::runtime::GraphRuntime::load(db_path)?;
+        let command = if args.status {
+            metadata_checker::tool_contract::ToolCommand::Status
+        } else if args.reload_graph {
+            metadata_checker::tool_contract::ToolCommand::ReloadGraph
+        } else {
+            metadata_checker::tool_contract::ToolCommand::CheckReload
+        };
+        let result = run_cli_runtime_tool(
+            &mut runtime,
+            cli::CliToolInput {
+                command,
+                target: None,
+                budget: args.budget.clone(),
+                human: false,
+                intent: None,
+                page_scope: None,
+                depth: None,
+                check_reload: false,
+            },
+        )?;
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(());
+    }
+
     // Cross-file graph analysis mode
     if let Some(ref project_dir) = args.project_dir {
         let db_path = args

@@ -1390,6 +1390,37 @@ fn test_cli_runtime_check_reload_contract() {
 }
 
 #[test]
+fn test_cli_runtime_lifecycle_accepts_graph_db_path_without_project_dir() {
+    let db_path = unique_cli_graph_db_path("graph-only");
+    let db_path_str = db_path.to_str().expect("db path must be valid utf-8");
+    scan_project(Path::new("tests/fixtures/test_project"), &db_path)
+        .expect("fixture graphdb must be built");
+
+    let status_output = run_cli(&["--graph-db-path", db_path_str, "--status"]);
+    let status: serde_json::Value =
+        serde_json::from_str(&status_output).expect("status output must be JSON");
+    assert_eq!(status["load_count"].as_u64(), Some(1));
+    assert!(
+        status["node_count"].as_u64().unwrap_or(0) > 0,
+        "graph-db-only status must expose loaded graph, got: {}",
+        status
+    );
+
+    let reload_output = run_cli(&["--graph-db-path", db_path_str, "--reload-graph"]);
+    let reload: serde_json::Value =
+        serde_json::from_str(&reload_output).expect("reload output must be JSON");
+    assert_eq!(reload["reload_count"].as_u64(), Some(1));
+
+    let check_reload_output = run_cli(&["--graph-db-path", db_path_str, "--check-reload"]);
+    let check_reload: serde_json::Value =
+        serde_json::from_str(&check_reload_output).expect("check_reload output must be JSON");
+    assert_eq!(check_reload["reloaded"].as_bool(), Some(false));
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
+}
+
+#[test]
 fn test_cli_query_model_contract() {
     let output = run_cli(&[
         "--project-dir",

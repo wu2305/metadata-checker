@@ -345,6 +345,30 @@ fn test_runtime_query_cross_returns_real_value() {
 }
 
 #[test]
+fn test_runtime_query_cross_invalid_target_returns_error() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut runtime = GraphRuntime::load(&db_path).unwrap();
+    let req = RuntimeQueryRequest {
+        command: metadata_checker::tool_contract::ToolCommand::QueryCross,
+        target: "page:app/actions_test.spg".to_string(),
+        budget: "compact".to_string(),
+        human: false,
+        intent: None,
+        page_scope: None,
+        depth: None,
+        check_reload: false,
+    };
+    let err = runtime
+        .query(req)
+        .expect_err("invalid query_cross target must fail");
+    assert!(
+        err.to_string().contains("INVALID_ARGUMENT"),
+        "runtime query_cross invalid target must surface INVALID_ARGUMENT, got: {}",
+        err
+    );
+}
+
+#[test]
 fn test_runtime_query_dataflow_returns_real_value() {
     let (_temp_dir, db_path) = common::build_fixture_graphdb();
     let mut runtime = GraphRuntime::load(&db_path).unwrap();

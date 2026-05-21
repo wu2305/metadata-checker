@@ -55,7 +55,7 @@ metadata-checker --serve-stdio --project-dir /path/to/project
 | `command` | string | 是 | 命令名：`explain_condition` / `explain` / `query_model` / `query_page` / `query_cross` / `query_dataflow` / `query_page_logic` / `context` / `find_page` / `find_model` / `find_component` / `advise_query` / `status` / `reload_graph` / `check_reload` |
 | `target` | string | explain_condition 必需 | 查询目标 |
 | `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal` |
-| `human` | bool | 否 | 是否生成 human_summary，默认 `false` |
+| `human` | bool | 否 | 是否生成 human_summary，默认 `false`；目前仅 `explain_condition` 支持 |
 | `check_reload` | bool | 否 | 查询前检查 graphdb 是否变更并自动 reload，默认 `false` |
 
 ## 响应格式

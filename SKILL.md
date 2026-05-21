@@ -175,7 +175,9 @@ intent 到 fact block 映射：
 | `metadata_explain` | `explain` | 这个对象是什么 |
 | `metadata_context` | `context` | 周围关系是什么 / 需要补查上下游 |
 | `metadata_query_model` | `query_model` | 模型读写全貌 / 谁写了这个表 |
+| `metadata_query_page` | `query_page` | 页面出边/入边关系 |
 | `metadata_query_page_logic` | `query_page_logic` | 页面整体逻辑 / 入口 / 写入 / 跳转 / 可见性 |
+| `metadata_advise_query` | `advise_query` | 为目标生成结构化查询建议 |
 | `metadata_runtime_status` | `status` | 只检查 runtime/graph 状态 |
 | `metadata_runtime_reload` | `reload_graph` | graphdb 更新后手动刷新 |
 | `metadata_runtime_check_reload` | `check_reload` | graphdb 变更时自动刷新 |

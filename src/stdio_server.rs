@@ -292,16 +292,19 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
     }
 
     // human 模式校验
-    if invocation.human && !spec.supports_human {
+    let human = if invocation.human && !spec.supports_human {
         diagnostics.push("HUMAN_MODE_NOT_SUPPORTED".to_string());
-    }
+        false
+    } else {
+        invocation.human
+    };
 
     // 构造 RuntimeQueryRequest 并统一执行
     let req = RuntimeQueryRequest {
         command: invocation.command,
         target: invocation.target.unwrap_or_default(),
         budget: invocation.budget.unwrap_or_else(|| "normal".to_string()),
-        human: invocation.human,
+        human,
         intent: invocation.intent,
         page_scope: invocation.page_scope,
         depth: invocation.depth,

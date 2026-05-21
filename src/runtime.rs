@@ -334,19 +334,9 @@ impl GraphRuntime {
                 crate::query::build_query_page_output(&self.graph, &request.target)?
             }
             ToolCommand::QueryCross => {
-                let parts: Vec<&str> = request.target.split(',').collect();
-                if parts.len() >= 2 {
-                    crate::query::build_query_cross_output(
-                        &self.graph,
-                        parts[0].trim(),
-                        parts[1].trim(),
-                    )?
-                } else {
-                    serde_json::json!({
-                        "error": "QueryCross requires two comma-separated page IDs",
-                        "target": request.target,
-                    })
-                }
+                let (page_a, page_b) =
+                    crate::tool_contract::parse_query_cross_target(&request.target)?;
+                crate::query::build_query_cross_output(&self.graph, &page_a, &page_b)?
             }
             ToolCommand::QueryDataflow => {
                 crate::query::build_query_dataflow_output(&self.graph, &request.target)?

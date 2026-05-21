@@ -73,7 +73,9 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 | `metadata_explain` | `explain` | `target` | `compact` | 这个对象是什么、它读写/跳转/影响什么 | `result.summary`、`result.details`、`result.evidence` |
 | `metadata_context` | `context` | `target`, `depth` | `normal` | 周围关系是什么、需要扩展核查上下游 | `result.summary`、`result.details.upstream`、`result.details.downstream` |
 | `metadata_query_model` | `query_model` | `target` | `compact` | 模型读写全貌、谁读/谁写、跨页 writer | `result.summary`、`result.details.readers`、`result.details.writers`、`result.evidence` |
+| `metadata_query_page` | `query_page` | `target` | `compact` | 页面出边/入边关系 | `result.summary`、`result.details`、`result.evidence` |
 | `metadata_query_page_logic` | `query_page_logic` | `target` | `compact` | 页面整体逻辑、入口、写入、跳转、可见性规则 | `result.summary`、`result.details.page_inputs`、`result.details.write_targets`、`result.details.action_flows` |
+| `metadata_advise_query` | `advise_query` | `target` | `compact` | 为目标生成结构化查询建议 | `result.summary`、`result.details` |
 | `metadata_runtime_status` | `status` | 无 | 不适用 | 只检查 runtime/graph 状态 | `result`；不得作为业务证据 |
 | `metadata_runtime_reload` | `reload_graph` | 无 | 不适用 | graphdb 更新后手动刷新 | `ok`、`error.code`；不得作为业务证据 |
 | `metadata_runtime_check_reload` | `check_reload` | 无 | 不适用 | graphdb 变更时自动刷新 | `ok`、`error.code`；不得作为业务证据 |
@@ -86,7 +88,9 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 | `metadata_explain` | `target: string`, `budget?: compact|normal|full` |
 | `metadata_context` | `target: string`, `depth?: number`, `budget?: compact|normal|full` |
 | `metadata_query_model` | `target: string`, `budget?: compact|normal|full` |
+| `metadata_query_page` | `target: string`, `budget?: compact|normal|full` |
 | `metadata_query_page_logic` | `target: string`, `budget?: compact|normal|full`, `check_reload?: boolean` |
+| `metadata_advise_query` | `target: string`, `page_scope?: string`, `intent?: auto|display|value-source|writer|availability|context`, `budget?: compact|normal|full` |
 | `metadata_runtime_status` | 无业务参数 |
 | `metadata_runtime_reload` | 无业务参数 |
 | `metadata_runtime_check_reload` | 无业务参数 |
@@ -98,7 +102,9 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 - “这个对象是什么” → `metadata_explain`。
 - “周围关系是什么 / 需要补看上下游” → `metadata_context`。
 - “模型读写全貌 / 谁写了这个表” → `metadata_query_model`。
+- “页面有哪些直接关系” → `metadata_query_page`。
 - “页面整体逻辑 / 入口 / 写入 / 跳转 / 可见性” → `metadata_query_page_logic`。
+- “不确定下一步该查什么” → `metadata_advise_query`。
 - `metadata_runtime_status`、`metadata_runtime_reload` 和 `metadata_runtime_check_reload` 只能用于运行时健康与刷新判断，不能作为业务结论证据。
 - 每个 stdio 响应的 `timing.output_size_bytes` 记录最终 stdout JSON 行的字节数，用于容量治理和性能基线。
 

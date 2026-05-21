@@ -216,7 +216,7 @@ impl ToolRegistry {
                 requires_target: true,
                 requires_graph: true,
                 mutates_runtime: false,
-                supports_human: true,
+                supports_human: false,
                 supported_budgets: &["compact", "normal", "full"],
                 supported_intents: &[],
             },
@@ -228,7 +228,7 @@ impl ToolRegistry {
                 requires_target: true,
                 requires_graph: true,
                 mutates_runtime: false,
-                supports_human: true,
+                supports_human: false,
                 supported_budgets: &["compact", "normal", "full"],
                 supported_intents: &[],
             },
@@ -240,7 +240,7 @@ impl ToolRegistry {
                 requires_target: true,
                 requires_graph: true,
                 mutates_runtime: false,
-                supports_human: true,
+                supports_human: false,
                 supported_budgets: &["compact", "normal", "full"],
                 supported_intents: &[],
             },
@@ -441,6 +441,11 @@ pub fn validate_depth(depth: Option<&serde_json::Value>) -> Result<usize, ToolEr
 
 /// 校验 target 前缀是否合法。
 pub fn validate_target_prefix(command: ToolCommand, target: &str) -> Result<(), ToolError> {
+    if command == ToolCommand::QueryCross {
+        parse_query_cross_target(target)?;
+        return Ok(());
+    }
+
     let allowed: &[&str] = match command {
         ToolCommand::QueryModel => &["model:"],
         ToolCommand::QueryPageLogic | ToolCommand::QueryPage => &["page:"],
@@ -449,7 +454,7 @@ pub fn validate_target_prefix(command: ToolCommand, target: &str) -> Result<(), 
         }
         ToolCommand::AdviseQuery => &[],
         ToolCommand::QueryDataflow => &["model:", "dataflow:"],
-        ToolCommand::QueryCross => &[], // cross 用两个 page id
+        ToolCommand::QueryCross => unreachable!("QueryCross handled above"),
         ToolCommand::FindPage | ToolCommand::FindModel | ToolCommand::FindComponent => &[],
         ToolCommand::Status | ToolCommand::ReloadGraph | ToolCommand::CheckReload => &[],
     };
@@ -475,6 +480,37 @@ pub fn validate_target_prefix(command: ToolCommand, target: &str) -> Result<(), 
     }
 
     Ok(())
+}
+
+/// 解析 `query_cross` 的双页面 target。
+///
+/// 运行期协议用一个字符串传递两个页面节点，格式固定为
+/// `page:PAGE_A,page:PAGE_B`。这里统一做结构校验，避免 adapter 放过坏参数后
+/// runtime 以业务 JSON 伪装成功响应。
+pub fn parse_query_cross_target(target: &str) -> Result<(String, String), ToolError> {
+    if target != target.trim() || target.contains('\0') {
+        return Err(ToolError::new(
+            ToolErrorCode::InvalidTarget,
+            format!("Invalid query_cross target '{}'", target),
+        ));
+    }
+
+    let parts: Vec<&str> = target.split(',').map(str::trim).collect();
+    if parts.len() != 2 || parts.iter().any(|part| part.is_empty()) {
+        return Err(ToolError::new(
+            ToolErrorCode::InvalidArgument,
+            "query_cross target must be two comma-separated page targets",
+        ));
+    }
+
+    if !parts.iter().all(|part| part.starts_with("page:")) {
+        return Err(ToolError::new(
+            ToolErrorCode::InvalidTarget,
+            format!("query_cross target must use page: prefix: '{}'", target),
+        ));
+    }
+
+    Ok((parts[0].to_string(), parts[1].to_string()))
 }
 
 #[cfg(test)]
@@ -536,6 +572,18 @@ mod tests {
     }
 
     #[test]
+    fn test_registry_human_support_only_explain_condition() {
+        for spec in ToolRegistry::all_specs() {
+            assert_eq!(
+                spec.supports_human,
+                spec.command == ToolCommand::ExplainCondition,
+                "{} human support flag must match runtime behavior",
+                spec.name
+            );
+        }
+    }
+
+    #[test]
     fn test_validate_budget() {
         assert!(validate_budget("compact").is_ok());
         assert!(validate_budget("normal").is_ok());
@@ -579,5 +627,25 @@ mod tests {
         );
 
         assert!(validate_target_prefix(ToolCommand::Status, "anything").is_ok());
+    }
+
+    #[test]
+    fn test_validate_query_cross_target() {
+        assert!(
+            validate_target_prefix(ToolCommand::QueryCross, "page:app/a.spg,page:app/b.spg")
+                .is_ok()
+        );
+        assert_eq!(
+            validate_target_prefix(ToolCommand::QueryCross, "page:app/a.spg")
+                .unwrap_err()
+                .code,
+            ToolErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            validate_target_prefix(ToolCommand::QueryCross, "model:a,model:b")
+                .unwrap_err()
+                .code,
+            ToolErrorCode::InvalidTarget
+        );
     }
 }
