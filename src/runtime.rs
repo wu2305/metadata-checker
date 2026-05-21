@@ -317,19 +317,19 @@ impl GraphRuntime {
                 &request.target,
                 Some("page"),
                 20,
-            ))?,
+            )?)?,
             ToolCommand::FindModel => serde_json::to_value(crate::query::find_nodes(
                 &self.graph,
                 &request.target,
                 Some("model"),
                 20,
-            ))?,
+            )?)?,
             ToolCommand::FindComponent => serde_json::to_value(crate::query::find_nodes(
                 &self.graph,
                 &request.target,
                 Some("component"),
                 20,
-            ))?,
+            )?)?,
             ToolCommand::QueryPage => {
                 crate::query::build_query_page_output(&self.graph, &request.target)?
             }

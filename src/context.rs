@@ -1,5 +1,6 @@
-use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 use crate::output::schema::{format_next_query, format_next_query_multi};
+use crate::query::find_candidates;
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::{HashSet, VecDeque};
@@ -77,7 +78,7 @@ fn generate_next_queries(
 ///
 /// 返回 Value，由外层调用者决定输出格式。
 pub fn build_context_output(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node_id: &str,
     depth: usize,
     budget: &str,
@@ -89,10 +90,10 @@ pub fn build_context_output(
             budget
         );
     }
-    let node = match graph.get_node(node_id) {
+    let node = match graph.get_node(node_id)? {
         Some(n) => n,
         None => {
-            let candidates = graph.find_candidates(node_id, 5);
+            let candidates = find_candidates(graph, node_id, 5)?;
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::Context,
                 node_id,
@@ -119,8 +120,12 @@ pub fn build_context_output(
             continue;
         }
 
-        if let Some((outgoing, incoming)) = graph.get_node_edges(&current_id) {
-            for (target, edge) in outgoing {
+        if let Some(neighbors) = graph.get_node_edges(&current_id)? {
+            let outgoing = &neighbors.outgoing;
+            let incoming = &neighbors.incoming;
+            for ev in outgoing.iter() {
+                let target = &ev.node;
+                let edge = &ev.edge;
                 if !visited.contains(&target.id) {
                     visited.insert(target.id.clone());
                     queue.push_back((target.id.clone(), current_depth + 1));
@@ -178,7 +183,9 @@ pub fn build_context_output(
                 }
             }
 
-            for (source, edge) in incoming {
+            for ev in incoming.iter() {
+                let source = &ev.node;
+                let edge = &ev.edge;
                 if !visited.contains(&source.id) {
                     visited.insert(source.id.clone());
                     queue.push_back((source.id.clone(), current_depth + 1));
@@ -488,8 +495,12 @@ pub fn build_context_output(
             }));
         }
         // Collect page action writes from incoming edges
-        if let Some((_outgoing, incoming)) = graph.get_node_edges(node_id) {
-            for (source, edge) in &incoming {
+        if let Some(neighbors) = graph.get_node_edges(node_id)? {
+            let _outgoing = &neighbors.outgoing;
+            let incoming = &neighbors.incoming;
+            for ev in incoming.iter() {
+                let source = &ev.node;
+                let edge = &ev.edge;
                 if matches!(
                     edge.edge_type,
                     crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites
@@ -562,8 +573,12 @@ pub fn build_context_output(
         }
         // Backfill from parent model edges (spg writes often go to model, not field node)
         let field_name = node.name.as_str();
-        let parent_model = if let Some((_outgoing, incoming)) = graph.get_node_edges(node_id) {
-            incoming.iter().find_map(|(source, edge)| {
+        let parent_model = if let Some(neighbors) = graph.get_node_edges(node_id)? {
+            let _outgoing = &neighbors.outgoing;
+            let incoming = &neighbors.incoming;
+            incoming.iter().find_map(|ev| {
+                let source = &ev.node;
+                let edge = &ev.edge;
                 if matches!(edge.edge_type, crate::graph::EdgeType::Contains)
                     && matches!(source.node_type, crate::graph::NodeType::Model)
                 {
@@ -576,9 +591,11 @@ pub fn build_context_output(
             None
         };
         if let Some(ref model) = parent_model
-            && let Some((_model_out, model_in)) = graph.get_node_edges(&model.id)
+            && let Some(neighbors) = graph.get_node_edges(&model.id)?
         {
-            for (source, edge) in &model_in {
+            for ev in &neighbors.incoming {
+                let source = &ev.node;
+                let edge = &ev.edge;
                 if matches!(
                     edge.edge_type,
                     crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites
@@ -792,7 +809,7 @@ pub fn build_context_output(
 ///
 /// CLI 包装器，负责调用 `build_context_output` 并按 `human` 参数决定输出格式。
 pub fn context_node_graph(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node_id: &str,
     depth: usize,
     budget: &str,

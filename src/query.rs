@@ -1,4 +1,5 @@
-use crate::graph::GraphDB;
+use crate::graph::{Edge, GraphDB, Node};
+use crate::graph_store::GraphReadStore;
 use crate::output::schema::format_next_query;
 use anyhow::Result;
 use std::io::{self, Write};
@@ -11,31 +12,179 @@ use std::io::{self, Write};
 ///   - query_cross：查询两个页面之间的跨文件关系
 ///   - query_dataflow：展开 DataFlow 的子图，做字段级来源追溯
 ///
+
+/// 适配 GraphReadStore::get_node_edges 到 query 内部使用的元组格式
+fn get_node_edges_compat(
+    graph: &dyn GraphReadStore,
+    node_id: &str,
+) -> Result<Option<(Vec<(Node, Edge)>, Vec<(Node, Edge)>)>> {
+    Ok(graph.get_node_edges(node_id)?.map(|neighbors| {
+        let outgoing = neighbors
+            .outgoing
+            .into_iter()
+            .map(|v| (v.node, v.edge))
+            .collect();
+        let incoming = neighbors
+            .incoming
+            .into_iter()
+            .map(|v| (v.node, v.edge))
+            .collect();
+        (outgoing, incoming)
+    }))
+}
+
+/// 搜索与目标 ID 相似的候选节点（诊断层 helper，不依赖 GraphDB 具体类型）
+pub fn find_candidates(
+    graph: &dyn GraphReadStore,
+    target_id: &str,
+    limit: usize,
+) -> Result<Vec<(crate::graph::Node, String)>> {
+    let mut candidates = Vec::new();
+    let target_lower = target_id.to_lowercase();
+
+    let target_prefix = if target_id.starts_with("model:") {
+        Some("model")
+    } else if target_id.starts_with("page:") {
+        Some("page")
+    } else if target_id.starts_with("comp:") {
+        Some("comp")
+    } else if target_id.starts_with("action:") {
+        Some("action")
+    } else if target_id.starts_with("field:") {
+        Some("field")
+    } else {
+        None
+    };
+
+    let target_bare = target_id
+        .strip_prefix("model:")
+        .or_else(|| target_id.strip_prefix("page:"))
+        .or_else(|| target_id.strip_prefix("comp:"))
+        .or_else(|| target_id.strip_prefix("action:"))
+        .or_else(|| target_id.strip_prefix("field:"))
+        .unwrap_or(target_id);
+
+    for node in graph.iter_nodes()? {
+        if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty() {
+            continue;
+        }
+        let node_bare = node
+            .id
+            .strip_prefix("model:")
+            .or_else(|| node.id.strip_prefix("page:"))
+            .or_else(|| node.id.strip_prefix("comp:"))
+            .or_else(|| node.id.strip_prefix("action:"))
+            .or_else(|| node.id.strip_prefix("field:"))
+            .unwrap_or(&node.id);
+
+        let mut score: f64 = 0.0;
+        let mut reason = "substring match";
+
+        if let Some(prefix) = target_prefix {
+            if node.id.starts_with(prefix) {
+                if node_bare.to_lowercase() == target_bare.to_lowercase() {
+                    score = 100.0;
+                    reason = "exact bare name match";
+                } else if node_bare
+                    .to_lowercase()
+                    .contains(&target_bare.to_lowercase())
+                    || target_bare
+                        .to_lowercase()
+                        .contains(&node_bare.to_lowercase())
+                {
+                    score = 80.0;
+                    reason = "bare name substring match";
+                } else if node.id.to_lowercase().contains(&target_lower)
+                    || target_lower.contains(&node.id.to_lowercase())
+                {
+                    score = 60.0;
+                    reason = "full id substring match";
+                }
+            }
+            if node_bare.starts_with(target_bare) && node_bare != target_bare {
+                if node_bare
+                    .trim_start_matches(target_bare)
+                    .parse::<f64>()
+                    .is_ok()
+                {
+                    score = score.max(40.0_f64);
+                    reason = "numbered suffix variant";
+                }
+            }
+            if node_bare.starts_with(target_bare) {
+                if let Some(rest) = node_bare.strip_prefix(target_bare) {
+                    if rest.parse::<f64>().is_ok() {
+                        score = score.max(40.0_f64);
+                        reason = "numbered suffix variant";
+                    }
+                }
+            }
+            if score == 0.0 && target_id.starts_with("comp:") && node.id.starts_with("comp:") {
+                score = 5.0;
+                reason = "same prefix (component)";
+            }
+        } else {
+            if node.name.to_lowercase() == target_lower || node.id.to_lowercase() == target_lower {
+                score = 100.0;
+                reason = "exact match";
+            } else if node.name.to_lowercase().contains(&target_lower)
+                || node.id.to_lowercase().contains(&target_lower)
+            {
+                score = 80.0;
+                reason = "name/id substring match";
+            } else if node.path.to_lowercase().contains(&target_lower) {
+                score = 50.0;
+                reason = "path substring match";
+            }
+        }
+
+        if score > 0.0 {
+            candidates.push((node.clone(), score, reason.to_string()));
+        }
+    }
+
+    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut seen = std::collections::HashSet::new();
+    let result: Vec<_> = candidates
+        .into_iter()
+        .filter(|(n, _, _)| seen.insert(n.id.clone()))
+        .take(limit)
+        .map(|(n, _, r)| (n, r))
+        .collect();
+    Ok(result)
+}
+
 /// 追溯节点所属的页面（通过 Contains 边）
-pub fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node> {
-    if let Some((_, incoming)) = graph.get_node_edges(node_id) {
+pub fn find_parent_page(
+    graph: &dyn GraphReadStore,
+    node_id: &str,
+) -> Result<Option<crate::graph::Node>> {
+    if let Some((_, incoming)) = get_node_edges_compat(graph, node_id)? {
         for (parent, edge) in incoming {
             if matches!(edge.edge_type, crate::graph::EdgeType::Contains) {
                 if matches!(parent.node_type, crate::graph::NodeType::Page) {
-                    return Some(parent.clone());
+                    return Ok(Some(parent.clone()));
                 }
-                if let Some(page) = find_parent_page(graph, &parent.id) {
-                    return Some(page);
+                if let Ok(Some(page)) = find_parent_page(graph, &parent.id) {
+                    return Ok(Some(page));
                 }
             }
             if matches!(edge.edge_type, crate::graph::EdgeType::Triggers)
-                && let Some(page) = find_parent_page(graph, &parent.id)
+                && let Ok(Some(page)) = find_parent_page(graph, &parent.id)
             {
-                return Some(page);
+                return Ok(Some(page));
             }
         }
     }
-    None
+    Ok(None)
 }
 
 /// 构建 query_page 输出（返回 Value，不打印）
-pub fn build_query_page_output(graph: &GraphDB, page_id: &str) -> Result<serde_json::Value> {
-    if let Some((outgoing, incoming)) = graph.get_node_edges(page_id) {
+pub fn build_query_page_output(
+    graph: &dyn GraphReadStore,
+    page_id: &str,
+) -> Result<serde_json::Value> {
+    if let Some((outgoing, incoming)) = get_node_edges_compat(graph, page_id)? {
         let summary = serde_json::json!({
             "page_id": page_id,
             "outgoing_count": outgoing.len(),
@@ -76,7 +225,7 @@ pub fn build_query_page_output(graph: &GraphDB, page_id: &str) -> Result<serde_j
         let output = output.validate();
         Ok(serde_json::to_value(output)?)
     } else {
-        let candidates = graph.find_candidates(page_id, 5);
+        let candidates = find_candidates(graph, page_id, 5)?;
         let out = crate::output::schema::build_target_not_found_output(
             crate::output::schema::OutputKind::PageQuery,
             page_id,
@@ -87,8 +236,8 @@ pub fn build_query_page_output(graph: &GraphDB, page_id: &str) -> Result<serde_j
 }
 
 /// 查询页面的跨文件依赖关系（保留旧入口，直接打印 stdout）
-pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
-    if let Some((outgoing, incoming)) = graph.get_node_edges(page_id) {
+pub fn query_page(graph: &dyn GraphReadStore, page_id: &str, human: bool) -> Result<()> {
+    if let Some((outgoing, incoming)) = get_node_edges_compat(graph, page_id)? {
         if human {
             let mut out = io::stdout();
             writeln!(out, "=== Page: {} ===", page_id)?;
@@ -112,13 +261,52 @@ pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
     Ok(())
 }
 
+/// 查找两个页面之间的共同依赖路径（从 GraphDB 方法下沉为独立函数）
+pub fn find_cross_relations(
+    graph: &dyn GraphReadStore,
+    page_a: &str,
+    page_b: &str,
+) -> Result<Vec<Vec<(crate::graph::Node, crate::graph::Edge)>>> {
+    let neighbors_a = get_node_edges_compat(graph, page_a)?;
+    let neighbors_b = get_node_edges_compat(graph, page_b)?;
+
+    let mut paths = Vec::new();
+    if let (Some((out_a, _)), Some((out_b, _))) = (neighbors_a, neighbors_b) {
+        let a_targets: std::collections::HashSet<String> =
+            out_a.iter().map(|(n, _)| n.id.clone()).collect();
+        let b_targets: std::collections::HashSet<String> =
+            out_b.iter().map(|(n, _)| n.id.clone()).collect();
+
+        for target_id in a_targets.intersection(&b_targets) {
+            if let (Some(node_a), Some(_node_b)) =
+                (graph.get_node(page_a)?, graph.get_node(page_b)?)
+            {
+                if let Some(target_node) = graph.get_node(target_id)? {
+                    let edge_a = out_a
+                        .iter()
+                        .find(|(n, _)| &n.id == target_id)
+                        .map(|(_, e)| e.clone());
+                    let edge_b = out_b
+                        .iter()
+                        .find(|(n, _)| &n.id == target_id)
+                        .map(|(_, e)| e.clone());
+                    if let (Some(ea), Some(eb)) = (edge_a, edge_b) {
+                        paths.push(vec![(node_a.clone(), ea), (target_node.clone(), eb)]);
+                    }
+                }
+            }
+        }
+    }
+    Ok(paths)
+}
+
 /// 构建 query_cross 输出（返回 Value，不打印）
 pub fn build_query_cross_output(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_a: &str,
     page_b: &str,
 ) -> Result<serde_json::Value> {
-    let paths = graph.find_cross_relations(page_a, page_b);
+    let paths = find_cross_relations(graph, page_a, page_b)?;
     let json_paths: Vec<_> = paths
         .iter()
         .map(|path| {
@@ -180,8 +368,13 @@ pub fn build_query_cross_output(
 }
 
 /// 查询两个页面之间的直接或间接关系（保留旧入口，直接打印 stdout）
-pub fn query_cross(graph: &GraphDB, page_a: &str, page_b: &str, human: bool) -> Result<()> {
-    let paths = graph.find_cross_relations(page_a, page_b);
+pub fn query_cross(
+    graph: &dyn GraphReadStore,
+    page_a: &str,
+    page_b: &str,
+    human: bool,
+) -> Result<()> {
+    let paths = find_cross_relations(graph, page_a, page_b)?;
     if human {
         let mut out = io::stdout();
         writeln!(
@@ -283,38 +476,36 @@ pub use page_logic::build_query_page_logic_output;
 pub use page_logic::query_page_logic;
 /// 返回匹配节点列表，按名称相似度排序。
 pub fn find_nodes(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     keyword: &str,
     node_type_filter: Option<&str>,
     limit: usize,
-) -> crate::output::schema::AiOutput {
+) -> Result<crate::output::schema::AiOutput> {
     let keyword_lower = keyword.to_lowercase();
     let mut matches = Vec::new();
 
-    for (_, idx) in &graph.node_indices {
-        if let Some(node) = graph.graph.node_weight(*idx) {
-            let node_type_str = format!("{:?}", node.node_type).to_lowercase();
-            if let Some(filter) = node_type_filter {
-                if !node_type_str.contains(filter) {
-                    continue;
-                }
+    for node in graph.iter_nodes()? {
+        let node_type_str = format!("{:?}", node.node_type).to_lowercase();
+        if let Some(filter) = node_type_filter {
+            if !node_type_str.contains(filter) {
+                continue;
             }
-            let score = if node.id.to_lowercase() == keyword_lower
-                || node.name.to_lowercase() == keyword_lower
-            {
-                100.0
-            } else if node.id.to_lowercase().contains(&keyword_lower)
-                || node.name.to_lowercase().contains(&keyword_lower)
-            {
-                80.0
-            } else if node.path.to_lowercase().contains(&keyword_lower) {
-                50.0
-            } else {
-                0.0
-            };
-            if score > 0.0 {
-                matches.push((node.clone(), score));
-            }
+        }
+        let score = if node.id.to_lowercase() == keyword_lower
+            || node.name.to_lowercase() == keyword_lower
+        {
+            100.0
+        } else if node.id.to_lowercase().contains(&keyword_lower)
+            || node.name.to_lowercase().contains(&keyword_lower)
+        {
+            80.0
+        } else if node.path.to_lowercase().contains(&keyword_lower) {
+            50.0
+        } else {
+            0.0
+        };
+        if score > 0.0 {
+            matches.push((node.clone(), score));
         }
     }
 
@@ -408,7 +599,7 @@ pub fn find_nodes(
         });
     }
 
-    output.validate()
+    Ok(output.validate())
 }
 
 /// 在页面作用域内解析局部模型 ID

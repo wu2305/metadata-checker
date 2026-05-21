@@ -967,6 +967,16 @@ impl GraphDB {
 
         Some((outgoing, incoming))
     }
+
+    /// 返回当前脏节点 ID 集合的引用
+    pub fn dirty_nodes_set(&self) -> &std::collections::HashSet<String> {
+        &self.dirty_nodes
+    }
+
+    /// 返回当前已移除节点 ID 集合的引用
+    pub fn removed_nodes_set(&self) -> &std::collections::HashSet<String> {
+        &self.removed_nodes
+    }
 }
 
 /// 计算 Levenshtein 编辑距离
@@ -1004,6 +1014,123 @@ fn levenshtein(a: &str, b: &str) -> usize {
     }
 
     prev[b_len]
+}
+
+/// 查找读取指定模型的所有节点（独立函数，基于 GraphReadStore）
+pub fn find_readers(graph: &dyn GraphReadStore, model_id: &str) -> Result<Vec<(Node, Edge)>> {
+    Ok(graph
+        .get_node_edges(model_id)?
+        .map(|n| {
+            n.incoming
+                .into_iter()
+                .filter(|ev| matches!(ev.edge.edge_type, EdgeType::Reads))
+                .map(|ev| (ev.node, ev.edge))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// 查找写入指定模型的所有节点（独立函数，基于 GraphReadStore）
+pub fn find_writers(graph: &dyn GraphReadStore, model_id: &str) -> Result<Vec<(Node, Edge)>> {
+    Ok(graph
+        .get_node_edges(model_id)?
+        .map(|n| {
+            n.incoming
+                .into_iter()
+                .filter(|ev| matches!(ev.edge.edge_type, EdgeType::Writes | EdgeType::ActionWrites))
+                .map(|ev| (ev.node, ev.edge))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// 查询 DataFlow 的输入依赖（ outgoing DataflowInput 边）（独立函数，基于 GraphReadStore）
+pub fn find_dataflow_inputs(
+    graph: &dyn GraphReadStore,
+    model_id: &str,
+) -> Result<Vec<(Node, Edge)>> {
+    Ok(graph
+        .get_node_edges(model_id)?
+        .map(|n| {
+            n.outgoing
+                .into_iter()
+                .filter(|ev| matches!(ev.edge.edge_type, EdgeType::DataflowInput))
+                .map(|ev| (ev.node, ev.edge))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// 查询 DataFlow 的输出目标（ outgoing OutputsTo 边）（独立函数，基于 GraphReadStore）
+pub fn find_dataflow_outputs(
+    graph: &dyn GraphReadStore,
+    model_id: &str,
+) -> Result<Vec<(Node, Edge)>> {
+    Ok(graph
+        .get_node_edges(model_id)?
+        .map(|n| {
+            n.outgoing
+                .into_iter()
+                .filter(|ev| matches!(ev.edge.edge_type, EdgeType::OutputsTo))
+                .map(|ev| (ev.node, ev.edge))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// 查询物理表的生产者（ incoming OutputsTo 边）（独立函数，基于 GraphReadStore）
+pub fn find_produced_by(graph: &dyn GraphReadStore, model_id: &str) -> Result<Vec<(Node, Edge)>> {
+    Ok(graph
+        .get_node_edges(model_id)?
+        .map(|n| {
+            n.incoming
+                .into_iter()
+                .filter(|ev| matches!(ev.edge.edge_type, EdgeType::OutputsTo))
+                .map(|ev| (ev.node, ev.edge))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// 查询哪些 DataFlow 消费了该输入表（ incoming DataflowInput 边）（独立函数，基于 GraphReadStore）
+pub fn find_consumed_by_dataflows(
+    graph: &dyn GraphReadStore,
+    model_id: &str,
+) -> Result<Vec<(Node, Edge)>> {
+    Ok(graph
+        .get_node_edges(model_id)?
+        .map(|n| {
+            n.incoming
+                .into_iter()
+                .filter(|ev| matches!(ev.edge.edge_type, EdgeType::DataflowInput))
+                .map(|ev| (ev.node, ev.edge))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// 把 GraphReadStore::get_node_edges 结果转换为旧风格的 owned tuple 列表
+pub fn get_node_edges_as_tuples(
+    graph: &dyn GraphReadStore,
+    node_id: &str,
+) -> anyhow::Result<(Vec<(Node, Edge)>, Vec<(Node, Edge)>)> {
+    let neighbors = graph
+        .get_node_edges(node_id)?
+        .unwrap_or_else(|| GraphNeighbors {
+            outgoing: Vec::new(),
+            incoming: Vec::new(),
+        });
+    let outgoing = neighbors
+        .outgoing
+        .into_iter()
+        .map(|v| (v.node, v.edge))
+        .collect();
+    let incoming = neighbors
+        .incoming
+        .into_iter()
+        .map(|v| (v.node, v.edge))
+        .collect();
+    Ok((outgoing, incoming))
 }
 
 impl GraphDB {
@@ -1130,5 +1257,128 @@ impl GraphDB {
             .take(limit)
             .map(|(n, _, r)| (n, r))
             .collect()
+    }
+}
+
+// M39：GraphDB 实现 GraphReadStore / GraphWriteStore / IndexStateStore
+use crate::graph_store::{
+    GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
+    GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
+};
+
+impl GraphReadStore for GraphDB {
+    fn get_node(&self, node_id: &str) -> GraphStoreResult<Option<Node>> {
+        Ok(self
+            .node_indices
+            .get(node_id)
+            .and_then(|&idx| self.graph.node_weight(idx))
+            .cloned())
+    }
+
+    fn get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>> {
+        let idx = match self.node_indices.get(node_id) {
+            Some(i) => *i,
+            None => return Ok(None),
+        };
+
+        let outgoing: Vec<GraphEdgeView> = self
+            .graph
+            .edges_directed(idx, petgraph::Direction::Outgoing)
+            .filter_map(|e| {
+                self.graph.node_weight(e.target()).map(|n| GraphEdgeView {
+                    node: n.clone(),
+                    edge: e.weight().clone(),
+                })
+            })
+            .collect();
+
+        let incoming: Vec<GraphEdgeView> = self
+            .graph
+            .edges_directed(idx, petgraph::Direction::Incoming)
+            .filter_map(|e| {
+                self.graph.node_weight(e.source()).map(|n| GraphEdgeView {
+                    node: n.clone(),
+                    edge: e.weight().clone(),
+                })
+            })
+            .collect();
+
+        Ok(Some(GraphNeighbors { outgoing, incoming }))
+    }
+
+    fn node_count(&self) -> GraphStoreResult<usize> {
+        Ok(self.graph.node_count())
+    }
+
+    fn edge_count(&self) -> GraphStoreResult<usize> {
+        Ok(self.graph.edge_count())
+    }
+
+    fn iter_nodes(&self) -> GraphStoreResult<Box<dyn Iterator<Item = Node> + '_>> {
+        Ok(Box::new(self.graph.node_weights().cloned()))
+    }
+}
+
+impl GraphWriteStore for GraphDB {
+    fn upsert_node(&mut self, node: Node) -> GraphStoreResult<()> {
+        let node_id = node.id.clone();
+        if let Some(idx) = self.node_indices.get(&node_id).copied() {
+            // 保留已有 meta（与新 add_node 语义一致：None 不覆盖）
+            let preserve_meta = if node.meta.is_none() {
+                self.graph[idx].meta.clone()
+            } else {
+                node.meta
+            };
+            self.graph[idx] = Node {
+                meta: preserve_meta,
+                ..node
+            };
+        } else {
+            let idx = self.graph.add_node(node);
+            self.node_indices.insert(node_id.clone(), idx);
+        }
+        self.is_dirty = true;
+        self.dirty_nodes.insert(node_id);
+        Ok(())
+    }
+
+    fn add_edge(&mut self, edge: Edge) -> GraphStoreResult<()> {
+        GraphDB::add_edge_with_meta(
+            self,
+            &edge.from,
+            &edge.to,
+            edge.edge_type,
+            edge.field_path,
+            edge.meta,
+        );
+        Ok(())
+    }
+
+    fn remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()> {
+        GraphDB::remove_nodes_by_ids(self, &node_ids.to_vec());
+        Ok(())
+    }
+}
+
+impl IndexStateStore for GraphDB {
+    fn load_file_states(&self) -> GraphStoreResult<HashMap<String, FileState>> {
+        GraphDB::load_file_states(self).map_err(|e| GraphStoreError::ReadFailed {
+            reason: format!("{}", e),
+        })
+    }
+
+    fn persist_index(&mut self, commit: &IndexCommit) -> GraphStoreResult<IndexReport> {
+        GraphDB::persist(self, &commit.file_states).map_err(|e| GraphStoreError::WriteFailed {
+            reason: format!("{}", e),
+        })?;
+        Ok(IndexReport {
+            indexed: commit.file_states.len(),
+            unchanged: commit
+                .file_states
+                .len()
+                .saturating_sub(commit.dirty_nodes.len()),
+            dirty: commit.dirty_nodes.len(),
+            deleted: commit.deleted_nodes.len(),
+        })
     }
 }

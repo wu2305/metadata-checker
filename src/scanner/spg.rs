@@ -1,5 +1,6 @@
 use super::resolve_reference_path;
-use crate::graph::{EdgeType, GraphDB, NodeType};
+use crate::graph::{EdgeType, NodeType};
+use crate::graph_store::GraphStore;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
@@ -139,7 +140,7 @@ fn extract_single_bare_symbol(raw_expr: &str) -> Option<String> {
 /// 确保 model 和 field 节点存在，并建立 Contains 关系。
 /// 返回 (model_id, field_id)。
 fn ensure_model_field(
-    graph: &mut GraphDB,
+    graph: &mut dyn GraphStore,
     model: &str,
     field: &str,
     model_path: &str,
@@ -161,7 +162,7 @@ fn ensure_model_field(
         field.to_string(),
         field_meta,
     );
-    graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+    graph.add_edge_with_meta(&model_id, &field_id, EdgeType::Contains, None, None);
     (model_id, field_id)
 }
 
@@ -182,7 +183,7 @@ fn resolve_physical_table_name(model_path: &str) -> Option<String> {
 
 /// 添加从 from_id 读取 model.field 的关系边。
 fn add_model_read(
-    graph: &mut GraphDB,
+    graph: &mut dyn GraphStore,
     from_id: &str,
     model: &str,
     field: &str,
@@ -228,18 +229,19 @@ fn add_model_read(
                 Some(edge_meta.clone()),
             );
             // 局部模型字段到物理表字段的别名映射
-            graph.add_edge(
+            graph.add_edge_with_meta(
                 &field_id,
                 &phy_field_id,
                 EdgeType::FieldAlias,
                 Some(format!("{}.{}", model, field)),
+                None,
             );
         }
     }
 }
 /// 添加从 from_id 写入 model.field 的关系边。
 fn add_model_write(
-    graph: &mut GraphDB,
+    graph: &mut dyn GraphStore,
     from_id: &str,
     model: &str,
     field: &str,
@@ -285,18 +287,19 @@ fn add_model_write(
                 Some(edge_meta.clone()),
             );
             // 局部模型字段到物理表字段的别名映射
-            graph.add_edge(
+            graph.add_edge_with_meta(
                 &field_id,
                 &phy_field_id,
                 EdgeType::FieldAlias,
                 Some(format!("{}.{}", model, field)),
+                None,
             );
         }
     }
 }
 
 pub fn process_spg_file_from_value(
-    graph: &mut GraphDB,
+    graph: &mut dyn GraphStore,
     rel_path: &str,
     raw_value: serde_json::Value,
 ) -> Result<Vec<String>> {
@@ -367,7 +370,7 @@ pub fn process_spg_file_from_value(
                     if !node_ids.contains(&field_id) {
                         node_ids.insert(field_id.clone());
                     }
-                    graph.add_edge(&model_id, &field_id, EdgeType::Contains, None);
+                    graph.add_edge_with_meta(&model_id, &field_id, EdgeType::Contains, None, None);
                 }
             }
         }
@@ -394,11 +397,12 @@ pub fn process_spg_file_from_value(
                         ref_model.clone(),
                         None,
                     );
-                    graph.add_edge(
+                    graph.add_edge_with_meta(
                         &model_id,
                         &ref_model_id,
                         EdgeType::DataflowInput,
                         Some(module_table_path.to_string()),
+                        None,
                     );
                 }
             }
@@ -478,7 +482,7 @@ pub fn process_spg_file_from_value(
             Some(comp_meta),
         );
         node_ids.insert(comp_id.clone());
-        graph.add_edge(&page_id, &comp_id, EdgeType::Contains, None);
+        graph.add_edge_with_meta(&page_id, &comp_id, EdgeType::Contains, None, None);
 
         // Process expressions (reads)
         if let Some(exprs) = expr_map.get(comp.id.as_str()) {
@@ -733,11 +737,12 @@ pub fn process_spg_file_from_value(
                 target_name.clone(),
                 None,
             );
-            graph.add_edge(
+            graph.add_edge_with_meta(
                 &comp_id,
                 &target_page_id,
                 EdgeType::EmbedsPage,
                 Some(target_rel.clone()),
+                None,
             );
         }
     }
@@ -765,7 +770,7 @@ pub fn process_spg_file_from_value(
                 })),
             );
             node_ids.insert(action_id.clone());
-            graph.add_edge(&comp_id, &action_id, EdgeType::Triggers, None);
+            graph.add_edge_with_meta(&comp_id, &action_id, EdgeType::Triggers, None, None);
 
             match action.action_type.as_str() {
                 "submitData" => {
@@ -1061,7 +1066,7 @@ pub fn process_spg_file_from_value(
                         let dialog_comp_id =
                             format!("comp:{}|{}", rel_path.replace(r"\", "/"), dialog_id);
                         // 确保目标节点存在
-                        if !graph.node_indices.contains_key(&dialog_comp_id) {
+                        if graph.get_node(&dialog_comp_id).ok().flatten().is_none() {
                             graph.add_node(
                                 dialog_comp_id.clone(),
                                 NodeType::Component,
@@ -1107,7 +1112,7 @@ pub fn process_spg_file_from_value(
                     if let Some(ref pb) = action.panelbook {
                         let panelbook_id = format!("comp:{}|{}", rel_path.replace(r"\", "/"), pb);
                         // 确保目标节点存在
-                        if !graph.node_indices.contains_key(&panelbook_id) {
+                        if graph.get_node(&panelbook_id).ok().flatten().is_none() {
                             graph.add_node(
                                 panelbook_id.clone(),
                                 NodeType::Component,
@@ -1370,7 +1375,7 @@ pub fn process_spg_file_from_value(
                     "description": "模型过滤后的隐式行数字段",
                 })),
             );
-            graph.add_edge(&trc_model_id, &trc_field_id, EdgeType::Contains, None);
+            graph.add_edge_with_meta(&trc_model_id, &trc_field_id, EdgeType::Contains, None, None);
 
             let cond_node_id =
                 format!("cond:{}|{}", rel_path.replace(r"\", "/"), cond.condition_id);
@@ -1422,7 +1427,7 @@ pub fn process_spg_file_from_value(
             node_ids.insert(model_id.clone());
         }
         // 避免覆盖已有节点（如 App/DataFlow 表）的 modelType
-        if graph.get_node(&physical_model_id).is_none() {
+        if graph.get_node(&physical_model_id).ok().flatten().is_none() {
             graph.add_node(
                 physical_model_id.clone(),
                 NodeType::Model,
@@ -1431,18 +1436,20 @@ pub fn process_spg_file_from_value(
                 Some(serde_json::json!({"modelType": "PhysicalTable", "sourcePath": path})),
             );
         }
-        graph.add_edge(
+        graph.add_edge_with_meta(
             &model_id,
             &physical_model_id,
             EdgeType::DataflowInput,
             Some(path.clone()),
+            None,
         );
         // 建立反向边，使 BFS 能从物理表回溯到局部模型
-        graph.add_edge(
+        graph.add_edge_with_meta(
             &physical_model_id,
             &model_id,
             EdgeType::DataflowOutput,
             Some(path.clone()),
+            None,
         );
     }
 

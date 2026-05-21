@@ -1,4 +1,5 @@
 use crate::graph::GraphDB;
+use crate::query::find_candidates;
 use anyhow::Result;
 use serde_json::json;
 use std::io::{self, Write};
@@ -194,7 +195,7 @@ pub fn build_query_page_logic_output(
     let page_node = match graph.get_node(page_id) {
         Some(n) => n,
         None => {
-            let candidates = graph.find_candidates(page_id, 5);
+            let candidates = find_candidates(graph, page_id, 5)?;
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::PageQuery,
                 page_id,

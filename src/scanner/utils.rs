@@ -1,24 +1,4 @@
-use anyhow::Result;
-use std::fs;
-use std::path::{Path, PathBuf};
-
-pub fn collect_files(dir: &Path, _base: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                collect_files(&path, _base, files)?;
-            } else if path
-                .extension()
-                .map(|e| e == "spg" || e == "tbl")
-                .unwrap_or(false)
-            {
-                files.push(path);
-            }
-        }
-    }
-    Ok(())
-}
+use std::path::Path;
 
 /// Resolve a reference path from referenceResources to an absolute path.
 /// Handles relative paths (../, ./) and $TAPP: prefix.

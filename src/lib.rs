@@ -6,6 +6,7 @@ pub mod context;
 pub mod dependency;
 pub mod explain;
 pub mod graph;
+pub mod graph_store;
 pub mod model_scope;
 pub mod output;
 pub mod parsed_content;

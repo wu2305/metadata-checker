@@ -1,5 +1,6 @@
-use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 use crate::output::schema::format_next_query;
+use crate::query::find_candidates;
 use anyhow::Result;
 use regex::Regex;
 use serde::Deserialize;
@@ -765,13 +766,13 @@ fn trace_field_source(
 /// 展开 DataFlow 子图，追溯字段来源
 /// 构建 query_dataflow 输出（返回 Value，不打印）
 pub fn build_query_dataflow_output(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     dataflow_id: &str,
 ) -> Result<serde_json::Value> {
-    let node = match graph.get_node(dataflow_id) {
+    let node = match graph.get_node(dataflow_id)? {
         Some(n) => n,
         None => {
-            let candidates = graph.find_candidates(dataflow_id, 5);
+            let candidates = find_candidates(graph, dataflow_id, 5)?;
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::ModelQuery,
                 dataflow_id,
@@ -786,20 +787,20 @@ pub fn build_query_dataflow_output(
     let dataflow_filters = dfm.project_filters();
 
     let outgoing = graph
-        .get_node_edges(dataflow_id)
-        .map(|(out, _)| out)
+        .get_node_edges(dataflow_id)?
+        .map(|n| n.outgoing)
         .unwrap_or_default();
 
     let inputs: Vec<_> = outgoing
         .iter()
-        .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::DataflowInput))
-        .map(|&(n, e)| (n, e))
+        .filter(|ev| matches!(ev.edge.edge_type, crate::graph::EdgeType::DataflowInput))
+        .map(|ev| (ev.node.clone(), ev.edge.clone()))
         .collect();
 
     let outputs: Vec<_> = outgoing
         .iter()
-        .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::OutputsTo))
-        .map(|&(n, e)| (n, e))
+        .filter(|ev| matches!(ev.edge.edge_type, crate::graph::EdgeType::OutputsTo))
+        .map(|ev| (ev.node.clone(), ev.edge.clone()))
         .collect();
 
     let mut field_traces: Vec<serde_json::Value> = Vec::new();
@@ -908,11 +909,11 @@ pub fn build_query_dataflow_output(
 }
 
 /// 查询 DataFlow 模型（保留旧入口，直接打印 stdout）
-pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result<()> {
-    let node = match graph.get_node(dataflow_id) {
+pub fn query_dataflow(graph: &dyn GraphReadStore, dataflow_id: &str, human: bool) -> Result<()> {
+    let node = match graph.get_node(dataflow_id)? {
         Some(n) => n,
         None => {
-            let candidates = graph.find_candidates(dataflow_id, 5);
+            let candidates = find_candidates(graph, dataflow_id, 5)?;
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::ModelQuery,
                 dataflow_id,
@@ -928,20 +929,20 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
     let _dataflow_filters = dfm.project_filters();
 
     let outgoing = graph
-        .get_node_edges(dataflow_id)
-        .map(|(out, _)| out)
+        .get_node_edges(dataflow_id)?
+        .map(|n| n.outgoing)
         .unwrap_or_default();
 
     let inputs: Vec<_> = outgoing
         .iter()
-        .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::DataflowInput))
-        .map(|&(n, e)| (n, e))
+        .filter(|ev| matches!(ev.edge.edge_type, crate::graph::EdgeType::DataflowInput))
+        .map(|ev| (ev.node.clone(), ev.edge.clone()))
         .collect();
 
     let outputs: Vec<_> = outgoing
         .iter()
-        .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::OutputsTo))
-        .map(|&(n, e)| (n, e))
+        .filter(|ev| matches!(ev.edge.edge_type, crate::graph::EdgeType::OutputsTo))
+        .map(|ev| (ev.node.clone(), ev.edge.clone()))
         .collect();
 
     if human {

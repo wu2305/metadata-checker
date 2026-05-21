@@ -1,18 +1,22 @@
-use super::find_parent_page;
-use crate::graph::GraphDB;
+use super::{find_candidates, find_parent_page};
+use crate::graph::{
+    find_consumed_by_dataflows, find_dataflow_inputs, find_dataflow_outputs, find_produced_by,
+    find_readers, find_writers,
+};
+use crate::graph_store::GraphReadStore;
 use crate::output::schema::format_next_query;
 use anyhow::Result;
 use std::io::{self, Write};
 
 /// 构建 query_model JSON 输出，不直接打印。
 pub fn build_query_model_output(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     model_id: &str,
     budget: &str,
 ) -> Result<serde_json::Value> {
     let is_compact = budget == "compact";
-    if graph.get_node(model_id).is_none() {
-        let candidates = graph.find_candidates(model_id, 5);
+    if graph.get_node(model_id)?.is_none() {
+        let candidates = find_candidates(graph, model_id, 5)?;
         let out = crate::output::schema::build_target_not_found_output(
             crate::output::schema::OutputKind::ModelQuery,
             model_id,
@@ -20,11 +24,10 @@ pub fn build_query_model_output(
         );
         return Ok(serde_json::to_value(out)?);
     }
-    let readers: Vec<_> = graph
-        .find_readers(model_id)
+    let readers: Vec<_> = find_readers(graph, model_id)?
         .into_iter()
         .map(|(n, e)| {
-            let page = find_parent_page(graph, &n.id);
+            let page = find_parent_page(graph, &n.id).unwrap_or(None);
             serde_json::json!({
                 "page": page.as_ref().map(|p| p.name.clone()),
                 "page_id": page.as_ref().map(|p| p.id.clone()),
@@ -38,11 +41,10 @@ pub fn build_query_model_output(
             })
         })
         .collect();
-    let writers: Vec<_> = graph
-        .find_writers(model_id)
+    let writers: Vec<_> = find_writers(graph, model_id)?
         .into_iter()
         .map(|(n, e)| {
-            let page = find_parent_page(graph, &n.id);
+            let page = find_parent_page(graph, &n.id).unwrap_or(None);
             serde_json::json!({
                 "page": page.as_ref().map(|p| p.name.clone()),
                 "page_id": page.as_ref().map(|p| p.id.clone()),
@@ -56,8 +58,7 @@ pub fn build_query_model_output(
             })
         })
         .collect();
-    let dataflow_inputs = graph
-        .find_dataflow_inputs(model_id)
+    let dataflow_inputs = find_dataflow_inputs(graph, model_id)?
         .into_iter()
         .map(|(n, e)| {
             serde_json::json!({
@@ -70,8 +71,7 @@ pub fn build_query_model_output(
             })
         })
         .collect::<Vec<_>>();
-    let dataflow_outputs = graph
-        .find_dataflow_outputs(model_id)
+    let dataflow_outputs = find_dataflow_outputs(graph, model_id)?
         .into_iter()
         .map(|(n, e)| {
             serde_json::json!({
@@ -84,8 +84,7 @@ pub fn build_query_model_output(
             })
         })
         .collect::<Vec<_>>();
-    let produced_by = graph
-        .find_produced_by(model_id)
+    let produced_by = find_produced_by(graph, model_id)?
         .into_iter()
         .map(|(n, e)| {
             serde_json::json!({
@@ -98,8 +97,7 @@ pub fn build_query_model_output(
             })
         })
         .collect::<Vec<_>>();
-    let consumed_by_dataflows = graph
-        .find_consumed_by_dataflows(model_id)
+    let consumed_by_dataflows = find_consumed_by_dataflows(graph, model_id)?
         .into_iter()
         .map(|(n, e)| {
             serde_json::json!({
@@ -112,8 +110,7 @@ pub fn build_query_model_output(
             })
         })
         .collect::<Vec<_>>();
-    let upstream = graph
-        .find_upstream_dependencies(model_id)
+    let upstream = find_dataflow_inputs(graph, model_id)?
         .into_iter()
         .map(|(n, e)| {
             serde_json::json!({
@@ -126,8 +123,7 @@ pub fn build_query_model_output(
             })
         })
         .collect::<Vec<_>>();
-    let downstream = graph
-        .find_downstream_outputs(model_id)
+    let downstream = find_dataflow_outputs(graph, model_id)?
         .into_iter()
         .map(|(n, e)| {
             serde_json::json!({
@@ -327,9 +323,14 @@ pub fn build_query_model_output(
 }
 
 /// 查询某个模型被哪些节点读取/写入。
-pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -> Result<()> {
-    if graph.get_node(model_id).is_none() {
-        let candidates = graph.find_candidates(model_id, 5);
+pub fn query_model(
+    graph: &dyn GraphReadStore,
+    model_id: &str,
+    human: bool,
+    budget: &str,
+) -> Result<()> {
+    if graph.get_node(model_id)?.is_none() {
+        let candidates = find_candidates(graph, model_id, 5)?;
         let out = crate::output::schema::build_target_not_found_output(
             crate::output::schema::OutputKind::ModelQuery,
             model_id,
@@ -342,7 +343,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -
         let mut out = io::stdout();
         writeln!(out, "=== Model: {} ===", model_id)?;
 
-        let readers = graph.find_readers(model_id);
+        let readers = find_readers(graph, model_id)?;
         writeln!(
             out,
             "
@@ -350,7 +351,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -
             readers.len()
         )?;
         for (node, edge) in readers {
-            let page = find_parent_page(graph, &node.id);
+            let page = find_parent_page(graph, &node.id)?;
             let page_info = page
                 .as_ref()
                 .map(|p| format!(" (page: {})", p.name))
@@ -366,7 +367,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -
             )?;
         }
 
-        let writers = graph.find_writers(model_id);
+        let writers = find_writers(graph, model_id)?;
         writeln!(
             out,
             "
@@ -374,7 +375,7 @@ pub fn query_model(graph: &GraphDB, model_id: &str, human: bool, budget: &str) -
             writers.len()
         )?;
         for (node, edge) in writers {
-            let page = find_parent_page(graph, &node.id);
+            let page = find_parent_page(graph, &node.id)?;
             let page_info = page
                 .as_ref()
                 .map(|p| format!(" (page: {})", p.name))

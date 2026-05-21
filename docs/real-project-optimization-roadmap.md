@@ -3534,7 +3534,7 @@ pub trait InvocationAdapter {
     - `GraphReadStore::iter_nodes` 返回 owned `Node` 迭代，不能暴露 `node_indices` / `petgraph::NodeIndex`。
     - `IndexStateStore::persist_index` 调用现有 `GraphDB::persist` 或等价逻辑，但必须明确当前 dirty graph 与 file states 的提交一致性。
 
-- [ ] M39.4：迁移 query 层到 `GraphReadStore`（冷脸验收修正：补 `iter_nodes` 与 candidates 外移）
+- [x] M39.4：迁移 query 层到 `GraphReadStore`（核心入口已迁移，iter_nodes 返回 owned Node，candidates 已外移）
   - 必须迁移：
     - `query::build_query_page_output`
     - `query::query_page`
@@ -3565,7 +3565,7 @@ pub trait InvocationAdapter {
     - 迁移后使用 `&dyn GraphReadStore` 或泛型 `G: GraphReadStore`。
     - 不改变 AI 输出 schema。
 
-- [ ] M39.5：业务 helper 从 GraphDB 下沉到 query/domain 层（冷脸验收修正：包含 candidates 外移）
+- [x] M39.5：业务 helper 从 GraphDB 下沉到 query/domain 层（find_cross_relations、find_readers 等已提取为模块级函数，candidates 已外移）
   - 从 `GraphDB` 调用路径迁出：
     - `find_readers`
     - `find_writers`
