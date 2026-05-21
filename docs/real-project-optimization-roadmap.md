@@ -3292,7 +3292,7 @@ pub struct ToolInvocation {
 
 实施任务清单：
 
-- [ ] M38.1：新增 `ToolCommand` / `ToolSpec` / `ToolRegistry`
+- [x] M38.1：新增 `ToolCommand` / `ToolSpec` / `ToolRegistry`
   - 建议位置：
     - `src/tool_contract.rs` 或 `src/runtime/tool_contract.rs`。
   - 要求：
@@ -3305,7 +3305,7 @@ pub struct ToolInvocation {
     - registry 不包含 `build_graph` / `refresh_index` / `rebuild_graph`。
     - 工具名与别名查找稳定，未知工具返回统一错误码。
 
-- [ ] M38.2：定义标准 `ToolInvocation`
+- [x] M38.2：定义标准 `ToolInvocation`
   - 字段覆盖：
     - `command`
     - `target`
@@ -3326,7 +3326,7 @@ pub struct ToolInvocation {
     - 非法 intent 返回 `INVALID_INTENT`。
     - 非法 depth 返回 `INVALID_DEPTH`。
 
-- [ ] M38.3：扩展 `GraphRuntime::query` 为统一工具执行入口
+- [x] M38.3：扩展 `GraphRuntime::query` 为统一工具执行入口
   - 当前状态：
     - `RuntimeQueryCommand` 只覆盖 `ExplainCondition` / `AdviseQuery`，stdio 仍直接分发 `query_model`、`context`、`explain`、`query_page_logic` 等。
   - 要求：
@@ -3342,7 +3342,7 @@ pub struct ToolInvocation {
     - 长驻进程必须真实支持 `reload_graph` / `check_reload`。
     - 不得把 reload 实现成重新扫描项目或写 graphdb。
 
-- [ ] M38.4：统一错误码
+- [x] M38.4：统一错误码
   - 建议新增：
     - `UNKNOWN_COMMAND`
     - `MISSING_TARGET`
@@ -3370,7 +3370,7 @@ pub struct ToolInvocation {
     - CLI / stdio 同一非法参数返回同一 code。
     - `check_reload` 未变化返回成功并带 `GRAPH_UNCHANGED` 诊断。
 
-- [ ] M38.5：实现调用方式 adapter
+- [x] M38.5：实现调用方式 adapter
   - 建议 trait：
 
 ```rust
@@ -3397,7 +3397,7 @@ pub trait InvocationAdapter {
     - CLI adapter 与 stdio adapter 对同一逻辑输入产出同一 `ToolInvocation`。
     - adapter 只处理输入/输出包装，不直接调用 `query_model` 等业务函数。
 
-- [ ] M38.6：统一输出 envelope 与 `ResponseProcessor` 使用方式
+- [x] M38.6：统一输出 envelope 与 `ResponseProcessor` 使用方式
   - 要求：
     - 核心执行返回 `ToolResponse` 或复用 `RuntimeQueryResponse` 的等价结构。
     - adapter 决定外层 envelope：
@@ -3410,7 +3410,7 @@ pub trait InvocationAdapter {
     - `timing.output_size_bytes` 的含义在 CLI / stdio 中保持当前约定或文档同步说明。
     - `human=true` 仍在不支持的调用方式返回 `HUMAN_MODE_NOT_SUPPORTED`。
 
-- [ ] M38.7：CLI / stdio parity 回归
+- [x] M38.7：CLI / stdio parity 回归
   - 覆盖命令：
     - `explain_condition`
     - `explain`
@@ -3430,7 +3430,7 @@ pub trait InvocationAdapter {
     - 用 xiaoshouyi graphdb 验证至少一个 `explain_condition` 与一个 `query_page_logic`。
     - 验证 `check_reload` 不会触发项目扫描。
 
-- [ ] M38.8：文档与 skill 同步
+- [x] M38.8：文档与 skill 同步
   - 更新：
     - `docs/schema.md`
     - `README.md` 或 CLI 使用文档

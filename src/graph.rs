@@ -268,7 +268,7 @@ impl GraphDB {
             Err(e) => {
                 out.diagnostics.push(Diagnostic {
                     severity: DiagnosticSeverity::Error,
-                    code: "GRAPH_DB_LOCK_FAILED".to_string(),
+                    code: "GRAPH_DB_LOCKED".to_string(),
                     message: format!("Cannot acquire graphdb lock: {}", e),
                     location: Location {
                         source_file: Some(db_path.to_string_lossy().to_string()),
@@ -280,6 +280,10 @@ impl GraphDB {
                             .to_string(),
                     ),
                 });
+                out.next_queries.push(format_next_query(
+                    "metadata-checker --graph-db-path {} --graph-lock-timeout-ms <MS>",
+                    &db_path.to_string_lossy(),
+                ));
                 return out;
             }
         };

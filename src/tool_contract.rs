@@ -42,6 +42,49 @@ pub struct ToolSpec {
     pub supported_intents: &'static [&'static str],
 }
 
+/// 标准工具响应，adapter 用它渲染各自的外层 envelope。
+#[derive(Debug, Clone)]
+pub struct ToolResponse {
+    pub ok: bool,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<ToolError>,
+    pub diagnostics: Vec<String>,
+}
+
+impl ToolResponse {
+    /// 构造成功响应。
+    pub fn ok(result: serde_json::Value, diagnostics: Vec<String>) -> Self {
+        Self {
+            ok: true,
+            result: Some(result),
+            error: None,
+            diagnostics,
+        }
+    }
+
+    /// 构造失败响应。
+    pub fn error(error: ToolError, diagnostics: Vec<String>) -> Self {
+        Self {
+            ok: false,
+            result: None,
+            error: Some(error),
+            diagnostics,
+        }
+    }
+}
+
+/// 调用方式 adapter：各入口只负责输入解析和输出渲染。
+pub trait InvocationAdapter {
+    type RawInput;
+    type RawOutput;
+
+    /// 将入口原始输入解析为标准调用对象。
+    fn parse_input(&self, raw: Self::RawInput) -> Result<ToolInvocation, ToolError>;
+
+    /// 将标准响应渲染为入口自己的输出 envelope。
+    fn render_output(&self, response: ToolResponse) -> Result<Self::RawOutput, ToolError>;
+}
+
 /// 统一错误码。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -209,7 +252,7 @@ impl ToolRegistry {
                 requires_target: true,
                 requires_graph: true,
                 mutates_runtime: false,
-                supports_human: true,
+                supports_human: false,
                 supported_budgets: &["compact", "normal", "full"],
                 supported_intents: &[],
             },
@@ -221,7 +264,7 @@ impl ToolRegistry {
                 requires_target: true,
                 requires_graph: true,
                 mutates_runtime: false,
-                supports_human: true,
+                supports_human: false,
                 supported_budgets: &["compact", "normal", "full"],
                 supported_intents: &[],
             },
@@ -233,7 +276,7 @@ impl ToolRegistry {
                 requires_target: true,
                 requires_graph: true,
                 mutates_runtime: false,
-                supports_human: true,
+                supports_human: false,
                 supported_budgets: &["compact", "normal", "full"],
                 supported_intents: &[],
             },
@@ -245,7 +288,7 @@ impl ToolRegistry {
                 requires_target: true,
                 requires_graph: true,
                 mutates_runtime: false,
-                supports_human: true,
+                supports_human: false,
                 supported_budgets: &["compact", "normal", "full"],
                 supported_intents: &[],
             },

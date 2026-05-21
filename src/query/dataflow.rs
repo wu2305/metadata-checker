@@ -763,6 +763,151 @@ fn trace_field_source(
     steps
 }
 /// 展开 DataFlow 子图，追溯字段来源
+/// 构建 query_dataflow 输出（返回 Value，不打印）
+pub fn build_query_dataflow_output(
+    graph: &GraphDB,
+    dataflow_id: &str,
+) -> Result<serde_json::Value> {
+    let node = match graph.get_node(dataflow_id) {
+        Some(n) => n,
+        None => {
+            let candidates = graph.find_candidates(dataflow_id, 5);
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::ModelQuery,
+                dataflow_id,
+                &candidates,
+            );
+            return Ok(serde_json::to_value(out)?);
+        }
+    };
+
+    let raw_meta = node.meta.as_ref();
+    let dfm = raw_meta.map(DataFlowMeta::from_meta).unwrap_or_default();
+    let dataflow_filters = dfm.project_filters();
+
+    let outgoing = graph
+        .get_node_edges(dataflow_id)
+        .map(|(out, _)| out)
+        .unwrap_or_default();
+
+    let inputs: Vec<_> = outgoing
+        .iter()
+        .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::DataflowInput))
+        .map(|&(n, e)| (n, e))
+        .collect();
+
+    let outputs: Vec<_> = outgoing
+        .iter()
+        .filter(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::OutputsTo))
+        .map(|&(n, e)| (n, e))
+        .collect();
+
+    let mut field_traces: Vec<serde_json::Value> = Vec::new();
+
+    let output_nodes = dfm.get_output_fields();
+    let is_dimensions_fallback = output_nodes.iter().any(|(id, _)| *id == "default");
+
+    if output_nodes.is_empty() {
+        field_traces.push(serde_json::json!({
+            "trace_source": "missing",
+            "diagnostics": "No output node fields or dimensions found",
+        }));
+    } else {
+        for (node_id, fields) in output_nodes {
+            let trace_source = if is_dimensions_fallback {
+                "dimensions_fallback"
+            } else {
+                "output_node"
+            };
+            let alias = dfm
+                .get_alias(node_id)
+                .map_or(node_id.to_string(), |v| v.clone());
+
+            for (field_name, field_rec) in fields {
+                let mut visited: Vec<(String, String)> = Vec::new();
+                let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
+                let origin_projection = project_output_field_origin(&dfm, field_name);
+
+                field_traces.push(serde_json::json!({
+                    "field": field_name,
+                    "dbfield": field_rec.dbfield,
+                    "output_node_id": node_id,
+                    "output_node_alias": alias,
+                    "trace_source": trace_source,
+                    "origin_projection": origin_projection.to_json(),
+                    "trace": trace.iter().map(|s| serde_json::json!({
+                        "node_alias": s.node_alias,
+                        "node_type": s.node_type,
+                        "module_table_path": s.module_table_path,
+                        "field_name": s.field_name,
+                        "dbfield": s.dbfield,
+                        "input_node": s.input_node,
+                        "exp": s.exp,
+                    })).collect::<Vec<_>>(),
+                }));
+            }
+        }
+    }
+
+    let summary = serde_json::json!({
+        "dataflow_id": dataflow_id,
+        "name": node.name,
+        "model_type": raw_meta.and_then(|m| m.get("modelType")).and_then(|v| v.as_str()).unwrap_or("DataFlow"),
+        "input_count": inputs.len(),
+        "output_count": outputs.len(),
+    });
+
+    let details = serde_json::json!({
+        "inputs": inputs.iter().map(|(n, e)| serde_json::json!({
+            "id": n.id,
+            "name": n.name,
+            "path": n.path,
+            "field_path": e.field_path,
+        })).collect::<Vec<_>>(),
+        "outputs": outputs.iter().map(|(n, e)| serde_json::json!({
+            "id": n.id,
+            "name": n.name,
+            "path": n.path,
+            "field_path": e.field_path,
+        })).collect::<Vec<_>>(),
+        "field_traces": field_traces,
+        "internal_deps": dfm.internal_deps.iter().map(|(id, deps)| serde_json::json!({
+            "node_id": id,
+            "depends_on": deps,
+        })).collect::<Vec<_>>(),
+        "dataflow_filters": dataflow_filters.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
+    });
+
+    let mut output =
+        crate::output::AiOutput::new(crate::output::OutputKind::DataFlowQuery, summary);
+    output.query_target = Some(dataflow_id.to_string());
+    output.details = Some(details);
+    output.evidence.push(
+        crate::output::Evidence::new(
+            format!("DataFlow {} has {} inputs", dataflow_id, inputs.len()),
+            "Parsed from DataFlow metadata: input nodes",
+        )
+        .with_confidence(crate::output::Confidence::High)
+        .with_node_id(dataflow_id),
+    );
+    output.evidence.push(
+        crate::output::Evidence::new(
+            format!("DataFlow {} has {} outputs", dataflow_id, outputs.len()),
+            "Parsed from DataFlow metadata: output nodes",
+        )
+        .with_confidence(crate::output::Confidence::High)
+        .with_node_id(dataflow_id),
+    );
+    output.next_queries = vec![
+        format_next_query("--explain {} for semantic summary", dataflow_id),
+        format_next_query("--context {} --depth 2", dataflow_id),
+    ];
+
+    let output = output.validate();
+    Ok(serde_json::to_value(output)?)
+}
+
+/// 查询 DataFlow 模型（保留旧入口，直接打印 stdout）
 pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result<()> {
     let node = match graph.get_node(dataflow_id) {
         Some(n) => n,
@@ -780,7 +925,7 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
 
     let raw_meta = node.meta.as_ref();
     let dfm = raw_meta.map(DataFlowMeta::from_meta).unwrap_or_default();
-    let dataflow_filters = dfm.project_filters();
+    let _dataflow_filters = dfm.project_filters();
 
     let outgoing = graph
         .get_node_edges(dataflow_id)
@@ -937,109 +1082,8 @@ pub fn query_dataflow(graph: &GraphDB, dataflow_id: &str, human: bool) -> Result
             }
         }
     } else {
-        let mut field_traces: Vec<serde_json::Value> = Vec::new();
-
-        let output_nodes = dfm.get_output_fields();
-        let is_dimensions_fallback = output_nodes.iter().any(|(id, _)| *id == "default");
-
-        if output_nodes.is_empty() {
-            field_traces.push(serde_json::json!({
-                "trace_source": "missing",
-                "diagnostics": "No output node fields or dimensions found",
-            }));
-        } else {
-            for (node_id, fields) in output_nodes {
-                let trace_source = if is_dimensions_fallback {
-                    "dimensions_fallback"
-                } else {
-                    "output_node"
-                };
-                let alias = dfm
-                    .get_alias(node_id)
-                    .map_or(node_id.to_string(), |v| v.clone());
-
-                for (field_name, field_rec) in fields {
-                    let mut visited: Vec<(String, String)> = Vec::new();
-                    let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
-                    let origin_projection = project_output_field_origin(&dfm, field_name);
-
-                    field_traces.push(serde_json::json!({
-                        "field": field_name,
-                        "dbfield": field_rec.dbfield,
-                        "output_node_id": node_id,
-                        "output_node_alias": alias,
-                        "trace_source": trace_source,
-                        "origin_projection": origin_projection.to_json(),
-                        "trace": trace.iter().map(|s| serde_json::json!({
-                            "node_alias": s.node_alias,
-                            "node_type": s.node_type,
-                            "module_table_path": s.module_table_path,
-                            "field_name": s.field_name,
-                            "dbfield": s.dbfield,
-                            "input_node": s.input_node,
-                            "exp": s.exp,
-                        })).collect::<Vec<_>>(),
-                    }));
-                }
-            }
-        }
-
-        let summary = serde_json::json!({
-            "dataflow_id": dataflow_id,
-            "name": node.name,
-            "model_type": raw_meta.and_then(|m| m.get("modelType")).and_then(|v| v.as_str()).unwrap_or("DataFlow"),
-            "input_count": inputs.len(),
-            "output_count": outputs.len(),
-        });
-
-        let details = serde_json::json!({
-            "inputs": inputs.iter().map(|(n, e)| serde_json::json!({
-                "id": n.id,
-                "name": n.name,
-                "path": n.path,
-                "field_path": e.field_path,
-            })).collect::<Vec<_>>(),
-            "outputs": outputs.iter().map(|(n, e)| serde_json::json!({
-                "id": n.id,
-                "name": n.name,
-                "path": n.path,
-                "field_path": e.field_path,
-            })).collect::<Vec<_>>(),
-            "field_traces": field_traces,
-            "internal_deps": dfm.internal_deps.iter().map(|(id, deps)| serde_json::json!({
-                "node_id": id,
-                "depends_on": deps,
-            })).collect::<Vec<_>>(),
-            "dataflow_filters": dataflow_filters.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
-        });
-
-        let mut output =
-            crate::output::AiOutput::new(crate::output::OutputKind::DataFlowQuery, summary);
-        output.query_target = Some(dataflow_id.to_string());
-        output.details = Some(details);
-        output.evidence.push(
-            crate::output::Evidence::new(
-                format!("DataFlow {} has {} inputs", dataflow_id, inputs.len()),
-                "Parsed from DataFlow metadata: input nodes",
-            )
-            .with_confidence(crate::output::Confidence::High)
-            .with_node_id(dataflow_id),
-        );
-        output.evidence.push(
-            crate::output::Evidence::new(
-                format!("DataFlow {} has {} outputs", dataflow_id, outputs.len()),
-                "Parsed from DataFlow metadata: output nodes",
-            )
-            .with_confidence(crate::output::Confidence::High)
-            .with_node_id(dataflow_id),
-        );
-        output.next_queries = vec![
-            format_next_query("--explain {} for semantic summary", dataflow_id),
-            format_next_query("--context {} --depth 2", dataflow_id),
-        ];
-
-        let output = output.validate();
-        println!("{}", serde_json::to_string_pretty(&output)?);
+        let val = build_query_dataflow_output(graph, dataflow_id)?;
+        println!("{}", serde_json::to_string_pretty(&val)?);
     }
     Ok(())
 }

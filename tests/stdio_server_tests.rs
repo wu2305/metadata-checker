@@ -1,3 +1,4 @@
+use metadata_checker::tool_contract::ToolRegistry;
 use std::io::{BufRead, Write};
 use std::process::{Command, Stdio};
 
@@ -961,26 +962,35 @@ fn test_stdio_server_check_reload_failure() {
     let stdout = child.stdout.take().expect("stdout");
     let mut stdout_reader = std::io::BufReader::new(stdout);
 
-    // 等待 server 启动完成
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    // 破坏 graphdb 文件
-    std::fs::write(&db_path, b"not a valid graphdb").unwrap();
-
-    let req = serde_json::json!({
-        "request_id": "req-check-reload-fail",
-        "command": "explain_condition",
-        "target": "comp:app/actions_test.spg|input1",
-        "budget": "compact",
-        "human": false,
-        "check_reload": true
+    let status_req = serde_json::json!({
+        "request_id": "req-check-reload-ready",
+        "command": "status"
     });
-
     {
         let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", status_req).unwrap();
+        stdin_lock.flush().unwrap();
+
+        let mut ready_line = String::new();
+        stdout_reader.read_line(&mut ready_line).unwrap();
+        let ready_resp: serde_json::Value =
+            serde_json::from_str(&ready_line).expect("ready resp must be valid JSON");
+        assert_eq!(ready_resp["ok"].as_bool(), Some(true));
+
+        // server 确认加载完成后再破坏 graphdb，避免 baseline fingerprint 记录到坏文件。
+        std::fs::write(&db_path, b"not a valid graphdb").unwrap();
+
+        let req = serde_json::json!({
+            "request_id": "req-check-reload-fail",
+            "command": "explain_condition",
+            "target": "comp:app/actions_test.spg|input1",
+            "budget": "compact",
+            "human": false,
+            "check_reload": true
+        });
+
         writeln!(stdin_lock, "{}", req).unwrap();
         stdin_lock.flush().unwrap();
-        drop(stdin_lock);
     }
 
     let mut line = String::new();
@@ -1991,4 +2001,161 @@ fn test_real_project_stdio_query_model_fact_qw_sidebar() {
     if let Some(path) = cleanup_db {
         let _ = std::fs::remove_file(path);
     }
+}
+
+#[test]
+fn test_stdio_server_all_registry_commands_accepted() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    fn request_extra(command: &str) -> serde_json::Value {
+        match command {
+            "explain_condition" | "explain-condition" => {
+                serde_json::json!({"target": "comp:app/actions_test.spg|button1"})
+            }
+            "explain" => serde_json::json!({"target": "page:app/actions_test.spg"}),
+            "query_model" | "query-model" => serde_json::json!({"target": "model:model1"}),
+            "query_page" | "query-page" => {
+                serde_json::json!({"target": "page:app/actions_test.spg"})
+            }
+            "query_cross" | "query-cross" => serde_json::json!({
+                "target": "page:app/actions_test.spg,page:app/page_relations.spg"
+            }),
+            "query_dataflow" | "query-dataflow" => {
+                serde_json::json!({"target": "model:dataflow_a"})
+            }
+            "query_page_logic" | "query-page-logic" => {
+                serde_json::json!({"target": "page:app/actions_test.spg"})
+            }
+            "find_page" | "find-page" => serde_json::json!({"target": "actions"}),
+            "find_model" | "find-model" => serde_json::json!({"target": "model1"}),
+            "find_component" | "find-component" => serde_json::json!({"target": "button"}),
+            "advise_query" | "advise-query" => serde_json::json!({"target": "model:model1"}),
+            "context" => serde_json::json!({"target": "page:app/actions_test.spg", "depth": 1}),
+            "status" | "reload_graph" | "reload" | "check_reload" | "check-reload" => {
+                serde_json::json!({})
+            }
+            other => panic!(
+                "missing request fixture for registry command alias: {}",
+                other
+            ),
+        }
+    }
+
+    let mut commands: Vec<String> = Vec::new();
+    for spec in ToolRegistry::all_specs() {
+        commands.push(spec.name.to_string());
+        commands.extend(spec.aliases.iter().map(|alias| alias.to_string()));
+    }
+
+    {
+        let mut stdin_lock = stdin;
+        for (i, cmd) in commands.iter().enumerate() {
+            let extra = request_extra(cmd);
+            let mut req = serde_json::json!({
+                "request_id": format!("req-all-{}", i),
+                "command": cmd,
+                "budget": "compact",
+                "human": false,
+            });
+            if let Some(obj) = req.as_object_mut() {
+                if let serde_json::Value::Object(extra_obj) = extra {
+                    for (k, v) in extra_obj {
+                        obj.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            writeln!(stdin_lock, "{}", req).unwrap();
+        }
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    for i in 0..commands.len() {
+        let mut line = String::new();
+        stdout_reader.read_line(&mut line).expect("read line");
+        let resp: serde_json::Value = serde_json::from_str(&line).expect("valid JSON");
+        assert_stdio_envelope(&resp, true);
+        let code = stdio_error_code(&resp);
+        assert_ne!(
+            code,
+            Some("UNKNOWN_COMMAND"),
+            "command '{}' should not be UNKNOWN_COMMAND (got error: {:?})",
+            commands[i],
+            resp["error"]
+        );
+    }
+
+    let _ = child.kill();
+}
+
+#[test]
+fn test_stdio_server_check_reload_command_returns_unchanged_or_reloaded() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let bin = env!("CARGO_BIN_EXE_metadata-checker");
+
+    let mut child = Command::new(bin)
+        .args([
+            "--serve-stdio",
+            "--graph-db-path",
+            db_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn stdio server");
+
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stdout_reader = std::io::BufReader::new(stdout);
+
+    let req = serde_json::json!({
+        "request_id": "req-check-reload",
+        "command": "check_reload",
+        "budget": "compact",
+        "human": false
+    });
+
+    {
+        let mut stdin_lock = stdin;
+        writeln!(stdin_lock, "{}", req).unwrap();
+        stdin_lock.flush().unwrap();
+        drop(stdin_lock);
+    }
+
+    let mut line = String::new();
+    stdout_reader.read_line(&mut line).expect("read line");
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("valid JSON");
+    assert_stdio_envelope(&resp, true);
+    let diagnostics: Vec<String> = resp["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+    assert!(
+        diagnostics.contains(&"GRAPH_UNCHANGED".to_string())
+            || diagnostics.contains(&"GRAPH_RELOADED".to_string()),
+        "check_reload should produce GRAPH_UNCHANGED or GRAPH_RELOADED diagnostics, got: {:?}",
+        diagnostics
+    );
+
+    let _ = child.kill();
 }

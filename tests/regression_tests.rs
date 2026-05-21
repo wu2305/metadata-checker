@@ -1283,6 +1283,112 @@ fn run_cli_stderr(args: &[&str]) -> String {
     String::from_utf8(cmd_output.stderr).expect("Invalid UTF-8")
 }
 
+fn unique_cli_graph_db_path(suffix: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("metadata-checker-cli-{}-{}.graphdb", suffix, nanos))
+}
+
+#[test]
+fn test_cli_runtime_status_contract() {
+    let db_path = unique_cli_graph_db_path("status");
+    let db_path_str = db_path.to_str().expect("db path must be valid utf-8");
+    scan_project(Path::new("tests/fixtures/test_project"), &db_path)
+        .expect("fixture graphdb must be built");
+
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--graph-db-path",
+        db_path_str,
+        "--status",
+    ]);
+    let value: serde_json::Value =
+        serde_json::from_str(&output).expect("status output must be JSON");
+
+    assert_eq!(value["load_count"].as_u64(), Some(1));
+    assert_eq!(value["reload_count"].as_u64(), Some(0));
+    assert!(
+        value["node_count"].as_u64().unwrap_or(0) > 0,
+        "status must expose node_count > 0, got: {}",
+        value
+    );
+    assert!(
+        value["edge_count"].as_u64().unwrap_or(0) > 0,
+        "status must expose edge_count > 0, got: {}",
+        value
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
+}
+
+#[test]
+fn test_cli_runtime_reload_graph_contract() {
+    let db_path = unique_cli_graph_db_path("reload");
+    let db_path_str = db_path.to_str().expect("db path must be valid utf-8");
+    scan_project(Path::new("tests/fixtures/test_project"), &db_path)
+        .expect("fixture graphdb must be built");
+
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--graph-db-path",
+        db_path_str,
+        "--reload-graph",
+    ]);
+    let value: serde_json::Value =
+        serde_json::from_str(&output).expect("reload_graph output must be JSON");
+
+    assert_eq!(value["load_count"].as_u64(), Some(1));
+    assert_eq!(value["reload_count"].as_u64(), Some(1));
+    assert!(
+        value["node_count"].as_u64().unwrap_or(0) > 0,
+        "reload_graph must return runtime status, got: {}",
+        value
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
+}
+
+#[test]
+fn test_cli_runtime_check_reload_contract() {
+    let db_path = unique_cli_graph_db_path("check-reload");
+    let db_path_str = db_path.to_str().expect("db path must be valid utf-8");
+    scan_project(Path::new("tests/fixtures/test_project"), &db_path)
+        .expect("fixture graphdb must be built");
+
+    let output = run_cli(&[
+        "--project-dir",
+        "tests/fixtures/test_project",
+        "--graph-db-path",
+        db_path_str,
+        "--check-reload",
+    ]);
+    let value: serde_json::Value =
+        serde_json::from_str(&output).expect("check_reload output must be JSON");
+
+    assert_eq!(value["reloaded"].as_bool(), Some(false));
+    assert_eq!(
+        value["diagnostics"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(|v| v.as_str()),
+        Some("GRAPH_UNCHANGED")
+    );
+    assert!(
+        value["status"]["node_count"].as_u64().unwrap_or(0) > 0,
+        "check_reload must include runtime status, got: {}",
+        value
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
+}
+
 #[test]
 fn test_cli_query_model_contract() {
     let output = run_cli(&[

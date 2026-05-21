@@ -1,3 +1,7 @@
+use crate::tool_contract::{
+    InvocationAdapter, ToolCommand, ToolError, ToolErrorCode, ToolInvocation, ToolRegistry,
+    ToolResponse,
+};
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -77,6 +81,15 @@ pub struct Cli {
 
     #[arg(long, help = "Check graph database status and output JSON report")]
     pub check_graph: bool,
+
+    #[arg(long, help = "Show runtime status (loaded graphdb info)")]
+    pub status: bool,
+
+    #[arg(long, help = "Reload graph database from disk")]
+    pub reload_graph: bool,
+
+    #[arg(long, help = "Check if graph database changed and reload if needed")]
+    pub check_reload: bool,
 
     #[arg(long, help = "Build/update graph database from project directory")]
     pub build_graph: bool,
@@ -238,5 +251,135 @@ impl Cli {
         self.project_dir
             .as_ref()
             .map(|dir| dir.join(".metadata-checker.graphdb"))
+    }
+}
+
+/// CLI runtime 工具调用的入口原始输入。
+///
+/// Clap 负责把命令行解析成 `Cli`，该结构只承载已判定为 runtime 工具的参数，
+/// 由 `CliAdapter` 统一转换为 `ToolInvocation`。
+#[derive(Debug, Clone)]
+pub struct CliToolInput {
+    pub command: ToolCommand,
+    pub target: Option<String>,
+    pub budget: String,
+    pub human: bool,
+    pub intent: Option<String>,
+    pub page_scope: Option<String>,
+    pub depth: Option<usize>,
+    pub check_reload: bool,
+}
+
+/// CLI 调用 adapter，负责命令行 runtime 工具参数到标准调用对象的转换。
+pub struct CliAdapter;
+
+impl InvocationAdapter for CliAdapter {
+    type RawInput = CliToolInput;
+    type RawOutput = serde_json::Value;
+
+    fn parse_input(&self, raw: Self::RawInput) -> Result<ToolInvocation, ToolError> {
+        let spec = ToolRegistry::find_by_command(raw.command).ok_or_else(|| {
+            ToolError::new(
+                ToolErrorCode::UnknownCommand,
+                format!("Tool spec not found for CLI command: {:?}", raw.command),
+            )
+        })?;
+
+        crate::tool_contract::validate_budget(&raw.budget)?;
+
+        if spec.requires_target {
+            let target = raw.target.as_deref().unwrap_or("");
+            if target.trim().is_empty() {
+                return Err(ToolError::new(
+                    ToolErrorCode::MissingTarget,
+                    format!("Missing target for {}", spec.name),
+                ));
+            }
+            crate::tool_contract::validate_target_prefix(raw.command, target)?;
+        }
+
+        if let Some(intent) = raw.intent.as_deref() {
+            if !spec.supported_intents.is_empty() {
+                crate::tool_contract::validate_intent(intent)?;
+            }
+        }
+
+        Ok(ToolInvocation {
+            command: raw.command,
+            target: raw.target,
+            budget: Some(raw.budget),
+            intent: raw.intent,
+            depth: raw.depth,
+            page_scope: raw.page_scope,
+            human: raw.human,
+            check_reload: raw.check_reload,
+        })
+    }
+
+    fn render_output(&self, response: ToolResponse) -> Result<Self::RawOutput, ToolError> {
+        if response.ok {
+            Ok(response.result.unwrap_or(serde_json::Value::Null))
+        } else {
+            let err = response.error.unwrap_or_else(|| {
+                ToolError::new(ToolErrorCode::InternalError, "Missing tool error")
+            });
+            Ok(serde_json::json!({
+                "ok": false,
+                "error": {
+                    "code": err.code_str(),
+                    "message": err.message,
+                },
+                "diagnostics": response.diagnostics,
+            }))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool_contract::{InvocationAdapter, ToolErrorCode};
+
+    #[test]
+    fn test_cli_adapter_builds_standard_invocation() {
+        let adapter = CliAdapter;
+        let invocation = adapter
+            .parse_input(CliToolInput {
+                command: ToolCommand::QueryPageLogic,
+                target: Some("page:app/actions_test.spg".to_string()),
+                budget: "compact".to_string(),
+                human: false,
+                intent: None,
+                page_scope: None,
+                depth: None,
+                check_reload: false,
+            })
+            .expect("valid CLI input must parse");
+
+        assert_eq!(invocation.command, ToolCommand::QueryPageLogic);
+        assert_eq!(
+            invocation.target.as_deref(),
+            Some("page:app/actions_test.spg")
+        );
+        assert_eq!(invocation.budget.as_deref(), Some("compact"));
+    }
+
+    #[test]
+    fn test_cli_adapter_rejects_missing_target() {
+        let adapter = CliAdapter;
+        let err = adapter
+            .parse_input(CliToolInput {
+                command: ToolCommand::QueryModel,
+                target: None,
+                budget: "compact".to_string(),
+                human: false,
+                intent: None,
+                page_scope: None,
+                depth: None,
+                check_reload: false,
+            })
+            .expect_err("missing target must fail");
+
+        assert_eq!(err.code, ToolErrorCode::MissingTarget);
     }
 }

@@ -4,55 +4,9 @@ use std::io::{self, BufRead, Write};
 
 use crate::response_processor::ResponseProcessor;
 use crate::runtime::{GraphRuntime, RuntimeQueryRequest};
-use crate::tool_contract::ToolRegistry;
-
-/// Stdio 支持的命令枚举
-///
-/// 将字符串命令解析为类型安全枚举，避免大 match 中散落字符串字面量。
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum StdioCommand {
-    ExplainCondition,
-    Explain,
-    QueryModel,
-    QueryPageLogic,
-    AdviseQuery,
-    Context,
-    Status,
-    Reload,
-    Unknown(String),
-}
-
-impl StdioCommand {
-    fn parse(s: &str) -> Self {
-        match s {
-            "explain_condition" => StdioCommand::ExplainCondition,
-            "explain" => StdioCommand::Explain,
-            "query_model" => StdioCommand::QueryModel,
-            "query_page_logic" => StdioCommand::QueryPageLogic,
-            "advise_query" => StdioCommand::AdviseQuery,
-            "context" => StdioCommand::Context,
-            "status" => StdioCommand::Status,
-            "reload" => StdioCommand::Reload,
-            other => StdioCommand::Unknown(other.to_string()),
-        }
-    }
-
-    /// 映射到 M38 统一 ToolCommand。
-    fn to_tool_command(&self) -> Option<crate::tool_contract::ToolCommand> {
-        use crate::tool_contract::ToolCommand;
-        match self {
-            StdioCommand::ExplainCondition => Some(ToolCommand::ExplainCondition),
-            StdioCommand::Explain => Some(ToolCommand::Explain),
-            StdioCommand::QueryModel => Some(ToolCommand::QueryModel),
-            StdioCommand::QueryPageLogic => Some(ToolCommand::QueryPageLogic),
-            StdioCommand::AdviseQuery => Some(ToolCommand::AdviseQuery),
-            StdioCommand::Context => Some(ToolCommand::Context),
-            StdioCommand::Status => Some(ToolCommand::Status),
-            StdioCommand::Reload => Some(ToolCommand::ReloadGraph),
-            StdioCommand::Unknown(_) => None,
-        }
-    }
-}
+use crate::tool_contract::{
+    InvocationAdapter, ToolError, ToolErrorCode, ToolInvocation, ToolRegistry, ToolResponse,
+};
 
 /// Stdio JSONL 请求
 ///
@@ -123,6 +77,85 @@ fn error_response(
     }
 }
 
+/// stdio 调用 adapter，负责 JSONL 请求和标准工具调用之间的转换。
+pub struct StdioAdapter;
+
+impl InvocationAdapter for StdioAdapter {
+    type RawInput = StdioRequest;
+    type RawOutput = StdioResponse;
+
+    fn parse_input(&self, raw: Self::RawInput) -> std::result::Result<ToolInvocation, ToolError> {
+        let spec = ToolRegistry::find_by_name(&raw.command).ok_or_else(|| {
+            ToolError::new(
+                ToolErrorCode::UnknownCommand,
+                format!(
+                    "Unknown command: '{}'. Supported: {}",
+                    raw.command,
+                    ToolRegistry::command_names().join(", ")
+                ),
+            )
+        })?;
+
+        let budget = raw.budget.unwrap_or_else(|| "normal".to_string());
+        crate::tool_contract::validate_budget(&budget)?;
+
+        let intent = raw.intent.unwrap_or_else(|| "auto".to_string());
+        if !spec.supported_intents.is_empty() {
+            crate::tool_contract::validate_intent(&intent)?;
+        }
+
+        if spec.requires_target {
+            let target = raw.target.as_deref().unwrap_or("");
+            if target.trim().is_empty() {
+                return Err(ToolError::new(
+                    ToolErrorCode::MissingTarget,
+                    format!("Missing target for {}", spec.name),
+                ));
+            }
+            crate::tool_contract::validate_target_prefix(spec.command, target)?;
+        }
+
+        let depth = crate::tool_contract::validate_depth(raw.depth.as_ref())?;
+
+        Ok(ToolInvocation {
+            command: spec.command,
+            target: raw.target,
+            budget: Some(budget),
+            intent: Some(intent),
+            depth: Some(depth),
+            page_scope: raw.page_scope,
+            human: raw.human.unwrap_or(false),
+            check_reload: raw.check_reload.unwrap_or(false),
+        })
+    }
+
+    fn render_output(
+        &self,
+        response: ToolResponse,
+    ) -> std::result::Result<StdioResponse, ToolError> {
+        Ok(if response.ok {
+            StdioResponse {
+                request_id: String::new(),
+                ok: true,
+                result: response.result,
+                error: None,
+                diagnostics: response.diagnostics,
+                timing: Some(zero_timing()),
+            }
+        } else {
+            let err = response.error.unwrap_or_else(|| {
+                ToolError::new(ToolErrorCode::InternalError, "Missing tool error")
+            });
+            error_response(
+                String::new(),
+                err.code_str(),
+                err.message,
+                response.diagnostics,
+            )
+        })
+    }
+}
+
 /// 启动 JSONL stdio 服务
 ///
 /// 加载 graphdb 一次，进入 stdin/stdout 循环处理请求。
@@ -186,40 +219,10 @@ pub fn run_stdio_server(
 /// 处理单个请求
 fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioResponse {
     let mut diagnostics = Vec::new();
-
-    let command = StdioCommand::parse(&request.command);
-
-    // 未知命令
-    let tool_command = match command.to_tool_command() {
-        Some(tc) => tc,
-        None => {
-            return error_response(
-                request.request_id.clone(),
-                "UNKNOWN_COMMAND",
-                format!("Unknown command: {}", request.command),
-                diagnostics,
-            );
-        }
-    };
-
-    // M38 统一参数校验
-    let budget = request
-        .budget
-        .clone()
-        .unwrap_or_else(|| "normal".to_string());
-    if let Err(err) = crate::tool_contract::validate_budget(&budget) {
-        return error_response(
-            request.request_id.clone(),
-            err.code_str(),
-            err.message,
-            diagnostics,
-        );
-    }
-
-    let human = request.human.unwrap_or(false);
-    let intent = request.intent.clone().unwrap_or_else(|| "auto".to_string());
-    if command == StdioCommand::ExplainCondition {
-        if let Err(err) = crate::tool_contract::validate_intent(&intent) {
+    let adapter = StdioAdapter;
+    let invocation = match adapter.parse_input(request.clone()) {
+        Ok(i) => i,
+        Err(err) => {
             return error_response(
                 request.request_id.clone(),
                 err.code_str(),
@@ -227,22 +230,11 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
                 diagnostics,
             );
         }
-    }
-
-    let spec = match ToolRegistry::find_by_command(tool_command) {
-        Some(s) => s,
-        None => {
-            return error_response(
-                request.request_id.clone(),
-                "INTERNAL_ERROR",
-                format!("Tool spec not found for command: {}", request.command),
-                diagnostics,
-            );
-        }
     };
+    let spec = ToolRegistry::find_by_command(invocation.command).expect("registered command");
 
     // 处理 status 命令
-    if tool_command == crate::tool_contract::ToolCommand::Status {
+    if invocation.command == crate::tool_contract::ToolCommand::Status {
         let status = runtime.status();
         return StdioResponse {
             request_id: request.request_id.clone(),
@@ -255,7 +247,7 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
     }
 
     // 处理 reload 命令
-    if tool_command == crate::tool_contract::ToolCommand::ReloadGraph {
+    if invocation.command == crate::tool_contract::ToolCommand::ReloadGraph {
         match runtime.reload() {
             Ok(()) => {
                 diagnostics.push("GRAPH_RELOADED".to_string());
@@ -282,12 +274,14 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
     }
 
     // 可选：在查询前检查 graphdb 是否变更
-    if request.check_reload == Some(true) {
+    if invocation.check_reload {
         match runtime.reload_if_changed() {
             Ok(crate::runtime::ReloadResult::Reloaded) => {
                 diagnostics.push("GRAPH_RELOADED".to_string())
             }
-            Ok(crate::runtime::ReloadResult::Unchanged) => {}
+            Ok(crate::runtime::ReloadResult::Unchanged) => {
+                diagnostics.push("GRAPH_UNCHANGED".to_string())
+            }
             Ok(crate::runtime::ReloadResult::ReloadFailed { .. }) => {
                 diagnostics.push("GRAPH_RELOAD_FAILED".to_string());
             }
@@ -297,53 +291,20 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
         }
     }
 
-    // target 校验
-    if spec.requires_target {
-        let target = request.target.as_deref().unwrap_or("");
-        if target.trim().is_empty() {
-            return error_response(
-                request.request_id.clone(),
-                "MISSING_TARGET",
-                format!("Missing target for {}", spec.name),
-                diagnostics,
-            );
-        }
-        if let Err(err) = crate::tool_contract::validate_target_prefix(tool_command, target) {
-            return error_response(
-                request.request_id.clone(),
-                err.code_str(),
-                err.message,
-                diagnostics,
-            );
-        }
-    }
-
     // human 模式校验
-    if human && !spec.supports_human {
+    if invocation.human && !spec.supports_human {
         diagnostics.push("HUMAN_MODE_NOT_SUPPORTED".to_string());
     }
 
     // 构造 RuntimeQueryRequest 并统一执行
-    let depth = match crate::tool_contract::validate_depth(request.depth.as_ref()) {
-        Ok(d) => Some(d),
-        Err(err) => {
-            return error_response(
-                request.request_id.clone(),
-                err.code_str(),
-                err.message,
-                diagnostics,
-            );
-        }
-    };
-
     let req = RuntimeQueryRequest {
-        command: tool_command,
-        target: request.target.clone().unwrap_or_default(),
-        budget: budget.clone(),
-        human,
-        intent: Some(intent),
-        page_scope: request.page_scope.clone(),
-        depth,
+        command: invocation.command,
+        target: invocation.target.unwrap_or_default(),
+        budget: invocation.budget.unwrap_or_else(|| "normal".to_string()),
+        human: invocation.human,
+        intent: invocation.intent,
+        page_scope: invocation.page_scope,
+        depth: invocation.depth,
         check_reload: false,
     };
 

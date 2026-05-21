@@ -37,7 +37,7 @@ stdin 每行一个 JSON 对象：
 | 字段 | 类型 | 必需 | 说明 |
 |---|---|---|---|
 | `request_id` | string | 是 | 请求标识，响应原样返回 |
-| `command` | string | 是 | `explain_condition` / `explain` / `query_model` / `query_page_logic` / `context` / `status` / `reload` |
+| `command` | string | 是 | `explain_condition` / `explain` / `query_model` / `query_page` / `query_cross` / `query_dataflow` / `query_page_logic` / `context` / `find_page` / `find_model` / `find_component` / `advise_query` / `status` / `reload_graph` / `check_reload` |
 | `target` | string | 查询类命令必需 | 查询目标 |
 | `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal`；非法值返回 `INVALID_BUDGET` |
 | `intent` | string | 否 | `explain_condition` 专用：`auto` / `display` / `value-source` / `writer` / `availability` / `context`，非法值返回 `INVALID_INTENT` |
@@ -75,7 +75,8 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 | `metadata_query_model` | `query_model` | `target` | `compact` | 模型读写全貌、谁读/谁写、跨页 writer | `result.summary`、`result.details.readers`、`result.details.writers`、`result.evidence` |
 | `metadata_query_page_logic` | `query_page_logic` | `target` | `compact` | 页面整体逻辑、入口、写入、跳转、可见性规则 | `result.summary`、`result.details.page_inputs`、`result.details.write_targets`、`result.details.action_flows` |
 | `metadata_runtime_status` | `status` | 无 | 不适用 | 只检查 runtime/graph 状态 | `result`；不得作为业务证据 |
-| `metadata_runtime_reload` | `reload` | 无 | 不适用 | graphdb 更新后手动刷新 | `ok`、`error.code`；不得作为业务证据 |
+| `metadata_runtime_reload` | `reload_graph` | 无 | 不适用 | graphdb 更新后手动刷新 | `ok`、`error.code`；不得作为业务证据 |
+| `metadata_runtime_check_reload` | `check_reload` | 无 | 不适用 | graphdb 变更时自动刷新 | `ok`、`error.code`；不得作为业务证据 |
 
 工具入参边界：
 
@@ -88,6 +89,7 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 | `metadata_query_page_logic` | `target: string`, `budget?: compact|normal|full`, `check_reload?: boolean` |
 | `metadata_runtime_status` | 无业务参数 |
 | `metadata_runtime_reload` | 无业务参数 |
+| `metadata_runtime_check_reload` | 无业务参数 |
 
 选择规则：
 
@@ -97,7 +99,7 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 - “周围关系是什么 / 需要补看上下游” → `metadata_context`。
 - “模型读写全貌 / 谁写了这个表” → `metadata_query_model`。
 - “页面整体逻辑 / 入口 / 写入 / 跳转 / 可见性” → `metadata_query_page_logic`。
-- `metadata_runtime_status` 和 `metadata_runtime_reload` 只能用于运行时健康与刷新判断，不能作为业务结论证据。
+- `metadata_runtime_status`、`metadata_runtime_reload` 和 `metadata_runtime_check_reload` 只能用于运行时健康与刷新判断，不能作为业务结论证据。
 - 每个 stdio 响应的 `timing.output_size_bytes` 记录最终 stdout JSON 行的字节数，用于容量治理和性能基线。
 
 Anti-drift 约束：
@@ -191,7 +193,10 @@ class MetadataCheckerRuntime:
         return self._request({"request_id": self._next_id(), "command": "status"})
 
     def reload(self) -> dict:
-        return self._request({"request_id": self._next_id(), "command": "reload"})
+        return self._request({"request_id": self._next_id(), "command": "reload_graph"})
+
+    def check_reload(self) -> dict:
+        return self._request({"request_id": self._next_id(), "command": "check_reload"})
 
     def _request(self, req: dict) -> dict:
         self.proc.stdin.write(json.dumps(req) + "\n")
@@ -238,7 +243,7 @@ runtime.close()
 适用：同一项目内多个相关条件解释问题、AI 连续追问字段来源/显示条件/数据为空原因的场景。
 
 M27 起 stdio server 支持全部核心查询命令：
-`explain_condition`、`explain`、`query_model`、`query_page_logic`、`context`、`status`、`reload`。
+`explain_condition`、`explain`、`query_model`、`query_page`、`query_cross`、`query_dataflow`、`query_page_logic`、`context`、`find_page`、`find_model`、`find_component`、`advise_query`、`status`、`reload_graph`、`check_reload`。
 所有项目级查询均可通过 stdio 执行，享受热 graph 复用。
 
 ### 模式 3：graphdb 变更后刷新
@@ -252,6 +257,7 @@ if status["result"]["reload_count"] == 0:
 
 # 手动 reload
 reload_result = runtime.reload()
+check_reload_result = runtime.check_reload()
 if reload_result["ok"]:
     print("Graph reloaded")
 else:

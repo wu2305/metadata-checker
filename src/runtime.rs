@@ -179,10 +179,89 @@ impl GraphRuntime {
     /// 执行查询，复用内存中的 graph
     ///
     /// M38 统一入口：支持所有已加载 graphdb 后的运行期工具命令。
-    pub fn query(&self, request: RuntimeQueryRequest) -> Result<RuntimeQueryResponse> {
+    pub fn query(&mut self, request: RuntimeQueryRequest) -> Result<RuntimeQueryResponse> {
         use crate::tool_contract::ToolCommand;
         let total_start = Instant::now();
         let mut diagnostics = Vec::new();
+
+        // ReloadGraph / CheckReload 需要可变借用 self，在 match 之前单独处理
+        if request.command == ToolCommand::ReloadGraph {
+            let result = match self.reload() {
+                Ok(()) => {
+                    diagnostics.push("GRAPH_RELOADED".to_string());
+                    serde_json::to_value(self.status())?
+                }
+                Err(e) => {
+                    diagnostics.push("GRAPH_RELOAD_FAILED".to_string());
+                    serde_json::json!({
+                        "ok": false,
+                        "error": format!("{}", e),
+                        "diagnostics": vec!["GRAPH_RELOAD_FAILED"],
+                    })
+                }
+            };
+            let query_compute_ms = total_start.elapsed().as_millis();
+            diagnostics.push(format!(
+                "Query compute: {} ms before response processing",
+                query_compute_ms
+            ));
+            return ResponseProcessor::runtime_response(
+                result,
+                diagnostics,
+                0,
+                query_compute_ms,
+                total_start,
+            );
+        }
+
+        if request.command == ToolCommand::CheckReload {
+            let result = match self.reload_if_changed() {
+                Ok(crate::runtime::ReloadResult::Reloaded) => {
+                    diagnostics.push("GRAPH_RELOADED".to_string());
+                    serde_json::json!({
+                        "reloaded": true,
+                        "status": self.status(),
+                        "diagnostics": vec!["GRAPH_RELOADED"],
+                    })
+                }
+                Ok(crate::runtime::ReloadResult::Unchanged) => {
+                    diagnostics.push("GRAPH_UNCHANGED".to_string());
+                    serde_json::json!({
+                        "reloaded": false,
+                        "status": self.status(),
+                        "diagnostics": vec!["GRAPH_UNCHANGED"],
+                    })
+                }
+                Ok(crate::runtime::ReloadResult::ReloadFailed { error }) => {
+                    diagnostics.push("GRAPH_RELOAD_FAILED".to_string());
+                    serde_json::json!({
+                        "reloaded": false,
+                        "error": error,
+                        "diagnostics": vec!["GRAPH_RELOAD_FAILED"],
+                    })
+                }
+                Err(e) => {
+                    diagnostics.push("GRAPH_RELOAD_FAILED".to_string());
+                    serde_json::json!({
+                        "reloaded": false,
+                        "error": format!("{}", e),
+                        "diagnostics": vec!["GRAPH_RELOAD_FAILED"],
+                    })
+                }
+            };
+            let query_compute_ms = total_start.elapsed().as_millis();
+            diagnostics.push(format!(
+                "Query compute: {} ms before response processing",
+                query_compute_ms
+            ));
+            return ResponseProcessor::runtime_response(
+                result,
+                diagnostics,
+                0,
+                query_compute_ms,
+                total_start,
+            );
+        }
 
         let query_start = Instant::now();
         let mut result = match request.command {
@@ -252,38 +331,32 @@ impl GraphRuntime {
                 20,
             ))?,
             ToolCommand::QueryPage => {
-                // M38: query_page 目前直接打印 stdout，在统一入口中返回空对象
-                // TODO: 后续迁移为返回 Value 的 build_query_page_output
-                serde_json::json!({
-                    "note": "query_page not yet migrated to Value-returning API in M38",
-                    "page_id": request.target,
-                })
+                crate::query::build_query_page_output(&self.graph, &request.target)?
             }
             ToolCommand::QueryCross => {
-                serde_json::json!({
-                    "note": "query_cross not yet migrated to Value-returning API in M38",
-                    "target": request.target,
-                })
+                let parts: Vec<&str> = request.target.split(',').collect();
+                if parts.len() >= 2 {
+                    crate::query::build_query_cross_output(
+                        &self.graph,
+                        parts[0].trim(),
+                        parts[1].trim(),
+                    )?
+                } else {
+                    serde_json::json!({
+                        "error": "QueryCross requires two comma-separated page IDs",
+                        "target": request.target,
+                    })
+                }
             }
             ToolCommand::QueryDataflow => {
-                serde_json::json!({
-                    "note": "query_dataflow not yet migrated to Value-returning API in M38",
-                    "target": request.target,
-                })
+                crate::query::build_query_dataflow_output(&self.graph, &request.target)?
+            }
+            ToolCommand::ReloadGraph | ToolCommand::CheckReload => {
+                unreachable!("ReloadGraph and CheckReload handled before match")
             }
             ToolCommand::Status => {
                 let status = self.status();
                 serde_json::to_value(status)?
-            }
-            ToolCommand::ReloadGraph => {
-                serde_json::json!({
-                    "note": "reload_graph should be called directly, not through query",
-                })
-            }
-            ToolCommand::CheckReload => {
-                serde_json::json!({
-                    "note": "check_reload should be called directly, not through query",
-                })
             }
         };
         let query_compute_ms = query_start.elapsed().as_millis();

@@ -33,7 +33,60 @@ pub fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::
     None
 }
 
-/// 查询页面的跨文件依赖关系
+/// 构建 query_page 输出（返回 Value，不打印）
+pub fn build_query_page_output(graph: &GraphDB, page_id: &str) -> Result<serde_json::Value> {
+    if let Some((outgoing, incoming)) = graph.get_node_edges(page_id) {
+        let summary = serde_json::json!({
+            "page_id": page_id,
+            "outgoing_count": outgoing.len(),
+            "incoming_count": incoming.len(),
+            "relation_types": outgoing.iter().map(|(_, e)| format!("{:?}", e.edge_type)).collect::<std::collections::HashSet<String>>().into_iter().collect::<Vec<String>>(),
+        });
+
+        let details = serde_json::json!({
+            "outgoing": outgoing.iter().map(|(n, e)| serde_json::json!({"name": n.name, "type": format!("{:?}", e.edge_type)})).collect::<Vec<_>>(),
+            "incoming": incoming.iter().map(|(n, e)| serde_json::json!({"name": n.name, "type": format!("{:?}", e.edge_type)})).collect::<Vec<_>>(),
+        });
+
+        let mut output =
+            crate::output::AiOutput::new(crate::output::OutputKind::PageQuery, summary);
+        output.query_target = Some(page_id.to_string());
+        output.details = Some(details);
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Page {} has {} outgoing edges", page_id, outgoing.len()),
+                "Graph traversal: outgoing edges from page node",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(page_id),
+        );
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Page {} has {} incoming edges", page_id, incoming.len()),
+                "Graph traversal: incoming edges to page node",
+            )
+            .with_confidence(crate::output::Confidence::High)
+            .with_node_id(page_id),
+        );
+        output.next_queries = vec![format_next_query(
+            "--query-page-logic {} for page-level logic summary",
+            page_id,
+        )];
+
+        let output = output.validate();
+        Ok(serde_json::to_value(output)?)
+    } else {
+        let candidates = graph.find_candidates(page_id, 5);
+        let out = crate::output::schema::build_target_not_found_output(
+            crate::output::schema::OutputKind::PageQuery,
+            page_id,
+            &candidates,
+        );
+        Ok(serde_json::to_value(out)?)
+    }
+}
+
+/// 查询页面的跨文件依赖关系（保留旧入口，直接打印 stdout）
 pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
     if let Some((outgoing, incoming)) = graph.get_node_edges(page_id) {
         if human {
@@ -48,60 +101,85 @@ pub fn query_page(graph: &GraphDB, page_id: &str, human: bool) -> Result<()> {
                 writeln!(out, "  <- {} ({:?})", node.name, edge.edge_type)?;
             }
         } else {
-            let summary = serde_json::json!({
-                "page_id": page_id,
-                "outgoing_count": outgoing.len(),
-                "incoming_count": incoming.len(),
-                "relation_types": outgoing.iter().map(|(_, e)| format!("{:?}", e.edge_type)).collect::<std::collections::HashSet<String>>().into_iter().collect::<Vec<String>>(),
-            });
-
-            let details = serde_json::json!({
-                "outgoing": outgoing.iter().map(|(n, e)| serde_json::json!({"name": n.name, "type": format!("{:?}", e.edge_type)})).collect::<Vec<_>>(),
-                "incoming": incoming.iter().map(|(n, e)| serde_json::json!({"name": n.name, "type": format!("{:?}", e.edge_type)})).collect::<Vec<_>>(),
-            });
-
-            let mut output =
-                crate::output::AiOutput::new(crate::output::OutputKind::PageQuery, summary);
-            output.query_target = Some(page_id.to_string());
-            output.details = Some(details);
-            output.evidence.push(
-                crate::output::Evidence::new(
-                    format!("Page {} has {} outgoing edges", page_id, outgoing.len()),
-                    "Graph traversal: outgoing edges from page node",
-                )
-                .with_confidence(crate::output::Confidence::High)
-                .with_node_id(page_id),
-            );
-            output.evidence.push(
-                crate::output::Evidence::new(
-                    format!("Page {} has {} incoming edges", page_id, incoming.len()),
-                    "Graph traversal: incoming edges to page node",
-                )
-                .with_confidence(crate::output::Confidence::High)
-                .with_node_id(page_id),
-            );
-            output.next_queries = vec![format_next_query(
-                "--query-page-logic {} for page-level logic summary",
-                page_id,
-            )];
-
-            let output = output.validate();
-            println!("{}", serde_json::to_string_pretty(&output)?);
+            let val = build_query_page_output(graph, page_id)?;
+            println!("{}", serde_json::to_string_pretty(&val)?);
         }
     } else {
-        let candidates = graph.find_candidates(page_id, 5);
-        let out = crate::output::schema::build_target_not_found_output(
-            crate::output::schema::OutputKind::PageQuery,
-            page_id,
-            &candidates,
-        );
-        println!("{}", serde_json::to_string_pretty(&out)?);
+        let val = build_query_page_output(graph, page_id)?;
+        println!("{}", serde_json::to_string_pretty(&val)?);
         return Ok(());
     }
     Ok(())
 }
 
-/// 查询两个页面之间的直接或间接关系
+/// 构建 query_cross 输出（返回 Value，不打印）
+pub fn build_query_cross_output(
+    graph: &GraphDB,
+    page_a: &str,
+    page_b: &str,
+) -> Result<serde_json::Value> {
+    let paths = graph.find_cross_relations(page_a, page_b);
+    let json_paths: Vec<_> = paths
+        .iter()
+        .map(|path| {
+            path.iter()
+                .map(|(n, e)| {
+                    serde_json::json!({
+                        "name": n.name,
+                        "type": format!("{:?}", n.node_type),
+                        "edge": format!("{:?}", e.edge_type),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let summary = serde_json::json!({
+        "page_a": page_a,
+        "page_b": page_b,
+        "path_count": paths.len(),
+    });
+
+    let details = serde_json::json!({
+        "paths": json_paths,
+    });
+
+    let mut output =
+        crate::output::AiOutput::new(crate::output::OutputKind::CrossPageQuery, summary);
+    output.query_target = Some(format!("{} <-> {}", page_a, page_b));
+    output.details = Some(details);
+    output.evidence.push(
+        crate::output::Evidence::new(
+            format!(
+                "Cross-page query found {} paths between {} and {}",
+                paths.len(),
+                page_a,
+                page_b
+            ),
+            "Graph traversal: find_cross_relations",
+        )
+        .with_confidence(crate::output::Confidence::High),
+    );
+    for (i, path) in paths.iter().take(5).enumerate() {
+        let nodes: Vec<String> = path.iter().map(|(n, _)| n.name.clone()).collect();
+        output.evidence.push(
+            crate::output::Evidence::new(
+                format!("Path {}: {}", i + 1, nodes.join(" -> ")),
+                "Graph traversal: individual cross-page path",
+            )
+            .with_confidence(crate::output::Confidence::High),
+        );
+    }
+    output.next_queries = vec![
+        format_next_query("--query-page {} for page dependencies", page_a),
+        format_next_query("--query-page {} for page dependencies", page_b),
+    ];
+
+    let output = output.validate();
+    Ok(serde_json::to_value(output)?)
+}
+
+/// 查询两个页面之间的直接或间接关系（保留旧入口，直接打印 stdout）
 pub fn query_cross(graph: &GraphDB, page_a: &str, page_b: &str, human: bool) -> Result<()> {
     let paths = graph.find_cross_relations(page_a, page_b);
     if human {
@@ -193,6 +271,7 @@ pub use dataflow::DataflowFilterClause;
 pub use dataflow::DataflowFilterProjection;
 pub use dataflow::DataflowJoinCondition;
 pub use dataflow::DataflowUnionMapEntry;
+pub use dataflow::build_query_dataflow_output;
 pub use dataflow::build_via_value;
 pub use dataflow::project_output_field_origin;
 pub use dataflow::query_dataflow;

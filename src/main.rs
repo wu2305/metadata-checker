@@ -1,18 +1,36 @@
 use metadata_checker::cli;
-use metadata_checker::context;
 use metadata_checker::dependency::DependencyGraph;
 use metadata_checker::explain;
 use metadata_checker::graph::GraphDB;
 use metadata_checker::output;
 use metadata_checker::parser;
 use metadata_checker::priority;
-use metadata_checker::query;
 use metadata_checker::scanner;
-use metadata_checker::tool_contract;
+use metadata_checker::tool_contract::{self, InvocationAdapter};
 
 use anyhow::Result;
 use clap::Parser;
 use std::io::{self, Write};
+
+/// 通过 CLI adapter 执行 runtime 工具调用。
+fn run_cli_runtime_tool(
+    runtime: &mut metadata_checker::runtime::GraphRuntime,
+    input: cli::CliToolInput,
+) -> Result<serde_json::Value> {
+    let adapter = cli::CliAdapter;
+    let invocation = adapter.parse_input(input)?;
+    let req = metadata_checker::runtime::RuntimeQueryRequest {
+        command: invocation.command,
+        target: invocation.target.unwrap_or_default(),
+        budget: invocation.budget.unwrap_or_else(|| "normal".to_string()),
+        human: invocation.human,
+        intent: invocation.intent,
+        page_scope: invocation.page_scope,
+        depth: invocation.depth,
+        check_reload: invocation.check_reload,
+    };
+    Ok(runtime.query(req)?.result)
+}
 
 /// CLI 入口
 ///
@@ -60,7 +78,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        let runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir(
+        let mut runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir(
             &db_path,
             Some(project_dir),
         ) {
@@ -71,7 +89,61 @@ fn main() -> Result<()> {
                 return Ok(());
             }
         };
-        let graph = &runtime.graph;
+        let _graph = &runtime.graph;
+
+        if args.status {
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::Status,
+                    target: None,
+                    budget: args.budget.clone(),
+                    human: false,
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            return Ok(());
+        }
+
+        if args.reload_graph {
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::ReloadGraph,
+                    target: None,
+                    budget: args.budget.clone(),
+                    human: false,
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            return Ok(());
+        }
+
+        if args.check_reload {
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::CheckReload,
+                    target: None,
+                    budget: args.budget.clone(),
+                    human: false,
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            return Ok(());
+        }
 
         if let Some(ref model_id) = args.query_model {
             let model_node_id = if model_id.starts_with("model:") {
@@ -79,18 +151,58 @@ fn main() -> Result<()> {
             } else {
                 format!("model:{}", model_id)
             };
-            query::query_model(&graph, &model_node_id, args.is_human(), &args.budget)?;
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::QueryModel,
+                    target: Some(model_node_id),
+                    budget: args.budget.clone(),
+                    human: args.is_human(),
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
         if let Some(ref page_id) = args.query_page {
-            query::query_page(&graph, page_id, args.is_human())?;
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::QueryPage,
+                    target: Some(page_id.clone()),
+                    budget: args.budget.clone(),
+                    human: args.is_human(),
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
         if let Some(ref pages) = args.query_cross {
             if pages.len() >= 2 {
-                query::query_cross(&graph, &pages[0], &pages[1], args.is_human())?;
+                let target = format!("{}, {}", pages[0], pages[1]);
+                let result = run_cli_runtime_tool(
+                    &mut runtime,
+                    cli::CliToolInput {
+                        command: metadata_checker::tool_contract::ToolCommand::QueryCross,
+                        target: Some(target),
+                        budget: args.budget.clone(),
+                        human: args.is_human(),
+                        intent: None,
+                        page_scope: None,
+                        depth: None,
+                        check_reload: false,
+                    },
+                )?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
             }
             return Ok(());
         }
@@ -101,69 +213,158 @@ fn main() -> Result<()> {
             } else {
                 format!("model:{}", dataflow_id)
             };
-            query::query_dataflow(&graph, &model_node_id, args.is_human())?;
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::QueryDataflow,
+                    target: Some(model_node_id),
+                    budget: args.budget.clone(),
+                    human: args.is_human(),
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
         if let Some(ref page_logic_id) = args.query_page_logic {
-            query::query_page_logic(
-                &graph,
-                page_logic_id,
-                args.project_dir.as_deref(),
-                args.is_human(),
-                &args.budget,
-            )?;
+            if args.is_human() {
+                // M38：human 模式暂时保留旧路径，待统一 human 渲染器后再迁到 runtime
+                metadata_checker::query::query_page_logic(
+                    &runtime.graph,
+                    page_logic_id,
+                    args.project_dir.as_deref(),
+                    true,
+                    &args.budget,
+                )?;
+            } else {
+                let result = run_cli_runtime_tool(
+                    &mut runtime,
+                    cli::CliToolInput {
+                        command: metadata_checker::tool_contract::ToolCommand::QueryPageLogic,
+                        target: Some(page_logic_id.clone()),
+                        budget: args.budget.clone(),
+                        human: false,
+                        intent: None,
+                        page_scope: None,
+                        depth: None,
+                        check_reload: false,
+                    },
+                )?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
             return Ok(());
         }
 
         if let Some(ref explain_id) = args.explain {
-            explain::explain_node_graph(&graph, explain_id, args.is_human())?;
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::Explain,
+                    target: Some(explain_id.clone()),
+                    budget: args.budget.clone(),
+                    human: args.is_human(),
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
         if let Some(ref explain_target) = args.explain_condition {
             let intent = explain::TraversalIntent::parse(&args.intent)?;
-            let req = metadata_checker::runtime::RuntimeQueryRequest {
-                command: metadata_checker::tool_contract::ToolCommand::ExplainCondition,
-                target: explain_target.clone(),
-                budget: args.budget.clone(),
-                human: args.is_human(),
-                intent: Some(intent.as_str().to_string()),
-                page_scope: None,
-                depth: None,
-                check_reload: false,
-            };
-            let response = runtime.query(req)?;
-            println!("{}", serde_json::to_string_pretty(&response.result)?);
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::ExplainCondition,
+                    target: Some(explain_target.clone()),
+                    budget: args.budget.clone(),
+                    human: args.is_human(),
+                    intent: Some(intent.as_str().to_string()),
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
         if let Some(ref context_id) = args.context {
-            context::context_node_graph(
-                &graph,
-                context_id,
-                args.depth,
-                &args.budget,
-                args.is_human(),
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::Context,
+                    target: Some(context_id.clone()),
+                    budget: args.budget.clone(),
+                    human: args.is_human(),
+                    intent: None,
+                    page_scope: None,
+                    depth: Some(args.depth),
+                    check_reload: false,
+                },
             )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
         if let Some(ref keyword) = args.find_page {
-            let out = query::find_nodes(&graph, keyword, Some("page"), 20);
-            println!("{}", serde_json::to_string_pretty(&out)?);
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::FindPage,
+                    target: Some(keyword.clone()),
+                    budget: args.budget.clone(),
+                    human: false,
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
         if let Some(ref keyword) = args.find_model {
-            let out = query::find_nodes(&graph, keyword, Some("model"), 20);
-            println!("{}", serde_json::to_string_pretty(&out)?);
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::FindModel,
+                    target: Some(keyword.clone()),
+                    budget: args.budget.clone(),
+                    human: false,
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
         if let Some(ref keyword) = args.find_component {
-            let out = query::find_nodes(&graph, keyword, Some("component"), 20);
-            println!("{}", serde_json::to_string_pretty(&out)?);
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::FindComponent,
+                    target: Some(keyword.clone()),
+                    budget: args.budget.clone(),
+                    human: false,
+                    intent: None,
+                    page_scope: None,
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
@@ -180,28 +381,43 @@ fn main() -> Result<()> {
                     );
                 }
             };
-            let out = query::resolve_model_in_page(&graph, &page_id, &local_model_id);
-            println!("{}", serde_json::to_string_pretty(&out)?);
+            let target = format!("{}|{}", page_id, local_model_id);
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::QueryPageLogic,
+                    target: Some(target),
+                    budget: args.budget.clone(),
+                    human: false,
+                    intent: None,
+                    page_scope: Some(page_id),
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 
         if let Some(ref advise_target) = args.advise_query {
-            let req = metadata_checker::runtime::RuntimeQueryRequest {
-                command: metadata_checker::tool_contract::ToolCommand::AdviseQuery,
-                target: advise_target.clone(),
-                budget: args.budget.clone(),
-                human: false,
-                intent: Some(
-                    args.question_kind
-                        .clone()
-                        .unwrap_or_else(|| "auto".to_string()),
-                ),
-                page_scope: args.advise_query_page.clone(),
-                depth: None,
-                check_reload: false,
-            };
-            let response = runtime.query(req)?;
-            println!("{}", serde_json::to_string_pretty(&response.result)?);
+            let result = run_cli_runtime_tool(
+                &mut runtime,
+                cli::CliToolInput {
+                    command: metadata_checker::tool_contract::ToolCommand::AdviseQuery,
+                    target: Some(advise_target.clone()),
+                    budget: args.budget.clone(),
+                    human: false,
+                    intent: Some(
+                        args.question_kind
+                            .clone()
+                            .unwrap_or_else(|| "auto".to_string()),
+                    ),
+                    page_scope: args.advise_query_page.clone(),
+                    depth: None,
+                    check_reload: false,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             return Ok(());
         }
 

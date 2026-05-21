@@ -477,12 +477,14 @@ M34 在 \`answer_facts\` 中增加 DataFlow 内部字段级来源和可用性投
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `request_id` | string | 是 | 请求标识，响应原样返回；非法 JSON 时为空字符串 |
-| `command` | string | 是 | `explain_condition` / `explain` / `query_model` / `query_page_logic` / `context` / `status` / `reload` |
+| `command` | string | 是 | `explain_condition` / `explain` / `query_model` / `query_page` / `query_cross` / `query_dataflow` / `query_page_logic` / `context` / `find_page` / `find_model` / `find_component` / `advise_query` / `status` / `reload_graph` / `check_reload` |
 | `target` | string | 查询类命令必需 | 查询目标节点、模型或页面 |
 | `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal` |
 | `depth` | number | `context` 可选 | 非负整数，默认 `1` |
-| `human` | boolean | 否 | 目前仅 `explain_condition` 支持 |
+| `human` | boolean | 否 | 仅 `explain_condition` / `explain` / `context` 支持；不支持 human 的命令会返回 `HUMAN_MODE_NOT_SUPPORTED` 诊断 |
 | `check_reload` | boolean | 否 | 查询前检测 graphdb 是否需要 reload |
+| `intent` | string | 否 | `explain_condition` 专用：`auto` / `display` / `value-source` / `writer` / `availability` / `context`，默认 `auto` |
+| `page_scope` | string | 否 | `advise_query` 专用：限定查询建议的页面范围 |
 
 成功响应：
 
@@ -503,17 +505,39 @@ M34 在 \`answer_facts\` 中增加 DataFlow 内部字段级来源和可用性投
 | code | 说明 |
 |------|------|
 | `INVALID_JSON` | 输入行不是合法 JSON request |
-| `UNKNOWN_COMMAND` | command 不在 stdio 支持列表中 |
+| `UNKNOWN_COMMAND` | command 不在运行期工具注册表中（`build_graph` / `refresh_index` 等初始化命令不属于运行期工具） |
 | `MISSING_TARGET` | 查询类命令缺少 target 或 target 为空 |
-| `INVALID_TARGET` | target 格式非法或不能作为对应命令的目标 |
+| `INVALID_TARGET` | target 格式非法或前缀与命令不匹配 |
 | `INVALID_BUDGET` | budget 不是 `compact` / `normal` / `full` |
+| `INVALID_INTENT` | intent 不在 `explain_condition` 支持列表中 |
 | `INVALID_DEPTH` | context depth 不是非负整数 |
+| `INVALID_ARGUMENT` | 其他参数非法 |
+| `TARGET_NOT_FOUND` | target 在 graphdb 中不存在 |
+| `GRAPH_DB_NOT_FOUND` | graphdb 文件不存在，需先 `--build-graph` |
 | `GRAPH_RELOAD_FAILED` | reload graphdb 失败；旧 graph 保留可继续查询 |
+| `HUMAN_MODE_NOT_SUPPORTED` | 该命令不支持 `--human` |
 | `QUERY_FAILED` | 查询执行失败 |
+| `INTERNAL_ERROR` | 内部错误 |
+
+### 运行期工具与初始化建图的区别（M38）
+
+`--serve-stdio` 和 function calling 只暴露**运行期工具**：已加载 graphdb 后的查询/解释/刷新能力。
+
+以下命令**不属于**运行期工具，不能通过 stdio / function calling 触发：
+
+| 命令 | 为什么排除 |
+|------|-----------|
+| `build_graph` | 会扫描项目目录、解析元数据、写 graphdb，属于初始化/索引生命周期 |
+| `refresh_index` | 同 `build_graph`，会重建索引 |
+| `rebuild_graph` | 同 `build_graph` |
+
+区分原则：
+- **运行期工具**：只读已加载 graphdb，不扫描项目，不写 graphdb。`reload_graph` / `check_reload` 只重新读取已有 graphdb 文件，不重建索引。
+- **初始化命令**：扫描项目目录、解析 `.spg/.tbl`、写 graphdb。这些操作由运维/CI 触发，不是模型在对话中应调用的。
 
 ### Function Calling 工具层约束
 
-M29 推荐 function calling wrapper 暴露以下任务型工具。工具层只映射 stdio 已支持命令，不新增底层查询语义：
+M38 推荐 function calling wrapper 暴露以下任务型工具。工具层只映射运行期工具，不映射初始化命令：
 
 | Tool | stdio command | 业务用途 |
 |------|---------------|----------|
@@ -521,9 +545,12 @@ M29 推荐 function calling wrapper 暴露以下任务型工具。工具层只�
 | `metadata_explain` | `explain` | 解释单个节点是什么 |
 | `metadata_context` | `context` | 扩展查看目标周围关系 |
 | `metadata_query_model` | `query_model` | 查看模型读写全貌和跨页 writer |
+| `metadata_query_page` | `query_page` | 查看页面出边/入边关系 |
 | `metadata_query_page_logic` | `query_page_logic` | 查看页面入口、写入、跳转、可见性 |
-| `metadata_runtime_status` | `status` | 查看 runtime 状态 |
-| `metadata_runtime_reload` | `reload` | 手动刷新 graphdb |
+| `metadata_advise_query` | `advise_query` | 为目标生成结构化查询建议 |
+| `metadata_runtime_status` | `status` | 查看 runtime 状态（节点数、边数、加载时间） |
+| `metadata_runtime_reload` | `reload_graph` | 手动刷新 graphdb |
+| `metadata_runtime_check_reload` | `check_reload` | 仅在 graphdb 变化时自动重载 |
 
 Anti-drift 读取规则：
 

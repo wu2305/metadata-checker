@@ -177,7 +177,8 @@ intent 到 fact block 映射：
 | `metadata_query_model` | `query_model` | 模型读写全貌 / 谁写了这个表 |
 | `metadata_query_page_logic` | `query_page_logic` | 页面整体逻辑 / 入口 / 写入 / 跳转 / 可见性 |
 | `metadata_runtime_status` | `status` | 只检查 runtime/graph 状态 |
-| `metadata_runtime_reload` | `reload` | graphdb 更新后手动刷新 |
+| `metadata_runtime_reload` | `reload_graph` | graphdb 更新后手动刷新 |
+| `metadata_runtime_check_reload` | `check_reload` | graphdb 变更时自动刷新 |
 
 工具层约束：
 - `timing` 只能用于性能判断，不能作为业务证据。
@@ -185,7 +186,7 @@ intent 到 fact block 映射：
 - 业务回答优先读取 `result.summary`。
 - 证据核查读取 `result.details.primary_path`、`result.summary.key_primary_paths`、`result.evidence`。
 - `related_context` 默认不是必要条件，只能作为相关上下文表述。
-- `metadata_runtime_status` / `metadata_runtime_reload` 不能回答业务来源链路。
+- `metadata_runtime_status` / `metadata_runtime_reload` / `metadata_runtime_check_reload` 不能回答业务来源链路。
 
 ## 输出结构
 

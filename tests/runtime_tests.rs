@@ -9,7 +9,7 @@ mod common;
 fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
     let (_temp_dir, db_path) = common::build_fixture_graphdb();
 
-    let runtime = GraphRuntime::load(&db_path).expect("GraphRuntime::load must succeed");
+    let mut runtime = GraphRuntime::load(&db_path).expect("GraphRuntime::load must succeed");
     assert_eq!(runtime.load_count, 1, "首次加载后 load_count 应为 1");
     assert!(
         runtime.graph_load_ms > 0,
@@ -88,7 +88,7 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
     scanner::scan_project(std::path::Path::new(project_dir), &db_path)
         .expect("scan real project must succeed");
 
-    let runtime = GraphRuntime::load(&db_path).expect("load real project graph must succeed");
+    let mut runtime = GraphRuntime::load(&db_path).expect("load real project graph must succeed");
     assert_eq!(runtime.load_count, 1);
     assert!(
         runtime.graph_load_ms > 0,
@@ -279,5 +279,95 @@ fn test_runtime_reload_failure_preserves_old_graph() {
     assert_eq!(
         resp.result.get("kind").and_then(|v| v.as_str()),
         Some("Explain")
+    );
+}
+
+#[test]
+fn test_runtime_query_page_returns_real_value() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut runtime = GraphRuntime::load(&db_path).unwrap();
+    let req = RuntimeQueryRequest {
+        command: metadata_checker::tool_contract::ToolCommand::QueryPage,
+        target: "page:app/actions_test.spg".to_string(),
+        budget: "compact".to_string(),
+        human: false,
+        intent: None,
+        page_scope: None,
+        depth: None,
+        check_reload: false,
+    };
+    let resp = runtime.query(req).unwrap();
+    let result = resp.result;
+    assert!(
+        !result.get("note").is_some(),
+        "query_page should not return placeholder note, got: {:?}",
+        result
+    );
+    assert!(
+        result.get("summary").is_some(),
+        "query_page should return summary, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_runtime_query_cross_returns_real_value() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut runtime = GraphRuntime::load(&db_path).unwrap();
+    let req = RuntimeQueryRequest {
+        command: metadata_checker::tool_contract::ToolCommand::QueryCross,
+        target: "page:app/actions_test.spg,page:app/page_relations.spg".to_string(),
+        budget: "compact".to_string(),
+        human: false,
+        intent: None,
+        page_scope: None,
+        depth: None,
+        check_reload: false,
+    };
+    let resp = runtime.query(req).unwrap();
+    let result = resp.result;
+    assert!(
+        !result.get("note").is_some(),
+        "query_cross should not return placeholder note, got: {:?}",
+        result
+    );
+    assert_eq!(
+        result.get("kind").and_then(|v| v.as_str()),
+        Some("CrossPageQuery"),
+        "query_cross must return CrossPageQuery, got: {:?}",
+        result
+    );
+    assert!(
+        result.get("summary").is_some(),
+        "query_cross should return summary, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_runtime_query_dataflow_returns_real_value() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut runtime = GraphRuntime::load(&db_path).unwrap();
+    let req = RuntimeQueryRequest {
+        command: metadata_checker::tool_contract::ToolCommand::QueryDataflow,
+        target: "model:dataflow_a".to_string(),
+        budget: "compact".to_string(),
+        human: false,
+        intent: None,
+        page_scope: None,
+        depth: None,
+        check_reload: false,
+    };
+    let resp = runtime.query(req).unwrap();
+    let result = resp.result;
+    assert!(
+        !result.get("note").is_some(),
+        "query_dataflow should not return placeholder note, got: {:?}",
+        result
+    );
+    assert!(
+        result.get("summary").is_some(),
+        "query_dataflow should return summary, got: {:?}",
+        result
     );
 }
