@@ -1,4 +1,3 @@
-pub mod memory_graph_store;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

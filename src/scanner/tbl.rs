@@ -1,3 +1,4 @@
+use super::{add_edge_with_meta, add_node};
 use crate::graph::{EdgeType, NodeType};
 use crate::graph_store::GraphStore;
 use anyhow::Result;
@@ -36,13 +37,14 @@ pub fn process_tbl_file_from_string(
     {
         obj.insert("dimensions".to_string(), dims.clone());
     }
-    graph.add_node(
+    add_node(
+        graph,
         model_id.clone(),
         NodeType::Model,
         rel_path.to_string(),
         model_name.clone(),
         Some(model_meta),
-    );
+    )?;
     node_ids.insert(model_id.clone());
 
     // Process dimensions (fields)
@@ -80,15 +82,16 @@ pub fn process_tbl_file_from_string(
                         );
                     }
                 }
-                graph.add_node(
+                add_node(
+                    graph,
                     field_id.clone(),
                     NodeType::Field,
                     rel_path.to_string(),
                     name.to_string(),
                     Some(field_meta),
-                );
+                )?;
                 node_ids.insert(field_id.clone());
-                graph.add_edge_with_meta(&model_id, &field_id, EdgeType::Contains, None, None);
+                add_edge_with_meta(graph, &model_id, &field_id, EdgeType::Contains, None, None)?;
             }
         }
     }
@@ -115,20 +118,22 @@ pub fn process_tbl_file_from_string(
         } else {
             Some(serde_json::json!({"modelType": "PhysicalTable"}))
         };
-        graph.add_node(
+        add_node(
+            graph,
             output_model_id.clone(),
             NodeType::Model,
             db_table_path.clone(),
             db_table_name.to_string(),
             output_meta,
-        );
-        graph.add_edge_with_meta(
+        )?;
+        add_edge_with_meta(
+            graph,
             &model_id,
             &output_model_id,
             EdgeType::OutputsTo,
             Some(db_table_name.to_string()),
             None,
-        );
+        )?;
         // Also create field nodes for the output physical table so field-level lineage works
         if let Some(dims) = value.get("dimensions").and_then(|d| d.as_array()) {
             for dim in dims {
@@ -163,20 +168,22 @@ pub fn process_tbl_file_from_string(
                             serde_json::json!(input_field),
                         );
                     }
-                    graph.add_node(
+                    add_node(
+                        graph,
                         field_id.clone(),
                         NodeType::Field,
                         db_table_path.clone(),
                         name.to_string(),
                         Some(field_meta),
-                    );
-                    graph.add_edge_with_meta(
+                    )?;
+                    add_edge_with_meta(
+                        graph,
                         &output_model_id,
                         &field_id,
                         EdgeType::Contains,
                         None,
                         None,
-                    );
+                    )?;
                 }
             }
         }
@@ -196,20 +203,22 @@ pub fn process_tbl_file_from_string(
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| dep_path.to_string());
                 let dep_model_id = format!("model:{}", dep_model);
-                graph.add_node(
+                add_node(
+                    graph,
                     dep_model_id.clone(),
                     NodeType::Model,
                     dep_path.to_string(),
                     dep_model.clone(),
                     Some(serde_json::json!({"modelType": "DataFlowDependency"})),
-                );
-                graph.add_edge_with_meta(
+                )?;
+                add_edge_with_meta(
+                    graph,
                     &model_id,
                     &dep_model_id,
                     EdgeType::DataflowInput,
                     Some(dep_path.to_string()),
                     None,
-                );
+                )?;
             }
         }
     }
@@ -377,9 +386,7 @@ pub fn process_tbl_file_from_string(
                     }
                 }
                 model_node.meta = Some(meta);
-                graph
-                    .upsert_node(model_node)
-                    .expect("upsert_node must succeed");
+                graph.upsert_node(model_node)?;
             }
             // Second pass: create DataflowInput edges for ModelTable nodes
             for (_, node) in nodes {
@@ -392,21 +399,23 @@ pub fn process_tbl_file_from_string(
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| module_table_path.to_string());
                     let ref_model_id = format!("model:{}", ref_model);
-                    graph.add_node(
+                    add_node(
+                        graph,
                         ref_model_id.clone(),
                         NodeType::Model,
                         module_table_path.to_string(),
                         ref_model.clone(),
                         None,
-                    );
+                    )?;
                     // DataflowInput edge: this DataFlow reads from ref_model
-                    graph.add_edge_with_meta(
+                    add_edge_with_meta(
+                        graph,
                         &model_id,
                         &ref_model_id,
                         EdgeType::DataflowInput,
                         Some(module_table_path.to_string()),
                         None,
-                    );
+                    )?;
                 }
             }
         }

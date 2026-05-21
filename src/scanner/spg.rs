@@ -1,4 +1,4 @@
-use super::resolve_reference_path;
+use super::{add_edge_with_meta, add_node, resolve_reference_path};
 use crate::graph::{EdgeType, NodeType};
 use crate::graph_store::GraphStore;
 use anyhow::Result;
@@ -145,25 +145,27 @@ fn ensure_model_field(
     field: &str,
     model_path: &str,
     field_meta: Option<serde_json::Value>,
-) -> (String, String) {
+) -> Result<(String, String)> {
     let model_id = format!("model:{}", model);
     let field_id = format!("field:{}.{}", model, field);
-    graph.add_node(
+    add_node(
+        graph,
         model_id.clone(),
         NodeType::Model,
         model_path.to_string(),
         model.to_string(),
         None,
-    );
-    graph.add_node(
+    )?;
+    add_node(
+        graph,
         field_id.clone(),
         NodeType::Field,
         model_path.to_string(),
         field.to_string(),
         field_meta,
-    );
-    graph.add_edge_with_meta(&model_id, &field_id, EdgeType::Contains, None, None);
-    (model_id, field_id)
+    )?;
+    add_edge_with_meta(graph, &model_id, &field_id, EdgeType::Contains, None, None)?;
+    Ok((model_id, field_id))
 }
 
 /// 从模型路径中提取物理表名（去除路径前缀和 .tbl 后缀）。
@@ -190,54 +192,60 @@ fn add_model_read(
     model_path: &str,
     edge_meta: serde_json::Value,
     edge_type: EdgeType,
-) {
-    let (model_id, field_id) = ensure_model_field(graph, model, field, model_path, None);
-    graph.add_edge_with_meta(
+) -> Result<()> {
+    let (model_id, field_id) = ensure_model_field(graph, model, field, model_path, None)?;
+    add_edge_with_meta(
+        graph,
         from_id,
         &model_id,
         edge_type.clone(),
         Some(format!("{}.{}", model, field)),
         Some(edge_meta.clone()),
-    );
+    )?;
     // 字段级读取边：组件直接指向字段节点
-    graph.add_edge_with_meta(
+    add_edge_with_meta(
+        graph,
         from_id,
         &field_id,
         edge_type.clone(),
         Some(format!("{}.{}", model, field)),
         Some(edge_meta.clone()),
-    );
+    )?;
 
     // 同时创建到物理表的读取边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
         if model != physical_name {
             let (phy_model_id, phy_field_id) =
-                ensure_model_field(graph, &physical_name, field, model_path, None);
-            graph.add_edge_with_meta(
+                ensure_model_field(graph, &physical_name, field, model_path, None)?;
+            add_edge_with_meta(
+                graph,
                 from_id,
                 &phy_model_id,
                 edge_type.clone(),
                 Some(format!("{}.{}", physical_name, field)),
                 Some(edge_meta.clone()),
-            );
+            )?;
             // 字段级读取边：组件直接指向物理字段节点
-            graph.add_edge_with_meta(
+            add_edge_with_meta(
+                graph,
                 from_id,
                 &phy_field_id,
                 edge_type.clone(),
                 Some(format!("{}.{}", physical_name, field)),
                 Some(edge_meta.clone()),
-            );
+            )?;
             // 局部模型字段到物理表字段的别名映射
-            graph.add_edge_with_meta(
+            add_edge_with_meta(
+                graph,
                 &field_id,
                 &phy_field_id,
                 EdgeType::FieldAlias,
                 Some(format!("{}.{}", model, field)),
                 None,
-            );
+            )?;
         }
     }
+    Ok(())
 }
 /// 添加从 from_id 写入 model.field 的关系边。
 fn add_model_write(
@@ -248,54 +256,60 @@ fn add_model_write(
     model_path: &str,
     edge_type: EdgeType,
     edge_meta: serde_json::Value,
-) {
-    let (model_id, field_id) = ensure_model_field(graph, model, field, model_path, None);
-    graph.add_edge_with_meta(
+) -> Result<()> {
+    let (model_id, field_id) = ensure_model_field(graph, model, field, model_path, None)?;
+    add_edge_with_meta(
+        graph,
         from_id,
         &model_id,
         edge_type.clone(),
         Some(format!("{}.{}", model, field)),
         Some(edge_meta.clone()),
-    );
+    )?;
     // 字段级写入边：action 直接指向字段节点
-    graph.add_edge_with_meta(
+    add_edge_with_meta(
+        graph,
         from_id,
         &field_id,
         EdgeType::FieldWrite,
         Some(format!("{}.{}", model, field)),
         Some(edge_meta.clone()),
-    );
+    )?;
 
     // 同时创建到物理表的写入边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
         if model != physical_name {
             let (phy_model_id, phy_field_id) =
-                ensure_model_field(graph, &physical_name, field, model_path, None);
-            graph.add_edge_with_meta(
+                ensure_model_field(graph, &physical_name, field, model_path, None)?;
+            add_edge_with_meta(
+                graph,
                 from_id,
                 &phy_model_id,
                 edge_type.clone(),
                 Some(format!("{}.{}", physical_name, field)),
                 Some(edge_meta.clone()),
-            );
+            )?;
             // 字段级写入边：action 直接指向物理字段节点
-            graph.add_edge_with_meta(
+            add_edge_with_meta(
+                graph,
                 from_id,
                 &phy_field_id,
                 EdgeType::FieldWrite,
                 Some(format!("{}.{}", physical_name, field)),
                 Some(edge_meta.clone()),
-            );
+            )?;
             // 局部模型字段到物理表字段的别名映射
-            graph.add_edge_with_meta(
+            add_edge_with_meta(
+                graph,
                 &field_id,
                 &phy_field_id,
                 EdgeType::FieldAlias,
                 Some(format!("{}.{}", model, field)),
                 None,
-            );
+            )?;
         }
     }
+    Ok(())
 }
 
 pub fn process_spg_file_from_value(
@@ -324,13 +338,14 @@ pub fn process_spg_file_from_value(
 
     // Use normalized relative path for unique page_id to avoid collisions
     let page_id = format!("page:{}", rel_path.replace("\\", "/"));
-    graph.add_node(
+    add_node(
+        graph,
         page_id.clone(),
         NodeType::Page,
         rel_path.to_string(),
         page_name.clone(),
         None,
-    );
+    )?;
     node_ids.insert(page_id.clone());
 
     // Process embedded DataFlow models in sources
@@ -344,13 +359,14 @@ pub fn process_spg_file_from_value(
         let model_name = &source.id;
         let model_id = format!("model:{}", model_name);
 
-        graph.add_node(
+        add_node(
+            graph,
             model_id.clone(),
             NodeType::Model,
             rel_path.to_string(),
             model_name.clone(),
             Some(serde_json::json!({"modelType": "DataFlow", "embeddedIn": page_name})),
-        );
+        )?;
         if !node_ids.contains(&model_id) {
             node_ids.insert(model_id.clone());
         }
@@ -360,17 +376,25 @@ pub fn process_spg_file_from_value(
             for dim in dimensions {
                 if let Some(name) = dim.get("name").and_then(|n| n.as_str()) {
                     let field_id = format!("field:{}.{}", model_name, name);
-                    graph.add_node(
+                    add_node(
+                        graph,
                         field_id.clone(),
                         NodeType::Field,
                         rel_path.to_string(),
                         name.to_string(),
                         Some(dim.clone()),
-                    );
+                    )?;
                     if !node_ids.contains(&field_id) {
                         node_ids.insert(field_id.clone());
                     }
-                    graph.add_edge_with_meta(&model_id, &field_id, EdgeType::Contains, None, None);
+                    add_edge_with_meta(
+                        graph,
+                        &model_id,
+                        &field_id,
+                        EdgeType::Contains,
+                        None,
+                        None,
+                    )?;
                 }
             }
         }
@@ -390,20 +414,22 @@ pub fn process_spg_file_from_value(
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| module_table_path.to_string());
                     let ref_model_id = format!("model:{}", ref_model);
-                    graph.add_node(
+                    add_node(
+                        graph,
                         ref_model_id.clone(),
                         NodeType::Model,
                         module_table_path.to_string(),
                         ref_model.clone(),
                         None,
-                    );
-                    graph.add_edge_with_meta(
+                    )?;
+                    add_edge_with_meta(
+                        graph,
                         &model_id,
                         &ref_model_id,
                         EdgeType::DataflowInput,
                         Some(module_table_path.to_string()),
                         None,
-                    );
+                    )?;
                 }
             }
         }
@@ -474,15 +500,16 @@ pub fn process_spg_file_from_value(
                 );
             }
         }
-        graph.add_node(
+        add_node(
+            graph,
             comp_id.clone(),
             NodeType::Component,
             rel_path.to_string(),
             comp.id.clone(),
             Some(comp_meta),
-        );
+        )?;
         node_ids.insert(comp_id.clone());
-        graph.add_edge_with_meta(&page_id, &comp_id, EdgeType::Contains, None, None);
+        add_edge_with_meta(graph, &page_id, &comp_id, EdgeType::Contains, None, None)?;
 
         // Process expressions (reads)
         if let Some(exprs) = expr_map.get(comp.id.as_str()) {
@@ -527,7 +554,7 @@ pub fn process_spg_file_from_value(
                         &model_path,
                         edge_meta,
                         EdgeType::Reads,
-                    );
+                    )?;
                 }
                 for ref_type in &expr.refs {
                     match ref_type {
@@ -555,7 +582,7 @@ pub fn process_spg_file_from_value(
                                 &model_path,
                                 edge_meta,
                                 EdgeType::Reads,
-                            );
+                            )?;
                         }
                         crate::superpage::RefType::ComponentValue(target_id) => {
                             let target_comp_id =
@@ -572,24 +599,26 @@ pub fn process_spg_file_from_value(
                                 "source_expr": expr.raw_expr,
                                 "source_field": expr.field,
                             });
-                            graph.add_edge_with_meta(
+                            add_edge_with_meta(
+                                graph,
                                 &comp_id,
                                 &target_comp_id,
                                 EdgeType::DependsOn,
                                 Some(format!("comp:{}.value", target_id)),
                                 Some(edge_meta),
-                            );
+                            )?;
                         }
                         crate::superpage::RefType::Param(param_name) => {
                             let param_id =
                                 format!("param:{}|{}", rel_path.replace(r"\", "/"), param_name);
-                            graph.add_node(
+                            add_node(
+                                graph,
                                 param_id.clone(),
                                 NodeType::Field,
                                 rel_path.to_string(),
                                 param_name.clone(),
                                 Some(serde_json::json!({"kind": "param"})),
-                            );
+                            )?;
                             let edge_meta = serde_json::json!({
                                 "reason": format!(
                                     "Component '{}' depends on param '{}' via field '{}'",
@@ -602,23 +631,25 @@ pub fn process_spg_file_from_value(
                                 "source_expr": expr.raw_expr,
                                 "source_field": expr.field,
                             });
-                            graph.add_edge_with_meta(
+                            add_edge_with_meta(
+                                graph,
                                 &comp_id,
                                 &param_id,
                                 EdgeType::DependsOn,
                                 Some(format!("param:{}", param_name)),
                                 Some(edge_meta),
-                            );
+                            )?;
                         }
                         crate::superpage::RefType::UserProperty(prop) => {
                             let user_id = format!("user:{}", prop);
-                            graph.add_node(
+                            add_node(
+                                graph,
                                 user_id.clone(),
                                 NodeType::Field,
                                 "system".to_string(),
                                 format!("$user.{}", prop),
                                 Some(serde_json::json!({"kind": "user_property"})),
-                            );
+                            )?;
                             let edge_meta = serde_json::json!({
                                 "reason": format!(
                                     "Component '{}' depends on user property '$user.{}' via field '{}'",
@@ -631,23 +662,25 @@ pub fn process_spg_file_from_value(
                                 "source_expr": expr.raw_expr,
                                 "source_field": expr.field,
                             });
-                            graph.add_edge_with_meta(
+                            add_edge_with_meta(
+                                graph,
                                 &comp_id,
                                 &user_id,
                                 EdgeType::DependsOn,
                                 Some(format!("$user.{}", prop)),
                                 Some(edge_meta),
-                            );
+                            )?;
                         }
                         crate::superpage::RefType::SystemVar(var_name) => {
                             let sys_id = format!("system:{}", var_name);
-                            graph.add_node(
+                            add_node(
+                                graph,
                                 sys_id.clone(),
                                 NodeType::Field,
                                 "system".to_string(),
                                 format!("${}", var_name),
                                 Some(serde_json::json!({"kind": "system_var"})),
-                            );
+                            )?;
                             let edge_meta = serde_json::json!({
                                 "reason": format!(
                                     "Component '{}' depends on system variable '${}' via field '{}'",
@@ -660,13 +693,14 @@ pub fn process_spg_file_from_value(
                                 "source_expr": expr.raw_expr,
                                 "source_field": expr.field,
                             });
-                            graph.add_edge_with_meta(
+                            add_edge_with_meta(
+                                graph,
                                 &comp_id,
                                 &sys_id,
                                 EdgeType::DependsOn,
                                 Some(format!("${}", var_name)),
                                 Some(edge_meta),
-                            );
+                            )?;
                         }
                         _ => {}
                     }
@@ -707,7 +741,7 @@ pub fn process_spg_file_from_value(
                     &model_path,
                     EdgeType::Writes,
                     submit_meta,
-                );
+                )?;
             }
         }
     }
@@ -730,20 +764,22 @@ pub fn process_spg_file_from_value(
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| target_rel.clone());
             let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
-            graph.add_node(
+            add_node(
+                graph,
                 target_page_id.clone(),
                 NodeType::Page,
                 target_rel.clone(),
                 target_name.clone(),
                 None,
-            );
-            graph.add_edge_with_meta(
+            )?;
+            add_edge_with_meta(
+                graph,
                 &comp_id,
                 &target_page_id,
                 EdgeType::EmbedsPage,
                 Some(target_rel.clone()),
                 None,
-            );
+            )?;
         }
     }
 
@@ -757,7 +793,8 @@ pub fn process_spg_file_from_value(
                 comp.id,
                 action.id
             );
-            graph.add_node(
+            add_node(
+                graph,
                 action_id.clone(),
                 NodeType::Action,
                 rel_path.to_string(),
@@ -768,9 +805,9 @@ pub fn process_spg_file_from_value(
                     "conditionExp": action.condition_exp,
                     "triggerType": action.trigger_type,
                 })),
-            );
+            )?;
             node_ids.insert(action_id.clone());
-            graph.add_edge_with_meta(&comp_id, &action_id, EdgeType::Triggers, None, None);
+            add_edge_with_meta(graph, &comp_id, &action_id, EdgeType::Triggers, None, None)?;
 
             match action.action_type.as_str() {
                 "submitData" => {
@@ -820,7 +857,7 @@ pub fn process_spg_file_from_value(
                                     &model_path,
                                     EdgeType::ActionWrites,
                                     action_meta,
-                                );
+                                )?;
                             }
                         }
                     }
@@ -850,7 +887,7 @@ pub fn process_spg_file_from_value(
                                 &data_set_path,
                                 EdgeType::ActionWrites,
                                 ud_meta,
-                            );
+                            )?;
                             // If value_type is "exp", parse expression refs for dependency analysis
                             if value_type == "exp" {
                                 let refs = crate::superpage::parse_expression_refs(field_value);
@@ -880,7 +917,7 @@ pub fn process_spg_file_from_value(
                                             &model_path,
                                             read_meta,
                                             EdgeType::ActionReads,
-                                        );
+                                        )?;
                                     }
                                 }
                             }
@@ -899,13 +936,14 @@ pub fn process_spg_file_from_value(
                             .map(|s| s.to_string_lossy().to_string())
                             .unwrap_or_else(|| target_rel.clone());
                         let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
-                        graph.add_node(
+                        add_node(
+                            graph,
                             target_page_id.clone(),
                             NodeType::Page,
                             target_rel.clone(),
                             target_name.clone(),
                             None,
-                        );
+                        )?;
                         let opens_meta = serde_json::json!({
                             "reason": format!("Link action opens page '{}'", target_name),
                             "actor_kind": "action",
@@ -914,24 +952,26 @@ pub fn process_spg_file_from_value(
                             "trigger": action.trigger_type,
                             "target_model": target_name,
                         });
-                        graph.add_edge_with_meta(
+                        add_edge_with_meta(
+                            graph,
                             &action_id,
                             &target_page_id,
                             EdgeType::ActionNavigates,
                             Some(target_rel.clone()),
                             Some(opens_meta),
-                        );
+                        )?;
 
                         // Process parameter passing via data array
                         for (param_name, param_value) in &action.data {
                             let param_id = format!("param:{}/{}", target_name, param_name);
-                            graph.add_node(
+                            add_node(
+                                graph,
                                 param_id.clone(),
                                 NodeType::Field,
                                 target_rel.clone(),
                                 param_name.clone(),
                                 None,
-                            );
+                            )?;
                             let pass_meta = serde_json::json!({
                                 "reason": format!("Link action passes param '{}'", param_name),
                                 "actor_kind": "action",
@@ -941,13 +981,14 @@ pub fn process_spg_file_from_value(
                                 "target_field": param_name,
                                 "source_expr": param_value,
                             });
-                            graph.add_edge_with_meta(
+                            add_edge_with_meta(
+                                graph,
                                 &action_id,
                                 &param_id,
                                 EdgeType::PassesParam,
                                 Some(param_value.clone()),
                                 Some(pass_meta),
-                            );
+                            )?;
                             // Parse expression refs from param_value for dependency analysis
                             let refs = crate::superpage::parse_expression_refs(param_value);
                             for ref_type in refs {
@@ -976,7 +1017,7 @@ pub fn process_spg_file_from_value(
                                         &model_path,
                                         read_meta,
                                         EdgeType::ActionReads,
-                                    );
+                                    )?;
                                 }
                             }
                         }
@@ -986,13 +1027,14 @@ pub fn process_spg_file_from_value(
                     for (param_name, param_value) in &action.params {
                         let param_id =
                             format!("param:{}|{}", rel_path.replace("\\", "/"), param_name);
-                        graph.add_node(
+                        add_node(
+                            graph,
                             param_id.clone(),
                             NodeType::Field,
                             rel_path.to_string(),
                             param_name.clone(),
                             None,
-                        );
+                        )?;
                         let sets_meta = serde_json::json!({
                             "reason": format!("setParamValue sets param '{}'", param_name),
                             "actor_kind": "action",
@@ -1002,13 +1044,14 @@ pub fn process_spg_file_from_value(
                             "target_field": param_name,
                             "source_expr": param_value,
                         });
-                        graph.add_edge_with_meta(
+                        add_edge_with_meta(
+                            graph,
                             &action_id,
                             &param_id,
                             EdgeType::ActionSetsParam,
                             Some(param_value.clone()),
                             Some(sets_meta),
-                        );
+                        )?;
                         // Parse expression refs from param_value for dependency analysis
                         let refs = crate::superpage::parse_expression_refs(param_value);
                         for ref_type in refs {
@@ -1035,7 +1078,7 @@ pub fn process_spg_file_from_value(
                                     &model_path,
                                     read_meta,
                                     EdgeType::ActionReads,
-                                );
+                                )?;
                             }
                         }
                     }
@@ -1052,13 +1095,14 @@ pub fn process_spg_file_from_value(
                             "trigger": action.trigger_type,
                             "target_component": target_comp,
                         });
-                        graph.add_edge_with_meta(
+                        add_edge_with_meta(
+                            graph,
                             &action_id,
                             &target_comp_id,
                             EdgeType::ActionControlsComponent,
                             None,
                             Some(ctrl_meta),
-                        );
+                        )?;
                     }
                 }
                 "showDialog" => {
@@ -1067,13 +1111,14 @@ pub fn process_spg_file_from_value(
                             format!("comp:{}|{}", rel_path.replace(r"\", "/"), dialog_id);
                         // 确保目标节点存在
                         if graph.get_node(&dialog_comp_id).ok().flatten().is_none() {
-                            graph.add_node(
+                            add_node(
+                                graph,
                                 dialog_comp_id.clone(),
                                 NodeType::Component,
                                 rel_path.to_string(),
                                 dialog_id.clone(),
                                 None,
-                            );
+                            )?;
                         }
                         let dialog_meta = serde_json::json!({
                             "reason": format!("Action 'showDialog' opens dialog '{}'", dialog_id),
@@ -1083,13 +1128,14 @@ pub fn process_spg_file_from_value(
                             "trigger": action.trigger_type,
                             "dialog": dialog_id,
                         });
-                        graph.add_edge_with_meta(
+                        add_edge_with_meta(
+                            graph,
                             &action_id,
                             &dialog_comp_id,
                             EdgeType::ActionControlsComponent,
                             None,
                             Some(dialog_meta),
-                        );
+                        )?;
                     }
                 }
                 "closeDialog" => {
@@ -1100,26 +1146,28 @@ pub fn process_spg_file_from_value(
                         "operation": "ActionControlsComponent",
                         "trigger": action.trigger_type,
                     });
-                    graph.add_edge_with_meta(
+                    add_edge_with_meta(
+                        graph,
                         &action_id,
                         &comp_id,
                         EdgeType::ActionControlsComponent,
                         None,
                         Some(close_meta),
-                    );
+                    )?;
                 }
                 "switchPanel" => {
                     if let Some(ref pb) = action.panelbook {
                         let panelbook_id = format!("comp:{}|{}", rel_path.replace(r"\", "/"), pb);
                         // 确保目标节点存在
                         if graph.get_node(&panelbook_id).ok().flatten().is_none() {
-                            graph.add_node(
+                            add_node(
+                                graph,
                                 panelbook_id.clone(),
                                 NodeType::Component,
                                 rel_path.to_string(),
                                 pb.clone(),
                                 None,
-                            );
+                            )?;
                         }
                         let ctrl_meta = serde_json::json!({
                             "reason": format!("Action 'switchPanel' controls panelbook '{}'", pb),
@@ -1130,13 +1178,14 @@ pub fn process_spg_file_from_value(
                             "panelbook": pb,
                             "panel": action.panel,
                         });
-                        graph.add_edge_with_meta(
+                        add_edge_with_meta(
+                            graph,
                             &action_id,
                             &panelbook_id,
                             EdgeType::ActionControlsComponent,
                             None,
                             Some(ctrl_meta),
-                        );
+                        )?;
                     }
                 }
                 "validateData" => {
@@ -1181,7 +1230,7 @@ pub fn process_spg_file_from_value(
                                     &model_path,
                                     EdgeType::ActionValidates,
                                     val_meta,
-                                );
+                                )?;
                             }
                         }
                     }
@@ -1216,13 +1265,14 @@ pub fn process_spg_file_from_value(
                                 "trigger": action.trigger_type,
                                 "target_component": sc,
                             });
-                            graph.add_edge_with_meta(
+                            add_edge_with_meta(
+                                graph,
                                 &action_id,
                                 &comp_full_id,
                                 EdgeType::ActionLoadsData,
                                 None,
                                 Some(load_meta),
-                            );
+                            )?;
                         }
                     }
                     for (model, model_path) in targets {
@@ -1242,7 +1292,7 @@ pub fn process_spg_file_from_value(
                             &model_path,
                             EdgeType::ActionLoadsData,
                             load_meta,
-                        );
+                        )?;
                     }
                 }
                 _ => {}
@@ -1266,13 +1316,14 @@ pub fn process_spg_file_from_value(
             "owner_id": cond.owner_id,
             "referenced_symbols": cond.referenced_symbols,
         });
-        graph.add_node(
+        add_node(
+            graph,
             cond_node_id.clone(),
             NodeType::Condition,
             cond.source_file.as_deref().unwrap_or(rel_path).to_string(),
             cond_name,
             Some(cond_meta),
-        );
+        )?;
         if !node_ids.contains(&cond_node_id) {
             node_ids.insert(cond_node_id.clone());
         }
@@ -1311,13 +1362,14 @@ pub fn process_spg_file_from_value(
             "json_path": cond.json_path,
             "condition_type": format!("{:?}", cond.condition_type),
         });
-        graph.add_edge_with_meta(
+        add_edge_with_meta(
+            graph,
             &cond_node_id,
             &owner_node_id,
             EdgeType::DependsOn,
             Some(cond.json_path.clone()),
             Some(owner_edge_meta),
-        );
+        )?;
 
         // condition -> upstream dependency 边
         for sym in &cond.referenced_symbols {
@@ -1345,13 +1397,14 @@ pub fn process_spg_file_from_value(
                 "source_expr": cond.raw_expr,
                 "json_path": cond.json_path,
             });
-            graph.add_edge_with_meta(
+            add_edge_with_meta(
+                graph,
                 &cond_node_id,
                 &target_node_id,
                 EdgeType::DependsOn,
                 Some(sym.clone()),
                 Some(dep_edge_meta),
-            );
+            )?;
         }
     }
 
@@ -1365,7 +1418,8 @@ pub fn process_spg_file_from_value(
             let model_name = &cond.owner_id;
             let trc_field_id = format!("field:{}.totalRowCount__", model_name);
             let trc_model_id = format!("model:{}", model_name);
-            graph.add_node(
+            add_node(
+                graph,
                 trc_field_id.clone(),
                 NodeType::Field,
                 rel_path.to_string(),
@@ -1374,8 +1428,15 @@ pub fn process_spg_file_from_value(
                     "kind": "implicit",
                     "description": "模型过滤后的隐式行数字段",
                 })),
-            );
-            graph.add_edge_with_meta(&trc_model_id, &trc_field_id, EdgeType::Contains, None, None);
+            )?;
+            add_edge_with_meta(
+                graph,
+                &trc_model_id,
+                &trc_field_id,
+                EdgeType::Contains,
+                None,
+                None,
+            )?;
 
             let cond_node_id =
                 format!("cond:{}|{}", rel_path.replace(r"\", "/"), cond.condition_id);
@@ -1387,13 +1448,14 @@ pub fn process_spg_file_from_value(
                 "source_expr": cond.raw_expr.clone(),
                 "json_path": cond.json_path.clone(),
             });
-            graph.add_edge_with_meta(
+            add_edge_with_meta(
+                graph,
                 &cond_node_id,
                 &trc_field_id,
                 EdgeType::DependsOn,
                 Some(format!("{}.totalRowCount__", model_name)),
                 Some(trc_edge_meta),
-            );
+            )?;
         }
     }
 
@@ -1413,7 +1475,8 @@ pub fn process_spg_file_from_value(
             .unwrap_or(path);
         let model_id = format!("model:{}", source.id);
         let physical_model_id = format!("model:{}", physical_table);
-        graph.add_node(
+        add_node(
+            graph,
             model_id.clone(),
             NodeType::Model,
             path.clone(),
@@ -1422,35 +1485,38 @@ pub fn process_spg_file_from_value(
                 "modelType": "dwtable",
                 "sourcePath": path,
             })),
-        );
+        )?;
         if !node_ids.contains(&model_id) {
             node_ids.insert(model_id.clone());
         }
         // 避免覆盖已有节点（如 App/DataFlow 表）的 modelType
         if graph.get_node(&physical_model_id).ok().flatten().is_none() {
-            graph.add_node(
+            add_node(
+                graph,
                 physical_model_id.clone(),
                 NodeType::Model,
                 path.clone(),
                 physical_table.to_string(),
                 Some(serde_json::json!({"modelType": "PhysicalTable", "sourcePath": path})),
-            );
+            )?;
         }
-        graph.add_edge_with_meta(
+        add_edge_with_meta(
+            graph,
             &model_id,
             &physical_model_id,
             EdgeType::DataflowInput,
             Some(path.clone()),
             None,
-        );
+        )?;
         // 建立反向边，使 BFS 能从物理表回溯到局部模型
-        graph.add_edge_with_meta(
+        add_edge_with_meta(
+            graph,
             &physical_model_id,
             &model_id,
             EdgeType::DataflowOutput,
             Some(path.clone()),
             None,
-        );
+        )?;
     }
 
     Ok(node_ids.into_iter().collect())

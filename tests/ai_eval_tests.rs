@@ -37,9 +37,13 @@ fn copy_dir_all(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Pat
 /// 运行 CLI 命令并返回 stdout
 fn run_cli(args: &[&str]) -> String {
     let _guard = CLI_LOCK.lock().unwrap();
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = std::env::var_os("CARGO_BIN_EXE_metadata-checker")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap()
+                .join("target/debug/metadata-checker")
+        });
     let cmd_output = std::process::Command::new(&bin)
         .args(args)
         .output()
@@ -467,10 +471,19 @@ fn test_ai_eval_commands_execute_and_assert() {
                 // 真实项目 case：添加 --graph-db-path 到独立路径
                 let mut cmd = cmd_str.to_string();
                 if let Some(ref db) = real_project_db {
+                    let lock_path = db.with_extension("graphdb.lock");
+                    let _ = std::fs::remove_file(&lock_path);
                     if !db.exists() {
                         let pd = case["project_dir"].as_str().unwrap_or("");
-                        let _ =
-                            metadata_checker::scanner::scan_project(std::path::Path::new(pd), db);
+                        metadata_checker::scanner::scan_project(std::path::Path::new(pd), db)
+                            .unwrap_or_else(|err| {
+                                panic!(
+                                    "real project graph build failed for case {} at {}: {}",
+                                    case_id,
+                                    db.display(),
+                                    err
+                                )
+                            });
                     }
                     if cmd.contains("--project-dir") && !cmd.contains("--graph-db-path") {
                         cmd.push_str(&format!(" --graph-db-path {}", db.to_str().unwrap()));

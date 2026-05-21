@@ -1,12 +1,12 @@
 use metadata_checker::graph::GraphDB;
-use metadata_checker::graph_store::{GraphReadStore, GraphWriteStore, IndexStateStore};
+use metadata_checker::graph_store::{GraphReadStore, GraphWriteStore};
 use std::collections::HashMap;
 
 #[test]
 fn test_graphdb_implements_graph_read_store() {
     let db_path = std::env::temp_dir().join("m39_test_read.graphdb");
     let _ = std::fs::remove_file(&db_path);
-    let mut graph = GraphDB::open(&db_path).expect("open graphdb");
+    let graph = GraphDB::open(&db_path).expect("open graphdb");
 
     // 使用 trait 方法
     let count = GraphReadStore::node_count(&graph).expect("node_count");
@@ -35,7 +35,7 @@ fn test_graphdb_implements_graph_write_store() {
         meta: None,
     };
 
-    GraphWriteStore::upsert_node(&mut graph, node);
+    GraphWriteStore::upsert_node(&mut graph, node).expect("upsert_node must succeed");
     assert_eq!(graph.node_count().expect("count"), 1);
 
     let edge = metadata_checker::graph::Edge {
@@ -45,10 +45,11 @@ fn test_graphdb_implements_graph_write_store() {
         field_path: None,
         meta: None,
     };
-    GraphWriteStore::add_edge(&mut graph, edge);
+    GraphWriteStore::add_edge(&mut graph, edge).expect("add_edge must succeed");
     assert_eq!(graph.edge_count().expect("count"), 1);
 
-    GraphWriteStore::remove_nodes_by_ids(&mut graph, &["page:test".to_string()]);
+    GraphWriteStore::remove_nodes_by_ids(&mut graph, &["page:test".to_string()])
+        .expect("remove_nodes_by_ids must succeed");
     assert_eq!(graph.node_count().expect("count"), 0);
 
     let _ = std::fs::remove_file(&db_path);
@@ -215,7 +216,7 @@ fn test_persist_index_commits_graph_and_file_states_together() {
     };
 
     let report =
-        IndexStateStore::persist_index(&mut graph, &commit).expect("persist_index must succeed");
+        IndexStateStore::persist_index(&mut graph, commit).expect("persist_index must succeed");
     assert_eq!(report.indexed, 1);
 
     // 验证 file_states 已持久化

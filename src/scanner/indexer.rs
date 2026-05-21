@@ -177,17 +177,16 @@ impl ProjectIndexer {
         graph: &mut dyn GraphStore,
         new_states: &mut HashMap<String, FileState>,
         deleted: &[DeletedFile],
-    ) {
+    ) -> Result<()> {
         for (rel, node_ids) in deleted {
-            graph
-                .remove_nodes_by_ids(node_ids)
-                .expect("remove_nodes_by_ids must succeed");
+            graph.remove_nodes_by_ids(node_ids)?;
             new_states.remove(rel);
         }
+        Ok(())
     }
 
     /// 阶段 5：持久化索引结果
-    pub fn persist_index(graph: &mut GraphDB, commit: &IndexCommit) -> Result<IndexReport> {
+    pub fn persist_index(graph: &mut GraphDB, commit: IndexCommit) -> Result<IndexReport> {
         IndexStateStore::persist_index(graph, commit)
             .map_err(|e| anyhow::anyhow!("persist_index failed: {}", e))
     }
@@ -202,7 +201,7 @@ impl ProjectIndexer {
         let plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
 
         let mut new_states = prev_states.clone();
-        Self::apply_deletions(&mut graph, &mut new_states, &plan.deleted);
+        Self::apply_deletions(&mut graph, &mut new_states, &plan.deleted)?;
 
         if !plan.dirty.is_empty() || !plan.deleted.is_empty() {
             new_states = Self::parse_dirty_files(
@@ -218,7 +217,7 @@ impl ProjectIndexer {
                 dirty_nodes: graph.dirty_nodes_set().iter().cloned().collect(),
                 deleted_nodes: graph.removed_nodes_set().iter().cloned().collect(),
             };
-            let report = Self::persist_index(&mut graph, &commit)?;
+            let report = Self::persist_index(&mut graph, commit)?;
             return Ok(report);
         }
 

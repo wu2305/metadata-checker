@@ -1,7 +1,8 @@
-mod common;
+#[path = "common/memory_graph_store.rs"]
+mod memory_graph_store;
 
 use metadata_checker::graph::GraphDB;
-use metadata_checker::graph_store::{GraphReadStore, GraphWriteStore};
+use metadata_checker::graph_store::GraphReadStore;
 use metadata_checker::scanner::indexer::ProjectIndexer;
 use metadata_checker::scanner::scan_project;
 use metadata_checker::storage_provider::LocalStorageProvider;
@@ -156,54 +157,39 @@ fn test_scan_project_behavior_unchanged() {
 /// 测试 query 辅助函数不直接依赖 GraphDB 具体类型（通过 trait 对象也能工作）
 #[test]
 fn test_query_functions_do_not_require_graphdb() {
-    use common::memory_graph_store::MemoryGraphStore;
+    use memory_graph_store::MemoryGraphStore;
 
     let mut store = MemoryGraphStore::new();
-    let node_a = metadata_checker::graph::Node {
-        id: "page:a".to_string(),
-        name: "Page A".to_string(),
-        node_type: metadata_checker::graph::NodeType::Page,
-        path: "a.spg".to_string(),
-        meta: None,
-    };
-    let node_b = metadata_checker::graph::Node {
-        id: "page:b".to_string(),
-        name: "Page B".to_string(),
-        node_type: metadata_checker::graph::NodeType::Page,
-        path: "b.spg".to_string(),
-        meta: None,
-    };
-    let node_model = metadata_checker::graph::Node {
-        id: "model:m1".to_string(),
-        name: "Model 1".to_string(),
-        node_type: metadata_checker::graph::NodeType::Model,
-        path: "m1.tbl".to_string(),
-        meta: None,
-    };
-
-    store.upsert_node(node_a.clone()).unwrap();
-    store.upsert_node(node_b.clone()).unwrap();
-    store.upsert_node(node_model.clone()).unwrap();
-
-    store
-        .add_edge(metadata_checker::graph::Edge {
-            from: "page:a".to_string(),
-            to: "model:m1".to_string(),
-            edge_type: metadata_checker::graph::EdgeType::Reads,
-            field_path: None,
-            meta: None,
-        })
-        .unwrap();
-
-    store
-        .add_edge(metadata_checker::graph::Edge {
-            from: "page:b".to_string(),
-            to: "model:m1".to_string(),
-            edge_type: metadata_checker::graph::EdgeType::Reads,
-            field_path: None,
-            meta: None,
-        })
-        .unwrap();
+    store.add_test_node(
+        "page:a",
+        "Page A",
+        metadata_checker::graph::NodeType::Page,
+        "a.spg",
+    );
+    store.add_test_node(
+        "page:b",
+        "Page B",
+        metadata_checker::graph::NodeType::Page,
+        "b.spg",
+    );
+    store.add_test_node(
+        "model:m1",
+        "Model 1",
+        metadata_checker::graph::NodeType::Model,
+        "m1.tbl",
+    );
+    store.add_test_edge(
+        "page:a",
+        "model:m1",
+        metadata_checker::graph::EdgeType::Reads,
+        None,
+    );
+    store.add_test_edge(
+        "page:b",
+        "model:m1",
+        metadata_checker::graph::EdgeType::Reads,
+        None,
+    );
 
     let read_store: &dyn GraphReadStore = &store;
     let edges = read_store

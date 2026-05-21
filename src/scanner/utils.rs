@@ -1,4 +1,47 @@
+use crate::graph::{Edge, EdgeType, Node, NodeType};
+use crate::graph_store::GraphStore;
+use anyhow::{Context, Result};
 use std::path::Path;
+
+/// 向图存储写入节点。
+pub fn add_node(
+    graph: &mut dyn GraphStore,
+    id: String,
+    node_type: NodeType,
+    path: String,
+    name: String,
+    meta: Option<serde_json::Value>,
+) -> Result<()> {
+    graph
+        .upsert_node(Node {
+            id,
+            node_type,
+            path,
+            name,
+            meta,
+        })
+        .with_context(|| "Failed to upsert graph node")
+}
+
+/// 向图存储写入带元数据的边。
+pub fn add_edge_with_meta(
+    graph: &mut dyn GraphStore,
+    from: &str,
+    to: &str,
+    edge_type: EdgeType,
+    field_path: Option<String>,
+    meta: Option<serde_json::Value>,
+) -> Result<()> {
+    graph
+        .add_edge(Edge {
+            from: from.to_string(),
+            to: to.to_string(),
+            edge_type,
+            field_path,
+            meta,
+        })
+        .with_context(|| format!("Failed to add graph edge from {} to {}", from, to))
+}
 
 /// Resolve a reference path from referenceResources to an absolute path.
 /// Handles relative paths (../, ./) and $TAPP: prefix.

@@ -22,6 +22,7 @@ use crate::model_scope::{
 use crate::output::schema::format_next_query;
 use crate::path::PathFinder;
 use crate::path::PathSelector;
+use crate::query::find_candidates;
 use crate::superpage::{RefType, SuperPageMetadata};
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -1146,7 +1147,7 @@ pub fn build_explain_output(graph: &GraphDB, node_id: &str) -> Result<Value> {
     let node = match graph.get_node(node_id) {
         Some(n) => n,
         None => {
-            let candidates = graph.find_candidates(node_id, 5);
+            let candidates = find_candidates(graph, node_id, 5)?;
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::Explain,
                 node_id,
@@ -1195,7 +1196,7 @@ pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result
         let node = match graph.get_node(node_id) {
             Some(n) => n,
             None => {
-                let candidates = graph.find_candidates(node_id, 5);
+                let candidates = find_candidates(graph, node_id, 5)?;
                 let out = crate::output::schema::build_target_not_found_output(
                     crate::output::schema::OutputKind::Explain,
                     node_id,

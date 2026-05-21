@@ -1367,7 +1367,7 @@ impl IndexStateStore for GraphDB {
         })
     }
 
-    fn persist_index(&mut self, commit: &IndexCommit) -> GraphStoreResult<IndexReport> {
+    fn persist_index(&mut self, commit: IndexCommit) -> GraphStoreResult<IndexReport> {
         GraphDB::persist(self, &commit.file_states).map_err(|e| GraphStoreError::WriteFailed {
             reason: format!("{}", e),
         })?;

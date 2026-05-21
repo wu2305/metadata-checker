@@ -147,44 +147,6 @@ pub trait GraphWriteStore {
 
     /// 按 ID 列表删除节点
     fn remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()>;
-
-    /// 便捷方法：从部件构造并插入节点（内部 panic 兜底，适配旧 API）
-    fn add_node(
-        &mut self,
-        id: String,
-        node_type: crate::graph::NodeType,
-        path: String,
-        name: String,
-        meta: Option<serde_json::Value>,
-    ) {
-        self.upsert_node(Node {
-            id,
-            node_type,
-            path,
-            name,
-            meta,
-        })
-        .expect("add_node must succeed")
-    }
-
-    /// 便捷方法：添加带 meta 的边（内部 panic 兜底，适配旧 API）
-    fn add_edge_with_meta(
-        &mut self,
-        from: &str,
-        to: &str,
-        edge_type: crate::graph::EdgeType,
-        field_path: Option<String>,
-        meta: Option<serde_json::Value>,
-    ) {
-        self.add_edge(Edge {
-            from: from.to_string(),
-            to: to.to_string(),
-            edge_type,
-            field_path,
-            meta,
-        })
-        .expect("add_edge_with_meta must succeed")
-    }
 }
 
 /// 组合读写 trait（用于需要同时读写的场景）
@@ -220,7 +182,7 @@ pub trait IndexStateStore {
     fn load_file_states(&self) -> GraphStoreResult<HashMap<String, FileState>>;
 
     /// 持久化索引结果（IndexCommit 为唯一提交边界）
-    fn persist_index(&mut self, commit: &IndexCommit) -> GraphStoreResult<IndexReport>;
+    fn persist_index(&mut self, commit: IndexCommit) -> GraphStoreResult<IndexReport>;
 }
 
 /// 把 GraphStoreError 映射为 ToolError（统一错误出口）

@@ -160,7 +160,7 @@ impl IndexStateStore for MemoryGraphStore {
         Ok(std::collections::HashMap::new())
     }
 
-    fn persist_index(&mut self, _commit: &IndexCommit) -> GraphStoreResult<IndexReport> {
+    fn persist_index(&mut self, _commit: IndexCommit) -> GraphStoreResult<IndexReport> {
         Ok(IndexReport {
             indexed: 0,
             unchanged: 0,

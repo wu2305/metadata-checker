@@ -3472,7 +3472,7 @@ pub trait InvocationAdapter {
 
 任务清单：
 
-- [ ] M39.1：新增 `src/graph_store.rs`
+- [x] M39.1：新增 `src/graph_store.rs`
   - 定义：
     - `GraphStoreResult<T> = Result<T, GraphStoreError>`
     - `GraphStoreError`
@@ -3496,7 +3496,7 @@ pub trait InvocationAdapter {
     - `GraphEdgeView` 使用 owned `Node` / `Edge`，避免 trait 生命周期复杂化。
     - 不直接复用 `ToolErrorCode`，但预留统一映射函数。
 
-- [ ] M39.2：定义读写分离 trait（冷脸验收修正）
+- [x] M39.2：定义读写分离 trait（冷脸验收修正）
   - `GraphReadStore`：
     - `get_node(&self, node_id: &str) -> GraphStoreResult<Option<Node>>`
     - `get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>>`
@@ -3521,7 +3521,7 @@ pub trait InvocationAdapter {
     - `find_candidates` 不在 trait 内；改由 query/diagnostic helper 基于 `iter_nodes` 实现。
     - `GraphWriteStore` 不继承 `GraphReadStore`；需要组合能力时在调用处显式写出组合约束。
 
-- [ ] M39.3：让现有 `GraphDB` 实现 trait（冷脸验收修正：按 M39.2 新边界复核）
+- [x] M39.3：让现有 `GraphDB` 实现 trait（冷脸验收修正：按 M39.2 新边界复核）
   - 实现：
     - `GraphReadStore for GraphDB`
     - `GraphWriteStore for GraphDB`
@@ -3534,7 +3534,7 @@ pub trait InvocationAdapter {
     - `GraphReadStore::iter_nodes` 返回 owned `Node` 迭代，不能暴露 `node_indices` / `petgraph::NodeIndex`。
     - `IndexStateStore::persist_index` 调用现有 `GraphDB::persist` 或等价逻辑，但必须明确当前 dirty graph 与 file states 的提交一致性。
 
-- [x] M39.4：迁移 query 层到 `GraphReadStore`（核心入口已迁移，iter_nodes 返回 owned Node，candidates 已外移）
+- [ ] M39.4：迁移 query 层到 `GraphReadStore`（部分入口已迁移，candidates 运行路径已外移；page_logic/explain_condition/path/model_scope 仍需继续迁移）
   - 必须迁移：
     - `query::build_query_page_output`
     - `query::query_page`
@@ -3582,7 +3582,7 @@ pub trait InvocationAdapter {
     - `GraphDB` 旧方法可暂时保留兼容，但新 query 代码不再依赖旧方法。
     - reader/writer/dataflow/candidate 语义集中在 query/domain 层，不下沉到 storage trait。
 
-- [ ] M39.6：新增 test-only `MemoryGraphStore`
+- [ ] M39.6：新增 test-only `MemoryGraphStore`（已具备基础替身和方向一致性测试；仍需覆盖 query_page/query_cross/context 等真实查询入口）
   - 位置建议：
     - `tests/common/memory_graph_store.rs`
     - 或 `src/graph_store.rs` 内 `#[cfg(test)]`

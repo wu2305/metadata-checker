@@ -1,5 +1,6 @@
-mod common;
-use common::memory_graph_store::MemoryGraphStore;
+#[path = "common/memory_graph_store.rs"]
+mod memory_graph_store;
+use memory_graph_store::MemoryGraphStore;
 use metadata_checker::graph::{EdgeType, NodeType};
 use metadata_checker::graph_store::GraphReadStore;
 

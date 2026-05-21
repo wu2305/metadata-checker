@@ -29,4 +29,4 @@ mod utils;
 
 pub use spg::process_spg_file_from_value;
 pub use tbl::process_tbl_file_from_string;
-pub use utils::resolve_reference_path;
+pub use utils::{add_edge_with_meta, add_node, resolve_reference_path};
