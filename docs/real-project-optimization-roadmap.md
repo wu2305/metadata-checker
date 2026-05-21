@@ -3455,39 +3455,210 @@ pub trait InvocationAdapter {
 
 #### M39：GraphStore 与 Indexer 分层
 
-目标：让查询层不直接绑定 redb，给 WASM 内存图和远程 session 图缓存留出口。
+目标：把图查询、图写入、索引状态提交拆开，让 query 不再绑定 redb，让 indexer 的阶段可测试，同时保持现有 CLI / stdio / schema 行为不变。M39 不做并发优化，不实现 MCP、远程、session 或 WASM 正式后端。
+
+设计边界：
+
+- `GraphReadStore` 只表达低语义图读取能力，不包含 reader/writer/dataflow 这类业务 helper。
+- `GraphWriteStore` 与 `GraphReadStore` 分离，写接口接收完整 `Node` / `Edge`，方便后续自定义新增节点和边。
+- `IndexStateStore` 负责 file states 与一次索引结果提交，`persist_index` 放在 index 层。
+- `Arc` / `Mutex` 不进入 trait 定义；未来 runtime/session 可在外层用 `Arc<dyn GraphReadStore + Send + Sync>` 或 `Arc<Mutex<dyn GraphWriteStore + Send>>` 包装。
+- `MemoryGraphStore` 在 M39 仅作为 test-only 替身和调试雏形，不暴露 CLI / stdio / runtime tool。
+- `GraphStoreError` 提供固定枚举和稳定 `code()`，保持错误信息来源统一；具体映射到 `ToolError` / diagnostics 由 runtime/adapter 统一处理。
 
 任务清单：
 
-- [ ] M39.1：定义 `GraphStore` trait
-  - 最小接口：
-    - `get_node`
-    - `get_node_edges`
-    - `find_candidates`
-    - `node_count`
-    - `edge_count`
+- [ ] M39.1：新增 `src/graph_store.rs`
+  - 定义：
+    - `GraphStoreResult<T> = Result<T, GraphStoreError>`
+    - `GraphStoreError`
+    - `GraphEdgeView`
+    - `GraphNeighbors`
+  - `GraphStoreError` 至少覆盖：
+    - `NotFound`
+    - `InvalidArgument`
+    - `OpenFailed`
+    - `ReadFailed`
+    - `WriteFailed`
+    - `SerializeFailed`
+    - `DeserializeFailed`
+    - `LockTimeout`
+    - `PermissionDenied`
+    - `Corrupted`
+    - `UnsupportedOperation`
+  - 要求：
+    - `GraphStoreError` 实现 `Display`。
+    - `GraphStoreError::code()` 是内部图存储错误的稳定 code 来源。
+    - `GraphEdgeView` 使用 owned `Node` / `Edge`，避免 trait 生命周期复杂化。
+    - 不直接复用 `ToolErrorCode`，但预留统一映射函数。
 
-- [ ] M39.2：让现有 `GraphDB` 实现 `GraphStore`
-  - 不改 redb 文件格式。
-  - 不改 petgraph 内部结构。
+- [ ] M39.2：定义读写分离 trait
+  - `GraphReadStore`：
+    - `get_node(&self, node_id: &str) -> GraphStoreResult<Option<Node>>`
+    - `get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>>`
+    - `find_candidates(&self, target_id: &str, limit: usize) -> GraphStoreResult<Vec<(Node, String)>>`
+    - `node_count(&self) -> GraphStoreResult<usize>`
+    - `edge_count(&self) -> GraphStoreResult<usize>`
+  - `GraphWriteStore: GraphReadStore`：
+    - `upsert_node(&mut self, node: Node) -> GraphStoreResult<()>`
+    - `add_edge(&mut self, edge: Edge) -> GraphStoreResult<()>`
+    - `remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()>`
+  - `IndexStateStore`：
+    - `load_file_states(&self) -> GraphStoreResult<HashMap<String, FileState>>`
+    - `persist_index(&mut self, file_states: &HashMap<String, FileState>) -> GraphStoreResult<()>`
+  - 要求：
+    - trait 不包含 `Arc` / `Mutex`。
+    - read trait 不包含写入、事务、持久化、file state。
+    - write trait 接收完整 `Node` / `Edge`，不要固化当前 `GraphDB::add_node` 的长参数形态。
 
-- [ ] M39.3：拆 `ProjectIndexer`
-  - 拆分阶段：
-    - discover files
-    - diff file states
-    - parse dirty files
-    - update graph
-    - persist state
+- [ ] M39.3：让现有 `GraphDB` 实现 trait
+  - 实现：
+    - `GraphReadStore for GraphDB`
+    - `GraphWriteStore for GraphDB`
+    - `IndexStateStore for GraphDB`
+  - 要求：
+    - 不改 redb 文件格式。
+    - 不改 petgraph 内部结构。
+    - 不删除现有 `GraphDB` public 方法。
+    - trait 方法内部可调用现有方法。
+    - `IndexStateStore::persist_index` 调用现有 `GraphDB::persist` 或等价逻辑。
 
-- [ ] M39.4：补内存图测试替身
-  - 用 fixture 构造小图。
-  - 验证 query 函数可依赖 trait。
+- [ ] M39.4：迁移 query 层到 `GraphReadStore`
+  - 必须迁移：
+    - `query::build_query_page_output`
+    - `query::query_page`
+    - `query::build_query_cross_output`
+    - `query::query_cross`
+    - `query::find_nodes`
+    - `context::build_context_output`
+    - `explain::build_explain_output`
+  - 继续迁移：
+    - `query::model::build_query_model_output`
+    - `query::model::query_model`
+    - `query::dataflow::build_query_dataflow_output`
+    - `query::dataflow::query_dataflow`
+    - `model_scope` 中只读图访问函数
+    - `path` 中只读图访问函数
+  - 最终迁移：
+    - `query_page_logic`
+    - `explain_condition`
+    - `answer_facts`
+    - `condition_facts`
+    - `page_logic` 子模块
+  - 要求：
+    - 新增查询入口不得继续要求 `&GraphDB`。
+    - 迁移后使用 `&dyn GraphReadStore` 或泛型 `G: GraphReadStore`。
+    - 不改变 AI 输出 schema。
+
+- [ ] M39.5：业务 helper 从 GraphDB 下沉到 query/domain 层
+  - 从 `GraphDB` 调用路径迁出：
+    - `find_readers`
+    - `find_writers`
+    - `find_cross_relations`
+    - `find_dataflow_inputs`
+    - `find_dataflow_outputs`
+    - `find_produced_by`
+    - `find_consumed_by_dataflows`
+    - `find_upstream_dependencies`
+    - `find_downstream_outputs`
+  - 要求：
+    - 新 helper 接收 `&dyn GraphReadStore`。
+    - `GraphDB` 旧方法可暂时保留兼容，但新 query 代码不再依赖旧方法。
+    - reader/writer/dataflow 语义集中在 query/domain 层，不下沉到 storage trait。
+
+- [ ] M39.6：新增 test-only `MemoryGraphStore`
+  - 位置建议：
+    - `tests/common/memory_graph_store.rs`
+    - 或 `src/graph_store.rs` 内 `#[cfg(test)]`
+  - 能力：
+    - 手工构造节点和边。
+    - 实现 `GraphReadStore`。
+    - 可选实现 `GraphWriteStore`，方便测试写入。
+  - 用途：
+    - 验证 query 代码依赖 `GraphReadStore`，不是 `GraphDB` / redb。
+    - 测试 `query_page`、`query_cross`、`context`、candidates、缺节点、孤立边、循环边界。
+  - 禁止：
+    - 不新增 `--memory-graph`。
+    - 不作为正式 runtime backend。
+    - 不暴露给 stdio / function calling。
+
+- [ ] M39.7：拆 `ProjectIndexer`
+  - 新增位置建议：
+    - `src/indexer.rs`
+    - 或 `src/scanner/indexer.rs`
+  - 阶段：
+    - `discover_files`
+    - `diff_file_states`
+    - `parse_dirty_files`
+    - `apply_graph_updates`
+    - `persist_index`
+  - 建议结构：
+    - `ProjectIndexer<P: DocumentProvider>`
+    - `DiscoveredFile`
+    - `DirtyFile`
+    - `IndexPlan`
+    - `IndexReport`
+  - 要求：
+    - `scan_project(project_dir, db_path)` 继续作为对外入口。
+    - `scan_project` 内部改为调用 `ProjectIndexer`。
+    - 不改变现有增量行为。
+    - 不引入远程 provider。
+    - 不引入 session。
+
+- [ ] M39.8：错误转换统一
+  - 实现：
+    - `GraphStoreError::code()`
+    - `GraphStoreError` 到 `ToolError` / diagnostics 的统一映射函数。
+  - 要求：
+    - runtime / stdio / CLI 不再各自猜测 graph store 错误字符串。
+    - `ToolErrorCode` 保持不动。
+    - redb lock、permission、corruption、serde 错误应尽量映射到稳定 `GraphStoreError`。
+
+- [ ] M39.9：补测试覆盖
+  - 必须新增：
+    - `test_graphdb_implements_graph_read_store`
+    - `test_graphdb_implements_graph_write_store`
+    - `test_graphdb_index_state_store_load_persist`
+    - `test_memory_graph_store_query_page`
+    - `test_memory_graph_store_query_cross`
+    - `test_memory_graph_store_candidates`
+    - `test_query_functions_do_not_require_graphdb`
+    - `test_project_indexer_discovers_spg_tbl`
+    - `test_project_indexer_diff_detects_dirty_deleted_unchanged`
+    - `test_scan_project_behavior_unchanged`
+
+- [ ] M39.10：文档同步
+  - 更新：
+    - `docs/real-project-optimization-roadmap.md`
+    - `docs/schema.md` 中 M36/M39 边界说明
+  - 要求：
+    - 不改 function-calling / stdio 工具协议。
+    - 不改 AI 输出 schema。
+    - 明确 M39 不做 MCP、远程、session、WASM 正式实现。
+
+不做：
+
+- 不处理并发优化。
+- 不把 `Arc` / `Mutex` 写进 trait。
+- 不实现 MCP server。
+- 不实现远程拉取。
+- 不实现 session 目录。
+- 不实现 IndexedDB / WASM 正式 backend。
+- 不改 graphdb 文件格式。
+- 不改查询输出 schema。
+- 不新增用户可见 runtime tool。
 
 验收标准：
 
-- 现有 graphdb 增量行为不变。
-- 关键 query 不直接要求 redb。
-- 真实项目 build-graph / query 回归通过。
+- `GraphReadStore` / `GraphWriteStore` / `IndexStateStore` 分离明确。
+- 查询层不再直接绑定 redb。
+- 写入和 index persist 不混入 read trait。
+- `MemoryGraphStore` 证明查询可脱离 redb。
+- `scan_project` 外部行为不变。
+- 业务 helper 不进入 storage trait。
+- 固定错误枚举成为 graph store 错误 code 来源。
+- `cargo test` 全量通过。
+- 真实项目 build-graph / query 回归通过或明确记录未跑原因。
 
 #### M40：Session Manager 本地会话
 
