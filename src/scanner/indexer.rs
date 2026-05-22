@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use std::hash::Hasher;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use twox_hash::XxHash64;
 
@@ -15,7 +15,7 @@ use crate::storage_provider::{DocumentProvider, LocalStorageProvider};
 /// 发现的文件数量（阶段内部使用，不暴露字段级细节）
 
 /// 脏文件（需要重新解析）
-pub type DirtyFile = (String, std::path::PathBuf, Vec<u8>);
+pub type DirtyFile = (String, PathBuf, Option<Vec<u8>>);
 /// 已删除文件记录
 pub type DeletedFile = (String, Vec<String>);
 
@@ -34,17 +34,15 @@ pub struct ProjectIndexer;
 
 impl ProjectIndexer {
     /// 阶段 1：递归发现项目目录下所有 .spg 和 .tbl 文件
-    pub fn discover_files(project_dir: &Path) -> Result<Vec<std::path::PathBuf>> {
+    ///
+    /// 仅做本地路径发现，不读取文件内容。
+    pub fn discover_files(project_dir: &Path) -> Result<Vec<PathBuf>> {
         let mut files = Vec::new();
         Self::collect_files(project_dir, project_dir, &mut files)?;
         Ok(files)
     }
 
-    fn collect_files(
-        base: &Path,
-        current: &Path,
-        files: &mut Vec<std::path::PathBuf>,
-    ) -> Result<()> {
+    fn collect_files(base: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
         for entry in std::fs::read_dir(current)? {
             let entry = entry?;
             let path = entry.path();
@@ -62,17 +60,19 @@ impl ProjectIndexer {
     }
 
     /// 阶段 2：对比文件 hash，找出脏文件和已删除文件
+    ///
+    /// 本阶段读取已发现文件并生成脏文件计划，不负责目录遍历。
     pub fn diff_file_states(
-        files: &[std::path::PathBuf],
+        discovered_files: &[PathBuf],
         prev_states: &HashMap<String, FileState>,
         project_dir: &Path,
         provider: &dyn DocumentProvider,
     ) -> Result<IndexPlan> {
         let mut discovered_count: usize = 0;
         let mut dirty = Vec::new();
-        let mut current_paths: HashMap<String, std::path::PathBuf> = HashMap::new();
+        let mut current_paths: HashMap<String, PathBuf> = HashMap::new();
 
-        for path in files {
+        for path in discovered_files {
             let rel = path
                 .strip_prefix(project_dir)
                 .unwrap_or(path)
@@ -92,7 +92,7 @@ impl ProjectIndexer {
                     // File unchanged, skip
                 }
                 _ => {
-                    dirty.push((rel, path.clone(), content_bytes));
+                    dirty.push((rel, path.clone(), Some(content_bytes)));
                 }
             }
         }
@@ -112,6 +112,9 @@ impl ProjectIndexer {
     }
 
     /// 阶段 3：解析脏文件内容并更新图存储
+    ///
+    /// 如果 `dirty_files` 已经携带字节内容，本阶段只在缺失时才回退到
+    /// `provider.read_bytes`，避免重复读取。
     pub fn parse_dirty_files(
         graph: &mut dyn GraphStore,
         prev_states: &HashMap<String, FileState>,
@@ -121,12 +124,18 @@ impl ProjectIndexer {
     ) -> Result<HashMap<String, FileState>> {
         let mut new_states = prev_states.clone();
 
-        for (rel, path, content_bytes) in dirty_files {
+        for (rel, path, staged_bytes) in dirty_files {
             // Remove old nodes if updating
             if let Some(old_state) = prev_states.get(rel) {
                 let _ = graph.remove_nodes_by_ids(&old_state.node_ids);
                 new_states.remove(rel);
             }
+
+            let content_bytes = if let Some(bytes) = staged_bytes {
+                bytes.clone()
+            } else {
+                provider.read_bytes(path)?
+            };
 
             let node_ids = if path.extension().map(|e| e == "spg").unwrap_or(false) {
                 let source =
@@ -138,14 +147,14 @@ impl ProjectIndexer {
                     .with_context(|| format!("Failed to parse JSON for {}", rel))?;
                 process_spg_file_from_value(graph, rel, (*raw_value).clone())?
             } else if path.extension().map(|e| e == "tbl").unwrap_or(false) {
-                let content = String::from_utf8_lossy(content_bytes);
+                let content = String::from_utf8_lossy(&content_bytes);
                 process_tbl_file_from_string(graph, rel, &content)?
             } else {
                 Vec::new()
             };
 
             let mut hasher = XxHash64::default();
-            hasher.write(content_bytes);
+            hasher.write(&content_bytes);
             let file_hash = format!("{:x}", hasher.finish());
 
             let metadata = provider.metadata(path)?;
@@ -186,9 +195,12 @@ impl ProjectIndexer {
     }
 
     /// 阶段 5：持久化索引结果
-    pub fn persist_index(graph: &mut GraphDB, commit: IndexCommit) -> Result<IndexReport> {
+    pub fn persist_index(
+        graph: &mut dyn IndexStateStore,
+        commit: IndexCommit,
+    ) -> Result<IndexReport> {
         IndexStateStore::persist_index(graph, commit)
-            .map_err(|e| anyhow::anyhow!("persist_index failed: {}", e))
+            .map_err(|e| anyhow!("persist_index failed: {}", e))
     }
 
     /// 全量索引入口（替代 scan_project）

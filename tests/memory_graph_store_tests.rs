@@ -1,8 +1,11 @@
 #[path = "common/memory_graph_store.rs"]
 mod memory_graph_store;
 use memory_graph_store::MemoryGraphStore;
-use metadata_checker::graph::{EdgeType, NodeType};
-use metadata_checker::graph_store::GraphReadStore;
+use metadata_checker::graph::{EdgeType, FileState, NodeType};
+use metadata_checker::graph_store::{
+    GraphReadStore, GraphWriteStore, IndexCommit, IndexStateStore,
+};
+use metadata_checker::query::find_candidates;
 
 #[test]
 fn test_memory_graph_store_node_count() {
@@ -31,6 +34,15 @@ fn test_memory_graph_store_get_node_edges() {
     assert_eq!(neighbors2.incoming.len(), 1);
     assert_eq!(neighbors2.incoming[0].node.id, "page:home");
     assert_eq!(neighbors2.incoming[0].edge.from, "page:home");
+}
+
+#[test]
+fn test_memory_graph_store_get_node_edges_missing_node_returns_none() {
+    let mut store = MemoryGraphStore::new();
+    store.add_test_node("page:home", "首页", NodeType::Page, "app/home.spg");
+
+    let missing = store.get_node_edges("page:missing").unwrap();
+    assert!(missing.is_none(), "不存在的节点应返回 None");
 }
 
 #[test]
@@ -84,4 +96,117 @@ fn test_memory_graph_store_edge_direction_parity() {
     assert_eq!(reverse.incoming.len(), 1);
     assert_eq!(reverse.incoming[0].node.id, "page:home");
     assert_eq!(reverse.incoming[0].edge.edge_type, EdgeType::Contains);
+}
+
+#[test]
+fn test_memory_graph_store_find_candidates_through_graph_read_store() {
+    let mut store = MemoryGraphStore::new();
+    store.add_test_node("page:home", "首页", NodeType::Page, "app/home.spg");
+    store.add_test_node(
+        "comp:hero_btn",
+        "首页按钮",
+        NodeType::Component,
+        "app/home.spg",
+    );
+    store.add_test_node("model:user", "用户", NodeType::Model, "models/user.tbl");
+
+    let graph: &dyn GraphReadStore = &store;
+    let candidates = find_candidates(graph, "user", 10).expect("find_candidates should work");
+    let contains_user = candidates.iter().any(|(node, _)| node.id == "model:user");
+    assert!(
+        contains_user,
+        "find_candidates 应该在 trait 对象上可用并返回命中节点"
+    );
+}
+
+#[test]
+fn test_memory_graph_store_remove_nodes_removes_incident_edges() {
+    let mut store = MemoryGraphStore::new();
+    store.add_test_node("page:home", "首页", NodeType::Page, "app/home.spg");
+    store.add_test_node("comp:btn1", "按钮1", NodeType::Component, "app/home.spg");
+    store.add_test_node("model:user", "用户", NodeType::Model, "app/user.tbl");
+    store.add_test_edge("page:home", "comp:btn1", EdgeType::Contains, None);
+    store.add_test_edge("comp:btn1", "model:user", EdgeType::Writes, None);
+
+    assert_eq!(store.edge_count().unwrap(), 2);
+    assert_eq!(store.node_count().unwrap(), 3);
+
+    GraphWriteStore::remove_nodes_by_ids(&mut store, &["comp:btn1".to_string()])
+        .expect("remove node should succeed");
+
+    assert_eq!(store.node_count().unwrap(), 2);
+    assert_eq!(store.edge_count().unwrap(), 0);
+    assert!(store
+        .get_node_edges("page:home")
+        .unwrap()
+        .expect("node should still exist")
+        .outgoing
+        .is_empty());
+    assert!(store
+        .get_node_edges("model:user")
+        .unwrap()
+        .expect("node should still exist")
+        .incoming
+        .is_empty());
+    assert!(
+        store.get_node_edges("comp:btn1").unwrap().is_none(),
+        "删除节点后 get_node_edges 应返回 None"
+    );
+}
+
+#[test]
+fn test_memory_graph_store_persist_index_returns_commit_stats() {
+    let mut store = MemoryGraphStore::new();
+    let file_states = vec![
+        (
+            "app/home.spg".to_string(),
+            FileState {
+                file_path: "app/home.spg".to_string(),
+                file_hash: "hash-home".to_string(),
+                mtime: 100,
+                size: 10,
+                node_ids: vec!["page:home".to_string()],
+            },
+        ),
+        (
+            "app/about.spg".to_string(),
+            FileState {
+                file_path: "app/about.spg".to_string(),
+                file_hash: "hash-about".to_string(),
+                mtime: 200,
+                size: 20,
+                node_ids: vec!["page:about".to_string()],
+            },
+        ),
+        (
+            "models/user.tbl".to_string(),
+            FileState {
+                file_path: "models/user.tbl".to_string(),
+                file_hash: "hash-user".to_string(),
+                mtime: 300,
+                size: 30,
+                node_ids: vec!["model:user".to_string()],
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    let commit = IndexCommit {
+        file_states,
+        dirty_nodes: vec!["page:home".to_string(), "model:user".to_string()],
+        deleted_nodes: vec!["old:removed".to_string()],
+    };
+
+    let report =
+        IndexStateStore::persist_index(&mut store, commit).expect("persist_index should succeed");
+    assert_eq!(report.indexed, 3);
+    assert_eq!(report.dirty, 2);
+    assert_eq!(report.deleted, 1);
+    assert_eq!(report.unchanged, 1);
+
+    let loaded = store
+        .load_file_states()
+        .expect("load_file_states should succeed");
+    assert_eq!(loaded.len(), 3);
 }

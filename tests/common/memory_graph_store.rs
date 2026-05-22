@@ -3,7 +3,7 @@ use metadata_checker::graph_store::{
     GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreResult, GraphWriteStore, IndexCommit,
     IndexReport, IndexStateStore,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// 内存图存储测试替身
 ///
@@ -13,6 +13,7 @@ pub struct MemoryGraphStore {
     nodes: HashMap<String, Node>,
     outgoing: HashMap<String, Vec<(Node, Edge)>>,
     incoming: HashMap<String, Vec<(Node, Edge)>>,
+    file_states: HashMap<String, metadata_checker::graph::FileState>,
 }
 
 impl MemoryGraphStore {
@@ -21,6 +22,7 @@ impl MemoryGraphStore {
             nodes: HashMap::new(),
             outgoing: HashMap::new(),
             incoming: HashMap::new(),
+            file_states: HashMap::new(),
         }
     }
 
@@ -143,10 +145,20 @@ impl GraphWriteStore for MemoryGraphStore {
     }
 
     fn remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()> {
+        let removed_ids: HashSet<&str> = node_ids.iter().map(String::as_str).collect();
+
         for id in node_ids {
             self.nodes.remove(id);
             self.outgoing.remove(id);
             self.incoming.remove(id);
+        }
+
+        for edges in self.outgoing.values_mut() {
+            edges.retain(|(_, e)| !removed_ids.contains(e.to.as_str()));
+        }
+
+        for edges in self.incoming.values_mut() {
+            edges.retain(|(_, e)| !removed_ids.contains(e.from.as_str()));
         }
         Ok(())
     }
@@ -157,15 +169,20 @@ impl IndexStateStore for MemoryGraphStore {
         &self,
     ) -> GraphStoreResult<std::collections::HashMap<String, metadata_checker::graph::FileState>>
     {
-        Ok(std::collections::HashMap::new())
+        Ok(self.file_states.clone())
     }
 
-    fn persist_index(&mut self, _commit: IndexCommit) -> GraphStoreResult<IndexReport> {
+    fn persist_index(&mut self, commit: IndexCommit) -> GraphStoreResult<IndexReport> {
+        let indexed = commit.file_states.len();
+        let dirty = commit.dirty_nodes.len();
+        let deleted = commit.deleted_nodes.len();
+        let unchanged = indexed.saturating_sub(dirty);
+        self.file_states = commit.file_states;
         Ok(IndexReport {
-            indexed: 0,
-            unchanged: 0,
-            dirty: 0,
-            deleted: 0,
+            indexed,
+            unchanged,
+            dirty,
+            deleted,
         })
     }
 }

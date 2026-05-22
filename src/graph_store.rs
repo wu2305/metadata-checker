@@ -117,7 +117,9 @@ pub struct GraphNeighbors {
 /// 图只读存储 trait
 ///
 /// 不包含 reader/writer/dataflow 这类业务 helper，只表达低语义图读取能力。
-pub trait GraphReadStore {
+use std::any::Any;
+
+pub trait GraphReadStore: Any {
     /// 按 ID 获取节点（返回克隆）
     fn get_node(&self, node_id: &str) -> GraphStoreResult<Option<Node>>;
 

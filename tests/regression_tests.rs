@@ -228,6 +228,7 @@ fn test_diagnostics_uniform_structure() {
 // ============================================================
 
 use metadata_checker::graph::GraphDB;
+use metadata_checker::graph_store::GraphReadStore;
 use metadata_checker::scanner::scan_project;
 use std::path::Path;
 
@@ -349,6 +350,27 @@ fn test_query_page_logic_contract() {
     assert!(
         result.is_ok(),
         "query_page_logic should succeed for existing page"
+    );
+}
+
+#[test]
+fn test_query_page_logic_accepts_graph_read_store_trait_object() {
+    let (_db_path, graph) = setup_graph_db("logic_trait_store");
+    let graph_store: &dyn GraphReadStore = &graph;
+    let result = metadata_checker::query::build_query_page_logic_output(
+        graph_store,
+        "page:app/page_relations.spg",
+        Some(Path::new("tests/fixtures/test_project")),
+        "compact",
+    )
+    .expect("query_page_logic should support GraphReadStore trait object");
+
+    let details = result
+        .get("details")
+        .and_then(|v| v.get("key_model_availability"));
+    assert!(
+        details.is_some(),
+        "page logic output should keep key_model_availability field"
     );
 }
 

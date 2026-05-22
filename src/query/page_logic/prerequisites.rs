@@ -1,4 +1,6 @@
-use crate::graph::{GraphDB, Node};
+use crate::graph::Node;
+use crate::graph_store::GraphReadStore;
+use anyhow::Result;
 
 /// 页面级条件前置条件分组
 pub(super) struct PagePrerequisites {
@@ -9,12 +11,12 @@ pub(super) struct PagePrerequisites {
 
 /// 收集组件、动作和数据源模型关联的条件前置条件
 pub(super) fn collect_page_prerequisites(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_path: &str,
-    child_components: &[&Node],
-    child_actions: &[&Node],
+    child_components: &[Node],
+    child_actions: &[Node],
     data_sources: &[serde_json::Value],
-) -> PagePrerequisites {
+) -> Result<PagePrerequisites> {
     let mut display_prerequisites = Vec::new();
     let mut data_prerequisites = Vec::new();
     let mut action_prerequisites = Vec::new();
@@ -29,7 +31,7 @@ pub(super) fn collect_page_prerequisites(
             &mut display_prerequisites,
             &mut data_prerequisites,
             &mut action_prerequisites,
-        );
+        )?;
     }
     for action in child_actions {
         collect_from_node(
@@ -40,7 +42,7 @@ pub(super) fn collect_page_prerequisites(
             &mut display_prerequisites,
             &mut data_prerequisites,
             &mut action_prerequisites,
-        );
+        )?;
     }
     for ds in data_sources {
         if let Some(target_id) = ds.get("target_id").and_then(|v| v.as_str()) {
@@ -52,7 +54,7 @@ pub(super) fn collect_page_prerequisites(
                 &mut display_prerequisites,
                 &mut data_prerequisites,
                 &mut action_prerequisites,
-            );
+            )?;
         }
     }
 
@@ -60,31 +62,34 @@ pub(super) fn collect_page_prerequisites(
     sort_by_impact(&mut data_prerequisites);
     sort_by_impact(&mut action_prerequisites);
 
-    PagePrerequisites {
+    Ok(PagePrerequisites {
         display_prerequisites,
         data_prerequisites,
         action_prerequisites,
-    }
+    })
 }
 
 fn collect_from_node(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_path: &str,
     node_id: &str,
     seen_conditions: &mut std::collections::HashSet<String>,
     display_prerequisites: &mut Vec<serde_json::Value>,
     data_prerequisites: &mut Vec<serde_json::Value>,
     action_prerequisites: &mut Vec<serde_json::Value>,
-) {
-    if let Some((_out, incoming)) = graph.get_node_edges(node_id) {
-        for (source, edge) in &incoming {
+) -> Result<()> {
+    if let Some(neighbors) = graph.get_node_edges(node_id)? {
+        let incoming = neighbors.incoming;
+        for view in incoming {
+            let source = view.node;
+            let edge = view.edge;
             if matches!(source.node_type, crate::graph::NodeType::Condition)
                 && matches!(edge.edge_type, crate::graph::EdgeType::DependsOn)
                 && !seen_conditions.contains(&source.id)
                 && source.path == page_path
             {
                 seen_conditions.insert(source.id.clone());
-                if let Some(prereq) = build_prerequisite(source, edge) {
+                if let Some(prereq) = build_prerequisite(&source, &edge) {
                     push_prerequisite(
                         prereq,
                         display_prerequisites,
@@ -93,8 +98,9 @@ fn collect_from_node(
                     );
                 }
             }
-        }
     }
+    }
+    Ok(())
 }
 
 fn push_prerequisite(

@@ -1,7 +1,9 @@
 use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 use crate::query::find_candidates;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::json;
+use std::any::Any;
 use std::io::{self, Write};
 
 mod diagnostics;
@@ -61,6 +63,12 @@ fn page_scoped_model_target(page_path: &str, model_id: &str) -> String {
 }
 
 /// availability_facts 的字段提升：保持 answer_facts 为主证据，同时便于模型快速定位。
+fn cast_graph_db(graph: &dyn GraphReadStore) -> Result<&GraphDB> {
+    (graph as &dyn Any)
+        .downcast_ref::<GraphDB>()
+        .with_context(|| "query_page_logic currently requires GraphDB-backed GraphReadStore")
+}
+
 fn build_key_model_availability_entry(
     graph: &GraphDB,
     page_path: &str,
@@ -185,11 +193,12 @@ fn build_key_model_availability_entry(
 ///
 /// 输出 page_inputs、data_sources、write_targets、entrypoints、action_flows、visibility_rules、navigation、risk_diagnostics。
 pub fn build_query_page_logic_output(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_id: &str,
     project_dir: Option<&std::path::Path>,
     budget: &str,
 ) -> Result<serde_json::Value> {
+    let graph = cast_graph_db(graph)?;
     let is_compact = budget == "compact";
     let is_full = budget == "full";
     let page_node = match graph.get_node(page_id) {
@@ -209,7 +218,9 @@ pub fn build_query_page_logic_output(
     let graph_collect::PageLogicNodes {
         child_components,
         child_actions,
-    } = graph_collect::collect_page_logic_nodes(graph, page_id);
+    } = graph_collect::collect_page_logic_nodes(graph, page_id)?;
+    let child_component_refs: Vec<&crate::graph::Node> = child_components.iter().collect();
+    let child_action_refs: Vec<&crate::graph::Node> = child_actions.iter().collect();
 
     // ---- 2. 从原始文件读取：递归收集组件元数据、action 元数据、visibility_rules ----
     let metadata::PageFileMetadata {
@@ -262,8 +273,8 @@ pub fn build_query_page_logic_output(
     let mut action_flows: Vec<serde_json::Value> = Vec::new();
 
     let mut all_nodes: Vec<&crate::graph::Node> = Vec::new();
-    all_nodes.extend(child_components.iter().copied());
-    all_nodes.extend(child_actions.iter().copied());
+    all_nodes.extend(child_components.iter());
+    all_nodes.extend(child_actions.iter());
 
     for node in &all_nodes {
         if let Some((node_out, _)) = graph.get_node_edges(&node.id) {
@@ -676,7 +687,7 @@ pub fn build_query_page_logic_output(
         &child_components,
         &child_actions,
         &data_sources,
-    );
+    )?;
 
     // ---- 5.6 主链路抽取（M19.5）—— 使用路径计算领域模型 ----
     let path_summary::PageLogicPaths {
@@ -690,8 +701,8 @@ pub fn build_query_page_logic_output(
         graph,
         page_id,
         &page_node,
-        &child_components,
-        &child_actions,
+        &child_component_refs,
+        &child_action_refs,
         &data_sources,
         &write_targets,
         &entrypoints,
@@ -976,7 +987,7 @@ pub fn build_query_page_logic_output(
 ///
 /// CLI 包装器，负责调用 `build_query_page_logic_output` 并按 `human` 参数决定输出格式。
 pub fn query_page_logic(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_id: &str,
     project_dir: Option<&std::path::Path>,
     human: bool,
