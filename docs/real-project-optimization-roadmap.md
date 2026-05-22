@@ -3857,23 +3857,55 @@ pub trait InvocationAdapter {
 - `cargo test` 全量通过。
 - 真实项目 build-graph / query 回归通过或明确记录未跑原因。
 
-#### M40：浏览器端 SuperPage 设计器分析（SW-first）
+#### M40：浏览器端插件化接入架构
 
-目标：在 BI SuperPage 设计器页面内，通过 `onInitDesigner` 低侵入注入浮动分析面板；默认优先在 Service Worker 中加载 WASM runtime、fetch 元数据并写入 IndexedDB 图存储。页面 JS 只负责设计器选择态采集、面板渲染和消息转发，不传输大型 `.spg` 内容、不转换元数据、不修改 BI 侧源码或现有 viewlet。
+目标：把浏览器端能力拆成“统一 Rust/WASM runtime core + 统一 JS Plugin Core + 平台特化 Glue JS”。Rust/WASM 只负责元数据解析、建图、查询、分析和输出 contract；Service Worker、Web Worker、Page Runtime、Browser Extension、BI `onInitDesigner` 都只是不同 glue/launcher，不应改变 WASM 能力核心。
 
-已确认约束：
+架构原则：
 
-- 只支持 `onInitDesigner` 入口，首版只覆盖 SuperPage 编辑器。
-- 不修改 BI 侧代码，不调整现有 viewlet；分析列表以浮动容器形式挂载。
-- 大型页面元数据可能达到 5MB，JS bridge 不传 `.spg` content，只传 `sourcePath/fileId/componentId` 等轻量上下文。
-- 元数据内容优先由 Service Worker 使用原生 `fetch(..., { credentials: "include" })` 获取；页面 `window.SZ.rc` 仅作为 page-side fallback。
-- WASM 独立产出，JS 不做元数据结构转换；解析、建图、查询、输出分析结果都由 WASM/Rust 侧完成。
-- 默认 SW-first：能在用户进入系统时注册/预热 SW，不等待设计器初始化；`onInitDesigner` 只连接已有 runtime。
-- 同一 execution context 内必须 singleton，不重复 instantiate WASM；默认只有 SW runtime active，页面 runtime 只作为 fallback。
-- IndexedDB 使用 `rexie`，不手写 IndexedDB glue；存储设计采用类似 redb 的 nodes/edges/index/file_states 分表。
-- IndexedDB 不做清理策略；依赖浏览器同源隔离，同时记录 `project_ref/source_path/schema_version`。
-- 不支持 TableCell / `.tbl` 编辑器 / DataFlow 编辑器 UI，`.tbl` 只作为 SuperPage 关联模型内容被 fetch 和分析。
-- 先完整覆盖正例/反例测试和 mock 流程，再做真实 BI 环境测试。
+- 同一份 WASM runtime 可以被 Service Worker、Web Worker、页面线程或浏览器插件拉起。
+- 功能差异只能来自 Glue JS 和 Host Capabilities，不能让 Rust/WASM 感知 BI、SW scope、插件权限或 DOM 面板。
+- `onInitDesigner` 是 SuperPage Designer 平台 glue，不是插件核心。
+- Service Worker 是 runtime launcher 的一个实现，不是插件 contract 的默认假设。
+- 大型 `.spg` 内容不经 selection bridge 传输；metadata fetch 由 host provider / runtime launcher 协作完成。
+- JS 不转换元数据结构；原始 text / JSON 入参进入统一 runtime core。
+- 先用 fake host / fake runtime / fake designer 的 JS mock 测试固化 contract，再做真实 BI 环境验证。
+
+建议目录：
+
+```text
+browser/
+  plugin-core/
+    metadata-checker-plugin.js
+  runtime-launchers/
+    page-runtime-launcher.js
+    web-worker-runtime-launcher.js
+    service-worker-runtime-launcher.js
+    browser-extension-runtime-launcher.js
+  platform-glue/
+    superpage-designer-glue.js
+  providers/
+    metadata-provider.js
+  renderer/
+    floating-panel-renderer.js
+  test/
+    fake-runtime-client.mjs
+    fake-host.mjs
+    fake-designer.mjs
+    plugin-core-smoke.test.mjs
+    runtime-launcher-smoke.test.mjs
+    superpage-designer-glue-smoke.test.mjs
+```
+
+非目标：
+
+- 不修改 BI 源码或 viewlet。
+- 不把 SW 作为唯一 runtime 路径。
+- 不把 `onInitDesigner` 写进 Plugin Core。
+- 不让 Rust/WASM 直接访问 DOM、`window.SZ.rc`、Service Worker scope 或浏览器插件 API。
+- 不让 JS 解析/转换 `.spg/.tbl` 元数据结构。
+- 不在 M40 中实现本地远程项目完整同步、多服务器 session、MCP。
+- 不把 `GraphReadStore` 改 async；IndexedDB/远程缓存通过 JS provider 或后续 storage adapter 处理。
 
 任务清单：
 
@@ -3954,7 +3986,8 @@ pub trait InvocationAdapter {
       - 第三提交补依赖树验收与文档更新。
       - 任一提交不得混入 SW bootstrap、IndexedDB、designer bridge 等 M40.2 之后任务。
 
-- [ ] M40.2：Browser WASM runtime API
+- [ ] M40.2：Browser Runtime Core API
+  - 重新定位：这是统一 WASM runtime core 的浏览器入口，不是插件接入层。
   - 新增 browser-only WASM API，不改变现有 CLI/stdio 输出 schema。
   - 首批 API：
     - `init_runtime(options)`
@@ -3965,124 +3998,179 @@ pub trait InvocationAdapter {
   - 入参只接收 raw text / selection JSON，不接收 JS 转换后的中间结构。
   - 输出统一为 browser analysis envelope，包含 `status` / `target` / `items` / `diagnostics`。
   - 支持 `initializing` / `partial` / `ready` / `error` 状态。
-
-- [ ] M40.3：SW-first bootstrap
-  - 代码位置：
-    - 新增 `browser/bootstrap/metadata-checker-bootstrap.js`。
-    - 新增 `browser/service-worker/metadata-checker-sw.js`。
-    - 新增 `browser/test/`，只放 JS mock 和 smoke，不放进 Rust `src/` / `tests/`。
-    - 首轮不引入 bundler，不引入 Playwright，不修改 BI 代码，不依赖真实 WASM 文件。
-  - 提供 `metadata-checker-bootstrap.js`。
-  - 用户进入系统后尽早注册 `metadata-checker-sw.js`。
-  - bootstrap 防重复注册，支持 `ping/status`。
-  - SW 作为默认 active runtime owner。
-  - SW 内实现：
-    - `ensureIndexedDb()`
-    - `ensureWasmInstance()`
-    - `ensureRuntime()`
-    - 并发初始化共用同一个 init promise。
-  - SW 被浏览器回收后允许重新 instantiate，但必须从 IndexedDB 恢复状态。
-  - 最小实现要求：
-    - bootstrap 导出一个安装函数，例如 `installMetadataCheckerRuntime(options)`。
-    - 安装函数可重复调用，但同一 execution context 只创建一个 controller。
-    - controller 暴露 `status()` / `ping()` / `request(type, payload)`。
-    - 所有 request 使用递增或随机 `requestId` 配对响应。
-    - SW 不可用时返回 `initializing` 或明确 fallback 状态，不抛出未捕获异常。
-    - SW runtime active 时，page runtime fallback 不得同时 active。
-  - 最小测试要求：
-    - 使用 Node 内置 `node:test` + `assert`，测试文件放在 `browser/test/bootstrap-smoke.test.mjs`。
-    - 使用 fake `navigator.serviceWorker` / fake message bus，不启动真实浏览器 SW。
-    - 正例：
-      - 多次安装不重复 register。
-      - `ping/status` 可返回结构化状态。
-      - 并发初始化复用同一个 init promise。
-      - `requestId` 能正确匹配异步响应。
-      - 模拟 SW 被回收后，下一次调用能重新握手。
-    - 反例：
-      - serviceWorker 缺失时不崩溃，返回 fallback diagnostic。
-      - SW 响应 requestId 不匹配时不误用响应。
-      - SW 初始化失败时返回 `error` 状态和 diagnostic。
+  - 详细任务：
+    - 修正 selection raw id 与 graph node id 的映射：
+      - raw component id 用于 `SuperPageMetadata` 查组件。
+      - graph query 使用 `comp:{source_path}|{component_id}`。
+    - 增加 `COMPONENT_NOT_FOUND` / `DOCUMENT_NOT_FOUND` / `EMPTY_SELECTION` 等诊断测试。
+    - 增加 reads/writes item 断言，不能只断言 component item。
+    - 明确 `include_priority` / `include_dataflow`：
+      - 要么实现最小行为。
+      - 要么从 M40.2 标记为后续 unsupported diagnostic。
+    - 增加 `#[wasm_bindgen]` 或等价 JS-callable wrapper：
+      - JS 入参用 JSON string 或 `JsValue`。
+      - 返回统一 JSON string / `JsValue` envelope。
+      - wrapper 只做序列化/反序列化，不做语义分析。
+    - 补 wasm/JS 边界测试：
+      - 导出函数名稳定。
+      - invalid options JSON。
+      - invalid selection JSON。
+      - 返回 envelope 可解析。
   - 验证命令：
-    - `node --test browser/test/bootstrap-smoke.test.mjs`
-    - `cargo test` 不应因为 M40.3 JS glue 增加新依赖或变慢。
+    - `cargo test --test browser_runtime_api_tests`
+    - `cargo build --no-default-features --features browser-wasm --target wasm32-unknown-unknown`
 
-- [ ] M40.4：SuperPage Designer JS Bridge
-  - 代码位置：
-    - 新增 `browser/designer-bridge/superpage-designer-bridge.js`。
-    - 新增 `browser/test/fake-designer.mjs`。
-    - 新增 `browser/test/designer-bridge-smoke.test.mjs`。
-    - 可选新增 `browser/test/harness.html`，仅用于手工浏览器 smoke。
-  - 只通过 `customJS.onInitDesigner(designer, args)` 安装。
-  - `onInitDesigner` 只做轻量注册并立即返回，不等待 WASM / fetch / IndexedDB。
-  - 不修改 BI 源码，不接入 viewlet，不改变 toolbar/right panel。
-  - monkeypatch `designer.notifyStateChange`，过滤选择变化事件。
-  - 读取选择态时优先走设计器 API，不从 DOM class 猜测：
+- [ ] M40.3：Plugin Core Contract
+  - 目标：定义统一 JS 插件协议，插件核心不感知 BI、SW、Worker、Extension 或 DOM 细节。
+  - 建议位置：
+    - `browser/plugin-core/metadata-checker-plugin.js`
+    - `browser/test/plugin-core-smoke.test.mjs`
+    - `browser/test/fake-runtime-client.mjs`
+    - `browser/test/fake-host.mjs`
+  - 核心接口：
+    - `createMetadataCheckerPlugin({ runtime, host, renderer, logger })`
+    - `plugin.activate(context)`
+    - `plugin.deactivate()`
+    - `plugin.status()`
+    - `plugin.onSelectionChanged(selection)`
+    - `plugin.analyze(selection, options)`
+  - host capabilities：
+    - `host.getSelection()`
+    - `host.fetchMetadata(ref)`
+    - `host.mountPanel(containerHint)`
+    - `host.onSelectionChanged(callback)`
+    - `host.getContext()`
+  - runtime client contract：
+    - `runtime.status()`
+    - `runtime.init(options)`
+    - `runtime.loadDocument(sourcePath, rawText)`
+    - `runtime.buildOrUpdateGraph(sourcePath)`
+    - `runtime.analyzeSelection(selection, options)`
+  - plugin events：
+    - `plugin_activated`
+    - `selection_changed`
+    - `metadata_loaded`
+    - `analysis_started`
+    - `analysis_ready`
+    - `analysis_error`
+  - 最小实现要求：
+    - plugin core 不 import BI adapter。
+    - plugin core 不 import Service Worker launcher。
+    - plugin core 不直接访问 `window.SZ.rc`。
+    - plugin core 不读取 DOM class 判断 selection。
+    - plugin core 能在 fake host + fake runtime 下完整运行。
+  - 测试要求：
+    - 使用 Node 内置 `node:test` + `assert`，不引入 bundler。
+    - 正例：
+      - `activate` 后能读取 host context。
+      - selection change 能触发 metadata fetch、runtime load/build/analyze。
+      - runtime 分析结果能交给 renderer。
+      - 多次 `activate` 不重复订阅事件。
+      - `deactivate` 后不再响应 selection change。
+    - 反例：
+      - host 缺少必要 capability 时返回 diagnostic。
+      - runtime analyze 失败时产生 `analysis_error`。
+      - 空 selection 不触发 metadata fetch。
+      - 大型 raw metadata 不进入 selection event payload。
+  - 验证命令：
+    - `node --test browser/test/plugin-core-smoke.test.mjs`
+    - `cargo test` 不应因为 JS plugin core 变慢或新增依赖。
+
+- [ ] M40.4：Runtime Launcher Contract
+  - 目标：不同运行环境用不同 launcher 拉起同一 WASM runtime，并返回同一 `runtimeClient`。
+  - 建议位置：
+    - `browser/runtime-launchers/page-runtime-launcher.js`
+    - `browser/runtime-launchers/web-worker-runtime-launcher.js`
+    - `browser/runtime-launchers/service-worker-runtime-launcher.js`
+    - `browser/runtime-launchers/browser-extension-runtime-launcher.js`
+    - `browser/test/runtime-launcher-smoke.test.mjs`
+  - 统一接口：
+    - `createRuntimeLauncher(options)`
+    - `launcher.start()`
+    - `launcher.stop()`
+    - `launcher.status()`
+    - `launcher.getClient()`
+  - `runtimeClient` 必须实现 M40.3 的 runtime client contract。
+  - launcher 类型：
+    - Page Runtime：直接在页面线程 instantiate WASM。
+    - Web Worker Runtime：通过 Worker message bridge 调用 WASM。
+    - Service Worker Runtime：通过 SW message bridge 调用 WASM。
+    - Browser Extension Runtime：通过 extension background/content message bridge 调用 WASM。
+  - 最小实现要求：
+    - 首轮可以只实现 Page Runtime + fake Worker/SW/Extension launcher。
+    - 所有 launcher 都必须返回同一种 client shape。
+    - request/response 使用 request id 配对。
+    - 不同 launcher 的差异只在消息传输和生命周期管理，不影响 runtime method 名称和 envelope。
+    - SW 不可用时可以 fallback 到 Page Runtime，但 fallback 是 launcher 策略，不进入 plugin core。
+  - 测试要求：
+    - 正例：
+      - Page launcher 返回可调用 client。
+      - fake Worker launcher 通过 message bus 返回相同 envelope。
+      - fake SW launcher 初始化失败时可 fallback。
+      - 并发 `start()` 复用同一个 init promise。
+      - request id 能正确匹配异步响应。
+    - 反例：
+      - response request id 不匹配时不误用。
+      - launcher start 失败返回 diagnostic。
+      - 重复 start 不重复 instantiate runtime。
+  - 验证命令：
+    - `node --test browser/test/runtime-launcher-smoke.test.mjs`
+
+- [ ] M40.5：Platform Glue - SuperPage Designer
+  - 目标：把 BI SuperPage 设计器特化逻辑限制在 Glue JS 中。
+  - 建议位置：
+    - `browser/platform-glue/superpage-designer-glue.js`
+    - `browser/test/fake-designer.mjs`
+    - `browser/test/superpage-designer-glue-smoke.test.mjs`
+  - 安装入口：
+    - `installSuperPageDesignerGlue(designer, args, plugin)`
+    - `customJS.onInitDesigner(designer, args)` 只调用该 glue。
+  - 选择态解析优先级：
     - `designer.getSelectedInfo?.()`
     - 当前 page/builder 的 `getSelectedComponents?.()`
     - selected component 的 `getSelectedInfo?.()`
-  - 首版标准化结构只覆盖 SuperPage 组件选择：
+  - 标准 selection：
     - `sourcePath`
     - `fileId`
     - `selectedComponentIds`
     - `activeComponentId`
     - `timestamp`
-  - bridge 不传 `.spg` content 或完整 component JSON。
   - 最小实现要求：
-    - bridge 导出安装函数，例如 `installSuperPageDesignerBridge(designer, args, runtimeClient)`。
-    - 安装函数必须同步返回控制对象，不等待 runtimeClient 初始化。
-    - 同一个 designer 实例多次安装不得重复 patch。
-    - monkeypatch 后必须继续调用原始 `designer.notifyStateChange`。
-    - 选择变化事件需要 debounce 或合并，避免高频重复请求。
-    - 标准化 selection 时只能传轻量字段：`sourcePath` / `fileId` / `selectedComponentIds` / `activeComponentId` / `timestamp`。
-    - 明确拒绝传输 `.spg` raw content、完整 component JSON、DOM HTML。
-  - 选择态解析优先级：
-    - 先读 `designer.getSelectedInfo?.()`。
-    - 再读当前 page/builder 的 `getSelectedComponents?.()`。
-    - 再读 selected component 的 `getSelectedInfo?.()`。
-    - 所有路径都失败时返回空 selection 和 diagnostic，不从 DOM class 猜测。
-  - 最小测试要求：
-    - 使用 Node 内置 `node:test` + `assert`，不依赖真实 BI 页面。
+    - `onInitDesigner` / install 函数同步返回，不等待 runtime、fetch 或 IndexedDB。
+    - monkeypatch `designer.notifyStateChange` 后必须继续调用原始函数。
+    - 同一个 designer 多次安装不得重复 patch。
+    - selection event 需要 debounce 或合并。
+    - 不从 DOM class 猜测组件。
+    - 不传 `.spg` raw content、完整 component JSON、DOM HTML。
+  - 测试要求：
     - 正例：
-      - `onInitDesigner` / install 函数立即返回。
-      - patch 后原始 `notifyStateChange` 仍被调用。
-      - 选择变化会调用 runtimeClient.request。
-      - 非选择变化不会触发分析请求。
-      - 能从 fake designer API 生成标准 selection。
-      - 多次 init 不重复 patch 同一个 designer。
+      - install 立即返回。
+      - 原始 `notifyStateChange` 被调用。
+      - selection change 调用 `plugin.onSelectionChanged`。
+      - 非 selection change 不触发分析。
+      - 多次 install 不重复 patch。
     - 反例：
-      - designer 缺少选择 API 时返回 diagnostic，不抛异常。
-      - selection 中不得包含 `raw_text` / `components` / `html` / `.spg` content。
-      - runtimeClient 失败时 bridge 状态可观测，不吞掉错误。
+      - designer 缺少选择 API 时返回 diagnostic。
+      - selection payload 不包含 `raw_text` / `components` / `html`。
+      - plugin 抛错时 glue 可观测错误，不吞掉异常。
   - 验证命令：
-    - `node --test browser/test/designer-bridge-smoke.test.mjs`
-    - 可选手工 smoke：打开 `browser/test/harness.html`，验证 fake designer 选择变化能驱动面板/日志更新。
+    - `node --test browser/test/superpage-designer-glue-smoke.test.mjs`
 
-- [ ] M40.5：浮动分析面板
-  - 面板挂载在设计器容器下，表现为浮动容器。
-  - 不参与 Workbench viewlet layout。
-  - 支持折叠、刷新、错误展示。
-  - 展示内容：
-    - 当前选中组件
-    - 读取的数据源
-    - 写入目标
-    - 显示/隐藏/禁用/只读条件
-    - value/defaultValue/exp 来源
-    - 相关 action
-    - 下一步可探索项
-  - 大结果必须截断并给出 diagnostics，不渲染 raw JSON。
-
-- [ ] M40.6：Metadata fetch adapter
-  - 定义 `MetadataFetchAdapter`：
-    - `get_file_info(ref)`
-    - `get_file_content(ref)`
-  - 默认路径：SW native fetch。
-  - fallback 路径：
-    - page native fetch
-    - page `window.SZ.rc`
-  - SW fetch 失败时可通过 controlled client 请求 page proxy fetch。
-  - 路径构造参考 BI `makeMetaFileUrl` 规则，但实现放在 metadata-checker browser adapter 内，不 import BI `metadata.ts`。
-  - content response 以原始 text 传入 WASM。
-  - 错误 code 至少覆盖：
+- [ ] M40.6：Metadata Provider Glue
+  - 目标：元数据获取也是平台 glue 能力，不进入 Rust/WASM core。
+  - 建议位置：
+    - `browser/providers/metadata-provider.js`
+    - `browser/test/metadata-provider-smoke.test.mjs`
+  - provider contract：
+    - `getFileInfo(ref)`
+    - `getFileContent(ref)`
+    - `getRelatedFiles(ref)`
+  - provider 实现：
+    - Native Fetch Provider：`fetch(..., { credentials: "include" })`。
+    - Window RC Provider：使用 `window.SZ.rc` / `window.SZ.rc1` 作为 fallback。
+    - Injected Content Provider：用于 standalone/harness 测试。
+    - Extension Provider：通过浏览器插件权限 fetch。
+  - 错误 code：
     - `REMOTE_FETCH_UNAUTHORIZED`
     - `REMOTE_FETCH_FORBIDDEN`
     - `REMOTE_FETCH_NOT_FOUND`
@@ -4091,9 +4179,52 @@ pub trait InvocationAdapter {
     - `PAGE_RC_UNAVAILABLE`
     - `CLIENT_FETCH_PROXY_TIMEOUT`
     - `CLIENT_FETCH_PROXY_FAILED`
+  - 要求：
+    - content response 以原始 text 交给 runtime。
+    - provider 不解析 `.spg/.tbl`。
+    - provider 不保存 token/cookie 到 graph、log 或 output。
+    - BI URL 构造规则可以参考 BI `metadata/metadata.ts`，但实现放在 metadata-checker glue 内，不 import BI 源码。
+  - 测试要求：
+    - mock fetch success / 401 / 403 / 404 / CORS / network fail。
+    - mock `window.SZ.rc` fallback。
+    - 确认 provider 返回 raw text。
+    - 确认错误映射稳定。
 
-- [ ] M40.7：IndexedDB 图存储（rexie）
-  - 使用 `rexie`，不手写 IndexedDB request/transaction glue。
+- [ ] M40.7：Panel Renderer
+  - 目标：面板渲染独立于 BI glue，输入 analysis envelope，输出 DOM。
+  - 建议位置：
+    - `browser/renderer/floating-panel-renderer.js`
+    - `browser/test/panel-renderer-smoke.test.mjs`
+  - renderer contract：
+    - `mount(container, options)`
+    - `render(envelope)`
+    - `setStatus(status)`
+    - `destroy()`
+  - 展示内容：
+    - 当前选中组件
+    - 读取的数据源
+    - 写入目标
+    - 显示/隐藏/禁用/只读条件
+    - value/defaultValue/exp 来源
+    - 相关 action
+    - 下一步可探索项
+  - 要求：
+    - 不渲染 raw JSON。
+    - 大结果必须截断并显示 diagnostics。
+    - 支持 initializing / partial / ready / error / empty selection。
+    - 不依赖 Workbench viewlet layout。
+  - 测试要求：
+    - fake DOM 或最小 harness 下验证 mount/render/destroy。
+    - ready envelope 渲染关键 item。
+    - error envelope 渲染 diagnostic。
+    - large result 被截断。
+    - destroy 后不残留事件监听。
+
+- [ ] M40.8：Browser Cache / IndexedDB Provider
+  - 目标：缓存是 host/provider 能力，不改变 Rust `GraphReadStore` 为 async。
+  - 建议位置：
+    - `browser/providers/indexeddb-cache-provider.js`
+    - M40.8 后续可引入 `rexie`，首轮不阻塞 M40.3-M40.7。
   - database：`metadata_checker_graph_v1`。
   - object stores：
     - `document_cache`
@@ -4105,90 +4236,59 @@ pub trait InvocationAdapter {
     - `document_cache`: `project_ref` / `content_hash` / `fetched_at`
     - `file_states`: `project_ref` / `content_hash`
     - `nodes`: `project_ref` / `node_type` / `source_path`
-    - `edges`: `project_ref` / `from` / `to` / `edge_type` / `from_edge_type` / `to_edge_type`
-  - `edge_key` 与现有 graph 逻辑保持稳定：
-    - `${from}|${to}|${edge_type}|${field_path || ""}`
-  - IndexedDB 先作为持久化与恢复层，查询仍在 in-memory graph 上执行，不把现有 `GraphReadStore` 改 async。
+    - `edges`: `project_ref` / `from` / `to` / `edge_type`
+  - 要求：
+    - IndexedDB 先作为持久化与恢复层，查询仍在 in-memory runtime core 上执行。
+    - version mismatch 返回 diagnostic。
+    - 同源隔离作为默认清理边界，M40 不做清理策略。
+  - 测试要求：
+    - 首轮可用 fake cache provider 跑 plugin contract。
+    - rexie 接入后补 open / upgrade / put / get / duplicate edge upsert。
 
-- [ ] M40.8：SW 内 SuperPage 分析链路
-  - SW 收到 `sourcePath/fileId/componentId` 后：
-    - 查询 IndexedDB document cache。
-    - stale/miss 时 fetch `.spg`。
-    - 调 WASM parse/build/update。
-    - 写入 `document_cache` / `file_states` / `nodes` / `edges` / `graph_meta`。
-    - 对选中 component 执行分析。
-    - 返回 `BrowserAnalysisResult`。
-  - 未完成预热时返回 `partial`，不得阻塞设计器交互。
+- [ ] M40.9：Standalone Harness 与组合测试
+  - 目标：在不接真实 BI 的情况下验证 Plugin Core + Launcher + Provider + Renderer + Designer Glue 组合。
+  - 建议位置：
+    - `browser/test/harness.html`
+    - `browser/test/plugin-integration-smoke.test.mjs`
+  - 场景：
+    - fake host + page runtime client。
+    - fake designer glue + fake metadata provider。
+    - fake renderer 记录 render calls。
+    - 可选手工打开 harness 验证 UI。
+  - 测试要求：
+    - selection -> fetch metadata -> runtime load/build/analyze -> renderer render。
+    - runtime failure -> renderer error。
+    - metadata fetch failure -> renderer diagnostic。
+    - duplicate init 不重复 runtime、listener、panel。
+    - 5MB raw text 不经 selection payload，只经 provider -> runtime。
 
-- [ ] M40.9：页面 runtime fallback
-  - 只有 SW 不可用或 SW 初始化失败时启用页面 runtime。
-  - 页面 runtime 与 SW runtime 不能同时 active。
-  - 同一 page context 内必须 singleton。
-  - fallback 必须返回明确 diagnostics：
-    - `SW_UNAVAILABLE`
-    - `WASM_LOAD_FAILED`
-    - `INDEXEDDB_UNAVAILABLE`
-
-- [ ] M40.10：测试矩阵先行
-  - Rust/WASM：
-    - wasm target build。
-    - raw SuperPage text parse。
-    - 5MB `.spg` fixture 不 panic，返回 size/timing diagnostics。
-    - invalid JSON。
-    - unsupported metadata type。
-    - selected component exists / missing / empty / multiple。
-  - JS bridge：
-    - `onInitDesigner` 立即返回。
-    - 重复 init 不重复 monkeypatch。
-    - 重复 init 不重复 active runtime。
-    - select event 触发分析。
-    - 非 select event 不触发分析。
-    - bridge 不传 content。
-  - Fetch adapter：
-    - native fetch success。
-    - page `window.SZ.rc` fallback。
-    - 401 / 403 / 404 / CORS / network fail。
-    - client proxy timeout。
-  - IndexedDB / rexie：
-    - open db。
-    - schema upgrade。
-    - document cache put/get。
-    - file_state put/get。
-    - nodes put/get。
-    - edges put/get。
-    - by-from / by-to 查询。
-    - duplicate edge upsert。
-    - version mismatch diagnostics。
-  - UI：
-    - initializing。
-    - partial。
-    - ready。
-    - error。
-    - empty selection。
-    - large result truncation。
-  - 真实环境测试必须等上述 mock/自动化测试通过后再开始。
-
-M40 非目标：
-
-- 不实现本地远程项目完整同步。
-- 不实现多服务器 session 管理。
-- 不实现本地登录、token 管理、secret store。
-- 不修改 BI 源码或 viewlet。
-- 不支持 TableCell / `.tbl` 编辑器 / DataFlow 编辑器 UI。
-- 不把 `GraphReadStore` 改 async。
-- 不让 JS 转换元数据结构。
-- 不把 `window.SZ.rc` 作为主路径。
-- 不做 MCP。
+- [ ] M40.10：真实 BI 环境接入验收
+  - 前置条件：
+    - M40.3-M40.9 mock/standalone 测试通过。
+    - Rust/WASM target build 通过。
+    - 不存在直接把 BI 逻辑写入 plugin core 的实现。
+  - 验收场景：
+    - 在 BI SuperPage 设计器中通过 `onInitDesigner` 安装 glue。
+    - 选中普通组件，面板展示 component / reads / conditions。
+    - 选中无关联组件，面板返回 empty/partial 而非报错。
+    - 元数据 fetch 失败时显示 stable diagnostic。
+    - 大型 `.spg` 不通过 selection bridge 传输。
+    - 重复进入设计器不重复 patch、不重复 instantiate runtime。
+  - 记录要求：
+    - browser console 无未捕获错误。
+    - 记录 runtime launcher 类型。
+    - 记录 fetch provider 类型。
+    - 记录一次分析 timing。
+    - 记录不能覆盖的真实环境限制。
 
 验收标准：
 
-- 进入系统即可注册 SW；进入 SuperPage 设计器后 `onInitDesigner` 不阻塞。
-- SW native fetch 是默认元数据获取路径，`window.SZ.rc` 仅作为 fallback。
-- 大型 `.spg` 不经 JS bridge 传输。
-- WASM 由 SW 默认持有并 singleton；页面 runtime 只在 fallback 下启用。
-- IndexedDB 使用 `rexie`，具备类 redb 的 nodes/edges/file_states/document_cache 存储。
-- 选中 SuperPage 组件后，浮动面板能展示可信的关联关系列表。
-- 所有正例/反例测试先通过，再做真实 BI 环境验证。
+- Rust/WASM core 不感知 BI、SW、Worker、Extension、DOM。
+- Plugin Core 不 import 平台 glue 或 launcher 特化实现。
+- Service Worker、Web Worker、Page Runtime、Browser Extension 最终返回同一种 `runtimeClient`。
+- SuperPage Designer 只作为平台 glue 通过 `onInitDesigner` 接入。
+- selection payload 只包含轻量字段，不包含 `.spg` content 或完整 component JSON。
+- mock JS tests 先通过，再做真实 BI 环境测试。
 - native/wasm 依赖隔离可由 `cargo tree` 证明。
 
 #### M41：本地远程项目元数据获取与 Session
