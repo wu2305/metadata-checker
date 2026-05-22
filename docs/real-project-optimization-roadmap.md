@@ -3706,68 +3706,278 @@ pub trait InvocationAdapter {
 - `cargo test` 全量通过。
 - 真实项目 build-graph / query 回归通过或明确记录未跑原因。
 
-#### M40：Session Manager 本地会话
+#### M40：浏览器端 SuperPage 设计器分析（SW-first）
 
-目标：先实现本地 session，不接远程 API。
+目标：在 BI SuperPage 设计器页面内，通过 `onInitDesigner` 低侵入注入浮动分析面板；默认优先在 Service Worker 中加载 WASM runtime、fetch 元数据并写入 IndexedDB 图存储。页面 JS 只负责设计器选择态采集、面板渲染和消息转发，不传输大型 `.spg` 内容、不转换元数据、不修改 BI 侧源码或现有 viewlet。
+
+已确认约束：
+
+- 只支持 `onInitDesigner` 入口，首版只覆盖 SuperPage 编辑器。
+- 不修改 BI 侧代码，不调整现有 viewlet；分析列表以浮动容器形式挂载。
+- 大型页面元数据可能达到 5MB，JS bridge 不传 `.spg` content，只传 `sourcePath/fileId/componentId` 等轻量上下文。
+- 元数据内容优先由 Service Worker 使用原生 `fetch(..., { credentials: "include" })` 获取；页面 `window.SZ.rc` 仅作为 page-side fallback。
+- WASM 独立产出，JS 不做元数据结构转换；解析、建图、查询、输出分析结果都由 WASM/Rust 侧完成。
+- 默认 SW-first：能在用户进入系统时注册/预热 SW，不等待设计器初始化；`onInitDesigner` 只连接已有 runtime。
+- 同一 execution context 内必须 singleton，不重复 instantiate WASM；默认只有 SW runtime active，页面 runtime 只作为 fallback。
+- IndexedDB 使用 `rexie`，不手写 IndexedDB glue；存储设计采用类似 redb 的 nodes/edges/index/file_states 分表。
+- IndexedDB 不做清理策略；依赖浏览器同源隔离，同时记录 `project_ref/source_path/schema_version`。
+- 不支持 TableCell / `.tbl` 编辑器 / DataFlow 编辑器 UI，`.tbl` 只作为 SuperPage 关联模型内容被 fetch 和分析。
+- 先完整覆盖正例/反例测试和 mock 流程，再做真实 BI 环境测试。
 
 任务清单：
 
-- [ ] M40.1：定义 session manifest schema
+- [ ] M40.1：Feature / target 拆分
+  - 新增 browser wasm 构建 feature，默认 native 构建仍走 CLI/local。
+  - `browser-wasm` 只包含 WASM/browser 所需依赖。
+  - `cli-local` 保留 `redb` / `clap` / stdio / 本地文件系统。
+  - native 默认构建不得包含 `wasm-bindgen` / `web-sys` / `rexie`。
+  - wasm 构建不得包含 `redb` / `clap` / stdio。
+  - 验证命令必须覆盖：
+    - `cargo test`
+    - `cargo build --no-default-features --features browser-wasm --target wasm32-unknown-unknown`
+    - `cargo tree --features cli-local`
+    - `cargo tree --no-default-features --features browser-wasm`
+
+- [ ] M40.2：Browser WASM runtime API
+  - 新增 browser-only WASM API，不改变现有 CLI/stdio 输出 schema。
+  - 首批 API：
+    - `init_runtime(options)`
+    - `runtime_status()`
+    - `load_superpage_document(source_path, raw_text)`
+    - `build_or_update_superpage_graph(source_path)`
+    - `analyze_superpage_selection(selection, options)`
+  - 入参只接收 raw text / selection JSON，不接收 JS 转换后的中间结构。
+  - 输出统一为 browser analysis envelope，包含 `status` / `target` / `items` / `diagnostics`。
+  - 支持 `initializing` / `partial` / `ready` / `error` 状态。
+
+- [ ] M40.3：SW-first bootstrap
+  - 提供 `metadata-checker-bootstrap.js`。
+  - 用户进入系统后尽早注册 `metadata-checker-sw.js`。
+  - bootstrap 防重复注册，支持 `ping/status`。
+  - SW 作为默认 active runtime owner。
+  - SW 内实现：
+    - `ensureIndexedDb()`
+    - `ensureWasmInstance()`
+    - `ensureRuntime()`
+    - 并发初始化共用同一个 init promise。
+  - SW 被浏览器回收后允许重新 instantiate，但必须从 IndexedDB 恢复状态。
+
+- [ ] M40.4：SuperPage Designer JS Bridge
+  - 只通过 `customJS.onInitDesigner(designer, args)` 安装。
+  - `onInitDesigner` 只做轻量注册并立即返回，不等待 WASM / fetch / IndexedDB。
+  - 不修改 BI 源码，不接入 viewlet，不改变 toolbar/right panel。
+  - monkeypatch `designer.notifyStateChange`，过滤选择变化事件。
+  - 读取选择态时优先走设计器 API，不从 DOM class 猜测：
+    - `designer.getSelectedInfo?.()`
+    - 当前 page/builder 的 `getSelectedComponents?.()`
+    - selected component 的 `getSelectedInfo?.()`
+  - 首版标准化结构只覆盖 SuperPage 组件选择：
+    - `sourcePath`
+    - `fileId`
+    - `selectedComponentIds`
+    - `activeComponentId`
+    - `timestamp`
+  - bridge 不传 `.spg` content 或完整 component JSON。
+
+- [ ] M40.5：浮动分析面板
+  - 面板挂载在设计器容器下，表现为浮动容器。
+  - 不参与 Workbench viewlet layout。
+  - 支持折叠、刷新、错误展示。
+  - 展示内容：
+    - 当前选中组件
+    - 读取的数据源
+    - 写入目标
+    - 显示/隐藏/禁用/只读条件
+    - value/defaultValue/exp 来源
+    - 相关 action
+    - 下一步可探索项
+  - 大结果必须截断并给出 diagnostics，不渲染 raw JSON。
+
+- [ ] M40.6：Metadata fetch adapter
+  - 定义 `MetadataFetchAdapter`：
+    - `get_file_info(ref)`
+    - `get_file_content(ref)`
+  - 默认路径：SW native fetch。
+  - fallback 路径：
+    - page native fetch
+    - page `window.SZ.rc`
+  - SW fetch 失败时可通过 controlled client 请求 page proxy fetch。
+  - 路径构造参考 BI `makeMetaFileUrl` 规则，但实现放在 metadata-checker browser adapter 内，不 import BI `metadata.ts`。
+  - content response 以原始 text 传入 WASM。
+  - 错误 code 至少覆盖：
+    - `REMOTE_FETCH_UNAUTHORIZED`
+    - `REMOTE_FETCH_FORBIDDEN`
+    - `REMOTE_FETCH_NOT_FOUND`
+    - `REMOTE_FETCH_CORS_BLOCKED`
+    - `REMOTE_FETCH_FAILED`
+    - `PAGE_RC_UNAVAILABLE`
+    - `CLIENT_FETCH_PROXY_TIMEOUT`
+    - `CLIENT_FETCH_PROXY_FAILED`
+
+- [ ] M40.7：IndexedDB 图存储（rexie）
+  - 使用 `rexie`，不手写 IndexedDB request/transaction glue。
+  - database：`metadata_checker_graph_v1`。
+  - object stores：
+    - `document_cache`
+    - `file_states`
+    - `nodes`
+    - `edges`
+    - `graph_meta`
+  - indexes：
+    - `document_cache`: `project_ref` / `content_hash` / `fetched_at`
+    - `file_states`: `project_ref` / `content_hash`
+    - `nodes`: `project_ref` / `node_type` / `source_path`
+    - `edges`: `project_ref` / `from` / `to` / `edge_type` / `from_edge_type` / `to_edge_type`
+  - `edge_key` 与现有 graph 逻辑保持稳定：
+    - `${from}|${to}|${edge_type}|${field_path || ""}`
+  - IndexedDB 先作为持久化与恢复层，查询仍在 in-memory graph 上执行，不把现有 `GraphReadStore` 改 async。
+
+- [ ] M40.8：SW 内 SuperPage 分析链路
+  - SW 收到 `sourcePath/fileId/componentId` 后：
+    - 查询 IndexedDB document cache。
+    - stale/miss 时 fetch `.spg`。
+    - 调 WASM parse/build/update。
+    - 写入 `document_cache` / `file_states` / `nodes` / `edges` / `graph_meta`。
+    - 对选中 component 执行分析。
+    - 返回 `BrowserAnalysisResult`。
+  - 未完成预热时返回 `partial`，不得阻塞设计器交互。
+
+- [ ] M40.9：页面 runtime fallback
+  - 只有 SW 不可用或 SW 初始化失败时启用页面 runtime。
+  - 页面 runtime 与 SW runtime 不能同时 active。
+  - 同一 page context 内必须 singleton。
+  - fallback 必须返回明确 diagnostics：
+    - `SW_UNAVAILABLE`
+    - `WASM_LOAD_FAILED`
+    - `INDEXEDDB_UNAVAILABLE`
+
+- [ ] M40.10：测试矩阵先行
+  - Rust/WASM：
+    - wasm target build。
+    - raw SuperPage text parse。
+    - 5MB `.spg` fixture 不 panic，返回 size/timing diagnostics。
+    - invalid JSON。
+    - unsupported metadata type。
+    - selected component exists / missing / empty / multiple。
+  - JS bridge：
+    - `onInitDesigner` 立即返回。
+    - 重复 init 不重复 monkeypatch。
+    - 重复 init 不重复 active runtime。
+    - select event 触发分析。
+    - 非 select event 不触发分析。
+    - bridge 不传 content。
+  - Fetch adapter：
+    - native fetch success。
+    - page `window.SZ.rc` fallback。
+    - 401 / 403 / 404 / CORS / network fail。
+    - client proxy timeout。
+  - IndexedDB / rexie：
+    - open db。
+    - schema upgrade。
+    - document cache put/get。
+    - file_state put/get。
+    - nodes put/get。
+    - edges put/get。
+    - by-from / by-to 查询。
+    - duplicate edge upsert。
+    - version mismatch diagnostics。
+  - UI：
+    - initializing。
+    - partial。
+    - ready。
+    - error。
+    - empty selection。
+    - large result truncation。
+  - 真实环境测试必须等上述 mock/自动化测试通过后再开始。
+
+M40 非目标：
+
+- 不实现本地远程项目完整同步。
+- 不实现多服务器 session 管理。
+- 不实现本地登录、token 管理、secret store。
+- 不修改 BI 源码或 viewlet。
+- 不支持 TableCell / `.tbl` 编辑器 / DataFlow 编辑器 UI。
+- 不把 `GraphReadStore` 改 async。
+- 不让 JS 转换元数据结构。
+- 不把 `window.SZ.rc` 作为主路径。
+- 不做 MCP。
+
+验收标准：
+
+- 进入系统即可注册 SW；进入 SuperPage 设计器后 `onInitDesigner` 不阻塞。
+- SW native fetch 是默认元数据获取路径，`window.SZ.rc` 仅作为 fallback。
+- 大型 `.spg` 不经 JS bridge 传输。
+- WASM 由 SW 默认持有并 singleton；页面 runtime 只在 fallback 下启用。
+- IndexedDB 使用 `rexie`，具备类 redb 的 nodes/edges/file_states/document_cache 存储。
+- 选中 SuperPage 组件后，浮动面板能展示可信的关联关系列表。
+- 所有正例/反例测试先通过，再做真实 BI 环境验证。
+- native/wasm 依赖隔离可由 `cargo tree` 证明。
+
+#### M41：本地远程项目元数据获取与 Session
+
+目标：在本地 CLI/stdio 环境中支持从远程低代码平台获取 projects/metafiles，建立本地 session 目录并复用现有 scanner/query。M41 不接浏览器页面 UI，不实现 Service Worker，不实现 IndexedDB；它负责 native 侧的远程同步、凭证边界、session manifest 和 redb graphdb。
+
+任务清单：
+
+- [ ] M41.1：定义 native session manifest schema
   - `session_id`
   - `created_at`
-  - `project_root`
+  - `updated_at`
+  - `remote_server`
+  - `project_ref`
+  - `project_name`
+  - `source_origin`
   - `files[]`
   - `graph_db_path`
-  - `source_origin`
+  - `schema_version`
+  - 不记录 token/secret。
 
-- [ ] M40.2：实现 session 创建/打开
-  - 从本地 project 创建 session。
-  - session 内保存可扫描的项目镜像或路径映射。
-
-- [ ] M40.3：session-aware build graph
-  - 对 session 目录运行 build graph。
+- [ ] M41.2：实现 session 创建/打开
+  - 从 remote server + project 创建 session。
+  - session 内保存可扫描的项目镜像。
   - 保持原 `--project-dir` 行为不变。
+  - session-aware build graph 复用现有 scanner/query。
 
-- [ ] M40.4：清理与状态查询
-  - list sessions
-  - show manifest
-  - delete session
-
-验收标准：
-
-- 不接远程也能创建 session。
-- session project 可被现有 scanner/query 使用。
-- token/secret 字段不存在。
-
-#### M41：Remote Provider 与安全边界
-
-目标：把远程 projects/metafiles 拉取接入 session，但不改变 parser/scanner 语义。
-
-任务清单：
-
-- [ ] M41.1：定义 `RemoteMetadataProvider`
+- [ ] M41.3：定义 `RemoteMetadataProvider`
   - `list_projects`
   - `list_metafiles`
-  - `fetch_metafile`
+  - `fetch_metafile_info`
+  - `fetch_metafile_content`
+  - `fetch_changed_since`（远端支持时启用）
 
-- [ ] M41.2：定义认证边界
+- [ ] M41.4：定义认证与安全边界
   - `AuthProvider`
   - `SecretStore`
-  - 日志脱敏策略
+  - 凭证读取与刷新策略。
+  - 日志脱敏策略。
+  - token 不进入 stdout/stderr/graphdb/manifest。
 
-- [ ] M41.3：远程同步到 session
-  - 根据 remote path 写入 session project。
-  - manifest 记录 etag/version/hash。
+- [ ] M41.5：远程同步到 session
+  - 根据 remote logical path 写入 session project。
+  - manifest 记录 etag/version/hash/mtime/size。
+  - 支持只同步 SuperPage 及其关联 `.tbl` 的局部模式。
+  - 支持全项目同步模式。
 
-- [ ] M41.4：远程增量
+- [ ] M41.6：远程增量
   - 未变化文件不重新下载。
   - 删除文件在 manifest 中标记并从 session index 移除。
+  - 失败时保留上一轮可用 session。
+
+- [ ] M41.7：session 管理命令
+  - list sessions
+  - show manifest
+  - refresh session
+  - delete session
+  - status
 
 验收标准：
 
-- token 不进入 stdout/stderr/graphdb/manifest。
+- 本地可以从远程 server 拉取项目元数据并建立 session。
 - session 同步后可用现有 build graph/query。
 - 增量同步不会全量重拉。
+- token/secret 不进入 stdout/stderr/graphdb/manifest。
+- 远程失败不破坏已有可用 session。
+- M41 不引入 browser/wasm/rexie/IndexedDB 依赖。
 
 #### M42：MCP Adapter
 
@@ -3815,6 +4025,8 @@ pub trait InvocationAdapter {
 #### M43：WASM 浏览器端人工阅读 MVP
 
 目标：把 M37 的 parse core 用于浏览器端单文件阅读，不做远程、不做全项目图查询。
+
+边界说明：M40 负责 BI SuperPage 设计器内的 SW-first 集成分析；M43 仅保留为独立、离线、单文件上传/粘贴阅读场景，不复用 M40 的设计器 bridge、Service Worker 预热和远程 fetch 能力。
 
 任务清单：
 
