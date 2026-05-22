@@ -1,5 +1,6 @@
 pub mod action_semantics;
 pub mod answer_contract;
+#[cfg(feature = "cli-local")]
 pub mod cli;
 pub mod conditions;
 pub mod context;
@@ -7,6 +8,9 @@ pub mod dependency;
 pub mod explain;
 pub mod graph;
 pub mod graph_store;
+#[cfg(feature = "cli-local")]
+pub mod graph_redb;
+pub mod memory_graph_store;
 pub mod model_scope;
 pub mod output;
 pub mod parsed_content;
@@ -15,9 +19,12 @@ pub mod path;
 pub mod priority;
 pub mod query;
 pub mod response_processor;
+#[cfg(feature = "cli-local")]
 pub mod runtime;
+#[cfg(feature = "cli-local")]
 pub mod scanner;
 pub mod source_id;
+#[cfg(feature = "cli-local")]
 pub mod stdio_server;
 pub mod storage_provider;
 pub mod superpage;
