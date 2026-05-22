@@ -3598,7 +3598,8 @@ pub trait InvocationAdapter {
     - 不作为正式 runtime backend。
     - 不暴露给 stdio / function calling。
 
-- [x] M39.7：拆 `ProjectIndexer`（冷脸验收修正：拆清文件发现与 DocumentProvider）
+- [x] M39.7：拆 `ProjectIndexer`（冷脸验收修正后完成）
+  - 冷脸验收修复：`parse_dirty_files` 只解析并返回 `ParsedGraphUpdate`，`apply_graph_updates` 只接收 `GraphWriteStore` 并更新内存图，`persist_index` 保持唯一 file states 提交边界。
   - 新增位置建议：
     - `src/indexer.rs`
     - 或 `src/scanner/indexer.rs`
@@ -3637,7 +3638,7 @@ pub trait InvocationAdapter {
     - redb lock、permission、corruption、serde 错误应尽量映射到稳定 `GraphStoreError`。
     - 必须有反向测试覆盖 lock、permission、corruption、serialize、deserialize、read、write 的 code 映射。
 
-- [x] M39.9：补测试覆盖（冷脸验收修正）
+- [x] M39.9：补测试覆盖（冷脸验收修正后完成）
   - 必须新增：
     - `test_graphdb_implements_graph_read_store`
     - `test_graphdb_implements_graph_write_store`
@@ -3684,6 +3685,14 @@ pub trait InvocationAdapter {
 - 不改 graphdb 文件格式。
 - 不改查询输出 schema。
 - 不新增用户可见 runtime tool。
+
+#### 冷脸验收遗留项（已修复）
+
+- 阻塞项 1：M39.7 未形成完整分层闭环。
+  - 修复结果：`ProjectIndexer` 已形成 `discover_files -> diff_file_states -> parse_dirty_files -> apply_graph_updates -> persist_index` 阶段链路；`apply_graph_updates` 已降为 `GraphWriteStore`，并新增 write-only store 测试证明该阶段不要求读接口或 IndexState。
+
+- 阻塞项 2：M39.9 的 schema parity 测试未按 roadmap 明确项完整落地。
+  - 修复结果：已新增 `m39_graph_store_schema_parity_tests`，覆盖 `query_model`、`query_dataflow`、`query_page_logic`、`context`、`explain_condition`、`explain` 的 GraphReadStore 顶层输出 contract。
 
 验收标准：
 

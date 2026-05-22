@@ -1,11 +1,11 @@
 use crate::graph::{Edge, EdgeType, Node, NodeType};
-use crate::graph_store::GraphStore;
+use crate::graph_store::GraphWriteStore;
 use anyhow::{Context, Result};
 use std::path::Path;
 
 /// 向图存储写入节点。
 pub fn add_node(
-    graph: &mut dyn GraphStore,
+    graph: &mut dyn GraphWriteStore,
     id: String,
     node_type: NodeType,
     path: String,
@@ -25,7 +25,7 @@ pub fn add_node(
 
 /// 向图存储写入带元数据的边。
 pub fn add_edge_with_meta(
-    graph: &mut dyn GraphStore,
+    graph: &mut dyn GraphWriteStore,
     from: &str,
     to: &str,
     edge_type: EdgeType,

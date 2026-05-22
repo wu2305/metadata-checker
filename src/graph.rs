@@ -1324,11 +1324,7 @@ impl GraphWriteStore for GraphDB {
         let node_id = node.id.clone();
         if let Some(idx) = self.node_indices.get(&node_id).copied() {
             // 保留已有 meta（与新 add_node 语义一致：None 不覆盖）
-            let preserve_meta = if node.meta.is_none() {
-                self.graph[idx].meta.clone()
-            } else {
-                node.meta
-            };
+            let preserve_meta = merge_upsert_meta(self.graph[idx].meta.clone(), node.meta);
             self.graph[idx] = Node {
                 meta: preserve_meta,
                 ..node
@@ -1338,7 +1334,8 @@ impl GraphWriteStore for GraphDB {
             self.node_indices.insert(node_id.clone(), idx);
         }
         self.is_dirty = true;
-        self.dirty_nodes.insert(node_id);
+        self.dirty_nodes.insert(node_id.clone());
+        self.removed_nodes.remove(&node_id);
         Ok(())
     }
 
@@ -1358,6 +1355,29 @@ impl GraphWriteStore for GraphDB {
         GraphDB::remove_nodes_by_ids(self, &node_ids.to_vec());
         Ok(())
     }
+}
+
+/// 合并写入节点 meta，避免物理表占位覆盖已经解析出的 DataFlow/App 语义。
+fn merge_upsert_meta(
+    existing_meta: Option<serde_json::Value>,
+    incoming_meta: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let Some(incoming_meta) = incoming_meta else {
+        return existing_meta;
+    };
+    let Some(existing_meta) = existing_meta else {
+        return Some(incoming_meta);
+    };
+
+    let existing_model_type = existing_meta.get("modelType").and_then(|v| v.as_str());
+    let incoming_model_type = incoming_meta.get("modelType").and_then(|v| v.as_str());
+    if incoming_model_type == Some("PhysicalTable")
+        && matches!(existing_model_type, Some("DataFlow" | "App"))
+    {
+        return Some(existing_meta);
+    }
+
+    Some(incoming_meta)
 }
 
 impl IndexStateStore for GraphDB {

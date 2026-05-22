@@ -1,12 +1,12 @@
 use super::{add_edge_with_meta, add_node};
 use crate::graph::{EdgeType, NodeType};
-use crate::graph_store::GraphStore;
+use crate::graph_store::GraphWriteStore;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
 pub fn process_tbl_file_from_string(
-    graph: &mut dyn GraphStore,
+    graph: &mut dyn GraphWriteStore,
     rel_path: &str,
     content: &str,
 ) -> Result<Vec<String>> {
@@ -104,20 +104,8 @@ pub fn process_tbl_file_from_string(
     {
         let output_model_id = format!("model:{}", db_table_name);
         let db_table_path = format!("{}.tbl", db_table_name);
-        // Merge with existing meta if node already exists (e.g., physical table also has its own .tbl file)
-        let output_meta = if let Some(existing) = graph.get_node(&output_model_id).ok().flatten() {
-            let mut merged = existing.meta.clone().unwrap_or(serde_json::json!({}));
-            if let Some(obj) = merged.as_object_mut() {
-                // M34 fix: do not overwrite DataFlow modelType with PhysicalTable
-                let existing_model_type = obj.get("modelType").and_then(|v| v.as_str());
-                if existing_model_type != Some("DataFlow") {
-                    obj.insert("modelType".to_string(), serde_json::json!("PhysicalTable"));
-                }
-            }
-            Some(merged)
-        } else {
-            Some(serde_json::json!({"modelType": "PhysicalTable"}))
-        };
+        // 写入端会保留已有 DataFlow/App modelType，避免物理表占位覆盖真实模型。
+        let output_meta = Some(serde_json::json!({"modelType": "PhysicalTable"}));
         add_node(
             graph,
             output_model_id.clone(),
@@ -340,54 +328,57 @@ pub fn process_tbl_file_from_string(
                 }
             }
 
-            // Store all DataFlow metadata for subGraph expansion
-            if let Ok(Some(mut model_node)) = graph.get_node(&model_id) {
-                let mut meta = model_node.meta.clone().unwrap_or(serde_json::Value::Null);
-                if let Some(obj) = meta.as_object_mut() {
+            // Store all DataFlow metadata for subGraph expansion.
+            let mut enriched_meta = serde_json::json!({"modelType": model_type});
+            if let Some(obj) = enriched_meta.as_object_mut() {
+                obj.insert(
+                    "internalDeps".to_string(),
+                    serde_json::to_value(&internal_deps).unwrap_or(serde_json::Value::Null),
+                );
+                obj.insert(
+                    "aliasMap".to_string(),
+                    serde_json::to_value(&alias_map).unwrap_or(serde_json::Value::Null),
+                );
+                obj.insert(
+                    "nodeFields".to_string(),
+                    serde_json::to_value(&node_fields).unwrap_or(serde_json::Value::Null),
+                );
+                obj.insert(
+                    "nodeTypes".to_string(),
+                    serde_json::to_value(&node_types).unwrap_or(serde_json::Value::Null),
+                );
+                obj.insert(
+                    "nodeTablePaths".to_string(),
+                    serde_json::to_value(&node_table_paths).unwrap_or(serde_json::Value::Null),
+                );
+                obj.insert(
+                    "nodeFilters".to_string(),
+                    serde_json::to_value(&node_filters).unwrap_or(serde_json::Value::Null),
+                );
+                obj.insert(
+                    "nodeJoinConditions".to_string(),
+                    serde_json::to_value(&node_join_conditions).unwrap_or(serde_json::Value::Null),
+                );
+                obj.insert(
+                    "nodeUnionMaps".to_string(),
+                    serde_json::to_value(&node_union_maps).unwrap_or(serde_json::Value::Null),
+                );
+                // Store dimensions for fallback when nodeFields is absent.
+                if let Some(dims) = value.get("dimensions") {
                     obj.insert(
-                        "internalDeps".to_string(),
-                        serde_json::to_value(&internal_deps).unwrap_or(serde_json::Value::Null),
+                        "dimensions".to_string(),
+                        serde_json::to_value(dims).unwrap_or(serde_json::Value::Null),
                     );
-                    obj.insert(
-                        "aliasMap".to_string(),
-                        serde_json::to_value(&alias_map).unwrap_or(serde_json::Value::Null),
-                    );
-                    obj.insert(
-                        "nodeFields".to_string(),
-                        serde_json::to_value(&node_fields).unwrap_or(serde_json::Value::Null),
-                    );
-                    obj.insert(
-                        "nodeTypes".to_string(),
-                        serde_json::to_value(&node_types).unwrap_or(serde_json::Value::Null),
-                    );
-                    obj.insert(
-                        "nodeTablePaths".to_string(),
-                        serde_json::to_value(&node_table_paths).unwrap_or(serde_json::Value::Null),
-                    );
-                    obj.insert(
-                        "nodeFilters".to_string(),
-                        serde_json::to_value(&node_filters).unwrap_or(serde_json::Value::Null),
-                    );
-                    obj.insert(
-                        "nodeJoinConditions".to_string(),
-                        serde_json::to_value(&node_join_conditions)
-                            .unwrap_or(serde_json::Value::Null),
-                    );
-                    obj.insert(
-                        "nodeUnionMaps".to_string(),
-                        serde_json::to_value(&node_union_maps).unwrap_or(serde_json::Value::Null),
-                    );
-                    // Store dimensions for fallback when nodeFields is absent
-                    if let Some(dims) = value.get("dimensions") {
-                        obj.insert(
-                            "dimensions".to_string(),
-                            serde_json::to_value(dims).unwrap_or(serde_json::Value::Null),
-                        );
-                    }
                 }
-                model_node.meta = Some(meta);
-                graph.upsert_node(model_node)?;
             }
+            add_node(
+                graph,
+                model_id.clone(),
+                NodeType::Model,
+                rel_path.to_string(),
+                model_name.clone(),
+                Some(enriched_meta),
+            )?;
             // Second pass: create DataflowInput edges for ModelTable nodes
             for (_, node) in nodes {
                 if let Some(module_table_path) =

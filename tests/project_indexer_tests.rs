@@ -2,12 +2,13 @@
 mod memory_graph_store;
 
 use anyhow::{Result, bail};
-use metadata_checker::graph::FileState;
-use metadata_checker::graph::GraphDB;
+use metadata_checker::graph::{Edge, FileState, GraphDB, Node, NodeType};
 use metadata_checker::graph_store::{
-    GraphReadStore, GraphStoreResult, IndexCommit, IndexReport, IndexStateStore,
+    GraphReadStore, GraphStoreResult, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
 };
-use metadata_checker::scanner::indexer::{DirtyFile, ProjectIndexer};
+use metadata_checker::scanner::indexer::{
+    DirtyFile, ParsedGraphContent, ParsedGraphUpdate, ProjectIndexer,
+};
 use metadata_checker::scanner::scan_project;
 use metadata_checker::storage_provider::{DocumentFileMetadata, DocumentProvider};
 use std::cell::Cell;
@@ -177,7 +178,7 @@ fn test_project_indexer_diff_detects_dirty_deleted_unchanged() {
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
-/// 测试 parse_dirty_files 在 dirty 文件已预携带 bytes 时不会重复读取
+/// 测试 parse_dirty_files 在 dirty 文件已预携带 bytes 时不会重复读取，并且不需要 Graph 写接口。
 #[test]
 fn test_project_indexer_parse_dirty_files_uses_staged_bytes() {
     let temp_dir = std::env::temp_dir().join(format!(
@@ -192,8 +193,6 @@ fn test_project_indexer_parse_dirty_files_uses_staged_bytes() {
 
     let src = Path::new("tests/fixtures/test_project");
     copy_dir(src, &temp_dir);
-    let db_path = temp_dir.join(".metadata-checker.graphdb");
-    let mut graph = GraphDB::open(&db_path).expect("open graph must succeed");
 
     let files = ProjectIndexer::discover_files(&temp_dir).expect("discover files");
     let spg_file = files
@@ -206,17 +205,11 @@ fn test_project_indexer_parse_dirty_files_uses_staged_bytes() {
         .to_string_lossy()
         .to_string();
     let staged_bytes = std::fs::read(spg_file).unwrap();
-    let dirty: Vec<DirtyFile> = vec![(rel, spg_file.clone(), Some(staged_bytes))];
+    let dirty: Vec<DirtyFile> = vec![(rel.clone(), spg_file.clone(), Some(staged_bytes))];
     let provider = TestDocumentProvider::new(false);
 
-    let new_states = ProjectIndexer::parse_dirty_files(
-        &mut graph,
-        &HashMap::new(),
-        &dirty,
-        &temp_dir,
-        &provider,
-    )
-    .expect("parse should succeed");
+    let updates = ProjectIndexer::parse_dirty_files(&HashMap::new(), &dirty, &temp_dir, &provider)
+        .expect("parse should succeed");
 
     assert!(
         provider.metadata_calls.get() > 0,
@@ -227,9 +220,132 @@ fn test_project_indexer_parse_dirty_files_uses_staged_bytes() {
         0,
         "有 content 的 dirty 不应再次读取文件"
     );
-    assert!(new_states.len() >= 1, "应有解析后的文件状态记录");
+    assert_eq!(updates.len(), 1, "应有一条解析更新");
+    assert!(!updates[0].logical_path.is_empty(), "应有逻辑路径");
+    assert_eq!(updates[0].logical_path, rel, "更新应对应同一文件");
 
     let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+/// 测试 parse 阶段产物可直接交给 apply 阶段写入图（仅 apply 需要图接口）。
+#[test]
+fn test_project_indexer_apply_graph_updates_uses_parsed_updates_to_write_graph() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "m39-apply-test-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let src = Path::new("tests/fixtures/test_project");
+    copy_dir(src, &temp_dir);
+
+    let files = ProjectIndexer::discover_files(&temp_dir).expect("discover files");
+    let spg_file = files
+        .iter()
+        .find(|p| p.extension().map(|e| e == "spg").unwrap_or(false))
+        .expect("at least one spg");
+    let rel = spg_file
+        .strip_prefix(&temp_dir)
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let staged_bytes = std::fs::read(spg_file).unwrap();
+    let provider = TestDocumentProvider::new(false);
+
+    let updates = ProjectIndexer::parse_dirty_files(
+        &HashMap::new(),
+        &vec![(rel.clone(), spg_file.clone(), Some(staged_bytes))],
+        &temp_dir,
+        &provider,
+    )
+    .expect("parse should succeed");
+
+    let db_path = temp_dir.join(".metadata-checker.graphdb");
+    let mut graph = GraphDB::open(&db_path).expect("open graph must succeed");
+    let applied = ProjectIndexer::apply_graph_updates(&mut graph, &updates)
+        .expect("apply graph updates should succeed");
+
+    assert_eq!(
+        applied.get(&rel).map(|nodes| nodes.len()).unwrap_or(0) > 0,
+        true
+    );
+    assert!(
+        GraphReadStore::node_count(&graph).unwrap() > 0,
+        "apply 阶段写入后 graph 应有节点"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+/// 测试 apply_graph_updates 只依赖 GraphWriteStore，不要求读接口或 IndexStateStore。
+#[test]
+fn test_project_indexer_apply_graph_updates_accepts_write_only_store() {
+    #[derive(Default)]
+    struct WriteOnlyGraphStore {
+        nodes: Vec<Node>,
+        edges: Vec<Edge>,
+        removed: Vec<String>,
+    }
+
+    impl GraphWriteStore for WriteOnlyGraphStore {
+        fn upsert_node(&mut self, node: Node) -> GraphStoreResult<()> {
+            self.nodes.push(node);
+            Ok(())
+        }
+
+        fn add_edge(&mut self, edge: Edge) -> GraphStoreResult<()> {
+            self.edges.push(edge);
+            Ok(())
+        }
+
+        fn remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()> {
+            self.removed.extend(node_ids.iter().cloned());
+            Ok(())
+        }
+    }
+
+    let update = ParsedGraphUpdate {
+        logical_path: "tables/user.tbl".to_string(),
+        physical_path: Path::new("tables/user.tbl").to_path_buf(),
+        file_hash: "hash".to_string(),
+        mtime: 0,
+        size: 1,
+        previous_node_ids: vec!["model:old_user".to_string()],
+        content: ParsedGraphContent::Tbl(
+            serde_json::json!({
+                "dimensions": [
+                    {"name": "id"},
+                    {"name": "name"}
+                ]
+            })
+            .to_string(),
+        ),
+    };
+    let mut store = WriteOnlyGraphStore::default();
+
+    let applied = ProjectIndexer::apply_graph_updates(&mut store, &[update])
+        .expect("apply_graph_updates should work with write-only store");
+
+    assert_eq!(store.removed, vec!["model:old_user".to_string()]);
+    assert!(
+        store
+            .nodes
+            .iter()
+            .any(|node| node.node_type == NodeType::Model),
+        "apply 阶段应通过写接口插入模型节点"
+    );
+    assert!(!store.edges.is_empty(), "apply 阶段应通过写接口插入关系边");
+    assert!(
+        applied
+            .get("tables/user.tbl")
+            .map(|nodes| !nodes.is_empty())
+            .unwrap_or(false),
+        "apply 应返回逻辑文件对应的 node_ids"
+    );
 }
 
 /// 测试 scan_project 行为不变（graph 能正常构建）

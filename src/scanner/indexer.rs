@@ -7,10 +7,11 @@ use twox_hash::XxHash64;
 
 use super::{process_spg_file_from_value, process_tbl_file_from_string};
 use crate::graph::{FileState, GraphDB};
-use crate::graph_store::{GraphStore, IndexCommit, IndexReport, IndexStateStore};
+use crate::graph_store::{GraphWriteStore, IndexCommit, IndexReport, IndexStateStore};
 use crate::parsed_content::ParsedContent;
 use crate::source_id::{ProjectRef, SourceId};
 use crate::storage_provider::{DocumentProvider, LocalStorageProvider};
+use serde_json::Value;
 
 /// 发现的文件数量（阶段内部使用，不暴露字段级细节）
 
@@ -25,6 +26,32 @@ pub struct IndexPlan {
     pub discovered_count: usize,
     pub dirty: Vec<DirtyFile>,
     pub deleted: Vec<DeletedFile>,
+}
+
+/// 已解析待写图更新项
+#[derive(Debug)]
+pub struct ParsedGraphUpdate {
+    /// 逻辑路径（相对项目路径）
+    pub logical_path: String,
+    /// 物理路径
+    pub physical_path: PathBuf,
+    /// 文件哈希
+    pub file_hash: String,
+    /// 文件修改时间（Unix seconds）
+    pub mtime: u64,
+    /// 文件大小
+    pub size: u64,
+    /// 上次解析产生的节点 ID，更新前需要先移除
+    pub previous_node_ids: Vec<String>,
+    /// 解析后的文件内容
+    pub content: ParsedGraphContent,
+}
+
+/// 已解析文件内容
+#[derive(Debug)]
+pub enum ParsedGraphContent {
+    Spg(Value),
+    Tbl(String),
 }
 
 /// 项目索引器
@@ -89,7 +116,7 @@ impl ProjectIndexer {
 
             match prev_states.get(&rel) {
                 Some(state) if state.file_hash == file_hash => {
-                    // File unchanged, skip
+                    // 文件未变化，跳过后续解析。
                 }
                 _ => {
                     dirty.push((rel, path.clone(), Some(content_bytes)));
@@ -111,33 +138,45 @@ impl ProjectIndexer {
         })
     }
 
-    /// 阶段 3：解析脏文件内容并更新图存储
+    /// 阶段 3：解析脏文件内容，返回待写图更新列表
     ///
-    /// 如果 `dirty_files` 已经携带字节内容，本阶段只在缺失时才回退到
-    /// `provider.read_bytes`，避免重复读取。
+    /// 该阶段仅负责内容解析，不执行图读写；上游只在内容确认为可解析后再应用更新。
     pub fn parse_dirty_files(
-        graph: &mut dyn GraphStore,
         prev_states: &HashMap<String, FileState>,
         dirty_files: &[DirtyFile],
         project_dir: &Path,
         provider: &dyn DocumentProvider,
-    ) -> Result<HashMap<String, FileState>> {
-        let mut new_states = prev_states.clone();
+    ) -> Result<Vec<ParsedGraphUpdate>> {
+        let mut updates = Vec::with_capacity(dirty_files.len());
 
         for (rel, path, staged_bytes) in dirty_files {
-            // Remove old nodes if updating
-            if let Some(old_state) = prev_states.get(rel) {
-                let _ = graph.remove_nodes_by_ids(&old_state.node_ids);
-                new_states.remove(rel);
-            }
-
             let content_bytes = if let Some(bytes) = staged_bytes {
                 bytes.clone()
             } else {
                 provider.read_bytes(path)?
             };
 
-            let node_ids = if path.extension().map(|e| e == "spg").unwrap_or(false) {
+            let (file_hash, mtime, size) = {
+                let mut hasher = XxHash64::default();
+                hasher.write(&content_bytes);
+                let hash = format!("{:x}", hasher.finish());
+
+                let metadata = provider.metadata(path)?;
+                let mtime = metadata
+                    .modified
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                (hash, mtime, metadata.size)
+            };
+
+            let previous_node_ids = prev_states
+                .get(rel)
+                .map(|state| state.node_ids.clone())
+                .unwrap_or_default();
+
+            let content = if path.extension().map(|e| e == "spg").unwrap_or(false) {
                 let source =
                     SourceId::from_local_path(ProjectRef::new("default"), path, Some(project_dir))
                         .with_context(|| format!("Failed to build SourceId for {}", rel))?;
@@ -145,45 +184,57 @@ impl ProjectIndexer {
                 let raw_value = parsed
                     .json()
                     .with_context(|| format!("Failed to parse JSON for {}", rel))?;
-                process_spg_file_from_value(graph, rel, (*raw_value).clone())?
+                ParsedGraphContent::Spg((*raw_value).clone())
             } else if path.extension().map(|e| e == "tbl").unwrap_or(false) {
                 let content = String::from_utf8_lossy(&content_bytes);
-                process_tbl_file_from_string(graph, rel, &content)?
+                ParsedGraphContent::Tbl(content.to_string())
             } else {
-                Vec::new()
+                continue;
             };
 
-            let mut hasher = XxHash64::default();
-            hasher.write(&content_bytes);
-            let file_hash = format!("{:x}", hasher.finish());
-
-            let metadata = provider.metadata(path)?;
-            let mtime = metadata
-                .modified
-                .unwrap_or(SystemTime::UNIX_EPOCH)
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let size = metadata.size;
-
-            new_states.insert(
-                rel.clone(),
-                FileState {
-                    file_path: rel.clone(),
-                    file_hash,
-                    mtime,
-                    size,
-                    node_ids,
-                },
-            );
+            updates.push(ParsedGraphUpdate {
+                logical_path: rel.clone(),
+                physical_path: path.clone(),
+                file_hash,
+                mtime,
+                size,
+                previous_node_ids,
+                content,
+            });
         }
 
-        Ok(new_states)
+        Ok(updates)
     }
 
-    /// 阶段 4：应用删除操作
+    /// 阶段 4：应用解析后的脏文件更新到图数据库
+    pub fn apply_graph_updates(
+        graph: &mut dyn GraphWriteStore,
+        updates: &[ParsedGraphUpdate],
+    ) -> Result<HashMap<String, Vec<String>>> {
+        let mut touched_nodes = HashMap::new();
+
+        for update in updates {
+            if !update.previous_node_ids.is_empty() {
+                graph.remove_nodes_by_ids(&update.previous_node_ids)?;
+            }
+
+            let node_ids = match &update.content {
+                ParsedGraphContent::Spg(value) => {
+                    process_spg_file_from_value(graph, &update.logical_path, value.clone())?
+                }
+                ParsedGraphContent::Tbl(content) => {
+                    process_tbl_file_from_string(graph, &update.logical_path, content)?
+                }
+            };
+            touched_nodes.insert(update.logical_path.clone(), node_ids);
+        }
+
+        Ok(touched_nodes)
+    }
+
+    /// 阶段 5：应用删除操作
     pub fn apply_deletions(
-        graph: &mut dyn GraphStore,
+        graph: &mut dyn GraphWriteStore,
         new_states: &mut HashMap<String, FileState>,
         deleted: &[DeletedFile],
     ) -> Result<()> {
@@ -194,7 +245,7 @@ impl ProjectIndexer {
         Ok(())
     }
 
-    /// 阶段 5：持久化索引结果
+    /// 阶段 6：持久化索引结果
     pub fn persist_index(
         graph: &mut dyn IndexStateStore,
         commit: IndexCommit,
@@ -216,13 +267,27 @@ impl ProjectIndexer {
         Self::apply_deletions(&mut graph, &mut new_states, &plan.deleted)?;
 
         if !plan.dirty.is_empty() || !plan.deleted.is_empty() {
-            new_states = Self::parse_dirty_files(
-                &mut graph,
-                &prev_states,
-                &plan.dirty,
-                project_dir,
-                &provider,
-            )?;
+            let updates =
+                Self::parse_dirty_files(&prev_states, &plan.dirty, project_dir, &provider)?;
+            let parsed_nodes = Self::apply_graph_updates(&mut graph, &updates)?;
+
+            for update in updates {
+                let logical_path = update.logical_path.clone();
+                let node_ids = parsed_nodes
+                    .get(logical_path.as_str())
+                    .cloned()
+                    .unwrap_or_default();
+                new_states.insert(
+                    logical_path.clone(),
+                    FileState {
+                        file_path: logical_path,
+                        file_hash: update.file_hash,
+                        mtime: update.mtime,
+                        size: update.size,
+                        node_ids,
+                    },
+                );
+            }
 
             let commit = IndexCommit {
                 file_states: new_states.clone(),

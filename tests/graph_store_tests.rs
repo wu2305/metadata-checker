@@ -56,6 +56,86 @@ fn test_graphdb_implements_graph_write_store() {
 }
 
 #[test]
+fn test_graphdb_write_store_preserves_dataflow_model_type_on_physical_placeholder() {
+    let db_path = std::env::temp_dir().join("m39_test_preserve_model_type.graphdb");
+    let lock_path = db_path.with_extension("graphdb.lock");
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(&lock_path);
+    let mut graph = GraphDB::open(&db_path).expect("open graphdb");
+
+    GraphWriteStore::upsert_node(
+        &mut graph,
+        metadata_checker::graph::Node {
+            id: "model:daily_orders".to_string(),
+            node_type: metadata_checker::graph::NodeType::Model,
+            path: "dataflow/daily_orders.tbl".to_string(),
+            name: "daily_orders".to_string(),
+            meta: Some(serde_json::json!({"modelType": "DataFlow"})),
+        },
+    )
+    .expect("insert dataflow model");
+    GraphWriteStore::upsert_node(
+        &mut graph,
+        metadata_checker::graph::Node {
+            id: "model:daily_orders".to_string(),
+            node_type: metadata_checker::graph::NodeType::Model,
+            path: "daily_orders.tbl".to_string(),
+            name: "daily_orders".to_string(),
+            meta: Some(serde_json::json!({"modelType": "PhysicalTable"})),
+        },
+    )
+    .expect("insert physical placeholder");
+
+    let node = GraphReadStore::get_node(&graph, "model:daily_orders")
+        .expect("get node")
+        .expect("node exists");
+    assert_eq!(
+        node.meta
+            .as_ref()
+            .and_then(|meta| meta.get("modelType"))
+            .and_then(|value| value.as_str()),
+        Some("DataFlow")
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(&lock_path);
+}
+
+#[test]
+fn test_graphdb_write_store_reinsert_clears_removed_marker() {
+    let db_path = std::env::temp_dir().join("m39_test_reinsert_clears_removed.graphdb");
+    let lock_path = db_path.with_extension("graphdb.lock");
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(&lock_path);
+    let mut graph = GraphDB::open(&db_path).expect("open graphdb");
+
+    let node = metadata_checker::graph::Node {
+        id: "page:test".to_string(),
+        node_type: metadata_checker::graph::NodeType::Page,
+        path: "test.spg".to_string(),
+        name: "Test Page".to_string(),
+        meta: None,
+    };
+
+    GraphWriteStore::upsert_node(&mut graph, node.clone()).expect("insert node");
+    GraphWriteStore::remove_nodes_by_ids(&mut graph, &["page:test".to_string()])
+        .expect("remove node");
+    GraphWriteStore::upsert_node(&mut graph, node).expect("reinsert node");
+
+    assert!(
+        !graph.removed_nodes_set().contains("page:test"),
+        "重新插入的节点不应继续出现在删除集合中"
+    );
+    assert!(
+        graph.dirty_nodes_set().contains("page:test"),
+        "重新插入的节点应作为脏节点持久化"
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(&lock_path);
+}
+
+#[test]
 fn test_graphdb_implements_index_state_store() {
     let db_path = std::env::temp_dir().join("m39_test_index.graphdb");
     let lock_path = db_path.with_extension("graphdb.lock");

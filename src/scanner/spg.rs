@@ -1,6 +1,6 @@
 use super::{add_edge_with_meta, add_node, resolve_reference_path};
 use crate::graph::{EdgeType, NodeType};
-use crate::graph_store::GraphStore;
+use crate::graph_store::GraphWriteStore;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
@@ -140,7 +140,7 @@ fn extract_single_bare_symbol(raw_expr: &str) -> Option<String> {
 /// 确保 model 和 field 节点存在，并建立 Contains 关系。
 /// 返回 (model_id, field_id)。
 fn ensure_model_field(
-    graph: &mut dyn GraphStore,
+    graph: &mut dyn GraphWriteStore,
     model: &str,
     field: &str,
     model_path: &str,
@@ -185,7 +185,7 @@ fn resolve_physical_table_name(model_path: &str) -> Option<String> {
 
 /// 添加从 from_id 读取 model.field 的关系边。
 fn add_model_read(
-    graph: &mut dyn GraphStore,
+    graph: &mut dyn GraphWriteStore,
     from_id: &str,
     model: &str,
     field: &str,
@@ -249,7 +249,7 @@ fn add_model_read(
 }
 /// 添加从 from_id 写入 model.field 的关系边。
 fn add_model_write(
-    graph: &mut dyn GraphStore,
+    graph: &mut dyn GraphWriteStore,
     from_id: &str,
     model: &str,
     field: &str,
@@ -313,7 +313,7 @@ fn add_model_write(
 }
 
 pub fn process_spg_file_from_value(
-    graph: &mut dyn GraphStore,
+    graph: &mut dyn GraphWriteStore,
     rel_path: &str,
     raw_value: serde_json::Value,
 ) -> Result<Vec<String>> {
@@ -1109,17 +1109,15 @@ pub fn process_spg_file_from_value(
                     if let Some(ref dialog_id) = action.dialog {
                         let dialog_comp_id =
                             format!("comp:{}|{}", rel_path.replace(r"\", "/"), dialog_id);
-                        // 确保目标节点存在
-                        if graph.get_node(&dialog_comp_id).ok().flatten().is_none() {
-                            add_node(
-                                graph,
-                                dialog_comp_id.clone(),
-                                NodeType::Component,
-                                rel_path.to_string(),
-                                dialog_id.clone(),
-                                None,
-                            )?;
-                        }
+                        // 通过 upsert 确保目标节点存在；None meta 不覆盖已有节点 meta。
+                        add_node(
+                            graph,
+                            dialog_comp_id.clone(),
+                            NodeType::Component,
+                            rel_path.to_string(),
+                            dialog_id.clone(),
+                            None,
+                        )?;
                         let dialog_meta = serde_json::json!({
                             "reason": format!("Action 'showDialog' opens dialog '{}'", dialog_id),
                             "actor_kind": "action",
@@ -1158,17 +1156,15 @@ pub fn process_spg_file_from_value(
                 "switchPanel" => {
                     if let Some(ref pb) = action.panelbook {
                         let panelbook_id = format!("comp:{}|{}", rel_path.replace(r"\", "/"), pb);
-                        // 确保目标节点存在
-                        if graph.get_node(&panelbook_id).ok().flatten().is_none() {
-                            add_node(
-                                graph,
-                                panelbook_id.clone(),
-                                NodeType::Component,
-                                rel_path.to_string(),
-                                pb.clone(),
-                                None,
-                            )?;
-                        }
+                        // 通过 upsert 确保目标节点存在；None meta 不覆盖已有节点 meta。
+                        add_node(
+                            graph,
+                            panelbook_id.clone(),
+                            NodeType::Component,
+                            rel_path.to_string(),
+                            pb.clone(),
+                            None,
+                        )?;
                         let ctrl_meta = serde_json::json!({
                             "reason": format!("Action 'switchPanel' controls panelbook '{}'", pb),
                             "actor_kind": "action",
@@ -1489,17 +1485,15 @@ pub fn process_spg_file_from_value(
         if !node_ids.contains(&model_id) {
             node_ids.insert(model_id.clone());
         }
-        // 避免覆盖已有节点（如 App/DataFlow 表）的 modelType
-        if graph.get_node(&physical_model_id).ok().flatten().is_none() {
-            add_node(
-                graph,
-                physical_model_id.clone(),
-                NodeType::Model,
-                path.clone(),
-                physical_table.to_string(),
-                Some(serde_json::json!({"modelType": "PhysicalTable", "sourcePath": path})),
-            )?;
-        }
+        // 写入端会保留已有 DataFlow/App modelType，避免物理表占位覆盖真实模型。
+        add_node(
+            graph,
+            physical_model_id.clone(),
+            NodeType::Model,
+            path.clone(),
+            physical_table.to_string(),
+            Some(serde_json::json!({"modelType": "PhysicalTable", "sourcePath": path})),
+        )?;
         add_edge_with_meta(
             graph,
             &model_id,
