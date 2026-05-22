@@ -121,6 +121,44 @@ fn assert_ai_output_contract(value: &serde_json::Value, expected_target: &str) {
     );
 }
 
+fn assert_target_not_found_contract(
+    value: &serde_json::Value,
+    expected_target: &str,
+    expected_kind: &str,
+) {
+    assert_eq!(
+        value.get("kind").and_then(|v| v.as_str()),
+        Some(expected_kind)
+    );
+    assert_eq!(
+        value.get("query_target").and_then(|v| v.as_str()),
+        Some(expected_target)
+    );
+    assert_eq!(
+        value
+            .get("summary")
+            .and_then(|v| v.get("target_id"))
+            .and_then(|v| v.as_str()),
+        Some(expected_target)
+    );
+
+    let diagnostics = value
+        .get("diagnostics")
+        .and_then(|v| v.as_array())
+        .expect("diagnostics should exist");
+    assert!(
+        !diagnostics.is_empty(),
+        "target-not-found path should carry diagnostics"
+    );
+    let has_target_not_found = diagnostics
+        .iter()
+        .any(|diag| diag.get("code").and_then(|v| v.as_str()) == Some("TARGET_NOT_FOUND"));
+    assert!(
+        has_target_not_found,
+        "target-not-found should emit TARGET_NOT_FOUND diagnostic"
+    );
+}
+
 #[test]
 fn test_m39_query_model_graph_store_schema_contract() {
     let store = build_contract_graph();
@@ -194,4 +232,91 @@ fn test_m39_explain_graph_store_schema_contract() {
         .expect("explain should run on GraphReadStore");
 
     assert_ai_output_contract(&value, "model:user");
+}
+
+#[test]
+fn test_m39_query_model_target_not_found_contract() {
+    let store = build_contract_graph();
+    let graph: &dyn GraphReadStore = &store;
+    let value =
+        metadata_checker::query::build_query_model_output(graph, "model:not_exists", "compact")
+            .expect("query_model should handle missing target without panic");
+
+    assert_target_not_found_contract(&value, "model:not_exists", "ModelQuery");
+}
+
+#[test]
+fn test_m39_query_dataflow_target_not_found_or_non_dataflow_contract() {
+    let store = build_contract_graph();
+    let graph: &dyn GraphReadStore = &store;
+
+    let missing = metadata_checker::query::build_query_dataflow_output(graph, "model:not_exists")
+        .expect("query_dataflow should handle missing target without panic");
+    assert_target_not_found_contract(&missing, "model:not_exists", "ModelQuery");
+
+    let non_dataflow =
+        metadata_checker::query::build_query_dataflow_output(graph, "page:app/home.spg")
+            .expect("query_dataflow should handle non-DataFlow target without panic");
+    assert_ai_output_contract(&non_dataflow, "page:app/home.spg");
+    assert_eq!(
+        non_dataflow.get("kind").and_then(|v| v.as_str()),
+        Some("DataFlowQuery")
+    );
+    assert_eq!(
+        non_dataflow
+            .get("summary")
+            .and_then(|v| v.get("dataflow_id"))
+            .and_then(|v| v.as_str()),
+        Some("page:app/home.spg")
+    );
+}
+
+#[test]
+fn test_m39_query_page_logic_missing_page_contract() {
+    let store = build_contract_graph();
+    let graph: &dyn GraphReadStore = &store;
+    let value = metadata_checker::query::build_query_page_logic_output(
+        graph,
+        "page:not_exists",
+        None,
+        "compact",
+    )
+    .expect("query_page_logic should handle missing page without panic");
+
+    assert_target_not_found_contract(&value, "page:not_exists", "PageQuery");
+}
+
+#[test]
+fn test_m39_context_target_not_found_contract() {
+    let store = build_contract_graph();
+    let graph: &dyn GraphReadStore = &store;
+    let value =
+        metadata_checker::context::build_context_output(graph, "model:not_exists", 1, "compact")
+            .expect("context should handle missing target without panic");
+
+    assert_target_not_found_contract(&value, "model:not_exists", "Context");
+}
+
+#[test]
+fn test_m39_explain_condition_target_not_found_contract() {
+    let store = build_contract_graph();
+    let graph: &dyn GraphReadStore = &store;
+    let value = metadata_checker::explain::build_explain_condition_output(
+        graph,
+        "model:not_exists",
+        "compact",
+    )
+    .expect("explain_condition should handle missing target without panic");
+
+    assert_target_not_found_contract(&value, "model:not_exists", "Explain");
+}
+
+#[test]
+fn test_m39_explain_target_not_found_contract() {
+    let store = build_contract_graph();
+    let graph: &dyn GraphReadStore = &store;
+    let value = metadata_checker::explain::build_explain_output(graph, "model:not_exists")
+        .expect("explain should handle missing target without panic");
+
+    assert_target_not_found_contract(&value, "model:not_exists", "Explain");
 }
