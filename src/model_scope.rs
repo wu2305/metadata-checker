@@ -1,4 +1,5 @@
-use crate::graph::{EdgeType, GraphDB, Node, NodeType};
+use crate::graph::{EdgeType, Node, NodeType};
+use crate::graph_store::GraphReadStore;
 use std::collections::HashSet;
 
 const FACT_AUTO_CUSTOMER_AUTO_REL_TABLE: &str = "$DATA:/主数据/fact_autoCustomerAutoRel.tbl";
@@ -54,7 +55,7 @@ fn is_same_dataflow_path(left: &str, right: &str) -> bool {
     normalize_dataflow_path(left) == normalize_dataflow_path(right)
 }
 
-fn collect_page_descendants(graph: &GraphDB, root_id: &str) -> Vec<String> {
+fn collect_page_descendants(graph: &dyn GraphReadStore, root_id: &str) -> Vec<String> {
     let mut stack = vec![root_id.to_string()];
     let mut seen = HashSet::new();
     let mut ids = Vec::new();
@@ -64,10 +65,10 @@ fn collect_page_descendants(graph: &GraphDB, root_id: &str) -> Vec<String> {
             continue;
         }
         ids.push(node_id.clone());
-        if let Some((outgoing, _incoming)) = graph.get_node_edges(&node_id) {
-            for (child, edge) in &outgoing {
-                if matches!(edge.edge_type, EdgeType::Contains | EdgeType::Triggers) {
-                    stack.push(child.id.clone());
+        if let Some(neighbors) = graph.get_node_edges(&node_id).ok().flatten() {
+            for edge_view in &neighbors.outgoing {
+                if matches!(edge_view.edge.edge_type, EdgeType::Contains | EdgeType::Triggers) {
+                    stack.push(edge_view.node.id.clone());
                 }
             }
         }
@@ -76,21 +77,22 @@ fn collect_page_descendants(graph: &GraphDB, root_id: &str) -> Vec<String> {
     ids
 }
 
-fn collect_dataflow_input_paths_by_model(graph: &GraphDB, model_id: &str) -> Vec<String> {
+fn collect_dataflow_input_paths_by_model(graph: &dyn GraphReadStore, model_id: &str) -> Vec<String> {
     let mut paths = Vec::new();
-    let Some((outgoing, _)) = graph.get_node_edges(model_id) else {
+    let Some(neighbors) = graph.get_node_edges(model_id).ok().flatten() else {
         return paths;
     };
 
-    for (target, edge) in &outgoing {
-        if !matches!(edge.edge_type, EdgeType::DataflowInput) {
+    for edge_view in &neighbors.outgoing {
+        if !matches!(edge_view.edge.edge_type, EdgeType::DataflowInput) {
             continue;
         }
-        let edge_path = edge.field_path.as_deref().unwrap_or("");
+        let edge_path = edge_view.edge.field_path.as_deref().unwrap_or("");
         if !edge_path.is_empty() {
             paths.push(edge_path.to_string());
         }
-        if let Some(source_file) = edge
+        if let Some(source_file) = edge_view
+            .edge
             .meta
             .as_ref()
             .and_then(|m| m.get("source_file"))
@@ -100,8 +102,8 @@ fn collect_dataflow_input_paths_by_model(graph: &GraphDB, model_id: &str) -> Vec
                 paths.push(source_file.to_string());
             }
         }
-        if !target.path.is_empty() {
-            paths.push(target.path.clone());
+        if !edge_view.node.path.is_empty() {
+            paths.push(edge_view.node.path.clone());
         }
     }
 
@@ -111,7 +113,7 @@ fn collect_dataflow_input_paths_by_model(graph: &GraphDB, model_id: &str) -> Vec
 }
 
 fn score_dataflow_candidate(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node: &Node,
     preferred_input: Option<&str>,
 ) -> (u8, u8, usize) {
@@ -130,7 +132,7 @@ fn score_dataflow_candidate(
 }
 
 fn pick_best_dataflow_candidate(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     mut candidates: Vec<Node>,
     preferred_input: Option<&str>,
 ) -> Option<Node> {
@@ -153,7 +155,7 @@ fn pick_best_dataflow_candidate(
 }
 
 fn resolve_dataflow_model_by_path(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     dataflow_path: &str,
     preferred_input: Option<&str>,
 ) -> Option<Node> {
@@ -166,11 +168,11 @@ fn resolve_dataflow_model_by_path(
         .and_then(|s| s.to_str())
         .map(std::string::ToString::to_string);
 
-    for node in graph
-        .node_indices
-        .values()
-        .filter_map(|idx| graph.graph.node_weight(*idx))
-        .filter(|node| node.node_type == NodeType::Model && is_dataflow_model(node))
+    let Some(iter_nodes) = graph.iter_nodes().ok() else {
+        return None;
+    };
+
+    for node in iter_nodes.filter(|node| node.node_type == NodeType::Model && is_dataflow_model(node))
     {
         let node_path = normalize_dataflow_path(&node.path);
         if is_same_dataflow_path(&node.path, dataflow_path) || normalized_path == node_path {
@@ -200,29 +202,29 @@ fn resolve_dataflow_model_by_path(
 }
 
 fn resolve_dataflow_model_by_input_path(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     local_model_id: &str,
     dataflow_path: &str,
 ) -> Option<Node> {
     let mut exact_candidates: Vec<Node> = Vec::new();
     let mut fallback_candidates: Vec<Node> = Vec::new();
-    if let Some((outgoing, _incoming)) = graph.get_node_edges(local_model_id) {
-        for (target, edge) in &outgoing {
-            if !matches!(edge.edge_type, EdgeType::DataflowInput) {
+    if let Some(neighbors) = graph.get_node_edges(local_model_id).ok().flatten() {
+        for edge_view in &neighbors.outgoing {
+            if !matches!(edge_view.edge.edge_type, EdgeType::DataflowInput) {
                 continue;
             }
 
-            let edge_target_path = edge.field_path.as_deref().unwrap_or("");
-            if !is_dataflow_model(target) {
+            let edge_target_path = edge_view.edge.field_path.as_deref().unwrap_or("");
+            if !is_dataflow_model(&edge_view.node) {
                 continue;
             }
 
             if is_same_dataflow_path(edge_target_path, dataflow_path)
-                || is_same_dataflow_path(&target.path, dataflow_path)
+                || is_same_dataflow_path(&edge_view.node.path, dataflow_path)
             {
-                exact_candidates.push((*target).clone());
+                exact_candidates.push(edge_view.node.clone());
             } else {
-                fallback_candidates.push((*target).clone());
+                fallback_candidates.push(edge_view.node.clone());
             }
         }
     }
@@ -251,44 +253,50 @@ fn resolve_dataflow_model_by_input_path(
 /// 解析规则是通用的：`page path + local model id`。不要按 `model11` 等具体 id
 /// 写特殊分支；这些 id 只应出现在真实项目回归测试中。
 pub fn resolve_model_target_in_page(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_id: &str,
     local_model_id: &str,
 ) -> Option<(Node, Node, Option<String>)> {
     let page_node_id = normalize_page_node_id(page_id);
-    let page_node = graph.get_node(&page_node_id)?;
+    let Some(page_node) = graph.get_node(&page_node_id).ok().flatten() else {
+        return None;
+    };
     let normalized_model = local_model_id.trim_start_matches("model:");
     let model_id = format!("model:{}", normalized_model);
-    let model_node = graph.get_node(&model_id)?;
+    let Some(model_node) = graph.get_node(&model_id).ok().flatten() else {
+        return None;
+    };
 
     let mut candidate_paths = Vec::new();
     let mut seen_paths = HashSet::new();
     for node_id in collect_page_descendants(graph, &page_node.id) {
-        let Some((outgoing, _incoming)) = graph.get_node_edges(&node_id) else {
+        let Some(neighbors) = graph.get_node_edges(&node_id).ok().flatten() else {
             continue;
         };
-        for (target, edge) in &outgoing {
-            if target.node_type != NodeType::Model {
+        for edge_view in &neighbors.outgoing {
+            if edge_view.node.node_type != NodeType::Model {
                 continue;
             }
-            let meta_target_model = edge
+            let meta_target_model = edge_view
+                .edge
                 .meta
                 .as_ref()
                 .and_then(|m| m.get("target_model"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let to_node_model = target.id.strip_prefix("model:").unwrap_or(&target.id);
+            let to_node_model = edge_view.node.id.strip_prefix("model:").unwrap_or(&edge_view.node.id);
             if meta_target_model != normalized_model && to_node_model != normalized_model {
                 continue;
             }
-            let path = edge
+            let path = edge_view
+                .edge
                 .meta
                 .as_ref()
                 .and_then(|m| m.get("target_model_path"))
                 .and_then(|v| v.as_str())
                 .filter(|p| !p.is_empty())
                 .map(str::to_string)
-                .unwrap_or_else(|| target.path.clone());
+                .unwrap_or_else(|| edge_view.node.path.clone());
             if !path.is_empty() && seen_paths.insert(path.clone()) {
                 candidate_paths.push(path);
             }
@@ -311,7 +319,11 @@ pub fn resolve_model_target_in_page(
             })
             .map(|n| n.id);
     if let Some(dataflow_model_id) = &dataflow_model_id
-        && let Some(dataflow_meta) = graph.get_node(dataflow_model_id).and_then(|n| n.meta)
+        && let Some(dataflow_meta) = graph
+            .get_node(dataflow_model_id)
+            .ok()
+            .flatten()
+            .and_then(|n| n.meta)
     {
         scoped_model.meta = Some(dataflow_meta);
     } else if let Some(embedded_meta) = model_node.meta {

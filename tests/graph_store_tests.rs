@@ -177,6 +177,96 @@ fn test_graph_store_error_code_roundtrip() {
 }
 
 #[test]
+fn test_graph_store_error_into_tool_error_code_map() {
+    use metadata_checker::graph_store::GraphStoreError;
+    use metadata_checker::tool_contract::{ToolError, ToolErrorCode};
+
+    let cases: Vec<(GraphStoreError, &'static str, ToolErrorCode)> = vec![
+        (
+            GraphStoreError::NotFound {
+                resource: "x".into(),
+            },
+            "GRAPH_DB_NOT_FOUND",
+            ToolErrorCode::GraphDbNotFound,
+        ),
+        (
+            GraphStoreError::InvalidArgument {
+                message: "x".into(),
+            },
+            "INVALID_ARGUMENT",
+            ToolErrorCode::InvalidArgument,
+        ),
+        (
+            GraphStoreError::OpenFailed {
+                path: "x".into(),
+                reason: "x".into(),
+            },
+            "GRAPH_DB_OPEN_FAILED",
+            ToolErrorCode::InternalError,
+        ),
+        (
+            GraphStoreError::ReadFailed { reason: "x".into() },
+            "GRAPH_DB_READ_FAILED",
+            ToolErrorCode::InternalError,
+        ),
+        (
+            GraphStoreError::WriteFailed { reason: "x".into() },
+            "GRAPH_DB_WRITE_FAILED",
+            ToolErrorCode::InternalError,
+        ),
+        (
+            GraphStoreError::SerializeFailed { reason: "x".into() },
+            "GRAPH_DB_SERIALIZE_FAILED",
+            ToolErrorCode::InternalError,
+        ),
+        (
+            GraphStoreError::DeserializeFailed { reason: "x".into() },
+            "GRAPH_DB_DESERIALIZE_FAILED",
+            ToolErrorCode::InternalError,
+        ),
+        (
+            GraphStoreError::LockTimeout { path: "x".into() },
+            "GRAPH_DB_LOCK_TIMEOUT",
+            ToolErrorCode::InternalError,
+        ),
+        (
+            GraphStoreError::PermissionDenied { path: "x".into() },
+            "GRAPH_DB_PERMISSION_DENIED",
+            ToolErrorCode::InternalError,
+        ),
+        (
+            GraphStoreError::Corrupted { reason: "x".into() },
+            "GRAPH_DB_CORRUPTED",
+            ToolErrorCode::InternalError,
+        ),
+        (
+            GraphStoreError::UnsupportedOperation {
+                message: "x".into(),
+            },
+            "GRAPH_DB_UNSUPPORTED_OPERATION",
+            ToolErrorCode::InternalError,
+        ),
+    ];
+
+    for (err, expected_code, expected_tool_code) in cases {
+        assert_eq!(err.code(), expected_code, "code mismatch for {:?}", err);
+        let tool_error: ToolError = err.into();
+        assert_eq!(
+            tool_error.code, expected_tool_code,
+            "tool code mismatch for {:?}",
+            tool_error.message
+        );
+        if matches!(expected_tool_code, ToolErrorCode::InternalError) {
+            assert_eq!(
+                tool_error.code,
+                ToolErrorCode::InternalError,
+                "mapped internal errors should stay explicit"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_persist_index_commits_graph_and_file_states_together() {
     use metadata_checker::graph_store::{GraphWriteStore, IndexCommit, IndexStateStore};
     use std::collections::HashMap;

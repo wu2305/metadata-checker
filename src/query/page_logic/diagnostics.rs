@@ -1,4 +1,5 @@
-use crate::graph::{GraphDB, Node};
+use crate::graph::Node;
+use crate::graph_store::GraphReadStore;
 use crate::output::{Diagnostic, DiagnosticSeverity, Location};
 
 use super::pick_str_field;
@@ -14,7 +15,7 @@ pub(super) struct PageLogicDiagnostics {
 
 /// 构建页面逻辑风险诊断，并执行主路径截断降级
 pub(super) fn build_page_logic_diagnostics(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_id: &str,
     page_node: &Node,
     from_file: bool,
@@ -125,7 +126,7 @@ pub(super) fn build_page_logic_diagnostics(
     // UNRESOLVED_PAGE_NAVIGATION：导航目标页面不存在于图中
     for nav in navigation {
         let to = nav.get("to").and_then(|v| v.as_str()).unwrap_or("");
-        if to.starts_with("page:") && graph.get_node(to).is_none() {
+        if to.starts_with("page:") && graph.get_node(to).is_ok_and(|node| node.is_none()) {
             diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,
                 code: "UNRESOLVED_PAGE_NAVIGATION".to_string(),
@@ -152,7 +153,7 @@ pub(super) fn build_page_logic_diagnostics(
     // UNRESOLVED_MODEL_WRITE：写入目标模型不存在于图中
     for wt in write_targets {
         let target_id = wt.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
-        if target_id.starts_with("model:") && graph.get_node(target_id).is_none() {
+        if target_id.starts_with("model:") && graph.get_node(target_id).is_ok_and(|node| node.is_none()) {
             diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,
                 code: "UNRESOLVED_MODEL_WRITE".to_string(),

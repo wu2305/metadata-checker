@@ -713,20 +713,23 @@ pub fn build_query_page_logic_output(
     let diagnostics::PageLogicDiagnostics {
         diagnostics,
         related_context_summary,
-    } = diagnostics::build_page_logic_diagnostics(
-        graph,
-        page_id,
-        &page_node,
-        from_file,
-        &entrypoints,
-        &data_sources,
-        &write_targets,
-        &navigation,
-        &visibility_rules,
-        &action_flows,
-        &mut primary_paths,
-        &mut related_context,
-    );
+    } = {
+        let graph_store: &dyn GraphReadStore = graph;
+        diagnostics::build_page_logic_diagnostics(
+            graph_store,
+            page_id,
+            &page_node,
+            from_file,
+            &entrypoints,
+            &data_sources,
+            &write_targets,
+            &navigation,
+            &visibility_rules,
+            &action_flows,
+            &mut primary_paths,
+            &mut related_context,
+        )
+    };
 
     // ---- 7. Summary & page_role ----
     let page_role = if entrypoints.is_empty() {
