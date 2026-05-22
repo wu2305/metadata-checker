@@ -1,4 +1,4 @@
-use crate::graph::{Edge, GraphDB, Node};
+use crate::graph::{Edge, Node};
 use crate::graph_store::GraphReadStore;
 use crate::output::schema::format_next_query;
 use anyhow::Result;
@@ -606,13 +606,13 @@ pub fn find_nodes(
 ///
 /// 从页面的数据源、组件绑定、action reads/writes、DataFlow 输入输出中搜索与 local_model_id 匹配的模型。
 pub fn resolve_model_in_page(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_id: &str,
     local_model_id: &str,
 ) -> crate::output::schema::AiOutput {
     let page_node = match graph.get_node(page_id) {
-        Some(n) => n,
-        None => {
+        Ok(Some(n)) => n,
+        Ok(None) | Err(_) => {
             let mut out = crate::output::schema::AiOutput::new(
                 crate::output::schema::OutputKind::ModelQuery,
                 serde_json::json!({
@@ -642,8 +642,10 @@ pub fn resolve_model_in_page(
     let local_lower = local_model_id.to_lowercase();
 
     // 从页面出边收集关联模型
-    if let Some((outgoing, _)) = graph.get_node_edges(page_id) {
-        for (target, edge) in &outgoing {
+    if let Ok(Some(neighbors)) = graph.get_node_edges(page_id) {
+        for edge_view in &neighbors.outgoing {
+            let target = &edge_view.node;
+            let edge = &edge_view.edge;
             let score = if target.id.to_lowercase() == local_lower {
                 100.0
             } else if target.id.to_lowercase().contains(&local_lower)
@@ -654,7 +656,7 @@ pub fn resolve_model_in_page(
                 0.0
             };
             if score > 0.0 {
-                candidates.push(((*target).clone(), score, format!("{:?}", edge.edge_type)));
+                candidates.push((target.clone(), score, format!("{:?}", edge.edge_type)));
             }
         }
     }
@@ -663,12 +665,12 @@ pub fn resolve_model_in_page(
     let bare = local_model_id
         .strip_prefix("model:")
         .unwrap_or(local_model_id);
-    for (_, idx) in &graph.node_indices {
-        if let Some(node) = graph.graph.node_weight(*idx) {
+    if let Ok(nodes) = graph.iter_nodes() {
+        for node in nodes {
             if node.id.starts_with("model:") {
                 let node_bare = node.id.strip_prefix("model:").unwrap_or(&node.id);
                 if node_bare.eq_ignore_ascii_case(bare) {
-                    candidates.push((node.clone(), 60.0, "global model match".to_string()));
+                    candidates.push((node, 60.0, "global model match".to_string()));
                 }
             }
         }

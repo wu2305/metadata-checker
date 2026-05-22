@@ -1,9 +1,7 @@
-use crate::graph::GraphDB;
 use crate::graph_store::GraphReadStore;
 use crate::query::find_candidates;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::json;
-use std::any::Any;
 use std::io::{self, Write};
 
 mod diagnostics;
@@ -62,15 +60,8 @@ fn page_scoped_model_target(page_path: &str, model_id: &str) -> String {
     }
 }
 
-/// availability_facts 的字段提升：保持 answer_facts 为主证据，同时便于模型快速定位。
-fn cast_graph_db(graph: &dyn GraphReadStore) -> Result<&GraphDB> {
-    (graph as &dyn Any)
-        .downcast_ref::<GraphDB>()
-        .with_context(|| "query_page_logic currently requires GraphDB-backed GraphReadStore")
-}
-
 fn build_key_model_availability_entry(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_path: &str,
     model_id: &str,
 ) -> Option<serde_json::Value> {
@@ -198,10 +189,9 @@ pub fn build_query_page_logic_output(
     project_dir: Option<&std::path::Path>,
     budget: &str,
 ) -> Result<serde_json::Value> {
-    let graph = cast_graph_db(graph)?;
     let is_compact = budget == "compact";
     let is_full = budget == "full";
-    let page_node = match graph.get_node(page_id) {
+    let page_node = match graph.get_node(page_id)? {
         Some(n) => n,
         None => {
             let candidates = find_candidates(graph, page_id, 5)?;
@@ -234,10 +224,10 @@ pub fn build_query_page_logic_output(
     // ---- 3. Entrypoints：只包含用户可触发组件（有 action 的 button/link 等） ----
     let mut entrypoints: Vec<serde_json::Value> = Vec::new();
     for comp in &child_components {
-        if let Some((comp_out, _)) = graph.get_node_edges(&comp.id) {
-            let has_trigger = comp_out
-                .iter()
-                .any(|(_, e)| matches!(e.edge_type, crate::graph::EdgeType::Triggers));
+        if let Some(neighbors) = graph.get_node_edges(&comp.id)? {
+            let has_trigger = neighbors.outgoing.iter().any(|edge_view| {
+                matches!(edge_view.edge.edge_type, crate::graph::EdgeType::Triggers)
+            });
             if has_trigger {
                 let comp_type = comp
                     .meta
@@ -277,8 +267,10 @@ pub fn build_query_page_logic_output(
     all_nodes.extend(child_actions.iter());
 
     for node in &all_nodes {
-        if let Some((node_out, _)) = graph.get_node_edges(&node.id) {
-            for (target, edge) in &node_out {
+        if let Some(neighbors) = graph.get_node_edges(&node.id)? {
+            for edge_view in &neighbors.outgoing {
+                let target = &edge_view.node;
+                let edge = &edge_view.edge;
                 match edge.edge_type {
                     crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
                         let default_json_path =
@@ -464,9 +456,21 @@ pub fn build_query_page_logic_output(
 
     // ---- 5. Action flows：遍历 Action 节点，聚合 reads/writes/navigation ----
     for action in &child_actions {
-        let (action_out, action_in) = graph
-            .get_node_edges(&action.id)
-            .unwrap_or_else(|| (Vec::new(), Vec::new()));
+        let action_neighbors = graph.get_node_edges(&action.id)?;
+        let (action_out, action_in) = match action_neighbors.as_ref() {
+            Some(neighbors) => (&neighbors.outgoing, &neighbors.incoming),
+            None => {
+                action_flows.push(json!({
+                    "action_id": action.id,
+                    "action_type": action.name,
+                    "triggered_by": serde_json::Value::Null,
+                    "reads": [],
+                    "writes": [],
+                    "navigation": []
+                }));
+                continue;
+            }
+        };
 
         let (action_type, action_id) = action
             .name
@@ -474,7 +478,9 @@ pub fn build_query_page_logic_output(
             .map(|(t, i)| (t.to_string(), i.to_string()))
             .unwrap_or_else(|| (action.name.clone(), action.name.clone()));
 
-        let parent_component = action_in.iter().find_map(|(src, e)| {
+        let parent_component = action_in.iter().find_map(|edge_view| {
+            let src = &edge_view.node;
+            let e = &edge_view.edge;
             if matches!(e.edge_type, crate::graph::EdgeType::Triggers)
                 && matches!(src.node_type, crate::graph::NodeType::Component)
             {
@@ -490,7 +496,9 @@ pub fn build_query_page_logic_output(
         let mut sets_params = Vec::new();
         let mut passes_params = Vec::new();
 
-        for (target, edge) in &action_out {
+        for edge_view in action_out.iter() {
+            let target = &edge_view.node;
+            let edge = &edge_view.edge;
             match edge.edge_type {
                 crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
                     reads.push(json!({

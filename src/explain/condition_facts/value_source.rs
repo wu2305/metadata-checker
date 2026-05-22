@@ -1,4 +1,4 @@
-use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 
 use super::conditions::{component_json_paths, is_ancestor_json_path};
 
@@ -41,24 +41,22 @@ fn extract_single_bare_symbol(raw_expr: &str) -> Option<String> {
 }
 
 fn nearest_data_context_component(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_path: &str,
     target_json_path: &str,
 ) -> Option<crate::graph::Node> {
     let mut best: Option<(usize, crate::graph::Node)> = None;
-    for (_id, idx) in &graph.node_indices {
-        let Some(node) = graph.graph.node_weight(*idx) else {
-            continue;
-        };
+    let nodes = graph.iter_nodes().ok()?;
+    for node in nodes {
         if !matches!(node.node_type, crate::graph::NodeType::Component) || node.path != page_path {
             continue;
         }
-        let has_data_context = component_meta_string(node, "dataSet").is_some()
-            || component_meta_string(node, "source").is_some();
+        let has_data_context = component_meta_string(&node, "dataSet").is_some()
+            || component_meta_string(&node, "source").is_some();
         if !has_data_context {
             continue;
         }
-        let Some(ctx_path) = component_meta_string(node, "json_path") else {
+        let Some(ctx_path) = component_meta_string(&node, "json_path") else {
             continue;
         };
         if !is_ancestor_json_path(ctx_path, target_json_path) {
@@ -69,7 +67,7 @@ fn nearest_data_context_component(
             .as_ref()
             .map_or(true, |(best_score, _)| score > *best_score)
         {
-            best = Some((score, node.clone()));
+            best = Some((score, node));
         }
     }
     best.map(|(_, node)| node)
@@ -93,13 +91,16 @@ fn dataflow_field_origin(
 }
 
 fn build_value_source_context_from_derived_edge(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     target_node: &crate::graph::Node,
 ) -> Option<serde_json::Value> {
-    let (outgoing, _) = graph.get_node_edges(&target_node.id)?;
-    let (field_node, edge) = outgoing
+    let neighbors = graph.get_node_edges(&target_node.id).ok().flatten()?;
+    let (field_node, edge) = neighbors
+        .outgoing
         .iter()
-        .find(|(node, edge)| {
+        .find(|edge_view| {
+            let node = &edge_view.node;
+            let edge = &edge_view.edge;
             let Some(meta) = edge.meta.as_ref() else {
                 return false;
             };
@@ -121,7 +122,9 @@ fn build_value_source_context_from_derived_edge(
             node.id == format!("field:{}.{}", data_set, bare_symbol)
         })
         .or_else(|| {
-            outgoing.iter().find(|(node, edge)| {
+            neighbors.outgoing.iter().find(|edge_view| {
+                let node = &edge_view.node;
+                let edge = &edge_view.edge;
                 matches!(edge.edge_type, crate::graph::EdgeType::Reads)
                     && node.id.starts_with("field:")
                     && edge
@@ -131,7 +134,8 @@ fn build_value_source_context_from_derived_edge(
                         .and_then(|v| v.as_str())
                         == Some("inherited_container_data_context")
             })
-        })?;
+        })
+        .map(|edge_view| (&edge_view.node, &edge_view.edge))?;
     let meta = edge.meta.as_ref()?;
     let raw_expr = meta.get("source_expr").and_then(|v| v.as_str())?;
     let bare_symbol = meta.get("bare_symbol").and_then(|v| v.as_str())?;
@@ -140,9 +144,9 @@ fn build_value_source_context_from_derived_edge(
         .get("data_context_component_id")
         .and_then(|v| v.as_str())?;
     let context_node_id = format!("comp:{}|{}", target_node.path, context_component_id);
-    let context_node = graph.get_node(&context_node_id);
+    let context_node = graph.get_node(&context_node_id).ok().flatten();
     let data_set_model_id = format!("model:{}", data_set);
-    let data_set_model = graph.get_node(&data_set_model_id);
+    let data_set_model = graph.get_node(&data_set_model_id).ok().flatten();
     let data_set_model_path = meta
         .get("target_model_path")
         .and_then(|v| v.as_str())
@@ -152,7 +156,7 @@ fn build_value_source_context_from_derived_edge(
         .as_deref()
         .and_then(model_from_table_path)
         .map(|model| format!("model:{}", model))
-        .and_then(|model_id| graph.get_node(&model_id));
+        .and_then(|model_id| graph.get_node(&model_id).ok().flatten());
     let dataflow_field_origin = dataflow_model
         .as_ref()
         .and_then(|node| dataflow_field_origin(node, bare_symbol));
@@ -160,18 +164,33 @@ fn build_value_source_context_from_derived_edge(
         .as_ref()
         .map(|node| {
             graph
-                .find_dataflow_inputs(&node.id)
-                .into_iter()
-                .map(|(input, edge)| {
-                    serde_json::json!({
-                        "node_id": input.id,
-                        "name": input.name,
-                        "source_file": input.path,
-                        "edge_type": format!("{:?}", edge.edge_type),
-                        "field_path": edge.field_path,
-                    })
+                .get_node_edges(&node.id)
+                .ok()
+                .flatten()
+                .map(|neighbors| {
+                    neighbors
+                        .outgoing
+                        .into_iter()
+                        .filter(|edge_view| {
+                            matches!(
+                                edge_view.edge.edge_type,
+                                crate::graph::EdgeType::DataflowInput
+                            )
+                        })
+                        .map(|edge_view| {
+                            let input = edge_view.node;
+                            let edge = edge_view.edge;
+                            serde_json::json!({
+                                "node_id": input.id,
+                                "name": input.name,
+                                "source_file": input.path,
+                                "edge_type": format!("{:?}", edge.edge_type),
+                                "field_path": edge.field_path,
+                            })
+                        })
+                        .collect::<Vec<_>>()
                 })
-                .collect::<Vec<_>>()
+                .unwrap_or_default()
         })
         .unwrap_or_default();
 
@@ -214,7 +233,7 @@ fn build_value_source_context_from_derived_edge(
 }
 
 pub(in crate::explain) fn build_value_source_context(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     target_node: &crate::graph::Node,
     page_path: &str,
 ) -> Option<serde_json::Value> {
@@ -237,14 +256,14 @@ pub(in crate::explain) fn build_value_source_context(
     let data_set = component_meta_string(&context_node, "dataSet")
         .or_else(|| component_property(&context_node, "dataSet"))?;
     let data_set_model_id = format!("model:{}", data_set);
-    let data_set_model = graph.get_node(&data_set_model_id);
+    let data_set_model = graph.get_node(&data_set_model_id).ok().flatten();
     let data_set_model_path = data_set_model.as_ref().map(|n| n.path.clone());
 
     let dataflow_model = data_set_model_path
         .as_deref()
         .and_then(model_from_table_path)
         .map(|model| format!("model:{}", model))
-        .and_then(|model_id| graph.get_node(&model_id));
+        .and_then(|model_id| graph.get_node(&model_id).ok().flatten());
     let dataflow_field_origin = dataflow_model
         .as_ref()
         .and_then(|node| dataflow_field_origin(node, &bare_symbol));
@@ -252,18 +271,33 @@ pub(in crate::explain) fn build_value_source_context(
         .as_ref()
         .map(|node| {
             graph
-                .find_dataflow_inputs(&node.id)
-                .into_iter()
-                .map(|(input, edge)| {
-                    serde_json::json!({
-                        "node_id": input.id,
-                        "name": input.name,
-                        "source_file": input.path,
-                        "edge_type": format!("{:?}", edge.edge_type),
-                        "field_path": edge.field_path,
-                    })
+                .get_node_edges(&node.id)
+                .ok()
+                .flatten()
+                .map(|neighbors| {
+                    neighbors
+                        .outgoing
+                        .into_iter()
+                        .filter(|edge_view| {
+                            matches!(
+                                edge_view.edge.edge_type,
+                                crate::graph::EdgeType::DataflowInput
+                            )
+                        })
+                        .map(|edge_view| {
+                            let input = edge_view.node;
+                            let edge = edge_view.edge;
+                            serde_json::json!({
+                                "node_id": input.id,
+                                "name": input.name,
+                                "source_file": input.path,
+                                "edge_type": format!("{:?}", edge.edge_type),
+                                "field_path": edge.field_path,
+                            })
+                        })
+                        .collect::<Vec<_>>()
                 })
-                .collect::<Vec<_>>()
+                .unwrap_or_default()
         })
         .unwrap_or_default();
 

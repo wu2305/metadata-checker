@@ -1,7 +1,7 @@
 #[path = "common/memory_graph_store.rs"]
 mod memory_graph_store;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use metadata_checker::graph::FileState;
 use metadata_checker::graph::GraphDB;
 use metadata_checker::graph_store::{

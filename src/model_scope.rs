@@ -67,7 +67,10 @@ fn collect_page_descendants(graph: &dyn GraphReadStore, root_id: &str) -> Vec<St
         ids.push(node_id.clone());
         if let Some(neighbors) = graph.get_node_edges(&node_id).ok().flatten() {
             for edge_view in &neighbors.outgoing {
-                if matches!(edge_view.edge.edge_type, EdgeType::Contains | EdgeType::Triggers) {
+                if matches!(
+                    edge_view.edge.edge_type,
+                    EdgeType::Contains | EdgeType::Triggers
+                ) {
                     stack.push(edge_view.node.id.clone());
                 }
             }
@@ -77,7 +80,10 @@ fn collect_page_descendants(graph: &dyn GraphReadStore, root_id: &str) -> Vec<St
     ids
 }
 
-fn collect_dataflow_input_paths_by_model(graph: &dyn GraphReadStore, model_id: &str) -> Vec<String> {
+fn collect_dataflow_input_paths_by_model(
+    graph: &dyn GraphReadStore,
+    model_id: &str,
+) -> Vec<String> {
     let mut paths = Vec::new();
     let Some(neighbors) = graph.get_node_edges(model_id).ok().flatten() else {
         return paths;
@@ -172,7 +178,8 @@ fn resolve_dataflow_model_by_path(
         return None;
     };
 
-    for node in iter_nodes.filter(|node| node.node_type == NodeType::Model && is_dataflow_model(node))
+    for node in
+        iter_nodes.filter(|node| node.node_type == NodeType::Model && is_dataflow_model(node))
     {
         let node_path = normalize_dataflow_path(&node.path);
         if is_same_dataflow_path(&node.path, dataflow_path) || normalized_path == node_path {
@@ -284,7 +291,11 @@ pub fn resolve_model_target_in_page(
                 .and_then(|m| m.get("target_model"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let to_node_model = edge_view.node.id.strip_prefix("model:").unwrap_or(&edge_view.node.id);
+            let to_node_model = edge_view
+                .node
+                .id
+                .strip_prefix("model:")
+                .unwrap_or(&edge_view.node.id);
             if meta_target_model != normalized_model && to_node_model != normalized_model {
                 continue;
             }

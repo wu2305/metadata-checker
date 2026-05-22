@@ -1,6 +1,10 @@
 use crate::explain::evidence::{push_lineage_evidence, push_relation_evidence};
 use crate::explain::importance::classify_importance;
-use crate::graph::GraphDB;
+use crate::graph::{
+    find_consumed_by_dataflows, find_dataflow_inputs, find_dataflow_outputs, find_produced_by,
+    find_readers, find_writers,
+};
+use crate::graph_store::GraphReadStore;
 use crate::output::schema::format_next_query;
 use anyhow::Result;
 use serde_json::Value;
@@ -9,19 +13,19 @@ use std::io::{self, Write};
 use super::super::find_parent_page;
 
 pub(in crate::explain) fn explain_model_graph(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node: &crate::graph::Node,
-    _outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
-    _incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    _outgoing: Vec<(crate::graph::Node, crate::graph::Edge)>,
+    _incoming: Vec<(crate::graph::Node, crate::graph::Edge)>,
     human: bool,
 ) -> Result<Value> {
     // Use existing graph query helpers for richer semantics
-    let readers = graph.find_readers(&node.id);
-    let writers = graph.find_writers(&node.id);
-    let dataflow_inputs = graph.find_dataflow_inputs(&node.id);
-    let dataflow_outputs = graph.find_dataflow_outputs(&node.id);
-    let produced_by = graph.find_produced_by(&node.id);
-    let consumed_by_dataflows = graph.find_consumed_by_dataflows(&node.id);
+    let readers = find_readers(graph, &node.id)?;
+    let writers = find_writers(graph, &node.id)?;
+    let dataflow_inputs = find_dataflow_inputs(graph, &node.id)?;
+    let dataflow_outputs = find_dataflow_outputs(graph, &node.id)?;
+    let produced_by = find_produced_by(graph, &node.id)?;
+    let consumed_by_dataflows = find_consumed_by_dataflows(graph, &node.id)?;
 
     let read_count = readers.len();
     let write_count = writers.len();
@@ -216,10 +220,10 @@ pub(in crate::explain) fn explain_model_graph(
 
 /// 解释参数节点：展示哪些组件/条件依赖此参数，以及哪些动作设置了此参数
 fn explain_param_graph(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node: &crate::graph::Node,
-    _outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
-    incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    _outgoing: Vec<(crate::graph::Node, crate::graph::Edge)>,
+    incoming: Vec<(crate::graph::Node, crate::graph::Edge)>,
     human: bool,
 ) -> Result<Value> {
     let mut dependents = Vec::new();
@@ -327,10 +331,10 @@ fn explain_param_graph(
 }
 
 pub(in crate::explain) fn explain_field_graph(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node: &crate::graph::Node,
-    _outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
-    incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    _outgoing: Vec<(crate::graph::Node, crate::graph::Edge)>,
+    incoming: Vec<(crate::graph::Node, crate::graph::Edge)>,
     human: bool,
 ) -> Result<Value> {
     // 参数节点走独立分支
@@ -417,10 +421,12 @@ pub(in crate::explain) fn explain_field_graph(
     let read_count = readers.len();
     let det_count = determined_by.len();
     if let Some(ref model) = parent_model
-        && let Some((_model_out, model_in)) = graph.get_node_edges(&model.id)
+        && let Some(model_neighbors) = graph.get_node_edges(&model.id).ok().flatten()
     {
         let field_name = node.name.as_str();
-        for (source, edge) in &model_in {
+        for edge_view in &model_neighbors.incoming {
+            let source = &edge_view.node;
+            let edge = &edge_view.edge;
             if matches!(
                 edge.edge_type,
                 crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads
@@ -568,7 +574,7 @@ pub(in crate::explain) fn explain_field_graph(
     if !produced_by.is_empty() {
         for producer in &produced_by {
             let producer_id = producer.get("id").and_then(|v| v.as_str()).unwrap_or("?");
-            let producer_node = graph.get_node(producer_id);
+            let producer_node = graph.get_node(producer_id).ok().flatten();
             // Try to resolve field-level mapping from producer node meta (dimensions)
             let producer_dims: Vec<serde_json::Value> = producer_node
                 .as_ref()
@@ -593,8 +599,10 @@ pub(in crate::explain) fn explain_field_graph(
                     break;
                 }
             }
-            if let Some((producer_out, _producer_in)) = graph.get_node_edges(producer_id) {
-                for (upstream_model, edge) in &producer_out {
+            if let Some(producer_neighbors) = graph.get_node_edges(producer_id).ok().flatten() {
+                for edge_view in &producer_neighbors.outgoing {
+                    let upstream_model = &edge_view.node;
+                    let edge = &edge_view.edge;
                     if matches!(edge.edge_type, crate::graph::EdgeType::DataflowInput) {
                         let source_field = mapped_source_field
                             .as_ref()
@@ -698,7 +706,7 @@ pub(in crate::explain) fn explain_field_graph(
         && let Some(ref model) = parent_model
     {
         // Check if parent is a DataFlow with input models
-        let dataflow_inputs = graph.find_dataflow_inputs(&model.id);
+        let dataflow_inputs = find_dataflow_inputs(graph, &model.id).unwrap_or_default();
         let field_name = node.name.as_str();
         for (input_model, _edge) in dataflow_inputs {
             let input_dims: Vec<serde_json::Value> = input_model
@@ -733,7 +741,7 @@ pub(in crate::explain) fn explain_field_graph(
             }
         }
         // Check if parent is produced by a DataFlow (physical table case)
-        let producers = graph.find_produced_by(&model.id);
+        let producers = find_produced_by(graph, &model.id).unwrap_or_default();
         for (producer, _edge) in producers {
             let producer_dims: Vec<serde_json::Value> = producer
                 .meta

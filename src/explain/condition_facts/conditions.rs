@@ -1,4 +1,4 @@
-use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 
 /// 辅助：从条件节点构建条件对象
 fn build_cond_obj(source: &crate::graph::Node) -> serde_json::Value {
@@ -244,7 +244,7 @@ pub(in crate::explain) fn dedupe_conditions(
 
 /// 沿 Contains 入边查找组件祖先，返回从近到远的祖先组件
 pub(in crate::explain) fn component_ancestor_chain(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     component_id: &str,
 ) -> Vec<(String, usize)> {
     let mut ancestors = Vec::new();
@@ -253,19 +253,22 @@ pub(in crate::explain) fn component_ancestor_chain(
     let mut distance = 0usize;
 
     while seen.insert(current.clone()) {
-        let Some((_outgoing, incoming)) = graph.get_node_edges(&current) else {
+        let Some(neighbors) = graph.get_node_edges(&current).ok().flatten() else {
             break;
         };
-        let parent = incoming
+        let parent = neighbors
+            .incoming
             .iter()
-            .find(|(source, edge)| {
+            .find(|edge_view| {
+                let source = &edge_view.node;
+                let edge = &edge_view.edge;
                 matches!(edge.edge_type, crate::graph::EdgeType::Contains)
                     && matches!(
                         source.node_type,
                         crate::graph::NodeType::Component | crate::graph::NodeType::Page
                     )
             })
-            .map(|(source, _)| (*source).clone());
+            .map(|edge_view| edge_view.node.clone());
 
         let Some(parent) = parent else {
             break;
@@ -324,10 +327,15 @@ fn total_row_count_models(cond_obj: &serde_json::Value) -> Vec<String> {
 }
 
 /// 收集组件自身表达式所在 JSON path，用于通过 JSON 层级推断祖先容器
-pub(in crate::explain) fn component_json_paths(graph: &GraphDB, component_id: &str) -> Vec<String> {
+pub(in crate::explain) fn component_json_paths(
+    graph: &dyn GraphReadStore,
+    component_id: &str,
+) -> Vec<String> {
     let mut paths = Vec::new();
-    if let Some((outgoing, incoming)) = graph.get_node_edges(component_id) {
-        for (source, edge) in &incoming {
+    if let Some(neighbors) = graph.get_node_edges(component_id).ok().flatten() {
+        for edge_view in &neighbors.incoming {
+            let source = &edge_view.node;
+            let edge = &edge_view.edge;
             if matches!(source.node_type, crate::graph::NodeType::Condition)
                 && matches!(edge.edge_type, crate::graph::EdgeType::DependsOn)
             {
@@ -341,7 +349,8 @@ pub(in crate::explain) fn component_json_paths(graph: &GraphDB, component_id: &s
                 }
             }
         }
-        for (_target, edge) in &outgoing {
+        for edge_view in &neighbors.outgoing {
+            let edge = &edge_view.edge;
             if let Some(path) = edge
                 .meta
                 .as_ref()
@@ -373,20 +382,21 @@ pub(in crate::explain::condition_facts) fn is_ancestor_json_path(
 
 /// 低代码组件图当前只保证 page -> component Contains；嵌套父子关系用 json_path 前缀补足
 pub(in crate::explain) fn collect_inherited_conditions_by_json_path(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_path: &str,
     target_paths: &[String],
     seen_conditions: &mut std::collections::HashSet<String>,
 ) -> Vec<serde_json::Value> {
     let mut inherited = Vec::new();
-    for (_id, idx) in &graph.node_indices {
-        let Some(node) = graph.graph.node_weight(*idx) else {
-            continue;
-        };
+    let nodes = match graph.iter_nodes() {
+        Ok(nodes) => nodes,
+        Err(_) => return inherited,
+    };
+    for node in nodes {
         if !matches!(node.node_type, crate::graph::NodeType::Condition) || node.path != page_path {
             continue;
         }
-        let cond_obj = build_cond_obj(node);
+        let cond_obj = build_cond_obj(&node);
         if classify_condition(&cond_obj) != "blocking" {
             continue;
         }
@@ -416,7 +426,7 @@ pub(in crate::explain) fn collect_inherited_conditions_by_json_path(
 
 /// 对 `model.totalRowCount__` 门控展开当前页面模型 filter
 pub(in crate::explain) fn expand_total_row_count_gates(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     blocking_conditions: &[serde_json::Value],
     page_path: &str,
     seen_conditions: &mut std::collections::HashSet<String>,
@@ -485,14 +495,16 @@ pub(in crate::explain) fn classify_condition(cond_obj: &serde_json::Value) -> &'
 
 /// 辅助：收集节点的 incoming condition 边
 pub(in crate::explain) fn collect_conditions_for_node(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node_id: &str,
     _page_path: &str,
     seen: &mut std::collections::HashSet<String>,
 ) -> Vec<serde_json::Value> {
     let mut results = Vec::new();
-    if let Some((_out, incoming)) = graph.get_node_edges(node_id) {
-        for (source, edge) in &incoming {
+    if let Some(neighbors) = graph.get_node_edges(node_id).ok().flatten() {
+        for edge_view in &neighbors.incoming {
+            let source = &edge_view.node;
+            let edge = &edge_view.edge;
             if !matches!(source.node_type, crate::graph::NodeType::Condition) {
                 continue;
             }

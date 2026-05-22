@@ -1,6 +1,6 @@
 use crate::explain::evidence::push_relation_evidence;
 use crate::explain::importance::{classify_importance, component_type_from_meta};
-use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 use crate::output::schema::format_next_query;
 use anyhow::Result;
 use serde_json::Value;
@@ -9,10 +9,10 @@ use std::io::{self, Write};
 use super::super::{find_parent_page, make_ref};
 
 pub(in crate::explain) fn explain_component_graph(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node: &crate::graph::Node,
-    outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
-    incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    outgoing: Vec<(crate::graph::Node, crate::graph::Edge)>,
+    incoming: Vec<(crate::graph::Node, crate::graph::Edge)>,
     human: bool,
 ) -> Result<Value> {
     let parent_page = find_parent_page(graph, &node.id);
@@ -54,8 +54,10 @@ pub(in crate::explain) fn explain_component_graph(
                 let mut action_reads = Vec::new();
                 let mut action_writes = Vec::new();
                 let mut action_nav = Vec::new();
-                if let Some((action_out, _)) = graph.get_node_edges(&target.id) {
-                    for (t, e) in &action_out {
+                if let Some(action_neighbors) = graph.get_node_edges(&target.id).ok().flatten() {
+                    for edge_view in &action_neighbors.outgoing {
+                        let t = &edge_view.node;
+                        let e = &edge_view.edge;
                         match e.edge_type {
                             crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
                                 reads.push(make_ref(t, e, Some(&target.path)));
@@ -319,10 +321,10 @@ pub(in crate::explain) fn explain_component_graph(
     Ok(serde_json::to_value(output)?)
 }
 pub(in crate::explain) fn explain_action_graph(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node: &crate::graph::Node,
-    outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
-    incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    outgoing: Vec<(crate::graph::Node, crate::graph::Edge)>,
+    incoming: Vec<(crate::graph::Node, crate::graph::Edge)>,
     human: bool,
 ) -> Result<Value> {
     let parent_comp = incoming.iter().find_map(|(source, edge)| {

@@ -1,4 +1,5 @@
 use crate::graph::{Edge, EdgeType, Node, NodeType};
+use crate::graph_store::GraphReadStore;
 use serde::{Deserialize, Serialize};
 // use std::collections::HashMap; // reserved for future use
 
@@ -223,11 +224,7 @@ pub trait PathSelector {
 
 /// 路径发现器 trait
 pub trait PathFinder {
-    fn find_candidates(
-        &self,
-        graph: &crate::graph::GraphDB,
-        query: &PathQuery,
-    ) -> Vec<PathCandidate>;
+    fn find_candidates(&self, graph: &dyn GraphReadStore, query: &PathQuery) -> Vec<PathCandidate>;
 }
 
 /// 锚点提取器
@@ -243,7 +240,7 @@ pub struct AnchorExtractor;
 impl AnchorExtractor {
     /// 从 query_page_logic 的已知上下文提取锚点
     pub fn extract(
-        graph: &crate::graph::GraphDB,
+        graph: &dyn GraphReadStore,
         page_id: &str,
         page_node: &crate::graph::Node,
         _child_components: &Vec<&crate::graph::Node>,
@@ -325,8 +322,10 @@ impl AnchorExtractor {
             }
         }
         for model_id in &model_targets {
-            if let Some((_out, incoming)) = graph.get_node_edges(model_id) {
-                for (source, edge) in &incoming {
+            if let Some(neighbors) = graph.get_node_edges(model_id).ok().flatten() {
+                for edge_view in &neighbors.incoming {
+                    let source = &edge_view.node;
+                    let edge = &edge_view.edge;
                     if matches!(
                         edge.edge_type,
                         crate::graph::EdgeType::ActionWrites
@@ -343,8 +342,10 @@ impl AnchorExtractor {
         // 5. 排除锚点：其他页面同名局部模型
         for ds in data_sources {
             if let Some(tgt) = ds.get("target_id").and_then(|v| v.as_str()) {
-                if let Some((_out, incoming)) = graph.get_node_edges(tgt) {
-                    for (source, edge) in &incoming {
+                if let Some(neighbors) = graph.get_node_edges(tgt).ok().flatten() {
+                    for edge_view in &neighbors.incoming {
+                        let source = &edge_view.node;
+                        let edge = &edge_view.edge;
                         if matches!(edge.edge_type, crate::graph::EdgeType::DependsOn)
                             && source.path != page_node.path
                             && source.id.starts_with("cond:")
@@ -402,11 +403,7 @@ impl Default for BoundedCausalPathFinder {
 }
 
 impl PathFinder for BoundedCausalPathFinder {
-    fn find_candidates(
-        &self,
-        graph: &crate::graph::GraphDB,
-        query: &PathQuery,
-    ) -> Vec<PathCandidate> {
+    fn find_candidates(&self, graph: &dyn GraphReadStore, query: &PathQuery) -> Vec<PathCandidate> {
         let mut candidates: Vec<PathCandidate> = Vec::new();
         let mut diagnostics: Vec<String> = Vec::new();
         let mut visited_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -447,9 +444,11 @@ impl PathFinder for BoundedCausalPathFinder {
                     None => continue,
                 };
 
-                if let Some((outgoing, incoming)) = graph.get_node_edges(current_node) {
+                if let Some(neighbors) = graph.get_node_edges(current_node).ok().flatten() {
                     // 正常 outgoing 遍历
-                    for (target, edge) in outgoing {
+                    for edge_view in neighbors.outgoing {
+                        let target = edge_view.node;
+                        let edge = edge_view.edge;
                         if !self.allowed_edge_types.contains(&edge.edge_type) {
                             continue;
                         }
@@ -461,21 +460,24 @@ impl PathFinder for BoundedCausalPathFinder {
                             continue; // 防止环，但允许 FieldAlias 回退
                         }
 
+                        let target_id = target.id.clone();
                         let segment = PathSegment {
-                            from: PathNodeRef::from(graph.get_node(current_node).unwrap_or(
-                                crate::graph::Node {
-                                    id: current_node.clone(),
-                                    node_type: NodeType::Component,
-                                    path: query.page_path.clone(),
-                                    name: current_node.clone(),
-                                    meta: None,
-                                },
-                            )),
+                            from: PathNodeRef::from(
+                                graph.get_node(current_node).ok().flatten().unwrap_or(
+                                    crate::graph::Node {
+                                        id: current_node.clone(),
+                                        node_type: NodeType::Component,
+                                        path: query.page_path.clone(),
+                                        name: current_node.clone(),
+                                        meta: None,
+                                    },
+                                ),
+                            ),
                             to: PathNodeRef::from(target),
-                            edge: PathEdgeRef::from((*edge).clone()),
+                            edge: PathEdgeRef::from(edge.clone()),
                             evidence: format!(
                                 "{} -> {} via {:?}",
-                                current_node, target.id, edge.edge_type
+                                current_node, target_id, edge.edge_type
                             ),
                             confidence: if edge.field_path.is_some() {
                                 "high".to_string()
@@ -523,7 +525,9 @@ impl PathFinder for BoundedCausalPathFinder {
                     }
                     // 对 Model 节点反向遍历 incoming ActionWrites/Writes 边，找到写入者 action
                     if current_node.starts_with("model:") || current_node.starts_with("field:") {
-                        for (source, edge) in &incoming {
+                        for edge_view in &neighbors.incoming {
+                            let source = &edge_view.node;
+                            let edge = &edge_view.edge;
                             if matches!(
                                 edge.edge_type,
                                 crate::graph::EdgeType::ActionWrites
@@ -539,7 +543,7 @@ impl PathFinder for BoundedCausalPathFinder {
                                 }
                                 let segment = PathSegment {
                                     from: PathNodeRef::from(
-                                        graph.get_node(current_node).unwrap_or(
+                                        graph.get_node(current_node).ok().flatten().unwrap_or(
                                             crate::graph::Node {
                                                 id: current_node.clone(),
                                                 node_type: NodeType::Component,
@@ -617,7 +621,7 @@ impl PathFinder for BoundedCausalPathFinder {
 /// 6. 只接受 edge.field_path 匹配目标字段的 writer
 /// 7. 生成三段路径：组件 -> 局部字段 -> canonical 字段 <- action
 pub fn build_field_causal_paths_for_data_source(
-    graph: &crate::graph::GraphDB,
+    graph: &dyn GraphReadStore,
     page_node: &crate::graph::Node,
     data_source: &serde_json::Value,
 ) -> Vec<PathCandidate> {
@@ -698,8 +702,10 @@ pub fn build_field_causal_paths_for_data_source(
     };
 
     // 查找局部字段的 outgoing FieldAlias，找到 canonical 字段
-    if let Some((outgoing, _incoming)) = graph.get_node_edges(&local_field_id) {
-        for (target, edge) in outgoing {
+    if let Some(neighbors) = graph.get_node_edges(&local_field_id).ok().flatten() {
+        for edge_view in neighbors.outgoing {
+            let target = edge_view.node;
+            let edge = edge_view.edge;
             if edge.edge_type == crate::graph::EdgeType::FieldAlias {
                 let canonical_field_id = target.id.clone();
                 let local_to_canonical_seg = PathSegment {
@@ -736,8 +742,10 @@ pub fn build_field_causal_paths_for_data_source(
                 };
 
                 // 从 canonical 字段反向查找 FieldWrite
-                if let Some((_out, incoming)) = graph.get_node_edges(&canonical_field_id) {
-                    for (source, edge) in incoming {
+                if let Some(neighbors) = graph.get_node_edges(&canonical_field_id).ok().flatten() {
+                    for edge_view in neighbors.incoming {
+                        let source = edge_view.node;
+                        let edge = edge_view.edge;
                         if edge.edge_type == crate::graph::EdgeType::FieldWrite
                             && source.path != page_node.path
                         {

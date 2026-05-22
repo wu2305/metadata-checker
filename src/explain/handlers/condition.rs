@@ -1,14 +1,14 @@
-use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 use anyhow::Result;
 use serde_json::Value;
 use std::io::{self, Write};
 
 /// 解释条件节点：输出完整条件依赖路径，包含上游依赖、下游影响与每段 evidence
 pub(in crate::explain) fn explain_condition_graph(
-    _graph: &GraphDB,
+    _graph: &dyn GraphReadStore,
     node: &crate::graph::Node,
-    outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
-    incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    outgoing: Vec<(crate::graph::Node, crate::graph::Edge)>,
+    incoming: Vec<(crate::graph::Node, crate::graph::Edge)>,
     human: bool,
 ) -> Result<Value> {
     // 从节点 meta 提取条件核心信息

@@ -153,7 +153,9 @@ pub(super) fn build_page_logic_diagnostics(
     // UNRESOLVED_MODEL_WRITE：写入目标模型不存在于图中
     for wt in write_targets {
         let target_id = wt.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
-        if target_id.starts_with("model:") && graph.get_node(target_id).is_ok_and(|node| node.is_none()) {
+        if target_id.starts_with("model:")
+            && graph.get_node(target_id).is_ok_and(|node| node.is_none())
+        {
             diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,
                 code: "UNRESOLVED_MODEL_WRITE".to_string(),

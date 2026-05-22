@@ -1,5 +1,5 @@
 use crate::answer_contract::{AnswerFactKind, TraversalIntent, answer_fact_enabled};
-use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 
 fn answer_path_step(
     step: usize,
@@ -639,7 +639,10 @@ fn graph_edge_ref(node: &crate::graph::Node, edge: &crate::graph::Edge) -> serde
     })
 }
 
-fn build_model_io_facts(graph: &GraphDB, target_node: &crate::graph::Node) -> serde_json::Value {
+fn build_model_io_facts(
+    graph: &dyn GraphReadStore,
+    target_node: &crate::graph::Node,
+) -> serde_json::Value {
     if target_node.node_type != crate::graph::NodeType::Model {
         return serde_json::json!({
             "result": null,
@@ -654,8 +657,10 @@ fn build_model_io_facts(graph: &GraphDB, target_node: &crate::graph::Node) -> se
 
     let mut reads = Vec::new();
     let mut writes = Vec::new();
-    if let Some((outgoing, incoming)) = graph.get_node_edges(&target_node.id) {
-        for (node, edge) in outgoing.iter().chain(incoming.iter()) {
+    if let Some(neighbors) = graph.get_node_edges(&target_node.id).ok().flatten() {
+        for edge_view in neighbors.outgoing.iter().chain(neighbors.incoming.iter()) {
+            let node = &edge_view.node;
+            let edge = &edge_view.edge;
             match edge.edge_type {
                 crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads => {
                     reads.push(graph_edge_ref(node, edge));
@@ -837,7 +842,7 @@ pub(in crate::explain) fn build_traversal_policy(
 }
 
 pub(in crate::explain) fn build_answer_facts(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     intent: TraversalIntent,
     target_node: &crate::graph::Node,
     blocking_conditions: &[serde_json::Value],
@@ -901,15 +906,19 @@ pub(in crate::explain) fn build_answer_facts(
     serde_json::Value::Object(facts)
 }
 
-fn collect_dataflow_input_paths(graph: &GraphDB, target_model_id: Option<&str>) -> Vec<String> {
+fn collect_dataflow_input_paths(
+    graph: &dyn GraphReadStore,
+    target_model_id: Option<&str>,
+) -> Vec<String> {
     let target_model_id = match target_model_id {
         Some(id) => id,
         None => return Vec::new(),
     };
 
     let mut paths = Vec::new();
-    if let Some((outgoing, _)) = graph.get_node_edges(target_model_id) {
-        for (_, edge) in outgoing {
+    if let Some(neighbors) = graph.get_node_edges(target_model_id).ok().flatten() {
+        for edge_view in neighbors.outgoing {
+            let edge = edge_view.edge;
             if !matches!(edge.edge_type, crate::graph::EdgeType::DataflowInput) {
                 continue;
             }

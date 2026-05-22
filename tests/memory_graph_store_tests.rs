@@ -1,7 +1,7 @@
 #[path = "common/memory_graph_store.rs"]
 mod memory_graph_store;
 use memory_graph_store::MemoryGraphStore;
-use metadata_checker::graph::{EdgeType, FileState, NodeType};
+use metadata_checker::graph::{Edge, EdgeType, FileState, NodeType};
 use metadata_checker::graph_store::{
     GraphReadStore, GraphWriteStore, IndexCommit, IndexStateStore,
 };
@@ -99,6 +99,35 @@ fn test_memory_graph_store_edge_direction_parity() {
 }
 
 #[test]
+fn test_memory_graph_store_write_trait_edge_direction_parity() {
+    let mut store = MemoryGraphStore::new();
+    store.add_test_node("page:home", "首页", NodeType::Page, "app/home.spg");
+    store.add_test_node("comp:btn1", "按钮1", NodeType::Component, "app/home.spg");
+
+    GraphWriteStore::add_edge(
+        &mut store,
+        Edge {
+            from: "page:home".to_string(),
+            to: "comp:btn1".to_string(),
+            edge_type: EdgeType::Contains,
+            field_path: None,
+            meta: None,
+        },
+    )
+    .expect("add_edge should succeed");
+
+    let outgoing = store.get_node_edges("page:home").unwrap().unwrap();
+    assert_eq!(outgoing.outgoing.len(), 1);
+    assert_eq!(outgoing.outgoing[0].node.id, "comp:btn1");
+    assert_eq!(outgoing.outgoing[0].edge.to, "comp:btn1");
+
+    let incoming = store.get_node_edges("comp:btn1").unwrap().unwrap();
+    assert_eq!(incoming.incoming.len(), 1);
+    assert_eq!(incoming.incoming[0].node.id, "page:home");
+    assert_eq!(incoming.incoming[0].edge.from, "page:home");
+}
+
+#[test]
 fn test_memory_graph_store_find_candidates_through_graph_read_store() {
     let mut store = MemoryGraphStore::new();
     store.add_test_node("page:home", "首页", NodeType::Page, "app/home.spg");
@@ -120,6 +149,137 @@ fn test_memory_graph_store_find_candidates_through_graph_read_store() {
 }
 
 #[test]
+fn test_query_page_logic_runs_on_memory_graph_store() {
+    let mut store = MemoryGraphStore::new();
+    store.add_test_node("page:app/home.spg", "首页", NodeType::Page, "app/home.spg");
+    store.add_test_node(
+        "comp:app/home.spg|input1",
+        "input1",
+        NodeType::Component,
+        "app/home.spg",
+    );
+    store.add_test_node(
+        "action:app/home.spg|input1|action1",
+        "setParamValue:action1",
+        NodeType::Action,
+        "app/home.spg",
+    );
+    store.add_test_node("model:user", "用户", NodeType::Model, "tables/user.tbl");
+
+    store.add_test_edge(
+        "page:app/home.spg",
+        "comp:app/home.spg|input1",
+        EdgeType::Contains,
+        None,
+    );
+    store.add_test_edge(
+        "comp:app/home.spg|input1",
+        "model:user",
+        EdgeType::Reads,
+        Some("user.name"),
+    );
+    store.add_test_edge(
+        "comp:app/home.spg|input1",
+        "action:app/home.spg|input1|action1",
+        EdgeType::Triggers,
+        None,
+    );
+    store.add_test_edge(
+        "action:app/home.spg|input1|action1",
+        "model:user",
+        EdgeType::ActionWrites,
+        Some("user.name"),
+    );
+
+    let graph: &dyn GraphReadStore = &store;
+    let output = metadata_checker::query::build_query_page_logic_output(
+        graph,
+        "page:app/home.spg",
+        None,
+        "compact",
+    )
+    .expect("query_page_logic should run on MemoryGraphStore");
+
+    assert_eq!(
+        output
+            .get("query_target")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+        "page:app/home.spg"
+    );
+    let data_sources = output
+        .get("details")
+        .and_then(|v| v.get("data_sources"))
+        .and_then(|v| v.get("items"))
+        .and_then(|v| v.as_array())
+        .expect("data_sources should be present");
+    assert_eq!(data_sources.len(), 1);
+}
+
+#[test]
+fn test_query_page_cross_context_and_resolve_run_on_memory_graph_store() {
+    let mut store = MemoryGraphStore::new();
+    store.add_test_node("page:a.spg", "页面A", NodeType::Page, "a.spg");
+    store.add_test_node("page:b.spg", "页面B", NodeType::Page, "b.spg");
+    store.add_test_node("model:user", "用户", NodeType::Model, "tables/user.tbl");
+    store.add_test_edge("page:a.spg", "model:user", EdgeType::Reads, None);
+    store.add_test_edge("page:b.spg", "model:user", EdgeType::Reads, None);
+
+    let graph: &dyn GraphReadStore = &store;
+    let page = metadata_checker::query::build_query_page_output(graph, "page:a.spg")
+        .expect("query page should run on MemoryGraphStore");
+    assert_eq!(
+        page.get("query_target").and_then(|v| v.as_str()),
+        Some("page:a.spg")
+    );
+
+    let cross =
+        metadata_checker::query::build_query_cross_output(graph, "page:a.spg", "page:b.spg")
+            .expect("query cross should run on MemoryGraphStore");
+    assert_eq!(
+        cross
+            .get("summary")
+            .and_then(|v| v.get("path_count"))
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+
+    let context =
+        metadata_checker::context::build_context_output(graph, "model:user", 1, "compact")
+            .expect("context should run on MemoryGraphStore");
+    assert_eq!(
+        context.get("query_target").and_then(|v| v.as_str()),
+        Some("model:user")
+    );
+
+    let resolved = metadata_checker::query::resolve_model_in_page(graph, "page:a.spg", "user");
+    assert_eq!(
+        resolved
+            .summary
+            .get("resolved_count")
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+
+    let explain = metadata_checker::explain::build_explain_output(graph, "model:user")
+        .expect("explain should run on MemoryGraphStore");
+    assert_eq!(
+        explain.get("query_target").and_then(|v| v.as_str()),
+        Some("model:user")
+    );
+
+    let explain_condition =
+        metadata_checker::explain::build_explain_condition_output(graph, "model:user", "compact")
+            .expect("explain-condition should run on MemoryGraphStore");
+    assert_eq!(
+        explain_condition
+            .get("query_target")
+            .and_then(|v| v.as_str()),
+        Some("model:user")
+    );
+}
+
+#[test]
 fn test_memory_graph_store_remove_nodes_removes_incident_edges() {
     let mut store = MemoryGraphStore::new();
     store.add_test_node("page:home", "首页", NodeType::Page, "app/home.spg");
@@ -136,18 +296,22 @@ fn test_memory_graph_store_remove_nodes_removes_incident_edges() {
 
     assert_eq!(store.node_count().unwrap(), 2);
     assert_eq!(store.edge_count().unwrap(), 0);
-    assert!(store
-        .get_node_edges("page:home")
-        .unwrap()
-        .expect("node should still exist")
-        .outgoing
-        .is_empty());
-    assert!(store
-        .get_node_edges("model:user")
-        .unwrap()
-        .expect("node should still exist")
-        .incoming
-        .is_empty());
+    assert!(
+        store
+            .get_node_edges("page:home")
+            .unwrap()
+            .expect("node should still exist")
+            .outgoing
+            .is_empty()
+    );
+    assert!(
+        store
+            .get_node_edges("model:user")
+            .unwrap()
+            .expect("node should still exist")
+            .incoming
+            .is_empty()
+    );
     assert!(
         store.get_node_edges("comp:btn1").unwrap().is_none(),
         "删除节点后 get_node_edges 应返回 None"

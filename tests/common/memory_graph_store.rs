@@ -129,18 +129,20 @@ impl GraphWriteStore for MemoryGraphStore {
     }
 
     fn add_edge(&mut self, edge: Edge) -> GraphStoreResult<()> {
-        if let Some(from_node) = self.nodes.get(&edge.from).cloned() {
-            self.outgoing
-                .entry(edge.from.clone())
-                .or_default()
-                .push((from_node.clone(), edge.clone()));
-            if let Some(to_node) = self.nodes.get(&edge.to).cloned() {
-                self.incoming
-                    .entry(edge.to.clone())
-                    .or_default()
-                    .push((to_node, edge));
-            }
-        }
+        let Some(from_node) = self.nodes.get(&edge.from).cloned() else {
+            return Ok(());
+        };
+        let Some(to_node) = self.nodes.get(&edge.to).cloned() else {
+            return Ok(());
+        };
+        self.outgoing
+            .entry(edge.from.clone())
+            .or_default()
+            .push((to_node, edge.clone()));
+        self.incoming
+            .entry(edge.to.clone())
+            .or_default()
+            .push((from_node, edge));
         Ok(())
     }
 

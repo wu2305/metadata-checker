@@ -3534,7 +3534,7 @@ pub trait InvocationAdapter {
     - `GraphReadStore::iter_nodes` 返回 owned `Node` 迭代，不能暴露 `node_indices` / `petgraph::NodeIndex`。
     - `IndexStateStore::persist_index` 调用现有 `GraphDB::persist` 或等价逻辑，但必须明确当前 dirty graph 与 file states 的提交一致性。
 
-- [ ] M39.4：迁移 query 层到 `GraphReadStore`（部分入口已迁移，candidates 运行路径已外移；page_logic/explain_condition/path/model_scope 仍需继续迁移）
+- [x] M39.4：迁移 query 层到 `GraphReadStore`（已完成：query/model/dataflow/context/page_logic/path/model_scope/explain-condition/full explain 只读入口均可接收 `&dyn GraphReadStore`）
   - 必须迁移：
     - `query::build_query_page_output`
     - `query::query_page`
@@ -3582,7 +3582,7 @@ pub trait InvocationAdapter {
     - `GraphDB` 旧方法可暂时保留兼容，但新 query 代码不再依赖旧方法。
     - reader/writer/dataflow/candidate 语义集中在 query/domain 层，不下沉到 storage trait。
 
-- [ ] M39.6：新增 test-only `MemoryGraphStore`（已具备基础替身和方向一致性测试；仍需覆盖 query_page/query_cross/context 等真实查询入口）
+- [x] M39.6：新增 test-only `MemoryGraphStore`
   - 位置建议：
     - `tests/common/memory_graph_store.rs`
     - 或 `src/graph_store.rs` 内 `#[cfg(test)]`
@@ -3598,7 +3598,7 @@ pub trait InvocationAdapter {
     - 不作为正式 runtime backend。
     - 不暴露给 stdio / function calling。
 
-- [ ] M39.7：拆 `ProjectIndexer`（冷脸验收修正：拆清文件发现与 DocumentProvider）
+- [x] M39.7：拆 `ProjectIndexer`（冷脸验收修正：拆清文件发现与 DocumentProvider）
   - 新增位置建议：
     - `src/indexer.rs`
     - 或 `src/scanner/indexer.rs`
@@ -3627,7 +3627,7 @@ pub trait InvocationAdapter {
     - 不引入远程 provider。
     - 不引入 session。
 
-- [ ] M39.8：错误转换统一（冷脸验收修正：补 code 映射反向测试）
+- [x] M39.8：错误转换统一（冷脸验收修正：补 code 映射反向测试）
   - 实现：
     - `GraphStoreError::code()`
     - `GraphStoreError` 到 `ToolError` / diagnostics 的统一映射函数。
@@ -3637,7 +3637,7 @@ pub trait InvocationAdapter {
     - redb lock、permission、corruption、serde 错误应尽量映射到稳定 `GraphStoreError`。
     - 必须有反向测试覆盖 lock、permission、corruption、serialize、deserialize、read、write 的 code 映射。
 
-- [ ] M39.9：补测试覆盖（冷脸验收修正）
+- [x] M39.9：补测试覆盖（冷脸验收修正）
   - 必须新增：
     - `test_graphdb_implements_graph_read_store`
     - `test_graphdb_implements_graph_write_store`

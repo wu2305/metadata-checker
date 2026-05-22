@@ -1,16 +1,16 @@
 use crate::explain::evidence::{push_lineage_evidence, push_relation_evidence};
 use crate::explain::importance::classify_importance;
-use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 use crate::output::schema::format_next_query;
 use anyhow::Result;
 use serde_json::Value;
 use std::io::{self, Write};
 
 pub(in crate::explain) fn explain_page_graph(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     node: &crate::graph::Node,
-    outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
-    incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    outgoing: Vec<(crate::graph::Node, crate::graph::Edge)>,
+    incoming: Vec<(crate::graph::Node, crate::graph::Edge)>,
     human: bool,
 ) -> Result<Value> {
     let mut entrypoints = Vec::new();
@@ -26,11 +26,12 @@ pub(in crate::explain) fn explain_page_graph(
         if matches!(edge.edge_type, crate::graph::EdgeType::Contains) {
             child_count += 1;
             // Check if this child has actions (entrypoint)
-            if let Some((child_out, _)) = graph.get_node_edges(&target.id) {
+            if let Some(child_neighbors) = graph.get_node_edges(&target.id).ok().flatten() {
                 let mut has_action = false;
                 let mut child_reads = false;
                 let mut child_writes = false;
-                for (_, e) in &child_out {
+                for edge_view in &child_neighbors.outgoing {
+                    let e = &edge_view.edge;
                     match e.edge_type {
                         crate::graph::EdgeType::Triggers => {
                             has_action = true;
@@ -65,8 +66,10 @@ pub(in crate::explain) fn explain_page_graph(
     for (target, edge) in &outgoing {
         if matches!(edge.edge_type, crate::graph::EdgeType::Contains) {
             // Check component's own edges
-            if let Some((child_out, _)) = graph.get_node_edges(&target.id) {
-                for (t, e) in &child_out {
+            if let Some(child_neighbors) = graph.get_node_edges(&target.id).ok().flatten() {
+                for edge_view in &child_neighbors.outgoing {
+                    let t = &edge_view.node;
+                    let e = &edge_view.edge;
                     if matches!(e.edge_type, crate::graph::EdgeType::OpensPage) {
                         navigation.push(serde_json::json!({
                             "from": target.id,
@@ -80,12 +83,17 @@ pub(in crate::explain) fn explain_page_graph(
                 }
             }
             // Check action edges (via Triggers)
-            if let Some((child_out, _)) = graph.get_node_edges(&target.id) {
-                for (action_node, action_edge) in &child_out {
+            if let Some(child_neighbors) = graph.get_node_edges(&target.id).ok().flatten() {
+                for edge_view in &child_neighbors.outgoing {
+                    let action_node = &edge_view.node;
+                    let action_edge = &edge_view.edge;
                     if matches!(action_edge.edge_type, crate::graph::EdgeType::Triggers)
-                        && let Some((action_out, _)) = graph.get_node_edges(&action_node.id)
+                        && let Some(action_neighbors) =
+                            graph.get_node_edges(&action_node.id).ok().flatten()
                     {
-                        for (t, e) in &action_out {
+                        for action_edge_view in &action_neighbors.outgoing {
+                            let t = &action_edge_view.node;
+                            let e = &action_edge_view.edge;
                             match e.edge_type {
                                 crate::graph::EdgeType::Reads
                                 | crate::graph::EdgeType::ActionReads => {
@@ -296,10 +304,10 @@ pub(in crate::explain) fn explain_page_graph(
 }
 
 pub(in crate::explain) fn explain_dataflow_graph(
-    _graph: &GraphDB,
+    _graph: &dyn GraphReadStore,
     node: &crate::graph::Node,
-    outgoing: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
-    incoming: Vec<(&crate::graph::Node, &crate::graph::Edge)>,
+    outgoing: Vec<(crate::graph::Node, crate::graph::Edge)>,
+    incoming: Vec<(crate::graph::Node, crate::graph::Edge)>,
     human: bool,
 ) -> Result<Value> {
     let mut inputs = Vec::new();

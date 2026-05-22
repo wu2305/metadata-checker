@@ -15,7 +15,7 @@ use crate::explain::handlers::{
     explain_action_graph, explain_component_graph, explain_condition_graph, explain_dataflow_graph,
     explain_field_graph, explain_model_graph, explain_page_graph,
 };
-use crate::graph::GraphDB;
+use crate::graph_store::GraphReadStore;
 use crate::model_scope::{
     is_dataflow_model, parse_scoped_model_target, resolve_model_target_in_page,
 };
@@ -253,12 +253,14 @@ pub fn explain_component_spg(spg: &SuperPageMetadata, target_id: &str, human: bo
 
 /// 解释项目图中的节点
 /// 查找节点的父页面（通过 Contains 或 Triggers 边递归）
-fn find_parent_page(graph: &GraphDB, node_id: &str) -> Option<crate::graph::Node> {
-    if let Some((_, incoming)) = graph.get_node_edges(node_id) {
-        for (parent, edge) in incoming {
+fn find_parent_page(graph: &dyn GraphReadStore, node_id: &str) -> Option<crate::graph::Node> {
+    if let Some(neighbors) = graph.get_node_edges(node_id).ok().flatten() {
+        for edge_view in neighbors.incoming {
+            let parent = edge_view.node;
+            let edge = edge_view.edge;
             if matches!(edge.edge_type, crate::graph::EdgeType::Contains) {
                 if matches!(parent.node_type, crate::graph::NodeType::Page) {
-                    return Some(parent.clone());
+                    return Some(parent);
                 }
                 if let Some(page) = find_parent_page(graph, &parent.id) {
                     return Some(page);
@@ -394,7 +396,7 @@ pub fn render_explain_condition_human(result: &serde_json::Value, target_id: &st
 ///
 /// 内部调用 build_explain_condition_output 获取结构化结果，再按 human/JSON 格式打印
 pub fn explain_condition_target(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     target_id: &str,
     human: bool,
     budget: &str,
@@ -416,7 +418,7 @@ pub fn explain_condition_target(
 ///
 /// 返回纯 JSON Value，供 CLI 包装或 runtime 复用
 pub fn build_explain_condition_output(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     target_id: &str,
     _budget: &str,
 ) -> Result<serde_json::Value> {
@@ -425,7 +427,7 @@ pub fn build_explain_condition_output(
 
 /// 构建带 M33 intent 的 explain-condition 结构化 JSON 输出，不直接打印
 pub fn build_explain_condition_output_with_intent(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     target_id: &str,
     _budget: &str,
     intent: TraversalIntent,
@@ -445,7 +447,7 @@ pub fn build_explain_condition_output_with_intent(
                 );
                 return Ok(serde_json::to_value(out)?);
             }
-        } else if let Some(node) = graph.get_node(target_id) {
+        } else if let Some(node) = graph.get_node(target_id).ok().flatten() {
             (node, None, None)
         } else {
             let candidates = find_local_candidates(graph, target_id);
@@ -478,15 +480,19 @@ pub fn build_explain_condition_output_with_intent(
 
     let target_node_ids: Vec<String> = if target_node.node_type == crate::graph::NodeType::Page {
         let mut ids = vec![target_node.id.clone()];
-        if let Some((outgoing, _incoming)) = graph.get_node_edges(&target_node.id) {
-            for (child, edge) in &outgoing {
+        if let Some(neighbors) = graph.get_node_edges(&target_node.id).ok().flatten() {
+            for edge_view in &neighbors.outgoing {
+                let child = &edge_view.node;
+                let edge = &edge_view.edge;
                 if matches!(
                     edge.edge_type,
                     crate::graph::EdgeType::Contains | crate::graph::EdgeType::Triggers
                 ) {
                     ids.push(child.id.clone());
-                    if let Some((child_out, _)) = graph.get_node_edges(&child.id) {
-                        for (grandchild, gedge) in &child_out {
+                    if let Some(child_neighbors) = graph.get_node_edges(&child.id).ok().flatten() {
+                        for child_edge_view in &child_neighbors.outgoing {
+                            let grandchild = &child_edge_view.node;
+                            let gedge = &child_edge_view.edge;
                             if matches!(
                                 gedge.edge_type,
                                 crate::graph::EdgeType::Contains | crate::graph::EdgeType::Triggers
@@ -502,8 +508,10 @@ pub fn build_explain_condition_output_with_intent(
     } else {
         let mut ids = vec![target_node.id.clone()];
         if target_node.node_type == crate::graph::NodeType::Component {
-            if let Some((outgoing, _incoming)) = graph.get_node_edges(&target_node.id) {
-                for (child, edge) in &outgoing {
+            if let Some(neighbors) = graph.get_node_edges(&target_node.id).ok().flatten() {
+                for edge_view in &neighbors.outgoing {
+                    let child = &edge_view.node;
+                    let edge = &edge_view.edge;
                     if matches!(edge.edge_type, crate::graph::EdgeType::Triggers) {
                         ids.push(child.id.clone());
                     }
@@ -717,8 +725,10 @@ pub fn build_explain_condition_output_with_intent(
         let mut candidates = finder.find_candidates(graph, &path_query);
 
         if target_node.id.starts_with("comp:") {
-            if let Some((outgoing, _incoming)) = graph.get_node_edges(&target_node.id) {
-                for (target, edge) in &outgoing {
+            if let Some(neighbors) = graph.get_node_edges(&target_node.id).ok().flatten() {
+                for edge_view in &neighbors.outgoing {
+                    let target = &edge_view.node;
+                    let edge = &edge_view.edge;
                     if matches!(
                         edge.edge_type,
                         crate::graph::EdgeType::Reads | crate::graph::EdgeType::ActionReads
@@ -1027,8 +1037,11 @@ fn is_all_digits(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
 }
 
-fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph::Node, String)> {
-    let mut candidates = Vec::new();
+fn find_local_candidates(
+    graph: &dyn GraphReadStore,
+    target_id: &str,
+) -> Vec<(crate::graph::Node, String)> {
+    let mut candidates: Vec<(crate::graph::Node, f64, String)> = Vec::new();
     let target_lower = target_id.to_lowercase();
 
     let target_prefix = if target_id.starts_with("model:") {
@@ -1064,71 +1077,73 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
         Some(target_bare.to_string())
     };
 
-    for idx in graph.node_indices.values() {
-        if let Some(node) = graph.graph.node_weight(*idx) {
-            if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty() {
-                continue;
-            }
-            let node_bare = node
-                .id
-                .strip_prefix("model:")
-                .or_else(|| node.id.strip_prefix("page:"))
-                .or_else(|| node.id.strip_prefix("comp:"))
-                .or_else(|| node.id.strip_prefix("action:"))
-                .or_else(|| node.id.strip_prefix("field:"))
-                .unwrap_or(&node.id);
+    let nodes = match graph.iter_nodes() {
+        Ok(nodes) => nodes,
+        Err(_) => return Vec::new(),
+    };
+    for node in nodes {
+        if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty() {
+            continue;
+        }
+        let node_bare = node
+            .id
+            .strip_prefix("model:")
+            .or_else(|| node.id.strip_prefix("page:"))
+            .or_else(|| node.id.strip_prefix("comp:"))
+            .or_else(|| node.id.strip_prefix("action:"))
+            .or_else(|| node.id.strip_prefix("field:"))
+            .unwrap_or(&node.id);
 
-            let mut score = 0.0;
-            let mut reason = "substring match";
+        let mut score = 0.0;
+        let mut reason = "substring match";
 
-            // 同页面组件优先
-            if let Some(ref page) = target_page
-                && node_bare.starts_with(page)
-            {
-                if let Some(ref id_part) = target_id_part {
-                    let node_name_lower = node.name.to_lowercase();
-                    let target_id_lower = id_part.to_lowercase();
+        // 同页面组件优先
+        if let Some(ref page) = target_page
+            && node_bare.starts_with(page)
+        {
+            if let Some(ref id_part) = target_id_part {
+                let node_name_lower = node.name.to_lowercase();
+                let target_id_lower = id_part.to_lowercase();
 
-                    // 双向子串匹配：input3 匹配 input33（前缀），input3 匹配 input13（包含子串）
-                    if node_name_lower.contains(&target_id_lower)
-                        || target_id_lower.contains(&node_name_lower)
-                    {
-                        score = 3.0;
-                        reason = "same page component name match";
-                    }
+                // 双向子串匹配：input3 匹配 input33（前缀），input3 匹配 input13（包含子串）
+                if node_name_lower.contains(&target_id_lower)
+                    || target_id_lower.contains(&node_name_lower)
+                {
+                    score = 3.0;
+                    reason = "same page component name match";
+                }
 
-                    // 公共前缀 + 数字后缀近似：input33 ~ input3 / input13 / input23
-                    if score == 0.0 {
-                        let prefix_len = common_prefix_len(&node_name_lower, &target_id_lower);
-                        if prefix_len >= 3 {
-                            let node_suffix = &node_name_lower[prefix_len..];
-                            let target_suffix = &target_id_lower[prefix_len..];
-                            if is_all_digits(node_suffix) && is_all_digits(target_suffix) {
-                                score = 2.5;
-                                reason = "same prefix numeric suffix match";
-                            }
+                // 公共前缀 + 数字后缀近似：input33 ~ input3 / input13 / input23
+                if score == 0.0 {
+                    let prefix_len = common_prefix_len(&node_name_lower, &target_id_lower);
+                    if prefix_len >= 3 {
+                        let node_suffix = &node_name_lower[prefix_len..];
+                        let target_suffix = &target_id_lower[prefix_len..];
+                        if is_all_digits(node_suffix) && is_all_digits(target_suffix) {
+                            score = 2.5;
+                            reason = "same prefix numeric suffix match";
                         }
                     }
                 }
             }
+        }
 
-            // 裸名精确匹配（不同前缀）
-            if score == 0.0 && !target_bare.is_empty() && node_bare == target_bare {
-                score = 5.0;
-                reason = "bare name match with different prefix";
-            }
+        // 裸名精确匹配（不同前缀）
+        if score == 0.0 && !target_bare.is_empty() && node_bare == target_bare {
+            score = 5.0;
+            reason = "bare name match with different prefix";
+        }
 
-            // 子串匹配
-            if score == 0.0
-                && (node.id.to_lowercase().contains(&target_lower)
-                    || node.name.to_lowercase().contains(&target_lower))
-            {
-                score = 1.0;
-            }
+        // 子串匹配
+        if score == 0.0
+            && (node.id.to_lowercase().contains(&target_lower)
+                || node.name.to_lowercase().contains(&target_lower))
+        {
+            score = 1.0;
+        }
 
-            if score > 0.0 {
-                candidates.push((node.clone(), score, reason.to_string()));
-            }
+        if score > 0.0 {
+            candidates.push((node, score, reason.to_string()));
         }
     }
 
@@ -1143,8 +1158,8 @@ fn find_local_candidates(graph: &GraphDB, target_id: &str) -> Vec<(crate::graph:
 /// 构建 explain JSON 输出
 ///
 /// 返回 Value，由外层调用者决定输出格式。
-pub fn build_explain_output(graph: &GraphDB, node_id: &str) -> Result<Value> {
-    let node = match graph.get_node(node_id) {
+pub fn build_explain_output(graph: &dyn GraphReadStore, node_id: &str) -> Result<Value> {
+    let node = match graph.get_node(node_id)? {
         Some(n) => n,
         None => {
             let candidates = find_candidates(graph, node_id, 5)?;
@@ -1158,7 +1173,21 @@ pub fn build_explain_output(graph: &GraphDB, node_id: &str) -> Result<Value> {
     };
 
     let (outgoing, incoming) = graph
-        .get_node_edges(node_id)
+        .get_node_edges(node_id)?
+        .map(|neighbors| {
+            (
+                neighbors
+                    .outgoing
+                    .into_iter()
+                    .map(|edge_view| (edge_view.node, edge_view.edge))
+                    .collect(),
+                neighbors
+                    .incoming
+                    .into_iter()
+                    .map(|edge_view| (edge_view.node, edge_view.edge))
+                    .collect(),
+            )
+        })
         .unwrap_or_else(|| (Vec::new(), Vec::new()));
 
     let value = match node.node_type {
@@ -1191,9 +1220,9 @@ pub fn build_explain_output(graph: &GraphDB, node_id: &str) -> Result<Value> {
 /// 解释图节点
 ///
 /// CLI 包装器，负责调用 `build_explain_output` 并按 `human` 参数决定输出格式。
-pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result<()> {
+pub fn explain_node_graph(graph: &dyn GraphReadStore, node_id: &str, human: bool) -> Result<()> {
     if human {
-        let node = match graph.get_node(node_id) {
+        let node = match graph.get_node(node_id)? {
             Some(n) => n,
             None => {
                 let candidates = find_candidates(graph, node_id, 5)?;
@@ -1208,7 +1237,21 @@ pub fn explain_node_graph(graph: &GraphDB, node_id: &str, human: bool) -> Result
         };
 
         let (outgoing, incoming) = graph
-            .get_node_edges(node_id)
+            .get_node_edges(node_id)?
+            .map(|neighbors| {
+                (
+                    neighbors
+                        .outgoing
+                        .into_iter()
+                        .map(|edge_view| (edge_view.node, edge_view.edge))
+                        .collect(),
+                    neighbors
+                        .incoming
+                        .into_iter()
+                        .map(|edge_view| (edge_view.node, edge_view.edge))
+                        .collect(),
+                )
+            })
             .unwrap_or_else(|| (Vec::new(), Vec::new()));
 
         match node.node_type {

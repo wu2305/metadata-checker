@@ -98,7 +98,7 @@ fn collect_from_node(
                     );
                 }
             }
-    }
+        }
     }
     Ok(())
 }

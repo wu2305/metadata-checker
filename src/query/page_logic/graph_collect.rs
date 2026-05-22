@@ -65,7 +65,13 @@ fn collect_components_recursive(
                         }
                     }
                 }
-                collect_components_recursive(graph, &component_id, child_components, child_actions, visited)?;
+                collect_components_recursive(
+                    graph,
+                    &component_id,
+                    child_components,
+                    child_actions,
+                    visited,
+                )?;
             }
         }
     }
@@ -76,8 +82,8 @@ fn collect_components_recursive(
 mod tests {
     use super::*;
     use crate::graph::GraphDB;
-    use crate::scanner::scan_project;
     use crate::graph_store::GraphReadStore;
+    use crate::scanner::scan_project;
     use std::path::Path;
     use std::process;
 

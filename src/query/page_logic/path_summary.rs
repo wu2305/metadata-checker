@@ -1,4 +1,5 @@
-use crate::graph::{GraphDB, Node};
+use crate::graph::Node;
+use crate::graph_store::GraphReadStore;
 use crate::path::{PathFinder, PathSelector};
 
 /// 页面逻辑输出中的路径选择结果
@@ -13,7 +14,7 @@ pub(super) struct PageLogicPaths {
 
 /// 计算页面主链路、候选链路和旁路上下文
 pub(super) fn build_page_logic_paths(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_id: &str,
     page_node: &Node,
     child_components: &Vec<&Node>,
@@ -90,15 +91,17 @@ pub(super) fn build_page_logic_paths(
 }
 
 fn collect_cross_page_side_context(
-    graph: &GraphDB,
+    graph: &dyn GraphReadStore,
     page_id: &str,
     child_components: &[&Node],
     related_context: &mut Vec<serde_json::Value>,
 ) {
     let mut seen_ctx: std::collections::HashSet<String> = std::collections::HashSet::new();
     for comp in child_components {
-        if let Some((comp_out, _comp_in)) = graph.get_node_edges(&comp.id) {
-            for (target, edge) in comp_out {
+        if let Some(neighbors) = graph.get_node_edges(&comp.id).ok().flatten() {
+            for edge_view in neighbors.outgoing {
+                let target = edge_view.node;
+                let edge = edge_view.edge;
                 if target.id.starts_with("page:") && target.id != page_id {
                     let ctx_key = format!("{}->{}", comp.id, target.id);
                     if !seen_ctx.contains(&ctx_key) {
