@@ -1,4 +1,6 @@
+#[cfg(feature = "cli-local")]
 use anyhow::Result;
+#[cfg(feature = "cli-local")]
 use std::path::Path;
 
 /// 项目目录扫描模块
@@ -9,6 +11,7 @@ use std::path::Path;
 ///
 /// 支持增量更新：对比文件 mtime/size/hash，只重新处理变更文件。
 /// Scan a project directory and build/update the graph database.
+#[cfg(feature = "cli-local")]
 pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
     let report = indexer::ProjectIndexer::scan(project_dir, db_path)?;
     eprintln!(
@@ -21,6 +24,7 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "cli-local")]
 pub mod indexer;
 mod spg;
 mod tbl;
