@@ -3727,11 +3727,27 @@ pub trait InvocationAdapter {
 任务清单：
 
 - [ ] M40.1：Feature / target 拆分
-  - 新增 browser wasm 构建 feature，默认 native 构建仍走 CLI/local。
-  - `browser-wasm` 只包含 WASM/browser 所需依赖。
-  - `cli-local` 保留 `redb` / `clap` / stdio / 本地文件系统。
-  - native 默认构建不得包含 `wasm-bindgen` / `web-sys` / `rexie`。
-  - wasm 构建不得包含 `redb` / `clap` / stdio。
+  - 目标不是让 wasm 空壳编译通过，而是让 browser 端具备真实的 SuperPage 组件关系分析能力。
+  - 不允许把 `browser-wasm` 缩成“纯 parser feature”；M40 需要图模型、图读接口、内存图存储和查询链路。
+  - 不允许把 `graph` / `graph_store` 整体隐藏到 `cli-local` 后面；这些模块中有 browser 端必须复用的节点、边、读写 trait 和查询抽象。
+  - feature 边界：
+    - `cli-local`：`clap`、`redb`、stdio、本地 runtime、本地文件系统扫描、redb 持久化实现。
+    - `browser-wasm`：parser、superpage、dependency、conditions、priority、图数据结构、图读写 trait、内存图存储、query/page_logic/explain 的 wasm-safe 分析入口、browser API。
+    - shared 模块默认不加 feature gate；只在 native-only / browser-only 边界模块加 `#[cfg]`。
+  - 图层拆分要求：
+    - `src/graph.rs` 保留 wasm-safe 纯数据结构和通用 helper：`NodeType`、`EdgeType`、`Node`、`Edge`、`FileState`、edge key helper、基于 `GraphReadStore` 的 reader/writer 查询 helper。
+    - `src/graph_store.rs` 保留 wasm-safe trait 和统一错误类型：`GraphReadStore`、`GraphWriteStore`、`IndexStateStore`、`GraphStoreError`、edge/node view 类型。
+    - 新增 `src/graph_redb.rs`，只在 `cli-local` 下编译，承载 `GraphDB`、redb table、lock file、持久化加载、`check_graph_db`、redb trait impl。
+    - 为降低迁移风险，M40.1 可以临时在 `graph.rs` 中 `#[cfg(feature = "cli-local")] pub use crate::graph_redb::GraphDB;`，但不得把 redb 逻辑继续留在 shared graph 模块。
+  - 依赖拆分要求：
+    - native 默认构建不得包含 `wasm-bindgen` / `web-sys` / `rexie`。
+    - wasm 构建不得包含 `redb` / `clap` / stdio。
+    - 不预先引入 `getrandom`；只有实际依赖链需要随机能力时再按目标平台处理。
+  - 验收用例必须证明 browser feature 不是空编译：
+    - `browser-wasm` 下存在一个内存图 + 查询 smoke 测试，至少覆盖 `Node` / `Edge` / `GraphReadStore` / 目标节点关联查询。
+    - native 默认路径仍能通过 `GraphDB` 完成现有图数据库读写测试。
+    - `cargo tree --no-default-features --features browser-wasm` 中不得出现 `redb` / `clap`。
+    - `cargo tree --features cli-local` 中不得强制出现 `rexie` / `web-sys` / `wasm-bindgen`。
   - 验证命令必须覆盖：
     - `cargo test`
     - `cargo build --no-default-features --features browser-wasm --target wasm32-unknown-unknown`
