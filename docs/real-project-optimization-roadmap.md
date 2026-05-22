@@ -3753,6 +3753,55 @@ pub trait InvocationAdapter {
     - `cargo build --no-default-features --features browser-wasm --target wasm32-unknown-unknown`
     - `cargo tree --features cli-local`
     - `cargo tree --no-default-features --features browser-wasm`
+  - 详细实施清单：
+    - [ ] M40.1.0：建立迁移基线
+      - 确认工作区干净，记录当前 `cargo check` / `cargo test` 状态。
+      - 不先改 `lib.rs` 做大面积 `#[cfg]`；先完成模块拆分，再收窄暴露面。
+      - 检查 `src/graph.rs` 中 redb-only 内容、pure graph 内容、GraphDB trait impl 的边界，形成待搬迁段落清单。
+    - [ ] M40.1.1：Cargo feature 骨架
+      - 在 `Cargo.toml` 中新增 `default = ["cli-local"]`。
+      - 新增 `cli-local` feature，包含 `clap` / `redb` / native stdio/runtime 需要的依赖。
+      - 新增 `browser-wasm` feature，只引入 browser API 必需依赖；首轮可只放 `wasm-bindgen` / `js-sys` / `web-sys`，`rexie` 等 IndexedDB 依赖放到 M40.7 再接入。
+      - 给 binary 配置 `required-features = ["cli-local"]`，确保 native CLI 不污染 browser wasm。
+      - 不引入 `getrandom`，除非后续真实依赖链要求。
+    - [ ] M40.1.2：拆出 redb 实现模块
+      - 新增 `src/graph_redb.rs`，迁入 `GraphDB`、redb table 定义、lock file、open/load/persist/check 相关实现。
+      - `src/graph.rs` 只保留 `NodeType` / `EdgeType` / `Node` / `Edge` / `FileState` 和纯 helper。
+      - `GraphDB` 的 `GraphReadStore` / `GraphWriteStore` / `IndexStateStore` impl 跟随迁入 `graph_redb.rs`。
+      - `src/lib.rs` 在 `cli-local` 下暴露 `graph_redb`。
+      - 临时兼容：`src/graph.rs` 可在 `cli-local` 下 `pub use crate::graph_redb::GraphDB;`，避免一次性修改全部调用点。
+    - [ ] M40.1.3：稳定 shared graph store trait
+      - 保持 `src/graph_store.rs` 不依赖 redb、clap、文件系统。
+      - `GraphStoreError` 保持统一枚举，native/redb 具体错误通过固定 variant 承载。
+      - 确认 `GraphReadStore` / `GraphWriteStore` / `IndexStateStore` 的方法签名在 wasm 下可编译，不暴露 native-only 类型。
+      - 保留读写分离，不把 helper 业务查询塞回 graph store trait。
+    - [ ] M40.1.4：迁入生产可用 MemoryGraphStore
+      - 将 `tests/common/memory_graph_store.rs` 的能力整理为 `src/memory_graph_store.rs` 或等价 browser-safe store。
+      - 生产模块中的 MemoryGraphStore 必须实现 `GraphReadStore` / `GraphWriteStore` / `IndexStateStore`。
+      - 测试侧改为复用生产 MemoryGraphStore，避免测试实现与 wasm 实现漂移。
+      - 覆盖手工 upsert node、add edge、remove nodes、neighbors、file state/index state 的基本行为。
+    - [ ] M40.1.5：收敛 native-only cfg 边界
+      - 只对 `cli.rs`、`runtime.rs`、`stdio_server.rs`、`graph_redb.rs`、native scanner 入口、binary main 做 `cli-local` gate。
+      - `scanner/spg.rs`、`scanner/tbl.rs`、纯解析、条件抽取、query helper 如果可复用，应尽量保持 shared。
+      - 若某个 shared 模块仍引用 native-only 类型，优先通过 trait 参数或小 adapter 拆开，不直接把整个模块 gate 掉。
+    - [ ] M40.1.6：补 browser feature smoke
+      - 新增一个只在 `browser-wasm` 或 no-default browser 构建下编译的测试/示例模块。
+      - 用 MemoryGraphStore 构造页面节点、组件节点、模型节点、字段边和写入边。
+      - 通过现有 query/page_logic/explain 中的 wasm-safe 入口读取目标组件关联边。
+      - 断言输出能定位目标节点的直接关联边和至少一条多跳来源路径。
+    - [ ] M40.1.7：补 native 回归
+      - 保留现有 GraphDB 测试，确保迁移到 `graph_redb.rs` 后仍覆盖 redb 持久化读写。
+      - 补一个编译或单测断言：默认 feature 下 `metadata_checker::graph::GraphDB` 兼容旧调用。
+      - 跑真实项目最小 smoke：构建 graph 后执行一个既有 `query_page_logic` 或 `explain` 查询。
+    - [ ] M40.1.8：依赖树验收脚本化
+      - 增加文档化命令或测试脚本，检查 `browser-wasm` 依赖树不包含 `redb` / `clap`。
+      - 检查 `cli-local` 依赖树不强制包含 `rexie` / `web-sys` / `wasm-bindgen`。
+      - 将检查结果写入 M40 验收记录，避免只看 `cargo build`。
+    - [ ] M40.1.9：提交边界
+      - 第一提交只做 feature 骨架和 redb 模块搬迁，必须保持 native 测试通过。
+      - 第二提交引入生产 MemoryGraphStore 和 browser smoke。
+      - 第三提交补依赖树验收与文档更新。
+      - 任一提交不得混入 SW bootstrap、IndexedDB、designer bridge 等 M40.2 之后任务。
 
 - [ ] M40.2：Browser WASM runtime API
   - 新增 browser-only WASM API，不改变现有 CLI/stdio 输出 schema。
