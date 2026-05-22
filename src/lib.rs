@@ -1,4 +1,6 @@
 pub mod browser;
+#[cfg(feature = "browser-wasm")]
+pub mod browser_wasm_bindgen;
 pub mod action_semantics;
 pub mod answer_contract;
 #[cfg(feature = "cli-local")]
@@ -22,7 +24,6 @@ pub mod query;
 pub mod response_processor;
 #[cfg(feature = "cli-local")]
 pub mod runtime;
-#[cfg(feature = "cli-local")]
 pub mod scanner;
 pub mod source_id;
 #[cfg(feature = "cli-local")]
