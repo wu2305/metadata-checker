@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 ///
 /// 手工构造节点和边，实现 GraphReadStore / GraphWriteStore / IndexStateStore。
 /// 用于 browser-wasm 场景和测试替身。
+#[derive(Debug)]
 pub struct MemoryGraphStore {
     nodes: HashMap<String, Node>,
     outgoing: HashMap<String, Vec<(Node, Edge)>>,

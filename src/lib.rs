@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod action_semantics;
 pub mod answer_contract;
 #[cfg(feature = "cli-local")]

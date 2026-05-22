@@ -16,7 +16,6 @@ use anyhow::{Context, Result};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
