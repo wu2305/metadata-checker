@@ -95,8 +95,17 @@ impl BrowserRuntime {
 
 /// 初始化 WASM runtime
 pub fn init_runtime(options: RuntimeOptions) -> BrowserAnalysisEnvelope {
-    let runtime = BrowserRuntime::new(options);
-    let _ = RUNTIME.set(Mutex::new(runtime));
+    let runtime = BrowserRuntime::new(options.clone());
+    match RUNTIME.set(Mutex::new(runtime)) {
+        Ok(_) => {}
+        Err(_) => {
+            // 已初始化，替换内部状态
+            if let Some(rt) = RUNTIME.get() {
+                let mut rt = rt.lock().unwrap();
+                *rt = BrowserRuntime::new(options);
+            }
+        }
+    }
 
     BrowserAnalysisEnvelope {
         status: AnalysisStatus::Ready,
@@ -146,10 +155,7 @@ pub fn runtime_status() -> BrowserAnalysisEnvelope {
 }
 
 /// 加载 SuperPage 文档（原始 JSON 文本）
-pub fn load_superpage_document(
-    source_path: &str,
-    raw_text: &str,
-) -> BrowserAnalysisEnvelope {
+pub fn load_superpage_document(source_path: &str, raw_text: &str) -> BrowserAnalysisEnvelope {
     let rt = match RUNTIME.get() {
         Some(r) => r,
         None => {
@@ -163,7 +169,7 @@ pub fn load_superpage_document(
                     message: "Runtime has not been initialized. Call init_runtime first."
                         .to_string(),
                 }],
-            }
+            };
         }
     };
 
@@ -179,7 +185,7 @@ pub fn load_superpage_document(
                     code: "PARSE_ERROR".to_string(),
                     message: format!("Failed to parse JSON: {}", e),
                 }],
-            }
+            };
         }
     };
 
@@ -195,7 +201,7 @@ pub fn load_superpage_document(
                     code: "METADATA_PARSE_ERROR".to_string(),
                     message: format!("Failed to parse SuperPage metadata: {}", e),
                 }],
-            }
+            };
         }
     };
 
@@ -233,7 +239,7 @@ pub fn build_or_update_superpage_graph(source_path: &str) -> BrowserAnalysisEnve
                     message: "Runtime has not been initialized. Call init_runtime first."
                         .to_string(),
                 }],
-            }
+            };
         }
     };
 
@@ -250,7 +256,7 @@ pub fn build_or_update_superpage_graph(source_path: &str) -> BrowserAnalysisEnve
                     code: "DOCUMENT_NOT_FOUND".to_string(),
                     message: format!("Document not found for source_path: {}", source_path),
                 }],
-            }
+            };
         }
     };
 
@@ -283,20 +289,41 @@ pub fn analyze_superpage_selection(
     selection: SuperPageSelection,
     options: AnalysisOptions,
 ) -> BrowserAnalysisEnvelope {
+    let mut diagnostics = Vec::new();
+    if options.include_priority {
+        diagnostics.push(AnalysisDiagnostic {
+            severity: "warning".to_string(),
+            code: "UNSUPPORTED_OPTION".to_string(),
+            message: "include_priority is not supported in this runtime yet.".to_string(),
+        });
+    }
+
+    if options.include_dataflow {
+        diagnostics.push(AnalysisDiagnostic {
+            severity: "warning".to_string(),
+            code: "UNSUPPORTED_OPTION".to_string(),
+            message: "include_dataflow is not supported in this runtime yet.".to_string(),
+        });
+    }
+
     let rt = match RUNTIME.get() {
         Some(r) => r,
         None => {
+            let mut error_diagnostics = diagnostics;
             return BrowserAnalysisEnvelope {
                 status: AnalysisStatus::Error,
                 target: Some(selection.source_path.clone()),
                 items: vec![],
-                diagnostics: vec![AnalysisDiagnostic {
-                    severity: "error".to_string(),
-                    code: "RUNTIME_NOT_INITIALIZED".to_string(),
-                    message: "Runtime has not been initialized. Call init_runtime first."
-                        .to_string(),
-                }],
-            }
+                diagnostics: {
+                    error_diagnostics.push(AnalysisDiagnostic {
+                        severity: "error".to_string(),
+                        code: "RUNTIME_NOT_INITIALIZED".to_string(),
+                        message: "Runtime has not been initialized. Call init_runtime first."
+                            .to_string(),
+                    });
+                    error_diagnostics
+                },
+            };
         }
     };
 
@@ -304,19 +331,23 @@ pub fn analyze_superpage_selection(
     let meta = match rt.documents.get(&selection.source_path) {
         Some(m) => m,
         None => {
+            let mut error_diagnostics = diagnostics;
             return BrowserAnalysisEnvelope {
                 status: AnalysisStatus::Error,
                 target: Some(selection.source_path.clone()),
                 items: vec![],
-                diagnostics: vec![AnalysisDiagnostic {
-                    severity: "error".to_string(),
-                    code: "DOCUMENT_NOT_FOUND".to_string(),
-                    message: format!(
-                        "Document not found for source_path: {}",
-                        selection.source_path
-                    ),
-                }],
-            }
+                diagnostics: {
+                    error_diagnostics.push(AnalysisDiagnostic {
+                        severity: "error".to_string(),
+                        code: "DOCUMENT_NOT_FOUND".to_string(),
+                        message: format!(
+                            "Document not found for source_path: {}",
+                            selection.source_path
+                        ),
+                    });
+                    error_diagnostics
+                },
+            };
         }
     };
 
@@ -328,22 +359,25 @@ pub fn analyze_superpage_selection(
         .unwrap_or("");
 
     if target_id.is_empty() {
+        let mut error_diagnostics = diagnostics;
+        error_diagnostics.push(AnalysisDiagnostic {
+            severity: "info".to_string(),
+            code: "EMPTY_SELECTION".to_string(),
+            message: "No component selected.".to_string(),
+        });
         return BrowserAnalysisEnvelope {
             status: AnalysisStatus::Partial,
             target: Some(selection.source_path.clone()),
             items: vec![],
-            diagnostics: vec![AnalysisDiagnostic {
-                severity: "info".to_string(),
-                code: "EMPTY_SELECTION".to_string(),
-                message: "No component selected.".to_string(),
-            }],
+            diagnostics: error_diagnostics,
         };
     }
 
     let mut items = Vec::new();
 
     // 组件基本信息
-    if let Some(comp) = meta.components.iter().find(|c| c.id == target_id) {
+    let comp_opt = meta.components.iter().find(|c| c.id == target_id);
+    if let Some(comp) = comp_opt {
         items.push(AnalysisItem {
             kind: "component".to_string(),
             label: format!("Component: {}", comp.id),
@@ -352,6 +386,22 @@ pub fn analyze_superpage_selection(
                 "component_type": comp.component_type,
             }),
         });
+    } else {
+        let mut error_diagnostics = diagnostics;
+        error_diagnostics.push(AnalysisDiagnostic {
+            severity: "error".to_string(),
+            code: "COMPONENT_NOT_FOUND".to_string(),
+            message: format!(
+                "Component '{}' not found in document '{}'",
+                target_id, selection.source_path
+            ),
+        });
+        return BrowserAnalysisEnvelope {
+            status: AnalysisStatus::Error,
+            target: Some(target_id.to_string()),
+            items,
+            diagnostics: error_diagnostics,
+        };
     }
 
     // 依赖关系
@@ -405,8 +455,9 @@ pub fn analyze_superpage_selection(
     }
 
     // 图存储中的边（如果图已构建）
+    let graph_node_id = format!("comp:{}|{}", selection.source_path, target_id);
     if let Some(store) = rt.graphs.get(&selection.source_path) {
-        if let Ok(Some(neighbors)) = store.get_node_edges(target_id) {
+        if let Ok(Some(neighbors)) = store.get_node_edges(&graph_node_id) {
             let reads: Vec<String> = neighbors
                 .outgoing
                 .iter()
@@ -462,12 +513,16 @@ pub fn analyze_superpage_selection(
         status: AnalysisStatus::Ready,
         target: Some(target_id.to_string()),
         items,
-        diagnostics: vec![],
+        diagnostics,
     }
 }
 
 /// 从 SuperPage 元数据构建内存图
-fn build_spg_graph(meta: &superpage::SuperPageMetadata, source_path: &str, store: &mut MemoryGraphStore) {
+fn build_spg_graph(
+    meta: &superpage::SuperPageMetadata,
+    source_path: &str,
+    store: &mut MemoryGraphStore,
+) {
     let page_id = format!("page:{}", source_path);
     store
         .upsert_node(Node {
