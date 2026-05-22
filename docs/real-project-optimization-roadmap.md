@@ -3816,6 +3816,11 @@ pub trait InvocationAdapter {
   - 支持 `initializing` / `partial` / `ready` / `error` 状态。
 
 - [ ] M40.3：SW-first bootstrap
+  - 代码位置：
+    - 新增 `browser/bootstrap/metadata-checker-bootstrap.js`。
+    - 新增 `browser/service-worker/metadata-checker-sw.js`。
+    - 新增 `browser/test/`，只放 JS mock 和 smoke，不放进 Rust `src/` / `tests/`。
+    - 首轮不引入 bundler，不引入 Playwright，不修改 BI 代码，不依赖真实 WASM 文件。
   - 提供 `metadata-checker-bootstrap.js`。
   - 用户进入系统后尽早注册 `metadata-checker-sw.js`。
   - bootstrap 防重复注册，支持 `ping/status`。
@@ -3826,8 +3831,36 @@ pub trait InvocationAdapter {
     - `ensureRuntime()`
     - 并发初始化共用同一个 init promise。
   - SW 被浏览器回收后允许重新 instantiate，但必须从 IndexedDB 恢复状态。
+  - 最小实现要求：
+    - bootstrap 导出一个安装函数，例如 `installMetadataCheckerRuntime(options)`。
+    - 安装函数可重复调用，但同一 execution context 只创建一个 controller。
+    - controller 暴露 `status()` / `ping()` / `request(type, payload)`。
+    - 所有 request 使用递增或随机 `requestId` 配对响应。
+    - SW 不可用时返回 `initializing` 或明确 fallback 状态，不抛出未捕获异常。
+    - SW runtime active 时，page runtime fallback 不得同时 active。
+  - 最小测试要求：
+    - 使用 Node 内置 `node:test` + `assert`，测试文件放在 `browser/test/bootstrap-smoke.test.mjs`。
+    - 使用 fake `navigator.serviceWorker` / fake message bus，不启动真实浏览器 SW。
+    - 正例：
+      - 多次安装不重复 register。
+      - `ping/status` 可返回结构化状态。
+      - 并发初始化复用同一个 init promise。
+      - `requestId` 能正确匹配异步响应。
+      - 模拟 SW 被回收后，下一次调用能重新握手。
+    - 反例：
+      - serviceWorker 缺失时不崩溃，返回 fallback diagnostic。
+      - SW 响应 requestId 不匹配时不误用响应。
+      - SW 初始化失败时返回 `error` 状态和 diagnostic。
+  - 验证命令：
+    - `node --test browser/test/bootstrap-smoke.test.mjs`
+    - `cargo test` 不应因为 M40.3 JS glue 增加新依赖或变慢。
 
 - [ ] M40.4：SuperPage Designer JS Bridge
+  - 代码位置：
+    - 新增 `browser/designer-bridge/superpage-designer-bridge.js`。
+    - 新增 `browser/test/fake-designer.mjs`。
+    - 新增 `browser/test/designer-bridge-smoke.test.mjs`。
+    - 可选新增 `browser/test/harness.html`，仅用于手工浏览器 smoke。
   - 只通过 `customJS.onInitDesigner(designer, args)` 安装。
   - `onInitDesigner` 只做轻量注册并立即返回，不等待 WASM / fetch / IndexedDB。
   - 不修改 BI 源码，不接入 viewlet，不改变 toolbar/right panel。
@@ -3843,6 +3876,35 @@ pub trait InvocationAdapter {
     - `activeComponentId`
     - `timestamp`
   - bridge 不传 `.spg` content 或完整 component JSON。
+  - 最小实现要求：
+    - bridge 导出安装函数，例如 `installSuperPageDesignerBridge(designer, args, runtimeClient)`。
+    - 安装函数必须同步返回控制对象，不等待 runtimeClient 初始化。
+    - 同一个 designer 实例多次安装不得重复 patch。
+    - monkeypatch 后必须继续调用原始 `designer.notifyStateChange`。
+    - 选择变化事件需要 debounce 或合并，避免高频重复请求。
+    - 标准化 selection 时只能传轻量字段：`sourcePath` / `fileId` / `selectedComponentIds` / `activeComponentId` / `timestamp`。
+    - 明确拒绝传输 `.spg` raw content、完整 component JSON、DOM HTML。
+  - 选择态解析优先级：
+    - 先读 `designer.getSelectedInfo?.()`。
+    - 再读当前 page/builder 的 `getSelectedComponents?.()`。
+    - 再读 selected component 的 `getSelectedInfo?.()`。
+    - 所有路径都失败时返回空 selection 和 diagnostic，不从 DOM class 猜测。
+  - 最小测试要求：
+    - 使用 Node 内置 `node:test` + `assert`，不依赖真实 BI 页面。
+    - 正例：
+      - `onInitDesigner` / install 函数立即返回。
+      - patch 后原始 `notifyStateChange` 仍被调用。
+      - 选择变化会调用 runtimeClient.request。
+      - 非选择变化不会触发分析请求。
+      - 能从 fake designer API 生成标准 selection。
+      - 多次 init 不重复 patch 同一个 designer。
+    - 反例：
+      - designer 缺少选择 API 时返回 diagnostic，不抛异常。
+      - selection 中不得包含 `raw_text` / `components` / `html` / `.spg` content。
+      - runtimeClient 失败时 bridge 状态可观测，不吞掉错误。
+  - 验证命令：
+    - `node --test browser/test/designer-bridge-smoke.test.mjs`
+    - 可选手工 smoke：打开 `browser/test/harness.html`，验证 fake designer 选择变化能驱动面板/日志更新。
 
 - [ ] M40.5：浮动分析面板
   - 面板挂载在设计器容器下，表现为浮动容器。
