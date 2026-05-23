@@ -1,6 +1,7 @@
 pub mod browser;
 #[cfg(feature = "browser-wasm")]
 pub mod browser_wasm_bindgen;
+pub mod remote_metadata;
 pub mod action_semantics;
 pub mod answer_contract;
 #[cfg(feature = "cli-local")]
