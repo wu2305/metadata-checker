@@ -4327,39 +4327,125 @@ browser/
   - 验证命令：
     - `node --test browser/test/superpage-designer-glue-smoke.test.mjs`
 
-- [ ] M40.6：Metadata Provider Glue
-  - 目标：元数据获取也是平台 glue 能力，不进入 Rust/WASM core。
-  - 建议位置：
-    - `browser/providers/metadata-provider.js`
-    - `browser/test/metadata-provider-smoke.test.mjs`
-  - provider contract：
-    - `getFileInfo(ref)`
-    - `getFileContent(ref)`
-    - `getRelatedFiles(ref)`
-  - provider 实现：
-    - Native Fetch Provider：`fetch(..., { credentials: "include" })`。
-    - Window RC Provider：使用 `window.SZ.rc` / `window.SZ.rc1` 作为 fallback。
-    - Injected Content Provider：用于 standalone/harness 测试。
-    - Extension Provider：通过浏览器插件权限 fetch。
+- [ ] M40.6：Remote Metadata Provider Contract
+  - 目标：建立统一远程元数据读取能力，供 Web/WASM、页面 JS fallback、Browser Extension、CLI 共用同一语义 contract。不同运行环境只差在权限来源和 transport，不应各自长出一套元数据读取函数。
+  - 核心判断：
+    - 远程元数据请求应优先在 Rust/WASM 内闭环实现，页面 JS 处理只是 fallback。
+    - WASM 不能也不应该读取 cookie；WASM provider 通过浏览器原生 `fetch`，设置 `credentials: "include"`，由浏览器自动携带同源登录态。
+    - Page JS runtime / Service Worker 可以复用浏览器 cookie；`window.SZ.rc` / `window.SZ.rc1` 只作为原生 fetch 不可用或平台接口必须走封装 Ajax 时的兜底。
+    - Browser Extension 不应假设能直接复用页面 JS 权限；它可以通过扩展权限发请求，cookie 是否自动携带取决于浏览器策略和扩展权限，必要时扩展侧自行登录。
+    - CLI 不能复用浏览器页面登录态，必须自行登录、维护 cookie jar/session file，或接受用户显式提供的 cookie/token。
+  - 建议 Rust 位置：
+    - `src/remote_metadata.rs`：通用 trait、请求/响应类型、错误枚举。
+    - `src/browser_remote.rs` 或 `src/browser/remote_metadata.rs`：`wasm32` 下的浏览器原生 fetch 实现。
+    - `src/cli_remote.rs`：CLI cookie jar / login 实现，允许后续里程碑落地，M40.6 先保留 contract 与测试桩。
+  - 建议 JS 位置：
+    - `browser/providers/page-rc-metadata-provider.mjs`：`window.SZ.rc` / `rc1` fallback bridge。
+    - `browser/test/fake-remote-metadata-provider.mjs`：standalone/harness 测试桩。
+  - Rust trait contract：
+    - `RemoteMetadataProvider`
+      - `get_file_info(ref)`
+      - `get_file_content(ref)`
+      - `get_related_files(ref)`
+    - 若同时兼容 WASM fetch 与 CLI HTTP，trait 应预留 async 形态；若当前不引入 `async_trait`，先用环境特化 wrapper 保持 API 语义一致。
+  - 核心数据结构：
+    - `RemoteFileRef`
+      - `remote_ref`
+      - `project_ref`
+      - `source_path`
+      - `file_id`
+      - `revision`
+    - `RemoteFileInfo`
+      - `source_path`
+      - `file_id`
+      - `revision`
+      - `content_type`
+      - `updated_at`
+    - `RemoteFileContent`
+      - `source_path`
+      - `file_id`
+      - `revision`
+      - `content_type`
+      - `raw_text`
+    - `MetadataContentType`
+      - `SuperPage`
+      - `Table`
+      - `Unknown`
+  - Provider 实现：
+    - `WasmFetchMetadataProvider`
+      - 主路径。
+      - 使用 browser fetch。
+      - 请求设置 `credentials: "include"`。
+      - 返回 raw metadata text。
+    - `PageRcMetadataProvider`
+      - fallback。
+      - 通过 JS bridge 调用 `window.SZ.rc` / `window.SZ.rc1`。
+      - 不参与解析、不建图、不保存数据。
+    - `ExtensionMetadataProvider`
+      - 通过浏览器插件权限 fetch。
+      - 若浏览器 cookie 不可用或被隔离，后续补扩展侧登录/session 管理。
+    - `CliCookieJarMetadataProvider`
+      - 使用 Rust/CLI HTTP client。
+      - 支持 username/password 登录 `/api/auth/signin`。
+      - 支持 cookie jar/session file。
+      - 支持用户显式传入已有 cookie/token。
+    - `TestMetadataProvider`
+      - fixture/mock provider，用于 contract 和错误映射测试。
+  - Transport / Credential / Session 分层：
+    - Page JS Runtime：
+      - transport：native fetch / `window.SZ.rc`
+      - credential source：当前浏览器页面 cookie
+      - session manager：无，浏览器负责
+    - Service Worker：
+      - transport：native fetch
+      - credential source：同源 cookie
+      - session manager：无，浏览器负责
+      - 注意：Service Worker 不能访问 `window.SZ.rc`，需要页面消息桥才可 fallback。
+    - Browser Extension：
+      - transport：extension fetch
+      - credential source：浏览器 cookie 或扩展登录态
+      - session manager：可选
+    - CLI：
+      - transport：Rust/CLI HTTP client
+      - credential source：用户名密码 / cookie jar / token
+      - session manager：必须有
   - 错误 code：
+    - `REMOTE_AUTH_REQUIRED`
+    - `REMOTE_SESSION_EXPIRED`
     - `REMOTE_FETCH_UNAUTHORIZED`
     - `REMOTE_FETCH_FORBIDDEN`
     - `REMOTE_FETCH_NOT_FOUND`
     - `REMOTE_FETCH_CORS_BLOCKED`
     - `REMOTE_FETCH_FAILED`
+    - `REMOTE_RESPONSE_INVALID`
     - `PAGE_RC_UNAVAILABLE`
     - `CLIENT_FETCH_PROXY_TIMEOUT`
     - `CLIENT_FETCH_PROXY_FAILED`
-  - 要求：
-    - content response 以原始 text 交给 runtime。
+  - 硬性要求：
+    - provider 只负责远程读取元数据 raw text。
     - provider 不解析 `.spg/.tbl`。
-    - provider 不保存 token/cookie 到 graph、log 或 output。
-    - BI URL 构造规则可以参考 BI `metadata/metadata.ts`，但实现放在 metadata-checker glue 内，不 import BI 源码。
+    - provider 不建图。
+    - provider 不保存 token/cookie/password 到 graph、log、AI output 或 IndexedDB graph cache。
+    - `source_path` 继续是项目内逻辑路径，例如 `app/M40HookSmoke.app/Page.spg`。
+    - remote server、project name、file id、revision、cookie jar 只能存在于 `RemoteRef` / provider context / session metadata，不能混进 `source_path`。
+    - content response 以原始 text 交给 runtime，例如 `load_superpage_document(source_path, raw_text)`。
+    - BI URL 构造规则可以参考 BI `metadata/metadata.ts` 和现有 `remote-metadata-uploader.mjs`，但不能 import BI 源码。
+  - M40.6 首轮落地范围：
+    - 定义 `RemoteMetadataProvider` trait 和统一请求/响应/错误类型。
+    - 实现 `TestMetadataProvider`。
+    - 实现 `WasmFetchMetadataProvider` 的最小 fetch contract 或 wasm feature 下的可编译骨架。
+    - 实现 `PageRcMetadataProvider` JS fallback contract。
+    - CLI provider 先记录 contract、错误映射和测试桩，不要求本轮完成真实登录。
   - 测试要求：
+    - contract 测试：所有 provider 返回 `RemoteFileContent.raw_text`，不解析元数据。
+    - source path 测试：远程绝对路径、server URL、cookie jar 路径不得进入 `source_path`。
     - mock fetch success / 401 / 403 / 404 / CORS / network fail。
-    - mock `window.SZ.rc` fallback。
-    - 确认 provider 返回 raw text。
-    - 确认错误映射稳定。
+    - mock session expired 映射为 `REMOTE_SESSION_EXPIRED` 或 `REMOTE_AUTH_REQUIRED`。
+    - mock invalid response 映射为 `REMOTE_RESPONSE_INVALID`。
+    - mock `window.SZ.rc` fallback success / unavailable / timeout / failure。
+    - 确认 token/cookie/password 不出现在 provider 输出、diagnostics、log payload。
+    - Browser/WASM feature 编译测试不引入 CLI-only HTTP/cookie jar 依赖。
+    - CLI feature 编译测试不引入 wasm/browser-only 依赖。
 
 - [ ] M40.7：Panel Renderer
   - 目标：面板渲染独立于 BI glue，输入 analysis envelope，输出 DOM。
