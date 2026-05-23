@@ -213,7 +213,60 @@ customJSES":{"sysdata":...,"xiaoshouyi":...,"/xiaoshouyi/app/售后.app":...}
 4. 使用已保存的 cookie jar 调用新增接口。
 5. 再用本流程重新打开页面，验证新增 `custom.js` 或测试页面是否被真实渲染链路加载。
 
-## 7. 失败排查
+## 7. 快速更新远程胶水 JS
+
+项目级前端 hook 的真实加载路径是：
+
+```text
+/{projectName}/public/hooks/custom.js
+```
+
+例如 `analyzer` 项目：
+
+```text
+/analyzer/public/hooks/custom.js
+```
+
+`custom.ts` 是源码文件；平台编辑器保存时会在前端 Monaco 中编译并同步保存 `custom.js`。如果已经生成了可直接运行的 AMD 格式胶水 JS，可以直接更新 `custom.js`。
+
+仓库提供了测试工具：
+
+```bash
+node browser/tools/remote-metadata-uploader.mjs \
+  --base-url 'https://autocrm-test.xiaoshouyi.com' \
+  --login-body-file /private/tmp/autocrm-login-payload.json \
+  --file /path/to/generated-glue.js \
+  --remote-path /analyzer/public/hooks/custom.js
+```
+
+也可以使用环境变量传登录信息：
+
+```bash
+export MC_REMOTE_BASE_URL='https://autocrm-test.xiaoshouyi.com'
+export MC_REMOTE_USERNAME='<username>'
+export MC_REMOTE_PASSWORD='<password>'
+
+node browser/tools/remote-metadata-uploader.mjs \
+  --file /path/to/generated-glue.js \
+  --remote-path /analyzer/public/hooks/custom.js
+```
+
+工具行为：
+
+- 登录 `/api/auth/signin`。
+- 自动确保父目录存在，例如 `/analyzer/public/hooks`。
+- 文件不存在时调用 `/api/meta/file/createFile`。
+- 文件存在时调用 `/api/meta/file/modifyFile`，并携带当前 `revision`。
+- 保存后重新读取 `downloadContent=true`，确认远程内容和本地文件一致。
+- 不会把密码或 cookie 写入输出。
+
+本地测试命令：
+
+```bash
+node --test browser/test/remote-metadata-uploader-smoke.test.mjs
+```
+
+## 8. 失败排查
 
 | 现象 | 优先检查 |
 |---|---|
