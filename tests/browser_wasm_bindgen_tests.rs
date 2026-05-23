@@ -8,8 +8,8 @@ use metadata_checker::browser_wasm_bindgen::{
     js_load_superpage_document, js_runtime_status,
 };
 use serde::Deserialize;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, Deserialize)]
 struct JsDiagnostic {
@@ -31,10 +31,7 @@ fn parse_js_envelope(output: &str) -> JsEnvelope {
 }
 
 fn has_diagnostic_code<'a>(envelope: &'a JsEnvelope, code: &str) -> bool {
-    envelope
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == code)
+    envelope.diagnostics.iter().any(|diag| diag.code == code)
 }
 
 fn with_runtime<T>(f: impl FnOnce(&str) -> T) -> T {
@@ -213,7 +210,8 @@ fn test_js_analyze_superpage_selection_unknown_component_with_priority_option_re
             r#"{{"source_path":"{}","file_id":"test","selected_component_ids":["missing"],"active_component_id":"missing"}}"#,
             source_path
         );
-        let options = r#"{"include_priority":true,"include_dataflow":false,"include_conditions":false}"#;
+        let options =
+            r#"{"include_priority":true,"include_dataflow":false,"include_conditions":false}"#;
         let output = js_analyze_superpage_selection(&selection, options);
         let envelope = parse_js_envelope(&output);
         assert_eq!(envelope.status, "error");

@@ -116,7 +116,10 @@ pub fn levenshtein(a: &str, b: &str) -> usize {
 }
 
 /// 查找读取指定模型的所有节点（独立函数，基于 GraphReadStore）
-pub fn find_readers(graph: &dyn GraphReadStore, model_id: &str) -> anyhow::Result<Vec<(Node, Edge)>> {
+pub fn find_readers(
+    graph: &dyn GraphReadStore,
+    model_id: &str,
+) -> anyhow::Result<Vec<(Node, Edge)>> {
     Ok(graph
         .get_node_edges(model_id)?
         .map(|n| {
@@ -130,7 +133,10 @@ pub fn find_readers(graph: &dyn GraphReadStore, model_id: &str) -> anyhow::Resul
 }
 
 /// 查找写入指定模型的所有节点（独立函数，基于 GraphReadStore）
-pub fn find_writers(graph: &dyn GraphReadStore, model_id: &str) -> anyhow::Result<Vec<(Node, Edge)>> {
+pub fn find_writers(
+    graph: &dyn GraphReadStore,
+    model_id: &str,
+) -> anyhow::Result<Vec<(Node, Edge)>> {
     Ok(graph
         .get_node_edges(model_id)?
         .map(|n| {
@@ -178,7 +184,10 @@ pub fn find_dataflow_outputs(
 }
 
 /// 查询物理表的生产者（ incoming OutputsTo 边）（独立函数，基于 GraphReadStore）
-pub fn find_produced_by(graph: &dyn GraphReadStore, model_id: &str) -> anyhow::Result<Vec<(Node, Edge)>> {
+pub fn find_produced_by(
+    graph: &dyn GraphReadStore,
+    model_id: &str,
+) -> anyhow::Result<Vec<(Node, Edge)>> {
     Ok(graph
         .get_node_edges(model_id)?
         .map(|n| {

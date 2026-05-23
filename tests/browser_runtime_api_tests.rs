@@ -34,17 +34,18 @@ fn get_runtime_counts_from_status(
         .iter()
         .find(|item| item.kind == "runtime_status")
         .expect("runtime status item should exist");
-    let detail = item.detail.as_object().expect("runtime status detail should be object");
+    let detail = item
+        .detail
+        .as_object()
+        .expect("runtime status detail should be object");
     let document_count = detail
         .get("document_count")
         .and_then(|value| value.as_u64())
-        .expect("document_count should be number")
-        as usize;
+        .expect("document_count should be number") as usize;
     let graph_count = detail
         .get("graph_count")
         .and_then(|value| value.as_u64())
-        .expect("graph_count should be number")
-        as usize;
+        .expect("graph_count should be number") as usize;
     (document_count, graph_count)
 }
 
@@ -78,7 +79,10 @@ fn test_init_runtime_reinitialize_clears_previous_documents_and_graphs() {
             ]
         }"#;
 
-        assert_eq!(load_superpage_document(source_path, raw).status, AnalysisStatus::Ready);
+        assert_eq!(
+            load_superpage_document(source_path, raw).status,
+            AnalysisStatus::Ready
+        );
         assert_eq!(
             build_or_update_superpage_graph(source_path).status,
             AnalysisStatus::Ready
@@ -111,7 +115,10 @@ fn test_runtime_status_reflects_loaded_documents_and_graphs() {
             ]
         }"#;
 
-        assert_eq!(load_superpage_document(source_path, raw).status, AnalysisStatus::Ready);
+        assert_eq!(
+            load_superpage_document(source_path, raw).status,
+            AnalysisStatus::Ready
+        );
         assert_eq!(
             build_or_update_superpage_graph(source_path).status,
             AnalysisStatus::Ready
@@ -462,14 +469,18 @@ fn test_analyze_include_priority_warning_kept_with_component_not_found_error() {
             },
         );
         assert_eq!(result.status, AnalysisStatus::Error);
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "UNSUPPORTED_OPTION"));
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "COMPONENT_NOT_FOUND"));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "UNSUPPORTED_OPTION")
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "COMPONENT_NOT_FOUND")
+        );
     });
 }
 
@@ -490,14 +501,18 @@ fn test_analyze_include_dataflow_warning_kept_with_document_not_found_error() {
             },
         );
         assert_eq!(result.status, AnalysisStatus::Error);
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "UNSUPPORTED_OPTION"));
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "DOCUMENT_NOT_FOUND"));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "UNSUPPORTED_OPTION")
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "DOCUMENT_NOT_FOUND")
+        );
     });
 }
 

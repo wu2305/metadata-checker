@@ -1,9 +1,8 @@
+pub mod action_semantics;
+pub mod answer_contract;
 pub mod browser;
 #[cfg(feature = "browser-wasm")]
 pub mod browser_wasm_bindgen;
-pub mod remote_metadata;
-pub mod action_semantics;
-pub mod answer_contract;
 #[cfg(feature = "cli-local")]
 pub mod cli;
 pub mod conditions;
@@ -11,9 +10,9 @@ pub mod context;
 pub mod dependency;
 pub mod explain;
 pub mod graph;
-pub mod graph_store;
 #[cfg(feature = "cli-local")]
 pub mod graph_redb;
+pub mod graph_store;
 pub mod memory_graph_store;
 pub mod model_scope;
 pub mod output;
@@ -22,6 +21,7 @@ pub mod parser;
 pub mod path;
 pub mod priority;
 pub mod query;
+pub mod remote_metadata;
 pub mod response_processor;
 #[cfg(feature = "cli-local")]
 pub mod runtime;

@@ -32,7 +32,13 @@ impl MemoryGraphStore {
         }
     }
 
-    pub fn add_test_node(&mut self, id: &str, name: &str, node_type: crate::graph::NodeType, path: &str) {
+    pub fn add_test_node(
+        &mut self,
+        id: &str,
+        name: &str,
+        node_type: crate::graph::NodeType,
+        path: &str,
+    ) {
         self.nodes.insert(
             id.to_string(),
             Node {

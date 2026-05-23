@@ -941,8 +941,10 @@ impl GraphDB {
                     reason = "bare name exact match";
                 } else {
                     let id_dist = crate::graph::levenshtein(&node.id.to_lowercase(), &target_lower);
-                    let bare_dist =
-                        crate::graph::levenshtein(&node_bare.to_lowercase(), &target_bare.to_lowercase());
+                    let bare_dist = crate::graph::levenshtein(
+                        &node_bare.to_lowercase(),
+                        &target_bare.to_lowercase(),
+                    );
                     if id_dist == 0 || bare_dist == 0 {
                         score = 100.0;
                         reason = "exact match";
