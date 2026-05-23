@@ -4028,50 +4028,102 @@ browser/
     - `browser/test/fake-runtime-client.mjs`
     - `browser/test/fake-host.mjs`
   - 核心接口：
-    - `createMetadataCheckerPlugin({ runtime, host, renderer, logger })`
+    - `createMetadataCheckerPlugin({ runtimeClient, host, logger, clock, defaultAnalysisOptions })`
     - `plugin.activate(context)`
     - `plugin.deactivate()`
     - `plugin.status()`
     - `plugin.onSelectionChanged(selection)`
     - `plugin.analyze(selection, options)`
+  - 前置决策：
+    - `onSelectionChanged(selection)` 在 M40.3 中不自动触发分析，只校验并保存 selection，发出 `selection_changed` 事件。
+    - 自动分析属于 M40.5 glue 或 M40.7 renderer 的交互策略，不能写入 Plugin Core 默认行为。
+    - `activate(context)` 必须幂等：`ready` 状态下重复调用不得重复初始化 runtime；`error` 状态下允许重新初始化重试。
+    - `deactivate()` 清空 `lastSelection` / `lastResult` / `lastError`，状态回到 `inactive`，但不销毁 runtimeClient；Worker/SW/Extension runtime 生命周期属于 M40.4 launcher。
+    - 公开方法的业务错误返回统一 error envelope，不直接抛出；仅 `createMetadataCheckerPlugin` 参数缺失这类编程错误可以抛出。
+    - M40.3 严格复用 BrowserAnalysisEnvelope：`{ status, target, items, diagnostics }`，不得额外包一层 plugin response。
+    - Plugin 状态通过 `plugin.status()` 暴露，不污染 runtime 分析结果。
+    - Selection schema 只覆盖 SuperPage：`{ source_path, file_id, selected_component_ids, active_component_id }`。
+    - `source_path` 必须是项目内逻辑路径，不接受绝对路径；真实 BI selection / TableCell / subcomponent 转换放到 M40.5 glue。
+    - `host.emit` 是必需能力；`host.renderAnalysis` / `host.renderStatus` / `host.renderError` 是可选能力。
+    - `runtimeClient` 方法统一按 Promise 处理：`await Promise.resolve(runtimeClient.method(...))`，兼容同步 fake runtime 和异步真实 launcher。
+  - context schema：
+    - `context.runtimeOptions`：传给 `runtimeClient.initRuntime`，默认 `{}`。
+    - `context.analysisOptions`：默认分析选项，默认 `{}`。
+    - `context.autoAnalyzeOnSelection`：M40.3 只保留字段，不启用自动分析；默认 `false`。
   - host capabilities：
-    - `host.getSelection()`
-    - `host.fetchMetadata(ref)`
-    - `host.mountPanel(containerHint)`
-    - `host.onSelectionChanged(callback)`
-    - `host.getContext()`
+    - `host.emit(eventName, payload)`，必需。
+    - `host.renderAnalysis(result)`，可选。
+    - `host.renderStatus(status)`，可选。
+    - `host.renderError(errorEnvelope)`，可选。
+    - Plugin Core 不要求 `host.getSelection()` / `host.fetchMetadata()` / `host.mountPanel()` / `host.onSelectionChanged()`。
   - runtime client contract：
-    - `runtime.status()`
-    - `runtime.init(options)`
-    - `runtime.loadDocument(sourcePath, rawText)`
-    - `runtime.buildOrUpdateGraph(sourcePath)`
-    - `runtime.analyzeSelection(selection, options)`
+    - `runtimeClient.initRuntime(options)`
+    - `runtimeClient.runtimeStatus()`
+    - `runtimeClient.loadSuperpageDocument(sourcePath, rawText)`
+    - `runtimeClient.buildOrUpdateSuperpageGraph(sourcePath)`
+    - `runtimeClient.analyzeSuperpageSelection(selection, options)`
+    - M40.3 只定义并消费该 contract，不实现真实 WASM loader。
+  - Plugin 内部状态：
+    - `inactive`
+    - `activating`
+    - `ready`
+    - `analyzing`
+    - `error`
+  - `plugin.status()` 返回：
+    - `state`
+    - `activated`
+    - `lastSelection`
+    - `lastResult`
+    - `lastError`
+    - `runtimeStatus`
+  - 内部错误 envelope：
+    - `status: "error"`
+    - `target: selection?.active_component_id ?? selection?.source_path ?? null`
+    - `items: []`
+    - `diagnostics: [{ severity: "error", code, message }]`
+    - 固定错误码：
+      - `PLUGIN_NOT_ACTIVATED`
+      - `INVALID_SELECTION`
+      - `RUNTIME_CLIENT_ERROR`
+      - `PLUGIN_CONTEXT_ERROR`
   - plugin events：
     - `plugin_activated`
+    - `plugin_deactivated`
+    - `runtime_ready`
+    - `runtime_error`
     - `selection_changed`
-    - `metadata_loaded`
     - `analysis_started`
-    - `analysis_ready`
-    - `analysis_error`
+    - `analysis_completed`
+    - `analysis_failed`
   - 最小实现要求：
     - plugin core 不 import BI adapter。
     - plugin core 不 import Service Worker launcher。
+    - plugin core 不 import runtime launcher。
     - plugin core 不直接访问 `window.SZ.rc`。
+    - plugin core 不直接访问 `window` / `document` / `navigator`。
+    - plugin core 不直接 `fetch` metadata。
+    - plugin core 不创建 DOM panel。
     - plugin core 不读取 DOM class 判断 selection。
     - plugin core 能在 fake host + fake runtime 下完整运行。
   - 测试要求：
     - 使用 Node 内置 `node:test` + `assert`，不引入 bundler。
     - 正例：
-      - `activate` 后能读取 host context。
-      - selection change 能触发 metadata fetch、runtime load/build/analyze。
-      - runtime 分析结果能交给 renderer。
-      - 多次 `activate` 不重复订阅事件。
-      - `deactivate` 后不再响应 selection change。
+      - `activate` 成功调用 `runtimeClient.initRuntime` 和 `runtimeClient.runtimeStatus`。
+      - `activate` 重复调用不重复初始化 runtime。
+      - `activate` 在 error 状态下允许重试。
+      - `deactivate` 清理 selection/result/error 状态并发出 `plugin_deactivated`。
+      - `status` 返回 state / lastSelection / lastResult / lastError / runtimeStatus。
+      - `onSelectionChanged` 校验并保存 selection，发出 `selection_changed`，但不调用 runtime analyze。
+      - `analyze` 成功调用 `runtimeClient.analyzeSuperpageSelection`，保存结果，调用可选 `host.renderAnalysis`，发出 `analysis_completed`。
+      - runtime 同步返回和 Promise 返回都可被处理。
     - 反例：
-      - host 缺少必要 capability 时返回 diagnostic。
-      - runtime analyze 失败时产生 `analysis_error`。
-      - 空 selection 不触发 metadata fetch。
-      - 大型 raw metadata 不进入 selection event payload。
+      - host 缺少 `emit` 时 `createMetadataCheckerPlugin` 抛出明确编程错误。
+      - 未 activate 调用 `analyze` 返回 `PLUGIN_NOT_ACTIVATED`。
+      - invalid selection 返回 `INVALID_SELECTION`。
+      - runtime analyze reject / throw 时返回 `RUNTIME_CLIENT_ERROR`，调用可选 `host.renderError`，发出 `analysis_failed`。
+      - selection event payload 不包含 raw metadata。
+      - Plugin Core 在 Node 环境直接运行，不依赖 `window` / `document`。
+      - 测试静态检查 plugin core 不 import BI adapter、runtime launcher、SW launcher。
   - 验证命令：
     - `node --test browser/test/plugin-core-smoke.test.mjs`
     - `cargo test` 不应因为 JS plugin core 变慢或新增依赖。
