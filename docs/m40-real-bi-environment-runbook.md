@@ -439,3 +439,80 @@ customJSES":{"sysdata":...,"analyzer":...,"/analyzer/app/M40HookSmoke.app":null}
 - 不要用过度简化的 `.spg` fixture 直接判断 hook 是否失败。fixture 可能先让设计器初始化报错。
 - 不要只看远程上传工具返回 `modified`。必须继续查 HTML 注入、脚本响应和 hook 执行信号。
 - 不要把 `custom.ts` 当成运行时入口。真实运行时入口是编译后的 `custom.js`。
+
+### 9.6 onInitDesigner 与选择对象真实形态
+
+真实环境探测显示：
+
+- `onInitDesigner(designer, args)` 的 `designer` 是 `SuperPageWorkbench`。
+- `args` 是 `WorkbenchArgs`，主要包含 `toolbarItems`、`toolbarItemDefaultEnable`、`pagesConf`、`hotkeys`。
+- 当前打开文件信息不在 `args`，而在 `designer.openFileArgs`。
+- `designer.openFileArgs.path` 是远程项目逻辑绝对路径，例如：
+
+```text
+/analyzer/app/M40HookSmoke.app/M40HookDesign.spg
+```
+
+M40.5 glue 传给 Plugin Core 时需要转换成项目内逻辑路径：
+
+```text
+app/M40HookSmoke.app/M40HookDesign.spg
+```
+
+SuperPage 组件选择的主入口不是 `designer.getSelectedInfo()`。该方法在 SuperPage 设计器中返回 `null`。真实选择链路是：
+
+```text
+designer.getBuilder()
+builder.selectComponents(["webview1"], true)
+builder.doSelectedChange(["webview1"], ["canvas"])
+builder.getSelectedComponents()
+builder.getSelectedComponent()
+builder.getSelectedComponentInfo("webview1")
+```
+
+普通组件被选中时，摘要形态如下：
+
+```json
+{
+  "id": "webview1",
+  "type": "webview",
+  "selected_info": {
+    "id": "webview1"
+  }
+}
+```
+
+`canvas` 被选中时也会返回合法选择：
+
+```json
+{
+  "id": "canvas",
+  "type": "canvas",
+  "selected_info": {
+    "id": "canvas"
+  }
+}
+```
+
+因此 M40.5 的标准 selection 应使用 M40.3 Plugin Core 的 snake_case contract：
+
+```json
+{
+  "source_path": "app/M40HookSmoke.app/M40HookDesign.spg",
+  "file_id": "EwLEBjaYNhLFYTaK6rxMNC",
+  "selected_component_ids": ["webview1"],
+  "active_component_id": "webview1",
+  "timestamp": 1779540000000
+}
+```
+
+如果真实对象中暂时取不到 `file_id`，glue 可以先发出 warning/diagnostic 并使用稳定 fallback，但不能伪造路径或把完整组件对象塞进 selection。
+
+生产调试时可以直接打印原始对象：
+
+```js
+console.log("[metadata-checker raw onInitDesigner]", designer, args);
+console.log("[metadata-checker raw selectComponents args]", infos, clearOthers);
+```
+
+但自动化验收仍建议同步写 DOM marker 或 JSON 摘要节点，避免测试环境读不到控制台日志。

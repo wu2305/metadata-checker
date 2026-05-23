@@ -4247,6 +4247,14 @@ browser/
 
 - [ ] M40.5：Platform Glue - SuperPage Designer
   - 目标：把 BI SuperPage 设计器特化逻辑限制在 Glue JS 中。
+  - 真实环境探测结论：
+    - `customJS.onInitDesigner(designer, args)` 的 `designer` 是 `SuperPageWorkbench`。
+    - `args` 是 `WorkbenchArgs`，主要包含 `toolbarItems`、`toolbarItemDefaultEnable`、`pagesConf`、`hotkeys`。
+    - 当前 SuperPage 文件路径不在 `args` 中，必须从 `designer.openFileArgs.path` 读取。
+    - `designer.getSelectedInfo()` 在 SuperPage 设计器中返回 `null`，不能作为主选择态入口。
+    - 组件选择真实链路是 `designer.getBuilder()` -> `SuperPageBuilder.selectComponents(...)` -> `SuperPageBuilder.doSelectedChange(...)`。
+    - 当前选中组件来自 `builder.getSelectedComponents()` / `builder.getSelectedComponent()`。
+    - 当前选中组件附加信息来自 `builder.getSelectedComponentInfo(componentId)`，普通组件形态为 `{ id: "webview1" }`，浮动面板或子组件可能带 `floatInfo`。
   - 建议位置：
     - `browser/platform-glue/superpage-designer-glue.js`
     - `browser/test/fake-designer.mjs`
@@ -4254,34 +4262,68 @@ browser/
   - 安装入口：
     - `installSuperPageDesignerGlue(designer, args, plugin)`
     - `customJS.onInitDesigner(designer, args)` 只调用该 glue。
+  - 文件信息解析：
+    - `source_path` 从 `designer.openFileArgs.path` 读取，并转换为项目内逻辑路径：
+      - `/analyzer/app/M40HookSmoke.app/M40HookDesign.spg` -> `app/M40HookSmoke.app/M40HookDesign.spg`
+    - `file_id` 优先从 `designer.openFileArgs.id` / `designer.getFileInfo?.().id` / `designer.metaFileInfo?.id` 读取。
+    - 若真实对象没有 `id`，M40.5 可用 `""` 或稳定 fallback，但必须发出 diagnostic/event，后续由 M40.6 provider 补齐远程 file id。
+    - `project_name` 可从 `designer.openFileArgs.projectName` 或路径第一段读取，但 Plugin Core selection 只传 `source_path`，不要把 project path 混入 source_path。
   - 选择态解析优先级：
-    - `designer.getSelectedInfo?.()`
-    - 当前 page/builder 的 `getSelectedComponents?.()`
-    - selected component 的 `getSelectedInfo?.()`
+    - 主入口：`const builder = designer.getBuilder?.()`。
+    - 组件列表：`builder.getSelectedComponents?.()`，每个组件用 `component.getId?.()` / `component.id` 取 id。
+    - active 组件：`builder.getSelectedComponent?.()`，取不到时使用组件列表第一项。
+    - 选中附加信息：`builder.getSelectedComponentInfo?.(componentId)`，仅提取 `{ id, floatInfo }` 等小对象，不传完整 component。
+    - `designer.getSelectedInfo?.()` 只作为非 SuperPage 兼容旁路，不作为 M40.5 SuperPage 主路径。
   - 标准 selection：
-    - `sourcePath`
-    - `fileId`
-    - `selectedComponentIds`
-    - `activeComponentId`
-    - `timestamp`
+    - 必须对齐 M40.3 Plugin Core 的 snake_case contract：
+      - `source_path`
+      - `file_id`
+      - `selected_component_ids`
+      - `active_component_id`
+      - `timestamp`
+    - 可选扩展字段：
+      - `designer_kind: "superpage"`
+      - `project_name`
+      - `selection_infos`: `{ [componentId]: { id, floatInfo? } }`
+    - 禁止传入：
+      - `.spg` raw text
+      - 完整 component JSON
+      - DOM HTML
+      - 组件 builder 原对象
   - 最小实现要求：
     - `onInitDesigner` / install 函数同步返回，不等待 runtime、fetch 或 IndexedDB。
-    - monkeypatch `designer.notifyStateChange` 后必须继续调用原始函数。
+    - monkeypatch `builder.selectComponents` 或 `builder.doSelectedChange` 后必须继续调用原始函数。
+    - 允许保留 `designer.notifyStateChange` 旁路监听，但不得依赖它捕获 SuperPage 组件选择。
     - 同一个 designer 多次安装不得重复 patch。
     - selection event 需要 debounce 或合并。
     - 不从 DOM class 猜测组件。
     - 不传 `.spg` raw content、完整 component JSON、DOM HTML。
+    - `plugin.onSelectionChanged(selection)` 的错误 envelope 必须被 glue 记录到 host/logger，不得静默吞掉。
+    - glue 只能调用 Plugin Core contract，不 import runtime launcher、metadata provider 或 renderer。
+  - 生产调试要求：
+    - 真实环境 smoke custom.js 可以保留以下 console 探针：
+      - `console.log("[metadata-checker raw onInitDesigner]", designer, args)`
+      - `console.log("[metadata-checker raw selectComponents args]", infos, clearOthers)`
+    - 自动化验收仍使用 DOM marker 或 `<script type="application/json">` 摘要，不能只依赖 console。
   - 测试要求：
     - 正例：
       - install 立即返回。
-      - 原始 `notifyStateChange` 被调用。
+      - 原始 `builder.selectComponents` 被调用。
+      - 原始 `builder.doSelectedChange` 被调用。
       - selection change 调用 `plugin.onSelectionChanged`。
+      - selection 使用 `designer.openFileArgs.path` 生成项目内逻辑 `source_path`。
+      - `builder.getSelectedComponents()` 返回 `webview1` 时，selection 包含 `selected_component_ids: ["webview1"]` 和 `active_component_id: "webview1"`。
+      - 选中 `canvas` 时也生成合法 selection，不能误判为空。
       - 非 selection change 不触发分析。
       - 多次 install 不重复 patch。
+      - plugin 返回 error envelope 时 glue 发出可观测 error 事件或 logger 记录。
     - 反例：
-      - designer 缺少选择 API 时返回 diagnostic。
+      - designer 缺少 `getBuilder` 或 builder 缺少选择 API 时返回 diagnostic。
+      - `designer.openFileArgs.path` 缺失时返回 diagnostic，不构造假路径。
       - selection payload 不包含 `raw_text` / `components` / `html`。
       - plugin 抛错时 glue 可观测错误，不吞掉异常。
+      - `file_id` 缺失时有 warning diagnostic/event，但不阻塞 selection 事件。
+      - `designer.getSelectedInfo()` 返回 `null` 时仍能通过 builder 主路径生成 selection。
   - 验证命令：
     - `node --test browser/test/superpage-designer-glue-smoke.test.mjs`
 
