@@ -4399,6 +4399,8 @@ browser/
     - 真实环境登录、cookie、SuperPage 页面 HTML 和 `custom.js` 注入验证流程已按 `docs/m40-real-bi-environment-runbook.md` 执行。
   - 验收场景：
     - 在 BI SuperPage 设计器中通过 `onInitDesigner` 安装 glue。
+    - 真实环境 smoke 使用 `.app` 容器内 SuperPage，例如 `/analyzer/app/M40HookSmoke.app/M40HookDesign.spg`，不要用孤立 `/app/Page.spg` 路径。
+    - 项目级 `/analyzer/public/hooks/custom.js` 至少能证明脚本顶层执行、AMD factory 执行、`onInitDesigner` 被调用。
     - 选中普通组件，面板展示 component / reads / conditions。
     - 选中无关联组件，面板返回 empty/partial 而非报错。
     - 元数据 fetch 失败时显示 stable diagnostic。
@@ -4406,10 +4408,17 @@ browser/
     - 重复进入设计器不重复 patch、不重复 instantiate runtime。
   - 记录要求：
     - browser console 无未捕获错误。
+    - 人工验收记录 `console.log("[metadata-checker] onInitDesigner loaded", ...)`。
+    - 自动化验收记录 DOM marker，例如 `data-metadata-checker-on-init-designer`。
+    - 记录 HTML 中 `customJSES` 与 `/analyzer/public/hooks/custom.js?v=...` 注入证据。
     - 记录 runtime launcher 类型。
     - 记录 fetch provider 类型。
     - 记录一次分析 timing。
     - 记录不能覆盖的真实环境限制。
+  - 方法论：
+    - `console.log` 适合人工观察，但自动化测试不应只依赖 console。
+    - DOM marker 比 `window.__xxx` 更适合跨自动化上下文验收。
+    - 若 hook 没执行，优先区分“脚本文件没执行”“AMD factory 没执行”“`onInitDesigner` 没调用”，不要直接跳到 iframe 假设。
 
 验收标准：
 

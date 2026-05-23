@@ -276,3 +276,166 @@ node --test browser/test/remote-metadata-uploader-smoke.test.mjs
 | 页面 HTML 无 `customJSES` | 是否访问的是元数据页面而非登录页；是否带 `?:edit=true`；目标文件是否存在 |
 | 只看到系统级脚本 | 当前项目或应用可能没有 `custom.js` 文件 |
 | `onInitDesigner` 不执行 | 脚本是否正确导出；当前打开的是否是设计器；`custom.js` 是否被合并规则命中 |
+
+## 9. SuperPage Designer hook 真实验证方法论
+
+本节记录真实环境中验证 `onInitDesigner` 的推荐流程。不要只验证文件上传成功；必须证明浏览器端设计器加载了脚本，并且 hook 被调用。
+
+### 9.1 先创建真实 app 容器
+
+SuperPage 设计器不要用孤立路径 `/analyzer/app/Page.spg` 验证。真实应用页面通常位于 `.app` 目录下：
+
+```text
+/analyzer/app/M40HookSmoke.app/settings.json
+/analyzer/app/M40HookSmoke.app/M40HookDesign.spg
+```
+
+最小 `settings.json`：
+
+```json
+{
+  "version": "4.15.0",
+  "shortUrls": null
+}
+```
+
+上传示例：
+
+```bash
+node browser/tools/remote-metadata-uploader.mjs \
+  --base-url 'https://autocrm-test.xiaoshouyi.com' \
+  --login-body-file /private/tmp/autocrm-login-payload.json \
+  --file /private/tmp/m40-hook-smoke-settings.json \
+  --remote-path /analyzer/app/M40HookSmoke.app/settings.json
+
+node browser/tools/remote-metadata-uploader.mjs \
+  --base-url 'https://autocrm-test.xiaoshouyi.com' \
+  --login-body-file /private/tmp/autocrm-login-payload.json \
+  --file /path/to/real-superpage.spg \
+  --remote-path /analyzer/app/M40HookSmoke.app/M40HookDesign.spg
+```
+
+注意：过小的手写 fixture 可能在真实设计器中报类似 `Cannot read properties of undefined (reading 'dimensions')` 的错误，导致设计器初始化没有走到 hook。验证 hook 时优先使用真实项目中能打开的 SuperPage 元数据样本。
+
+### 9.2 用项目级 custom.js 做隔离验证
+
+测试项目 `analyzer` 的项目级 hook 路径：
+
+```text
+/analyzer/public/hooks/custom.js
+```
+
+推荐先上传一个最小、可人工观察、也可自动化验收的 AMD 脚本：
+
+```js
+(function () {
+  function mark(key, value) {
+    var root = document.documentElement || document.body;
+    if (root) {
+      root.setAttribute(key, value);
+    }
+  }
+  mark("data-metadata-checker-script-evaluated", "top-level");
+  mark("data-metadata-checker-script-has-define", String(typeof define));
+})();
+
+define(["require", "exports"], function (require, exports) {
+  "use strict";
+  Object.defineProperty(exports, "__esModule", { value: true });
+
+  var MARKER = "metadata-checker-m40-hook-smoke";
+
+  function mark(key, value) {
+    var root = document.documentElement || document.body;
+    if (root) {
+      root.setAttribute(key, value);
+    }
+  }
+
+  mark("data-metadata-checker-module-loaded", MARKER);
+
+  function onInitDesigner(designer, args) {
+    console.log("[metadata-checker] onInitDesigner loaded", {
+      href: location.href,
+      designer: designer,
+      args: args,
+      at: new Date().toISOString()
+    });
+    mark("data-metadata-checker-on-init-designer", MARKER);
+    mark("data-metadata-checker-on-init-href", location.href);
+    mark("data-metadata-checker-on-init-path", args && (args.path || (args.file && args.file.path)) || "");
+  }
+
+  exports.onInitDesigner = onInitDesigner;
+  exports.CustomJS = {
+    "*": { onInitDesigner: onInitDesigner },
+    "spg": { onInitDesigner: onInitDesigner },
+    "M40HookDesign.spg": { onInitDesigner: onInitDesigner },
+    "/analyzer/app/M40HookSmoke.app/M40HookDesign.spg": { onInitDesigner: onInitDesigner }
+  };
+});
+```
+
+其中：
+
+- `console.log(...)` 用于人工打开浏览器控制台观察。
+- `data-metadata-checker-script-evaluated` 证明脚本文件被浏览器执行。
+- `data-metadata-checker-module-loaded` 证明 AMD factory 被执行。
+- `data-metadata-checker-on-init-designer` 证明 `onInitDesigner` 被调用。
+- `exports.onInitDesigner` 和 `exports.CustomJS["*"]` 同时保留，用于排除导出形态或匹配 key 差异。
+
+### 9.3 打开设计器并确认注入链路
+
+打开：
+
+```text
+https://autocrm-test.xiaoshouyi.com/analyzer/app/M40HookSmoke.app/M40HookDesign.spg?:edit=true
+```
+
+页面可能会规范化到：
+
+```text
+https://autocrm-test.xiaoshouyi.com/analyzer/app/M40HookSmoke.app?:edit=true
+```
+
+这是 app 设计器路由的正常行为，不代表运行在 iframe 中，也不代表目标页面丢失。
+
+用 HTML 验证注入版本：
+
+```bash
+curl --compressed -sS -D /private/tmp/m40-hook-design.headers \
+  -o /private/tmp/m40-hook-design.html \
+  -b /private/tmp/autocrm-cookies.txt \
+  'https://autocrm-test.xiaoshouyi.com/analyzer/app/M40HookSmoke.app/M40HookDesign.spg?:edit=true'
+
+rg -n "customJSES|custom\\.js|M40HookSmoke|M40HookDesign" /private/tmp/m40-hook-design.html
+```
+
+期望看到：
+
+```text
+/sysdata/public/hooks/custom.js
+/analyzer/public/hooks/custom.js
+customJSES":{"sysdata":...,"analyzer":...,"/analyzer/app/M40HookSmoke.app":null}
+```
+
+这说明设计器 HTML 已经把项目级 hook 注入到 `sys.ready([...])`。
+
+### 9.4 验收信号优先级
+
+推荐按下面顺序判断：
+
+1. 设计器 UI 正常打开，无页面级错误弹窗。
+2. HTML 中存在 `/analyzer/public/hooks/custom.js?v=...`，且版本参数随上传时间更新。
+3. 直接下载 `/analyzer/public/hooks/custom.js` 能看到最新脚本内容。
+4. 浏览器控制台出现 `[metadata-checker] onInitDesigner loaded`。
+5. DOM 上存在 `data-metadata-checker-on-init-designer`。
+
+其中第 4 条适合人工验收，第 5 条适合自动化验收。不要只依赖 console，因为自动化工具未必稳定暴露控制台日志；也不要只依赖全局 `window.__xxx`，部分自动化执行上下文可能看不到页面脚本挂载的全局变量。
+
+### 9.5 已知误区
+
+- 不要把问题优先归因到 iframe。当前 SuperPage 设计器主流程不应运行在 iframe 中；只有页面内组件本身可能包含 iframe。
+- 不要用过度简化的 `.spg` fixture 直接判断 hook 是否失败。fixture 可能先让设计器初始化报错。
+- 不要只看远程上传工具返回 `modified`。必须继续查 HTML 注入、脚本响应和 hook 执行信号。
+- 不要把 `custom.ts` 当成运行时入口。真实运行时入口是编译后的 `custom.js`。
