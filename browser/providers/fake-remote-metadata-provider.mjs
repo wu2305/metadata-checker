@@ -56,8 +56,8 @@ export function createFakeRemoteMetadataProvider(options = {}) {
       }
       return _resolve({
         source_path: fileRef.source_path,
-        file_id: fileRef.file_id,
-        revision: fixture.revision ?? "1",
+        file_id: fileRef.file_id ?? null,
+        revision: fixture.revision ?? null,
         content_type: fixture.content_type ?? "unknown",
         updated_at: fixture.updated_at ?? null,
       });
@@ -80,8 +80,8 @@ export function createFakeRemoteMetadataProvider(options = {}) {
       }
       return _resolve({
         source_path: fileRef.source_path,
-        file_id: fileRef.file_id,
-        revision: fixture.revision ?? "1",
+        file_id: fileRef.file_id ?? null,
+        revision: fixture.revision ?? null,
         content_type: fixture.content_type ?? "unknown",
         raw_text: fixture.raw_text ?? "",
       });

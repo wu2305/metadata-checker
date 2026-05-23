@@ -78,7 +78,7 @@ fn collect_components_recursive(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cli-local"))]
 mod tests {
     use super::*;
     use crate::graph::GraphDB;

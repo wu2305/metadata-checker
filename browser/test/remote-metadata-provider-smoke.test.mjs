@@ -40,6 +40,7 @@ describe("FakeRemoteMetadataProvider", () => {
     assert.strictEqual(result.raw_text, '{"components":[]}');
     assert.strictEqual(result.revision, "3");
     assert.strictEqual(result.content_type, "super_page");
+    assert.strictEqual(result.file_id, "fid1");
   });
 
   it("returns fixture info", async () => {
@@ -47,6 +48,7 @@ describe("FakeRemoteMetadataProvider", () => {
     const result = await provider.getFileInfo(validFileRef);
     assert.strictEqual(result.source_path, "app/Test.app/Page.spg");
     assert.strictEqual(result.revision, "3");
+    assert.strictEqual(result.file_id, "fid1");
   });
 
   it("records callLog", async () => {
@@ -173,6 +175,42 @@ describe("PageRcMetadataProvider", () => {
     assert.strictEqual(result.source_path, "app/Test.app/Page.spg");
     assert.strictEqual(result.source_path.includes("http"), false);
     assert.strictEqual(result.source_path.startsWith("/"), false);
+  });
+
+  it("rejects absolute source_path", async () => {
+    const rc = async () => '{"components":[]}';
+    const host = createFakeHost();
+    const provider = createPageRcMetadataProvider({ rc, host });
+    const result = await provider.getFileContent({ source_path: "/analyzer/app/Page.spg" });
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.code, "REMOTE_RESPONSE_INVALID");
+    assert.strictEqual(host.getEvents("metadata_fetch_failed").length, 1);
+  });
+
+  it("rejects URL source_path", async () => {
+    const rc = async () => '{"components":[]}';
+    const host = createFakeHost();
+    const provider = createPageRcMetadataProvider({ rc, host });
+    const result = await provider.getFileContent({ source_path: "https://example.com/app/Page.spg" });
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.code, "REMOTE_RESPONSE_INVALID");
+  });
+
+  it("rejects parent escape source_path", async () => {
+    const rc = async () => '{"components":[]}';
+    const host = createFakeHost();
+    const provider = createPageRcMetadataProvider({ rc, host });
+    const result = await provider.getFileContent({ source_path: "app/../../secret.spg" });
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.code, "REMOTE_RESPONSE_INVALID");
+  });
+
+  it("file_id can be null", async () => {
+    const rc = async () => '{"components":[]}';
+    const provider = createPageRcMetadataProvider({ rc });
+    const result = await provider.getFileContent({ source_path: "app/Test.app/Page.spg" });
+    assert.strictEqual(result.file_id, null);
+    assert.strictEqual(result.revision, null);
   });
 });
 

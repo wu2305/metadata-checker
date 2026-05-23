@@ -35,6 +35,33 @@ function _inferContentType(sourcePath) {
   return "unknown";
 }
 
+function _isLogicalSourcePath(path) {
+  if (typeof path !== "string" || path === "") return false;
+  if (path.startsWith("/") || path.startsWith("\\")) return false;
+  if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("file://")) {
+    return false;
+  }
+  if (/^[A-Za-z]:/.test(path)) return false;
+  if (path.split(/[\/]/).some((segment) => segment === "..")) return false;
+  return true;
+}
+
+function _validateFileRef(fileRef) {
+  if (!fileRef || typeof fileRef !== "object") {
+    return { valid: false, error: _makeError("REMOTE_RESPONSE_INVALID", "fileRef must be an object") };
+  }
+  if (!_isLogicalSourcePath(fileRef.source_path)) {
+    return {
+      valid: false,
+      error: _makeError(
+        "REMOTE_RESPONSE_INVALID",
+        `source_path is not a project-internal logical path: ${fileRef.source_path}`
+      ),
+    };
+  }
+  return { valid: true };
+}
+
 export function createPageRcMetadataProvider(options = {}) {
   const rc = options.rc ?? (typeof window !== "undefined" ? window.SZ?.rc : undefined);
   const rc1 = options.rc1 ?? (typeof window !== "undefined" ? window.SZ?.rc1 : undefined);
@@ -53,8 +80,14 @@ export function createPageRcMetadataProvider(options = {}) {
 
   const provider = {
     async getFileInfo(fileRef) {
-      const sourcePath = fileRef?.source_path;
-      const fileId = fileRef?.file_id;
+      const validation = _validateFileRef(fileRef);
+      if (!validation.valid) {
+        _emitHost(host, "metadata_fetch_failed", { error: validation.error, timestamp: Date.now() });
+        return validation.error;
+      }
+
+      const sourcePath = fileRef.source_path;
+      const fileId = fileRef.file_id ?? null;
 
       if (!rc && !rc1) {
         const err = _makeError(
@@ -90,7 +123,7 @@ export function createPageRcMetadataProvider(options = {}) {
         return {
           source_path: sourcePath,
           file_id: fileId,
-          revision: String(parsed.revision ?? "1"),
+          revision: parsed.revision ?? null,
           content_type: parsed.content_type ?? _inferContentType(sourcePath),
           updated_at: parsed.updated_at ?? null,
         };
@@ -106,8 +139,14 @@ export function createPageRcMetadataProvider(options = {}) {
     },
 
     async getFileContent(fileRef) {
-      const sourcePath = fileRef?.source_path;
-      const fileId = fileRef?.file_id;
+      const validation = _validateFileRef(fileRef);
+      if (!validation.valid) {
+        _emitHost(host, "metadata_fetch_failed", { error: validation.error, timestamp: Date.now() });
+        return validation.error;
+      }
+
+      const sourcePath = fileRef.source_path;
+      const fileId = fileRef.file_id ?? null;
 
       if (!rc && !rc1) {
         const err = _makeError(
@@ -135,7 +174,7 @@ export function createPageRcMetadataProvider(options = {}) {
         return {
           source_path: sourcePath,
           file_id: fileId,
-          revision: "1",
+          revision: null,
           content_type: _inferContentType(sourcePath),
           raw_text: rawText,
         };
