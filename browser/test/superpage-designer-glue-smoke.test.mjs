@@ -74,6 +74,44 @@ describe("installSuperPageDesignerGlue", () => {
     assert.strictEqual(result.diagnostics[0].code, "GLUE_INSTALL_FAILED");
     assert.strictEqual(host.getEvents("glue_install_failed").length, 1);
   });
+
+  it("emits file_id_missing through installed glue when file_id cannot be resolved", () => {
+    const designer = createFakeDesigner({ missingFileId: true });
+    const { plugin, host } = createPlugin();
+    const result = installSuperPageDesignerGlue(designer, {}, plugin, { host });
+    assert.deepStrictEqual(result, { installed: true });
+    const builder = designer.getBuilder();
+    builder.doSelectedChange(["webview1"], []);
+
+    assert.strictEqual(host.getEvents("file_id_missing").length, 1);
+    assert.strictEqual(plugin._selections.length, 1);
+    assert.strictEqual(plugin._selections[0].file_id, "");
+  });
+
+  it("returns error when builder lacks both selection APIs", () => {
+    const designer = createFakeDesigner({
+      missingSelectComponents: true,
+      missingDoSelectedChange: true,
+    });
+    const { plugin, host } = createPlugin();
+    const result = installSuperPageDesignerGlue(designer, {}, plugin, { host });
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.diagnostics[0].code, "GLUE_INSTALL_FAILED");
+    assert.strictEqual(host.getEvents("glue_install_failed").length, 1);
+  });
+
+  it("installs and observes selection when only doSelectedChange exists", () => {
+    const designer = createFakeDesigner({ missingSelectComponents: true });
+    const { plugin, host } = createPlugin();
+    const result = installSuperPageDesignerGlue(designer, {}, plugin, { host });
+    assert.deepStrictEqual(result, { installed: true });
+
+    const builder = designer.getBuilder();
+    builder.doSelectedChange(["webview1"], []);
+
+    assert.strictEqual(plugin._selections.length, 1);
+    assert.deepStrictEqual(plugin._selections[0].selected_component_ids, ["webview1"]);
+  });
 });
 
 describe("path extraction", () => {
@@ -81,6 +119,33 @@ describe("path extraction", () => {
     const designer = createFakeDesigner();
     const path = _extractSourcePath(designer);
     assert.strictEqual(path, "app/Test.app/Page.spg");
+  });
+
+  it("converts arbitrary project absolute paths to project-relative app paths", () => {
+    const designer = createFakeDesigner({
+      path: "/xiaoshouyi/app/售后.app/Page.spg",
+      projectName: "xiaoshouyi",
+    });
+    const path = _extractSourcePath(designer);
+    assert.strictEqual(path, "app/售后.app/Page.spg");
+  });
+
+  it("converts absolute paths by stripping the leading project segment when projectName is missing", () => {
+    const designer = createFakeDesigner({
+      path: "/xiaoshouyi/app/售后.app/Page.spg",
+      missingProjectName: true,
+    });
+    const path = _extractSourcePath(designer);
+    assert.strictEqual(path, "app/售后.app/Page.spg");
+  });
+
+  it("keeps project-internal relative paths unchanged", () => {
+    const designer = createFakeDesigner({
+      path: "app/售后.app/Page.spg",
+      missingProjectName: true,
+    });
+    const path = _extractSourcePath(designer);
+    assert.strictEqual(path, "app/售后.app/Page.spg");
   });
 
   it("returns null when path is missing", () => {
@@ -122,6 +187,26 @@ describe("selection building", () => {
     assert.ok(typeof selection.timestamp === "number");
   });
 
+  it("derives project_name from absolute remote path before stripping source_path", () => {
+    const designer = createFakeDesigner({
+      path: "/xiaoshouyi/app/售后.app/Page.spg",
+      missingProjectName: true,
+    });
+    const selection = _buildSelection(designer);
+    assert.strictEqual(selection.source_path, "app/售后.app/Page.spg");
+    assert.strictEqual(selection.project_name, "xiaoshouyi");
+  });
+
+  it("does not infer project_name from already project-internal relative paths", () => {
+    const designer = createFakeDesigner({
+      path: "app/售后.app/Page.spg",
+      missingProjectName: true,
+    });
+    const selection = _buildSelection(designer);
+    assert.strictEqual(selection.source_path, "app/售后.app/Page.spg");
+    assert.strictEqual(selection.project_name, "");
+  });
+
   it("handles canvas selection correctly", () => {
     const designer = createFakeDesigner({
       selectedComponents: [{ getId: () => "canvas", id: "canvas" }],
@@ -137,6 +222,59 @@ describe("selection building", () => {
     assert.strictEqual("raw_text" in selection, false);
     assert.strictEqual("components" in selection, false);
     assert.strictEqual("html" in selection, false);
+  });
+
+  it("uses first selected component when active component is null", () => {
+    const designer = createFakeDesigner({
+      activeComponentNull: true,
+      selectedComponents: [
+        { getId: () => "input1", id: "input1" },
+        { getId: () => "button1", id: "button1" },
+      ],
+    });
+    const selection = _buildSelection(designer);
+    assert.deepStrictEqual(selection.selected_component_ids, ["input1", "button1"]);
+    assert.strictEqual(selection.active_component_id, "input1");
+  });
+
+  it("keeps floatInfo in selection_infos but strips raw payload and object references", () => {
+    const builderRef = { kind: "builder" };
+    const componentRef = { kind: "component" };
+    const designer = createFakeDesigner({
+      selectedComponents: [{ getId: () => "float1", id: "float1" }],
+      componentInfos: {
+        float1: {
+          id: "float1",
+          floatInfo: { top: 10, left: 20 },
+          raw_text: "large raw text",
+          components: [{ id: "nested" }],
+          html: "<div>raw</div>",
+          builder: builderRef,
+          component: componentRef,
+        },
+      },
+    });
+    const selection = _buildSelection(designer);
+
+    assert.deepStrictEqual(selection.selection_infos.float1, {
+      id: "float1",
+      floatInfo: { top: 10, left: 20 },
+    });
+    assert.strictEqual("raw_text" in selection, false);
+    assert.strictEqual("components" in selection, false);
+    assert.strictEqual("html" in selection, false);
+    assert.strictEqual("builder" in selection.selection_infos.float1, false);
+    assert.strictEqual("component" in selection.selection_infos.float1, false);
+  });
+
+  it("uses builder selection when designer.getSelectedInfo returns null", () => {
+    const designer = createFakeDesigner({ selectedInfo: null });
+    const selection = _buildSelection(designer);
+    assert.deepStrictEqual(selection.selected_component_ids, ["webview1"]);
+    assert.strictEqual(
+      designer._callLog.some((entry) => entry.method === "getSelectedComponents"),
+      true
+    );
   });
 
   it("returns null when builder is missing", () => {
@@ -156,6 +294,22 @@ describe("patched builder methods", () => {
     builder.selectComponents([{ id: "webview1" }], true);
 
     assert.strictEqual(designer._callLog.some((c) => c.method === "selectComponents"), true);
+    assert.strictEqual(plugin._selections.length, 1);
+    assert.deepStrictEqual(plugin._selections[0].selected_component_ids, ["webview1"]);
+  });
+
+  it("does not emit duplicate selection when selectComponents calls doSelectedChange internally", () => {
+    const designer = createFakeDesigner({ selectComponentsCallsDoSelectedChange: true });
+    const { plugin, host } = createPlugin();
+    installSuperPageDesignerGlue(designer, {}, plugin, { host });
+
+    const builder = designer.getBuilder();
+    builder.selectComponents([{ id: "webview1" }], true);
+
+    assert.strictEqual(
+      designer._callLog.filter((entry) => entry.method === "doSelectedChange").length,
+      1
+    );
     assert.strictEqual(plugin._selections.length, 1);
     assert.deepStrictEqual(plugin._selections[0].selected_component_ids, ["webview1"]);
   });

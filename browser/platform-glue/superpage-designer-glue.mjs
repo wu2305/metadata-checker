@@ -21,17 +21,21 @@ function _makeErrorEnvelope(code, message, extra = {}) {
   };
 }
 
-function _debounce(fn, ms = 50) {
-  let timer = null;
-  return function (...args) {
-    if (timer) {
-      clearTimeout(timer);
-    }
-    timer = setTimeout(() => {
-      timer = null;
-      fn.apply(this, args);
-    }, ms);
-  };
+function _emitHost(host, eventName, payload) {
+  if (host && typeof host.emit === "function") {
+    host.emit(eventName, payload);
+  }
+}
+
+function _log(logger, level, ...args) {
+  const log = logger ?? console;
+  log?.[level]?.(...args);
+}
+
+function _emitInstallFailed(host, code, message) {
+  const envelope = _makeErrorEnvelope(code, message);
+  _emitHost(host, "glue_install_failed", { error: envelope, timestamp: Date.now() });
+  return envelope;
 }
 
 function _extractSourcePath(designer) {
@@ -39,15 +43,43 @@ function _extractSourcePath(designer) {
   if (typeof path !== "string") {
     return null;
   }
-  // 去掉 /analyzer/ 前缀，转为项目内逻辑路径
-  if (path.startsWith("/analyzer/")) {
-    return path.slice("/analyzer/".length);
+
+  const normalizedPath = path.replace(/^\/+/, "");
+  if (normalizedPath === "") {
+    return null;
   }
+
+  const projectName = designer?.openFileArgs?.projectName;
+  if (
+    typeof projectName === "string" &&
+    projectName !== "" &&
+    normalizedPath.startsWith(`${projectName}/`)
+  ) {
+    return normalizedPath.slice(projectName.length + 1);
+  }
+
   if (path.startsWith("/")) {
-    // 其他绝对路径，去掉首个 /
-    return path.slice(1);
+    const slashIndex = normalizedPath.indexOf("/");
+    return slashIndex >= 0 ? normalizedPath.slice(slashIndex + 1) : normalizedPath;
   }
-  return path;
+
+  return normalizedPath;
+}
+
+function _extractProjectName(designer) {
+  const projectName = designer?.openFileArgs?.projectName;
+  if (typeof projectName === "string" && projectName !== "") {
+    return projectName;
+  }
+
+  const path = designer?.openFileArgs?.path;
+  if (typeof path !== "string" || !path.startsWith("/")) {
+    return "";
+  }
+
+  const normalizedPath = path.replace(/^\/+/, "");
+  const slashIndex = normalizedPath.indexOf("/");
+  return slashIndex > 0 ? normalizedPath.slice(0, slashIndex) : "";
 }
 
 function _extractFileId(designer, host, logger) {
@@ -56,16 +88,22 @@ function _extractFileId(designer, host, logger) {
     designer?.getFileInfo?.()?.id ??
     designer?.metaFileInfo?.id ??
     "";
-  if (id === "" && host && typeof host.emit === "function") {
-    host.emit("file_id_missing", {
+  if (id === "") {
+    const payload = {
       message: "file_id not found in designer, using empty fallback",
       timestamp: Date.now(),
-    });
+    };
+    _emitHost(host, "file_id_missing", payload);
+    if (logger) {
+      _log(logger, "warn", "[glue] file_id not found in designer, using empty fallback");
+    }
   }
   return id;
 }
 
-function _buildSelection(designer) {
+function _buildSelection(designer, options = {}) {
+  const host = options?.host ?? (typeof options?.emit === "function" ? options : null);
+  const logger = options?.logger;
   const builder = designer?.getBuilder?.();
   if (!builder) {
     return null;
@@ -76,7 +114,7 @@ function _buildSelection(designer) {
     return null;
   }
 
-  const fileId = _extractFileId(designer);
+  const fileId = _extractFileId(designer, host, logger);
 
   const components = builder.getSelectedComponents?.() ?? [];
   const selectedComponentIds = [];
@@ -108,9 +146,7 @@ function _buildSelection(designer) {
     activeComponentId = selectedComponentIds[0];
   }
 
-  const projectName =
-    designer?.openFileArgs?.projectName ??
-    (sourcePath ? sourcePath.split("/")[0] : "");
+  const projectName = _extractProjectName(designer);
 
   return {
     source_path: sourcePath,
@@ -124,35 +160,41 @@ function _buildSelection(designer) {
   };
 }
 
+function _dispatchSelection(builder, plugin, host, logger, sourceMethod) {
+  try {
+    const selection = _buildSelection(builder.__designerRef, { host, logger });
+    if (!selection) {
+      return;
+    }
+
+    const pluginResult = plugin.onSelectionChanged(selection);
+    if (pluginResult && pluginResult.status === "error") {
+      _log(logger, "warn", "[glue] plugin.onSelectionChanged returned error:", pluginResult);
+      _emitHost(host, "glue_selection_failed", {
+        error: pluginResult,
+        timestamp: Date.now(),
+      });
+    }
+  } catch (err) {
+    _log(logger, "error", `[glue] error in patched ${sourceMethod}:`, err);
+    _emitHost(host, "glue_selection_failed", {
+      error: _makeErrorEnvelope("GLUE_ERROR", err?.message ?? String(err)),
+      timestamp: Date.now(),
+    });
+  }
+}
+
 function _patchBuilderSelectComponents(builder, plugin, host, logger) {
   const original = builder.selectComponents;
   builder.selectComponents = function (infos, clearOthers) {
-    const result = original.apply(this, arguments);
+    builder.__metadataCheckerSelectDepth = (builder.__metadataCheckerSelectDepth ?? 0) + 1;
+    let result;
     try {
-      const selection = _buildSelection(builder.__designerRef);
-      if (selection) {
-        const pluginResult = plugin.onSelectionChanged(selection);
-        if (pluginResult && pluginResult.status === "error") {
-          const log = logger ?? console;
-          log.warn?.("[glue] plugin.onSelectionChanged returned error:", pluginResult);
-          if (host && typeof host.emit === "function") {
-            host.emit("glue_selection_failed", {
-              error: pluginResult,
-              timestamp: Date.now(),
-            });
-          }
-        }
-      }
-    } catch (err) {
-      const log = logger ?? console;
-      log.error?.("[glue] error in patched selectComponents:", err);
-      if (host && typeof host.emit === "function") {
-        host.emit("glue_selection_failed", {
-          error: _makeErrorEnvelope("GLUE_ERROR", err?.message ?? String(err)),
-          timestamp: Date.now(),
-        });
-      }
+      result = original.apply(this, arguments);
+    } finally {
+      builder.__metadataCheckerSelectDepth -= 1;
     }
+    _dispatchSelection(builder, plugin, host, logger, "selectComponents");
     return result;
   };
   builder.__originalSelectComponents = original;
@@ -162,30 +204,8 @@ function _patchBuilderDoSelectedChange(builder, plugin, host, logger) {
   const original = builder.doSelectedChange;
   builder.doSelectedChange = function () {
     const result = original.apply(this, arguments);
-    try {
-      const selection = _buildSelection(builder.__designerRef);
-      if (selection) {
-        const pluginResult = plugin.onSelectionChanged(selection);
-        if (pluginResult && pluginResult.status === "error") {
-          const log = logger ?? console;
-          log.warn?.("[glue] plugin.onSelectionChanged returned error:", pluginResult);
-          if (host && typeof host.emit === "function") {
-            host.emit("glue_selection_failed", {
-              error: pluginResult,
-              timestamp: Date.now(),
-            });
-          }
-        }
-      }
-    } catch (err) {
-      const log = logger ?? console;
-      log.error?.("[glue] error in patched doSelectedChange:", err);
-      if (host && typeof host.emit === "function") {
-        host.emit("glue_selection_failed", {
-          error: _makeErrorEnvelope("GLUE_ERROR", err?.message ?? String(err)),
-          timestamp: Date.now(),
-        });
-      }
+    if ((builder.__metadataCheckerSelectDepth ?? 0) === 0) {
+      _dispatchSelection(builder, plugin, host, logger, "doSelectedChange");
     }
     return result;
   };
@@ -199,25 +219,19 @@ export function installSuperPageDesignerGlue(designer, args, plugin, options = {
   const logger = options.logger;
 
   if (!designer || typeof designer !== "object") {
-    const envelope = _makeErrorEnvelope(
+    return _emitInstallFailed(
+      host,
       "GLUE_INSTALL_FAILED",
       "designer is required and must be an object"
     );
-    if (host && typeof host.emit === "function") {
-      host.emit("glue_install_failed", { error: envelope, timestamp: Date.now() });
-    }
-    return envelope;
   }
 
   if (!plugin || typeof plugin.onSelectionChanged !== "function") {
-    const envelope = _makeErrorEnvelope(
+    return _emitInstallFailed(
+      host,
       "GLUE_INSTALL_FAILED",
       "plugin.onSelectionChanged is required"
     );
-    if (host && typeof host.emit === "function") {
-      host.emit("glue_install_failed", { error: envelope, timestamp: Date.now() });
-    }
-    return envelope;
   }
 
   if (designer.__metadataCheckerGlueInstalled) {
@@ -225,33 +239,41 @@ export function installSuperPageDesignerGlue(designer, args, plugin, options = {
   }
 
   if (!designer.openFileArgs?.path) {
-    const envelope = _makeErrorEnvelope(
+    return _emitInstallFailed(
+      host,
       "GLUE_INSTALL_FAILED",
       "designer.openFileArgs.path is required"
     );
-    if (host && typeof host.emit === "function") {
-      host.emit("glue_install_failed", { error: envelope, timestamp: Date.now() });
-    }
-    return envelope;
   }
 
   const builder = designer.getBuilder?.();
   if (!builder) {
-    const envelope = _makeErrorEnvelope(
+    return _emitInstallFailed(
+      host,
       "GLUE_INSTALL_FAILED",
       "designer.getBuilder() returned null or undefined"
     );
-    if (host && typeof host.emit === "function") {
-      host.emit("glue_install_failed", { error: envelope, timestamp: Date.now() });
-    }
-    return envelope;
+  }
+
+  const hasSelectComponents = typeof builder.selectComponents === "function";
+  const hasDoSelectedChange = typeof builder.doSelectedChange === "function";
+  if (!hasSelectComponents && !hasDoSelectedChange) {
+    return _emitInstallFailed(
+      host,
+      "GLUE_INSTALL_FAILED",
+      "builder must provide selectComponents or doSelectedChange"
+    );
   }
 
   // 让 builder 能反向访问 designer 以构建 selection
   builder.__designerRef = designer;
 
-  _patchBuilderSelectComponents(builder, plugin, host, logger);
-  _patchBuilderDoSelectedChange(builder, plugin, host, logger);
+  if (hasSelectComponents) {
+    _patchBuilderSelectComponents(builder, plugin, host, logger);
+  }
+  if (hasDoSelectedChange) {
+    _patchBuilderDoSelectedChange(builder, plugin, host, logger);
+  }
 
   designer.__metadataCheckerGlueInstalled = true;
 
