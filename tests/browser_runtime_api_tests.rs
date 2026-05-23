@@ -26,6 +26,28 @@ fn with_runtime<T>(f: impl FnOnce(&str) -> T) -> T {
     f(&source_path)
 }
 
+fn get_runtime_counts_from_status(
+    status: &metadata_checker::browser::BrowserAnalysisEnvelope,
+) -> (usize, usize) {
+    let item = status
+        .items
+        .iter()
+        .find(|item| item.kind == "runtime_status")
+        .expect("runtime status item should exist");
+    let detail = item.detail.as_object().expect("runtime status detail should be object");
+    let document_count = detail
+        .get("document_count")
+        .and_then(|value| value.as_u64())
+        .expect("document_count should be number")
+        as usize;
+    let graph_count = detail
+        .get("graph_count")
+        .and_then(|value| value.as_u64())
+        .expect("graph_count should be number")
+        as usize;
+    (document_count, graph_count)
+}
+
 #[test]
 fn test_init_runtime_returns_ready() {
     let _guard = TEST_RUNTIME_LOCK.lock().unwrap();
@@ -39,6 +61,65 @@ fn test_runtime_status_after_init() {
     init_runtime(RuntimeOptions::default());
     let status = runtime_status();
     assert_eq!(status.status, AnalysisStatus::Ready);
+}
+
+#[test]
+fn test_init_runtime_reinitialize_clears_previous_documents_and_graphs() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    { "id": "btn1", "type": "button", "title": "Submit" }
+                ]
+            },
+            "sources": [
+                { "id": "m1", "modelType": "App", "path": "app/m1.tbl" }
+            ]
+        }"#;
+
+        assert_eq!(load_superpage_document(source_path, raw).status, AnalysisStatus::Ready);
+        assert_eq!(
+            build_or_update_superpage_graph(source_path).status,
+            AnalysisStatus::Ready
+        );
+
+        let status_before = runtime_status();
+        assert_eq!(get_runtime_counts_from_status(&status_before), (1, 1));
+
+        let reinit = init_runtime(RuntimeOptions::default());
+        assert_eq!(reinit.status, AnalysisStatus::Ready);
+
+        let status_after = runtime_status();
+        assert_eq!(status_after.status, AnalysisStatus::Ready);
+        assert_eq!(get_runtime_counts_from_status(&status_after), (0, 0));
+    });
+}
+
+#[test]
+fn test_runtime_status_reflects_loaded_documents_and_graphs() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    { "id": "btn1", "type": "button", "title": "Submit" }
+                ]
+            },
+            "sources": [
+                { "id": "m1", "modelType": "App", "path": "app/m1.tbl" }
+            ]
+        }"#;
+
+        assert_eq!(load_superpage_document(source_path, raw).status, AnalysisStatus::Ready);
+        assert_eq!(
+            build_or_update_superpage_graph(source_path).status,
+            AnalysisStatus::Ready
+        );
+
+        let status = runtime_status();
+        assert_eq!(get_runtime_counts_from_status(&status), (1, 1));
+    });
 }
 
 #[test]
@@ -163,6 +244,113 @@ fn test_analyze_component_with_dependencies() {
 }
 
 #[test]
+fn test_analyze_selection_uses_active_component_id_first() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    { "id": "input1", "type": "input", "title": "Name" },
+                    { "id": "label1", "type": "label", "title": "Display" }
+                ]
+            }
+        }"#;
+        load_superpage_document(source_path, raw);
+
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["input1".to_string()],
+            active_component_id: Some("label1".to_string()),
+        };
+        let result = analyze_superpage_selection(selection, AnalysisOptions::default());
+        assert_eq!(result.status, AnalysisStatus::Ready);
+        assert_eq!(result.target, Some("label1".to_string()));
+
+        let component_item = result
+            .items
+            .iter()
+            .find(|item| item.kind == "component")
+            .expect("should include component item");
+        assert_eq!(component_item.detail["id"], "label1");
+    });
+}
+
+#[test]
+fn test_analyze_selection_falls_back_to_first_selected_when_active_is_empty() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    { "id": "input1", "type": "input", "title": "Name" },
+                    { "id": "label1", "type": "label", "title": "Display" }
+                ]
+            }
+        }"#;
+        load_superpage_document(source_path, raw);
+
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["label1".to_string()],
+            active_component_id: None,
+        };
+        let result = analyze_superpage_selection(selection, AnalysisOptions::default());
+        assert_eq!(result.status, AnalysisStatus::Ready);
+        assert_eq!(result.target, Some("label1".to_string()));
+    });
+}
+
+#[test]
+fn test_analyze_selection_include_conditions_outputs_condition_items() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    { "id": "input1", "type": "input", "title": "Name" },
+                    {
+                        "id": "label1",
+                        "type": "label",
+                        "title": "Display",
+                        "visibleCondition": "${input1.value}",
+                        "calcCondition": "${input1.value > 0}"
+                    }
+                ]
+            }
+        }"#;
+        load_superpage_document(source_path, raw);
+
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["label1".to_string()],
+            active_component_id: Some("label1".to_string()),
+        };
+        let result = analyze_superpage_selection(
+            selection,
+            AnalysisOptions {
+                include_conditions: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(result.status, AnalysisStatus::Ready);
+
+        let conditions_item = result
+            .items
+            .iter()
+            .find(|item| item.kind == "conditions")
+            .expect("should include conditions item");
+        let fields = conditions_item.detail["fields"]
+            .as_array()
+            .expect("conditions fields should be an array");
+        assert!(fields.iter().any(|field| field == "visibleCondition"));
+        assert!(fields.iter().any(|field| field == "calcCondition"));
+    });
+}
+
+#[test]
 fn test_analyze_component_reads_from_graph() {
     with_runtime(|source_path| {
         let raw = r#"{
@@ -244,6 +432,72 @@ fn test_analyze_document_not_found() {
         let result = analyze_superpage_selection(selection, AnalysisOptions::default());
         assert_eq!(result.status, AnalysisStatus::Error);
         assert_eq!(result.diagnostics[0].code, "DOCUMENT_NOT_FOUND");
+    });
+}
+
+#[test]
+fn test_analyze_include_priority_warning_kept_with_component_not_found_error() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    { "id": "btn1", "type": "button", "title": "Submit" }
+                ]
+            }
+        }"#;
+        load_superpage_document(source_path, raw);
+
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["nonexistent".to_string()],
+            active_component_id: Some("nonexistent".to_string()),
+        };
+        let result = analyze_superpage_selection(
+            selection,
+            AnalysisOptions {
+                include_priority: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(result.status, AnalysisStatus::Error);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "UNSUPPORTED_OPTION"));
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "COMPONENT_NOT_FOUND"));
+    });
+}
+
+#[test]
+fn test_analyze_include_dataflow_warning_kept_with_document_not_found_error() {
+    with_runtime(|_source_path| {
+        let selection = SuperPageSelection {
+            source_path: "app/nonexistent-for-runtime.spg".to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["btn1".to_string()],
+            active_component_id: Some("btn1".to_string()),
+        };
+        let result = analyze_superpage_selection(
+            selection,
+            AnalysisOptions {
+                include_dataflow: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(result.status, AnalysisStatus::Error);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "UNSUPPORTED_OPTION"));
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "DOCUMENT_NOT_FOUND"));
     });
 }
 
