@@ -142,6 +142,7 @@ export function createMetadataCheckerPlugin({
   let activated = false;
   let lastSelection = null;
   let lastResult = null;
+  let activationResult = null;
   let lastError = null;
   let runtimeStatus = null;
   let _initPromise = null;
@@ -156,6 +157,7 @@ export function createMetadataCheckerPlugin({
     activated = false;
     lastSelection = null;
     lastResult = null;
+    activationResult = null;
     lastError = null;
     runtimeStatus = null;
     _initPromise = null;
@@ -168,7 +170,7 @@ export function createMetadataCheckerPlugin({
       const runtimeOptions = ctx.runtimeOptions ?? {};
 
       if (state === "ready") {
-        return _deepClone(lastResult ?? runtimeStatus);
+        return _deepClone(activationResult ?? runtimeStatus);
       }
 
       if (state === "activating" && _initPromise) {
@@ -188,7 +190,8 @@ export function createMetadataCheckerPlugin({
           );
           _setState("ready");
           activated = true;
-          lastResult = initResult;
+          activationResult = initResult;
+          lastError = null;
           host.emit("plugin_activated", { timestamp: now() });
           host.emit("runtime_ready", { runtimeStatus });
           return initResult;
@@ -283,6 +286,7 @@ export function createMetadataCheckerPlugin({
           runtimeClient.analyzeSuperpageSelection(validatedSelection, mergedOptions)
         );
         lastResult = result;
+        lastError = null;
         _setState("ready");
         host.emit("analysis_completed", {
           result: _deepClone(result),

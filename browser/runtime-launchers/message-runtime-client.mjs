@@ -6,6 +6,10 @@
  * response: { id, ok, result, error }
  */
 
+export const MESSAGE_RUNTIME_CLIENT_CONTROL = Symbol(
+  "metadata-checker.runtime-message-client-control"
+);
+
 function createErrorEnvelope(message, code = "LAUNCHER_REQUEST_FAILED", target = null) {
   return {
     status: "error",
@@ -35,6 +39,7 @@ export function createMessageRuntimeClient({
   transport,
   requestTimeoutMs = 0,
   idGenerator,
+  ignoredRequestIds,
   onError = () => {},
 }) {
   if (!transport || typeof transport !== "object") {
@@ -51,7 +56,9 @@ export function createMessageRuntimeClient({
   }
 
   let nextId = 0;
+  let disposed = false;
   const pendingRequests = new Map();
+  const staleResponseIds = ignoredRequestIds || new Set();
   const fallbackGenerator =
     idGenerator ??
     (() => {
@@ -100,9 +107,13 @@ export function createMessageRuntimeClient({
   }
 
   function handleResponse(response) {
-    const responseId = response && typeof response === "object" ? response.id : undefined;
-    const pending = pendingRequests.get(String(responseId));
+    const responseId =
+      response && typeof response === "object" ? String(response.id) : undefined;
+    const pending = pendingRequests.get(responseId);
     if (!pending) {
+      if (responseId !== undefined && staleResponseIds.delete(responseId)) {
+        return;
+      }
       reportMismatch(response);
       return;
     }
@@ -139,8 +150,12 @@ export function createMessageRuntimeClient({
 
   function clearPendingRequests(reason = "pending requests cleared") {
     const pendingIds = Array.from(pendingRequests.entries());
+    const clearedRequestIds = [];
     for (const [id, pending] of pendingIds) {
+      const requestId = String(id);
       removePending(id);
+      staleResponseIds.add(requestId);
+      clearedRequestIds.push(requestId);
       pending.resolve(
         createErrorEnvelope(
           typeof reason === "string" ? reason : String(reason),
@@ -149,13 +164,29 @@ export function createMessageRuntimeClient({
         )
       );
     }
+    return clearedRequestIds;
   }
 
   function getPendingRequestCount() {
     return pendingRequests.size;
   }
 
+  function dispose() {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    transport.offMessage(onTransportMessage);
+    clearPendingRequests("runtime client disposed");
+  }
+
   function request(method, args = []) {
+    if (disposed) {
+      return Promise.resolve(
+        createErrorEnvelope("Runtime client disposed", "LAUNCHER_REQUEST_FAILED", null)
+      );
+    }
+
     const id = getPendingId();
     const requestObj = {
       id,
@@ -227,6 +258,12 @@ export function createMessageRuntimeClient({
   };
   transport.onMessage(onTransportMessage);
 
+  const clientControl = {
+    clearPendingRequests,
+    getPendingRequestCount,
+    dispose,
+  };
+
   const client = {
     initRuntime(options = {}) {
       return request("initRuntime", [options]);
@@ -245,15 +282,9 @@ export function createMessageRuntimeClient({
     },
   };
 
-  Object.defineProperties(client, {
-    clearPendingRequests: {
-      value: clearPendingRequests,
-      enumerable: false,
-    },
-    getPendingRequestCount: {
-      value: getPendingRequestCount,
-      enumerable: false,
-    },
+  Object.defineProperty(client, MESSAGE_RUNTIME_CLIENT_CONTROL, {
+    value: clientControl,
+    enumerable: false,
   });
 
   return client;

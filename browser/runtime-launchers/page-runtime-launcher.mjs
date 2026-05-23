@@ -35,6 +35,21 @@ function makeRequestError(method, error) {
   };
 }
 
+function makeCanceledRequestError(method, reason) {
+  return {
+    status: "error",
+    target: null,
+    items: [],
+    diagnostics: [
+      {
+        severity: "error",
+        code: "LAUNCHER_REQUEST_FAILED",
+        message: `runtime client method ${method} was canceled (${reason})`,
+      },
+    ],
+  };
+}
+
 function makeNotStartedError() {
   return {
     status: "error",
@@ -121,6 +136,12 @@ export function createPageRuntimeLauncher(options = {}) {
   let _startPromise = null;
   let _runtimeClient = null;
   let _wrappedClient = null;
+  let launcherGeneration = 0;
+
+  const nextGeneration = () => {
+    launcherGeneration += 1;
+    return launcherGeneration;
+  };
 
   const resolveClient = async () => {
     if (options.runtimeClient !== undefined) {
@@ -156,7 +177,27 @@ export function createPageRuntimeLauncher(options = {}) {
   };
 
   const makeRuntimeClient = (baseClient) => {
+    const activeGeneration = launcherGeneration;
     const wrappedClient = {};
+
+    const isCurrentRequest = () =>
+      state === "ready" &&
+      _runtimeClient === baseClient &&
+      launcherGeneration === activeGeneration;
+
+    const finalizeRequest = (token) => {
+      if (pendingRequestTokens.delete(token)) {
+        pendingRequestCount -= 1;
+      }
+    };
+
+    const makeResultEnvelope = (method, result) => {
+      if (!isCurrentRequest()) {
+        return makeCanceledRequestError(method, "launcher stopped or restarted");
+      }
+      return result;
+    };
+
     for (const method of REQUIRED_RUNTIME_METHODS) {
       wrappedClient[method] = (...args) => {
         if (state !== "ready" || _runtimeClient !== baseClient) {
@@ -170,24 +211,24 @@ export function createPageRuntimeLauncher(options = {}) {
           const result = baseClient[method].apply(baseClient, args);
           if (result && typeof result.then === "function") {
             return result
-              .then((value) => value)
-              .catch((error) => makeRequestError(method, error))
+              .then((value) => makeResultEnvelope(method, value))
+              .catch((error) =>
+                isCurrentRequest()
+                  ? makeRequestError(method, error)
+                  : makeCanceledRequestError(method, "launcher stopped or restarted")
+              )
               .finally(() => {
-                if (pendingRequestTokens.delete(requestToken)) {
-                  pendingRequestCount -= 1;
-                }
+                finalizeRequest(requestToken);
               });
           }
 
-          if (pendingRequestTokens.delete(requestToken)) {
-            pendingRequestCount -= 1;
-          }
-          return result;
+          finalizeRequest(requestToken);
+          return makeResultEnvelope(method, result);
         } catch (error) {
-          if (pendingRequestTokens.delete(requestToken)) {
-            pendingRequestCount -= 1;
-          }
-          return makeRequestError(method, error);
+          finalizeRequest(requestToken);
+          return isCurrentRequest()
+            ? makeRequestError(method, error)
+            : makeCanceledRequestError(method, "launcher stopped or restarted");
         }
       };
     }
@@ -207,9 +248,13 @@ export function createPageRuntimeLauncher(options = {}) {
     _startPromise = (async () => {
       state = "starting";
       lastError = null;
+      const activeGeneration = nextGeneration();
       try {
         const candidate = await Promise.resolve(resolveClient());
         const loadedClient = await Promise.resolve(candidate);
+        if (state !== "starting" || activeGeneration !== launcherGeneration) {
+          throw makeCanceledRequestError("start", "launcher stopped before start completed");
+        }
         const missing = assertRuntimeClient(loadedClient);
         if (missing) {
           throw new Error(missing);
@@ -217,22 +262,31 @@ export function createPageRuntimeLauncher(options = {}) {
 
         _runtimeClient = loadedClient;
         _wrappedClient = makeRuntimeClient(_runtimeClient);
-        state = "ready";
-        started = true;
-        pendingRequestCount = 0;
-        return _wrappedClient;
+        if (state === "starting" && activeGeneration === launcherGeneration) {
+          state = "ready";
+          started = true;
+          pendingRequestCount = 0;
+          return _wrappedClient;
+        }
+
+        throw makeCanceledRequestError("start", "launcher stopped before ready");
       } catch (error) {
-        state = "error";
-        started = false;
-        _runtimeClient = null;
-        _wrappedClient = null;
-        pendingRequestCount = 0;
-        const startError =
-          error?.code === "LAUNCHER_START_FAILED"
-            ? error
-            : normalizeStartError(error);
-        lastError = startError;
-        throw startError;
+        if (state === "starting" && activeGeneration === launcherGeneration) {
+          state = "error";
+          started = false;
+          _runtimeClient = null;
+          _wrappedClient = null;
+          pendingRequestCount = 0;
+          pendingRequestTokens.clear();
+          const startError =
+            error?.code === "LAUNCHER_START_FAILED"
+              ? error
+              : normalizeStartError(error);
+          lastError = startError;
+          throw startError;
+        }
+
+        throw error;
       } finally {
         if (state !== "starting") {
           _startPromise = null;
@@ -245,6 +299,7 @@ export function createPageRuntimeLauncher(options = {}) {
 
   const stop = () => {
     state = "stopped";
+    nextGeneration();
     started = false;
     lastError = null;
     pendingRequestCount = 0;

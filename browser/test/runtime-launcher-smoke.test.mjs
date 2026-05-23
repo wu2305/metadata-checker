@@ -11,7 +11,10 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 
 import { createFakeMessageTransport } from "./fake-message-transport.mjs";
-import { createMessageRuntimeClient } from "../runtime-launchers/message-runtime-client.mjs";
+import {
+  createMessageRuntimeClient,
+  MESSAGE_RUNTIME_CLIENT_CONTROL,
+} from "../runtime-launchers/message-runtime-client.mjs";
 import { createPageRuntimeLauncher } from "../runtime-launchers/page-runtime-launcher.mjs";
 import { createRuntimeLauncher } from "../runtime-launchers/runtime-launcher.mjs";
 
@@ -441,7 +444,8 @@ describe("Runtime Launcher Runtime-Contract (M40.4)", () => {
     assert.strictEqual(timedOut.status, "error");
     assert.strictEqual(timedOut.diagnostics?.[0]?.code, "LAUNCHER_REQUEST_TIMEOUT");
     await makeRequestTimeoutPromise();
-    assert.strictEqual(client.getPendingRequestCount(), 0);
+    const control = client[MESSAGE_RUNTIME_CLIENT_CONTROL];
+    assert.strictEqual(control.getPendingRequestCount(), 0);
   });
 
   it("service-worker launcher start failure should fallback and mark fallbackUsed=true", async () => {
@@ -478,7 +482,7 @@ describe("Runtime Launcher Runtime-Contract (M40.4)", () => {
     const launcher = createPageRuntimeLauncher({ runtimeClient: slowClient });
     await launcher.start();
 
-    const statusPromise = launcher.getClient().runtimeStatus();
+    const pendingRequest = launcher.getClient().runtimeStatus();
     await Promise.resolve();
     assert.ok(launcher.status().pendingRequestCount > 0);
 
@@ -490,8 +494,62 @@ describe("Runtime Launcher Runtime-Contract (M40.4)", () => {
     const restarted = await launcher.start();
     assertClientMethodShape(restarted, "restarted page launcher client");
     assert.strictEqual(launcher.status().state, "ready");
+
+    const restartReady = await restarted.initRuntime({ test: true });
+    assert.strictEqual(restartReady.status, "ready");
+
     pending.resolve?.(makeEnvelopeForMethod("runtimeStatus"));
-    await statusPromise;
+    const stoppedResult = await pendingRequest;
+    assert.strictEqual(stoppedResult.status, "error");
+    assert.strictEqual(stoppedResult.diagnostics?.[0]?.code, "LAUNCHER_REQUEST_FAILED");
+  });
+
+  it("web-worker launcher stop/restart with same transport should not leak old listener and should keep new request healthy", async () => {
+    const transport = createFakeMessageTransport({ autoRespond: false });
+    let requestIdCounter = 0;
+    const launcher = await createLauncherByKind("web-worker", {
+      transport,
+      idGenerator: () => `msg-${++requestIdCounter}`,
+    });
+
+    const firstClient = await launcher.start();
+    const firstRequest = firstClient.runtimeStatus();
+    await Promise.resolve();
+    const firstRequestRecord = transport.getSentRequests().at(-1);
+    assert.ok(firstRequestRecord);
+
+    launcher.stop();
+    assert.strictEqual(launcher.status().state, "stopped");
+    assert.strictEqual(launcher.status().lastError, null);
+
+    const secondClient = await launcher.start();
+    const secondRequest = secondClient.runtimeStatus();
+    await Promise.resolve();
+    const secondRequestRecord = transport.getSentRequests().at(-1);
+    assert.ok(secondRequestRecord);
+    assert.notStrictEqual(String(firstRequestRecord.id), String(secondRequestRecord.id));
+
+    transport.emitResponse({
+      id: firstRequestRecord.id,
+      ok: true,
+      result: makeEnvelopeForMethod("runtimeStatus"),
+      error: null,
+    });
+    await Promise.resolve();
+
+    transport.emitResponse({
+      id: secondRequestRecord.id,
+      ok: true,
+      result: makeEnvelopeForMethod("runtimeStatus"),
+      error: null,
+    });
+
+    const firstResult = await firstRequest;
+    const secondResult = await secondRequest;
+    assert.strictEqual(firstResult.status, "error");
+    assert.strictEqual(firstResult.diagnostics?.[0]?.code, "LAUNCHER_REQUEST_FAILED");
+    assert.strictEqual(secondResult.status, "ready");
+    assert.strictEqual(launcher.status().lastError, null);
   });
 
   it("all launcher kinds should expose the same five runtime client methods", async () => {

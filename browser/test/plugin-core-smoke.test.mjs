@@ -123,15 +123,30 @@ describe("activate", () => {
     const r1 = await plugin.activate();
     assert.strictEqual(r1.status, "error");
     assert.strictEqual(plugin.status().state, "error");
+    assert.strictEqual(plugin.status().lastError.status, "error");
     assert.strictEqual(initCalls, 1);
     assert.strictEqual(runtimeClient.callLog.filter((c) => c.method === "runtimeStatus").length, 0);
 
     const r2 = await plugin.activate();
     assert.strictEqual(r2.status, "ready");
     assert.strictEqual(plugin.status().state, "ready");
+    assert.strictEqual(plugin.status().lastError, null);
     assert.strictEqual(initCalls, 2);
     assert.strictEqual(runtimeClient.callLog.filter((c) => c.method === "runtimeStatus").length, 1);
     assert.strictEqual(runtimeClient.callLog.filter((c) => c.method === "initRuntime").length, 2);
+  });
+
+  it("returns the cached activation result after analyze, without reinitializing runtime", async () => {
+    const { plugin, runtimeClient } = createPlugin();
+    const activationResult = await plugin.activate();
+    const analyzeResult = await plugin.analyze(validSelection);
+
+    const secondActivateResult = await plugin.activate();
+    assert.deepStrictEqual(secondActivateResult, activationResult);
+    assert.notDeepStrictEqual(secondActivateResult, analyzeResult);
+    assert.strictEqual(plugin.status().lastResult.status, "ready");
+    assert.deepStrictEqual(plugin.status().lastResult.target, analyzeResult.target);
+    assert.strictEqual(runtimeClient.callLog.filter((c) => c.method === "initRuntime").length, 1);
   });
 
   it("keeps first analysisOptions after repeated activate in ready state", async () => {

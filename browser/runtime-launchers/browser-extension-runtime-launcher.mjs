@@ -1,4 +1,7 @@
-import { createMessageRuntimeClient } from "./message-runtime-client.mjs";
+import {
+  createMessageRuntimeClient,
+  MESSAGE_RUNTIME_CLIENT_CONTROL,
+} from "./message-runtime-client.mjs";
 
 const REQUIRED_RUNTIME_METHODS = [
   "initRuntime",
@@ -62,6 +65,7 @@ export function createBrowserExtensionRuntimeLauncher(options = {}) {
 
   let _startPromise = null;
   let _runtimeClient = null;
+  const _staleResponseIds = new Set();
 
   const resolveTransport = () => {
     if (options.transport !== undefined) {
@@ -88,6 +92,7 @@ export function createBrowserExtensionRuntimeLauncher(options = {}) {
       transport,
       requestTimeoutMs: options.requestTimeoutMs ?? 0,
       idGenerator: options.idGenerator,
+      ignoredRequestIds: _staleResponseIds,
       onError: (error) => {
         lastError = error;
       },
@@ -102,16 +107,25 @@ export function createBrowserExtensionRuntimeLauncher(options = {}) {
   };
 
   const clearPending = () => {
-    if (_runtimeClient && typeof _runtimeClient.clearPendingRequests === "function") {
-      _runtimeClient.clearPendingRequests("runtime launcher stopped");
+    const control = _runtimeClient?.[MESSAGE_RUNTIME_CLIENT_CONTROL];
+    if (control && typeof control.clearPendingRequests === "function") {
+      control.clearPendingRequests("runtime launcher stopped");
     }
   };
 
   const getPendingRequestCount = () => {
-    if (_runtimeClient && typeof _runtimeClient.getPendingRequestCount === "function") {
-      return _runtimeClient.getPendingRequestCount();
+    const control = _runtimeClient?.[MESSAGE_RUNTIME_CLIENT_CONTROL];
+    if (control && typeof control.getPendingRequestCount === "function") {
+      return control.getPendingRequestCount();
     }
     return 0;
+  };
+
+  const disposeRuntimeClient = () => {
+    const control = _runtimeClient?.[MESSAGE_RUNTIME_CLIENT_CONTROL];
+    if (control && typeof control.dispose === "function") {
+      control.dispose();
+    }
   };
 
   const start = () => {
@@ -159,6 +173,7 @@ export function createBrowserExtensionRuntimeLauncher(options = {}) {
 
   const stop = () => {
     clearPending();
+    disposeRuntimeClient();
     state = "stopped";
     started = false;
     fallbackUsed = false;
