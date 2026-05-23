@@ -5,19 +5,63 @@
  * 不参与解析、不建图、不保存数据。
  */
 
+const SENSITIVE_KEY_PATTERN = /(token|cookie|password)/i;
+const SENSITIVE_PAIR_PATTERN = /(token|cookie|password)\s*[:=]\s*[^&\s,;}]+/gi;
+
+function _redactSensitiveText(text) {
+  if (typeof text !== "string") return text;
+  return text.replace(SENSITIVE_PAIR_PATTERN, "[REDACTED]");
+}
+
+function _redactSensitiveValue(key, value) {
+  if (SENSITIVE_KEY_PATTERN.test(String(key))) {
+    return "[REDACTED]";
+  }
+  if (typeof value === "string") {
+    return _redactSensitiveText(value);
+  }
+  return value;
+}
+
+function _redactForTelemetry(value, seen = new WeakSet()) {
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: _redactSensitiveText(value.message),
+    };
+  }
+  if (!value || typeof value !== "object") {
+    return typeof value === "string" ? _redactSensitiveText(value) : value;
+  }
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => _redactForTelemetry(item, seen));
+  }
+  const redacted = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (SENSITIVE_KEY_PATTERN.test(String(key))) {
+      redacted.redacted = "[REDACTED]";
+      continue;
+    }
+    redacted[key] = _redactSensitiveValue(key, _redactForTelemetry(item, seen));
+  }
+  return redacted;
+}
+
 function _makeError(code, message) {
-  return { status: "error", code, message };
+  return { status: "error", code, message: _redactSensitiveText(message) };
 }
 
 function _emitHost(host, eventName, payload) {
   if (host && typeof host.emit === "function") {
-    host.emit(eventName, payload);
+    host.emit(eventName, _redactForTelemetry(payload));
   }
 }
 
 function _log(logger, level, ...args) {
   const log = logger ?? console;
-  log?.[level]?.(...args);
+  log?.[level]?.(...args.map((arg) => _redactForTelemetry(arg)));
 }
 
 function _safeJsonParse(text) {
@@ -55,7 +99,7 @@ function _validateFileRef(fileRef) {
       valid: false,
       error: _makeError(
         "REMOTE_RESPONSE_INVALID",
-        `source_path is not a project-internal logical path: ${fileRef.source_path}`
+        "source_path is not a project-internal logical path"
       ),
     };
   }
@@ -130,9 +174,12 @@ export function createPageRcMetadataProvider(options = {}) {
       } catch (err) {
         const error = _makeError(
           "REMOTE_FETCH_FAILED",
-          err?.message ?? String(err)
+          "rc getFileInfo failed"
         );
-        _log(logger, "error", "[page-rc-provider] getFileInfo failed:", err);
+        _log(logger, "error", "[page-rc-provider] getFileInfo failed:", {
+          name: err?.name ?? "Error",
+          message: "rc getFileInfo failed",
+        });
         _emitHost(host, "metadata_fetch_failed", { error, timestamp: Date.now() });
         return error;
       }
@@ -181,9 +228,12 @@ export function createPageRcMetadataProvider(options = {}) {
       } catch (err) {
         const error = _makeError(
           "REMOTE_FETCH_FAILED",
-          err?.message ?? String(err)
+          "rc getFileContent failed"
         );
-        _log(logger, "error", "[page-rc-provider] getFileContent failed:", err);
+        _log(logger, "error", "[page-rc-provider] getFileContent failed:", {
+          name: err?.name ?? "Error",
+          message: "rc getFileContent failed",
+        });
         _emitHost(host, "metadata_fetch_failed", { error, timestamp: Date.now() });
         return error;
       }

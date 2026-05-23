@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 use metadata_checker::parser::parse_file;
 use metadata_checker::superpage::parse_superpage;
 use std::collections::HashSet;

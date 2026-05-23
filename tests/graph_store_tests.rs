@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 use metadata_checker::graph::GraphDB;
 use metadata_checker::graph_store::{GraphReadStore, GraphWriteStore};
 use std::collections::HashMap;

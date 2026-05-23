@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 //! M11 图数据库路径、只读与并发可用性测试
 
 use metadata_checker::output::schema::{AiOutput, OutputKind};

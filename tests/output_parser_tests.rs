@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 use clap::Parser;
 use metadata_checker::dependency::DependencyGraph;
 use metadata_checker::output;

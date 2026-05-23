@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 

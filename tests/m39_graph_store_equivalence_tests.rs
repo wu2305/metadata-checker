@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 #[path = "common/memory_graph_store.rs"]
 mod memory_graph_store;
 

@@ -20,6 +20,16 @@ const validFileRef = {
   file_id: "fid1",
 };
 
+const sensitiveValues = [
+  "secret-token-value",
+  "secret-cookie-value",
+  "secret-password-value",
+  "token=",
+  "cookie=",
+  "password=",
+  "{\"components\":[{\"id\":\"raw-secret\"}]}",
+];
+
 function makeFixtures() {
   return new Map([
     [
@@ -31,6 +41,31 @@ function makeFixtures() {
       },
     ],
   ]);
+}
+
+function createMemoryLogger() {
+  const entries = [];
+  const logger = {
+    entries,
+    warn(...args) {
+      entries.push({ level: "warn", args });
+    },
+    error(...args) {
+      entries.push({ level: "error", args });
+    },
+  };
+  return logger;
+}
+
+function assertNoSensitiveLeak(value) {
+  const serialized = JSON.stringify(value);
+  for (const sensitiveValue of sensitiveValues) {
+    assert.strictEqual(
+      serialized.includes(sensitiveValue),
+      false,
+      `unexpected sensitive value leaked: ${sensitiveValue}`
+    );
+  }
 }
 
 describe("FakeRemoteMetadataProvider", () => {
@@ -65,6 +100,7 @@ describe("FakeRemoteMetadataProvider", () => {
     const result = await provider.getFileContent({ source_path: "app/Missing.app/Page.spg" });
     assert.strictEqual(result.status, "error");
     assert.strictEqual(result.code, "REMOTE_FETCH_NOT_FOUND");
+    assert.strictEqual(result.message, "file not found");
   });
 
   it("handles reject gracefully", async () => {
@@ -89,6 +125,33 @@ describe("FakeRemoteMetadataProvider", () => {
     } catch (err) {
       assert.strictEqual(err.message, "mock getFileContent throw");
     }
+  });
+
+  it("keeps missing file, reject, and call log output free of sensitive values", async () => {
+    const provider = createFakeRemoteMetadataProvider({
+      getFileInfoShouldReject: true,
+    });
+    const sensitiveFileRef = {
+      source_path:
+        "app/Missing.app/Page.spg?token=secret-token-value&cookie=secret-cookie-value&password=secret-password-value",
+      token: "secret-token-value",
+      cookie: "secret-cookie-value",
+      password: "secret-password-value",
+    };
+    const missingProvider = createFakeRemoteMetadataProvider();
+    const missing = await missingProvider.getFileInfo(sensitiveFileRef);
+    assert.strictEqual(missing.code, "REMOTE_FETCH_NOT_FOUND");
+    assertNoSensitiveLeak(missing);
+    assertNoSensitiveLeak(missingProvider.callLog);
+
+    try {
+      await provider.getFileInfo(sensitiveFileRef);
+      assert.fail("should have rejected");
+    } catch (err) {
+      assert.strictEqual(err.code, "REMOTE_FETCH_FAILED");
+      assertNoSensitiveLeak(err);
+    }
+    assertNoSensitiveLeak(provider.callLog);
   });
 
   it("returns empty related files", async () => {
@@ -128,6 +191,42 @@ describe("PageRcMetadataProvider", () => {
     assert.strictEqual(result.updated_at, "2024-01-01");
   });
 
+  it("uses rc1 fallback when rc is missing", async () => {
+    const calls = [];
+    const rc1 = async (method, fileId, sourcePath) => {
+      calls.push({ method, fileId, sourcePath });
+      return { revision: "6", content_type: "super_page" };
+    };
+    const provider = createPageRcMetadataProvider({ rc: undefined, rc1 });
+    const result = await provider.getFileInfo(validFileRef);
+    assert.strictEqual(result.revision, "6");
+    assert.strictEqual(calls.length, 1);
+    assert.deepStrictEqual(calls[0], {
+      method: "getFileInfo",
+      fileId: "fid1",
+      sourcePath: "app/Test.app/Page.spg",
+    });
+  });
+
+  it("parses string JSON getFileInfo response", async () => {
+    const rc = async () => '{"revision":"7","content_type":"table","updated_at":"2024-02-02"}';
+    const provider = createPageRcMetadataProvider({ rc });
+    const result = await provider.getFileInfo(validFileRef);
+    assert.strictEqual(result.revision, "7");
+    assert.strictEqual(result.content_type, "table");
+    assert.strictEqual(result.updated_at, "2024-02-02");
+  });
+
+  it("maps invalid string getFileInfo response to REMOTE_RESPONSE_INVALID", async () => {
+    const rc = async () => "not json";
+    const host = createFakeHost();
+    const provider = createPageRcMetadataProvider({ rc, host });
+    const result = await provider.getFileInfo(validFileRef);
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.code, "REMOTE_RESPONSE_INVALID");
+    assert.strictEqual(host.getEvents("metadata_fetch_failed").length, 1);
+  });
+
   it("calls mock rc and returns content", async () => {
     const rc = async (method, fileId, sourcePath) => {
       return '{"components":[]}';
@@ -158,6 +257,24 @@ describe("PageRcMetadataProvider", () => {
     assert.strictEqual(result.status, "error");
     assert.strictEqual(result.code, "REMOTE_FETCH_FAILED");
     assert.strictEqual(host.getEvents("metadata_fetch_failed").length, 1);
+  });
+
+  it("does not leak token, cookie, password, or raw metadata through errors, events, or logs", async () => {
+    const host = createFakeHost();
+    const logger = createMemoryLogger();
+    const rc = async () => {
+      throw new Error(
+        "token=secret-token-value cookie=secret-cookie-value password=secret-password-value {\"components\":[{\"id\":\"raw-secret\"}]}"
+      );
+    };
+    const provider = createPageRcMetadataProvider({ rc, host, logger });
+    const result = await provider.getFileInfo(validFileRef);
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.code, "REMOTE_FETCH_FAILED");
+    assertNoSensitiveLeak(result);
+    assertNoSensitiveLeak(result.diagnostics ?? []);
+    assertNoSensitiveLeak(host.getEvents("metadata_fetch_failed"));
+    assertNoSensitiveLeak(logger.entries);
   });
 
   it("getRelatedFiles returns empty array", async () => {
@@ -203,6 +320,16 @@ describe("PageRcMetadataProvider", () => {
     const result = await provider.getFileContent({ source_path: "app/../../secret.spg" });
     assert.strictEqual(result.status, "error");
     assert.strictEqual(result.code, "REMOTE_RESPONSE_INVALID");
+  });
+
+  it("rejects Windows drive source_path", async () => {
+    const rc = async () => '{"components":[]}';
+    const host = createFakeHost();
+    const provider = createPageRcMetadataProvider({ rc, host });
+    const result = await provider.getFileContent({ source_path: "C:\\workspace\\app\\Page.spg" });
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.code, "REMOTE_RESPONSE_INVALID");
+    assert.strictEqual(host.getEvents("metadata_fetch_failed").length, 1);
   });
 
   it("file_id can be null", async () => {

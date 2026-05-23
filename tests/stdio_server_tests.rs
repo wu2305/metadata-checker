@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 use metadata_checker::tool_contract::ToolRegistry;
 use std::io::{BufRead, Write};
 use std::process::{Command, Stdio};

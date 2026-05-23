@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 use metadata_checker::explain::explain_component_spg;
 use metadata_checker::parser::parse_file;
 use std::path::PathBuf;

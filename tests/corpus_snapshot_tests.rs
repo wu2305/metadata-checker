@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 use metadata_checker::output::AiOutput;
 use serde_json::json;
 use std::path::PathBuf;

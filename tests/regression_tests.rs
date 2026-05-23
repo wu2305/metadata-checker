@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 use clap::Parser;
 use metadata_checker::output::{AiOutput, OutputKind};
 use std::sync::Mutex;

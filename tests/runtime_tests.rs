@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-local")]
+
 use metadata_checker::runtime::{GraphRuntime, RuntimeQueryCommand, RuntimeQueryRequest};
 use metadata_checker::scanner;
 
