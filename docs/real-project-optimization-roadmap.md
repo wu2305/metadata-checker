@@ -4396,6 +4396,7 @@ browser/
     - M40.3-M40.9 mock/standalone 测试通过。
     - Rust/WASM target build 通过。
     - 不存在直接把 BI 逻辑写入 plugin core 的实现。
+    - 真实环境登录、cookie、SuperPage 页面 HTML 和 `custom.js` 注入验证流程已按 `docs/m40-real-bi-environment-runbook.md` 执行。
   - 验收场景：
     - 在 BI SuperPage 设计器中通过 `onInitDesigner` 安装 glue。
     - 选中普通组件，面板展示 component / reads / conditions。
