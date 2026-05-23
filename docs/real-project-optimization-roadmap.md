@@ -4137,41 +4137,111 @@ browser/
 
 - [ ] M40.4：Runtime Launcher Contract
   - 目标：不同运行环境用不同 launcher 拉起同一 WASM runtime，并返回同一 `runtimeClient`。
+  - M40.4 边界：
+    - 只实现 launcher contract 与 fake transport，不真实 instantiate WASM。
+    - 不注册真实 Service Worker。
+    - 不创建真实 Worker 文件。
+    - 不接浏览器插件 API。
+    - 不接 IndexedDB / Dexie。
+    - 不接 BI designer。
+    - 不改 Rust。
+    - 不引入 bundler 或 npm 依赖。
+    - 文件统一使用 `.mjs`，避免 Node ESM module type warning。
   - 建议位置：
-    - `browser/runtime-launchers/page-runtime-launcher.js`
-    - `browser/runtime-launchers/web-worker-runtime-launcher.js`
-    - `browser/runtime-launchers/service-worker-runtime-launcher.js`
-    - `browser/runtime-launchers/browser-extension-runtime-launcher.js`
+    - `browser/runtime-launchers/page-runtime-launcher.mjs`
+    - `browser/runtime-launchers/message-runtime-client.mjs`
+    - `browser/runtime-launchers/web-worker-runtime-launcher.mjs`
+    - `browser/runtime-launchers/service-worker-runtime-launcher.mjs`
+    - `browser/runtime-launchers/browser-extension-runtime-launcher.mjs`
+    - `browser/runtime-launchers/runtime-launcher.mjs`
+    - `browser/test/fake-message-transport.mjs`
     - `browser/test/runtime-launcher-smoke.test.mjs`
   - 统一接口：
     - `createRuntimeLauncher(options)`
+    - `createPageRuntimeLauncher(options)`
+    - `createWebWorkerRuntimeLauncher(options)`
+    - `createServiceWorkerRuntimeLauncher(options)`
+    - `createBrowserExtensionRuntimeLauncher(options)`
     - `launcher.start()`
     - `launcher.stop()`
     - `launcher.status()`
     - `launcher.getClient()`
   - `runtimeClient` 必须实现 M40.3 的 runtime client contract。
   - launcher 类型：
-    - Page Runtime：直接在页面线程 instantiate WASM。
-    - Web Worker Runtime：通过 Worker message bridge 调用 WASM。
-    - Service Worker Runtime：通过 SW message bridge 调用 WASM。
-    - Browser Extension Runtime：通过 extension background/content message bridge 调用 WASM。
+    - Page Runtime：M40.4 只包装传入的 `runtimeClient`、`runtimeModule` 或 `runtimeClientFactory`，不真实加载 WASM。
+    - Web Worker Runtime：M40.4 只通过 fake message transport 模拟 Worker message bridge。
+    - Service Worker Runtime：M40.4 只通过 fake message transport 模拟 SW message bridge。
+    - Browser Extension Runtime：M40.4 只通过 fake message transport 模拟 extension background/content message bridge。
+  - runtime client 方法名：
+    - `initRuntime(options)`
+    - `runtimeStatus()`
+    - `loadSuperpageDocument(sourcePath, rawText)`
+    - `buildOrUpdateSuperpageGraph(sourcePath)`
+    - `analyzeSuperpageSelection(selection, options)`
+    - 不允许新增 `runtime.init()` / `runtime.status()` / `analyzeSelection()` 之类别名。
+  - launcher status schema：
+    - `kind`
+    - `state`
+    - `started`
+    - `fallbackUsed`
+    - `lastError`
+    - `pendingRequestCount`
+  - launcher 状态：
+    - `idle`
+    - `starting`
+    - `ready`
+    - `stopped`
+    - `error`
+  - `start()` 语义：
+    - `start()` 返回标准 `runtimeClient`，不是 envelope。
+    - 并发 `start()` 必须复用同一个 `_startPromise`。
+    - ready 后重复 `start()` 直接返回同一个 client 引用。
+    - `getClient()` 未 start 前返回 `null`，ready 后返回同一个 client。
+  - `stop()` 语义：
+    - 清空 pending requests。
+    - `state` 变为 `stopped`。
+    - `getClient()` 返回 `null`。
+    - 后续可重新 `start()`。
+    - 真实 Worker terminate / SW unregister 不在 M40.4 处理。
+  - message protocol：
+    - request：`{ id, method, args }`
+    - response：`{ id, ok, result, error }`
+    - request id 单调递增，或测试中可注入 `idGenerator`。
+    - response id 不匹配不能 resolve 错请求。
+    - unknown id response 应忽略并记录 `lastError`。
+  - timeout 语义：
+    - 支持 `requestTimeoutMs`，默认 `0` 表示不启用。
+    - 超时返回 error envelope，错误码 `LAUNCHER_REQUEST_TIMEOUT`。
+  - 固定错误码：
+    - `LAUNCHER_START_FAILED`
+    - `LAUNCHER_NOT_STARTED`
+    - `LAUNCHER_REQUEST_FAILED`
+    - `LAUNCHER_REQUEST_TIMEOUT`
+    - `LAUNCHER_RESPONSE_MISMATCH`
   - 最小实现要求：
-    - 首轮可以只实现 Page Runtime + fake Worker/SW/Extension launcher。
+    - 首轮只实现 Page Runtime + fake Worker/SW/Extension launcher。
     - 所有 launcher 都必须返回同一种 client shape。
     - request/response 使用 request id 配对。
     - 不同 launcher 的差异只在消息传输和生命周期管理，不影响 runtime method 名称和 envelope。
     - SW 不可用时可以 fallback 到 Page Runtime，但 fallback 是 launcher 策略，不进入 plugin core。
+    - Plugin Core 不 import runtime launcher；runtime launcher 也不 import Plugin Core。
   - 测试要求：
     - 正例：
       - Page launcher 返回可调用 client。
       - fake Worker launcher 通过 message bus 返回相同 envelope。
       - fake SW launcher 初始化失败时可 fallback。
       - 并发 `start()` 复用同一个 init promise。
+      - ready 后重复 `start()` 不重复 instantiate runtime。
+      - `stop()` 后 client 清空，pending request 清理，且可重新 `start()`。
       - request id 能正确匹配异步响应。
+      - 所有 launcher 返回相同 client method shape。
     - 反例：
       - response request id 不匹配时不误用。
+      - unknown response id 不 resolve 错请求，并记录 `LAUNCHER_RESPONSE_MISMATCH`。
       - launcher start 失败返回 diagnostic。
-      - 重复 start 不重复 instantiate runtime。
+      - request reject / throw 转 error envelope。
+      - request timeout 返回 `LAUNCHER_REQUEST_TIMEOUT`。
+      - 静态检查 runtime launcher 不 import plugin core、不访问 BI glue、不 fetch metadata、不创建 DOM。
   - 验证命令：
     - `node --test browser/test/runtime-launcher-smoke.test.mjs`
 
