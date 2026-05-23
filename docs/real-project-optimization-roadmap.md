@@ -3876,7 +3876,7 @@ pub trait InvocationAdapter {
 ```text
 browser/
   plugin-core/
-    metadata-checker-plugin.js
+    metadata-checker-plugin.mjs
   runtime-launchers/
     page-runtime-launcher.js
     web-worker-runtime-launcher.js
@@ -4023,7 +4023,7 @@ browser/
 - [ ] M40.3：Plugin Core Contract
   - 目标：定义统一 JS 插件协议，插件核心不感知 BI、SW、Worker、Extension 或 DOM 细节。
   - 建议位置：
-    - `browser/plugin-core/metadata-checker-plugin.js`
+    - `browser/plugin-core/metadata-checker-plugin.mjs`
     - `browser/test/plugin-core-smoke.test.mjs`
     - `browser/test/fake-runtime-client.mjs`
     - `browser/test/fake-host.mjs`
@@ -4036,8 +4036,10 @@ browser/
     - `plugin.analyze(selection, options)`
   - 前置决策：
     - `onSelectionChanged(selection)` 在 M40.3 中不自动触发分析，只校验并保存 selection，发出 `selection_changed` 事件。
+    - `onSelectionChanged(selection)` 需保存 `selection` 的深拷贝，避免后续外部对象变更污染 `lastSelection`。
     - 自动分析属于 M40.5 glue 或 M40.7 renderer 的交互策略，不能写入 Plugin Core 默认行为。
     - `activate(context)` 必须幂等：`ready` 状态下重复调用不得重复初始化 runtime；`error` 状态下允许重新初始化重试。
+    - `ready` 状态下重复 `activate` 不得改变 `context.analysisOptions`。
     - `deactivate()` 清空 `lastSelection` / `lastResult` / `lastError`，状态回到 `inactive`，但不销毁 runtimeClient；Worker/SW/Extension runtime 生命周期属于 M40.4 launcher。
     - 公开方法的业务错误返回统一 error envelope，不直接抛出；仅 `createMetadataCheckerPlugin` 参数缺失这类编程错误可以抛出。
     - M40.3 严格复用 BrowserAnalysisEnvelope：`{ status, target, items, diagnostics }`，不得额外包一层 plugin response。
@@ -4111,6 +4113,10 @@ browser/
       - `activate` 成功调用 `runtimeClient.initRuntime` 和 `runtimeClient.runtimeStatus`。
       - `activate` 重复调用不重复初始化 runtime。
       - `activate` 在 error 状态下允许重试。
+      - `error` 状态重试应基于同一 `plugin` 实例完成恢复链路（不得通过重建实例规避）。
+      - `ready` 状态重复 `activate` 不得改变 `context.analysisOptions`。
+      - `onSelectionChanged(selection)` 触发后 `lastSelection` 为深拷贝，外部改动 `selection` 不影响 `status` 中缓存结果。
+      - `node --test` 执行 `browser/test/plugin-core-smoke.test.mjs` 不输出 `ESM module type` warning。
       - `deactivate` 清理 selection/result/error 状态并发出 `plugin_deactivated`。
       - `status` 返回 state / lastSelection / lastResult / lastError / runtimeStatus。
       - `onSelectionChanged` 校验并保存 selection，发出 `selection_changed`，但不调用 runtime analyze。
@@ -4120,6 +4126,7 @@ browser/
       - host 缺少 `emit` 时 `createMetadataCheckerPlugin` 抛出明确编程错误。
       - 未 activate 调用 `analyze` 返回 `PLUGIN_NOT_ACTIVATED`。
       - invalid selection 返回 `INVALID_SELECTION`。
+      - invalid selection 缺字段应覆盖 `file_id`、`selected_component_ids`、`active_component_id`。
       - runtime analyze reject / throw 时返回 `RUNTIME_CLIENT_ERROR`，调用可选 `host.renderError`，发出 `analysis_failed`。
       - selection event payload 不包含 raw metadata。
       - Plugin Core 在 Node 环境直接运行，不依赖 `window` / `document`。
