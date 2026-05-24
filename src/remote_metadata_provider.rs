@@ -1,8 +1,7 @@
 /**!
  * M41.2：统一 reqwest-based remote metadata provider
  *
- * 替代 WasmFetchMetadataProvider 中的 web_sys::window().fetch，
- * 同时支持 native（cli-local）和 browser-wasm 两种 target。
+ * 作为 M41 的统一 HTTP transport，同时支持 native（cli-local）和 browser-wasm 两种 target。
  * URL 构造、响应解析、错误码映射仍在 remote_metadata.rs 中，此处只做 transport 层。
  */
 use crate::remote_metadata::{
@@ -17,15 +16,23 @@ pub struct ReqwestRemoteMetadataProvider {
 }
 
 impl ReqwestRemoteMetadataProvider {
-    /// 创建默认 provider
-    pub fn new(base_url: impl Into<String>) -> Self {
-        let client = reqwest::Client::builder()
-            .build()
-            .expect("reqwest client build failed");
-        Self {
+    /// 创建默认 provider。创建失败时返回错误，不再 panic/expect。
+    pub fn new(base_url: impl Into<String>) -> Result<Self, RemoteMetadataError> {
+        let client = reqwest::Client::builder().build().map_err(|err| {
+            RemoteMetadataError::new(
+                RemoteMetadataErrorCode::ClientFetchProxyFailed,
+                format!("failed to build reqwest client: {}", err),
+            )
+        })?;
+        Ok(Self {
             client,
             base_url: base_url.into(),
-        }
+        })
+    }
+
+    /// 创建 provider 兼容别名（兼容旧命名风格）。
+    pub fn try_new(base_url: impl Into<String>) -> Result<Self, RemoteMetadataError> {
+        Self::new(base_url)
     }
 
     /// 使用外部 reqwest::Client（便于注入 mock 或自定义配置）
@@ -178,7 +185,16 @@ pub mod wasm_bindings {
             }
         };
 
-        let provider = ReqwestRemoteMetadataProvider::new(base_url);
+        let provider = match ReqwestRemoteMetadataProvider::new(base_url) {
+            Ok(p) => p,
+            Err(err) => {
+                return envelope_to_string(&make_error_envelope(
+                    err.message,
+                    "REMOTE_FETCH_INITIALIZE_FAILED",
+                ));
+            }
+        };
+
         match AsyncRemoteMetadataProvider::get_file_info(&provider, &file_ref).await {
             Ok(info) => {
                 let envelope = BrowserAnalysisEnvelope {
@@ -212,7 +228,16 @@ pub mod wasm_bindings {
             }
         };
 
-        let provider = ReqwestRemoteMetadataProvider::new(base_url);
+        let provider = match ReqwestRemoteMetadataProvider::new(base_url) {
+            Ok(p) => p,
+            Err(err) => {
+                return envelope_to_string(&make_error_envelope(
+                    err.message,
+                    "REMOTE_FETCH_INITIALIZE_FAILED",
+                ));
+            }
+        };
+
         match AsyncRemoteMetadataProvider::get_file_content(&provider, &file_ref).await {
             Ok(content) => {
                 let envelope = BrowserAnalysisEnvelope {
@@ -260,7 +285,16 @@ pub mod wasm_bindings {
             }
         };
 
-        let provider = ReqwestRemoteMetadataProvider::new(base_url);
+        let provider = match ReqwestRemoteMetadataProvider::new(base_url) {
+            Ok(p) => p,
+            Err(err) => {
+                return envelope_to_string(&make_error_envelope(
+                    err.message,
+                    "REMOTE_FETCH_INITIALIZE_FAILED",
+                ));
+            }
+        };
+
         match AsyncRemoteMetadataProvider::get_file_content(&provider, &file_ref).await {
             Ok(content) => crate::browser_wasm_bindgen::js_load_superpage_document(
                 &content.source_path,

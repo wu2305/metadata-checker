@@ -8,7 +8,7 @@
 
 | 模块 | 当前能力 | M41 关系 |
 |---|---|---|
-| `remote_metadata.rs` | `RemoteFileRef/Info/Content`、`RemoteMetadataErrorCode`、`AsyncRemoteMetadataProvider` trait、`WasmFetchMetadataProvider`（基于 `web_sys::window().fetch`） | 核心 contract 保留，替换 transport 实现 |
+| `remote_metadata.rs` | `RemoteFileRef/Info/Content`、`RemoteMetadataErrorCode`、`AsyncRemoteMetadataProvider` trait、`WasmFetchMetadataProvider` 兼容类型 | 核心 contract 保留，兼容类型必须委托 reqwest provider，不得再直接调用 `web_sys::window().fetch` |
 | `browser.rs` + `browser_wasm_bindgen.rs` | WASM runtime API：init/load/build/analyze，内存态 graph | 暴露新的远程 fetch WASM API |
 | `scanner/indexer.rs` | 6 阶段本地扫描：discover → diff → parse → apply → delete → persist | 复用于 session 目录；新增远程 discover/diff |
 | `storage_provider.rs` | `DocumentProvider` trait：`read_bytes`/`metadata` | 新增 `RemoteDocumentProvider` 实现 |
@@ -17,7 +17,6 @@
 
 ### 1.2 当前缺失
 
-- `WasmFetchMetadataProvider` 写死 `web_sys::window().fetch`，无法在 Service Worker 环境运行。
 - 没有 reqwest 统一 HTTP transport。
 - 没有 session 概念：远程 server + project → 本地目录映射。
 - 没有远程元数据批量同步能力（list/list_changed/fetch）。
@@ -48,7 +47,7 @@ browser-wasm = [
 
 - **native**：`reqwest` + `rustls-tls` + `tokio`（已有 std async）。
 - **wasm**：`reqwest` 的 `wasm-bindgen` backend，等价于 `fetch(..., credentials: include)`，不依赖 tokio。
-- **验证**：`cargo check`、`cargo check --target wasm32-unknown-unknown --features browser-wasm`。
+- **验证**：`cargo check`、`cargo check --no-default-features`、`cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown`。
 
 ### 2.2 session 存储策略
 
@@ -71,10 +70,10 @@ browser-wasm = [
 | 任务 | 文件 | 说明 |
 |---|---|---|
 | 调整 Cargo.toml | `Cargo.toml` | 引入 reqwest（optional, default-features=false），cli-local 和 browser-wasm 分别启用 |
-| 验证编译 | — | `cargo check`、`cargo check --target wasm32-unknown-unknown --features browser-wasm` |
+| 验证编译 | — | `cargo check`、`cargo check --no-default-features`、`cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown` |
 | 扩展 remote_metadata contract | `src/remote_metadata.rs` | 确认字段完整；新增 `RemoteProjectInfo`、`RemoteMetafileEntry`；URL 构造保留在 Rust 中 |
-| 实现 `ReqwestRemoteMetadataProvider` | `src/remote_metadata_provider.rs`（新建） | 替代 `WasmFetchMetadataProvider` 中的 `web_sys::window().fetch`，统一使用 reqwest |
-| 移除 `web_sys::window().fetch` | `src/remote_metadata.rs` | `WasmFetchMetadataProvider` 改用 reqwest backend |
+| 实现 `ReqwestRemoteMetadataProvider` | `src/remote_metadata_provider.rs`（新建） | 统一使用 reqwest；构造失败必须返回错误，不得在库代码中 panic |
+| 移除 `web_sys::window().fetch` 主实现 | `src/remote_metadata.rs` | `WasmFetchMetadataProvider` 仅作为兼容 wrapper 委托 reqwest backend |
 
 ### Phase 2：WASM 远程 provider（M41.3）
 
@@ -142,7 +141,8 @@ browser/
 ## 5. 验收标准
 
 - [ ] `cargo check` 通过（native）。
-- [ ] `cargo check --target wasm32-unknown-unknown --features browser-wasm` 通过。
+- [ ] `cargo check --no-default-features` 通过。
+- [ ] `cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown` 通过。
 - [ ] `cargo tree` 证明 cli-local 不携带 wasm-only 依赖，browser-wasm 不携带 tokio/native-tls。
 - [ ] browser tests 全量通过（`node --test browser/test/*.test.mjs`）。
 - [ ] Rust tests 全量通过（`cargo test`）。

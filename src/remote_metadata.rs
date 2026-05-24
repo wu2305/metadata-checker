@@ -353,24 +353,30 @@ pub trait AsyncRemoteMetadataProvider {
     ) -> Result<Vec<RemoteFileRef>, RemoteMetadataError>;
 }
 
-/// WASM 浏览器原生 fetch provider
+/// 兼容类型：保留 `WasmFetchMetadataProvider` 名称，但不再使用浏览器原生 fetch。
 ///
-/// 只通过浏览器 fetch 读取远程元数据 raw text。认证由浏览器同源登录态负责，
-/// provider 不读取 cookie，也不保存 token。
+/// 实际实现已统一迁移到 `ReqwestRemoteMetadataProvider`，此类型仅委托调用。
 #[cfg(feature = "browser-wasm")]
 pub struct WasmFetchMetadataProvider {
-    pub base_url: String,
+    base_url: String,
+    inner: crate::remote_metadata_provider::ReqwestRemoteMetadataProvider,
 }
 
 #[cfg(feature = "browser-wasm")]
 impl WasmFetchMetadataProvider {
-    pub fn new(base_url: impl Into<String>) -> Self {
-        Self {
-            base_url: base_url.into(),
-        }
+    /// 创建兼容类型实例。创建失败时返回错误，不再 panic。
+    pub fn new(base_url: impl Into<String>) -> Result<Self, RemoteMetadataError> {
+        let base_url = base_url.into();
+        let inner = crate::remote_metadata_provider::ReqwestRemoteMetadataProvider::new(&base_url)?;
+        Ok(Self { base_url, inner })
     }
 
-    /// 构造 fetch RequestInit，设置 credentials = include
+    /// 与 `new` 等价的兼容构造接口。
+    pub fn try_new(base_url: impl Into<String>) -> Result<Self, RemoteMetadataError> {
+        Self::new(base_url)
+    }
+
+    /// 保留兼容签名：构造 fetch 参数对象并设置 credentials=include。
     pub fn make_request_init(&self) -> web_sys::RequestInit {
         let init = web_sys::RequestInit::new();
         init.set_method("GET");
@@ -386,105 +392,27 @@ impl WasmFetchMetadataProvider {
         build_remote_content_url(&self.base_url, file_ref)
     }
 
-    /// 将 HTTP status 映射为 RemoteMetadataErrorCode
+    /// 将 HTTP status 映射为 RemoteMetadataErrorCode。
     pub fn map_http_status(status: u16) -> RemoteMetadataErrorCode {
         map_http_status_code(status)
     }
 
-    async fn fetch_text(&self, url: &str) -> Result<String, RemoteMetadataError> {
-        use wasm_bindgen::JsCast;
-        use wasm_bindgen_futures::JsFuture;
-
-        let window = web_sys::window().ok_or_else(|| {
-            RemoteMetadataError::new(
-                RemoteMetadataErrorCode::RemoteFetchFailed,
-                "browser window is unavailable for native fetch",
-            )
-        })?;
-        let init = self.make_request_init();
-        let response_value = JsFuture::from(window.fetch_with_str_and_init(url, &init))
-            .await
-            .map_err(map_js_fetch_error)?;
-        let response: web_sys::Response = response_value.dyn_into().map_err(|err| {
-            RemoteMetadataError::new(
-                RemoteMetadataErrorCode::RemoteResponseInvalid,
-                format!(
-                    "fetch response is not a Response object: {}",
-                    js_error_message(&err)
-                ),
-            )
-        })?;
-
-        let status = response.status();
-        if !response.ok() {
-            return Err(RemoteMetadataError::new(
-                Self::map_http_status(status),
-                format!("remote metadata fetch failed with HTTP status {}", status),
-            ));
-        }
-
-        let text_promise = response.text().map_err(map_js_fetch_error)?;
-        let text_value = JsFuture::from(text_promise)
-            .await
-            .map_err(map_js_fetch_error)?;
-        let raw_text = text_value.as_string().ok_or_else(|| {
-            RemoteMetadataError::new(
-                RemoteMetadataErrorCode::RemoteResponseInvalid,
-                "remote metadata response.text() did not produce a string",
-            )
-        })?;
-        if raw_text.is_empty() {
-            return Err(RemoteMetadataError::new(
-                RemoteMetadataErrorCode::RemoteResponseInvalid,
-                "remote metadata response is empty",
-            ));
-        }
-        Ok(raw_text)
+    pub fn with_client(
+        base_url: impl Into<String>,
+        client: reqwest::Client,
+    ) -> Result<Self, RemoteMetadataError> {
+        let base_url = base_url.into();
+        let inner = crate::remote_metadata_provider::ReqwestRemoteMetadataProvider::with_client(
+            base_url.clone(),
+            client,
+        );
+        Ok(Self { base_url, inner })
     }
 
-    async fn fetch_content(
-        &self,
-        file_ref: &RemoteFileRef,
-    ) -> Result<RemoteFileContent, RemoteMetadataError> {
-        let url = self.build_content_url(file_ref)?;
-        let response_text = self.fetch_text(&url).await?;
-        extract_remote_content_payload(&response_text, file_ref)
+    /// 保留兼容字段访问能力。
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
-}
-
-#[cfg(feature = "browser-wasm")]
-fn js_error_message(err: &wasm_bindgen::JsValue) -> String {
-    if let Some(message) = err.as_string() {
-        return message;
-    }
-    let message = js_sys::Reflect::get(err, &"message".into())
-        .ok()
-        .and_then(|value| value.as_string());
-    let name = js_sys::Reflect::get(err, &"name".into())
-        .ok()
-        .and_then(|value| value.as_string());
-    match (name, message) {
-        (Some(name), Some(message)) if !message.is_empty() => format!("{name}: {message}"),
-        (Some(name), _) => name,
-        (_, Some(message)) => message,
-        _ => "unknown JavaScript error".to_string(),
-    }
-}
-
-#[cfg(feature = "browser-wasm")]
-fn map_js_fetch_error(err: wasm_bindgen::JsValue) -> RemoteMetadataError {
-    let message = js_error_message(&err);
-    let lower = message.to_lowercase();
-    let code = if lower.contains("cors")
-        || lower.contains("failed to fetch")
-        || lower.contains("networkerror")
-        || lower.contains("load failed")
-    {
-        RemoteMetadataErrorCode::RemoteFetchCorsBlocked
-    } else {
-        RemoteMetadataErrorCode::RemoteFetchFailed
-    };
-    RemoteMetadataError::new(code, message)
 }
 
 #[cfg(feature = "browser-wasm")]
@@ -493,28 +421,21 @@ impl AsyncRemoteMetadataProvider for WasmFetchMetadataProvider {
         &self,
         file_ref: &RemoteFileRef,
     ) -> Result<RemoteFileInfo, RemoteMetadataError> {
-        let content = self.fetch_content(file_ref).await?;
-        Ok(RemoteFileInfo {
-            source_path: content.source_path,
-            file_id: content.file_id,
-            revision: content.revision,
-            content_type: content.content_type,
-            updated_at: None,
-        })
+        AsyncRemoteMetadataProvider::get_file_info(&self.inner, file_ref).await
     }
 
     async fn get_file_content(
         &self,
         file_ref: &RemoteFileRef,
     ) -> Result<RemoteFileContent, RemoteMetadataError> {
-        self.fetch_content(file_ref).await
+        AsyncRemoteMetadataProvider::get_file_content(&self.inner, file_ref).await
     }
 
     async fn get_related_files(
         &self,
         _file_ref: &RemoteFileRef,
     ) -> Result<Vec<RemoteFileRef>, RemoteMetadataError> {
-        Ok(Vec::new())
+        AsyncRemoteMetadataProvider::get_related_files(&self.inner, _file_ref).await
     }
 }
 
@@ -791,7 +712,7 @@ mod tests {
     #[cfg(all(feature = "browser-wasm", target_arch = "wasm32"))]
     #[test]
     fn test_wasm_request_init_sets_credentials_include() {
-        let provider = WasmFetchMetadataProvider::new("https://host.example");
+        let provider = WasmFetchMetadataProvider::new("https://host.example").unwrap();
         let init = provider.make_request_init();
         let value = wasm_bindgen::JsValue::from(init);
         let credentials = js_sys::Reflect::get(&value, &"credentials".into())
