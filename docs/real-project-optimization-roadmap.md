@@ -4790,8 +4790,8 @@ browser/
   - session-aware build graph 复用现有 scanner/query。
 
 - [ ] M41.8：实现 native CLI remote provider
-  - 当前已完成 native remote session provider contract 与 in-memory/test provider，用于后续 CLI 真实 HTTP provider 和同步流程接入。
-  - 尚未完成真实登录、list_projects/list_metafiles 的 HTTP 实现，因此本项仍未完全验收。
+  - 当前已完成 native remote session provider contract、in-memory/test provider、基于 reqwest 的 BI provider 初版，以及 permissionInfo JSON / lz-string 压缩响应解析测试。
+  - 尚未完成真实登录/cookie jar 接入和真实服务器端到端验收，因此本项仍未完全验收。
   - `list_projects`
   - `list_metafiles`
   - `fetch_metafile_info`
@@ -4814,24 +4814,27 @@ browser/
     - `none`
 
 - [ ] M41.10：远程同步到 session
-  - 当前已完成远程内容写入 session project mirror 的底座：logical path 校验、临时文件写入、manifest 更新、未变化跳过、删除标记。
-  - 尚未接入真实 remote provider、CLI refresh 命令和 scanner/indexer 调用，因此本项仍未完全验收。
+  - 当前已完成远程内容写入 session project mirror 的底座：logical path 校验、临时文件写入、manifest 更新、未变化跳过、删除标记、deleted 条目不拉取内容、失败时保留旧 session。
+  - 已提供 `build_session_graph` 复用现有 `ProjectIndexer::scan`。
+  - 尚未接入真实 CLI refresh 命令，因此本项仍未完全验收。
   - 根据 remote logical path 写入 session project。
   - manifest 记录 etag/version/hash/mtime/size。
   - 支持只同步 SuperPage 及其关联 `.tbl` 的局部模式。
   - 支持全项目同步模式。
 
 - [ ] M41.11：远程增量
+  - 当前已有 partial sync 不删除未出现文件、deleted entry 标记并删除 mirror 文件、fetch 失败不污染旧 session 的测试。
+  - 尚未完成真实远端 changed_since / etag diff 的端到端验收。
   - 未变化文件不重新下载。
   - 删除文件在 manifest 中标记并从 session index 移除。
   - 失败时保留上一轮可用 session。
 
 - [ ] M41.12：session 管理命令
-  - list sessions
-  - show manifest
-  - refresh session
-  - delete session
-  - status
+  - [x] list sessions
+  - [x] show manifest
+  - [x] delete session
+  - [x] status
+  - [ ] refresh session：当前返回稳定 `SESSION_REFRESH_NOT_IMPLEMENTED` envelope，等待真实 provider/login 接入
 
 验收标准：
 

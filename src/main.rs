@@ -32,6 +32,40 @@ fn run_cli_runtime_tool(
     Ok(runtime.query(req)?.result)
 }
 
+/// 输出 session 命令的结构化错误。
+fn print_session_error(code: &str, message: impl Into<String>) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "ok": false,
+            "error": {
+                "code": code,
+                "message": message.into(),
+            },
+        }))?
+    );
+    Ok(())
+}
+
+/// 读取 session manifest，失败时转换为稳定 JSON envelope。
+fn read_session_manifest_or_print_error(
+    session_manager: &metadata_checker::session::SessionManager,
+    session_id: &str,
+) -> Result<Option<metadata_checker::session::SessionManifest>> {
+    match session_manager.read_manifest(session_id) {
+        Ok(manifest) => Ok(Some(manifest)),
+        Err(err) => {
+            let code = if err.to_string().contains("invalid session_id") {
+                "SESSION_INVALID_ID"
+            } else {
+                "SESSION_NOT_FOUND"
+            };
+            print_session_error(code, err.to_string())?;
+            Ok(None)
+        }
+    }
+}
+
 /// CLI 入口
 ///
 /// 命令行参数解析后，根据子命令执行：
@@ -53,38 +87,52 @@ fn main() -> Result<()> {
 
     if args.session_list {
         let sessions = session_manager.list_sessions()?;
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-            "ok": true,
-            "sessions": sessions,
-            "session_dir": session_root.to_string_lossy(),
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ok": true,
+                "sessions": sessions,
+                "session_dir": session_root.to_string_lossy(),
+            }))?
+        );
         return Ok(());
     }
 
     if let Some(ref id) = args.session_show {
-        let manifest = session_manager.read_manifest(id)?;
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-            "ok": true,
-            "manifest": manifest,
-        }))?);
+        let Some(manifest) = read_session_manifest_or_print_error(&session_manager, id)? else {
+            return Ok(());
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ok": true,
+                "manifest": manifest,
+            }))?
+        );
         return Ok(());
     }
 
     if let Some(ref id) = args.session_status {
-        let manifest = session_manager.read_manifest(id)?;
-        let mirror_root = metadata_checker::session::sync::project_mirror_root(&session_manager.session_dir(id));
+        let Some(manifest) = read_session_manifest_or_print_error(&session_manager, id)? else {
+            return Ok(());
+        };
+        let mirror_root =
+            metadata_checker::session::sync::project_mirror_root(&session_manager.session_dir(id));
         let file_count = std::fs::read_dir(&mirror_root)
             .map(|entries| entries.filter(|e| e.is_ok()).count())
             .unwrap_or(0);
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-            "ok": true,
-            "session_id": id,
-            "project_ref": manifest.project_ref,
-            "project_name": manifest.project_name,
-            "file_count": file_count,
-            "graph_db_path": manifest.graph_db_path,
-            "updated_at": manifest.updated_at,
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ok": true,
+                "session_id": id,
+                "project_ref": manifest.project_ref,
+                "project_name": manifest.project_name,
+                "file_count": file_count,
+                "graph_db_path": manifest.graph_db_path,
+                "updated_at": manifest.updated_at,
+            }))?
+        );
         return Ok(());
     }
 
@@ -93,18 +141,21 @@ fn main() -> Result<()> {
         if session_dir.exists() {
             std::fs::remove_dir_all(&session_dir)?;
         }
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-            "ok": true,
-            "deleted": id,
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ok": true,
+                "deleted": id,
+            }))?
+        );
         return Ok(());
     }
 
     if let Some(ref _id) = args.session_refresh {
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-            "ok": false,
-            "error": "session refresh requires remote provider (M41.10)",
-        }))?);
+        print_session_error(
+            "SESSION_REFRESH_NOT_IMPLEMENTED",
+            "session refresh requires remote provider (M41.10)",
+        )?;
         return Ok(());
     }
 

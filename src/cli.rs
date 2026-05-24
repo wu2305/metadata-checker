@@ -228,7 +228,11 @@ pub struct Cli {
     )]
     pub question_kind: Option<String>,
 
-    #[arg(long, value_name = "DIR", help = "Session root directory (default: ~/.metadata-checker/sessions)")]
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Session root directory (default: ~/.metadata-checker/sessions)"
+    )]
     pub session_dir: Option<PathBuf>,
 
     #[arg(long, help = "List all sessions")]

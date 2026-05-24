@@ -107,7 +107,7 @@ browser-wasm = [
 
 ### Phase 5：Native Session 基座（M41.6 - M41.12）
 
-状态：部分落地。已完成 manifest schema、session manager、AuthContext/SecretStore、native remote session provider contract + in-memory test provider，以及远程内容写入 session project mirror 的同步底座。尚未完成真实 CLI 登录/远程同步命令、真实远程增量拉取和 session 管理子命令。
+状态：部分落地。已完成 manifest schema、session manager、AuthContext/SecretStore、native remote session provider contract + in-memory/test provider、reqwest BI provider 初版、远程内容写入 session project mirror、删除事件处理、失败不污染旧 session、session-aware build graph 辅助函数，以及 `--session-list/show/status/delete/refresh` 的 CLI 契约测试。尚未完成真实 CLI 登录/session refresh 端到端命令、真实服务器增量拉取验收和 browser-wasm 真实 artifact 联调。
 
 | 任务 | 文件 | 说明 |
 |---|---|---|
@@ -117,7 +117,7 @@ browser-wasm = [
 | 同步到 session | `src/session/sync.rs` | 远程 logical path → 本地 session 目录；局部模式（只同步 SPG+关联 TBL）/ 全量模式 |
 | 增量同步 | `src/session/sync.rs` | manifest 记录 etag/version/hash/mtime/size；未变化不下载；删除文件标记并移除 |
 | 认证边界 | `src/session/auth.rs` | `AuthProvider`、`SecretStore`、`AuthContext`（browser_session / cookie_jar / explicit_credentials / none） |
-| session 管理命令 | `src/cli.rs` + `src/main.rs` | `session list`, `session show`, `session refresh`, `session delete`, `session status` |
+| session 管理命令 | `src/cli.rs` + `src/main.rs` | 已提供 `--session-list`, `--session-show`, `--session-refresh`, `--session-delete`, `--session-status`；`refresh` 暂返回稳定 `SESSION_REFRESH_NOT_IMPLEMENTED` envelope |
 | 脱敏策略 | — | token/secret 不进入 stdout/stderr/graphdb/manifest；日志脱敏 |
 
 ---
@@ -146,18 +146,18 @@ browser/
 
 ## 5. 验收标准
 
-- [ ] `cargo check` 通过（native）。
-- [ ] `cargo check --no-default-features` 通过。
-- [ ] `cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown` 通过。
+- [x] `cargo check` 通过（native）。
+- [x] `cargo check --no-default-features` 通过。
+- [x] `cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown` 通过。
 - [ ] `cargo tree` 证明 cli-local 不携带 wasm-only 依赖，browser-wasm 不携带 tokio/native-tls。
 - [ ] browser tests 全量通过（`node --test browser/test/*.test.mjs`）。
 - [ ] Rust tests 全量通过（`cargo test`）。
 - [ ] 远程元数据 URL 构造、响应解析、错误码映射仅在 Rust 中实现，JS 不再新增第二套。
 - [ ] browser-wasm 通过 reqwest/fetch 借用浏览器登录 session 获取远程元数据。
 - [ ] Service Worker 可以通过 message 调用 WASM 远程 fetch，并返回统一 envelope。
-- [ ] 本地可以从远程 server 拉取项目元数据并建立 session。
-- [ ] session 同步后可用现有 `ProjectIndexer::scan` + `build_graph` + `query`。
-- [ ] 增量同步不会全量重拉。
+- [ ] 本地可以从远程 server 拉取项目元数据并建立 session。（provider 和同步底座已有，CLI 登录/refresh 尚未接通）
+- [x] session 同步后可用现有 `ProjectIndexer::scan` + `build_graph` + `query`。
+- [ ] 增量同步不会全量重拉。（partial/delete/失败保留已有测试，真实远端 changed_since 尚未验收）
 - [ ] token/secret 不进入 stdout/stderr/graphdb/manifest。
 - [ ] 远程失败不破坏已有可用 session。
 - [ ] 不引入 rexie/IndexedDB 真实持久化依赖。
