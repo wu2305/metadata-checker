@@ -24,6 +24,7 @@ const REQUIRED_METHODS = [
   "initRuntime",
   "runtimeStatus",
   "loadSuperpageDocument",
+  "loadRemoteSuperpageDocument",
   "buildOrUpdateSuperpageGraph",
   "analyzeSuperpageSelection",
 ];
@@ -96,6 +97,24 @@ function makeEnvelopeForMethod(method, args = []) {
     };
   }
 
+  if (method === "loadRemoteSuperpageDocument") {
+    return {
+      status: "ready",
+      target: selection.source_path ?? null,
+      items: [
+        {
+          kind: "remote_document_loaded",
+          label: "Remote Document Loaded",
+          detail: {
+            source_path: selection.source_path,
+            file_id: selection.file_id,
+          },
+        },
+      ],
+      diagnostics: [],
+    };
+  }
+
   if (method === "buildOrUpdateSuperpageGraph") {
     return {
       status: "ready",
@@ -159,6 +178,10 @@ function createStubRuntimeClient() {
       calls.push({ method: "loadSuperpageDocument", args });
       return makeEnvelopeForMethod("loadSuperpageDocument", args);
     },
+    loadRemoteSuperpageDocument(...args) {
+      calls.push({ method: "loadRemoteSuperpageDocument", args });
+      return makeEnvelopeForMethod("loadRemoteSuperpageDocument", args);
+    },
     buildOrUpdateSuperpageGraph(...args) {
       calls.push({ method: "buildOrUpdateSuperpageGraph", args });
       return makeEnvelopeForMethod("buildOrUpdateSuperpageGraph", args);
@@ -177,7 +200,7 @@ function assertClientMethodShape(client, label = "runtime client") {
   assert.deepStrictEqual(
     Object.keys(client).sort(),
     [...REQUIRED_METHODS].sort(),
-    `${label} should expose only the five public runtime methods`
+    `${label} should expose only the public runtime methods`
   );
   for (const method of REQUIRED_METHODS) {
     assert.strictEqual(
@@ -528,6 +551,8 @@ describe("Runtime Launcher Runtime-Contract (M40.4)", () => {
       runtimeStatus: () => new Promise((resolve) => (pending.resolve = resolve)),
       loadSuperpageDocument: (sourcePath) =>
         makeEnvelopeForMethod("loadSuperpageDocument", [sourcePath]),
+      loadRemoteSuperpageDocument: (fileRef) =>
+        makeEnvelopeForMethod("loadRemoteSuperpageDocument", [fileRef]),
       buildOrUpdateSuperpageGraph: (sourcePath) =>
         makeEnvelopeForMethod("buildOrUpdateSuperpageGraph", [sourcePath]),
       analyzeSuperpageSelection: (selection) =>
@@ -607,7 +632,7 @@ describe("Runtime Launcher Runtime-Contract (M40.4)", () => {
     assert.strictEqual(launcher.status().lastError, null);
   });
 
-  it("all launcher kinds should expose the same five runtime client methods", async () => {
+  it("all launcher kinds should expose the same runtime client methods", async () => {
     for (const kind of LAUNCHER_KINDS) {
       const isPage = kind === "page";
       const runtimeClient = isPage

@@ -4753,7 +4753,7 @@ browser/
   - 覆盖同源 cookie/session 借用路径。
   - 覆盖 401/403/404/CORS/network/invalid JSON/empty body。
 
-- [ ] M41.4：Service Worker message API 接入远程元数据
+- [x] M41.4：Service Worker message API 接入远程元数据
   - 在 `browser/service-worker/metadata-checker-sw.js` 中新增 message method：
     - `fetchRemoteFileInfo`
     - `fetchRemoteFileContent`
@@ -4763,14 +4763,14 @@ browser/
   - WASM 初始化失败时返回稳定 diagnostic，允许 page fallback。
   - 测试覆盖 SW fetch 成功、401、404、WASM_FETCH_FAILED、重复请求复用初始化 Promise。
 
-- [ ] M41.5：Controller 支持远程加载双模式
+- [x] M41.5：Controller 支持远程加载双模式
   - Page provider 模式：页面 provider 拉 rawText，再调用 `loadSuperpageDocument(sourcePath, rawText)`。
   - Runtime/SW provider 模式：页面只传 `fileRef/selection`，runtime/SW 自行远程加载。
   - 默认优先 runtime/SW provider；失败时可 fallback 到 page provider。
   - selection payload 仍禁止携带 `.spg` raw text 或完整组件 JSON。
   - 大型 `.spg` 不通过 selection bridge 传输。
 
-- [ ] M41.6：定义 native session manifest schema
+- [x] M41.6：定义 native session manifest schema
   - `session_id`
   - `created_at`
   - `updated_at`
@@ -4783,13 +4783,15 @@ browser/
   - `schema_version`
   - 不记录 token/secret。
 
-- [ ] M41.7：实现 session 创建/打开
+- [x] M41.7：实现 session 创建/打开
   - 从 remote server + project 创建 session。
   - session 内保存可扫描的项目镜像。
   - 保持原 `--project-dir` 行为不变。
   - session-aware build graph 复用现有 scanner/query。
 
 - [ ] M41.8：实现 native CLI remote provider
+  - 当前已完成 native remote session provider contract 与 in-memory/test provider，用于后续 CLI 真实 HTTP provider 和同步流程接入。
+  - 尚未完成真实登录、list_projects/list_metafiles 的 HTTP 实现，因此本项仍未完全验收。
   - `list_projects`
   - `list_metafiles`
   - `fetch_metafile_info`
@@ -4799,7 +4801,7 @@ browser/
   - cookie/session 使用 native cookie jar 或显式 session store。
   - 不把密码、cookie、token 写入日志、manifest 或 graphdb。
 
-- [ ] M41.9：定义认证与安全边界
+- [x] M41.9：定义认证与安全边界
   - `AuthProvider`
   - `SecretStore`
   - 凭证读取与刷新策略。
@@ -4812,6 +4814,8 @@ browser/
     - `none`
 
 - [ ] M41.10：远程同步到 session
+  - 当前已完成远程内容写入 session project mirror 的底座：logical path 校验、临时文件写入、manifest 更新、未变化跳过、删除标记。
+  - 尚未接入真实 remote provider、CLI refresh 命令和 scanner/indexer 调用，因此本项仍未完全验收。
   - 根据 remote logical path 写入 session project。
   - manifest 记录 etag/version/hash/mtime/size。
   - 支持只同步 SuperPage 及其关联 `.tbl` 的局部模式。

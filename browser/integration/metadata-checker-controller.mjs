@@ -109,24 +109,32 @@ export function createMetadataCheckerController(options = {}) {
   const host = options.host;
   const logger = options.logger ?? console;
   const analysisOptions = options.analysisOptions ?? {};
+  const runtimeOptions = options.runtimeOptions ?? {};
+  const remoteLoadMode = options.remoteLoadMode ?? "runtime-first";
   const clock = options.clock ?? (() => Date.now());
+  const hasPageProvider = provider && typeof provider.getFileContent === "function";
+  const hasRuntimeRemoteLoader =
+    runtimeClient && typeof runtimeClient.loadRemoteSuperpageDocument === "function";
+  const shouldPreferRuntimeRemote =
+    remoteLoadMode === "runtime-first" && hasRuntimeRemoteLoader;
 
   if (!plugin || typeof plugin.onSelectionChanged !== "function") {
     throw new Error(
       "createMetadataCheckerController: plugin with onSelectionChanged is required",
     );
   }
-  if (!provider || typeof provider.getFileContent !== "function") {
+  if (!hasPageProvider && !shouldPreferRuntimeRemote) {
     throw new Error(
       "createMetadataCheckerController: provider with getFileContent is required",
     );
   }
   if (
     !runtimeClient ||
-    typeof runtimeClient.loadSuperpageDocument !== "function"
+    (typeof runtimeClient.loadSuperpageDocument !== "function" &&
+      !hasRuntimeRemoteLoader)
   ) {
     throw new Error(
-      "createMetadataCheckerController: runtimeClient with loadSuperpageDocument is required",
+      "createMetadataCheckerController: runtimeClient with loadSuperpageDocument or loadRemoteSuperpageDocument is required",
     );
   }
   if (!renderer || typeof renderer.renderAnalysis !== "function") {
@@ -162,6 +170,70 @@ export function createMetadataCheckerController(options = {}) {
       runtimeType,
       timestamp: clock(),
     });
+  }
+
+  function _isErrorEnvelope(value) {
+    return value && typeof value === "object" && value.status === "error";
+  }
+
+  async function _loadDocumentViaPageProvider(fileRef, sourcePath) {
+    if (!hasPageProvider) {
+      throw new Error("page metadata provider is not available for fallback");
+    }
+
+    const contentResult = await provider.getFileContent(fileRef);
+    if (_isErrorEnvelope(contentResult)) {
+      throw new Error(
+        _errorMessageFromProviderResult(contentResult, "metadata fetch failed"),
+      );
+    }
+    const rawText = contentResult?.raw_text ?? "";
+
+    if (typeof provider.getFileInfo === "function") {
+      const infoResult = await provider.getFileInfo(fileRef);
+      if (_isErrorEnvelope(infoResult)) {
+        throw new Error(
+          _errorMessageFromProviderResult(infoResult, "metadata info fetch failed"),
+        );
+      }
+    }
+
+    const loadResult = await runtimeClient.loadSuperpageDocument(sourcePath, rawText);
+    if (_isErrorEnvelope(loadResult)) {
+      throw new Error(
+        _errorMessageFromProviderResult(loadResult, "runtime load failed"),
+      );
+    }
+    return loadResult;
+  }
+
+  async function _loadDocumentForSelection(fileRef, sourcePath) {
+    if (!shouldPreferRuntimeRemote) {
+      return _loadDocumentViaPageProvider(fileRef, sourcePath);
+    }
+
+    try {
+      const remoteResult = await runtimeClient.loadRemoteSuperpageDocument(
+        fileRef,
+        runtimeOptions,
+      );
+      if (_isErrorEnvelope(remoteResult)) {
+        throw new Error(
+          _errorMessageFromProviderResult(remoteResult, "runtime remote metadata load failed"),
+        );
+      }
+      return remoteResult;
+    } catch (err) {
+      _emitHost(host, "controller_remote_load_fallback", {
+        error: _makeErrorEnvelope(
+          "REMOTE_RUNTIME_LOAD_FAILED",
+          err?.message ?? String(err),
+          sourcePath,
+        ),
+        timestamp: clock(),
+      });
+      return _loadDocumentViaPageProvider(fileRef, sourcePath);
+    }
   }
 
   async function _ensureInitialized() {
@@ -278,31 +350,7 @@ export function createMetadataCheckerController(options = {}) {
     _emitHost(host, "analysis_started", { selection, timestamp: clock() });
 
     try {
-      // 获取文件内容，但不塞进 selection payload
-      const contentResult = await provider.getFileContent(fileRef);
-      if (
-        contentResult &&
-        typeof contentResult === "object" &&
-        contentResult.status === "error"
-      ) {
-        throw new Error(
-          _errorMessageFromProviderResult(contentResult, "metadata fetch failed"),
-        );
-      }
-      const rawText = contentResult?.raw_text ?? "";
-
-      const infoResult = await provider.getFileInfo(fileRef);
-      if (
-        infoResult &&
-        typeof infoResult === "object" &&
-        infoResult.status === "error"
-      ) {
-        throw new Error(
-          _errorMessageFromProviderResult(infoResult, "metadata info fetch failed"),
-        );
-      }
-
-      await runtimeClient.loadSuperpageDocument(sourcePath, rawText);
+      await _loadDocumentForSelection(fileRef, sourcePath);
       await runtimeClient.buildOrUpdateSuperpageGraph(sourcePath);
 
       const result = await runtimeClient.analyzeSuperpageSelection(

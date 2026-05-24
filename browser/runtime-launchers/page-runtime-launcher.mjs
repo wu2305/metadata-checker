@@ -2,6 +2,7 @@ const REQUIRED_RUNTIME_METHODS = [
   "initRuntime",
   "runtimeStatus",
   "loadSuperpageDocument",
+  "loadRemoteSuperpageDocument",
   "buildOrUpdateSuperpageGraph",
   "analyzeSuperpageSelection",
 ];

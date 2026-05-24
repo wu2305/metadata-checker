@@ -29,6 +29,8 @@ pub mod response_processor;
 #[cfg(feature = "cli-local")]
 pub mod runtime;
 pub mod scanner;
+#[cfg(feature = "cli-local")]
+pub mod session;
 pub mod source_id;
 #[cfg(feature = "cli-local")]
 pub mod stdio_server;

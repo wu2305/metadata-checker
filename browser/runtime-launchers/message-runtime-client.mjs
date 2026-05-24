@@ -203,6 +203,8 @@ export function createMessageRuntimeClient({
     const target =
       method === "loadSuperpageDocument" || method === "buildOrUpdateSuperpageGraph"
         ? args[0] ?? null
+        : method === "loadRemoteSuperpageDocument"
+          ? args?.[0]?.source_path ?? args?.[0]?.file_id ?? null
         : method === "analyzeSuperpageSelection"
           ? args?.[0]?.active_component_id ?? args?.[0]?.source_path ?? null
           : null;
@@ -280,6 +282,9 @@ export function createMessageRuntimeClient({
     },
     loadSuperpageDocument(sourcePath, rawText) {
       return request("loadSuperpageDocument", [sourcePath, rawText]);
+    },
+    loadRemoteSuperpageDocument(fileRef, options) {
+      return request("loadRemoteSuperpageDocument", [fileRef, options]);
     },
     buildOrUpdateSuperpageGraph(sourcePath) {
       return request("buildOrUpdateSuperpageGraph", [sourcePath]);

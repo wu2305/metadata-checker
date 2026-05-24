@@ -85,6 +85,8 @@ browser-wasm = [
 
 ### Phase 3：Service Worker message API（M41.4）
 
+状态：已落地。`browser/service-worker/metadata-checker-sw.js` 已新增远程元数据 message method，并通过 runtime launcher contract 暴露给 Controller；SW JS 只做 WASM lifecycle/message routing，不新增 BI URL 拼接。
+
 | 任务 | 文件 | 说明 |
 |---|---|---|
 | SW 新增 message method | `browser/service-worker/metadata-checker-sw.js` | `fetchRemoteFileInfo`、`fetchRemoteFileContent`、`loadRemoteSuperpageDocument` |
@@ -94,6 +96,8 @@ browser-wasm = [
 
 ### Phase 4：Controller 双模式（M41.5）
 
+状态：已落地。Controller 默认优先 runtime/SW remote loader，失败时 fallback 到 page provider；selection payload 仍不携带 raw metadata。
+
 | 任务 | 文件 | 说明 |
 |---|---|---|
 | page provider 模式 | `browser/integration/metadata-checker-controller.mjs` | 保留现有逻辑：页面 provider 拉 rawText → runtime.loadSuperpageDocument |
@@ -102,6 +106,8 @@ browser-wasm = [
 | selection payload 约束 | — | 仍禁止携带 `.spg` raw text 或完整 component JSON |
 
 ### Phase 5：Native Session 基座（M41.6 - M41.12）
+
+状态：部分落地。已完成 manifest schema、session manager、AuthContext/SecretStore、native remote session provider contract + in-memory test provider，以及远程内容写入 session project mirror 的同步底座。尚未完成真实 CLI 登录/远程同步命令、真实远程增量拉取和 session 管理子命令。
 
 | 任务 | 文件 | 说明 |
 |---|---|---|

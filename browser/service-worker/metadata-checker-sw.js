@@ -13,6 +13,7 @@ const DEFAULT_WASM_FILE = "metadata_checker_bg.wasm";
 let _initPromise = null;
 let _initFailed = false;
 let _initError = null;
+let _wasmExports = {};
 let _wasmStatus = {
   state: "mock",
   mode: "mock",
@@ -60,6 +61,135 @@ function _makeWasmError(code, message, detail = {}) {
   err.code = code;
   err.diagnostic = _makeDiagnostic(code, message, detail);
   return err;
+}
+
+function _findExportName(name) {
+  const camelName = name?.replace(/_([a-z])/g, (_, ch) => ch.toUpperCase());
+  const candidates = [name, camelName];
+  const fallback = name?.replace(/[A-Z]/g, "_$&").toLowerCase();
+  if (fallback !== name) {
+    candidates.push(fallback);
+  }
+  for (const candidate of candidates) {
+    if (typeof _wasmExports[candidate] === "function") {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+async function _callWasmExport(exportName, args = []) {
+  const resolvedName = _findExportName(exportName);
+  if (!resolvedName) {
+    throw _makeWasmError("WASM_EXPORT_MISSING", "WASM export is missing", {
+      export_name: exportName,
+    });
+  }
+  try {
+    const fn = _wasmExports[resolvedName];
+    const result = fn(...args);
+    if (result && typeof result?.then === "function") {
+      return await result;
+    }
+    return result;
+  } catch (err) {
+    if (err && typeof err === "object" && typeof err.code === "string") {
+      throw err;
+    }
+    throw _makeWasmError(
+      "WASM_EXPORT_ERROR",
+      err?.message ?? "WASM export execution failed",
+      {
+        export_name: resolvedName,
+        cause_message: err?.message ?? String(err),
+      },
+    );
+  }
+}
+
+function _extractSourcePath(ref) {
+  if (typeof ref === "string") {
+    return ref;
+  }
+  if (ref && typeof ref === "object") {
+    return ref.source_path ?? ref.sourcePath ?? ref.filePath ?? null;
+  }
+  return null;
+}
+
+function _extractRawText(result) {
+  if (typeof result === "string") {
+    try {
+      const parsed = JSON.parse(result);
+      return _extractRawText(parsed);
+    } catch {
+      return result;
+    }
+  }
+  if (!result || typeof result !== "object") {
+    return "";
+  }
+  return (
+    result.raw_text ??
+    result.rawText ??
+    result.content ??
+    result.detail?.raw_text ??
+    result.detail?.rawText ??
+    result.detail?.content ??
+    ""
+  );
+}
+
+function _parseWasmResult(result) {
+  if (typeof result !== "string") {
+    return result;
+  }
+  try {
+    const parsed = JSON.parse(result);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      ("status" in parsed || "items" in parsed || "diagnostics" in parsed)
+    ) {
+      return parsed;
+    }
+    return result;
+  } catch {
+    return result;
+  }
+}
+
+function _baseUrlFromOptions(options) {
+  return (
+    options?.base_url ??
+    options?.baseUrl ??
+    options?.remote_base_url ??
+    options?.remoteBaseUrl ??
+    self.location?.origin ??
+    ""
+  );
+}
+
+function _remoteExportArgs(exportName, fileRef, options = {}) {
+  const resolvedName = _findExportName(exportName);
+  const fn = resolvedName ? _wasmExports[resolvedName] : null;
+  const expectedBindingArity =
+    exportName === "loadRemoteSuperpageDocument" ? 3 : 2;
+  const shouldUseRustBindingShape =
+    typeof fn === "function" &&
+    (fn.length >= expectedBindingArity ||
+      options?.base_url ||
+      options?.baseUrl ||
+      options?.remote_base_url ||
+      options?.remoteBaseUrl);
+  if (!shouldUseRustBindingShape) {
+    return [fileRef, options];
+  }
+  const fileRefJson = typeof fileRef === "string" ? fileRef : JSON.stringify(fileRef ?? {});
+  if (exportName === "loadRemoteSuperpageDocument") {
+    return [_baseUrlFromOptions(options), fileRefJson, JSON.stringify(options ?? {})];
+  }
+  return [_baseUrlFromOptions(options), fileRefJson];
 }
 
 function _getFetch() {
@@ -130,7 +260,9 @@ async function _arrayBufferInstantiate(wasmApi, response, imports, context) {
 
 async function _loadWasmRuntime(options = {}) {
   if (options?.mock === true) {
-    return _mockInitRuntime(options);
+    const result = _mockInitRuntime(options);
+    _wasmExports = result.exports ?? {};
+    return result;
   }
 
   const wasmUrl = options?.wasmUrl ?? _defaultWasmUrl();
@@ -233,6 +365,7 @@ async function _loadWasmRuntime(options = {}) {
   }
 
   const instance = instantiated?.instance ?? instantiated;
+  _wasmExports = instance?.exports ?? {};
   const exportNames = Object.keys(instance?.exports ?? {});
   _wasmStatus = {
     state: fallbackUsed ? "fallback" : "loaded",
@@ -269,6 +402,13 @@ function _mockInitRuntime(options = {}) {
   if (options?.shouldFail) {
     throw new Error("mock initRuntime failed");
   }
+  const exports = options?.mockExports ?? {
+    analyze: () => {},
+    fetch_remote_file_info: () => ({}),
+    fetch_remote_file_content: () => "",
+    load_remote_superpage_document: () => ({}),
+  };
+  _wasmExports = exports;
   _wasmStatus = {
     state: "mock",
     mode: "mock",
@@ -277,6 +417,7 @@ function _mockInitRuntime(options = {}) {
     diagnostic: null,
   };
   return {
+    exports,
     status: "ready",
     target: null,
     items: [
@@ -287,6 +428,53 @@ function _mockInitRuntime(options = {}) {
       },
     ],
     diagnostics: [],
+  };
+}
+
+async function _mockFetchRemoteFileInfo(fileRef, options) {
+  const result = await _callWasmExport(
+    "fetchRemoteFileInfo",
+    _remoteExportArgs("fetchRemoteFileInfo", fileRef, options),
+  );
+  return _parseWasmResult(result);
+}
+
+async function _mockFetchRemoteFileContent(fileRef, options) {
+  const result = await _callWasmExport(
+    "fetchRemoteFileContent",
+    _remoteExportArgs("fetchRemoteFileContent", fileRef, options),
+  );
+  return _parseWasmResult(result);
+}
+
+async function _mockLoadRemoteSuperpageDocument(fileRef, options) {
+  const wasmResult = await _callWasmExport(
+    "loadRemoteSuperpageDocument",
+    _remoteExportArgs("loadRemoteSuperpageDocument", fileRef, options),
+  );
+  const result = _parseWasmResult(wasmResult);
+  const sourcePath = _extractSourcePath(fileRef) ?? _extractSourcePath(result);
+  const remoteText = _extractRawText(result);
+  if (!remoteText && result && typeof result === "object" && result.status) {
+    return result;
+  }
+  if (!sourcePath || typeof sourcePath !== "string") {
+    throw new Error("source_path is required");
+  }
+  const loaded = _mockLoadSuperpageDocument(sourcePath, remoteText);
+  return {
+    ...loaded,
+    items: [
+      ...loaded.items,
+      {
+        kind: "remote_document_loaded",
+        label: "Remote Document Loaded (SW)",
+        detail: {
+          source_path: sourcePath,
+          wasm_detail: result && typeof result === "object" ? result : undefined,
+        },
+      },
+    ],
   };
 }
 
@@ -453,6 +641,24 @@ async function handleRequest(request) {
 
     if (method === "loadSuperpageDocument") {
       const result = _mockLoadSuperpageDocument(args[0], args[1]);
+      return makeResponse(id, result);
+    }
+
+    if (method === "fetchRemoteFileInfo") {
+      await _ensureInit();
+      const result = await _mockFetchRemoteFileInfo(args[0], args[1]);
+      return makeResponse(id, result);
+    }
+
+    if (method === "fetchRemoteFileContent") {
+      await _ensureInit();
+      const result = await _mockFetchRemoteFileContent(args[0], args[1]);
+      return makeResponse(id, result);
+    }
+
+    if (method === "loadRemoteSuperpageDocument") {
+      await _ensureInit();
+      const result = await _mockLoadRemoteSuperpageDocument(args[0], args[1]);
       return makeResponse(id, result);
     }
 

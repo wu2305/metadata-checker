@@ -1,7 +1,7 @@
 /**
  * Fake Runtime Client for M40.3 Plugin Core testing
  *
- * 模拟 runtime client contract 的 5 个方法，支持同步/异步返回。
+ * 模拟 runtime client contract，支持同步/异步返回。
  */
 
 export function createFakeRuntimeClient(options = {}) {
@@ -76,6 +76,26 @@ export function createFakeRuntimeClient(options = {}) {
             kind: "document_loaded",
             label: "Document Loaded",
             detail: { source_path: sourcePath, component_count: 1 },
+          },
+        ],
+        diagnostics: [],
+      });
+    },
+
+    loadRemoteSuperpageDocument(fileRef, options) {
+      recordCall("loadRemoteSuperpageDocument", arguments);
+      return wrap({
+        status: "ready",
+        target: fileRef?.source_path ?? null,
+        items: [
+          {
+            kind: "remote_document_loaded",
+            label: "Remote Document Loaded",
+            detail: {
+              source_path: fileRef?.source_path,
+              file_id: fileRef?.file_id,
+              options,
+            },
           },
         ],
         diagnostics: [],

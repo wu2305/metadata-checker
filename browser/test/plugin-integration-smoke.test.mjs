@@ -128,7 +128,7 @@ function createFakeRuntimeClient(options = {}) {
     callLog.push({ method, args: Array.from(args) });
   }
 
-  return {
+  const client = {
     callLog,
     _kind: options.kind ?? "page",
 
@@ -183,6 +183,33 @@ function createFakeRuntimeClient(options = {}) {
       });
     },
   };
+  if (options.supportsRemoteLoad) {
+    client.loadRemoteSuperpageDocument = function (fileRef, opts) {
+      log("loadRemoteSuperpageDocument", arguments);
+      if (shouldFail && failMethod === "loadRemoteSuperpageDocument") {
+        return Promise.reject(new Error("loadRemoteSuperpageDocument failed"));
+      }
+      if (options.remoteLoadReturnsError) {
+        return Promise.resolve({
+          status: "error",
+          diagnostics: [
+            {
+              severity: "error",
+              code: "REMOTE_FETCH_FAILED",
+              message: "remote runtime load failed",
+            },
+          ],
+        });
+      }
+      return Promise.resolve({
+        status: "ready",
+        target: fileRef?.source_path,
+        items: [],
+        diagnostics: [],
+      });
+    };
+  }
+  return client;
 }
 
 async function loadController() {
@@ -213,7 +240,7 @@ describe("createMetadataCheckerController parameter validation", async () => {
         plugin: { onSelectionChanged() {} },
         provider: { getFileContent() {} },
       });
-    }, /runtimeClient with loadSuperpageDocument is required/);
+    }, /runtimeClient with loadSuperpageDocument or loadRemoteSuperpageDocument is required/);
   });
 
   it("throws when renderer is missing", () => {
@@ -407,6 +434,216 @@ describe("integration success path", async () => {
     );
     assert.strictEqual(contentCall.args[0].project_name, "analyzer");
     assert.strictEqual(contentCall.args[0].file_id, "");
+  });
+
+  it("runtime-first mode loads remote document without page provider fetch", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient({ supportsRemoteLoad: true });
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    const result = await controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      project_name: "analyzer",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    });
+
+    assert.strictEqual(result.status, "ready");
+    assert.strictEqual(
+      provider.callLog.some((c) => c.method === "getFileContent"),
+      false,
+    );
+    const remoteLoadCall = runtimeClient.callLog.find(
+      (c) => c.method === "loadRemoteSuperpageDocument",
+    );
+    assert.ok(remoteLoadCall);
+    assert.deepStrictEqual(remoteLoadCall.args[0], {
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      project_name: "analyzer",
+    });
+    assert.ok(
+      runtimeClient.callLog.some(
+        (c) => c.method === "buildOrUpdateSuperpageGraph",
+      ),
+    );
+    assert.ok(
+      runtimeClient.callLog.some(
+        (c) => c.method === "analyzeSuperpageSelection",
+      ),
+    );
+  });
+
+  it("runtime-first mode can run without page provider when runtime remote load succeeds", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const runtimeClient = createFakeRuntimeClient({ supportsRemoteLoad: true });
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    const result = await controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    });
+
+    assert.strictEqual(result.status, "ready");
+    assert.ok(
+      runtimeClient.callLog.some(
+        (c) => c.method === "loadRemoteSuperpageDocument",
+      ),
+    );
+  });
+
+  it("runtime-first failure falls back to page provider mode", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient({
+      supportsRemoteLoad: true,
+      shouldFail: true,
+      failMethod: "loadRemoteSuperpageDocument",
+    });
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    const result = await controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    });
+
+    assert.strictEqual(result.status, "ready");
+    assert.ok(
+      runtimeClient.callLog.some(
+        (c) => c.method === "loadRemoteSuperpageDocument",
+      ),
+    );
+    assert.ok(provider.callLog.some((c) => c.method === "getFileContent"));
+    assert.strictEqual(host.getEvents("controller_remote_load_fallback").length, 1);
+  });
+
+  it("page-provider mode keeps existing raw text load path", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient({ supportsRemoteLoad: true });
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+      remoteLoadMode: "page-provider",
+    });
+
+    await controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    });
+
+    assert.strictEqual(
+      runtimeClient.callLog.some(
+        (c) => c.method === "loadRemoteSuperpageDocument",
+      ),
+      false,
+    );
+    assert.ok(provider.callLog.some((c) => c.method === "getFileContent"));
+    assert.ok(
+      runtimeClient.callLog.some((c) => c.method === "loadSuperpageDocument"),
+    );
   });
 
   it("rejects nested raw metadata or component json in selection payload", async () => {

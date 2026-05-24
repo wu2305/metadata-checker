@@ -78,12 +78,27 @@ function makeWasmHarness(options = {}) {
     instantiateStreaming: 0,
     instantiate: 0,
   };
+  const exportCalls = {};
   const responseFactory =
     options.responseFactory ??
     (() => makeWasmResponse({ contentType: options.contentType ?? "application/wasm" }));
+  const providedExports = options.exports ?? {};
+  const wasmExports = {
+    analyze: () => {},
+    ...providedExports,
+  };
+
+  Object.keys(wasmExports).forEach((name) => {
+    const original = wasmExports[name];
+    wasmExports[name] = (...args) => {
+      exportCalls[name] = (exportCalls[name] ?? 0) + 1;
+      return original(...args);
+    };
+  });
 
   return {
     calls,
+    exportCalls,
     fetch: async () => {
       calls.fetch += 1;
       if (options.fetchError) {
@@ -97,14 +112,14 @@ function makeWasmHarness(options = {}) {
         if (options.streamingError) {
           throw options.streamingError;
         }
-        return { instance: { exports: { analyze: () => {} } }, module: {} };
+        return { instance: { exports: wasmExports }, module: {} };
       },
       instantiate: async () => {
         calls.instantiate += 1;
         if (options.instantiateError) {
           throw options.instantiateError;
         }
-        return { instance: { exports: { analyze: () => {} } }, module: {} };
+        return { instance: { exports: wasmExports }, module: {} };
       },
     },
   };
@@ -143,6 +158,190 @@ describe("Service Worker script internal protocol", () => {
     assert.strictEqual(response.id, "req-2");
     assert.strictEqual(response.ok, false);
     assert.strictEqual(response.error.code, "UNKNOWN_METHOD");
+  });
+
+  it("fetchRemoteFileContent calls wasm export and returns content", async () => {
+    const wasm = makeWasmHarness({
+      exports: {
+        fetch_remote_file_content: (fileRef) => {
+          assert.deepStrictEqual(fileRef, { file_id: "fid-100" });
+          return '{"components":[{"id":"c-1"}]}';
+        },
+      },
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+    await exports.handleRequest({
+      id: "remote-init",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    const response = await exports.handleRequest({
+      id: "remote-content",
+      method: "fetchRemoteFileContent",
+      args: [{ file_id: "fid-100" }],
+    });
+    assert.strictEqual(response.ok, true);
+    assert.strictEqual(response.result, '{"components":[{"id":"c-1"}]}');
+  });
+
+  it("fetchRemoteFileInfo calls wasm export and returns file info", async () => {
+    const wasm = makeWasmHarness({
+      exports: {
+        fetch_remote_file_info: (fileRef) => {
+          assert.deepStrictEqual(fileRef, { file_id: "fid-info" });
+          return { file_id: "fid-info", source_path: "pages/info.spg", revision: "9" };
+        },
+      },
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+    await exports.handleRequest({
+      id: "remote-info-init",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    const response = await exports.handleRequest({
+      id: "remote-info",
+      method: "fetchRemoteFileInfo",
+      args: [{ file_id: "fid-info" }],
+    });
+    assert.strictEqual(response.ok, true);
+    assert.deepStrictEqual(response.result, {
+      file_id: "fid-info",
+      source_path: "pages/info.spg",
+      revision: "9",
+    });
+  });
+
+  it("loadRemoteSuperpageDocument caches document so build/analyze can run", async () => {
+    const wasm = makeWasmHarness({
+      exports: {
+        load_remote_superpage_document: (sourceOrRef, rawText) => {
+          assert.strictEqual(sourceOrRef, "pages/remote.spg");
+          assert.strictEqual(rawText, '{"components":[{"id":"c-1"}]}');
+          return {
+            source_path: "pages/remote.spg",
+            raw_text: rawText,
+            status: "ready",
+            diagnostics: [],
+          };
+        },
+      },
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+    await exports.handleRequest({
+      id: "remote-load-runtime",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    const loaded = await exports.handleRequest({
+      id: "remote-load-doc",
+      method: "loadRemoteSuperpageDocument",
+      args: ["pages/remote.spg", '{"components":[{"id":"c-1"}]}'],
+    });
+    const built = await exports.handleRequest({
+      id: "remote-build",
+      method: "buildOrUpdateSuperpageGraph",
+      args: ["pages/remote.spg"],
+    });
+    const analyzed = await exports.handleRequest({
+      id: "remote-analyze",
+      method: "analyzeSuperpageSelection",
+      args: [
+        {
+          source_path: "pages/remote.spg",
+          file_id: "fid-100",
+          selected_component_ids: ["c-1"],
+          active_component_id: "c-1",
+        },
+      ],
+    });
+
+    assert.strictEqual(loaded.ok, true);
+    assert.strictEqual(built.ok, true);
+    assert.strictEqual(analyzed.ok, true);
+  });
+
+  it("fetchRemoteFileContent returns stable WASM_FETCH_FAILED when runtime init fails", async () => {
+    const wasm = makeWasmHarness({
+      fetchError: new Error("network blocked"),
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+
+    const response = await exports.handleRequest({
+      id: "remote-fetch-failed",
+      method: "fetchRemoteFileContent",
+      args: [{ file_id: "fid-100" }],
+    });
+
+    assert.strictEqual(response.ok, false);
+    assert.strictEqual(response.error.code, "WASM_FETCH_FAILED");
+    assert.match(response.error.diagnostic.code, /WASM_FETCH_FAILED/);
+  });
+
+  it("fetchRemoteFileContent supports sync or Promise export", async () => {
+    const syncWasm = makeWasmHarness({
+      exports: {
+        fetch_remote_file_content: () => "sync-content",
+      },
+    });
+    const { exports } = await loadSwInMockEnvironment(syncWasm);
+    await exports.handleRequest({
+      id: "sync-runtime",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    const syncResult = await exports.handleRequest({
+      id: "sync-content",
+      method: "fetchRemoteFileContent",
+      args: [{ file_id: "fid-sync" }],
+    });
+    assert.strictEqual(syncResult.ok, true);
+    assert.strictEqual(syncResult.result, "sync-content");
+
+    const promiseWasm = makeWasmHarness({
+      exports: {
+        fetch_remote_file_content: () => Promise.resolve("promise-content"),
+      },
+    });
+    const { exports: promiseExports } = await loadSwInMockEnvironment(promiseWasm);
+    await promiseExports.handleRequest({
+      id: "promise-runtime",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    const promiseResult = await promiseExports.handleRequest({
+      id: "promise-content",
+      method: "fetchRemoteFileContent",
+      args: [{ file_id: "fid-promise" }],
+    });
+    assert.strictEqual(promiseResult.ok, true);
+    assert.strictEqual(promiseResult.result, "promise-content");
+  });
+
+  it("remote fetch/init duplicate request still initializes once", async () => {
+    const wasm = makeWasmHarness({
+      exports: {
+        fetch_remote_file_content: () => "c",
+        load_remote_superpage_document: () => ({ raw_text: "{}", source_path: "pages/dup.spg" }),
+      },
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+
+    const p1 = exports.handleRequest({
+      id: "dup-remote-1",
+      method: "fetchRemoteFileContent",
+      args: [{ file_id: "fid-1" }],
+    });
+    const p2 = exports.handleRequest({
+      id: "dup-remote-2",
+      method: "loadRemoteSuperpageDocument",
+      args: ["pages/dup.spg", "{}"],
+    });
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    assert.strictEqual(r1.ok, true);
+    assert.strictEqual(r2.ok, true);
+    assert.strictEqual(wasm.calls.fetch, 1);
   });
 
   it("handleRequest returns error for missing id", async () => {
@@ -472,13 +671,14 @@ describe("Service Worker runtime launcher with mock transport", async () => {
     };
   }
 
-  it("start returns runtimeClient with five required methods", async () => {
+  it("start returns runtimeClient with required methods", async () => {
     const transport = makeFakeTransportWithSwProtocol();
     const launcher = createServiceWorkerRuntimeLauncher({ transport });
     const client = await launcher.start();
     assert.ok(typeof client.initRuntime === "function");
     assert.ok(typeof client.runtimeStatus === "function");
     assert.ok(typeof client.loadSuperpageDocument === "function");
+    assert.ok(typeof client.loadRemoteSuperpageDocument === "function");
     assert.ok(typeof client.buildOrUpdateSuperpageGraph === "function");
     assert.ok(typeof client.analyzeSuperpageSelection === "function");
   });
@@ -488,6 +688,7 @@ describe("Service Worker runtime launcher with mock transport", async () => {
       initRuntime: () => Promise.resolve({ status: "ready" }),
       runtimeStatus: () => Promise.resolve({ status: "ready" }),
       loadSuperpageDocument: () => Promise.resolve({ status: "ready" }),
+      loadRemoteSuperpageDocument: () => Promise.resolve({ status: "ready" }),
       buildOrUpdateSuperpageGraph: () => Promise.resolve({ status: "ready" }),
       analyzeSuperpageSelection: () => Promise.resolve({ status: "ready" }),
     };

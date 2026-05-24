@@ -62,6 +62,25 @@ function createReadyEnvelope(method, args = []) {
     };
   }
 
+  if (method === "loadRemoteSuperpageDocument") {
+    const fileRef = args[0] ?? {};
+    return {
+      status: "ready",
+      target: fileRef.source_path ?? null,
+      items: [
+        {
+          kind: "remote_document_loaded",
+          label: "Remote Document Loaded",
+          detail: {
+            source_path: fileRef.source_path,
+            file_id: fileRef.file_id,
+          },
+        },
+      ],
+      diagnostics: [],
+    };
+  }
+
   if (method === "buildOrUpdateSuperpageGraph") {
     const sourcePath = args[0];
     return {

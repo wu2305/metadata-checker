@@ -249,6 +249,14 @@ define(function () {
       async loadSuperpageDocument(sourcePath, rawText) {
         return { status: "ready", target: sourcePath, items: [], diagnostics: [] };
       },
+      async loadRemoteSuperpageDocument(fileRef) {
+        return {
+          status: "ready",
+          target: fileRef && fileRef.source_path,
+          items: [],
+          diagnostics: [],
+        };
+      },
       async buildOrUpdateSuperpageGraph(sourcePath) {
         return { status: "ready", target: sourcePath, items: [], diagnostics: [] };
       },
@@ -314,6 +322,9 @@ define(function () {
       },
       loadSuperpageDocument(...args) {
         return call("loadSuperpageDocument", args);
+      },
+      loadRemoteSuperpageDocument(...args) {
+        return call("loadRemoteSuperpageDocument", args);
       },
       buildOrUpdateSuperpageGraph(...args) {
         return call("buildOrUpdateSuperpageGraph", args);
@@ -694,6 +705,9 @@ define(function () {
             },
             loadSuperpageDocument(sourcePath, rawText) {
               return makeRequest("loadSuperpageDocument", [sourcePath, rawText]);
+            },
+            loadRemoteSuperpageDocument(fileRef, opts) {
+              return makeRequest("loadRemoteSuperpageDocument", [fileRef, opts]);
             },
             buildOrUpdateSuperpageGraph(sourcePath) {
               return makeRequest("buildOrUpdateSuperpageGraph", [sourcePath]);
