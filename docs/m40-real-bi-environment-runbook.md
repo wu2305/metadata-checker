@@ -440,7 +440,46 @@ customJSES":{"sysdata":...,"analyzer":...,"/analyzer/app/M40HookSmoke.app":null}
 - 不要只看远程上传工具返回 `modified`。必须继续查 HTML 注入、脚本响应和 hook 执行信号。
 - 不要把 `custom.ts` 当成运行时入口。真实运行时入口是编译后的 `custom.js`。
 
-### 9.6 onInitDesigner 与选择对象真实形态
+### 9.6 M40.10 真实链路验收补充
+
+M40.10 的真实环境验证使用：
+
+```text
+https://autocrm-test.xiaoshouyi.com/analyzer/app/M40HookSmoke.app/M40HookDesign.spg?:edit=true
+```
+
+关键结论：
+
+- Service Worker 脚本位于 `/analyzer/public/hooks/metadata-checker-sw.js` 时，默认允许的最大 scope 是 `/analyzer/public/hooks/`。除非服务端额外返回 `Service-Worker-Allowed`，否则不能注册为 `/analyzer/`，浏览器会抛出 `SecurityError`。
+- 真实 hook 页面中观测到 `window.SZ.rc` 是函数，`window.SZ.rc1` 未暴露。
+- `window.SZ.rc` 的真实调用形态是对象参数，例如：
+
+  ```js
+  window.SZ.rc({
+    url: "/api/meta/services/getFileContent/EwLEBjaYNhLFYTaK6rxMNC",
+    dataType: "text"
+  });
+  ```
+
+  不要调用 `rc("getFileContent", fileId, sourcePath)`。
+- `GET /api/meta/services/getFileContent/EwLEBjaYNhLFYTaK6rxMNC` 会返回原始 `.spg` 文本。
+- `GET /api/meta/services/getFileInfo/EwLEBjaYNhLFYTaK6rxMNC?downloadContent=true` 会返回包含 `content` 的文件信息 JSON。
+
+自动化验收优先读取 DOM marker：
+
+| marker | 期望 |
+|---|---|
+| `data-metadata-checker-real-bundle` | `loaded` |
+| `data-metadata-checker-factories` | `installed` |
+| `data-metadata-checker-on-init-designer` | `called` |
+| `data-metadata-checker-sw` | `registered` 或 `active` |
+| `data-metadata-checker-glue` | `installed` |
+| `data-metadata-checker-analysis-status` | `ready` |
+| `data-metadata-checker-last-render` | 点击组件后为 `analysis` |
+
+如果没有部署真实 WASM 文件，`data-metadata-checker-fallback-code` 仍可能是 `WASM_FETCH_FAILED`，这是 SW 可用但 WASM 资源不存在时的预期 page fallback；只要点击组件后 `last-render=analysis`，说明 page fallback 的远程元数据读取、controller 和 glue 已走通。
+
+### 9.7 onInitDesigner 与选择对象真实形态
 
 真实环境探测显示：
 

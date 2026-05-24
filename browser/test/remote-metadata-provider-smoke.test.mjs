@@ -180,8 +180,10 @@ describe("PageRcMetadataProvider", () => {
     assert.strictEqual(host.getEvents("metadata_fetch_failed").length, 1);
   });
 
-  it("calls mock rc and returns info", async () => {
-    const rc = async (method, fileId, sourcePath) => {
+  it("calls mock rc with BI object-url contract and returns info", async () => {
+    const calls = [];
+    const rc = async (request) => {
+      calls.push(request);
       return { revision: "5", updated_at: "2024-01-01" };
     };
     const provider = createPageRcMetadataProvider({ rc });
@@ -189,23 +191,22 @@ describe("PageRcMetadataProvider", () => {
     assert.strictEqual(result.revision, "5");
     assert.strictEqual(result.content_type, "super_page");
     assert.strictEqual(result.updated_at, "2024-01-01");
+    assert.deepStrictEqual(calls, [
+      { url: "/api/meta/services/getFileInfo/fid1" },
+    ]);
   });
 
   it("uses rc1 fallback when rc is missing", async () => {
     const calls = [];
-    const rc1 = async (method, fileId, sourcePath) => {
-      calls.push({ method, fileId, sourcePath });
+    const rc1 = async (request) => {
+      calls.push(request);
       return { revision: "6", content_type: "super_page" };
     };
     const provider = createPageRcMetadataProvider({ rc: undefined, rc1 });
     const result = await provider.getFileInfo(validFileRef);
     assert.strictEqual(result.revision, "6");
     assert.strictEqual(calls.length, 1);
-    assert.deepStrictEqual(calls[0], {
-      method: "getFileInfo",
-      fileId: "fid1",
-      sourcePath: "app/Test.app/Page.spg",
-    });
+    assert.deepStrictEqual(calls[0], { url: "/api/meta/services/getFileInfo/fid1" });
   });
 
   it("parses string JSON getFileInfo response", async () => {
@@ -227,14 +228,42 @@ describe("PageRcMetadataProvider", () => {
     assert.strictEqual(host.getEvents("metadata_fetch_failed").length, 1);
   });
 
-  it("calls mock rc and returns content", async () => {
-    const rc = async (method, fileId, sourcePath) => {
+  it("calls mock rc with BI object-url contract and returns content", async () => {
+    const calls = [];
+    const rc = async (request) => {
+      calls.push(request);
       return '{"components":[]}';
     };
     const provider = createPageRcMetadataProvider({ rc });
     const result = await provider.getFileContent(validFileRef);
     assert.strictEqual(result.raw_text, '{"components":[]}');
     assert.strictEqual(result.content_type, "super_page");
+    assert.deepStrictEqual(calls, [
+      {
+        url: "/api/meta/services/getFileContent/fid1",
+        dataType: "text",
+      },
+    ]);
+  });
+
+  it("falls back to project-scoped path when file_id is missing", async () => {
+    const calls = [];
+    const rc = async (request) => {
+      calls.push(request);
+      return '{"components":[]}';
+    };
+    const provider = createPageRcMetadataProvider({ rc });
+    const result = await provider.getFileContent({
+      project_name: "analyzer",
+      source_path: "app/M40HookSmoke.app/M40HookDesign.spg",
+    });
+    assert.strictEqual(result.file_id, null);
+    assert.deepStrictEqual(calls, [
+      {
+        url: "/api/meta/services/getFileContent/analyzer/app/M40HookSmoke.app/M40HookDesign.spg",
+        dataType: "text",
+      },
+    ]);
   });
 
   it("maps invalid rc response to REMOTE_RESPONSE_INVALID", async () => {
@@ -284,7 +313,7 @@ describe("PageRcMetadataProvider", () => {
   });
 
   it("source_path remains logical path", async () => {
-    const rc = async (method, fileId, sourcePath) => {
+    const rc = async () => {
       return '{"components":[]}';
     };
     const provider = createPageRcMetadataProvider({ rc });

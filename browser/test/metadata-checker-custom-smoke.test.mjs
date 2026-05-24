@@ -133,6 +133,7 @@ function createWorkerMock(options = {}) {
 
 function createServiceWorkerMock(options = {}) {
   const listeners = new Map();
+  const registerCalls = [];
   const activeWorker = createWorkerMock({
     onRequest(request) {
       if (typeof options.onWorkerRequest === "function") {
@@ -157,6 +158,7 @@ function createServiceWorkerMock(options = {}) {
     activeWorker,
     installingWorker,
     waitingWorker,
+    registerCalls,
     addEventListener(type, handler) {
       listeners.set(type, handler);
     },
@@ -164,6 +166,7 @@ function createServiceWorkerMock(options = {}) {
       listeners.delete(type);
     },
     async register(scriptUrl, registerOptions) {
+      registerCalls.push({ scriptUrl, registerOptions });
       if (options.registerReject) {
         throw new Error(options.registerReject);
       }
@@ -262,6 +265,104 @@ describe("metadata-checker custom.js AMD entry", () => {
     assert.strictEqual(marker(document, "fallback-used"), "false");
     assert.strictEqual(marker(document, "fallback-code"), "none");
     assert.strictEqual(marker(document, "analysis-status"), "ready");
+  });
+
+  it("derives Service Worker scope from script directory", async () => {
+    const serviceWorker = createServiceWorkerMock();
+    const { module } = loadCustomModule({ serviceWorker });
+
+    const result = await module.onInitDesigner({}, {});
+
+    assert.strictEqual(result.installed, true);
+    assert.strictEqual(serviceWorker.registerCalls.length, 1);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(serviceWorker.registerCalls[0])), {
+      scriptUrl: "/analyzer/public/hooks/metadata-checker-sw.js",
+      registerOptions: { scope: "/analyzer/public/hooks/" },
+    });
+  });
+
+  it("inline page rc provider calls BI rc object-url contract", async () => {
+    const rcCalls = [];
+    let contentResult = null;
+    let infoResult = null;
+    const { module } = loadCustomModule({
+      windowOverrides: {
+        SZ: {
+          async rc(request) {
+            rcCalls.push(request);
+            if (request.url.startsWith("/api/meta/services/getFileContent/")) {
+              return '{"components":[]}';
+            }
+            if (request.url.startsWith("/api/meta/services/getFileInfo/")) {
+              return { revision: "9", updated_at: "2026-05-24" };
+            }
+            throw new Error(`unexpected rc url: ${request.url}`);
+          },
+        },
+        __metadata_checker_controller_factory: ({ provider }) => ({
+          async init() {
+            contentResult = await provider.getFileContent({
+              source_path: "app/M40HookSmoke.app/M40HookDesign.spg",
+              file_id: "EwLEBjaYNhLFYTaK6rxMNC",
+              project_name: "analyzer",
+            });
+            infoResult = await provider.getFileInfo({
+              source_path: "app/M40HookSmoke.app/M40HookDesign.spg",
+              file_id: "",
+              project_name: "analyzer",
+            });
+            return { status: "ready" };
+          },
+          status: () => ({ state: "ready" }),
+        }),
+      },
+    });
+
+    const result = await module.onInitDesigner({}, {});
+
+    assert.strictEqual(result.installed, true);
+    assert.strictEqual(contentResult.raw_text, '{"components":[]}');
+    assert.strictEqual(infoResult.revision, "9");
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(rcCalls)), [
+      {
+        url: "/api/meta/services/getFileContent/EwLEBjaYNhLFYTaK6rxMNC",
+        dataType: "text",
+      },
+      {
+        url: "/api/meta/services/getFileInfo/analyzer/app/M40HookSmoke.app/M40HookDesign.spg",
+      },
+    ]);
+  });
+
+  it("DOM renderer exposes provider error message marker", async () => {
+    const { module, document } = loadCustomModule({
+      windowOverrides: {
+        SZ: {
+          async rc() {
+            throw new Error("mock rc failure");
+          },
+        },
+        __metadata_checker_controller_factory: ({ provider, renderer }) => ({
+          async init() {
+            const result = await provider.getFileContent({
+              source_path: "app/M40HookSmoke.app/M40HookDesign.spg",
+              file_id: "fid1",
+              project_name: "analyzer",
+            });
+            renderer.renderError(result);
+            return { status: "ready" };
+          },
+          status: () => ({ state: "ready" }),
+        }),
+      },
+    });
+
+    const result = await module.onInitDesigner({}, {});
+
+    assert.strictEqual(result.installed, true);
+    assert.strictEqual(marker(document, "last-render"), "error");
+    assert.strictEqual(marker(document, "last-render-error-code"), "REMOTE_FETCH_FAILED");
+    assert.strictEqual(marker(document, "last-render-error-message"), "rc getFileContent failed");
   });
 
   it("real service-worker launcher receives explicit requestTimeoutMs", async () => {

@@ -18,7 +18,7 @@ define(function () {
   "use strict";
 
   const SW_SCRIPT_URL = "/analyzer/public/hooks/metadata-checker-sw.js";
-  const SW_SCOPE = "/analyzer/";
+  const SW_SCOPE = resolveServiceWorkerScope();
   const SW_REQUEST_TIMEOUT_MS = 5000;
   const SW_ACTIVATION_TIMEOUT_MS = 30000;
   const CONTROLLER_VERSION = "0.1.0-m40.10";
@@ -47,6 +47,18 @@ define(function () {
       document.addEventListener("DOMContentLoaded", () => {
         document.body.appendChild(el);
       });
+    }
+  }
+
+  function resolveServiceWorkerScope() {
+    try {
+      const origin =
+        typeof window !== "undefined" && window.location?.origin
+          ? window.location.origin
+          : "https://metadata-checker.local";
+      return new URL("./", new URL(SW_SCRIPT_URL, origin)).pathname;
+    } catch {
+      return "/analyzer/public/hooks/";
     }
   }
 
@@ -320,12 +332,17 @@ define(function () {
         _log("log", "renderAnalysis:", result);
         _writeMarker("last-render", "analysis");
         _writeMarker("last-render-status", result.status ?? "unknown");
+        _removeMarker("last-render-error-code");
+        _removeMarker("last-render-error-message");
       },
       renderError(errorEnvelope) {
         _log("error", "renderError:", errorEnvelope);
         _writeMarker("last-render", "error");
         if (errorEnvelope?.diagnostics?.[0]?.code) {
           _writeMarker("last-render-error-code", errorEnvelope.diagnostics[0].code);
+        }
+        if (errorEnvelope?.diagnostics?.[0]?.message) {
+          _writeMarker("last-render-error-message", errorEnvelope.diagnostics[0].message);
         }
       },
     };
@@ -339,9 +356,35 @@ define(function () {
     const rc = typeof window !== "undefined" ? window.SZ?.rc : undefined;
     const rc1 = typeof window !== "undefined" ? window.SZ?.rc1 : undefined;
 
-    async function callRc(method, args) {
-      if (typeof rc === "function") return rc(method, ...args);
-      if (typeof rc1 === "function") return rc1(method, ...args);
+    function encodeMetaPath(value) {
+      return encodeURIComponent(value).replaceAll("%2F", "/");
+    }
+
+    function normalizeProjectName(projectName) {
+      if (typeof projectName !== "string") return "";
+      return projectName.replace(/^\/+|\/+$/g, "");
+    }
+
+    function resolveIdOrProjectPath(fileRef) {
+      if (typeof fileRef.file_id === "string" && fileRef.file_id !== "") {
+        return fileRef.file_id;
+      }
+      const sourcePath = String(fileRef.source_path ?? "").replace(/^\/+/, "");
+      const projectName = normalizeProjectName(fileRef.project_name);
+      return projectName ? `${projectName}/${sourcePath}` : sourcePath;
+    }
+
+    function getFileInfoUrl(fileRef) {
+      return `/api/meta/services/getFileInfo/${encodeMetaPath(resolveIdOrProjectPath(fileRef))}`;
+    }
+
+    function getFileContentUrl(fileRef) {
+      return `/api/meta/services/getFileContent/${encodeMetaPath(resolveIdOrProjectPath(fileRef))}`;
+    }
+
+    async function callRc(request) {
+      if (typeof rc === "function") return rc(request);
+      if (typeof rc1 === "function") return rc1(request);
       return null;
     }
 
@@ -358,7 +401,7 @@ define(function () {
           return _makeErrorEnvelope("PAGE_RC_UNAVAILABLE", "window.SZ.rc / rc1 is not available");
         }
         try {
-          const result = await callRc("getFileInfo", [fileRef.file_id, fileRef.source_path]);
+          const result = await callRc({ url: getFileInfoUrl(fileRef) });
           if (!result) {
             return _makeErrorEnvelope("REMOTE_RESPONSE_INVALID", "rc returned null");
           }
@@ -379,7 +422,10 @@ define(function () {
           return _makeErrorEnvelope("PAGE_RC_UNAVAILABLE", "window.SZ.rc / rc1 is not available");
         }
         try {
-          const result = await callRc("getFileContent", [fileRef.file_id, fileRef.source_path]);
+          const result = await callRc({
+            url: getFileContentUrl(fileRef),
+            dataType: "text",
+          });
           if (!result) {
             return _makeErrorEnvelope("REMOTE_RESPONSE_INVALID", "rc returned null");
           }

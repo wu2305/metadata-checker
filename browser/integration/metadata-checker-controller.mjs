@@ -50,6 +50,18 @@ function _emitHost(host, eventName, payload) {
   }
 }
 
+function _errorMessageFromProviderResult(value, fallback) {
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+  return (
+    value.message ??
+    value.diagnostics?.[0]?.message ??
+    value.error?.message ??
+    fallback
+  );
+}
+
 function _findForbiddenSelectionPayload(value, path = "selection", seen = new WeakSet()) {
   if (!value || typeof value !== "object") {
     return null;
@@ -256,7 +268,11 @@ export function createMetadataCheckerController(options = {}) {
       return error;
     }
 
-    const fileRef = { source_path: sourcePath, file_id: fileId };
+    const fileRef = {
+      source_path: sourcePath,
+      file_id: fileId,
+      project_name: selection.project_name ?? null,
+    };
 
     _setState(CONTROLLER_STATE.ANALYZING);
     _emitHost(host, "analysis_started", { selection, timestamp: clock() });
@@ -269,7 +285,9 @@ export function createMetadataCheckerController(options = {}) {
         typeof contentResult === "object" &&
         contentResult.status === "error"
       ) {
-        throw new Error(contentResult.message ?? "metadata fetch failed");
+        throw new Error(
+          _errorMessageFromProviderResult(contentResult, "metadata fetch failed"),
+        );
       }
       const rawText = contentResult?.raw_text ?? "";
 
@@ -279,7 +297,9 @@ export function createMetadataCheckerController(options = {}) {
         typeof infoResult === "object" &&
         infoResult.status === "error"
       ) {
-        throw new Error(infoResult.message ?? "metadata info fetch failed");
+        throw new Error(
+          _errorMessageFromProviderResult(infoResult, "metadata info fetch failed"),
+        );
       }
 
       await runtimeClient.loadSuperpageDocument(sourcePath, rawText);

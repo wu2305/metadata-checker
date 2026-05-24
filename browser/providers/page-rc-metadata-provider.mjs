@@ -79,6 +79,32 @@ function _inferContentType(sourcePath) {
   return "unknown";
 }
 
+function _encodeMetaPath(value) {
+  return encodeURIComponent(value).replaceAll("%2F", "/");
+}
+
+function _normalizeProjectName(projectName) {
+  if (typeof projectName !== "string") return "";
+  return projectName.replace(/^\/+|\/+$/g, "");
+}
+
+function _resolveIdOrProjectPath(fileRef) {
+  if (typeof fileRef.file_id === "string" && fileRef.file_id !== "") {
+    return fileRef.file_id;
+  }
+  const sourcePath = fileRef.source_path.replace(/^\/+/, "");
+  const projectName = _normalizeProjectName(fileRef.project_name);
+  return projectName ? `${projectName}/${sourcePath}` : sourcePath;
+}
+
+function _getFileInfoUrl(fileRef) {
+  return `/api/meta/services/getFileInfo/${_encodeMetaPath(_resolveIdOrProjectPath(fileRef))}`;
+}
+
+function _getFileContentUrl(fileRef) {
+  return `/api/meta/services/getFileContent/${_encodeMetaPath(_resolveIdOrProjectPath(fileRef))}`;
+}
+
 function _isLogicalSourcePath(path) {
   if (typeof path !== "string" || path === "") return false;
   if (path.startsWith("/") || path.startsWith("\\")) return false;
@@ -112,12 +138,12 @@ export function createPageRcMetadataProvider(options = {}) {
   const host = options.host;
   const logger = options.logger;
 
-  async function _callRc(method, args) {
+  async function _requestRc(request) {
     if (typeof rc === "function") {
-      return rc(method, ...args);
+      return rc(request);
     }
     if (typeof rc1 === "function") {
-      return rc1(method, ...args);
+      return rc1(request);
     }
     return null;
   }
@@ -144,7 +170,7 @@ export function createPageRcMetadataProvider(options = {}) {
       }
 
       try {
-        const result = await _callRc("getFileInfo", [fileId, sourcePath]);
+        const result = await _requestRc({ url: _getFileInfoUrl(fileRef) });
         if (!result) {
           const err = _makeError(
             "REMOTE_RESPONSE_INVALID",
@@ -206,7 +232,10 @@ export function createPageRcMetadataProvider(options = {}) {
       }
 
       try {
-        const result = await _callRc("getFileContent", [fileId, sourcePath]);
+        const result = await _requestRc({
+          url: _getFileContentUrl(fileRef),
+          dataType: "text",
+        });
         if (!result) {
           const err = _makeError(
             "REMOTE_RESPONSE_INVALID",

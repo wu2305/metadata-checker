@@ -283,6 +283,8 @@ describe("integration success path", async () => {
     );
     assert.strictEqual(contentCalls.length, 1);
     assert.strictEqual(contentCalls[0].args[0].source_path, "pages/demo.spg");
+    assert.strictEqual(contentCalls[0].args[0].file_id, "demo-123");
+    assert.strictEqual(contentCalls[0].args[0].project_name, null);
 
     // runtime 被调用 load/build/analyze
     assert.ok(
@@ -357,6 +359,54 @@ describe("integration success path", async () => {
     );
     assert.strictEqual(loadCalls.length, 1);
     assert.strictEqual(loadCalls[0].args[1].length, bigText.length);
+  });
+
+  it("passes project_name from selection to provider fileRef", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    await controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "",
+      project_name: "analyzer",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    });
+
+    const contentCall = provider.callLog.find(
+      (c) => c.method === "getFileContent",
+    );
+    assert.strictEqual(contentCall.args[0].project_name, "analyzer");
+    assert.strictEqual(contentCall.args[0].file_id, "");
   });
 
   it("rejects nested raw metadata or component json in selection payload", async () => {
@@ -461,6 +511,57 @@ describe("integration error paths", async () => {
         (d) => d.code === "ANALYSIS_PIPELINE_FAILED",
       ),
     );
+  });
+
+  it("metadata provider diagnostic message is preserved in pipeline error", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = {
+      async getFileContent() {
+        return {
+          status: "error",
+          target: null,
+          items: [],
+          diagnostics: [
+            {
+              severity: "error",
+              code: "REMOTE_FETCH_FAILED",
+              message: "rc getFileContent failed",
+            },
+          ],
+        };
+      },
+    };
+    const runtimeClient = createFakeRuntimeClient();
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    const result = await controller.handleSelection({
+      source_path: "pages/missing.spg",
+      file_id: "missing-123",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    });
+
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.diagnostics[0].code, "ANALYSIS_PIPELINE_FAILED");
+    assert.strictEqual(result.diagnostics[0].message, "rc getFileContent failed");
+    assert.strictEqual(renderer.renderCalls[0].type, "renderError");
   });
 
   it("runtime analyze failure -> renderer error", async () => {
