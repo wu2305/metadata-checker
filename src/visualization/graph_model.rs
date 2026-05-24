@@ -1,5 +1,8 @@
 use crate::output::schema::Diagnostic;
 use crate::visualization::options::{EdgeDirection, EdgeKind, NodeKind};
+use crate::visualization::sanitizer::{
+    sanitize_diagnostic, sanitize_metadata_entry, sanitize_text,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -41,12 +44,12 @@ impl VisualGraph {
     /// 创建仅包含诊断信息的图
     pub fn from_diagnostics(diagnostics: Vec<Diagnostic>) -> Self {
         let mut graph = Self::empty();
-        graph.diagnostics = diagnostics.clone();
-        for diag in &diagnostics {
-            let node_id = format!("diag_{}", diag.code);
+        graph.diagnostics = diagnostics.iter().map(sanitize_diagnostic).collect();
+        for diag in &graph.diagnostics {
+            let node_id = sanitize_text(&format!("diag_{}", diag.code));
             graph.nodes.push(VisualNode {
                 id: node_id.clone(),
-                label: format!("[{}] {}", diag.code, diag.message),
+                label: sanitize_text(&format!("[{}] {}", diag.code, diag.message)),
                 kind: NodeKind::Diagnostic,
                 source_path: diag.location.source_file.clone().unwrap_or_default(),
                 metadata: {
@@ -55,7 +58,10 @@ impl VisualGraph {
                         "severity".to_string(),
                         serde_json::json!(format!("{:?}", diag.severity)),
                     );
-                    m.insert("code".to_string(), serde_json::json!(diag.code.clone()));
+                    m.insert(
+                        "code".to_string(),
+                        sanitize_metadata_entry("code", &serde_json::json!(diag.code.clone())),
+                    );
                     m
                 },
             });

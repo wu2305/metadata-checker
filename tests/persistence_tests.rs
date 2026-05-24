@@ -194,13 +194,24 @@ fn test_redb_persistence_provider_reuses_existing_graph_db_file_states() {
 
     let project_ref = "project:m40_8_fixture";
     let graph_ref = "graph:m40_8_fixture";
+    let (baseline_node_count, baseline_edge_count) = {
+        let graph_db = GraphDB::open(&db_path).expect("GraphDB::open should succeed");
+        (graph_db.graph.node_count(), graph_db.graph.edge_count())
+    };
+    assert!(baseline_node_count > 0, "fixture graphdb should have nodes");
+
     let mut provider =
         RedbPersistenceProvider::new(&db_path).expect("provider init should succeed");
 
     let snapshot = make_graph_snapshot();
-    provider
+    let save_snapshot_err = provider
         .save_graph_snapshot(project_ref, graph_ref, &snapshot)
-        .expect("save_graph_snapshot should succeed in redb provider");
+        .expect_err("redb provider should not write a second graph snapshot store");
+    assert!(matches!(
+        save_snapshot_err,
+        PersistenceError::Unsupported { .. }
+    ));
+    assert_eq!(save_snapshot_err.code(), "PERSISTENCE_UNSUPPORTED");
 
     let document = make_cached_document("fixture cache", false);
     provider
@@ -214,9 +225,10 @@ fn test_redb_persistence_provider_reuses_existing_graph_db_file_states() {
 
     let loaded_snapshot = provider
         .load_graph_snapshot(project_ref, graph_ref)
-        .expect("load_graph_snapshot should succeed in redb provider");
-    assert_eq!(loaded_snapshot.schema_version, snapshot.schema_version);
-    assert_eq!(loaded_snapshot.nodes.len(), snapshot.nodes.len());
+        .expect("load_graph_snapshot should map existing GraphDB nodes and edges");
+    assert_eq!(loaded_snapshot.schema_version, PERSISTENCE_SCHEMA_VERSION);
+    assert_eq!(loaded_snapshot.nodes.len(), baseline_node_count);
+    assert_eq!(loaded_snapshot.edges.len(), baseline_edge_count);
 
     let loaded_document = provider
         .load_document_cache(project_ref, "app/fetch.spg")
@@ -272,40 +284,39 @@ fn test_indexed_db_persistence_provider_is_unsupported_stub() {
     let state = make_file_state("app/wasm.spg");
     let meta = make_graph_meta("graph:wasm");
 
-    assert!(matches!(
-        provider.load_graph_snapshot("p", "g").unwrap_err(),
-        PersistenceError::Unsupported { .. }
-    ));
-    assert!(matches!(
-        provider
-            .save_graph_snapshot("p", "g", &snapshot)
-            .unwrap_err(),
-        PersistenceError::Unsupported { .. }
-    ));
-    assert!(matches!(
-        provider.load_document_cache("p", "d").unwrap_err(),
-        PersistenceError::Unsupported { .. }
-    ));
-    assert!(matches!(
-        provider
-            .save_document_cache("p", "d", &document)
-            .unwrap_err(),
-        PersistenceError::Unsupported { .. }
-    ));
-    assert!(matches!(
-        provider.load_file_state("p", "s").unwrap_err(),
-        PersistenceError::Unsupported { .. }
-    ));
-    assert!(matches!(
-        provider.save_file_state("p", "s", &state).unwrap_err(),
-        PersistenceError::Unsupported { .. }
-    ));
-    assert!(matches!(
-        provider.load_graph_meta("p", "g").unwrap_err(),
-        PersistenceError::Unsupported { .. }
-    ));
-    assert!(matches!(
-        provider.save_graph_meta("p", "g", &meta).unwrap_err(),
-        PersistenceError::Unsupported { .. }
-    ));
+    let err = provider.load_graph_snapshot("p", "g").unwrap_err();
+    assert!(matches!(err, PersistenceError::Unsupported { .. }));
+    assert_eq!(err.code(), "PERSISTENCE_UNSUPPORTED");
+
+    let err = provider
+        .save_graph_snapshot("p", "g", &snapshot)
+        .unwrap_err();
+    assert!(matches!(err, PersistenceError::Unsupported { .. }));
+    assert_eq!(err.code(), "PERSISTENCE_UNSUPPORTED");
+
+    let err = provider.load_document_cache("p", "d").unwrap_err();
+    assert!(matches!(err, PersistenceError::Unsupported { .. }));
+    assert_eq!(err.code(), "PERSISTENCE_UNSUPPORTED");
+
+    let err = provider
+        .save_document_cache("p", "d", &document)
+        .unwrap_err();
+    assert!(matches!(err, PersistenceError::Unsupported { .. }));
+    assert_eq!(err.code(), "PERSISTENCE_UNSUPPORTED");
+
+    let err = provider.load_file_state("p", "s").unwrap_err();
+    assert!(matches!(err, PersistenceError::Unsupported { .. }));
+    assert_eq!(err.code(), "PERSISTENCE_UNSUPPORTED");
+
+    let err = provider.save_file_state("p", "s", &state).unwrap_err();
+    assert!(matches!(err, PersistenceError::Unsupported { .. }));
+    assert_eq!(err.code(), "PERSISTENCE_UNSUPPORTED");
+
+    let err = provider.load_graph_meta("p", "g").unwrap_err();
+    assert!(matches!(err, PersistenceError::Unsupported { .. }));
+    assert_eq!(err.code(), "PERSISTENCE_UNSUPPORTED");
+
+    let err = provider.save_graph_meta("p", "g", &meta).unwrap_err();
+    assert!(matches!(err, PersistenceError::Unsupported { .. }));
+    assert_eq!(err.code(), "PERSISTENCE_UNSUPPORTED");
 }

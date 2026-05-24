@@ -54,7 +54,7 @@ impl EChartsRenderer {
             }],
             "title": {
                 "text": graph.focus_node.as_ref()
-                    .map(|id| format!("Graph: {}", id))
+                    .map(|id| format!("Graph: {}", sanitize_text(id)))
                     .unwrap_or_else(|| "Metadata Graph".to_string()),
                 "subtext": if graph.truncated {
                     format!(
@@ -128,8 +128,8 @@ impl EChartsRenderer {
                 let tooltip_content = Self::build_node_tooltip(node);
 
                 serde_json::json!({
-                    "id": node.id,
-                    "name": node.label,
+                    "id": sanitize_text(&node.id),
+                    "name": sanitize_text(&node.label),
                     "category": category_index,
                     "symbolSize": symbol_size,
                     "value": node.metadata.len(),
@@ -153,16 +153,17 @@ impl EChartsRenderer {
             .iter()
             .map(|edge| {
                 let mut link = serde_json::json!({
-                    "source": edge.from,
-                    "target": edge.to,
+                    "source": sanitize_text(&edge.from),
+                    "target": sanitize_text(&edge.to),
                 });
 
                 if let Some(ref label) = edge.label {
+                    let sanitized_label = sanitize_text(label);
                     link["label"] = serde_json::json!({
                         "show": true,
-                        "formatter": label,
+                        "formatter": sanitized_label,
                     });
-                    link["value"] = serde_json::json!(label);
+                    link["value"] = serde_json::json!(sanitized_label);
                 }
 
                 if let Some(ref evidence) = edge.evidence {
@@ -176,11 +177,11 @@ impl EChartsRenderer {
 
     /// 构建节点 tooltip 内容
     fn build_node_tooltip(node: &crate::visualization::graph_model::VisualNode) -> String {
-        let mut lines = vec![format!("<b>{}</b>", node.label)];
+        let mut lines = vec![format!("<b>{}</b>", sanitize_text(&node.label))];
         lines.push(format!("Type: {}", node.kind));
 
         if !node.source_path.is_empty() {
-            lines.push(format!("Source: {}", node.source_path));
+            lines.push(format!("Source: {}", sanitize_text(&node.source_path)));
         }
 
         // 添加元数据（过滤敏感信息）
@@ -193,7 +194,7 @@ impl EChartsRenderer {
                 serde_json::Value::String(s) => s,
                 other => other.to_string(),
             };
-            lines.push(format!("{}: {}", key, value_str));
+            lines.push(format!("{}: {}", sanitize_text(key), value_str));
         }
 
         lines.join("<br/>")

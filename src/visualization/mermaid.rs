@@ -49,11 +49,14 @@ impl MermaidRenderer {
             for group in &sorted_groups {
                 lines.push(format!(
                     "subgraph {} [{}]",
-                    group.id,
-                    Self::escape_label(&group.label)
+                    Self::sanitize_mermaid_id(&sanitize_text(&group.id)),
+                    Self::escape_label(&sanitize_text(&group.label))
                 ));
                 for node_id in &group.node_ids {
-                    lines.push(format!("    {}", Self::sanitize_mermaid_id(node_id)));
+                    lines.push(format!(
+                        "    {}",
+                        Self::sanitize_mermaid_id(&sanitize_text(node_id))
+                    ));
                 }
                 lines.push("end".to_string());
                 lines.push(String::new());
@@ -68,8 +71,8 @@ impl MermaidRenderer {
                 lines.push(format!(
                     "%% [{}] {}: {}",
                     Self::escape_comment(&format!("{:?}", diag.severity)),
-                    Self::escape_comment(&diag.code),
-                    Self::escape_comment(&diag.message)
+                    Self::escape_comment(&sanitize_text(&diag.code)),
+                    Self::escape_comment(&sanitize_text(&diag.message))
                 ));
             }
         }
@@ -79,7 +82,7 @@ impl MermaidRenderer {
 
     /// 渲染单个节点
     fn render_node(node: &VisualNode) -> String {
-        let id = Self::sanitize_mermaid_id(&node.id);
+        let id = Self::sanitize_mermaid_id(&sanitize_text(&node.id));
         let label = Self::escape_label(&sanitize_text(&node.label));
 
         match node.kind {
@@ -95,8 +98,8 @@ impl MermaidRenderer {
 
     /// 渲染单条边
     fn render_edge(edge: &VisualEdge) -> String {
-        let from = Self::sanitize_mermaid_id(&edge.from);
-        let to = Self::sanitize_mermaid_id(&edge.to);
+        let from = Self::sanitize_mermaid_id(&sanitize_text(&edge.from));
+        let to = Self::sanitize_mermaid_id(&sanitize_text(&edge.to));
 
         let arrow = match edge.direction {
             EdgeDirection::Forward => "-->",

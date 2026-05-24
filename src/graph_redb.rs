@@ -17,7 +17,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// 图数据库锁等待超时（毫秒），进程级可配置
@@ -67,6 +67,28 @@ fn release_graph_lock(db_path: &Path) {
     let _ = std::fs::remove_file(&lock_path);
 }
 
+/// GraphDB 锁守卫，Drop 时释放与 GraphDB 相同的锁文件
+pub(crate) struct GraphDbLockGuard {
+    db_path: PathBuf,
+    lock_file: Option<std::fs::File>,
+}
+
+impl Drop for GraphDbLockGuard {
+    fn drop(&mut self) {
+        drop(self.lock_file.take());
+        release_graph_lock(&self.db_path);
+    }
+}
+
+/// 获取 GraphDB 共享锁语义，供同一 graphdb 文件的附加持久化表复用
+pub(crate) fn acquire_graph_db_lock(db_path: &Path) -> Result<GraphDbLockGuard> {
+    let lock_file = acquire_graph_lock(db_path)?;
+    Ok(GraphDbLockGuard {
+        db_path: db_path.to_path_buf(),
+        lock_file: Some(lock_file),
+    })
+}
+
 /// 图数据库（内存图 + redb 持久化）
 pub struct GraphDB {
     pub graph: DiGraph<Node, Edge>,
@@ -83,9 +105,8 @@ type NodeEdgePair<'a> = (&'a Node, &'a Edge);
 impl GraphDB {
     /// 打开或创建图数据库
     pub fn open(db_path: &Path) -> Result<Self> {
-        let _lock = acquire_graph_lock(db_path)?;
+        let _lock = acquire_graph_db_lock(db_path)?;
         let result = Self::open_inner(db_path);
-        release_graph_lock(db_path);
         result
     }
 

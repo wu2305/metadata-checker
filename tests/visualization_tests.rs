@@ -49,6 +49,60 @@ fn create_test_output_with_secrets() -> AiOutput {
     output
 }
 
+/// 创建覆盖嵌套元数据、诊断和标识字段泄露的测试 AiOutput
+fn create_test_output_with_nested_visual_secrets() -> AiOutput {
+    let mut output = AiOutput::new(
+        OutputKind::PageQuery,
+        json!({
+            "target_id": "page:token=summary_token_001",
+            "target_name": "Dashboard password=summary_password_001",
+            "source_file": "pages/cookie=summary_cookie_001.spg",
+        }),
+    );
+    output.details = Some(json!({
+        "readers": [{
+            "id": "comp:cookie=detail_cookie_001",
+            "name": "Reader api_key=detail_api_key_001",
+            "source_file": "pages/secret=detail_secret_001.spg",
+            "from": "comp:cookie=detail_cookie_001",
+            "to": "model:token=detail_token_001",
+            "edge_type": "reads",
+            "edge_label": "uses token=detail_edge_token_001",
+            "config": {
+                "api_key": "nested_api_key_001",
+                "headers": {
+                    "cookie": "nested_cookie_001"
+                }
+            },
+            "raw_expr": "password=nested_raw_password_001"
+        }]
+    }));
+    output.evidence.push(
+        Evidence::new(
+            "Evidence secret=evidence_label_secret_001",
+            "reason token=evidence_reason_token_001",
+        )
+        .with_node_id("comp:token=evidence_node_token_001")
+        .with_source_file("pages/password=evidence_source_password_001.spg")
+        .with_edge_type("DependsOn api_key=evidence_edge_api_key_001")
+        .with_raw_expr(
+            "${model:secret=evidence_target_secret_001}; cookie=evidence_raw_cookie_001",
+        ),
+    );
+    output.diagnostics.push(Diagnostic {
+        severity: DiagnosticSeverity::Warning,
+        code: "TOKEN_DIAGNOSTIC".to_string(),
+        message: "diagnostic leaked token=diagnostic_token_001".to_string(),
+        location: Location {
+            source_file: Some("pages/api_key=diagnostic_api_key_001.spg".to_string()),
+            node_id: Some("comp:cookie=diagnostic_cookie_001".to_string()),
+            json_path: Some("$.password=diagnostic_password_001".to_string()),
+        },
+        suggestion: Some("rotate secret=diagnostic_secret_001".to_string()),
+    });
+    output
+}
+
 /// 创建大型测试 AiOutput
 fn create_large_test_output(node_count: usize) -> AiOutput {
     let mut output = AiOutput::new(
@@ -294,6 +348,143 @@ fn test_sensitive_fields_not_in_output() {
             .iter()
             .any(|tooltip| tooltip.contains("secret123") || tooltip.contains("abc123")),
         "ECharts edge tooltip should not contain sensitive raw values"
+    );
+}
+
+#[test]
+fn test_nested_metadata_sensitive_keys_are_redacted() {
+    let output = create_test_output_with_nested_visual_secrets();
+    let mut opts = VisualGraphOptions::default();
+    opts.include_evidence = true;
+
+    let graph = VisualGraphBuilder::from_ai_output(&output, &opts);
+    let graph_str = serde_json::to_string(&graph).unwrap().to_lowercase();
+
+    for leaked in [
+        "nested_api_key_001",
+        "nested_cookie_001",
+        "nested_raw_password_001",
+        "detail_api_key_001",
+        "detail_secret_001",
+    ] {
+        assert!(
+            !graph_str.contains(leaked),
+            "VisualGraph should redact nested metadata value: {}",
+            leaked
+        );
+    }
+}
+
+#[test]
+fn test_diagnostic_values_are_redacted_in_graph_mermaid_and_echarts() {
+    let mut output = AiOutput::new(OutputKind::PageQuery, json!({}));
+    output.diagnostics.push(Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: "AUTH_FAILED".to_string(),
+        message: "token=diagnostic_token_002 password=diagnostic_password_002".to_string(),
+        location: Location {
+            source_file: Some("pages/cookie=diagnostic_cookie_002.spg".to_string()),
+            node_id: Some("comp:secret=diagnostic_secret_002".to_string()),
+            json_path: Some("$.api_key=diagnostic_api_key_002".to_string()),
+        },
+        suggestion: Some("replace api_key=diagnostic_suggestion_api_key_002".to_string()),
+    });
+
+    let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());
+    let mermaid = render_mermaid_from_ai_output(&output, &VisualGraphOptions::default()).unwrap();
+    let echarts = render_echarts_from_ai_output(&output, &VisualGraphOptions::default()).unwrap();
+    let combined = format!(
+        "{}\n{}\n{}",
+        serde_json::to_string(&graph).unwrap(),
+        mermaid,
+        echarts
+    )
+    .to_lowercase();
+
+    for leaked in [
+        "diagnostic_token_002",
+        "diagnostic_password_002",
+        "diagnostic_cookie_002",
+        "diagnostic_secret_002",
+        "diagnostic_api_key_002",
+        "diagnostic_suggestion_api_key_002",
+    ] {
+        assert!(
+            !combined.contains(leaked),
+            "diagnostic rendering should redact sensitive value: {}",
+            leaked
+        );
+    }
+}
+
+#[test]
+fn test_visual_identifiers_and_edge_values_are_redacted() {
+    let output = create_test_output_with_nested_visual_secrets();
+    let mut opts = VisualGraphOptions::default();
+    opts.include_evidence = true;
+
+    let graph = VisualGraphBuilder::from_ai_output(&output, &opts);
+    let mermaid = render_mermaid_from_ai_output(&output, &opts).unwrap();
+    let echarts = render_echarts_from_ai_output(&output, &opts).unwrap();
+    let combined = format!(
+        "{}\n{}\n{}",
+        serde_json::to_string(&graph).unwrap(),
+        mermaid,
+        echarts
+    )
+    .to_lowercase();
+
+    for leaked in [
+        "summary_token_001",
+        "summary_password_001",
+        "summary_cookie_001",
+        "detail_cookie_001",
+        "detail_token_001",
+        "detail_edge_token_001",
+        "evidence_node_token_001",
+        "evidence_source_password_001",
+        "evidence_target_secret_001",
+        "evidence_raw_cookie_001",
+        "evidence_reason_token_001",
+        "diagnostic_token_001",
+    ] {
+        assert!(
+            !combined.contains(leaked),
+            "visual output should redact identifier/edge value: {}",
+            leaked
+        );
+    }
+}
+
+#[test]
+fn test_include_evidence_false_excludes_evidence_details() {
+    let output = create_test_output_with_nested_visual_secrets();
+    let mut opts = VisualGraphOptions::default();
+    opts.include_evidence = false;
+
+    let graph = VisualGraphBuilder::from_ai_output(&output, &opts);
+    let echarts = render_echarts_from_ai_output(&output, &opts).unwrap();
+    let combined =
+        format!("{}\n{}", serde_json::to_string(&graph).unwrap(), echarts).to_lowercase();
+
+    assert!(
+        graph.edges.iter().all(|edge| edge.evidence.is_none()),
+        "include_evidence=false should remove edge evidence"
+    );
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .all(|node| !node.metadata.contains_key("raw_expr")),
+        "include_evidence=false should remove raw_expr metadata"
+    );
+    assert!(
+        !combined.contains("raw_expr"),
+        "include_evidence=false output should not contain raw_expr key"
+    );
+    assert!(
+        !combined.contains("evidence_reason_token_001"),
+        "include_evidence=false output should not contain edge evidence details"
     );
 }
 

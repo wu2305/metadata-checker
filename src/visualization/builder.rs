@@ -4,7 +4,7 @@ use crate::visualization::graph_model::{
 };
 use crate::visualization::options::{EdgeDirection, EdgeKind, NodeKind, VisualGraphOptions};
 use crate::visualization::sanitizer::{
-    sanitize_metadata_value, sanitize_text as sanitize_sensitive_text,
+    sanitize_diagnostic, sanitize_metadata_entry, sanitize_text as sanitize_sensitive_text,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -17,7 +17,7 @@ impl VisualGraphBuilder {
     /// 从 AiOutput 构建可视化图
     pub fn from_ai_output(output: &AiOutput, options: &VisualGraphOptions) -> VisualGraph {
         let mut graph = VisualGraph::empty();
-        graph.diagnostics = output.diagnostics.clone();
+        graph.diagnostics = output.diagnostics.iter().map(sanitize_diagnostic).collect();
 
         // 如果只有 diagnostics 没有实质内容，生成 diagnostic-only 图
         let has_substantive_content = !output.summary.is_null()
@@ -66,7 +66,7 @@ impl VisualGraphBuilder {
 
         // 设置焦点节点
         if let Some(ref target) = options.focus_target {
-            graph.focus_node = Some(target.clone());
+            graph.focus_node = Some(sanitize_sensitive_text(target));
         }
 
         // 计算来源摘要
@@ -96,10 +96,10 @@ impl VisualGraphBuilder {
                 .unwrap_or("");
 
             graph.nodes.push(VisualNode {
-                id: target_id.to_string(),
+                id: sanitize_sensitive_text(target_id),
                 label: Self::sanitize_label(target_name),
                 kind: NodeKind::Component,
-                source_path: source_path.to_string(),
+                source_path: sanitize_sensitive_text(source_path),
                 metadata: {
                     let mut m = HashMap::new();
                     m.insert("type".to_string(), serde_json::json!("target"));
@@ -113,7 +113,7 @@ impl VisualGraphBuilder {
 
         // 从 details 提取关联信息
         if let Some(ref details) = output.details {
-            Self::parse_details(details, graph);
+            Self::parse_details(details, graph, _options);
         }
     }
 
@@ -138,10 +138,10 @@ impl VisualGraphBuilder {
                 .unwrap_or("");
 
             graph.nodes.push(VisualNode {
-                id: model_id.to_string(),
+                id: sanitize_sensitive_text(model_id),
                 label: Self::sanitize_label(model_name),
                 kind: NodeKind::Model,
-                source_path: source_path.to_string(),
+                source_path: sanitize_sensitive_text(source_path),
                 metadata: {
                     let mut m = HashMap::new();
                     m.insert("type".to_string(), serde_json::json!("target"));
@@ -153,7 +153,7 @@ impl VisualGraphBuilder {
         Self::parse_from_evidence(output, graph, _options);
 
         if let Some(ref details) = output.details {
-            Self::parse_details(details, graph);
+            Self::parse_details(details, graph, _options);
         }
     }
 
@@ -169,14 +169,14 @@ impl VisualGraphBuilder {
             output.summary.get("page_b").and_then(|v| v.as_str()),
         ) {
             graph.nodes.push(VisualNode {
-                id: page_a.to_string(),
+                id: sanitize_sensitive_text(page_a),
                 label: Self::sanitize_label(page_a),
                 kind: NodeKind::Page,
                 source_path: String::new(),
                 metadata: HashMap::new(),
             });
             graph.nodes.push(VisualNode {
-                id: page_b.to_string(),
+                id: sanitize_sensitive_text(page_b),
                 label: Self::sanitize_label(page_b),
                 kind: NodeKind::Page,
                 source_path: String::new(),
@@ -187,7 +187,7 @@ impl VisualGraphBuilder {
         Self::parse_from_evidence(output, graph, _options);
 
         if let Some(ref details) = output.details {
-            Self::parse_details(details, graph);
+            Self::parse_details(details, graph, _options);
         }
     }
 
@@ -202,29 +202,36 @@ impl VisualGraphBuilder {
 
         for evidence in &output.evidence {
             // 提取节点
-            if let Some(ref node_id) = evidence.node_id {
-                if !seen_nodes.contains(node_id) {
+            if let Some(ref raw_node_id) = evidence.node_id {
+                let node_id = sanitize_sensitive_text(raw_node_id);
+                if !seen_nodes.contains(&node_id) {
                     seen_nodes.insert(node_id.clone());
                     let label = &evidence.claim;
-                    let kind = Self::infer_node_kind(node_id, &evidence.edge_type);
-                    let source_path = evidence.source_file.clone().unwrap_or_default();
+                    let kind = Self::infer_node_kind(raw_node_id, &evidence.edge_type);
+                    let source_path = evidence
+                        .source_file
+                        .as_ref()
+                        .map(|source_file| sanitize_sensitive_text(source_file))
+                        .unwrap_or_default();
 
                     graph.nodes.push(VisualNode {
                         id: node_id.clone(),
                         label: Self::sanitize_label(label),
                         kind,
                         source_path,
-                        metadata: Self::build_node_metadata(evidence),
+                        metadata: Self::build_node_metadata(evidence, _options.include_evidence),
                     });
                 }
             }
 
             // 从 claim 和 reason 中尝试提取边关系
             if let Some(ref edge_type) = evidence.edge_type {
-                if let Some(ref node_id) = evidence.node_id {
+                if let Some(ref raw_node_id) = evidence.node_id {
+                    let node_id = sanitize_sensitive_text(raw_node_id);
                     if let Some(ref raw_expr) = evidence.raw_expr {
                         // 尝试解析表达式中的目标引用
                         if let Some(target) = Self::extract_target_from_expr(raw_expr) {
+                            let target = sanitize_sensitive_text(&target);
                             let edge_key = (node_id.clone(), target.clone(), edge_type.clone());
                             if !seen_edges.contains(&edge_key) {
                                 seen_edges.insert(edge_key);
@@ -235,7 +242,11 @@ impl VisualGraphBuilder {
                                     kind,
                                     label: Some(sanitize_sensitive_text(edge_type)),
                                     direction: EdgeDirection::Forward,
-                                    evidence: Some(sanitize_sensitive_text(&evidence.reason)),
+                                    evidence: if _options.include_evidence {
+                                        Some(sanitize_sensitive_text(&evidence.reason))
+                                    } else {
+                                        None
+                                    },
                                 });
                             }
                         }
@@ -246,7 +257,11 @@ impl VisualGraphBuilder {
     }
 
     /// 解析 details JSON 中的关联信息
-    fn parse_details(details: &serde_json::Value, graph: &mut VisualGraph) {
+    fn parse_details(
+        details: &serde_json::Value,
+        graph: &mut VisualGraph,
+        options: &VisualGraphOptions,
+    ) {
         // 解析 readers / writers / inputs / outputs 等数组
         let arrays = vec![
             ("readers", EdgeKind::Reads),
@@ -260,12 +275,13 @@ impl VisualGraphBuilder {
         for (key, default_kind) in arrays {
             if let Some(arr) = details.get(key).and_then(|v| v.as_array()) {
                 for item in arr {
-                    if let (Some(id), Some(name)) = (
+                    if let (Some(raw_id), Some(name)) = (
                         item.get("id").and_then(|v| v.as_str()),
                         item.get("name")
                             .or_else(|| item.get("label"))
                             .and_then(|v| v.as_str()),
                     ) {
+                        let id = sanitize_sensitive_text(raw_id);
                         // 添加节点（如果不存在）
                         if !graph.nodes.iter().any(|n| n.id == id) {
                             let kind = item
@@ -278,21 +294,23 @@ impl VisualGraphBuilder {
                                 .get("source_file")
                                 .or_else(|| item.get("source_path"))
                                 .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
+                                .map(sanitize_sensitive_text)
+                                .unwrap_or_default();
 
                             graph.nodes.push(VisualNode {
-                                id: id.to_string(),
+                                id: id.clone(),
                                 label: Self::sanitize_label(name),
                                 kind,
                                 source_path,
-                                metadata: Self::json_to_metadata(item),
+                                metadata: Self::json_to_metadata(item, options.include_evidence),
                             });
                         }
 
                         // 尝试添加边（如果有 from/to 信息）
-                        if let Some(from) = item.get("from").and_then(|v| v.as_str()) {
-                            if let Some(to) = item.get("to").and_then(|v| v.as_str()) {
+                        if let Some(raw_from) = item.get("from").and_then(|v| v.as_str()) {
+                            if let Some(raw_to) = item.get("to").and_then(|v| v.as_str()) {
+                                let from = sanitize_sensitive_text(raw_from);
+                                let to = sanitize_sensitive_text(raw_to);
                                 let kind = item
                                     .get("edge_type")
                                     .and_then(|v| v.as_str())
@@ -309,8 +327,8 @@ impl VisualGraphBuilder {
                                         && format!("{:?}", e.kind) == format!("{:?}", kind)
                                 }) {
                                     graph.edges.push(VisualEdge {
-                                        from: from.to_string(),
-                                        to: to.to_string(),
+                                        from,
+                                        to,
                                         kind,
                                         label,
                                         direction: EdgeDirection::Forward,
@@ -385,10 +403,11 @@ impl VisualGraphBuilder {
 
         for (path, node_ids) in path_to_nodes {
             if node_ids.len() >= 2 {
-                let group_id = format!("group_{}", Self::sanitize_id(&path));
+                let sanitized_path = sanitize_sensitive_text(&path);
+                let group_id = format!("group_{}", Self::sanitize_id(&sanitized_path));
                 graph.groups.push(VisualGroup {
                     id: group_id,
-                    label: path.clone(),
+                    label: sanitized_path,
                     node_ids,
                 });
             }
@@ -458,7 +477,7 @@ impl VisualGraphBuilder {
             "triggers" => EdgeKind::Triggers,
             "contains" => EdgeKind::Contains,
             "dependson" | "depends_on" | "depends on" => EdgeKind::DependsOn,
-            _ => EdgeKind::Other(s.to_string()),
+            _ => EdgeKind::Other(sanitize_sensitive_text(s)),
         }
     }
 
@@ -486,19 +505,24 @@ impl VisualGraphBuilder {
     }
 
     /// 构建节点元数据
-    fn build_node_metadata(evidence: &Evidence) -> HashMap<String, serde_json::Value> {
+    fn build_node_metadata(
+        evidence: &Evidence,
+        include_evidence: bool,
+    ) -> HashMap<String, serde_json::Value> {
         let mut m = HashMap::new();
-        if let Some(ref raw_expr) = evidence.raw_expr {
-            m.insert(
-                "raw_expr".to_string(),
-                sanitize_metadata_value(&serde_json::json!(raw_expr)),
-            );
-        }
-        if let Some(ref json_path) = evidence.json_path {
-            m.insert(
-                "json_path".to_string(),
-                sanitize_metadata_value(&serde_json::json!(json_path)),
-            );
+        if include_evidence {
+            if let Some(ref raw_expr) = evidence.raw_expr {
+                m.insert(
+                    "raw_expr".to_string(),
+                    sanitize_metadata_entry("raw_expr", &serde_json::json!(raw_expr)),
+                );
+            }
+            if let Some(ref json_path) = evidence.json_path {
+                m.insert(
+                    "json_path".to_string(),
+                    sanitize_metadata_entry("json_path", &serde_json::json!(json_path)),
+                );
+            }
         }
         m.insert(
             "confidence".to_string(),
@@ -508,14 +532,26 @@ impl VisualGraphBuilder {
     }
 
     /// 将 JSON 值转换为元数据映射
-    fn json_to_metadata(value: &serde_json::Value) -> HashMap<String, serde_json::Value> {
+    fn json_to_metadata(
+        value: &serde_json::Value,
+        include_evidence: bool,
+    ) -> HashMap<String, serde_json::Value> {
         match value {
             serde_json::Value::Object(map) => map
                 .iter()
-                .map(|(k, v)| (k.clone(), sanitize_metadata_value(v)))
+                .filter(|(key, _)| include_evidence || !Self::is_evidence_metadata_key(key))
+                .map(|(k, v)| (k.clone(), sanitize_metadata_entry(k, v)))
                 .collect(),
             _ => HashMap::new(),
         }
+    }
+
+    /// 判断 metadata key 是否属于证据细节
+    fn is_evidence_metadata_key(key: &str) -> bool {
+        matches!(
+            key,
+            "raw_expr" | "rawExpression" | "evidence" | "reason" | "json_path" | "jsonPath"
+        )
     }
 
     /// 清理标签文本（过滤敏感信息）
