@@ -1,5 +1,6 @@
 use crate::visualization::graph_model::VisualGraph;
 use crate::visualization::options::NodeKind;
+use crate::visualization::sanitizer::{is_sensitive_key, sanitize_metadata_value, sanitize_text};
 
 /// ECharts 渲染器
 ///
@@ -165,7 +166,7 @@ impl EChartsRenderer {
                 }
 
                 if let Some(ref evidence) = edge.evidence {
-                    link["tooltip"] = serde_json::json!(evidence);
+                    link["tooltip"] = serde_json::json!(sanitize_text(evidence));
                 }
 
                 link
@@ -187,9 +188,10 @@ impl EChartsRenderer {
             if Self::is_sensitive_key(key) {
                 continue;
             }
-            let value_str = match value {
-                serde_json::Value::String(s) => s.clone(),
-                _ => value.to_string(),
+            let sanitized_value = sanitize_metadata_value(value);
+            let value_str = match sanitized_value {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
             };
             lines.push(format!("{}: {}", key, value_str));
         }
@@ -219,11 +221,6 @@ impl EChartsRenderer {
 
     /// 检查键名是否敏感
     fn is_sensitive_key(key: &str) -> bool {
-        let lower = key.to_lowercase();
-        [
-            "token", "password", "secret", "cookie", "auth", "credential", "api_key", "apikey",
-        ]
-        .iter()
-        .any(|s| lower.contains(s))
+        is_sensitive_key(key)
     }
 }

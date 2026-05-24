@@ -1,12 +1,12 @@
 use crate::output::schema::{AiOutput, Evidence, OutputKind};
-use crate::visualization::graph_model::{SourceSummary, VisualEdge, VisualGraph, VisualGroup, VisualNode};
+use crate::visualization::graph_model::{
+    SourceSummary, VisualEdge, VisualGraph, VisualGroup, VisualNode,
+};
 use crate::visualization::options::{EdgeDirection, EdgeKind, NodeKind, VisualGraphOptions};
+use crate::visualization::sanitizer::{
+    sanitize_metadata_value, sanitize_text as sanitize_sensitive_text,
+};
 use std::collections::{HashMap, HashSet};
-
-/// 敏感关键词列表，用于过滤输出
-const SENSITIVE_KEYS: &[&str] = &[
-    "token", "password", "secret", "cookie", "auth", "credential", "api_key", "apikey",
-];
 
 /// 可视化图构建器
 ///
@@ -21,8 +21,16 @@ impl VisualGraphBuilder {
 
         // 如果只有 diagnostics 没有实质内容，生成 diagnostic-only 图
         let has_substantive_content = !output.summary.is_null()
-            && output.summary.as_object().map(|o| !o.is_empty()).unwrap_or(true)
-            && output.summary.as_array().map(|a| !a.is_empty()).unwrap_or(true);
+            && output
+                .summary
+                .as_object()
+                .map(|o| !o.is_empty())
+                .unwrap_or(true)
+            && output
+                .summary
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(true);
 
         if !has_substantive_content && !output.diagnostics.is_empty() {
             return VisualGraph::from_diagnostics(output.diagnostics.clone());
@@ -199,10 +207,7 @@ impl VisualGraphBuilder {
                     seen_nodes.insert(node_id.clone());
                     let label = &evidence.claim;
                     let kind = Self::infer_node_kind(node_id, &evidence.edge_type);
-                    let source_path = evidence
-                        .source_file
-                        .clone()
-                        .unwrap_or_default();
+                    let source_path = evidence.source_file.clone().unwrap_or_default();
 
                     graph.nodes.push(VisualNode {
                         id: node_id.clone(),
@@ -220,11 +225,7 @@ impl VisualGraphBuilder {
                     if let Some(ref raw_expr) = evidence.raw_expr {
                         // 尝试解析表达式中的目标引用
                         if let Some(target) = Self::extract_target_from_expr(raw_expr) {
-                            let edge_key = (
-                                node_id.clone(),
-                                target.clone(),
-                                edge_type.clone(),
-                            );
+                            let edge_key = (node_id.clone(), target.clone(), edge_type.clone());
                             if !seen_edges.contains(&edge_key) {
                                 seen_edges.insert(edge_key);
                                 let kind = Self::parse_edge_kind(edge_type);
@@ -232,9 +233,9 @@ impl VisualGraphBuilder {
                                     from: node_id.clone(),
                                     to: target,
                                     kind,
-                                    label: Some(edge_type.clone()),
+                                    label: Some(sanitize_sensitive_text(edge_type)),
                                     direction: EdgeDirection::Forward,
-                                    evidence: Some(Self::sanitize_text(&evidence.reason)),
+                                    evidence: Some(sanitize_sensitive_text(&evidence.reason)),
                                 });
                             }
                         }
@@ -261,7 +262,8 @@ impl VisualGraphBuilder {
                 for item in arr {
                     if let (Some(id), Some(name)) = (
                         item.get("id").and_then(|v| v.as_str()),
-                        item.get("name").or_else(|| item.get("label"))
+                        item.get("name")
+                            .or_else(|| item.get("label"))
                             .and_then(|v| v.as_str()),
                     ) {
                         // 添加节点（如果不存在）
@@ -299,10 +301,11 @@ impl VisualGraphBuilder {
                                 let label = item
                                     .get("edge_label")
                                     .and_then(|v| v.as_str())
-                                    .map(|s| s.to_string());
+                                    .map(sanitize_sensitive_text);
 
                                 if !graph.edges.iter().any(|e| {
-                                    e.from == from && e.to == to
+                                    e.from == from
+                                        && e.to == to
                                         && format!("{:?}", e.kind) == format!("{:?}", kind)
                                 }) {
                                     graph.edges.push(VisualEdge {
@@ -331,11 +334,10 @@ impl VisualGraphBuilder {
             graph.truncated = true;
             graph.nodes.truncate(options.max_nodes);
             // 截断后只保留两端节点都在保留列表中的边
-            let kept_ids: HashSet<String> =
-                graph.nodes.iter().map(|n| n.id.clone()).collect();
-            graph.edges.retain(|e| {
-                kept_ids.contains(&e.from) && kept_ids.contains(&e.to)
-            });
+            let kept_ids: HashSet<String> = graph.nodes.iter().map(|n| n.id.clone()).collect();
+            graph
+                .edges
+                .retain(|e| kept_ids.contains(&e.from) && kept_ids.contains(&e.to));
         }
 
         if graph.edges.len() > options.max_edges {
@@ -399,15 +401,11 @@ impl VisualGraphBuilder {
         let mut edge_kinds: HashMap<String, usize> = HashMap::new();
 
         for node in &graph.nodes {
-            *node_kinds
-                .entry(format!("{}", node.kind))
-                .or_insert(0) += 1;
+            *node_kinds.entry(format!("{}", node.kind)).or_insert(0) += 1;
         }
 
         for edge in &graph.edges {
-            *edge_kinds
-                .entry(format!("{}", edge.kind))
-                .or_insert(0) += 1;
+            *edge_kinds.entry(format!("{}", edge.kind)).or_insert(0) += 1;
         }
 
         SourceSummary {
@@ -491,30 +489,38 @@ impl VisualGraphBuilder {
     fn build_node_metadata(evidence: &Evidence) -> HashMap<String, serde_json::Value> {
         let mut m = HashMap::new();
         if let Some(ref raw_expr) = evidence.raw_expr {
-            m.insert("raw_expr".to_string(), serde_json::json!(raw_expr.clone()));
+            m.insert(
+                "raw_expr".to_string(),
+                sanitize_metadata_value(&serde_json::json!(raw_expr)),
+            );
         }
         if let Some(ref json_path) = evidence.json_path {
-            m.insert("json_path".to_string(), serde_json::json!(json_path.clone()));
+            m.insert(
+                "json_path".to_string(),
+                sanitize_metadata_value(&serde_json::json!(json_path)),
+            );
         }
-        m.insert("confidence".to_string(), serde_json::json!(format!("{:?}", evidence.confidence)));
+        m.insert(
+            "confidence".to_string(),
+            serde_json::json!(format!("{:?}", evidence.confidence)),
+        );
         m
     }
 
     /// 将 JSON 值转换为元数据映射
     fn json_to_metadata(value: &serde_json::Value) -> HashMap<String, serde_json::Value> {
         match value {
-            serde_json::Value::Object(map) => {
-                map.iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect()
-            }
+            serde_json::Value::Object(map) => map
+                .iter()
+                .map(|(k, v)| (k.clone(), sanitize_metadata_value(v)))
+                .collect(),
             _ => HashMap::new(),
         }
     }
 
     /// 清理标签文本（过滤敏感信息）
     fn sanitize_label(text: &str) -> String {
-        let sanitized = Self::sanitize_text(text);
+        let sanitized = sanitize_sensitive_text(text);
         // 限制长度
         if sanitized.chars().count() > 80 {
             let truncated: String = sanitized.chars().take(80).collect();
@@ -522,21 +528,6 @@ impl VisualGraphBuilder {
         } else {
             sanitized
         }
-    }
-
-    /// 清理文本（过滤敏感信息）
-    fn sanitize_text(text: &str) -> String {
-        let mut result = text.to_string();
-        for key in SENSITIVE_KEYS {
-            // 匹配 key=value 或 key: value 格式，替换值部分
-            let pattern = format!("(?i){}\\s*[=:]\\s*[^\\s,;)}}]+", regex::escape(key));
-            if let Ok(re) = regex::Regex::new(&pattern) {
-                result = re
-                    .replace_all(&result, format!("{}=***", key))
-                    .to_string();
-            }
-        }
-        result
     }
 
     /// 将字符串转换为合法的 ID（用于 Mermaid）

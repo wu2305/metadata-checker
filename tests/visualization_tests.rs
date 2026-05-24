@@ -1,11 +1,11 @@
 use metadata_checker::output::schema::{
     AiOutput, Diagnostic, DiagnosticSeverity, Evidence, Location, OutputKind,
 };
+use metadata_checker::visualization::builder::VisualGraphBuilder;
+use metadata_checker::visualization::options::VisualGraphOptions;
 use metadata_checker::visualization::{
     render_echarts_from_ai_output, render_mermaid_from_ai_output,
 };
-use metadata_checker::visualization::builder::VisualGraphBuilder;
-use metadata_checker::visualization::options::VisualGraphOptions;
 use serde_json::json;
 
 /// 创建包含特殊字符的测试 AiOutput
@@ -37,7 +37,14 @@ fn create_test_output_with_secrets() -> AiOutput {
     output.evidence.push(
         Evidence::new("字段:密码", "password=secret123, token=abc123, api_key=xyz")
             .with_node_id("field:password")
-            .with_raw_expr("${user.password}"),
+            .with_source_file("models/users.tbl")
+            .with_edge_type("Reads token=abc123")
+            .with_raw_expr("${model:users}; password=raw_user_secret_123"),
+    );
+    output.evidence.push(
+        Evidence::new("model users", "Target model")
+            .with_node_id("model:users")
+            .with_source_file("models/users.tbl"),
     );
     output
 }
@@ -107,9 +114,15 @@ fn test_error_envelope_generates_diagnostic_only_graph() {
     });
 
     let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());
-    assert!(!graph.nodes.is_empty(), "Diagnostic graph should have nodes");
     assert!(
-        graph.nodes.iter().all(|n| matches!(n.kind, metadata_checker::visualization::options::NodeKind::Diagnostic)),
+        !graph.nodes.is_empty(),
+        "Diagnostic graph should have nodes"
+    );
+    assert!(
+        graph.nodes.iter().all(|n| matches!(
+            n.kind,
+            metadata_checker::visualization::options::NodeKind::Diagnostic
+        )),
         "All nodes should be diagnostic nodes"
     );
 }
@@ -131,7 +144,10 @@ fn test_mermaid_output_is_stable_for_snapshot() {
     let mermaid2 = render_mermaid_from_ai_output(&output, &opts).unwrap();
 
     assert_eq!(mermaid1, mermaid2, "Mermaid output should be stable");
-    assert!(mermaid1.starts_with("graph TD"), "Should start with graph TD");
+    assert!(
+        mermaid1.starts_with("graph TD"),
+        "Should start with graph TD"
+    );
 }
 
 #[test]
@@ -189,11 +205,17 @@ fn test_echarts_option_json_contains_nodes_links_categories() {
 
     let series = &option["series"][0];
     assert!(
-        series["data"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        series["data"]
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false),
         "ECharts should have nodes"
     );
     assert!(
-        series["categories"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        series["categories"]
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false),
         "ECharts should have categories"
     );
 }
@@ -219,24 +241,59 @@ fn test_sensitive_fields_not_in_output() {
     let mermaid = render_mermaid_from_ai_output(&output, &VisualGraphOptions::default()).unwrap();
     let echarts = render_echarts_from_ai_output(&output, &VisualGraphOptions::default()).unwrap();
 
+    let sensitive_values = ["secret123", "abc123", "xyz", "raw_user_secret_123"];
     let mermaid_lower = mermaid.to_lowercase();
+
+    for value in &sensitive_values {
+        assert!(
+            !mermaid_lower.contains(value),
+            "Mermaid should not contain sensitive plain value: {}",
+            value
+        );
+    }
+
     let echarts_str = echarts.to_string().to_lowercase();
+    for value in &sensitive_values {
+        assert!(
+            !echarts_str.contains(value),
+            "ECharts JSON should not contain sensitive plain value: {}",
+            value
+        );
+    }
+
+    let series = &echarts["series"][0];
+    let node_tooltips: Vec<&str> = series["data"]
+        .as_array()
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|node| node.get("tooltip").and_then(|v| v.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     assert!(
-        !mermaid_lower.contains("secret123"),
-        "Mermaid should not contain raw password"
+        !node_tooltips
+            .iter()
+            .any(|tooltip| tooltip.to_lowercase().contains("raw_user_secret_123")),
+        "ECharts node tooltip should not contain raw metadata value"
     );
+
+    let link_tooltips: Vec<&str> = series["links"]
+        .as_array()
+        .map(|links| {
+            links
+                .iter()
+                .filter_map(|link| link.get("tooltip").and_then(|v| v.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
+
     assert!(
-        !mermaid_lower.contains("abc123"),
-        "Mermaid should not contain raw token"
-    );
-    assert!(
-        !echarts_str.contains("secret123"),
-        "ECharts should not contain raw password"
-    );
-    assert!(
-        !echarts_str.contains("abc123"),
-        "ECharts should not contain raw token"
+        !link_tooltips
+            .iter()
+            .any(|tooltip| tooltip.contains("secret123") || tooltip.contains("abc123")),
+        "ECharts edge tooltip should not contain sensitive raw values"
     );
 }
 
@@ -250,10 +307,9 @@ fn test_mermaid_id_sanitization() {
         }),
     );
     // ID 以数字开头，需要 sanitization
-    output.evidence.push(
-        Evidence::new("Numeric ID", "Test")
-            .with_node_id("123_invalid"),
-    );
+    output
+        .evidence
+        .push(Evidence::new("Numeric ID", "Test").with_node_id("123_invalid"));
 
     let mermaid = render_mermaid_from_ai_output(&output, &VisualGraphOptions::default()).unwrap();
     // 确保没有以数字开头的 ID 出现在输出中

@@ -1,5 +1,6 @@
 use crate::visualization::graph_model::{VisualEdge, VisualGraph, VisualNode};
 use crate::visualization::options::{EdgeDirection, NodeKind};
+use crate::visualization::sanitizer::sanitize_text;
 
 /// Mermaid 渲染器
 ///
@@ -27,8 +28,11 @@ impl MermaidRenderer {
         // 按 (from, to, kind) 稳定排序边
         let mut sorted_edges = graph.edges.clone();
         sorted_edges.sort_by(|a, b| {
-            (&a.from, &a.to, format!("{:?}", a.kind))
-                .cmp(&(&b.from, &b.to, format!("{:?}", b.kind)))
+            (&a.from, &a.to, format!("{:?}", a.kind)).cmp(&(
+                &b.from,
+                &b.to,
+                format!("{:?}", b.kind),
+            ))
         });
 
         // 渲染边
@@ -43,7 +47,11 @@ impl MermaidRenderer {
             sorted_groups.sort_by(|a, b| a.id.cmp(&b.id));
 
             for group in &sorted_groups {
-                lines.push(format!("subgraph {} [{}]", group.id, Self::escape_label(&group.label)));
+                lines.push(format!(
+                    "subgraph {} [{}]",
+                    group.id,
+                    Self::escape_label(&group.label)
+                ));
                 for node_id in &group.node_ids {
                     lines.push(format!("    {}", Self::sanitize_mermaid_id(node_id)));
                 }
@@ -72,7 +80,7 @@ impl MermaidRenderer {
     /// 渲染单个节点
     fn render_node(node: &VisualNode) -> String {
         let id = Self::sanitize_mermaid_id(&node.id);
-        let label = Self::escape_label(&node.label);
+        let label = Self::escape_label(&sanitize_text(&node.label));
 
         match node.kind {
             NodeKind::Page => format!("{}((\"{}\"))", id, label),
@@ -96,7 +104,7 @@ impl MermaidRenderer {
         };
 
         if let Some(ref label) = edge.label {
-            let escaped_label = Self::escape_label(label);
+            let escaped_label = Self::escape_label(&sanitize_text(label));
             format!("{} {}|{}| {}", from, arrow, escaped_label, to)
         } else {
             format!("{} {} {}", from, arrow, to)
@@ -139,8 +147,9 @@ impl MermaidRenderer {
 
         // 确保不是 Mermaid 关键字
         match result.as_str() {
-            "graph" | "subgraph" | "end" | "direction" | "style" | "class" | "click"
-            | "link" => result.insert(0, 'n'),
+            "graph" | "subgraph" | "end" | "direction" | "style" | "class" | "click" | "link" => {
+                result.insert(0, 'n')
+            }
             _ => {}
         }
 

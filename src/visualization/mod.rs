@@ -3,6 +3,7 @@ pub mod echarts;
 pub mod graph_model;
 pub mod mermaid;
 pub mod options;
+pub mod sanitizer;
 
 use crate::output::schema::AiOutput;
 use crate::visualization::builder::VisualGraphBuilder;
