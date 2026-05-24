@@ -823,12 +823,21 @@ fn test_stdio_server_reload_failure() {
         .spawn()
         .expect("failed to spawn stdio server");
 
-    let stdin = child.stdin.take().expect("stdin");
+    let mut stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
     let mut stdout_reader = std::io::BufReader::new(stdout);
 
-    // 等待 server 启动完成
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    let ready_req = serde_json::json!({
+        "request_id": "req-reload-fail-ready",
+        "command": "status"
+    });
+    writeln!(stdin, "{}", ready_req).unwrap();
+    stdin.flush().unwrap();
+    let mut ready_line = String::new();
+    stdout_reader.read_line(&mut ready_line).unwrap();
+    let ready_resp: serde_json::Value =
+        serde_json::from_str(&ready_line).expect("ready resp must be valid JSON");
+    assert_eq!(ready_resp["ok"].as_bool(), Some(true));
 
     // 在 server 启动后破坏 graphdb
     std::fs::write(&db_path, b"not a valid graphdb").unwrap();
@@ -890,11 +899,22 @@ fn test_stdio_server_reload_failure_keeps_old_graph_usable() {
         .spawn()
         .expect("failed to spawn stdio server");
 
-    let stdin = child.stdin.take().expect("stdin");
+    let mut stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
     let mut stdout_reader = std::io::BufReader::new(stdout);
 
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    let ready_req = serde_json::json!({
+        "request_id": "req-reload-fail-old-graph-ready",
+        "command": "status"
+    });
+    writeln!(stdin, "{}", ready_req).unwrap();
+    stdin.flush().unwrap();
+    let mut ready_line = String::new();
+    stdout_reader.read_line(&mut ready_line).unwrap();
+    let ready_resp: serde_json::Value =
+        serde_json::from_str(&ready_line).expect("ready resp must be valid JSON");
+    assert_eq!(ready_resp["ok"].as_bool(), Some(true));
+
     std::fs::write(&db_path, b"not a valid graphdb").unwrap();
 
     let reload_req = serde_json::json!({

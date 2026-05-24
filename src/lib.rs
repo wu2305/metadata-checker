@@ -19,6 +19,7 @@ pub mod output;
 pub mod parsed_content;
 pub mod parser;
 pub mod path;
+pub mod persistence;
 pub mod priority;
 pub mod query;
 pub mod remote_metadata;

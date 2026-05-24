@@ -15,6 +15,11 @@ use crate::visualization::options::VisualGraphOptions;
 ///
 /// # 示例
 /// ```
+/// use metadata_checker::output::schema::{AiOutput, OutputKind};
+/// use metadata_checker::visualization::options::VisualGraphOptions;
+/// use metadata_checker::visualization::render_mermaid_from_ai_output;
+/// use serde_json::json;
+///
 /// let output = AiOutput::new(OutputKind::PageQuery, json!({"target_id": "page:home"}));
 /// let mermaid = render_mermaid_from_ai_output(&output, &VisualGraphOptions::default()).unwrap();
 /// assert!(mermaid.starts_with("graph TD"));
@@ -31,6 +36,11 @@ pub fn render_mermaid_from_ai_output(
 ///
 /// # 示例
 /// ```
+/// use metadata_checker::output::schema::{AiOutput, OutputKind};
+/// use metadata_checker::visualization::options::VisualGraphOptions;
+/// use metadata_checker::visualization::render_echarts_from_ai_output;
+/// use serde_json::json;
+///
 /// let output = AiOutput::new(OutputKind::ModelQuery, json!({"model_id": "model:users"}));
 /// let option = render_echarts_from_ai_output(&output, &VisualGraphOptions::default()).unwrap();
 /// assert!(option["series"][0]["data"].is_array());

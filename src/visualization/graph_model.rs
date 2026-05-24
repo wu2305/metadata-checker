@@ -48,11 +48,7 @@ impl VisualGraph {
                 id: node_id.clone(),
                 label: format!("[{}] {}", diag.code, diag.message),
                 kind: NodeKind::Diagnostic,
-                source_path: diag
-                    .location
-                    .source_file
-                    .clone()
-                    .unwrap_or_default(),
+                source_path: diag.location.source_file.clone().unwrap_or_default(),
                 metadata: {
                     let mut m = HashMap::new();
                     m.insert(
