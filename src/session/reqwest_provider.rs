@@ -16,6 +16,7 @@ use crate::session::remote_provider::{
 
 /// BI getPermissionInfo 返回结构。
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BiPermissionInfo {
     #[serde(default)]
     meta_projects: Vec<BiMetaProject>,
@@ -24,6 +25,7 @@ struct BiPermissionInfo {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BiMetaProject {
     project_name: String,
     #[serde(default)]
@@ -32,27 +34,16 @@ struct BiMetaProject {
 
 /// BI 文件信息结构。
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BiFileInfo {
     id: String,
     path: String,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
-    #[serde(rename = "type")]
-    #[allow(dead_code)]
-    file_type: Option<String>,
-    #[serde(default)]
     revision: Option<String>,
     #[serde(default)]
     modify_time: Option<u64>,
-    #[serde(flatten)]
-    _extra: HashMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct BiFileChildrenResponse {
-    #[serde(default)]
-    children: Vec<BiFileInfo>,
     #[serde(flatten)]
     _extra: HashMap<String, serde_json::Value>,
 }
@@ -159,16 +150,16 @@ impl RemoteSessionProvider for ReqwestRemoteSessionProvider {
     }
 
     fn list_metafiles(&self, project_ref: &str) -> Result<Vec<RemoteMetafileEntry>> {
+        // BI getFileDescendant 返回全量后代文件（扁平列表），比 getFileChildren 更适合同步。
         let path = format!(
-            "/api/meta/services/getFileChildren/{}",
+            "/api/meta/services/getFileDescendant/{}",
             urlencoding::encode(project_ref)
         );
         let raw = self.get_text(&path)?;
-        let resp: BiFileChildrenResponse = serde_json::from_str(&raw)
-            .with_context(|| format!("failed to parse file children for project {}", project_ref))?;
+        let files: Vec<BiFileInfo> = serde_json::from_str(&raw)
+            .with_context(|| format!("failed to parse file descendants for project {}", project_ref))?;
 
-        Ok(resp
-            .children
+        Ok(files
             .into_iter()
             .map(|f| RemoteMetafileEntry {
                 project_ref: project_ref.to_string(),

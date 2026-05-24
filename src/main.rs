@@ -44,6 +44,70 @@ fn main() -> Result<()> {
     let args = cli::Cli::parse();
     metadata_checker::graph::set_graph_lock_timeout_ms(args.graph_lock_timeout_ms);
 
+    // Session management commands (M41.12)
+    let session_root = args.session_dir.clone().unwrap_or_else(|| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        std::path::PathBuf::from(home).join(".metadata-checker/sessions")
+    });
+    let session_manager = metadata_checker::session::SessionManager::new(&session_root);
+
+    if args.session_list {
+        let sessions = session_manager.list_sessions()?;
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true,
+            "sessions": sessions,
+            "session_dir": session_root.to_string_lossy(),
+        }))?);
+        return Ok(());
+    }
+
+    if let Some(ref id) = args.session_show {
+        let manifest = session_manager.read_manifest(id)?;
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true,
+            "manifest": manifest,
+        }))?);
+        return Ok(());
+    }
+
+    if let Some(ref id) = args.session_status {
+        let manifest = session_manager.read_manifest(id)?;
+        let mirror_root = metadata_checker::session::sync::project_mirror_root(&session_manager.session_dir(id));
+        let file_count = std::fs::read_dir(&mirror_root)
+            .map(|entries| entries.filter(|e| e.is_ok()).count())
+            .unwrap_or(0);
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true,
+            "session_id": id,
+            "project_ref": manifest.project_ref,
+            "project_name": manifest.project_name,
+            "file_count": file_count,
+            "graph_db_path": manifest.graph_db_path,
+            "updated_at": manifest.updated_at,
+        }))?);
+        return Ok(());
+    }
+
+    if let Some(ref id) = args.session_delete {
+        let session_dir = session_manager.session_dir(id);
+        if session_dir.exists() {
+            std::fs::remove_dir_all(&session_dir)?;
+        }
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true,
+            "deleted": id,
+        }))?);
+        return Ok(());
+    }
+
+    if let Some(ref _id) = args.session_refresh {
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "ok": false,
+            "error": "session refresh requires remote provider (M41.10)",
+        }))?);
+        return Ok(());
+    }
+
     // M38: 统一参数校验
     if let Err(err) = tool_contract::validate_budget(&args.budget) {
         anyhow::bail!("{}", err);

@@ -227,6 +227,24 @@ pub struct Cli {
         help = "Question kind for --advise-query: display | value-source | availability | writer | page-logic | model-relationships"
     )]
     pub question_kind: Option<String>,
+
+    #[arg(long, value_name = "DIR", help = "Session root directory (default: ~/.metadata-checker/sessions)")]
+    pub session_dir: Option<PathBuf>,
+
+    #[arg(long, help = "List all sessions")]
+    pub session_list: bool,
+
+    #[arg(long, value_name = "ID", help = "Show session details")]
+    pub session_show: Option<String>,
+
+    #[arg(long, value_name = "ID", help = "Refresh session from remote")]
+    pub session_refresh: Option<String>,
+
+    #[arg(long, value_name = "ID", help = "Delete session")]
+    pub session_delete: Option<String>,
+
+    #[arg(long, value_name = "ID", help = "Show session status")]
+    pub session_status: Option<String>,
     #[arg(
         long,
         help = "启动 JSONL stdin/stdout 长驻查询服务（机器协议，非人类 REPL）"
