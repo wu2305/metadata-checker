@@ -23,12 +23,15 @@ const launcherSourcePath = join(
 );
 
 // 模拟 Service Worker 全局环境
-function createMockSwGlobal() {
+function createMockSwGlobal(options = {}) {
   const listeners = new Map();
   let clientsMock = { claim: async () => {} };
   const self = {
     skipWaiting: () => {},
     clients: clientsMock,
+    fetch: options.fetch,
+    WebAssembly: options.WebAssembly,
+    location: { href: "https://example.test/browser/service-worker/metadata-checker-sw.js" },
     addEventListener: (type, handler) => {
       listeners.set(type, handler);
     },
@@ -37,10 +40,10 @@ function createMockSwGlobal() {
 }
 
 // 从 SW 脚本中提取可测试函数（通过 eval 在 mock 环境中执行）
-async function loadSwInMockEnvironment() {
+async function loadSwInMockEnvironment(options = {}) {
   const { readFileSync } = await import("node:fs");
   const swSource = readFileSync(swSourcePath, "utf-8");
-  const { self, listeners } = createMockSwGlobal();
+  const { self, listeners } = createMockSwGlobal(options);
 
   // 在 mock self 环境中 eval SW 脚本
   const wrapped = `(function(self, module) {\n${swSource}\n})`;
@@ -51,17 +54,83 @@ async function loadSwInMockEnvironment() {
   return { self, listeners, exports: mod.exports };
 }
 
+function makeWasmResponse({ contentType = "application/wasm", bytes = new Uint8Array([0, 97]) } = {}) {
+  return {
+    ok: true,
+    status: 200,
+    headers: {
+      get(name) {
+        return name.toLowerCase() === "content-type" ? contentType : null;
+      },
+    },
+    async arrayBuffer() {
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    },
+    clone() {
+      return makeWasmResponse({ contentType, bytes });
+    },
+  };
+}
+
+function makeWasmHarness(options = {}) {
+  const calls = {
+    fetch: 0,
+    instantiateStreaming: 0,
+    instantiate: 0,
+  };
+  const responseFactory =
+    options.responseFactory ??
+    (() => makeWasmResponse({ contentType: options.contentType ?? "application/wasm" }));
+
+  return {
+    calls,
+    fetch: async () => {
+      calls.fetch += 1;
+      if (options.fetchError) {
+        throw options.fetchError;
+      }
+      return responseFactory();
+    },
+    WebAssembly: {
+      instantiateStreaming: async () => {
+        calls.instantiateStreaming += 1;
+        if (options.streamingError) {
+          throw options.streamingError;
+        }
+        return { instance: { exports: { analyze: () => {} } }, module: {} };
+      },
+      instantiate: async () => {
+        calls.instantiate += 1;
+        if (options.instantiateError) {
+          throw options.instantiateError;
+        }
+        return { instance: { exports: { analyze: () => {} } }, module: {} };
+      },
+    },
+  };
+}
+
 describe("Service Worker script internal protocol", () => {
   it("handleRequest returns response with id for initRuntime", async () => {
-    const { exports } = await loadSwInMockEnvironment();
+    const wasm = makeWasmHarness();
+    const { exports } = await loadSwInMockEnvironment(wasm);
     const response = await exports.handleRequest({
       id: "req-1",
       method: "initRuntime",
-      args: [{}],
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
     });
     assert.strictEqual(response.id, "req-1");
     assert.strictEqual(response.ok, true);
     assert.strictEqual(response.result.status, "ready");
+    assert.strictEqual(response.result.items[0].detail.wasm.mode, "streaming");
+    assert.strictEqual(wasm.calls.instantiateStreaming, 1);
+
+    const status = await exports.handleRequest({
+      id: "req-1-status",
+      method: "runtimeStatus",
+      args: [],
+    });
+    assert.strictEqual(status.result.items[0].detail.wasm.state, "loaded");
   });
 
   it("handleRequest returns error for unknown method", async () => {
@@ -99,21 +168,71 @@ describe("Service Worker script internal protocol", () => {
     assert.ok(response.error.message.includes("document not loaded"));
   });
 
-  it("lazy init reuses promise for duplicate initRuntime calls", async () => {
-    const { exports } = await loadSwInMockEnvironment();
-    const p1 = exports._ensureInit({});
-    const p2 = exports._ensureInit({});
-    assert.strictEqual(p1, p2);
-    await p1;
+  it("loadSuperpageDocument accepts large raw text from provider-runtime channel", async () => {
+    const wasm = makeWasmHarness();
+    const { exports } = await loadSwInMockEnvironment(wasm);
+    const largeRawText = "x".repeat(6 * 1024 * 1024);
+
+    await exports.handleRequest({
+      id: "large-r0",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    const loaded = await exports.handleRequest({
+      id: "large-r1",
+      method: "loadSuperpageDocument",
+      args: ["pages/large.spg", largeRawText],
+    });
+    const built = await exports.handleRequest({
+      id: "large-r2",
+      method: "buildOrUpdateSuperpageGraph",
+      args: ["pages/large.spg"],
+    });
+    const analyzed = await exports.handleRequest({
+      id: "large-r3",
+      method: "analyzeSuperpageSelection",
+      args: [
+        {
+          source_path: "pages/large.spg",
+          file_id: "large-1",
+          selected_component_ids: ["c1"],
+          active_component_id: "c1",
+        },
+      ],
+    });
+
+    assert.strictEqual(loaded.ok, true);
+    assert.strictEqual(built.ok, true);
+    assert.strictEqual(analyzed.ok, true);
   });
 
-  it("analyzeSuperpageSelection rejects if selection contains raw_text", async () => {
-    const { exports } = await loadSwInMockEnvironment();
+  it("lazy init reuses promise for duplicate initRuntime calls", async () => {
+    const wasm = makeWasmHarness();
+    const { exports } = await loadSwInMockEnvironment(wasm);
+    const p1 = exports.handleRequest({
+      id: "dup-1",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    const p2 = exports.handleRequest({
+      id: "dup-2",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    const [r1, r2] = await Promise.all([p1, p2]);
+    assert.strictEqual(r1.ok, true);
+    assert.strictEqual(r2.ok, true);
+    assert.strictEqual(wasm.calls.fetch, 1);
+  });
+
+  it("analyzeSuperpageSelection rejects if selection contains raw metadata payload", async () => {
+    const wasm = makeWasmHarness();
+    const { exports } = await loadSwInMockEnvironment(wasm);
     // 先 init + load + build
     await exports.handleRequest({
       id: "r0",
       method: "initRuntime",
-      args: [{}],
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
     });
     await exports.handleRequest({
       id: "r1",
@@ -140,7 +259,147 @@ describe("Service Worker script internal protocol", () => {
       ],
     });
     assert.strictEqual(response.ok, false);
+    assert.strictEqual(response.error.code, "INVALID_SELECTION_PAYLOAD");
     assert.ok(response.error.message.includes("raw_text"));
+
+    const nested = await exports.handleRequest({
+      id: "r4",
+      method: "analyzeSuperpageSelection",
+      args: [
+        {
+          source_path: "pages/a.spg",
+          file_id: "f1",
+          selected_component_ids: ["c1"],
+          active_component_id: "c1",
+          active_component: {
+            id: "c1",
+            components: [{ id: "nested-1" }],
+          },
+        },
+      ],
+    });
+    assert.strictEqual(nested.ok, false);
+    assert.strictEqual(nested.error.code, "INVALID_SELECTION_PAYLOAD");
+    assert.ok(nested.error.message.includes("active_component.components"));
+  });
+
+  it("initRuntime returns stable diagnostic when WASM fetch fails", async () => {
+    const wasm = makeWasmHarness({
+      fetchError: new Error("network blocked"),
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+
+    const response = await exports.handleRequest({
+      id: "fetch-failure",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+
+    assert.strictEqual(response.ok, false);
+    assert.strictEqual(response.error.code, "WASM_FETCH_FAILED");
+    assert.strictEqual(response.error.diagnostic.code, "WASM_FETCH_FAILED");
+    assert.match(response.error.diagnostic.detail.cause_message, /network blocked/);
+  });
+
+  it("initRuntime falls back to arrayBuffer when MIME is not application/wasm", async () => {
+    const wasm = makeWasmHarness({ contentType: "application/octet-stream" });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+
+    const response = await exports.handleRequest({
+      id: "mime-fallback",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+
+    assert.strictEqual(response.ok, true);
+    assert.strictEqual(wasm.calls.instantiateStreaming, 0);
+    assert.strictEqual(wasm.calls.instantiate, 1);
+    assert.strictEqual(response.result.items[0].detail.wasm.mode, "arrayBuffer");
+    assert.strictEqual(response.result.diagnostics[0].code, "WASM_MIME_FALLBACK");
+
+    const status = await exports.handleRequest({
+      id: "mime-status",
+      method: "runtimeStatus",
+      args: [],
+    });
+    assert.strictEqual(status.result.items[0].detail.wasm.state, "fallback");
+  });
+
+  it("initRuntime falls back to arrayBuffer when instantiateStreaming throws", async () => {
+    const wasm = makeWasmHarness({
+      streamingError: new Error("streaming blocked"),
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+
+    const response = await exports.handleRequest({
+      id: "streaming-fallback",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+
+    assert.strictEqual(response.ok, true);
+    assert.strictEqual(wasm.calls.instantiateStreaming, 1);
+    assert.strictEqual(wasm.calls.instantiate, 1);
+    assert.strictEqual(response.result.items[0].detail.wasm.mode, "arrayBuffer");
+    assert.strictEqual(response.result.diagnostics[0].code, "WASM_STREAMING_FALLBACK");
+  });
+
+  it("initRuntime returns stable diagnostic when compile or CSP blocks fallback", async () => {
+    const wasm = makeWasmHarness({
+      streamingError: new Error("CSP blocked streaming compile"),
+      instantiateError: new Error("CSP blocked arrayBuffer compile"),
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+
+    const response = await exports.handleRequest({
+      id: "csp-failure",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+
+    assert.strictEqual(response.ok, false);
+    assert.strictEqual(response.error.code, "WASM_CSP_OR_COMPILE_FAILED");
+    assert.strictEqual(response.error.diagnostic.code, "WASM_CSP_OR_COMPILE_FAILED");
+
+    const status = await exports.handleRequest({
+      id: "status-after-csp",
+      method: "runtimeStatus",
+      args: [],
+    });
+    assert.strictEqual(status.result.items[0].detail.wasm.state, "failed");
+  });
+
+  it("initRuntime clears failed promise and allows retry", async () => {
+    const wasm = makeWasmHarness({
+      streamingError: new Error("first streaming failure"),
+      instantiateError: new Error("first compile failure"),
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+
+    const failed = await exports.handleRequest({
+      id: "retry-1",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    assert.strictEqual(failed.ok, false);
+    assert.strictEqual(failed.error.code, "WASM_CSP_OR_COMPILE_FAILED");
+
+    wasm.WebAssembly.instantiateStreaming = async () => {
+      wasm.calls.instantiateStreaming += 1;
+      return { instance: { exports: { analyze: () => {} } }, module: {} };
+    };
+    wasm.WebAssembly.instantiate = async () => {
+      wasm.calls.instantiate += 1;
+      return { instance: { exports: { analyze: () => {} } }, module: {} };
+    };
+
+    const retried = await exports.handleRequest({
+      id: "retry-2",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    assert.strictEqual(retried.ok, true);
+    assert.strictEqual(retried.result.items[0].detail.wasm.state, "loaded");
   });
 });
 

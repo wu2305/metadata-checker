@@ -358,6 +358,64 @@ describe("integration success path", async () => {
     assert.strictEqual(loadCalls.length, 1);
     assert.strictEqual(loadCalls[0].args[1].length, bigText.length);
   });
+
+  it("rejects nested raw metadata or component json in selection payload", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    const result = await controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+      active_component: {
+        id: "comp-1",
+        components: [{ id: "nested-1" }],
+      },
+    });
+
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.diagnostics[0].code, "INVALID_SELECTION");
+    assert.match(result.diagnostics[0].message, /active_component\.components/);
+    assert.strictEqual(
+      provider.callLog.some((c) => c.method === "getFileContent"),
+      false,
+    );
+    assert.strictEqual(
+      runtimeClient.callLog.some((c) => c.method === "analyzeSuperpageSelection"),
+      false,
+    );
+    assert.strictEqual(renderer.renderCalls[0].type, "renderError");
+  });
 });
 
 describe("integration error paths", async () => {
@@ -513,8 +571,20 @@ describe("duplicate init and idempotency", async () => {
 });
 
 describe("controller source constraints", async () => {
-  it("does not import BI-specific modules", () => {
-    const forbidden = ["SZ", "onInitDesigner", "AMD", "require("];
+  it("does not reference DOM API or BI-specific platform entry points", () => {
+    const forbidden = [
+      "document",
+      "querySelector",
+      "createElement",
+      ".body",
+      "window",
+      "SZ",
+      "onInitDesigner",
+      "AMD",
+      "require(",
+      "navigator.",
+      "service-worker-runtime-launcher",
+    ];
     for (const token of forbidden) {
       assert.ok(
         !controllerSource.includes(token),
@@ -523,7 +593,66 @@ describe("controller source constraints", async () => {
     }
   });
 
-  it("does not manipulate DOM directly except through markers", () => {
+  it("emits controller state transition events through host.emit", async () => {
+    const createController = await loadController();
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient({ kind: "service-worker" });
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    const selection = {
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    };
+
+    await controller.handleSelection(selection);
+
+    const stateEvents = host.getEvents("controller_state_changed");
+    assert.ok(stateEvents.length >= 2);
+    assert.deepStrictEqual(
+      stateEvents.map((entry) => entry.payload.current),
+      ["initializing", "ready", "analyzing", "ready"],
+    );
+    assert.deepStrictEqual(
+      stateEvents.map((entry) => entry.payload.previous),
+      ["idle", "initializing", "ready", "analyzing"],
+    );
+
+    assert.strictEqual(host.getEvents("controller_runtime_type").length, 1);
+    const runtimeTypeEvent = host.getEvents("controller_runtime_type")[0];
+    assert.strictEqual(runtimeTypeEvent.payload.runtimeType, "service-worker");
+  });
+
+  it("does not manipulate DOM via marker-like APIs", () => {
     const forbidden = [
       "innerHTML",
       "outerHTML",
@@ -540,8 +669,12 @@ describe("controller source constraints", async () => {
 
   it("does not put raw_text references in selection handling", () => {
     assert.ok(
-      controllerSource.includes("selection.raw_text"),
-      "controller should guard against raw_text in selection",
+      !controllerSource.includes("selection.raw_text"),
+      "controller should not use a top-level-only raw_text guard",
+    );
+    assert.ok(
+      controllerSource.includes("_findForbiddenSelectionPayload"),
+      "controller should recursively guard forbidden selection payload fields",
     );
   });
 });

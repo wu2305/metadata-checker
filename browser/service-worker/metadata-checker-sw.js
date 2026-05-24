@@ -1,30 +1,267 @@
 /**
- * M40.9：Service Worker Runtime Contract
+ * M40.10：Service Worker Runtime Contract
  *
- * 提供最小 message protocol，先 mock runtime 行为，不接真实 WASM。
+ * 提供最小 message protocol，并在 initRuntime 中执行 WASM lazy init。
  * 支持 lazy init、重复请求复用初始化 Promise、失败后重试或 fallback。
  * message response 携带 request_id，错误返回稳定 code。
  */
 
-const SW_VERSION = "0.1.0-m40.9";
+const SW_VERSION = "0.1.0-m40.10";
+const DEFAULT_WASM_FILE = "metadata_checker_bg.wasm";
 
 // runtime 状态
 let _initPromise = null;
 let _initFailed = false;
 let _initError = null;
+let _wasmStatus = {
+  state: "mock",
+  mode: "mock",
+  wasmUrl: null,
+  fallbackUsed: false,
+  diagnostic: null,
+};
 let _documentCache = new Map(); // sourcePath -> { rawText, loadedAt }
 let _graphCache = new Map(); // sourcePath -> { builtAt }
+const FORBIDDEN_SELECTION_KEYS = new Set([
+  "raw_text",
+  "rawText",
+  "components",
+  "component_json",
+  "componentJson",
+  "raw_component",
+  "rawComponent",
+  "canvas",
+]);
 
 function makeResponse(requestId, result) {
   return { id: requestId, ok: true, result, error: null };
 }
 
-function makeErrorResponse(requestId, code, message) {
+function makeErrorResponse(requestId, code, message, diagnostic = null) {
   return {
     id: requestId,
     ok: false,
     result: null,
-    error: { code, message },
+    error: { code, message, diagnostic },
+  };
+}
+
+function _makeDiagnostic(code, message, detail = {}) {
+  return {
+    code,
+    severity: "error",
+    message,
+    detail,
+  };
+}
+
+function _makeWasmError(code, message, detail = {}) {
+  const err = new Error(message);
+  err.code = code;
+  err.diagnostic = _makeDiagnostic(code, message, detail);
+  return err;
+}
+
+function _getFetch() {
+  return self.fetch ?? globalThis.fetch;
+}
+
+function _getWebAssembly() {
+  return self.WebAssembly ?? globalThis.WebAssembly;
+}
+
+function _defaultWasmUrl() {
+  const baseHref = self.location?.href;
+  if (baseHref) {
+    return new URL(DEFAULT_WASM_FILE, baseHref).toString();
+  }
+  return DEFAULT_WASM_FILE;
+}
+
+function _contentTypeOf(response) {
+  return response?.headers?.get?.("content-type") ?? "";
+}
+
+function _findForbiddenSelectionPayload(value, path = "selection", seen = new WeakSet()) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  if (seen.has(value)) {
+    return null;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      const nested = _findForbiddenSelectionPayload(value[i], `${path}[${i}]`, seen);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    const childPath = `${path}.${key}`;
+    if (FORBIDDEN_SELECTION_KEYS.has(key)) {
+      return childPath;
+    }
+    const nested = _findForbiddenSelectionPayload(item, childPath, seen);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+async function _arrayBufferInstantiate(wasmApi, response, imports, context) {
+  const bytes = await response.arrayBuffer();
+  const instantiated = await wasmApi.instantiate(bytes, imports);
+  return {
+    instantiated,
+    mode: "arrayBuffer",
+    fallbackUsed: true,
+    diagnostics: [
+      {
+        code: context.diagnosticCode,
+        severity: "warning",
+        message: context.message,
+        detail: context.detail,
+      },
+    ],
+  };
+}
+
+async function _loadWasmRuntime(options = {}) {
+  if (options?.mock === true) {
+    return _mockInitRuntime(options);
+  }
+
+  const wasmUrl = options?.wasmUrl ?? _defaultWasmUrl();
+  const imports = options?.imports ?? {};
+  const fetchImpl = _getFetch();
+  const wasmApi = _getWebAssembly();
+
+  if (typeof fetchImpl !== "function") {
+    throw _makeWasmError("WASM_FETCH_UNAVAILABLE", "fetch is not available in Service Worker", {
+      wasm_url: wasmUrl,
+    });
+  }
+  if (!wasmApi || typeof wasmApi.instantiate !== "function") {
+    throw _makeWasmError(
+      "WASM_UNAVAILABLE",
+      "WebAssembly.instantiate is not available in Service Worker",
+      { wasm_url: wasmUrl },
+    );
+  }
+
+  let response;
+  try {
+    response = await fetchImpl(wasmUrl);
+  } catch (err) {
+    throw _makeWasmError("WASM_FETCH_FAILED", "Failed to fetch WASM runtime", {
+      wasm_url: wasmUrl,
+      cause_message: err?.message ?? String(err),
+    });
+  }
+
+  if (!response || response.ok === false) {
+    throw _makeWasmError("WASM_FETCH_FAILED", "WASM runtime fetch returned a non-ok response", {
+      wasm_url: wasmUrl,
+      status: response?.status ?? null,
+    });
+  }
+
+  const contentType = _contentTypeOf(response);
+  const isWasmMime = contentType.toLowerCase().split(";")[0].trim() === "application/wasm";
+  let instantiated;
+  let mode = "streaming";
+  let fallbackUsed = false;
+  let diagnostics = [];
+
+  if (isWasmMime && typeof wasmApi.instantiateStreaming === "function") {
+    try {
+      instantiated = await wasmApi.instantiateStreaming(Promise.resolve(response), imports);
+    } catch (err) {
+      const fallbackResponse =
+        typeof response.clone === "function" ? response.clone() : await fetchImpl(wasmUrl);
+      try {
+        const fallback = await _arrayBufferInstantiate(wasmApi, fallbackResponse, imports, {
+          diagnosticCode: "WASM_STREAMING_FALLBACK",
+          message: "instantiateStreaming failed; used arrayBuffer fallback",
+          detail: {
+            wasm_url: wasmUrl,
+            content_type: contentType,
+            cause_message: err?.message ?? String(err),
+          },
+        });
+        instantiated = fallback.instantiated;
+        mode = fallback.mode;
+        fallbackUsed = fallback.fallbackUsed;
+        diagnostics = fallback.diagnostics;
+      } catch (fallbackErr) {
+        throw _makeWasmError(
+          "WASM_CSP_OR_COMPILE_FAILED",
+          "WASM runtime compile or instantiate failed",
+          {
+            wasm_url: wasmUrl,
+            phase: "streaming_then_arrayBuffer",
+            streaming_cause_message: err?.message ?? String(err),
+            cause_message: fallbackErr?.message ?? String(fallbackErr),
+          },
+        );
+      }
+    }
+  } else {
+    try {
+      const fallback = await _arrayBufferInstantiate(wasmApi, response, imports, {
+        diagnosticCode: "WASM_MIME_FALLBACK",
+        message: "WASM response MIME is not application/wasm; used arrayBuffer fallback",
+        detail: {
+          wasm_url: wasmUrl,
+          content_type: contentType,
+        },
+      });
+      instantiated = fallback.instantiated;
+      mode = fallback.mode;
+      fallbackUsed = fallback.fallbackUsed;
+      diagnostics = fallback.diagnostics;
+    } catch (err) {
+      throw _makeWasmError("WASM_CSP_OR_COMPILE_FAILED", "WASM runtime compile or instantiate failed", {
+        wasm_url: wasmUrl,
+        phase: "arrayBuffer",
+        content_type: contentType,
+        cause_message: err?.message ?? String(err),
+      });
+    }
+  }
+
+  const instance = instantiated?.instance ?? instantiated;
+  const exportNames = Object.keys(instance?.exports ?? {});
+  _wasmStatus = {
+    state: fallbackUsed ? "fallback" : "loaded",
+    mode,
+    wasmUrl,
+    fallbackUsed,
+    diagnostic: diagnostics[0] ?? null,
+  };
+
+  return {
+    status: "ready",
+    target: null,
+    items: [
+      {
+        kind: "runtime_ready",
+        label: "SW WASM Runtime Initialized",
+        detail: {
+          version: SW_VERSION,
+          wasm: {
+            state: _wasmStatus.state,
+            mode,
+            wasm_url: wasmUrl,
+            fallback_used: fallbackUsed,
+            export_count: exportNames.length,
+          },
+        },
+      },
+    ],
+    diagnostics,
   };
 }
 
@@ -32,6 +269,13 @@ function _mockInitRuntime(options = {}) {
   if (options?.shouldFail) {
     throw new Error("mock initRuntime failed");
   }
+  _wasmStatus = {
+    state: "mock",
+    mode: "mock",
+    wasmUrl: options?.wasmUrl ?? null,
+    fallbackUsed: false,
+    diagnostic: null,
+  };
   return {
     status: "ready",
     target: null,
@@ -59,6 +303,14 @@ function _mockRuntimeStatus() {
           sw_version: SW_VERSION,
           document_count: _documentCache.size,
           graph_count: _graphCache.size,
+          wasm: {
+            state: _wasmStatus.state,
+            mode: _wasmStatus.mode,
+            wasm_url: _wasmStatus.wasmUrl,
+            fallback_used: _wasmStatus.fallbackUsed,
+            diagnostic: _wasmStatus.diagnostic,
+            last_error_code: _initError?.code ?? null,
+          },
         },
       },
     ],
@@ -69,11 +321,6 @@ function _mockRuntimeStatus() {
 function _mockLoadSuperpageDocument(sourcePath, rawText) {
   if (typeof sourcePath !== "string") {
     throw new Error("sourcePath is required");
-  }
-  // 5MB 限制检查：rawText 过大时拒绝通过 selection payload 传输，但这里是从 message 接收
-  const MAX_RAW_TEXT_LENGTH = 5 * 1024 * 1024;
-  if (rawText && rawText.length > MAX_RAW_TEXT_LENGTH) {
-    throw new Error("raw_text exceeds 5MB limit");
   }
   _documentCache.set(sourcePath, {
     rawText: rawText ?? "",
@@ -124,9 +371,12 @@ function _mockAnalyzeSuperpageSelection(selection, options = {}) {
     throw new Error("graph not built, call buildOrUpdateSuperpageGraph first");
   }
 
-  // 验证 selection 不包含 raw_text
-  if (selection.raw_text !== undefined) {
-    throw new Error("selection payload must not contain raw_text");
+  const forbiddenSelectionPath = _findForbiddenSelectionPayload(selection);
+  if (forbiddenSelectionPath) {
+    throw _makeWasmError(
+      "INVALID_SELECTION_PAYLOAD",
+      `${forbiddenSelectionPath} is not allowed in selection payload`,
+    );
   }
 
   return {
@@ -159,14 +409,23 @@ function _ensureInit(options = {}) {
   }
   _initPromise = (async () => {
     try {
-      // 这里未来替换为真实 WASM lazy init
-      const result = _mockInitRuntime(options);
+      const result = await _loadWasmRuntime(options);
       _initFailed = false;
       _initError = null;
       return result;
     } catch (err) {
       _initFailed = true;
       _initError = err;
+      _wasmStatus = {
+        state: "failed",
+        mode: "failed",
+        wasmUrl: options?.wasmUrl ?? _defaultWasmUrl(),
+        fallbackUsed: false,
+        diagnostic:
+          err?.diagnostic ??
+          _makeDiagnostic("WASM_RUNTIME_INIT_FAILED", err?.message ?? String(err)),
+      };
+      _initPromise = null;
       throw err;
     }
   })();
@@ -211,8 +470,9 @@ async function handleRequest(request) {
   } catch (err) {
     return makeErrorResponse(
       id,
-      "RUNTIME_EXECUTION_ERROR",
+      err?.code ?? "RUNTIME_EXECUTION_ERROR",
       err?.message ?? String(err),
+      err?.diagnostic ?? null,
     );
   }
 }
@@ -249,6 +509,7 @@ if (typeof module !== "undefined" && module.exports) {
     SW_VERSION,
     handleRequest,
     _ensureInit,
+    _loadWasmRuntime,
     _mockInitRuntime,
     _mockRuntimeStatus,
     _mockLoadSuperpageDocument,

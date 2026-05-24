@@ -95,7 +95,14 @@ export function createMessageRuntimeClient({
 
   function buildResponseFailureEnvelope(response, target) {
     const message = getErrorMessage(response?.error);
-    return createErrorEnvelope(message || "request failed", "LAUNCHER_REQUEST_FAILED", target);
+    const code =
+      response?.error &&
+      typeof response.error === "object" &&
+      typeof response.error.code === "string" &&
+      response.error.code.length > 0
+        ? response.error.code
+        : "LAUNCHER_REQUEST_FAILED";
+    return createErrorEnvelope(message || "request failed", code, target);
   }
 
   function getPendingId() {

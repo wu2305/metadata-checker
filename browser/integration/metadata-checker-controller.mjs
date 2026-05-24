@@ -50,20 +50,43 @@ function _emitHost(host, eventName, payload) {
   }
 }
 
-function _writeDomMarker(key, value) {
-  if (typeof document === "undefined") return;
-  const existing = document.querySelector(
-    `[data-metadata-checker-marker="${key}"]`,
-  );
-  if (existing) {
-    existing.setAttribute("data-metadata-checker-marker-value", value);
-    return;
+function _findForbiddenSelectionPayload(value, path = "selection", seen = new WeakSet()) {
+  if (!value || typeof value !== "object") {
+    return null;
   }
-  const el = document.createElement("span");
-  el.setAttribute("data-metadata-checker-marker", key);
-  el.setAttribute("data-metadata-checker-marker-value", value);
-  el.style.display = "none";
-  document.body.appendChild(el);
+  if (seen.has(value)) {
+    return null;
+  }
+  seen.add(value);
+
+  const forbiddenKeys = new Set([
+    "raw_text",
+    "rawText",
+    "components",
+    "component_json",
+    "componentJson",
+    "raw_component",
+    "rawComponent",
+    "canvas",
+  ]);
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      const nested = _findForbiddenSelectionPayload(value[i], `${path}[${i}]`, seen);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    const childPath = `${path}.${key}`;
+    if (forbiddenKeys.has(key)) {
+      return childPath;
+    }
+    const nested = _findForbiddenSelectionPayload(item, childPath, seen);
+    if (nested) return nested;
+  }
+  return null;
 }
 
 export function createMetadataCheckerController(options = {}) {
@@ -105,18 +128,28 @@ export function createMetadataCheckerController(options = {}) {
   let _initPromise = null;
   let lastAnalysisResult = null;
   let lastError = null;
+  let _previousState = CONTROLLER_STATE.IDLE;
 
   function _setState(newState) {
+    const previousState = _previousState;
     state = newState;
-    _writeDomMarker("analysis-status", state);
+    _previousState = newState;
+    _emitHost(host, "controller_state_changed", {
+      previous: previousState,
+      current: newState,
+      timestamp: clock(),
+    });
   }
 
-  function _setRuntimeTypeMarker() {
-    const isSw =
-      runtimeClient &&
-      typeof runtimeClient.runtimeStatus === "function" &&
-      runtimeClient._kind === "service-worker";
-    _writeDomMarker("runtime", isSw ? "service-worker" : "page-fallback");
+  function _emitRuntimeType() {
+    const runtimeType =
+      runtimeClient && runtimeClient._kind === "service-worker"
+        ? "service-worker"
+        : "page-fallback";
+    _emitHost(host, "controller_runtime_type", {
+      runtimeType,
+      timestamp: clock(),
+    });
   }
 
   async function _ensureInitialized() {
@@ -145,7 +178,7 @@ export function createMetadataCheckerController(options = {}) {
         }
         initialized = true;
         _setState(CONTROLLER_STATE.READY);
-        _setRuntimeTypeMarker();
+        _emitRuntimeType();
         lastError = null;
         _emitHost(host, "controller_ready", {
           timestamp: clock(),
@@ -196,11 +229,12 @@ export function createMetadataCheckerController(options = {}) {
       return error;
     }
 
-    // 防御性检查：selection payload 不得包含 raw_text
-    if ("raw_text" in selection) {
+    // 防御性检查：selection payload 不得携带 raw metadata 或完整组件 JSON。
+    const forbiddenSelectionPath = _findForbiddenSelectionPayload(selection);
+    if (forbiddenSelectionPath) {
       const error = _makeErrorEnvelope(
         "INVALID_SELECTION",
-        "selection.raw_text is not allowed in payload",
+        `${forbiddenSelectionPath} is not allowed in selection payload`,
       );
       if (typeof renderer.renderError === "function") {
         renderer.renderError(error);
@@ -328,6 +362,7 @@ export function createMetadataCheckerController(options = {}) {
       initialized = false;
       _initPromise = null;
       _setState(CONTROLLER_STATE.IDLE);
+      _previousState = CONTROLLER_STATE.IDLE;
     },
   };
 

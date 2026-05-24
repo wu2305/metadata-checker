@@ -19,6 +19,8 @@ define(function () {
 
   const SW_SCRIPT_URL = "/analyzer/public/hooks/metadata-checker-sw.js";
   const SW_SCOPE = "/analyzer/";
+  const SW_REQUEST_TIMEOUT_MS = 5000;
+  const SW_ACTIVATION_TIMEOUT_MS = 30000;
   const CONTROLLER_VERSION = "0.1.0-m40.10";
   const MARKER_NS = "data-metadata-checker";
 
@@ -48,6 +50,21 @@ define(function () {
     }
   }
 
+  function _writeFallback(code) {
+    _writeMarker("fallback-used", "true");
+    _writeMarker("fallback-code", code);
+    _writeMarker("analysis-status", `fallback:${code}`);
+  }
+
+  function _writeRuntimeMarker(value) {
+    _writeMarker("runtime", value);
+    if (value === "service-worker") {
+      _writeMarker("wasm", "service-worker");
+    } else if (value === "page-fallback") {
+      _writeMarker("wasm", "page-fallback");
+    }
+  }
+
   function _removeMarker(name) {
     if (typeof document === "undefined") return;
     const key = `${MARKER_NS}-${name}`;
@@ -66,13 +83,34 @@ define(function () {
     };
   }
 
+  function _makeRuntimeError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
+  function _isErrorEnvelope(value) {
+    return value && typeof value === "object" && value.status === "error";
+  }
+
+  function _throwIfErrorEnvelope(value) {
+    if (!_isErrorEnvelope(value)) {
+      return value;
+    }
+    const diagnostic = value.diagnostics?.[0] ?? {};
+    throw _makeRuntimeError(
+      diagnostic.code ?? "RUNTIME_ERROR_ENVELOPE",
+      diagnostic.message ?? "runtime returned an error envelope",
+    );
+  }
+
   // ---- Service Worker 注册 ----
 
   async function registerServiceWorker() {
     if (!("serviceWorker" in navigator)) {
       _log("warn", "Service Worker not supported in this browser");
       _writeMarker("sw", "unsupported");
-      return { registered: false, reason: "unsupported", controller: null };
+      return { registered: false, reason: "unsupported", code: "SW_UNSUPPORTED", controller: null };
     }
 
     try {
@@ -98,6 +136,7 @@ define(function () {
       return {
         registered: false,
         reason: "registration_failed",
+        code: "SW_REGISTRATION_FAILED",
         error: err?.message ?? String(err),
       };
     }
@@ -109,25 +148,33 @@ define(function () {
         resolve();
         return;
       }
+      let timeoutId = null;
       const onStateChange = () => {
         if (worker.state === state) {
-          worker.removeEventListener("statechange", onStateChange);
+          cleanup();
           resolve();
         }
       };
+      function cleanup() {
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        worker.removeEventListener("statechange", onStateChange);
+      }
       worker.addEventListener("statechange", onStateChange);
 
       // 超时保护
-      setTimeout(() => {
-        worker.removeEventListener("statechange", onStateChange);
+      timeoutId = setTimeout(() => {
+        cleanup();
         reject(new Error(`Service Worker state did not reach ${state} in time`));
-      }, 30000);
+      }, SW_ACTIVATION_TIMEOUT_MS);
     });
   }
 
   // ---- 与 SW 通信的 transport ----
 
-  function createSwMessageTransport() {
+  function createSwMessageTransport(worker) {
     const handlers = new Set();
 
     function onMessage(event) {
@@ -141,11 +188,17 @@ define(function () {
 
     return {
       send(request) {
-        if (navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage(request);
-        } else {
-          return Promise.reject(new Error("Service Worker controller not available"));
+        const target = navigator.serviceWorker.controller ?? worker;
+        if (!target || typeof target.postMessage !== "function") {
+          return Promise.reject(
+            _makeRuntimeError(
+              "SW_CONTROLLER_UNAVAILABLE",
+              "Service Worker controller not available",
+            ),
+          );
         }
+        target.postMessage(request);
+        return undefined;
       },
       onMessage(handler) {
         handlers.add(handler);
@@ -168,7 +221,15 @@ define(function () {
     return {
       _kind: "page-fallback",
       async initRuntime(options) {
-        return { status: "ready", items: [], diagnostics: [] };
+        try {
+          const result = { status: "ready", items: [], diagnostics: [] };
+          _writeMarker("wasm", "page-fallback-ready");
+          return result;
+        } catch (err) {
+          _writeMarker("wasm", "failed");
+          _writeFallback("PAGE_RUNTIME_WASM_INIT_FAILED");
+          throw err;
+        }
       },
       async runtimeStatus() {
         return { status: "ready", items: [], diagnostics: [] };
@@ -186,6 +247,67 @@ define(function () {
           items: [{ kind: "analysis", label: "Fallback Analysis", detail: { selection } }],
           diagnostics: [],
         };
+      },
+    };
+  }
+
+  function createMarkerRuntimeClient(runtimeClient, options) {
+    let currentClient = runtimeClient;
+    let currentKind = options?.runtimeKind ?? runtimeClient?._kind ?? "unknown";
+    const onFallback = options?.onFallback ?? (() => {});
+
+    async function switchToPageFallback(code) {
+      onFallback(code);
+      _writeFallback(code);
+      _writeRuntimeMarker("page-fallback");
+      currentClient = await createPageFallbackRuntimeClient();
+      currentKind = "page-fallback";
+      return currentClient;
+    }
+
+    async function call(method, args) {
+      if (!currentClient || typeof currentClient[method] !== "function") {
+        throw new Error(`runtimeClient.${method} is not available`);
+      }
+      return currentClient[method](...args);
+    }
+
+    return {
+      get _kind() {
+        return currentKind;
+      },
+      async initRuntime(...args) {
+        _writeMarker("wasm", `${currentKind}-initializing`);
+        try {
+          const result = await call("initRuntime", args);
+          _throwIfErrorEnvelope(result);
+          _writeMarker("wasm", `${currentKind}-ready`);
+          return result;
+        } catch (err) {
+          _writeMarker("wasm", "failed");
+          if (currentKind !== "page-fallback") {
+            const fallbackClient = await switchToPageFallback(
+              err?.code ?? "WASM_INIT_FAILED",
+            );
+            const result = await fallbackClient.initRuntime(...args);
+            _writeMarker("wasm", "page-fallback-ready");
+            return result;
+          }
+          _writeFallback("PAGE_RUNTIME_WASM_INIT_FAILED");
+          throw err;
+        }
+      },
+      runtimeStatus(...args) {
+        return call("runtimeStatus", args);
+      },
+      loadSuperpageDocument(...args) {
+        return call("loadSuperpageDocument", args);
+      },
+      buildOrUpdateSuperpageGraph(...args) {
+        return call("buildOrUpdateSuperpageGraph", args);
+      },
+      analyzeSuperpageSelection(...args) {
+        return call("analyzeSuperpageSelection", args);
       },
     };
   }
@@ -295,14 +417,14 @@ define(function () {
     }
 
     // 1. 注册 Service Worker
-    const swResult = await registerServiceWatcher();
+    const swResult = await registerServiceWorker();
 
     // 2. 决定 runtime launcher 类型
     let runtimeClient;
     let fallbackUsed = false;
     if (swResult.registered && swResult.controller) {
       try {
-        const transport = createSwMessageTransport();
+        const transport = createSwMessageTransport(swResult.controller);
         // 动态导入 launcher（AMD 环境下通过 require 或全局 script）
         // 这里假设 runtime launcher 已通过 script 标签预加载到 window
         const launcherFactory =
@@ -310,31 +432,46 @@ define(function () {
           createFallbackLauncher;
         const launcher = launcherFactory({
           transport,
+          requestTimeoutMs: SW_REQUEST_TIMEOUT_MS,
           fallbackPageLauncher: {
             start: async () => {
               fallbackUsed = true;
-              _writeMarker("runtime", "page-fallback");
+              _writeFallback("SW_RUNTIME_FALLBACK_REQUESTED");
+              _writeRuntimeMarker("page-fallback");
               return createPageFallbackRuntimeClient();
             },
             stop() {},
           },
         });
         runtimeClient = await launcher.start();
-        _writeMarker("runtime", "service-worker");
+        _writeRuntimeMarker("service-worker");
       } catch (err) {
         _log("error", "SW runtime start failed, using fallback:", err);
         fallbackUsed = true;
         runtimeClient = await createPageFallbackRuntimeClient();
-        _writeMarker("runtime", "page-fallback");
+        _writeFallback("SW_RUNTIME_START_FAILED");
+        _writeRuntimeMarker("page-fallback");
       }
     } else {
       _log("warn", "SW not available, using page runtime fallback");
       fallbackUsed = true;
       runtimeClient = await createPageFallbackRuntimeClient();
-      _writeMarker("runtime", "page-fallback");
+      _writeFallback(swResult.code ?? "SW_UNAVAILABLE");
+      _writeRuntimeMarker("page-fallback");
     }
 
     _writeMarker("fallback-used", String(fallbackUsed));
+    if (!fallbackUsed) {
+      _writeMarker("fallback-code", "none");
+      _writeMarker("analysis-status", "initializing");
+    }
+
+    runtimeClient = createMarkerRuntimeClient(runtimeClient, {
+      runtimeKind: fallbackUsed ? "page-fallback" : "service-worker",
+      onFallback() {
+        fallbackUsed = true;
+      },
+    });
 
     // 3. 创建 host
     const host = {
@@ -351,6 +488,7 @@ define(function () {
     if (!pluginFactory) {
       _log("error", "Plugin factory not found on window");
       _writeMarker("plugin", "missing");
+      _writeMarker("analysis-status", "plugin_factory_missing");
       return { installed: false, reason: "plugin_factory_missing" };
     }
     const plugin = pluginFactory({
@@ -372,6 +510,7 @@ define(function () {
     if (!controllerFactory) {
       _log("error", "Controller factory not found on window");
       _writeMarker("controller", "missing");
+      _writeMarker("analysis-status", "controller_factory_missing");
       return { installed: false, reason: "controller_factory_missing" };
     }
     _controller = controllerFactory({
@@ -392,6 +531,7 @@ define(function () {
     if (!glueFactory) {
       _log("error", "Glue factory not found on window");
       _writeMarker("glue", "missing");
+      _writeMarker("analysis-status", "glue_factory_missing");
       return { installed: false, reason: "glue_factory_missing" };
     }
     const glueResult = glueFactory(designer, args, plugin, { host, logger: console });
@@ -400,6 +540,7 @@ define(function () {
       _writeMarker("glue", "installed");
     } else {
       _writeMarker("glue", "failed");
+      _writeMarker("analysis-status", "glue_install_failed");
       return { installed: false, reason: "glue_install_failed", detail: glueResult };
     }
 
@@ -412,8 +553,84 @@ define(function () {
   function createFallbackLauncher(options) {
     // 最小 fallback launcher，模拟 service-worker-runtime-launcher 的接口
     const transport = options.transport;
+    const requestTimeoutMs = options.requestTimeoutMs ?? SW_REQUEST_TIMEOUT_MS;
     let started = false;
     let _client = null;
+    let nextRequestId = 0;
+
+    function makeRequest(method, args) {
+      const id = `req-${++nextRequestId}`;
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timeoutId = setTimeout(() => {
+          settleReject(
+            _makeRuntimeError(
+              "SW_RUNTIME_REQUEST_TIMEOUT",
+              `Service Worker request ${id} timed out`,
+            ),
+          );
+        }, requestTimeoutMs);
+
+        function cleanup() {
+          clearTimeout(timeoutId);
+          transport.offMessage(handler);
+        }
+
+        function settleResolve(value) {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(value);
+        }
+
+        function settleReject(error) {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error);
+        }
+
+        function handler(response) {
+          if (response.id !== id) return;
+          if (response.ok) {
+            settleResolve(response.result);
+            return;
+          }
+          settleReject(
+            _makeRuntimeError(
+              response.error?.code ?? "SW_RUNTIME_REQUEST_FAILED",
+              response.error?.message ?? "request failed",
+            ),
+          );
+        }
+
+        transport.onMessage(handler);
+        try {
+          const sendResult = transport.send({ id, method, args });
+          if (sendResult && typeof sendResult.then === "function") {
+            sendResult.catch((err) => {
+              settleReject(
+                err?.code
+                  ? err
+                  : _makeRuntimeError(
+                      "SW_RUNTIME_REQUEST_FAILED",
+                      err?.message ?? String(err),
+                    ),
+              );
+            });
+          }
+        } catch (err) {
+          settleReject(
+            err?.code
+              ? err
+              : _makeRuntimeError(
+                  "SW_RUNTIME_REQUEST_FAILED",
+                  err?.message ?? String(err),
+                ),
+          );
+        }
+      });
+    }
 
     return {
       async start() {
@@ -424,74 +641,19 @@ define(function () {
         try {
           const messageClient = {
             initRuntime(opts) {
-              return new Promise((resolve, reject) => {
-                const id = `req-${Date.now()}`;
-                const handler = (response) => {
-                  if (response.id === id) {
-                    transport.offMessage(handler);
-                    if (response.ok) resolve(response.result);
-                    else reject(new Error(response.error?.message ?? "request failed"));
-                  }
-                };
-                transport.onMessage(handler);
-                transport.send({ id, method: "initRuntime", args: [opts ?? {}] });
-              });
+              return makeRequest("initRuntime", [opts ?? {}]);
             },
             runtimeStatus() {
-              return new Promise((resolve, reject) => {
-                const id = `req-${Date.now()}`;
-                const handler = (response) => {
-                  if (response.id === id) {
-                    transport.offMessage(handler);
-                    if (response.ok) resolve(response.result);
-                    else reject(new Error(response.error?.message ?? "request failed"));
-                  }
-                };
-                transport.onMessage(handler);
-                transport.send({ id, method: "runtimeStatus", args: [] });
-              });
+              return makeRequest("runtimeStatus", []);
             },
             loadSuperpageDocument(sourcePath, rawText) {
-              return new Promise((resolve, reject) => {
-                const id = `req-${Date.now()}`;
-                const handler = (response) => {
-                  if (response.id === id) {
-                    transport.offMessage(handler);
-                    if (response.ok) resolve(response.result);
-                    else reject(new Error(response.error?.message ?? "request failed"));
-                  }
-                };
-                transport.onMessage(handler);
-                transport.send({ id, method: "loadSuperpageDocument", args: [sourcePath, rawText] });
-              });
+              return makeRequest("loadSuperpageDocument", [sourcePath, rawText]);
             },
             buildOrUpdateSuperpageGraph(sourcePath) {
-              return new Promise((resolve, reject) => {
-                const id = `req-${Date.now()}`;
-                const handler = (response) => {
-                  if (response.id === id) {
-                    transport.offMessage(handler);
-                    if (response.ok) resolve(response.result);
-                    else reject(new Error(response.error?.message ?? "request failed"));
-                  }
-                };
-                transport.onMessage(handler);
-                transport.send({ id, method: "buildOrUpdateSuperpageGraph", args: [sourcePath] });
-              });
+              return makeRequest("buildOrUpdateSuperpageGraph", [sourcePath]);
             },
             analyzeSuperpageSelection(selection, opts) {
-              return new Promise((resolve, reject) => {
-                const id = `req-${Date.now()}`;
-                const handler = (response) => {
-                  if (response.id === id) {
-                    transport.offMessage(handler);
-                    if (response.ok) resolve(response.result);
-                    else reject(new Error(response.error?.message ?? "request failed"));
-                  }
-                };
-                transport.onMessage(handler);
-                transport.send({ id, method: "analyzeSuperpageSelection", args: [selection, opts] });
-              });
+              return makeRequest("analyzeSuperpageSelection", [selection, opts]);
             },
           };
           _client = messageClient;

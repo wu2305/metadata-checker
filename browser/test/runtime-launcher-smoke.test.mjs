@@ -410,6 +410,61 @@ describe("Runtime Launcher Runtime-Contract (M40.4)", () => {
     assert.strictEqual(failed.diagnostics?.[0]?.code, "LAUNCHER_REQUEST_FAILED");
   });
 
+  it("message transport: ok=false should preserve stable response error code", async () => {
+    const transport = createFakeMessageTransport({ autoRespond: false });
+    const client = createMessageRuntimeClient({ transport, requestTimeoutMs: 0 });
+    const resultPromise = client.initRuntime({ wasmUrl: "/runtime.wasm" });
+    await Promise.resolve();
+
+    const request = transport.getSentRequests().at(-1);
+    transport.emitResponse({
+      id: request.id,
+      ok: false,
+      result: null,
+      error: {
+        code: "WASM_FETCH_FAILED",
+        message: "failed to fetch runtime wasm",
+      },
+    });
+
+    const failed = await resultPromise;
+    assert.strictEqual(failed.status, "error");
+    assert.strictEqual(failed.target, null);
+    assert.deepStrictEqual(failed.items, []);
+    assert.strictEqual(failed.diagnostics?.[0]?.code, "WASM_FETCH_FAILED");
+    assert.strictEqual(
+      failed.diagnostics?.[0]?.message,
+      "failed to fetch runtime wasm"
+    );
+  });
+
+  it("message transport: ok=false without response error code falls back to LAUNCHER_REQUEST_FAILED", async () => {
+    const transport = createFakeMessageTransport({ autoRespond: false });
+    const client = createMessageRuntimeClient({ transport, requestTimeoutMs: 0 });
+    const resultPromise = client.initRuntime({});
+    await Promise.resolve();
+
+    const request = transport.getSentRequests().at(-1);
+    transport.emitResponse({
+      id: request.id,
+      ok: false,
+      result: null,
+      error: {
+        message: "runtime failed without stable code",
+      },
+    });
+
+    const failed = await resultPromise;
+    assert.strictEqual(failed.status, "error");
+    assert.strictEqual(failed.target, null);
+    assert.deepStrictEqual(failed.items, []);
+    assert.strictEqual(failed.diagnostics?.[0]?.code, "LAUNCHER_REQUEST_FAILED");
+    assert.strictEqual(
+      failed.diagnostics?.[0]?.message,
+      "runtime failed without stable code"
+    );
+  });
+
   it("request reject path: transport send throw should map to LAUNCHER_REQUEST_FAILED", async () => {
     const transport = createFakeMessageTransport({ throwOnSend: true, autoRespond: false });
     const client = createMessageRuntimeClient({ transport, requestTimeoutMs: 0 });
