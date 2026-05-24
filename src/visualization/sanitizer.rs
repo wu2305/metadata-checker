@@ -1,5 +1,8 @@
-use crate::output::schema::{Diagnostic, Location};
 use serde_json::{Map, Value};
+use std::hash::Hasher;
+use twox_hash::XxHash64;
+
+use crate::output::schema::{Diagnostic, Location};
 
 /// 敏感字段关键词（匹配 key=value / key: value 这类写法）
 const SENSITIVE_KEYS: &[&str] = &[
@@ -27,10 +30,47 @@ pub fn sanitize_text(text: &str) -> String {
     .expect("invalid sensitive pair regex");
 
     result = pair_regex
-        .replace_all(&result, format!("$1$2{}", REDACTED_VALUE))
+        .replace_all(&result, |captures: &regex::Captures| {
+            let key = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+            let separator = captures.get(2).map(|m| m.as_str()).unwrap_or_default();
+            let value = captures.get(3).map(|m| m.as_str()).unwrap_or_default();
+            if is_internal_redacted_hash(value) {
+                captures
+                    .get(0)
+                    .map(|m| m.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            } else {
+                format!("{}{}{}", key, separator, REDACTED_VALUE)
+            }
+        })
         .to_string();
 
     result
+}
+
+/// 清洗图身份 ID，并在发生脱敏时追加稳定短 hash 防止 ID 碰撞。
+pub fn sanitize_identity_id(raw_id: &str) -> String {
+    let safe_id = sanitize_text(raw_id);
+    if safe_id == raw_id {
+        safe_id
+    } else {
+        format!("{}__h{}", safe_id, short_hash(raw_id))
+    }
+}
+
+/// 计算不可逆短 hash，用于区分脱敏后文本相同的原始 ID。
+fn short_hash(text: &str) -> String {
+    let mut hasher = XxHash64::default();
+    hasher.write(text.as_bytes());
+    format!("{:08x}", (hasher.finish() & 0xffff_ffff) as u32)
+}
+
+/// 判断是否为内部生成的已脱敏 identity hash 后缀。
+fn is_internal_redacted_hash(value: &str) -> bool {
+    value.len() == 14
+        && value.starts_with("***__h")
+        && value[6..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// 判断字段名是否为敏感字段名。

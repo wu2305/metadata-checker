@@ -106,8 +106,7 @@ impl GraphDB {
     /// 打开或创建图数据库
     pub fn open(db_path: &Path) -> Result<Self> {
         let _lock = acquire_graph_db_lock(db_path)?;
-        let result = Self::open_inner(db_path);
-        result
+        Self::open_inner(db_path)
     }
 
     fn open_inner(db_path: &Path) -> Result<Self> {
@@ -430,10 +429,8 @@ impl GraphDB {
 
     /// 以只读模式打开图数据库（不创建表，不持有写锁）
     pub fn open_readonly(db_path: &Path) -> Result<Self> {
-        let _lock = acquire_graph_lock(db_path)?;
-        let result = Self::open_readonly_inner(db_path);
-        release_graph_lock(db_path);
-        result
+        let _lock = acquire_graph_db_lock(db_path)?;
+        Self::open_readonly_inner(db_path)
     }
 
     fn open_readonly_inner(db_path: &Path) -> Result<Self> {

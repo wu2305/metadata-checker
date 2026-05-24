@@ -4,7 +4,8 @@ use crate::visualization::graph_model::{
 };
 use crate::visualization::options::{EdgeDirection, EdgeKind, NodeKind, VisualGraphOptions};
 use crate::visualization::sanitizer::{
-    sanitize_diagnostic, sanitize_metadata_entry, sanitize_text as sanitize_sensitive_text,
+    sanitize_diagnostic, sanitize_identity_id, sanitize_metadata_entry,
+    sanitize_text as sanitize_sensitive_text,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -66,7 +67,7 @@ impl VisualGraphBuilder {
 
         // 设置焦点节点
         if let Some(ref target) = options.focus_target {
-            graph.focus_node = Some(sanitize_sensitive_text(target));
+            graph.focus_node = Some(sanitize_identity_id(target));
         }
 
         // 计算来源摘要
@@ -96,7 +97,7 @@ impl VisualGraphBuilder {
                 .unwrap_or("");
 
             graph.nodes.push(VisualNode {
-                id: sanitize_sensitive_text(target_id),
+                id: sanitize_identity_id(target_id),
                 label: Self::sanitize_label(target_name),
                 kind: NodeKind::Component,
                 source_path: sanitize_sensitive_text(source_path),
@@ -138,7 +139,7 @@ impl VisualGraphBuilder {
                 .unwrap_or("");
 
             graph.nodes.push(VisualNode {
-                id: sanitize_sensitive_text(model_id),
+                id: sanitize_identity_id(model_id),
                 label: Self::sanitize_label(model_name),
                 kind: NodeKind::Model,
                 source_path: sanitize_sensitive_text(source_path),
@@ -169,14 +170,14 @@ impl VisualGraphBuilder {
             output.summary.get("page_b").and_then(|v| v.as_str()),
         ) {
             graph.nodes.push(VisualNode {
-                id: sanitize_sensitive_text(page_a),
+                id: sanitize_identity_id(page_a),
                 label: Self::sanitize_label(page_a),
                 kind: NodeKind::Page,
                 source_path: String::new(),
                 metadata: HashMap::new(),
             });
             graph.nodes.push(VisualNode {
-                id: sanitize_sensitive_text(page_b),
+                id: sanitize_identity_id(page_b),
                 label: Self::sanitize_label(page_b),
                 kind: NodeKind::Page,
                 source_path: String::new(),
@@ -203,7 +204,7 @@ impl VisualGraphBuilder {
         for evidence in &output.evidence {
             // 提取节点
             if let Some(ref raw_node_id) = evidence.node_id {
-                let node_id = sanitize_sensitive_text(raw_node_id);
+                let node_id = sanitize_identity_id(raw_node_id);
                 if !seen_nodes.contains(&node_id) {
                     seen_nodes.insert(node_id.clone());
                     let label = &evidence.claim;
@@ -227,11 +228,11 @@ impl VisualGraphBuilder {
             // 从 claim 和 reason 中尝试提取边关系
             if let Some(ref edge_type) = evidence.edge_type {
                 if let Some(ref raw_node_id) = evidence.node_id {
-                    let node_id = sanitize_sensitive_text(raw_node_id);
+                    let node_id = sanitize_identity_id(raw_node_id);
                     if let Some(ref raw_expr) = evidence.raw_expr {
                         // 尝试解析表达式中的目标引用
                         if let Some(target) = Self::extract_target_from_expr(raw_expr) {
-                            let target = sanitize_sensitive_text(&target);
+                            let target = sanitize_identity_id(&target);
                             let edge_key = (node_id.clone(), target.clone(), edge_type.clone());
                             if !seen_edges.contains(&edge_key) {
                                 seen_edges.insert(edge_key);
@@ -281,7 +282,7 @@ impl VisualGraphBuilder {
                             .or_else(|| item.get("label"))
                             .and_then(|v| v.as_str()),
                     ) {
-                        let id = sanitize_sensitive_text(raw_id);
+                        let id = sanitize_identity_id(raw_id);
                         // 添加节点（如果不存在）
                         if !graph.nodes.iter().any(|n| n.id == id) {
                             let kind = item
@@ -309,8 +310,8 @@ impl VisualGraphBuilder {
                         // 尝试添加边（如果有 from/to 信息）
                         if let Some(raw_from) = item.get("from").and_then(|v| v.as_str()) {
                             if let Some(raw_to) = item.get("to").and_then(|v| v.as_str()) {
-                                let from = sanitize_sensitive_text(raw_from);
-                                let to = sanitize_sensitive_text(raw_to);
+                                let from = sanitize_identity_id(raw_from);
+                                let to = sanitize_identity_id(raw_to);
                                 let kind = item
                                     .get("edge_type")
                                     .and_then(|v| v.as_str())

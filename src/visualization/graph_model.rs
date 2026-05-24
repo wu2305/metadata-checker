@@ -1,7 +1,7 @@
 use crate::output::schema::Diagnostic;
 use crate::visualization::options::{EdgeDirection, EdgeKind, NodeKind};
 use crate::visualization::sanitizer::{
-    sanitize_diagnostic, sanitize_metadata_entry, sanitize_text,
+    sanitize_diagnostic, sanitize_identity_id, sanitize_metadata_entry, sanitize_text,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -45,8 +45,8 @@ impl VisualGraph {
     pub fn from_diagnostics(diagnostics: Vec<Diagnostic>) -> Self {
         let mut graph = Self::empty();
         graph.diagnostics = diagnostics.iter().map(sanitize_diagnostic).collect();
-        for diag in &graph.diagnostics {
-            let node_id = sanitize_text(&format!("diag_{}", diag.code));
+        for (raw_diag, diag) in diagnostics.iter().zip(graph.diagnostics.iter()) {
+            let node_id = sanitize_identity_id(&format!("diag_{}", raw_diag.code));
             graph.nodes.push(VisualNode {
                 id: node_id.clone(),
                 label: sanitize_text(&format!("[{}] {}", diag.code, diag.message)),

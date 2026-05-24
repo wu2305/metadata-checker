@@ -11,7 +11,7 @@ use crate::persistence::types::{
     CachedDocument, GraphMeta, GraphSnapshot, PERSISTENCE_SCHEMA_VERSION, PersistenceError,
     validate_schema_version,
 };
-use redb::{Database, ReadableDatabase, TableDefinition};
+use redb::{Database, ReadableDatabase, TableDefinition, TableError};
 use std::path::Path;
 
 const DOCUMENT_CACHE_TABLE: TableDefinition<(&str, &str), Vec<u8>> =
@@ -33,35 +33,29 @@ impl RedbPersistenceProvider {
     ///
     /// db_path 是现有 GraphDB 的数据库文件路径。
     pub fn new(db_path: &Path) -> anyhow::Result<Self> {
-        let provider = Self {
+        Ok(Self {
             db_path: db_path.to_string_lossy().to_string(),
-        };
-        provider.with_db(|db| {
-            let write_txn = db.begin_write().map_err(|e| PersistenceError::Io {
-                reason: format!("{}", e),
-            })?;
-            {
-                let _ = write_txn.open_table(DOCUMENT_CACHE_TABLE).map_err(|e| {
-                    PersistenceError::Io {
-                        reason: format!("{}", e),
-                    }
-                })?;
-                let _ =
-                    write_txn
-                        .open_table(GRAPH_META_TABLE)
-                        .map_err(|e| PersistenceError::Io {
-                            reason: format!("{}", e),
-                        })?;
-            }
-            write_txn.commit().map_err(|e| PersistenceError::Io {
-                reason: format!("{}", e),
-            })
-        })?;
-
-        Ok(provider)
+        })
     }
 
-    fn with_db<F, T>(&self, f: F) -> Result<T, PersistenceError>
+    fn with_existing_db<F, T>(&self, resource: String, f: F) -> Result<T, PersistenceError>
+    where
+        F: FnOnce(Database) -> Result<T, PersistenceError>,
+    {
+        let db_path = Path::new(&self.db_path);
+        if !db_path.exists() {
+            return Err(PersistenceError::NotFound { resource });
+        }
+        let _lock = acquire_graph_db_lock(db_path).map_err(|e| PersistenceError::Io {
+            reason: format!("{}", e),
+        })?;
+        let db = Database::open(db_path).map_err(|e| PersistenceError::Io {
+            reason: format!("{}", e),
+        })?;
+        f(db)
+    }
+
+    fn with_writable_db<F, T>(&self, f: F) -> Result<T, PersistenceError>
     where
         F: FnOnce(Database) -> Result<T, PersistenceError>,
     {
@@ -74,6 +68,15 @@ impl RedbPersistenceProvider {
         })?;
         f(db)
     }
+
+    fn map_open_table_error(err: TableError, resource: String) -> PersistenceError {
+        match err {
+            TableError::TableDoesNotExist(_) => PersistenceError::NotFound { resource },
+            other => PersistenceError::Io {
+                reason: format!("{}", other),
+            },
+        }
+    }
 }
 
 impl GraphPersistenceProvider for RedbPersistenceProvider {
@@ -84,10 +87,17 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
         project_ref: &str,
         graph_ref: &str,
     ) -> Result<GraphSnapshot, Self::Error> {
-        let graph_db =
-            GraphDB::open(Path::new(&self.db_path)).map_err(|e| PersistenceError::Io {
-                reason: format!("{}", e),
-            })?;
+        let graph_db = GraphDB::open_readonly(Path::new(&self.db_path)).map_err(|e| {
+            if Path::new(&self.db_path).exists() {
+                PersistenceError::Io {
+                    reason: format!("{}", e),
+                }
+            } else {
+                PersistenceError::NotFound {
+                    resource: format!("graph snapshot: {}/{}", project_ref, graph_ref),
+                }
+            }
+        })?;
         let nodes = graph_db.graph.node_weights().cloned().collect::<Vec<_>>();
         let edges = graph_db
             .graph
@@ -125,16 +135,14 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
         project_ref: &str,
         source_path: &str,
     ) -> Result<CachedDocument, Self::Error> {
-        self.with_db(|db| {
+        let resource = format!("document cache: {}/{}", project_ref, source_path);
+        self.with_existing_db(resource.clone(), |db| {
             let read_txn = db.begin_read().map_err(|e| PersistenceError::Io {
                 reason: format!("{}", e),
             })?;
-            let table =
-                read_txn
-                    .open_table(DOCUMENT_CACHE_TABLE)
-                    .map_err(|e| PersistenceError::Io {
-                        reason: format!("{}", e),
-                    })?;
+            let table = read_txn
+                .open_table(DOCUMENT_CACHE_TABLE)
+                .map_err(|e| Self::map_open_table_error(e, resource.clone()))?;
             let value =
                 table
                     .get((project_ref, source_path))
@@ -150,9 +158,7 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
                         }
                     })
                 }
-                None => Err(PersistenceError::NotFound {
-                    resource: format!("document cache: {}/{}", project_ref, source_path),
-                }),
+                None => Err(PersistenceError::NotFound { resource }),
             }
         })
     }
@@ -163,7 +169,7 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
         source_path: &str,
         document: &CachedDocument,
     ) -> Result<(), Self::Error> {
-        self.with_db(|db| {
+        self.with_writable_db(|db| {
             let write_txn = db.begin_write().map_err(|e| PersistenceError::Io {
                 reason: format!("{}", e),
             })?;
@@ -204,16 +210,14 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
         source_path: &str,
     ) -> Result<FileState, Self::Error> {
         // 委托给 GraphDB 的 file_states 表
-        self.with_db(|db| {
+        let resource = format!("file state: {}/{}", project_ref, source_path);
+        self.with_existing_db(resource.clone(), |db| {
             let read_txn = db.begin_read().map_err(|e| PersistenceError::Io {
                 reason: format!("{}", e),
             })?;
-            let table =
-                read_txn
-                    .open_table(FILE_STATES_TABLE)
-                    .map_err(|e| PersistenceError::Io {
-                        reason: format!("{}", e),
-                    })?;
+            let table = read_txn
+                .open_table(FILE_STATES_TABLE)
+                .map_err(|e| Self::map_open_table_error(e, resource.clone()))?;
             let value = table.get(source_path).map_err(|e| PersistenceError::Io {
                 reason: format!("{}", e),
             })?;
@@ -226,9 +230,7 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
                         }
                     })
                 }
-                None => Err(PersistenceError::NotFound {
-                    resource: format!("file state: {}/{}", project_ref, source_path),
-                }),
+                None => Err(PersistenceError::NotFound { resource }),
             }
         })
     }
@@ -239,7 +241,7 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
         source_path: &str,
         state: &FileState,
     ) -> Result<(), Self::Error> {
-        self.with_db(|db| {
+        self.with_writable_db(|db| {
             let write_txn = db.begin_write().map_err(|e| PersistenceError::Io {
                 reason: format!("{}", e),
             })?;
@@ -271,16 +273,14 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
         project_ref: &str,
         graph_ref: &str,
     ) -> Result<GraphMeta, Self::Error> {
-        self.with_db(|db| {
+        let resource = format!("graph meta: {}/{}", project_ref, graph_ref);
+        self.with_existing_db(resource.clone(), |db| {
             let read_txn = db.begin_read().map_err(|e| PersistenceError::Io {
                 reason: format!("{}", e),
             })?;
-            let table =
-                read_txn
-                    .open_table(GRAPH_META_TABLE)
-                    .map_err(|e| PersistenceError::Io {
-                        reason: format!("{}", e),
-                    })?;
+            let table = read_txn
+                .open_table(GRAPH_META_TABLE)
+                .map_err(|e| Self::map_open_table_error(e, resource.clone()))?;
             let value = table
                 .get((project_ref, graph_ref))
                 .map_err(|e| PersistenceError::Io {
@@ -298,9 +298,7 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
                     validate_schema_version(&meta.schema_version)?;
                     Ok(meta)
                 }
-                None => Err(PersistenceError::NotFound {
-                    resource: format!("graph meta: {}/{}", project_ref, graph_ref),
-                }),
+                None => Err(PersistenceError::NotFound { resource }),
             }
         })
     }
@@ -312,7 +310,7 @@ impl GraphPersistenceProvider for RedbPersistenceProvider {
         meta: &GraphMeta,
     ) -> Result<(), Self::Error> {
         validate_schema_version(&meta.schema_version)?;
-        self.with_db(|db| {
+        self.with_writable_db(|db| {
             let write_txn = db.begin_write().map_err(|e| PersistenceError::Io {
                 reason: format!("{}", e),
             })?;

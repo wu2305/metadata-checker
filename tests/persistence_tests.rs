@@ -20,6 +20,20 @@ use metadata_checker::persistence::redb::RedbPersistenceProvider;
 #[cfg(feature = "browser-wasm")]
 use metadata_checker::persistence::indexeddb::IndexedDbPersistenceProvider;
 
+#[cfg(feature = "cli-local")]
+fn unique_graph_db_path(name: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock should be after unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "metadata-checker-persistence-{}-{}-{}.graphdb",
+        name,
+        std::process::id(),
+        nanos
+    ))
+}
+
 fn make_graph_snapshot() -> GraphSnapshot {
     GraphSnapshot {
         schema_version: PERSISTENCE_SCHEMA_VERSION.to_string(),
@@ -174,6 +188,97 @@ fn test_memory_persistence_provider_rejects_version_mismatch() {
         .save_graph_meta("project:m40_8", "graph:old", &meta)
         .expect_err("old meta schema should be rejected");
     assert!(matches!(err, PersistenceError::VersionMismatch { .. }));
+}
+
+#[cfg(feature = "cli-local")]
+#[test]
+fn test_redb_provider_new_is_lazy_for_missing_db() {
+    let db_path = unique_graph_db_path("lazy-missing");
+    let _ = std::fs::remove_file(&db_path);
+
+    let provider = RedbPersistenceProvider::new(&db_path).expect("provider init should be lazy");
+    assert!(
+        !db_path.exists(),
+        "new should not create a missing graphdb file"
+    );
+
+    assert_not_found(
+        provider
+            .load_document_cache("project:m40_8", "app/missing.spg")
+            .expect_err("missing db document cache read should be NotFound"),
+    );
+    assert!(
+        !db_path.exists(),
+        "document cache load should not create a missing graphdb file"
+    );
+
+    assert_not_found(
+        provider
+            .load_graph_meta("project:m40_8", "graph:missing")
+            .expect_err("missing db graph meta read should be NotFound"),
+    );
+    assert!(
+        !db_path.exists(),
+        "graph meta load should not create a missing graphdb file"
+    );
+}
+
+#[cfg(feature = "cli-local")]
+#[test]
+fn test_redb_provider_new_and_missing_cache_load_do_not_modify_existing_db() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let before_len = std::fs::metadata(&db_path)
+        .expect("fixture graphdb should exist")
+        .len();
+
+    let provider = RedbPersistenceProvider::new(&db_path).expect("provider init should be lazy");
+    let after_new_len = std::fs::metadata(&db_path)
+        .expect("fixture graphdb should still exist")
+        .len();
+    assert_eq!(after_new_len, before_len);
+
+    assert_not_found(
+        provider
+            .load_document_cache("project:m40_8", "app/not-yet-cached.spg")
+            .expect_err("missing document cache table should be NotFound"),
+    );
+    assert_not_found(
+        provider
+            .load_graph_meta("project:m40_8", "graph:not-yet-cached")
+            .expect_err("missing graph meta table should be NotFound"),
+    );
+
+    let after_load_len = std::fs::metadata(&db_path)
+        .expect("fixture graphdb should still exist")
+        .len();
+    assert_eq!(after_load_len, before_len);
+}
+
+#[cfg(feature = "cli-local")]
+#[test]
+fn test_redb_load_graph_snapshot_reads_existing_graphdb_readonly() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let before_len = std::fs::metadata(&db_path)
+        .expect("fixture graphdb should exist")
+        .len();
+    let (baseline_node_count, baseline_edge_count) = {
+        let graph_db = GraphDB::open_readonly(&db_path).expect("readonly GraphDB open should work");
+        (graph_db.graph.node_count(), graph_db.graph.edge_count())
+    };
+    assert!(baseline_node_count > 0, "fixture graphdb should have nodes");
+
+    let provider = RedbPersistenceProvider::new(&db_path).expect("provider init should be lazy");
+    let snapshot = provider
+        .load_graph_snapshot("project:m40_8_fixture", "graph:m40_8_fixture")
+        .expect("snapshot load should read existing nodes and edges");
+
+    assert_eq!(snapshot.schema_version, PERSISTENCE_SCHEMA_VERSION);
+    assert_eq!(snapshot.nodes.len(), baseline_node_count);
+    assert_eq!(snapshot.edges.len(), baseline_edge_count);
+    let after_len = std::fs::metadata(&db_path)
+        .expect("fixture graphdb should still exist")
+        .len();
+    assert_eq!(after_len, before_len);
 }
 
 #[cfg(feature = "cli-local")]

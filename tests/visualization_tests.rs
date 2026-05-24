@@ -489,6 +489,62 @@ fn test_include_evidence_false_excludes_evidence_details() {
 }
 
 #[test]
+fn test_sensitive_node_ids_keep_distinct_safe_identities() {
+    let mut output = AiOutput::new(
+        OutputKind::PageQuery,
+        json!({
+            "target_id": "page:collision",
+            "target_name": "Collision Page",
+        }),
+    );
+    output.evidence.push(
+        Evidence::new("Token A node", "reads model")
+            .with_node_id("comp:token=a")
+            .with_edge_type("Reads")
+            .with_raw_expr("${model:orders}"),
+    );
+    output.evidence.push(
+        Evidence::new("Token B node", "reads model")
+            .with_node_id("comp:token=b")
+            .with_edge_type("Reads")
+            .with_raw_expr("${model:customers}"),
+    );
+
+    let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());
+    let colliding_nodes = graph
+        .nodes
+        .iter()
+        .filter(|node| node.id.starts_with("comp:token=***__h"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        colliding_nodes.len(),
+        2,
+        "different sensitive raw ids should remain distinct after redaction"
+    );
+    assert_ne!(
+        colliding_nodes[0].id, colliding_nodes[1].id,
+        "safe ids should include distinct stable hash suffixes"
+    );
+
+    let edge_sources = graph
+        .edges
+        .iter()
+        .map(|edge| edge.from.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert!(
+        colliding_nodes
+            .iter()
+            .all(|node| edge_sources.contains(node.id.as_str())),
+        "edge endpoints should use the same safe id mapping as nodes"
+    );
+
+    let graph_str = serde_json::to_string(&graph).unwrap();
+    assert!(!graph_str.contains("comp:token=a"));
+    assert!(!graph_str.contains("comp:token=b"));
+}
+
+#[test]
 fn test_mermaid_id_sanitization() {
     let mut output = AiOutput::new(
         OutputKind::PageQuery,
