@@ -3887,7 +3887,7 @@ browser/
   providers/
     metadata-provider.js
   renderer/
-    floating-panel-renderer.js
+    graph-panel-renderer.js
   test/
     fake-runtime-client.mjs
     fake-host.mjs
@@ -3905,7 +3905,7 @@ browser/
 - 不让 Rust/WASM 直接访问 DOM、`window.SZ.rc`、Service Worker scope 或浏览器插件 API。
 - 不让 JS 解析/转换 `.spg/.tbl` 元数据结构。
 - 不在 M40 中实现本地远程项目完整同步、多服务器 session、MCP。
-- 不把 `GraphReadStore` 改 async；IndexedDB/远程缓存通过 JS provider 或后续 storage adapter 处理。
+- 不把 `GraphReadStore` 改 async；IndexedDB/远程缓存通过 Rust persistence provider + 平台 adapter 处理。
 
 任务清单：
 
@@ -3944,7 +3944,7 @@ browser/
     - [ ] M40.1.1：Cargo feature 骨架
       - 在 `Cargo.toml` 中新增 `default = ["cli-local"]`。
       - 新增 `cli-local` feature，包含 `clap` / `redb` / native stdio/runtime 需要的依赖。
-      - 新增 `browser-wasm` feature，只引入 browser API 必需依赖；首轮可只放 `wasm-bindgen` / `js-sys` / `web-sys`，`rexie` 等 IndexedDB 依赖放到 M40.7 再接入。
+      - 新增 `browser-wasm` feature，只引入 browser API 必需依赖；首轮可只放 `wasm-bindgen` / `js-sys` / `web-sys`，`rexie` 等 IndexedDB 依赖放到 M40.8 persistence provider 再接入。
       - 给 binary 配置 `required-features = ["cli-local"]`，确保 native CLI 不污染 browser wasm。
       - 不引入 `getrandom`，除非后续真实依赖链要求。
     - [ ] M40.1.2：拆出 redb 实现模块
@@ -4447,60 +4447,138 @@ browser/
     - Browser/WASM feature 编译测试不引入 CLI-only HTTP/cookie jar 依赖。
     - CLI feature 编译测试不引入 wasm/browser-only 依赖。
 
-- [ ] M40.7：Panel Renderer
-  - 目标：面板渲染独立于 BI glue，输入 analysis envelope，输出 DOM。
+- [ ] M40.7：Graph Visualization Renderer
+  - 目标：先实现“分析结果到可视化图”的稳定中间模型，再输出 Mermaid / ECharts，而不是优先实现 DOM 面板。
+  - 背景纠偏：
+    - UI panel 只是可视化结果的一个消费者，不应成为核心 renderer contract。
+    - 浏览器、STDIO、MCP、REPL 都应能复用同一份可视化图模型。
+    - M40.7 不读取远程元数据，不建图，不改变 query 输出主 schema。
   - 建议位置：
-    - `browser/renderer/floating-panel-renderer.js`
-    - `browser/test/panel-renderer-smoke.test.mjs`
-  - renderer contract：
-    - `mount(container, options)`
-    - `render(envelope)`
-    - `setStatus(status)`
-    - `destroy()`
-  - 展示内容：
-    - 当前选中组件
-    - 读取的数据源
-    - 写入目标
-    - 显示/隐藏/禁用/只读条件
-    - value/defaultValue/exp 来源
-    - 相关 action
-    - 下一步可探索项
+    - `src/visualization.rs`
+    - `src/visualization/graph_model.rs`
+    - `src/visualization/mermaid.rs`
+    - `src/visualization/echarts.rs`
+    - `tests/visualization_tests.rs`
+    - 后续浏览器消费者可放在 `browser/renderer/graph-panel-renderer.mjs`，但不是 M40.7 的第一优先级。
+  - 核心数据模型：
+    - `VisualGraph`
+      - `nodes`
+      - `edges`
+      - `groups`
+      - `focus_node`
+      - `diagnostics`
+      - `truncated`
+      - `source_summary`
+    - `VisualNode`
+      - `id`
+      - `label`
+      - `kind`
+      - `source_path`
+      - `metadata`
+    - `VisualEdge`
+      - `from`
+      - `to`
+      - `kind`
+      - `label`
+      - `direction`
+      - `evidence`
+    - `VisualGraphOptions`
+      - `max_nodes`
+      - `max_edges`
+      - `include_evidence`
+      - `group_by_source_path`
+      - `focus_target`
+  - 输入来源：
+    - 首轮支持从 analysis envelope / query result 中提取：
+      - 当前选中组件
+      - 读取的数据源
+      - 写入目标
+      - 显示/隐藏/禁用/只读条件
+      - value/defaultValue/exp 来源
+      - 相关 action
+      - 下一步可探索项
+    - 后续可支持直接从 `GraphReadStore` + target 生成可视化子图。
+  - Mermaid renderer：
+    - 输出 Mermaid flowchart 文本。
+    - 必须稳定排序节点和边，便于测试和 AI diff。
+    - 必须转义 Mermaid 特殊字符，避免中文路径、括号、冒号、引号导致图渲染失败。
+    - 大结果必须截断并插入 diagnostic node。
+  - ECharts renderer：
+    - 输出 ECharts graph option JSON，不依赖 DOM。
+    - option 中保留 nodes / links / categories / tooltip 数据。
+    - 不引入 ECharts runtime 依赖；浏览器 glue 或 panel 自行加载 ECharts。
   - 要求：
     - 不渲染 raw JSON。
-    - 大结果必须截断并显示 diagnostics。
-    - 支持 initializing / partial / ready / error / empty selection。
-    - 不依赖 Workbench viewlet layout。
+    - 不把 token/cookie/password/raw metadata 内容写入 label、tooltip、diagnostics。
+    - 不依赖 BI Workbench viewlet layout。
+    - 不把 renderer 绑定到 browser-only feature；Mermaid/ECharts option 生成应是纯 Rust 可测试能力。
+    - 输出应适合小模型阅读：summary-first，图节点标签短，详细 evidence 可选。
   - 测试要求：
-    - fake DOM 或最小 harness 下验证 mount/render/destroy。
-    - ready envelope 渲染关键 item。
-    - error envelope 渲染 diagnostic。
-    - large result 被截断。
-    - destroy 后不残留事件监听。
+    - ready envelope 可生成 `VisualGraph`。
+    - error envelope 可生成 diagnostic-only graph。
+    - empty selection 可生成空状态 graph。
+    - Mermaid 输出稳定且可 snapshot。
+    - Mermaid label 转义覆盖中文、空格、括号、冒号、双引号、换行。
+    - ECharts option JSON 包含 nodes / links / categories，且不依赖 DOM。
+    - large result 按 `max_nodes` / `max_edges` 截断。
+    - sensitive 字段不出现在 Mermaid / ECharts 输出中。
 
-- [ ] M40.8：Browser Cache / IndexedDB Provider
-  - 目标：缓存是 host/provider 能力，不改变 Rust `GraphReadStore` 为 async。
+- [ ] M40.8：Platform Graph Persistence Provider
+  - 目标：平台特化的图持久化、元数据记录能力通过 Rust trait + struct 实现，而不是写成 JS-only IndexedDB provider。
+  - 背景纠偏：
+    - `GraphReadStore` / 查询链路保持同步，不改 async。
+    - IndexedDB / redb / memory 都是平台持久化与恢复层，查询仍优先 hydrate 到 in-memory runtime core 后执行。
+    - JS glue 只负责启动、传入环境能力、挂 UI，不承担核心存储抽象。
   - 建议位置：
-    - `browser/providers/indexeddb-cache-provider.js`
-    - M40.8 后续可引入 `rexie`，首轮不阻塞 M40.3-M40.7。
-  - database：`metadata_checker_graph_v1`。
-  - object stores：
-    - `document_cache`
-    - `file_states`
-    - `nodes`
-    - `edges`
-    - `graph_meta`
-  - indexes：
-    - `document_cache`: `project_ref` / `content_hash` / `fetched_at`
-    - `file_states`: `project_ref` / `content_hash`
-    - `nodes`: `project_ref` / `node_type` / `source_path`
-    - `edges`: `project_ref` / `from` / `to` / `edge_type`
+    - `src/persistence.rs`
+    - `src/persistence/memory.rs`
+    - `src/persistence/redb.rs`（`cli-local` feature）
+    - `src/persistence/indexeddb.rs`（`browser-wasm` feature，首轮可先 trait/contract + fake 实现）
+    - `tests/persistence_tests.rs`
+  - 核心 trait 草案：
+    - `GraphPersistenceProvider`
+      - `load_graph_snapshot(project_ref, graph_ref) -> GraphSnapshot`
+      - `save_graph_snapshot(project_ref, graph_ref, snapshot)`
+      - `load_document_cache(project_ref, source_path) -> CachedDocument`
+      - `save_document_cache(project_ref, source_path, document)`
+      - `load_file_state(project_ref, source_path) -> FileState`
+      - `save_file_state(project_ref, source_path, state)`
+      - `load_graph_meta(project_ref, graph_ref) -> GraphMeta`
+      - `save_graph_meta(project_ref, graph_ref, meta)`
+    - 若 IndexedDB wasm 端必须 async，先隔离在 adapter 层，不能污染同步 `GraphReadStore` 和 query API。
+  - 预期 struct：
+    - `MemoryPersistenceProvider`
+      - 用于测试、harness、无持久化运行。
+    - `RedbPersistenceProvider`
+      - 用于 CLI / stdio / MCP native 场景。
+    - `IndexedDbPersistenceProvider`
+      - 用于 browser-wasm 场景。
+  - IndexedDB database 草案：
+    - database：`metadata_checker_graph_v1`
+    - object stores：
+      - `document_cache`
+      - `file_states`
+      - `graph_snapshots`
+      - `graph_meta`
+    - indexes：
+      - `document_cache`: `project_ref` / `source_path` / `content_hash` / `fetched_at`
+      - `file_states`: `project_ref` / `source_path` / `content_hash`
+      - `graph_snapshots`: `project_ref` / `graph_ref` / `schema_version` / `updated_at`
+      - `graph_meta`: `project_ref` / `graph_ref`
   - 要求：
-    - IndexedDB 先作为持久化与恢复层，查询仍在 in-memory runtime core 上执行。
-    - version mismatch 返回 diagnostic。
-    - 同源隔离作为默认清理边界，M40 不做清理策略。
+    - 不把 `source_path` 扩展成 URL 或物理路径；它仍是项目内逻辑路径。
+    - remote server、project namespace、session id、graph_ref 进入 provider context / metadata，不混进 `source_path`。
+    - version mismatch 返回 diagnostic，并允许上层选择 rebuild graph。
+    - token/cookie/password 不进入任何持久化 store。
+    - 同源隔离作为浏览器默认清理边界，M40 不做复杂清理策略。
+    - 首轮不要求 IndexedDB 直接承载节点级查询；节点级查询仍由 `MemoryGraphStore` 执行。
   - 测试要求：
-    - 首轮可用 fake cache provider 跑 plugin contract。
-    - rexie 接入后补 open / upgrade / put / get / duplicate edge upsert。
+    - `MemoryPersistenceProvider` 覆盖 save/load document cache、file state、graph snapshot、graph meta。
+    - `RedbPersistenceProvider` 与现有 redb graphdb 不破坏兼容。
+    - `browser-wasm` feature 编译不引入 redb。
+    - `cli-local` feature 编译不引入 IndexedDB / wasm-only 依赖。
+    - version mismatch、missing snapshot、corrupt snapshot 返回稳定错误码/diagnostic。
+    - sensitive 字段不进入 persisted payload。
 
 - [ ] M40.9：Standalone Harness 与组合测试
   - 目标：在不接真实 BI 的情况下验证 Plugin Core + Launcher + Provider + Renderer + Designer Glue 组合。
