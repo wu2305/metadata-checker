@@ -75,19 +75,19 @@
 
 ## Agent 协作与验收循环
 
-当用户要求“冷脸验收”“复用 workers”“循环这一段逻辑”时，必须按以下流程执行：
+当用户要求“冷脸验收”“复用 workers”“循环这一段逻辑”时，必须按以下通用流程执行：
 
 1. 主线程先确认当前看似完成的提交或工作区状态。
-2. 拉起或复用独立验收 agent **Hooke**（5.5 high）做冷脸验收。验收 agent 只读不改，输出 P0/P1/P2 阻塞项、测试覆盖缺口和方向性偏差。
-3. 主线程把验收问题拆成小任务包，按文件/职责边界分给现有 `5.3-codex-spark` workers。每个 worker 必须有明确写入范围，不得修改其他 worker 范围。
+2. 拉起或复用一个**独立验收者**做冷脸验收。验收者只读不改，输出 P0/P1/P2 阻塞项、测试覆盖缺口和方向性偏差。
+3. 主线程把验收问题拆成小任务包，按文件/职责边界分给 scoped workers。每个 worker 必须有明确写入范围，不得修改其他 worker 范围。
 4. worker 完成后，主线程复核 diff、运行影响面测试并提交。
-5. 再次拉起 Hooke 复验新提交。
-6. 循环 2-5，直到 Hooke 明确给出“可验收”且无 P0/P1/P2 阻塞项。
+5. 再次让独立验收者复验新提交。
+6. 循环 2-5，直到独立验收者明确给出“可验收”且无 P0/P1/P2 阻塞项。
 
 执行该循环时：
 
-- 不要让验收 agent 直接修代码。
-- 不要把阻塞项一次性塞给一个小上下文 worker；拆成互不重叠的小包。
+- 不要让验收者直接修代码。
+- 不要把阻塞项一次性塞给一个上下文较小或职责不匹配的 worker；拆成互不重叠的小包。
 - 不要全量 `cargo test` 当默认动作；优先按影响面运行目标测试。只有跨模块核心行为或用户明确要求时才跑全量。
 - 每轮可验收修复必须提交。
 
@@ -163,7 +163,7 @@ ls -lh target/release/metadata-checker
 
 - 低代码平台代码仓库：`/Users/wuhaocheng/Downloads/bi`
 - 真实测试项目：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
-- SKILL.md：`/Users/wuhaocheng/.codex/skills/metadata-checker/SKILL.md`
+- metadata-checker 使用说明：若运行环境提供对应 skill / tool 文档，应以其当前版本为准；不要在仓库规范中依赖某个工具的私有本地路径。
 
 ## 常见问题
 
