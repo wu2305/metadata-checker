@@ -33,3 +33,4 @@ pub mod storage_provider;
 pub mod superpage;
 pub mod tbl_single;
 pub mod tool_contract;
+pub mod visualization;
