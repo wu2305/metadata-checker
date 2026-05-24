@@ -23,6 +23,7 @@ pub mod persistence;
 pub mod priority;
 pub mod query;
 pub mod remote_metadata;
+pub mod remote_metadata_provider;
 pub mod response_processor;
 #[cfg(feature = "cli-local")]
 pub mod runtime;

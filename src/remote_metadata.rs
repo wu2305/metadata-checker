@@ -86,6 +86,27 @@ pub struct RemoteFileContent {
     pub raw_text: String,
 }
 
+/// 远程项目信息
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteProjectInfo {
+    pub project_ref: String,
+    pub project_name: String,
+    pub source_origin: String,
+    pub updated_at: Option<String>,
+}
+
+/// 远程元数据文件条目
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteMetafileEntry {
+    pub source_path: String,
+    pub file_id: Option<String>,
+    pub revision: Option<String>,
+    pub content_type: MetadataContentType,
+    pub updated_at: Option<String>,
+    pub etag: Option<String>,
+    pub size: Option<u64>,
+}
+
 /// 元数据内容类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -124,7 +145,7 @@ pub enum RemoteMetadataErrorCode {
     ClientFetchProxyFailed,
 }
 
-#[cfg(any(test, feature = "browser-wasm"))]
+#[cfg(any(test, feature = "cli-local", feature = "browser-wasm"))]
 const WASM_FETCH_FILE_INFO_ENDPOINT: &str = "/api/meta/services/getFileInfo";
 #[cfg(test)]
 const WASM_FETCH_CREDENTIALS_MODE: &str = "include";
@@ -134,8 +155,8 @@ fn remote_fetch_credentials_mode() -> &'static str {
     WASM_FETCH_CREDENTIALS_MODE
 }
 
-#[cfg(any(test, feature = "browser-wasm"))]
-fn map_http_status_code(status: u16) -> RemoteMetadataErrorCode {
+#[cfg(any(test, feature = "cli-local", feature = "browser-wasm"))]
+pub(crate) fn map_http_status_code(status: u16) -> RemoteMetadataErrorCode {
     match status {
         401 => RemoteMetadataErrorCode::RemoteFetchUnauthorized,
         403 => RemoteMetadataErrorCode::RemoteFetchForbidden,
@@ -144,7 +165,7 @@ fn map_http_status_code(status: u16) -> RemoteMetadataErrorCode {
     }
 }
 
-#[cfg(any(test, feature = "browser-wasm"))]
+#[cfg(any(test, feature = "cli-local", feature = "browser-wasm"))]
 fn percent_encode_query(value: &str) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
@@ -158,7 +179,7 @@ fn percent_encode_query(value: &str) -> String {
     encoded
 }
 
-#[cfg(any(test, feature = "browser-wasm"))]
+#[cfg(any(test, feature = "cli-local", feature = "browser-wasm"))]
 fn percent_encode_path_preserving_slashes(path: &str) -> String {
     path.split('/')
         .map(percent_encode_query)
@@ -166,7 +187,7 @@ fn percent_encode_path_preserving_slashes(path: &str) -> String {
         .join("/")
 }
 
-#[cfg(any(test, feature = "browser-wasm"))]
+#[cfg(any(test, feature = "cli-local", feature = "browser-wasm"))]
 fn build_remote_file_path(file_ref: &RemoteFileRef) -> String {
     let project_ref = file_ref.project_ref.trim_matches('/');
     if project_ref.is_empty() {
@@ -180,8 +201,8 @@ fn build_remote_file_path(file_ref: &RemoteFileRef) -> String {
     }
 }
 
-#[cfg(any(test, feature = "browser-wasm"))]
-fn build_remote_content_url(
+#[cfg(any(test, feature = "cli-local", feature = "browser-wasm"))]
+pub(crate) fn build_remote_content_url(
     base_url: &str,
     file_ref: &RemoteFileRef,
 ) -> Result<String, RemoteMetadataError> {
@@ -206,7 +227,7 @@ fn build_remote_content_url(
     ))
 }
 
-#[cfg(feature = "browser-wasm")]
+#[cfg(any(feature = "cli-local", feature = "browser-wasm"))]
 fn extract_string_field(value: &serde_json::Value, key: &str) -> Option<String> {
     value
         .get(key)
@@ -214,7 +235,7 @@ fn extract_string_field(value: &serde_json::Value, key: &str) -> Option<String> 
         .map(ToString::to_string)
 }
 
-#[cfg(feature = "browser-wasm")]
+#[cfg(any(feature = "cli-local", feature = "browser-wasm"))]
 fn extract_nested_string_field(value: &serde_json::Value, key: &str) -> Option<String> {
     fn from_object_or_file(value: &serde_json::Value, key: &str) -> Option<String> {
         extract_string_field(value, key)
@@ -231,8 +252,8 @@ fn extract_nested_string_field(value: &serde_json::Value, key: &str) -> Option<S
         .or_else(|| value.get("file").and_then(|v| extract_string_field(v, key)))
 }
 
-#[cfg(feature = "browser-wasm")]
-fn extract_remote_content_payload(
+#[cfg(any(feature = "cli-local", feature = "browser-wasm"))]
+pub(crate) fn extract_remote_content_payload(
     response_text: &str,
     file_ref: &RemoteFileRef,
 ) -> Result<RemoteFileContent, RemoteMetadataError> {
@@ -727,7 +748,7 @@ mod tests {
         assert_eq!(code, "\"REMOTE_RESPONSE_INVALID\"");
     }
 
-    #[cfg(feature = "browser-wasm")]
+    #[cfg(any(feature = "cli-local", feature = "browser-wasm"))]
     #[test]
     fn test_remote_fetch_payload_extracts_wrapped_content_response() {
         let file_ref =
@@ -753,7 +774,7 @@ mod tests {
         assert_eq!(content.raw_text, "{\"canvas\":{\"components\":[]}}");
     }
 
-    #[cfg(feature = "browser-wasm")]
+    #[cfg(any(feature = "cli-local", feature = "browser-wasm"))]
     #[test]
     fn test_remote_fetch_payload_preserves_plain_text_response() {
         let file_ref =

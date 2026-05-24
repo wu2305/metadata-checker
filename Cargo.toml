@@ -5,12 +5,13 @@ edition = "2024"
 
 [features]
 default = ["cli-local"]
-cli-local = ["dep:clap", "dep:redb"]
+cli-local = ["dep:clap", "dep:redb", "dep:reqwest", "reqwest/rustls-tls", "dep:tokio"]
 browser-wasm = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:js-sys",
     "dep:web-sys",
+    "dep:reqwest",
 ]
 
 [[bin]]
@@ -34,6 +35,8 @@ twox-hash = { version = "2", default-features = false, features = ["xxhash64"] }
 # cli-local only
 clap = { version = "4", features = ["derive", "help"], optional = true }
 redb = { version = "4.1.0", optional = true }
+reqwest = { version = "0.12", default-features = false, optional = true }
+tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
 
 # browser-wasm only
 wasm-bindgen = { version = "0.2", optional = true }
