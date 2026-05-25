@@ -289,13 +289,14 @@ mod tests {
     use std::fs;
 
     fn test_root(name: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::SeqCst);
         std::env::temp_dir().join(format!(
-            "metadata-checker-remote-sync-test-{}-{}",
+            "metadata-checker-remote-sync-test-{}-{}-{}",
             name,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
+            std::process::id(),
+            id
         ))
     }
 
@@ -957,6 +958,128 @@ mod tests {
                 to_revision: None,
                 changed_files: self.list_metafiles(project_ref)?,
             })
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "cli-local")]
+    fn refresh_session_from_remote_creates_session_when_missing() {
+        let root = test_root("refresh-create");
+        let manager = SessionManager::new(&root);
+
+        let mut provider = InMemoryRemoteSessionProvider::new();
+        provider
+            .register_project(RemoteProjectInfo {
+                project_ref: "proj".to_string(),
+                project_name: "proj".to_string(),
+                source_origin: "remote".to_string(),
+            })
+            .unwrap();
+        provider
+            .add_metafile(
+                RemoteMetafileEntry {
+                    project_ref: "proj".to_string(),
+                    source_path: "app/Page.spg".to_string(),
+                    file_id: Some("spg1".to_string()),
+                    revision: Some("1".to_string()),
+                    etag: None,
+                    mtime: Some(1715000000000),
+                    size: Some(200),
+                    deleted: false,
+                },
+                RemoteFileContent {
+                    source_path: "app/Page.spg".to_string(),
+                    file_id: Some("spg1".to_string()),
+                    revision: Some("1".to_string()),
+                    content_type: crate::remote_metadata::MetadataContentType::SuperPage,
+                    raw_text: r#"{"pageName":"Page","components":[]}"#.to_string(),
+                },
+            )
+            .unwrap();
+
+        let options = SessionRefreshOptions {
+            session_id: "s1".to_string(),
+            remote_server: "https://bi.test".to_string(),
+            project_ref: "proj".to_string(),
+            project_name: "proj".to_string(),
+            sync_mode: SessionSyncMode::Full,
+            create_if_missing: true,
+        };
+
+        let report = refresh_session_from_remote(&provider, &manager, options).unwrap();
+
+        assert!(report.ok);
+        assert_eq!(report.session_id, "s1");
+        assert_eq!(report.project_ref, "proj");
+        assert_eq!(report.sync.written, 1);
+        assert!(report.index.indexed >= 1);
+        assert!(std::path::Path::new(&report.graph_db_path).exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(feature = "cli-local")]
+    fn refresh_session_from_remote_failure_keeps_existing_session() {
+        let root = test_root("refresh-failure");
+        let manager = SessionManager::new(&root);
+        let _ = manager
+            .create_session("s1", "https://bi.test", "proj", "proj", "remote")
+            .unwrap();
+
+        // Write an existing mirror file
+        let mirror = crate::session::sync::project_mirror_root(&manager.session_dir("s1"))
+            .join("app/Page.spg");
+        std::fs::create_dir_all(mirror.parent().unwrap()).unwrap();
+        std::fs::write(&mirror, "old content").unwrap();
+
+        // Provider that always fails list_metafiles
+        let provider = FailingRemoteSessionProvider;
+
+        let options = SessionRefreshOptions {
+            session_id: "s1".to_string(),
+            remote_server: "https://bi.test".to_string(),
+            project_ref: "proj".to_string(),
+            project_name: "proj".to_string(),
+            sync_mode: SessionSyncMode::Full,
+            create_if_missing: false,
+        };
+
+        let err = refresh_session_from_remote(&provider, &manager, options).unwrap_err();
+
+        // Existing file should still exist
+        assert!(mirror.exists());
+        let content = std::fs::read_to_string(&mirror).unwrap();
+        assert_eq!(content, "old content");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    struct FailingRemoteSessionProvider;
+
+    impl RemoteSessionProvider for FailingRemoteSessionProvider {
+        fn list_projects(&self) -> Result<Vec<RemoteProjectInfo>> {
+            Err(anyhow!("always fails"))
+        }
+
+        fn list_metafiles(&self, _project_ref: &str) -> Result<Vec<RemoteMetafileEntry>> {
+            Err(anyhow!("always fails"))
+        }
+
+        fn fetch_metafile_info(&self, _file_ref: &RemoteFileRef) -> Result<RemoteFileInfo> {
+            Err(anyhow!("always fails"))
+        }
+
+        fn fetch_metafile_content(&self, _file_ref: &RemoteFileRef) -> Result<RemoteFileContent> {
+            Err(anyhow!("always fails"))
+        }
+
+        fn fetch_changed_since(
+            &self,
+            _project_ref: &str,
+            _since_revision: &str,
+        ) -> Result<RemoteChangeSet> {
+            Err(anyhow!("always fails"))
         }
     }
 }

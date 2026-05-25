@@ -10,11 +10,13 @@ fn bin_path() -> &'static str {
 }
 
 fn test_root(name: &str) -> std::path::PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time must be valid")
-        .as_millis();
-    std::env::temp_dir().join(format!("metadata-checker-session-cli-{name}-{now}"))
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+    std::env::temp_dir().join(format!(
+        "metadata-checker-session-cli-{name}-{}-{id}",
+        std::process::id()
+    ))
 }
 
 fn run_session_command(root: &std::path::Path, args: &[&str]) -> serde_json::Value {

@@ -171,6 +171,18 @@ fn main() -> Result<()> {
             }
         };
 
+        // 先校验本地参数（sync_mode），再创建 provider / 登录
+        let sync_mode = match args.session_sync_mode.as_deref() {
+            Some("full") => metadata_checker::session::SessionSyncMode::Full,
+            Some("partial") | None => metadata_checker::session::SessionSyncMode::Partial,
+            Some(mode) => {
+                return print_session_error(
+                    "SESSION_INVALID_SYNC_MODE",
+                    format!("invalid sync mode: {}", mode),
+                );
+            }
+        };
+
         let provider =
             match metadata_checker::session::ReqwestRemoteSessionProvider::new(remote_server) {
                 Ok(p) => p,
@@ -182,29 +194,37 @@ fn main() -> Result<()> {
                 }
             };
 
-        // 登录
-        if let (Some(username), Some(password)) = (
-            args.remote_username.as_deref(),
-            args.remote_password.as_deref(),
-        ) {
-            if let Err(e) = provider.login(username, password, "sys") {
+        // 登录认证
+        let username = args.remote_username.as_deref();
+        let password = args.remote_password.as_deref();
+        match (username, password) {
+            (Some(u), Some(p)) => {
+                if let Err(e) = provider.login(u, p, "sys") {
+                    return print_session_error(
+                        "SESSION_AUTH_REQUIRED",
+                        format!("remote login failed: {}", e),
+                    );
+                }
+            }
+            (Some(_), None) => {
                 return print_session_error(
                     "SESSION_AUTH_REQUIRED",
-                    format!("remote login failed: {}", e),
+                    "--session-refresh requires both --remote-username and --remote-password",
+                );
+            }
+            (None, Some(_)) => {
+                return print_session_error(
+                    "SESSION_AUTH_REQUIRED",
+                    "--session-refresh requires both --remote-username and --remote-password",
+                );
+            }
+            (None, None) => {
+                return print_session_error(
+                    "SESSION_AUTH_REQUIRED",
+                    "--session-refresh requires --remote-username and --remote-password for remote BI login",
                 );
             }
         }
-
-        let sync_mode = match args.session_sync_mode.as_deref() {
-            Some("full") => metadata_checker::session::SessionSyncMode::Full,
-            Some("partial") | None => metadata_checker::session::SessionSyncMode::Partial,
-            Some(mode) => {
-                return print_session_error(
-                    "SESSION_INVALID_SYNC_MODE",
-                    format!("invalid sync mode: {}", mode),
-                );
-            }
-        };
 
         let options = metadata_checker::session::SessionRefreshOptions {
             session_id: session_id.clone(),

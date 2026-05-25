@@ -97,6 +97,7 @@ impl ReqwestRemoteSessionProvider {
     /// 创建默认 provider。
     pub fn new(base_url: impl Into<String>) -> Result<Self> {
         let client = Client::builder()
+            .cookie_store(true)
             .build()
             .context("failed to build reqwest blocking client")?;
         Ok(Self {
@@ -183,6 +184,9 @@ impl ReqwestRemoteSessionProvider {
         let text = response
             .text()
             .with_context(|| "failed to read login response")?;
+        if text.trim().is_empty() {
+            return Err(anyhow!("login failed: response body is empty"));
+        }
         let json: Value = serde_json::from_str(&text).with_context(|| {
             format!(
                 "login response is not valid JSON: {}",

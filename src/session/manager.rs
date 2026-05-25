@@ -138,10 +138,14 @@ mod tests {
     use super::*;
 
     fn test_root(name: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::SeqCst);
         std::env::temp_dir().join(format!(
-            "metadata-checker-session-test-{}-{}",
+            "metadata-checker-session-test-{}-{}-{}",
             name,
-            now_millis()
+            std::process::id(),
+            id
         ))
     }
 
