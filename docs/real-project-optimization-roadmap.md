@@ -4848,79 +4848,230 @@ browser/
 - 远程失败不破坏已有可用 session。
 - M41 不引入 rexie/IndexedDB 真实持久化依赖。
 
-#### M42：MCP Adapter
+#### M42：Browser Graph Relationship Rendering & Reader
 
-目标：在 runtime command 统一后实现 MCP，不复制查询逻辑。
+目标：废弃当前 MCP Adapter 主线，并合并原 M43 浏览器端人工阅读 MVP，把浏览器中的图关系可视化、组件关系阅读和单文件/设计器阅读体验提前。M42 的价值是让用户在 BI SuperPage 设计器/浏览器 harness 中直接看到当前选中组件的关联关系、条件、数据来源与下一跳探索入口；同时保留上传/粘贴 `.spg/.tbl` 的独立浏览器阅读入口。当前不继续投入偏文本向的 MCP tool/resource 协议。
 
-任务清单：
+背景纠偏：
 
-- [ ] M42.1：MCP tools adapter
-  - `metadata_open_session`
-  - `metadata_build_graph`
-  - `metadata_advise_query`
-  - `metadata_explain_condition`
-  - `metadata_query_page_logic`
-  - `metadata_query_model`
-  - `metadata_context`
-  - `metadata_status`
-  - `metadata_reload`
-
-- [ ] M42.2：MCP resources adapter
-  - `metadata://sessions`
-  - `metadata://session/{id}/manifest`
-  - `metadata://session/{id}/schema`
-  - `metadata://session/{id}/pages`
-  - `metadata://session/{id}/models`
-
-- [ ] M42.3：MCP 输出 contract
-  - MCP tool result 必须保留：
-    - `answer_contract`
-    - `thinking_frame`
-    - `required_followups`
-    - `truncation_guard`
-    - `timing`
-
-- [ ] M42.4：安全限制
-  - MCP 不暴露任意 shell。
-  - MCP 不返回 secret。
-  - MCP 不允许绕过 runtime 直接读 raw graph 作为主证据。
-
-验收标准：
-
-- MCP 与 CLI/stdio 在关键 contract 字段上等价。
-- 同一 session 连续查询复用 runtime。
-- 真实项目 `text41` / `model11` / `fact_qwSidebar` 样例可通过 MCP tools 跑通。
-
-#### M43：WASM 浏览器端人工阅读 MVP
-
-目标：把 M37 的 parse core 用于浏览器端单文件阅读，不做远程、不做全项目图查询。
-
-边界说明：M40 负责 BI SuperPage 设计器内的 SW-first 集成分析；M43 仅保留为独立、离线、单文件上传/粘贴阅读场景，不复用 M40 的设计器 bridge、Service Worker 预热和远程 fetch 能力。
+- 当前不做 MCP。Zed MCP 只作为可选远期方向保留，不能占用 M42 主线。
+- M42 不实现新的图查询语义；它消费已有 runtime / browser API / VisualGraph 中间模型。
+- M42 不把关系渲染写进 Plugin Core。Plugin Core 仍只维护插件状态和事件。
+- M42 不把 BI 特化对象直接传给 renderer。Designer Glue / Integration Controller 负责转换 selection 与 runtime result。
+- M42 不渲染 raw `.spg/.tbl` 内容，不把完整 component JSON 放进 DOM。
+- M42 首要目标是浏览器里“用上”：可见、可验证、可复现，而不是追求完整正式 UI。
+- 原 M43 不再作为独立里程碑；其离线单文件上传/粘贴阅读能力并入 M42.7-M42.9。
 
 任务清单：
 
-- [ ] M43.1：wasm build 验证
-  - 只包含 parse core / analysis core 中可 wasm 的模块。
-  - 不包含 redb、stdio、clap。
+- [ ] M42.1：确认并收敛 VisualGraph contract
+  - 复核 M40.7 的 `VisualGraph` / Mermaid / ECharts option 能力是否已经可复用。
+  - 若 M40.7 尚未完全落地，M42 只补 browser 必需的最小 contract：
+    - `nodes`
+    - `edges`
+    - `focus_node`
+    - `diagnostics`
+    - `truncated`
+    - `source_summary`
+  - 明确 renderer 输入优先来自 `analyzeSuperpageSelection` 的 analysis envelope / query result。
+  - 不新增第二套 browser-only graph schema；browser JS 只消费 Rust 输出的稳定结构。
+  - 测试：
+    - ready result -> `VisualGraph`
+    - error result -> diagnostic graph
+    - empty result -> empty graph
+    - large result -> truncated graph
+    - sensitive 字段不进入 graph label / tooltip
 
-- [ ] M43.2：浏览器输入
-  - 上传 `.spg/.tbl`。
-  - 粘贴 JSON。
+- [ ] M42.2：浏览器 graph renderer 模块
+  - 建议位置：
+    - `browser/renderer/graph-panel-renderer.mjs`
+    - `browser/renderer/graph-layout.mjs`
+    - `browser/renderer/graph-dom.mjs`
+    - `browser/test/graph-panel-renderer.test.mjs`
+  - renderer 输入：
+    - `VisualGraph`
+    - `analysis envelope`（仅作为兼容入口，内部先转换成 `VisualGraph`）
+  - renderer 输出：
+    - DOM 面板内容
+    - DOM marker
+    - 可选 Mermaid 文本
+    - 可选 ECharts option JSON dump（不引入 ECharts runtime）
+  - 要求：
+    - 不 import Plugin Core。
+    - 不 import BI designer glue。
+    - 不 fetch metadata。
+    - 不调用 runtime。
+    - 不依赖 ECharts runtime；首轮可用轻量 SVG/HTML graph 或 Mermaid 文本。
+    - 所有节点 label 做长度限制和脱敏。
+    - 关系边必须表达方向：reads / writes / condition / action / alias / dataflow。
+  - 测试：
+    - 节点、边、诊断、截断状态都能渲染。
+    - label 中中文、空格、冒号、引号、换行不破坏 DOM。
+    - token/cookie/password/cipherPassport 不出现在 DOM textContent。
 
-- [ ] M43.3：浏览器输出
-  - 组件树
-  - 条件列表
-  - 表达式引用
-  - DataFlow 节点与字段来源
-  - 单文件 value trace
+- [ ] M42.3：Integration Controller 接入 graph renderer
+  - 修改范围：
+    - `browser/integration/metadata-checker-controller.mjs`
+    - 对应 integration 测试
+  - controller 在 `analyze` 成功后调用 graph renderer。
+  - controller 在 `analyze` 失败后渲染 diagnostic graph，而不是只显示文本错误。
+  - controller 负责把 runtime result 转换/传递给 graph renderer。
+  - Plugin Core 仍只发事件和保存 lastResult，不直接知道 graph renderer。
+  - 测试：
+    - selection -> provider -> runtime load/build/analyze -> graph render。
+    - runtime error -> diagnostic graph render。
+    - metadata fetch error -> diagnostic graph render。
+    - duplicate init 不重复创建 panel / listener / renderer instance。
 
-- [ ] M43.4：容量护栏
-  - 大文件解析进 Web Worker。
-  - 输出分 summary/detail。
-  - 不默认渲染 raw JSON。
+- [ ] M42.4：设计器浮动容器 / 面板最小实现
+  - 建议位置：
+    - `browser/renderer/graph-panel-host.mjs`
+    - 或放在现有 integration host 中作为 browser-only consumer。
+  - UI 目标：
+    - 在 SuperPage 设计器中显示当前选中组件的关系图。
+    - 面板可收起/展开。
+    - 面板不阻挡设计器主要操作。
+    - 面板显示当前 focus target。
+    - 面板显示空状态、错误状态、运行中状态。
+  - DOM marker：
+    - `data-metadata-checker-graph-panel="mounted|hidden|error"`
+    - `data-metadata-checker-graph-nodes="<count>"`
+    - `data-metadata-checker-graph-edges="<count>"`
+    - `data-metadata-checker-graph-focus="<target>"`
+    - `data-metadata-checker-analysis-status="idle|running|ready|error"`
+  - 要求：
+    - 不修改 BI viewlet。
+    - 不依赖 iframe 假设。
+    - 不把 raw metadata 写入 DOM。
+    - 自动化验收以 DOM marker 为准，console 只辅助人工观察。
+
+- [ ] M42.5：真实 BI 环境 smoke
+  - 前置：
+    - M41 真实远程 session 已能拉取 `analyzer` 项目。
+    - M40 custom.js / Service Worker / runtime launcher 接入流程可复用。
+  - 场景：
+    - 在 `/analyzer/app/M40HookSmoke.app?:edit=true` 或其 SuperPage 设计器中加载 hook。
+    - 顶层脚本执行、AMD factory 执行、`onInitDesigner` 调用均有 marker。
+    - 选择普通组件后，graph panel 更新 focus target / nodes / edges。
+    - 选择无关联组件后，graph panel 显示 empty/partial，不报错。
+    - runtime/SW 失败时 fallback 并显示 diagnostic graph。
+  - 记录：
+    - Service Worker 状态。
+    - WASM/runtime 状态。
+    - provider 类型。
+    - renderer 类型。
+    - graph nodes/edges 数量。
+    - 一次分析 timing。
+    - 真实环境无法覆盖的限制。
+
+- [ ] M42.6：模型注意力与输出噪声控制
+  - graph panel 默认只展示当前 focus target 的一跳/关键多跳摘要。
+  - 大图必须折叠，不能把完整 graph dump 到页面。
+  - 对小模型可读的辅助输出：
+    - `summary`
+    - `primary_edges`
+    - `diagnostics`
+    - `next_queries`
+  - 不在页面默认展示 raw evidence；只在展开详情时显示短 evidence。
+  - 测试：
+    - large graph 不超过默认节点/边预算。
+    - truncated 状态明确可见。
+    - next query 文案不引导模型跑偏到无关页面。
+
+- [ ] M42.7：Standalone Browser Reader 入口
+  - 目标：提供不依赖真实 BI 设计器的浏览器端阅读入口，用于上传/粘贴 `.spg/.tbl` 并查看组件树、条件、表达式引用和局部关系图。
+  - 建议位置：
+    - `browser/reader/index.html`
+    - `browser/reader/metadata-reader.mjs`
+    - `browser/test/metadata-reader-smoke.test.mjs`
+  - 输入：
+    - 上传 `.spg`
+    - 上传 `.tbl`
+    - 粘贴 JSON
+    - 可选输入逻辑 `source_path`
+  - 输出：
+    - 文档摘要
+    - 组件树摘要
+    - 条件列表
+    - 表达式引用
+    - DataFlow 节点与字段来源摘要
+    - 当前选中节点的 `VisualGraph`
+  - 要求：
+    - 不接远程。
+    - 不依赖 BI。
+    - 不引入 redb / clap。
+    - 不默认展示 raw JSON。
+    - 大文件解析必须异步，不阻塞主线程。
+  - 测试：
+    - 上传最小 `.spg` 可以渲染组件树和空关系图。
+    - 上传含表达式 `.spg` 可以渲染引用关系。
+    - 上传 `.tbl` 可以渲染字段/数据源摘要。
+    - 粘贴非法 JSON 返回 stable diagnostic。
+
+- [ ] M42.8：Browser Reader 与 Runtime/WASM 连接
+  - 目标：Standalone Reader 与 BI Designer Graph Panel 复用同一 runtime client contract，而不是各自实现解析逻辑。
+  - 复用：
+    - `initRuntime`
+    - `runtimeStatus`
+    - `loadSuperpageDocument`
+    - `buildOrUpdateSuperpageGraph`
+    - `analyzeSuperpageSelection`
+  - 若 `.tbl` 单文件阅读需要新增 API，必须先定义 Rust/WASM 入口，再由 JS 调用。
+  - 不允许 JS 解析 `.spg/.tbl` 业务结构。
+  - 测试：
+    - reader runtime 和 designer runtime 使用同一 fake runtime client contract。
+    - runtime 初始化失败时显示 diagnostic，不崩溃。
+    - 重复上传不会重复创建 runtime instance。
+
+- [ ] M42.9：容量护栏与真实文件样例
+  - 目标：确保浏览器阅读入口能处理真实低代码元数据规模。
+  - 容量策略：
+    - 5MB `.spg` 不通过 selection payload。
+    - 大文件解析放入 Web Worker 或 runtime 异步路径。
+    - 输出分 summary/detail。
+    - 默认节点/边预算可配置。
+  - 真实样例：
+    - `xiaoshouyi` 中一个复杂 SuperPage。
+    - 一个包含 DataFlow 的 `.tbl`。
+    - 一个条件较多的页面。
+    - 一个无明显关系的负例页面。
+  - 测试：
+    - 大文件不会冻结 UI。
+    - graph truncation 可见。
+    - summary-first 输出不超过默认预算。
+    - sensitive 字段不进入 DOM。
 
 验收标准：
 
-- 无服务器场景下可阅读单个 `.spg/.tbl`。
-- 与 CLI 单文件解析的关键字段一致。
-- 浏览器端不会加载 native-only crate。
+- 浏览器里能看到当前选中组件的图关系，不需要 MCP。
+- 浏览器里能上传/粘贴 `.spg/.tbl` 做独立阅读，不需要真实 BI 环境。
+- Graph renderer 是 browser consumer，不污染 Rust core、Plugin Core 或 Designer Glue。
+- Runtime result / VisualGraph 是唯一关系图输入 contract，不新增 JS-only 业务推理。
+- DOM marker 能支持自动化验收。
+- 真实 BI smoke 至少跑通一次 selection -> analyze -> graph render。
+- Standalone reader smoke 至少跑通一次 upload/paste -> runtime parse/analyze -> graph render。
+- 失败时返回 diagnostic graph，不静默失败。
+- sensitive 字段不进入 DOM、diagnostics、tooltip、Mermaid/ECharts 输出。
+
+#### M97：Optional MCP Adapter（远期可选）
+
+触发条件：只有当 Zed Agent、Claude Desktop、Cursor 等多个 MCP client 明确需要复用 metadata-checker，且浏览器/CLI/stdio 主线已经稳定时，才恢复 MCP 适配。
+
+当前结论：
+
+- MCP 不进入 M42。
+- 不实现 MCP tools/resources。
+- 不做偏文本向 tool result 优化。
+- 不为 Zed 集成提前背 MCP 协议维护成本。
+
+可选任务（暂不实施）：
+
+- MCP stdio server spike。
+- `metadata_query` 最小 tool。
+- Zed `context_servers` 配置验证。
+- MCP tool 输出复用 runtime contract。
+- MCP 不暴露 shell、不返回 secret、不绕过 runtime 直接读 raw graph。
+
+#### M43：已并入 M42
+
+原 “WASM 浏览器端人工阅读 MVP” 不再作为独立里程碑推进。上传/粘贴 `.spg/.tbl`、组件树、条件列表、表达式引用、DataFlow 字段来源和容量护栏统一并入 M42.7-M42.9。
