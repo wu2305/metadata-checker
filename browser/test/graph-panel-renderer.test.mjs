@@ -438,13 +438,13 @@ describe("createGraphPanelRenderer", () => {
       document,
     });
 
-    await renderer.render({
+    const result = await renderer.render({
       nodes: [
         { id: "a", label: "username: \"alice\"\ncookie=value", metadata: { depth: 0 } },
-        { id: "b", label: "token=abc123", metadata: { depth: 1 }, kind: "Model", source_path: "x" },
+        { id: "token=abc123", label: "token=abc123", metadata: { depth: 1 }, kind: "Model", source_path: "x" },
         { id: "c", label: "cipherPassport=xyz", metadata: { depth: 2 }, kind: "Model", source_path: "y" },
       ],
-      edges: [{ from: "a", to: "b", kind: "Reads", direction: "Forward", label: "read" }],
+      edges: [{ from: "a", to: "token=abc123", kind: "Reads", direction: "Forward", label: "read" }],
       groups: [],
       focus_node: "a",
       source_summary: {
@@ -461,6 +461,20 @@ describe("createGraphPanelRenderer", () => {
       /token|cookie|password|cipherpassport/i.test(text),
     );
     assert.strictEqual(hasSensitive, false);
+    const nodeRows = findByClass(container, "graph-node");
+    assert.strictEqual(
+      nodeRows.some((row) => /token|cookie|password|cipherpassport/i.test(row.getAttribute("data-node-id") ?? "")),
+      false,
+    );
+    assert.strictEqual(
+      /token|cookie|password|cipherpassport/i.test(container.getAttribute("data-metadata-checker-graph-focus") ?? ""),
+      false,
+    );
+    assert.strictEqual(/token=abc123/i.test(result.mermaid), false);
+    assert.strictEqual(
+      JSON.stringify(result.echartsOption).includes("token=abc123"),
+      false,
+    );
     assert.ok(walkText(container, (text) => /quote|:/i.test(text)));
     assert.ok(walkText(container, (text) => /\s/.test(text)));
   });

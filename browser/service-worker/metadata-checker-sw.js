@@ -78,6 +78,10 @@ function _findExportName(name) {
   return null;
 }
 
+function _hasWasmExport(name) {
+  return _findExportName(name) !== null;
+}
+
 async function _callWasmExport(exportName, args = []) {
   const resolvedName = _findExportName(exportName);
   if (!resolvedName) {
@@ -105,6 +109,47 @@ async function _callWasmExport(exportName, args = []) {
       },
     );
   }
+}
+
+async function _runtimeLoadSuperpageDocument(sourcePath, rawText) {
+  if (_hasWasmExport("loadSuperpageDocument")) {
+    const wasmResult = await _callWasmExport("loadSuperpageDocument", [sourcePath, rawText]);
+    const result = _parseWasmResult(wasmResult);
+    _documentCache.set(sourcePath, {
+      rawText: rawText ?? "",
+      loadedAt: Date.now(),
+    });
+    return result;
+  }
+  return _mockLoadSuperpageDocument(sourcePath, rawText);
+}
+
+async function _runtimeBuildOrUpdateSuperpageGraph(sourcePath) {
+  if (_hasWasmExport("buildOrUpdateSuperpageGraph")) {
+    const wasmResult = await _callWasmExport("buildOrUpdateSuperpageGraph", [sourcePath]);
+    const result = _parseWasmResult(wasmResult);
+    _graphCache.set(sourcePath, { builtAt: Date.now() });
+    return result;
+  }
+  return _mockBuildOrUpdateSuperpageGraph(sourcePath);
+}
+
+async function _runtimeAnalyzeSuperpageSelection(selection, options = {}) {
+  const forbiddenSelectionPath = _findForbiddenSelectionPayload(selection);
+  if (forbiddenSelectionPath) {
+    throw _makeWasmError(
+      "INVALID_SELECTION_PAYLOAD",
+      `${forbiddenSelectionPath} is not allowed in selection payload`,
+    );
+  }
+  if (_hasWasmExport("analyzeSuperpageSelection")) {
+    const wasmResult = await _callWasmExport("analyzeSuperpageSelection", [
+      JSON.stringify(selection ?? {}),
+      JSON.stringify(options ?? {}),
+    ]);
+    return _parseWasmResult(wasmResult);
+  }
+  return _mockAnalyzeSuperpageSelection(selection, options);
 }
 
 function _extractSourcePath(ref) {
@@ -461,7 +506,7 @@ async function _mockLoadRemoteSuperpageDocument(fileRef, options) {
   if (!sourcePath || typeof sourcePath !== "string") {
     throw new Error("source_path is required");
   }
-  const loaded = _mockLoadSuperpageDocument(sourcePath, remoteText);
+  const loaded = await _runtimeLoadSuperpageDocument(sourcePath, remoteText);
   return {
     ...loaded,
     items: [
@@ -640,7 +685,10 @@ async function handleRequest(request) {
     }
 
     if (method === "loadSuperpageDocument") {
-      const result = _mockLoadSuperpageDocument(args[0], args[1]);
+      if (_initPromise) {
+        await _ensureInit();
+      }
+      const result = await _runtimeLoadSuperpageDocument(args[0], args[1]);
       return makeResponse(id, result);
     }
 
@@ -663,12 +711,18 @@ async function handleRequest(request) {
     }
 
     if (method === "buildOrUpdateSuperpageGraph") {
-      const result = _mockBuildOrUpdateSuperpageGraph(args[0]);
+      if (_initPromise) {
+        await _ensureInit();
+      }
+      const result = await _runtimeBuildOrUpdateSuperpageGraph(args[0]);
       return makeResponse(id, result);
     }
 
     if (method === "analyzeSuperpageSelection") {
-      const result = _mockAnalyzeSuperpageSelection(args[0], args[1]);
+      if (_initPromise) {
+        await _ensureInit();
+      }
+      const result = await _runtimeAnalyzeSuperpageSelection(args[0], args[1]);
       return makeResponse(id, result);
     }
 

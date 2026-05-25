@@ -247,6 +247,14 @@ fn test_analyze_component_with_dependencies() {
             result.items.iter().any(|i| i.kind == "component"),
             "should have component item"
         );
+        let visual_graph = result
+            .items
+            .iter()
+            .find(|item| item.kind == "visual_graph")
+            .expect("browser analyze output must include visual_graph item");
+        assert_eq!(visual_graph.detail["focus_node"].is_string(), true);
+        assert_eq!(visual_graph.detail["nodes"].as_array().unwrap().len() >= 2, true);
+        assert_eq!(visual_graph.detail["edges"].as_array().unwrap().len() >= 1, true);
     });
 }
 

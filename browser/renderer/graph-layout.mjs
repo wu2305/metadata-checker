@@ -634,9 +634,18 @@ export function buildMermaidText(layout) {
   const nodes = Array.isArray(layout.nodes) ? layout.nodes : [];
   const edges = Array.isArray(layout.edges) ? layout.edges : [];
   const lines = ["graph TD", ""];
+  const idMap = new Map();
+
+  nodes.forEach((node, index) => {
+    const rawId = safeToString(node.id);
+    const safeId = containsSensitive(rawId)
+      ? `sensitive_${index}`
+      : rawId.replace(/[^A-Za-z0-9_]/g, "_");
+    idMap.set(rawId, safeId || `node_${index}`);
+  });
 
   for (const node of nodes) {
-    const nodeId = safeToString(node.id).replace(/[^A-Za-z0-9_]/g, "_");
+    const nodeId = idMap.get(safeToString(node.id)) ?? "node";
     const label = sanitizeLabel(node.label, 40);
     if (node.styleClass === "focus") {
       lines.push(`${nodeId}[${label}]`);
@@ -648,8 +657,8 @@ export function buildMermaidText(layout) {
   }
   lines.push("");
   for (const edge of edges) {
-    const fromId = safeToString(edge.from).replace(/[^A-Za-z0-9_]/g, "_");
-    const toId = safeToString(edge.to).replace(/[^A-Za-z0-9_]/g, "_");
+    const fromId = idMap.get(safeToString(edge.from)) ?? "source";
+    const toId = idMap.get(safeToString(edge.to)) ?? "target";
     const arrow = edge.direction === "Bidirectional" ? "<-->" : "-->";
     const suffix = edge.label ? ` |${sanitizeLabel(edge.label, 20)}|` : "";
     lines.push(`${fromId} ${arrow}${suffix} ${toId}`);
@@ -661,6 +670,11 @@ export function buildMermaidText(layout) {
 export function buildEChartsOption(layout) {
   const nodes = Array.isArray(layout.nodes) ? layout.nodes : [];
   const edges = Array.isArray(layout.edges) ? layout.edges : [];
+  const idMap = new Map();
+  nodes.forEach((node, index) => {
+    const rawId = safeToString(node.id);
+    idMap.set(rawId, containsSensitive(rawId) ? `sensitive_${index}` : rawId);
+  });
   return {
     series: [
       {
@@ -668,7 +682,7 @@ export function buildEChartsOption(layout) {
         layout: "none",
         roam: true,
         data: nodes.map((node) => ({
-          id: node.id,
+          id: idMap.get(safeToString(node.id)) ?? safeToString(node.id),
           name: sanitizeLabel(node.visualLabel ?? node.label, 44),
           category: node.styleClass,
           x: node.position?.x ?? 0,
@@ -683,8 +697,8 @@ export function buildEChartsOption(layout) {
           },
         })),
         links: edges.map((edge) => ({
-          source: edge.from,
-          target: edge.to,
+          source: idMap.get(safeToString(edge.from)) ?? sanitizeLabel(edge.from, 32),
+          target: idMap.get(safeToString(edge.to)) ?? sanitizeLabel(edge.to, 32),
           value: sanitizeLabel(edge.label, 24),
           lineStyle: {
             width: edge.fromDepth != null && edge.toDepth != null && edge.toDepth <= 3 ? 2 : 1,

@@ -10,6 +10,18 @@
   - `/analyzer/public/hooks/custom.js`（推荐 smoke 用例）
   - `/{projectName}/public/hooks/custom.js`
 - `metadata-checker-custom.js` 在 BI 设计器加载成功。
+- M42 真实入口不是单文件假设。`custom.js` 会动态加载同目录 sidecar：
+  - `/analyzer/public/hooks/metadata-checker-browser-entry.mjs`
+  - `/analyzer/public/hooks/plugin-core/metadata-checker-plugin.mjs`
+  - `/analyzer/public/hooks/integration/metadata-checker-controller.mjs`
+  - `/analyzer/public/hooks/platform-glue/superpage-designer-glue.mjs`
+  - `/analyzer/public/hooks/renderer/echarts-runtime-resolver.mjs`
+  - `/analyzer/public/hooks/renderer/graph-panel-host.mjs`
+  - `/analyzer/public/hooks/renderer/graph-panel-renderer.mjs`
+  - `/analyzer/public/hooks/renderer/graph-layout.mjs`
+  - `/analyzer/public/hooks/renderer/graph-dom.mjs`
+  - `/analyzer/public/hooks/metadata-checker-sw.js`
+  - 若测试真实 WASM：`/analyzer/public/hooks/metadata_checker_bg.wasm`
 
 ## 2. 核验 custom.js / onInitDesigner
 
@@ -45,6 +57,9 @@ console.table({
   fallbackCode: marker("fallback-code"),
   graphPanel: marker("graph-panel"),
   graphFactory: marker("graph-factory"),
+  factories: marker("factories"),
+  factoryEntry: marker("factory-entry"),
+  realBundle: marker("real-bundle"),
   graphRenderer: marker("graph-renderer"),
   graphEchartsResolver: marker("graph-echarts-resolver"),
 });
@@ -57,6 +72,8 @@ console.log("初始 panel 状态：", panelState());
 - `data-metadata-checker-sw=registered|active|failed|unsupported`
 - `data-metadata-checker-runtime=service-worker|page-fallback`
 - `data-metadata-checker-wasm` 不为空
+- `data-metadata-checker-real-bundle=loaded`
+- `data-metadata-checker-factories=installed|preinstalled`
 - `data-metadata-checker-analysis-status=ready`（至少进入过一次）
 - `data-metadata-checker-graph-panel=mounted`（若面板可见）
 - 若使用页面级 `custom.js` 注入，确认实际 provider 请求到 `/api/meta/services/getFileContent/...`（说明走 page-RC provider）；否则记录为无法判定。
@@ -123,10 +140,15 @@ if (typeof origPluginFactory === "function") {
 
 - 若图为空但无报错，检查 `graph-truncated`/`graph-truncated-reason`。
 - 若 `graph-panel` 处于 `error` 或无法渲染，检查下列 marker：
+  - `factories`
+  - `factory-entry`
+  - `factory-diagnostic`
   - `graph-factory-diagnostic`
   - `graph-panel`（`error`/`unavailable`）
   - `last-render-error-code`
   - `last-render-error-message`
+
+注意：page fallback 只允许返回 diagnostic graph，不能用 mock analysis 冒充真实图关系。若未部署真实 WASM 或 SW 无法调用 WASM export，预期是稳定 diagnostic，而不是 `Fallback Analysis`。
 
 ## 4. renderer 与 fallback 复核
 

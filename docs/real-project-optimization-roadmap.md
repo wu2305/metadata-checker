@@ -4868,6 +4868,7 @@ browser/
 状态更新（截至 2026-05-25）：
 
 - `M42.1` ~ `M42.6` 在仓库代码和本地测试链路上已完成落地。
+- 2026-05-26 冷脸验收指出真实 smoke 前必须补齐：真实 `custom.js` sidecar factory 加载、WASM/Runtime `visual_graph` contract、真实 renderer+host DOM 绑定。上述阻塞已转入 M42.8 前置验收项。
 - `M42.8`、`M42.9` 为真实 BI 验收与实测指标补全点，当前不代表已在真实环境通跑。
 
 任务清单：
@@ -5046,6 +5047,8 @@ browser/
   - 前置：
     - M41 真实远程 session 已能拉取 `analyzer` 项目。
     - M40 custom.js / Service Worker / runtime launcher 接入流程可复用。
+    - 真实上传物必须包含 `metadata-checker-browser-entry.mjs` 及其 ESM sidecar；不能只上传裸 `custom.js` 后依赖手工 mock `window.__metadata_checker_*_factory`。
+    - browser runtime `analyzeSuperpageSelection` 必须返回 Rust/WASM 产生的 `visual_graph` item；page fallback 只能返回 diagnostic graph，不能返回 mock analysis。
   - 现场可执行项（按顺序）：
     - 在真实设计器中加载含 `custom.js` 的页面后，先完成 `custom.js` 注入与 `onInitDesigner` marker 校验。
     - 进行至少 5 次 selection，包含：

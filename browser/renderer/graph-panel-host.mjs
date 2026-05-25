@@ -120,6 +120,9 @@ export function createGraphPanelHost(options = {}) {
     append(parent, root);
 
     mounted = true;
+    if (renderer && typeof renderer.setContainer === "function") {
+      renderer.setContainer(body);
+    }
     setStatus("idle");
     return { mounted: true, alreadyMounted: false, root, body };
   }

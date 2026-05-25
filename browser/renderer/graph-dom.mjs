@@ -109,7 +109,7 @@ function buildDiagnostics(document, diagnostics) {
 function buildNodeElement(document, node, callbacks) {
   const row = createElementFrom(document, "li");
   row.className = `graph-node graph-node-${node.styleClass || "normal"}`;
-  row.setAttribute("data-node-id", toString(node.id));
+  row.setAttribute("data-node-id", sanitizeLabelText(node.id));
   if (node.depth != null) {
     row.setAttribute("data-node-depth", String(node.depth));
   }
@@ -272,7 +272,7 @@ export function setGraphMarkers(
   panel.setAttribute(`${MARKER_PREFIX}graph-panel`, "mounted");
   panel.setAttribute(`${MARKER_PREFIX}graph-nodes`, String(nodeCount ?? 0));
   panel.setAttribute(`${MARKER_PREFIX}graph-edges`, String(edgeCount ?? 0));
-  panel.setAttribute(`${MARKER_PREFIX}graph-focus`, toString(focus ?? ""));
+  panel.setAttribute(`${MARKER_PREFIX}graph-focus`, sanitizeLabelText(focus ?? ""));
   panel.setAttribute(
     `${MARKER_PREFIX}graph-truncated`,
     truncated ? "true" : "false"

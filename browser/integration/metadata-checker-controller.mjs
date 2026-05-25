@@ -576,12 +576,22 @@ export function createMetadataCheckerController(options = {}) {
 
     try {
       await _loadDocumentForSelection(fileRef, sourcePath);
-      await runtimeClient.buildOrUpdateSuperpageGraph(sourcePath);
+      const buildResult = await runtimeClient.buildOrUpdateSuperpageGraph(sourcePath);
+      if (_isErrorEnvelope(buildResult)) {
+        throw new Error(
+          _errorMessageFromProviderResult(buildResult, "runtime build graph failed"),
+        );
+      }
 
       const result = await runtimeClient.analyzeSuperpageSelection(
         selection,
         analysisOptions,
       );
+      if (_isErrorEnvelope(result)) {
+        throw new Error(
+          _errorMessageFromProviderResult(result, "runtime analyze failed"),
+        );
+      }
 
       if (result?.status === "ready") {
         analysisCache.set(cacheKey, _cloneResultForCache(result));

@@ -20,9 +20,22 @@ function createMockDocument() {
 
   function createElement(tagName) {
     const attributes = new Map();
+    const elementChildren = [];
     return {
       tagName,
+      children: elementChildren,
       style: {},
+      className: "",
+      textContent: "",
+      appendChild(child) {
+        elementChildren.push(child);
+        child.parentNode = this;
+      },
+      replaceChildren(...nextChildren) {
+        elementChildren.length = 0;
+        elementChildren.push(...nextChildren);
+      },
+      addEventListener() {},
       setAttribute(name, value) {
         attributes.set(name, String(value));
       },
@@ -252,6 +265,52 @@ describe("metadata-checker custom.js AMD entry", () => {
     const result = await module.onInitDesigner({}, {});
     assert.strictEqual(result.installed, true);
     assert.strictEqual(result.fallbackUsed, false);
+  });
+
+  it("loads core factories from sidecar module when custom.js is uploaded alone", async () => {
+    let importedUrl = null;
+    const fakeDesigner = {
+      openFileArgs: {
+        path: "/analyzer/app/M42Smoke.app/M42Smoke.spg",
+        id: "fid-m42",
+        projectName: "analyzer",
+      },
+      getBuilder() {
+        return {
+          getSelectedComponents: () => [],
+          getSelectedComponent: () => null,
+          getSelectedComponentInfo: () => null,
+          selectComponents() {},
+          doSelectedChange() {},
+        };
+      },
+    };
+    const { module, document } = loadCustomModule({
+      noServiceWorker: true,
+      windowOverrides: {
+        __metadata_checker_plugin_factory: null,
+        __metadata_checker_controller_factory: null,
+        __metadata_checker_glue_factory: null,
+        __metadata_checker_factory_entry_url:
+          "https://autocrm-test.xiaoshouyi.com/analyzer/public/hooks/metadata-checker-browser-entry.mjs",
+        __metadata_checker_module_import: async (url) => {
+          importedUrl = url;
+          return import("../metadata-checker-browser-entry.mjs");
+        },
+      },
+    });
+
+    const result = await module.onInitDesigner(fakeDesigner, {});
+
+    assert.strictEqual(result.installed, true);
+    assert.strictEqual(
+      importedUrl,
+      "https://autocrm-test.xiaoshouyi.com/analyzer/public/hooks/metadata-checker-browser-entry.mjs",
+    );
+    assert.strictEqual(marker(document, "real-bundle"), "loaded");
+    assert.strictEqual(marker(document, "factories"), "installed");
+    assert.strictEqual(marker(document, "graph-panel"), "mounted");
+    assert.strictEqual(marker(document, "analysis-status"), "ready");
   });
 
   it("Service Worker register success writes stable markers", async () => {

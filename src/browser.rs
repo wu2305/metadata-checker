@@ -8,8 +8,13 @@ use crate::graph::{EdgeType, Node, NodeType};
 use crate::graph_store::{GraphReadStore, GraphWriteStore};
 use crate::memory_graph_store::MemoryGraphStore;
 use crate::superpage;
+use crate::visualization::graph_model::{SourceSummary, VisualEdge, VisualGraph, VisualNode};
+use crate::visualization::options::{EdgeDirection, EdgeKind, NodeKind};
+use crate::visualization::sanitizer::{
+    sanitize_identity_id, sanitize_metadata_entry, sanitize_text,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 /// WASM runtime 全局单例
@@ -404,6 +409,19 @@ pub fn analyze_superpage_selection(
         };
     }
 
+    let visual_graph = build_selection_visual_graph(
+        meta,
+        rt.graphs.get(&selection.source_path),
+        &graph,
+        &selection.source_path,
+        target_id,
+    );
+    items.push(AnalysisItem {
+        kind: "visual_graph".to_string(),
+        label: "Visual Graph".to_string(),
+        detail: serde_json::to_value(visual_graph).unwrap_or_else(|_| serde_json::json!({})),
+    });
+
     // 依赖关系
     if let Some(deps) = graph.dependencies.get(target_id) {
         let dep_ids: Vec<String> = deps
@@ -515,6 +533,215 @@ pub fn analyze_superpage_selection(
         items,
         diagnostics,
     }
+}
+
+fn insert_visual_node(
+    graph: &mut VisualGraph,
+    seen: &mut HashSet<String>,
+    raw_id: &str,
+    label: &str,
+    kind: NodeKind,
+    source_path: &str,
+    depth: usize,
+) -> String {
+    let id = sanitize_identity_id(raw_id);
+    if seen.insert(id.clone()) {
+        graph.nodes.push(VisualNode {
+            id: id.clone(),
+            label: sanitize_text(label),
+            kind,
+            source_path: sanitize_text(source_path),
+            depth: Some(depth),
+            collapsed: depth > 3,
+            importance: if depth == 0 {
+                Some("focus".to_string())
+            } else {
+                None
+            },
+            expand_token: if depth > 2 {
+                Some(sanitize_text(raw_id))
+            } else {
+                None
+            },
+            metadata: {
+                let mut metadata = HashMap::new();
+                metadata.insert(
+                    "target".to_string(),
+                    sanitize_metadata_entry("target", &serde_json::json!(raw_id)),
+                );
+                metadata
+            },
+        });
+    }
+    id
+}
+
+fn push_visual_edge(
+    graph: &mut VisualGraph,
+    from: &str,
+    to: &str,
+    kind: EdgeKind,
+    label: &str,
+    evidence: Option<String>,
+) {
+    graph.edges.push(VisualEdge {
+        from: from.to_string(),
+        to: to.to_string(),
+        edge_type: Some(kind.to_string()),
+        label: Some(sanitize_text(label)),
+        direction: EdgeDirection::Forward,
+        evidence: evidence.map(|value| sanitize_text(&value)),
+        kind,
+    });
+}
+
+fn build_selection_visual_graph(
+    meta: &superpage::SuperPageMetadata,
+    store: Option<&MemoryGraphStore>,
+    dependency_graph: &DependencyGraph,
+    source_path: &str,
+    target_id: &str,
+) -> VisualGraph {
+    let mut visual_graph = VisualGraph::empty();
+    let mut seen_nodes = HashSet::new();
+    let raw_focus_id = format!("comp:{}|{}", source_path, target_id);
+    let focus_id = insert_visual_node(
+        &mut visual_graph,
+        &mut seen_nodes,
+        &raw_focus_id,
+        target_id,
+        NodeKind::Component,
+        source_path,
+        0,
+    );
+    visual_graph.focus_node = Some(focus_id.clone());
+
+    if let Some(deps) = dependency_graph.dependencies.get(target_id) {
+        for dep in deps {
+            let dep_id = match dep {
+                superpage::RefType::ComponentValue(id)
+                | superpage::RefType::ComponentProperty(id, _) => id,
+                _ => continue,
+            };
+            let raw_dep_id = format!("comp:{}|{}", source_path, dep_id);
+            let dep_node_id = insert_visual_node(
+                &mut visual_graph,
+                &mut seen_nodes,
+                &raw_dep_id,
+                dep_id,
+                NodeKind::Component,
+                source_path,
+                1,
+            );
+            push_visual_edge(
+                &mut visual_graph,
+                &dep_node_id,
+                &focus_id,
+                EdgeKind::DependsOn,
+                "depends_on",
+                None,
+            );
+        }
+    }
+
+    if let Some(reverse) = dependency_graph.reverse_deps.get(target_id) {
+        for reverse_id in reverse {
+            let raw_reverse_id = format!("comp:{}|{}", source_path, reverse_id);
+            let reverse_node_id = insert_visual_node(
+                &mut visual_graph,
+                &mut seen_nodes,
+                &raw_reverse_id,
+                reverse_id,
+                NodeKind::Component,
+                source_path,
+                1,
+            );
+            push_visual_edge(
+                &mut visual_graph,
+                &focus_id,
+                &reverse_node_id,
+                EdgeKind::DependsOn,
+                "used_by",
+                None,
+            );
+        }
+    }
+
+    for expr in meta
+        .expressions
+        .iter()
+        .filter(|expr| expr.component_id == target_id)
+    {
+        let raw_expr_id = format!("expr:{}|{}|{}", source_path, target_id, expr.field);
+        let expr_id = insert_visual_node(
+            &mut visual_graph,
+            &mut seen_nodes,
+            &raw_expr_id,
+            &expr.field,
+            NodeKind::Condition,
+            source_path,
+            1,
+        );
+        push_visual_edge(
+            &mut visual_graph,
+            &expr_id,
+            &focus_id,
+            EdgeKind::DependsOn,
+            "condition_or_expression",
+            Some(expr.raw_expr.clone()),
+        );
+    }
+
+    if let Some(store) = store {
+        if let Ok(Some(neighbors)) = store.get_node_edges(&raw_focus_id) {
+            for edge_view in &neighbors.outgoing {
+                let (edge_kind, label) = match edge_view.edge.edge_type {
+                    EdgeType::Reads => (EdgeKind::Reads, "reads"),
+                    EdgeType::Writes | EdgeType::ActionWrites => (EdgeKind::Writes, "writes"),
+                    EdgeType::Triggers => (EdgeKind::Triggers, "triggers"),
+                    EdgeType::Contains => (EdgeKind::Contains, "contains"),
+                    _ => (
+                        EdgeKind::Other(format!("{:?}", edge_view.edge.edge_type)),
+                        "related",
+                    ),
+                };
+                let node_kind = match edge_view.node.node_type {
+                    NodeType::Model => NodeKind::Model,
+                    NodeType::Field => NodeKind::Field,
+                    NodeType::Action => NodeKind::Action,
+                    NodeType::Component => NodeKind::Component,
+                    NodeType::Page => NodeKind::Page,
+                    _ => NodeKind::Model,
+                };
+                let to_id = insert_visual_node(
+                    &mut visual_graph,
+                    &mut seen_nodes,
+                    &edge_view.node.id,
+                    &edge_view.node.name,
+                    node_kind,
+                    &edge_view.node.path,
+                    1,
+                );
+                push_visual_edge(&mut visual_graph, &focus_id, &to_id, edge_kind, label, None);
+            }
+        }
+    }
+
+    let mut node_kinds = HashMap::new();
+    for node in &visual_graph.nodes {
+        *node_kinds.entry(node.kind.to_string()).or_insert(0) += 1;
+    }
+    let mut edge_kinds = HashMap::new();
+    for edge in &visual_graph.edges {
+        *edge_kinds.entry(edge.kind.to_string()).or_insert(0) += 1;
+    }
+    visual_graph.source_summary = SourceSummary {
+        total_nodes: visual_graph.nodes.len(),
+        total_edges: visual_graph.edges.len(),
+        node_kinds,
+        edge_kinds,
+    };
+    visual_graph
 }
 
 /// 从 SuperPage 元数据构建内存图

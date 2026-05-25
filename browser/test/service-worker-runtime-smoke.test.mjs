@@ -261,6 +261,98 @@ describe("Service Worker script internal protocol", () => {
     assert.strictEqual(analyzed.ok, true);
   });
 
+  it("load/build/analyze calls real WASM exports when available and preserves visual_graph", async () => {
+    const wasm = makeWasmHarness({
+      exports: {
+        load_superpage_document: (sourcePath, rawText) => {
+          assert.strictEqual(sourcePath, "pages/visual.spg");
+          assert.strictEqual(rawText, '{"components":[{"id":"c-1"}]}');
+          return JSON.stringify({
+            status: "ready",
+            target: sourcePath,
+            items: [{ kind: "document_loaded", label: "Document Loaded", detail: { source_path: sourcePath } }],
+            diagnostics: [],
+          });
+        },
+        build_or_update_superpage_graph: (sourcePath) => {
+          assert.strictEqual(sourcePath, "pages/visual.spg");
+          return {
+            status: "ready",
+            target: sourcePath,
+            items: [{ kind: "graph_built", label: "Graph Built", detail: { source_path: sourcePath } }],
+            diagnostics: [],
+          };
+        },
+        analyze_superpage_selection: (selectionJson, optionsJson) => {
+          const selection = JSON.parse(selectionJson);
+          const options = JSON.parse(optionsJson);
+          assert.strictEqual(selection.active_component_id, "c-1");
+          assert.deepStrictEqual(options, { include_conditions: true });
+          return JSON.stringify({
+            status: "ready",
+            target: "c-1",
+            items: [
+              {
+                kind: "visual_graph",
+                label: "Visual Graph",
+                detail: {
+                  nodes: [
+                    { id: "c-1", label: "c-1", kind: "Component", metadata: { depth: 0 } },
+                    { id: "m-1", label: "m-1", kind: "Model", metadata: { depth: 1 } },
+                  ],
+                  edges: [{ from: "c-1", to: "m-1", kind: "Reads", direction: "Forward" }],
+                  groups: [],
+                  focus_node: "c-1",
+                  diagnostics: [],
+                  truncated: false,
+                  source_summary: { total_nodes: 2, total_edges: 1, node_kinds: {}, edge_kinds: {} },
+                },
+              },
+            ],
+            diagnostics: [],
+          });
+        },
+      },
+    });
+    const { exports } = await loadSwInMockEnvironment(wasm);
+    await exports.handleRequest({
+      id: "visual-init",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+    const loaded = await exports.handleRequest({
+      id: "visual-load",
+      method: "loadSuperpageDocument",
+      args: ["pages/visual.spg", '{"components":[{"id":"c-1"}]}'],
+    });
+    const built = await exports.handleRequest({
+      id: "visual-build",
+      method: "buildOrUpdateSuperpageGraph",
+      args: ["pages/visual.spg"],
+    });
+    const analyzed = await exports.handleRequest({
+      id: "visual-analyze",
+      method: "analyzeSuperpageSelection",
+      args: [
+        {
+          source_path: "pages/visual.spg",
+          file_id: "fid-visual",
+          selected_component_ids: ["c-1"],
+          active_component_id: "c-1",
+        },
+        { include_conditions: true },
+      ],
+    });
+
+    assert.strictEqual(loaded.ok, true);
+    assert.strictEqual(built.ok, true);
+    assert.strictEqual(analyzed.ok, true);
+    assert.strictEqual(wasm.exportCalls.load_superpage_document, 1);
+    assert.strictEqual(wasm.exportCalls.build_or_update_superpage_graph, 1);
+    assert.strictEqual(wasm.exportCalls.analyze_superpage_selection, 1);
+    assert.strictEqual(analyzed.result.items[0].detail.nodes.length, 2);
+  });
+
   it("fetchRemoteFileContent returns stable WASM_FETCH_FAILED when runtime init fails", async () => {
     const wasm = makeWasmHarness({
       fetchError: new Error("network blocked"),

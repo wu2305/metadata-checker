@@ -182,7 +182,7 @@ export function renderVisualGraph(container, input, options) {
 
 export function createGraphPanelRenderer(rawOptions = {}) {
   const options = normalizeOptions(rawOptions);
-  const root = makeElementHost(options.container, options);
+  let root = makeElementHost(options.container, options);
   let lastRender = null;
 
   function getRendererType(usedEcharts) {
@@ -318,7 +318,16 @@ export function createGraphPanelRenderer(rawOptions = {}) {
     lastRender = null;
   }
 
+  function setContainer(container) {
+    if (!container) {
+      return { updated: false };
+    }
+    root = makeElementHost(container, options);
+    return { updated: true };
+  }
+
   return {
+    setContainer,
     render,
     renderAnalysis: render,
     renderError,

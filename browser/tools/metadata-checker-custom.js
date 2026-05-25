@@ -18,6 +18,11 @@ define(function () {
   "use strict";
 
   const SW_SCRIPT_URL = "/analyzer/public/hooks/metadata-checker-sw.js";
+  const FACTORY_ENTRY_FILE = "metadata-checker-browser-entry.mjs";
+  const CUSTOM_SCRIPT_URL =
+    typeof document !== "undefined" && document.currentScript?.src
+      ? document.currentScript.src
+      : null;
   const SW_SCOPE = resolveServiceWorkerScope();
   const SW_REQUEST_TIMEOUT_MS = 5000;
   const SW_ACTIVATION_TIMEOUT_MS = 30000;
@@ -83,6 +88,113 @@ define(function () {
     const existing = document.querySelector(`[${key}]`);
     if (existing) {
       existing.remove();
+    }
+  }
+
+  function resolveFactoryEntryUrl() {
+    if (typeof window !== "undefined" && window.__metadata_checker_factory_entry_url) {
+      return window.__metadata_checker_factory_entry_url;
+    }
+    try {
+      const base =
+        CUSTOM_SCRIPT_URL ??
+        (typeof window !== "undefined" && window.location?.href
+          ? window.location.href
+          : "https://metadata-checker.local/analyzer/public/hooks/custom.js");
+      return new URL(`./${FACTORY_ENTRY_FILE}`, base).toString();
+    } catch {
+      return `/analyzer/public/hooks/${FACTORY_ENTRY_FILE}`;
+    }
+  }
+
+  function hasCoreFactories() {
+    return (
+      typeof window.__metadata_checker_plugin_factory === "function" &&
+      typeof window.__metadata_checker_controller_factory === "function" &&
+      typeof window.__metadata_checker_glue_factory === "function"
+    );
+  }
+
+  function coreFactoryMissingReason() {
+    if (typeof window.__metadata_checker_plugin_factory !== "function") {
+      return "plugin_factory_missing";
+    }
+    if (typeof window.__metadata_checker_controller_factory !== "function") {
+      return "controller_factory_missing";
+    }
+    if (typeof window.__metadata_checker_glue_factory !== "function") {
+      return "glue_factory_missing";
+    }
+    return "core_factory_missing";
+  }
+
+  function hasAnyCoreFactory() {
+    return (
+      typeof window.__metadata_checker_plugin_factory === "function" ||
+      typeof window.__metadata_checker_controller_factory === "function" ||
+      typeof window.__metadata_checker_glue_factory === "function"
+    );
+  }
+
+  async function importFactoryEntry(entryUrl) {
+    const injectedImporter = window.__metadata_checker_module_import;
+    if (typeof injectedImporter === "function") {
+      return injectedImporter(entryUrl);
+    }
+    return import(entryUrl);
+  }
+
+  async function ensureCoreFactories() {
+    if (hasCoreFactories()) {
+      _writeMarker("factories", "preinstalled");
+      return { installed: true, source: "preinstalled" };
+    }
+
+    if (hasAnyCoreFactory()) {
+      const reason = coreFactoryMissingReason();
+      _writeMarker("factories", "partial");
+      _writeMarker("factory-diagnostic", reason.toUpperCase());
+      return { installed: false, source: "preinstalled", reason };
+    }
+
+    const installer = window.__metadata_checker_core_factory_installer ?? null;
+    if (typeof installer === "function") {
+      try {
+        _writeMarker("factory-installer", "attempted");
+        await Promise.resolve(installer({ window, document, logger: console, marker: _writeMarker }));
+        if (hasCoreFactories()) {
+          _writeMarker("factory-installer", "installed");
+          _writeMarker("factories", "installed");
+          return { installed: true, source: "installer" };
+        }
+      } catch (err) {
+        _log("warn", "Core factory installer failed:", err);
+        _writeMarker("factory-installer", "failed");
+      }
+    }
+
+    const entryUrl = resolveFactoryEntryUrl();
+    try {
+      _writeMarker("factory-entry", entryUrl);
+      const module = await importFactoryEntry(entryUrl);
+      const moduleInstaller =
+        module?.installMetadataCheckerBrowserFactories ?? module?.default ?? null;
+      if (typeof moduleInstaller === "function") {
+        await Promise.resolve(moduleInstaller({ window, document, logger: console, marker: _writeMarker }));
+      }
+      if (hasCoreFactories()) {
+        _writeMarker("real-bundle", "loaded");
+        _writeMarker("factories", "installed");
+        return { installed: true, source: "module" };
+      }
+      _writeMarker("factories", "missing");
+      _writeMarker("factory-diagnostic", "CORE_FACTORY_MISSING");
+      return { installed: false, source: "module", reason: "core_factory_missing" };
+    } catch (err) {
+      _log("warn", "Core factory entry failed:", err);
+      _writeMarker("factories", "failed");
+      _writeMarker("factory-diagnostic", "CORE_FACTORY_IMPORT_FAILED");
+      return { installed: false, source: "module", reason: "core_factory_import_failed" };
     }
   }
 
@@ -258,15 +370,16 @@ define(function () {
         };
       },
       async buildOrUpdateSuperpageGraph(sourcePath) {
-        return { status: "ready", target: sourcePath, items: [], diagnostics: [] };
+        return _makeErrorEnvelope(
+          "PAGE_RUNTIME_WASM_UNAVAILABLE",
+          "page fallback runtime cannot build a graph without the WASM runtime",
+        );
       },
       async analyzeSuperpageSelection(selection, options) {
-        return {
-          status: "ready",
-          target: selection.active_component_id ?? selection.source_path,
-          items: [{ kind: "analysis", label: "Fallback Analysis", detail: { selection } }],
-          diagnostics: [],
-        };
+        return _makeErrorEnvelope(
+          "PAGE_RUNTIME_WASM_UNAVAILABLE",
+          "page fallback runtime cannot analyze a selection without the WASM runtime",
+        );
       },
     };
   }
@@ -650,7 +763,19 @@ define(function () {
     };
 
     // 4. 创建 plugin core
-    // 这里假设 plugin core 已通过 script 标签预加载到 window
+    const factoryResult = await ensureCoreFactories();
+    if (!factoryResult.installed) {
+      if (factoryResult.reason === "controller_factory_missing") {
+        _writeMarker("controller", "missing");
+      } else if (factoryResult.reason === "glue_factory_missing") {
+        _writeMarker("glue", "missing");
+      } else {
+        _writeMarker("plugin", "missing");
+      }
+      _writeMarker("analysis-status", factoryResult.reason ?? "core_factory_missing");
+      return { installed: false, reason: factoryResult.reason ?? "core_factory_missing" };
+    }
+
     const pluginFactory =
       window.__metadata_checker_plugin_factory ?? null;
     if (!pluginFactory) {

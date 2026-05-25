@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
+import { createGraphPanelRenderer } from "../renderer/graph-panel-renderer.mjs";
 import { createGraphPanelHost } from "../renderer/graph-panel-host.mjs";
 
 function createFakeDocument() {
@@ -119,6 +120,50 @@ describe("createGraphPanelHost", () => {
       host.status().root.getAttribute("data-metadata-checker-analysis-status"),
       "ready",
     );
+  });
+
+  it("binds a real graph renderer to the mounted panel body", async () => {
+    const document = createFakeDocument();
+    const renderer = createGraphPanelRenderer({ document });
+    const host = createGraphPanelHost({ document, renderer });
+
+    const rendered = await host.render({
+      status: "ready",
+      target: "comp1",
+      items: [
+        {
+          kind: "visual_graph",
+          label: "Visual Graph",
+          detail: {
+            nodes: [
+              { id: "comp1", label: "comp1", kind: "Component", metadata: { depth: 0 } },
+              { id: "model1", label: "model1", kind: "Model", metadata: { depth: 1 } },
+            ],
+            edges: [
+              { from: "comp1", to: "model1", kind: "Reads", direction: "Forward", label: "reads" },
+            ],
+            groups: [],
+            focus_node: "comp1",
+            diagnostics: [],
+            truncated: false,
+            source_summary: {
+              total_nodes: 2,
+              total_edges: 1,
+              node_kinds: {},
+              edge_kinds: {},
+            },
+          },
+        },
+      ],
+      diagnostics: [],
+    });
+
+    const { root, body } = host.status();
+    assert.strictEqual(rendered.graph.nodes.length, 2);
+    assert.ok(body.children.length > 0);
+    assert.strictEqual(body.getAttribute("data-metadata-checker-graph-nodes"), "2");
+    assert.strictEqual(body.getAttribute("data-metadata-checker-graph-edges"), "1");
+    assert.strictEqual(root.getAttribute("data-metadata-checker-analysis-status"), "ready");
   });
 
   it("delegates error render and updates status", async () => {
