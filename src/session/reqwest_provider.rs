@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result, anyhow};
+use base64::Engine;
 use lz_str::decompress_from_base64;
 use reqwest::blocking::Client;
 use serde::Deserialize;
@@ -110,6 +111,95 @@ impl ReqwestRemoteSessionProvider {
             client,
             base_url: base_url.into(),
         }
+    }
+
+    /// 使用 AuthContext 构造 provider。
+    ///
+    /// 若 AuthContext 为 CookieJar，会在 Client 中注入对应 cookie。
+    pub fn with_auth_context(
+        base_url: impl Into<String>,
+        auth: &crate::session::auth::AuthContext,
+    ) -> Result<Self> {
+        let mut builder = Client::builder();
+
+        if let crate::session::auth::AuthContext::CookieJar { jar_ref } = auth {
+            if let Ok(jar) = std::fs::read_to_string(jar_ref) {
+                let mut headers = reqwest::header::HeaderMap::new();
+                for line in jar.lines() {
+                    if let Some((name, value)) = line.split_once('=') {
+                        headers.insert(
+                            reqwest::header::COOKIE,
+                            format!("{}={}", name.trim(), value.trim()).parse().unwrap(),
+                        );
+                    }
+                }
+                builder = builder.default_headers(headers);
+            }
+        }
+
+        let client = builder
+            .build()
+            .context("failed to build reqwest blocking client with auth")?;
+        Ok(Self {
+            client,
+            base_url: base_url.into(),
+        })
+    }
+
+    /// 使用用户名密码登录。
+    ///
+    /// 成功后 cookie jar 会自动保存 session，后续请求复用。
+    /// 失败返回稳定错误，不泄漏 password。
+    pub fn login(&self, username: &str, password: &str, user_directory: &str) -> Result<()> {
+        let login_args = serde_json::json!({
+            "user": username,
+            "password": password,
+            "remember": false,
+            "userDirectory": user_directory,
+        });
+        let cipher_passport =
+            base64::engine::general_purpose::STANDARD.encode(serde_json::to_string(&login_args)?);
+        let body = serde_json::json!({ "cipherPassport": cipher_passport });
+
+        let url = self.url("/api/auth/signin");
+        let response = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .with_context(|| "login HTTP request failed")?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(anyhow!("login failed: 401 Unauthorized"));
+        }
+        if status == reqwest::StatusCode::FORBIDDEN {
+            return Err(anyhow!("login failed: 403 Forbidden"));
+        }
+        if !status.is_success() {
+            return Err(anyhow!("login failed: HTTP {}", status.as_u16()));
+        }
+
+        let text = response
+            .text()
+            .with_context(|| "failed to read login response")?;
+        let json: Value = serde_json::from_str(&text).with_context(|| {
+            format!(
+                "login response is not valid JSON: {}",
+                text.chars().take(100).collect::<String>()
+            )
+        })?;
+
+        if json.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+            let msg = json
+                .get("message")
+                .or_else(|| json.get("error")?.get("message"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("login failed");
+            return Err(anyhow!("login failed: {}", msg));
+        }
+
+        Ok(())
     }
 
     fn url(&self, path: &str) -> String {

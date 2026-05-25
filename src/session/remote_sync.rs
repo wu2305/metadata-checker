@@ -8,6 +8,8 @@ use std::fs;
 use anyhow::{Context, Result, anyhow};
 
 use crate::remote_metadata::RemoteFileRef;
+
+use crate::graph_store::IndexReport;
 use crate::session::{
     RemoteSessionProvider, SessionManager,
     manifest::RemoteSessionFile,
@@ -186,6 +188,95 @@ pub fn build_session_graph(
     })
 }
 
+/// Session 刷新选项。
+#[derive(Debug, Clone)]
+pub struct SessionRefreshOptions {
+    pub session_id: String,
+    pub remote_server: String,
+    pub project_ref: String,
+    pub project_name: String,
+    pub sync_mode: SessionSyncMode,
+    pub create_if_missing: bool,
+}
+
+/// Session 刷新报告。
+#[derive(Debug, Clone)]
+pub struct SessionRefreshReport {
+    pub ok: bool,
+    pub session_id: String,
+    pub project_ref: String,
+    pub session_dir: String,
+    pub graph_db_path: String,
+    pub sync: SessionSyncReport,
+    pub index: IndexReport,
+    pub error: Option<SessionRefreshError>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionRefreshError {
+    pub code: String,
+    pub message: String,
+}
+
+/// 统一的 session refresh runner。
+///
+/// 覆盖：创建/读取 session -> sync -> build graph -> 统一 report。
+#[cfg(feature = "cli-local")]
+pub fn refresh_session_from_remote(
+    provider: &dyn RemoteSessionProvider,
+    manager: &SessionManager,
+    options: SessionRefreshOptions,
+) -> Result<SessionRefreshReport> {
+    let SessionRefreshOptions {
+        session_id,
+        remote_server,
+        project_ref,
+        project_name,
+        sync_mode,
+        create_if_missing,
+    } = options;
+
+    // 读取或创建 session
+    let _manifest = match manager.read_manifest(&session_id) {
+        Ok(m) => m,
+        Err(_) if create_if_missing => manager.create_session(
+            &session_id,
+            &remote_server,
+            &project_ref,
+            &project_name,
+            "remote",
+        )?,
+        Err(e) => return Err(e),
+    };
+
+    let session_dir = manager.session_dir(&session_id);
+    let graph_db_path = session_dir.join("graph.redb");
+
+    // 同步远程文件
+    let sync_report =
+        sync_project_from_remote(provider, manager, &session_id, &project_ref, sync_mode)
+            .with_context(|| {
+                format!(
+                    "failed to sync project {} to session {}",
+                    project_ref, session_id
+                )
+            })?;
+
+    // 构建 graph
+    let index_report = build_session_graph(&session_dir, &graph_db_path)
+        .with_context(|| format!("failed to build graph for session {}", session_id))?;
+
+    Ok(SessionRefreshReport {
+        ok: true,
+        session_id: session_id.clone(),
+        project_ref: project_ref.clone(),
+        session_dir: session_dir.to_string_lossy().to_string(),
+        graph_db_path: graph_db_path.to_string_lossy().to_string(),
+        sync: sync_report,
+        index: index_report,
+        error: None,
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;

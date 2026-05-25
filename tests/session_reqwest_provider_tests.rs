@@ -139,3 +139,92 @@ fn request_status_errors_and_empty_body() {
         .unwrap_err();
     assert!(err.to_string().contains("empty"));
 }
+
+#[test]
+fn login_success_and_reuse_cookie() {
+    let login_body = r#"{"ok":true}"#;
+    let projects_body = r#"{"metaProjects":[{"projectName":"test","desc":"test"}]}"#;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let addr = listener.local_addr().expect("read test server addr");
+
+    thread::spawn(move || {
+        for (path, status, body) in [
+            ("/api/auth/signin", 200, login_body),
+            ("/api/me/getPermissionInfo", 200, projects_body),
+        ] {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 2048];
+            let n = stream.read(&mut request).expect("read request");
+            let req_str = String::from_utf8_lossy(&request[..n]);
+            assert!(req_str.contains(path), "expected request to {}", path);
+
+            let response = format!(
+                "HTTP/1.1 {status} OK
+Content-Length: {}
+Content-Type: application/json
+Connection: close
+
+{body}",
+                body.len(),
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
+    });
+
+    let url = format!("http://{}", addr);
+    let provider = ReqwestRemoteSessionProvider::new(&url).unwrap();
+
+    provider
+        .login("user", "pass", "sys")
+        .expect("login should succeed");
+
+    let projects = provider
+        .list_projects()
+        .expect("list_projects should succeed");
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].project_ref, "test");
+}
+
+#[test]
+fn login_401_returns_stable_error() {
+    let body = r#"{"ok":false,"message":"invalid credentials"}"#;
+    let provider = ReqwestRemoteSessionProvider::new(serve_once(401, body)).unwrap();
+    let err = provider.login("user", "pass", "sys").unwrap_err();
+    assert!(err.to_string().contains("401"));
+    assert!(
+        !err.to_string().contains("pass"),
+        "error must not leak password"
+    );
+}
+
+#[test]
+fn login_403_returns_stable_error() {
+    let provider = ReqwestRemoteSessionProvider::new(serve_once(403, "")).unwrap();
+    let err = provider.login("user", "pass", "sys").unwrap_err();
+    assert!(err.to_string().contains("403"));
+}
+
+#[test]
+fn login_invalid_json_returns_stable_error() {
+    let provider = ReqwestRemoteSessionProvider::new(serve_once(200, "not-json")).unwrap();
+    let err = provider.login("user", "pass", "sys").unwrap_err();
+    assert!(err.to_string().contains("JSON"));
+    assert!(
+        !err.to_string().contains("pass"),
+        "error must not leak password"
+    );
+}
+
+#[test]
+fn login_empty_body_returns_stable_error() {
+    let provider = ReqwestRemoteSessionProvider::new(serve_once(200, "")).unwrap();
+    let err = provider.login("user", "pass", "sys").unwrap_err();
+    assert!(err.to_string().contains("empty"));
+    assert!(
+        !err.to_string().contains("pass"),
+        "error must not leak password"
+    );
+}

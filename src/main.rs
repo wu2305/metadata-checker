@@ -151,11 +151,107 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    if let Some(ref _id) = args.session_refresh {
-        print_session_error(
-            "SESSION_REFRESH_NOT_IMPLEMENTED",
-            "session refresh requires remote provider (M41.10)",
-        )?;
+    if let Some(ref session_id) = args.session_refresh {
+        let remote_server = match args.remote_server.as_deref() {
+            Some(s) => s,
+            None => {
+                return print_session_error(
+                    "SESSION_MISSING_REMOTE_SERVER",
+                    "--session-refresh requires --remote-server",
+                );
+            }
+        };
+        let project_ref = match args.remote_project.as_deref() {
+            Some(s) => s,
+            None => {
+                return print_session_error(
+                    "SESSION_MISSING_REMOTE_PROJECT",
+                    "--session-refresh requires --remote-project",
+                );
+            }
+        };
+
+        let provider =
+            match metadata_checker::session::ReqwestRemoteSessionProvider::new(remote_server) {
+                Ok(p) => p,
+                Err(e) => {
+                    return print_session_error(
+                        "SESSION_PROVIDER_CREATE_FAILED",
+                        format!("failed to create remote session provider: {}", e),
+                    );
+                }
+            };
+
+        // 登录
+        if let (Some(username), Some(password)) = (
+            args.remote_username.as_deref(),
+            args.remote_password.as_deref(),
+        ) {
+            if let Err(e) = provider.login(username, password, "sys") {
+                return print_session_error(
+                    "SESSION_AUTH_REQUIRED",
+                    format!("remote login failed: {}", e),
+                );
+            }
+        }
+
+        let sync_mode = match args.session_sync_mode.as_deref() {
+            Some("full") => metadata_checker::session::SessionSyncMode::Full,
+            Some("partial") | None => metadata_checker::session::SessionSyncMode::Partial,
+            Some(mode) => {
+                return print_session_error(
+                    "SESSION_INVALID_SYNC_MODE",
+                    format!("invalid sync mode: {}", mode),
+                );
+            }
+        };
+
+        let options = metadata_checker::session::SessionRefreshOptions {
+            session_id: session_id.clone(),
+            remote_server: remote_server.to_string(),
+            project_ref: project_ref.to_string(),
+            project_name: project_ref.to_string(),
+            sync_mode,
+            create_if_missing: true,
+        };
+
+        let report = metadata_checker::session::refresh_session_from_remote(
+            &provider,
+            &session_manager,
+            options,
+        );
+
+        match report {
+            Ok(report) => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "ok": true,
+                        "session_id": report.session_id,
+                        "project_ref": report.project_ref,
+                        "session_dir": report.session_dir,
+                        "graph_db_path": report.graph_db_path,
+                        "sync": {
+                            "written": report.sync.written,
+                            "skipped": report.sync.skipped,
+                            "deleted": report.sync.deleted,
+                        },
+                        "index": {
+                            "indexed": report.index.indexed,
+                            "unchanged": report.index.unchanged,
+                            "dirty": report.index.dirty,
+                            "deleted": report.index.deleted,
+                        },
+                    }))?
+                );
+            }
+            Err(err) => {
+                print_session_error(
+                    "SESSION_REFRESH_FAILED",
+                    format!("session refresh failed: {}", err),
+                )?;
+            }
+        }
         return Ok(());
     }
 

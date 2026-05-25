@@ -14,3 +14,6 @@ pub use auth::{AuthContext, AuthProvider, SecretStore, StaticAuthProvider};
 pub use manager::SessionManager;
 pub use manifest::{RemoteSessionFile, SessionManifest};
 pub use remote_provider::RemoteSessionProvider;
+pub use remote_sync::{SessionRefreshOptions, SessionRefreshReport, refresh_session_from_remote};
+pub use reqwest_provider::ReqwestRemoteSessionProvider;
+pub use sync::{SessionSyncMode, SessionSyncReport, sync_remote_files_to_session};

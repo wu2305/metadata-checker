@@ -244,6 +244,25 @@ pub struct Cli {
     #[arg(long, value_name = "ID", help = "Refresh session from remote")]
     pub session_refresh: Option<String>,
 
+    #[arg(
+        long,
+        value_name = "URL",
+        help = "Remote BI server URL (e.g. https://autocrm-test.xiaoshouyi.com)"
+    )]
+    pub remote_server: Option<String>,
+
+    #[arg(long, value_name = "PROJECT", help = "Remote project reference")]
+    pub remote_project: Option<String>,
+
+    #[arg(long, value_name = "USERNAME", help = "Remote BI username")]
+    pub remote_username: Option<String>,
+
+    #[arg(long, value_name = "PASSWORD", help = "Remote BI password")]
+    pub remote_password: Option<String>,
+
+    #[arg(long, value_name = "MODE", help = "Session sync mode: full | partial")]
+    pub session_sync_mode: Option<String>,
+
     #[arg(long, value_name = "ID", help = "Delete session")]
     pub session_delete: Option<String>,
 

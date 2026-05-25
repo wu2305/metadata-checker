@@ -171,27 +171,77 @@ fn session_delete_missing_session_is_idempotent_success() {
 }
 
 #[test]
-fn session_refresh_returns_stable_not_implemented_envelope() {
-    let root = test_root("refresh");
-    let output = run_session_command_raw(&root, &["--session-refresh", "s1"]);
+fn session_refresh_missing_server_returns_stable_error() {
+    let root = test_root("refresh-missing-server");
+    let output = run_session_command_raw(
+        &root,
+        &["--session-refresh", "s1", "--remote-project", "analyzer"],
+    );
     assert!(output.status.success());
     let json = as_json_from_stdout(&output);
 
     assert_eq!(json["ok"], false);
-    assert_eq!(
-        json,
-        serde_json::json!({
-            "ok": false,
-            "error": {
-                "code": "SESSION_REFRESH_NOT_IMPLEMENTED",
-                "message": "session refresh requires remote provider (M41.10)",
-            },
-        })
+    assert_eq!(json["error"]["code"], "SESSION_MISSING_REMOTE_SERVER");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("remote-server")
     );
     let text = serde_json::to_string(&json).unwrap();
-    assert!(!text.contains("token"));
-    assert!(!text.contains("cookie"));
     assert!(!text.contains("password"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_refresh_missing_project_returns_stable_error() {
+    let root = test_root("refresh-missing-project");
+    let output = run_session_command_raw(
+        &root,
+        &[
+            "--session-refresh",
+            "s1",
+            "--remote-server",
+            "https://example.com",
+        ],
+    );
+    assert!(output.status.success());
+    let json = as_json_from_stdout(&output);
+
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "SESSION_MISSING_REMOTE_PROJECT");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("remote-project")
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_refresh_invalid_sync_mode_returns_stable_error() {
+    let root = test_root("refresh-invalid-mode");
+    let output = run_session_command_raw(
+        &root,
+        &[
+            "--session-refresh",
+            "s1",
+            "--remote-server",
+            "https://example.com",
+            "--remote-project",
+            "analyzer",
+            "--session-sync-mode",
+            "bad-mode",
+        ],
+    );
+    assert!(output.status.success());
+    let json = as_json_from_stdout(&output);
+
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "SESSION_INVALID_SYNC_MODE");
 
     let _ = std::fs::remove_dir_all(root);
 }
