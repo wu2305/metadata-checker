@@ -37,6 +37,36 @@ function createFakeRenderer() {
   };
 }
 
+function createFakeGraphRenderer() {
+  const renderCalls = [];
+  const handlers = new Map();
+  return {
+    renderCalls,
+    render(result) {
+      renderCalls.push({ type: "render", result });
+      return Promise.resolve({ renderer: "fake", result });
+    },
+    renderGraph(result) {
+      renderCalls.push({ type: "renderGraph", result });
+      return Promise.resolve({ renderer: "fake", result });
+    },
+    renderError(errorEnvelope) {
+      renderCalls.push({ type: "renderError", errorEnvelope });
+      return Promise.resolve({ renderer: "fake", errorEnvelope });
+    },
+    on(eventName, handler) {
+      handlers.set(eventName, handler);
+    },
+    emit(eventName, payload) {
+      const handler = handlers.get(eventName);
+      if (handler) {
+        return handler(payload);
+      }
+      return undefined;
+    },
+  };
+}
+
 function createFakeHost() {
   const events = [];
   return {
@@ -260,6 +290,7 @@ describe("integration success path", async () => {
   it("selection -> provider -> runtime -> renderer complete pipeline", async () => {
     const host = createFakeHost();
     const renderer = createFakeRenderer();
+    const graphRenderer = createFakeGraphRenderer();
     const provider = createFakeProvider({
       fixtures: new Map([
         [
@@ -287,6 +318,7 @@ describe("integration success path", async () => {
       provider,
       runtimeClient,
       renderer,
+      graphRenderer,
       host,
       logger: null,
     });
@@ -303,6 +335,8 @@ describe("integration success path", async () => {
     assert.strictEqual(result.status, "ready");
     assert.strictEqual(renderer.renderCalls.length, 1);
     assert.strictEqual(renderer.renderCalls[0].type, "renderAnalysis");
+    assert.strictEqual(graphRenderer.renderCalls.length, 1);
+    assert.strictEqual(graphRenderer.renderCalls[0].type, "renderGraph");
 
     // provider 被调用
     const contentCalls = provider.callLog.filter(
@@ -539,6 +573,77 @@ describe("integration success path", async () => {
     );
   });
 
+  it("stale analysis result does not render old graph over latest selection", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const graphRenderer = createFakeGraphRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+    runtimeClient.analyzeSuperpageSelection = function (selection) {
+      this.callLog.push({ method: "analyzeSuperpageSelection", args: Array.from(arguments) });
+      const delay = selection.active_component_id === "slow" ? 20 : 0;
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            status: "ready",
+            target: selection.active_component_id,
+            items: [],
+            diagnostics: [],
+          });
+        }, delay);
+      });
+    };
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      graphRenderer,
+      host,
+      logger: null,
+    });
+
+    const slow = controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["slow"],
+      active_component_id: "slow",
+    });
+    const fast = controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["fast"],
+      active_component_id: "fast",
+    });
+
+    await Promise.all([slow, fast]);
+
+    const graphTargets = graphRenderer.renderCalls.map(
+      (call) => call.result?.target ?? call.errorEnvelope?.target,
+    );
+    assert.deepStrictEqual(graphTargets, ["fast"]);
+    assert.strictEqual(host.getEvents("analysis_stale_discarded").length, 1);
+  });
+
   it("runtime-first failure falls back to page provider mode", async () => {
     const host = createFakeHost();
     const renderer = createFakeRenderer();
@@ -711,6 +816,7 @@ describe("integration error paths", async () => {
   it("metadata fetch failure -> renderer diagnostic", async () => {
     const host = createFakeHost();
     const renderer = createFakeRenderer();
+    const graphRenderer = createFakeGraphRenderer();
     const provider = createFakeProvider({ shouldFailContent: true });
     const runtimeClient = createFakeRuntimeClient();
 
@@ -727,6 +833,7 @@ describe("integration error paths", async () => {
       provider,
       runtimeClient,
       renderer,
+      graphRenderer,
       host,
       logger: null,
     });
@@ -743,6 +850,9 @@ describe("integration error paths", async () => {
     assert.strictEqual(result.status, "error");
     assert.strictEqual(renderer.renderCalls.length, 1);
     assert.strictEqual(renderer.renderCalls[0].type, "renderError");
+    assert.strictEqual(graphRenderer.renderCalls.length, 1);
+    assert.strictEqual(graphRenderer.renderCalls[0].type, "renderGraph");
+    assert.strictEqual(graphRenderer.renderCalls[0].result.status, "error");
     assert.ok(
       renderer.renderCalls[0].errorEnvelope.diagnostics.some(
         (d) => d.code === "ANALYSIS_PIPELINE_FAILED",
@@ -849,6 +959,55 @@ describe("integration error paths", async () => {
     assert.strictEqual(result.status, "error");
     assert.strictEqual(renderer.renderCalls.length, 1);
     assert.strictEqual(renderer.renderCalls[0].type, "renderError");
+  });
+
+  it("graph expand request without runtime support emits diagnostic graph", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const graphRenderer = createFakeGraphRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      graphRenderer,
+      host,
+      logger: null,
+    });
+
+    const result = await graphRenderer.emit("expand_requested", {
+      nodeId: "comp-2",
+      depth: 3,
+    });
+
+    assert.strictEqual(result.status, "error");
+    assert.strictEqual(result.diagnostics[0].code, "GRAPH_EXPAND_UNSUPPORTED");
+    assert.strictEqual(host.getEvents("graph_expand_requested").length, 1);
+    assert.strictEqual(host.getEvents("graph_expand_failed").length, 1);
+    const lastGraphCall = graphRenderer.renderCalls.at(-1);
+    assert.strictEqual(lastGraphCall.type, "renderGraph");
+    assert.strictEqual(lastGraphCall.result.status, "error");
   });
 });
 

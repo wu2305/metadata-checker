@@ -106,6 +106,7 @@ export function createMetadataCheckerController(options = {}) {
   const provider = options.provider;
   const runtimeClient = options.runtimeClient;
   const renderer = options.renderer;
+  const graphRenderer = options.graphRenderer ?? renderer;
   const host = options.host;
   const logger = options.logger ?? console;
   const analysisOptions = options.analysisOptions ?? {};
@@ -149,6 +150,7 @@ export function createMetadataCheckerController(options = {}) {
   let lastAnalysisResult = null;
   let lastError = null;
   let _previousState = CONTROLLER_STATE.IDLE;
+  let _selectionSeq = 0;
 
   function _setState(newState) {
     const previousState = _previousState;
@@ -236,6 +238,101 @@ export function createMetadataCheckerController(options = {}) {
     }
   }
 
+  function _renderGraph(result) {
+    if (graphRenderer && typeof graphRenderer.renderGraph === "function") {
+      return graphRenderer.renderGraph(result);
+    }
+    if (graphRenderer && typeof graphRenderer.render === "function") {
+      return graphRenderer.render(result);
+    }
+    if (
+      graphRenderer !== renderer &&
+      graphRenderer &&
+      typeof graphRenderer.renderError === "function" &&
+      result?.status === "error"
+    ) {
+      return graphRenderer.renderError(result);
+    }
+    return undefined;
+  }
+
+  function _renderDiagnosticGraph(error) {
+    return _renderGraph(error);
+  }
+
+  async function _handleGraphExpandRequested(payload = {}) {
+    const target = payload.target ?? payload.nodeId ?? payload.node?.id ?? null;
+    const depth = payload.depth ?? payload.nextDepth ?? null;
+    const expandToken = payload.expand_token ?? payload.expandToken ?? null;
+
+    _emitHost(host, "graph_expand_requested", {
+      target,
+      depth,
+      expandToken,
+      timestamp: clock(),
+    });
+
+    const expandFn =
+      (runtimeClient && typeof runtimeClient.analyzeGraphTarget === "function"
+        ? runtimeClient.analyzeGraphTarget.bind(runtimeClient)
+        : null) ??
+      (runtimeClient && typeof runtimeClient.expandVisualGraph === "function"
+        ? runtimeClient.expandVisualGraph.bind(runtimeClient)
+        : null);
+
+    if (!expandFn) {
+      const error = _makeErrorEnvelope(
+        "GRAPH_EXPAND_UNSUPPORTED",
+        "runtime does not support graph expand target/depth query",
+        target,
+      );
+      _emitHost(host, "graph_expand_failed", {
+        error,
+        timestamp: clock(),
+      });
+      _renderDiagnosticGraph(error);
+      return error;
+    }
+
+    try {
+      const result = await expandFn({ target, depth, expand_token: expandToken });
+      _emitHost(host, "graph_expand_completed", {
+        result,
+        timestamp: clock(),
+      });
+      _renderGraph(result);
+      return result;
+    } catch (err) {
+      const error = _makeErrorEnvelope(
+        "GRAPH_EXPAND_FAILED",
+        err?.message ?? String(err),
+        target,
+      );
+      _emitHost(host, "graph_expand_failed", {
+        error,
+        timestamp: clock(),
+      });
+      _renderDiagnosticGraph(error);
+      return error;
+    }
+  }
+
+  function _wireGraphRendererEvents() {
+    if (graphRenderer && typeof graphRenderer.on === "function") {
+      graphRenderer.on("expand_requested", _handleGraphExpandRequested);
+      return;
+    }
+    if (graphRenderer && typeof graphRenderer.setEventHandler === "function") {
+      graphRenderer.setEventHandler((event) => {
+        if (event?.type === "expand_requested") {
+          _handleGraphExpandRequested(event).catch((err) => {
+            logger.error("[controller] graph expand failed:", err);
+          });
+        }
+      });
+    }
+  }
+
   async function _ensureInitialized() {
     if (initialized && state === CONTROLLER_STATE.READY) {
       return { ready: true };
@@ -288,6 +385,7 @@ export function createMetadataCheckerController(options = {}) {
   }
 
   async function _handleSelectionChanged(selection) {
+    const selectionSeq = ++_selectionSeq;
     const initResult = await _ensureInitialized();
     if (!initResult.ready) {
       if (typeof renderer.renderError === "function") {
@@ -299,6 +397,7 @@ export function createMetadataCheckerController(options = {}) {
             ),
         );
       }
+      _renderDiagnosticGraph(initResult.error);
       return initResult.error;
     }
 
@@ -310,6 +409,7 @@ export function createMetadataCheckerController(options = {}) {
       if (typeof renderer.renderError === "function") {
         renderer.renderError(error);
       }
+      _renderDiagnosticGraph(error);
       return error;
     }
 
@@ -323,6 +423,7 @@ export function createMetadataCheckerController(options = {}) {
       if (typeof renderer.renderError === "function") {
         renderer.renderError(error);
       }
+      _renderDiagnosticGraph(error);
       return error;
     }
 
@@ -337,6 +438,7 @@ export function createMetadataCheckerController(options = {}) {
       if (typeof renderer.renderError === "function") {
         renderer.renderError(error);
       }
+      _renderDiagnosticGraph(error);
       return error;
     }
 
@@ -358,12 +460,22 @@ export function createMetadataCheckerController(options = {}) {
         analysisOptions,
       );
 
+      if (selectionSeq !== _selectionSeq) {
+        _emitHost(host, "analysis_stale_discarded", {
+          result,
+          selection,
+          timestamp: clock(),
+        });
+        return result;
+      }
+
       lastAnalysisResult = result;
       lastError = null;
       _setState(CONTROLLER_STATE.READY);
       _emitHost(host, "analysis_completed", { result, timestamp: clock() });
 
       renderer.renderAnalysis(result);
+      await _renderGraph(result);
       return result;
     } catch (err) {
       const error = _makeErrorEnvelope(
@@ -371,6 +483,14 @@ export function createMetadataCheckerController(options = {}) {
         err?.message ?? String(err),
         selection.active_component_id ?? sourcePath,
       );
+      if (selectionSeq !== _selectionSeq) {
+        _emitHost(host, "analysis_stale_discarded", {
+          error,
+          selection,
+          timestamp: clock(),
+        });
+        return error;
+      }
       lastError = error;
       _setState(CONTROLLER_STATE.ERROR);
       _emitHost(host, "analysis_failed", { error, timestamp: clock() });
@@ -378,6 +498,7 @@ export function createMetadataCheckerController(options = {}) {
       if (typeof renderer.renderError === "function") {
         renderer.renderError(error);
       }
+      await _renderDiagnosticGraph(error);
       return error;
     }
   }
@@ -401,6 +522,8 @@ export function createMetadataCheckerController(options = {}) {
       _onPluginEvent(eventName, payload);
     };
   }
+
+  _wireGraphRendererEvents();
 
   const controller = {
     async init() {

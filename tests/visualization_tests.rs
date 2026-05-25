@@ -234,6 +234,79 @@ fn test_mermaid_label_escaping() {
     }
 }
 
+fn create_depth_chain_output() -> AiOutput {
+    let mut output = AiOutput::new(
+        OutputKind::PageQuery,
+        json!({
+            "target_id": "comp:root",
+            "target_name": "Root Component",
+            "depth": 3,
+            "direction": "both",
+        }),
+    );
+    output.details.replace(json!({
+        "dependencies": [
+            {
+                "id": "comp:one",
+                "name": "One-hop",
+                "from": "comp:one",
+                "to": "comp:root",
+                "edge_type": "reads",
+            },
+            {
+                "id": "comp:two",
+                "name": "Two-hop",
+                "from": "comp:two",
+                "to": "comp:one",
+                "edge_type": "reads",
+            },
+            {
+                "id": "comp:three",
+                "name": "Three-hop",
+                "from": "comp:three",
+                "to": "comp:two",
+                "edge_type": "reads",
+            },
+        ]
+    }));
+    output
+}
+
+fn create_two_hop_output_for_group() -> AiOutput {
+    let mut output = AiOutput::new(
+        OutputKind::PageQuery,
+        json!({
+            "target_id": "comp:center",
+            "target_name": "Center",
+            "depth": 1,
+            "direction": "both",
+        }),
+    );
+    output.details.replace(json!({
+        "dependencies": [
+            {
+                "id": "comp:leaf_a",
+                "name": "LeafA",
+                "from": "comp:leaf_a",
+                "to": "comp:center",
+                "edge_type": "reads",
+                "importance": "high",
+                "from_depth": 1,
+            },
+            {
+                "id": "comp:leaf_b",
+                "name": "LeafB",
+                "from": "comp:leaf_b",
+                "to": "comp:center",
+                "edge_type": "writes",
+                "importance": "high",
+                "from_depth": 1,
+            }
+        ]
+    }));
+    output
+}
+
 #[test]
 fn test_echarts_option_json_contains_nodes_links_categories() {
     let mut output = AiOutput::new(
@@ -287,6 +360,171 @@ fn test_large_result_truncation() {
         graph.nodes.len() <= opts.max_nodes + 1,
         "Nodes should be truncated to max_nodes + diagnostic node"
     );
+}
+
+#[test]
+fn test_one_hop_depth_contract() {
+    let mut output = AiOutput::new(
+        OutputKind::PageQuery,
+        json!({
+            "target_id": "comp:start",
+            "target_name": "Start",
+            "depth": 1,
+            "direction": "both",
+        }),
+    );
+    output.details = Some(json!({
+        "dependencies": [{
+            "id": "comp:neighbor",
+            "name": "Neighbor",
+            "from": "comp:neighbor",
+            "to": "comp:start",
+            "edge_type": "reads",
+            "importance": "critical",
+            "expand_token": "--context comp:neighbor --depth 2",
+        }]
+    }));
+
+    let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());
+    assert_eq!(graph.depth, 1);
+    assert_eq!(graph.direction, "both");
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "comp:start")
+            .and_then(|n| n.depth),
+        Some(0)
+    );
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "comp:neighbor")
+            .and_then(|n| n.depth),
+        Some(1)
+    );
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "comp:neighbor")
+            .and_then(|n| n.importance.as_deref()),
+        Some("critical")
+    );
+    assert_eq!(graph.nodes.iter().filter(|n| n.depth == Some(2)).count(), 0);
+}
+
+#[test]
+fn test_two_three_hop_nodes_and_collapsed_expand_token() {
+    let output = create_depth_chain_output();
+    let mut opts = VisualGraphOptions::default();
+    opts.group_by_source_path = false;
+    let graph = VisualGraphBuilder::from_ai_output(&output, &opts);
+
+    let focus = "comp:root".to_string();
+    assert_eq!(graph.focus_node, Some(focus));
+    assert_eq!(graph.depth, 3);
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "comp:three")
+            .and_then(|n| n.depth),
+        Some(3)
+    );
+    let collapsed = graph
+        .nodes
+        .iter()
+        .find(|n| n.id == "comp:three")
+        .expect("three-hop node");
+    assert!(collapsed.collapsed);
+    assert!(collapsed.expand_token.is_some());
+    assert!(
+        collapsed
+            .expand_token
+            .as_ref()
+            .unwrap()
+            .contains("--depth 4")
+    );
+}
+
+#[test]
+fn test_collapsed_group_like_expression_in_graph_and_renderers() {
+    let output = create_two_hop_output_for_group();
+    let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());
+    let mermaid = render_mermaid_from_ai_output(&output, &VisualGraphOptions::default()).unwrap();
+    let echarts = render_echarts_from_ai_output(&output, &VisualGraphOptions::default()).unwrap();
+
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .any(|node| node.id == "comp:leaf_a" && node.importance.as_deref() == Some("high")),
+        "group-like leaves should be preserved"
+    );
+    assert!(mermaid.contains("style"));
+    assert_eq!(graph.direction, "both");
+    assert_eq!(graph.depth, 1);
+    assert!(echarts["series"][0]["links"].as_array().is_some());
+}
+
+#[test]
+fn test_truncated_reason_is_structured() {
+    let output = create_large_test_output(80);
+    let mut opts = VisualGraphOptions::default();
+    opts.max_nodes = 3;
+    opts.max_edges = 3;
+
+    let graph = VisualGraphBuilder::from_ai_output(&output, &opts);
+    let echarts = render_echarts_from_ai_output(&output, &opts).unwrap();
+    let echarts_title = echarts["title"]["subtext"].as_str().unwrap_or("");
+
+    assert!(graph.truncated);
+    assert!(graph.truncated_reason.is_some());
+    assert!(graph.truncated_reason.as_ref().unwrap().contains("nodes"));
+    assert!(echarts_title.contains("nodes"));
+    assert!(echarts_title.contains("truncated"));
+}
+
+#[test]
+fn test_sensitive_fields_not_in_depth_contract_output() {
+    let mut output = create_depth_chain_output();
+    output.evidence.push(
+        Evidence::new("Contains secret", "token=deep_secret_001")
+            .with_node_id("comp:root")
+            .with_edge_type("Reads password=secret_001")
+            .with_raw_expr("${model:one}; password=raw_secret_001"),
+    );
+    output.details = Some(json!({
+        "dependencies": [
+            {
+                "id": "comp:leaf_secret",
+                "name": "Leaf with token=leaf_secret_001",
+                "from": "comp:leaf_secret",
+                "to": "comp:root",
+                "edge_type": "reads token=secret_001",
+            },
+        ],
+    }));
+
+    let mut opts = VisualGraphOptions::default();
+    opts.include_evidence = true;
+    let graph = VisualGraphBuilder::from_ai_output(&output, &opts);
+    let raw = serde_json::to_string(&graph).unwrap();
+
+    for leaked in [
+        "deep_secret_001",
+        "raw_secret_001",
+        "secret_001",
+        "leaf_secret_001",
+    ] {
+        assert!(
+            !raw.to_lowercase().contains(leaked),
+            "contract output should not contain sensitive value: {}",
+            leaked
+        );
+    }
 }
 
 #[test]

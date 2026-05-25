@@ -21,11 +21,60 @@ impl MermaidRenderer {
         // 渲染节点
         for node in &sorted_nodes {
             lines.push(Self::render_node(node));
+
+            if node.collapsed {
+                let node_id = Self::sanitize_mermaid_id(&sanitize_text(&node.id));
+                lines.push(format!(
+                    "style {} fill:#f5f5f5,stroke:#8e8e8e,stroke-width:1px",
+                    node_id
+                ));
+                if let Some(ref token) = node.expand_token {
+                    lines.push(format!(
+                        "%% {} collapsed, expandable via: {}",
+                        node_id,
+                        Self::escape_label(&sanitize_text(token))
+                    ));
+                }
+            }
+
+            if let Some(depth) = node.depth {
+                if depth >= 2 {
+                    let node_id = Self::sanitize_mermaid_id(&sanitize_text(&node.id));
+                    lines.push(format!("style {} fill:#ffffff,opacity:0.75", node_id));
+                    if depth >= 3 {
+                        lines.push(format!("style {} fill:#efefef,opacity:0.6", node_id));
+                    }
+                }
+            }
+
+            if let Some(ref importance) = node.importance {
+                if importance == "static_display" {
+                    let node_id = Self::sanitize_mermaid_id(&sanitize_text(&node.id));
+                    lines.push(format!("style {} fill:#f0fff0,stroke:#66cdaa", node_id));
+                }
+            }
+        }
+
+        // 元数据说明
+        if let Some(ref focus) = graph.focus_node {
+            lines.push(String::new());
+            lines.push(format!(
+                "%% focus={} direction={} depth={} collapsed={}",
+                Self::escape_label(&sanitize_text(focus)),
+                Self::escape_label(&graph.direction),
+                graph.depth,
+                graph.collapsed
+            ));
+            if let Some(ref reason) = graph.truncated_reason {
+                lines.push(format!(
+                    "%% truncated_reason: {}",
+                    Self::escape_label(&sanitize_text(reason))
+                ));
+            }
         }
 
         lines.push(String::new());
 
-        // 按 (from, to, kind) 稳定排序边
         let mut sorted_edges = graph.edges.clone();
         sorted_edges.sort_by(|a, b| {
             (&a.from, &a.to, format!("{:?}", a.kind)).cmp(&(
@@ -35,9 +84,14 @@ impl MermaidRenderer {
             ))
         });
 
-        // 渲染边
-        for edge in &sorted_edges {
+        for (idx, edge) in sorted_edges.iter().enumerate() {
             lines.push(Self::render_edge(edge));
+            if Self::is_collapsed_edge(edge, graph) {
+                lines.push(format!(
+                    "linkStyle {} stroke: #c0c0c0, stroke-width: 1px, stroke-dasharray: 5 5",
+                    idx
+                ));
+            }
         }
 
         // 渲染分组
@@ -83,7 +137,17 @@ impl MermaidRenderer {
     /// 渲染单个节点
     fn render_node(node: &VisualNode) -> String {
         let id = Self::sanitize_mermaid_id(&sanitize_text(&node.id));
-        let label = Self::escape_label(&sanitize_text(&node.label));
+        let base_label = Self::escape_label(&sanitize_text(&node.label));
+        let label = if node.depth.is_some() {
+            let depth = node.depth.unwrap_or(0);
+            if node.collapsed {
+                format!("{} (d={} ⟲)", base_label, depth)
+            } else {
+                format!("{} (d={})", base_label, depth)
+            }
+        } else {
+            base_label
+        };
 
         match node.kind {
             NodeKind::Page => format!("{}((\"{}\"))", id, label),
@@ -101,17 +165,18 @@ impl MermaidRenderer {
         let from = Self::sanitize_mermaid_id(&sanitize_text(&edge.from));
         let to = Self::sanitize_mermaid_id(&sanitize_text(&edge.to));
 
+        let label = edge
+            .label
+            .as_deref()
+            .or(edge.edge_type.as_deref())
+            .unwrap_or("relation");
         let arrow = match edge.direction {
             EdgeDirection::Forward => "-->",
             EdgeDirection::Bidirectional => "<-->",
         };
 
-        if let Some(ref label) = edge.label {
-            let escaped_label = Self::escape_label(&sanitize_text(label));
-            format!("{} {}|{}| {}", from, arrow, escaped_label, to)
-        } else {
-            format!("{} {} {}", from, arrow, to)
-        }
+        let escaped_label = Self::escape_label(&sanitize_text(label));
+        format!("{} {}|{}| {}", from, arrow, escaped_label, to)
     }
 
     /// 将 ID 转换为 Mermaid 安全的标识符
@@ -139,7 +204,6 @@ impl MermaidRenderer {
             }
         }
 
-        // 后续字符
         for c in chars {
             if c.is_ascii_alphanumeric() || c == '_' {
                 result.push(c);
@@ -148,7 +212,6 @@ impl MermaidRenderer {
             }
         }
 
-        // 确保不是 Mermaid 关键字
         match result.as_str() {
             "graph" | "subgraph" | "end" | "direction" | "style" | "class" | "click" | "link" => {
                 result.insert(0, 'n')
@@ -186,5 +249,13 @@ impl MermaidRenderer {
     /// 转义 Mermaid 注释中的特殊字符
     fn escape_comment(text: &str) -> String {
         text.replace('\n', " ").replace('\r', "")
+    }
+
+    /// 当前边是否与折叠节点相邻。
+    fn is_collapsed_edge(edge: &VisualEdge, graph: &VisualGraph) -> bool {
+        graph
+            .nodes
+            .iter()
+            .any(|node| node.collapsed && (node.id == edge.from || node.id == edge.to))
     }
 }
