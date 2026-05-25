@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, anyhow};
 use base64::Engine;
-use lz_str::decompress_from_base64;
+use lz_str::{decompress_from_base64, decompress_from_encoded_uri_component};
+use regex::Regex;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::Value;
@@ -18,6 +19,44 @@ use crate::remote_metadata::{
 use crate::session::remote_provider::{
     RemoteChangeSet, RemoteMetafileEntry, RemoteProjectInfo, RemoteSessionProvider,
 };
+
+/// 统一脱敏占位符。
+const SANITIZED_VALUE: &str = "***";
+
+/// 会话相关错误信息的统一脱敏入口。
+pub fn sanitize_session_error_message(message: &str) -> String {
+    let mut sanitized = message.to_string();
+
+    let set_cookie_re = Regex::new(r"(?i)(set-cookie)\s*[:=]\s*[^\r\n]+")
+        .expect("valid regex for set-cookie redaction");
+    sanitized = set_cookie_re
+        .replace_all(&sanitized, format!("$1: {SANITIZED_VALUE}"))
+        .to_string();
+
+    let sensitive_keys = [
+        "password",
+        "pass",
+        "token",
+        "cookie",
+        "authorization",
+        "cipherpassport",
+    ]
+    .join("|");
+    let key_value_re = Regex::new(&format!(
+        r#"(?i)({})(\s*[:=]\s*)("[^"]*"|'[^']*'|`[^`]*`|[^\s,;\)\]]+)"#,
+        sensitive_keys
+    ))
+    .expect("valid regex for sensitive key-value redaction");
+    sanitized = key_value_re
+        .replace_all(&sanitized, |captures: &regex::Captures| {
+            let key = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+            let sep = captures.get(2).map(|m| m.as_str()).unwrap_or_default();
+            format!("{key}{sep}{SANITIZED_VALUE}")
+        })
+        .to_string();
+
+    sanitized
+}
 
 /// BI 项目信息。
 #[derive(Debug, Clone, Deserialize)]
@@ -51,6 +90,8 @@ struct BiFileInfo {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
+    parent_dir: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     revision: Option<String>,
     #[serde(default)]
     is_folder: Option<bool>,
@@ -84,6 +125,24 @@ impl BiFileInfo {
             .or_else(|| self.path.as_deref())
             .map(|path| path.rsplit('.').next().unwrap_or(fallback))
             .unwrap_or(fallback)
+    }
+
+    /// 还原 BI 文件的资源路径，兼容仅返回 parentDir + name 的真实接口。
+    fn resource_path(&self) -> Option<String> {
+        if let Some(path) = self.path.as_deref().filter(|path| !path.trim().is_empty()) {
+            return Some(path.trim().to_string());
+        }
+
+        let name = self.name.as_deref()?.trim();
+        if name.is_empty() {
+            return None;
+        }
+
+        let parent = self
+            .parent_dir
+            .as_deref()
+            .filter(|parent| !parent.trim().is_empty())?;
+        Some(format!("{}/{}", parent.trim_end_matches('/'), name))
     }
 }
 
@@ -187,12 +246,9 @@ impl ReqwestRemoteSessionProvider {
         if text.trim().is_empty() {
             return Err(anyhow!("login failed: response body is empty"));
         }
-        let json: Value = serde_json::from_str(&text).with_context(|| {
-            format!(
-                "login response is not valid JSON: {}",
-                text.chars().take(100).collect::<String>()
-            )
-        })?;
+        let preview = sanitize_session_error_message(&text.chars().take(100).collect::<String>());
+        let json: Value = serde_json::from_str(&text)
+            .with_context(|| format!("login response is not valid JSON: {preview}"))?;
 
         if json.get("ok").and_then(|v| v.as_bool()) == Some(false) {
             let msg = json
@@ -200,7 +256,10 @@ impl ReqwestRemoteSessionProvider {
                 .or_else(|| json.get("error")?.get("message"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("login failed");
-            return Err(anyhow!("login failed: {}", msg));
+            return Err(anyhow!(
+                "login failed: {}",
+                sanitize_session_error_message(msg)
+            ));
         }
 
         Ok(())
@@ -209,7 +268,7 @@ impl ReqwestRemoteSessionProvider {
     fn url(&self, path: &str) -> String {
         let base = self.base_url.trim_end_matches('/');
         let path = path.trim_start_matches('/');
-        format!("{}/{}/", base, path)
+        format!("{}/{}", base, path)
     }
 
     /// 发送 GET 请求并获取文本。
@@ -245,26 +304,48 @@ impl ReqwestRemoteSessionProvider {
         Ok(text)
     }
 
-    /// 处理 BI 的 LZString+Base64 响应。
-    fn decode_permission_info_payload(&self, raw: &str) -> Result<String> {
+    /// 处理 BI 结构化接口的 JSON 或 LZString+Base64 响应。
+    fn decode_structured_payload(&self, raw: &str, context: &str) -> Result<String> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             return Err(anyhow!(
-                "failed to decode getPermissionInfo: response body is empty"
+                "failed to decode {context}: response body is empty"
             ));
         }
 
-        if looks_like_json(trimmed) {
+        if looks_like_json_document(trimmed) {
             return Ok(raw.to_string());
         }
 
-        let decoded = decompress_from_base64(trimmed).ok_or_else(|| {
-            anyhow!("failed to decode getPermissionInfo: LZString+Base64 decompression failed")
-        })?;
+        if let Ok(Value::String(inner)) = serde_json::from_str::<Value>(trimmed) {
+            if looks_like_json_document(inner.trim()) {
+                return Ok(inner);
+            }
+            return decompress_lzstring_base64(&inner, context);
+        }
 
-        String::from_utf16(&decoded).map_err(|_| {
-            anyhow!("failed to decode getPermissionInfo: decompressed payload is not valid UTF-16")
-        })
+        decompress_lzstring_base64(trimmed, context)
+    }
+
+    /// 处理 BI 文件内容响应：压缩内容会解压，普通文本保持原样。
+    fn decode_content_payload(&self, raw: &str) -> Result<String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("remote session getFileContent response is empty"));
+        }
+
+        if looks_like_json_document(trimmed) {
+            return Ok(raw.to_string());
+        }
+
+        if let Ok(Value::String(inner)) = serde_json::from_str::<Value>(trimmed) {
+            if looks_like_json_document(inner.trim()) {
+                return Ok(inner);
+            }
+            return Ok(decompress_lzstring_base64(&inner, "file content").unwrap_or(inner));
+        }
+
+        Ok(decompress_lzstring_base64(trimmed, "file content").unwrap_or_else(|_| raw.to_string()))
     }
 
     /// 解析 JSON（返回通用 Value，便于兼容通用包装层）。
@@ -295,12 +376,15 @@ impl ReqwestRemoteSessionProvider {
         None
     }
 
-    /// 先直接取数组字段，再兼容 data/file/result 包装后的 children/数组。
+    /// 先直接取数组字段，再兼容 data/file/result 包装后的 children/files/数组。
     fn find_wrapped_array<'a>(value: &'a Value, key: &str) -> Option<&'a [Value]> {
         if let Some(items) = value.get(key).and_then(Value::as_array) {
             return Some(items.as_slice());
         }
         if let Some(items) = value.get("children").and_then(Value::as_array) {
+            return Some(items);
+        }
+        if let Some(items) = value.get("files").and_then(Value::as_array) {
             return Some(items);
         }
 
@@ -320,11 +404,17 @@ impl ReqwestRemoteSessionProvider {
             if let Some(items) = nested.get("children").and_then(Value::as_array) {
                 return Some(items);
             }
+            if let Some(items) = nested.get("files").and_then(Value::as_array) {
+                return Some(items);
+            }
             if let Some(nested_file) = nested.get("file") {
                 if let Some(items) = nested_file.as_array() {
                     return Some(items);
                 }
                 if let Some(items) = nested_file.get("children").and_then(Value::as_array) {
+                    return Some(items);
+                }
+                if let Some(items) = nested_file.get("files").and_then(Value::as_array) {
                     return Some(items);
                 }
             }
@@ -333,6 +423,9 @@ impl ReqwestRemoteSessionProvider {
                     return Some(items);
                 }
                 if let Some(items) = nested_result.get("children").and_then(Value::as_array) {
+                    return Some(items);
+                }
+                if let Some(items) = nested_result.get("files").and_then(Value::as_array) {
                     return Some(items);
                 }
             }
@@ -388,12 +481,97 @@ impl ReqwestRemoteSessionProvider {
 
         if value.is_object() { Some(value) } else { None }
     }
+
+    /// 读取某个项目或模块路径下的全部后代文件。
+    fn list_metafiles_from_descendant_path(
+        &self,
+        project_ref: &str,
+        descendant_path: &str,
+    ) -> Result<Vec<RemoteMetafileEntry>> {
+        let path = format!(
+            "/api/meta/services/getFileDescendant/{}",
+            percent_encode_path(descendant_path, true)
+        );
+        let raw = self.get_text(&path)?;
+        let json_text = self.decode_structured_payload(&raw, "file descendants")?;
+        let parsed = Self::parse_json(&json_text, "file descendants")?;
+        let file_list = Self::find_wrapped_array(&parsed, "children")
+            .context("failed to parse file descendants: expected array")?;
+
+        self.parse_metafile_entries(project_ref, file_list)
+    }
+
+    /// 读取项目根节点下的模块列表，用于真实 BI 的分模块拉取流程。
+    fn list_project_children(&self, project_ref: &str) -> Result<Vec<BiFileInfo>> {
+        let path = format!(
+            "/api/meta/services/getFileChildren/{}",
+            percent_encode_path(project_ref, false)
+        );
+        let raw = self.get_text(&path)?;
+        let json_text = self.decode_structured_payload(&raw, "project children")?;
+        let parsed = Self::parse_json(&json_text, "project children")?;
+        let children = Self::find_wrapped_array(&parsed, "children")
+            .context("failed to parse project children: expected array")?;
+
+        children
+            .iter()
+            .map(|child| {
+                serde_json::from_value(child.clone()).with_context(|| {
+                    format!("failed to parse project child entry for project {project_ref}")
+                })
+            })
+            .collect()
+    }
+
+    /// 将 BI 文件数组转换成 session 同步可消费的远程文件条目。
+    fn parse_metafile_entries(
+        &self,
+        project_ref: &str,
+        file_list: &[Value],
+    ) -> Result<Vec<RemoteMetafileEntry>> {
+        let mut entries = Vec::new();
+        for file_value in file_list {
+            let info: BiFileInfo =
+                serde_json::from_value(file_value.clone()).with_context(|| {
+                    format!("failed to parse file descendant entry for project {project_ref}")
+                })?;
+            if let Some(entry) = Self::entry_from_file_info(project_ref, info) {
+                entries.push(entry);
+            }
+        }
+
+        Ok(entries)
+    }
+
+    /// 将单个 BI 文件信息转换成远程文件条目，目录节点会被跳过。
+    fn entry_from_file_info(project_ref: &str, info: BiFileInfo) -> Option<RemoteMetafileEntry> {
+        if info.is_folder.unwrap_or(false) {
+            return None;
+        }
+
+        let raw_path = info.resource_path()?;
+        let source_path = normalize_source_path(&raw_path, project_ref);
+        if source_path.is_empty() {
+            return None;
+        }
+
+        Some(RemoteMetafileEntry {
+            project_ref: project_ref.to_string(),
+            source_path,
+            file_id: info.resolved_id(None),
+            revision: info.revision,
+            etag: None,
+            mtime: info.modify_time,
+            size: None,
+            deleted: false,
+        })
+    }
 }
 
 impl RemoteSessionProvider for ReqwestRemoteSessionProvider {
     fn list_projects(&self) -> Result<Vec<RemoteProjectInfo>> {
         let raw = self.get_text("/api/me/getPermissionInfo")?;
-        let json_text = self.decode_permission_info_payload(&raw)?;
+        let json_text = self.decode_structured_payload(&raw, "permission info")?;
         let parsed = Self::parse_json(&json_text, "permission info")?;
 
         let meta_projects_value = Self::find_wrapped_field(&parsed, "metaProjects")
@@ -428,55 +606,34 @@ impl RemoteSessionProvider for ReqwestRemoteSessionProvider {
     }
 
     fn list_metafiles(&self, project_ref: &str) -> Result<Vec<RemoteMetafileEntry>> {
-        let path = format!(
-            "/api/meta/services/getFileDescendant/{}",
-            percent_encode_path(project_ref, true)
-        );
-        let raw = self.get_text(&path)?;
-        let parsed = Self::parse_json(&raw, "file descendants")?;
-        let file_list = Self::find_wrapped_array(&parsed, "children")
-            .context("failed to parse file descendants: expected array")?;
-
-        let mut entries = Vec::new();
-        for file_value in file_list {
-            let info: BiFileInfo =
-                serde_json::from_value(file_value.clone()).with_context(|| {
-                    format!("failed to parse file descendant entry for project {project_ref}")
+        match self.list_metafiles_from_descendant_path(project_ref, project_ref) {
+            Ok(entries) => Ok(entries),
+            Err(project_descendant_error) => {
+                let children = self.list_project_children(project_ref).with_context(|| {
+                    format!(
+                        "failed to list project children after project descendant request failed: {}",
+                        project_descendant_error
+                    )
                 })?;
 
-            if info.is_folder.unwrap_or(false) {
-                continue;
-            }
+                let mut entries = Vec::new();
+                for child in children {
+                    if child.is_folder.unwrap_or(false) {
+                        let Some(child_path) = child.resource_path() else {
+                            continue;
+                        };
+                        entries.extend(self.list_metafiles_from_descendant_path(
+                            project_ref,
+                            child_path.trim_start_matches('/'),
+                        )?);
+                    } else if let Some(entry) = Self::entry_from_file_info(project_ref, child) {
+                        entries.push(entry);
+                    }
+                }
 
-            let raw_path = info
-                .path
-                .as_deref()
-                .or_else(|| info.name.as_deref())
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            if raw_path.is_empty() {
-                continue;
+                Ok(entries)
             }
-
-            let source_path = normalize_source_path(&raw_path, project_ref);
-            if source_path.is_empty() {
-                continue;
-            }
-
-            entries.push(RemoteMetafileEntry {
-                project_ref: project_ref.to_string(),
-                source_path,
-                file_id: info.resolved_id(None),
-                revision: info.revision,
-                etag: None,
-                mtime: info.modify_time,
-                size: None,
-                deleted: false,
-            });
         }
-
-        Ok(entries)
     }
 
     fn fetch_metafile_info(&self, file_ref: &RemoteFileRef) -> Result<RemoteFileInfo> {
@@ -489,7 +646,8 @@ impl RemoteSessionProvider for ReqwestRemoteSessionProvider {
             percent_encode_path(file_id, false)
         );
         let raw = self.get_text(&path)?;
-        let parsed = Self::parse_json(&raw, "file info")?;
+        let json_text = self.decode_structured_payload(&raw, "file info")?;
+        let parsed = Self::parse_json(&json_text, "file info")?;
         let info_value = Self::find_wrapped_object(&parsed)
             .context("failed to parse file info payload: expected object")?;
 
@@ -531,10 +689,7 @@ impl RemoteSessionProvider for ReqwestRemoteSessionProvider {
             percent_encode_path(file_id, false)
         );
         let raw = self.get_text(&path)?;
-
-        if raw.trim().is_empty() {
-            return Err(anyhow!("remote session getFileContent response is empty"));
-        }
+        let raw_text = self.decode_content_payload(&raw)?;
 
         Ok(RemoteFileContent {
             source_path: file_ref.source_path.clone(),
@@ -543,7 +698,7 @@ impl RemoteSessionProvider for ReqwestRemoteSessionProvider {
             content_type: MetadataContentType::from_extension(
                 file_ref.source_path.rsplit('.').next().unwrap_or(""),
             ),
-            raw_text: raw,
+            raw_text,
         })
     }
 
@@ -583,11 +738,25 @@ impl RemoteSessionProvider for ReqwestRemoteSessionProvider {
     }
 }
 
-fn looks_like_json(input: &str) -> bool {
+fn decompress_lzstring_base64(input: &str, context: &str) -> Result<String> {
+    let trimmed = input.trim();
+    let decoded = decompress_from_base64(trimmed)
+        .filter(|decoded| !decoded.is_empty())
+        .or_else(|| {
+            decompress_from_encoded_uri_component(trimmed).filter(|decoded| !decoded.is_empty())
+        })
+        .ok_or_else(|| anyhow!("failed to decode {context}: LZString decompression failed"))?;
+
+    String::from_utf16(&decoded).map_err(|_| {
+        anyhow!("failed to decode {context}: decompressed payload is not valid UTF-16")
+    })
+}
+
+fn looks_like_json_document(input: &str) -> bool {
     input
         .chars()
         .next()
-        .is_some_and(|first| matches!(first, '{' | '[' | '\"' | '-' | '0'..='9'))
+        .is_some_and(|first| matches!(first, '{' | '['))
 }
 
 /// 将 BI 绝对路径转换为项目内逻辑路径。
@@ -622,4 +791,20 @@ fn percent_encode(text: &str) -> String {
         }
     }
     encoded
+}
+
+/// 将 BI 可能返回的字符串/数字版本号统一反序列化为字符串。
+fn deserialize_optional_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| match value {
+        Value::String(text) => Some(text),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }))
 }

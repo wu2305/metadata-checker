@@ -4790,8 +4790,7 @@ browser/
   - session-aware build graph 复用现有 scanner/query。
 
 - [x] M41.8：实现 native CLI remote provider
-  - 当前已完成 native remote session provider contract、in-memory/test provider、基于 reqwest 的 BI provider 初版，以及 permissionInfo JSON / lz-string 压缩响应解析测试。
-  - 尚未完成真实登录/cookie jar 接入和真实服务器端到端验收，因此本项仍未完全验收。
+  - 当前已完成 native remote session provider contract、in-memory/test provider、基于 reqwest 的 BI provider、permissionInfo JSON / lz-string 压缩响应解析、gzip HTTP body 解压、真实登录 cookie jar 复用和真实服务器端到端验收。
   - `list_projects`
   - `list_metafiles`
   - `fetch_metafile_info`
@@ -4816,7 +4815,7 @@ browser/
 - [x] M41.10：远程同步到 session
   - 当前已完成远程内容写入 session project mirror 的底座：logical path 校验、临时文件写入、manifest 更新、未变化跳过、删除标记、deleted 条目不拉取内容、失败时保留旧 session。
   - 已提供 `build_session_graph` 复用现有 `ProjectIndexer::scan`。
-  - 尚未接入真实 CLI refresh 命令，因此本项仍未完全验收。
+  - 已接入真实 CLI refresh 命令，并在真实 BI 测试环境验证 `analyzer` 项目可同步到 session 后构建 graphdb。
   - 根据 remote logical path 写入 session project。
   - manifest 记录 etag/version/hash/mtime/size。
   - 支持只同步 SuperPage 及其关联 `.tbl` 的局部模式。
@@ -4834,7 +4833,7 @@ browser/
   - [x] show manifest
   - [x] delete session
   - [x] status
-  - [ ] refresh session：当前返回稳定 `SESSION_REFRESH_NOT_IMPLEMENTED` envelope，等待真实 provider/login 接入
+  - [x] refresh session：已接入真实 provider/login/session sync/build graph
 
 验收标准：
 

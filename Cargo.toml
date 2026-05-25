@@ -13,6 +13,7 @@ cli-local = [
     "reqwest/rustls-tls",
     "reqwest/cookies",
     "reqwest/json",
+    "reqwest/gzip",
     "dep:base64",
     "dep:urlencoding",
     "dep:tokio",

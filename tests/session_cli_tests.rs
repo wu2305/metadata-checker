@@ -252,8 +252,66 @@ fn session_refresh_invalid_sync_mode_returns_stable_error() {
 }
 
 #[test]
+fn session_refresh_login_error_message_is_sanitized() {
+    let root = test_root("refresh-login-error");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("read mock server addr");
+
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        let mut request = [0_u8; 2048];
+        let n = stream.read(&mut request).expect("read request");
+        let request = String::from_utf8_lossy(&request[..n]).to_string();
+        assert!(
+            request.contains("/api/auth/signin"),
+            "expected request to signin, got: {request}"
+        );
+
+        let body = r#"{"ok":false,"message":"password=secret token=abc cookie=JSESSIONID cipherPassport=xxx set-cookie=JSESSIONID=abc"}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+            body.len(),
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    });
+
+    let output = run_session_command_raw(
+        &root,
+        &[
+            "--session-refresh",
+            "s1",
+            "--remote-server",
+            &format!("http://{addr}"),
+            "--remote-project",
+            "analyzer",
+            "--remote-username",
+            "user",
+            "--remote-password",
+            "pass",
+        ],
+    );
+    assert!(output.status.success());
+    let json = as_json_from_stdout(&output);
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "SESSION_AUTH_REQUIRED");
+
+    let json_text = serde_json::to_string(&json).expect("serialize output");
+    assert!(!json_text.contains("password=secret"));
+    assert!(!json_text.contains("token=abc"));
+    assert!(!json_text.contains("JSESSIONID"));
+    assert!(!json_text.contains("cipherPassport=xxx"));
+    assert!(!json_text.contains("set-cookie="));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn session_refresh_full_mode_success_with_mock_remote_server() {
     let root = test_root("refresh-success");
+    let minimal_superpage = r#"{"pageName":"Page","components":[]}"#;
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("read mock server addr");
@@ -276,7 +334,7 @@ fn session_refresh_full_mode_success_with_mock_remote_server() {
             (
                 "/api/meta/services/getFileContent/spg1",
                 200,
-                r#"{"pageName":"Page","components":[]}"#,
+                minimal_superpage,
                 None,
             ),
         ] {
@@ -285,13 +343,19 @@ fn session_refresh_full_mode_success_with_mock_remote_server() {
             let n = stream.read(&mut request).expect("read request");
             let request = String::from_utf8_lossy(&request[..n]).to_string();
 
-            let request_lower = request.to_ascii_lowercase();
+            let request_line = request.lines().next().unwrap_or_default();
+            let method = if path == "/api/auth/signin" {
+                "POST"
+            } else {
+                "GET"
+            };
             assert!(
-                request_lower.contains(&path.to_ascii_lowercase()),
-                "expected request to {path}, got: {request}"
+                request_line == format!("{method} {path} HTTP/1.1"),
+                "expected exact request line for {path}, got: {request_line}"
             );
 
             if path != "/api/auth/signin" {
+                let request_lower = request.to_ascii_lowercase();
                 assert!(
                     request_lower.contains("cookie: jsessionid=abc"),
                     "expected cookie for {path}, got: {request}"
@@ -364,6 +428,29 @@ fn session_refresh_full_mode_success_with_mock_remote_server() {
             .expect("written must be integer")
             >= 1
     );
+    let manifest_path = root.join("s1").join("session.json");
+    assert!(manifest_path.exists());
+    let manifest_text = std::fs::read_to_string(&manifest_path).expect("read session manifest");
+    let manifest_json: serde_json::Value =
+        serde_json::from_str(&manifest_text).expect("manifest should be valid JSON");
+    assert_eq!(manifest_json["session_id"].as_str(), Some("s1"));
+    assert_eq!(manifest_json["project_ref"].as_str(), Some("proj"));
+
+    let manifest_files = manifest_json["files"]
+        .as_array()
+        .expect("manifest files should be array");
+    let page_entry = manifest_files
+        .iter()
+        .find(|file| file["source_path"] == "app/Page.spg")
+        .expect("manifest files should contain app/Page.spg");
+    assert_eq!(page_entry["revision"].as_str(), Some("1"));
+    assert_eq!(page_entry["deleted"].as_bool(), Some(false));
+
+    let mirror_path = root.join("s1").join("project").join("app").join("Page.spg");
+    assert!(mirror_path.exists());
+    let mirror_text = std::fs::read_to_string(&mirror_path).expect("read mirrored Page.spg");
+    assert_eq!(mirror_text, minimal_superpage);
+
     let graph_db_path = std::path::Path::new(
         json["graph_db_path"]
             .as_str()

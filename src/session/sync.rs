@@ -227,13 +227,19 @@ fn hash_text(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::remote_metadata::MetadataContentType;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
     fn test_root(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "metadata-checker-session-sync-test-{}-{}",
-            name,
+        let seq = TEST_DIR_SEQ.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        let path = std::env::temp_dir().join(format!(
+            "metadata-checker-session-sync-test-{pid}-{seq}-{}",
             hash_text(name)
-        ))
+        ));
+        let _ = fs::remove_dir_all(&path);
+        path
     }
 
     fn manifest() -> SessionManifest {

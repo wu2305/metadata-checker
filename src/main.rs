@@ -6,6 +6,7 @@ use metadata_checker::output;
 use metadata_checker::parser;
 use metadata_checker::priority;
 use metadata_checker::scanner;
+use metadata_checker::session::reqwest_provider::sanitize_session_error_message;
 use metadata_checker::tool_contract::{self, InvocationAdapter};
 
 use anyhow::Result;
@@ -34,17 +35,31 @@ fn run_cli_runtime_tool(
 
 /// 输出 session 命令的结构化错误。
 fn print_session_error(code: &str, message: impl Into<String>) -> Result<()> {
+    let safe_message = sanitize_session_error_message(&message.into());
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
             "ok": false,
             "error": {
                 "code": code,
-                "message": message.into(),
+                "message": safe_message,
             },
         }))?
     );
     Ok(())
+}
+
+/// 格式化错误链，供 session 命令输出可诊断但已脱敏的错误。
+fn format_error_chain(err: &anyhow::Error) -> String {
+    let mut parts = Vec::new();
+    for cause in err.chain() {
+        let message = cause.to_string();
+        if parts.last().is_some_and(|last| last == &message) {
+            continue;
+        }
+        parts.push(message);
+    }
+    sanitize_session_error_message(&parts.join(": "))
 }
 
 /// 读取 session manifest，失败时转换为稳定 JSON envelope。
@@ -202,7 +217,7 @@ fn main() -> Result<()> {
                 if let Err(e) = provider.login(u, p, "sys") {
                     return print_session_error(
                         "SESSION_AUTH_REQUIRED",
-                        format!("remote login failed: {}", e),
+                        format!("remote login failed: {}", format_error_chain(&e)),
                     );
                 }
             }
@@ -268,7 +283,7 @@ fn main() -> Result<()> {
             Err(err) => {
                 print_session_error(
                     "SESSION_REFRESH_FAILED",
-                    format!("session refresh failed: {}", err),
+                    format!("session refresh failed: {}", format_error_chain(&err)),
                 )?;
             }
         }

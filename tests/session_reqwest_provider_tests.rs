@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
-use lz_str::compress_to_base64;
+use lz_str::{compress_to_base64, compress_to_encoded_uri_component};
 use metadata_checker::remote_metadata::RemoteFileRef;
 use metadata_checker::session::RemoteSessionProvider;
 use metadata_checker::session::reqwest_provider::ReqwestRemoteSessionProvider;
@@ -31,6 +31,39 @@ fn serve_once(status: u16, body: &str) -> String {
         stream
             .write_all(response.as_bytes())
             .expect("write response");
+    });
+    format!("http://{addr}")
+}
+
+fn serve_sequence(responses: Vec<(&'static str, u16, &'static str)>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let addr = listener.local_addr().expect("read test server addr");
+    thread::spawn(move || {
+        for (expected_path, status, body) in responses {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 4096];
+            let n = stream.read(&mut request).expect("read request");
+            let req_str = String::from_utf8_lossy(&request[..n]);
+            assert!(
+                req_str.contains(expected_path),
+                "expected request path {expected_path}, got {req_str}"
+            );
+            let status_text = match status {
+                200 => "OK",
+                400 => "Bad Request",
+                401 => "Unauthorized",
+                403 => "Forbidden",
+                404 => "Not Found",
+                _ => "Error",
+            };
+            let response = format!(
+                "HTTP/1.1 {status} {status_text}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                body.len(),
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
     });
     format!("http://{addr}")
 }
@@ -64,15 +97,25 @@ fn list_projects_200_compressed_success() {
 }
 
 #[test]
+fn list_projects_200_quoted_compressed_success() {
+    let raw = r#"{"metaProjects":[{"projectName":"quoted","desc":"quoted project"}]}"#;
+    let compressed_json_string = serde_json::to_string(&compress_to_base64(raw)).unwrap();
+    let provider =
+        ReqwestRemoteSessionProvider::new(serve_once(200, &compressed_json_string)).unwrap();
+    let projects = provider.list_projects().unwrap();
+
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].project_ref, "quoted");
+    assert_eq!(projects[0].project_name, "quoted project");
+}
+
+#[test]
 fn list_projects_compressed_but_invalid_should_error() {
     let provider =
         ReqwestRemoteSessionProvider::new(serve_once(200, "not-a-valid-lz-string")).unwrap();
     let err = provider.list_projects().unwrap_err();
 
-    assert!(
-        err.to_string()
-            .contains("LZString+Base64 decompression failed")
-    );
+    assert!(err.to_string().contains("LZString decompression failed"));
 }
 
 #[test]
@@ -90,6 +133,71 @@ fn list_metafiles_200_filter_folders() {
     assert_eq!(files[0].file_id, Some("file-a".to_string()));
     assert_eq!(files[1].source_path, "data/tables/tb.tbl");
     assert_eq!(files[1].file_id, Some("file-b".to_string()));
+}
+
+#[test]
+fn list_metafiles_200_compressed_success() {
+    let raw = r#"{"children":[
+        {"id":"file-a","path":"/xiaoshouyi/app/page.spg","name":"page.spg","revision":"1","modifyTime":111,"isFolder":false},
+        {"id":"folder-1","path":"/xiaoshouyi/app/folder","name":"folder","isFolder":true}
+    ]}"#;
+    let compressed = compress_to_base64(raw);
+    let provider = ReqwestRemoteSessionProvider::new(serve_once(200, &compressed)).unwrap();
+
+    let files = provider.list_metafiles("xiaoshouyi").unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].source_path, "app/page.spg");
+    assert_eq!(files[0].file_id, Some("file-a".to_string()));
+}
+
+#[test]
+fn list_metafiles_200_uri_component_compressed_success() {
+    let raw = r#"{"children":[
+        {"id":"file-a","path":"/xiaoshouyi/app/page.spg","name":"page.spg","revision":"1","modifyTime":111,"isFolder":false}
+    ]}"#;
+    let compressed = compress_to_encoded_uri_component(raw);
+    let provider = ReqwestRemoteSessionProvider::new(serve_once(200, &compressed)).unwrap();
+
+    let files = provider.list_metafiles("xiaoshouyi").unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].source_path, "app/page.spg");
+    assert_eq!(files[0].file_id, Some("file-a".to_string()));
+}
+
+#[test]
+fn list_metafiles_falls_back_to_project_children_and_module_descendants() {
+    let children_body = r#"{"file":{"name":"proj","type":"project","projectName":"proj","isFolder":true},"children":[
+        {"id":"app-folder","name":"app","projectName":"proj","parentDir":"/proj","isFolder":true},
+        {"id":"root-page","name":"Root.spg","projectName":"proj","parentDir":"/proj","revision":"1","isFolder":false}
+    ]}"#;
+    let descendant_body = r#"{"project":{"projectName":"proj"},"module":{"name":"app"},"files":[
+        {"id":"app-folder-file","name":"App.app","projectName":"proj","parentDir":"/proj/app","isFolder":true},
+        {"id":"page-file","name":"Page.spg","projectName":"proj","parentDir":"/proj/app/App.app","revision":"2","isFolder":false}
+    ]}"#;
+    let provider = ReqwestRemoteSessionProvider::new(serve_sequence(vec![
+        ("/api/meta/services/getFileDescendant/proj", 400, "{}"),
+        (
+            "/api/meta/services/getFileChildren/proj",
+            200,
+            children_body,
+        ),
+        (
+            "/api/meta/services/getFileDescendant/proj/app",
+            200,
+            descendant_body,
+        ),
+    ]))
+    .unwrap();
+
+    let files = provider.list_metafiles("proj").unwrap();
+
+    assert_eq!(files.len(), 2);
+    assert!(files.iter().any(|file| {
+        file.source_path == "Root.spg" && file.file_id == Some("root-page".to_string())
+    }));
+    assert!(files.iter().any(|file| {
+        file.source_path == "app/App.app/Page.spg" && file.file_id == Some("page-file".to_string())
+    }));
 }
 
 #[test]
@@ -116,6 +224,30 @@ fn fetch_metafile_content_200_text() {
     assert_eq!(content.source_path, "app/page.spg");
     assert_eq!(content.file_id, Some("file-a".to_string()));
     assert_eq!(content.raw_text, r#"{"canvas":{"components":[]}}"#);
+}
+
+#[test]
+fn fetch_metafile_content_200_compressed_text() {
+    let body = r#"{"canvas":{"components":[]}}"#;
+    let compressed = compress_to_base64(body);
+    let provider = ReqwestRemoteSessionProvider::new(serve_once(200, &compressed)).unwrap();
+    let content = provider
+        .fetch_metafile_content(&file_ref("xiaoshouyi", "app/page.spg", "file-a"))
+        .unwrap();
+
+    assert_eq!(content.raw_text, body);
+}
+
+#[test]
+fn fetch_metafile_content_200_uri_component_compressed_text() {
+    let body = r#"{"canvas":{"components":[]}}"#;
+    let compressed = compress_to_encoded_uri_component(body);
+    let provider = ReqwestRemoteSessionProvider::new(serve_once(200, &compressed)).unwrap();
+    let content = provider
+        .fetch_metafile_content(&file_ref("xiaoshouyi", "app/page.spg", "file-a"))
+        .unwrap();
+
+    assert_eq!(content.raw_text, body);
 }
 
 #[test]
@@ -237,6 +369,20 @@ fn login_invalid_json_returns_stable_error() {
         !err.to_string().contains("pass"),
         "error must not leak password"
     );
+}
+
+#[test]
+fn login_failed_message_is_sanitized() {
+    let body = r#"{"ok":false,"message":"password=secret token=abc cookie=JSESSIONID cipherPassport=xxx set-cookie=JSESSIONID=abc"}"#;
+    let provider = ReqwestRemoteSessionProvider::new(serve_once(200, body)).unwrap();
+    let err = provider.login("user", "pass", "sys").unwrap_err();
+
+    assert!(!err.to_string().contains("password=secret"));
+    assert!(!err.to_string().contains("token=abc"));
+    assert!(!err.to_string().contains("cookie=JSESSIONID"));
+    assert!(!err.to_string().contains("cipherPassport=xxx"));
+    assert!(!err.to_string().contains("set-cookie="));
+    assert!(err.to_string().contains("login failed"));
 }
 
 #[test]

@@ -107,7 +107,7 @@ browser-wasm = [
 
 ### Phase 5：Native Session 基座（M41.6 - M41.12）
 
-状态：部分落地。已完成 manifest schema、session manager、AuthContext/SecretStore、native remote session provider contract + in-memory/test provider、reqwest BI provider 初版、远程内容写入 session project mirror、删除事件处理、失败不污染旧 session、session-aware build graph 辅助函数，以及 `--session-list/show/status/delete/refresh` 的 CLI 契约测试。尚未完成真实 CLI 登录/session refresh 端到端命令、真实服务器增量拉取验收和 browser-wasm 真实 artifact 联调。
+状态：native session 主链路已落地。已完成 manifest schema、session manager、AuthContext/SecretStore、native remote session provider contract + in-memory/test provider、reqwest BI provider、远程内容写入 session project mirror、删除事件处理、失败不污染旧 session、session-aware build graph 辅助函数，以及 `--session-list/show/status/delete/refresh` 的 CLI 契约测试。2026-05-25 已用真实 BI 测试环境验证 `--session-refresh analyzer` 可登录、拉取远程元数据、写入 session mirror 并构建 graphdb。browser-wasm 真实 artifact 联调仍在后续阶段。
 
 | 任务 | 文件 | 说明 |
 |---|---|---|
@@ -117,7 +117,7 @@ browser-wasm = [
 | 同步到 session | `src/session/sync.rs` | 远程 logical path → 本地 session 目录；局部模式（只同步 SPG+关联 TBL）/ 全量模式 |
 | 增量同步 | `src/session/sync.rs` | manifest 记录 etag/version/hash/mtime/size；未变化不下载；删除文件标记并移除 |
 | 认证边界 | `src/session/auth.rs` | `AuthProvider`、`SecretStore`、`AuthContext`（browser_session / cookie_jar / explicit_credentials / none） |
-| session 管理命令 | `src/cli.rs` + `src/main.rs` | 已提供 `--session-list`, `--session-show`, `--session-refresh`, `--session-delete`, `--session-status`；`refresh` 暂返回稳定 `SESSION_REFRESH_NOT_IMPLEMENTED` envelope |
+| session 管理命令 | `src/cli.rs` + `src/main.rs` | 已提供 `--session-list`, `--session-show`, `--session-refresh`, `--session-delete`, `--session-status`；`refresh` 已接入真实 provider/login/session sync/build graph |
 | 脱敏策略 | — | token/secret 不进入 stdout/stderr/graphdb/manifest；日志脱敏 |
 
 ---
