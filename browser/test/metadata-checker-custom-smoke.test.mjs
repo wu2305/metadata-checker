@@ -268,6 +268,62 @@ describe("metadata-checker custom.js AMD entry", () => {
     assert.strictEqual(marker(document, "graph-panel"), "unavailable");
   });
 
+  it("records stable graph factory diagnostics when graph factories are missing", async () => {
+    const { module, document } = loadCustomModule();
+    const result = await module.onInitDesigner({}, {});
+
+    assert.strictEqual(result.installed, true);
+    assert.strictEqual(marker(document, "graph-factory"), "missing_renderer_host");
+    assert.strictEqual(marker(document, "graph-factory-renderer"), "missing");
+    assert.strictEqual(marker(document, "graph-factory-host"), "missing");
+    assert.strictEqual(marker(document, "graph-factory-diagnostic"), "GRAPH_PANEL_FACTORY_MISSING");
+    assert.strictEqual(marker(document, "graph-factory-installer"), null);
+    assert.strictEqual(marker(document, "graph-renderer"), "missing");
+  });
+
+  it("optional graph factory installer can materialize panel factories", async () => {
+    let installerCalled = 0;
+    const { module, document } = loadCustomModule({
+      windowOverrides: {
+        __metadata_checker_graph_factory_installer: ({ window: sandboxWindow }) => {
+          installerCalled += 1;
+          sandboxWindow.__metadata_checker_echarts_resolver_factory = async () => ({
+            echarts: { version: "4.x" },
+            source: "commons/echarts/echarts-ext",
+            diagnostics: [],
+          });
+          sandboxWindow.__metadata_checker_graph_renderer_factory = ({ echarts }) => ({
+            echarts,
+            render: async () => ({ renderer: echarts ? "echarts" : "html" }),
+            renderError: async () => ({ renderer: "error" }),
+          });
+          sandboxWindow.__metadata_checker_graph_panel_host_factory = ({ renderer }) => ({
+            renderer,
+            mount() {
+              return { mounted: true };
+            },
+            render(result) {
+              return renderer.render(result);
+            },
+            renderError(error) {
+              return renderer.renderError(error);
+            },
+          });
+        },
+      },
+    });
+
+    const result = await module.onInitDesigner({}, {});
+
+    assert.strictEqual(installerCalled, 1);
+    assert.strictEqual(result.installed, true);
+    assert.strictEqual(marker(document, "graph-factory-installer"), "installed");
+    assert.strictEqual(marker(document, "graph-panel"), "mounted");
+    assert.strictEqual(marker(document, "graph-factory"), "installed");
+    assert.strictEqual(marker(document, "graph-renderer"), "echarts");
+    assert.strictEqual(marker(document, "graph-echarts-resolver"), "installed");
+  });
+
   it("wires optional graph renderer and panel host into controller", async () => {
     let capturedControllerArgs = null;
     let panelMounted = false;

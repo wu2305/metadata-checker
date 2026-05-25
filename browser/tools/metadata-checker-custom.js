@@ -335,6 +335,30 @@ define(function () {
     };
   }
 
+  async function ensureGraphPanelFactories() {
+    const installer = window.__metadata_checker_graph_factory_installer ?? null;
+    if (typeof installer !== "function") {
+      return;
+    }
+
+    try {
+      _writeMarker("graph-factory-installer", "attempted");
+      await Promise.resolve(
+        installer({
+          window,
+          document,
+          logger: console,
+          marker: _writeMarker,
+        }),
+      );
+      _writeMarker("graph-factory-installer", "installed");
+    } catch (err) {
+      _log("warn", "Graph factory installer failed:", err);
+      _writeMarker("graph-factory-installer", "failed");
+      _writeMarker("graph-factory-diagnostic", "GRAPH_PANEL_FACTORY_INSTALL_FAILED");
+    }
+  }
+
   // ---- Renderer ----
 
   function createDomRenderer() {
@@ -365,9 +389,42 @@ define(function () {
     const hostFactory =
       window.__metadata_checker_graph_panel_host_factory ?? null;
     if (!rendererFactory || !hostFactory) {
+      await ensureGraphPanelFactories();
+    }
+
+    const finalRendererFactory =
+      window.__metadata_checker_graph_renderer_factory ?? rendererFactory;
+    const finalHostFactory =
+      window.__metadata_checker_graph_panel_host_factory ?? hostFactory;
+
+    if (!finalRendererFactory || !finalHostFactory) {
+      if (!finalRendererFactory) {
+        _writeMarker("graph-factory-renderer", "missing");
+      }
+      if (!finalHostFactory) {
+        _writeMarker("graph-factory-host", "missing");
+      }
+      _writeMarker(
+        "graph-factory",
+        !finalRendererFactory && !finalHostFactory
+          ? "missing_renderer_host"
+          : "missing_" +
+              (!finalRendererFactory
+                ? "renderer"
+                : "panel_host"),
+      );
+      _writeMarker("graph-factory-diagnostic", "GRAPH_PANEL_FACTORY_MISSING");
       _writeMarker("graph-panel", "unavailable");
+      _writeMarker("graph-renderer", "missing");
       return null;
     }
+
+    if (!rendererFactory || !hostFactory) {
+      _writeMarker("graph-factory", "installed");
+    }
+
+    const rendererFactoryToUse = finalRendererFactory;
+    const hostFactoryToUse = finalHostFactory;
 
     let echarts = null;
     const resolverFactory =
@@ -381,15 +438,19 @@ define(function () {
         });
         echarts = resolved?.echarts ?? null;
         _writeMarker("graph-renderer", echarts ? "echarts" : "html");
+        _writeMarker("graph-echarts-resolver", "installed");
       } catch (err) {
         _log("warn", "ECharts resolver failed, falling back to HTML renderer:", err);
+        _writeMarker("graph-echarts-resolver", "failed");
         _writeMarker("graph-renderer", "html");
+        _writeMarker("graph-factory-diagnostic", "GRAPH_ECHARTS_RESOLVER_FAILED");
       }
     } else {
+      _writeMarker("graph-echarts-resolver", "missing");
       _writeMarker("graph-renderer", "html");
     }
 
-    const graphRenderer = rendererFactory({
+    const graphRenderer = rendererFactoryToUse({
       document,
       echarts,
       onEvent(event) {
@@ -398,7 +459,7 @@ define(function () {
         }
       },
     });
-    const panelHost = hostFactory({
+    const panelHost = hostFactoryToUse({
       document,
       parent: document.body,
       renderer: graphRenderer,

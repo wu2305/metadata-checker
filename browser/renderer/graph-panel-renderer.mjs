@@ -166,12 +166,12 @@ function extractNodePayloadForExpand(node) {
   const expandToken = node?.expand_token ?? node?.expandToken ?? node?.metadata?.expand_token ?? null;
   return {
     nodeId: node?.id ?? node?.nodeId ?? node?.node_id ?? null,
-    legacyNodeId: node?.nodeId ?? null,
+    legacyNodeId: node?.nodeId ?? node?.node_id ?? null,
     depth: node?.depth ?? null,
-    target: node?.target ?? null,
+    target: node?.target ?? node?.metadata?.target ?? null,
     expandToken,
     expand_token: expandToken,
-    collapsed: Boolean(node?.collapsed),
+    collapsed: Boolean(node?.collapsed || node?.metadata?.collapsed === true),
   };
 }
 
@@ -219,7 +219,9 @@ export function createGraphPanelRenderer(rawOptions = {}) {
       });
       layout.diagnostics = normalized.diagnostics;
       layout.source_summary = normalized.source_summary;
-      layout.truncatedReason = normalized.truncatedReason ?? "";
+      if (normalized.truncatedReason) {
+        layout.truncatedReason = normalized.truncatedReason;
+      }
     } catch (error) {
       if (typeof options.onDiagnostic === "function") {
         options.onDiagnostic(error);
@@ -249,6 +251,7 @@ export function createGraphPanelRenderer(rawOptions = {}) {
             edgeCount: layout.edgeCount ?? 0,
             focus: layout.focus_node,
             truncated: Boolean(layout.truncated),
+            truncatedReason: layout.truncatedReason,
             depth: toMarkerDepth(layout),
             renderer,
           });

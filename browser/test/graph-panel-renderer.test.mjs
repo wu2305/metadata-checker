@@ -245,6 +245,19 @@ describe("createGraphPanelRenderer", () => {
     assert.ok(depth2Nodes.length >= 1);
     const focusNodes = findByClass(container, "graph-node-focus");
     assert.strictEqual(focusNodes.length, 1);
+
+    const result = await renderer.render({
+      nodes: VIZ.nodes,
+      edges: VIZ.edges,
+      groups: [],
+      focus_node: "focus",
+      source_summary: VIZ.source_summary,
+      diagnostics: [],
+      truncated: false,
+      status: "ready",
+    });
+    const weakEdges = (result.graph.edges || []).filter((edge) => edge.edgeClass === "weak-edge");
+    assert.ok(weakEdges.length >= 1);
   });
 
   it("renders collapsed/expandable node click as expand_requested event without inferring relations", async () => {
@@ -277,8 +290,144 @@ describe("createGraphPanelRenderer", () => {
 
     assert.strictEqual(events.length, 1);
     assert.strictEqual(events[0].type, "expand_requested");
+    assert.strictEqual(events[0].event, "click");
     assert.ok(typeof events[0].nodeId === "string");
-    assert.ok(typeof events[0].node?.nodeId === "string" || events[0].nodeId);
+    assert.ok(events[0].nodeId);
+  });
+
+  it("keeps collapsed nodes visible and emits collapse-aware expand event", async () => {
+    const events = [];
+    const document = createFakeDocument();
+    const container = document.createElement("div");
+    const renderer = createGraphPanelRenderer({
+      container,
+      document,
+      maxDepth: 2,
+      onEvent(payload) {
+        events.push(payload);
+      },
+    });
+
+    const collapsedNode = {
+      id: "collapsed",
+      label: "collapsed block",
+      kind: "Model",
+      metadata: { depth: 1, collapsed: true },
+    };
+    const deepNode = {
+      id: "deep",
+      label: "deep node",
+      kind: "Model",
+      metadata: { depth: 3 },
+    };
+
+    await renderer.render({
+      nodes: [
+        { id: "focus", label: "focus", metadata: { depth: 0 } },
+        collapsedNode,
+        deepNode,
+      ],
+      edges: [
+        { from: "focus", to: "collapsed", kind: "Reads", direction: "Forward", label: "to collapsed" },
+        { from: "collapsed", to: "deep", kind: "Writes", direction: "Forward", label: "to deep" },
+      ],
+      groups: [],
+      focus_node: "focus",
+      source_summary: {
+        total_nodes: 3,
+        total_edges: 2,
+        node_kinds: {},
+        edge_kinds: {},
+      },
+      diagnostics: [],
+      truncated: false,
+      status: "ready",
+    });
+
+    const collapsedRows = findByClass(container, "graph-node-collapsed");
+    assert.ok(collapsedRows.length >= 1);
+    const buttons = findAllByTag(collapsedRows[0], "button");
+    assert.strictEqual(buttons.length, 1);
+    buttons[0].dispatchEvent({ type: "click" });
+
+    assert.strictEqual(events.length, 1);
+    assert.strictEqual(events[0].type, "expand_requested");
+    assert.strictEqual(events[0].nodeId, "collapsed");
+    assert.strictEqual(events[0].collapsed, true);
+  });
+
+  it("caps large graphs by node/edge budget and keeps truncated status visible", async () => {
+    const document = createFakeDocument();
+    const container = document.createElement("div");
+    const renderer = createGraphPanelRenderer({ container, document, maxDepth: 200 });
+    const nodes = Array.from({ length: 130 }, (_, index) => ({
+      id: `n${index}`,
+      label: `node-${index}`,
+      metadata: { depth: index === 0 ? 0 : 1 },
+    }));
+    const edges = [];
+    for (let from = 0; from < 120; from++) {
+      for (let step = 1; step <= 4; step++) {
+        const to = (from + step) % 120;
+        edges.push({
+          from: `n${from}`,
+          to: `n${to}`,
+          kind: "Reads",
+          direction: "Forward",
+          label: "rel",
+        });
+      }
+    }
+
+    const result = await renderer.render({
+      nodes,
+      edges,
+      groups: [],
+      focus_node: "n0",
+      source_summary: {
+        total_nodes: nodes.length,
+        total_edges: edges.length,
+        node_kinds: {},
+        edge_kinds: {},
+      },
+      diagnostics: [],
+      truncated: false,
+      status: "ready",
+    });
+
+    assert.ok(result.graph.nodes.length <= 120);
+    assert.ok(result.graph.edges.length <= 360);
+    assert.strictEqual(container.getAttribute("data-metadata-checker-graph-truncated"), "true");
+    assert.strictEqual(container.getAttribute("data-metadata-checker-graph-truncated-reason"), "max_nodes;max_edges");
+    const truncatedText = walkText(container, (text) => /truncated/i.test(text));
+    assert.strictEqual(truncatedText, true);
+    assert.ok(Number.parseInt(container.getAttribute("data-metadata-checker-graph-nodes"), 10) <= 120);
+  });
+
+  it("accepts Rust-style truncated_reason in visual graph input", async () => {
+    const document = createFakeDocument();
+    const container = document.createElement("div");
+    const renderer = createGraphPanelRenderer({ container, document });
+
+    await renderer.render({
+      nodes: [{ id: "focus", label: "focus", metadata: { depth: 0 } }],
+      edges: [],
+      groups: [],
+      focus_node: "focus",
+      source_summary: {
+        total_nodes: 1,
+        total_edges: 0,
+        node_kinds: {},
+        edge_kinds: {},
+      },
+      diagnostics: [],
+      truncated: true,
+      truncated_reason: "max_nodes",
+      status: "ready",
+    });
+
+    assert.strictEqual(container.getAttribute("data-metadata-checker-graph-truncated"), "true");
+    assert.strictEqual(container.getAttribute("data-metadata-checker-graph-truncated-reason"), "max_nodes");
   });
 
   it("keeps sensitive keywords out of rendered labels and keeps punctuation intact", async () => {

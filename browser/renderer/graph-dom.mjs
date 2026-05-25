@@ -5,6 +5,14 @@ function toString(value) {
   return String(value);
 }
 
+function sanitizeLabelText(value) {
+  const text = toString(value);
+  if (/token|cookie|password|cipherpassport/i.test(text)) {
+    return "[sensitive]";
+  }
+  return text;
+}
+
 function createElementFrom(document, tag) {
   if (document && typeof document.createElement === "function") {
     return document.createElement(tag);
@@ -114,7 +122,7 @@ function buildNodeElement(document, node, callbacks) {
 
   const detail = createElementFrom(document, "span");
   detail.className = "graph-node-meta";
-  detail.textContent = toString(node.kind || "node");
+  detail.textContent = sanitizeLabelText(node.kind || "node");
   row.appendChild(detail);
 
   if (node.collapsed || node.expandable) {
@@ -128,10 +136,11 @@ function buildNodeElement(document, node, callbacks) {
         callbacks.onExpand({
           type: "expand_requested",
           event: "click",
-          node,
-          depth: node.depth,
-          target: node.target || null,
-          expand_token: node.expand_token || null,
+          nodeId: toString(node.id ?? node.nodeId ?? node.node_id ?? ""),
+          legacyNodeId: toString(node.nodeId ?? ""),
+          target: node.target || node.metadata?.target || null,
+          depth: node.depth ?? null,
+          expand_token: node.expand_token || node.metadata?.expand_token || null,
           collapsed: node.collapsed === true,
         });
       }
@@ -145,8 +154,10 @@ function buildNodeElement(document, node, callbacks) {
 function buildEdgeElement(document, edge) {
   const row = createElementFrom(document, "li");
   row.className = "graph-edge";
-  const label = toString(edge.label || edge.kind || "edge");
-  row.textContent = `${toString(edge.from)} → ${toString(edge.to)} : ${label}`;
+  const label = sanitizeLabelText(edge.label || edge.kind || "edge");
+  const from = sanitizeLabelText(edge.from);
+  const to = sanitizeLabelText(edge.to);
+  row.textContent = `${from} → ${to} : ${label}`;
   return row;
 }
 
@@ -162,7 +173,6 @@ function createListBlock(document, titleText, items, buildItem) {
   block.appendChild(list);
   return block;
 }
-
 function getBounds(nodes) {
   if (nodes.length === 0) {
     return { width: 520, height: 220 };
@@ -246,7 +256,18 @@ function buildSVGCanvas(document, layout) {
   return frame;
 }
 
-export function setGraphMarkers(panel, { nodeCount, edgeCount, focus, truncated, depth, renderer }) {
+export function setGraphMarkers(
+  panel,
+  {
+    nodeCount,
+    edgeCount,
+    focus,
+    truncated,
+    depth,
+    renderer,
+    truncatedReason,
+  },
+) {
   if (!panel || typeof panel.setAttribute !== "function") return;
   panel.setAttribute(`${MARKER_PREFIX}graph-panel`, "mounted");
   panel.setAttribute(`${MARKER_PREFIX}graph-nodes`, String(nodeCount ?? 0));
@@ -256,6 +277,12 @@ export function setGraphMarkers(panel, { nodeCount, edgeCount, focus, truncated,
     `${MARKER_PREFIX}graph-truncated`,
     truncated ? "true" : "false"
   );
+  if (truncatedReason) {
+    panel.setAttribute(
+      `${MARKER_PREFIX}graph-truncated-reason`,
+      toString(truncatedReason),
+    );
+  }
   panel.setAttribute(`${MARKER_PREFIX}graph-depth`, String(depth ?? 0));
   panel.setAttribute(`${MARKER_PREFIX}graph-renderer`, toString(renderer ?? "html"));
   panel.setAttribute("data-metadata-checker-renderer", toString(renderer ?? "html"));
@@ -272,6 +299,7 @@ export function renderGraphPanelDOM(root, layout, options = {}) {
     edgeCount: layout.edgeCount ?? 0,
     focus: layout.focus_node,
     truncated: Boolean(layout.truncated),
+    truncatedReason: layout.truncatedReason,
     depth: layout.depth ?? 0,
     renderer: options.renderer,
   });

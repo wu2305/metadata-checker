@@ -4865,9 +4865,14 @@ browser/
 - BI 内已有 ECharts runtime。M42 不打包自己的 ECharts，不新增 npm 图表依赖；Browser renderer 应优先解析 BI AMD 模块，失败后降级 HTML/SVG renderer。
 - 原 M43 不再作为独立里程碑，也不并入 M42。standalone browser reader 暂不规划，除非后续出现明确的人类离线阅读需求。
 
+状态更新（截至 2026-05-25）：
+
+- `M42.1` ~ `M42.6` 在仓库代码和本地测试链路上已完成落地。
+- `M42.8`、`M42.9` 为真实 BI 验收与实测指标补全点，当前不代表已在真实环境通跑。
+
 任务清单：
 
-- [ ] M42.1：确认并收敛 VisualGraph contract
+- [x] M42.1：确认并收敛 VisualGraph contract
   - 复核 M40.7 的 `VisualGraph` / Mermaid / ECharts option 能力是否已经可复用。
   - 若 M40.7 尚未完全落地，M42 只补 browser 必需的最小 contract：
     - `nodes`
@@ -4893,8 +4898,9 @@ browser/
     - large result -> truncated graph
     - 1 跳、2-3 跳、折叠组节点均可表达
     - sensitive 字段不进入 graph label / tooltip
+  - 证据：`browser/renderer/graph-layout.mjs`、`browser/test/graph-panel-renderer.test.mjs`。
 
-- [ ] M42.2：浏览器 graph renderer 模块
+- [x] M42.2：浏览器 graph renderer 模块
   - 建议位置：
     - `browser/renderer/graph-panel-renderer.mjs`
     - `browser/renderer/graph-layout.mjs`
@@ -4927,8 +4933,9 @@ browser/
     - 点击可展开节点时发出结构化 `expand_requested` 事件，不直接编造关系。
     - label 中中文、空格、冒号、引号、换行不破坏 DOM。
     - token/cookie/password/cipherPassport 不出现在 DOM textContent。
+  - 证据：`browser/renderer/graph-panel-renderer.mjs`、`browser/renderer/graph-dom.mjs`、`browser/test/graph-panel-renderer.test.mjs`。
 
-- [ ] M42.3：BI ECharts runtime resolver
+- [x] M42.3：BI ECharts runtime resolver
   - 建议位置：
     - `browser/renderer/echarts-runtime-resolver.mjs`
     - `browser/test/echarts-runtime-resolver.test.mjs`
@@ -4949,8 +4956,9 @@ browser/
     - 全局 `window.echarts` fallback 正常解析。
     - 全部失败时返回 `null`，renderer 使用 HTML/SVG fallback。
     - resolver 不访问 metadata、不创建 DOM、不调用 runtime。
+  - 证据：`browser/renderer/echarts-runtime-resolver.mjs`、`browser/test/echarts-runtime-resolver.test.mjs`。
 
-- [ ] M42.4：Integration Controller 接入 graph renderer
+- [x] M42.4：Integration Controller 接入 graph renderer
   - 修改范围：
     - `browser/integration/metadata-checker-controller.mjs`
     - 对应 integration 测试
@@ -4969,8 +4977,9 @@ browser/
     - duplicate init 不重复创建 panel / listener / renderer instance。
     - stale response 不覆盖新 selection 的 graph。
     - expand request 能触发 runtime 查询或 diagnostic。
+  - 证据：`browser/integration/metadata-checker-controller.mjs`、`browser/test/plugin-integration-smoke.test.mjs`。
 
-- [ ] M42.5：设计器浮动容器 / 面板最小实现
+- [x] M42.5：设计器浮动容器 / 面板最小实现
   - 建议位置：
     - `browser/renderer/graph-panel-host.mjs`
     - 或放在现有 integration host 中作为 browser-only consumer。
@@ -4996,8 +5005,9 @@ browser/
     - 不依赖 iframe 假设。
     - 不把 raw metadata 写入 DOM。
     - 自动化验收以 DOM marker 为准，console 只辅助人工观察。
+  - 证据：`browser/renderer/graph-panel-host.mjs`。
 
-- [ ] M42.6：Selection trigger / debounce / cache
+- [x] M42.6：Selection trigger / debounce / cache
   - 目标：真实设计器里频繁点击组件时，关系图足够快且不会乱序。
   - 要求：
     - selection 改变后 debounce 分析。
@@ -5010,44 +5020,45 @@ browser/
     - cache hit 不重复调用 runtime analyze。
     - cache miss 正常调用 provider/runtime。
     - stale response 被丢弃并记录 marker 或 event。
+  - 证据：`browser/integration/metadata-checker-controller.mjs`、`browser/test/plugin-integration-smoke.test.mjs`。
 
-- [ ] M42.7：渐进多跳探索与注意力控制
+- [ ] M42.7：渐进多跳探索与注意力控制（与真实 smoke 联动）
   - 目标：让复杂多跳关系可读，不一次性把大图塞给模型或用户。
   - 展示策略：
     - 1 跳：默认清晰显示。
     - 2-3 跳：默认弱化显示，作为可探索预览。
     - 3 跳外：折叠成组节点，点击后按 target/depth 继续查询。
+  - 可执行验收（按步骤执行）：
+    - 使用同一 selection，比较 `data-metadata-checker-graph-truncated` 与 `data-metadata-checker-graph-depth`，确认 2-3 跳样式和 `collapsed` 组节点存在。
+    - 点击可展开节点后只允许出现 `expand_requested` 事件；不允许新建无来源的边。
+    - 点击展开后若 runtime 返回 unsupported，必须展示 diagnostic graph。
+    - 将 `graph` 输出中的 `collapsed` / `expandable` 标记归入 `groups` 或 `node.metadata`，不在 renderer 侧推理新增关系。
   - 输出策略：
     - 默认只展示 `summary`、`primary_edges`、`diagnostics`、`next_queries`。
     - raw evidence 只在展开详情时短展示。
     - 大图必须按节点/边预算截断，并明确 `truncated_reason`。
-  - 测试：
-    - large graph 不超过默认节点/边预算。
-    - truncated 状态明确可见。
-    - next query 文案不引导模型跑偏到无关页面。
-    - 折叠节点点击不会让 JS 直接推理关系。
+  - 交付条件：
+    - 本地测试继续保持：large graph 截断、expand 事件、diagnostic 展示。
+    - real BI 运行时记录一例可展示 `collapsed group` + `expand_requested` + 失败降级。
+  - 参考：`docs/m42-real-bi-smoke-and-performance-runbook.md`
 
 - [ ] M42.8：真实 BI 环境 smoke
   - 前置：
     - M41 真实远程 session 已能拉取 `analyzer` 项目。
     - M40 custom.js / Service Worker / runtime launcher 接入流程可复用。
-  - 场景：
-    - 在 `/analyzer/app/M40HookSmoke.app?:edit=true` 或其 SuperPage 设计器中加载 hook。
-    - 顶层脚本执行、AMD factory 执行、`onInitDesigner` 调用均有 marker。
-    - 选择普通组件后，graph panel 更新 focus target / nodes / edges。
-    - 选择无关联组件后，graph panel 显示 empty/partial，不报错。
-    - runtime/SW 失败时 fallback 并显示 diagnostic graph。
-    - BI ECharts 可用时使用 ECharts renderer；不可用时 HTML/SVG fallback 仍能显示关系。
-  - 记录：
-    - Service Worker 状态。
-    - WASM/runtime 状态。
-    - provider 类型。
-    - renderer 类型。
-    - graph nodes/edges 数量。
-    - 一次分析 timing。
-    - cache hit/miss。
-    - stale response 是否被丢弃。
-    - 真实环境无法覆盖的限制。
+  - 现场可执行项（按顺序）：
+    - 在真实设计器中加载含 `custom.js` 的页面后，先完成 `custom.js` 注入与 `onInitDesigner` marker 校验。
+    - 进行至少 5 次 selection，包含：
+      - 普通组件 selection。
+      - 无关联组件 selection。
+      - 快速连点 3 次 selection（验证 debounce 与 stale 丢弃）。
+    - 在每次 selection 后读取节点/边 marker、renderer 类型、runtime 标记。
+    - 至少一次触发 `expand_requested`，确认成功回调或 `GRAPH_EXPAND_UNSUPPORTED`。
+    - 至少一次模拟/触发 SW/runtime fallback（如移除或禁用 SW 启动），确认 fallback marker 与图 fallback。
+  - 验收证据：
+    - 完成后将命令/截图/DOM marker 记录填入 `docs/m42-real-bi-smoke-and-performance-runbook.md`。
+    - 仅在记录完整证据后将任务标为已通过。
+  - 参考：`docs/m42-real-bi-smoke-and-performance-runbook.md`
 
 - [ ] M42.9：性能预算与真实文件样例
   - 目标：确保真实 Designer 点击组件后的图关系反馈足够快，不因为大页面、大图、多跳关系卡住 UI。
@@ -5068,6 +5079,13 @@ browser/
     - summary-first 输出不超过默认预算。
     - sensitive 字段不进入 DOM。
     - renderer 不因 ECharts 不存在而失败。
+  - 交付项：
+    - 在真实场景补齐 3 条性能记录：
+      - 简单页面。
+      - 中等复杂页面。
+      - DataFlow/高复杂页面。
+    - 每条记录需要包含：runtime 渲染标记、节点/边数、truncated、analyze timing、render timing、cache hit/miss。
+    - 记录模板见 `docs/m42-real-bi-smoke-and-performance-runbook.md`。
 
 验收标准：
 
@@ -5075,7 +5093,7 @@ browser/
 - Graph renderer 是 browser consumer，不污染 Rust core、Plugin Core 或 Designer Glue。
 - Runtime result / VisualGraph 是唯一关系图输入 contract，不新增 JS-only 业务推理。
 - DOM marker 能支持自动化验收。
-- 真实 BI smoke 至少跑通一次 selection -> analyze -> graph render。
+- 真实 BI smoke 完成后至少跑通一次 selection -> analyze -> graph render。
 - ECharts 可用时使用 BI 现有 runtime；ECharts 不可用时 fallback renderer 仍可用。
 - 默认 1 跳清晰、2-3 跳弱化、远端折叠，并支持点击探索。
 - 快速切换 selection 不出现旧结果覆盖新结果。

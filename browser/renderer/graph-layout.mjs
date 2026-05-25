@@ -81,7 +81,6 @@ function shouldTruncateNodeLabel(node, maxLen) {
 function isNodeCollapsed(node, maxDepth, sourceDepth) {
   const metadata = node?.metadata || {};
   if (metadata.collapsed === true || metadata.collapsed === "true") return true;
-  if (metadata.expandable === true || metadata.expandable === "true") return true;
   if (metadata.depth != null) {
     const depth = normalizeDepthFromMetadata(metadata.depth);
     if (depth != null && depth > maxDepth) return true;
@@ -288,6 +287,9 @@ function normalizeNodesEdges(visualGraph) {
     diagnostics,
     truncated: visualGraph.truncated === true || visualGraph.truncated === "true",
     source_summary: normalizeSourceSummary(visualGraph.source_summary, nodes.length, edges.length),
+    truncatedReason: safeToString(
+      visualGraph.truncated_reason ?? visualGraph.truncatedReason ?? "",
+    ),
   };
 };
 
@@ -385,7 +387,8 @@ function computeNodeDepths(normalized, options) {
   for (const node of normalized.nodes) {
     const depth = depths.get(node.id) ?? maxDepth + 1;
     const depthInMeta = node.depth;
-    const isCollapsed = isNodeCollapsed(node, maxDepth, depthInMeta) || depth > maxDepth;
+    const collapsesBeyondBudget = depth > maxDepth || (depthInMeta != null && depthInMeta > maxDepth);
+    const isCollapsed = isNodeCollapsed(node, maxDepth, depthInMeta) || collapsesBeyondBudget;
     const nodeDepth = depth === null ? maxDepth + 1 : depth;
     renderedNodes.push({
       ...node,
@@ -396,7 +399,7 @@ function computeNodeDepths(normalized, options) {
         isExpandableNode(node, isCollapsed) || isNodeExpandable(node),
       truncated: shouldTruncateNodeLabel(node, options?.nodeLabelMaxLength ?? DEFAULT_RENDER_OPTIONS.nodeLabelMaxLength),
     });
-    if (isCollapsed) {
+    if (collapsesBeyondBudget) {
       collapsed.add(node.id);
     }
   }
@@ -493,13 +496,30 @@ function computeNodeDepths(normalized, options) {
   const sanitizedGroups = Array.isArray(normalized.groups) ? normalized.groups : [];
   const maxRenderedNodes =
     options?.maxNodes != null ? parseIntSafe(options.maxNodes, DEFAULT_RENDER_OPTIONS.maxNodes) : normalized.nodes.length;
+  const maxRenderedEdges =
+    options?.maxEdges != null ? parseIntSafe(options.maxEdges, DEFAULT_RENDER_OPTIONS.maxEdges) : normalized.edges.length;
 
   const capped = finalNodes.slice(0, maxRenderedNodes);
   const visibleIds = new Set(capped.map((node) => node.id));
   const finalEdges = [];
   for (const edge of visibleEdges) {
     if (!visibleIds.has(edge.from) || !visibleIds.has(edge.to)) continue;
+    if (finalEdges.length >= maxRenderedEdges) {
+      break;
+    }
     finalEdges.push(edge);
+  }
+  const truncatedByNodeBudget = normalized.nodes.length > capped.length;
+  const truncatedByEdgeBudget = visibleEdges.length > maxRenderedEdges;
+  const truncatedReasons = [];
+  if (normalized.truncatedReason) {
+    truncatedReasons.push(normalized.truncatedReason);
+  }
+  if (truncatedByNodeBudget) {
+    truncatedReasons.push("max_nodes");
+  }
+  if (truncatedByEdgeBudget) {
+    truncatedReasons.push("max_edges");
   }
 
   return {
@@ -508,7 +528,11 @@ function computeNodeDepths(normalized, options) {
     groups: sanitizedGroups,
     focus_node: normalized.focus_node,
     diagnostics: normalized.diagnostics,
-    truncated: normalized.truncated || normalized.nodes.length > capped.length || normalized.edges.length > finalEdges.length,
+    truncated:
+      normalized.truncated ||
+      truncatedByNodeBudget ||
+      truncatedByEdgeBudget,
+    truncatedReason: truncatedReasons.join(";"),
     source_summary: normalized.source_summary,
     maxDepth: parseIntSafe(computeMaxDepth(finalNodes), 1),
     nodeCount: capped.length,
@@ -577,7 +601,11 @@ export function layoutGraph(visualGraph, options = {}) {
     position: positions.get(node.id) ?? { x: 0, y: 0 },
     isGroup: node.kind === "group",
     edgeStyleClass:
-      node.depth === 0 ? "focus" : node.depth <= 3 ? "focus-band" : "faded-band",
+      node.depth === 0
+        ? "focus"
+        : node.depth === 1
+          ? "focus-band"
+          : "faded-band",
   }));
 
   const positionedEdges = computed.edges.map((edge) => ({
@@ -586,7 +614,7 @@ export function layoutGraph(visualGraph, options = {}) {
     toPosition: positions.get(edge.to),
     label: edge.label,
     edgeClass:
-      edge.fromDepth != null && edge.toDepth != null && edge.toDepth <= 3
+      edge.fromDepth != null && edge.toDepth != null && edge.toDepth <= 1
         ? "depth-edge"
         : "weak-edge",
     direction: edge.direction || "Forward",
