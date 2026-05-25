@@ -62,6 +62,38 @@ function _errorMessageFromProviderResult(value, fallback) {
   );
 }
 
+function _sortDeep(value) {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(_sortDeep);
+  }
+
+  const normalized = {};
+  const keys = Object.keys(value).sort();
+  for (const key of keys) {
+    normalized[key] = _sortDeep(value[key]);
+  }
+  return normalized;
+}
+
+function _cloneResultForCache(value) {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function _makeDeferred() {
+  let resolve;
+  const promise = new Promise((resolveFn, rejectFn) => {
+    resolve = resolveFn;
+  });
+  return { promise, resolve };
+}
+
 function _findForbiddenSelectionPayload(value, path = "selection", seen = new WeakSet()) {
   if (!value || typeof value !== "object") {
     return null;
@@ -111,6 +143,12 @@ export function createMetadataCheckerController(options = {}) {
   const logger = options.logger ?? console;
   const analysisOptions = options.analysisOptions ?? {};
   const runtimeOptions = options.runtimeOptions ?? {};
+  const selectionDebounceMs =
+    Number.isFinite(Number(options.selectionDebounceMs)) &&
+    Number(options.selectionDebounceMs) > 0
+      ? Number(options.selectionDebounceMs)
+      : 0;
+  const analysisCache = options.analysisCache || new Map();
   const remoteLoadMode = options.remoteLoadMode ?? "runtime-first";
   const clock = options.clock ?? (() => Date.now());
   const hasPageProvider = provider && typeof provider.getFileContent === "function";
@@ -151,6 +189,39 @@ export function createMetadataCheckerController(options = {}) {
   let lastError = null;
   let _previousState = CONTROLLER_STATE.IDLE;
   let _selectionSeq = 0;
+  let _latestSelectionSeq = 0;
+  let _activeSelectionSeq = 0;
+  let _debounceTimer = null;
+  const _selectionWaiters = new Map();
+
+  function _makeAnalysisCacheKey(selection) {
+    return JSON.stringify(
+      _sortDeep({
+        source_path: selection?.source_path,
+        active_component_id: selection?.active_component_id ?? null,
+        selected_component_ids:
+          Array.isArray(selection?.selected_component_ids)
+            ? selection.selected_component_ids
+            : [],
+        analysisOptions: _sortDeep(analysisOptions),
+      }),
+    );
+  }
+
+  function _emitStaleSelection(payload) {
+    _emitHost(host, "analysis_stale_discarded", {
+      ...payload,
+      timestamp: clock(),
+    });
+  }
+
+  function _buildStaleResult(target) {
+    return _makeErrorEnvelope(
+      "ANALYSIS_STALE",
+      "selection is stale and will not be rendered",
+      target,
+    );
+  }
 
   function _setState(newState) {
     const previousState = _previousState;
@@ -384,8 +455,7 @@ export function createMetadataCheckerController(options = {}) {
     return _initPromise;
   }
 
-  async function _handleSelectionChanged(selection) {
-    const selectionSeq = ++_selectionSeq;
+  async function _handleSelectionChanged(selection, selectionSeq) {
     const initResult = await _ensureInitialized();
     if (!initResult.ready) {
       if (typeof renderer.renderError === "function") {
@@ -448,8 +518,61 @@ export function createMetadataCheckerController(options = {}) {
       project_name: selection.project_name ?? null,
     };
 
+    const cacheKey = _makeAnalysisCacheKey(selection);
+
+    if (analysisCache.has(cacheKey)) {
+      const cachedResult = _cloneResultForCache(analysisCache.get(cacheKey));
+
+      _setState(CONTROLLER_STATE.ANALYZING);
+      _emitHost(host, "analysis_started", {
+        selection,
+        cacheKey,
+        timestamp: clock(),
+      });
+      _emitHost(host, "analysis_cache_hit", {
+        cacheKey,
+        source_path: sourcePath,
+        active_component_id: selection.active_component_id,
+        timestamp: clock(),
+      });
+
+      if (selectionSeq !== _selectionSeq) {
+        const staleResult = _buildStaleResult(selection.active_component_id ?? sourcePath);
+        _emitStaleSelection({
+          reason: "cache-hit-stale",
+          result: staleResult,
+          selection,
+        });
+        return staleResult;
+      }
+
+      lastAnalysisResult = cachedResult;
+      lastError = null;
+      _setState(CONTROLLER_STATE.READY);
+      _emitHost(host, "analysis_completed", {
+        result: cachedResult,
+        cacheKey,
+        timestamp: clock(),
+      });
+
+      renderer.renderAnalysis(cachedResult);
+      await _renderGraph(cachedResult);
+      return cachedResult;
+    }
+
     _setState(CONTROLLER_STATE.ANALYZING);
-    _emitHost(host, "analysis_started", { selection, timestamp: clock() });
+    _emitHost(host, "analysis_started", {
+      selection,
+      cacheKey,
+      timestamp: clock(),
+    });
+
+    _emitHost(host, "analysis_cache_miss", {
+      cacheKey,
+      source_path: sourcePath,
+      active_component_id: selection.active_component_id,
+      timestamp: clock(),
+    });
 
     try {
       await _loadDocumentForSelection(fileRef, sourcePath);
@@ -460,11 +583,15 @@ export function createMetadataCheckerController(options = {}) {
         analysisOptions,
       );
 
+      if (result?.status === "ready") {
+        analysisCache.set(cacheKey, _cloneResultForCache(result));
+      }
+
       if (selectionSeq !== _selectionSeq) {
-        _emitHost(host, "analysis_stale_discarded", {
+        _emitStaleSelection({
+          reason: "superseded",
           result,
           selection,
-          timestamp: clock(),
         });
         return result;
       }
@@ -484,10 +611,10 @@ export function createMetadataCheckerController(options = {}) {
         selection.active_component_id ?? sourcePath,
       );
       if (selectionSeq !== _selectionSeq) {
-        _emitHost(host, "analysis_stale_discarded", {
+        _emitStaleSelection({
+          reason: "superseded",
           error,
           selection,
-          timestamp: clock(),
         });
         return error;
       }
@@ -507,11 +634,93 @@ export function createMetadataCheckerController(options = {}) {
     if (eventName === "selection_changed") {
       const selection = payload?.selection;
       if (selection) {
-        _handleSelectionChanged(selection).catch((err) => {
+        controller.handleSelection(selection).catch((err) => {
           logger.error("[controller] _handleSelectionChanged failed:", err);
         });
       }
     }
+  }
+
+  function _dispatchSelection(selection) {
+    const selectionSeq = ++_selectionSeq;
+    const deferred = _makeDeferred();
+
+    _selectionWaiters.set(selectionSeq, {
+      selection,
+      deferred,
+    });
+
+    _latestSelectionSeq = selectionSeq;
+
+    const runLatest = async () => {
+      const latestSeq = _latestSelectionSeq;
+      const entry = _selectionWaiters.get(latestSeq);
+      if (!entry) {
+        return;
+      }
+
+      if (selectionDebounceMs > 0) {
+        // 标记掉所有未执行完成且已被后续 selection supersede 的请求。
+        for (const [seq, waiter] of _selectionWaiters.entries()) {
+          if (seq === latestSeq || seq === _activeSelectionSeq) {
+            continue;
+          }
+          if (seq < latestSeq) {
+            const staleResult = _buildStaleResult(
+              waiter.selection?.active_component_id ?? waiter.selection?.source_path,
+            );
+            waiter.deferred.resolve(staleResult);
+            _emitStaleSelection({
+              reason: "debounced",
+              result: staleResult,
+              selection: waiter.selection,
+            });
+            _selectionWaiters.delete(seq);
+          }
+        }
+      }
+
+      const active = _selectionWaiters.get(latestSeq);
+      if (!active) {
+        return;
+      }
+
+      const currentSeq = latestSeq;
+      _activeSelectionSeq = currentSeq;
+      try {
+        const result = await _handleSelectionChanged(active.selection, currentSeq);
+        active.deferred.resolve(result);
+      } catch (err) {
+        active.deferred.resolve(
+          _makeErrorEnvelope(
+            "ANALYSIS_FAILED",
+            err?.message ?? String(err),
+            active.selection?.active_component_id ?? active.selection?.source_path,
+          ),
+        );
+      } finally {
+        _selectionWaiters.delete(currentSeq);
+        if (_activeSelectionSeq === currentSeq) {
+          _activeSelectionSeq = 0;
+        }
+      }
+    };
+
+    if (selectionDebounceMs > 0) {
+      if (_debounceTimer) {
+        clearTimeout(_debounceTimer);
+      }
+      _debounceTimer = setTimeout(() => {
+        _debounceTimer = null;
+        runLatest().catch((err) => {
+          logger.error("[controller] selection dispatch failed:", err);
+        });
+      }, selectionDebounceMs);
+    } else {
+      runLatest();
+    }
+
+    return deferred.promise;
   }
 
   // 监听 host 事件，若 plugin 也 emit 到同一 host
@@ -531,7 +740,7 @@ export function createMetadataCheckerController(options = {}) {
     },
 
     async handleSelection(selection) {
-      return _handleSelectionChanged(selection);
+      return _dispatchSelection(selection);
     },
 
     status() {

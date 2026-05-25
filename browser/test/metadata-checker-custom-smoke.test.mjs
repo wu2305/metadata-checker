@@ -265,6 +265,57 @@ describe("metadata-checker custom.js AMD entry", () => {
     assert.strictEqual(marker(document, "fallback-used"), "false");
     assert.strictEqual(marker(document, "fallback-code"), "none");
     assert.strictEqual(marker(document, "analysis-status"), "ready");
+    assert.strictEqual(marker(document, "graph-panel"), "unavailable");
+  });
+
+  it("wires optional graph renderer and panel host into controller", async () => {
+    let capturedControllerArgs = null;
+    let panelMounted = false;
+    const { module, document } = loadCustomModule({
+      windowOverrides: {
+        __metadata_checker_echarts_resolver_factory: async () => ({
+          echarts: { version: "4.x" },
+          source: "commons/echarts/echarts-ext",
+          diagnostics: [],
+        }),
+        __metadata_checker_graph_renderer_factory: ({ echarts }) => ({
+          echarts,
+          render: async () => ({ renderer: echarts ? "echarts" : "html" }),
+          renderError: async () => ({ renderer: "error" }),
+        }),
+        __metadata_checker_graph_panel_host_factory: ({ renderer }) => ({
+          renderer,
+          mount() {
+            panelMounted = true;
+            return { mounted: true };
+          },
+          render(result) {
+            return renderer.render(result);
+          },
+          renderError(error) {
+            return renderer.renderError(error);
+          },
+        }),
+        __metadata_checker_controller_factory: (args) => {
+          capturedControllerArgs = args;
+          return {
+            async init() {
+              return { status: "ready" };
+            },
+            status: () => ({ state: "ready" }),
+          };
+        },
+      },
+    });
+
+    const result = await module.onInitDesigner({}, {});
+
+    assert.strictEqual(result.installed, true);
+    assert.strictEqual(panelMounted, true);
+    assert.strictEqual(marker(document, "graph-panel"), "mounted");
+    assert.strictEqual(marker(document, "graph-renderer"), "echarts");
+    assert.ok(capturedControllerArgs.graphRenderer);
+    assert.strictEqual(capturedControllerArgs.selectionDebounceMs, 50);
   });
 
   it("derives Service Worker scope from script directory", async () => {

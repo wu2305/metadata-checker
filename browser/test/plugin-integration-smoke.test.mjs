@@ -644,6 +644,310 @@ describe("integration success path", async () => {
     assert.strictEqual(host.getEvents("analysis_stale_discarded").length, 1);
   });
 
+  it("cache miss emits cache miss event and runs provider/runtime pipeline", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const graphRenderer = createFakeGraphRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      graphRenderer,
+      host,
+      logger: null,
+    });
+
+    const first = {
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    };
+    const second = {
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-2"],
+      active_component_id: "comp-2",
+    };
+
+    await controller.handleSelection(first);
+    const missCountBefore = host.getEvents("analysis_cache_miss").length;
+
+    const result = await controller.handleSelection(second);
+
+    assert.strictEqual(result.status, "ready");
+    assert.strictEqual(host.getEvents("analysis_cache_miss").length, missCountBefore + 1);
+    assert.strictEqual(host.getEvents("analysis_cache_hit").length, 0);
+    assert.ok(runtimeClient.callLog.some((c) => c.method === "loadSuperpageDocument"));
+    assert.ok(runtimeClient.callLog.some((c) => c.method === "buildOrUpdateSuperpageGraph"));
+    assert.ok(runtimeClient.callLog.some((c) => c.method === "analyzeSuperpageSelection"));
+    const graphTargets = graphRenderer.renderCalls.map(
+      (call) => call.result?.target ?? call.errorEnvelope?.target,
+    );
+    assert.deepStrictEqual(graphTargets.at(-1), "comp-2");
+  });
+
+  it("cache hit does not repeat runtime load/build/analyze", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const graphRenderer = createFakeGraphRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      graphRenderer,
+      host,
+      logger: null,
+    });
+
+    const selection = {
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    };
+
+    await controller.handleSelection(selection);
+
+    const providerLoadCallsBefore = provider.callLog.filter(
+      (c) => c.method === "getFileContent",
+    ).length;
+    const runtimeLoadCallsBefore = runtimeClient.callLog.filter(
+      (c) => c.method === "loadSuperpageDocument",
+    ).length;
+    const buildCallsBefore = runtimeClient.callLog.filter(
+      (c) => c.method === "buildOrUpdateSuperpageGraph",
+    ).length;
+    const analyzeCallsBefore = runtimeClient.callLog.filter(
+      (c) => c.method === "analyzeSuperpageSelection",
+    ).length;
+
+    const cachedResult = await controller.handleSelection(selection);
+
+    assert.strictEqual(cachedResult.status, "ready");
+    assert.strictEqual(host.getEvents("analysis_cache_hit").length, 1);
+    assert.strictEqual(
+      host.getEvents("analysis_cache_miss").length,
+      1,
+    );
+    assert.strictEqual(provider.callLog.filter((c) => c.method === "getFileContent").length, providerLoadCallsBefore);
+    assert.strictEqual(
+      runtimeClient.callLog.filter((c) => c.method === "loadSuperpageDocument").length,
+      runtimeLoadCallsBefore,
+    );
+    assert.strictEqual(
+      runtimeClient.callLog.filter((c) => c.method === "buildOrUpdateSuperpageGraph").length,
+      buildCallsBefore,
+    );
+    assert.strictEqual(
+      runtimeClient.callLog.filter((c) => c.method === "analyzeSuperpageSelection").length,
+      analyzeCallsBefore,
+    );
+
+    assert.strictEqual(renderer.renderCalls.length, 2);
+    assert.strictEqual(renderer.renderCalls[1].type, "renderAnalysis");
+    assert.strictEqual(graphRenderer.renderCalls[1].type, "renderGraph");
+    assert.strictEqual(graphRenderer.renderCalls[1].result.target, "comp-1");
+  });
+
+  it("selection debounce only keeps the last selection result", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const graphRenderer = createFakeGraphRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+    const analyzeTargets = [];
+    runtimeClient.analyzeSuperpageSelection = function (selection) {
+      this.callLog.push({ method: "analyzeSuperpageSelection", args: Array.from(arguments) });
+      analyzeTargets.push(selection.active_component_id);
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            status: "ready",
+            target: selection.active_component_id,
+            items: [{ kind: "analysis", label: "Analysis", detail: { selection } }],
+            diagnostics: [],
+          });
+        }, 10);
+      });
+    };
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      graphRenderer,
+      host,
+      logger: null,
+      selectionDebounceMs: 20,
+    });
+
+    const first = controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    });
+    const second = controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-2"],
+      active_component_id: "comp-2",
+    });
+    const third = controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["comp-3"],
+      active_component_id: "comp-3",
+    });
+
+    const results = await Promise.all([first, second, third]);
+
+    assert.deepStrictEqual(analyzeTargets, ["comp-3"]);
+    assert.strictEqual(results[0].diagnostics?.[0]?.code, "ANALYSIS_STALE");
+    assert.strictEqual(results[1].diagnostics?.[0]?.code, "ANALYSIS_STALE");
+    assert.strictEqual(results[2].status, "ready");
+    assert.deepStrictEqual(results[2].target, "comp-3");
+
+    assert.strictEqual(graphRenderer.renderCalls.length, 1);
+    assert.strictEqual(graphRenderer.renderCalls[0].result.target, "comp-3");
+    assert.strictEqual(host.getEvents("analysis_stale_discarded").length, 2);
+  });
+
+  it("stale response is discarded and does not overwrite latest graph", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const graphRenderer = createFakeGraphRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+    runtimeClient.analyzeSuperpageSelection = function (selection) {
+      this.callLog.push({ method: "analyzeSuperpageSelection", args: Array.from(arguments) });
+      const delay = selection.active_component_id === "slow" ? 30 : 0;
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            status: "ready",
+            target: selection.active_component_id,
+            items: [],
+            diagnostics: [],
+          });
+        }, delay);
+      });
+    };
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      graphRenderer,
+      host,
+      logger: null,
+    });
+
+    const slow = controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["slow"],
+      active_component_id: "slow",
+    });
+    const fast = controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      selected_component_ids: ["fast"],
+      active_component_id: "fast",
+    });
+
+    await Promise.all([slow, fast]);
+
+    const graphTargets = graphRenderer.renderCalls.map(
+      (call) => call.result?.target ?? call.errorEnvelope?.target,
+    );
+    assert.deepStrictEqual(graphTargets, ["fast"]);
+    assert.strictEqual(host.getEvents("analysis_stale_discarded").length, 1);
+  });
+
   it("runtime-first failure falls back to page provider mode", async () => {
     const host = createFakeHost();
     const renderer = createFakeRenderer();

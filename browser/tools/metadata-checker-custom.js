@@ -359,6 +359,56 @@ define(function () {
     };
   }
 
+  async function createGraphRenderer() {
+    const rendererFactory =
+      window.__metadata_checker_graph_renderer_factory ?? null;
+    const hostFactory =
+      window.__metadata_checker_graph_panel_host_factory ?? null;
+    if (!rendererFactory || !hostFactory) {
+      _writeMarker("graph-panel", "unavailable");
+      return null;
+    }
+
+    let echarts = null;
+    const resolverFactory =
+      window.__metadata_checker_echarts_resolver_factory ?? null;
+    if (resolverFactory) {
+      try {
+        const resolved = await resolverFactory({
+          globalThisLike: window,
+          requireLike: typeof window.require === "function" ? window.require : undefined,
+          logger: console,
+        });
+        echarts = resolved?.echarts ?? null;
+        _writeMarker("graph-renderer", echarts ? "echarts" : "html");
+      } catch (err) {
+        _log("warn", "ECharts resolver failed, falling back to HTML renderer:", err);
+        _writeMarker("graph-renderer", "html");
+      }
+    } else {
+      _writeMarker("graph-renderer", "html");
+    }
+
+    const graphRenderer = rendererFactory({
+      document,
+      echarts,
+      onEvent(event) {
+        if (event?.type === "expand_requested") {
+          _writeMarker("graph-last-event", "expand_requested");
+        }
+      },
+    });
+    const panelHost = hostFactory({
+      document,
+      parent: document.body,
+      renderer: graphRenderer,
+      logger: console,
+    });
+    const mounted = panelHost.mount?.();
+    _writeMarker("graph-panel", mounted?.mounted ? "mounted" : "error");
+    return panelHost;
+  }
+
   // ---- Provider ----
 
   function createPageRcProvider() {
@@ -559,6 +609,7 @@ define(function () {
 
     // 6. 创建 renderer
     const renderer = createDomRenderer();
+    const graphRenderer = await createGraphRenderer();
 
     // 7. 创建 controller
     // 这里假设 controller 已通过 script 标签预加载到 window
@@ -575,8 +626,10 @@ define(function () {
       provider,
       runtimeClient,
       renderer,
+      graphRenderer,
       host,
       logger: console,
+      selectionDebounceMs: 50,
     });
 
     await _controller.init();
