@@ -1045,7 +1045,7 @@ mod tests {
             create_if_missing: false,
         };
 
-        let err = refresh_session_from_remote(&provider, &manager, options).unwrap_err();
+        let _err = refresh_session_from_remote(&provider, &manager, options).unwrap_err();
 
         // Existing file should still exist
         assert!(mirror.exists());

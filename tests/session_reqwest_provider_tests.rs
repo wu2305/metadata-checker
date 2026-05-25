@@ -144,28 +144,36 @@ fn request_status_errors_and_empty_body() {
 fn login_success_and_reuse_cookie() {
     let login_body = r#"{"ok":true}"#;
     let projects_body = r#"{"metaProjects":[{"projectName":"test","desc":"test"}]}"#;
+    let (request_sender, request_receiver) = std::sync::mpsc::channel::<(String, String)>();
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
     let addr = listener.local_addr().expect("read test server addr");
 
     thread::spawn(move || {
-        for (path, status, body) in [
-            ("/api/auth/signin", 200, login_body),
-            ("/api/me/getPermissionInfo", 200, projects_body),
+        for (path, status, body, set_cookie) in [
+            (
+                "/api/auth/signin",
+                200,
+                login_body,
+                Some("JSESSIONID=abc; Path=/"),
+            ),
+            ("/api/me/getPermissionInfo", 200, projects_body, None),
         ] {
             let (mut stream, _) = listener.accept().expect("accept request");
             let mut request = [0_u8; 2048];
             let n = stream.read(&mut request).expect("read request");
             let req_str = String::from_utf8_lossy(&request[..n]);
             assert!(req_str.contains(path), "expected request to {}", path);
+            request_sender
+                .send((path.to_string(), req_str.to_string()))
+                .expect("send captured request");
+
+            let set_cookie_header = set_cookie
+                .map(|value| format!("Set-Cookie: {value}\r\n"))
+                .unwrap_or_default();
 
             let response = format!(
-                "HTTP/1.1 {status} OK
-Content-Length: {}
-Content-Type: application/json
-Connection: close
-
-{body}",
+                "HTTP/1.1 {status} OK\r\n{set_cookie_header}Content-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
                 body.len(),
             );
             stream
@@ -186,6 +194,19 @@ Connection: close
         .expect("list_projects should succeed");
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].project_ref, "test");
+
+    let (_, login_request) = request_receiver.recv().expect("capture login request");
+    let (_, permission_request) = request_receiver
+        .recv()
+        .expect("capture permission info request");
+
+    assert!(login_request.contains("POST /api/auth/signin"));
+    assert!(permission_request.contains("GET /api/me/getPermissionInfo"));
+    assert!(
+        permission_request
+            .to_ascii_lowercase()
+            .contains("cookie: jsessionid=abc")
+    );
 }
 
 #[test]
