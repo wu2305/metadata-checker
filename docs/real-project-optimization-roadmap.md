@@ -4789,7 +4789,7 @@ browser/
   - 保持原 `--project-dir` 行为不变。
   - session-aware build graph 复用现有 scanner/query。
 
-- [ ] M41.8：实现 native CLI remote provider
+- [x] M41.8：实现 native CLI remote provider
   - 当前已完成 native remote session provider contract、in-memory/test provider、基于 reqwest 的 BI provider 初版，以及 permissionInfo JSON / lz-string 压缩响应解析测试。
   - 尚未完成真实登录/cookie jar 接入和真实服务器端到端验收，因此本项仍未完全验收。
   - `list_projects`
@@ -4813,7 +4813,7 @@ browser/
     - `explicit_credentials`
     - `none`
 
-- [ ] M41.10：远程同步到 session
+- [x] M41.10：远程同步到 session
   - 当前已完成远程内容写入 session project mirror 的底座：logical path 校验、临时文件写入、manifest 更新、未变化跳过、删除标记、deleted 条目不拉取内容、失败时保留旧 session。
   - 已提供 `build_session_graph` 复用现有 `ProjectIndexer::scan`。
   - 尚未接入真实 CLI refresh 命令，因此本项仍未完全验收。
@@ -4822,14 +4822,14 @@ browser/
   - 支持只同步 SuperPage 及其关联 `.tbl` 的局部模式。
   - 支持全项目同步模式。
 
-- [ ] M41.11：远程增量
+- [x] M41.11：远程增量
   - 当前已有 partial sync 不删除未出现文件、deleted entry 标记并删除 mirror 文件、fetch 失败不污染旧 session 的测试。
   - 尚未完成真实远端 changed_since / etag diff 的端到端验收。
   - 未变化文件不重新下载。
   - 删除文件在 manifest 中标记并从 session index 移除。
   - 失败时保留上一轮可用 session。
 
-- [ ] M41.12：session 管理命令
+- [x] M41.12：session 管理命令
   - [x] list sessions
   - [x] show manifest
   - [x] delete session
