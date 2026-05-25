@@ -95,13 +95,24 @@ define(function () {
     if (typeof window !== "undefined" && window.__metadata_checker_factory_entry_url) {
       return window.__metadata_checker_factory_entry_url;
     }
+    if (!CUSTOM_SCRIPT_URL) {
+      try {
+        const origin =
+          typeof window !== "undefined" && window.location?.origin
+            ? window.location.origin
+            : "https://metadata-checker.local";
+        const pathname =
+          typeof window !== "undefined" && window.location?.pathname
+            ? window.location.pathname
+            : "/analyzer/app/";
+        const projectName = pathname.split("/").filter(Boolean)[0] || "analyzer";
+        return new URL(`/${projectName}/public/hooks/${FACTORY_ENTRY_FILE}`, origin).toString();
+      } catch {
+        return `/analyzer/public/hooks/${FACTORY_ENTRY_FILE}`;
+      }
+    }
     try {
-      const base =
-        CUSTOM_SCRIPT_URL ??
-        (typeof window !== "undefined" && window.location?.href
-          ? window.location.href
-          : "https://metadata-checker.local/analyzer/public/hooks/custom.js");
-      return new URL(`./${FACTORY_ENTRY_FILE}`, base).toString();
+      return new URL(`./${FACTORY_ENTRY_FILE}`, CUSTOM_SCRIPT_URL).toString();
     } catch {
       return `/analyzer/public/hooks/${FACTORY_ENTRY_FILE}`;
     }

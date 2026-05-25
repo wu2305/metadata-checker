@@ -8,12 +8,14 @@
 
 const SW_VERSION = "0.1.0-m40.10";
 const DEFAULT_WASM_FILE = "metadata_checker_bg.wasm";
+const DEFAULT_WASM_BINDGEN_FILE = "metadata_checker.js";
 
 // runtime 状态
 let _initPromise = null;
 let _initFailed = false;
 let _initError = null;
 let _wasmExports = {};
+let _wasmBindgenLoader = null;
 let _wasmStatus = {
   state: "mock",
   mode: "mock",
@@ -121,7 +123,9 @@ async function _runtimeLoadSuperpageDocument(sourcePath, rawText) {
     });
     return result;
   }
-  return _mockLoadSuperpageDocument(sourcePath, rawText);
+  throw _makeWasmError("WASM_EXPORT_MISSING", "WASM export is missing", {
+    export_name: "loadSuperpageDocument",
+  });
 }
 
 async function _runtimeBuildOrUpdateSuperpageGraph(sourcePath) {
@@ -131,7 +135,9 @@ async function _runtimeBuildOrUpdateSuperpageGraph(sourcePath) {
     _graphCache.set(sourcePath, { builtAt: Date.now() });
     return result;
   }
-  return _mockBuildOrUpdateSuperpageGraph(sourcePath);
+  throw _makeWasmError("WASM_EXPORT_MISSING", "WASM export is missing", {
+    export_name: "buildOrUpdateSuperpageGraph",
+  });
 }
 
 async function _runtimeAnalyzeSuperpageSelection(selection, options = {}) {
@@ -149,7 +155,26 @@ async function _runtimeAnalyzeSuperpageSelection(selection, options = {}) {
     ]);
     return _parseWasmResult(wasmResult);
   }
-  return _mockAnalyzeSuperpageSelection(selection, options);
+  throw _makeWasmError("WASM_EXPORT_MISSING", "WASM export is missing", {
+    export_name: "analyzeSuperpageSelection",
+  });
+}
+
+async function _runtimeStatus() {
+  if (_hasWasmExport("runtimeStatus")) {
+    const wasmResult = await _callWasmExport("runtimeStatus", []);
+    const result = _parseWasmResult(wasmResult);
+    if (result && typeof result === "object") {
+      return {
+        ...result,
+        items: [
+          ...(Array.isArray(result.items) ? result.items : []),
+          _mockRuntimeStatus().items[0],
+        ],
+      };
+    }
+  }
+  return _mockRuntimeStatus();
 }
 
 function _extractSourcePath(ref) {
@@ -237,14 +262,6 @@ function _remoteExportArgs(exportName, fileRef, options = {}) {
   return [_baseUrlFromOptions(options), fileRefJson];
 }
 
-function _getFetch() {
-  return self.fetch ?? globalThis.fetch;
-}
-
-function _getWebAssembly() {
-  return self.WebAssembly ?? globalThis.WebAssembly;
-}
-
 function _defaultWasmUrl() {
   const baseHref = self.location?.href;
   if (baseHref) {
@@ -253,8 +270,12 @@ function _defaultWasmUrl() {
   return DEFAULT_WASM_FILE;
 }
 
-function _contentTypeOf(response) {
-  return response?.headers?.get?.("content-type") ?? "";
+function _defaultWasmBindgenUrl() {
+  const baseHref = self.location?.href;
+  if (baseHref) {
+    return new URL(DEFAULT_WASM_BINDGEN_FILE, baseHref).toString();
+  }
+  return DEFAULT_WASM_BINDGEN_FILE;
 }
 
 function _findForbiddenSelectionPayload(value, path = "selection", seen = new WeakSet()) {
@@ -285,24 +306,6 @@ function _findForbiddenSelectionPayload(value, path = "selection", seen = new We
   return null;
 }
 
-async function _arrayBufferInstantiate(wasmApi, response, imports, context) {
-  const bytes = await response.arrayBuffer();
-  const instantiated = await wasmApi.instantiate(bytes, imports);
-  return {
-    instantiated,
-    mode: "arrayBuffer",
-    fallbackUsed: true,
-    diagnostics: [
-      {
-        code: context.diagnosticCode,
-        severity: "warning",
-        message: context.message,
-        detail: context.detail,
-      },
-    ],
-  };
-}
-
 async function _loadWasmRuntime(options = {}) {
   if (options?.mock === true) {
     const result = _mockInitRuntime(options);
@@ -311,118 +314,42 @@ async function _loadWasmRuntime(options = {}) {
   }
 
   const wasmUrl = options?.wasmUrl ?? _defaultWasmUrl();
-  const imports = options?.imports ?? {};
-  const fetchImpl = _getFetch();
-  const wasmApi = _getWebAssembly();
-
-  if (typeof fetchImpl !== "function") {
-    throw _makeWasmError("WASM_FETCH_UNAVAILABLE", "fetch is not available in Service Worker", {
-      wasm_url: wasmUrl,
-    });
-  }
-  if (!wasmApi || typeof wasmApi.instantiate !== "function") {
-    throw _makeWasmError(
-      "WASM_UNAVAILABLE",
-      "WebAssembly.instantiate is not available in Service Worker",
-      { wasm_url: wasmUrl },
-    );
-  }
-
-  let response;
+  const glueUrl = options?.wasmBindgenUrl ?? _defaultWasmBindgenUrl();
+  const loader = await _loadWasmBindgenLoader(glueUrl, options);
+  let initDiagnostics = [];
   try {
-    response = await fetchImpl(wasmUrl);
+    await loader(wasmUrl);
   } catch (err) {
-    throw _makeWasmError("WASM_FETCH_FAILED", "Failed to fetch WASM runtime", {
+    throw _makeWasmError("WASM_BINDGEN_INIT_FAILED", "wasm-bindgen runtime init failed", {
       wasm_url: wasmUrl,
+      wasm_bindgen_url: glueUrl,
       cause_message: err?.message ?? String(err),
     });
   }
 
-  if (!response || response.ok === false) {
-    throw _makeWasmError("WASM_FETCH_FAILED", "WASM runtime fetch returned a non-ok response", {
-      wasm_url: wasmUrl,
-      status: response?.status ?? null,
-    });
-  }
-
-  const contentType = _contentTypeOf(response);
-  const isWasmMime = contentType.toLowerCase().split(";")[0].trim() === "application/wasm";
-  let instantiated;
-  let mode = "streaming";
-  let fallbackUsed = false;
-  let diagnostics = [];
-
-  if (isWasmMime && typeof wasmApi.instantiateStreaming === "function") {
-    try {
-      instantiated = await wasmApi.instantiateStreaming(Promise.resolve(response), imports);
-    } catch (err) {
-      const fallbackResponse =
-        typeof response.clone === "function" ? response.clone() : await fetchImpl(wasmUrl);
-      try {
-        const fallback = await _arrayBufferInstantiate(wasmApi, fallbackResponse, imports, {
-          diagnosticCode: "WASM_STREAMING_FALLBACK",
-          message: "instantiateStreaming failed; used arrayBuffer fallback",
-          detail: {
-            wasm_url: wasmUrl,
-            content_type: contentType,
-            cause_message: err?.message ?? String(err),
-          },
-        });
-        instantiated = fallback.instantiated;
-        mode = fallback.mode;
-        fallbackUsed = fallback.fallbackUsed;
-        diagnostics = fallback.diagnostics;
-      } catch (fallbackErr) {
-        throw _makeWasmError(
-          "WASM_CSP_OR_COMPILE_FAILED",
-          "WASM runtime compile or instantiate failed",
-          {
-            wasm_url: wasmUrl,
-            phase: "streaming_then_arrayBuffer",
-            streaming_cause_message: err?.message ?? String(err),
-            cause_message: fallbackErr?.message ?? String(fallbackErr),
-          },
-        );
-      }
-    }
-  } else {
-    try {
-      const fallback = await _arrayBufferInstantiate(wasmApi, response, imports, {
-        diagnosticCode: "WASM_MIME_FALLBACK",
-        message: "WASM response MIME is not application/wasm; used arrayBuffer fallback",
-        detail: {
-          wasm_url: wasmUrl,
-          content_type: contentType,
-        },
-      });
-      instantiated = fallback.instantiated;
-      mode = fallback.mode;
-      fallbackUsed = fallback.fallbackUsed;
-      diagnostics = fallback.diagnostics;
-    } catch (err) {
-      throw _makeWasmError("WASM_CSP_OR_COMPILE_FAILED", "WASM runtime compile or instantiate failed", {
-        wasm_url: wasmUrl,
-        phase: "arrayBuffer",
-        content_type: contentType,
-        cause_message: err?.message ?? String(err),
-      });
-    }
-  }
-
-  const instance = instantiated?.instance ?? instantiated;
-  _wasmExports = instance?.exports ?? {};
-  const exportNames = Object.keys(instance?.exports ?? {});
+  _wasmBindgenLoader = loader;
+  _wasmExports = loader;
+  const exportNames = Object.keys(loader ?? {});
   _wasmStatus = {
-    state: fallbackUsed ? "fallback" : "loaded",
-    mode,
+    state: "loaded",
+    mode: "wasm-bindgen",
     wasmUrl,
-    fallbackUsed,
-    diagnostic: diagnostics[0] ?? null,
+    fallbackUsed: false,
+    diagnostic: null,
   };
 
+  const runtimeOptions = options?.runtimeOptions ?? {};
+  const initResult = _parseWasmResult(
+    await _callWasmExport("initRuntime", [JSON.stringify(runtimeOptions)]),
+  );
+  if (Array.isArray(initResult?.diagnostics)) {
+    initDiagnostics = initResult.diagnostics;
+  }
+
   return {
-    status: "ready",
-    target: null,
+    ...(initResult && typeof initResult === "object" ? initResult : {}),
+    status: initResult?.status ?? "ready",
+    target: initResult?.target ?? null,
     items: [
       {
         kind: "runtime_ready",
@@ -431,16 +358,50 @@ async function _loadWasmRuntime(options = {}) {
           version: SW_VERSION,
           wasm: {
             state: _wasmStatus.state,
-            mode,
+            mode: _wasmStatus.mode,
             wasm_url: wasmUrl,
-            fallback_used: fallbackUsed,
+            wasm_bindgen_url: glueUrl,
+            fallback_used: false,
             export_count: exportNames.length,
           },
         },
       },
+      ...((Array.isArray(initResult?.items) ? initResult.items : [])),
     ],
-    diagnostics,
+    diagnostics: initDiagnostics,
   };
+}
+
+async function _loadWasmBindgenLoader(glueUrl, options = {}) {
+  if (typeof options?.wasmBindgenFactory === "function") {
+    return options.wasmBindgenFactory;
+  }
+  if (typeof self.wasm_bindgen === "function") {
+    return self.wasm_bindgen;
+  }
+  if (typeof self.importScripts !== "function") {
+    throw _makeWasmError(
+      "WASM_BINDGEN_GLUE_UNAVAILABLE",
+      "importScripts is required to load wasm-bindgen glue in this Service Worker",
+      { wasm_bindgen_url: glueUrl },
+    );
+  }
+  try {
+    self.importScripts(glueUrl);
+  } catch (err) {
+    throw _makeWasmError("WASM_BINDGEN_GLUE_LOAD_FAILED", "Failed to load wasm-bindgen glue", {
+      wasm_bindgen_url: glueUrl,
+      cause_message: err?.message ?? String(err),
+    });
+  }
+  if (typeof self.wasm_bindgen !== "function") {
+    throw _makeWasmError(
+      "WASM_BINDGEN_GLUE_INVALID",
+      "wasm-bindgen glue did not expose self.wasm_bindgen",
+      { wasm_bindgen_url: glueUrl },
+    );
+  }
+  return self.wasm_bindgen;
 }
 
 function _mockInitRuntime(options = {}) {
@@ -680,7 +641,7 @@ async function handleRequest(request) {
     }
 
     if (method === "runtimeStatus") {
-      const result = _mockRuntimeStatus();
+      const result = await _runtimeStatus();
       return makeResponse(id, result);
     }
 

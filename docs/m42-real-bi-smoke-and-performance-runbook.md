@@ -22,6 +22,17 @@
   - `/analyzer/public/hooks/renderer/graph-dom.mjs`
   - `/analyzer/public/hooks/metadata-checker-sw.js`
   - 若测试真实 WASM：`/analyzer/public/hooks/metadata_checker_bg.wasm`
+  - 若测试真实 WASM：`/analyzer/public/hooks/metadata_checker.js`（wasm-bindgen 生成的 JS glue，需暴露全局 `wasm_bindgen`）
+
+真实 WASM artifact 生成方式：
+
+```bash
+cargo build --release --no-default-features --features browser-wasm --target wasm32-unknown-unknown
+wasm-bindgen --target no-modules --out-dir /tmp/metadata-checker-wasm --out-name metadata_checker target/wasm32-unknown-unknown/release/metadata_checker.wasm
+```
+
+上传 `/tmp/metadata-checker-wasm/metadata_checker.js` 和 `/tmp/metadata-checker-wasm/metadata_checker_bg.wasm`。`--target no-modules` 是为了让 Service Worker 通过 `importScripts()` 加载后获得全局 `wasm_bindgen`。
+`wasm-bindgen` CLI 版本需与 `Cargo.lock` 中的 `wasm-bindgen` crate 版本一致；当前为 `0.2.122`。
 
 ## 2. 核验 custom.js / onInitDesigner
 
@@ -149,6 +160,7 @@ if (typeof origPluginFactory === "function") {
   - `last-render-error-message`
 
 注意：page fallback 只允许返回 diagnostic graph，不能用 mock analysis 冒充真实图关系。若未部署真实 WASM 或 SW 无法调用 WASM export，预期是稳定 diagnostic，而不是 `Fallback Analysis`。
+真实 SW runtime 必须通过 wasm-bindgen JS glue 初始化 `metadata_checker_bg.wasm`，不能直接把裸 `.wasm` 的 `instance.exports` 当成 `initRuntime` / `analyzeSuperpageSelection` 等 JS API 使用。
 
 ## 4. renderer 与 fallback 复核
 

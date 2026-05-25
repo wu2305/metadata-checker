@@ -6,7 +6,17 @@ export const DEFAULT_RENDER_OPTIONS = {
   edgeLabelMaxLength: 48,
 };
 
-const SENSITIVE_KEYWORDS = ["token", "cookie", "password", "cipherpassport"];
+const SENSITIVE_KEYWORDS = [
+  "token",
+  "password",
+  "secret",
+  "cookie",
+  "auth",
+  "credential",
+  "api_key",
+  "apikey",
+  "cipherpassport",
+];
 
 function safeToString(value) {
   if (value == null) return "";

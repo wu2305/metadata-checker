@@ -219,9 +219,17 @@ function createRequiredFactories(options = {}) {
 function loadCustomModule(options = {}) {
   const source = readFileSync(customSourcePath, "utf-8");
   const document = createMockDocument();
+  if (Object.prototype.hasOwnProperty.call(options, "currentScript")) {
+    document.currentScript = options.currentScript;
+  }
   const serviceWorker = options.serviceWorker ?? createServiceWorkerMock();
   const windowObject = {
     SZ: {},
+    location: options.location ?? {
+      origin: "https://autocrm-test.xiaoshouyi.com",
+      pathname: "/analyzer/app/M40HookSmoke.app",
+      href: "https://autocrm-test.xiaoshouyi.com/analyzer/app/M40HookSmoke.app?:edit=true",
+    },
     ...createRequiredFactories(options),
     ...(options.windowOverrides ?? {}),
   };
@@ -311,6 +319,54 @@ describe("metadata-checker custom.js AMD entry", () => {
     assert.strictEqual(marker(document, "factories"), "installed");
     assert.strictEqual(marker(document, "graph-panel"), "mounted");
     assert.strictEqual(marker(document, "analysis-status"), "ready");
+  });
+
+  it("resolves sidecar module from project hook path when document.currentScript is unavailable", async () => {
+    let importedUrl = null;
+    const fakeDesigner = {
+      openFileArgs: {
+        path: "/analyzer/app/M42Smoke.app/M42Smoke.spg",
+        id: "fid-m42",
+        projectName: "analyzer",
+      },
+      getBuilder() {
+        return {
+          getSelectedComponents: () => [],
+          getSelectedComponent: () => null,
+          getSelectedComponentInfo: () => null,
+          selectComponents() {},
+          doSelectedChange() {},
+        };
+      },
+    };
+    const { module, document } = loadCustomModule({
+      currentScript: null,
+      noServiceWorker: true,
+      location: {
+        origin: "https://autocrm-test.xiaoshouyi.com",
+        pathname: "/analyzer/app/M42Smoke.app/M42Smoke.spg",
+        href: "https://autocrm-test.xiaoshouyi.com/analyzer/app/M42Smoke.app/M42Smoke.spg?:edit=true",
+      },
+      windowOverrides: {
+        __metadata_checker_plugin_factory: null,
+        __metadata_checker_controller_factory: null,
+        __metadata_checker_glue_factory: null,
+        __metadata_checker_module_import: async (url) => {
+          importedUrl = url;
+          return import("../metadata-checker-browser-entry.mjs");
+        },
+      },
+    });
+
+    const result = await module.onInitDesigner(fakeDesigner, {});
+
+    assert.strictEqual(result.installed, true);
+    assert.strictEqual(
+      importedUrl,
+      "https://autocrm-test.xiaoshouyi.com/analyzer/public/hooks/metadata-checker-browser-entry.mjs",
+    );
+    assert.strictEqual(marker(document, "factory-entry"), importedUrl);
+    assert.strictEqual(marker(document, "factories"), "installed");
   });
 
   it("Service Worker register success writes stable markers", async () => {

@@ -443,12 +443,14 @@ describe("createGraphPanelRenderer", () => {
         { id: "a", label: "username: \"alice\"\ncookie=value", metadata: { depth: 0 } },
         { id: "token=abc123", label: "token=abc123", metadata: { depth: 1 }, kind: "Model", source_path: "x" },
         { id: "c", label: "cipherPassport=xyz", metadata: { depth: 2 }, kind: "Model", source_path: "y" },
+        { id: "secret=abc", label: "credential=abc", metadata: { depth: 2 }, kind: "Model", source_path: "z" },
+        { id: "api_key=abc", label: "auth=abc", metadata: { depth: 2 }, kind: "Model", source_path: "k" },
       ],
       edges: [{ from: "a", to: "token=abc123", kind: "Reads", direction: "Forward", label: "read" }],
       groups: [],
       focus_node: "a",
       source_summary: {
-        total_nodes: 3,
+        total_nodes: 5,
         total_edges: 1,
         node_kinds: {},
         edge_kinds: {},
@@ -457,22 +459,26 @@ describe("createGraphPanelRenderer", () => {
       truncated: false,
     });
 
-    const hasSensitive = walkText(container, (text) =>
-      /token|cookie|password|cipherpassport/i.test(text),
-    );
+    const sensitivePattern = /token|cookie|password|secret|auth|credential|api_key|apikey|cipherpassport/i;
+    const hasSensitive = walkText(container, (text) => sensitivePattern.test(text));
     assert.strictEqual(hasSensitive, false);
     const nodeRows = findByClass(container, "graph-node");
     assert.strictEqual(
-      nodeRows.some((row) => /token|cookie|password|cipherpassport/i.test(row.getAttribute("data-node-id") ?? "")),
+      nodeRows.some((row) => sensitivePattern.test(row.getAttribute("data-node-id") ?? "")),
       false,
     );
     assert.strictEqual(
-      /token|cookie|password|cipherpassport/i.test(container.getAttribute("data-metadata-checker-graph-focus") ?? ""),
+      sensitivePattern.test(container.getAttribute("data-metadata-checker-graph-focus") ?? ""),
       false,
     );
     assert.strictEqual(/token=abc123/i.test(result.mermaid), false);
+    assert.strictEqual(/secret=abc|credential=abc|api_key=abc|auth=abc/i.test(result.mermaid), false);
     assert.strictEqual(
       JSON.stringify(result.echartsOption).includes("token=abc123"),
+      false,
+    );
+    assert.strictEqual(
+      /secret=abc|credential=abc|api_key=abc|auth=abc/i.test(JSON.stringify(result.echartsOption)),
       false,
     );
     assert.ok(walkText(container, (text) => /quote|:/i.test(text)));

@@ -7,7 +7,7 @@ function toString(value) {
 
 function sanitizeLabelText(value) {
   const text = toString(value);
-  if (/token|cookie|password|cipherpassport/i.test(text)) {
+  if (/token|password|secret|cookie|auth|credential|api_key|apikey|cipherpassport/i.test(text)) {
     return "[sensitive]";
   }
   return text;

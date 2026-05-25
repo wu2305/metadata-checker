@@ -4585,7 +4585,7 @@ browser/
   - 背景纠偏：
     - M40.9 不是正式 UI 里程碑；它负责把后续真实 BI 接入前的组合链路测透。
     - Plugin Core 仍不负责 fetch metadata、注册 Service Worker、渲染 DOM panel；这些组合逻辑需要单独 integration/controller 层承接。
-    - Service Worker 中可以加载 WASM，但注册目标仍是 JS Service Worker 文件，WASM 由 SW JS 通过 `WebAssembly.instantiateStreaming` 或 `arrayBuffer + instantiate` lazy init。
+    - Service Worker 中可以加载 WASM，但注册目标仍是 JS Service Worker 文件，WASM 由 SW JS 先加载 wasm-bindgen JS glue，再由 glue lazy init `metadata_checker_bg.wasm`。
     - Service Worker 内存态可能随浏览器 idle 终止而丢失；runtime 初始化必须支持 lazy/re-init，不依赖永久全局状态。
   - 建议位置：
     - `browser/integration/metadata-checker-controller.mjs`
@@ -4619,8 +4619,7 @@ browser/
       - `buildOrUpdateSuperpageGraph`
       - `analyzeSuperpageSelection`
     - WASM runtime 在 SW 内 lazy init；重复请求复用初始化 Promise，失败后允许重试或明确 fallback。
-    - 同时覆盖 `instantiateStreaming` 成功与 MIME 不正确时 fallback 到 `arrayBuffer + WebAssembly.instantiate` 的路径。
-    - 覆盖 CSP/wasm 编译失败时的 diagnostic/fallback 行为；M40.9 不要求真实修改服务端 CSP。
+    - 覆盖 wasm-bindgen glue 加载失败、glue 未暴露全局 `wasm_bindgen`、WASM init 失败时的 diagnostic/fallback 行为；M40.9 不要求真实修改服务端 CSP。
     - SW message response 必须携带 `request_id`，错误返回稳定 code。
   - 测试要求：
     - selection -> fetch metadata -> runtime load/build/analyze -> renderer render。
@@ -4638,7 +4637,7 @@ browser/
     - Rust/WASM target build 通过。
     - 不存在直接把 BI 逻辑写入 plugin core 的实现。
     - 真实环境登录、cookie、SuperPage 页面 HTML 和 `custom.js` 注入验证流程已按 `docs/m40-real-bi-environment-runbook.md` 执行。
-    - Service Worker JS 与 WASM artifact 已能被同源 URL 访问；若无法访问，必须记录部署限制和 fallback。
+    - Service Worker JS、wasm-bindgen JS glue 与 WASM artifact 已能被同源 URL 访问；若无法访问，必须记录部署限制和 fallback。
   - 验收场景：
     - 在 BI SuperPage 设计器中通过 `onInitDesigner` 安装 glue。
     - 真实环境 smoke 使用 `.app` 容器内 SuperPage，例如 `/analyzer/app/M40HookSmoke.app/M40HookDesign.spg`，不要用孤立 `/app/Page.spg` 路径。
@@ -4655,8 +4654,8 @@ browser/
     - 重复进入设计器不重复 patch、不重复 instantiate runtime、不重复注册同 scope Service Worker。
   - Service Worker / WASM 真实环境要求：
     - SW 注册脚本仍是 JS，例如 `metadata-checker-sw.js`；`.wasm` 不能直接作为 Service Worker 注册入口。
-    - `.wasm` 优先通过 `WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)` 加载。
-    - 若响应 MIME 不是 `application/wasm`，必须 fallback 到 `fetch(wasmUrl).arrayBuffer()` + `WebAssembly.instantiate(bytes, imports)`。
+    - `.wasm` 通过 wasm-bindgen 生成的 JS glue 加载，SW 侧不能直接调用裸 `instance.exports`。
+    - wasm-bindgen JS glue 必须与 `metadata_checker_bg.wasm` 一起部署在同源可访问 URL 下；glue 未加载、未暴露全局 `wasm_bindgen`、或初始化失败时必须返回稳定 diagnostic。
     - 若站点 CSP 禁止 wasm 编译（例如缺少 `'wasm-unsafe-eval'`），必须返回稳定 diagnostic，不允许静默失败。
     - SW 不访问 DOM；UI 与 marker 更新只能由页面侧 host/controller 完成。
     - SW 不依赖永久内存态；被浏览器终止后下一次 message 能重新 lazy init。
@@ -4674,7 +4673,7 @@ browser/
     - 记录 runtime launcher 类型。
     - 记录 fetch provider 类型。
     - 记录 Service Worker script URL、scope、registration state、controller state。
-    - 记录 WASM URL、加载方式（streaming 或 arrayBuffer fallback）、失败 code（如有）。
+    - 记录 WASM URL、wasm-bindgen glue URL、失败 code（如有）。
     - 记录一次分析 timing。
     - 记录不能覆盖的真实环境限制。
   - 方法论：
@@ -4682,7 +4681,7 @@ browser/
     - DOM marker 比 `window.__xxx` 更适合跨自动化上下文验收。
     - 若 hook 没执行，优先区分“脚本文件没执行”“AMD factory 没执行”“`onInitDesigner` 没调用”，不要直接跳到 iframe 假设。
     - 若 SW 没注册，优先区分“不支持 Service Worker”“script URL 404/CSP 阻断”“scope 不覆盖当前页面”“register 成功但 controller 未接管”。
-    - 若 WASM 没加载，优先区分“MIME 不正确但 fallback 成功”“CSP 阻止 wasm 编译”“WASM URL 不可访问”“imports/wasm-bindgen glue 不匹配”。
+    - 若 WASM 没加载，优先区分“glue URL 不可访问”“glue 未暴露全局 wasm_bindgen”“CSP 阻止 wasm 编译”“WASM URL 不可访问”“wasm-bindgen glue 与 wasm artifact 不匹配”。
 
 验收标准：
 
@@ -5047,7 +5046,7 @@ browser/
   - 前置：
     - M41 真实远程 session 已能拉取 `analyzer` 项目。
     - M40 custom.js / Service Worker / runtime launcher 接入流程可复用。
-    - 真实上传物必须包含 `metadata-checker-browser-entry.mjs` 及其 ESM sidecar；不能只上传裸 `custom.js` 后依赖手工 mock `window.__metadata_checker_*_factory`。
+    - 真实上传物必须包含 `metadata-checker-browser-entry.mjs`、其 ESM sidecar、`metadata_checker.js` wasm-bindgen glue 和 `metadata_checker_bg.wasm`；不能只上传裸 `custom.js` 后依赖手工 mock `window.__metadata_checker_*_factory`。
     - browser runtime `analyzeSuperpageSelection` 必须返回 Rust/WASM 产生的 `visual_graph` item；page fallback 只能返回 diagnostic graph，不能返回 mock analysis。
   - 现场可执行项（按顺序）：
     - 在真实设计器中加载含 `custom.js` 的页面后，先完成 `custom.js` 注入与 `onInitDesigner` marker 校验。
