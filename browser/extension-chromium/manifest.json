@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Metadata Checker",
+  "description": "Connects BI SuperPage Designer to metadata-checker browser runtime.",
+  "version": "0.0.0",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://autocrm-test.xiaoshouyi.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Metadata Checker",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://autocrm-test.xiaoshouyi.com/*"
+      ],
+      "js": [
+        "extension-core/bridge-protocol.js",
+        "content-script.js",
+        "extension-core/content-bridge.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "extension-core/bridge-protocol.js",
+        "extension-core/runtime-adapter.js",
+        "extension-core/page-script.js",
+        "metadata_checker.js",
+        "metadata_checker_bg.wasm"
+      ],
+      "matches": [
+        "https://autocrm-test.xiaoshouyi.com/*"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Metadata Checker",
+  "short_name": "metadata-checker",
+  "version": "{{VERSION}}",
+  "description": "Metadata Checker Browser Extension (shared core)",
+  "permissions": ["storage"],
+  "host_permissions": ["{{HOST_MATCHES}}"],
+  "content_scripts": [
+    {
+      "matches": ["{{HOST_MATCHES}}"],
+      "js": [
+        "extension-core/page-script.js",
+        "extension-core/content-bridge.js"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "service_worker": "extension-core/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Metadata Checker",
+    "default_popup": "extension-core/popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "bridge/*",
+        "extension-core/*",
+        "metadata-checker-sw.js",
+        "metadata_checker.js",
+        "metadata_checker_bg.wasm",
+        "custom-bridge.js",
+        "metadata-checker-browser-entry.js"
+      ],
+      "matches": ["{{HOST_MATCHES}}"]
+    }
+  ]
+}
