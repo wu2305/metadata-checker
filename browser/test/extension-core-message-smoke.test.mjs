@@ -286,3 +286,12 @@ test("chromium content script exposes tab request listener", async () => {
   assert.match(contentSource, /metadata-checker-tab-request/);
   assert.match(contentSource, /requestPageBridge/);
 });
+
+test("chromium content script writes automatic bridge probe markers", async () => {
+  const contentSource = await loadChromiumScript("content-script.js");
+
+  assert.match(contentSource, /probeBridgeWhenReady/);
+  assert.match(contentSource, /extension-bridge-request/);
+  assert.match(contentSource, /extension-bridge-source-path/);
+  assert.match(contentSource, /extension-bridge-selection-count/);
+});

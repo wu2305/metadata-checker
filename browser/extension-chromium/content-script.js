@@ -75,6 +75,51 @@
     return bridge.request(requestType || "getBridgeStatus", {});
   }
 
+  function writeBridgeProbeMarkers(response) {
+    const payload = response?.payload || response || {};
+    const pageContext = payload.page_context || {};
+    const selection = payload.selection || {};
+    const diagnostics = Array.isArray(response?.diagnostics)
+      ? response.diagnostics
+      : Array.isArray(payload.diagnostics)
+        ? payload.diagnostics
+        : [];
+    writeMarker("extension-bridge-request", payload.bridge_detected === false ? "missing" : "ready");
+    writeMarker("extension-bridge-source-path", pageContext.source_path || pageContext.file_id || "");
+    writeMarker(
+      "extension-bridge-selection-count",
+      String(Array.isArray(selection.selected_component_ids) ? selection.selected_component_ids.length : 0),
+    );
+    writeMarker("extension-bridge-diagnostic-code", diagnostics[0]?.code || "");
+  }
+
+  function probeBridgeWhenReady(attempt = 0) {
+    const bridge = root.__metadata_checker_content_bridge__;
+    if (!bridge || typeof bridge.request !== "function") {
+      if (attempt < 20 && typeof root.setTimeout === "function") {
+        root.setTimeout(() => probeBridgeWhenReady(attempt + 1), 100);
+      }
+      return;
+    }
+    requestPageBridge("getBridgeStatus").then((response) => {
+      writeBridgeProbeMarkers(response);
+      forwardStatus(response);
+    }).catch((error) => {
+      writeMarker("extension-bridge-request", "error");
+      writeMarker("extension-bridge-diagnostic-code", "METADATA_CHECKER_TAB_REQUEST_FAILED");
+      forwardStatus({
+        payload: { supported: false },
+        diagnostics: [
+          stableDiagnostic(
+            "METADATA_CHECKER_TAB_REQUEST_FAILED",
+            error?.message || "metadata checker tab request failed",
+            "error",
+          ),
+        ],
+      });
+    });
+  }
+
   if (runtime && typeof runtime.onMessage?.addListener === "function") {
     runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!message || message.type !== "metadata-checker-tab-request") {
@@ -98,6 +143,8 @@
       return true;
     });
   }
+
+  probeBridgeWhenReady();
 
   root.addEventListener("message", (event) => {
     const data = event?.data;
