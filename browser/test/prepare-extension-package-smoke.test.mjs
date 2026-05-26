@@ -209,6 +209,19 @@ test("prepareExtensionPackage builds Chromium extension and rewrites manifest", 
   }
 });
 
+test("Chromium manifest loads shared panel host before content script", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("../extension-chromium/manifest.json", import.meta.url), "utf8"),
+  );
+  const scripts = manifest.content_scripts?.[0]?.js || [];
+  const panelHostIndex = scripts.indexOf("extension-core/panel-host.js");
+  const contentScriptIndex = scripts.indexOf("content-script.js");
+
+  assert.notEqual(panelHostIndex, -1);
+  assert.notEqual(contentScriptIndex, -1);
+  assert.ok(panelHostIndex < contentScriptIndex);
+});
+
 test("prepareExtensionPackage writes .wasm as binary", async () => {
   const fixture = await createChromiumFixture();
   const outRoot = await mkdtemp(join(tmpdir(), "metadata-checker-ext-out-bin-"));

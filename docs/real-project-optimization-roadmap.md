@@ -5397,6 +5397,8 @@ browser/tools/
 - 页面内悬浮窗可以常驻，但会随页面刷新/SPA 重建而销毁，需要 content script 重新挂载。
 - 悬浮窗属于 extension 接入层，不承载解析、建图、查询、业务推理；核心能力仍走 Rust/WASM runtime 与既有 analysis envelope。
 - M44 不追求正式设计器内嵌图面板的完整体验，先证明“可常驻、可恢复、可与 bridge 通信、可显示分析结果/诊断”。
+- UI 形态参考 eruda：页面右下角固定一个小型触发 button，初始只显示 button；点击 button 展开 panel，再点击 button 收起 panel。button 始终存在，panel 只做 show/hide。
+- SuperPage selection 不通过 DOM click 猜测。源码确认 `onInitDesigner(designer, args)` 先拿到 Workbench 级 designer，SuperPage 选择状态最终进入 `SuperPageBuilder.selectComponents(...)`、`deselectComponents(...)`、`deselectAll(...)` 并统一触发 `doSelectedChange(selectIds, deselectIds)`。M44 应优先在 page script adapter 中定位当前 SuperPage builder，并 patch `doSelectedChange` 或相关选择方法，触发后用 `builder.getSelectedComponents()` 重新读取完整当前 selection。
 
 推荐架构：
 
@@ -5419,6 +5421,9 @@ BI onInitDesigner
 - content script panel：
   - 在页面 DOM 中创建固定定位容器。
   - 首选 Shadow DOM 隔离样式；如 BI 样式冲突严重，再评估 iframe。
+  - 初始只挂载右下角 trigger button；panel 默认隐藏，不自动弹出。
+  - trigger button 与 panel 必须幂等：重复注入、刷新、SPA 重入不能产生多个 button/panel。
+  - panel 关闭后 selection 事件仍继续更新内部状态；再次打开时展示最新 selection。
   - 不读取 raw `.spg/.tbl`、不保存密码/token/cookie。
   - 只消费轻量 selection/page_context、analysis envelope、visual graph option。
   - 必须幂等挂载：重复 content script、SPA 切换、设计器重入不重复创建多个 panel。
@@ -5426,10 +5431,28 @@ BI onInitDesigner
   - 每次调用检查 extension 是否注入，写出 `plugin-state/plugin-ready`。
   - 不直接调用 `chrome.runtime`；只通过 DOM marker / page script 状态判断插件加载情况。
   - 插件未加载时仍保持 bridge 可用，后续 extension 注入后由 page script 补发 ready。
+  - 只安装设计器 bridge / selection bridge，不负责渲染 panel，也不直接 fetch metadata、调 runtime 或读取 raw metadata。
+- selection bridge：
+  - patch 点优先级：
+    - 首选 `SuperPageBuilder.doSelectedChange(selectIds, deselectIds)`，因为它是选择状态统一出口。
+    - 如真实对象不可直接稳定定位，再 fallback patch `selectComponents`、`deselectComponents`、`deselectAll`。
+  - 每次事件必须重新读取完整 selection，而不是只使用增量参数：
+    - `builder.getSelectedComponents()`
+    - `component.getId()`
+    - `component.getType()`
+    - 可选 `component.getName()`，但不得发送完整 component JSON。
+  - selection payload 只允许轻量字段：
+    - `source_path`
+    - `selected_component_ids`
+    - `selected_component_types`
+    - `selected_count`
+    - `selection_source`
+    - `changed_at`
+  - 高频 selection 变化需要 debounce，首轮建议 100-200ms。
 
 任务清单：
 
-- [ ] M44.1：Floating Panel Host contract
+- [x] M44.1：Floating Panel Host contract
   - 文件建议：
     - `browser/extension-core/panel-host.js`
     - `browser/test/panel-host-smoke.test.mjs`
@@ -5438,26 +5461,47 @@ BI onInitDesigner
     - `unmountPanel()`
     - `updatePanel(envelope)`
     - `setPanelStatus(status)`
+    - `togglePanel(forceVisible?)`
+    - `updateSelection(selection)`
   - 写稳定 DOM marker：
     - `data-metadata-checker-panel="mounted|hidden|error"`
+    - `data-metadata-checker-panel-trigger="mounted"`
     - `data-metadata-checker-panel-source-path`
     - `data-metadata-checker-panel-selection-count`
     - `data-metadata-checker-panel-last-status`
   - 正反例测试：
     - 重复 mount 不创建多个节点。
+    - 初始只显示 trigger button，panel 处于 hidden。
+    - trigger button 点击后 panel show/hide 状态切换。
+    - panel hidden 时 selection 更新仍进入状态，重新打开后展示最新 selection。
     - 没有 `document.body` 时返回 stable diagnostic。
     - 不泄漏 raw metadata / raw component JSON。
 
-- [ ] M44.2：Content Script Panel Lifecycle
+- [x] M44.2：SuperPage Selection Bridge
+  - 文件建议：
+    - `browser/extension-core/page-script.js`
+    - `browser/test/extension-selection-bridge-smoke.test.mjs`
+  - 通过 `onInitDesigner` / page script 中保存的 designer context 定位当前 SuperPage builder。
+  - patch `doSelectedChange` 或 fallback patch `selectComponents`、`deselectComponents`、`deselectAll`。
+  - 触发后发送 `metadata-checker-selection-changed` page message，由 content script 转成 extension 内部状态。
+  - 正反例测试：
+    - patch 后调用 `selectComponents` 能发出当前完整 selection。
+    - 调用 `deselectComponents` / `deselectAll` 后 selection 可更新到 canvas 或空状态。
+    - 重复 patch 不重复包装方法、不重复发事件。
+    - payload 不包含 raw metadata、raw component JSON、cookie、token、password。
+    - 找不到 SuperPage builder 时返回 stable diagnostic，不抛未捕获异常。
+
+- [x] M44.3：Content Script Panel Lifecycle
   - content script 负责：
     - 接收 popup/background 的 open/close/toggle panel 请求。
     - 在 bridge ready 后自动刷新 panel 状态。
+    - 接收 page script selection changed message，更新 panel host。
     - 页面刷新或重新进入设计器后重新挂载。
   - 反例：
     - extension 未注入时 popup 显示 stable diagnostic。
     - bridge missing 时 panel 显示缺失诊断，不抛未捕获异常。
 
-- [ ] M44.3：Panel Rendering MVP
+- [x] M44.4：Panel Rendering MVP
   - 首屏显示：
     - bridge 状态
     - source_path
@@ -5469,7 +5513,7 @@ BI onInitDesigner
     - visual graph summary 或 ECharts option 的简化预览入口
   - 暂不要求完整图关系交互；先保证可持续展示和更新。
 
-- [ ] M44.4：Popup 与 Panel 协作
+- [x] M44.5：Popup 与 Panel 协作
   - popup 不再承载主结果 UI。
   - popup 按钮：
     - Open panel
@@ -5479,12 +5523,15 @@ BI onInitDesigner
   - popup 通过 `chrome.tabs.sendMessage` 与 content script 通信。
   - 不使用 `chrome.scripting.executeScript` 直接读取页面对象。
 
-- [ ] M44.5：真实 BI 验收
+- [ ] M44.6：真实 BI 验收
   - 在 `https://autocrm-test.xiaoshouyi.com` 验证：
     - `onInitDesigner` 写出 `plugin-ready=true`。
     - extension content script 注入成功。
+    - 页面右下角固定 trigger button 存在，初始 panel 隐藏。
+    - 点击 trigger button 后 panel 展开，再次点击后 panel 收起。
     - panel 挂载后点击页面不会关闭。
     - 切换组件后 panel 可刷新 selection。
+    - panel 收起时切换组件，再展开后显示最新 selection。
     - 点击 Analyze 后 panel 显示结果或 stable diagnostic。
     - 刷新页面后 panel 可恢复或明确显示 idle 状态。
 

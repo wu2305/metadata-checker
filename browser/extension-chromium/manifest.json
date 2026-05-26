@@ -26,6 +26,7 @@
       ],
       "js": [
         "extension-core/bridge-protocol.js",
+        "extension-core/panel-host.js",
         "content-script.js",
         "extension-core/content-bridge.js"
       ],
