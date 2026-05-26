@@ -51,6 +51,54 @@
     }
   }
 
+  function stableDiagnostic(code, message, severity = "warning") {
+    return {
+      severity,
+      code,
+      message,
+    };
+  }
+
+  async function requestPageBridge(requestType) {
+    const bridge = root.__metadata_checker_content_bridge__;
+    if (!bridge || typeof bridge.request !== "function") {
+      return {
+        payload: { supported: false },
+        diagnostics: [
+          stableDiagnostic(
+            "METADATA_CHECKER_CONTENT_BRIDGE_MISSING",
+            "metadata checker content bridge is unavailable",
+          ),
+        ],
+      };
+    }
+    return bridge.request(requestType || "getBridgeStatus", {});
+  }
+
+  if (runtime && typeof runtime.onMessage?.addListener === "function") {
+    runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (!message || message.type !== "metadata-checker-tab-request") {
+        return false;
+      }
+      requestPageBridge(message.request_type).then((response) => {
+        forwardStatus(response);
+        sendResponse(response);
+      }).catch((error) => {
+        sendResponse({
+          payload: { supported: false },
+          diagnostics: [
+            stableDiagnostic(
+              "METADATA_CHECKER_TAB_REQUEST_FAILED",
+              error?.message || "metadata checker tab request failed",
+              "error",
+            ),
+          ],
+        });
+      });
+      return true;
+    });
+  }
+
   root.addEventListener("message", (event) => {
     const data = event?.data;
     if (

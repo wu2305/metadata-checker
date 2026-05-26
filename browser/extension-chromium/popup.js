@@ -39,6 +39,26 @@ function renderStatus(state) {
   setText(fields.diagnostic, diagnostic ? JSON.stringify(diagnostic, null, 2) : "");
 }
 
+async function requestActiveTab(requestType) {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tabId = tabs?.[0]?.id;
+  if (!tabId) {
+    return {
+      diagnostics: [
+        {
+          severity: "warning",
+          code: "METADATA_CHECKER_ACTIVE_TAB_MISSING",
+          message: "active tab is unavailable",
+        },
+      ],
+    };
+  }
+  return chrome.tabs.sendMessage(tabId, {
+    type: "metadata-checker-tab-request",
+    request_type: requestType,
+  });
+}
+
 async function loadStatus() {
   if (!chrome?.runtime?.sendMessage) {
     renderStatus({
@@ -50,36 +70,22 @@ async function loadStatus() {
     });
     return;
   }
-  const response = await chrome.runtime.sendMessage({
-    type: "metadata-checker-popup-status",
-  });
-  renderStatus(response?.state || {});
+  try {
+    const tabStatus = await requestActiveTab("getBridgeStatus");
+    renderStatus({
+      last_bridge_status: tabStatus,
+      last_diagnostic: tabStatus?.diagnostics?.[0] || null,
+    });
+  } catch (_error) {
+    const response = await chrome.runtime.sendMessage({
+      type: "metadata-checker-popup-status",
+    });
+    renderStatus(response?.state || {});
+  }
 }
 
 async function analyzeCurrentSelection() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tabId = tabs?.[0]?.id;
-  if (!tabId) {
-    return;
-  }
-  const [{ result } = {}] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: async () => {
-      const bridge = globalThis.__metadata_checker_content_bridge__;
-      if (!bridge || typeof bridge.analyzeCurrentSelection !== "function") {
-        return {
-          diagnostics: [
-            {
-              severity: "warning",
-              code: "METADATA_CHECKER_CONTENT_BRIDGE_MISSING",
-              message: "metadata checker content bridge is unavailable",
-            },
-          ],
-        };
-      }
-      return bridge.analyzeCurrentSelection();
-    },
-  });
+  const result = await requestActiveTab("analyzeCurrentSelection");
   renderStatus({
     last_bridge_status: result,
     last_diagnostic: result?.diagnostics?.[0] || null,

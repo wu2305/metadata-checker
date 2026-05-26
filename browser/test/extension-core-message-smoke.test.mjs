@@ -10,6 +10,10 @@ async function loadScript(name) {
   return readFile(join(ROOT.pathname, "extension-core", name), "utf8");
 }
 
+async function loadChromiumScript(name) {
+  return readFile(join(ROOT.pathname, "extension-chromium", name), "utf8");
+}
+
 function createFakeWindow({ bridge } = {}) {
   const listeners = new Map();
   const posted = [];
@@ -265,4 +269,20 @@ test("content bridge ignores forged responses without page-script source and tok
 
   const response = await pending;
   assert.deepEqual(response.payload, { ok: true });
+});
+
+test("chromium popup requests active tab instead of executing page code", async () => {
+  const popupSource = await loadChromiumScript("popup.js");
+
+  assert.match(popupSource, /chrome\.tabs\.sendMessage/);
+  assert.match(popupSource, /metadata-checker-tab-request/);
+  assert.doesNotMatch(popupSource, /chrome\.scripting\.executeScript/);
+});
+
+test("chromium content script exposes tab request listener", async () => {
+  const contentSource = await loadChromiumScript("content-script.js");
+
+  assert.match(contentSource, /runtime\.onMessage\.addListener/);
+  assert.match(contentSource, /metadata-checker-tab-request/);
+  assert.match(contentSource, /requestPageBridge/);
 });
