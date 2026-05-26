@@ -153,6 +153,7 @@
       data.__metadata_checker_bridge_source === "page-script" &&
       data.__metadata_checker_bridge_direction === "response"
     ) {
+      writeBridgeProbeMarkers(data);
       forwardStatus(data);
     }
   });

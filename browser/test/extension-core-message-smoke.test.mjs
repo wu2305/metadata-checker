@@ -294,4 +294,5 @@ test("chromium content script writes automatic bridge probe markers", async () =
   assert.match(contentSource, /extension-bridge-request/);
   assert.match(contentSource, /extension-bridge-source-path/);
   assert.match(contentSource, /extension-bridge-selection-count/);
+  assert.match(contentSource, /writeBridgeProbeMarkers\(data\)/);
 });
