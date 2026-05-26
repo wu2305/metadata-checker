@@ -258,10 +258,22 @@
       panel.style.position = "fixed";
       panel.style.right = "16px";
       panel.style.bottom = "56px";
+      panel.style.zIndex = "2147483647";
       panel.style.width = "360px";
+      panel.style.maxWidth = "calc(100vw - 32px)";
       panel.style.maxHeight = "60vh";
       panel.style.overflow = "auto";
+      panel.style.padding = "12px";
+      panel.style.boxSizing = "border-box";
+      panel.style.background = "#ffffff";
+      panel.style.color = "#202124";
+      panel.style.border = "1px solid rgba(60, 64, 67, 0.24)";
+      panel.style.borderRadius = "8px";
+      panel.style.boxShadow = "0 8px 24px rgba(60, 64, 67, 0.24)";
+      panel.style.font = "12px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif";
+      panel.style.whiteSpace = "pre-wrap";
       content.className = "metadata-checker-panel-content";
+      content.style.whiteSpace = "pre-wrap";
 
       panel.appendChild(content);
       shadow.appendChild(trigger);

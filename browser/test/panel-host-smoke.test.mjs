@@ -142,6 +142,22 @@ test("createPanelHost toggles visible and hidden via trigger and API", () => {
   assert.equal(host.getState().visible, true);
 });
 
+test("createPanelHost renders visible floating panel chrome above designer UI", () => {
+  const host = createPanelHost();
+  const document = createDocument(true);
+  host.mountPanel({ rootDocument: document });
+  host.togglePanel(true);
+
+  const panel = host.getState().panelElement;
+  assert.equal(panel.style.zIndex, "2147483647");
+  assert.equal(panel.style.background, "#ffffff");
+  assert.equal(panel.style.borderRadius, "8px");
+  assert.equal(panel.style.boxShadow, "0 8px 24px rgba(60, 64, 67, 0.24)");
+  assert.equal(panel.style.maxWidth, "calc(100vw - 32px)");
+  assert.equal(panel.style.whiteSpace, "pre-wrap");
+  assert.equal(host.getState().contentElement.style.whiteSpace, "pre-wrap");
+});
+
 test("createPanelHost keeps selection update while hidden and displays latest on expand", () => {
   const host = createPanelHost();
   const document = createDocument(true);
