@@ -5183,6 +5183,7 @@ Safari Web Extension package
   - 保存 Designer 引用到闭包或 page context bridge，不暴露完整 raw metadata/component JSON。
   - 暴露轻量 API：`getPageContext()`、`getSelectionSnapshot()`、`getBridgeStatus()`。
   - 通过 `CustomEvent` 通知插件，不主动调用插件私有 API。
+  - `onInitDesigner` 是页面侧检查插件是否已加载的稳定入口：检查 extension 注入 marker / page-script 状态，并写出 `data-metadata-checker-plugin-state` 与 `data-metadata-checker-plugin-ready`。
   - 可与业务已有 `custom.js` 手工合并；不得要求覆盖业务 monkey patch。
 - Extension：
   - content script 默认隔离环境，不直接假设能访问 page context 对象。
@@ -5385,3 +5386,112 @@ browser/tools/
 - extension store 发布。
 - 多平台自动适配。
 - IndexedDB 真实持久化。
+
+#### M44：Browser Extension Persistent Floating Panel
+
+目标：把 M43 已验证的 Browser Extension + `onInitDesigner` bridge 从“popup/diagnostic smoke”推进为“页面内常驻悬浮窗”。popup 只作为入口、状态页和设置页；真正持续显示分析结果、图关系、诊断和交互操作的 UI 由 content script 在当前 BI 页面内挂载，不依赖浏览器 toolbar popup 的生命周期。
+
+核心判断：
+
+- Chrome/Edge/Safari 的 extension popup 会在失焦、点击页面或切换 tab 时关闭，不能作为常驻工作面板。
+- 页面内悬浮窗可以常驻，但会随页面刷新/SPA 重建而销毁，需要 content script 重新挂载。
+- 悬浮窗属于 extension 接入层，不承载解析、建图、查询、业务推理；核心能力仍走 Rust/WASM runtime 与既有 analysis envelope。
+- M44 不追求正式设计器内嵌图面板的完整体验，先证明“可常驻、可恢复、可与 bridge 通信、可显示分析结果/诊断”。
+
+推荐架构：
+
+```text
+BI onInitDesigner
+  -> plugin-ready marker
+  -> page script bridgeReady
+  -> content script
+  -> floating panel host (Shadow DOM or iframe)
+  -> runtime/background/offscreen
+  -> analysis envelope / visual graph summary
+```
+
+边界要求：
+
+- popup：
+  - 只做入口、设置、权限提示、最近状态摘要。
+  - 不作为常驻分析结果 UI。
+  - 可以提供按钮：打开/隐藏页面悬浮窗、重新检测 bridge、触发一次分析。
+- content script panel：
+  - 在页面 DOM 中创建固定定位容器。
+  - 首选 Shadow DOM 隔离样式；如 BI 样式冲突严重，再评估 iframe。
+  - 不读取 raw `.spg/.tbl`、不保存密码/token/cookie。
+  - 只消费轻量 selection/page_context、analysis envelope、visual graph option。
+  - 必须幂等挂载：重复 content script、SPA 切换、设计器重入不重复创建多个 panel。
+- `onInitDesigner`：
+  - 每次调用检查 extension 是否注入，写出 `plugin-state/plugin-ready`。
+  - 不直接调用 `chrome.runtime`；只通过 DOM marker / page script 状态判断插件加载情况。
+  - 插件未加载时仍保持 bridge 可用，后续 extension 注入后由 page script 补发 ready。
+
+任务清单：
+
+- [ ] M44.1：Floating Panel Host contract
+  - 文件建议：
+    - `browser/extension-core/panel-host.js`
+    - `browser/test/panel-host-smoke.test.mjs`
+  - 定义 API：
+    - `mountPanel({ rootDocument, initialState })`
+    - `unmountPanel()`
+    - `updatePanel(envelope)`
+    - `setPanelStatus(status)`
+  - 写稳定 DOM marker：
+    - `data-metadata-checker-panel="mounted|hidden|error"`
+    - `data-metadata-checker-panel-source-path`
+    - `data-metadata-checker-panel-selection-count`
+    - `data-metadata-checker-panel-last-status`
+  - 正反例测试：
+    - 重复 mount 不创建多个节点。
+    - 没有 `document.body` 时返回 stable diagnostic。
+    - 不泄漏 raw metadata / raw component JSON。
+
+- [ ] M44.2：Content Script Panel Lifecycle
+  - content script 负责：
+    - 接收 popup/background 的 open/close/toggle panel 请求。
+    - 在 bridge ready 后自动刷新 panel 状态。
+    - 页面刷新或重新进入设计器后重新挂载。
+  - 反例：
+    - extension 未注入时 popup 显示 stable diagnostic。
+    - bridge missing 时 panel 显示缺失诊断，不抛未捕获异常。
+
+- [ ] M44.3：Panel Rendering MVP
+  - 首屏显示：
+    - bridge 状态
+    - source_path
+    - selected component ids/count
+    - last diagnostic
+    - analyze 按钮
+  - 分析结果显示：
+    - summary / items / diagnostics
+    - visual graph summary 或 ECharts option 的简化预览入口
+  - 暂不要求完整图关系交互；先保证可持续展示和更新。
+
+- [ ] M44.4：Popup 与 Panel 协作
+  - popup 不再承载主结果 UI。
+  - popup 按钮：
+    - Open panel
+    - Hide panel
+    - Refresh bridge
+    - Analyze current selection
+  - popup 通过 `chrome.tabs.sendMessage` 与 content script 通信。
+  - 不使用 `chrome.scripting.executeScript` 直接读取页面对象。
+
+- [ ] M44.5：真实 BI 验收
+  - 在 `https://autocrm-test.xiaoshouyi.com` 验证：
+    - `onInitDesigner` 写出 `plugin-ready=true`。
+    - extension content script 注入成功。
+    - panel 挂载后点击页面不会关闭。
+    - 切换组件后 panel 可刷新 selection。
+    - 点击 Analyze 后 panel 显示结果或 stable diagnostic。
+    - 刷新页面后 panel 可恢复或明确显示 idle 状态。
+
+验收标准：
+
+- Node 测试覆盖 panel host、content script lifecycle、popup-panel message contract。
+- 真实 BI 页面能看到常驻 panel marker。
+- 页面点击、设计器内交互不会关闭 panel。
+- popup 关闭不影响 panel 常驻。
+- panel 不承载核心解析/查询逻辑，不复制 Rust/WASM 能力。
