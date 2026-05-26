@@ -9,7 +9,8 @@
 | 模块 | 当前能力 | M41 关系 |
 |---|---|---|
 | `remote_metadata.rs` | `RemoteFileRef/Info/Content`、`RemoteMetadataErrorCode`、`AsyncRemoteMetadataProvider` trait、`WasmFetchMetadataProvider` 兼容类型 | 核心 contract 保留，兼容类型必须委托 reqwest provider，不得再直接调用 `web_sys::window().fetch` |
-| `browser.rs` + `browser_wasm_bindgen.rs` | WASM runtime API：init/load/build/analyze，内存态 graph | 暴露新的远程 fetch WASM API |
+| `browser.rs` + `browser_wasm_bindgen.rs` | WASM runtime API：init/load/build/analyze/status，内存态 graph | 仅负责 runtime core；远端 fetch/load 语义不在此暴露 |
+| `remote_metadata_provider.rs` | `wasm_bindings`：`fetchRemoteFileInfo` / `fetchRemoteFileContent` / `loadRemoteSuperpageDocument` | 远端文件信息、内容与远端文档加载的 wasm-export 在这里对外提供 |
 | `scanner/indexer.rs` | 6 阶段本地扫描：discover → diff → parse → apply → delete → persist | 复用于 session 目录；新增远程 discover/diff |
 | `storage_provider.rs` | `DocumentProvider` trait：`read_bytes`/`metadata` | 新增 `RemoteDocumentProvider` 实现 |
 | `persistence/` | `GraphPersistenceProvider`：memory / redb / indexeddb stub | 新增 session manifest 持久化（本地文件/JSON） |
@@ -79,7 +80,7 @@ browser-wasm = [
 
 | 任务 | 文件 | 说明 |
 |---|---|---|
-| 暴露 WASM API | `src/browser_wasm_bindgen.rs` | 新增 `fetchRemoteFileInfo`、`fetchRemoteFileContent`、`loadRemoteSuperpageDocument` |
+| 暴露远端 WASM API | `src/remote_metadata_provider.rs`（`wasm_bindings`） | 通过 wasm-bindgen 暴露 `fetchRemoteFileInfo`、`fetchRemoteFileContent`、`loadRemoteSuperpageDocument` |
 | 统一 envelope | `src/browser.rs` | 新增远程 fetch 结果 envelope，不抛裸 JS Error |
 | 覆盖错误场景 | `src/remote_metadata_provider.rs` | 401/403/404/CORS/network/invalid JSON/empty body |
 
@@ -90,7 +91,7 @@ browser-wasm = [
 | 任务 | 文件 | 说明 |
 |---|---|---|
 | SW 新增 message method | `browser/service-worker/metadata-checker-sw.js` | `fetchRemoteFileInfo`、`fetchRemoteFileContent`、`loadRemoteSuperpageDocument` |
-| SW 调用 WASM | — | SW JS 只调用 WASM export，不复制 URL 构造 |
+| SW 调用 WASM | `metadata_checker.js` + `metadata_checker_bg.wasm` | SW 通过 `self.wasm_bindgen` 调用 `fetchRemoteFileInfo`、`fetchRemoteFileContent`、`loadRemoteSuperpageDocument`，要求 glue 与 wasm 产物同目录发布 |
 | lazy init 后 fetch | — | WASM runtime 未初始化时先 init，再 fetch |
 | fallback diagnostic | — | WASM 初始化失败时返回稳定错误码，允许 page fallback |
 
@@ -107,7 +108,7 @@ browser-wasm = [
 
 ### Phase 5：Native Session 基座（M41.6 - M41.12）
 
-状态：native session 主链路已落地。已完成 manifest schema、session manager、AuthContext/SecretStore、native remote session provider contract + in-memory/test provider、reqwest BI provider、远程内容写入 session project mirror、删除事件处理、失败不污染旧 session、session-aware build graph 辅助函数，以及 `--session-list/show/status/delete/refresh` 的 CLI 契约测试。2026-05-25 已用真实 BI 测试环境验证 `--session-refresh analyzer` 可登录、拉取远程元数据、写入 session mirror 并构建 graphdb。browser-wasm 真实 artifact 联调仍在后续阶段。
+状态：native session 主链路已落地。已完成 manifest schema、session manager、AuthContext/SecretStore、native remote session provider contract + in-memory/test provider、reqwest BI provider、远程内容写入 session project mirror、删除事件处理、失败不污染旧 session、session-aware build graph 辅助函数，以及 `--session-list/show/status/delete/refresh` 的 CLI 契约测试。2026-05-25 已用真实 BI 测试环境验证 `--session-refresh analyzer` 可登录、拉取远程元数据、写入 session mirror 并构建 graphdb。browser-wasm 的真实联调需按 `metadata_checker.js` 与 `metadata_checker_bg.wasm` 一并生成、上传并部署到同一路径，且 SW 调用对应 export。
 
 | 任务 | 文件 | 说明 |
 |---|---|---|

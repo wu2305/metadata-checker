@@ -7,9 +7,15 @@ use metadata_checker::browser_wasm_bindgen::{
     js_analyze_superpage_selection, js_build_or_update_superpage_graph, js_init_runtime,
     js_load_superpage_document, js_runtime_status,
 };
+use metadata_checker::remote_metadata_provider::wasm_bindings::{
+    js_fetch_remote_file_content, js_fetch_remote_file_info, js_load_remote_superpage_document,
+};
 use serde::Deserialize;
+use std::future::Future;
+use std::pin::pin;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll, Wake, Waker};
 
 #[derive(Debug, Deserialize)]
 struct JsDiagnostic {
@@ -52,12 +58,133 @@ fn with_runtime_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn run_remote_wrapper<F>(future: F) -> String
+where
+    F: Future<Output = String>,
+{
+    let mut future = pin!(future);
+    struct TestWaker {
+        thread: std::thread::Thread,
+    }
+    impl Wake for TestWaker {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.thread.unpark();
+        }
+        fn wake_by_ref(self: &std::sync::Arc<Self>) {
+            self.thread.unpark();
+        }
+    }
+
+    let waker = Waker::from(std::sync::Arc::new(TestWaker {
+        thread: std::thread::current(),
+    }));
+    let mut cx = Context::from_waker(&waker);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+
+    loop {
+        match future.as_mut().poll(&mut cx) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => {
+                let now = std::time::Instant::now();
+                if now >= deadline {
+                    panic!("remote wrapper did not resolve in 1s");
+                }
+                std::thread::park_timeout(deadline - now);
+            }
+        }
+    }
+}
+
+fn valid_file_ref_json() -> &'static str {
+    r#"{"project_ref":"analyzer","source_path":"app/demo.spg","file_id":"test","remote_ref":"remote"}"#
+}
+
 #[test]
 fn test_js_init_runtime_invalid_options_json() {
     let output = js_init_runtime("not json");
     let envelope = parse_js_envelope(&output);
     assert_eq!(envelope.status, "error");
     assert_eq!(envelope.diagnostics[0].code, "INVALID_OPTIONS");
+}
+
+#[test]
+fn test_js_fetch_remote_file_info_invalid_file_ref_json() {
+    let output = run_remote_wrapper(js_fetch_remote_file_info(
+        "".to_string(),
+        "not json".to_string(),
+    ));
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "error");
+    assert_eq!(envelope.diagnostics[0].code, "INVALID_FILE_REF");
+}
+
+#[test]
+fn test_js_fetch_remote_file_content_invalid_file_ref_json() {
+    let output = run_remote_wrapper(js_fetch_remote_file_content(
+        "".to_string(),
+        "not json".to_string(),
+    ));
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "error");
+    assert_eq!(envelope.diagnostics[0].code, "INVALID_FILE_REF");
+}
+
+#[test]
+fn test_js_load_remote_superpage_document_invalid_file_ref_json() {
+    let output = run_remote_wrapper(js_load_remote_superpage_document(
+        "".to_string(),
+        "not json".to_string(),
+        r#"{}"#.to_string(),
+    ));
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "error");
+    assert_eq!(envelope.diagnostics[0].code, "INVALID_FILE_REF");
+}
+
+#[test]
+fn test_js_load_remote_superpage_document_invalid_options_json() {
+    let output = run_remote_wrapper(js_load_remote_superpage_document(
+        "http://example.invalid".to_string(),
+        valid_file_ref_json().to_string(),
+        "not json".to_string(),
+    ));
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "error");
+    assert_eq!(envelope.diagnostics[0].code, "INVALID_OPTIONS");
+}
+
+#[test]
+fn test_js_fetch_remote_file_info_empty_base_url_returns_request_error_envelope() {
+    let output = run_remote_wrapper(js_fetch_remote_file_info(
+        "".to_string(),
+        valid_file_ref_json().to_string(),
+    ));
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "error");
+    assert_eq!(envelope.diagnostics[0].code, "REMOTE_FETCH_FAILED");
+}
+
+#[test]
+fn test_js_fetch_remote_file_content_empty_base_url_returns_request_error_envelope() {
+    let output = run_remote_wrapper(js_fetch_remote_file_content(
+        "".to_string(),
+        valid_file_ref_json().to_string(),
+    ));
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "error");
+    assert_eq!(envelope.diagnostics[0].code, "REMOTE_FETCH_FAILED");
+}
+
+#[test]
+fn test_js_load_remote_superpage_document_empty_base_url_returns_request_error_envelope() {
+    let output = run_remote_wrapper(js_load_remote_superpage_document(
+        "".to_string(),
+        valid_file_ref_json().to_string(),
+        r#"{}"#.to_string(),
+    ));
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "error");
+    assert_eq!(envelope.diagnostics[0].code, "REMOTE_FETCH_FAILED");
 }
 
 #[test]
