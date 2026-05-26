@@ -120,6 +120,43 @@ function loadCustomBridgeWithProtocol() {
   };
 }
 
+function loadCustomBridgeAfterExtensionCoreProtocol() {
+  const extensionProtocolSource = readFileSync(
+    join(__dirname, "../extension-core/bridge-protocol.js"),
+    "utf-8",
+  );
+  const customSource = readFileSync(customSourcePath, "utf-8");
+  const document = createMockDocument();
+  const window = {};
+  const context = {
+    console: { log() {}, warn() {}, error() {}, },
+    window,
+    document,
+    navigator: {},
+    CustomEvent: class {
+      constructor(type, init) {
+        this.type = type;
+        this.detail = init?.detail;
+      }
+    },
+    define(factory) {
+      context.module = factory();
+    },
+    setTimeout,
+    clearTimeout,
+    String,
+    Array,
+    Object,
+    Date,
+    JSON,
+  };
+  context.globalThis = context;
+  vm.runInNewContext(extensionProtocolSource, context);
+  window.__metadata_checker_bridge_protocol__ = context.__metadata_checker_bridge_protocol__;
+  vm.runInNewContext(customSource, context, { filename: customSourcePath });
+  return { module: context.module, document, window };
+}
+
 function makeBuilder(selectedComponents = []) {
   return {
     getSelectedComponents() {
@@ -190,6 +227,20 @@ describe("metadata-checker custom bridge", () => {
       "protocol",
       "selection",
     ]);
+  });
+
+  it("does not crash when extension-core protocol is loaded before custom bridge", () => {
+    const { module, document } = loadCustomBridgeAfterExtensionCoreProtocol();
+    const readyEvents = [];
+    document.addEventListener("__metadata_checker_designer_ready__", (event) => {
+      readyEvents.push(event);
+    });
+
+    const result = module.onInitDesigner(makeDesigner("/analyzer/app/order.spg"), {});
+
+    assert.strictEqual(result.protocol.version, "m43-protocol-v1");
+    assert.strictEqual(readyEvents.length, 1);
+    assert.strictEqual(marker(document, "bridge"), "installed");
   });
 
   it("onInitDesigner is idempotent and updates designer reference", () => {

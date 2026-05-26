@@ -71,7 +71,16 @@
       file_id: typeof selection.file_id === "string" ? selection.file_id : "",
       selected_component_ids: asArray(selection.selected_component_ids).slice(),
       active_component_id: typeof selection.active_component_id === "string" ? selection.active_component_id : null,
-      selection_infos: isObject(selection.selection_infos) ? selection.selection_infos : {},
+      selection_infos: isObject(selection.selection_infos)
+        ? selection.selection_infos
+        : isObject(selection.selected_component_infos)
+          ? selection.selected_component_infos
+          : {},
+      selected_component_infos: isObject(selection.selected_component_infos)
+        ? selection.selected_component_infos
+        : isObject(selection.selection_infos)
+          ? selection.selection_infos
+          : {},
       project_name: typeof selection.project_name === "string" ? selection.project_name : "",
       timestamp: typeof selection.timestamp === "number" ? selection.timestamp : Date.now(),
       page_type: typeof selection.page_type === "string" ? selection.page_type : "unknown",
@@ -221,7 +230,7 @@
   }
 
   function makeResponse(type, request, payload, diagnostics) {
-    return createResponseEnvelope
+    const response = createResponseEnvelope
       ? createResponseEnvelope({
         requestEnvelope: request,
         type,
@@ -235,6 +244,10 @@
         payload,
         diagnostics: asDiagnostics(diagnostics),
       };
+    return {
+      ...response,
+      __metadata_checker_bridge_token: request.__metadata_checker_bridge_token ?? null,
+    };
   }
 
   function protocolMismatch(request) {
@@ -315,6 +328,7 @@
     }
     const message = {
       ...response,
+      __metadata_checker_bridge_token: response.__metadata_checker_bridge_token,
       __metadata_checker_bridge_direction: RESPONSE_DIRECTION,
       __metadata_checker_bridge_source: "page-script",
     };
@@ -348,6 +362,7 @@
         request_id: `bridge-ready-${Date.now()}`,
         payload,
         diagnostics: asDiagnostics(payload.diagnostics),
+        __metadata_checker_bridge_token: null,
         __metadata_checker_bridge_direction: RESPONSE_DIRECTION,
         __metadata_checker_bridge_source: "page-script",
       },

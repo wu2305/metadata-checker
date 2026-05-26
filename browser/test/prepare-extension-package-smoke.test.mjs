@@ -35,6 +35,12 @@ async function createChromiumFixture() {
           { js: ["content.js"], matches: ["https://old-host.example/*"] },
           { js: ["content2.js"], matches: ["https://old-host.example/page/*"] },
         ],
+        web_accessible_resources: [
+          {
+            resources: ["extension-core/page-script.js"],
+            matches: ["https://old-host.example/*"],
+          },
+        ],
       },
       null,
       2,
@@ -169,6 +175,10 @@ test("prepareExtensionPackage builds Chromium extension and rewrites manifest", 
       "https://host.test/*",
       "https://host2.test/*",
     ]);
+    assert.deepStrictEqual(manifest.web_accessible_resources[0].matches, [
+      "https://host.test/*",
+      "https://host2.test/*",
+    ]);
 
     const copiedWasm = await readFile(join(outDir, "metadata_checker_bg.wasm"));
     assert.deepStrictEqual(
@@ -233,12 +243,14 @@ test("prepareSafariExtensionPackage builds staging package with template manifes
       hostMatch: "https://safari.example/*",
       extensionCoreDir: fixture.extensionCoreDir,
       extensionSafariDir: fixture.extensionSafariDir,
+      extensionChromiumDir: fixture.extensionChromiumDir ?? fixture.extensionSafariDir,
       clean: true,
     });
 
     const manifest = JSON.parse(await readFile(join(outDir, "manifest.json"), "utf8"));
     assert.equal(manifest.version, "4.0.0");
     assert.deepStrictEqual(manifest.host_permissions, ["https://safari.example/*"]);
+    assert.equal(JSON.stringify(manifest).includes("{{HOST_MATCHES}}"), false);
     const notes = await readFile(join(outDir, "safari-notes.md"), "utf8");
     assert.equal(notes.includes("# Safari template notes"), true);
     const accessCore = await access(join(outDir, "extension-core", "core.js")).then(() => true, () => false);

@@ -49,6 +49,15 @@ function patchManifest(manifest, { version, hostMatch }) {
   if (patched.content_scripts.length === 0) {
     patched.content_scripts = [{ matches, js: [] }];
   }
+  const resources = Array.isArray(patched.web_accessible_resources)
+    ? patched.web_accessible_resources
+    : [];
+  patched.web_accessible_resources = resources.map((item) => {
+    if (!item || typeof item !== "object") {
+      return item;
+    }
+    return { ...item, matches };
+  });
 
   return patched;
 }

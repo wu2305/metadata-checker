@@ -23,6 +23,13 @@ const DEFAULT_SAFARI_NOTES = [
   "Inspect `info.plist` and adapter notes before submitting to App Store.",
 ].join("\n");
 
+const CHROMIUM_COMPAT_FILES = [
+  "content-script.js",
+  "background.js",
+  "popup.html",
+  "popup.js",
+];
+
 async function collectFiles(root, base = "") {
   const items = await readdir(root, { withFileTypes: true });
   const collected = [];
@@ -96,6 +103,7 @@ async function prepareSafariExtensionPackage(options = {}) {
   const outDir = resolve(options.outDir || DEFAULT_OUT_DIR);
   const coreDir = resolve(options.extensionCoreDir || DEFAULT_CORE_DIR);
   const safariDir = resolve(options.extensionSafariDir || DEFAULT_SAFARI_DIR);
+  const chromiumDir = resolve(options.extensionChromiumDir || join(DEFAULT_BROWSER_ROOT, "extension-chromium"));
   const clean = options.clean ?? true;
   const diagnostics = [];
 
@@ -121,6 +129,18 @@ async function prepareSafariExtensionPackage(options = {}) {
       manifest_path: null,
       notes: "safari-notes.md",
     };
+  }
+  try {
+    for (const file of CHROMIUM_COMPAT_FILES) {
+      await cp(join(chromiumDir, file), join(outDir, file), { force: true });
+    }
+  } catch (error) {
+    diagnostics.push(
+      stableDiagnostic(
+        "SAFARI_CHROMIUM_COMPAT_COPY_FAILED",
+        `cannot copy shared extension shell files: ${error.message}`,
+      ),
+    );
   }
 
   const manifestWritten = await applyManifestFromTemplate(safariDir, outDir, options, diagnostics);
@@ -170,6 +190,7 @@ async function main(argv = process.argv.slice(2)) {
     hostMatch: args.host_match,
     extensionCoreDir: args.extension_core_dir,
     extensionSafariDir: args.extension_safari_dir,
+    extensionChromiumDir: args.extension_chromium_dir,
     clean: args.clean ?? true,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

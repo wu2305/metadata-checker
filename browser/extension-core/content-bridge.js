@@ -31,6 +31,7 @@
   const pendingRequests = new Map();
   let injected = false;
   let injecting = false;
+  const sourceToken = `m43-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const injectedScriptPaths = root.__metadata_checker_injected_script_paths || [
     "extension-core/bridge-protocol.js",
@@ -62,19 +63,22 @@
   }
 
   function toMessage(payloadType, payload, requestId) {
-    if (typeof createRequestEnvelope === "function") {
-      return createRequestEnvelope({
+    const envelope = typeof createRequestEnvelope === "function"
+      ? createRequestEnvelope({
         type: payloadType,
         requestId,
         payload,
-      });
-    }
+      })
+      : {
+          protocol: BRIDGE_PROTOCOL,
+          request_id: requestId,
+          type: payloadType,
+          payload,
+          diagnostics: [],
+        };
     return {
-      protocol: BRIDGE_PROTOCOL,
-      request_id: requestId,
-      type: payloadType,
-      payload,
-      diagnostics: [],
+      ...envelope,
+      __metadata_checker_bridge_token: sourceToken,
     };
   }
 
@@ -189,6 +193,12 @@
     if (message.__metadata_checker_bridge_direction === REQUEST_DIRECTION) {
       return null;
     }
+    if (message.__metadata_checker_bridge_source !== "page-script") {
+      return null;
+    }
+    if (message.__metadata_checker_bridge_token !== sourceToken) {
+      return null;
+    }
     if (isMetadataCheckerMessage(message) === false) {
       return null;
     }
@@ -214,6 +224,7 @@
   function dispatchMessage(message) {
     const msg = {
       ...message,
+      __metadata_checker_bridge_token: sourceToken,
       __metadata_checker_bridge_direction: REQUEST_DIRECTION,
       __metadata_checker_bridge_source: "content-script",
     };

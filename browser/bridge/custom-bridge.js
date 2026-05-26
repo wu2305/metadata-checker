@@ -5,7 +5,7 @@ define(function () {
     ? window.__metadata_checker_bridge_protocol__
     : null;
 
-  const protocol = protocolExports?.BRIDGE_PROTOCOL ?? {
+  const protocol = {
     name: "metadata_checker_designer_bridge",
     version: "m43-protocol-v1",
     events: {
@@ -14,6 +14,14 @@ define(function () {
       selection_response: "__metadata_checker_selection_response__",
     },
   };
+  if (protocolExports?.BRIDGE_PROTOCOL) {
+    protocol.name = protocolExports.BRIDGE_PROTOCOL.name ?? protocol.name;
+    protocol.version = protocolExports.BRIDGE_PROTOCOL.version ?? protocol.version;
+    protocol.events = {
+      ...protocol.events,
+      ...(protocolExports.BRIDGE_PROTOCOL.events ?? protocolExports.BRIDGE_PROTOCOL_EVENTS ?? {}),
+    };
+  }
   const getPageContext = protocolExports?.getPageContext ?? defaultGetPageContext;
   const getSelectionSnapshot = protocolExports?.getSelectionSnapshot ?? defaultGetSelectionSnapshot;
 

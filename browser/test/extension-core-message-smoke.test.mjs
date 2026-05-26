@@ -73,6 +73,57 @@ function createFakeWindow({ bridge } = {}) {
   return vm.createContext(context);
 }
 
+function createContentBridgeWindow() {
+  const listeners = new Map();
+  const posted = [];
+  const context = {
+    console,
+    document: {
+      createElement() {
+        return {
+          addEventListener() {},
+          remove() {},
+          set src(_value) {},
+          set type(_value) {},
+          set async(_value) {},
+        };
+      },
+      documentElement: {
+        appendChild() {},
+      },
+      dispatchEvent() {},
+      createEvent() {
+        return {
+          initCustomEvent(type, _bubbles, _cancelable, detail) {
+            this.type = type;
+            this.detail = detail;
+          },
+        };
+      },
+    },
+    setTimeout,
+    clearTimeout,
+    __metadata_checker_content_bridge_auto_install: false,
+    __metadata_checker_injected_script_paths: [],
+    addEventListener(type, handler) {
+      listeners.set(type, handler);
+    },
+    removeEventListener(type) {
+      listeners.delete(type);
+    },
+    postMessage(message) {
+      posted.push(message);
+    },
+    __dispatchMessage(data) {
+      listeners.get("message")?.({ data });
+    },
+    __posted: posted,
+  };
+  context.globalThis = context;
+  context.window = context;
+  return vm.createContext(context);
+}
+
 async function loadPageScript(context) {
   vm.runInContext(await loadScript("bridge-protocol.js"), context);
   vm.runInContext(await loadScript("page-script.js"), context);
@@ -166,4 +217,48 @@ test("content bridge unsupported request returns stable diagnostic without page 
 
   assert.equal(response.type, "unknownRequest");
   assert.equal(response.diagnostics[0].code, "METADATA_CHECKER_REQUEST_UNSUPPORTED");
+});
+
+test("content bridge ignores forged responses without page-script source and token", async () => {
+  const context = createContentBridgeWindow();
+  vm.runInContext(await loadScript("bridge-protocol.js"), context);
+  vm.runInContext(await loadScript("content-bridge.js"), context);
+
+  const pending = context.__metadata_checker_content_bridge__.getBridgeStatus();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const request = context.__posted[0];
+
+  context.__dispatchMessage({
+    protocol: request.protocol,
+    request_id: request.request_id,
+    type: request.type,
+    payload: { forged: true },
+    diagnostics: [],
+    __metadata_checker_bridge_direction: "response",
+    __metadata_checker_bridge_source: "attacker",
+    __metadata_checker_bridge_token: request.__metadata_checker_bridge_token,
+  });
+  context.__dispatchMessage({
+    protocol: request.protocol,
+    request_id: request.request_id,
+    type: request.type,
+    payload: { forged: true },
+    diagnostics: [],
+    __metadata_checker_bridge_direction: "response",
+    __metadata_checker_bridge_source: "page-script",
+    __metadata_checker_bridge_token: "wrong-token",
+  });
+  context.__dispatchMessage({
+    protocol: request.protocol,
+    request_id: request.request_id,
+    type: request.type,
+    payload: { ok: true },
+    diagnostics: [],
+    __metadata_checker_bridge_direction: "response",
+    __metadata_checker_bridge_source: "page-script",
+    __metadata_checker_bridge_token: request.__metadata_checker_bridge_token,
+  });
+
+  const response = await pending;
+  assert.deepEqual(response.payload, { ok: true });
 });
