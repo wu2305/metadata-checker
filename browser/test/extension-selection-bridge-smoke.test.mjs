@@ -413,6 +413,21 @@ describe("selection bridge", () => {
     assert.equal(result.method, "doSelectedChange");
   });
 
+  it("uses custom bridge builder helper when page context is intentionally lightweight", () => {
+    const bridge = createBridgeWithContext({
+      source_path: "app/Test.app/CustomBridge.spg",
+    });
+    const windowState = createFakeWindow({ bridge });
+    const builder = windowState.createBuilder([{ id: "custom-node", type: "input" }]);
+    bridge.getSelectionBridgeBuilder = () => builder;
+
+    const script = windowState.context.__metadata_checker_page_script__;
+    const result = script.installSelectionBridge();
+    assert.equal(result.installed, true);
+    assert.equal(result.method, "doSelectedChange");
+    assert.equal(markerValue(windowState.document, "selection-bridge"), "installed");
+  });
+
   it("debounces rapid selection changes and emits the latest full selection only", async () => {
     const bridge = createBridgeWithContext({
       source_path: "app/Test.app/Debounce.spg",

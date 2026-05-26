@@ -435,4 +435,27 @@ describe("metadata-checker custom bridge", () => {
     assert.ok(snapshot.selection.selected_component_infos.hero.float_info);
     assert.strictEqual(readyEvents[0].detail.selection.selected_component_ids[0], "hero");
   });
+
+  it("exposes builder only through bridge helper for page-script selection patching", () => {
+    const { module, window } = loadCustomBridgeWithProtocol();
+    const builder = makeBuilder([{ id: "input1", type: "input" }]);
+    module.onInitDesigner({
+      type: "superpage",
+      openFileArgs: {
+        path: "/analyzer/app/builder.spg",
+        id: "fid-builder",
+        projectName: "analyzer",
+      },
+      getBuilder() {
+        return builder;
+      },
+    });
+
+    const bridge = window.__metadata_checker_designer_bridge__;
+    assert.strictEqual(bridge.getSelectionBridgeBuilder(), builder);
+    assert.strictEqual(bridge.getPageContext().builder, builder);
+    const snapshot = bridge.getSelectionSnapshot();
+    assert.strictEqual("builder" in snapshot, false);
+    assert.strictEqual("designer" in snapshot, false);
+  });
 });

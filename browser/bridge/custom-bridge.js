@@ -117,6 +117,7 @@ define(["require", "exports"], function (_require, exports) {
     return {
       protocol,
       page_context: pageContext,
+      builder: getSelectionBridgeBuilder(),
       selection: null,
       diagnostics: pageContext.diagnostics ?? [],
     };
@@ -132,12 +133,17 @@ define(["require", "exports"], function (_require, exports) {
     };
   }
 
+  function getSelectionBridgeBuilder() {
+    return lastDesigner?.getBuilder?.() ?? null;
+  }
+
   function ensureBridge() {
     if (!bridgeInstance) {
       bridgeInstance = {
         getBridgeStatus,
         getPageContext: getCurrentPageContext,
         getSelectionSnapshot: getCurrentSelectionSnapshot,
+        getSelectionBridgeBuilder,
       };
       root.__metadata_checker_designer_bridge__ = bridgeInstance;
       if (root.window && typeof root.window === "object") {

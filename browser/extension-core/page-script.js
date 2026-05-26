@@ -420,7 +420,11 @@
 
   function installSelectionBridge() {
     const context = getBridgeContext();
-    const builder = getBuilderFromContext(context);
+    const bridge = getBridge();
+    const bridgeBuilder = typeof bridge?.getSelectionBridgeBuilder === "function"
+      ? bridge.getSelectionBridgeBuilder()
+      : null;
+    const builder = bridgeBuilder || getBuilderFromContext(context);
     const sourcePath = extractSourcePathFromContext(context);
     if (!builder) {
       writeSelectionBridgeDiagnostic(
