@@ -5529,6 +5529,7 @@ BI onInitDesigner
     - extension content script 注入成功。
     - 页面右下角固定 trigger button 存在，初始 panel 隐藏。
     - 点击 trigger button 后 panel 展开，再次点击后 panel 收起。
+    - 点击 trigger button 后必须截图验证展开态：截图中应能看到明确的 panel 背景、边框/阴影、文本内容和 `Metadata` trigger，不允许只凭 DOM marker 判定 UI 可见。
     - panel 挂载后点击页面不会关闭。
     - 切换组件后 panel 可刷新 selection。
     - panel 收起时切换组件，再展开后显示最新 selection。
@@ -5539,6 +5540,7 @@ BI onInitDesigner
 
 - Node 测试覆盖 panel host、content script lifecycle、popup-panel message contract。
 - 真实 BI 页面能看到常驻 panel marker。
+- 真实 BI 页面必须保留 panel 展开态截图；截图证据优先于“只看到 marker”的验收结论。
 - 页面点击、设计器内交互不会关闭 panel。
 - popup 关闭不影响 panel 常驻。
 - panel 不承载核心解析/查询逻辑，不复制 Rust/WASM 能力。

@@ -50,7 +50,7 @@
 - `Integration Controller` 负责组合 `selection -> provider -> runtime -> renderer`，不得写入 Plugin Core
 - `Service Worker` 注册入口必须是 JS 文件；WASM 只能由 SW JS lazy init 加载，不能把 `.wasm` 直接注册为 Service Worker
 - selection payload 只能包含轻量字段，不得包含 `.spg` raw text 或完整 component JSON
-- 真实环境可用 `console.log` 辅助人工观察，但自动化验收必须有 DOM marker 或结构化事件
+- 真实环境可用 `console.log` 辅助人工观察，但自动化验收必须有 DOM marker 或结构化事件；涉及可见 UI 的真实验收还必须补充截图验证，不能只凭 marker 判定 UI 可见
 
 ## 模块职责
 

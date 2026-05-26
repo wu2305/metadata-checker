@@ -218,5 +218,6 @@ window.addEventListener("__metadata_checker_designer_ready__", (event) => {
 - 选页 URL
 - 页面 marker 快照
 - popup 关键字段截图
+- 页面内 panel 展开态截图：必须能肉眼看到 panel 背景、边框/阴影、文本内容和 `Metadata` trigger；如果截图里只剩 trigger button，应判定为 UI 可见性未通过。
 - console 与 extension 调试日志
 - 如出现 unsupported，记录稳定 code 与触发操作
