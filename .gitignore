@@ -1,3 +1,4 @@
 /target
 .metadata-checker.graphdb
 .DS_Store
+/browser/artifacts/
