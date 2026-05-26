@@ -63,6 +63,36 @@ define(["require", "exports"], function (_require, exports) {
     }
   }
 
+  function _readMarker(name) {
+    if (typeof document === "undefined" || typeof document.querySelector !== "function") {
+      return null;
+    }
+    const key = `data-metadata-checker-${name}`;
+    return document.querySelector(`[${key}]`)?.getAttribute(key) ?? null;
+  }
+
+  function detectPluginState() {
+    if (root.__metadata_checker_page_script__ || _readMarker("extension-page-script") === "loaded") {
+      return {
+        ready: true,
+        state: "page-script",
+      };
+    }
+    if (
+      _readMarker("extension-content") === "loaded" ||
+      _readMarker("extension-content-bridge") === "loaded"
+    ) {
+      return {
+        ready: false,
+        state: "content-script",
+      };
+    }
+    return {
+      ready: false,
+      state: "missing",
+    };
+  }
+
   function buildBridgeStatus() {
     const pageContext = getPageContext(lastDesigner, lastArgs);
     const selectionResult = getSelectionSnapshot(lastDesigner);
@@ -162,6 +192,9 @@ define(["require", "exports"], function (_require, exports) {
     _writeMarker("on-init-designer", "called");
     _writeMarker("bridge-protocol", protocol.version);
     _writeMarker("bridge-status", initState);
+    const pluginState = detectPluginState();
+    _writeMarker("plugin-state", pluginState.state);
+    _writeMarker("plugin-ready", pluginState.ready ? "true" : "false");
 
     dispatchReadyEvent();
 

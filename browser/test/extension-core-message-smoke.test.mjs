@@ -287,10 +287,12 @@ test("chromium content script exposes tab request listener", async () => {
   assert.match(contentSource, /requestPageBridge/);
 });
 
-test("chromium content script writes automatic bridge probe markers", async () => {
+test("page script announces bridge readiness and content script records response markers", async () => {
+  const pageScriptSource = await loadScript("page-script.js");
   const contentSource = await loadChromiumScript("content-script.js");
 
-  assert.match(contentSource, /probeBridgeWhenReady/);
+  assert.match(pageScriptSource, /announceBridgeWhenReady/);
+  assert.match(pageScriptSource, /onReadyBridgeEvent/);
   assert.match(contentSource, /extension-bridge-request/);
   assert.match(contentSource, /extension-bridge-source-path/);
   assert.match(contentSource, /extension-bridge-selection-count/);

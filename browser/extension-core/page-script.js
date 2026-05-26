@@ -387,6 +387,16 @@
     );
   }
 
+  function announceBridgeWhenReady(attempt = 0) {
+    if (getBridge()) {
+      onReadyBridgeEvent();
+      return;
+    }
+    if (attempt < 50 && typeof root.setTimeout === "function") {
+      root.setTimeout(() => announceBridgeWhenReady(attempt + 1), 100);
+    }
+  }
+
   function install() {
     if (typeof root.addEventListener !== "function") {
       return { installed: false, reason: "no-message-listener" };
@@ -395,6 +405,7 @@
     if (BRIDGE_READY_EVENT_NAME && typeof root.document?.addEventListener === "function") {
       root.document.addEventListener(BRIDGE_READY_EVENT_NAME, onReadyBridgeEvent);
     }
+    announceBridgeWhenReady();
     return { installed: true };
   }
 
@@ -415,6 +426,7 @@
     getSelectionSnapshotFromBridge,
     analyzeCurrentSelectionFromBridge,
     handleRequest,
+    announceBridgeWhenReady,
   };
   writeMarker("extension-page-script", "loaded");
 

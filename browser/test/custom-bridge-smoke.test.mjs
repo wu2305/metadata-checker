@@ -73,6 +73,13 @@ function marker(document, name) {
   return document.querySelector(`[${key}]`)?.getAttribute(key) ?? null;
 }
 
+function writeMarker(document, name, value) {
+  const key = `data-metadata-checker-${name}`;
+  const node = document.createElement("span");
+  node.setAttribute(key, value);
+  document.body.appendChild(node);
+}
+
 function loadCustomBridgeWithProtocol() {
   const protocolSource = readFileSync(protocolSourcePath, "utf-8");
   const customSource = readFileSync(customSourcePath, "utf-8");
@@ -311,6 +318,8 @@ describe("metadata-checker custom bridge", () => {
     assert.strictEqual(marker(document, "on-init-designer"), "called");
     assert.strictEqual(marker(document, "bridge-protocol"), "m43-protocol-v1");
     assert.strictEqual(marker(document, "bridge-status"), "ready");
+    assert.strictEqual(marker(document, "plugin-state"), "missing");
+    assert.strictEqual(marker(document, "plugin-ready"), "false");
     assert.deepStrictEqual(Object.keys(detail).sort(), [
       "diagnostics",
       "page_context",
@@ -337,6 +346,26 @@ describe("metadata-checker custom bridge", () => {
     assert.strictEqual(result.protocol.version, "m43-protocol-v1");
     assert.strictEqual(readyEvents.length, 1);
     assert.strictEqual(marker(document, "bridge"), "installed");
+  });
+
+  it("onInitDesigner detects extension page script readiness", () => {
+    const { module, document } = loadCustomBridgeWithProtocol();
+    writeMarker(document, "extension-page-script", "loaded");
+
+    module.onInitDesigner(makeDesigner("/analyzer/app/plugin-ready.spg"), {});
+
+    assert.strictEqual(marker(document, "plugin-state"), "page-script");
+    assert.strictEqual(marker(document, "plugin-ready"), "true");
+  });
+
+  it("onInitDesigner detects extension content script before page script is ready", () => {
+    const { module, document } = loadCustomBridgeWithProtocol();
+    writeMarker(document, "extension-content", "loaded");
+
+    module.onInitDesigner(makeDesigner("/analyzer/app/plugin-content.spg"), {});
+
+    assert.strictEqual(marker(document, "plugin-state"), "content-script");
+    assert.strictEqual(marker(document, "plugin-ready"), "false");
   });
 
   it("onInitDesigner is idempotent and updates designer reference", () => {
