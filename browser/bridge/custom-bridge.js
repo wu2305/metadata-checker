@@ -2,9 +2,15 @@ define(["require", "exports"], function (_require, exports) {
   "use strict";
   Object.defineProperty(exports, "__esModule", { value: true });
 
-  const protocolExports = typeof window !== "undefined"
-    ? window.__metadata_checker_bridge_protocol__
-    : null;
+  const root = typeof globalThis !== "undefined"
+    ? globalThis
+    : typeof window !== "undefined"
+      ? window
+      : typeof self !== "undefined"
+        ? self
+        : {};
+
+  const protocolExports = root.__metadata_checker_bridge_protocol__ ?? null;
 
   const protocol = {
     name: "metadata_checker_designer_bridge",
@@ -103,8 +109,12 @@ define(["require", "exports"], function (_require, exports) {
         getPageContext: getCurrentPageContext,
         getSelectionSnapshot: getCurrentSelectionSnapshot,
       };
-      if (typeof window !== "undefined") {
-        window.__metadata_checker_designer_bridge__ = bridgeInstance;
+      root.__metadata_checker_designer_bridge__ = bridgeInstance;
+      if (root.window && typeof root.window === "object") {
+        root.window.__metadata_checker_designer_bridge__ = bridgeInstance;
+      }
+      if (root.self && typeof root.self === "object") {
+        root.self.__metadata_checker_designer_bridge__ = bridgeInstance;
       }
     }
     return bridgeInstance;

@@ -138,6 +138,49 @@ function loadCustomBridgeWithProtocol() {
   };
 }
 
+function loadCustomBridgeWithoutWindowBinding() {
+  const customSource = readFileSync(customSourcePath, "utf-8");
+  const document = createMockDocument();
+  const context = {
+    console: { log() {}, warn() {}, error() {}, },
+    document,
+    navigator: {},
+    CustomEvent: class {
+      constructor(type, init) {
+        this.type = type;
+        this.detail = init?.detail;
+      }
+    },
+    define(deps, factory) {
+      const exports = {};
+      context.module = exports;
+      const args = deps.map((dep) => {
+        if (dep === "require") {
+          return () => null;
+        }
+        if (dep === "exports") {
+          return exports;
+        }
+        return null;
+      });
+      const returned = factory(...args);
+      if (returned) {
+        context.module = returned;
+      }
+    },
+    setTimeout,
+    clearTimeout,
+    String,
+    Array,
+    Object,
+    Date,
+    JSON,
+  };
+  context.globalThis = context;
+  vm.runInNewContext(customSource, context, { filename: customSourcePath });
+  return { module: context.module, document, context };
+}
+
 function loadCustomBridgeAfterExtensionCoreProtocol() {
   const extensionProtocolSource = readFileSync(
     join(__dirname, "../extension-core/bridge-protocol.js"),
@@ -240,6 +283,17 @@ describe("metadata-checker custom bridge", () => {
     assert.strictEqual(typeof module.CustomJS.spg.onInitDesigner, "function");
     assert.strictEqual(typeof module.CustomJS.SuperPage.onInitDesigner, "function");
     assert.strictEqual(marker(document, "bridge-module"), "loaded");
+  });
+
+  it("exposes bridge on globalThis when window binding is unavailable", () => {
+    const { module, context } = loadCustomBridgeWithoutWindowBinding();
+    module.onInitDesigner(makeDesigner("/analyzer/app/global.spg"), {});
+
+    assert.strictEqual(typeof context.__metadata_checker_designer_bridge__, "object");
+    assert.strictEqual(
+      context.__metadata_checker_designer_bridge__.getPageContext().page_context.source_path,
+      "app/global.spg",
+    );
   });
 
   it("onInitDesigner writes bridge markers and emits light-weight ready event", () => {
