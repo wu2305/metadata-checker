@@ -143,7 +143,6 @@ async function resolveViaRequire(requireLike, moduleName, timeoutMs, logger) {
         return;
       }
       done = true;
-      lastError = error;
       reject(error);
     };
 
@@ -261,25 +260,6 @@ export async function resolveEchartsRuntime(options = {}) {
     return {
       echarts: extAttempt.value,
       source: extAttempt.source,
-      diagnostics: [],
-    };
-  }
-
-  const amdAttempt = await resolveEchartsFromRequire(
-    requireLike,
-    "echarts",
-    timeoutMs,
-    logger
-  );
-  attempts.push({
-    source: "echarts",
-    success: !!amdAttempt.value,
-    error: amdAttempt.error ?? null,
-  });
-  if (amdAttempt.value) {
-    return {
-      echarts: amdAttempt.value,
-      source: amdAttempt.source,
       diagnostics: [],
     };
   }

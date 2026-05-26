@@ -90,7 +90,7 @@ describe("resolveEchartsRuntime", () => {
     ]);
   });
 
-  it("falls back to AMD module echarts when commons/echarts/echarts-ext fails", async () => {
+  it("does not require raw AMD module echarts when commons/echarts/echarts-ext fails", async () => {
     const requireLike = createFakeRequire({
       "commons/echarts/echarts-ext": { error: new Error("not found") },
       echarts: {
@@ -100,12 +100,11 @@ describe("resolveEchartsRuntime", () => {
 
     const result = await resolveEchartsRuntime({ requireLike, timeoutMs: 200 });
 
-    assert.strictEqual(result.source, "echarts");
-    assert.strictEqual(result.echarts.from, "amd-echarts");
-    assert.strictEqual(result.diagnostics.length, 0);
+    assert.strictEqual(result.source, "fallback");
+    assert.strictEqual(result.echarts, null);
+    assert.strictEqual(result.diagnostics[0].code, "ECHARTS_RESOLVER_UNAVAILABLE");
     assert.deepStrictEqual(requireLike.records, [
       "commons/echarts/echarts-ext",
-      "echarts",
     ]);
   });
 
@@ -143,6 +142,9 @@ describe("resolveEchartsRuntime", () => {
     assert.strictEqual(result.source, "window.echarts");
     assert.strictEqual(result.echarts.marker, "from-window");
     assert.strictEqual(result.diagnostics.length, 0);
+    assert.deepStrictEqual(requireLike.records, [
+      "commons/echarts/echarts-ext",
+    ]);
   });
 
   it("returns null + stable diagnostic when no runtime is available", async () => {
@@ -160,6 +162,9 @@ describe("resolveEchartsRuntime", () => {
     assert.strictEqual(diagnostic.code, "ECHARTS_RESOLVER_UNAVAILABLE");
     assert.strictEqual(diagnostic.severity, "warning");
     assert.ok(typeof diagnostic.message === "string");
+    assert.deepStrictEqual(requireLike.records, [
+      "commons/echarts/echarts-ext",
+    ]);
   });
 
   it("runs in Node-like environments without window", async () => {

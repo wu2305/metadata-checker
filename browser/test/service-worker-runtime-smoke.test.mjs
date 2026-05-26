@@ -60,10 +60,13 @@ async function loadSwInMockEnvironment(options = {}) {
   const { self, listeners } = createMockSwGlobal(options);
 
   // 在 mock self 环境中 eval SW 脚本
-  const wrapped = `(function(self, module) {\n${swSource}\n})`;
+  const lexicalPrelude = options.lexicalWasmBindgenFactory
+    ? "let wasm_bindgen = __lexicalWasmBindgenFactory;\n"
+    : "";
+  const wrapped = `(function(self, module, __lexicalWasmBindgenFactory) {\n${lexicalPrelude}${swSource}\n})`;
   const fn = eval(wrapped);
   const mod = { exports: {} };
-  fn(self, mod);
+  fn(self, mod, options.lexicalWasmBindgenFactory);
 
   return { self, listeners, exports: mod.exports };
 }
@@ -145,6 +148,26 @@ describe("Service Worker script internal protocol", () => {
       args: [],
     });
     assert.strictEqual(status.result.items[0].detail.wasm.state, "loaded");
+  });
+
+  it("loads wasm-bindgen glue exposed as a global lexical binding", async () => {
+    const wasm = makeWasmHarness();
+    const { exports, self } = await loadSwInMockEnvironment({
+      importScripts: wasm.importScripts,
+      lexicalWasmBindgenFactory: wasm.wasmBindgenFactory,
+    });
+
+    const response = await exports.handleRequest({
+      id: "lexical-runtime",
+      method: "initRuntime",
+      args: [{ wasmUrl: "https://example.test/runtime.wasm" }],
+    });
+
+    assert.strictEqual(response.ok, true);
+    assert.strictEqual(response.result.status, "ready");
+    assert.strictEqual(wasm.calls.importScripts, 0);
+    assert.strictEqual(wasm.calls.wasmBindgen, 1);
+    assert.strictEqual(self.wasm_bindgen, wasm.wasmBindgenFactory);
   });
 
   it("handleRequest returns error for unknown method", async () => {

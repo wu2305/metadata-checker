@@ -9,6 +9,7 @@
 const SW_VERSION = "0.1.0-m40.10";
 const DEFAULT_WASM_FILE = "metadata_checker_bg.wasm";
 const DEFAULT_WASM_BINDGEN_FILE = "metadata_checker.js";
+const DEFAULT_WASM_ASSET_VERSION = "m42-real-bi";
 
 // runtime 状态
 let _initPromise = null;
@@ -16,6 +17,7 @@ let _initFailed = false;
 let _initError = null;
 let _wasmExports = {};
 let _wasmBindgenLoader = null;
+let _wasmBindgenPreloadError = null;
 let _wasmStatus = {
   state: "mock",
   mode: "mock",
@@ -265,17 +267,21 @@ function _remoteExportArgs(exportName, fileRef, options = {}) {
 function _defaultWasmUrl() {
   const baseHref = self.location?.href;
   if (baseHref) {
-    return new URL(DEFAULT_WASM_FILE, baseHref).toString();
+    const url = new URL(DEFAULT_WASM_FILE, baseHref);
+    url.searchParams.set("v", DEFAULT_WASM_ASSET_VERSION);
+    return url.toString();
   }
-  return DEFAULT_WASM_FILE;
+  return `${DEFAULT_WASM_FILE}?v=${DEFAULT_WASM_ASSET_VERSION}`;
 }
 
 function _defaultWasmBindgenUrl() {
   const baseHref = self.location?.href;
   if (baseHref) {
-    return new URL(DEFAULT_WASM_BINDGEN_FILE, baseHref).toString();
+    const url = new URL(DEFAULT_WASM_BINDGEN_FILE, baseHref);
+    url.searchParams.set("v", DEFAULT_WASM_ASSET_VERSION);
+    return url.toString();
   }
-  return DEFAULT_WASM_BINDGEN_FILE;
+  return `${DEFAULT_WASM_BINDGEN_FILE}?v=${DEFAULT_WASM_ASSET_VERSION}`;
 }
 
 function _findForbiddenSelectionPayload(value, path = "selection", seen = new WeakSet()) {
@@ -376,8 +382,12 @@ async function _loadWasmBindgenLoader(glueUrl, options = {}) {
   if (typeof options?.wasmBindgenFactory === "function") {
     return options.wasmBindgenFactory;
   }
-  if (typeof self.wasm_bindgen === "function") {
-    return self.wasm_bindgen;
+  const existingLoader = _resolveWasmBindgenLoader();
+  if (existingLoader) {
+    return existingLoader;
+  }
+  if (_wasmBindgenPreloadError) {
+    throw _wasmBindgenPreloadError;
   }
   if (typeof self.importScripts !== "function") {
     throw _makeWasmError(
@@ -394,15 +404,69 @@ async function _loadWasmBindgenLoader(glueUrl, options = {}) {
       cause_message: err?.message ?? String(err),
     });
   }
-  if (typeof self.wasm_bindgen !== "function") {
+  const importedLoader = _resolveWasmBindgenLoader();
+  if (!importedLoader) {
     throw _makeWasmError(
       "WASM_BINDGEN_GLUE_INVALID",
-      "wasm-bindgen glue did not expose self.wasm_bindgen",
+      "wasm-bindgen glue did not expose wasm_bindgen",
       { wasm_bindgen_url: glueUrl },
     );
   }
-  return self.wasm_bindgen;
+  return importedLoader;
 }
+
+function _resolveWasmBindgenLoader() {
+  if (typeof self.wasm_bindgen === "function") {
+    return self.wasm_bindgen;
+  }
+  try {
+    if (typeof wasm_bindgen === "function") {
+      self.wasm_bindgen = wasm_bindgen;
+      return wasm_bindgen;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function _preloadWasmBindgenGlue() {
+  const existingLoader = _resolveWasmBindgenLoader();
+  if (existingLoader || _wasmBindgenPreloadError) {
+    return;
+  }
+  const glueUrl = _defaultWasmBindgenUrl();
+  if (typeof self.importScripts !== "function") {
+    _wasmBindgenPreloadError = _makeWasmError(
+      "WASM_BINDGEN_GLUE_UNAVAILABLE",
+      "importScripts is required to load wasm-bindgen glue in this Service Worker",
+      { wasm_bindgen_url: glueUrl },
+    );
+    return;
+  }
+  try {
+    self.importScripts(glueUrl);
+  } catch (err) {
+    _wasmBindgenPreloadError = _makeWasmError(
+      "WASM_BINDGEN_GLUE_LOAD_FAILED",
+      "Failed to load wasm-bindgen glue",
+      {
+        wasm_bindgen_url: glueUrl,
+        cause_message: err?.message ?? String(err),
+      },
+    );
+    return;
+  }
+  if (!_resolveWasmBindgenLoader()) {
+    _wasmBindgenPreloadError = _makeWasmError(
+      "WASM_BINDGEN_GLUE_INVALID",
+      "wasm-bindgen glue did not expose wasm_bindgen",
+      { wasm_bindgen_url: glueUrl },
+    );
+  }
+}
+
+_preloadWasmBindgenGlue();
 
 function _mockInitRuntime(options = {}) {
   if (options?.shouldFail) {

@@ -114,6 +114,21 @@ async function requestJson(client, path, { method = 'GET', body } = {}) {
   };
 }
 
+async function requestBytes(client, path) {
+  const response = await client.fetch(`${client.baseUrl}${path}`, {
+    headers: {
+      ...(client.cookieJar.header() ? { Cookie: client.cookieJar.header() } : {}),
+    },
+  });
+  client.cookieJar.addFromHeader(getSetCookieHeaders(response.headers));
+  const arrayBuffer = await response.arrayBuffer();
+  return {
+    ok: response.ok,
+    status: response.status,
+    bytes: Buffer.from(arrayBuffer),
+  };
+}
+
 async function login(client, { username, password, userDirectory, loginBody }) {
   const result = await requestJson(client, '/api/auth/signin', {
     method: 'POST',
@@ -137,7 +152,7 @@ async function getFileInfo(client, remotePath, { downloadContent = false } = {})
   return result.json;
 }
 
-async function createFile(client, { parentDir, name, isFolder = false, content, type }) {
+async function createFile(client, { parentDir, name, isFolder = false, content, type, base64 = false }) {
   const result = await requestJson(client, '/api/meta/file/createFile', {
     method: 'POST',
     body: {
@@ -146,6 +161,7 @@ async function createFile(client, { parentDir, name, isFolder = false, content, 
       isFolder,
       ...(content === undefined ? {} : { content }),
       ...(type === undefined ? {} : { type }),
+      ...(base64 ? { isBase64: true } : {}),
     },
   });
   if (!result.ok) {
@@ -154,19 +170,39 @@ async function createFile(client, { parentDir, name, isFolder = false, content, 
   return result.json;
 }
 
-async function modifyFile(client, { remotePath, content, revision }) {
+async function modifyFile(client, { remotePath, content, revision, base64 = false }) {
   const result = await requestJson(client, '/api/meta/file/modifyFile', {
     method: 'POST',
     body: {
       idOrPath: remotePath,
       content,
       ...(revision === undefined ? {} : { revision }),
+      ...(base64 ? { isBase64: true } : {}),
     },
   });
   if (!result.ok) {
     throw new Error(`modifyFile failed for ${remotePath}: HTTP ${result.status}`);
   }
   return result.json;
+}
+
+async function verifyUploadedContent(client, remotePath, expectedBytes, { base64 = false, expectedText }) {
+  const verified = await getFileInfo(client, remotePath, { downloadContent: true });
+  if (!verified) {
+    throw new Error(`verification failed for ${remotePath}`);
+  }
+  if (!base64) {
+    if (verified.content !== expectedText) {
+      throw new Error(`verification failed for ${remotePath}`);
+    }
+    return verified;
+  }
+
+  const staticResult = await requestBytes(client, remotePath);
+  if (!staticResult.ok || !staticResult.bytes.equals(expectedBytes)) {
+    throw new Error(`binary verification failed for ${remotePath}: HTTP ${staticResult.status}`);
+  }
+  return verified;
 }
 
 async function ensureDirectory(client, remoteDir) {
@@ -209,6 +245,7 @@ async function uploadMetadataFile(options) {
     remotePath,
     fetchImpl = globalThis.fetch,
     dryRun = false,
+    base64 = false,
   } = options;
 
   if (typeof fetchImpl !== 'function') {
@@ -219,7 +256,8 @@ async function uploadMetadataFile(options) {
   }
 
   const normalizedRemotePath = normalizeRemotePath(remotePath);
-  const content = await readFile(localFile, 'utf8');
+  const contentBytes = await readFile(localFile);
+  const content = base64 ? contentBytes.toString('base64') : contentBytes.toString('utf8');
   const client = {
     baseUrl: normalizeBaseUrl(baseUrl),
     cookieJar: new CookieJar(),
@@ -236,7 +274,8 @@ async function uploadMetadataFile(options) {
       status: 'dry_run',
       remotePath: normalizedRemotePath,
       action: existing ? 'modify' : 'create',
-      bytes: Buffer.byteLength(content),
+      bytes: contentBytes.length,
+      base64,
     };
   }
 
@@ -249,6 +288,7 @@ async function uploadMetadataFile(options) {
       remotePath: normalizedRemotePath,
       content,
       revision: existing.revision,
+      base64,
     });
     action = 'modified';
   } else {
@@ -258,20 +298,22 @@ async function uploadMetadataFile(options) {
       isFolder: false,
       content,
       type: inferTypeFromName(name),
+      base64,
     });
     action = 'created';
   }
 
-  const verified = await getFileInfo(client, normalizedRemotePath, { downloadContent: true });
-  if (!verified || verified.content !== content) {
-    throw new Error(`verification failed for ${normalizedRemotePath}`);
-  }
+  const verified = await verifyUploadedContent(client, normalizedRemotePath, contentBytes, {
+    base64,
+    expectedText: content,
+  });
 
   return {
     status: 'ok',
     action,
     remotePath: normalizedRemotePath,
-    bytes: Buffer.byteLength(content),
+    bytes: contentBytes.length,
+    base64,
     file: {
       id: verified.id,
       name: verified.name,
@@ -293,6 +335,10 @@ function parseArgs(argv) {
     }
     if (key === '--dry-run') {
       args.dryRun = true;
+      continue;
+    }
+    if (key === '--base64') {
+      args.base64 = true;
       continue;
     }
     const value = argv[index + 1];
@@ -323,6 +369,7 @@ async function main(argv = process.argv.slice(2)) {
     localFile: args.file,
     remotePath: args.remote_path,
     dryRun: args.dryRun ?? false,
+    base64: args.base64 ?? false,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
@@ -342,5 +389,6 @@ export {
   metadataInfoUrl,
   normalizeRemotePath,
   parseArgs,
+  requestBytes,
   uploadMetadataFile,
 };

@@ -363,7 +363,7 @@ describe("metadata-checker custom.js AMD entry", () => {
     assert.strictEqual(result.installed, true);
     assert.strictEqual(
       importedUrl,
-      "https://autocrm-test.xiaoshouyi.com/analyzer/public/hooks/metadata-checker-browser-entry.mjs",
+      "https://autocrm-test.xiaoshouyi.com/analyzer/public/hooks/metadata-checker-browser-entry.js?v=m42-echarts-ext-only",
     );
     assert.strictEqual(marker(document, "factory-entry"), importedUrl);
     assert.strictEqual(marker(document, "factories"), "installed");
@@ -400,6 +400,7 @@ describe("metadata-checker custom.js AMD entry", () => {
     let installerCalled = 0;
     const { module, document } = loadCustomModule({
       windowOverrides: {
+        __metadata_checker_enable_echarts: true,
         __metadata_checker_graph_factory_installer: ({ window: sandboxWindow }) => {
           installerCalled += 1;
           sandboxWindow.__metadata_checker_echarts_resolver_factory = async () => ({
@@ -444,6 +445,7 @@ describe("metadata-checker custom.js AMD entry", () => {
     let panelMounted = false;
     const { module, document } = loadCustomModule({
       windowOverrides: {
+        __metadata_checker_enable_echarts: true,
         __metadata_checker_echarts_resolver_factory: async () => ({
           echarts: { version: "4.x" },
           source: "commons/echarts/echarts-ext",
@@ -489,6 +491,44 @@ describe("metadata-checker custom.js AMD entry", () => {
     assert.strictEqual(capturedControllerArgs.selectionDebounceMs, 50);
   });
 
+  it("keeps BI hook on HTML graph renderer unless ECharts is explicitly enabled", async () => {
+    let resolverCalled = 0;
+    const { module, document } = loadCustomModule({
+      windowOverrides: {
+        __metadata_checker_echarts_resolver_factory: async () => {
+          resolverCalled += 1;
+          return {
+            echarts: { version: "4.x" },
+            source: "commons/echarts/echarts-ext",
+            diagnostics: [],
+          };
+        },
+        __metadata_checker_graph_renderer_factory: ({ echarts }) => ({
+          render: async () => ({ renderer: echarts ? "echarts" : "html" }),
+          renderError: async () => ({ renderer: "error" }),
+        }),
+        __metadata_checker_graph_panel_host_factory: ({ renderer }) => ({
+          mount() {
+            return { mounted: true };
+          },
+          render(result) {
+            return renderer.render(result);
+          },
+          renderError(error) {
+            return renderer.renderError(error);
+          },
+        }),
+      },
+    });
+
+    const result = await module.onInitDesigner({}, {});
+
+    assert.strictEqual(result.installed, true);
+    assert.strictEqual(resolverCalled, 0);
+    assert.strictEqual(marker(document, "graph-renderer"), "html");
+    assert.strictEqual(marker(document, "graph-echarts-resolver"), "disabled");
+  });
+
   it("derives Service Worker scope from script directory", async () => {
     const serviceWorker = createServiceWorkerMock();
     const { module } = loadCustomModule({ serviceWorker });
@@ -498,8 +538,8 @@ describe("metadata-checker custom.js AMD entry", () => {
     assert.strictEqual(result.installed, true);
     assert.strictEqual(serviceWorker.registerCalls.length, 1);
     assert.deepStrictEqual(JSON.parse(JSON.stringify(serviceWorker.registerCalls[0])), {
-      scriptUrl: "/analyzer/public/hooks/metadata-checker-sw.js",
-      registerOptions: { scope: "/analyzer/public/hooks/" },
+      scriptUrl: "/analyzer/public/hooks/metadata-checker-sw.js?v=m42-echarts-ext-only",
+      registerOptions: { scope: "/analyzer/public/hooks/", updateViaCache: "none" },
     });
   });
 

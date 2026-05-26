@@ -141,7 +141,12 @@ export function createMetadataCheckerController(options = {}) {
   const graphRenderer = options.graphRenderer ?? renderer;
   const host = options.host;
   const logger = options.logger ?? console;
-  const analysisOptions = options.analysisOptions ?? {};
+  const analysisOptions = {
+    include_priority: false,
+    include_conditions: false,
+    include_dataflow: false,
+    ...(options.analysisOptions ?? {}),
+  };
   const runtimeOptions = options.runtimeOptions ?? {};
   const selectionDebounceMs =
     Number.isFinite(Number(options.selectionDebounceMs)) &&

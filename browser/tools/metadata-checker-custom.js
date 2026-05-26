@@ -17,8 +17,11 @@
 define(function () {
   "use strict";
 
-  const SW_SCRIPT_URL = "/analyzer/public/hooks/metadata-checker-sw.js";
-  const FACTORY_ENTRY_FILE = "metadata-checker-browser-entry.mjs";
+  const SW_SCRIPT_FILE = "/analyzer/public/hooks/metadata-checker-sw.js";
+  const SW_SCRIPT_VERSION = "m42-echarts-ext-only";
+  const FACTORY_ENTRY_VERSION = "m42-echarts-ext-only";
+  const SW_SCRIPT_URL = `${SW_SCRIPT_FILE}?v=${SW_SCRIPT_VERSION}`;
+  const FACTORY_ENTRY_FILE = "metadata-checker-browser-entry.js";
   const CUSTOM_SCRIPT_URL =
     typeof document !== "undefined" && document.currentScript?.src
       ? document.currentScript.src
@@ -28,11 +31,31 @@ define(function () {
   const SW_ACTIVATION_TIMEOUT_MS = 30000;
   const CONTROLLER_VERSION = "0.1.0-m40.10";
   const MARKER_NS = "data-metadata-checker";
+  const ENABLE_ECHARTS_RENDERER =
+    typeof window !== "undefined" &&
+    window.__metadata_checker_enable_echarts === true;
 
   function _log(level, ...args) {
     if (console && typeof console[level] === "function") {
-      console[level]("[metadata-checker]", ...args);
+      console[level](`[metadata-checker] ${args.map(_formatLogArg).join(" ")}`);
     }
+  }
+
+  function _formatLogArg(value) {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (value instanceof Error) {
+      return `${value.name}: ${value.message}`;
+    }
+    if (value && typeof value === "object") {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    }
+    return String(value);
   }
 
   function _writeMarker(name, value) {
@@ -67,10 +90,22 @@ define(function () {
     }
   }
 
-  function _writeFallback(code) {
+  function _writeFallback(code, detail) {
     _writeMarker("fallback-used", "true");
     _writeMarker("fallback-code", code);
     _writeMarker("analysis-status", `fallback:${code}`);
+    if (detail?.message) {
+      _writeMarker("fallback-message", String(detail.message).slice(0, 500));
+    }
+    if (detail?.diagnostic?.code) {
+      _writeMarker("fallback-diagnostic-code", detail.diagnostic.code);
+    }
+    if (detail?.diagnostic?.detail?.cause_message) {
+      _writeMarker(
+        "fallback-cause-message",
+        String(detail.diagnostic.detail.cause_message).slice(0, 500),
+      );
+    }
   }
 
   function _writeRuntimeMarker(value) {
@@ -106,15 +141,19 @@ define(function () {
             ? window.location.pathname
             : "/analyzer/app/";
         const projectName = pathname.split("/").filter(Boolean)[0] || "analyzer";
-        return new URL(`/${projectName}/public/hooks/${FACTORY_ENTRY_FILE}`, origin).toString();
+        const url = new URL(`/${projectName}/public/hooks/${FACTORY_ENTRY_FILE}`, origin);
+        url.searchParams.set("v", FACTORY_ENTRY_VERSION);
+        return url.toString();
       } catch {
-        return `/analyzer/public/hooks/${FACTORY_ENTRY_FILE}`;
+        return `/analyzer/public/hooks/${FACTORY_ENTRY_FILE}?v=${FACTORY_ENTRY_VERSION}`;
       }
     }
     try {
-      return new URL(`./${FACTORY_ENTRY_FILE}`, CUSTOM_SCRIPT_URL).toString();
+      const url = new URL(`./${FACTORY_ENTRY_FILE}`, CUSTOM_SCRIPT_URL);
+      url.searchParams.set("v", FACTORY_ENTRY_VERSION);
+      return url.toString();
     } catch {
-      return `/analyzer/public/hooks/${FACTORY_ENTRY_FILE}`;
+      return `/analyzer/public/hooks/${FACTORY_ENTRY_FILE}?v=${FACTORY_ENTRY_VERSION}`;
     }
   }
 
@@ -251,6 +290,7 @@ define(function () {
     try {
       const registration = await navigator.serviceWorker.register(SW_SCRIPT_URL, {
         scope: SW_SCOPE,
+        updateViaCache: "none",
       });
       _log("log", "Service Worker registered:", registration.scope);
       _writeMarker("sw", "registered");
@@ -400,9 +440,9 @@ define(function () {
     let currentKind = options?.runtimeKind ?? runtimeClient?._kind ?? "unknown";
     const onFallback = options?.onFallback ?? (() => {});
 
-    async function switchToPageFallback(code) {
+    async function switchToPageFallback(code, detail) {
       onFallback(code);
-      _writeFallback(code);
+      _writeFallback(code, detail);
       _writeRuntimeMarker("page-fallback");
       currentClient = await createPageFallbackRuntimeClient();
       currentKind = "page-fallback";
@@ -432,12 +472,19 @@ define(function () {
           if (currentKind !== "page-fallback") {
             const fallbackClient = await switchToPageFallback(
               err?.code ?? "WASM_INIT_FAILED",
+              {
+                message: err?.message ?? String(err),
+                diagnostic: err?.diagnostic ?? null,
+              },
             );
             const result = await fallbackClient.initRuntime(...args);
             _writeMarker("wasm", "page-fallback-ready");
             return result;
           }
-          _writeFallback("PAGE_RUNTIME_WASM_INIT_FAILED");
+          _writeFallback("PAGE_RUNTIME_WASM_INIT_FAILED", {
+            message: err?.message ?? String(err),
+            diagnostic: err?.diagnostic ?? null,
+          });
           throw err;
         }
       },
@@ -553,7 +600,10 @@ define(function () {
     let echarts = null;
     const resolverFactory =
       window.__metadata_checker_echarts_resolver_factory ?? null;
-    if (resolverFactory) {
+    if (!ENABLE_ECHARTS_RENDERER) {
+      _writeMarker("graph-echarts-resolver", "disabled");
+      _writeMarker("graph-renderer", "html");
+    } else if (resolverFactory) {
       try {
         const resolved = await resolverFactory({
           globalThisLike: window,
@@ -903,12 +953,12 @@ define(function () {
             settleResolve(response.result);
             return;
           }
-          settleReject(
-            _makeRuntimeError(
-              response.error?.code ?? "SW_RUNTIME_REQUEST_FAILED",
-              response.error?.message ?? "request failed",
-            ),
+          const runtimeError = _makeRuntimeError(
+            response.error?.code ?? "SW_RUNTIME_REQUEST_FAILED",
+            response.error?.message ?? "request failed",
           );
+          runtimeError.diagnostic = response.error?.diagnostic ?? null;
+          settleReject(runtimeError);
         }
 
         transport.onMessage(handler);
