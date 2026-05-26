@@ -197,8 +197,13 @@ function readSelectionPayloads(windowState) {
   return windowState.getSelectionChangedMessages();
 }
 
+function waitForSelectionDebounce(windowState) {
+  const delay = windowState.context.__metadata_checker_page_script__.SELECTION_CHANGE_DEBOUNCE_MS + 20;
+  return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
 describe("selection bridge", () => {
-  it("patches selectComponents and emits full lightweight payload", () => {
+  it("patches selectComponents and emits full lightweight payload", async () => {
     const bridge = createBridgeWithContext({
       source_path: "app/Test.app/Page.spg",
     });
@@ -234,6 +239,7 @@ describe("selection bridge", () => {
       },
     ]);
 
+    await waitForSelectionDebounce(windowState);
     const messages = readSelectionPayloads(windowState);
     assert.strictEqual(messages.length, 1);
     const payload = messages[0].payload;
@@ -245,7 +251,7 @@ describe("selection bridge", () => {
     assert.equal(typeof payload.changed_at, "number");
   });
 
-  it("patches deselectComponents and deselectAll", () => {
+  it("patches deselectComponents and deselectAll", async () => {
     const bridge = createBridgeWithContext({
       source_path: "app/Test.app/Page.spg",
     });
@@ -268,18 +274,20 @@ describe("selection bridge", () => {
     assert.strictEqual(script.installSelectionBridge().installed, true);
 
     builder.deselectComponents(["canvas1"]);
+    await waitForSelectionDebounce(windowState);
     const first = readSelectionPayloads(windowState).at(-1).payload;
     assert.deepStrictEqual(first.selected_component_ids, ["input1", "button1"]);
     assert.deepStrictEqual(first.selected_component_types, ["input", "button"]);
 
     builder.deselectAll();
+    await waitForSelectionDebounce(windowState);
     const second = readSelectionPayloads(windowState).at(-1).payload;
     assert.deepStrictEqual(second.selected_component_ids, []);
     assert.deepStrictEqual(second.selected_component_types, []);
     assert.strictEqual(second.selected_count, 0);
   });
 
-  it("patches doSelectedChange preferentially and is idempotent", () => {
+  it("patches doSelectedChange preferentially and is idempotent", async () => {
     const bridge = createBridgeWithContext({
       source_path: "app/Test.app/Flow.spg",
     });
@@ -309,13 +317,14 @@ describe("selection bridge", () => {
     assert.deepStrictEqual(second.alreadyInstalled, true);
 
     builder.doSelectedChange();
+    await waitForSelectionDebounce(windowState);
     const messages = readSelectionPayloads(windowState);
     assert.strictEqual(messages.length, 1);
     const payload = messages[0].payload;
     assert.strictEqual(payload.selection_source, "doSelectedChange");
   });
 
-  it("does not emit sensitive component fields", () => {
+  it("does not emit sensitive component fields", async () => {
     const bridge = createBridgeWithContext({
       source_path: "app/Test.app/Secret.spg",
     });
@@ -349,6 +358,7 @@ describe("selection bridge", () => {
       },
     ]);
 
+    await waitForSelectionDebounce(windowState);
     const payload = readSelectionPayloads(windowState).at(-1).payload;
     const serialized = JSON.stringify(payload);
     assert.equal(serialized.includes("raw_text"), false);
@@ -401,5 +411,40 @@ describe("selection bridge", () => {
     const result = script.installSelectionBridge();
     assert.equal(result.installed, true);
     assert.equal(result.method, "doSelectedChange");
+  });
+
+  it("debounces rapid selection changes and emits the latest full selection only", async () => {
+    const bridge = createBridgeWithContext({
+      source_path: "app/Test.app/Debounce.spg",
+    });
+    const windowState = createFakeWindow({ bridge });
+    const builder = windowState.createBuilder();
+    delete builder.doSelectedChange;
+    bridge.getPageContext = () => ({
+      page_context: {
+        source_path: "app/Test.app/Debounce.spg",
+      },
+      builder,
+      diagnostics: [],
+    });
+
+    const script = windowState.context.__metadata_checker_page_script__;
+    assert.strictEqual(script.installSelectionBridge().installed, true);
+
+    builder.selectComponents([{ id: "first", type: "input" }]);
+    builder.selectComponents([{ id: "second", type: "text" }]);
+    builder.selectComponents([
+      { id: "third", type: "button" },
+      { id: "fourth", type: "container" },
+    ]);
+
+    assert.strictEqual(readSelectionPayloads(windowState).length, 0);
+    await waitForSelectionDebounce(windowState);
+
+    const messages = readSelectionPayloads(windowState);
+    assert.strictEqual(messages.length, 1);
+    assert.deepStrictEqual(messages[0].payload.selected_component_ids, ["third", "fourth"]);
+    assert.deepStrictEqual(messages[0].payload.selected_component_types, ["button", "container"]);
+    assert.strictEqual(messages[0].payload.selected_count, 2);
   });
 });

@@ -41,6 +41,7 @@
   const RESPONSE_DIRECTION = "response";
   const BRIDGE_EVENT_NAME = "metadata-checker-bridge-message";
   const SELECTION_CHANGED_EVENT_TYPE = "metadata-checker-selection-changed";
+  const SELECTION_CHANGE_DEBOUNCE_MS = 150;
 
   const SELECTION_BRIDGE_MARKER = "selection-bridge";
   const SELECTION_BRIDGE_DIAGNOSTIC_MARKER = "selection-bridge-diagnostic";
@@ -294,7 +295,10 @@
     };
   }
 
-  function dispatchSelectionChange(selectionSource, builder) {
+  let selectionChangeTimer = null;
+  let pendingSelectionChange = null;
+
+  function postSelectionChange(selectionSource, builder) {
     if (!builder || !selectionSource) {
       return;
     }
@@ -318,6 +322,30 @@
         __metadata_checker_bridge_direction: "notification",
       }, "*");
     }
+  }
+
+  function dispatchSelectionChange(selectionSource, builder) {
+    if (!builder || !selectionSource) {
+      return;
+    }
+    pendingSelectionChange = { selectionSource, builder };
+    if (selectionChangeTimer && typeof root.clearTimeout === "function") {
+      root.clearTimeout(selectionChangeTimer);
+    }
+    if (typeof root.setTimeout !== "function") {
+      postSelectionChange(selectionSource, builder);
+      pendingSelectionChange = null;
+      selectionChangeTimer = null;
+      return;
+    }
+    selectionChangeTimer = root.setTimeout(() => {
+      const pending = pendingSelectionChange;
+      pendingSelectionChange = null;
+      selectionChangeTimer = null;
+      if (pending) {
+        postSelectionChange(pending.selectionSource, pending.builder);
+      }
+    }, SELECTION_CHANGE_DEBOUNCE_MS);
   }
 
   function patchSelectionMethods(builder) {
@@ -762,6 +790,7 @@
     handleRequest,
     announceBridgeWhenReady,
     installSelectionBridge,
+    SELECTION_CHANGE_DEBOUNCE_MS,
   };
   writeMarker("extension-page-script", "loaded");
 
