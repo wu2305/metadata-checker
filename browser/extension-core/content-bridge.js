@@ -39,6 +39,25 @@
     "extension-core/page-script.js",
   ];
 
+  function writeMarker(name, value) {
+    const doc = root.document;
+    if (!doc || typeof doc.createElement !== "function") {
+      return;
+    }
+    const key = `data-metadata-checker-${name}`;
+    const existing = typeof doc.querySelector === "function" ? doc.querySelector(`[${key}]`) : null;
+    if (existing && typeof existing.setAttribute === "function") {
+      existing.setAttribute(key, value);
+      return;
+    }
+    const marker = doc.createElement("span");
+    marker.setAttribute(key, value);
+    marker.style.display = "none";
+    doc.documentElement?.appendChild(marker);
+  }
+
+  writeMarker("extension-content-bridge", "loaded");
+
   function isArray(value) {
     return Array.isArray(value);
   }
@@ -183,6 +202,7 @@
     return Promise.all(injectedScriptPaths.map((path) => appendScript(path))).then(() => {
       injected = true;
       injecting = false;
+      writeMarker("extension-injection", "ready");
     });
   }
 

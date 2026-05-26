@@ -5,6 +5,25 @@
 
   const runtime = typeof chrome !== "undefined" ? chrome.runtime : null;
 
+  function writeMarker(name, value) {
+    const doc = root.document;
+    if (!doc || typeof doc.createElement !== "function") {
+      return;
+    }
+    const key = `data-metadata-checker-${name}`;
+    const existing = typeof doc.querySelector === "function" ? doc.querySelector(`[${key}]`) : null;
+    if (existing && typeof existing.setAttribute === "function") {
+      existing.setAttribute(key, value);
+      return;
+    }
+    const marker = doc.createElement("span");
+    marker.setAttribute(key, value);
+    marker.style.display = "none";
+    doc.documentElement?.appendChild(marker);
+  }
+
+  writeMarker("extension-content", "loaded");
+
   root.__metadata_checker_resolve_asset_url = function resolveAssetUrl(path) {
     if (runtime && typeof runtime.getURL === "function") {
       return runtime.getURL(path);

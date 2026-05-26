@@ -15,6 +15,23 @@
     BRIDGE_REQUEST_UNSUPPORTED: "METADATA_CHECKER_REQUEST_UNSUPPORTED",
   };
 
+  function _writeMarker(name, value) {
+    const doc = root?.document;
+    if (!doc || typeof doc.createElement !== "function") {
+      return;
+    }
+    const key = `data-metadata-checker-${name}`;
+    const existing = typeof doc.querySelector === "function" ? doc.querySelector(`[${key}]`) : null;
+    if (existing && typeof existing.setAttribute === "function") {
+      existing.setAttribute(key, value);
+      return;
+    }
+    const marker = doc.createElement("span");
+    marker.setAttribute(key, value);
+    marker.style.display = "none";
+    doc.documentElement?.appendChild(marker);
+  }
+
   function _safeCall(fn, args = []) {
     if (typeof fn !== "function") {
       return {
@@ -319,5 +336,6 @@
       createRuntimeAdapter,
       createEnvelope: protocol.createResponseEnvelope,
     };
+    _writeMarker("extension-runtime-adapter", "loaded");
   }
 })(typeof globalThis === "undefined" ? undefined : globalThis);

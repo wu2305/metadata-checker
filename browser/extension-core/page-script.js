@@ -52,6 +52,23 @@
     );
   }
 
+  function writeMarker(name, value) {
+    const doc = root.document;
+    if (!doc || typeof doc.createElement !== "function") {
+      return;
+    }
+    const key = `data-metadata-checker-${name}`;
+    const existing = typeof doc.querySelector === "function" ? doc.querySelector(`[${key}]`) : null;
+    if (existing && typeof existing.setAttribute === "function") {
+      existing.setAttribute(key, value);
+      return;
+    }
+    const marker = doc.createElement("span");
+    marker.setAttribute(key, value);
+    marker.style.display = "none";
+    doc.documentElement?.appendChild(marker);
+  }
+
   function coerceSelection(selection) {
     if (!isObject(selection)) {
       return {
@@ -399,8 +416,10 @@
     analyzeCurrentSelectionFromBridge,
     handleRequest,
   };
+  writeMarker("extension-page-script", "loaded");
 
   if (root.__metadata_checker_page_script_auto_install !== false) {
     install();
+    writeMarker("extension-page-script-status", "installed");
   }
 })(typeof globalThis === "undefined" ? undefined : globalThis);

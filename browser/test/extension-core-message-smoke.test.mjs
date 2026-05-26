@@ -34,6 +34,8 @@ function createFakeWindow({ bridge } = {}) {
     },
     createElement() {
       return {
+        style: {},
+        setAttribute() {},
         addEventListener() {},
         remove() {},
         set src(_value) {},
@@ -81,6 +83,8 @@ function createContentBridgeWindow() {
     document: {
       createElement() {
         return {
+          style: {},
+          setAttribute() {},
           addEventListener() {},
           remove() {},
           set src(_value) {},
