@@ -5254,14 +5254,18 @@ browser/tools/
   - 文件建议：
     - `browser/bridge/custom-bridge.js`
     - `browser/test/custom-bridge-smoke.test.mjs`
-  - `custom-bridge.js` 使用 BI 可加载的 AMD `define(function(){ return { onInitDesigner } })` 形态。
+  - `custom-bridge.js` 使用真实 BI 可加载和可合并的 AMD `define(["require", "exports"], function (_require, exports) { ... })` 形态。
+  - 必须同时导出 `exports.onInitDesigner` 与 `exports.CustomJS["*"/"spg"/"SuperPage"]`，避免只支持直接导出时在 `getCustomJS(...)` 合并路径中失效。
   - 只做 bridge 初始化和事件发送。
   - 不 import sidecar、不动态加载 WASM、不注册 Service Worker。
   - 对重复初始化幂等：已有 bridge 时更新 designer 引用和状态，不重复挂多个监听。
   - 写稳定 DOM marker：
+    - `data-metadata-checker-bridge-module`
     - `data-metadata-checker-bridge`
     - `data-metadata-checker-bridge-protocol`
     - `data-metadata-checker-bridge-status`
+    - `data-metadata-checker-on-init-designer`
+  - marker 以隐藏节点属性形式写入，验收脚本必须使用 `document.querySelector("[data-metadata-checker-bridge]")` 读取，不要只读 `document.documentElement` 属性。
 
 - [ ] M43.3：Extension manifest 与目录骨架
   - 文件建议：

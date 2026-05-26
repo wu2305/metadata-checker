@@ -96,8 +96,26 @@ function loadCustomBridgeWithProtocol() {
         this.detail = init?.detail;
       }
     },
-    define(factory) {
-      context.module = factory();
+    define(deps, factory) {
+      if (typeof deps === "function") {
+        context.module = deps();
+        return;
+      }
+      const exports = {};
+      context.module = exports;
+      const args = deps.map((dep) => {
+        if (dep === "require") {
+          return () => null;
+        }
+        if (dep === "exports") {
+          return exports;
+        }
+        return null;
+      });
+      const returned = factory(...args);
+      if (returned) {
+        context.module = returned;
+      }
     },
     setTimeout,
     clearTimeout,
@@ -139,8 +157,26 @@ function loadCustomBridgeAfterExtensionCoreProtocol() {
         this.detail = init?.detail;
       }
     },
-    define(factory) {
-      context.module = factory();
+    define(deps, factory) {
+      if (typeof deps === "function") {
+        context.module = deps();
+        return;
+      }
+      const exports = {};
+      context.module = exports;
+      const args = deps.map((dep) => {
+        if (dep === "require") {
+          return () => null;
+        }
+        if (dep === "exports") {
+          return exports;
+        }
+        return null;
+      });
+      const returned = factory(...args);
+      if (returned) {
+        context.module = returned;
+      }
     },
     setTimeout,
     clearTimeout,
@@ -196,9 +232,14 @@ function makeDesigner(path = "/analyzer/app/M43.spg") {
 
 describe("metadata-checker custom bridge", () => {
   it("loads AMD factory", () => {
-    const { module } = loadCustomBridgeWithProtocol();
+    const { module, document } = loadCustomBridgeWithProtocol();
     assert.ok(module);
     assert.strictEqual(typeof module.onInitDesigner, "function");
+    assert.strictEqual(module.default, module);
+    assert.strictEqual(typeof module.CustomJS["*"].onInitDesigner, "function");
+    assert.strictEqual(typeof module.CustomJS.spg.onInitDesigner, "function");
+    assert.strictEqual(typeof module.CustomJS.SuperPage.onInitDesigner, "function");
+    assert.strictEqual(marker(document, "bridge-module"), "loaded");
   });
 
   it("onInitDesigner writes bridge markers and emits light-weight ready event", () => {
@@ -213,6 +254,7 @@ describe("metadata-checker custom bridge", () => {
 
     assert.strictEqual(readyEvents.length, 1);
     assert.strictEqual(marker(document, "bridge"), "installed");
+    assert.strictEqual(marker(document, "on-init-designer"), "called");
     assert.strictEqual(marker(document, "bridge-protocol"), "m43-protocol-v1");
     assert.strictEqual(marker(document, "bridge-status"), "ready");
     assert.deepStrictEqual(Object.keys(detail).sort(), [

@@ -1,5 +1,6 @@
-define(function () {
+define(["require", "exports"], function (_require, exports) {
   "use strict";
+  Object.defineProperty(exports, "__esModule", { value: true });
 
   const protocolExports = typeof window !== "undefined"
     ? window.__metadata_checker_bridge_protocol__
@@ -148,6 +149,7 @@ define(function () {
     } else {
       _writeMarker("bridge", "updated");
     }
+    _writeMarker("on-init-designer", "called");
     _writeMarker("bridge-protocol", protocol.version);
     _writeMarker("bridge-status", initState);
 
@@ -156,9 +158,19 @@ define(function () {
     return bridge.getBridgeStatus();
   }
 
-  return {
-    onInitDesigner,
+  _writeMarker("bridge-module", "loaded");
+  if (typeof console !== "undefined" && typeof console.log === "function") {
+    console.log("[metadata-checker] designer bridge loaded", protocol.version);
+  }
+
+  exports.onInitDesigner = onInitDesigner;
+  exports.CustomJS = {
+    "*": { onInitDesigner },
+    spg: { onInitDesigner },
+    SuperPage: { onInitDesigner },
   };
+  exports.default = exports;
+  return exports;
 
   function defaultGetPageContext(designer, options = {}) {
     const openFileArgs = designer?.openFileArgs ?? {};

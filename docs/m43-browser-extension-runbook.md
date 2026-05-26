@@ -9,6 +9,7 @@
 - `custom.js` 仅提供轻量、幂等、固定的 bridge stub。
 - 内置浏览器（如编辑器自带 WebView）不能安装 extension，不能作为 M43 主要验收对象；只能用于 marker/console 可见性检查。
 - Chrome/Edge 验收必须走 unpacked extension 加载与复核。
+- 真实 BI 当前自定义脚本加载器按 AMD `exports` 对象合并脚本；固定 bridge 必须使用 `define(["require", "exports"], function (_require, exports) { ... })` 并同时导出 `exports.onInitDesigner` 与 `exports.CustomJS["*"/"spg"/"SuperPage"]`。
 
 ## 0. 文件与工具约定
 
@@ -131,6 +132,7 @@ function marker(name) {
 }
 
 console.table({
+  bridgeModule: marker("bridge-module"),
   bridge: marker("bridge"),
   bridgeProtocol: marker("bridge-protocol"),
   bridgeStatus: marker("bridge-status"),
@@ -151,11 +153,14 @@ window.addEventListener("__metadata_checker_designer_ready__", (event) => {
 
 期望：
 
+- `marker("bridge-module")` 为 `loaded`
 - `marker("bridge")` 为 `installed` 或 `updated`
 - `marker("bridge-protocol")` 为 `m43-protocol-v1`
 - `marker("bridge-status")` 为 `ready` 或 `updated`
 - `window.__metadata_checker_designer_bridge__` 可见（若页面上下文可访问）
 - ready 事件触发后，`event.detail.selection.selected_component_ids` 与 designer 当前选区一致
+
+注意：M43 bridge marker 是隐藏节点属性（例如 `<span data-metadata-checker-bridge="installed">`），不是写在 `document.documentElement` 上。自动化验收必须使用 `document.querySelector("[data-metadata-checker-bridge]")` 读取。
 
 ## 4. 验证 extension popup / diagnostic / Analyze current selection
 
