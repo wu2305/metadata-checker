@@ -236,6 +236,14 @@
       return;
     }
     host.updateSelection(message.payload);
+    writeMarker("extension-selection-event", "received");
+    writeMarker("extension-selection-source", asString(message.payload.selection_source));
+    writeMarker(
+      "extension-selection-count",
+      String(Array.isArray(message.payload.selected_component_ids) ? message.payload.selected_component_ids.length : 0),
+    );
+    writeMarker("extension-selection-active", asString(message.payload.active_component_id));
+    writeMarker("extension-selection-changed-at", String(message.payload.changed_at || ""));
   }
 
   function normalizeAction(action) {

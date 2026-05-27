@@ -246,6 +246,7 @@ describe("selection bridge", () => {
     assert.strictEqual(payload.source_path, "app/Test.app/Page.spg");
     assert.deepStrictEqual(payload.selected_component_ids, ["input1", "button1"]);
     assert.deepStrictEqual(payload.selected_component_types, ["input", "button"]);
+    assert.strictEqual(payload.active_component_id, "input1");
     assert.strictEqual(payload.selected_count, 2);
     assert.strictEqual(payload.selection_source, "selectComponents");
     assert.equal(typeof payload.changed_at, "number");
@@ -278,12 +279,14 @@ describe("selection bridge", () => {
     const first = readSelectionPayloads(windowState).at(-1).payload;
     assert.deepStrictEqual(first.selected_component_ids, ["input1", "button1"]);
     assert.deepStrictEqual(first.selected_component_types, ["input", "button"]);
+    assert.strictEqual(first.active_component_id, "input1");
 
     builder.deselectAll();
     await waitForSelectionDebounce(windowState);
     const second = readSelectionPayloads(windowState).at(-1).payload;
     assert.deepStrictEqual(second.selected_component_ids, []);
     assert.deepStrictEqual(second.selected_component_types, []);
+    assert.strictEqual(second.active_component_id, null);
     assert.strictEqual(second.selected_count, 0);
   });
 
@@ -322,6 +325,7 @@ describe("selection bridge", () => {
     assert.strictEqual(messages.length, 1);
     const payload = messages[0].payload;
     assert.strictEqual(payload.selection_source, "doSelectedChange");
+    assert.strictEqual(payload.active_component_id, "node1");
   });
 
   it("does not emit sensitive component fields", async () => {
@@ -460,6 +464,7 @@ describe("selection bridge", () => {
     assert.strictEqual(messages.length, 1);
     assert.deepStrictEqual(messages[0].payload.selected_component_ids, ["third", "fourth"]);
     assert.deepStrictEqual(messages[0].payload.selected_component_types, ["button", "container"]);
+    assert.strictEqual(messages[0].payload.active_component_id, "third");
     assert.strictEqual(messages[0].payload.selected_count, 2);
   });
 });

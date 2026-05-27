@@ -181,6 +181,7 @@ test("createPanelHost keeps selection update while hidden and displays latest on
   host.updateSelection({
     source_path: "hidden.spg",
     selected_component_ids: ["x", "y", "z"],
+    selected_component_types: ["input", "button", "panel"],
     active_component_id: "z",
   });
 
@@ -195,6 +196,8 @@ test("createPanelHost keeps selection update while hidden and displays latest on
   assert.match(text, /Source: hidden\.spg/);
   assert.match(text, /Selection: 3/);
   assert.match(text, /Active: z/);
+  assert.match(text, /Selected: x, y, z/);
+  assert.match(text, /Types: input, button, panel/);
 });
 
 test("createPanelHost never renders raw payload fields into DOM text", () => {

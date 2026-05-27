@@ -285,10 +285,15 @@
       selectedComponents = [];
     }
     const snapshot = selectedComponents.map(asSelectionComponentSnapshot).filter(Boolean);
+    const activeComponent = typeof builder.getSelectedComponent === "function"
+      ? builder.getSelectedComponent()
+      : selectedComponents[0];
+    const activeSnapshot = asSelectionComponentSnapshot(activeComponent);
     return {
       source_path: sourcePath,
       selected_component_ids: snapshot.map((item) => item.id),
       selected_component_types: snapshot.map((item) => item.type),
+      active_component_id: activeSnapshot?.id ?? snapshot[0]?.id ?? null,
       selected_count: snapshot.length,
       selection_source: sourceMethod,
       changed_at: Date.now(),

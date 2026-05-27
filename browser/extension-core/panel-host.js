@@ -36,11 +36,13 @@
 
   function normalizeSelection(selection = {}) {
     const selected = asArray(selection.selected_component_ids);
+    const selectedTypes = asArray(selection.selected_component_types);
     const sourcePath = asString(selection.source_path);
     const active = asString(selection.active_component_id);
     return {
       source_path: sourcePath,
       selected_component_ids: selected,
+      selected_component_types: selectedTypes,
       active_component_id: active,
       page_type: asString(selection.page_type || "") || "",
       timestamp: typeof selection.timestamp === "number" ? selection.timestamp : Date.now(),
@@ -76,14 +78,24 @@
     const safeStatus = asString(envelopeSummary.status);
     const safeTarget = asString(envelopeSummary.target);
     const safeFocus = asString(envelopeSummary.focus);
+    const selectedIds = asArray(selectionSummary.selected_component_ids);
+    const selectedTypes = asArray(selectionSummary.selected_component_types);
+    const selectedLabel = selectedIds.length > 0
+      ? selectedIds.slice(0, 5).join(", ")
+      : "";
+    const selectedTypeLabel = selectedTypes.length > 0
+      ? selectedTypes.slice(0, 5).join(", ")
+      : "";
 
     const lines = [
       `Status: ${safeStatus || "unknown"}`,
       safeTarget ? `Target: ${safeTarget}` : "Target:",
-      `Selection: ${selectionSummary.selected_component_ids.length}`,
+      `Selection: ${selectedIds.length}`,
       selectionSummary.active_component_id
         ? `Active: ${selectionSummary.active_component_id}`
         : "Active:",
+      selectedLabel ? `Selected: ${selectedLabel}` : "Selected:",
+      selectedTypeLabel ? `Types: ${selectedTypeLabel}` : "Types:",
       `Items: ${String(envelopeSummary.itemCount)}`,
       `Diagnostics: ${String(envelopeSummary.diagnosticCount)}`,
       safeFocus ? `Focus: ${safeFocus}` : "Focus:",

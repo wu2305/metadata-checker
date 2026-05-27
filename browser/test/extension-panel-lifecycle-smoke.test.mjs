@@ -302,6 +302,9 @@ test("content script updates panel host on page script selection changed message
     payload: {
       source_path: "app/Test.spg",
       selected_component_ids: ["a", "b", "c"],
+      selected_component_types: ["input", "button", "panel"],
+      selection_source: "selectComponents",
+      changed_at: 123456,
       active_component_id: "b",
     },
   });
@@ -316,6 +319,18 @@ test("content script updates panel host on page script selection changed message
   assert.equal(
     state.hostElement?.getAttribute("data-metadata-checker-panel-selection-count"),
     "3",
+  );
+  assert.equal(
+    context.document.querySelector("[data-metadata-checker-extension-selection-event]")?.getAttribute("data-metadata-checker-extension-selection-event"),
+    "received",
+  );
+  assert.equal(
+    context.document.querySelector("[data-metadata-checker-extension-selection-active]")?.getAttribute("data-metadata-checker-extension-selection-active"),
+    "b",
+  );
+  assert.equal(
+    context.document.querySelector("[data-metadata-checker-extension-selection-source]")?.getAttribute("data-metadata-checker-extension-selection-source"),
+    "selectComponents",
   );
 });
 
