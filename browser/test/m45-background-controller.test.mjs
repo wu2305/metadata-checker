@@ -348,6 +348,100 @@ test("M45 selection pause/resume prevents additional background items until resu
   await resumed;
 });
 
+test("M45 pause while workers reserved preserves reserved order", async () => {
+  const deferreds = [];
+  const starts = [];
+  const fetchImpl = async () => jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) });
+  const controller = createM45BackgroundController({
+    fetchImpl,
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection(selection) {
+        starts.push(selection.source_path);
+        if (selection.source_path === "app/A.app/Page.spg") {
+          const deferred = createDeferred();
+          deferreds.push(deferred);
+          await deferred.promise;
+        }
+        return { status: "ready" };
+      },
+    },
+  });
+  controller.state.session = { base_url: "https://example.test" };
+  controller.seedBackgroundQueue([
+    {
+      project_name: "p",
+      source_path: "app/A.app/Page.spg",
+      file_id: "f1",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/B.app/Page.spg",
+      file_id: "f2",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/C.app/Page.spg",
+      file_id: "f3",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/D.app/Page.spg",
+      file_id: "f4",
+      revision: "1",
+      analyzable: true,
+    },
+  ]);
+
+  const processing = controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 3, max_concurrency: 3, min_interval_ms: 10 },
+  });
+  while (starts.length === 0) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(starts[0], "app/A.app/Page.spg");
+
+  await controller.handleMessage({ type: "metadata-checker-background-pause" });
+  assert.equal(starts.length, 1);
+
+  deferreds[0].resolve();
+  await processing;
+
+  assert.deepEqual(
+    controller.state.background.queue.map((item) => item.source_path),
+    [
+      "app/B.app/Page.spg",
+      "app/C.app/Page.spg",
+      "app/D.app/Page.spg",
+    ],
+  );
+  assert.equal(controller.state.background.queue.length, 3);
+
+  await controller.handleMessage({ type: "metadata-checker-background-resume" });
+  const resumed = controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 3, max_concurrency: 3, min_interval_ms: 10 },
+  });
+  while (starts.length < 4) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.deepEqual(starts, [
+    "app/A.app/Page.spg",
+    "app/B.app/Page.spg",
+    "app/C.app/Page.spg",
+    "app/D.app/Page.spg",
+  ]);
+  await resumed;
+});
+
 test("M45 background process limit reserves slots before completion under high concurrency", async () => {
   const deferreds = [];
   const fetchImpl = async () => jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) });

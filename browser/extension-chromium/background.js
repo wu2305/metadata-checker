@@ -859,6 +859,7 @@ export function createM45BackgroundController(options = {}) {
     state.background.min_interval_ms = normalizedMinInterval;
     const processed = [];
     const artifacts = [];
+    const reservedItems = [];
     let reservedCount = 0;
     let nextStartAt = state.background.next_run_at ?? null;
     let startGate = Promise.resolve();
@@ -905,6 +906,14 @@ export function createM45BackgroundController(options = {}) {
       return item;
     }
 
+    function requeuePausedReservedItems() {
+      if (reservedItems.length === 0) {
+        return;
+      }
+      state.background.queue.unshift(...reservedItems);
+      reservedItems.length = 0;
+    }
+
     async function worker() {
       while (true) {
         const item = reserveSlot();
@@ -913,7 +922,7 @@ export function createM45BackgroundController(options = {}) {
         }
         await waitForStartSlot();
         if (state.background.paused) {
-          state.background.queue.unshift(item);
+          reservedItems.push(item);
           reservedCount -= 1;
           return;
         }
@@ -944,6 +953,8 @@ export function createM45BackgroundController(options = {}) {
     }
 
     await Promise.all(Array.from({ length: normalizedMaxConcurrency }, () => worker()));
+
+    requeuePausedReservedItems();
 
     state.background.status = state.background.paused
       ? "paused"
