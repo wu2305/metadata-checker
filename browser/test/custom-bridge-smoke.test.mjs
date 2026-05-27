@@ -285,11 +285,41 @@ describe("metadata-checker custom bridge", () => {
     const { module, document } = loadCustomBridgeWithProtocol();
     assert.ok(module);
     assert.strictEqual(typeof module.onInitDesigner, "function");
+    assert.strictEqual(typeof module.designerHook, "object");
+    assert.strictEqual(module.designerHook.onInitDesigner, module.onInitDesigner);
     assert.strictEqual(module.default, module);
     assert.strictEqual(typeof module.CustomJS["*"].onInitDesigner, "function");
+    assert.strictEqual(module.CustomJS["*"], module.designerHook);
     assert.strictEqual(typeof module.CustomJS.spg.onInitDesigner, "function");
+    assert.strictEqual(module.CustomJS.spg, module.designerHook);
     assert.strictEqual(typeof module.CustomJS.SuperPage.onInitDesigner, "function");
+    assert.strictEqual(module.CustomJS.SuperPage, module.designerHook);
     assert.strictEqual(marker(document, "bridge-module"), "loaded");
+  });
+
+  it("supports TypeScript-style named import usage through designerHook", () => {
+    const { module, document } = loadCustomBridgeWithProtocol();
+    const importedDesignerHook = module.designerHook;
+
+    const result = importedDesignerHook.onInitDesigner(
+      {
+        type: "superpage",
+        openFileArgs: {
+          path: "/xiaoshouyi/app/价审.app/demo/销售订单价格审批.spg",
+          id: "fid-price-review",
+          projectName: "xiaoshouyi",
+          mode: "edit",
+        },
+        getBuilder() {
+          return makeBuilder();
+        },
+      },
+      { isEditMode: true },
+    );
+
+    assert.strictEqual(marker(document, "bridge"), "installed");
+    assert.strictEqual(result.page_context.source_path, "app/价审.app/demo/销售订单价格审批.spg");
+    assert.strictEqual(result.page_context.project_name, "xiaoshouyi");
   });
 
   it("exposes bridge on globalThis when window binding is unavailable", () => {

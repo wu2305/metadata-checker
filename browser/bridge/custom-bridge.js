@@ -212,11 +212,16 @@ define(["require", "exports"], function (_require, exports) {
     console.log("[metadata-checker] designer bridge loaded", protocol.version);
   }
 
+  const designerHook = {
+    onInitDesigner,
+  };
+
+  exports.designerHook = designerHook;
   exports.onInitDesigner = onInitDesigner;
   exports.CustomJS = {
-    "*": { onInitDesigner },
-    spg: { onInitDesigner },
-    SuperPage: { onInitDesigner },
+    "*": designerHook,
+    spg: designerHook,
+    SuperPage: designerHook,
   };
   exports.default = exports;
   return exports;

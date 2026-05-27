@@ -56,6 +56,30 @@ node browser/tools/remote-metadata-uploader.mjs \
 3. 加载后只写 `custom.js` 级别的 bridge marker，不做运行时计算/渲染。
 4. 对重复初始化做幂等（重复进入只更新设计器上下文，不重复 bind 监听）。
 
+如果平台允许在 `custom.ts` 中引用 hook 模块，推荐把 bridge 作为独立 AMD 模块上传，例如：
+
+```text
+/{projectName}/public/hooks/metadata-checker-designer-hook.js
+```
+
+然后在现有 `custom.ts` 中使用具名导入并合并到已有 hook：
+
+```ts
+import { designerHook } from "/xiaoshouyi/public/hooks/metadata-checker-designer-hook";
+
+const existingOnInitDesigner = CustomJS["*"]?.onInitDesigner;
+
+CustomJS["*"] = {
+  ...CustomJS["*"],
+  onInitDesigner(designer, args) {
+    existingOnInitDesigner?.(designer, args);
+    return designerHook.onInitDesigner(designer, args);
+  },
+};
+```
+
+注意：不要覆盖业务已有 `custom.js`，不要把 bridge 逻辑复制到 `.spg` / `.tbl` 元数据中。
+
 示意逻辑（仅结构示意，按项目 `custom.js` 风格适配）：
 
 ```js
