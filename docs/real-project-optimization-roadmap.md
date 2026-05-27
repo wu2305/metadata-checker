@@ -5563,8 +5563,9 @@ BI onInitDesigner
   - 使用 `reqwest` cookie jar 保存 session，后续元数据请求复用同一个 client。
   - 默认使用内存 cookie jar；持久化 session file 只作为显式配置。
 - Browser Extension：
-  - `onInitDesigner` / page script 在页面上下文调用 `/api/auth/getAccessToken`。
-  - content script 将一次性 token 转发给 extension service worker。
+  - content script 在 isolated world 中调用 `/api/auth/getAccessToken`，并使用 `credentials: include` 复用当前浏览器登录态。
+  - 一次性 token 不允许经过 page-visible `postMessage`、DOM、diagnostics、console 或 panel 文本。
+  - content script 将一次性 token 通过 `chrome.runtime.sendMessage` 转发给 extension service worker。
   - extension service worker 调用 `/api/me/whoami?access_token=...` bootstrap 插件侧 session。
   - 成功后 service worker 用该 session 拉取远程元数据；如果真实环境证明 SW 不能可靠建立 session，返回稳定 diagnostic 后再补 page-context fallback。
 
@@ -5593,14 +5594,14 @@ BI onInitDesigner
   - 队列只分析 `.spg` / `.tbl`，其它类型记录但不进入分析。
 
 - [x] M45.3：Foreground Auto Analysis
-  - page script 增加 `getAccessToken` bridge request。
+  - content script 直接获取一次性 token，page script / page bridge 不返回 token 明文。
   - content script 在 bridge ready 后获取 token 并触发 SW bootstrap。
-  - selection 变化后更新 panel，并把当前 selection 作为前台高优先级任务通知 SW。
-  - stale selection 仍由既有 controller seq 逻辑丢弃。
+  - selection 变化后更新 panel，并把当前 selection 作为前台高优先级任务通知 SW 后触发一次限量处理。
+  - foreground analysis cache key 必须包含 selection 信息，避免被后台页面级 artifact 覆盖。
 
 - [x] M45.4：SW Background Worker Queue
   - SW 维护后台扫描队列。
-  - 优先级：当前页面依赖 -> 同 app -> 同 project/module -> 其它可见项目。
+  - 优先级：当前页面 -> 当前页面依赖 -> 同 app -> 同 project/module -> 其它可见项目。
   - 限并发、限速、可暂停、可恢复。
   - 后台任务只做渐进预取和运行时可用时的分析触发，不阻塞 panel、selection、当前页面分析。
 

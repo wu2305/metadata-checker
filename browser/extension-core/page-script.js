@@ -13,7 +13,6 @@
     "getPageContext",
     "getSelectionSnapshot",
     "analyzeCurrentSelection",
-    "getAccessToken",
   ];
   const DEFAULT_DIAGNOSTIC_CODES = {
     PROTOCOL_MISMATCH: "METADATA_CHECKER_PROTOCOL_MISMATCH",
@@ -22,7 +21,6 @@
     BRIDGE_REQUEST_FAILED: "METADATA_CHECKER_REQUEST_FAILED",
     SELECTION_BRIDGE_MISSING: "METADATA_CHECKER_SELECTION_BRIDGE_MISSING",
     SELECTION_PATCH_FAILED: "METADATA_CHECKER_SELECTION_PATCH_FAILED",
-    ACCESS_TOKEN_UNAVAILABLE: "ACCESS_TOKEN_UNAVAILABLE",
   };
   const DIAGNOSTIC_CODES = {
     ...DEFAULT_DIAGNOSTIC_CODES,
@@ -618,73 +616,6 @@
     };
   }
 
-  async function getAccessTokenFromPage() {
-    try {
-      if (typeof root.fetch !== "function") {
-        return {
-          supported: false,
-          access_token_available: false,
-          diagnostics: [
-            createDiagnostic(
-              DIAGNOSTIC_CODES.ACCESS_TOKEN_UNAVAILABLE,
-              "native fetch is unavailable in page context",
-              "error",
-            ),
-          ],
-        };
-      }
-      const response = await root.fetch("/api/auth/getAccessToken", {
-        method: "GET",
-        credentials: "include",
-      });
-      if (!response || !response.ok) {
-        return {
-          supported: true,
-          access_token_available: false,
-          diagnostics: [
-            createDiagnostic(
-              DIAGNOSTIC_CODES.ACCESS_TOKEN_UNAVAILABLE,
-              `getAccessToken failed with HTTP ${response?.status ?? "unknown"}`,
-              "error",
-            ),
-          ],
-        };
-      }
-      const accessToken = String(await response.text()).trim();
-      if (!accessToken) {
-        return {
-          supported: true,
-          access_token_available: false,
-          diagnostics: [
-            createDiagnostic(
-              DIAGNOSTIC_CODES.ACCESS_TOKEN_UNAVAILABLE,
-              "getAccessToken returned empty token",
-              "error",
-            ),
-          ],
-        };
-      }
-      return {
-        supported: true,
-        access_token_available: true,
-        access_token: accessToken,
-        diagnostics: [],
-      };
-    } catch (error) {
-      return {
-        supported: true,
-        access_token_available: false,
-        diagnostics: [
-          createDiagnostic(
-            DIAGNOSTIC_CODES.ACCESS_TOKEN_UNAVAILABLE,
-            error?.message || "getAccessToken request failed",
-            "error",
-          ),
-        ],
-      };
-    }
-  }
-
   function makeResponse(type, request, payload, diagnostics) {
     const response = createResponseEnvelope
       ? createResponseEnvelope({
@@ -710,7 +641,7 @@
     if (typeof createProtocolMismatchEnvelope === "function") {
       return {
         ...createProtocolMismatchEnvelope(request, {
-        details: "metadata checker protocol mismatch",
+          details: "metadata checker protocol mismatch",
         }),
         __metadata_checker_bridge_token: request.__metadata_checker_bridge_token ?? null,
       };
@@ -775,12 +706,6 @@
         selection: payload.selection,
         diagnostics: asDiagnostics(payload.diagnostics),
       }, payload.diagnostics);
-    }
-
-    if (request.type === "getAccessToken") {
-      return getAccessTokenFromPage().then((payload) => {
-        return makeResponse("getAccessToken", request, payload, payload.diagnostics);
-      });
     }
 
     const payload = analyzeCurrentSelectionFromBridge();
@@ -874,7 +799,6 @@
     getPageContextFromBridge,
     getSelectionSnapshotFromBridge,
     analyzeCurrentSelectionFromBridge,
-    getAccessTokenFromPage,
     handleRequest,
     announceBridgeWhenReady,
     installSelectionBridge,

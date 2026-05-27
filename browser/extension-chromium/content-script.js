@@ -264,21 +264,84 @@
     });
   }
 
+  async function fetchAccessTokenInContentWorld() {
+    if (typeof root.fetch !== "function") {
+      return {
+        ok: false,
+        diagnostics: [
+          stableDiagnostic(
+            "ACCESS_TOKEN_UNAVAILABLE",
+            "native fetch is unavailable in content script",
+            "error",
+          ),
+        ],
+      };
+    }
+    try {
+      const response = await root.fetch("/api/auth/getAccessToken", {
+        method: "GET",
+        credentials: "include",
+      });
+      if (!response || !response.ok) {
+        return {
+          ok: false,
+          diagnostics: [
+            stableDiagnostic(
+              "ACCESS_TOKEN_UNAVAILABLE",
+              `getAccessToken failed with HTTP ${response?.status ?? "unknown"}`,
+              "error",
+            ),
+          ],
+        };
+      }
+      const accessToken = String(await response.text()).trim();
+      if (!accessToken) {
+        return {
+          ok: false,
+          diagnostics: [
+            stableDiagnostic(
+              "ACCESS_TOKEN_UNAVAILABLE",
+              "getAccessToken returned empty token",
+              "error",
+            ),
+          ],
+        };
+      }
+      return { ok: true, access_token: accessToken, diagnostics: [] };
+    } catch (error) {
+      return {
+        ok: false,
+        diagnostics: [
+          stableDiagnostic(
+            "ACCESS_TOKEN_UNAVAILABLE",
+            error?.message || "getAccessToken request failed",
+            "error",
+          ),
+        ],
+      };
+    }
+  }
+
   async function bootstrapRemoteSessionFromPage() {
     const [status, tokenResponse] = await Promise.all([
       requestPageBridge("getBridgeStatus"),
-      requestPageBridge("getAccessToken"),
+      fetchAccessTokenInContentWorld(),
     ]);
-    const payload = tokenResponse?.payload || {};
     const pageContext = status?.payload?.page_context || {};
-    if (!payload.access_token_available || typeof payload.access_token !== "string") {
+    if (!tokenResponse?.ok || typeof tokenResponse.access_token !== "string") {
+      writeMarker("extension-token-source", "content-script-error");
+      updatePanelWithBackgroundState({
+        ok: false,
+        diagnostics: asDiagnostics(tokenResponse?.diagnostics),
+      });
       return tokenResponse;
     }
+    writeMarker("extension-token-source", "content-script");
     const result = await sendRuntimeMessage({
       type: "metadata-checker-bootstrap-token",
       payload: {
         base_url: root.location?.origin || "",
-        access_token: payload.access_token,
+        access_token: tokenResponse.access_token,
         current_source_path: pageContext.source_path || "",
         initial_limit: 3,
       },

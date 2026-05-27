@@ -180,6 +180,15 @@ function makeCacheKey(baseUrl, file) {
   ].join("|");
 }
 
+function makeAnalysisArtifactKey(item) {
+  if (!item.foreground) {
+    return `analysis-artifact|background|${item.cache_key}`;
+  }
+  const selected = asArray(item.selected_component_ids).join(",");
+  const active = item.active_component_id ?? "";
+  return `analysis-artifact|foreground|${item.cache_key}|active:${active}|selected:${selected}`;
+}
+
 function assertCachePayloadSafe(value, seen = new WeakSet()) {
   if (!isObject(value)) {
     SENSITIVE_PAIR_PATTERN.lastIndex = 0;
@@ -305,11 +314,78 @@ export function createDefaultMetadataCache(options = {}) {
   return createMemoryMetadataCache();
 }
 
+export function createWasmAnalysisClient(options = {}) {
+  const chromeRuntime = options.chromeRuntime ?? globalThis.chrome?.runtime;
+  const importImpl = options.importImpl ?? ((specifier) => import(specifier));
+  const wasmModulePath = options.wasmModulePath ?? "metadata_checker.js";
+  const wasmFilePath = options.wasmFilePath ?? "metadata_checker_bg.wasm";
+  let runtimePromise = null;
+
+  function extensionUrl(path) {
+    if (!chromeRuntime || typeof chromeRuntime.getURL !== "function") {
+      throw new Error("extension runtime URL resolver is unavailable");
+    }
+    return chromeRuntime.getURL(path);
+  }
+
+  async function loadRuntime() {
+    if (runtimePromise) {
+      return runtimePromise;
+    }
+    runtimePromise = (async () => {
+      const module = await importImpl(extensionUrl(wasmModulePath));
+      const init = module.default ?? module.init;
+      if (typeof init === "function") {
+        await init(extensionUrl(wasmFilePath));
+      }
+      return module;
+    })();
+    return runtimePromise;
+  }
+
+  async function callRuntime(method, args = []) {
+    const module = await loadRuntime();
+    const fn = module[method];
+    if (typeof fn !== "function") {
+      throw new Error(`WASM runtime method missing: ${method}`);
+    }
+    const result = await fn(...args);
+    if (typeof result !== "string") {
+      return result;
+    }
+    return safeJsonParse(result) ?? result;
+  }
+
+  return {
+    async loadSuperpageDocument(sourcePath, rawText) {
+      return callRuntime("loadSuperpageDocument", [sourcePath, rawText]);
+    },
+    async buildOrUpdateSuperpageGraph(sourcePath) {
+      return callRuntime("buildOrUpdateSuperpageGraph", [sourcePath]);
+    },
+    async analyzeSuperpageSelection(selection, optionsArg = {}) {
+      return callRuntime("analyzeSuperpageSelection", [
+        JSON.stringify(selection ?? {}),
+        JSON.stringify(optionsArg ?? {}),
+      ]);
+    },
+  };
+}
+
+function createDefaultAnalysisClient() {
+  if (globalThis.chrome?.runtime?.getURL) {
+    return createWasmAnalysisClient();
+  }
+  return null;
+}
+
 export function createM45BackgroundController(options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const clock = options.clock ?? (() => Date.now());
   const cache = options.cache ?? createDefaultMetadataCache();
-  const analysisClient = options.analysisClient ?? null;
+  const analysisClient = options.analysisClient === undefined
+    ? createDefaultAnalysisClient()
+    : options.analysisClient;
   const state = {
     last_bridge_status: null,
     last_diagnostic: null,
@@ -544,12 +620,22 @@ export function createM45BackgroundController(options = {}) {
 
   function priorityForFile(file, context = {}) {
     const current = context.current_source_path ?? context.currentSourcePath ?? "";
+    const dependencyPaths = asArray(
+      context.current_dependency_paths ?? context.currentDependencyPaths ?? context.dependency_paths,
+    );
     if (current && file.source_path === current) {
       return 0;
+    }
+    if (dependencyPaths.includes(file.source_path)) {
+      return 10;
     }
     const currentApp = current.match(/^(.*?\.app)\//)?.[1];
     if (currentApp && file.source_path.startsWith(`${currentApp}/`)) {
       return 20;
+    }
+    const currentModule = current.split("/")[0] || "";
+    if (currentModule && file.source_path.startsWith(`${currentModule}/`)) {
+      return 30;
     }
     return 50;
   }
@@ -576,13 +662,17 @@ export function createM45BackgroundController(options = {}) {
     if (!sourcePath) {
       return { queued: false };
     }
-    const projectName = selection.project_name ?? state.visible_index.projects[0]?.project_name ?? "";
+    const indexedFile = state.visible_index.files.find((file) => file.source_path === sourcePath) ?? {};
+    const projectName = selection.project_name
+      ?? indexedFile.project_name
+      ?? state.visible_index.projects[0]?.project_name
+      ?? "";
     const file = {
       project_name: projectName,
       source_path: sourcePath,
-      file_id: selection.file_id ?? null,
-      revision: selection.revision ?? null,
-      extension: sourcePath.split(".").pop()?.toLowerCase() ?? "",
+      file_id: selection.file_id ?? indexedFile.file_id ?? null,
+      revision: selection.revision ?? indexedFile.revision ?? null,
+      extension: indexedFile.extension ?? sourcePath.split(".").pop()?.toLowerCase() ?? "",
       analyzable: true,
       base_url: state.session?.base_url,
       priority: 0,
@@ -592,8 +682,8 @@ export function createM45BackgroundController(options = {}) {
       cache_key: makeCacheKey(state.session?.base_url, {
         project_name: projectName,
         source_path: sourcePath,
-        file_id: selection.file_id ?? null,
-        revision: selection.revision ?? "",
+        file_id: selection.file_id ?? indexedFile.file_id ?? null,
+        revision: selection.revision ?? indexedFile.revision ?? "",
       }),
     };
     state.background.queue = [
@@ -615,7 +705,7 @@ export function createM45BackgroundController(options = {}) {
     while (!state.background.paused && state.background.queue.length > 0 && processed.length < limit) {
       const item = state.background.queue.shift();
       state.background.active = 1;
-      const artifactKey = `analysis-artifact|${item.cache_key}`;
+      const artifactKey = makeAnalysisArtifactKey(item);
       const cached = await cache.get(artifactKey);
       if (cached) {
         state.cache_stats.hits += 1;
@@ -740,7 +830,18 @@ export function createM45BackgroundController(options = {}) {
     if (!bootstrapped.ok) {
       return bootstrapped;
     }
-    const visibleIndex = await listVisibleMetadata(payload);
+    let visibleIndex;
+    try {
+      visibleIndex = await listVisibleMetadata(payload);
+    } catch (error) {
+      const message = error?.message || "visible metadata index failed";
+      const code = message.includes("REMOTE_METADATA_UNAUTHORIZED") || message.includes("REMOTE_METADATA_FORBIDDEN")
+        ? "SESSION_COOKIE_NOT_ESTABLISHED"
+        : "SESSION_BOOTSTRAP_FAILED";
+      const diagnostic = stableDiagnostic(code, message, "error");
+      state.last_diagnostic = diagnostic;
+      return { ok: false, session: bootstrapped.session, diagnostics: [diagnostic] };
+    }
     const queueResult = await processBackgroundQueue({ limit: payload.initial_limit ?? 3 });
     return {
       ok: true,
@@ -772,7 +873,12 @@ export function createM45BackgroundController(options = {}) {
     }
 
     if (message.type === "metadata-checker-selection-changed") {
-      return enqueueForegroundSelection(message.payload || {});
+      const queued = enqueueForegroundSelection(message.payload || {});
+      if (!queued.queued || !state.session?.base_url) {
+        return queued;
+      }
+      const processed = await processBackgroundQueue({ limit: 1 });
+      return { ok: true, ...queued, background: processed.background };
     }
 
     if (message.type === "metadata-checker-background-process") {

@@ -6,6 +6,7 @@ import {
   createIndexedDbMetadataCache,
   createM45BackgroundController,
   createMemoryMetadataCache,
+  createWasmAnalysisClient,
   M45_EVENT_TYPES,
 } from "../extension-chromium/background.js";
 
@@ -162,6 +163,68 @@ test("M45 background foreground selection is queued before background items", as
   assert.equal(controller.state.background.queue[0].source_path, "app/Current.app/Page.spg");
 });
 
+test("M45 background queue orders dependencies before same app and same module", async () => {
+  const controller = createM45BackgroundController({
+    fetchImpl: async () => jsonResponse(200, { userId: "u1" }),
+  });
+  const queue = controller.seedBackgroundQueue(
+    [
+      { project_name: "p", source_path: "data/Table.tbl", file_id: "dep", revision: "1", analyzable: true },
+      { project_name: "p", source_path: "app/Other.app/Page.spg", file_id: "other", revision: "1", analyzable: true },
+      { project_name: "p", source_path: "app/Test.app/Child.spg", file_id: "same-app", revision: "1", analyzable: true },
+      { project_name: "p", source_path: "report/Page.spg", file_id: "other-module", revision: "1", analyzable: true },
+    ],
+    {
+      current_source_path: "app/Test.app/Main.spg",
+      current_dependency_paths: ["data/Table.tbl"],
+    },
+  );
+
+  assert.deepEqual(
+    queue.map((item) => item.source_path),
+    ["data/Table.tbl", "app/Test.app/Child.spg", "app/Other.app/Page.spg", "report/Page.spg"],
+  );
+});
+
+test("M45 selection message triggers foreground processing with selection-specific cache key", async () => {
+  const { fetchImpl } = createFetchStub();
+  const runtimeCalls = [];
+  const cache = createMemoryMetadataCache();
+  const controller = createM45BackgroundController({
+    fetchImpl,
+    cache,
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection(selection) {
+        runtimeCalls.push(selection);
+        return { status: "ready", target: selection.active_component_id };
+      },
+    },
+  });
+  await controller.bootstrapAndIndex({
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    access_token: "one-shot",
+    initial_limit: 1,
+  });
+
+  const result = await controller.handleMessage({
+    type: "metadata-checker-selection-changed",
+    payload: {
+      project_name: "xiaoshouyi",
+      source_path: "app/Test.app/Page.spg",
+      active_component_id: "input1",
+      selected_component_ids: ["input1"],
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(runtimeCalls.some((selection) => selection.active_component_id === "input1"), true);
+  const keys = await cache.keys();
+  assert.equal(keys.some((key) => key.includes("analysis-artifact|background|")), true);
+  assert.equal(keys.some((key) => key.includes("analysis-artifact|foreground|")), true);
+});
+
 test("M45 background fetches raw metadata and calls injected runtime analyzer", async () => {
   const { fetchImpl } = createFetchStub();
   const runtimeCalls = [];
@@ -197,6 +260,74 @@ test("M45 background fetches raw metadata and calls injected runtime analyzer", 
   );
   assert.equal(runtimeCalls[0].sourcePath, "app/Test.app/Page.spg");
   assert.equal(controller.state.background.processed, 1);
+});
+
+test("M45 bootstrap maps post-whoami 401 to session cookie diagnostic", async () => {
+  const fetchImpl = async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/api/me/whoami") {
+      return jsonResponse(200, { userId: "u1" });
+    }
+    if (parsed.pathname === "/api/me/getPermissionInfo") {
+      return jsonResponse(401, { error: "unauthorized" });
+    }
+    return jsonResponse(404, {});
+  };
+  const controller = createM45BackgroundController({ fetchImpl });
+
+  const result = await controller.bootstrapAndIndex({
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    access_token: "one-shot",
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.diagnostics[0].code, "SESSION_COOKIE_NOT_ESTABLISHED");
+});
+
+test("M45 WASM analysis client loads extension runtime module", async () => {
+  const calls = [];
+  const client = createWasmAnalysisClient({
+    chromeRuntime: {
+      getURL(path) {
+        return `chrome-extension://id/${path}`;
+      },
+    },
+    importImpl: async (specifier) => {
+      calls.push({ method: "import", specifier });
+      return {
+        default: async (wasmUrl) => calls.push({ method: "init", wasmUrl }),
+        loadSuperpageDocument: async (sourcePath, rawText) => {
+          calls.push({ method: "loadSuperpageDocument", sourcePath, rawText });
+          return JSON.stringify({ status: "ready" });
+        },
+        buildOrUpdateSuperpageGraph: async (sourcePath) => {
+          calls.push({ method: "buildOrUpdateSuperpageGraph", sourcePath });
+          return JSON.stringify({ status: "ready" });
+        },
+        analyzeSuperpageSelection: async (selectionJson, optionsJson) => {
+          calls.push({ method: "analyzeSuperpageSelection", selectionJson, optionsJson });
+          return JSON.stringify({ status: "ready" });
+        },
+      };
+    },
+  });
+
+  await client.loadSuperpageDocument("app/Page.spg", "{}");
+  await client.buildOrUpdateSuperpageGraph("app/Page.spg");
+  await client.analyzeSuperpageSelection({ source_path: "app/Page.spg" }, { mode: "background" });
+
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    [
+      "import",
+      "init",
+      "loadSuperpageDocument",
+      "buildOrUpdateSuperpageGraph",
+      "analyzeSuperpageSelection",
+    ],
+  );
+  assert.equal(calls[0].specifier, "chrome-extension://id/metadata_checker.js");
+  assert.equal(calls[1].wasmUrl, "chrome-extension://id/metadata_checker_bg.wasm");
 });
 
 test("M45 background records per-file fetch failure and continues queue", async () => {

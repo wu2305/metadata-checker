@@ -21,7 +21,6 @@
     "getPageContext",
     "getSelectionSnapshot",
     "analyzeCurrentSelection",
-    "getAccessToken",
   ]);
 
   const DIAGNOSTIC_CODES = Object.freeze({

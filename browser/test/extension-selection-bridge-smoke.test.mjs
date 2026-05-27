@@ -210,24 +210,11 @@ function waitForSelectionDebounce(windowState) {
 }
 
 describe("selection bridge", () => {
-  it("gets one-shot access token through page-context fetch", async () => {
+  it("does not support access token over page-visible bridge", async () => {
     const bridge = createBridgeWithContext({
       source_path: "app/Test.app/Page.spg",
     });
     const windowState = createFakeWindow({ bridge });
-    let fetchUrl = "";
-    let fetchCredentials = "";
-    windowState.context.fetch = async (url, init) => {
-      fetchUrl = url;
-      fetchCredentials = init?.credentials;
-      return {
-        ok: true,
-        status: 200,
-        async text() {
-          return "one-shot-token";
-        },
-      };
-    };
 
     const response = await windowState.context.__metadata_checker_page_script__.handleRequest({
       protocol: windowState.context.__metadata_checker_bridge_protocol__.BRIDGE_PROTOCOL,
@@ -236,10 +223,8 @@ describe("selection bridge", () => {
       payload: {},
     });
 
-    assert.strictEqual(fetchUrl, "/api/auth/getAccessToken");
-    assert.strictEqual(fetchCredentials, "include");
-    assert.strictEqual(response.payload.access_token_available, true);
-    assert.strictEqual(response.payload.access_token, "one-shot-token");
+    assert.strictEqual(response.payload.supported, false);
+    assert.strictEqual(JSON.stringify(response).includes("one-shot-token"), false);
   });
 
   it("patches selectComponents and emits full lightweight payload", async () => {

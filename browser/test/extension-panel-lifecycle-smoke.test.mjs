@@ -117,10 +117,11 @@ function createFakeDocument() {
   };
 }
 
-function createFakeWindow({ bridge }) {
+function createFakeWindow({ bridge, fetchImpl, runtimeSendMessage }) {
   const listeners = new Map();
   const runtimeListeners = [];
   const sentStatuses = [];
+  const postedMessages = [];
   const document = createFakeDocument();
 
   const runtime = {
@@ -130,8 +131,15 @@ function createFakeWindow({ bridge }) {
       },
       listeners: runtimeListeners,
     },
-    sendMessage(message) {
+    sendMessage(message, callback) {
       sentStatuses.push(message);
+      if (typeof runtimeSendMessage === "function") {
+        return runtimeSendMessage(message, callback);
+      }
+      if (typeof callback === "function") {
+        callback({ ok: true });
+      }
+      return undefined;
     },
   };
 
@@ -150,11 +158,19 @@ function createFakeWindow({ bridge }) {
       listeners.set(type, list.filter((item) => item !== handler));
     },
     postMessage(message) {
+      postedMessages.push(message);
       const listenersForPost = listeners.get("message") || [];
       for (const listener of listenersForPost) {
         listener({ data: message });
       }
     },
+    fetch: fetchImpl ?? (async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return "one-shot-token";
+      },
+    })),
     __metadata_checker_content_bridge__: bridge,
     __metadata_checker_content_bridge_auto_install: false,
     chrome: {
@@ -170,6 +186,9 @@ function createFakeWindow({ bridge }) {
     },
     __sentStatuses() {
       return sentStatuses;
+    },
+    __postedMessages() {
+      return postedMessages;
     },
   };
   context.globalThis = context;
@@ -331,6 +350,59 @@ test("content script updates panel host on page script selection changed message
   assert.equal(
     context.document.querySelector("[data-metadata-checker-extension-selection-source]")?.getAttribute("data-metadata-checker-extension-selection-source"),
     "selectComponents",
+  );
+});
+
+test("content script fetches access token without exposing it through page messages", async () => {
+  const runtimeMessages = [];
+  const context = createFakeWindow({
+    bridge: defaultBridge(),
+    fetchImpl: async (url, init) => {
+      assert.equal(url, "/api/auth/getAccessToken");
+      assert.equal(init.credentials, "include");
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return "content-token";
+        },
+      };
+    },
+    runtimeSendMessage(message, callback) {
+      runtimeMessages.push(message);
+      callback?.({
+        ok: true,
+        session: { status: "ready" },
+        visible_index: { files: [], projects: [], analyzable_count: 0 },
+        background: { status: "idle", processed: 0, total: 0 },
+      });
+    },
+  });
+  await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
+
+  context.__dispatchMessage({
+    __metadata_checker_bridge_source: "page-script",
+    __metadata_checker_bridge_direction: "notification",
+    type: "bridgeReady",
+    payload: {
+      page_context: { source_path: "app/Test.spg" },
+      diagnostics: [],
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(
+    runtimeMessages.some(
+      (message) =>
+        message.type === "metadata-checker-bootstrap-token" &&
+        message.payload.access_token === "content-token",
+    ),
+    true,
+  );
+  assert.equal(JSON.stringify(context.__postedMessages()).includes("content-token"), false);
+  assert.equal(
+    context.document.querySelector("[data-metadata-checker-extension-token-source]")?.getAttribute("data-metadata-checker-extension-token-source"),
+    "content-script",
   );
 });
 

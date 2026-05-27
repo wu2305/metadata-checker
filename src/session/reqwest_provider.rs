@@ -289,11 +289,18 @@ impl ReqwestRemoteSessionProvider {
     /// 发送 GET 请求并获取文本。
     fn get_text(&self, path: &str) -> Result<String> {
         let url = self.url(path);
+        let safe_url = sanitize_session_error_message(&url);
         let response = self
             .client
             .get(&url)
             .send()
-            .with_context(|| format!("HTTP request failed: {}", url))?;
+            .map_err(|err| {
+                anyhow!(
+                    "HTTP request failed: {}: {}",
+                    safe_url,
+                    sanitize_session_error_message(&err.to_string())
+                )
+            })?;
 
         let status = response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -311,7 +318,13 @@ impl ReqwestRemoteSessionProvider {
 
         let text = response
             .text()
-            .with_context(|| format!("failed to read response body from {}", url))?;
+            .map_err(|err| {
+                anyhow!(
+                    "failed to read response body from {}: {}",
+                    safe_url,
+                    sanitize_session_error_message(&err.to_string())
+                )
+            })?;
         if text.trim().is_empty() {
             return Err(anyhow!("remote session response is empty"));
         }

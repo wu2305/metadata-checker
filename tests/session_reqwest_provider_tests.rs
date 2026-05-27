@@ -170,6 +170,22 @@ fn bootstrap_with_access_token_rejects_anonymous_whoami() {
 }
 
 #[test]
+fn bootstrap_with_access_token_network_error_does_not_leak_token() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused test port");
+    let addr = listener.local_addr().expect("read unused test addr");
+    drop(listener);
+    let provider = ReqwestRemoteSessionProvider::new(format!("http://{addr}")).unwrap();
+
+    let err = provider
+        .bootstrap_with_access_token("secret-token-value")
+        .unwrap_err();
+    let message = format!("{err:#}");
+
+    assert!(message.contains("SESSION_BOOTSTRAP_FAILED"));
+    assert!(!message.contains("secret-token-value"));
+}
+
+#[test]
 fn list_projects_200_compressed_success() {
     let raw = r#"{"metaProjects":[{"projectName":"alpha","desc":"alpha project","path":"/alpha","revision":"3"}]}"#;
     let compressed = compress_to_base64(raw);
