@@ -859,6 +859,9 @@ export function createM45BackgroundController(options = {}) {
     state.background.min_interval_ms = normalizedMinInterval;
     const processed = [];
     const artifacts = [];
+    let reservedCount = 0;
+    let nextStartAt = state.background.next_run_at ?? null;
+    let startGate = Promise.resolve();
     state.background.status = "running";
 
     if (normalizedLimit <= 0) {
@@ -868,22 +871,49 @@ export function createM45BackgroundController(options = {}) {
       return { processed, artifacts, background: { ...state.background } };
     }
 
+    async function waitForStartSlot() {
+      if (normalizedMinInterval <= 0) {
+        state.background.next_run_at = null;
+        return;
+      }
+      const now = clock();
+      const nextAt = Math.max(nextStartAt ?? now, now);
+      const delayMs = Math.max(0, nextAt - now);
+      const gate = startGate;
+      const slot = (async () => {
+        await gate;
+        if (delayMs > 0) {
+          await sleep(delayMs);
+        }
+      })();
+      nextStartAt = nextAt + normalizedMinInterval;
+      state.background.next_run_at = nextStartAt;
+      startGate = slot;
+      await slot;
+    }
+
+    function reserveSlot() {
+      if (state.background.paused || reservedCount >= normalizedLimit || state.background.queue.length === 0) {
+        return null;
+      }
+      const item = state.background.queue.shift();
+      if (!item) {
+        return null;
+      }
+      reservedCount += 1;
+      return item;
+    }
+
     async function worker() {
-      while (!state.background.paused && processed.length < normalizedLimit && state.background.queue.length > 0) {
-        const item = state.background.queue.shift();
+      while (true) {
+        const item = reserveSlot();
         if (!item) {
           return;
         }
-        const now = clock();
-        const nextAt = state.background.next_run_at ?? now;
-        if (normalizedMinInterval > 0 && nextAt > now) {
-          await sleep(nextAt - now);
-          state.background.next_run_at = clock() + normalizedMinInterval;
-        } else {
-          state.background.next_run_at = now + normalizedMinInterval;
-        }
+        await waitForStartSlot();
         if (state.background.paused) {
           state.background.queue.unshift(item);
+          reservedCount -= 1;
           return;
         }
         state.background.active += 1;
@@ -905,6 +935,9 @@ export function createM45BackgroundController(options = {}) {
           });
         } finally {
           state.background.active -= 1;
+        }
+        if (state.background.paused) {
+          return;
         }
       }
     }
