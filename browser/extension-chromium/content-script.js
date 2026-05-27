@@ -162,6 +162,46 @@
     }
   }
 
+  function updatePanelWithBackgroundState(result) {
+    const host = getPanelHost();
+    if (!host || typeof host.updatePanel !== "function") {
+      return;
+    }
+    if (result?.ok === false) {
+      host.updatePanel({
+        status: "error",
+        target: null,
+        items: [],
+        diagnostics: asDiagnostics(result.diagnostics),
+        background: result.background ?? null,
+      });
+      return;
+    }
+    const visibleIndex = result?.visible_index || result?.state?.visible_index || {};
+    const background = result?.background || result?.state?.background || {};
+    host.updatePanel({
+      status: result?.session ? "ready" : "idle",
+      target: visibleIndex.files?.[0]?.source_path ?? null,
+      items: [
+        {
+          kind: "background_status",
+          label: "Remote Metadata Background Status",
+          detail: {
+            project_count: Array.isArray(visibleIndex.projects) ? visibleIndex.projects.length : 0,
+            file_count: Array.isArray(visibleIndex.files) ? visibleIndex.files.length : 0,
+            analyzable_count: visibleIndex.analyzable_count ?? 0,
+            processed: background.processed ?? 0,
+            total: background.total ?? 0,
+            cache_hits: result?.state?.cache_stats?.hits ?? 0,
+          },
+        },
+      ],
+      diagnostics: asDiagnostics(result?.diagnostics),
+      background,
+      cache_stats: result?.state?.cache_stats ?? null,
+    });
+  }
+
   function forwardStatus(message) {
     if (!runtime || typeof runtime.sendMessage !== "function") {
       return;
@@ -174,6 +214,79 @@
     } catch {
       // Content scripts may run before the extension service worker is ready.
     }
+  }
+
+  function sendRuntimeMessage(message) {
+    if (!runtime || typeof runtime.sendMessage !== "function") {
+      return Promise.resolve({ ok: false });
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (!settled) {
+          settled = true;
+          resolve(value);
+        }
+      };
+      try {
+        const maybePromise = runtime.sendMessage(message, (response) => {
+          finish(response || { ok: false });
+        });
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(finish, (error) => {
+            finish({
+              ok: false,
+              diagnostics: [
+                stableDiagnostic(
+                  "METADATA_CHECKER_EXTENSION_BACKGROUND_UNAVAILABLE",
+                  error?.message || "extension background is unavailable",
+                  "warning",
+                ),
+              ],
+            });
+          });
+        }
+        if (runtime.sendMessage.length < 2 && typeof root.setTimeout === "function") {
+          root.setTimeout(() => finish({ ok: false }), 0);
+        }
+      } catch (error) {
+        finish({
+          ok: false,
+          diagnostics: [
+            stableDiagnostic(
+              "METADATA_CHECKER_EXTENSION_BACKGROUND_UNAVAILABLE",
+              error?.message || "extension background is unavailable",
+              "warning",
+            ),
+          ],
+        });
+      }
+    });
+  }
+
+  async function bootstrapRemoteSessionFromPage() {
+    const [status, tokenResponse] = await Promise.all([
+      requestPageBridge("getBridgeStatus"),
+      requestPageBridge("getAccessToken"),
+    ]);
+    const payload = tokenResponse?.payload || {};
+    const pageContext = status?.payload?.page_context || {};
+    if (!payload.access_token_available || typeof payload.access_token !== "string") {
+      return tokenResponse;
+    }
+    const result = await sendRuntimeMessage({
+      type: "metadata-checker-bootstrap-token",
+      payload: {
+        base_url: root.location?.origin || "",
+        access_token: payload.access_token,
+        current_source_path: pageContext.source_path || "",
+        initial_limit: 3,
+      },
+    });
+    writeMarker("extension-session", result?.ok ? "ready" : "error");
+    writeMarker("extension-background-index-count", String(result?.visible_index?.files?.length ?? 0));
+    updatePanelWithBackgroundState(result);
+    return result;
   }
 
   async function requestPageBridge(requestType) {
@@ -244,6 +357,10 @@
     );
     writeMarker("extension-selection-active", asString(message.payload.active_component_id));
     writeMarker("extension-selection-changed-at", String(message.payload.changed_at || ""));
+    sendRuntimeMessage({
+      type: "metadata-checker-selection-changed",
+      payload: message.payload,
+    }).then(updatePanelWithBackgroundState);
   }
 
   function normalizeAction(action) {
@@ -411,6 +528,18 @@
       if (data.type === BRIDGE_READY_MARKER) {
         writeBridgeProbeMarkers(data);
         applyPanelStateFromBridge(data, "getBridgeStatus");
+        bootstrapRemoteSessionFromPage().catch((error) => {
+          updatePanelWithBackgroundState({
+            ok: false,
+            diagnostics: [
+              stableDiagnostic(
+                "SESSION_BOOTSTRAP_FAILED",
+                error?.message || "remote session bootstrap failed",
+                "warning",
+              ),
+            ],
+          });
+        });
         return;
       }
       if (typeof data.type === "string" && typeof data.request_id === "string") {

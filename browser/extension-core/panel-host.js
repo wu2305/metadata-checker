@@ -62,6 +62,8 @@
       itemCount,
       diagnosticCount,
       focus,
+      background: envelope.background || null,
+      cacheStats: envelope.cache_stats || null,
     };
   }
 
@@ -78,6 +80,8 @@
     const safeStatus = asString(envelopeSummary.status);
     const safeTarget = asString(envelopeSummary.target);
     const safeFocus = asString(envelopeSummary.focus);
+    const background = isObject(envelopeSummary.background) ? envelopeSummary.background : {};
+    const cacheStats = isObject(envelopeSummary.cacheStats) ? envelopeSummary.cacheStats : {};
     const selectedIds = asArray(selectionSummary.selected_component_ids);
     const selectedTypes = asArray(selectionSummary.selected_component_types);
     const selectedLabel = selectedIds.length > 0
@@ -98,6 +102,9 @@
       selectedTypeLabel ? `Types: ${selectedTypeLabel}` : "Types:",
       `Items: ${String(envelopeSummary.itemCount)}`,
       `Diagnostics: ${String(envelopeSummary.diagnosticCount)}`,
+      `Background: ${asString(background.status) || "idle"}`,
+      `Background progress: ${String(background.processed ?? 0)}/${String(background.total ?? 0)}`,
+      `Cache hits: ${String(cacheStats.hits ?? 0)}`,
       safeFocus ? `Focus: ${safeFocus}` : "Focus:",
       asString(selectionSummary.source_path) ? `Source: ${selectionSummary.source_path}` : "Source:",
     ];
@@ -180,6 +187,10 @@
         }
         if (key === "items" || key === "diagnostics") {
           output[key] = asArray(value);
+          continue;
+        }
+        if (key === "background" || key === "cache_stats") {
+          output[key] = isObject(value) ? value : null;
           continue;
         }
         if (key === "source_summary") {

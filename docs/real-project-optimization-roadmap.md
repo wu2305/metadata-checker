@@ -5544,3 +5544,89 @@ BI onInitDesigner
 - 页面点击、设计器内交互不会关闭 panel。
 - popup 关闭不影响 panel 常驻。
 - panel 不承载核心解析/查询逻辑，不复制 Rust/WASM 能力。
+
+#### M45：Remote Metadata Auto Fetch and Background Analysis
+
+目标：让 CLI 与浏览器插件都能建立远程 session，并让浏览器插件在设计器中自动获取、缓存、分析当前页面及用户可见元数据。前台分析优先，Extension Service Worker 后台扫描全部拥有 View 权限的可见元数据，渐进预取和分析，不阻塞页面交互。
+
+边界要求：
+
+- 不修改远程 `.spg` / `.tbl`。
+- 不把 token、cookie、password 写入 IndexedDB、graphdb、日志、diagnostics、DOM 文本或 AI output。
+- JS 只做插件接入、消息桥、Service Worker 编排、缓存 provider 和 UI 状态展示；解析、建图、依赖追踪、分析仍由 Rust/WASM core 完成。
+- `RemoteMetadataProvider` 不负责登录，只接收已认证 session/client 后读取 raw metadata。
+
+登录链路：
+
+- CLI：
+  - 使用账号、密码、用户目录调用 `/api/auth/signin`。
+  - 使用 `reqwest` cookie jar 保存 session，后续元数据请求复用同一个 client。
+  - 默认使用内存 cookie jar；持久化 session file 只作为显式配置。
+- Browser Extension：
+  - `onInitDesigner` / page script 在页面上下文调用 `/api/auth/getAccessToken`。
+  - content script 将一次性 token 转发给 extension service worker。
+  - extension service worker 调用 `/api/me/whoami?access_token=...` bootstrap 插件侧 session。
+  - 成功后 service worker 用该 session 拉取远程元数据；如果真实环境证明 SW 不能可靠建立 session，返回稳定 diagnostic 后再补 page-context fallback。
+
+远程元数据清单：
+
+- 使用 `/api/me/getPermissionInfo` 获取当前用户可见 project/module 信息。
+- 使用 `/api/meta/services/getFileChildren/{project}` 获取项目下一级模块。
+- 使用 `/api/meta/services/getFileDescendant/{project}/{module}` 获取模块内递归文件清单。
+- 只把 `.spg` / `.tbl` 放入分析队列，其它文件只记录为可见但不可分析。
+
+任务清单：
+
+- [x] M45.1：Auth Session Contract
+  - Rust 增加 `AccessTokenProvider`、`SessionBootstrapper`、`AuthenticatedSession` contract。
+  - CLI path 继续使用 `/api/auth/signin` 登录并复用 reqwest cookie jar。
+  - Native provider 增加 `/api/me/whoami?access_token=...` bootstrap 能力。
+  - 稳定错误码：
+    - `ACCESS_TOKEN_UNAVAILABLE`
+    - `SESSION_BOOTSTRAP_FAILED`
+    - `SESSION_BOOTSTRAP_ANONYMOUS`
+    - `SESSION_COOKIE_NOT_ESTABLISHED`
+
+- [x] M45.2：Remote Metadata Index
+  - Extension SW 增加 visible metadata index controller。
+  - 通过 `getPermissionInfo -> getFileChildren -> getFileDescendant` 建立可见元数据清单。
+  - 队列只分析 `.spg` / `.tbl`，其它类型记录但不进入分析。
+
+- [x] M45.3：Foreground Auto Analysis
+  - page script 增加 `getAccessToken` bridge request。
+  - content script 在 bridge ready 后获取 token 并触发 SW bootstrap。
+  - selection 变化后更新 panel，并把当前 selection 作为前台高优先级任务通知 SW。
+  - stale selection 仍由既有 controller seq 逻辑丢弃。
+
+- [x] M45.4：SW Background Worker Queue
+  - SW 维护后台扫描队列。
+  - 优先级：当前页面依赖 -> 同 app -> 同 project/module -> 其它可见项目。
+  - 限并发、限速、可暂停、可恢复。
+  - 后台任务只做渐进预取和运行时可用时的分析触发，不阻塞 panel、selection、当前页面分析。
+
+- [x] M45.5：IndexedDB Cache
+  - Browser 侧 cache provider 预留 IndexedDB adapter。
+  - cache key 包含 server origin、project、source_path、file_id、revision/hash。
+  - token/cookie/password 永不落盘。
+  - Node 测试使用内存 fake IndexedDB 证明敏感信息不会进入缓存。
+
+- [x] M45.6：Panel and Diagnostics
+  - panel 展示当前分析状态、后台扫描进度、缓存命中、最近错误。
+  - 新增结构化事件：
+    - `session_bootstrapped`
+    - `visible_metadata_indexed`
+    - `metadata_prefetched`
+    - `background_analysis_progress`
+    - `background_analysis_completed`
+  - 所有输出必须脱敏。
+
+验收标准：
+
+- Rust 测试覆盖账号密码登录、whoami bootstrap、anonymous/401/403/token 失效、敏感信息脱敏。
+- Browser JS 测试覆盖 page script 获取 token、content script 转发、SW whoami bootstrap、visible metadata index、后台队列优先级、cache 脱敏。
+- 真实环境验收：
+  - 目标环境：`https://autocrm-test.xiaoshouyi.com`。
+  - 目标项目：`/xiaoshouyi/app/价审.app`。
+  - 不修改任何 `.spg` / `.tbl`。
+  - 验证 token 获取、SW whoami、元数据拉取、WASM 分析、后台扫描、panel 展示。
+  - 可见 UI 必须截图验收。

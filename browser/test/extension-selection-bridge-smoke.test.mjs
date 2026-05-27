@@ -96,6 +96,13 @@ function createFakeWindow({ bridge }) {
     postMessage(message) {
       posted.push(message);
     },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return "one-shot-token";
+      },
+    }),
     dispatchMessage(data) {
       listeners.get("message")?.({ data });
     },
@@ -203,6 +210,38 @@ function waitForSelectionDebounce(windowState) {
 }
 
 describe("selection bridge", () => {
+  it("gets one-shot access token through page-context fetch", async () => {
+    const bridge = createBridgeWithContext({
+      source_path: "app/Test.app/Page.spg",
+    });
+    const windowState = createFakeWindow({ bridge });
+    let fetchUrl = "";
+    let fetchCredentials = "";
+    windowState.context.fetch = async (url, init) => {
+      fetchUrl = url;
+      fetchCredentials = init?.credentials;
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return "one-shot-token";
+        },
+      };
+    };
+
+    const response = await windowState.context.__metadata_checker_page_script__.handleRequest({
+      protocol: windowState.context.__metadata_checker_bridge_protocol__.BRIDGE_PROTOCOL,
+      request_id: "token-1",
+      type: "getAccessToken",
+      payload: {},
+    });
+
+    assert.strictEqual(fetchUrl, "/api/auth/getAccessToken");
+    assert.strictEqual(fetchCredentials, "include");
+    assert.strictEqual(response.payload.access_token_available, true);
+    assert.strictEqual(response.payload.access_token, "one-shot-token");
+  });
+
   it("patches selectComponents and emits full lightweight payload", async () => {
     const bridge = createBridgeWithContext({
       source_path: "app/Test.app/Page.spg",

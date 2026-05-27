@@ -68,6 +68,53 @@ fn serve_sequence(responses: Vec<(&'static str, u16, &'static str)>) -> String {
     format!("http://{addr}")
 }
 
+fn serve_sequence_with_headers(
+    responses: Vec<(&'static str, u16, &'static str, Vec<(&'static str, &'static str)>)>,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let addr = listener.local_addr().expect("read test server addr");
+    thread::spawn(move || {
+        for (expected_path, status, body, headers) in responses {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 4096];
+            let n = stream.read(&mut request).expect("read request");
+            let req_str = String::from_utf8_lossy(&request[..n]);
+            assert!(
+                req_str.contains(expected_path),
+                "expected request path {expected_path}, got {req_str}"
+            );
+            if expected_path.contains("/api/meta/services/getFileInfo/") {
+                let req_lower = req_str.to_ascii_lowercase();
+                assert!(
+                    req_lower.contains("cookie: jsessionid=abc"),
+                    "expected bootstrap session cookie on metadata request, got {req_str}"
+                );
+            }
+            let status_text = match status {
+                200 => "OK",
+                400 => "Bad Request",
+                401 => "Unauthorized",
+                403 => "Forbidden",
+                404 => "Not Found",
+                _ => "Error",
+            };
+            let mut response = format!(
+                "HTTP/1.1 {status} {status_text}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n",
+                body.len(),
+            );
+            for (name, value) in headers {
+                response.push_str(&format!("{name}: {value}\r\n"));
+            }
+            response.push_str("\r\n");
+            response.push_str(body);
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
+    });
+    format!("http://{addr}")
+}
+
 fn file_ref(project: &str, source_path: &str, file_id: &str) -> RemoteFileRef {
     RemoteFileRef::try_new(project, source_path, Some(file_id.to_string())).expect("valid file ref")
 }
@@ -82,6 +129,44 @@ fn list_projects_200_json() {
     assert_eq!(projects[0].project_ref, "xiaoshouyi");
     assert_eq!(projects[0].project_name, "销售项目");
     assert_eq!(projects[0].source_origin, "/xiaoshouyi");
+}
+
+#[test]
+fn bootstrap_with_access_token_uses_whoami_and_reuses_cookie() {
+    let base_url = serve_sequence_with_headers(vec![
+        (
+            "/api/me/whoami?access_token=token-1",
+            200,
+            r#"{"userId":"user-1","userName":"User One"}"#,
+            vec![("Set-Cookie", "JSESSIONID=abc; Path=/; HttpOnly")],
+        ),
+        (
+            "/api/meta/services/getFileInfo/file-a",
+            200,
+            r#"{"file":{"id":"file-a","path":"/xiaoshouyi/app/page.spg","name":"page.spg","revision":"3"}}"#,
+            vec![],
+        ),
+    ]);
+    let provider = ReqwestRemoteSessionProvider::new(base_url).unwrap();
+
+    let session = provider.bootstrap_with_access_token("token-1").unwrap();
+    assert_eq!(session.user_id, "user-1");
+    assert_eq!(session.user_name, Some("User One".to_string()));
+
+    let info = provider
+        .fetch_metafile_info(&file_ref("xiaoshouyi", "app/page.spg", "file-a"))
+        .unwrap();
+    assert_eq!(info.file_id, Some("file-a".to_string()));
+}
+
+#[test]
+fn bootstrap_with_access_token_rejects_anonymous_whoami() {
+    let provider =
+        ReqwestRemoteSessionProvider::new(serve_once(200, r#"{"anonymous":true}"#)).unwrap();
+    let err = provider.bootstrap_with_access_token("token-1").unwrap_err();
+
+    assert!(err.to_string().contains("SESSION_BOOTSTRAP_ANONYMOUS"));
+    assert!(!err.to_string().contains("token-1"));
 }
 
 #[test]

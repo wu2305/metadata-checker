@@ -10,7 +10,10 @@ pub mod remote_sync;
 pub mod reqwest_provider;
 pub mod sync;
 
-pub use auth::{AuthContext, AuthProvider, SecretStore, StaticAuthProvider};
+pub use auth::{
+    AccessTokenProvider, AuthContext, AuthProvider, AuthSessionErrorCode, AuthenticatedSession,
+    SecretStore, SessionBootstrapper, StaticAuthProvider,
+};
 pub use manager::SessionManager;
 pub use manifest::{RemoteSessionFile, SessionManifest};
 pub use remote_provider::RemoteSessionProvider;

@@ -16,6 +16,9 @@ use serde_json::Value;
 use crate::remote_metadata::{
     MetadataContentType, RemoteFileContent, RemoteFileInfo, RemoteFileRef,
 };
+use crate::session::auth::{
+    AuthContext, AuthSessionErrorCode, AuthenticatedSession, SessionBootstrapper,
+};
 use crate::session::remote_provider::{
     RemoteChangeSet, RemoteMetafileEntry, RemoteProjectInfo, RemoteSessionProvider,
 };
@@ -99,6 +102,18 @@ struct BiFileInfo {
     modify_time: Option<u64>,
     #[serde(flatten)]
     _extra: HashMap<String, serde_json::Value>,
+}
+
+/// `/api/me/whoami` 返回结构。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BiWhoami {
+    #[serde(default)]
+    user_id: Option<String>,
+    #[serde(default)]
+    user_name: Option<String>,
+    #[serde(default)]
+    anonymous: Option<bool>,
 }
 
 impl BiFileInfo {
@@ -353,6 +368,64 @@ impl ReqwestRemoteSessionProvider {
         serde_json::from_str(value).with_context(|| format!("failed to parse {} JSON", context))
     }
 
+    /// 通过一次性 access token 请求 whoami，建立当前 client 内的 session。
+    pub fn bootstrap_with_access_token(&self, access_token: &str) -> Result<AuthenticatedSession> {
+        if access_token.trim().is_empty() {
+            return Err(anyhow!(
+                "{}: access token is empty",
+                AuthSessionErrorCode::AccessTokenUnavailable.as_str()
+            ));
+        }
+
+        let path = format!(
+            "/api/me/whoami?access_token={}",
+            percent_encode(access_token.trim())
+        );
+        let raw = self.get_text(&path).with_context(|| {
+            format!(
+                "{}: whoami bootstrap request failed",
+                AuthSessionErrorCode::SessionBootstrapFailed.as_str()
+            )
+        })?;
+        let json_text = self
+            .decode_structured_payload(&raw, "whoami")
+            .with_context(|| {
+                format!(
+                    "{}: failed to decode whoami response",
+                    AuthSessionErrorCode::SessionBootstrapFailed.as_str()
+                )
+            })?;
+        let whoami: BiWhoami = serde_json::from_str(&json_text).with_context(|| {
+            format!(
+                "{}: failed to parse whoami response",
+                AuthSessionErrorCode::SessionBootstrapFailed.as_str()
+            )
+        })?;
+
+        if whoami.anonymous.unwrap_or(false) {
+            return Err(anyhow!(
+                "{}: whoami returned anonymous user",
+                AuthSessionErrorCode::SessionBootstrapAnonymous.as_str()
+            ));
+        }
+
+        let user_id = whoami.user_id.filter(|value| !value.trim().is_empty());
+        let Some(user_id) = user_id else {
+            return Err(anyhow!(
+                "{}: whoami response missing userId",
+                AuthSessionErrorCode::SessionBootstrapFailed.as_str()
+            ));
+        };
+
+        Ok(AuthenticatedSession {
+            user_id,
+            user_name: whoami.user_name,
+            auth_context: AuthContext::RuntimeSession {
+                session_ref: "reqwest-memory-cookie-jar".to_string(),
+            },
+        })
+    }
+
     /// 提取普通字段，兼容 data/file/result 一级包装。
     fn find_wrapped_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
         if let Some(v) = value.get(key) {
@@ -565,6 +638,12 @@ impl ReqwestRemoteSessionProvider {
             size: None,
             deleted: false,
         })
+    }
+}
+
+impl SessionBootstrapper for ReqwestRemoteSessionProvider {
+    fn bootstrap_with_access_token(&self, access_token: &str) -> Result<AuthenticatedSession> {
+        Self::bootstrap_with_access_token(self, access_token)
     }
 }
 

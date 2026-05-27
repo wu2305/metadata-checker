@@ -13,6 +13,7 @@
     "getPageContext",
     "getSelectionSnapshot",
     "analyzeCurrentSelection",
+    "getAccessToken",
   ];
   const createRequestEnvelope = protocol.createRequestEnvelope;
   const createDiagnostic = protocol.createDiagnostic || ((code, message, severity = "error") => ({
@@ -301,12 +302,17 @@
     return request("analyzeCurrentSelection", {});
   }
 
+  function getAccessToken() {
+    return request("getAccessToken", {});
+  }
+
   root.__metadata_checker_content_bridge__ = {
     request,
     getBridgeStatus,
     getPageContext,
     getSelectionSnapshot,
     analyzeCurrentSelection,
+    getAccessToken,
     injectScripts,
   };
 
