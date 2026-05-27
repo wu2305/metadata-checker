@@ -472,6 +472,75 @@ test("M45 background min_interval_ms is serialized across concurrent workers", a
   assert.equal(sleepCalls.some((delay) => delay > 0), true);
 });
 
+test("M45 background min_interval_ms is enforced across batches", async () => {
+  let now = 0;
+  const starts = [];
+  const fetchImpl = async () => jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) });
+  const controller = createM45BackgroundController({
+    fetchImpl,
+    clock: () => now,
+    sleep: (ms) => new Promise((resolve) => {
+      globalThis.setTimeout(() => {
+        now += ms;
+        resolve();
+      }, 0);
+    }),
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection() {
+        starts.push(now);
+        return { status: "ready" };
+      },
+    },
+  });
+  controller.state.session = { base_url: "https://example.test" };
+  controller.seedBackgroundQueue([
+    {
+      project_name: "p",
+      source_path: "app/A.app/Page.spg",
+      file_id: "f1",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/B.app/Page.spg",
+      file_id: "f2",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/C.app/Page.spg",
+      file_id: "f3",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/D.app/Page.spg",
+      file_id: "f4",
+      revision: "1",
+      analyzable: true,
+    },
+  ]);
+
+  await controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 3, max_concurrency: 3, min_interval_ms: 10 },
+  });
+  await controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 1, max_concurrency: 3, min_interval_ms: 10 },
+  });
+
+  assert.equal(starts.length, 4);
+  assert.ok(starts[1] - starts[0] >= 10);
+  assert.ok(starts[2] - starts[1] >= 10);
+  assert.ok(starts[3] - starts[2] >= 10);
+});
+
 test("M45 background pause/resume keeps pending foreground items in queue", async () => {
   const deferreds = [];
   const fetchImpl = async () => jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) });

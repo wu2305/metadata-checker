@@ -876,18 +876,19 @@ export function createM45BackgroundController(options = {}) {
         state.background.next_run_at = null;
         return;
       }
-      const now = clock();
-      const nextAt = Math.max(nextStartAt ?? now, now);
-      const delayMs = Math.max(0, nextAt - now);
       const gate = startGate;
       const slot = (async () => {
         await gate;
+        const now = clock();
+        const nextAt = Math.max(nextStartAt ?? now, now);
+        const delayMs = Math.max(0, nextAt - now);
         if (delayMs > 0) {
           await sleep(delayMs);
         }
+        const startedAt = clock();
+        nextStartAt = startedAt + normalizedMinInterval;
+        state.background.next_run_at = nextStartAt;
       })();
-      nextStartAt = nextAt + normalizedMinInterval;
-      state.background.next_run_at = nextStartAt;
       startGate = slot;
       await slot;
     }
