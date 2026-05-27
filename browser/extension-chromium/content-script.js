@@ -41,6 +41,116 @@
     );
   }
 
+  function asObject(value) {
+    return isObject(value) ? value : null;
+  }
+
+  function coerceStatus(value) {
+    if (typeof value !== "string") {
+      return "";
+    }
+    const status = value.toLowerCase();
+    return status;
+  }
+
+  function extractForegroundArtifact(result) {
+    const directResult = asObject(result);
+    const explicit = asObject(directResult.foreground_artifact) || asObject(directResult.artifact);
+    if (explicit) {
+      return explicit;
+    }
+    const candidate = asObject(directResult.result);
+    if (!candidate) {
+      return null;
+    }
+    if (
+      typeof candidate.analysis_status === "string"
+      || typeof candidate.kind === "string"
+      || typeof candidate.source_path === "string"
+      || typeof candidate.target === "string"
+      || Array.isArray(candidate.items)
+      || Array.isArray(candidate.diagnostics)
+    ) {
+      return candidate;
+    }
+    return null;
+  }
+
+  function panelStatusFromBackgroundState(background) {
+    const status = coerceStatus(background?.status);
+    if (status === "running" || status === "queued") {
+      return "analyzing";
+    }
+    if (status === "completed" || status === "idle") {
+      return "ready";
+    }
+    return "";
+  }
+
+  function panelStatusFromAnalysisArtifact(artifact) {
+    const artifactStatus = coerceStatus(artifact?.analysis_status || artifact?.status);
+    if (artifactStatus === "runtime_unavailable" || artifactStatus === "error") {
+      return "error";
+    }
+    if (artifactStatus === "ready") {
+      return "ready";
+    }
+    if (artifactStatus) {
+      return "analyzing";
+    }
+    const resultStatus = coerceStatus(artifact?.result?.analysis_status || artifact?.result?.status);
+    if (resultStatus === "error") {
+      return "error";
+    }
+    if (resultStatus === "ready") {
+      return "ready";
+    }
+    if (resultStatus) {
+      return "analyzing";
+    }
+    return "";
+  }
+
+  function resolvePanelTarget(result, selectionSourcePath, foregroundArtifact) {
+    return asString(
+      result?.target
+      || result?.source_path
+      || selectionSourcePath
+      || asObject(foregroundArtifact)?.source_path
+      || asObject(foregroundArtifact)?.result?.source_path
+      || asObject(foregroundArtifact)?.target
+      || result?.state?.visible_index?.files?.[0]?.source_path
+      || result?.visible_index?.files?.[0]?.source_path,
+    );
+  }
+
+  function collectForegroundItems(foregroundArtifact) {
+    if (!isObject(foregroundArtifact)) {
+      return [];
+    }
+    const directItems = asArray(foregroundArtifact.items);
+    const nestedItems = asArray(foregroundArtifact.result?.items);
+    if (directItems.length > 0 || nestedItems.length > 0) {
+      return directItems.concat(nestedItems);
+    }
+    const sourcePath = asString(
+      foregroundArtifact.source_path || foregroundArtifact.result?.source_path || foregroundArtifact.target,
+    );
+    if (!sourcePath) {
+      return [];
+    }
+    return [
+      {
+        kind: "foreground_artifact",
+        label: "Foreground analysis artifact",
+        detail: {
+          source_path: sourcePath,
+          analysis_status: asString(foregroundArtifact.analysis_status || foregroundArtifact.status || ""),
+        },
+      },
+    ];
+  }
+
   function writeMarker(name, value) {
     const doc = root.document;
     if (!doc || typeof doc.createElement !== "function") {
@@ -163,6 +273,21 @@
   }
 
   function updatePanelWithBackgroundState(result) {
+    const foregroundArtifact = extractForegroundArtifact(result);
+    const diagnostics = asDiagnostics(result?.diagnostics)
+      .concat(asDiagnostics(foregroundArtifact?.diagnostics))
+      .concat(asDiagnostics(foregroundArtifact?.result?.diagnostics));
+    const backgroundStatus = asObject(result?.background);
+    const hasErrorDiagnostic = diagnostics.some((entry) => entry.severity === "error");
+    const artifactItems = collectForegroundItems(foregroundArtifact);
+
+    const statusFromArtifact = panelStatusFromAnalysisArtifact(foregroundArtifact);
+    const statusFromBackground = panelStatusFromBackgroundState(backgroundStatus);
+    const status =
+      result?.ok === false || hasErrorDiagnostic
+        ? "error"
+        : statusFromArtifact || statusFromBackground || "ready";
+
     const host = getPanelHost();
     if (!host || typeof host.updatePanel !== "function") {
       return;
@@ -178,11 +303,17 @@
       return;
     }
     const visibleIndex = result?.visible_index || result?.state?.visible_index || {};
-    const background = result?.background || result?.state?.background || {};
+    const background = backgroundStatus || result?.state?.background || {};
+    const sourcePath = resolvePanelTarget(
+      result,
+      asString(result?.source_path),
+      foregroundArtifact,
+    );
     host.updatePanel({
-      status: result?.session ? "ready" : "idle",
-      target: visibleIndex.files?.[0]?.source_path ?? null,
+      status,
+      target: sourcePath || visibleIndex.files?.[0]?.source_path || null,
       items: [
+        ...artifactItems,
         {
           kind: "background_status",
           label: "Remote Metadata Background Status",
@@ -196,7 +327,7 @@
           },
         },
       ],
-      diagnostics: asDiagnostics(result?.diagnostics),
+      diagnostics,
       background,
       cache_stats: result?.state?.cache_stats ?? null,
     });
@@ -423,7 +554,12 @@
     sendRuntimeMessage({
       type: "metadata-checker-selection-changed",
       payload: message.payload,
-    }).then(updatePanelWithBackgroundState);
+    }).then((result) => {
+      updatePanelWithBackgroundState({
+        ...(result || {}),
+        source_path: asString(message?.payload?.source_path),
+      });
+    });
   }
 
   function normalizeAction(action) {

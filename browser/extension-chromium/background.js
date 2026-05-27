@@ -382,6 +382,7 @@ function createDefaultAnalysisClient() {
 export function createM45BackgroundController(options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const clock = options.clock ?? (() => Date.now());
+  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const cache = options.cache ?? createDefaultMetadataCache();
   const analysisClient = options.analysisClient === undefined
     ? createDefaultAnalysisClient()
@@ -401,10 +402,14 @@ export function createM45BackgroundController(options = {}) {
     background: {
       status: "idle",
       queue: [],
+      pending_foreground: [],
       processed: 0,
       total: 0,
       active: 0,
       paused: false,
+      max_concurrency: 1,
+      min_interval_ms: 0,
+      next_run_at: null,
       last_event: null,
     },
     events: [],
@@ -483,6 +488,61 @@ export function createM45BackgroundController(options = {}) {
   function metadataContentPath(file) {
     const ref = file.file_id || `${file.project_name}/${file.source_path}`;
     return `/api/meta/services/getFileContent/${encodeMetaPath(ref, true)}`;
+  }
+
+  function normalizeQueueLimit(value, fallback) {
+    const parsed = typeof value === "string" ? Number(value) : value;
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      return fallback;
+    }
+    return parsed;
+  }
+
+  function normalizeMaxConcurrency(value, fallback = 1) {
+    const parsed = typeof value === "string" ? Number(value) : value;
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      return fallback;
+    }
+    return parsed;
+  }
+
+  function normalizeMinIntervalMs(value, fallback = 0) {
+    const parsed = typeof value === "string" ? Number(value) : value;
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return fallback;
+    }
+    return Math.max(0, Math.floor(parsed));
+  }
+
+  function buildForegroundSelectionItem(selection = {}) {
+    const sourcePath = asString(selection.source_path ?? selection.sourcePath);
+    if (!sourcePath) {
+      return null;
+    }
+    const fileInfo = state.visible_index.files.find((file) => file.source_path === sourcePath) ?? {};
+    const projectName = asString(
+      selection.project_name ?? fileInfo.project_name ?? state.visible_index.projects[0]?.project_name,
+    );
+    const fileNameParts = sourcePath.split(".");
+    return {
+      project_name: projectName,
+      source_path: sourcePath,
+      file_id: selection.file_id ?? fileInfo.file_id ?? null,
+      revision: selection.revision ?? fileInfo.revision ?? null,
+      extension: fileInfo.extension ?? fileNameParts.pop()?.toLowerCase() ?? "",
+      analyzable: true,
+      base_url: state.session?.base_url ?? null,
+      priority: 0,
+      foreground: true,
+      active_component_id: selection.active_component_id ?? selection.activeComponentId ?? null,
+      selected_component_ids: asArray(selection.selected_component_ids ?? selection.selectedComponentIds),
+      cache_key: makeCacheKey(state.session?.base_url, {
+        project_name: projectName,
+        source_path: sourcePath,
+        file_id: selection.file_id ?? fileInfo.file_id ?? null,
+        revision: selection.revision ?? fileInfo.revision ?? "",
+      }),
+    };
   }
 
   async function bootstrapWithAccessToken({ base_url, baseUrl, access_token }) {
@@ -642,7 +702,38 @@ export function createM45BackgroundController(options = {}) {
 
   function seedBackgroundQueue(files, context = {}) {
     const base = context.base_url ?? context.baseUrl ?? state.session?.base_url;
-    const queue = files
+    const indexedBySource = new Map(
+      files
+      .filter((file) => file && file.source_path)
+      .map((file) => [file.source_path, file]),
+    );
+    const pendingSelections = state.background.pending_foreground;
+    const pending = pendingSelections
+      .map((item) => {
+        const indexed = indexedBySource.get(item.source_path) ?? {};
+        const projectName = item.project_name || indexed.project_name || "";
+        return {
+          ...item,
+          project_name: projectName,
+          file_id: item.file_id ?? indexed.file_id ?? null,
+          revision: item.revision ?? indexed.revision ?? null,
+          extension: indexed.extension || item.extension,
+          analyzable: true,
+          base_url: base,
+          priority: 0,
+          foreground: true,
+          cache_key: makeCacheKey(base, {
+            project_name: projectName,
+            source_path: item.source_path,
+            file_id: item.file_id ?? indexed.file_id ?? null,
+            revision: item.revision ?? indexed.revision ?? "",
+          }),
+        };
+      })
+      .filter((item) => item.source_path);
+    state.background.pending_foreground = [];
+    const usedSources = new Set();
+    const queueFromVisible = files
       .map((file) => ({
         ...file,
         base_url: base,
@@ -650,121 +741,186 @@ export function createM45BackgroundController(options = {}) {
         cache_key: makeCacheKey(base, file),
       }))
       .sort((a, b) => a.priority - b.priority || a.source_path.localeCompare(b.source_path));
+    const queue = [
+      ...pending.filter((item) => {
+        if (usedSources.has(item.source_path)) {
+          return false;
+        }
+        usedSources.add(item.source_path);
+        return true;
+      }),
+      ...queueFromVisible.filter((file) => {
+        if (usedSources.has(file.source_path)) {
+          return false;
+        }
+        usedSources.add(file.source_path);
+        return true;
+      }),
+    ];
     state.background.queue = queue;
     state.background.total = queue.length;
     state.background.processed = 0;
+    state.background.next_run_at = null;
     state.background.status = queue.length > 0 ? "queued" : "idle";
     return queue;
   }
 
   function enqueueForegroundSelection(selection = {}) {
-    const sourcePath = selection.source_path;
-    if (!sourcePath) {
+    const file = buildForegroundSelectionItem(selection);
+    if (!file) {
       return { queued: false };
     }
-    const indexedFile = state.visible_index.files.find((file) => file.source_path === sourcePath) ?? {};
-    const projectName = selection.project_name
-      ?? indexedFile.project_name
-      ?? state.visible_index.projects[0]?.project_name
-      ?? "";
-    const file = {
-      project_name: projectName,
-      source_path: sourcePath,
-      file_id: selection.file_id ?? indexedFile.file_id ?? null,
-      revision: selection.revision ?? indexedFile.revision ?? null,
-      extension: indexedFile.extension ?? sourcePath.split(".").pop()?.toLowerCase() ?? "",
-      analyzable: true,
-      base_url: state.session?.base_url,
-      priority: 0,
-      foreground: true,
-      active_component_id: selection.active_component_id ?? selection.activeComponentId ?? null,
-      selected_component_ids: asArray(selection.selected_component_ids ?? selection.selectedComponentIds),
-      cache_key: makeCacheKey(state.session?.base_url, {
-        project_name: projectName,
-        source_path: sourcePath,
-        file_id: selection.file_id ?? indexedFile.file_id ?? null,
-        revision: selection.revision ?? indexedFile.revision ?? "",
-      }),
-    };
+    const isReady = state.session?.base_url && state.visible_index.status === "ready";
+    if (!isReady) {
+      state.background.pending_foreground = [
+        file,
+        ...state.background.pending_foreground.filter((item) => item.source_path !== file.source_path),
+      ];
+      emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_PROGRESS, {
+        status: "foreground_pending",
+        source_path: file.source_path,
+      });
+      return { queued: true, file, pending: true };
+    }
+    file.base_url = state.session.base_url;
+    file.cache_key = makeCacheKey(file.base_url, {
+      project_name: file.project_name,
+      source_path: file.source_path,
+      file_id: file.file_id,
+      revision: file.revision ?? "",
+    });
     state.background.queue = [
       file,
-      ...state.background.queue.filter((item) => item.source_path !== sourcePath),
+      ...state.background.queue.filter((item) => item.source_path !== file.source_path),
     ];
     state.background.total = Math.max(state.background.total, state.background.queue.length);
     state.background.status = "queued";
     emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_PROGRESS, {
       status: "foreground_queued",
-      source_path: sourcePath,
+      source_path: file.source_path,
     });
     return { queued: true, file };
   }
 
-  async function processBackgroundQueue({ limit = 3 } = {}) {
+  async function runBackgroundQueueItem(item) {
+    const artifactKey = makeAnalysisArtifactKey(item);
+    const cached = await cache.get(artifactKey);
+    if (cached) {
+      state.cache_stats.hits += 1;
+      return { cached, item, artifact_key: artifactKey, cache_hit: true };
+    }
+    state.cache_stats.misses += 1;
+    try {
+      const rawContent = await request(item.base_url, metadataContentPath(item));
+      const rawText = typeof rawContent === "string"
+        ? rawContent
+        : rawContent?.raw_text ?? rawContent?.rawText ?? rawContent?.content ?? "";
+      await tryCacheSet(`raw-metadata|${item.cache_key}`, {
+        kind: "raw-metadata",
+        source_path: item.source_path,
+        project_name: item.project_name,
+        file_id: item.file_id,
+        revision: item.revision,
+        raw_text: rawText,
+      });
+      const artifact = await runBackgroundAnalysis(item, rawText);
+      await tryCacheSet(artifactKey, artifact);
+      return { cached: artifact, item, artifact_key: artifactKey, cache_hit: false };
+    } catch (error) {
+      const diagnostic = stableDiagnostic(
+        "BACKGROUND_ANALYSIS_FAILED",
+        error?.message || "background analysis failed",
+        "error",
+      );
+      state.last_diagnostic = diagnostic;
+      const artifact = {
+        kind: "metadata-analysis-artifact",
+        source_path: item.source_path,
+        project_name: item.project_name,
+        file_id: item.file_id,
+        revision: item.revision,
+        analysis_status: "error",
+        diagnostics: [diagnostic],
+      };
+      await tryCacheSet(artifactKey, artifact);
+      return { cached: artifact, item, artifact_key: artifactKey, cache_hit: false };
+    }
+  }
+
+  async function processBackgroundQueue({
+    limit = 3,
+    max_concurrency = state.background.max_concurrency,
+    min_interval_ms = state.background.min_interval_ms,
+  } = {}) {
+    const normalizedLimit = normalizeQueueLimit(limit, 3);
+    const normalizedMaxConcurrency = normalizeMaxConcurrency(max_concurrency, state.background.max_concurrency ?? 1);
+    const normalizedMinInterval = normalizeMinIntervalMs(min_interval_ms, state.background.min_interval_ms);
+    state.background.max_concurrency = normalizedMaxConcurrency;
+    state.background.min_interval_ms = normalizedMinInterval;
     const processed = [];
+    const artifacts = [];
     state.background.status = "running";
-    while (!state.background.paused && state.background.queue.length > 0 && processed.length < limit) {
-      const item = state.background.queue.shift();
-      state.background.active = 1;
-      const artifactKey = makeAnalysisArtifactKey(item);
-      const cached = await cache.get(artifactKey);
-      if (cached) {
-        state.cache_stats.hits += 1;
-      } else {
-        state.cache_stats.misses += 1;
+
+    if (normalizedLimit <= 0) {
+      state.background.status = state.background.paused
+        ? "paused"
+        : state.background.queue.length > 0 ? "queued" : "idle";
+      return { processed, artifacts, background: { ...state.background } };
+    }
+
+    async function worker() {
+      while (!state.background.paused && processed.length < normalizedLimit && state.background.queue.length > 0) {
+        const item = state.background.queue.shift();
+        if (!item) {
+          return;
+        }
+        const now = clock();
+        const nextAt = state.background.next_run_at ?? now;
+        if (normalizedMinInterval > 0 && nextAt > now) {
+          await sleep(nextAt - now);
+          state.background.next_run_at = clock() + normalizedMinInterval;
+        } else {
+          state.background.next_run_at = now + normalizedMinInterval;
+        }
+        if (state.background.paused) {
+          state.background.queue.unshift(item);
+          return;
+        }
+        state.background.active += 1;
         try {
-          const rawContent = await request(item.base_url, metadataContentPath(item));
-          const rawText = typeof rawContent === "string"
-            ? rawContent
-            : rawContent?.raw_text ?? rawContent?.rawText ?? rawContent?.content ?? "";
-          await tryCacheSet(`raw-metadata|${item.cache_key}`, {
-            kind: "raw-metadata",
+          const result = await runBackgroundQueueItem(item);
+          processed.push(item);
+          artifacts.push(result);
+          state.background.processed += 1;
+          emit(M45_EVENT_TYPES.METADATA_PREFETCHED, {
             source_path: item.source_path,
-            project_name: item.project_name,
-            file_id: item.file_id,
-            revision: item.revision,
-            raw_text: rawText,
+            cache_hit: result.cache_hit,
+            artifact_key: result.artifact_key,
           });
-          const artifact = await runBackgroundAnalysis(item, rawText);
-          await tryCacheSet(artifactKey, artifact);
-        } catch (error) {
-          const diagnostic = stableDiagnostic(
-            "BACKGROUND_ANALYSIS_FAILED",
-            error?.message || "background analysis failed",
-            "error",
-          );
-          state.last_diagnostic = diagnostic;
-          await tryCacheSet(artifactKey, {
-            kind: "metadata-analysis-artifact",
+          emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_PROGRESS, {
+            processed: state.background.processed,
+            total: state.background.total,
             source_path: item.source_path,
-            project_name: item.project_name,
-            file_id: item.file_id,
-            revision: item.revision,
-            analysis_status: "error",
-            diagnostics: [diagnostic],
+            artifact_key: result.artifact_key,
           });
+        } finally {
+          state.background.active -= 1;
         }
       }
-      state.background.processed += 1;
-      processed.push(item);
-      emit(M45_EVENT_TYPES.METADATA_PREFETCHED, {
-        source_path: item.source_path,
-        cache_hit: Boolean(cached),
-      });
-      emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_PROGRESS, {
-        processed: state.background.processed,
-        total: state.background.total,
-        source_path: item.source_path,
-      });
     }
-    state.background.active = 0;
-    state.background.status = state.background.queue.length === 0 ? "completed" : "queued";
+
+    await Promise.all(Array.from({ length: normalizedMaxConcurrency }, () => worker()));
+
+    state.background.status = state.background.paused
+      ? "paused"
+      : state.background.queue.length === 0 ? "completed" : "queued";
     if (state.background.status === "completed") {
       emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_COMPLETED, {
         processed: state.background.processed,
         total: state.background.total,
       });
     }
-    return { processed, background: { ...state.background } };
+    return { processed, artifacts, background: { ...state.background } };
   }
 
   async function runBackgroundAnalysis(item, rawText) {
@@ -842,7 +998,11 @@ export function createM45BackgroundController(options = {}) {
       state.last_diagnostic = diagnostic;
       return { ok: false, session: bootstrapped.session, diagnostics: [diagnostic] };
     }
-    const queueResult = await processBackgroundQueue({ limit: payload.initial_limit ?? 3 });
+    const queueResult = await processBackgroundQueue({
+      limit: payload.initial_limit ?? 3,
+      max_concurrency: payload.initial_max_concurrency ?? payload.max_concurrency,
+      min_interval_ms: payload.min_interval_ms,
+    });
     return {
       ok: true,
       session: bootstrapped.session,
@@ -874,11 +1034,38 @@ export function createM45BackgroundController(options = {}) {
 
     if (message.type === "metadata-checker-selection-changed") {
       const queued = enqueueForegroundSelection(message.payload || {});
-      if (!queued.queued || !state.session?.base_url) {
-        return queued;
+      if (!queued.queued || !queued.file?.source_path) {
+        return { ok: false, ...queued };
       }
-      const processed = await processBackgroundQueue({ limit: 1 });
-      return { ok: true, ...queued, background: processed.background };
+      const artifactKey = makeAnalysisArtifactKey(queued.file);
+      if (!state.session?.base_url || state.visible_index.status !== "ready") {
+        const cachedArtifact = await cache.get(artifactKey);
+        return {
+          ok: true,
+          ...queued,
+          artifact_ready: Boolean(cachedArtifact),
+          artifact_key: artifactKey,
+          artifact: cachedArtifact ?? null,
+          background: { ...state.background },
+        };
+      }
+      const processed = await processBackgroundQueue({
+        limit: normalizeQueueLimit(message.payload?.limit, 1),
+        max_concurrency: normalizeMaxConcurrency(message.payload?.max_concurrency, state.background.max_concurrency),
+        min_interval_ms: normalizeMinIntervalMs(message.payload?.min_interval_ms, state.background.min_interval_ms),
+      });
+      const artifactEntry = processed.artifacts.find((entry) =>
+        entry?.artifact_key === artifactKey,
+      );
+      const artifact = artifactEntry?.cached || (await cache.get(artifactKey));
+      return {
+        ok: true,
+        ...queued,
+        artifact_ready: Boolean(artifact),
+        artifact_key: artifactKey,
+        artifact: artifact ?? null,
+        background: processed.background,
+      };
     }
 
     if (message.type === "metadata-checker-background-process") {

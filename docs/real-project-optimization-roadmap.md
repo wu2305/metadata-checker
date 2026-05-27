@@ -5523,8 +5523,9 @@ BI onInitDesigner
   - popup 通过 `chrome.tabs.sendMessage` 与 content script 通信。
   - 不使用 `chrome.scripting.executeScript` 直接读取页面对象。
 
-- [ ] M44.6：真实 BI 验收
+- [ ] M44.6：真实 BI 验收（验收步骤 / 待执行真实环境验证）
   - 在 `https://autocrm-test.xiaoshouyi.com` 验证：
+  - 状态：本项为真实环境待执行闭环，单元测试、Node 测试通过不等同闭环完成。
     - `onInitDesigner` 写出 `plugin-ready=true`。
     - extension content script 注入成功。
     - 页面右下角固定 trigger button 存在，初始 panel 隐藏。
@@ -5602,7 +5603,10 @@ BI onInitDesigner
 - [x] M45.4：SW Background Worker Queue
   - SW 维护后台扫描队列。
   - 优先级：当前页面 -> 当前页面依赖 -> 同 app -> 同 project/module -> 其它可见项目。
-  - 限并发、限速、可暂停、可恢复。
+  - 首轮最小限流语义：采用单并发处理（`concurrency=1`）；
+  - 首轮最小速率参数：每批次处理 `batchLimit`（可配置，默认先保守），任务间隔 `minIntervalMs`（可配置）。
+  - 支持可控暂停与恢复（`pause`/`resume`）；暂停期间保留队列与任务状态，恢复后继续处理不丢任务。
+  - 限速与暂停语义以可配置参数为主，后续再收敛为更高并发。
   - 后台任务只做渐进预取和运行时可用时的分析触发，不阻塞 panel、selection、当前页面分析。
 
 - [x] M45.5：IndexedDB Cache
@@ -5625,9 +5629,15 @@ BI onInitDesigner
 
 - Rust 测试覆盖账号密码登录、whoami bootstrap、anonymous/401/403/token 失效、敏感信息脱敏。
 - Browser JS 测试覆盖 page script 获取 token、content script 转发、SW whoami bootstrap、visible metadata index、后台队列优先级、cache 脱敏。
-- 真实环境验收：
-  - 目标环境：`https://autocrm-test.xiaoshouyi.com`。
-  - 目标项目：`/xiaoshouyi/app/价审.app`。
-  - 不修改任何 `.spg` / `.tbl`。
-  - 验证 token 获取、SW whoami、元数据拉取、WASM 分析、后台扫描、panel 展示。
-  - 可见 UI 必须截图验收。
+- 真实环境闭环（待执行）：
+  - 状态：本里程碑的真实 BI 端到端验收未闭合，**不得把测试通过当成真实环境闭环完成**。
+  - 验收步骤（需补充人工与自动化证据）：
+    1. 使用目标环境：`https://autocrm-test.xiaoshouyi.com`，目标应用：`/xiaoshouyi/app/价审.app`，并保留原始页面交互上下文；
+    2. 执行真实 token 获取流程，不上传、记录账号密码或 token；
+    3. 验证 SW whoami bootstrap 成功；
+    4. 验证可见元数据目录的拉取与队列入队；
+    5. 验证一条 SPG/TBL 的 WASM analysis 成功返回；
+    6. 验证后台扫描任务可持续运行并产出进度；
+    7. 验证 panel 可展示分析状态、后台扫描进度与错误；
+    8. 不修改任何 `.spg` / `.tbl` 文件；
+    9. 对 panel 展开态、关键分析状态、后台扫描状态留存截图（含时间戳或运行上下文）作为验收证据。

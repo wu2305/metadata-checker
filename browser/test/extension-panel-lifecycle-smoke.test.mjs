@@ -353,6 +353,68 @@ test("content script updates panel host on page script selection changed message
   );
 });
 
+test("selection change result with foreground artifact keeps panel status ready and renders artifact data", async () => {
+  const runtimeMessages = [];
+  const context = createFakeWindow({
+    bridge: defaultBridge(),
+    runtimeSendMessage(message, callback) {
+      runtimeMessages.push(message);
+      if (message?.type === "metadata-checker-selection-changed" && typeof callback === "function") {
+        callback({
+          ok: true,
+          source_path: "app/Test.spg",
+          foreground_artifact: {
+            source_path: "app/Test.spg",
+            analysis_status: "ready",
+            result: {
+              status: "ready",
+              target: "app/Test.spg",
+              items: [{ kind: "foreground_selection_item", label: "selection-result" }],
+              diagnostics: [{ severity: "warning", code: "SEL_ANALYSIS_OK", message: "foreground artifact ready" }],
+            },
+          },
+          background: {
+            status: "running",
+            processed: 1,
+            total: 2,
+          },
+          diagnostics: [{ severity: "warning", code: "SEL_QUEUE", message: "selection queued" }],
+        });
+      } else if (typeof callback === "function") {
+        callback({ ok: true });
+      }
+    },
+  });
+  await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
+  const host = context.__metadata_checker_chromium_content_state__.panelHost;
+
+  context.__dispatchMessage({
+    __metadata_checker_bridge_source: "page-script",
+    __metadata_checker_bridge_direction: "notification",
+    type: "metadata-checker-selection-changed",
+    payload: {
+      source_path: "app/Test.spg",
+      selected_component_ids: ["a", "b"],
+      selected_component_types: ["input", "button"],
+      selection_source: "selectComponents",
+      changed_at: 123456,
+      active_component_id: "a",
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const state = host.getState();
+  assert.equal(state.hostElement?.getAttribute("data-metadata-checker-panel-last-status"), "ready");
+  assert.equal(state.lastEnvelope?.status, "ready");
+  assert.equal(state.lastEnvelope?.target, "app/Test.spg");
+  assert.equal(state.lastEnvelope?.items?.some((item) => item.kind === "foreground_selection_item"), true);
+  assert.equal(state.lastEnvelope?.diagnostics?.some((item) => item.code === "SEL_QUEUE"), true);
+  assert.equal(state.lastEnvelope?.items?.some((item) => item.kind === "background_status"), true);
+  assert.equal(state.lastEnvelope?.status !== "idle", true);
+  assert.equal(runtimeMessages.some((message) => message.type === "metadata-checker-selection-changed"), true);
+});
+
 test("content script fetches access token without exposing it through page messages", async () => {
   const runtimeMessages = [];
   const context = createFakeWindow({

@@ -93,6 +93,14 @@ function createFetchStubWithContentFailure() {
   return { fetchImpl: failingFetch, calls };
 }
 
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolveFn) => {
+    resolve = resolveFn;
+  });
+  return { promise, resolve };
+}
+
 test("M45 background bootstraps with one-shot token and indexes visible metadata", async () => {
   const { fetchImpl, calls } = createFetchStub();
   const controller = createM45BackgroundController({ fetchImpl, clock: () => 1000 });
@@ -142,6 +150,8 @@ test("M45 background foreground selection is queued before background items", as
   const controller = createM45BackgroundController({
     fetchImpl: async () => jsonResponse(200, { userId: "u1" }),
   });
+  controller.state.visible_index.status = "ready";
+  controller.state.visible_index.projects = [{ project_name: "p" }];
   controller.state.session = { base_url: "https://example.test" };
   controller.seedBackgroundQueue([
     {
@@ -219,10 +229,123 @@ test("M45 selection message triggers foreground processing with selection-specif
   });
 
   assert.equal(result.ok, true);
+  assert.equal(result.artifact_ready, true);
+  assert.equal(Boolean(result.artifact && result.artifact.result), true);
+  assert.equal(result.artifact_key.includes("analysis-artifact|foreground|"), true);
+  assert.equal(result.artifact.analysis_status, "ready");
   assert.equal(runtimeCalls.some((selection) => selection.active_component_id === "input1"), true);
   const keys = await cache.keys();
   assert.equal(keys.some((key) => key.includes("analysis-artifact|background|")), true);
   assert.equal(keys.some((key) => key.includes("analysis-artifact|foreground|")), true);
+});
+
+test("M45 pre-bootstrap selection is replayed and prioritized after visible index ready", async () => {
+  const analyzeCalls = [];
+  const cache = createMemoryMetadataCache();
+  const controller = createM45BackgroundController({
+    fetchImpl: createFetchStub().fetchImpl,
+    cache,
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection(selection, options) {
+        analyzeCalls.push({ selection, options });
+        return { status: "ready", target: selection.active_component_id };
+      },
+    },
+  });
+
+  const queued = await controller.handleMessage({
+    type: "metadata-checker-selection-changed",
+    payload: {
+      project_name: "xiaoshouyi",
+      source_path: "app/Test.app/Page.spg",
+      active_component_id: "input1",
+      selected_component_ids: ["input1"],
+    },
+  });
+
+  assert.equal(queued.queued, true);
+  assert.equal(queued.pending, true);
+  assert.equal(controller.state.background.pending_foreground.length, 1);
+  assert.equal(controller.state.background.queue.length, 0);
+
+  const result = await controller.bootstrapAndIndex({
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    access_token: "one-shot",
+    initial_limit: 3,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(controller.state.background.pending_foreground.length, 0);
+  assert.equal(analyzeCalls[0].options.mode, "foreground");
+  assert.equal(analyzeCalls[0].selection.source_path, "app/Test.app/Page.spg");
+  const keys = await cache.keys();
+  assert.equal(
+    keys.some((key) => key.includes("analysis-artifact|foreground|") && key.includes("selected:input1")),
+    true,
+  );
+});
+
+test("M45 selection pause/resume prevents additional background items until resume", async () => {
+  const deferreds = [];
+  const fetchImpl = async () => jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) });
+  const controller = createM45BackgroundController({
+    fetchImpl,
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection() {
+        const deferred = createDeferred();
+        deferreds.push(deferred);
+        await deferred.promise;
+        return { status: "ready" };
+      },
+    },
+  });
+  controller.state.session = { base_url: "https://example.test" };
+  controller.seedBackgroundQueue([
+    {
+      project_name: "p",
+      source_path: "app/A.app/Page.spg",
+      file_id: "f1",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/B.app/Page.spg",
+      file_id: "f2",
+      revision: "1",
+      analyzable: true,
+    },
+  ]);
+
+  const processing = controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 2, max_concurrency: 1 },
+  });
+  while (deferreds.length === 0) {
+    await Promise.resolve();
+  }
+  assert.equal(deferreds.length, 1);
+  await controller.handleMessage({ type: "metadata-checker-background-pause" });
+  deferreds[0].resolve();
+  await processing;
+  assert.equal(deferreds.length, 1);
+  assert.equal(controller.state.background.queue.length, 1);
+
+  await controller.handleMessage({ type: "metadata-checker-background-resume" });
+  const resumed = controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 1, max_concurrency: 1 },
+  });
+  while (deferreds.length < 2) {
+    await Promise.resolve();
+  }
+  assert.equal(deferreds.length, 2);
+  deferreds[1].resolve();
+  await resumed;
 });
 
 test("M45 background fetches raw metadata and calls injected runtime analyzer", async () => {
