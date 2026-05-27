@@ -409,6 +409,7 @@ export function createM45BackgroundController(options = {}) {
       paused: false,
       max_concurrency: 1,
       min_interval_ms: 0,
+      process_gate: Promise.resolve(),
       next_run_at: null,
       last_event: null,
     },
@@ -848,6 +849,21 @@ export function createM45BackgroundController(options = {}) {
   }
 
   async function processBackgroundQueue({
+    limit = 3,
+    max_concurrency = state.background.max_concurrency,
+    min_interval_ms = state.background.min_interval_ms,
+  } = {}) {
+    const gate = state.background.process_gate;
+    const result = gate.then(() => processBackgroundQueueUnserialized({
+      limit,
+      max_concurrency,
+      min_interval_ms,
+    }));
+    state.background.process_gate = result.catch(() => {}).then(() => undefined);
+    return result;
+  }
+
+  async function processBackgroundQueueUnserialized({
     limit = 3,
     max_concurrency = state.background.max_concurrency,
     min_interval_ms = state.background.min_interval_ms,

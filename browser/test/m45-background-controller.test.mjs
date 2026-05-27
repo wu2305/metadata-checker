@@ -566,6 +566,152 @@ test("M45 background min_interval_ms is serialized across concurrent workers", a
   assert.equal(sleepCalls.some((delay) => delay > 0), true);
 });
 
+test("M45 process calls are serialized across concurrent invocations", async () => {
+  let now = 0;
+  const starts = [];
+  const deferreds = [];
+  const controller = createM45BackgroundController({
+    clock: () => now,
+    sleep: (ms) => new Promise((resolve) => {
+      globalThis.setTimeout(() => {
+        now += ms;
+        resolve();
+      }, 0);
+    }),
+    fetchImpl: async () => jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) }),
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection(selection) {
+        starts.push(now);
+        if (selection.source_path === "app/A.app/Page.spg") {
+          const deferred = createDeferred();
+          deferreds.push(deferred);
+          await deferred.promise;
+        }
+        return { status: "ready" };
+      },
+    },
+  });
+  controller.state.session = { base_url: "https://example.test" };
+  controller.seedBackgroundQueue([
+    {
+      project_name: "p",
+      source_path: "app/A.app/Page.spg",
+      file_id: "f1",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/B.app/Page.spg",
+      file_id: "f2",
+      revision: "1",
+      analyzable: true,
+    },
+  ]);
+
+  const first = controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 1, max_concurrency: 1, min_interval_ms: 10 },
+  });
+  const second = controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 1, max_concurrency: 1, min_interval_ms: 10 },
+  });
+
+  while (starts.length === 0) {
+    await Promise.resolve();
+  }
+  assert.equal(starts.length, 1);
+  assert.equal(deferreds.length, 1);
+
+  deferreds[0].resolve();
+  await first;
+  await second;
+
+  assert.equal(starts.length, 2);
+  assert.ok(starts[1] - starts[0] >= 10);
+});
+
+test("M45 foreground selection stays prioritized during running background processing", async () => {
+  const starts = [];
+  const deferreds = [];
+  const controller = createM45BackgroundController({
+    fetchImpl: async () => jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) }),
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection(selection) {
+        starts.push(selection.source_path);
+        if (selection.source_path === "app/A.app/Page.spg") {
+          const deferred = createDeferred();
+          deferreds.push(deferred);
+          await deferred.promise;
+        }
+        return { status: "ready" };
+      },
+    },
+  });
+  controller.state.session = { base_url: "https://example.test" };
+  controller.state.visible_index.status = "ready";
+  controller.state.visible_index.projects = [{ project_name: "p" }];
+  controller.seedBackgroundQueue([
+    {
+      project_name: "p",
+      source_path: "app/A.app/Page.spg",
+      file_id: "f1",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/B.app/Page.spg",
+      file_id: "f2",
+      revision: "1",
+      analyzable: true,
+    },
+  ]);
+
+  const backgroundProcess = controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 1, max_concurrency: 1 },
+  });
+
+  while (deferreds.length === 0) {
+    await Promise.resolve();
+  }
+  assert.equal(starts[0], "app/A.app/Page.spg");
+
+  const foregroundMessage = controller.handleMessage({
+    type: "metadata-checker-selection-changed",
+    payload: {
+      project_name: "p",
+      source_path: "app/Foreground.app/Page.spg",
+      file_id: "f3",
+      active_component_id: "fg1",
+    },
+  });
+
+  assert.equal(starts.length, 1);
+
+  deferreds[0].resolve();
+  await backgroundProcess;
+  await foregroundMessage;
+
+  assert.equal(starts[0], "app/A.app/Page.spg");
+  await controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 2, max_concurrency: 1 },
+  });
+
+  const foregroundIndex = starts.indexOf("app/Foreground.app/Page.spg");
+  const backgroundIndex = starts.indexOf("app/B.app/Page.spg");
+  assert.ok(foregroundIndex >= 0);
+  assert.ok(backgroundIndex >= 0);
+  assert.ok(foregroundIndex < backgroundIndex);
+});
+
 test("M45 background min_interval_ms is enforced across batches", async () => {
   let now = 0;
   const starts = [];
