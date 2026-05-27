@@ -794,7 +794,10 @@ export function createM45BackgroundController(options = {}) {
       file,
       ...state.background.queue.filter((item) => item.source_path !== file.source_path),
     ];
-    state.background.total = Math.max(state.background.total, state.background.queue.length);
+    state.background.total = Math.max(
+      state.background.total,
+      state.background.processed + state.background.active + state.background.queue.length,
+    );
     state.background.status = "queued";
     emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_PROGRESS, {
       status: "foreground_queued",
@@ -948,6 +951,10 @@ export function createM45BackgroundController(options = {}) {
           processed.push(item);
           artifacts.push(result);
           state.background.processed += 1;
+          state.background.total = Math.max(
+            state.background.total,
+            state.background.processed,
+          );
           emit(M45_EVENT_TYPES.METADATA_PREFETCHED, {
             source_path: item.source_path,
             cache_hit: result.cache_hit,
@@ -1094,6 +1101,27 @@ export function createM45BackgroundController(options = {}) {
     }
 
     if (message.type === "metadata-checker-selection-changed") {
+      const queuedPayload = buildForegroundSelectionItem(message.payload || {});
+      if (!queuedPayload?.source_path) {
+        return { ok: false };
+      }
+
+      if (state.session?.base_url && state.visible_index.status === "ready") {
+        const payloadArtifactKey = makeAnalysisArtifactKey(queuedPayload);
+        const cachedPayloadArtifact = await cache.get(payloadArtifactKey);
+        if (cachedPayloadArtifact) {
+          return {
+            ok: true,
+            queued: false,
+            file: queuedPayload,
+            artifact_ready: true,
+            artifact_key: payloadArtifactKey,
+            artifact: cachedPayloadArtifact ?? null,
+            background: { ...state.background },
+          };
+        }
+      }
+
       const queued = enqueueForegroundSelection(message.payload || {});
       if (!queued.queued || !queued.file?.source_path) {
         return { ok: false, ...queued };

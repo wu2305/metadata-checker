@@ -101,6 +101,16 @@ function createDeferred() {
   return { promise, resolve };
 }
 
+async function waitForCacheKey(cache, matcher) {
+  while (true) {
+    const keys = await cache.keys();
+    if (keys.some(matcher)) {
+      return;
+    }
+    await Promise.resolve();
+  }
+}
+
 test("M45 background bootstraps with one-shot token and indexes visible metadata", async () => {
   const { fetchImpl, calls } = createFetchStub();
   const controller = createM45BackgroundController({ fetchImpl, clock: () => 1000 });
@@ -710,6 +720,107 @@ test("M45 foreground selection stays prioritized during running background proce
   assert.ok(foregroundIndex >= 0);
   assert.ok(backgroundIndex >= 0);
   assert.ok(foregroundIndex < backgroundIndex);
+});
+
+test("M45 foreground selection can return from cache while background item remains deferred", async () => {
+  const starts = [];
+  const deferredA = createDeferred();
+  const deferredB = createDeferred();
+  const cache = createMemoryMetadataCache();
+  const controller = createM45BackgroundController({
+    fetchImpl: async () => jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) }),
+    cache,
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection(selection) {
+        starts.push(selection.source_path);
+        if (selection.source_path === "app/A.app/Page.spg") {
+          await deferredA.promise;
+        }
+        if (selection.source_path === "app/B.app/Page.spg") {
+          await deferredB.promise;
+        }
+        return { status: "ready" };
+      },
+    },
+  });
+  const foregroundPayload = {
+    project_name: "p",
+    source_path: "app/Foreground.app/Page.spg",
+    file_id: "f3",
+    active_component_id: "fg1",
+    selected_component_ids: ["fg1"],
+  };
+
+  controller.state.session = { base_url: "https://example.test" };
+  controller.state.visible_index.status = "ready";
+  controller.state.visible_index.projects = [{ project_name: "p" }];
+  controller.seedBackgroundQueue([
+    {
+      project_name: "p",
+      source_path: "app/A.app/Page.spg",
+      file_id: "f1",
+      revision: "1",
+      analyzable: true,
+    },
+    {
+      project_name: "p",
+      source_path: "app/B.app/Page.spg",
+      file_id: "f2",
+      revision: "1",
+      analyzable: true,
+    },
+  ]);
+
+  const processing = controller.handleMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 3, max_concurrency: 1 },
+  });
+
+  while (starts.length === 0) {
+    await Promise.resolve();
+  }
+
+  const firstSelection = controller.handleMessage({
+    type: "metadata-checker-selection-changed",
+    payload: foregroundPayload,
+  });
+
+  deferredA.resolve();
+
+  await waitForCacheKey(cache, (key) => key.includes("analysis-artifact|foreground|") && key.includes("selected:fg1"));
+
+  const secondSelection = controller.handleMessage({
+    type: "metadata-checker-selection-changed",
+    payload: foregroundPayload,
+  });
+
+  const winner = await Promise.race([
+    secondSelection.then(() => "selection"),
+    deferredB.promise.then(() => "background"),
+  ]);
+  assert.equal(winner, "selection");
+
+  const secondResult = await secondSelection;
+  assert.equal(secondResult.ok, true);
+  assert.equal(secondResult.queued, false);
+  assert.equal(secondResult.artifact_ready, true);
+  assert.equal(Boolean(secondResult.artifact && secondResult.artifact.source_path), true);
+
+  deferredB.resolve({ status: "ready" });
+  await firstSelection;
+  await processing;
+
+  assert.equal(starts.includes("app/A.app/Page.spg"), true);
+  assert.equal(starts.includes("app/Foreground.app/Page.spg"), true);
+  assert.equal(starts.includes("app/B.app/Page.spg"), true);
+  assert.equal(
+    starts.indexOf("app/Foreground.app/Page.spg"),
+    1,
+  );
+  assert.ok(starts.indexOf("app/Foreground.app/Page.spg") < starts.indexOf("app/B.app/Page.spg"));
+  assert.equal(controller.state.background.processed <= controller.state.background.total, true);
 });
 
 test("M45 background min_interval_ms is enforced across batches", async () => {
