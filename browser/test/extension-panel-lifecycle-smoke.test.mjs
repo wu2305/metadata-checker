@@ -117,21 +117,23 @@ function createFakeDocument() {
   };
 }
 
-function createFakeWindow({ bridge, fetchImpl, runtimeSendMessage }) {
+function createFakeWindow({ bridge, fetchImpl, runtimeSendMessage, runtimeSendMessageArityOne }) {
   const listeners = new Map();
   const runtimeListeners = [];
   const sentStatuses = [];
   const postedMessages = [];
   const document = createFakeDocument();
 
-  const runtime = {
-    onMessage: {
-      addListener(handler) {
-        runtimeListeners.push(handler);
-      },
-      listeners: runtimeListeners,
-    },
-    sendMessage(message, callback) {
+  const sendMessage = runtimeSendMessageArityOne
+    ? function sendMessage(message) {
+      sentStatuses.push(message);
+      if (typeof runtimeSendMessage === "function") {
+        return runtimeSendMessage(message, arguments[1]);
+      }
+      arguments[1]?.({ ok: true });
+      return undefined;
+    }
+    : function sendMessage(message, callback) {
       sentStatuses.push(message);
       if (typeof runtimeSendMessage === "function") {
         return runtimeSendMessage(message, callback);
@@ -140,7 +142,16 @@ function createFakeWindow({ bridge, fetchImpl, runtimeSendMessage }) {
         callback({ ok: true });
       }
       return undefined;
+    };
+
+  const runtime = {
+    onMessage: {
+      addListener(handler) {
+        runtimeListeners.push(handler);
+      },
+      listeners: runtimeListeners,
     },
+    sendMessage,
   };
 
   const context = {
@@ -527,6 +538,56 @@ test("bootstrap failure keeps source path and renders fallback diagnostic", asyn
   assert.equal(
     state.hostElement?.getAttribute("data-metadata-checker-panel-source-path"),
     "app/Test.spg",
+  );
+});
+
+test("arity-one runtime sendMessage waits for delayed background callback", async () => {
+  const context = createFakeWindow({
+    bridge: defaultBridge(),
+    runtimeSendMessageArityOne: true,
+    runtimeSendMessage(message, callback) {
+      if (message?.type === "metadata-checker-bootstrap-token") {
+        setTimeout(() => {
+          callback?.({
+            ok: false,
+            diagnostics: [
+              {
+                severity: "error",
+                code: "SESSION_COOKIE_NOT_ESTABLISHED",
+                message: "cookie jar was not established",
+              },
+            ],
+          });
+        }, 5);
+        return undefined;
+      }
+      callback?.({ ok: true });
+      return undefined;
+    },
+  });
+  await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
+
+  context.__dispatchMessage({
+    __metadata_checker_bridge_source: "page-script",
+    __metadata_checker_bridge_direction: "notification",
+    type: "bridgeReady",
+    payload: {
+      page_context: { source_path: "app/Test.spg" },
+      diagnostics: [],
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const host = context.__metadata_checker_chromium_content_state__.panelHost;
+  const state = host.getState();
+  assert.equal(state.lastEnvelope?.target, "app/Start.spg");
+  assert.equal(
+    state.lastEnvelope?.diagnostics?.some((item) => item.code === "SESSION_COOKIE_NOT_ESTABLISHED"),
+    true,
+  );
+  assert.equal(
+    state.lastEnvelope?.diagnostics?.some((item) => item.code === "SESSION_BOOTSTRAP_FAILED"),
+    false,
   );
 });
 

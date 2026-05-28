@@ -22,6 +22,7 @@
 
   const BRIDGE_READY_MARKER = "bridgeReady";
   const SELECTION_CHANGED_MARKER = "metadata-checker-selection-changed";
+  const RUNTIME_MESSAGE_TIMEOUT_MS = 15000;
 
   function isObject(value) {
     return value !== null && typeof value === "object";
@@ -385,13 +386,31 @@
     }
     return new Promise((resolve) => {
       let settled = false;
+      let timeoutId = null;
       const finish = (value) => {
         if (!settled) {
           settled = true;
+          if (timeoutId !== null && typeof root.clearTimeout === "function") {
+            root.clearTimeout(timeoutId);
+          }
           resolve(value);
         }
       };
       try {
+        if (typeof root.setTimeout === "function") {
+          timeoutId = root.setTimeout(() => {
+            finish({
+              ok: false,
+              diagnostics: [
+                stableDiagnostic(
+                  "METADATA_CHECKER_EXTENSION_BACKGROUND_TIMEOUT",
+                  "extension background did not respond in time",
+                  "warning",
+                ),
+              ],
+            });
+          }, RUNTIME_MESSAGE_TIMEOUT_MS);
+        }
         const maybePromise = runtime.sendMessage(message, (response) => {
           finish(response || { ok: false });
         });
@@ -408,9 +427,6 @@
               ],
             });
           });
-        }
-        if (runtime.sendMessage.length < 2 && typeof root.setTimeout === "function") {
-          root.setTimeout(() => finish({ ok: false }), 0);
         }
       } catch (error) {
         finish({
