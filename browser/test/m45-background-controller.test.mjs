@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createBackgroundMessageFailureResponse,
   createDefaultMetadataCache,
   createIndexedDbMetadataCache,
   createM45BackgroundController,
@@ -80,6 +81,18 @@ function createFetchStub() {
   };
   return { fetchImpl, calls };
 }
+
+test("M45 background message failure response is stable and redacted", () => {
+  const result = createBackgroundMessageFailureResponse(
+    new Error("IndexedDB failed token=secret password=secret-password"),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.diagnostics.length, 1);
+  assert.equal(result.diagnostics[0].severity, "error");
+  assert.equal(result.diagnostics[0].code, "METADATA_CHECKER_BACKGROUND_MESSAGE_FAILED");
+  assert.equal(result.diagnostics[0].message.includes("secret"), false);
+});
 
 function createFetchStubWithContentFailure() {
   const { fetchImpl, calls } = createFetchStub();

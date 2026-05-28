@@ -76,6 +76,19 @@ function stableDiagnostic(code, message, severity = "warning") {
   };
 }
 
+export function createBackgroundMessageFailureResponse(error) {
+  return {
+    ok: false,
+    diagnostics: [
+      stableDiagnostic(
+        "METADATA_CHECKER_BACKGROUND_MESSAGE_FAILED",
+        error?.message || "extension background message failed",
+        "error",
+      ),
+    ],
+  };
+}
+
 function encodeMetaPath(path, preserveSlash = true) {
   if (!preserveSlash) {
     return encodeURIComponent(path);
@@ -1267,7 +1280,10 @@ const controller = createM45BackgroundController();
 
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage?.addListener) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    controller.handleMessage(message).then(sendResponse);
+    controller.handleMessage(message).then(
+      sendResponse,
+      (error) => sendResponse(createBackgroundMessageFailureResponse(error)),
+    );
     return true;
   });
 }
