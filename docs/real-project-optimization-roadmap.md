@@ -5548,7 +5548,7 @@ BI onInitDesigner
 
 #### M45：Remote Metadata Auto Fetch and Background Analysis
 
-目标：让 CLI 与浏览器插件都能建立远程 session，并让浏览器插件在设计器中自动获取、缓存、分析当前页面及用户可见元数据。前台分析优先，Extension Service Worker 后台扫描全部拥有 View 权限的可见元数据，渐进预取和分析，不阻塞页面交互。
+目标：让 CLI 与浏览器插件都能建立远程 session，并让浏览器插件在设计器中自动获取、缓存、分析当前页面及用户可见元数据。浏览器端采用“简单 indexing 进度 + 当前页面优先”的产品策略：优先保证当前页面和当前选择可用，后台 indexing 以可见进度条展示，不追求完全无感知的强抢占调度。
 
 边界要求：
 
@@ -5556,7 +5556,7 @@ BI onInitDesigner
 - 不把 token、cookie、password 写入 IndexedDB、graphdb、日志、diagnostics、DOM 文本或 AI output。
 - JS 只做插件接入、消息桥、Service Worker 编排、缓存 provider 和 UI 状态展示；解析、建图、依赖追踪、分析仍由 Rust/WASM core 完成。
 - `RemoteMetadataProvider` 不负责登录，只接收已认证 session/client 后读取 raw metadata。
-- 当前 `background.js` 仍承载了队列/调度编排责任；下一阶段需下沉到 Rust orchestrator，JS 保持 adapter 职责。
+- 当前不要求为了浏览器体验引入完整强状态机。Rust orchestrator 可作为可复用基础能力保留，但 M45 的验收路径以简单 indexing、显式进度、当前页面优先为准。
 
 登录链路：
 
@@ -5609,6 +5609,7 @@ BI onInitDesigner
   - 支持可控暂停与恢复（`pause`/`resume`）；暂停期间保留队列与任务状态，恢复后继续处理不丢任务。
   - 限速与暂停语义以可配置参数为主，后续再收敛为更高并发。
   - 后台任务只做渐进预取和运行时可用时的分析触发，不阻塞 panel、selection、当前页面分析。
+  - 如果当前选择关联元数据尚未完成 indexing，panel 显示“正在索引 / 可重试 / 当前页面优先处理”，不要求做到完全无感知等待与抢占。
 
 - [x] M45.5：IndexedDB Cache
   - Browser 侧 cache provider 预留 IndexedDB adapter。
@@ -5626,27 +5627,17 @@ BI onInitDesigner
     - `background_analysis_completed`
   - 所有输出必须脱敏。
 
-- [ ] M45.7：JS Thinning + Rust Orchestrator Boundary
-  - 把 `background.js` 的核心调度逻辑与限流语义迁移到 Rust orchestrator：队列构建、前台/后台优先级、pause/resume、并发控制、`min_interval_ms`、`processed/total` 计数、artifact 等待时序。
-  - JS 侧仅保留：
-    - session/bootstrap 状态、错误码与轻量事件映射；
-    - 设计器 selection 标准化与发送；
-    - `analysis runtime client` 的高层调用与状态回传；
-    - 缓存访问与脱敏。
-  - 下沉后应删除或降级为 adapter 的 JS 成员：
-    - `state.background.queue`
-    - `state.background.pending_foreground`
-    - `state.background.process_gate`
-    - `state.background.processed`
-    - `state.background.total`
-    - `state.background.active`
-    - `state.background.next_run_at`
-    - `seedBackgroundQueue`
-    - `enqueueForegroundSelection`
-    - `processBackgroundQueue`
-    - `processBackgroundQueueUnserialized`
-    - `runBackgroundQueueItem`
-  - `process_gate`、`foreground queue`、`artifact waiter`、`processed/total` 算法验证转移到 Rust 测试；浏览器侧 JS 改为验证 adapter 调用边界，不验证复杂 queue 实现细节。
+- [ ] M45.7：Simplified Indexing Progress + Current Page First
+  - 保留已落地的 Rust orchestrator 作为后续可选基础能力，但 M45 不强制把浏览器端全部后台调度切到 Rust 状态机。
+  - 浏览器端验收改为更简单的产品路径：
+    - 打开设计器后优先获取并分析当前 `.spg`；
+    - 当前 selection 变化时优先处理当前页面，不等待全量可见元数据 indexing 完成；
+    - 后台 indexing 显式展示进度：已发现文件数、已处理数、失败数、当前处理文件、缓存命中数；
+    - 当前 selection 所需元数据未就绪时，panel 给出稳定状态：`indexing_current_page`、`waiting_for_metadata`、`retry_available`；
+    - 用户可手动触发“优先处理当前页面/重试当前选择”；
+    - 不要求实现完全无感知的 artifact waiter、强抢占、复杂多并发调度。
+  - JS 侧允许保留轻量队列与进度统计，但不得承载解析、图查询或业务推理；复杂队列算法不作为 M45 验收要求。
+  - Rust/WASM core 继续负责真实解析、建图、selection 分析；JS 只负责远程 fetch、缓存、触发分析和展示进度。
 
 
 验收标准：
