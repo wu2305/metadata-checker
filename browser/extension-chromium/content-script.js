@@ -634,7 +634,42 @@
     if (action === "analyzeCurrentSelection" || action === "analyze") {
       return "analyzeCurrentSelection";
     }
+    if (action === "retryCurrentSelection" || action === "retry-current-selection") {
+      return "retryCurrentSelection";
+    }
     return null;
+  }
+
+  async function retryCurrentSelectionFromBridge() {
+    const response = await requestPageBridge("getBridgeStatus");
+    const payload = response?.payload || {};
+    const selection = payload.selection || {};
+    if (!selection || !selection.source_path) {
+      return {
+        ok: false,
+        diagnostics: [
+          stableDiagnostic(
+            "METADATA_CHECKER_SELECTION_EMPTY",
+            "current selection has no source_path to retry",
+            "warning",
+          ),
+        ],
+      };
+    }
+    const result = await sendRuntimeMessage({
+      type: "metadata-checker-selection-changed",
+      payload: selection,
+    });
+    updatePanelWithBackgroundState({
+      ...(result || {}),
+      source_path: asString(selection.source_path),
+    });
+    return {
+      ok: result?.ok !== false,
+      bridge_status: response,
+      background_result: result,
+      diagnostics: asDiagnostics(response?.diagnostics).concat(asDiagnostics(result?.diagnostics)),
+    };
   }
 
   function mountIfNeeded() {
@@ -706,6 +741,23 @@
       }
 
       if (message?.type === "metadata-checker-tab-request") {
+        if (requestType === "retryCurrentSelection") {
+          retryCurrentSelectionFromBridge().then((response) => {
+            sendResponse(response);
+          }).catch((error) => {
+            sendResponse({
+              ok: false,
+              diagnostics: [
+                stableDiagnostic(
+                  "METADATA_CHECKER_RETRY_CURRENT_SELECTION_FAILED",
+                  error?.message || "retry current selection failed",
+                  "error",
+                ),
+              ],
+            });
+          });
+          return true;
+        }
         requestPageBridge(mappedRequestType).then((response) => {
           forwardStatus(response);
           sendResponse(response);
@@ -751,6 +803,20 @@
             wrapPanelCommandResponse("analyzeCurrentSelection", {
               ok: false,
               diagnostics: [stableDiagnostic("METADATA_CHECKER_PANEL_COMMAND_FAILED", error?.message || "analyze current selection failed", "error")],
+            }),
+          );
+        });
+        return true;
+      }
+
+      if (requestType === "retryCurrentSelection") {
+        retryCurrentSelectionFromBridge().then((response) => {
+          sendResponse(wrapPanelCommandResponse("retryCurrentSelection", response));
+        }).catch((error) => {
+          sendResponse(
+            wrapPanelCommandResponse("retryCurrentSelection", {
+              ok: false,
+              diagnostics: [stableDiagnostic("METADATA_CHECKER_PANEL_COMMAND_FAILED", error?.message || "retry current selection failed", "error")],
             }),
           );
         });

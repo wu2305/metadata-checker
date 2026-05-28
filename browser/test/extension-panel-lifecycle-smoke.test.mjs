@@ -426,6 +426,70 @@ test("selection change result with foreground artifact keeps panel status ready 
   assert.equal(runtimeMessages.some((message) => message.type === "metadata-checker-selection-changed"), true);
 });
 
+test("content script retryCurrentSelection replays bridge selection to background queue", async () => {
+  const runtimeMessages = [];
+  const context = createFakeWindow({
+    bridge: {
+      async request(type) {
+        assert.equal(type, "getBridgeStatus");
+        return {
+          payload: {
+            supported: true,
+            bridge_detected: true,
+            page_context: { source_path: "app/Retry.spg" },
+            selection: {
+              source_path: "app/Retry.spg",
+              selected_component_ids: ["input1"],
+              active_component_id: "input1",
+            },
+          },
+          diagnostics: [],
+        };
+      },
+    },
+    runtimeSendMessage(message, callback) {
+      runtimeMessages.push(message);
+      if (message?.type === "metadata-checker-selection-changed") {
+        callback?.({
+          ok: true,
+          artifact_ready: false,
+          indexing_status: "indexing_current_page",
+          background: {
+            status: "queued",
+            indexing_status: "indexing_current_page",
+            current_source_path: "app/Retry.spg",
+            processed: 0,
+            total: 1,
+          },
+        });
+        return undefined;
+      }
+      callback?.({ ok: true });
+      return undefined;
+    },
+  });
+  await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
+
+  const response = await runRuntimeMessage(context, {
+    type: "metadata-checker-tab-request",
+    request_type: "retryCurrentSelection",
+  });
+
+  assert.equal(response?.ok, true);
+  assert.equal(
+    runtimeMessages.some(
+      (message) =>
+        message.type === "metadata-checker-selection-changed" &&
+        message.payload.source_path === "app/Retry.spg" &&
+        message.payload.active_component_id === "input1",
+    ),
+    true,
+  );
+  const host = context.__metadata_checker_chromium_content_state__.panelHost;
+  assert.equal(host.getState().lastEnvelope?.target, "app/Retry.spg");
+  assert.equal(host.getState().lastEnvelope?.status, "analyzing");
+});
+
 test("content script fetches access token without exposing it through page messages", async () => {
   const runtimeMessages = [];
   const context = createFakeWindow({

@@ -24,6 +24,7 @@
         overflow-wrap: anywhere;
       }
       button {
+        margin: 0 0 6px;
         width: 100%;
       }
       pre {
@@ -43,10 +44,20 @@
       <dd data-field="source">unknown</dd>
       <dt>Selection</dt>
       <dd data-field="selection">unknown</dd>
+      <dt>Indexing</dt>
+      <dd data-field="indexing">unknown</dd>
+      <dt>Progress</dt>
+      <dd data-field="progress">unknown</dd>
+      <dt>Current</dt>
+      <dd data-field="current">unknown</dd>
+      <dt>Cache</dt>
+      <dd data-field="cache">unknown</dd>
     </dl>
     <button type="button" data-action="open-panel">Open panel</button>
     <button type="button" data-action="hide-panel">Hide panel</button>
     <button type="button" data-action="refresh-bridge">Refresh bridge</button>
+    <button type="button" data-action="process-background">Process background</button>
+    <button type="button" data-action="retry-current-selection">Retry current selection</button>
     <button type="button" data-action="analyze">Analyze current selection</button>
     <pre data-field="diagnostic"></pre>
     <script src="popup.js"></script>

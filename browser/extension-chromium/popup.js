@@ -5,12 +5,17 @@ const requestTypeByAction = {
   hide: "hidePanel",
   refresh: "refreshBridge",
   analyze: "analyzeCurrentSelection",
+  retry: "retryCurrentSelection",
 };
 
 const fields = {
   bridge: document.querySelector('[data-field="bridge"]'),
   source: document.querySelector('[data-field="source"]'),
   selection: document.querySelector('[data-field="selection"]'),
+  indexing: document.querySelector('[data-field="indexing"]'),
+  progress: document.querySelector('[data-field="progress"]'),
+  current: document.querySelector('[data-field="current"]'),
+  cache: document.querySelector('[data-field="cache"]'),
   diagnostic: document.querySelector('[data-field="diagnostic"]'),
 };
 
@@ -55,8 +60,38 @@ function firstDiagnostic(payload) {
   return null;
 }
 
-function renderStatus(state) {
-  const status = state?.last_bridge_status?.payload || state?.last_bridge_status || {};
+function pickBackgroundState(state) {
+  return state?.background || state?.state?.background || {};
+}
+
+function pickVisibleIndex(state) {
+  return state?.visible_index || state?.state?.visible_index || {};
+}
+
+function pickCacheStats(state) {
+  return state?.cache_stats || state?.state?.cache_stats || {};
+}
+
+function summarizeProgress(background, visibleIndex) {
+  const discovered = Array.isArray(visibleIndex.files) ? visibleIndex.files.length : 0;
+  const processed = background.processed ?? 0;
+  const total = background.total ?? visibleIndex.analyzable_count ?? 0;
+  const failed = background.failed ?? 0;
+  return `${processed}/${total} processed, ${failed} failed, ${discovered} discovered`;
+}
+
+function renderBackgroundState(state) {
+  const background = pickBackgroundState(state);
+  const visibleIndex = pickVisibleIndex(state);
+  const cacheStats = pickCacheStats(state);
+  setText(fields.indexing, background.indexing_status || background.status || visibleIndex.status || "unknown");
+  setText(fields.progress, summarizeProgress(background, visibleIndex));
+  setText(fields.current, background.current_source_path || background.last_processed_source_path || "unknown");
+  setText(fields.cache, `${cacheStats.hits ?? 0} hits, ${cacheStats.misses ?? 0} misses`);
+}
+
+function renderStatus(state = {}) {
+  const status = state.last_bridge_status?.payload || state.last_bridge_status || {};
   const pageContext = status.page_context || status.payload?.page_context || {};
   const selection = status.selection || status.payload?.selection || {};
   const diagnostic = state?.last_diagnostic || status.diagnostics?.[0] || status.payload?.diagnostics?.[0] || null;
@@ -64,6 +99,7 @@ function renderStatus(state) {
   setText(fields.bridge, status.bridge_detected === false ? "missing" : "ready");
   setText(fields.source, pageContext.source_path || pageContext.file_id || "unknown");
   setText(fields.selection, summarizeSelection(selection));
+  renderBackgroundState(state);
   setText(fields.diagnostic, diagnostic ? JSON.stringify(diagnostic, null, 2) : "");
 }
 
@@ -82,6 +118,11 @@ function getChromeApi() {
 function getTabApi() {
   const api = getChromeApi();
   return api?.tabs;
+}
+
+function getRuntimeApi() {
+  const api = getChromeApi();
+  return api?.runtime;
 }
 
 async function requestActiveTab(requestType) {
@@ -110,6 +151,33 @@ function requestBridgeStatus() {
 
 function requestAnalyzeCurrentSelection() {
   return requestActiveTab("analyzeCurrentSelection");
+}
+
+function requestRetryCurrentSelection() {
+  return requestActiveTab("retryCurrentSelection");
+}
+
+async function requestBackgroundState() {
+  const runtime = getRuntimeApi();
+  if (!runtime || typeof runtime.sendMessage !== "function") {
+    return null;
+  }
+  return runtime.sendMessage({ type: "metadata-checker-popup-status" });
+}
+
+async function requestBackgroundProcess() {
+  const runtime = getRuntimeApi();
+  if (!runtime || typeof runtime.sendMessage !== "function") {
+    throw {
+      severity: "error",
+      code: "METADATA_CHECKER_RUNTIME_API_MISSING",
+      message: "chrome.runtime sendMessage is unavailable",
+    };
+  }
+  return runtime.sendMessage({
+    type: "metadata-checker-background-process",
+    payload: { limit: 1, max_concurrency: 1 },
+  });
 }
 
 function sendPopupRequest(requestType, onErrorCode, onErrorMessage) {
@@ -177,12 +245,67 @@ function requestAnalyzeCurrentSelectionFromPopup() {
     });
 }
 
-function loadStatus() {
-  requestBridgeStatus()
+function requestRetryCurrentSelectionFromPopup() {
+  requestRetryCurrentSelection()
     .then((response) => {
       renderStatus({
         last_bridge_status: response || {},
         last_diagnostic: firstDiagnostic(response) || null,
+      });
+    })
+    .catch((error) => {
+      renderStatus({
+        last_diagnostic: normalizeError(
+          error,
+          "METADATA_CHECKER_POPUP_RETRY_SELECTION_FAILED",
+          "retry current selection failed",
+        ),
+      });
+    });
+}
+
+function requestBackgroundProcessFromPopup() {
+  requestBackgroundProcess()
+    .then((response) => {
+      renderStatus({
+        state: response || {},
+        last_diagnostic: firstDiagnostic(response) || null,
+      });
+    })
+    .catch((error) => {
+      renderStatus({
+        last_diagnostic: normalizeError(
+          error,
+          "METADATA_CHECKER_POPUP_BACKGROUND_PROCESS_FAILED",
+          "background process failed",
+        ),
+      });
+    });
+}
+
+function loadStatus() {
+  Promise.allSettled([requestBridgeStatus(), requestBackgroundState()])
+    .then(([bridgeResult, backgroundResult]) => {
+      const bridge = bridgeResult.status === "fulfilled" ? bridgeResult.value : {};
+      const background = backgroundResult.status === "fulfilled" ? backgroundResult.value : {};
+      const bridgeError = bridgeResult.status === "rejected"
+        ? normalizeError(
+          bridgeResult.reason,
+          "METADATA_CHECKER_POPUP_STATUS_FAILED",
+          "status failed",
+        )
+        : null;
+      const backgroundError = backgroundResult.status === "rejected"
+        ? normalizeError(
+          backgroundResult.reason,
+          "METADATA_CHECKER_POPUP_BACKGROUND_STATUS_FAILED",
+          "background status failed",
+        )
+        : null;
+      renderStatus({
+        last_bridge_status: bridge || {},
+        state: background?.state || background || {},
+        last_diagnostic: firstDiagnostic(bridge) || firstDiagnostic(background) || bridgeError || backgroundError || null,
       });
     })
     .catch((error) => {
@@ -204,6 +327,12 @@ document.querySelector('[data-action="hide-panel"]')?.addEventListener("click", 
 });
 document.querySelector('[data-action="refresh-bridge"]')?.addEventListener("click", () => {
   requestRefreshBridge();
+});
+document.querySelector('[data-action="process-background"]')?.addEventListener("click", () => {
+  requestBackgroundProcessFromPopup();
+});
+document.querySelector('[data-action="retry-current-selection"]')?.addEventListener("click", () => {
+  requestRetryCurrentSelectionFromPopup();
 });
 document.querySelector('[data-action="analyze"]')?.addEventListener("click", () => {
   requestAnalyzeCurrentSelectionFromPopup();

@@ -5627,7 +5627,7 @@ BI onInitDesigner
     - `background_analysis_completed`
   - 所有输出必须脱敏。
 
-- [ ] M45.7：Simplified Indexing Progress + Current Page First
+- [x] M45.7：Simplified Indexing Progress + Current Page First（代码能力已落地，真实 BI 证据仍按验收标准补齐）
   - 保留已落地的 Rust orchestrator 作为后续可选基础能力，但 M45 不强制把浏览器端全部后台调度切到 Rust 状态机。
   - 浏览器端验收改为更简单的产品路径：
     - 打开设计器后优先获取并分析当前 `.spg`；
@@ -5638,6 +5638,8 @@ BI onInitDesigner
     - 不要求实现完全无感知的 artifact waiter、强抢占、复杂多并发调度。
   - JS 侧允许保留轻量队列与进度统计，但不得承载解析、图查询或业务推理；复杂队列算法不作为 M45 验收要求。
   - Rust/WASM core 继续负责真实解析、建图、selection 分析；JS 只负责远程 fetch、缓存、触发分析和展示进度。
+  - 2026-05-28 已补齐 Chromium popup 的 indexing/progress/current/cache 展示，并新增 `Process background` 与 `Retry current selection` 手动验收入口。
+  - `Retry current selection` 由 content script 读取当前 bridge selection 后转发给 extension service worker 的 foreground queue，不经过 page-visible token、raw metadata 或业务解析逻辑。
 
 
 验收标准：
