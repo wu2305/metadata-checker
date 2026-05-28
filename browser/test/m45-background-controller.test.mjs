@@ -146,6 +146,76 @@ test("M45 background bootstraps with one-shot token and indexes visible metadata
   );
 });
 
+test("M45 bootstrap prioritizes current source path even when it sorts later", async () => {
+  const starts = [];
+  const fetchImpl = async (url, init = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/api/me/whoami") {
+      assert.equal(init.credentials, "include");
+      return jsonResponse(200, { userId: "u1", userName: "User One" });
+    }
+    if (parsed.pathname === "/api/me/getPermissionInfo") {
+      return jsonResponse(200, {
+        metaProjects: [{ projectName: "xiaoshouyi" }],
+      });
+    }
+    if (parsed.pathname === "/api/meta/services/getFileChildren/xiaoshouyi") {
+      return jsonResponse(200, {
+        children: [{ name: "app", parentDir: "/xiaoshouyi", isFolder: true }],
+      });
+    }
+    if (parsed.pathname === "/api/meta/services/getFileDescendant/xiaoshouyi/app") {
+      return jsonResponse(200, {
+        files: [
+          {
+            id: "page-a",
+            name: "Page.spg",
+            parentDir: "/xiaoshouyi/app/A.app",
+            revision: "1",
+            isFolder: false,
+          },
+          {
+            id: "page-z",
+            name: "Page.spg",
+            parentDir: "/xiaoshouyi/app/Z.app",
+            revision: "1",
+            isFolder: false,
+          },
+        ],
+      });
+    }
+    if (
+      parsed.pathname === "/api/meta/services/getFileContent/page-a" ||
+      parsed.pathname === "/api/meta/services/getFileContent/page-z"
+    ) {
+      return jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) });
+    }
+    return jsonResponse(404, {});
+  };
+  const controller = createM45BackgroundController({
+    fetchImpl,
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection(selection) {
+        starts.push(selection.source_path);
+        return { status: "ready" };
+      },
+    },
+  });
+
+  const result = await controller.bootstrapAndIndex({
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    access_token: "one-shot",
+    current_source_path: "app/Z.app/Page.spg",
+    initial_limit: 1,
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(starts, ["app/Z.app/Page.spg"]);
+  assert.equal(controller.state.background.queue[0].source_path, "app/A.app/Page.spg");
+});
+
 test("M45 background rejects anonymous whoami without leaking token", async () => {
   const controller = createM45BackgroundController({
     fetchImpl: async () => jsonResponse(200, { anonymous: true }),
@@ -1103,6 +1173,35 @@ test("M45 background records per-file fetch failure and continues queue", async 
     ),
     true,
   );
+});
+
+test("M45 background records runtime analysis failure in indexing progress", async () => {
+  const { fetchImpl } = createFetchStub();
+  const controller = createM45BackgroundController({
+    fetchImpl,
+    analysisClient: {
+      async loadSuperpageDocument() {},
+      async buildOrUpdateSuperpageGraph() {},
+      async analyzeSuperpageSelection() {
+        throw new Error("runtime analysis failed");
+      },
+    },
+  });
+
+  const result = await controller.bootstrapAndIndex({
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    access_token: "one-shot",
+    current_source_path: "app/Test.app/Page.spg",
+    initial_limit: 1,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.background.processed, 1);
+  assert.equal(result.background.failed, 1);
+  assert.equal(result.background.last_failed_source_path, "app/Test.app/Page.spg");
+  assert.equal(result.background.retry_available, true);
+  const failedArtifact = result.background.last_failed_source_path;
+  assert.equal(failedArtifact, "app/Test.app/Page.spg");
 });
 
 test("M45 metadata cache rejects sensitive payloads", async () => {

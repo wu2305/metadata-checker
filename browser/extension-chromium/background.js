@@ -609,7 +609,8 @@ export function createM45BackgroundController(options = {}) {
     }
   }
 
-  async function listVisibleMetadata({ base_url, baseUrl } = {}) {
+  async function listVisibleMetadata(context = {}) {
+    const { base_url, baseUrl } = context;
     const base = base_url ?? baseUrl ?? state.session?.base_url;
     if (!base) {
       throw new Error("SESSION_BOOTSTRAP_FAILED: base_url is required");
@@ -656,7 +657,11 @@ export function createM45BackgroundController(options = {}) {
       indexed_at: clock(),
     };
     await cache.set(`visible-index|${base}`, state.visible_index);
-    seedBackgroundQueue(analyzable, { base_url: base });
+    seedBackgroundQueue(analyzable, {
+      base_url: base,
+      current_source_path: context.current_source_path ?? context.currentSourcePath,
+      current_dependency_paths: context.current_dependency_paths ?? context.currentDependencyPaths ?? context.dependency_paths,
+    });
     emit(M45_EVENT_TYPES.VISIBLE_METADATA_INDEXED, {
       project_count: projects.length,
       file_count: visibleFiles.length,
@@ -854,6 +859,11 @@ export function createM45BackgroundController(options = {}) {
         raw_text: rawText,
       });
       const artifact = await runBackgroundAnalysis(item, rawText);
+      if (artifact?.analysis_status === "error") {
+        state.background.failed += 1;
+        state.background.last_failed_source_path = item.source_path;
+        state.background.retry_available = true;
+      }
       await tryCacheSet(artifactKey, artifact);
       state.background.last_processed_source_path = item.source_path;
       return { cached: artifact, item, artifact_key: artifactKey, cache_hit: false };
