@@ -1,13 +1,12 @@
 import { access, cp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
 
 import { copyDirectoryInto, patchManifest, stableDiagnostic } from "./prepare-extension-package.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_OUT_DIR = join(tmpdir(), "metadata-checker-extension-safari-staging");
 const DEFAULT_BROWSER_ROOT = join(__dirname, "..");
+const DEFAULT_OUT_DIR = join(DEFAULT_BROWSER_ROOT, "artifacts", "metadata-checker-extension-safari-staging");
 const DEFAULT_CORE_DIR = join(DEFAULT_BROWSER_ROOT, "extension-core");
 const DEFAULT_SAFARI_DIR = join(DEFAULT_BROWSER_ROOT, "extension-safari");
 const DEFAULT_VERSION = "0.0.0";

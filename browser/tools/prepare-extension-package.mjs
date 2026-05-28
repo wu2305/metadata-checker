@@ -1,11 +1,10 @@
 import { cp, copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_OUT_DIR = join(tmpdir(), "metadata-checker-extension-chromium");
 const DEFAULT_BROWSER_ROOT = join(__dirname, "..");
+const DEFAULT_OUT_DIR = join(DEFAULT_BROWSER_ROOT, "artifacts", "metadata-checker-extension-chromium");
 const DEFAULT_CORE_DIR = join(DEFAULT_BROWSER_ROOT, "extension-core");
 const DEFAULT_CHROMIUM_DIR = join(DEFAULT_BROWSER_ROOT, "extension-chromium");
 const DEFAULT_HOST_MATCH = "https://autocrm-test.xiaoshouyi.com/*";
