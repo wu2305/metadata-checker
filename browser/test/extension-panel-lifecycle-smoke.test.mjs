@@ -468,6 +468,68 @@ test("content script fetches access token without exposing it through page messa
   );
 });
 
+test("bootstrap failure keeps source path and renders fallback diagnostic", async () => {
+  const context = createFakeWindow({
+    bridge: {
+      async request() {
+        return {
+          payload: {
+            supported: true,
+            bridge_detected: true,
+            page_context: { source_path: "app/Test.spg" },
+            selection: {
+              source_path: "app/Test.spg",
+              selected_component_ids: ["canvas"],
+              active_component_id: "canvas",
+            },
+          },
+          diagnostics: [],
+        };
+      },
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return "content-token";
+      },
+    }),
+    runtimeSendMessage(message, callback) {
+      if (message?.type === "metadata-checker-bootstrap-token") {
+        callback?.({ ok: false });
+        return undefined;
+      }
+      callback?.({ ok: true });
+      return undefined;
+    },
+  });
+  await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
+
+  context.__dispatchMessage({
+    __metadata_checker_bridge_source: "page-script",
+    __metadata_checker_bridge_direction: "notification",
+    type: "bridgeReady",
+    payload: {
+      page_context: { source_path: "app/Test.spg" },
+      diagnostics: [],
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const host = context.__metadata_checker_chromium_content_state__.panelHost;
+  const state = host.getState();
+  assert.equal(state.lastEnvelope?.status, "error");
+  assert.equal(state.lastEnvelope?.target, "app/Test.spg");
+  assert.equal(
+    state.lastEnvelope?.diagnostics?.some((item) => item.code === "SESSION_BOOTSTRAP_FAILED"),
+    true,
+  );
+  assert.equal(
+    state.hostElement?.getAttribute("data-metadata-checker-panel-source-path"),
+    "app/Test.spg",
+  );
+});
+
 test("missing bridge sets panel status diagnostic without throwing", async () => {
   const missingBridge = {
     async request() {

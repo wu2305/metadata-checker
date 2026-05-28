@@ -302,11 +302,26 @@
       return;
     }
     if (result?.ok === false) {
+      const fallbackDiagnostics = diagnostics.length > 0
+        ? diagnostics
+        : [
+          stableDiagnostic(
+            "SESSION_BOOTSTRAP_FAILED",
+            "remote metadata session bootstrap failed without diagnostics",
+            "error",
+          ),
+        ];
+      const fallbackTarget = asString(
+        result?.source_path
+        || result?.current_source_path
+        || result?.state?.background?.current_source_path
+        || result?.background?.current_source_path,
+      );
       host.updatePanel({
         status: "error",
-        target: null,
+        target: fallbackTarget || null,
         items: [],
-        diagnostics: asDiagnostics(result.diagnostics),
+        diagnostics: fallbackDiagnostics,
         background: result.background ?? null,
       });
       return;
@@ -496,7 +511,12 @@
     });
     writeMarker("extension-session", result?.ok ? "ready" : "error");
     writeMarker("extension-background-index-count", String(result?.visible_index?.files?.length ?? 0));
-    updatePanelWithBackgroundState(result);
+    const diagnosticCode = asDiagnostics(result?.diagnostics)[0]?.code || "";
+    writeMarker("extension-session-diagnostic-code", diagnosticCode);
+    updatePanelWithBackgroundState({
+      ...(result || {}),
+      source_path: pageContext.source_path || "",
+    });
     return result;
   }
 
