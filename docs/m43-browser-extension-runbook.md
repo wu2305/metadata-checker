@@ -117,7 +117,7 @@ function onInitDesigner(designer, args) {
 
 ```bash
 node browser/tools/prepare-extension-package.mjs \
-  --out_dir /private/tmp/metadata-checker-extension-chromium \
+  --out_dir browser/artifacts/metadata-checker-extension-chromium \
   --version 0.1.0 \
   --host_match https://autocrm-test.xiaoshouyi.com/*
 ```
@@ -126,7 +126,7 @@ node browser/tools/prepare-extension-package.mjs \
 
 ```bash
 node browser/tools/prepare-extension-package.mjs \
-  --out_dir /private/tmp/metadata-checker-extension-chromium \
+  --out_dir browser/artifacts/metadata-checker-extension-chromium \
   --version 0.1.0 \
   --host_match https://autocrm-test.xiaoshouyi.com/* \
   --wasm_bindgen_js /path/metadata_checker.js \
@@ -137,7 +137,7 @@ node browser/tools/prepare-extension-package.mjs \
 
 1. 打开 `chrome://extensions` / `edge://extensions`。
 2. 开启「开发者模式」。
-3. 点击「加载已解压的扩展程序」并选 `/private/tmp/metadata-checker-extension-chromium`。
+3. 点击「加载已解压的扩展程序」并选仓库内的 `browser/artifacts/metadata-checker-extension-chromium`。
 4. 启用扩展，确认图标可见。
 5. **不在内置浏览器中验证 extension 安装**；该步骤仅限用于浏览器内核为真但不支持外部扩展时的 marker/console 复核。
 
