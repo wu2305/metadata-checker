@@ -4,8 +4,10 @@
 //! 仅在 browser-wasm feature 下编译，验证 JS callable 包装层 JSON 解析与透传行为。
 
 use metadata_checker::browser_wasm_bindgen::{
-    js_analyze_superpage_selection, js_build_or_update_superpage_graph, js_init_runtime,
-    js_load_superpage_document, js_runtime_status,
+    js_analysis_orchestrator_status, js_analyze_superpage_selection,
+    js_build_or_update_superpage_graph, js_enqueue_background_tasks,
+    js_enqueue_foreground_selection, js_init_runtime, js_load_superpage_document,
+    js_runtime_status, js_tick_analysis_orchestrator,
 };
 use metadata_checker::remote_metadata_provider::wasm_bindings::{
     js_fetch_remote_file_content, js_fetch_remote_file_info, js_load_remote_superpage_document,
@@ -24,8 +26,16 @@ struct JsDiagnostic {
 }
 
 #[derive(Debug, Deserialize)]
+struct JsEnvelopeItem {
+    kind: String,
+    detail: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
 struct JsEnvelope {
     status: String,
+    #[serde(default)]
+    items: Vec<JsEnvelopeItem>,
     diagnostics: Vec<JsDiagnostic>,
 }
 
@@ -38,6 +48,21 @@ fn parse_js_envelope(output: &str) -> JsEnvelope {
 
 fn has_diagnostic_code<'a>(envelope: &'a JsEnvelope, code: &str) -> bool {
     envelope.diagnostics.iter().any(|diag| diag.code == code)
+}
+
+fn has_item_kind(envelope: &JsEnvelope, kind: &str) -> bool {
+    envelope
+        .items
+        .iter()
+        .any(|item| item.kind == kind && item.detail.is_object())
+}
+
+fn find_item_detail<'a>(envelope: &'a JsEnvelope, kind: &str) -> Option<&'a serde_json::Value> {
+    envelope
+        .items
+        .iter()
+        .find(|item| item.kind == kind)
+        .map(|item| &item.detail)
 }
 
 fn with_runtime<T>(f: impl FnOnce(&str) -> T) -> T {
@@ -263,6 +288,140 @@ fn test_js_build_or_update_superpage_graph_nonexistent_source_path() {
         assert_eq!(envelope.status, "error");
         assert_eq!(envelope.diagnostics[0].code, "DOCUMENT_NOT_FOUND");
     });
+}
+
+#[test]
+fn test_js_enqueue_foreground_selection_invalid_selection_json() {
+    let _guard = with_runtime_lock();
+    let _ = js_init_runtime("{}");
+    let output = js_enqueue_foreground_selection("not json", "{}");
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "error");
+    assert_eq!(
+        envelope.diagnostics[0].code,
+        "INVALID_ORCHESTRATOR_SELECTION"
+    );
+}
+
+#[test]
+fn test_js_enqueue_foreground_selection_rejects_raw_text_field() {
+    let _guard = with_runtime_lock();
+    let _ = js_init_runtime("{}");
+    let output = js_enqueue_foreground_selection(
+        r#"{"source_path":"app/test.spg","rawText":"<x>","selected_component_ids":[]}"#,
+        "{}",
+    );
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "error");
+    assert_eq!(
+        envelope.diagnostics[0].code,
+        "INVALID_ORCHESTRATOR_SELECTION"
+    );
+}
+
+#[test]
+fn test_js_enqueue_background_tasks_and_tick_status_cycle() {
+    let _guard = with_runtime_lock();
+    let _ = js_init_runtime("{}");
+
+    let tasks = serde_json::json!([
+        {
+            "source_path": "app/js-task-a.spg",
+            "file_id": "a",
+            "processing_ticks": 1
+        },
+        {
+            "source_path": "app/js-task-b.spg",
+            "file_id": "b",
+            "processing_ticks": 1
+        }
+    ])
+    .to_string();
+    let enqueue_output = js_enqueue_background_tasks(&tasks);
+    let enqueue_envelope = parse_js_envelope(&enqueue_output);
+    assert_eq!(enqueue_envelope.status, "ready");
+    assert!(has_item_kind(&enqueue_envelope, "orchestrator_progress"));
+
+    let tick_output = js_tick_analysis_orchestrator("2", "4");
+    let tick_envelope = parse_js_envelope(&tick_output);
+    assert_eq!(tick_envelope.status, "ready");
+    assert!(has_item_kind(&tick_envelope, "orchestrator_tick"));
+
+    let status_output = js_analysis_orchestrator_status("4");
+    let status_envelope = parse_js_envelope(&status_output);
+    assert_eq!(status_envelope.status, "ready");
+    assert!(has_item_kind(&status_envelope, "orchestrator_progress"));
+}
+
+#[test]
+fn test_js_tick_emits_started_task_descriptor_for_background_queue() {
+    let _guard = with_runtime_lock();
+    let _ = js_init_runtime("{}");
+
+    let tasks = serde_json::json!([
+        {
+            "source_path": "app/js-wasm-bg-a.spg",
+            "file_id": "a",
+            "processing_ticks": 1
+        },
+        {
+            "source_path": "app/js-wasm-bg-b.spg",
+            "file_id": "b",
+            "processing_ticks": 1
+        }
+    ])
+    .to_string();
+
+    let enqueue_output = js_enqueue_background_tasks(&tasks);
+    let enqueue_envelope = parse_js_envelope(&enqueue_output);
+    assert!(has_item_kind(&enqueue_envelope, "orchestrator_progress"));
+
+    let tick_output = js_tick_analysis_orchestrator("1", "4");
+    let tick_envelope = parse_js_envelope(&tick_output);
+    let started = find_item_detail(&tick_envelope, "orchestrator_started_task")
+        .expect("tick should emit orchestrator_started_task");
+    let source_path = started
+        .get("source_path")
+        .and_then(|value| value.as_str())
+        .expect("started task should include source_path");
+    assert!(
+        source_path == "app/js-wasm-bg-a.spg" || source_path == "app/js-wasm-bg-b.spg"
+    );
+}
+
+#[test]
+fn test_js_tick_emits_started_foreground_task_selection_fields() {
+    let _guard = with_runtime_lock();
+    let _ = js_init_runtime("{}");
+
+    let selection = r#"{"source_path":"app/wasm-fg.spg","file_id":"f","selected_component_ids":["btn1","btn2"],"active_component_id":"btn1"}"#;
+    let options = r#"{"generation":1,"processing_ticks":1}"#;
+
+    let enqueue_output = js_enqueue_foreground_selection(selection, options);
+    let enqueue_envelope = parse_js_envelope(&enqueue_output);
+    assert_eq!(enqueue_envelope.status, "ready");
+    assert!(has_item_kind(&enqueue_envelope, "foreground_request"));
+
+    let tick_output = js_tick_analysis_orchestrator("1", "4");
+    let tick_envelope = parse_js_envelope(&tick_output);
+    let started = find_item_detail(&tick_envelope, "orchestrator_started_task")
+        .expect("tick should emit orchestrator_started_task");
+
+    let selected_component_ids = started
+        .get("selected_component_ids")
+        .and_then(|value| value.as_array())
+        .expect("started foreground task should include selected_component_ids");
+    let selected_ids: Vec<String> = selected_component_ids
+        .iter()
+        .map(|value| value.as_str().expect("selected component id should be string").to_string())
+        .collect();
+    assert_eq!(selected_ids, vec!["btn1".to_string(), "btn2".to_string()]);
+
+    let active_component_id = started
+        .get("active_component_id")
+        .and_then(|value| value.as_str())
+        .expect("started foreground task should include active_component_id");
+    assert_eq!(active_component_id, "btn1");
 }
 
 #[test]

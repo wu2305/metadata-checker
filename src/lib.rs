@@ -1,6 +1,7 @@
 pub mod action_semantics;
 pub mod answer_contract;
 pub mod browser;
+pub mod browser_orchestrator;
 #[cfg(feature = "browser-wasm")]
 pub mod browser_wasm_bindgen;
 #[cfg(feature = "cli-local")]

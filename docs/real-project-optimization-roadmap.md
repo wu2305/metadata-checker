@@ -5556,6 +5556,7 @@ BI onInitDesigner
 - 不把 token、cookie、password 写入 IndexedDB、graphdb、日志、diagnostics、DOM 文本或 AI output。
 - JS 只做插件接入、消息桥、Service Worker 编排、缓存 provider 和 UI 状态展示；解析、建图、依赖追踪、分析仍由 Rust/WASM core 完成。
 - `RemoteMetadataProvider` 不负责登录，只接收已认证 session/client 后读取 raw metadata。
+- 当前 `background.js` 仍承载了队列/调度编排责任；下一阶段需下沉到 Rust orchestrator，JS 保持 adapter 职责。
 
 登录链路：
 
@@ -5625,10 +5626,33 @@ BI onInitDesigner
     - `background_analysis_completed`
   - 所有输出必须脱敏。
 
+- [ ] M45.7：JS Thinning + Rust Orchestrator Boundary
+  - 把 `background.js` 的核心调度逻辑与限流语义迁移到 Rust orchestrator：队列构建、前台/后台优先级、pause/resume、并发控制、`min_interval_ms`、`processed/total` 计数、artifact 等待时序。
+  - JS 侧仅保留：
+    - session/bootstrap 状态、错误码与轻量事件映射；
+    - 设计器 selection 标准化与发送；
+    - `analysis runtime client` 的高层调用与状态回传；
+    - 缓存访问与脱敏。
+  - 下沉后应删除或降级为 adapter 的 JS 成员：
+    - `state.background.queue`
+    - `state.background.pending_foreground`
+    - `state.background.process_gate`
+    - `state.background.processed`
+    - `state.background.total`
+    - `state.background.active`
+    - `state.background.next_run_at`
+    - `seedBackgroundQueue`
+    - `enqueueForegroundSelection`
+    - `processBackgroundQueue`
+    - `processBackgroundQueueUnserialized`
+    - `runBackgroundQueueItem`
+  - `process_gate`、`foreground queue`、`artifact waiter`、`processed/total` 算法验证转移到 Rust 测试；浏览器侧 JS 改为验证 adapter 调用边界，不验证复杂 queue 实现细节。
+
+
 验收标准：
 
 - Rust 测试覆盖账号密码登录、whoami bootstrap、anonymous/401/403/token 失效、敏感信息脱敏。
-- Browser JS 测试覆盖 page script 获取 token、content script 转发、SW whoami bootstrap、visible metadata index、后台队列优先级、cache 脱敏。
+- Browser JS 测试覆盖 page script 获取 token、content script 转发、SW whoami bootstrap、visible metadata index、cache 脱敏、`selection -> runtime adapter` 的边界调用（不做 raw 解析/业务推理）。
 - 真实环境闭环（待执行）：
   - 状态：本里程碑的真实 BI 端到端验收未闭合，**不得把测试通过当成真实环境闭环完成**。
   - 验收步骤（需补充人工与自动化证据）：

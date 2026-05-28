@@ -8,8 +8,9 @@ use wasm_bindgen::prelude::*;
 
 use crate::browser::{
     AnalysisOptions, AnalysisStatus, BrowserAnalysisEnvelope, RuntimeOptions, SuperPageSelection,
-    analyze_superpage_selection, build_or_update_superpage_graph, init_runtime,
-    load_superpage_document, runtime_status,
+    analyze_superpage_selection, build_or_update_superpage_graph,
+    enqueue_orchestrator_background_tasks, enqueue_orchestrator_foreground_selection, init_runtime,
+    load_superpage_document, orchestrator_status, runtime_status, tick_orchestrator,
 };
 
 fn parse_json_or_error<T>(
@@ -34,6 +35,40 @@ where
 
 fn envelope_to_string(envelope: &BrowserAnalysisEnvelope) -> String {
     serde_json::to_string(envelope).unwrap_or_else(|_| "{\"status\":\"error\"}".to_string())
+}
+
+fn parse_u64_or_error(
+    json: &str,
+    code: &'static str,
+    message_prefix: &str,
+) -> Result<u64, BrowserAnalysisEnvelope> {
+    serde_json::from_str(json).map_err(|e| BrowserAnalysisEnvelope {
+        status: AnalysisStatus::Error,
+        target: None,
+        items: vec![],
+        diagnostics: vec![crate::browser::AnalysisDiagnostic {
+            severity: "error".to_string(),
+            code: code.to_string(),
+            message: format!("{}{}", message_prefix, e),
+        }],
+    })
+}
+
+fn parse_usize_or_error(
+    json: &str,
+    code: &'static str,
+    message_prefix: &str,
+) -> Result<usize, BrowserAnalysisEnvelope> {
+    serde_json::from_str(json).map_err(|e| BrowserAnalysisEnvelope {
+        status: AnalysisStatus::Error,
+        target: None,
+        items: vec![],
+        diagnostics: vec![crate::browser::AnalysisDiagnostic {
+            severity: "error".to_string(),
+            code: code.to_string(),
+            message: format!("{}{}", message_prefix, e),
+        }],
+    })
 }
 
 /// 初始化 WASM runtime，接收 JSON 字符串选项
@@ -100,5 +135,52 @@ pub fn js_analyze_superpage_selection(selection_json: &str, options_json: &str) 
         Err(err) => return envelope_to_string(&err),
     };
     let result = analyze_superpage_selection(selection, options);
+    envelope_to_string(&result)
+}
+
+/// 将前台请求入队到 orchestrator（JSON 入参）
+#[wasm_bindgen(js_name = enqueueForegroundSelection)]
+pub fn js_enqueue_foreground_selection(selection_json: &str, options_json: &str) -> String {
+    let result = enqueue_orchestrator_foreground_selection(selection_json, options_json);
+    envelope_to_string(&result)
+}
+
+/// 将后台任务批量入队到 orchestrator（JSON 入参）
+#[wasm_bindgen(js_name = enqueueBackgroundTasks)]
+pub fn js_enqueue_background_tasks(tasks_json: &str) -> String {
+    let result = enqueue_orchestrator_background_tasks(tasks_json);
+    envelope_to_string(&result)
+}
+
+/// 推进 orchestrator 一次逻辑 tick（JSON 入参）
+#[wasm_bindgen(js_name = tickAnalysisOrchestrator)]
+pub fn js_tick_analysis_orchestrator(logical_tick_json: &str, limit_json: &str) -> String {
+    let logical_tick = match parse_u64_or_error(
+        logical_tick_json,
+        "INVALID_TICK",
+        "Failed to parse tick JSON: ",
+    ) {
+        Ok(v) => v,
+        Err(err) => return envelope_to_string(&err),
+    };
+    let limit =
+        match parse_usize_or_error(limit_json, "INVALID_LIMIT", "Failed to parse limit JSON: ") {
+            Ok(v) => v,
+            Err(err) => return envelope_to_string(&err),
+        };
+
+    let result = tick_orchestrator(logical_tick, limit);
+    envelope_to_string(&result)
+}
+
+/// 查询 orchestrator 状态（JSON 入参）
+#[wasm_bindgen(js_name = analysisOrchestratorStatus)]
+pub fn js_analysis_orchestrator_status(limit_json: &str) -> String {
+    let limit =
+        match parse_usize_or_error(limit_json, "INVALID_LIMIT", "Failed to parse limit JSON: ") {
+            Ok(v) => v,
+            Err(err) => return envelope_to_string(&err),
+        };
+    let result = orchestrator_status(limit);
     envelope_to_string(&result)
 }

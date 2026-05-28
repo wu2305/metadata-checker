@@ -3,6 +3,10 @@
 //! M40.2：提供 browser-only WASM API，不改变现有 CLI/stdio 输出 schema。
 //! 所有函数返回统一的 BrowserAnalysisEnvelope。
 
+use crate::browser_orchestrator::{
+    AnalysisArtifactKey, AnalysisArtifactScope, BackgroundProgress, BackgroundScanTask,
+    AnalysisPriority, BrowserAnalysisOrchestrator, OrchestratorTaskDescriptor, QueueStatus,
+};
 use crate::dependency::DependencyGraph;
 use crate::graph::{EdgeType, Node, NodeType};
 use crate::graph_store::{GraphReadStore, GraphWriteStore};
@@ -78,13 +82,61 @@ pub struct AnalysisOptions {
     pub include_dataflow: bool,
 }
 
+/// Orchestrator 前台 selection 入队请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorForegroundSelection {
+    pub source_path: String,
+    #[serde(default)]
+    pub file_id: Option<String>,
+    #[serde(default)]
+    pub selected_component_ids: Vec<String>,
+    #[serde(default)]
+    pub active_component_id: Option<String>,
+}
+
+/// Orchestrator 入队参数
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorForegroundRequestOptions {
+    pub project_name: Option<String>,
+    pub revision: Option<String>,
+    #[serde(default)]
+    pub generation: Option<u64>,
+    #[serde(default)]
+    pub processing_ticks: Option<u64>,
+}
+
+impl Default for OrchestratorForegroundRequestOptions {
+    fn default() -> Self {
+        Self {
+            project_name: None,
+            revision: None,
+            generation: Some(1),
+            processing_ticks: Some(1),
+        }
+    }
+}
+
+/// Orchestrator 后台任务入队请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorBackgroundTaskRequest {
+    pub source_path: String,
+    pub file_id: Option<String>,
+    pub project_name: Option<String>,
+    pub revision: Option<String>,
+    #[serde(default)]
+    pub generation: Option<u64>,
+    #[serde(default)]
+    pub processing_ticks: Option<u64>,
+}
+
 /// Browser runtime 内部状态
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BrowserRuntime {
     pub initialized: bool,
     pub options: RuntimeOptions,
     pub documents: HashMap<String, superpage::SuperPageMetadata>,
     pub graphs: HashMap<String, MemoryGraphStore>,
+    pub orchestrator: BrowserAnalysisOrchestrator,
 }
 
 impl BrowserRuntime {
@@ -94,7 +146,14 @@ impl BrowserRuntime {
             options,
             documents: HashMap::new(),
             graphs: HashMap::new(),
+            orchestrator: BrowserAnalysisOrchestrator::new(1, 0),
         }
+    }
+}
+
+impl Default for BrowserRuntime {
+    fn default() -> Self {
+        Self::new(RuntimeOptions::default())
     }
 }
 
@@ -156,6 +215,428 @@ pub fn runtime_status() -> BrowserAnalysisEnvelope {
                 message: "Runtime has not been initialized. Call init_runtime first.".to_string(),
             }],
         },
+    }
+}
+
+fn orchestration_error_diagnostic(
+    code: &str,
+    message: impl Into<String>,
+) -> Vec<AnalysisDiagnostic> {
+    vec![AnalysisDiagnostic {
+        severity: "error".to_string(),
+        code: code.to_string(),
+        message: message.into(),
+    }]
+}
+
+fn queue_status_to_str(status: QueueStatus) -> &'static str {
+    match status {
+        QueueStatus::Idle => "idle",
+        QueueStatus::Running => "running",
+        QueueStatus::Paused => "paused",
+        QueueStatus::Completed => "completed",
+    }
+}
+
+fn progress_to_item(progress: &BackgroundProgress, label: impl Into<String>) -> AnalysisItem {
+    AnalysisItem {
+        kind: "orchestrator_progress".to_string(),
+        label: label.into(),
+        detail: serde_json::json!({
+            "status": queue_status_to_str(progress.status),
+            "processed": progress.processed,
+            "total": progress.total,
+            "active": progress.active,
+            "queued": progress.queued,
+            "max_concurrency": progress.max_concurrency,
+            "limit": progress.limit,
+            "min_interval_ticks": progress.min_interval_ticks,
+        }),
+    }
+}
+
+fn orchestrator_progress_value(progress: &BackgroundProgress) -> serde_json::Value {
+    serde_json::json!({
+        "status": queue_status_to_str(progress.status),
+        "processed": progress.processed,
+        "total": progress.total,
+        "active": progress.active,
+        "queued": progress.queued,
+        "max_concurrency": progress.max_concurrency,
+        "limit": progress.limit,
+        "min_interval_ticks": progress.min_interval_ticks,
+    })
+}
+
+fn artifact_scope_to_string(scope: AnalysisArtifactScope) -> &'static str {
+    match scope {
+        AnalysisArtifactScope::Foreground => "foreground",
+        AnalysisArtifactScope::Background => "background",
+    }
+}
+
+fn orchestrator_task_descriptor_value(task: &OrchestratorTaskDescriptor) -> serde_json::Value {
+    serde_json::json!({
+        "task_id": task.task_id,
+        "source_path": task.source_path,
+        "project_name": task.project_name,
+        "file_id": task.file_id,
+        "revision": task.revision,
+        "scope": artifact_scope_to_string(task.scope),
+        "generation": task.generation,
+        "active_component_id": task.active_component_id,
+        "selected_component_ids": task.selected_component_ids,
+    })
+}
+
+fn contains_restricted_selection_fields(value: &serde_json::Value) -> bool {
+    matches!(value, serde_json::Value::Object(obj)
+        if obj.contains_key("raw_text")
+            || obj.contains_key("rawText")
+            || obj.contains_key("raw_metadata"))
+}
+
+fn normalize_orchestrator_generation(generation: Option<u64>) -> u64 {
+    generation.unwrap_or(1).max(1)
+}
+
+fn normalize_orchestrator_ticks(ticks: Option<u64>) -> u64 {
+    ticks.unwrap_or(1).max(1)
+}
+
+const ORCHESTRATOR_PROGRESS_LIMIT: usize = 16;
+
+/// 查询 orchestrator 状态摘要
+pub fn orchestrator_status(limit: usize) -> BrowserAnalysisEnvelope {
+    let rt = match RUNTIME.get() {
+        Some(r) => r,
+        None => {
+            return BrowserAnalysisEnvelope {
+                status: AnalysisStatus::Error,
+                target: None,
+                items: vec![],
+                diagnostics: orchestration_error_diagnostic(
+                    "RUNTIME_NOT_INITIALIZED",
+                    "Runtime has not been initialized. Call init_runtime first.",
+                ),
+            };
+        }
+    };
+
+    let rt = rt.lock().unwrap();
+    let progress = rt.orchestrator.get_progress(limit);
+    BrowserAnalysisEnvelope {
+        status: AnalysisStatus::Ready,
+        target: None,
+        items: vec![progress_to_item(&progress, "Orchestrator Progress")],
+        diagnostics: vec![],
+    }
+}
+
+/// 队列入队前台 orchestrator 请求
+pub fn enqueue_orchestrator_foreground_selection(
+    selection_json: &str,
+    request_options_json: &str,
+) -> BrowserAnalysisEnvelope {
+    let rt = match RUNTIME.get() {
+        Some(r) => r,
+        None => {
+            return BrowserAnalysisEnvelope {
+                status: AnalysisStatus::Error,
+                target: None,
+                items: vec![],
+                diagnostics: orchestration_error_diagnostic(
+                    "RUNTIME_NOT_INITIALIZED",
+                    "Runtime has not been initialized. Call init_runtime first.",
+                ),
+            };
+        }
+    };
+
+    let selection_value: serde_json::Value = match serde_json::from_str(selection_json) {
+        Ok(v) => v,
+        Err(e) => {
+            return BrowserAnalysisEnvelope {
+                status: AnalysisStatus::Error,
+                target: None,
+                items: vec![],
+                diagnostics: orchestration_error_diagnostic(
+                    "INVALID_ORCHESTRATOR_SELECTION",
+                    format!("Failed to parse selection JSON: {e}"),
+                ),
+            };
+        }
+    };
+
+    if contains_restricted_selection_fields(&selection_value) {
+        return BrowserAnalysisEnvelope {
+            status: AnalysisStatus::Error,
+            target: None,
+            items: vec![],
+            diagnostics: orchestration_error_diagnostic(
+                "INVALID_ORCHESTRATOR_SELECTION",
+                "Selection payload contains forbidden fields raw_text/rawText/raw_metadata",
+            ),
+        };
+    }
+
+    let options: OrchestratorForegroundRequestOptions =
+        match serde_json::from_str(request_options_json) {
+            Ok(v) => v,
+            Err(e) => {
+                return BrowserAnalysisEnvelope {
+                    status: AnalysisStatus::Error,
+                    target: None,
+                    items: vec![],
+                    diagnostics: orchestration_error_diagnostic(
+                        "INVALID_ORCHESTRATOR_REQUEST_OPTIONS",
+                        format!("Failed to parse orchestrator request options JSON: {e}"),
+                    ),
+                };
+            }
+        };
+
+    let selection: OrchestratorForegroundSelection = match serde_json::from_value(selection_value) {
+        Ok(v) => v,
+        Err(e) => {
+            return BrowserAnalysisEnvelope {
+                status: AnalysisStatus::Error,
+                target: None,
+                items: vec![],
+                diagnostics: orchestration_error_diagnostic(
+                    "INVALID_ORCHESTRATOR_SELECTION",
+                    format!("Failed to parse orchestrator selection payload: {e}"),
+                ),
+            };
+        }
+    };
+
+    let mut rt = rt.lock().unwrap();
+    let generation = normalize_orchestrator_generation(options.generation);
+    let processing_ticks = normalize_orchestrator_ticks(options.processing_ticks);
+
+    let key = AnalysisArtifactKey::foreground(
+        options.project_name.clone(),
+        selection.source_path.clone(),
+        selection.file_id.clone(),
+        options.revision,
+        selection.active_component_id.clone(),
+        selection.selected_component_ids.clone(),
+    );
+
+    let result =
+        rt.orchestrator
+            .enqueue_foreground_request(key.clone(), generation, processing_ticks);
+    let progress = rt.orchestrator.get_progress(ORCHESTRATOR_PROGRESS_LIMIT);
+
+    let mut items = Vec::new();
+    items.push(AnalysisItem {
+        kind: "foreground_request".to_string(),
+        label: "Foreground Request".to_string(),
+        detail: serde_json::json!({
+            "request_id": result.request_id,
+            "task_id": result.task_id,
+            "merged_with": result.merged_with,
+            "cache_hit": result.cache_hit,
+            "generation": generation,
+            "processing_ticks": processing_ticks,
+            "source_path": key.source_path,
+            "project_name": key.project_name,
+            "file_id": key.file_id,
+            "active_component_id": key.active_component_id,
+            "selected_component_ids": key.selected_component_ids,
+            "scope": "foreground",
+        }),
+    });
+    items.push(progress_to_item(&progress, "Orchestrator Progress"));
+    BrowserAnalysisEnvelope {
+        status: AnalysisStatus::Ready,
+        target: Some(selection.source_path),
+        items,
+        diagnostics: vec![],
+    }
+}
+
+/// 队列入队后台 orchestrator 任务
+pub fn enqueue_orchestrator_background_tasks(tasks_json: &str) -> BrowserAnalysisEnvelope {
+    let rt = match RUNTIME.get() {
+        Some(r) => r,
+        None => {
+            return BrowserAnalysisEnvelope {
+                status: AnalysisStatus::Error,
+                target: None,
+                items: vec![],
+                diagnostics: orchestration_error_diagnostic(
+                    "RUNTIME_NOT_INITIALIZED",
+                    "Runtime has not been initialized. Call init_runtime first.",
+                ),
+            };
+        }
+    };
+
+    let tasks: Vec<OrchestratorBackgroundTaskRequest> = match serde_json::from_str(tasks_json) {
+        Ok(v) => v,
+        Err(e) => {
+            return BrowserAnalysisEnvelope {
+                status: AnalysisStatus::Error,
+                target: None,
+                items: vec![],
+                diagnostics: orchestration_error_diagnostic(
+                    "INVALID_ORCHESTRATOR_TASKS",
+                    format!("Failed to parse background tasks JSON: {e}"),
+                ),
+            };
+        }
+    };
+
+    let mut rt = rt.lock().unwrap();
+    let mut task_ids = Vec::new();
+    let mut request_sources = Vec::new();
+    let mut queued_task_descriptors = Vec::new();
+    for task in tasks.iter() {
+        let key = AnalysisArtifactKey::background(
+            task.project_name.clone(),
+            task.source_path.clone(),
+            task.file_id.clone(),
+            task.revision.clone(),
+        );
+        let generation = normalize_orchestrator_generation(task.generation);
+        let processing_ticks = normalize_orchestrator_ticks(task.processing_ticks);
+        let task_id = rt.orchestrator.enqueue_background_task(BackgroundScanTask {
+            artifact_key: key,
+            priority: AnalysisPriority::Background,
+            generation,
+            processing_ticks,
+        });
+        task_ids.push(task_id);
+        request_sources.push(task.source_path.clone());
+        queued_task_descriptors.push(
+            orchestrator_task_descriptor_value(&OrchestratorTaskDescriptor {
+                task_id,
+                source_path: task.source_path.clone(),
+                project_name: task.project_name.clone(),
+                file_id: task.file_id.clone(),
+                revision: task.revision.clone(),
+                scope: AnalysisArtifactScope::Background,
+                generation,
+                active_component_id: None,
+                selected_component_ids: Vec::new(),
+            }),
+        );
+    }
+    let progress = rt.orchestrator.get_progress(ORCHESTRATOR_PROGRESS_LIMIT);
+
+    BrowserAnalysisEnvelope {
+        status: AnalysisStatus::Ready,
+        target: None,
+        items: vec![
+            AnalysisItem {
+                kind: "orchestrator_progress".to_string(),
+                label: "Background Tasks Enqueued".to_string(),
+                detail: serde_json::json!({
+                    "enqueued_task_count": task_ids.len(),
+                    "enqueued_task_ids": task_ids,
+                    "sources": request_sources,
+                    "queued_task_descriptors": queued_task_descriptors,
+                    "progress": orchestrator_progress_value(&progress),
+                }),
+            },
+            progress_to_item(&progress, "Orchestrator Progress"),
+        ],
+        diagnostics: vec![],
+    }
+}
+
+/// 推进 orchestrator 调度一轮
+pub fn tick_orchestrator(logical_tick: u64, limit: usize) -> BrowserAnalysisEnvelope {
+    let rt = match RUNTIME.get() {
+        Some(r) => r,
+        None => {
+            return BrowserAnalysisEnvelope {
+                status: AnalysisStatus::Error,
+                target: None,
+                items: vec![],
+                diagnostics: orchestration_error_diagnostic(
+                    "RUNTIME_NOT_INITIALIZED",
+                    "Runtime has not been initialized. Call init_runtime first.",
+                ),
+            };
+        }
+    };
+
+    let mut rt = rt.lock().unwrap();
+    let tick_result = rt.orchestrator.tick(logical_tick, limit);
+    let progress = rt.orchestrator.get_progress(limit);
+    let mut items = vec![AnalysisItem {
+        kind: "orchestrator_tick".to_string(),
+        label: "Orchestrator Tick".to_string(),
+        detail: serde_json::json!({
+            "logical_tick": logical_tick,
+            "limit": limit,
+            "started_task_ids": tick_result.started_task_ids,
+            "started_task_descriptors": tick_result
+                .started_task_descriptors
+                .iter()
+                .map(orchestrator_task_descriptor_value)
+                .collect::<Vec<_>>(),
+            "completed_task_ids": tick_result.completed_task_ids,
+            "completed_task_descriptors": tick_result
+                .completed_task_descriptors
+                .iter()
+                .map(orchestrator_task_descriptor_value)
+                .collect::<Vec<_>>(),
+            "completed_request_ids": tick_result.completed_request_ids,
+            "progress": orchestrator_progress_value(&progress),
+        }),
+    }];
+
+    for task in &tick_result.started_task_descriptors {
+        items.push(AnalysisItem {
+            kind: "orchestrator_started_task".to_string(),
+            label: "Orchestrator Task Started".to_string(),
+            detail: orchestrator_task_descriptor_value(task),
+        });
+    }
+
+    for task in &tick_result.completed_task_descriptors {
+        items.push(AnalysisItem {
+            kind: "orchestrator_completed_task".to_string(),
+            label: "Orchestrator Task Completed".to_string(),
+            detail: orchestrator_task_descriptor_value(task),
+        });
+    }
+
+    if !tick_result.completed_request_ids.is_empty() {
+        for request_id in tick_result.completed_request_ids {
+            if let Some(request) = rt.orchestrator.get_request(request_id) {
+                items.push(AnalysisItem {
+                    kind: "foreground_request".to_string(),
+                    label: "Foreground Request Completed".to_string(),
+                    detail: serde_json::json!({
+                        "request_id": request_id,
+                        "state": "completed",
+                        "task_id": request.linked_task_id,
+                        "scope": "foreground",
+                        "source_path": request.artifact_key.source_path,
+                        "project_name": request.artifact_key.project_name,
+                        "file_id": request.artifact_key.file_id,
+                        "revision": request.artifact_key.revision,
+                        "active_component_id": request.artifact_key.active_component_id,
+                        "selected_component_ids": request.artifact_key.selected_component_ids,
+                        "generation": request.generation,
+                        "artifact_ready_tick": request.artifact.as_ref().map(|artifact| artifact.ready_tick),
+                    }),
+                });
+            }
+        }
+    }
+    items.push(progress_to_item(&progress, "Orchestrator Progress"));
+
+    BrowserAnalysisEnvelope {
+        status: AnalysisStatus::Ready,
+        target: None,
+        items,
+        diagnostics: vec![],
     }
 }
 

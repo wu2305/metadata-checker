@@ -5,8 +5,9 @@
 
 use metadata_checker::browser::{
     AnalysisOptions, AnalysisStatus, RuntimeOptions, SuperPageSelection,
-    analyze_superpage_selection, build_or_update_superpage_graph, init_runtime,
-    load_superpage_document, runtime_status,
+    analyze_superpage_selection, build_or_update_superpage_graph,
+    enqueue_orchestrator_background_tasks, enqueue_orchestrator_foreground_selection, init_runtime,
+    load_superpage_document, orchestrator_status, runtime_status, tick_orchestrator,
 };
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -49,6 +50,49 @@ fn get_runtime_counts_from_status(
     (document_count, graph_count)
 }
 
+fn get_orchestrator_progress(status: &metadata_checker::browser::BrowserAnalysisEnvelope) -> usize {
+    let item = status
+        .items
+        .iter()
+        .find(|item| item.kind == "orchestrator_progress")
+        .expect("orchestrator progress item should exist");
+    let progress = if item.detail.get("queued").is_some() {
+        item.detail.clone()
+    } else {
+        item.detail
+            .get("progress")
+            .cloned()
+            .expect("orchestrator progress detail should include progress")
+    };
+    progress
+        .get("queued")
+        .and_then(|value| value.as_u64())
+        .expect("queued should be number") as usize;
+    progress
+        .get("total")
+        .and_then(|value| value.as_u64())
+        .expect("total should be number") as usize
+}
+
+fn find_first_item_detail<'a>(
+    status: &'a metadata_checker::browser::BrowserAnalysisEnvelope,
+    kind: &str,
+) -> Option<&'a serde_json::Value> {
+    status
+        .items
+        .iter()
+        .find(|item| item.kind == kind)
+        .map(|item| &item.detail)
+}
+
+fn assert_task_descriptor_has_source(detail: &serde_json::Value, expected_source: &str) {
+    let source_path = detail
+        .get("source_path")
+        .and_then(|value| value.as_str())
+        .expect("task descriptor should contain source_path");
+    assert_eq!(source_path, expected_source);
+}
+
 #[test]
 fn test_init_runtime_returns_ready() {
     let _guard = TEST_RUNTIME_LOCK.lock().unwrap();
@@ -62,6 +106,198 @@ fn test_runtime_status_after_init() {
     init_runtime(RuntimeOptions::default());
     let status = runtime_status();
     assert_eq!(status.status, AnalysisStatus::Ready);
+}
+
+#[test]
+fn test_orchestrator_status_after_init_is_ready() {
+    let _guard = TEST_RUNTIME_LOCK.lock().unwrap();
+    init_runtime(RuntimeOptions::default());
+    let status = orchestrator_status(10);
+    assert_eq!(status.status, AnalysisStatus::Ready);
+    assert!(
+        status
+            .items
+            .iter()
+            .any(|item| item.kind == "orchestrator_progress"),
+        "orchestrator_status should include orchestrator_progress"
+    );
+}
+
+#[test]
+fn test_orchestrator_foreground_enqueue_and_tick_completes_request() {
+    let _guard = TEST_RUNTIME_LOCK.lock().unwrap();
+    init_runtime(RuntimeOptions::default());
+
+    let source_path = next_source_path("orchestrator-foreground");
+    load_superpage_document(
+        &source_path,
+        r#"{"version":"1.0","canvas":{"components":[]}}"#,
+    );
+
+    let selection_json = serde_json::json!({
+        "source_path": source_path,
+        "file_id": "test-file",
+        "selected_component_ids": ["btn1"],
+        "active_component_id": "btn1"
+    })
+    .to_string();
+    let options_json = serde_json::json!({
+        "generation": 1,
+        "processing_ticks": 1,
+    })
+    .to_string();
+
+    let enqueue_result = enqueue_orchestrator_foreground_selection(&selection_json, &options_json);
+    assert_eq!(enqueue_result.status, AnalysisStatus::Ready);
+
+    let request_id = enqueue_result
+        .items
+        .iter()
+        .find(|item| item.kind == "foreground_request")
+        .and_then(|item| item.detail.get("request_id"))
+        .and_then(|v| v.as_u64())
+        .expect("request_id should be present");
+
+    let first_tick = tick_orchestrator(1, 4);
+    assert_eq!(first_tick.status, AnalysisStatus::Ready);
+    let tick_result = tick_orchestrator(3, 4);
+    assert_eq!(tick_result.status, AnalysisStatus::Ready);
+    assert!(
+        tick_result
+            .items
+            .iter()
+            .any(|item| item.kind == "orchestrator_tick"),
+        "tick should include orchestrator_tick"
+    );
+    let has_completed_request = tick_result
+        .items
+        .iter()
+        .filter(|item| item.kind == "foreground_request")
+        .any(|item| item.detail.get("request_id") == Some(&serde_json::json!(request_id)));
+    assert!(has_completed_request, "request should complete after tick");
+}
+
+#[test]
+fn test_orchestrator_foreground_selection_rejects_raw_text_field() {
+    let _guard = TEST_RUNTIME_LOCK.lock().unwrap();
+    init_runtime(RuntimeOptions::default());
+    let selection_json =
+        r#"{"source_path":"app/test.spg","raw_text":"{\"a\":1}","selected_component_ids":[]}"#;
+    let options_json = "{}";
+    let result = enqueue_orchestrator_foreground_selection(selection_json, options_json);
+    assert_eq!(result.status, AnalysisStatus::Error);
+    assert_eq!(result.diagnostics[0].code, "INVALID_ORCHESTRATOR_SELECTION");
+}
+
+#[test]
+fn test_orchestrator_background_tasks_status_tracks_progress() {
+    let _guard = TEST_RUNTIME_LOCK.lock().unwrap();
+    init_runtime(RuntimeOptions::default());
+    let tasks_json = serde_json::json!([
+        {"source_path":"app/task-a.spg","file_id":"f1","processing_ticks":1},
+        {"source_path":"app/task-b.spg","file_id":"f2","processing_ticks":1}
+    ])
+    .to_string();
+    let enqueue_result = enqueue_orchestrator_background_tasks(&tasks_json);
+    assert_eq!(enqueue_result.status, AnalysisStatus::Ready);
+    let progress_total = get_orchestrator_progress(&enqueue_result);
+    assert!(
+        progress_total >= 2,
+        "total should reflect queued background tasks"
+    );
+}
+
+#[test]
+fn test_enqueue_background_and_tick_exposes_next_task_source_path() {
+    let _guard = TEST_RUNTIME_LOCK.lock().unwrap();
+    init_runtime(RuntimeOptions::default());
+
+    let tasks_json = serde_json::json!([
+        {"source_path":"app/js-bg-a.spg","file_id":"f1","processing_ticks":1},
+        {"source_path":"app/js-bg-b.spg","file_id":"f2","processing_ticks":1}
+    ])
+    .to_string();
+
+    let enqueue_result = enqueue_orchestrator_background_tasks(&tasks_json);
+    assert_eq!(enqueue_result.status, AnalysisStatus::Ready);
+    let enqueue_detail = find_first_item_detail(&enqueue_result, "orchestrator_progress")
+        .expect("background enqueue should include orchestrator_progress");
+    assert!(
+        enqueue_detail.get("queued_task_descriptors").is_some(),
+        "background enqueue should include queued_task_descriptors"
+    );
+    let queued = enqueue_detail
+        .get("queued_task_descriptors")
+        .and_then(|value| value.as_array())
+        .expect("queued_task_descriptors should be an array");
+    assert_eq!(queued.len(), 2);
+
+    let tick_result = tick_orchestrator(1, 4);
+    assert_eq!(tick_result.status, AnalysisStatus::Ready);
+    let started_task = tick_result
+        .items
+        .iter()
+        .find(|item| item.kind == "orchestrator_started_task")
+        .expect("tick should emit orchestrator_started_task");
+    let source = started_task
+        .detail
+        .get("source_path")
+        .and_then(|value| value.as_str())
+        .expect("started task descriptor should include source_path");
+    assert!(
+        source == "app/js-bg-a.spg" || source == "app/js-bg-b.spg",
+        "started task source_path should match queued background task"
+    );
+}
+
+#[test]
+fn test_tick_for_foreground_enqueued_request_includes_selected_components() {
+    let _guard = TEST_RUNTIME_LOCK.lock().unwrap();
+    init_runtime(RuntimeOptions::default());
+
+    let source_path = next_source_path("orchestrator-fg-components");
+    load_superpage_document(
+        &source_path,
+        r#"{"version":"1.0","canvas":{"components":[{"id":"btn1","type":"button","title":"Submit"}]}}"#,
+    );
+
+    let selection_json = serde_json::json!({
+        "source_path": source_path,
+        "file_id": "fg-file",
+        "selected_component_ids": ["btn1", "btn2"],
+        "active_component_id": "btn1"
+    })
+    .to_string();
+    let options_json = r#"{"generation":1,"processing_ticks":1}"#.to_string();
+    let enqueue_result = enqueue_orchestrator_foreground_selection(&selection_json, &options_json);
+    assert_eq!(enqueue_result.status, AnalysisStatus::Ready);
+
+    let tick_result = tick_orchestrator(1, 4);
+    assert_eq!(tick_result.status, AnalysisStatus::Ready);
+    let started_task = tick_result
+        .items
+        .iter()
+        .find(|item| item.kind == "orchestrator_started_task")
+        .expect("tick should emit orchestrator_started_task");
+    assert_task_descriptor_has_source(&started_task.detail, &source_path);
+
+    let selected_component_ids = started_task
+        .detail
+        .get("selected_component_ids")
+        .and_then(|value| value.as_array())
+        .expect("started foreground task should include selected_component_ids");
+    let selected_ids: Vec<String> = selected_component_ids
+        .iter()
+        .map(|value| value.as_str().expect("component id should be string").to_string())
+        .collect();
+    assert_eq!(selected_ids, vec!["btn1".to_string(), "btn2".to_string()]);
+
+    let active_component_id = started_task
+        .detail
+        .get("active_component_id")
+        .and_then(|value| value.as_str())
+        .expect("started foreground task should include active_component_id");
+    assert_eq!(active_component_id, "btn1");
 }
 
 #[test]
