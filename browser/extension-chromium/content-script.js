@@ -78,7 +78,16 @@
 
   function panelStatusFromBackgroundState(background) {
     const status = coerceStatus(background?.status);
-    if (status === "running" || status === "queued") {
+    const indexingStatus = coerceStatus(background?.indexing_status);
+    if (
+      status === "running"
+      || status === "queued"
+      || status === "indexing_current_page"
+      || status === "waiting_for_metadata"
+      || indexingStatus === "indexing_current_page"
+      || indexingStatus === "waiting_for_metadata"
+      || indexingStatus === "indexing_background"
+    ) {
       return "analyzing";
     }
     if (status === "completed" || status === "idle") {
@@ -304,6 +313,7 @@
     }
     const visibleIndex = result?.visible_index || result?.state?.visible_index || {};
     const background = backgroundStatus || result?.state?.background || {};
+    const cacheStats = result?.state?.cache_stats || result?.cache_stats || {};
     const sourcePath = resolvePanelTarget(
       result,
       asString(result?.source_path),
@@ -323,13 +333,20 @@
             analyzable_count: visibleIndex.analyzable_count ?? 0,
             processed: background.processed ?? 0,
             total: background.total ?? 0,
-            cache_hits: result?.state?.cache_stats?.hits ?? 0,
+            failed: background.failed ?? 0,
+            current_source_path: background.current_source_path ?? null,
+            last_processed_source_path: background.last_processed_source_path ?? null,
+            last_failed_source_path: background.last_failed_source_path ?? null,
+            indexing_status: background.indexing_status ?? background.status ?? "idle",
+            retry_available: Boolean(background.retry_available),
+            cache_hits: cacheStats.hits ?? 0,
+            cache_misses: cacheStats.misses ?? 0,
           },
         },
       ],
       diagnostics,
       background,
-      cache_stats: result?.state?.cache_stats ?? null,
+      cache_stats: cacheStats,
     });
   }
 

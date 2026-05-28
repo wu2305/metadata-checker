@@ -103,8 +103,21 @@
       `Items: ${String(envelopeSummary.itemCount)}`,
       `Diagnostics: ${String(envelopeSummary.diagnosticCount)}`,
       `Background: ${asString(background.status) || "idle"}`,
+      `Indexing: ${asString(background.indexing_status) || asString(background.status) || "idle"}`,
       `Background progress: ${String(background.processed ?? 0)}/${String(background.total ?? 0)}`,
+      `Background failed: ${String(background.failed ?? 0)}`,
+      asString(background.current_source_path)
+        ? `Current file: ${background.current_source_path}`
+        : "Current file:",
+      asString(background.last_processed_source_path)
+        ? `Last processed: ${background.last_processed_source_path}`
+        : "Last processed:",
+      asString(background.last_failed_source_path)
+        ? `Last failed: ${background.last_failed_source_path}`
+        : "Last failed:",
       `Cache hits: ${String(cacheStats.hits ?? 0)}`,
+      `Cache misses: ${String(cacheStats.misses ?? 0)}`,
+      `Retry available: ${background.retry_available === true ? "yes" : "no"}`,
       safeFocus ? `Focus: ${safeFocus}` : "Focus:",
       asString(selectionSummary.source_path) ? `Source: ${selectionSummary.source_path}` : "Source:",
     ];

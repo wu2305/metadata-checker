@@ -234,3 +234,41 @@ test("createPanelHost never renders raw payload fields into DOM text", () => {
   assert.doesNotMatch(text, /raw-text-secret/);
   assert.doesNotMatch(text, /raw list/);
 });
+
+test("createPanelHost renders simplified indexing progress and retry status", () => {
+  const host = createPanelHost();
+  const document = createDocument(true);
+  host.mountPanel({ rootDocument: document });
+  host.togglePanel(true);
+
+  host.updatePanel({
+    status: "analyzing",
+    target: "app/Test.app/Page.spg",
+    background: {
+      status: "queued",
+      indexing_status: "indexing_current_page",
+      processed: 3,
+      total: 10,
+      failed: 1,
+      current_source_path: "app/Test.app/Page.spg",
+      last_processed_source_path: "data/Table.tbl",
+      last_failed_source_path: "app/Broken.app/Page.spg",
+      retry_available: true,
+    },
+    cache_stats: {
+      hits: 2,
+      misses: 4,
+    },
+  });
+
+  const text = collectText(host.getState().contentElement);
+  assert.match(text, /Indexing: indexing_current_page/);
+  assert.match(text, /Background progress: 3\/10/);
+  assert.match(text, /Background failed: 1/);
+  assert.match(text, /Current file: app\/Test\.app\/Page\.spg/);
+  assert.match(text, /Last processed: data\/Table\.tbl/);
+  assert.match(text, /Last failed: app\/Broken\.app\/Page\.spg/);
+  assert.match(text, /Cache hits: 2/);
+  assert.match(text, /Cache misses: 4/);
+  assert.match(text, /Retry available: yes/);
+});

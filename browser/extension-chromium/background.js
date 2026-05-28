@@ -406,11 +406,17 @@ export function createM45BackgroundController(options = {}) {
       processed: 0,
       total: 0,
       active: 0,
+      failed: 0,
       paused: false,
       max_concurrency: 1,
       min_interval_ms: 0,
       process_gate: Promise.resolve(),
       next_run_at: null,
+      indexing_status: "idle",
+      current_source_path: null,
+      last_processed_source_path: null,
+      last_failed_source_path: null,
+      retry_available: false,
       last_event: null,
     },
     events: [],
@@ -761,8 +767,14 @@ export function createM45BackgroundController(options = {}) {
     state.background.queue = queue;
     state.background.total = queue.length;
     state.background.processed = 0;
+    state.background.failed = 0;
+    state.background.current_source_path = null;
+    state.background.last_processed_source_path = null;
+    state.background.last_failed_source_path = null;
+    state.background.retry_available = queue.length > 0;
     state.background.next_run_at = null;
     state.background.status = queue.length > 0 ? "queued" : "idle";
+    state.background.indexing_status = queue.length > 0 ? "queued" : "idle";
     return queue;
   }
 
@@ -773,15 +785,21 @@ export function createM45BackgroundController(options = {}) {
     }
     const isReady = state.session?.base_url && state.visible_index.status === "ready";
     if (!isReady) {
+      const indexingStatus = state.session?.base_url ? "indexing_current_page" : "waiting_for_metadata";
       state.background.pending_foreground = [
         file,
         ...state.background.pending_foreground.filter((item) => item.source_path !== file.source_path),
       ];
+      state.background.status = indexingStatus;
+      state.background.indexing_status = indexingStatus;
+      state.background.current_source_path = file.source_path;
+      state.background.retry_available = true;
       emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_PROGRESS, {
-        status: "foreground_pending",
+        status: indexingStatus,
         source_path: file.source_path,
+        retry_available: true,
       });
-      return { queued: true, file, pending: true };
+      return { queued: true, file, pending: true, indexing_status: indexingStatus, retry_available: true };
     }
     file.base_url = state.session.base_url;
     file.cache_key = makeCacheKey(file.base_url, {
@@ -799,18 +817,26 @@ export function createM45BackgroundController(options = {}) {
       state.background.processed + state.background.active + state.background.queue.length,
     );
     state.background.status = "queued";
+    state.background.indexing_status = "indexing_current_page";
+    state.background.current_source_path = file.source_path;
+    state.background.retry_available = true;
     emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_PROGRESS, {
-      status: "foreground_queued",
+      status: "indexing_current_page",
       source_path: file.source_path,
+      retry_available: true,
     });
     return { queued: true, file };
   }
 
   async function runBackgroundQueueItem(item) {
     const artifactKey = makeAnalysisArtifactKey(item);
+    state.background.current_source_path = item.source_path;
+    state.background.indexing_status = item.foreground ? "indexing_current_page" : "indexing_background";
+    state.background.retry_available = true;
     const cached = await cache.get(artifactKey);
     if (cached) {
       state.cache_stats.hits += 1;
+      state.background.last_processed_source_path = item.source_path;
       return { cached, item, artifact_key: artifactKey, cache_hit: true };
     }
     state.cache_stats.misses += 1;
@@ -829,8 +855,11 @@ export function createM45BackgroundController(options = {}) {
       });
       const artifact = await runBackgroundAnalysis(item, rawText);
       await tryCacheSet(artifactKey, artifact);
+      state.background.last_processed_source_path = item.source_path;
       return { cached: artifact, item, artifact_key: artifactKey, cache_hit: false };
     } catch (error) {
+      state.background.failed += 1;
+      state.background.last_failed_source_path = item.source_path;
       const diagnostic = stableDiagnostic(
         "BACKGROUND_ANALYSIS_FAILED",
         error?.message || "background analysis failed",
@@ -888,7 +917,8 @@ export function createM45BackgroundController(options = {}) {
       state.background.status = state.background.paused
         ? "paused"
         : state.background.queue.length > 0 ? "queued" : "idle";
-      return { processed, artifacts, background: { ...state.background } };
+      state.background.indexing_status = state.background.status;
+      return { processed, artifacts, background: { ...state.background }, cache_stats: { ...state.cache_stats } };
     }
 
     async function waitForStartSlot() {
@@ -963,8 +993,13 @@ export function createM45BackgroundController(options = {}) {
           emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_PROGRESS, {
             processed: state.background.processed,
             total: state.background.total,
+            failed: state.background.failed,
+            current_source_path: state.background.current_source_path,
             source_path: item.source_path,
             artifact_key: result.artifact_key,
+            cache_hits: state.cache_stats.hits,
+            cache_misses: state.cache_stats.misses,
+            retry_available: state.background.retry_available,
           });
         } finally {
           state.background.active -= 1;
@@ -982,13 +1017,19 @@ export function createM45BackgroundController(options = {}) {
     state.background.status = state.background.paused
       ? "paused"
       : state.background.queue.length === 0 ? "completed" : "queued";
+    state.background.indexing_status = state.background.status;
+    state.background.current_source_path = null;
+    state.background.retry_available = state.background.queue.length > 0 || state.background.failed > 0;
     if (state.background.status === "completed") {
       emit(M45_EVENT_TYPES.BACKGROUND_ANALYSIS_COMPLETED, {
         processed: state.background.processed,
         total: state.background.total,
+        failed: state.background.failed,
+        cache_hits: state.cache_stats.hits,
+        cache_misses: state.cache_stats.misses,
       });
     }
-    return { processed, artifacts, background: { ...state.background } };
+    return { processed, artifacts, background: { ...state.background }, cache_stats: { ...state.cache_stats } };
   }
 
   async function runBackgroundAnalysis(item, rawText) {
@@ -1076,6 +1117,7 @@ export function createM45BackgroundController(options = {}) {
       session: bootstrapped.session,
       visible_index: visibleIndex,
       background: queueResult.background,
+      cache_stats: { ...state.cache_stats },
     };
   }
 
@@ -1118,6 +1160,7 @@ export function createM45BackgroundController(options = {}) {
             artifact_key: payloadArtifactKey,
             artifact: cachedPayloadArtifact ?? null,
             background: { ...state.background },
+            cache_stats: { ...state.cache_stats },
           };
         }
       }
@@ -1135,7 +1178,10 @@ export function createM45BackgroundController(options = {}) {
           artifact_ready: Boolean(cachedArtifact),
           artifact_key: artifactKey,
           artifact: cachedArtifact ?? null,
+          indexing_status: queued.indexing_status ?? state.background.indexing_status,
+          retry_available: queued.retry_available ?? state.background.retry_available,
           background: { ...state.background },
+          cache_stats: { ...state.cache_stats },
         };
       }
       const processed = await processBackgroundQueue({
@@ -1154,6 +1200,7 @@ export function createM45BackgroundController(options = {}) {
         artifact_key: artifactKey,
         artifact: artifact ?? null,
         background: processed.background,
+        cache_stats: { ...state.cache_stats },
       };
     }
 
@@ -1164,12 +1211,14 @@ export function createM45BackgroundController(options = {}) {
     if (message.type === "metadata-checker-background-pause") {
       state.background.paused = true;
       state.background.status = "paused";
+      state.background.indexing_status = "paused";
       return { ok: true, background: { ...state.background } };
     }
 
     if (message.type === "metadata-checker-background-resume") {
       state.background.paused = false;
       state.background.status = state.background.queue.length > 0 ? "queued" : "idle";
+      state.background.indexing_status = state.background.status;
       return { ok: true, background: { ...state.background } };
     }
 

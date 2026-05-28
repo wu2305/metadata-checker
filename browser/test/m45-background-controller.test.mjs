@@ -127,6 +127,11 @@ test("M45 background bootstraps with one-shot token and indexes visible metadata
   assert.equal(result.visible_index.files.length, 4);
   assert.equal(result.visible_index.analyzable_count, 2);
   assert.equal(result.background.processed, 2);
+  assert.equal(result.background.total, 2);
+  assert.equal(result.background.failed, 0);
+  assert.equal(result.background.indexing_status, "completed");
+  assert.equal(result.background.retry_available, false);
+  assert.equal(result.cache_stats.misses, 2);
   assert.equal(
     controller.state.events.some((event) => event.event === M45_EVENT_TYPES.SESSION_BOOTSTRAPPED),
     true,
@@ -277,6 +282,10 @@ test("M45 pre-bootstrap selection is replayed and prioritized after visible inde
 
   assert.equal(queued.queued, true);
   assert.equal(queued.pending, true);
+  assert.equal(queued.indexing_status, "waiting_for_metadata");
+  assert.equal(queued.retry_available, true);
+  assert.equal(queued.background.indexing_status, "waiting_for_metadata");
+  assert.equal(queued.background.current_source_path, "app/Test.app/Page.spg");
   assert.equal(controller.state.background.pending_foreground.length, 1);
   assert.equal(controller.state.background.queue.length, 0);
 
@@ -1082,6 +1091,9 @@ test("M45 background records per-file fetch failure and continues queue", async 
 
   assert.equal(result.ok, true);
   assert.equal(result.background.processed, 2);
+  assert.equal(result.background.failed, 1);
+  assert.equal(result.background.last_failed_source_path, "app/Test.app/Page.spg");
+  assert.equal(result.background.retry_available, true);
   assert.equal(controller.state.last_diagnostic.code, "BACKGROUND_ANALYSIS_FAILED");
   assert.equal(
     controller.state.events.some(
