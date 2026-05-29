@@ -220,7 +220,7 @@ test("createPanelHost never renders raw payload fields into DOM text", () => {
     diagnostics: [
       {
         code: "TEST",
-        message: "ok",
+        message: "ok token=secret",
       },
     ],
     raw_text: "raw-text-secret",
@@ -228,6 +228,8 @@ test("createPanelHost never renders raw payload fields into DOM text", () => {
 
   const text = collectText(host.getState().contentElement);
   assert.match(text, /Status: ready/);
+  assert.match(text, /First diagnostic: TEST/);
+  assert.match(text, /Diagnostic message: ok token=\*\*\*/);
   assert.match(text, /Source: safe.spg/);
   assert.doesNotMatch(text, /raw-secret/);
   assert.doesNotMatch(text, /should-never-leak/);

@@ -13,6 +13,8 @@
     "raw_component",
     "components",
   ]);
+  const SENSITIVE_PAIR_PATTERN =
+    /["']?(token|cookie|password|secret|auth|credential|cipherpassport)["']?\s*[:=]\s*["']?[^&\s,;}]+/gi;
 
   function isObject(value) {
     return value !== null && typeof value === "object";
@@ -24,6 +26,13 @@
 
   function asArray(value) {
     return Array.isArray(value) ? value : [];
+  }
+
+  function redactText(text) {
+    if (typeof text !== "string") {
+      return "";
+    }
+    return text.replace(SENSITIVE_PAIR_PATTERN, "$1=***");
   }
 
   function createDiagnostic(code, message, severity = "error") {
@@ -53,7 +62,14 @@
     const status = asString(envelope.status) || "ready";
     const target = asString(envelope.target);
     const itemCount = asArray(envelope.items).length;
-    const diagnosticCount = asArray(envelope.diagnostics).length;
+    const diagnostics = asArray(envelope.diagnostics);
+    const diagnosticCount = diagnostics.length;
+    const firstDiagnostic = isObject(diagnostics[0])
+      ? {
+        code: redactText(asString(diagnostics[0].code)),
+        message: redactText(asString(diagnostics[0].message)),
+      }
+      : null;
     const focus = asString(envelope.focus_node || envelope.focus || envelope.target_node);
 
     return {
@@ -61,6 +77,7 @@
       target,
       itemCount,
       diagnosticCount,
+      firstDiagnostic,
       focus,
       background: envelope.background || null,
       cacheStats: envelope.cache_stats || null,
@@ -102,6 +119,12 @@
       selectedTypeLabel ? `Types: ${selectedTypeLabel}` : "Types:",
       `Items: ${String(envelopeSummary.itemCount)}`,
       `Diagnostics: ${String(envelopeSummary.diagnosticCount)}`,
+      envelopeSummary.firstDiagnostic?.code
+        ? `First diagnostic: ${envelopeSummary.firstDiagnostic.code}`
+        : "First diagnostic:",
+      envelopeSummary.firstDiagnostic?.message
+        ? `Diagnostic message: ${envelopeSummary.firstDiagnostic.message}`
+        : "Diagnostic message:",
       `Background: ${asString(background.status) || "idle"}`,
       `Indexing: ${asString(background.indexing_status) || asString(background.status) || "idle"}`,
       `Background progress: ${String(background.processed ?? 0)}/${String(background.total ?? 0)}`,
