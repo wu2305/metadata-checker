@@ -5664,3 +5664,5 @@ BI onInitDesigner
     - 已验证真实 selection 变化会更新 panel：`Status: analyzing`、`Indexing: waiting_for_metadata`、`Retry available: yes`。
     - 发现 MV3 extension service worker 可能在页面停留期间被回收，导致 DOM 上仍保留旧 `session=ready` marker，但 selection 消息进入新 SW 实例后返回 `waiting_for_metadata`。已补 content script 自动 rebootstrap 并重放当前 selection 的修复，待 reload unpacked extension 后复测。
     - reload 后复测显示自动 rebootstrap 已推进当前 selection 到后台队列，panel 从 `waiting_for_metadata` 变为 `Background progress: 1/1`、`Background failed: 1`。当前仍需定位单文件分析失败原因；已补 panel 首条 diagnostic code/message 展示，待再次 reload 后读取真实失败码。
+    - 后续验收不使用假 BI 服务替代真实环境；继续以真实 `autocrm-test.xiaoshouyi.com` 页面、真实登录态、真实 metadata API 和真实设计器对象为准。
+    - 已确认 Chromium MV3 extension 包需要 `wasm-bindgen --target web` 产物，因为 background module service worker 通过动态 `import()` 加载 `metadata_checker.js`；`--target no-modules` 只保留给 BI hook / `importScripts()` 场景。

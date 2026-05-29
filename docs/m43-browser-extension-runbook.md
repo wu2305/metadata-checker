@@ -125,13 +125,20 @@ node browser/tools/prepare-extension-package.mjs \
 如果有 WASM 产物：
 
 ```bash
+cargo build --release --no-default-features --features browser-wasm --target wasm32-unknown-unknown
+wasm-bindgen --target web \
+  --out-dir /private/tmp/metadata-checker-wasm-chromium \
+  --out-name metadata_checker \
+  target/wasm32-unknown-unknown/release/metadata_checker.wasm
 node browser/tools/prepare-extension-package.mjs \
   --out_dir browser/artifacts/metadata-checker-extension-chromium \
   --version 0.1.0 \
   --host_match https://autocrm-test.xiaoshouyi.com/* \
-  --wasm_bindgen_js /path/metadata_checker.js \
-  --wasm_file /path/metadata_checker_bg.wasm
+  --wasm_bindgen_js /private/tmp/metadata-checker-wasm-chromium/metadata_checker.js \
+  --wasm_file /private/tmp/metadata-checker-wasm-chromium/metadata_checker_bg.wasm
 ```
+
+Chromium MV3 extension 的 background 是 module service worker，M45 起通过动态 `import(chrome.runtime.getURL("metadata_checker.js"))` 加载 WASM glue，因此这里必须使用 `wasm-bindgen --target web`。`--target no-modules` 仅用于 BI hook / `importScripts()` 形态，不要混用于 Chromium extension 包。
 
 ### 2.2 在 Chrome/Edge 安装
 

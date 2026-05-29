@@ -6,7 +6,7 @@
 
 闭合 M45 真实 BI 端到端验收：在真实 `autocrm-test.xiaoshouyi.com` 设计器页面中验证 extension 能安全完成 `selection -> token bootstrap -> SW session -> remote metadata fetch/index -> WASM analysis -> panel progress/diagnostic`。
 
-真实环境验收不能用 Node 测试、本地构建或 marker 单点成功替代。必须保留真实页面状态、panel 展开态、关键 marker、后台进度和失败 diagnostic。
+真实环境验收不能用 Node 测试、本地构建、假 BI 服务或 marker 单点成功替代。必须保留真实页面状态、panel 展开态、关键 marker、后台进度和失败 diagnostic。
 
 ## 已验证进度
 
@@ -35,6 +35,7 @@ https://autocrm-test.xiaoshouyi.com/xiaoshouyi/app/价审.app?:edit=true&:file=�
   - `data-metadata-checker-extension-session-diagnostic-code=` 为空
 - 未在 DOM marker / console 中看到 token 明文。
 - panel 已挂载在 shadow DOM，可展开，能显示当前 selection、后台进度、cache 统计和 retry 状态。
+- 2026-05-29 已重新生成 Chromium unpacked extension 到 `browser/artifacts/metadata-checker-extension-chromium`，本次 WASM glue 使用 `wasm-bindgen --target web`，以匹配 MV3 module service worker 里的动态 `import(chrome.runtime.getURL("metadata_checker.js"))` 加载方式。
 
 ## 已修复问题
 
@@ -112,6 +113,8 @@ node --test browser/test/panel-host-smoke.test.mjs browser/test/extension-panel-
   - `Cache misses: 1`
   - `Retry available: yes`
 - 需要 reload 包含 `3688df1` 的扩展后，重新触发 selection，读取 panel 新增的 `First diagnostic` 和 `Diagnostic message`。
+- 2026-05-29 后续自动化方向调整：不使用假 BI 服务模拟验收；继续直接使用真实 `autocrm-test.xiaoshouyi.com` 页面、真实登录态、真实 metadata API 和真实设计器对象。
+- 当前本机 Google Chrome 未运行，Codex Chrome Extension native host 配置正常，但暂时没有可接管的真实 Chrome 页签；下一步需用户打开或允许启动 Chrome 后继续。
 
 不要把当前状态写成 M45 验收完成。真实环境端到端仍未闭合。
 
@@ -124,20 +127,22 @@ node browser/tools/prepare-extension-package.mjs \
   --out_dir browser/artifacts/metadata-checker-extension-chromium \
   --version 0.1.0 \
   --host_match 'https://autocrm-test.xiaoshouyi.com/*' \
-  --wasm_bindgen_js /private/tmp/metadata-checker-wasm-m45/metadata_checker.js \
-  --wasm_file /private/tmp/metadata-checker-wasm-m45/metadata_checker_bg.wasm
+  --wasm_bindgen_js /private/tmp/metadata-checker-wasm-m45-web/metadata_checker.js \
+  --wasm_file /private/tmp/metadata-checker-wasm-m45-web/metadata_checker_bg.wasm
 ```
 
-如果 `/private/tmp/metadata-checker-wasm-m45` 不存在，先重新生成：
+如果 `/private/tmp/metadata-checker-wasm-m45-web` 不存在，先重新生成 Chromium extension 使用的 ESM glue：
 
 ```bash
 cargo build --release --no-default-features --features browser-wasm --target wasm32-unknown-unknown
-mkdir -p /private/tmp/metadata-checker-wasm-m45
-wasm-bindgen --target no-modules \
-  --out-dir /private/tmp/metadata-checker-wasm-m45 \
+mkdir -p /private/tmp/metadata-checker-wasm-m45-web
+wasm-bindgen --target web \
+  --out-dir /private/tmp/metadata-checker-wasm-m45-web \
   --out-name metadata_checker \
   target/wasm32-unknown-unknown/release/metadata_checker.wasm
 ```
+
+`--target no-modules` 只适用于 BI hook / `importScripts()` 场景；Chromium MV3 extension service worker 当前是 module worker，必须使用可动态 import 的 ESM glue。
 
 2. 在 `chrome://extensions` reload `browser/artifacts/metadata-checker-extension-chromium`。
 
@@ -202,4 +207,3 @@ tests/session_reqwest_provider_tests.rs
 ```
 
 不要误提交到 M45 browser 真实环境修复里，除非下一轮明确处理它们。
-
