@@ -536,6 +536,37 @@
     return result;
   }
 
+  function needsSessionRebootstrap(result) {
+    const background = asObject(result?.background) || asObject(result?.state?.background) || {};
+    const indexingStatus = coerceStatus(
+      result?.indexing_status
+      || background.indexing_status
+      || background.status,
+    );
+    return (
+      indexingStatus === "waiting_for_metadata"
+      || indexingStatus === "indexing_current_page"
+    ) && result?.artifact_ready !== true;
+  }
+
+  async function sendSelectionToBackground(selection, { rebootstrapOnMissingMetadata = true } = {}) {
+    const result = await sendRuntimeMessage({
+      type: "metadata-checker-selection-changed",
+      payload: selection,
+    });
+    if (!rebootstrapOnMissingMetadata || !needsSessionRebootstrap(result)) {
+      return result;
+    }
+    const bootstrapped = await bootstrapRemoteSessionFromPage();
+    if (bootstrapped?.ok === false) {
+      return bootstrapped;
+    }
+    return sendRuntimeMessage({
+      type: "metadata-checker-selection-changed",
+      payload: selection,
+    });
+  }
+
   async function requestPageBridge(requestType) {
     const bridge = root.__metadata_checker_content_bridge__;
     if (!bridge || typeof bridge.request !== "function") {
@@ -604,10 +635,7 @@
     );
     writeMarker("extension-selection-active", asString(message.payload.active_component_id));
     writeMarker("extension-selection-changed-at", String(message.payload.changed_at || ""));
-    sendRuntimeMessage({
-      type: "metadata-checker-selection-changed",
-      payload: message.payload,
-    }).then((result) => {
+    sendSelectionToBackground(message.payload).then((result) => {
       updatePanelWithBackgroundState({
         ...(result || {}),
         source_path: asString(message?.payload?.source_path),
@@ -656,10 +684,7 @@
         ],
       };
     }
-    const result = await sendRuntimeMessage({
-      type: "metadata-checker-selection-changed",
-      payload: selection,
-    });
+    const result = await sendSelectionToBackground(selection);
     updatePanelWithBackgroundState({
       ...(result || {}),
       source_path: asString(selection.source_path),

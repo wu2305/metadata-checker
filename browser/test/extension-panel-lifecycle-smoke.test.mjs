@@ -490,6 +490,96 @@ test("content script retryCurrentSelection replays bridge selection to backgroun
   assert.equal(host.getState().lastEnvelope?.status, "analyzing");
 });
 
+test("selection waiting_for_metadata reboots session and replays current selection", async () => {
+  const runtimeMessages = [];
+  const context = createFakeWindow({
+    bridge: defaultBridge(),
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return "content-token";
+      },
+    }),
+    runtimeSendMessage(message, callback) {
+      runtimeMessages.push(message);
+      if (message?.type === "metadata-checker-selection-changed") {
+        const selectionCalls = runtimeMessages.filter((item) => item.type === "metadata-checker-selection-changed");
+        if (selectionCalls.length === 1) {
+          callback?.({
+            ok: true,
+            artifact_ready: false,
+            background: {
+              status: "waiting_for_metadata",
+              indexing_status: "waiting_for_metadata",
+              current_source_path: message.payload.source_path,
+            },
+          });
+          return undefined;
+        }
+        callback?.({
+          ok: true,
+          artifact_ready: true,
+          foreground_artifact: {
+            source_path: message.payload.source_path,
+            analysis_status: "ready",
+            result: { status: "ready", items: [{ kind: "analysis", label: "ready" }] },
+          },
+          background: {
+            status: "completed",
+            indexing_status: "completed",
+            processed: 1,
+            total: 1,
+          },
+        });
+        return undefined;
+      }
+      if (message?.type === "metadata-checker-bootstrap-token") {
+        callback?.({
+          ok: true,
+          session: { status: "ready" },
+          visible_index: { status: "ready", projects: [{ project_name: "xiaoshouyi" }], files: [], analyzable_count: 0 },
+          background: { status: "completed", indexing_status: "completed", processed: 0, total: 0 },
+        });
+        return undefined;
+      }
+      callback?.({ ok: true });
+      return undefined;
+    },
+  });
+  await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
+
+  context.__dispatchMessage({
+    __metadata_checker_bridge_source: "page-script",
+    __metadata_checker_bridge_direction: "notification",
+    type: "metadata-checker-selection-changed",
+    payload: {
+      source_path: "app/Start.spg",
+      selected_component_ids: ["text1"],
+      active_component_id: "text1",
+      selection_source: "selectComponents",
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(
+    runtimeMessages.filter((message) => message.type === "metadata-checker-selection-changed").length,
+    2,
+  );
+  assert.equal(
+    runtimeMessages.some(
+      (message) =>
+        message.type === "metadata-checker-bootstrap-token" &&
+        message.payload.access_token === "content-token",
+    ),
+    true,
+  );
+  const host = context.__metadata_checker_chromium_content_state__.panelHost;
+  assert.equal(host.getState().lastEnvelope?.status, "ready");
+  assert.equal(host.getState().lastEnvelope?.items?.some((item) => item.kind === "analysis"), true);
+});
+
 test("content script fetches access token without exposing it through page messages", async () => {
   const runtimeMessages = [];
   const context = createFakeWindow({

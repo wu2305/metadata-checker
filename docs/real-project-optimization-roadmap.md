@@ -5658,3 +5658,8 @@ BI onInitDesigner
     7. 验证 panel 可展示分析状态、后台扫描进度与错误；
     8. 不修改任何 `.spg` / `.tbl` 文件；
     9. 对 panel 展开态、关键分析状态、后台扫描状态留存截图（含时间戳或运行上下文）作为验收证据。
+  - 2026-05-29 真实环境阶段性记录：
+    - 已在 `https://autocrm-test.xiaoshouyi.com/xiaoshouyi/app/价审.app?:edit=true&:file=销售订单价格审批-信息补充.spg` 验证 extension content script、page script、runtime adapter、BI custom bridge、selection bridge 均加载成功。
+    - 已验证 content script 获取一次性 token 后 SW session bootstrap 返回 `session=ready`，DOM marker 未暴露 token 明文。
+    - 已验证真实 selection 变化会更新 panel：`Status: analyzing`、`Indexing: waiting_for_metadata`、`Retry available: yes`。
+    - 发现 MV3 extension service worker 可能在页面停留期间被回收，导致 DOM 上仍保留旧 `session=ready` marker，但 selection 消息进入新 SW 实例后返回 `waiting_for_metadata`。已补 content script 自动 rebootstrap 并重放当前 selection 的修复，待 reload unpacked extension 后复测。
