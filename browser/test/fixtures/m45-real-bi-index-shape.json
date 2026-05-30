@@ -1,0 +1,55 @@
+{
+  "projectName": "xiaoshouyi",
+  "targetSourcePath": "app/价审.app/demo/销售订单价格审批-信息补充.spg",
+  "permissionInfo": {
+    "status": 200,
+    "bodyType": "encoded-string",
+    "length": 9246
+  },
+  "children": {
+    "status": 200,
+    "children": [
+      {
+        "id": "jOuUQvmB6EIUQWPrxHfGD",
+        "name": "app",
+        "parentDir": "/xiaoshouyi",
+        "projectName": "xiaoshouyi",
+        "type": "fold",
+        "revision": 1779957611585,
+        "isFolder": true
+      }
+    ]
+  },
+  "descendant": {
+    "status": 200,
+    "files": [
+      {
+        "id": "JuXeIRwRyfGPFUqKkCHSXD",
+        "name": "价审.app",
+        "parentDir": "/xiaoshouyi/app",
+        "projectName": "xiaoshouyi",
+        "type": "app",
+        "revision": 1779072924322,
+        "isFolder": true
+      },
+      {
+        "id": "JczHRKMzgVyDN0ovJBd8E",
+        "name": "demo",
+        "parentDir": "/xiaoshouyi/app/价审.app",
+        "projectName": "xiaoshouyi",
+        "type": "fold",
+        "revision": 1779072924322,
+        "isFolder": true
+      },
+      {
+        "id": "nl84gB4KWkMN4vHWEsBBRE",
+        "name": "销售订单价格审批-信息补充.spg",
+        "parentDir": "/xiaoshouyi/app/价审.app/demo",
+        "projectName": "xiaoshouyi",
+        "type": "spg",
+        "revision": 1524,
+        "isFolder": false
+      }
+    ]
+  }
+}

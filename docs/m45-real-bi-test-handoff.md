@@ -100,21 +100,52 @@ cargo check
 node --test browser/test/panel-host-smoke.test.mjs browser/test/extension-panel-lifecycle-smoke.test.mjs browser/test/extension-popup-panel-smoke.test.mjs browser/test/m45-background-controller.test.mjs
 ```
 
+### 3. 真实 BI `getPermissionInfo` 为 encoded string 时无法建立项目索引
+
+现象：
+
+- Playwright Chrome for Testing 真实登录后，`/api/auth/getAccessToken` 返回 200，`/api/me/whoami` 返回已登录用户。
+- `/api/me/getPermissionInfo` 返回 200，但 body 不是 JSON，而是长度约 9246 的 encoded string。
+- `/api/meta/services/getFileChildren/xiaoshouyi` 和 `/api/meta/services/getFileDescendant/xiaoshouyi/app` 返回真实目录 JSON，可定位当前页面：
+  - `source_path=app/价审.app/demo/销售订单价格审批-信息补充.spg`
+  - `file_id=nl84gB4KWkMN4vHWEsBBRE`
+- 旧逻辑只从 permission JSON 推导 project，遇到 encoded string 时 project 列表为空，后台索引无法推进到真实 descendant 结果。
+
+修复：
+
+- `browser/extension-chromium/content-script.js`
+- `browser/extension-chromium/background.js`
+- content script 在 bootstrap payload 中传递当前页面 project name。
+- SW 在 permission info 无法解析出 project 时，使用 page context 中的 project name 作为 fallback，再通过真实 `getFileChildren/getFileDescendant/getFileContent/<file_id>` 链路索引当前页。
+
+回归测试：
+
+- 新增脱敏 fixture：`browser/test/fixtures/m45-real-bi-index-shape.json`
+- fixture 只保留真实 API 结构、目录字段、目标文件 id/revision，不包含 token、cookie、password 或 raw metadata。
+- `browser/test/m45-background-controller.test.mjs` 覆盖两类场景：
+  - permissionInfo 为 encoded string 时使用 page project fallback。
+  - 按真实 BI descendant shape 命中 `getFileContent/nl84gB4KWkMN4vHWEsBBRE`，而不是退回 path 404。
+
+验证：
+
+```bash
+node --test browser/test/m45-background-controller.test.mjs browser/test/extension-panel-lifecycle-smoke.test.mjs
+```
+
 ## 当前阻塞点
 
-当前未闭合项是：真实页面当前 selection 的单文件分析失败原因还未知。
+当前未闭合项是：真实浏览器中的 unpacked extension 仍需要一次干净 reload/cache clear 后复测。
 
 已知状态：
 
-- reload `2d0f27a` 后，selection 不再停在 `waiting_for_metadata`。
-- 已进入当前页处理：
-  - `Background progress: 1/1`
-  - `Background failed: 1`
-  - `Cache misses: 1`
-  - `Retry available: yes`
-- 需要 reload 包含 `3688df1` 的扩展后，重新触发 selection，读取 panel 新增的 `First diagnostic` 和 `Diagnostic message`。
 - 2026-05-29 后续自动化方向调整：不使用假 BI 服务模拟验收；继续直接使用真实 `autocrm-test.xiaoshouyi.com` 页面、真实登录态、真实 metadata API 和真实设计器对象。
-- 当前本机 Google Chrome 未运行，Codex Chrome Extension native host 配置正常，但暂时没有可接管的真实 Chrome 页签；下一步需用户打开或允许启动 Chrome 后继续。
+- Playwright Chrome for Testing 已能打开真实页面并完成用户登录。
+- 真实 API 采样确认 session/token 有效，目录接口可定位当前 `.spg` 文件 id。
+- SW 解析与索引路径已用脱敏 fixture mock 测试覆盖。
+- 真实页面此前仍显示过旧状态：
+  - `Background progress: 0/0`
+  - 旧缓存中曾出现 `REMOTE_METADATA_NOT_FOUND: HTTP 404`
+- 下一轮真实复测前应先 reload unpacked extension，并清理 extension IndexedDB/cache 或使用新的 Playwright profile，避免旧 SW 内存态和 artifact cache 干扰。
 
 不要把当前状态写成 M45 验收完成。真实环境端到端仍未闭合。
 

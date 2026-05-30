@@ -521,6 +521,7 @@
       payload: {
         base_url: root.location?.origin || "",
         access_token: tokenResponse.access_token,
+        project_name: pageContext.project_name || pageContext.projectName || "",
         current_source_path: pageContext.source_path || "",
         initial_limit: 3,
       },

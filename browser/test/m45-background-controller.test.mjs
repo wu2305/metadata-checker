@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -10,6 +11,11 @@ import {
   createWasmAnalysisClient,
   M45_EVENT_TYPES,
 } from "../extension-chromium/background.js";
+
+async function loadJsonFixture(name) {
+  const fixtureUrl = new URL(`./fixtures/${name}`, import.meta.url);
+  return JSON.parse(await readFile(fixtureUrl, "utf8"));
+}
 
 function jsonResponse(status, body) {
   return {
@@ -157,6 +163,101 @@ test("M45 background bootstraps with one-shot token and indexes visible metadata
     calls.every((call) => call.init.credentials === "include"),
     true,
   );
+});
+
+test("M45 bootstrap falls back to page project name when permission info is encoded", async () => {
+  const fetchImpl = async (url, init = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/api/me/whoami") {
+      assert.equal(init.credentials, "include");
+      return jsonResponse(200, { userId: "u1", userName: "User One" });
+    }
+    if (parsed.pathname === "/api/me/getPermissionInfo") {
+      return jsonResponse(200, "encoded-permission-info");
+    }
+    if (parsed.pathname === "/api/meta/services/getFileChildren/xiaoshouyi") {
+      return jsonResponse(200, {
+        children: [{ name: "app", parentDir: "/xiaoshouyi", isFolder: true }],
+      });
+    }
+    if (parsed.pathname === "/api/meta/services/getFileDescendant/xiaoshouyi/app") {
+      return jsonResponse(200, {
+        files: [
+          {
+            id: "page-1",
+            name: "Page.spg",
+            parentDir: "/xiaoshouyi/app/Test.app",
+            revision: "1",
+            isFolder: false,
+          },
+        ],
+      });
+    }
+    if (parsed.pathname === "/api/meta/services/getFileContent/page-1") {
+      return jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) });
+    }
+    return jsonResponse(404, {});
+  };
+  const controller = createM45BackgroundController({ fetchImpl });
+
+  const result = await controller.bootstrapAndIndex({
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    access_token: "one-shot",
+    project_name: "xiaoshouyi",
+    current_source_path: "app/Test.app/Page.spg",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.visible_index.projects.length, 1);
+  assert.equal(result.visible_index.projects[0].project_name, "xiaoshouyi");
+  assert.equal(result.visible_index.files.length, 1);
+  assert.equal(result.visible_index.files[0].file_id, "page-1");
+  assert.equal(result.background.processed, 1);
+  assert.equal(result.background.failed, 0);
+});
+
+test("M45 bootstrap indexes real BI encoded permission and descendant shape", async () => {
+  const fixture = await loadJsonFixture("m45-real-bi-index-shape.json");
+  const targetFile = fixture.descendant.files.find((file) => file.isFolder === false);
+  const contentFetches = [];
+  const fetchImpl = async (url, init = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/api/me/whoami") {
+      assert.equal(init.credentials, "include");
+      return jsonResponse(200, { userId: "u1", userName: "User One" });
+    }
+    if (parsed.pathname === "/api/me/getPermissionInfo") {
+      return jsonResponse(200, "x".repeat(fixture.permissionInfo.length));
+    }
+    if (parsed.pathname === `/api/meta/services/getFileChildren/${fixture.projectName}`) {
+      return jsonResponse(fixture.children.status, { children: fixture.children.children });
+    }
+    if (parsed.pathname === `/api/meta/services/getFileDescendant/${fixture.projectName}/app`) {
+      return jsonResponse(fixture.descendant.status, { files: fixture.descendant.files });
+    }
+    if (parsed.pathname === `/api/meta/services/getFileContent/${targetFile.id}`) {
+      contentFetches.push(parsed.pathname);
+      return jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) });
+    }
+    return jsonResponse(404, {});
+  };
+  const controller = createM45BackgroundController({ fetchImpl });
+
+  const result = await controller.bootstrapAndIndex({
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    access_token: "one-shot",
+    project_name: fixture.projectName,
+    current_source_path: fixture.targetSourcePath,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.visible_index.projects[0].project_name, fixture.projectName);
+  assert.equal(result.visible_index.files.length, 1);
+  assert.equal(result.visible_index.files[0].source_path, fixture.targetSourcePath);
+  assert.equal(result.visible_index.files[0].file_id, targetFile.id);
+  assert.equal(result.background.processed, 1);
+  assert.equal(result.background.failed, 0);
+  assert.deepEqual(contentFetches, [`/api/meta/services/getFileContent/${targetFile.id}`]);
 });
 
 test("M45 bootstrap prioritizes current source path even when it sorts later", async () => {

@@ -154,6 +154,15 @@ function inferProjectName(project) {
   return project?.projectName ?? project?.project_name ?? project?.name ?? project?.id ?? null;
 }
 
+function contextProjectName(context = {}) {
+  return asString(
+    context.project_name
+    ?? context.projectName
+    ?? context.current_project_name
+    ?? context.currentProjectName,
+  );
+}
+
 function resourcePath(file) {
   if (typeof file?.path === "string" && file.path.length > 0) {
     return file.path;
@@ -635,6 +644,13 @@ export function createM45BackgroundController(options = {}) {
         project_name: inferProjectName(project),
       }))
       .filter((project) => project.project_name);
+    const fallbackProjectName = contextProjectName(context);
+    if (projects.length === 0 && fallbackProjectName) {
+      projects.push({
+        projectName: fallbackProjectName,
+        project_name: fallbackProjectName,
+      });
+    }
     const files = [];
     for (const project of projects) {
       const projectName = project.project_name;
