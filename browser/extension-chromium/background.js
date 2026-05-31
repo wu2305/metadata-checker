@@ -12,6 +12,7 @@ const SUPPORTED_METADATA_EXTENSIONS = new Set(["spg", "tbl"]);
 const SENSITIVE_KEY_PATTERN = /(token|cookie|password|secret|auth|credential|cipherpassport)/i;
 const SENSITIVE_PAIR_PATTERN =
   /["']?(token|cookie|password|secret|auth|credential|cipherpassport)["']?\s*[:=]\s*["']?[^&\s,;}]+/gi;
+const OFFSCREEN_WASM_CALL_MESSAGE = "metadata-checker-offscreen-wasm-call";
 
 function isObject(value) {
   return value !== null && typeof value === "object";
@@ -338,10 +339,26 @@ export function createDefaultMetadataCache(options = {}) {
 
 export function createWasmAnalysisClient(options = {}) {
   const chromeRuntime = options.chromeRuntime ?? globalThis.chrome?.runtime;
-  const importImpl = options.importImpl ?? ((specifier) => import(specifier));
+  const chromeApi = options.chromeApi ?? globalThis.chrome;
+  if (
+    options.preferOffscreen !== false &&
+    !options.importImpl &&
+    !options.wasmModule &&
+    chromeApi?.offscreen &&
+    chromeApi?.runtime
+  ) {
+    return createOffscreenWasmAnalysisClient({
+      chromeApi,
+      wasmFilePath: options.wasmFilePath,
+    });
+  }
+  const importImpl = options.importImpl ?? null;
+  const wasmModule = options.wasmModule ?? null;
+  const wasmInit = options.wasmInit ?? null;
   const wasmModulePath = options.wasmModulePath ?? "metadata_checker.js";
   const wasmFilePath = options.wasmFilePath ?? "metadata_checker_bg.wasm";
   let runtimePromise = null;
+  let initRuntimePromise = null;
 
   function extensionUrl(path) {
     if (!chromeRuntime || typeof chromeRuntime.getURL !== "function") {
@@ -355,8 +372,15 @@ export function createWasmAnalysisClient(options = {}) {
       return runtimePromise;
     }
     runtimePromise = (async () => {
-      const module = await importImpl(extensionUrl(wasmModulePath));
-      const init = module.default ?? module.init;
+      const module = importImpl
+        ? await importImpl(extensionUrl(wasmModulePath))
+        : wasmModule;
+      if (!module) {
+        throw new Error("WASM runtime module is unavailable outside offscreen document");
+      }
+      const init = importImpl
+        ? module.default ?? module.init
+        : wasmInit ?? module.default ?? module.init;
       if (typeof init === "function") {
         await init(extensionUrl(wasmFilePath));
       }
@@ -379,6 +403,143 @@ export function createWasmAnalysisClient(options = {}) {
   }
 
   return {
+    async initRuntime(optionsArg = {}) {
+      if (!initRuntimePromise) {
+        initRuntimePromise = callRuntime("initRuntime", [
+          JSON.stringify(optionsArg ?? {}),
+        ]).catch((error) => {
+          initRuntimePromise = null;
+          throw error;
+        });
+      }
+      return initRuntimePromise;
+    },
+    async loadSuperpageDocument(sourcePath, rawText) {
+      return callRuntime("loadSuperpageDocument", [sourcePath, rawText]);
+    },
+    async buildOrUpdateSuperpageGraph(sourcePath) {
+      return callRuntime("buildOrUpdateSuperpageGraph", [sourcePath]);
+    },
+    async analyzeSuperpageSelection(selection, optionsArg = {}) {
+      return callRuntime("analyzeSuperpageSelection", [
+        JSON.stringify(selection ?? {}),
+        JSON.stringify(optionsArg ?? {}),
+      ]);
+    },
+  };
+}
+
+export function createOffscreenWasmAnalysisClient(options = {}) {
+  const chromeApi = options.chromeApi ?? globalThis.chrome;
+  const wasmFilePath = options.wasmFilePath ?? "metadata_checker_bg.wasm";
+  const offscreenPath = options.offscreenPath ?? "offscreen.html";
+  const requestTimeoutMs = options.requestTimeoutMs ?? 30000;
+  let creating = null;
+  let requestCounter = 0;
+  let initRuntimePromise = null;
+
+  function extensionUrl(path) {
+    if (!chromeApi?.runtime || typeof chromeApi.runtime.getURL !== "function") {
+      throw new Error("extension runtime URL resolver is unavailable");
+    }
+    return chromeApi.runtime.getURL(path);
+  }
+
+  async function hasOffscreenDocument() {
+    if (typeof chromeApi?.runtime?.getContexts === "function") {
+      const contexts = await chromeApi.runtime.getContexts({
+        contextTypes: ["OFFSCREEN_DOCUMENT"],
+        documentUrls: [extensionUrl(offscreenPath)],
+      });
+      return Array.isArray(contexts) && contexts.length > 0;
+    }
+    if (typeof chromeApi?.offscreen?.hasDocument === "function") {
+      return chromeApi.offscreen.hasDocument();
+    }
+    return false;
+  }
+
+  async function ensureOffscreenDocument() {
+    if (!chromeApi?.offscreen || typeof chromeApi.offscreen.createDocument !== "function") {
+      throw new Error("offscreen document API is unavailable");
+    }
+    if (await hasOffscreenDocument()) {
+      return;
+    }
+    if (!creating) {
+      creating = chromeApi.offscreen.createDocument({
+        url: offscreenPath,
+        reasons: ["WORKERS"],
+        justification: "Run metadata-checker WebAssembly runtime outside the extension service worker.",
+      }).finally(() => {
+        creating = null;
+      });
+    }
+    await creating;
+  }
+
+  async function sendOffscreenCall(method, args = []) {
+    await ensureOffscreenDocument();
+    requestCounter += 1;
+    const requestId = `m45-offscreen-${requestCounter}`;
+    const message = {
+      type: OFFSCREEN_WASM_CALL_MESSAGE,
+      request_id: requestId,
+      payload: {
+        method,
+        args,
+        wasm_url: extensionUrl(wasmFilePath),
+      },
+    };
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error("offscreen WASM runtime did not respond in time"));
+        }
+      }, requestTimeoutMs);
+      chromeApi.runtime.sendMessage(message, (response) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        const lastError = chromeApi.runtime.lastError;
+        if (lastError) {
+          reject(new Error(lastError.message || "offscreen WASM runtime unavailable"));
+          return;
+        }
+        if (!response?.ok) {
+          reject(new Error(response?.diagnostic?.message || "offscreen WASM runtime call failed"));
+          return;
+        }
+        resolve(response.result);
+      });
+    });
+  }
+
+  async function callRuntime(method, args = []) {
+    const result = await sendOffscreenCall(method, args);
+    if (typeof result !== "string") {
+      return result;
+    }
+    return safeJsonParse(result) ?? result;
+  }
+
+  return {
+    async initRuntime(optionsArg = {}) {
+      if (!initRuntimePromise) {
+        initRuntimePromise = callRuntime("initRuntime", [
+          JSON.stringify(optionsArg ?? {}),
+        ]).catch((error) => {
+          initRuntimePromise = null;
+          throw error;
+        });
+      }
+      return initRuntimePromise;
+    },
     async loadSuperpageDocument(sourcePath, rawText) {
       return callRuntime("loadSuperpageDocument", [sourcePath, rawText]);
     },
@@ -395,10 +556,30 @@ export function createWasmAnalysisClient(options = {}) {
 }
 
 function createDefaultAnalysisClient() {
-  if (globalThis.chrome?.runtime?.getURL) {
-    return createWasmAnalysisClient();
+  if (!globalThis.chrome?.runtime?.getURL) {
+    return null;
   }
-  return null;
+  let client = null;
+  function runtimeClient() {
+    if (!client) {
+      client = createWasmAnalysisClient();
+    }
+    return client;
+  }
+  return {
+    async initRuntime(...args) {
+      return runtimeClient().initRuntime(...args);
+    },
+    async loadSuperpageDocument(...args) {
+      return runtimeClient().loadSuperpageDocument(...args);
+    },
+    async buildOrUpdateSuperpageGraph(...args) {
+      return runtimeClient().buildOrUpdateSuperpageGraph(...args);
+    },
+    async analyzeSuperpageSelection(...args) {
+      return runtimeClient().analyzeSuperpageSelection(...args);
+    },
+  };
 }
 
 export function createM45BackgroundController(options = {}) {
@@ -492,6 +673,31 @@ export function createM45BackgroundController(options = {}) {
       throw new Error(`${code}: HTTP ${response.status}`);
     }
     return readJsonOrText(response);
+  }
+
+  async function requestText(baseUrl, path, init = {}) {
+    const fetch = requireFetch();
+    const response = await fetch(buildUrl(baseUrl, path), {
+      method: "GET",
+      credentials: "include",
+      redirect: "follow",
+      ...init,
+      headers: {
+        Accept: "application/json,text/plain,*/*",
+        ...(init.headers ?? {}),
+      },
+    });
+    if (!response.ok) {
+      const code = response.status === 401
+        ? "REMOTE_METADATA_UNAUTHORIZED"
+        : response.status === 403
+          ? "REMOTE_METADATA_FORBIDDEN"
+          : response.status === 404
+            ? "REMOTE_METADATA_NOT_FOUND"
+            : "REMOTE_METADATA_FETCH_FAILED";
+      throw new Error(`${code}: HTTP ${response.status}`);
+    }
+    return response.text();
   }
 
   async function tryCacheSet(key, value) {
@@ -685,7 +891,7 @@ export function createM45BackgroundController(options = {}) {
       analyzable_count: analyzable.length,
       indexed_at: clock(),
     };
-    await cache.set(`visible-index|${base}`, state.visible_index);
+    await tryCacheSet(`visible-index|${base}`, state.visible_index);
     seedBackgroundQueue(analyzable, {
       base_url: base,
       current_source_path: context.current_source_path ?? context.currentSourcePath,
@@ -875,10 +1081,7 @@ export function createM45BackgroundController(options = {}) {
     }
     state.cache_stats.misses += 1;
     try {
-      const rawContent = await request(item.base_url, metadataContentPath(item));
-      const rawText = typeof rawContent === "string"
-        ? rawContent
-        : rawContent?.raw_text ?? rawContent?.rawText ?? rawContent?.content ?? "";
+      const rawText = await requestText(item.base_url, metadataContentPath(item));
       await tryCacheSet(`raw-metadata|${item.cache_key}`, {
         kind: "raw-metadata",
         source_path: item.source_path,
@@ -1092,6 +1295,11 @@ export function createM45BackgroundController(options = {}) {
       };
     }
     try {
+      if (typeof analysisClient.initRuntime === "function") {
+        await analysisClient.initRuntime({
+          project_ref: item.project_name ?? null,
+        });
+      }
       if (typeof analysisClient.loadSuperpageDocument === "function") {
         await analysisClient.loadSuperpageDocument(item.source_path, rawText);
       }
@@ -1102,11 +1310,17 @@ export function createM45BackgroundController(options = {}) {
         ? await analysisClient.analyzeSuperpageSelection(
           {
             source_path: item.source_path,
+            file_id: item.file_id ?? "",
             project_name: item.project_name,
             active_component_id: item.foreground ? item.active_component_id ?? null : null,
             selected_component_ids: item.foreground ? item.selected_component_ids ?? [] : [],
           },
-          { mode: item.foreground ? "foreground" : "background" },
+          {
+            mode: item.foreground ? "foreground" : "background",
+            include_priority: false,
+            include_conditions: true,
+            include_dataflow: false,
+          },
         )
         : null;
       return {
@@ -1296,6 +1510,9 @@ const controller = createM45BackgroundController();
 
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage?.addListener) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === OFFSCREEN_WASM_CALL_MESSAGE) {
+      return false;
+    }
     controller.handleMessage(message).then(
       sendResponse,
       (error) => sendResponse(createBackgroundMessageFailureResponse(error)),

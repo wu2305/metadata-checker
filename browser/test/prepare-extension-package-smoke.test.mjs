@@ -222,6 +222,23 @@ test("Chromium manifest loads shared panel host before content script", async ()
   assert.ok(panelHostIndex < contentScriptIndex);
 });
 
+test("Chromium manifest allows WASM compilation in extension pages", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("../extension-chromium/manifest.json", import.meta.url), "utf8"),
+  );
+
+  assert.ok(manifest.permissions?.includes("offscreen"));
+  assert.match(
+    manifest.content_security_policy?.extension_pages || "",
+    /'wasm-unsafe-eval'/,
+  );
+});
+
+test("Chromium extension includes offscreen runtime host files", async () => {
+  await access(new URL("../extension-chromium/offscreen.html", import.meta.url));
+  await access(new URL("../extension-chromium/offscreen-runtime.js", import.meta.url));
+});
+
 test("prepareExtensionPackage writes .wasm as binary", async () => {
   const fixture = await createChromiumFixture();
   const outRoot = await mkdtemp(join(tmpdir(), "metadata-checker-ext-out-bin-"));

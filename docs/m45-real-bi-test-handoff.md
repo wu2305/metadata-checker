@@ -1,6 +1,6 @@
 # M45 Real BI Test Handoff
 
-记录时间：2026-05-29
+记录时间：2026-05-31
 
 ## 当前目标
 
@@ -35,7 +35,40 @@ https://autocrm-test.xiaoshouyi.com/xiaoshouyi/app/价审.app?:edit=true&:file=�
   - `data-metadata-checker-extension-session-diagnostic-code=` 为空
 - 未在 DOM marker / console 中看到 token 明文。
 - panel 已挂载在 shadow DOM，可展开，能显示当前 selection、后台进度、cache 统计和 retry 状态。
-- 2026-05-29 已重新生成 Chromium unpacked extension 到 `browser/artifacts/metadata-checker-extension-chromium`，本次 WASM glue 使用 `wasm-bindgen --target web`，以匹配 MV3 module service worker 里的动态 `import(chrome.runtime.getURL("metadata_checker.js"))` 加载方式。
+- 2026-05-31 已重新生成 Chromium unpacked extension 到 `browser/artifacts/metadata-checker-extension-chromium`，本次 WASM glue 使用 `wasm-bindgen --target web`，并通过 MV3 offscreen document 承载 WASM runtime。
+
+2026-05-31 最终真实验收结果：
+
+```text
+extensionOrigin=chrome-extension://jmfmjedknganfgjhhnpeelfkpbdokbcl
+page=销售订单价格审批-信息补充.spg
+token_status=200
+token_length=36
+project_count=1
+file_count=2177
+analyzable_count=1300
+current_file=app/价审.app/demo/销售订单价格审批-信息补充.spg
+file_id=nl84gB4KWkMN4vHWEsBBRE
+revision=1524
+artifact_ready=true
+artifact.status=ready
+artifact.result_status=ready
+artifact.target=canvas
+artifact.item_kinds=component, visual_graph, dependencies, expressions, reads
+background.processed=1
+background.failed=0
+offscreen target=chrome-extension://.../offscreen.html
+service_worker version=0.1.13
+```
+
+运行中 SW 源码确认包含：
+
+- `createOffscreenWasmAnalysisClient`
+- `file_id: item.file_id ?? ""`
+- `include_priority/include_conditions/include_dataflow`
+- `analysisClient.initRuntime({ project_ref })`
+- `requestText(...)` raw metadata 读取
+- `tryCacheSet("visible-index|...")` 非阻塞 visible index cache 写入
 
 ## 已修复问题
 
@@ -132,31 +165,60 @@ node --test browser/test/panel-host-smoke.test.mjs browser/test/extension-panel-
 node --test browser/test/m45-background-controller.test.mjs browser/test/extension-panel-lifecycle-smoke.test.mjs
 ```
 
-## 当前阻塞点
+### 4. MV3 Service Worker 中 WASM 编译被 CSP 阻止
 
-当前未闭合项是：真实浏览器中的 unpacked extension 仍需要一次干净 reload/cache clear 后复测。
+现象：
 
-已知状态：
+- 真实 Chrome 中 SW 直接 `WebAssembly.instantiateStreaming()` 时失败：
+  `script-src 'self'` 下没有 `wasm-eval` / `unsafe-eval`。
+- extension page / offscreen document 可以在 `wasm-unsafe-eval` 下编译 WASM。
 
-- 2026-05-29 后续自动化方向调整：不使用假 BI 服务模拟验收；继续直接使用真实 `autocrm-test.xiaoshouyi.com` 页面、真实登录态、真实 metadata API 和真实设计器对象。
-- Playwright Chrome for Testing 已能打开真实页面并完成用户登录。
-- 真实 API 采样确认 session/token 有效，目录接口可定位当前 `.spg` 文件 id。
-- SW 解析与索引路径已用脱敏 fixture mock 测试覆盖。
-- 真实页面此前仍显示过旧状态：
-  - `Background progress: 0/0`
-  - 旧缓存中曾出现 `REMOTE_METADATA_NOT_FOUND: HTTP 404`
-- 下一轮真实复测前应先 reload unpacked extension，并清理 extension IndexedDB/cache 或使用新的 Playwright profile，避免旧 SW 内存态和 artifact cache 干扰。
+修复：
 
-不要把当前状态写成 M45 验收完成。真实环境端到端仍未闭合。
+- SW 降级为 bootstrap/router/session/API 编排层。
+- 新增 `browser/extension-chromium/offscreen.html` 和 `offscreen-runtime.js`。
+- `createWasmAnalysisClient()` 在 MV3 extension 环境默认走 offscreen document。
+- offscreen document import `metadata_checker.js`，lazy init `metadata_checker_bg.wasm`，通过 `chrome.runtime.sendMessage` 接收 SW 的 runtime method call。
 
-## 下一轮恢复步骤
+### 5. 真实 WASM 调用缺少 Rust contract 必填字段
+
+现象：
+
+- `analyzeSuperpageSelection` 首次返回：
+  - `INVALID_SELECTION: missing field file_id`
+  - `INVALID_OPTIONS: missing field include_priority`
+  - `RUNTIME_NOT_INITIALIZED`
+
+修复：
+
+- background 从 visible index 中补齐当前 selection 的 `file_id/revision`，传给 WASM 的 selection 仍只包含轻量字段，不携带 raw metadata 或完整组件 JSON。
+- analysis options 显式传：
+  - `include_priority=false`
+  - `include_conditions=true`
+  - `include_dataflow=false`
+- analysis 前先调用 `initRuntime({ project_ref })`，client 内部缓存 init promise。
+
+### 6. 真实 `getFileContent` 返回 raw `.spg` 文本
+
+现象：
+
+- 真实 `/api/meta/services/getFileContent/nl84gB4KWkMN4vHWEsBBRE` 返回 `application/octet-stream;charset=UTF-8`。
+- body 是 7.25MB 的 `.spg` JSON 文本，不是 `{ raw_text: ... }` wrapper。
+- 旧 `request()` 会尝试 JSON parse，导致传给 WASM 的 raw text 为空，后续 `DOCUMENT_NOT_FOUND`。
+
+修复：
+
+- metadata content path 改用专用 `requestText()`，保持 raw `.spg/.tbl` 原文。
+- visible index cache 写入改为 `tryCacheSet`，避免测试中清 IndexedDB 时的 cache 写失败阻断真实 session/index 主链路。
+
+## 复现步骤
 
 1. 确认 unpacked 包已是最新：
 
 ```bash
 node browser/tools/prepare-extension-package.mjs \
   --out_dir browser/artifacts/metadata-checker-extension-chromium \
-  --version 0.1.0 \
+  --version 0.1.13 \
   --host_match 'https://autocrm-test.xiaoshouyi.com/*' \
   --wasm_bindgen_js /private/tmp/metadata-checker-wasm-m45-web/metadata_checker.js \
   --wasm_file /private/tmp/metadata-checker-wasm-m45-web/metadata_checker_bg.wasm
@@ -173,9 +235,9 @@ wasm-bindgen --target web \
   target/wasm32-unknown-unknown/release/metadata_checker.wasm
 ```
 
-`--target no-modules` 只适用于 BI hook / `importScripts()` 场景；Chromium MV3 extension service worker 当前是 module worker，必须使用可动态 import 的 ESM glue。
+`--target no-modules` 只适用于 BI hook / `importScripts()` 场景；Chromium MV3 extension 当前通过 offscreen document import ESM glue，必须使用 `--target web`。
 
-2. 在 `chrome://extensions` reload `browser/artifacts/metadata-checker-extension-chromium`。
+2. 在 `chrome://extensions` reload `browser/artifacts/metadata-checker-extension-chromium`。如果 Chrome profile 对同一路径的 unpacked extension 缓存旧 `background.js`，使用新的 versioned artifact 目录验证，例如 `browser/artifacts/metadata-checker-extension-chromium-0.1.13`。
 
 3. 刷新真实 BI 页面：
 
@@ -214,11 +276,15 @@ Cache hits/misses
 Retry available
 ```
 
-7. 根据 `First diagnostic` 分流：
+7. 若出现 `First diagnostic`，按 code 分流：
 
 - `REMOTE_METADATA_NOT_FOUND` / `REMOTE_METADATA_FETCH_FAILED`：优先查 SW metadata content path 与真实 BI content API。
 - `BACKGROUND_ANALYSIS_FAILED`：继续看 diagnostic message，区分 raw metadata 获取失败、WASM load/build 失败、selection analyze 失败。
 - `BACKGROUND_ANALYSIS_RUNTIME_UNAVAILABLE` 或 WASM 相关 code：查 `metadata_checker.js` / `metadata_checker_bg.wasm` 是否被扩展成功加载。
+- `INVALID_SELECTION`：检查 background 是否把 `file_id` 补入 WASM selection payload。
+- `INVALID_OPTIONS`：检查 `include_priority/include_conditions/include_dataflow` 是否显式传入。
+- `RUNTIME_NOT_INITIALIZED`：检查 background 是否先调用 `initRuntime`。
+- `DOCUMENT_NOT_FOUND`：检查 `getFileContent` 是否以 raw text 原样传给 `loadSuperpageDocument`。
 
 ## 安全边界
 

@@ -8,6 +8,7 @@ import {
   createIndexedDbMetadataCache,
   createM45BackgroundController,
   createMemoryMetadataCache,
+  createOffscreenWasmAnalysisClient,
   createWasmAnalysisClient,
   M45_EVENT_TYPES,
 } from "../extension-chromium/background.js";
@@ -81,7 +82,7 @@ function createFetchStub() {
       parsed.pathname === "/api/meta/services/getFileContent/page-1" ||
       parsed.pathname === "/api/meta/services/getFileContent/table-1"
     ) {
-      return jsonResponse(200, { raw_text: JSON.stringify({ type: "metadata" }) });
+      return jsonResponse(200, JSON.stringify({ type: "metadata" }));
     }
     return jsonResponse(404, {});
   };
@@ -482,6 +483,7 @@ test("M45 pre-bootstrap selection is replayed and prioritized after visible inde
   assert.equal(result.ok, true);
   assert.equal(controller.state.background.pending_foreground.length, 0);
   assert.equal(analyzeCalls[0].options.mode, "foreground");
+  assert.equal(analyzeCalls[0].options.include_conditions, true);
   assert.equal(analyzeCalls[0].selection.source_path, "app/Test.app/Page.spg");
   const keys = await cache.keys();
   assert.equal(
@@ -1164,6 +1166,10 @@ test("M45 background fetches raw metadata and calls injected runtime analyzer", 
     fetchImpl,
     clock: () => 2000,
     analysisClient: {
+      async initRuntime(options) {
+        runtimeCalls.push({ method: "initRuntime", options });
+        return { status: "ready" };
+      },
       async loadSuperpageDocument(sourcePath, rawText) {
         runtimeCalls.push({ method: "loadSuperpageDocument", sourcePath, rawText });
         return { status: "ready" };
@@ -1188,9 +1194,12 @@ test("M45 background fetches raw metadata and calls injected runtime analyzer", 
 
   assert.deepEqual(
     runtimeCalls.map((call) => call.method),
-    ["loadSuperpageDocument", "buildOrUpdateSuperpageGraph", "analyzeSuperpageSelection"],
+    ["initRuntime", "loadSuperpageDocument", "buildOrUpdateSuperpageGraph", "analyzeSuperpageSelection"],
   );
-  assert.equal(runtimeCalls[0].sourcePath, "app/Test.app/Page.spg");
+  assert.equal(runtimeCalls[0].options.project_ref, "xiaoshouyi");
+  assert.equal(runtimeCalls[1].sourcePath, "app/Test.app/Page.spg");
+  assert.equal(runtimeCalls[1].rawText, JSON.stringify({ type: "metadata" }));
+  assert.equal(runtimeCalls[3].selection.file_id, "page-1");
   assert.equal(controller.state.background.processed, 1);
 });
 
@@ -1228,6 +1237,10 @@ test("M45 WASM analysis client loads extension runtime module", async () => {
       calls.push({ method: "import", specifier });
       return {
         default: async (wasmUrl) => calls.push({ method: "init", wasmUrl }),
+        initRuntime: async (optionsJson) => {
+          calls.push({ method: "initRuntime", optionsJson });
+          return JSON.stringify({ status: "ready" });
+        },
         loadSuperpageDocument: async (sourcePath, rawText) => {
           calls.push({ method: "loadSuperpageDocument", sourcePath, rawText });
           return JSON.stringify({ status: "ready" });
@@ -1244,6 +1257,7 @@ test("M45 WASM analysis client loads extension runtime module", async () => {
     },
   });
 
+  await client.initRuntime({ project_ref: "p" });
   await client.loadSuperpageDocument("app/Page.spg", "{}");
   await client.buildOrUpdateSuperpageGraph("app/Page.spg");
   await client.analyzeSuperpageSelection({ source_path: "app/Page.spg" }, { mode: "background" });
@@ -1253,6 +1267,7 @@ test("M45 WASM analysis client loads extension runtime module", async () => {
     [
       "import",
       "init",
+      "initRuntime",
       "loadSuperpageDocument",
       "buildOrUpdateSuperpageGraph",
       "analyzeSuperpageSelection",
@@ -1260,6 +1275,137 @@ test("M45 WASM analysis client loads extension runtime module", async () => {
   );
   assert.equal(calls[0].specifier, "chrome-extension://id/metadata_checker.js");
   assert.equal(calls[1].wasmUrl, "chrome-extension://id/metadata_checker_bg.wasm");
+  assert.equal(calls[2].optionsJson, JSON.stringify({ project_ref: "p" }));
+});
+
+test("M45 WASM analysis client can use statically imported module in service worker", async () => {
+  const calls = [];
+  const client = createWasmAnalysisClient({
+    chromeRuntime: {
+      getURL(path) {
+        return `chrome-extension://id/${path}`;
+      },
+    },
+    wasmInit: async (wasmUrl) => calls.push({ method: "init", wasmUrl }),
+    wasmModule: {
+      initRuntime: async (optionsJson) => {
+        calls.push({ method: "initRuntime", optionsJson });
+        return JSON.stringify({ status: "ready" });
+      },
+      loadSuperpageDocument: async (sourcePath, rawText) => {
+        calls.push({ method: "loadSuperpageDocument", sourcePath, rawText });
+        return JSON.stringify({ status: "ready" });
+      },
+      buildOrUpdateSuperpageGraph: async (sourcePath) => {
+        calls.push({ method: "buildOrUpdateSuperpageGraph", sourcePath });
+        return JSON.stringify({ status: "ready" });
+      },
+      analyzeSuperpageSelection: async (selectionJson, optionsJson) => {
+        calls.push({ method: "analyzeSuperpageSelection", selectionJson, optionsJson });
+        return JSON.stringify({ status: "ready" });
+      },
+    },
+  });
+
+  await client.initRuntime({ project_ref: "p" });
+  await client.loadSuperpageDocument("app/Page.spg", "{}");
+  await client.buildOrUpdateSuperpageGraph("app/Page.spg");
+  await client.analyzeSuperpageSelection({ source_path: "app/Page.spg" }, { mode: "background" });
+
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    [
+      "init",
+      "initRuntime",
+      "loadSuperpageDocument",
+      "buildOrUpdateSuperpageGraph",
+      "analyzeSuperpageSelection",
+    ],
+  );
+  assert.equal(calls[0].wasmUrl, "chrome-extension://id/metadata_checker_bg.wasm");
+  assert.equal(calls[1].optionsJson, JSON.stringify({ project_ref: "p" }));
+});
+
+test("M45 WASM analysis client defaults to offscreen document when available", async () => {
+  const calls = [];
+  const client = createWasmAnalysisClient({
+    chromeApi: {
+      runtime: {
+        getURL(path) {
+          return `chrome-extension://id/${path}`;
+        },
+        async getContexts(query) {
+          calls.push({ method: "getContexts", query });
+          return [];
+        },
+        sendMessage(message, callback) {
+          calls.push({ method: "sendMessage", message });
+          callback({
+            ok: true,
+            result: JSON.stringify({ status: "ready" }),
+          });
+        },
+      },
+      offscreen: {
+        async createDocument(options) {
+          calls.push({ method: "createDocument", options });
+        },
+      },
+    },
+  });
+
+  await client.loadSuperpageDocument("app/Page.spg", "{}");
+
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    ["getContexts", "createDocument", "sendMessage"],
+  );
+  assert.equal(calls[1].options.url, "offscreen.html");
+  assert.deepEqual(calls[1].options.reasons, ["WORKERS"]);
+  assert.equal(calls[2].message.type, "metadata-checker-offscreen-wasm-call");
+  assert.equal(calls[2].message.payload.method, "loadSuperpageDocument");
+  assert.equal(calls[2].message.payload.wasm_url, "chrome-extension://id/metadata_checker_bg.wasm");
+});
+
+test("M45 offscreen WASM analysis client calls runtime methods through extension messages", async () => {
+  const calls = [];
+  const client = createOffscreenWasmAnalysisClient({
+    chromeApi: {
+      runtime: {
+        getURL(path) {
+          return `chrome-extension://id/${path}`;
+        },
+        async getContexts() {
+          return [{ documentUrl: "chrome-extension://id/offscreen.html" }];
+        },
+        sendMessage(message, callback) {
+          calls.push(message);
+          callback({
+            ok: true,
+            result: JSON.stringify({ status: "ready", method: message.payload.method }),
+          });
+        },
+      },
+      offscreen: {
+        async createDocument() {
+          throw new Error("should not create existing offscreen document");
+        },
+      },
+    },
+  });
+
+  const result = await client.analyzeSuperpageSelection(
+    { source_path: "app/Page.spg" },
+    { mode: "foreground" },
+  );
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.method, "analyzeSuperpageSelection");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].payload.args, [
+    JSON.stringify({ source_path: "app/Page.spg" }),
+    JSON.stringify({ mode: "foreground" }),
+  ]);
 });
 
 test("M45 background records per-file fetch failure and continues queue", async () => {
