@@ -82,9 +82,18 @@ function createFetchStub() {
       parsed.pathname === "/api/meta/services/getFileContent/page-1" ||
       parsed.pathname === "/api/meta/services/getFileContent/table-1"
     ) {
+      const syntheticComponents = Array.from({ length: 96 }, (_, index) => ({
+        id: `component-${index}`,
+        type: "Input",
+        props: {
+          defaultValue: `{{model.field_${index}}}`,
+          raw_text: "literal field that must stay raw text",
+        },
+      }));
       return jsonResponse(200, JSON.stringify({
         type: "metadata",
         raw_text: "literal field that must stay raw text",
+        components: syntheticComponents,
       }));
     }
     return jsonResponse(404, {});
@@ -1201,10 +1210,11 @@ test("M45 background fetches raw metadata and calls injected runtime analyzer", 
   );
   assert.equal(runtimeCalls[0].options.project_ref, "xiaoshouyi");
   assert.equal(runtimeCalls[1].sourcePath, "app/Test.app/Page.spg");
-  assert.equal(runtimeCalls[1].rawText, JSON.stringify({
-    type: "metadata",
-    raw_text: "literal field that must stay raw text",
-  }));
+  const loadedRawMetadata = JSON.parse(runtimeCalls[1].rawText);
+  assert.equal(loadedRawMetadata.raw_text, "literal field that must stay raw text");
+  assert.equal(loadedRawMetadata.components.length, 96);
+  assert.equal(runtimeCalls[1].rawText.includes("\"raw_text\":\"literal field that must stay raw text\""), true);
+  assert.ok(runtimeCalls[1].rawText.length > 10000);
   assert.equal(runtimeCalls[3].selection.file_id, "page-1");
   assert.equal(runtimeCalls[3].options.mode, "background");
   assert.equal(runtimeCalls[3].options.include_priority, false);
