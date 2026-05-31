@@ -11,7 +11,7 @@ M47 的设计器内嵌 popup 是一个跟随当前选中组件自动更新的局
 - `ui-ux-pro-max` 设计系统建议偏向 developer tool 的 dark/code/run-green 语义，适合表达运行和关系状态。
 - `ui-ux-pro-max` chart 建议表明关系数据适合 Network Graph，但紧凑场景必须提供文字摘要或邻接列表替代。
 - `ui-ux-pro-max` UX 建议强调 hover 只能做增强，click/tap 必须是主要交互；错误状态需要 `aria-live` 或结构化状态。
-- Obsidian Graph View 参考其 Local Graph 交互语法：当前对象居中、邻接节点、hover 高亮连接、click 打开对象、depth 控制和分组配色。
+- Obsidian Graph View 官方参考：https://obsidian.md/help/plugins/graph。参考其 Graph/Local Graph 语义：节点代表对象、连线代表关系；hover 高亮连接、click 打开对象；Local Graph 围绕 active note 展示关联节点，并通过 depth 控制邻接展开层级。
 
 ## 明确不属于本 popup 的能力
 
