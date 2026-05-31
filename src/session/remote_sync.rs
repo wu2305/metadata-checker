@@ -4,6 +4,7 @@
 //! 覆盖 partial / full 两种同步模式。
 
 use std::fs;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
 
@@ -101,7 +102,8 @@ pub fn sync_project_from_remote_with_filter(
 
     let mut diagnostics = Vec::new();
     let filtered = filter_remote_entries(&remote_files, filter);
-    if filter.is_some() && filtered.is_empty() {
+    let is_filter_miss = filter.is_some_and(has_entry_filter) && filtered.is_empty();
+    if is_filter_miss {
         diagnostics.push(SessionRefreshDiagnostic {
             code: "REMOTE_FILTER_MISS".to_string(),
             message: format!("remote filter matched no files for project {}", project_ref),
@@ -200,7 +202,7 @@ pub fn sync_project_from_remote_with_filter(
         }
     }
 
-    if mode == SessionSyncMode::Full {
+    if mode == SessionSyncMode::Full && !is_filter_miss {
         file_report.skipped += mark_missing_files_deleted(
             &session_dir,
             &mut manifest,
@@ -210,6 +212,12 @@ pub fn sync_project_from_remote_with_filter(
             &analyzable_paths,
             &mut report,
         )?;
+    } else if mode == SessionSyncMode::Full && is_filter_miss {
+        diagnostics.push(SessionRefreshDiagnostic {
+            code: "REMOTE_FILTER_MISS_NO_DELETE".to_string(),
+            message: "full sync skipped missing-scope file deletion because filter had no matches"
+                .to_string(),
+        });
     }
 
     manager.write_manifest(&manifest)?;
@@ -252,6 +260,10 @@ fn match_entry_filter(
         }
     }
     true
+}
+
+fn has_entry_filter(filter: &SessionRefreshFilter) -> bool {
+    filter.module.is_some() || filter.source_path.is_some() || filter.file_id.is_some()
 }
 
 fn discover_scope_paths(
@@ -543,6 +555,10 @@ pub struct SessionRefreshOptions {
     pub project_name: String,
     pub sync_mode: SessionSyncMode,
     pub create_if_missing: bool,
+    /// 可选的同步筛选条件。
+    pub filter: Option<SessionRefreshFilter>,
+    /// 可选 graph 数据库路径覆盖。
+    pub graph_db_path: Option<PathBuf>,
 }
 
 /// Session 刷新报告。
@@ -582,6 +598,8 @@ pub fn refresh_session_from_remote(
         project_name,
         sync_mode,
         create_if_missing,
+        filter,
+        graph_db_path,
     } = options;
 
     // 读取或创建 session
@@ -598,7 +616,11 @@ pub fn refresh_session_from_remote(
     };
 
     let session_dir = manager.session_dir(&session_id);
-    let graph_db_path = session_dir.join("graph.redb");
+    let graph_db_path = graph_db_path.unwrap_or_else(|| session_dir.join("graph.redb"));
+    if let Some(parent) = graph_db_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to prepare graph db parent {}", parent.display()))?;
+    }
 
     // 同步远程文件
     let (sync_report, file_report, diagnostics) = sync_project_from_remote_with_filter(
@@ -607,7 +629,7 @@ pub fn refresh_session_from_remote(
         &session_id,
         &project_ref,
         sync_mode,
-        None,
+        filter.as_ref(),
     )
     .with_context(|| {
         format!(
@@ -615,6 +637,13 @@ pub fn refresh_session_from_remote(
             project_ref, session_id
         )
     })?;
+
+    let mut manifest = manager.read_manifest(&session_id)?;
+    let graph_db_path_text = graph_db_path.to_string_lossy().to_string();
+    if manifest.graph_db_path != graph_db_path_text {
+        manifest.graph_db_path = graph_db_path_text;
+        manager.write_manifest(&manifest)?;
+    }
 
     // 构建 graph
     let index_report = build_session_graph(&session_dir, &graph_db_path)
@@ -1124,8 +1153,13 @@ mod tests {
         );
         assert_eq!(report.deleted, 0);
         assert_eq!(
-            fs::read_to_string(root.join("s1").join("project").join("app").join("Broken.spg"))
-                .unwrap(),
+            fs::read_to_string(
+                root.join("s1")
+                    .join("project")
+                    .join("app")
+                    .join("Broken.spg")
+            )
+            .unwrap(),
             "old-broken"
         );
 
@@ -1322,8 +1356,13 @@ mod tests {
                 .any(|file| file.source_path == "app/removed.spg" && file.deleted)
         );
         assert_eq!(
-            fs::read_to_string(root.join("s1").join("project").join("app").join("current.spg"))
-                .unwrap(),
+            fs::read_to_string(
+                root.join("s1")
+                    .join("project")
+                    .join("app")
+                    .join("current.spg")
+            )
+            .unwrap(),
             "current-new"
         );
 
@@ -1862,6 +1901,127 @@ mod tests {
     }
 
     #[test]
+    fn sync_project_from_remote_full_filter_file_id_miss_keeps_existing_files() {
+        let root = test_root("full-filter-miss");
+        let manager = SessionManager::new(&root);
+        let _ = manager
+            .create_session("s1", "https://bi.test", "proj", "proj", "remote")
+            .unwrap();
+
+        let mut initial_provider = InMemoryRemoteSessionProvider::new();
+        register_project(&mut initial_provider);
+        add_page(
+            &mut initial_provider,
+            "app/Keep.spg",
+            "keep",
+            "1",
+            false,
+            "keep-old",
+        );
+        add_page(
+            &mut initial_provider,
+            "app/KeepOther.spg",
+            "other",
+            "1",
+            false,
+            "other-old",
+        );
+        sync_project_from_remote(
+            &initial_provider,
+            &manager,
+            "s1",
+            "proj",
+            SessionSyncMode::Full,
+        )
+        .unwrap();
+
+        let mut filtered_provider = InMemoryRemoteSessionProvider::new();
+        register_project(&mut filtered_provider);
+        add_page(
+            &mut filtered_provider,
+            "app/Unknown.spg",
+            "unknown",
+            "2",
+            false,
+            "unknown-new",
+        );
+        let filter = SessionRefreshFilter {
+            module: None,
+            source_path: None,
+            file_id: Some("file-id-not-exist".to_string()),
+            current_source_path: None,
+        };
+        let (sync_report, file_report, diagnostics) = sync_project_from_remote_with_filter(
+            &filtered_provider,
+            &manager,
+            "s1",
+            "proj",
+            SessionSyncMode::Full,
+            Some(&filter),
+        )
+        .unwrap();
+
+        assert_eq!(sync_report.deleted, 0);
+        assert_eq!(file_report.discovered, 0);
+        assert_eq!(file_report.analyzable, 0);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| item.code == "REMOTE_FILTER_MISS")
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| item.code == "REMOTE_FILTER_MISS_NO_DELETE")
+        );
+
+        let manifest = manager.read_manifest("s1").unwrap();
+        assert!(
+            manifest
+                .files
+                .iter()
+                .any(|file| file.source_path == "app/Keep.spg" && !file.deleted)
+        );
+        assert!(
+            manifest
+                .files
+                .iter()
+                .any(|file| file.source_path == "app/KeepOther.spg" && !file.deleted)
+        );
+        assert!(
+            root.join("s1")
+                .join("project")
+                .join("app")
+                .join("Keep.spg")
+                .exists()
+        );
+        assert!(
+            root.join("s1")
+                .join("project")
+                .join("app")
+                .join("KeepOther.spg")
+                .exists()
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("s1").join("project").join("app").join("Keep.spg"))
+                .unwrap(),
+            "keep-old"
+        );
+        assert_eq!(
+            fs::read_to_string(
+                root.join("s1")
+                    .join("project")
+                    .join("app")
+                    .join("KeepOther.spg")
+            )
+            .unwrap(),
+            "other-old"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn sync_debug_does_not_leak_token_cookie_password() {
         let root = test_root("debug-secrets");
         let manager = SessionManager::new(&root);
@@ -1907,6 +2067,8 @@ mod tests {
             project_name: "proj".to_string(),
             sync_mode: SessionSyncMode::Partial,
             create_if_missing: false,
+            filter: None,
+            graph_db_path: None,
         };
         let report = refresh_session_from_remote(&provider, &manager, options).unwrap();
         let debug_text = format!("{:?}", report);
@@ -1961,6 +2123,8 @@ mod tests {
             project_name: "proj".to_string(),
             sync_mode: SessionSyncMode::Full,
             create_if_missing: true,
+            filter: None,
+            graph_db_path: None,
         };
 
         let report = refresh_session_from_remote(&provider, &manager, options).unwrap();
@@ -1971,6 +2135,110 @@ mod tests {
         assert_eq!(report.sync.written, 1);
         assert!(report.index.indexed >= 1);
         assert!(std::path::Path::new(&report.graph_db_path).exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(feature = "cli-local")]
+    fn refresh_session_from_remote_uses_filter_and_graph_db_path_override() {
+        let root = test_root("refresh-filter-graph-override");
+        let manager = SessionManager::new(&root);
+        let _ = manager
+            .create_session("s1", "https://bi.test", "proj", "proj", "remote")
+            .unwrap();
+
+        let mut initial_provider = InMemoryRemoteSessionProvider::new();
+        initial_provider
+            .register_project(RemoteProjectInfo {
+                project_ref: "proj".to_string(),
+                project_name: "proj".to_string(),
+                source_origin: "remote".to_string(),
+            })
+            .unwrap();
+        add_page(
+            &mut initial_provider,
+            "app/Target.spg",
+            "target",
+            "1",
+            false,
+            r#"{"components":[]}"#,
+        );
+        add_page(
+            &mut initial_provider,
+            "app/Keep.spg",
+            "keep",
+            "1",
+            false,
+            r#"{"components":[]}"#,
+        );
+        sync_project_from_remote(
+            &initial_provider,
+            &manager,
+            "s1",
+            "proj",
+            SessionSyncMode::Full,
+        )
+        .unwrap();
+
+        let mut refreshed_provider = InMemoryRemoteSessionProvider::new();
+        refreshed_provider
+            .register_project(RemoteProjectInfo {
+                project_ref: "proj".to_string(),
+                project_name: "proj".to_string(),
+                source_origin: "remote".to_string(),
+            })
+            .unwrap();
+        add_page(
+            &mut refreshed_provider,
+            "app/Target.spg",
+            "target",
+            "2",
+            false,
+            r#"{"components":[{"name":"c"}]}"#,
+        );
+        let override_graph_db = root.join("override-session.graphdb");
+        let filter = SessionRefreshFilter {
+            module: None,
+            source_path: Some("app/Target.spg".to_string()),
+            file_id: None,
+            current_source_path: None,
+        };
+        let options = SessionRefreshOptions {
+            session_id: "s1".to_string(),
+            remote_server: "https://bi.test".to_string(),
+            project_ref: "proj".to_string(),
+            project_name: "proj".to_string(),
+            sync_mode: SessionSyncMode::Full,
+            create_if_missing: false,
+            filter: Some(filter),
+            graph_db_path: Some(override_graph_db.clone()),
+        };
+
+        let report = refresh_session_from_remote(&refreshed_provider, &manager, options).unwrap();
+
+        assert_eq!(
+            report.graph_db_path,
+            override_graph_db.to_string_lossy().to_string()
+        );
+        assert!(std::path::Path::new(&report.graph_db_path).exists());
+        assert_eq!(report.files.discovered, 1);
+        assert_eq!(report.sync.deleted, 0);
+        assert_eq!(
+            fs::read_to_string(
+                root.join("s1")
+                    .join("project")
+                    .join("app")
+                    .join("Target.spg")
+            )
+            .unwrap(),
+            r#"{"components":[{"name":"c"}]}"#
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("s1").join("project").join("app").join("Keep.spg"))
+                .unwrap(),
+            r#"{"components":[]}"#
+        );
 
         let _ = fs::remove_dir_all(root);
     }
@@ -2000,6 +2268,8 @@ mod tests {
             project_name: "proj".to_string(),
             sync_mode: SessionSyncMode::Full,
             create_if_missing: false,
+            filter: None,
+            graph_db_path: None,
         };
 
         let _err = refresh_session_from_remote(&provider, &manager, options).unwrap_err();

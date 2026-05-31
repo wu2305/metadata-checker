@@ -274,21 +274,21 @@ pub struct Cli {
     #[arg(
         long,
         value_name = "SOURCE",
-        help = "Remote source filter placeholder (reserved, currently no-op)"
+        help = "Remote source_path filter for --session-refresh/--remote-index"
     )]
     pub remote_source: Option<String>,
 
     #[arg(
         long,
         value_name = "MODULE",
-        help = "Remote module filter placeholder (reserved, currently no-op)"
+        help = "Remote module/path-prefix filter for --session-refresh/--remote-index"
     )]
     pub remote_module: Option<String>,
 
     #[arg(
         long,
         value_name = "FILE",
-        help = "Remote file filter placeholder (reserved, currently no-op)"
+        help = "Remote file_id filter for --session-refresh/--remote-index"
     )]
     pub remote_file: Option<String>,
 

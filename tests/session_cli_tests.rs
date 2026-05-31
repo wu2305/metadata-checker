@@ -5,6 +5,7 @@ use std::net::TcpListener;
 use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 use metadata_checker::session::SessionManager;
 
@@ -595,9 +596,9 @@ fn session_refresh_remote_index_alias_success_reuses_mock_server() {
             "--project",
             "proj",
             "--remote-source",
-            "app",
+            "app/Page.spg",
             "--remote-module",
-            "module-a",
+            "app",
             "--remote-file",
             "spg1",
             "--remote-username",
@@ -655,6 +656,365 @@ fn session_refresh_remote_index_alias_success_reuses_mock_server() {
     assert!(!json_text.contains("pass"));
     assert!(!json_text.contains("JSESSIONID"));
     assert!(!json_text.contains("cookie"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_refresh_remote_filter_reduces_fetch_and_write() {
+    let root = test_root("refresh-filter");
+    let page_a = r#"{"pageName":"PageA","components":[]}"#;
+    let page_b = r#"{"pageName":"PageB","components":[]}"#;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("read mock server addr");
+    let (request_sender, request_receiver) = mpsc::channel::<String>();
+
+    thread::spawn(move || {
+        for _ in 0..8 {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 4096];
+            let n = stream.read(&mut request).expect("read request");
+            let request = String::from_utf8_lossy(&request[..n]).to_string();
+            let request_line = request.lines().next().unwrap_or_default();
+            let request_path = request_line
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("")
+                .to_string();
+            request_sender
+                .send(request_line.to_string())
+                .expect("send request snapshot");
+
+            if request_path == "/api/auth/signin" {
+                let body = r#"{"ok":true}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nSet-Cookie: JSESSIONID=abc; Path=/\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+
+            if request_path == "/api/meta/services/getFileDescendant/proj" {
+                let body = r#"{"children":[{"path":"/proj/app/PageA.spg","name":"PageA.spg","id":"pageA","revision":"1","isFolder":false},{"path":"/proj/app/PageB.spg","name":"PageB.spg","id":"pageB","revision":"1","isFolder":false},{"path":"/proj/data/tables/test.tbl","name":"test.tbl","id":"tbl1","revision":"1","isFolder":false}]}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+
+            if let Some(file_id) = request_path.strip_prefix("/api/meta/services/getFileContent/") {
+                let body = match file_id {
+                    "pageA" => page_a,
+                    "pageB" => page_b,
+                    "tbl1" => "a,b,c\n1,2,3\n",
+                    _ => "{\"ok\":false}",
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+
+            let response =
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
+    });
+
+    let mock_url = format!("http://{addr}");
+    let json = run_session_command(
+        &root,
+        &[
+            "--session-refresh",
+            "s1",
+            "--remote-server",
+            &mock_url,
+            "--project",
+            "proj",
+            "--remote-module",
+            "app",
+            "--remote-file",
+            "pageA",
+            "--remote-username",
+            "user",
+            "--remote-password",
+            "pass",
+        ],
+    );
+
+    let mut requests = Vec::new();
+    while let Ok(req) = request_receiver.recv_timeout(Duration::from_millis(10)) {
+        requests.push(req);
+    }
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|line| line.starts_with("GET /api/meta/services/getFileContent"))
+            .count(),
+        1
+    );
+    assert!(
+        requests
+            .iter()
+            .any(|line| line.contains("getFileContent/pageA"))
+    );
+    assert!(
+        !requests
+            .iter()
+            .any(|line| line.contains("getFileContent/pageB"))
+    );
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["files"]["synced"].as_u64().expect("synced"), 1);
+
+    let mirror_root = root.join("s1").join("project");
+    assert!(mirror_root.join("app").join("PageA.spg").exists());
+    assert!(!mirror_root.join("app").join("PageB.spg").exists());
+    assert!(
+        !mirror_root
+            .join("data")
+            .join("tables")
+            .join("test.tbl")
+            .exists()
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_refresh_remote_index_query_page_outputs_query_result() {
+    let root = test_root("refresh-query");
+    let page = r#"{"pageName":"Foo","components":[]}"#;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("read mock server addr");
+    let (request_sender, request_receiver) = mpsc::channel::<String>();
+    let mock_url = format!("http://{addr}");
+
+    thread::spawn(move || {
+        for _ in 0..6 {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 4096];
+            let n = stream.read(&mut request).expect("read request");
+            let request = String::from_utf8_lossy(&request[..n]).to_string();
+            let request_line = request.lines().next().unwrap_or_default();
+            request_sender
+                .send(request_line.to_string())
+                .expect("send request snapshot");
+            let request_path = request_line.split_whitespace().nth(1).unwrap_or("");
+            if request_path == "/api/auth/signin" {
+                let body = r#"{"ok":true}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nSet-Cookie: JSESSIONID=abc; Path=/\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+            if request_path == "/api/meta/services/getFileDescendant/proj" {
+                let body = r#"{"children":[{"path":"/proj/app/Foo.spg","name":"Foo.spg","id":"foo-id","revision":"1","isFolder":false}]}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+            if request_path == "/api/meta/services/getFileContent/foo-id" {
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{page}",
+                    page.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+            let response =
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
+    });
+
+    let output = run_session_command_raw(
+        &root,
+        &[
+            "--remote-index",
+            "s1",
+            "--base-url",
+            &mock_url,
+            "--project",
+            "proj",
+            "--query-page",
+            "page:app/Foo.spg",
+            "--remote-file",
+            "foo-id",
+            "--remote-username",
+            "user",
+            "--remote-password",
+            "pass",
+        ],
+    );
+
+    assert!(output.status.success());
+    let json = as_json_from_stdout(&output);
+    assert!(!json.get("error").is_some());
+    assert_eq!(json["query_target"], "page:app/Foo.spg");
+    assert_eq!(json["summary"]["page_id"], "page:app/Foo.spg");
+    assert!(!json.as_object().unwrap().contains_key("session_id"));
+
+    let manifest_path = root.join("s1").join("session.json");
+    assert!(manifest_path.exists());
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(manifest_path).expect("read session manifest"),
+    )
+    .expect("manifest should be valid JSON");
+    assert_eq!(manifest["session_id"], "s1");
+
+    let mut requests = Vec::new();
+    while let Ok(req) = request_receiver.recv_timeout(Duration::from_millis(10)) {
+        requests.push(req);
+    }
+    assert!(
+        requests
+            .iter()
+            .any(|line| line.contains("getFileContent/foo-id"))
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_remote_index_respects_graph_db_path_override() {
+    let root = test_root("refresh-graph-db");
+    let page = r#"{"pageName":"Foo","components":[]}"#;
+    let graph_db_path = root.join("custom-session.graphdb");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("read mock server addr");
+    let (request_sender, request_receiver) = mpsc::channel::<String>();
+
+    thread::spawn(move || {
+        for _ in 0..6 {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 4096];
+            let n = stream.read(&mut request).expect("read request");
+            let request = String::from_utf8_lossy(&request[..n]).to_string();
+            let request_line = request.lines().next().unwrap_or_default();
+            request_sender
+                .send(request_line.to_string())
+                .expect("send request snapshot");
+            let request_path = request_line.split_whitespace().nth(1).unwrap_or("");
+            if request_path == "/api/auth/signin" {
+                let body = r#"{"ok":true}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nSet-Cookie: JSESSIONID=abc; Path=/\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+            if request_path == "/api/meta/services/getFileDescendant/proj" {
+                let body = r#"{"children":[{"path":"/proj/app/Foo.spg","name":"Foo.spg","id":"foo-id","revision":"1","isFolder":false}]}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+            if request_path == "/api/meta/services/getFileContent/foo-id" {
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{page}",
+                    page.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+            let response =
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
+    });
+
+    let mock_url = format!("http://{addr}");
+    let json = run_session_command(
+        &root,
+        &[
+            "--remote-index",
+            "s1",
+            "--base-url",
+            &mock_url,
+            "--project",
+            "proj",
+            "--graph-db-path",
+            &graph_db_path.to_string_lossy(),
+            "--remote-username",
+            "user",
+            "--remote-password",
+            "pass",
+        ],
+    );
+
+    let _ = request_receiver
+        .recv_timeout(Duration::from_millis(10))
+        .expect("auth request");
+    assert_eq!(json["ok"], true);
+    assert_eq!(
+        json["graph_db_path"].as_str().unwrap(),
+        graph_db_path.to_string_lossy().as_ref(),
+    );
+    assert!(graph_db_path.exists());
+
+    let query_output = run_session_command_raw(
+        &root,
+        &[
+            "--graph-db-path",
+            &graph_db_path.to_string_lossy(),
+            "--query-page",
+            "page:app/Foo.spg",
+        ],
+    );
+    assert!(query_output.status.success());
+    let query_json = as_json_from_stdout(&query_output);
+    assert_eq!(query_json["query_target"], "page:app/Foo.spg");
+
+    let manifest_text = std::fs::read_to_string(root.join("s1").join("session.json"))
+        .expect("read session manifest");
+    let manifest_json: serde_json::Value =
+        serde_json::from_str(&manifest_text).expect("manifest should be valid JSON");
+    assert_eq!(
+        manifest_json["graph_db_path"].as_str().unwrap(),
+        graph_db_path.to_string_lossy().as_ref(),
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }

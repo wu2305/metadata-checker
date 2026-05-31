@@ -71,17 +71,38 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 ### 项目级图数据库
 
 ```bash
-# 扫描项目目录并构建/更新图数据库（默认路径：<project-dir>/.metadata-checker.graphdb）
+# 1) 本地项目全量构建图谱（默认路径：<project-dir>/.metadata-checker.graphdb）
 ./target/release/metadata-checker --project-dir /path/to/project --build-graph
 
-# 构建到自定义路径（适用于只读项目目录或沙箱环境）
+# 2) 本地项目构建到自定义图库路径（适用于只读目录 / 沙箱）
 ./target/release/metadata-checker --project-dir /path/to/project --build-graph --graph-db-path /tmp/my_project.graphdb
 
-# 检查图数据库状态
+# 3) 检查任意图数据库路径的状态（本地或远端会话产物）
 ./target/release/metadata-checker --check-graph --graph-db-path /tmp/my_project.graphdb
 
-# 查询模型的读写关系与 DataFlow lineage
+# 4) 本地或会话索引图：直接用于 --query-*（不额外重建）
 ./target/release/metadata-checker --project-dir /path/to/project --query-model model1
+./target/release/metadata-checker --graph-db-path /tmp/my_project.graphdb --query-model model1
+
+# 5) 拉取远端项目并建立 session 图索引（可选全量）
+./target/release/metadata-checker --remote-index <session-id> --base-url <https://bi.example.com> --project <analyzer> --remote-username <user> --remote-password <pass> --session-sync-mode full --graph-db-path /tmp/remote-analyzer.graphdb
+
+# 6) 拉取远端项目并按维度过滤（source/module/file）后建图
+./target/release/metadata-checker --remote-index <session-id> --base-url <https://bi.example.com> --project <analyzer> --remote-source <source> --remote-module <module> --remote-file <file> --remote-username <user> --remote-password <pass> --graph-db-path /tmp/remote-analyzer-filtered.graphdb
+
+# 7) 远端索引后直接查询同一图（仅 query 参数展示）
+./target/release/metadata-checker --graph-db-path /tmp/remote-analyzer.graphdb --query-model <model-id>
+
+# 8) 查询页面依赖
+./target/release/metadata-checker --project-dir /path/to/project --query-page "page/合同管理/销售合同"
+./target/release/metadata-checker --graph-db-path /tmp/my_project.graphdb --query-page "page/合同管理/销售合同"
+
+# 9) 查询两个页面关系
+./target/release/metadata-checker --project-dir /path/to/project --query-cross "page/A" "page/B"
+./target/release/metadata-checker --graph-db-path /tmp/my_project.graphdb --query-cross "page/A" "page/B"
+
+# 10) 展开 DataFlow 子图
+./target/release/metadata-checker --project-dir /path/to/project --query-dataflow flow.tbl
 
 # query-model 输出字段说明：
 # - readers: 读取该模型的页面/组件/动作
@@ -91,18 +112,6 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 # - produced_by: 物理表的生产者（ incoming OutputsTo 边）
 # - consumed_by_dataflows: 消费该输入表的 DataFlow（ incoming DataflowInput 边）
 # - upstream_dependencies / downstream_outputs: 兼容旧字段，不建议新模型依赖
-
-# 查询页面的跨文件关系
-./target/release/metadata-checker --project-dir /path/to/project --query-page "page/合同管理/销售合同"
-
-# 查询两个页面之间的关系
-./target/release/metadata-checker --project-dir /path/to/project --query-cross "page/A" "page/B"
-
-# 拉取远端项目到 session 并建立图索引（用于真实项目场景）
-./target/release/metadata-checker --remote-index <session-id> --base-url https://autocrm-test.xiaoshouyi.com --project analyzer --remote-username <user> --remote-password <pass> --session-sync-mode full
-
-# 展开 DataFlow 子图
-./target/release/metadata-checker --project-dir /path/to/project --query-dataflow flow.tbl
 
 # 解释一个组件（单文件模式）
 ./target/release/metadata-checker page.spg --explain button1
@@ -192,11 +201,23 @@ Options:
       --detail              输出完整原始结构（non-human 模式）
       --project-dir <DIR>   项目目录（用于跨文件分析）
       --build-graph         从项目目录构建/更新图数据库
-      --query-model <MODEL> 查询模型的读写关系（需 --project-dir）
-      --query-page <PAGE>   查询页面的依赖关系（需 --project-dir）
-      --query-cross <A> <B> 查询两页面间的跨文件关系（需 --project-dir）
-      --query-dataflow <M>  展开 DataFlow 模型的内部子图（需 --project-dir）
-      --query-page-logic <P> 查询页面级逻辑摘要（需 --project-dir）
+      --query-model <MODEL> 查询模型的读写关系（需图上下文，可配合 --project-dir 或 --graph-db-path）
+      --query-page <PAGE>   查询页面的依赖关系（需图上下文，可配合 --project-dir 或 --graph-db-path）
+      --query-cross <A> <B> 查询两页面间的跨文件关系（需图上下文，可配合 --project-dir 或 --graph-db-path）
+      --query-dataflow <M>  展开 DataFlow 模型的内部子图（需图上下文，可配合 --project-dir 或 --graph-db-path）
+      --query-page-logic <P> 查询页面级逻辑摘要（需图上下文，可配合 --project-dir 或 --graph-db-path）
+      --remote-index <ID>   下载远端项目并建立会话索引（与 --session-refresh 等价）
+      --session-refresh <ID> 刷新远端会话（等价于 --remote-index）
+      --remote-server <URL> 远端 BI 服务地址
+      --remote-project <PROJECT> 远端项目引用（别名：--project）
+      --remote-username <USER> 远端登录用户名
+      --remote-password <PASS> 远端登录密码
+      --session-sync-mode <MODE> 远端会话同步模式（full|partial）
+      --session-dir <DIR>   会话存储根目录（默认: ~/.metadata-checker/sessions）
+      --remote-source <SOURCE> 远端 source 过滤参数
+      --remote-module <MODULE> 远端 module 过滤参数
+      --remote-file <FILE> 远端 file 过滤参数
+      --graph-db-path <PATH> 本地/远端都可指定的图数据库路径
   -h, --help                打印帮助信息
   -V, --version             打印版本
 ```
