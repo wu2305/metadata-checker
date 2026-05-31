@@ -9,6 +9,11 @@ const ROOT = new URL("..", import.meta.url);
 class FakeElement {
   constructor() {
     this.textContent = "";
+    this.title = "";
+    this.disabled = false;
+    this.className = "";
+    this.style = {};
+    this.dataset = {};
     this._handlers = new Map();
   }
 
@@ -30,29 +35,62 @@ class FakeElement {
   }
 }
 
+class FakeClipboard {
+  constructor() {
+    this.lastText = null;
+  }
+
+  async writeText(text) {
+    this.lastText = text;
+    return undefined;
+  }
+}
+
 function createPopupContext({
   queryResult = [{ id: 1 }],
   sendMessage = async () => ({}),
   runtimeSendMessage = async () => ({ ok: true, state: {} }),
+  navigatorOverrides = {},
 } = {}) {
   const calls = [];
+  const clipboard = new FakeClipboard();
 
-  const nodes = {
-    '[data-field="bridge"]': new FakeElement(),
-    '[data-field="source"]': new FakeElement(),
-    '[data-field="selection"]': new FakeElement(),
-    '[data-field="indexing"]': new FakeElement(),
-    '[data-field="progress"]': new FakeElement(),
-    '[data-field="current"]': new FakeElement(),
-    '[data-field="cache"]': new FakeElement(),
-    '[data-field="diagnostic"]': new FakeElement(),
-    '[data-action="open-panel"]': new FakeElement(),
-    '[data-action="hide-panel"]': new FakeElement(),
-    '[data-action="refresh-bridge"]': new FakeElement(),
-    '[data-action="process-background"]': new FakeElement(),
-    '[data-action="retry-current-selection"]': new FakeElement(),
-    '[data-action="analyze"]': new FakeElement(),
-  };
+  const fieldIds = [
+    "session-status",
+    "session-state",
+    "source-path",
+    "source-file-id",
+    "source-revision",
+    "selection-summary",
+    "indexing-status",
+    "indexing-progress",
+    "indexing-progress-bar",
+    "indexing-current-source",
+    "cache-hits",
+    "cache-misses",
+    "artifact-readiness",
+    "diagnostic",
+    "action-message",
+  ];
+
+  const buttonIds = [
+    "open-panel",
+    "toggle-panel",
+    "process-current",
+    "process-background",
+    "retry-current-selection",
+    "pause-background",
+    "resume-background",
+    "copy-diagnostic",
+  ];
+
+  const nodes = {};
+  for (const fieldId of fieldIds) {
+    nodes[`[data-field="${fieldId}"]`] = new FakeElement();
+  }
+  for (const buttonId of buttonIds) {
+    nodes[`[data-action="${buttonId}"]`] = new FakeElement();
+  }
 
   const context = {
     console,
@@ -72,18 +110,29 @@ function createPopupContext({
           return queryResult;
         },
         async sendMessage(tabId, message) {
-          calls.push({ tabId, message });
-          return sendMessage(tabId, message);
+          calls.push({ tabId, message, source: "tabs.sendMessage" });
+          if (typeof sendMessage === "function") {
+            return sendMessage(tabId, message);
+          }
+          return {};
         },
       },
       runtime: {
         async sendMessage(message) {
-          calls.push({ runtime: true, message });
-          return runtimeSendMessage(message);
+          calls.push({ message, source: "runtime.sendMessage" });
+          if (typeof runtimeSendMessage === "function") {
+            return runtimeSendMessage(message);
+          }
+          return {};
         },
       },
     },
+    navigator: {
+      clipboard,
+      ...navigatorOverrides,
+    },
     __calls: calls,
+    __clipboard: clipboard,
   };
 
   return context;
@@ -102,67 +151,87 @@ function flush() {
   });
 }
 
-function assertDiagnostic(context, expectedCode) {
+function parseDiagnostic(context) {
   const raw = context.document.querySelector('[data-field="diagnostic"]').textContent;
-  if (!raw) {
-    assert.fail("diagnostic field is empty");
-  }
-  const parsed = JSON.parse(raw);
-  assert.equal(parsed.code, expectedCode);
+  return raw ? JSON.parse(raw) : null;
 }
 
-test("chromium popup sends panel, background, and retry requests through stable channels", async () => {
-  const context = createPopupContext();
-  await loadPopup(context);
-  await flush();
+function popupStatusFixture({
+  sourcePath = "projects/tenant/page.spg",
+  fileId = "file-001",
+  revision = "rev-1",
+  selectedComponentIds = ["comp-a", "comp-b", "comp-c", "comp-d"],
+  activeComponentId = "comp-a",
+  sessionStatus = "ready",
+  sessionBaseUrl = "https://autocrm-test.xiaoshouyi.com",
+  visibleIndex = { status: "ready", analyzable_count: 3, files: [{ source_path: "projects/tenant/page.spg" }] },
+  background = {
+    status: "running",
+    indexing_status: "indexing_current_page",
+    processed: 2,
+    total: 6,
+    failed: 1,
+    active: 1,
+    current_source_path: "projects/tenant/page.spg",
+    last_processed_source_path: "projects/tenant/page.spg",
+  },
+  cacheStats = { hits: 7, misses: 5 },
+  runtime = { available: true },
+  offscreen = { available: true },
+  version = { value: "1.2.3" },
+  lastDiagnostic = null,
+} = {}) {
+  const bridge = {
+    ok: true,
+    payload: {
+      page_context: { source_path: sourcePath, file_id: fileId, revision },
+      selection: {
+        source_path: sourcePath,
+        file_id: fileId,
+        revision,
+        selected_component_ids: selectedComponentIds,
+        active_component_id: activeComponentId,
+      },
+      diagnostics: lastDiagnostic ? [lastDiagnostic] : [],
+    },
+    page_context: { source_path: sourcePath, file_id: fileId, revision },
+    selection: {
+      source_path: sourcePath,
+      file_id: fileId,
+      revision,
+      selected_component_ids: selectedComponentIds,
+      active_component_id: activeComponentId,
+    },
+  };
+  const state = {
+    session: { status: sessionStatus, base_url: sessionBaseUrl },
+    visible_index: visibleIndex,
+    background,
+    cache_stats: cacheStats,
+    runtime,
+    offscreen,
+    version,
+    last_diagnostic: lastDiagnostic || null,
+    updated_at: 1700000000000,
+  };
+  return { bridge, state };
+}
 
-  context.document.querySelector('[data-action="open-panel"]').click();
-  context.document.querySelector('[data-action="hide-panel"]').click();
-  context.document.querySelector('[data-action="refresh-bridge"]').click();
-  context.document.querySelector('[data-action="process-background"]').click();
-  context.document.querySelector('[data-action="retry-current-selection"]').click();
-  context.document.querySelector('[data-action="analyze"]').click();
-  await flush();
-
-  const tabRequestTypes = context.__calls
-    .filter((item) => !item.runtime)
-    .map((item) => item.message.request_type);
-  const runtimeTypes = context.__calls
-    .filter((item) => item.runtime)
-    .map((item) => item.message.type);
-  assert.deepEqual(tabRequestTypes.slice(1), [
-    "openPanel",
-    "hidePanel",
-    "refreshBridge",
-    "retryCurrentSelection",
-    "analyzeCurrentSelection",
-  ]);
-  assert.equal(runtimeTypes.includes("metadata-checker-popup-status"), true);
-  assert.equal(runtimeTypes.includes("metadata-checker-background-process"), true);
-});
-
-test("chromium popup renders M45 indexing progress from background state", async () => {
+test("chromium popup renders ready state with session/indexing/cache/artifact fields", async () => {
   const context = createPopupContext({
+    sendMessage: async () => popupStatusFixture().bridge,
     runtimeSendMessage: async (message) => {
       if (message.type === "metadata-checker-popup-status") {
+        return popupStatusFixture().state;
+      }
+      if (message.type === "metadata-checker-selection-changed") {
         return {
           ok: true,
-          state: {
-            visible_index: {
-              status: "ready",
-              files: [{ source_path: "app/A.spg" }, { source_path: "data/T.tbl" }],
-              analyzable_count: 2,
-            },
-            background: {
-              status: "running",
-              indexing_status: "indexing_current_page",
-              processed: 1,
-              total: 2,
-              failed: 0,
-              current_source_path: "app/A.spg",
-            },
-            cache_stats: { hits: 3, misses: 4 },
+          artifact_ready: true,
+          artifact: {
+            analysis_status: "ready",
           },
+          background: { last_processed_source_path: "projects/tenant/page.spg" },
         };
       }
       return { ok: true };
@@ -171,74 +240,227 @@ test("chromium popup renders M45 indexing progress from background state", async
   await loadPopup(context);
   await flush();
 
-  assert.equal(context.document.querySelector('[data-field="indexing"]').textContent, "indexing_current_page");
-  assert.equal(context.document.querySelector('[data-field="progress"]').textContent, "1/2 processed, 0 failed, 2 discovered");
-  assert.equal(context.document.querySelector('[data-field="current"]').textContent, "app/A.spg");
-  assert.equal(context.document.querySelector('[data-field="cache"]').textContent, "3 hits, 4 misses");
+  assert.equal(context.document.querySelector('[data-field="session-status"]').textContent, "ready");
+  assert.match(context.document.querySelector('[data-field="session-state"]').textContent, /v1/);
+  assert.equal(
+    context.document.querySelector('[data-field="source-path"]').textContent,
+    "projects/tenant/page.spg",
+  );
+  assert.equal(context.document.querySelector('[data-field="source-file-id"]').textContent, "file-001");
+  assert.equal(context.document.querySelector('[data-field="source-revision"]').textContent, "rev-1");
+  assert.equal(context.document.querySelector('[data-field="selection-summary"]').textContent, "active=comp-a | ids=comp-a,comp-b,comp-c | selected=4");
+  assert.equal(context.document.querySelector('[data-field="indexing-status"]').textContent, "indexing_current_page");
+  assert.equal(context.document.querySelector('[data-field="indexing-progress"]').textContent, "2/6 processed, 1 failed, 3 discovered, 1 active");
+  assert.equal(context.document.querySelector('[data-field="cache-hits"]').textContent, "7");
+  assert.equal(context.document.querySelector('[data-field="cache-misses"]').textContent, "5");
+  assert.equal(context.document.querySelector('[data-field="artifact-readiness"]').textContent, "ready (ready)");
+  const diag = parseDiagnostic(context);
+  assert.equal(diag.code, "METADATA_CHECKER_IDLE");
 });
 
-test("chromium popup shows stable diagnostic when active tab is missing", async () => {
+test("chromium popup shows indexing status and progress ratio", async () => {
+  const status = popupStatusFixture({
+    sourcePath: "projects/tenant/index.spg",
+    selectedComponentIds: [],
+    background: {
+      status: "running",
+      indexing_status: "running",
+      processed: 1,
+      total: 4,
+      failed: 0,
+      active: 3,
+    },
+    visibleIndex: { status: "ready", analyzable_count: 8, files: [] },
+    cacheStats: { hits: 0, misses: 9 },
+    runtime: { available: true },
+    offscreen: { available: false },
+  });
   const context = createPopupContext({
-    queryResult: [],
-    sendMessage: async () => {
-      throw new Error("should not be called");
+    sendMessage: async () => status.bridge,
+    runtimeSendMessage: async (message) => {
+      if (message.type === "metadata-checker-popup-status") {
+        return status.state;
+      }
+      return { ok: true };
     },
   });
   await loadPopup(context);
   await flush();
-  assert.equal(context.__calls.some((item) => !item.runtime), false);
-  assertDiagnostic(context, "METADATA_CHECKER_ACTIVE_TAB_MISSING");
+
+  assert.equal(context.document.querySelector('[data-field="indexing-progress"]').textContent, "1/4 processed, 0 failed, 8 discovered, 3 active");
+  const width = context.document.querySelector('[data-field="indexing-progress-bar"]').style.width;
+  assert.equal(width, "25%");
+  assert.equal(context.document.querySelector('[data-field="selection-summary"]').textContent, "active=comp-a | selected=0");
 });
 
-test("chromium popup handles sendMessage failure with stable diagnostic", async () => {
-  const errors = [];
-  const onRejection = (error) => {
-    errors.push(error);
-  };
-  process.on("unhandledRejection", onRejection);
-  try {
-    const context = createPopupContext({
-      sendMessage: async (_tabId, message) => {
-        if (message.request_type === "analyzeCurrentSelection") {
-          throw new Error("content bridge send failed");
-        }
-        return { diagnostics: [] };
-      },
-    });
-    await loadPopup(context);
-    await flush();
-
-    context.document.querySelector('[data-action="analyze"]').click();
-    await flush();
-    assertDiagnostic(context, "METADATA_CHECKER_POPUP_ANALYZE_FAILED");
-    assert.equal(context.__calls.some((item) => item.message.request_type === "analyzeCurrentSelection"), true);
-    assert.equal(errors.length, 0);
-  } finally {
-    process.off("unhandledRejection", onRejection);
-  }
-});
-
-test("chromium popup shows bridge missing diagnostic when content script returns diagnostics", async () => {
+test("chromium popup surfaces active tab missing diagnostic", async () => {
   const context = createPopupContext({
-    sendMessage: async () => ({
-      diagnostics: [
-        {
-          severity: "warning",
-          code: "METADATA_CHECKER_BRIDGE_MISSING",
-          message: "bridge missing",
-        },
-      ],
-    }),
+    queryResult: [],
+    sendMessage: async () => popupStatusFixture().bridge,
+    runtimeSendMessage: async (message) => {
+      if (message.type === "metadata-checker-popup-status") {
+        return popupStatusFixture().state;
+      }
+      return { ok: true };
+    },
   });
   await loadPopup(context);
   await flush();
 
-  context.document.querySelector('[data-action="refresh-bridge"]').click();
+  const diag = parseDiagnostic(context);
+  assert.equal(diag.code, "METADATA_CHECKER_ACTIVE_TAB_MISSING");
+});
+
+test("chromium popup truncates long source path with tooltip", async () => {
+  const longPath = "projects/enterprise/apps/autocrm/prod/modules/marketing/campaigns/2026/rev-very-long-source-path/page-home-overview-dashboard.spg";
+  const context = createPopupContext({
+    sendMessage: async () => popupStatusFixture({ sourcePath: longPath }).bridge,
+    runtimeSendMessage: async (message) => {
+      if (message.type === "metadata-checker-popup-status") {
+        return popupStatusFixture({ sourcePath: longPath }).state;
+      }
+      if (message.type === "metadata-checker-selection-changed") {
+        return { ok: true, artifact_ready: false };
+      }
+      return { ok: true };
+    },
+  });
+  await loadPopup(context);
   await flush();
-  assertDiagnostic(context, "METADATA_CHECKER_BRIDGE_MISSING");
+
+  const sourcePathNode = context.document.querySelector('[data-field="source-path"]');
+  assert.notEqual(sourcePathNode.textContent, longPath);
+  assert.match(sourcePathNode.textContent, /…/);
+  assert.equal(sourcePathNode.title, longPath);
+});
+
+test("chromium popup executes actions and shows button messages", async () => {
+  const context = createPopupContext({
+    sendMessage: async (_tabId, message) => ({ ok: true, payload: {}, action: message.request_type }),
+    runtimeSendMessage: async (message) => {
+      if (message.type === "metadata-checker-popup-status") {
+        return popupStatusFixture({
+          lastDiagnostic: { code: "METADATA_CHECKER_SESSION_OK", message: "session ready" },
+        }).state;
+      }
+      if (message.type === "metadata-checker-selection-changed") {
+        return { ok: true, artifact_ready: false };
+      }
+      return { ok: true };
+    },
+  });
+
+  await loadPopup(context);
+  await flush();
+
+  const actionMessage = context.document.querySelector('[data-field="action-message"]');
+  const openPanel = context.document.querySelector('[data-action="open-panel"]');
+  const togglePanel = context.document.querySelector('[data-action="toggle-panel"]');
+  const processCurrent = context.document.querySelector('[data-action="process-current"]');
+  const processBackground = context.document.querySelector('[data-action="process-background"]');
+  const retry = context.document.querySelector('[data-action="retry-current-selection"]');
+  const pause = context.document.querySelector('[data-action="pause-background"]');
+  const resume = context.document.querySelector('[data-action="resume-background"]');
+
+  openPanel.click();
+  assert.equal(actionMessage.textContent, "open panel");
+  await flush();
+  assert.equal(context.__calls.some((item) => item.source === "tabs.sendMessage" && item.message.request_type === "openPanel"), true);
+
+  togglePanel.click();
+  assert.equal(actionMessage.textContent, "toggle panel");
+  await flush();
+  assert.equal(context.__calls.some((item) => item.source === "tabs.sendMessage" && item.message.request_type === "togglePanel"), true);
+
+  processCurrent.click();
+  assert.equal(actionMessage.textContent, "process current");
+  await flush();
+  assert.equal(context.__calls.some((item) => item.source === "tabs.sendMessage" && item.message.request_type === "analyzeCurrentSelection"), true);
+
+  processBackground.click();
+  await flush();
+  assert.equal(context.__calls.some((item) => item.source === "runtime.sendMessage" && item.message.type === "metadata-checker-background-process"), true);
+
+  retry.click();
+  await flush();
+  assert.equal(context.__calls.some((item) => item.source === "tabs.sendMessage" && item.message.request_type === "retryCurrentSelection"), true);
+
+  pause.click();
+  await flush();
+  assert.equal(context.__calls.some((item) => item.source === "runtime.sendMessage" && item.message.type === "metadata-checker-background-pause"), true);
+
+  resume.click();
+  await flush();
+  assert.equal(context.__calls.some((item) => item.source === "runtime.sendMessage" && item.message.type === "metadata-checker-background-resume"), true);
+});
+
+test("chromium popup copies redacted diagnostic", async () => {
+  const context = createPopupContext({
+    runtimeSendMessage: async (message) => {
+      if (message.type === "metadata-checker-popup-status") {
+        return popupStatusFixture({
+          lastDiagnostic: { code: "TOKEN_LEAK_CHECK", message: "token=secret-token cookie=secret-cookie password=secret-password" },
+        }).state;
+      }
+      if (message.type === "metadata-checker-selection-changed") {
+        return {
+          ok: true,
+          artifact_ready: false,
+        };
+      }
+      return { ok: true };
+    },
+    sendMessage: async () => popupStatusFixture().bridge,
+  });
+
+  await loadPopup(context);
+  await flush();
+
+  const copyDiagnostic = context.document.querySelector('[data-action="copy-diagnostic"]');
+  copyDiagnostic.click();
+  await flush();
+
+  const copied = context.__clipboard.lastText;
+  assert.ok(typeof copied === "string");
+  assert.equal(copied.includes("secret-token"), false);
+  assert.equal(copied.includes("secret-cookie"), false);
+  assert.equal(copied.includes("secret-password"), false);
+  assert.equal(copied.includes("***"), true);
+  const actionMessage = context.document.querySelector('[data-field="action-message"]');
+  assert.equal(actionMessage.textContent, "diagnostic copied");
+});
+
+test("chromium popup marks button failure with stable diagnostic", async () => {
+  const context = createPopupContext({
+    sendMessage: async (_tabId, message) => {
+      if (message.request_type === "analyzeCurrentSelection") {
+        return Promise.reject(new Error("analyze failed"));
+      }
+      return {};
+    },
+    runtimeSendMessage: async (message) => {
+      if (message.type === "metadata-checker-popup-status") {
+        return popupStatusFixture({}).state;
+      }
+      if (message.type === "metadata-checker-selection-changed") {
+        return { ok: true, artifact_ready: false };
+      }
+      return {};
+    },
+  });
+  await loadPopup(context);
+  await flush();
+
+  const processCurrent = context.document.querySelector('[data-action="process-current"]');
+  processCurrent.click();
+  await flush();
+
+  const diag = parseDiagnostic(context);
+  assert.equal(diag.code, "METADATA_CHECKER_ACTION_FAILED");
+  assert.match(context.document.querySelector('[data-field="action-message"]').textContent, /METADATA_CHECKER_ACTION_FAILED/);
 });
 
 test("chromium popup does not use chrome.scripting.executeScript", async () => {
   const source = await readFile(join(ROOT.pathname, "extension-chromium", "popup.js"), "utf8");
-  assert.doesNotMatch(source, /chrome\.scripting\.executeScript/);
+  assert.doesNotMatch(source, /chrome\\.scripting\\.executeScript/);
 });

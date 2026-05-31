@@ -1631,6 +1631,175 @@ test("M45 metadata cache rejects sensitive payloads", async () => {
   );
 });
 
+test("M45 popup status returns stable redacted contract envelope", async () => {
+  const controller = createM45BackgroundController({
+    clock: () => 2000,
+  });
+  controller.state.session = {
+    status: "ready",
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    user_id: "u1",
+    user_name: "Test User",
+    access_token: "secret-token",
+    bootstrapped_at: 1000,
+  };
+  controller.state.visible_index = {
+    status: "ready",
+    projects: [{ project_name: "xiaoshouyi", project_id: "project-id" }],
+    files: [
+      {
+        project_name: "xiaoshouyi",
+        source_path: "app/Test.app/Page.spg",
+        file_id: "page-1",
+        extension: "spg",
+        analyzable: true,
+        revision: "r1",
+        raw_text: "literal raw_text=should-not-leak",
+        token: "secret-token",
+      },
+    ],
+    analyzable_count: 1,
+    indexed_at: 1200,
+    secret: "token=abc",
+  };
+  controller.state.background = {
+    status: "ready",
+    queue: [1, 2],
+    pending_foreground: [1],
+    processed: 1,
+    total: 2,
+    active: 0,
+    failed: 0,
+    paused: false,
+    max_concurrency: 2,
+    min_interval_ms: 10,
+    process_gate: Promise.resolve(),
+    next_run_at: 1400,
+    indexing_status: "ready",
+    current_source_path: "app/Test.app/Page.spg",
+    last_processed_source_path: "app/Test.app/Page.spg",
+    last_failed_source_path: null,
+    retry_available: false,
+  };
+  controller.state.cache_stats = {
+    hits: 4,
+    misses: 2,
+    secret: "token=abc",
+  };
+  controller.state.last_diagnostic = {
+    severity: "warning",
+    code: "TEST_WARNING",
+    message: "leak token=popup-token-should-not-leak cookie=popup-cookie-should-not-leak password=popup-password-should-not-leak",
+  };
+
+  const result = await controller.handleMessage({ type: "metadata-checker-popup-status" });
+  assert.equal(result.ok, true);
+
+  const popupState = result.state;
+  assert.equal(popupState.runtime?.diagnostic, null);
+  assert.equal(popupState.offscreen?.diagnostic, null);
+  assert.equal(popupState.version?.diagnostic, null);
+  assert.equal(popupState.runtime.available, false);
+  assert.equal(popupState.offscreen.available, false);
+  assert.equal(popupState.version.value, null);
+
+  assert.deepEqual(Object.keys(popupState).sort(), [
+    "background",
+    "cache_stats",
+    "last_diagnostic",
+    "offscreen",
+    "runtime",
+    "session",
+    "updated_at",
+    "version",
+    "visible_index",
+  ]);
+
+  const backgroundKeys = [
+    "current_source_path",
+    "failed",
+    "indexing_status",
+    "last_failed_source_path",
+    "last_processed_source_path",
+    "max_concurrency",
+    "min_interval_ms",
+    "next_run_at",
+    "paused",
+    "pending_foreground_count",
+    "processed",
+    "queue_length",
+    "retry_available",
+    "status",
+    "total",
+    "active",
+  ];
+  assert.deepEqual(Object.keys(popupState.background).sort(), backgroundKeys.sort());
+  assert.equal(popupState.background.status, "ready");
+  assert.equal(popupState.background.indexing_status, "ready");
+
+  const visibleIndexKeys = [
+    "analyzable_count",
+    "files",
+    "indexed_at",
+    "projects",
+    "status",
+  ];
+  assert.deepEqual(Object.keys(popupState.visible_index).sort(), visibleIndexKeys.sort());
+  assert.equal(popupState.visible_index.files.length, 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(popupState.visible_index.files[0], "raw_text"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(popupState.visible_index.files[0], "token"), false);
+  assert.equal(popupState.visible_index.files[0].analyzable, true);
+
+  assert.equal(popupState.last_diagnostic.code, "TEST_WARNING");
+  assert.equal(popupState.last_diagnostic.message.includes("popup-token-should-not-leak"), false);
+  assert.equal(popupState.last_diagnostic.message.includes("popup-cookie-should-not-leak"), false);
+  assert.equal(popupState.last_diagnostic.message.includes("popup-password-should-not-leak"), false);
+  assert.equal(popupState.last_diagnostic.message.includes("***"), true);
+
+  const serialized = JSON.stringify(popupState);
+  assert.equal(serialized.includes("secret-token"), false);
+  assert.equal(serialized.includes("token=abc"), false);
+  assert.equal(serialized.includes("cookie=def"), false);
+  assert.equal(serialized.includes("password=ghi"), false);
+  assert.equal(serialized.includes("raw_text=sensitive"), false);
+});
+
+test("M45 popup status schema stable across failed/indexing/ready states", async () => {
+  const controller = createM45BackgroundController();
+  const expectedBackgroundKeys = [
+    "active",
+    "current_source_path",
+    "failed",
+    "indexing_status",
+    "last_failed_source_path",
+    "last_processed_source_path",
+    "max_concurrency",
+    "min_interval_ms",
+    "next_run_at",
+    "paused",
+    "pending_foreground_count",
+    "processed",
+    "queue_length",
+    "retry_available",
+    "status",
+    "total",
+  ];
+  const cases = [
+    { background_status: "failed", indexing_status: "failed" },
+    { background_status: "queued", indexing_status: "indexing" },
+    { background_status: "ready", indexing_status: "ready" },
+  ];
+  for (const item of cases) {
+    controller.state.background.status = item.background_status;
+    controller.state.background.indexing_status = item.indexing_status;
+    const result = await controller.handleMessage({ type: "metadata-checker-popup-status" });
+    assert.equal(result.ok, true);
+    assert.equal(result.state.background.status, item.background_status);
+    assert.equal(result.state.background.indexing_status, item.indexing_status);
+    assert.deepEqual(Object.keys(result.state.background).sort(), expectedBackgroundKeys.sort());
+  }
+});
+
 test("M45 default cache uses IndexedDB when available and never stores sensitive keys", async () => {
   const records = new Map();
   const fakeIndexedDB = {

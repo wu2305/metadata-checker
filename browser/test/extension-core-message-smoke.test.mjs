@@ -274,7 +274,7 @@ test("content bridge ignores forged responses without page-script source and tok
 test("chromium popup requests active tab instead of executing page code", async () => {
   const popupSource = await loadChromiumScript("popup.js");
 
-  assert.match(popupSource, /chrome\.tabs\.sendMessage/);
+  assert.match(popupSource, /tabs\.sendMessage/);
   assert.match(popupSource, /metadata-checker-tab-request/);
   assert.doesNotMatch(popupSource, /chrome\.scripting\.executeScript/);
 });
@@ -297,4 +297,18 @@ test("page script announces bridge readiness and content script records response
   assert.match(contentSource, /extension-bridge-source-path/);
   assert.match(contentSource, /extension-bridge-selection-count/);
   assert.match(contentSource, /writeBridgeProbeMarkers\(data\)/);
+});
+
+test("chromium background popup-status envelope contract exists in source", async () => {
+  const backgroundSource = await loadChromiumScript("background.js");
+
+  assert.match(backgroundSource, /metadata-checker-popup-status/);
+  assert.match(backgroundSource, /session:\s*pickPopupSession/);
+  assert.match(backgroundSource, /visible_index:\s*pickPopupVisibleIndex/);
+  assert.match(backgroundSource, /background:\s*pickPopupBackground/);
+  assert.match(backgroundSource, /cache_stats:\s*pickPopupCacheStats/);
+  assert.match(backgroundSource, /last_diagnostic:\s*normalizeDiagnostic/);
+  assert.match(backgroundSource, /runtime:\s*pickPopupRuntime/);
+  assert.match(backgroundSource, /offscreen:\s*pickPopupOffscreen/);
+  assert.match(backgroundSource, /version:\s*pickPopupVersion/);
 });

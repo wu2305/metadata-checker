@@ -1,65 +1,350 @@
 <!doctype html>
 <html>
   <head>
-    <meta charset="utf-8">
+    <meta charset="utf-8" />
     <title>Metadata Checker</title>
     <style>
+      :root {
+        --bg: #ffffff;
+        --text: #202124;
+        --muted: #5f6368;
+        --line: #dce0e5;
+        --surface: #f7f8fa;
+        --chip-ready: #0b6e4f;
+        --chip-running: #0b66c3;
+        --chip-warning: #8f5b00;
+        --chip-error: #b00020;
+        --focus: #1a73e8;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1f1f1f;
+          --text: #e8eaed;
+          --muted: #a1a6af;
+          --line: #3a3f45;
+          --surface: #2a2f37;
+          --focus: #8ab4f8;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font: 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background: var(--bg);
         margin: 0;
-        min-width: 280px;
-        padding: 12px;
+        width: 320px;
+        min-height: 340px;
+        max-height: 560px;
+        padding: 10px;
+        overflow: auto;
       }
-      dl {
+
+      .meta-popup {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 100%;
+        overflow: auto;
+      }
+
+      .section {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--surface);
+        padding: 8px;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .small-title {
+        margin: 0 0 5px;
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0;
+      }
+
+      .row {
         display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 6px 10px;
-        margin: 0 0 12px;
+        grid-template-columns: 90px 1fr;
+        gap: 4px;
+        align-items: start;
       }
-      dt {
+
+      .row + .row {
+        margin-top: 4px;
+      }
+
+      .label {
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .value {
+        min-width: 0;
+        color: var(--text);
+      }
+
+      .truncate {
+        display: inline-block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        padding: 0 8px;
+        min-width: 64px;
+        text-align: center;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        border: 1px solid transparent;
+      }
+
+      .status-chip.unknown {
+        background: #e8eaed;
         color: #5f6368;
       }
-      dd {
-        margin: 0;
-        overflow-wrap: anywhere;
+
+      .status-chip.ready {
+        background: #d7f4e8;
+        border-color: #8ee1ba;
+        color: var(--chip-ready);
       }
-      button {
-        margin: 0 0 6px;
+
+      .status-chip.running {
+        background: #e0ecff;
+        border-color: #a8c9ff;
+        color: var(--chip-running);
+      }
+
+      .status-chip.warning {
+        background: #fff4ce;
+        border-color: #fde3a4;
+        color: var(--chip-warning);
+      }
+
+      .status-chip.error {
+        background: #fde8ea;
+        border-color: #ffc9cf;
+        color: var(--chip-error);
+      }
+
+      .progress {
+        margin-top: 4px;
+      }
+
+      .progress-track {
+        height: 8px;
         width: 100%;
+        background: color-mix(in srgb, var(--line), transparent 65%);
+        border-radius: 999px;
+        overflow: hidden;
       }
+
+      .progress-value {
+        height: 100%;
+        width: 0;
+        background: linear-gradient(90deg, #0b6e4f, #14a37f);
+        transition: width 0.2s ease;
+      }
+
+      .action-bar {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+
+      .action-primary {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        font: inherit;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: white;
+        color: var(--text);
+        height: 30px;
+        padding: 0 10px;
+        min-width: 0;
+        cursor: pointer;
+        text-align: center;
+        text-decoration: none;
+      }
+
+      button:hover,
+      button:focus-visible {
+        border-color: var(--focus);
+        outline: none;
+      }
+
+      button[data-state='loading'] {
+        opacity: 0.85;
+        cursor: progress;
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      button[data-state='success'] {
+        border-color: #8ee1ba;
+      }
+
+      .action-msg {
+        margin-top: 2px;
+        min-height: 16px;
+        color: var(--muted);
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .action-msg.error {
+        color: var(--chip-error);
+      }
+
       pre {
-        background: #f5f5f5;
-        max-height: 180px;
+        margin: 4px 0 0;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 6px;
+        max-height: 120px;
         overflow: auto;
-        padding: 8px;
         white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
     </style>
   </head>
   <body>
-    <dl>
-      <dt>Bridge</dt>
-      <dd data-field="bridge">unknown</dd>
-      <dt>Source</dt>
-      <dd data-field="source">unknown</dd>
-      <dt>Selection</dt>
-      <dd data-field="selection">unknown</dd>
-      <dt>Indexing</dt>
-      <dd data-field="indexing">unknown</dd>
-      <dt>Progress</dt>
-      <dd data-field="progress">unknown</dd>
-      <dt>Current</dt>
-      <dd data-field="current">unknown</dd>
-      <dt>Cache</dt>
-      <dd data-field="cache">unknown</dd>
-    </dl>
-    <button type="button" data-action="open-panel">Open panel</button>
-    <button type="button" data-action="hide-panel">Hide panel</button>
-    <button type="button" data-action="refresh-bridge">Refresh bridge</button>
-    <button type="button" data-action="process-background">Process background</button>
-    <button type="button" data-action="retry-current-selection">Retry current selection</button>
-    <button type="button" data-action="analyze">Analyze current selection</button>
-    <pre data-field="diagnostic"></pre>
+    <main class="meta-popup">
+      <section class="section">
+        <div class="header">
+          <h1>Metadata Checker</h1>
+          <span data-field="session-status" class="status-chip unknown">unknown</span>
+        </div>
+        <div class="row">
+          <div class="label">Session</div>
+          <div class="value truncate" data-field="session-state">not ready</div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="small-title">Current Source</h2>
+        <div class="row">
+          <div class="label">Source</div>
+          <div class="value truncate" data-field="source-path" title=""></div>
+        </div>
+        <div class="row">
+          <div class="label">File</div>
+          <div class="value truncate" data-field="source-file-id" title=""></div>
+        </div>
+        <div class="row">
+          <div class="label">Revision</div>
+          <div class="value truncate" data-field="source-revision" title=""></div>
+        </div>
+        <div class="row">
+          <div class="label">Selection</div>
+          <div class="value" data-field="selection-summary">unknown</div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="small-title">Indexing</h2>
+        <div class="row">
+          <div class="label">Status</div>
+          <div class="value"><span data-field="indexing-status" class="status-chip unknown">unknown</span></div>
+        </div>
+        <div class="row">
+          <div class="label">Progress</div>
+          <div class="value" data-field="indexing-progress">unknown</div>
+        </div>
+        <div class="progress">
+          <div class="progress-track">
+            <div data-field="indexing-progress-bar" class="progress-value"></div>
+          </div>
+          <div class="muted" data-field="indexing-current-source"></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="small-title">Cache</h2>
+        <div class="row">
+          <div class="label">Hits</div>
+          <div class="value" data-field="cache-hits">0</div>
+        </div>
+        <div class="row">
+          <div class="label">Misses</div>
+          <div class="value" data-field="cache-misses">0</div>
+        </div>
+        <div class="row">
+          <div class="label">Artifact</div>
+          <div class="value" data-field="artifact-readiness">unknown</div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="small-title">Last Diagnostic</h2>
+        <pre data-field="diagnostic">ready</pre>
+      </section>
+
+      <section class="section action-bar">
+        <div class="action-primary">
+          <button type="button" data-action="open-panel" aria-label="Open metadata checker panel">Open panel</button>
+          <button type="button" data-action="toggle-panel" aria-label="Toggle metadata checker panel">Toggle panel</button>
+          <button type="button" data-action="process-current" aria-label="Process current selection">Process current</button>
+          <button type="button" data-action="process-background" aria-label="Process background queue">Process background</button>
+          <button type="button" data-action="retry-current-selection" aria-label="Retry current selection">Retry current selection</button>
+          <button type="button" data-action="pause-background" aria-label="Pause background indexing">Pause indexing</button>
+          <button type="button" data-action="resume-background" aria-label="Resume background indexing">Resume indexing</button>
+          <button type="button" data-action="copy-diagnostic" aria-label="Copy last diagnostic">Copy diagnostic</button>
+        </div>
+        <div class="action-msg" data-field="action-message" role="status" aria-live="polite"></div>
+      </section>
+    </main>
     <script src="popup.js"></script>
   </body>
 </html>

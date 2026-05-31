@@ -587,6 +587,7 @@ export function createM45BackgroundController(options = {}) {
   const clock = options.clock ?? (() => Date.now());
   const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const cache = options.cache ?? createDefaultMetadataCache();
+  const chromeApi = options.chrome ?? globalThis.chrome;
   const analysisClient = options.analysisClient === undefined
     ? createDefaultAnalysisClient()
     : options.analysisClient;
@@ -1378,6 +1379,140 @@ export function createM45BackgroundController(options = {}) {
     return redactForTelemetry(state);
   }
 
+  function asNumber(value, fallback = 0) {
+    const candidate = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(candidate) ? candidate : fallback;
+  }
+
+  function pickPopupSession(session = null) {
+    if (!isObject(session)) {
+      return null;
+    }
+    return {
+      status: asString(session.status) || null,
+      base_url: asString(session.base_url) || null,
+      user_id: asString(session.user_id) || asString(session.userId) || null,
+      user_name: asString(session.user_name) || asString(session.userName) || null,
+      bootstrapped_at: session.bootstrapped_at ?? null,
+    };
+  }
+
+  function pickPopupProject(project = {}) {
+    if (!isObject(project)) {
+      return null;
+    }
+    return {
+      project_name: asString(project.project_name || project.projectName) || null,
+    };
+  }
+
+  function pickPopupFile(file = {}) {
+    if (!isObject(file)) {
+      return null;
+    }
+    return {
+      project_name: asString(file.project_name) || null,
+      source_path: asString(file.source_path) || null,
+      file_id: asString(file.file_id) || null,
+      extension: asString(file.extension) || null,
+      analyzable: typeof file.analyzable === "boolean" ? file.analyzable : false,
+      revision: asString(file.revision) || null,
+    };
+  }
+
+  function pickPopupVisibleIndex(visibleIndex = {}) {
+    return {
+      status: asString(visibleIndex.status) || "idle",
+      projects: asArray(visibleIndex.projects)
+        .map(pickPopupProject)
+        .filter((item) => item !== null),
+      files: asArray(visibleIndex.files).map(pickPopupFile).filter((item) => item !== null),
+      analyzable_count: asNumber(visibleIndex.analyzable_count),
+      indexed_at: visibleIndex.indexed_at ?? null,
+    };
+  }
+
+  function pickPopupBackground(background = {}) {
+    return {
+      status: asString(background.status) || "idle",
+      indexing_status: asString(background.indexing_status) || "idle",
+      total: asNumber(background.total),
+      processed: asNumber(background.processed),
+      active: asNumber(background.active),
+      failed: asNumber(background.failed),
+      queue_length: asArray(background.queue).length,
+      pending_foreground_count: asArray(background.pending_foreground).length,
+      paused: Boolean(background.paused),
+      retry_available: Boolean(background.retry_available),
+      current_source_path: asString(background.current_source_path) || null,
+      last_processed_source_path: asString(background.last_processed_source_path) || null,
+      last_failed_source_path: asString(background.last_failed_source_path) || null,
+      max_concurrency: asNumber(background.max_concurrency, 1),
+      min_interval_ms: asNumber(background.min_interval_ms),
+      next_run_at: background.next_run_at ?? null,
+    };
+  }
+
+  function pickPopupCacheStats(stats = {}) {
+    return {
+      hits: asNumber(stats.hits),
+      misses: asNumber(stats.misses),
+    };
+  }
+
+  function pickPopupRuntime() {
+    const hasRuntime = Boolean(
+      analysisClient
+      && typeof analysisClient.loadSuperpageDocument === "function"
+      && typeof analysisClient.buildOrUpdateSuperpageGraph === "function"
+      && typeof analysisClient.analyzeSuperpageSelection === "function"
+    );
+    return {
+      available: hasRuntime,
+      diagnostic: null,
+    };
+  }
+
+  function pickPopupOffscreen() {
+    const offscreen = chromeApi?.offscreen;
+    const available = Boolean(
+      offscreen
+      && (typeof offscreen.createDocument === "function"
+        || typeof offscreen.hasDocument === "function"
+        || typeof offscreen.getContexts === "function")
+    );
+    return {
+      available,
+      diagnostic: null,
+    };
+  }
+
+  function pickPopupVersion() {
+    const manifest = chromeApi?.runtime?.getManifest?.();
+    return {
+      value: isObject(manifest) ? asString(manifest.version) || null : null,
+      diagnostic: null,
+    };
+  }
+
+  function getPopupStatus() {
+    return {
+      session: pickPopupSession(state.session),
+      visible_index: pickPopupVisibleIndex(state.visible_index),
+      background: pickPopupBackground(state.background),
+      cache_stats: pickPopupCacheStats(state.cache_stats),
+      last_diagnostic: normalizeDiagnostic(state.last_diagnostic),
+      runtime: pickPopupRuntime(),
+      offscreen: pickPopupOffscreen(),
+      version: pickPopupVersion(),
+      updated_at: state.updated_at,
+    };
+  }
+
+  function getPopupStatusSafe() {
+    return redactForTelemetry(getPopupStatus());
+  }
+
   async function handleMessage(message) {
     if (!message || typeof message !== "object") {
       return { ok: false };
@@ -1478,7 +1613,7 @@ export function createM45BackgroundController(options = {}) {
     if (message.type === "metadata-checker-popup-status") {
       return {
         ok: true,
-        state: getState(),
+        state: getPopupStatusSafe(),
       };
     }
 

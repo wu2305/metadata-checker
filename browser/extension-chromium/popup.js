@@ -1,114 +1,391 @@
-/* M44.5 Chromium extension popup */
+/* M47 Chromium 扩展 popup */
 
-const requestTypeByAction = {
-  open: "openPanel",
-  hide: "hidePanel",
-  refresh: "refreshBridge",
-  analyze: "analyzeCurrentSelection",
-  retry: "retryCurrentSelection",
+const MAX_TEXT_LENGTH = 72;
+const MAX_PATH_LENGTH = 72;
+
+const fallbackSetTimeout = typeof window === "object" && typeof window.setTimeout === "function"
+  ? window.setTimeout.bind(window)
+  : setTimeout;
+
+const SENSITIVE_KEYWORD_PATTERN = /(?:token|cookie|password|secret|auth|credential|cipherpassport)/i;
+const SENSITIVE_PAIR_PATTERN =
+  /["']?(token|cookie|password|secret|auth|credential|cipherpassport)["']?\s*[:=]\s*(["']?[^\n\r\s,;}]+["']?)/gi;
+
+const actionButtonDefs = {
+  openPanel: { selector: '[data-action="open-panel"]', requestType: "openPanel", message: "open panel" },
+  togglePanel: { selector: '[data-action="toggle-panel"]', requestType: "togglePanel", message: "toggle panel" },
+  processCurrent: {
+    selector: '[data-action="process-current"]',
+    requestType: "analyzeCurrentSelection",
+    message: "process current",
+  },
+  processBackground: {
+    selector: '[data-action="process-background"]',
+    runtimeMessage: { type: "metadata-checker-background-process", payload: { limit: 1, max_concurrency: 1 } },
+    message: "process background",
+  },
+  retryCurrentSelection: {
+    selector: '[data-action="retry-current-selection"]',
+    requestType: "retryCurrentSelection",
+    message: "retry selection",
+  },
+  pauseBackground: {
+    selector: '[data-action="pause-background"]',
+    runtimeMessage: { type: "metadata-checker-background-pause" },
+    message: "pause indexing",
+  },
+  resumeBackground: {
+    selector: '[data-action="resume-background"]',
+    runtimeMessage: { type: "metadata-checker-background-resume" },
+    message: "resume indexing",
+  },
+  copyDiagnostic: { selector: '[data-action="copy-diagnostic"]', message: "copy diagnostic" },
 };
 
 const fields = {
-  bridge: document.querySelector('[data-field="bridge"]'),
-  source: document.querySelector('[data-field="source"]'),
-  selection: document.querySelector('[data-field="selection"]'),
-  indexing: document.querySelector('[data-field="indexing"]'),
-  progress: document.querySelector('[data-field="progress"]'),
-  current: document.querySelector('[data-field="current"]'),
-  cache: document.querySelector('[data-field="cache"]'),
+  sessionStatus: document.querySelector('[data-field="session-status"]'),
+  sessionState: document.querySelector('[data-field="session-state"]'),
+  sourcePath: document.querySelector('[data-field="source-path"]'),
+  sourceFileId: document.querySelector('[data-field="source-file-id"]'),
+  sourceRevision: document.querySelector('[data-field="source-revision"]'),
+  selectionSummary: document.querySelector('[data-field="selection-summary"]'),
+  indexingStatus: document.querySelector('[data-field="indexing-status"]'),
+  indexingProgress: document.querySelector('[data-field="indexing-progress"]'),
+  indexingProgressBar: document.querySelector('[data-field="indexing-progress-bar"]'),
+  indexingCurrentSource: document.querySelector('[data-field="indexing-current-source"]'),
+  cacheHits: document.querySelector('[data-field="cache-hits"]'),
+  cacheMisses: document.querySelector('[data-field="cache-misses"]'),
+  artifactReadiness: document.querySelector('[data-field="artifact-readiness"]'),
   diagnostic: document.querySelector('[data-field="diagnostic"]'),
+  actionMessage: document.querySelector('[data-field="action-message"]'),
 };
 
-function setText(node, value) {
-  if (node) {
-    node.textContent = value == null || value === "" ? "unknown" : String(value);
-  }
+let buttons = {};
+let latestBridgeState = null;
+let latestBackgroundState = null;
+let latestActionDiagnostic = null;
+
+function asString(value) {
+  return typeof value === "string" ? value : "";
 }
 
-function summarizeSelection(selection) {
-  const ids = Array.isArray(selection?.selected_component_ids)
-    ? selection.selected_component_ids
-    : [];
-  if (ids.length === 0) {
-    return "empty";
-  }
-  return `${ids.length}: ${ids.slice(0, 3).join(", ")}`;
+function asObject(value) {
+  return value && typeof value === "object" ? value : null;
 }
 
-function normalizeError(error, fallbackCode, fallbackMessage) {
-  if (error && typeof error === "object" && typeof error.code === "string" && typeof error.message === "string") {
-    return {
-      severity: error.severity || "error",
-      code: error.code,
-      message: error.message,
-    };
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function asNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function sanitizeText(value) {
+  if (typeof value !== "string") {
+    return value;
+  }
+  return value
+    .replace(SENSITIVE_PAIR_PATTERN, "$1=***")
+    .replace(SENSITIVE_KEYWORD_PATTERN, "***");
+}
+
+function asDiagnostic(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  if (typeof value.code !== "string" || typeof value.message !== "string") {
+    return null;
   }
   return {
-    severity: "error",
-    code: fallbackCode,
-    message: fallbackMessage,
+    severity: asString(value.severity) || "warning",
+    code: value.code,
+    message: sanitizeText(value.message),
   };
 }
 
-function firstDiagnostic(payload) {
-  if (Array.isArray(payload?.diagnostics) && payload.diagnostics.length > 0) {
-    return payload.diagnostics[0];
+function asDiagnostics(value) {
+  if (Array.isArray(value)) {
+    return value.map(asDiagnostic).filter(Boolean);
   }
-  if (Array.isArray(payload?.payload?.diagnostics) && payload.payload.diagnostics.length > 0) {
-    return payload.payload.diagnostics[0];
+  const diagnostic = asDiagnostic(value);
+  return diagnostic ? [diagnostic] : [];
+}
+
+function normalizeText(value) {
+  if (value == null || value === "") {
+    return "unknown";
+  }
+  return String(value);
+}
+
+function truncateText(value, maxLength = 64) {
+  const normalized = normalizeText(value);
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  const safeMaxLength = Math.max(4, maxLength);
+  const reserved = 1;
+  const headLength = Math.max(4, Math.ceil((safeMaxLength - reserved) * 0.65));
+  const tailLength = Math.max(3, (safeMaxLength - reserved) - headLength);
+  return `${normalized.slice(0, headLength)}…${normalized.slice(-tailLength)}`;
+}
+
+function setText(node, value) {
+  if (!node) return;
+  node.textContent = normalizeText(value);
+}
+
+function setTruncatedText(node, value, maxLength = 64) {
+  if (!node) return;
+  const normalized = normalizeText(value);
+  node.textContent = truncateText(normalized, maxLength);
+  node.title = normalized;
+}
+
+function setStatusChip(node, value, tone = "unknown") {
+  if (!node) return;
+  node.textContent = normalizeText(value);
+  node.className = `status-chip ${tone}`;
+}
+
+function setActionMessage(text, isError = false) {
+  if (!fields.actionMessage) return;
+  fields.actionMessage.textContent = normalizeText(text);
+  fields.actionMessage.className = isError ? "action-msg error" : "action-msg";
+}
+
+function setButtonState(key, state, label) {
+  const button = buttons[key];
+  if (!button) return;
+
+  if (typeof button.defaultLabel !== "string") {
+    button.defaultLabel = button.textContent;
+  }
+
+  if (state === "loading") {
+    button.disabled = true;
+    button.dataset.state = "loading";
+    button.textContent = label ?? "Working";
+    return;
+  }
+
+  if (state === "success") {
+    button.disabled = true;
+    button.dataset.state = "success";
+    button.textContent = label ?? "Done";
+    return;
+  }
+
+  if (state === "error") {
+    button.disabled = true;
+    button.dataset.state = "error";
+    button.textContent = label ?? "Failed";
+    return;
+  }
+
+  button.disabled = false;
+  button.textContent = button.defaultLabel;
+  if (state) {
+    button.dataset.state = state;
+  } else {
+    delete button.dataset.state;
+  }
+}
+
+function clearButtonState(key, delay = 600) {
+  const button = buttons[key];
+  if (!button) return;
+  fallbackSetTimeout(() => {
+    setButtonState(key, "");
+  }, delay);
+}
+
+function classifyTone(value) {
+  const normalized = asString(value).toLowerCase();
+  if (normalized === "ready") {
+    return "ready";
+  }
+  if (
+    normalized === "running"
+    || normalized.includes("indexing")
+    || normalized === "queued"
+    || normalized === "processing"
+    || normalized === "building"
+  ) {
+    return "running";
+  }
+  if (normalized === "paused" || normalized === "waiting_for_metadata") {
+    return "warning";
+  }
+  if (normalized === "error") {
+    return "error";
+  }
+  return "unknown";
+}
+
+function summarizeSelection(selection) {
+  const ids = asArray(selection?.selected_component_ids).slice(0, 3);
+  const count = asArray(selection?.selected_component_ids).length;
+  const active = asString(selection?.active_component_id);
+  const parts = [];
+  if (active) {
+    parts.push(`active=${active}`);
+  }
+  if (ids.length > 0) {
+    parts.push(`ids=${ids.join(",")}`);
+  }
+  parts.push(`selected=${count}`);
+  return parts.join(" | ") || "none";
+}
+
+function normalizeBridgeState(payload) {
+  const source = asObject(payload) ? payload : {};
+  const envelope = asObject(source.payload) ? source.payload : source;
+  const statusPayload = asObject(envelope.payload) ? envelope.payload : envelope;
+  return {
+    pageContext: asObject(statusPayload.page_context) ? statusPayload.page_context : asObject(envelope.page_context) ? envelope.page_context : {},
+    selection: asObject(statusPayload.selection) ? statusPayload.selection : asObject(envelope.selection) ? envelope.selection : {},
+    diagnostics: asDiagnostics(statusPayload.diagnostics).concat(asDiagnostics(envelope.diagnostics)),
+    raw: source,
+  };
+}
+
+function normalizeBackgroundState(payload) {
+  const source = asObject(payload)
+    ? asObject(payload.state)
+      ? payload.state
+      : payload
+    : {};
+  return {
+    session: asObject(source.session) ? source.session : {},
+    visibleIndex: asObject(source.visible_index) ? source.visible_index : {},
+    background: asObject(source.background) ? source.background : {},
+    cacheStats: asObject(source.cache_stats) ? source.cache_stats : {},
+    diagnostics: asDiagnostics(source.last_diagnostic).concat(asDiagnostics(source.diagnostics)),
+    updatedAt: asObject(source.updated_at) ? source.updated_at : source.updated_at,
+    runtime: asObject(source.runtime) ? source.runtime : {},
+    offscreen: asObject(source.offscreen) ? source.offscreen : {},
+    version: asObject(source.version) ? source.version : {},
+    raw: source,
+  };
+}
+
+function collectLatestDiagnostic(...bags) {
+  for (const bag of bags) {
+    const list = asDiagnostics(bag);
+    if (list.length > 0) {
+      return list[0];
+    }
   }
   return null;
 }
 
-function pickBackgroundState(state) {
-  return state?.background || state?.state?.background || {};
+function pickArtifactReadiness(artifactResponse, background, sourcePath) {
+  if (!sourcePath) {
+    return "unknown";
+  }
+
+  if (artifactResponse && artifactResponse.artifact_ready) {
+    const status = asString(artifactResponse.artifact?.analysis_status || artifactResponse.artifact?.status);
+    return status ? `ready (${status})` : "ready";
+  }
+
+  if (artifactResponse && (artifactResponse.queued || artifactResponse.pending)) {
+    return `queued (${asString(artifactResponse.indexing_status || background.indexing_status || "").trim() || "pending"})`;
+  }
+
+  if (asString(background.last_processed_source_path) === sourcePath) {
+    return "ready (cached)";
+  }
+
+  if (artifactResponse && asString(artifactResponse.status)) {
+    return `unknown (${artifactResponse.status})`;
+  }
+
+  return "unknown";
 }
 
-function pickVisibleIndex(state) {
-  return state?.visible_index || state?.state?.visible_index || {};
-}
+function render(state) {
+  const bridge = normalizeBridgeState(state?.bridge);
+  const background = normalizeBackgroundState(state?.backgroundState);
+  const pageContext = bridge.pageContext || {};
+  const selection = bridge.selection || {};
+  const sourcePath = asString(pageContext.source_path || selection.source_path);
+  const fileId = asString(pageContext.file_id || selection.file_id);
+  const revision = asString(pageContext.revision || selection.revision);
 
-function pickCacheStats(state) {
-  return state?.cache_stats || state?.state?.cache_stats || {};
-}
+  const session = background.session || {};
+  const runtime = asObject(background.runtime) ? background.runtime : {};
+  const offscreen = asObject(background.offscreen) ? background.offscreen : {};
+  const version = asObject(background.version) ? background.version : {};
+  const sessionChipText = session.status || "unknown";
+  const versionText = asString(version.value || version.version || "na");
+  const sessionText = session.status === "ready" && asString(session.base_url)
+    ? `ready @ ${session.base_url} (${versionText ? `v${versionText}` : "v-"}, ${runtime.available ? "runtime:ready" : "runtime:offline"}, ${offscreen.available ? "offscreen:ready" : "offscreen:offline"})`
+    : `${session.status || "not ready"} (${versionText ? `v${versionText}` : "v-"}, ${runtime.available ? "runtime:ready" : "runtime:offline"}, ${offscreen.available ? "offscreen:ready" : "offscreen:offline"})`;
+  const sessionTone = classifyTone(session.status);
+  setStatusChip(fields.sessionStatus, sessionChipText, sessionTone);
+  setTruncatedText(fields.sessionState, sessionText, MAX_TEXT_LENGTH);
 
-function summarizeProgress(background, visibleIndex) {
-  const discovered = Array.isArray(visibleIndex.files) ? visibleIndex.files.length : 0;
-  const processed = background.processed ?? 0;
-  const total = background.total ?? visibleIndex.analyzable_count ?? 0;
-  const failed = background.failed ?? 0;
-  return `${processed}/${total} processed, ${failed} failed, ${discovered} discovered`;
-}
+  setTruncatedText(fields.sourcePath, sourcePath || "unbound", MAX_PATH_LENGTH);
+  setText(fields.sourceFileId, fileId || "unbound");
+  setText(fields.sourceRevision, revision || "unbound");
+  setText(fields.selectionSummary, summarizeSelection(selection));
 
-function renderBackgroundState(state) {
-  const background = pickBackgroundState(state);
-  const visibleIndex = pickVisibleIndex(state);
-  const cacheStats = pickCacheStats(state);
-  setText(fields.indexing, background.indexing_status || background.status || visibleIndex.status || "unknown");
-  setText(fields.progress, summarizeProgress(background, visibleIndex));
-  setText(fields.current, background.current_source_path || background.last_processed_source_path || "unknown");
-  setText(fields.cache, `${cacheStats.hits ?? 0} hits, ${cacheStats.misses ?? 0} misses`);
-}
+  const bg = background.background || {};
+  const statusText = asString(bg.indexing_status || bg.status || "idle");
+  const processed = asNumber(bg.processed, 0);
+  const failed = asNumber(bg.failed, 0);
+  const total = asNumber(bg.total, 0);
+  const discovered = asNumber(background.visibleIndex.analyzable_count, asArray(background.visibleIndex.files).length);
+  const active = asNumber(bg.active, 0);
+  const denominator = Math.max(1, total || discovered || 1);
+  const ratio = Math.max(0, Math.min(1, processed / denominator));
+  const currentSourceText = asString(bg.current_source_path || sourcePath || "");
 
-function renderStatus(state = {}) {
-  const status = state.last_bridge_status?.payload || state.last_bridge_status || {};
-  const pageContext = status.page_context || status.payload?.page_context || {};
-  const selection = status.selection || status.payload?.selection || {};
-  const diagnostic = state?.last_diagnostic || status.diagnostics?.[0] || status.payload?.diagnostics?.[0] || null;
+  setStatusChip(fields.indexingStatus, statusText, classifyTone(statusText));
+  setText(fields.indexingProgress, `${processed}/${total || discovered || 0} processed, ${failed} failed, ${discovered} discovered, ${active} active`);
+  if (fields.indexingProgressBar) {
+    fields.indexingProgressBar.style.width = `${Math.round(ratio * 100)}%`;
+  }
+  setText(fields.indexingCurrentSource, currentSourceText ? `Current queue: ${currentSourceText}` : "Current queue: unknown");
 
-  setText(fields.bridge, status.bridge_detected === false ? "missing" : "ready");
-  setText(fields.source, pageContext.source_path || pageContext.file_id || "unknown");
-  setText(fields.selection, summarizeSelection(selection));
-  renderBackgroundState(state);
-  setText(fields.diagnostic, diagnostic ? JSON.stringify(diagnostic, null, 2) : "");
-}
+  const cacheStats = background.cacheStats || {};
+  setText(fields.cacheHits, asNumber(cacheStats.hits, 0));
+  setText(fields.cacheMisses, asNumber(cacheStats.misses, 0));
+  setText(
+    fields.artifactReadiness,
+    pickArtifactReadiness(state?.artifactSelection, bg, sourcePath),
+  );
 
-function makeMissingTabDiagnostic(message) {
-  return {
-    severity: "warning",
-    code: "METADATA_CHECKER_ACTIVE_TAB_MISSING",
-    message,
+  const latestDiagnostic = collectLatestDiagnostic(
+    bridge.diagnostics,
+    asDiagnostics(state?.backgroundSelectionResult?.diagnostics),
+    state?.backgroundSelectionResult?.artifact?.diagnostics,
+    background.diagnostics,
+    state?.actionDiagnostic,
+  ) || {
+    severity: "ok",
+    code: "METADATA_CHECKER_IDLE",
+    message: "ready",
   };
+
+  latestActionDiagnostic = latestDiagnostic;
+  if (fields.diagnostic) {
+    fields.diagnostic.textContent = JSON.stringify(latestDiagnostic, null, 2);
+  }
+
+  if (buttons.pauseBackground && buttons.resumeBackground) {
+    const isPaused = Boolean(bg.paused);
+    buttons.pauseBackground.disabled = isPaused || asString(statusText) === "";
+    buttons.resumeBackground.disabled = !isPaused;
+  }
+
+  if (buttons.copyDiagnostic) {
+    buttons.copyDiagnostic.disabled = latestDiagnostic.code === "METADATA_CHECKER_IDLE";
+  }
 }
 
 function getChromeApi() {
@@ -125,217 +402,291 @@ function getRuntimeApi() {
   return api?.runtime;
 }
 
-async function requestActiveTab(requestType) {
+function requestTabAction(requestType, payload) {
   const tabs = getTabApi();
   if (!tabs || typeof tabs.query !== "function" || typeof tabs.sendMessage !== "function") {
-    throw {
-      severity: "error",
+    return Promise.reject({
       code: "METADATA_CHECKER_TABS_API_MISSING",
+      severity: "error",
       message: "chrome.tabs query/sendMessage is unavailable",
-    };
+    });
   }
-  const matched = await tabs.query({ active: true, currentWindow: true });
-  const tabId = Array.isArray(matched) && matched.length > 0 ? matched[0]?.id : null;
-  if (!tabId || typeof tabId !== "number") {
-    throw makeMissingTabDiagnostic("active tab is unavailable");
+  return Promise.resolve()
+    .then(() => tabs.query({ active: true, currentWindow: true }))
+    .then((matches) => {
+      const tabId = Array.isArray(matches) && matches[0]?.id;
+      if (typeof tabId !== "number") {
+        throw {
+          code: "METADATA_CHECKER_ACTIVE_TAB_MISSING",
+          severity: "warning",
+          message: "active tab is unavailable",
+        };
+      }
+      return tabs.sendMessage(tabId, {
+        type: "metadata-checker-tab-request",
+        request_type: requestType,
+        ...(payload ? { payload } : {}),
+      });
+    });
+}
+
+function requestRuntimeMessage(message) {
+  const runtime = getRuntimeApi();
+  if (!runtime || typeof runtime.sendMessage !== "function") {
+    return Promise.reject({
+      code: "METADATA_CHECKER_RUNTIME_API_MISSING",
+      severity: "error",
+      message: "chrome.runtime sendMessage is unavailable",
+    });
   }
-  return chrome.tabs.sendMessage(tabId, {
-    type: "metadata-checker-tab-request",
-    request_type: requestType,
-  });
+  return runtime.sendMessage(message);
 }
 
 function requestBridgeStatus() {
-  return requestActiveTab("getBridgeStatus");
+  return requestTabAction("getBridgeStatus");
 }
 
-function requestAnalyzeCurrentSelection() {
-  return requestActiveTab("analyzeCurrentSelection");
+function requestBackgroundStatus() {
+  return requestRuntimeMessage({ type: "metadata-checker-popup-status" });
 }
 
-function requestRetryCurrentSelection() {
-  return requestActiveTab("retryCurrentSelection");
+function sanitizeSelectionForBackground(payload) {
+  const selection = asObject(payload) ? payload : {};
+  return {
+    project_name: asString(selection.project_name || selection.projectName || ""),
+    source_path: asString(selection.source_path || selection.sourcePath || ""),
+    file_id: asString(selection.file_id || selection.fileId || ""),
+    revision: asString(selection.revision || ""),
+    active_component_id: asString(selection.active_component_id || selection.activeComponentId || ""),
+    selected_component_ids: asArray(selection.selected_component_ids || selection.selectedComponentIds),
+  };
 }
 
-async function requestBackgroundState() {
-  const runtime = getRuntimeApi();
-  if (!runtime || typeof runtime.sendMessage !== "function") {
-    return null;
+function requestArtifactSelectionState(bridgeState) {
+  const selection = bridgeState.selection || {};
+  const sourcePath = asString(selection.source_path || selection.sourcePath);
+  if (!sourcePath) {
+    return Promise.resolve({ status: "no-source" });
   }
-  return runtime.sendMessage({ type: "metadata-checker-popup-status" });
-}
+  const payload = sanitizeSelectionForBackground(selection);
+  payload.limit = 0;
+  payload.max_concurrency = 1;
 
-async function requestBackgroundProcess() {
-  const runtime = getRuntimeApi();
-  if (!runtime || typeof runtime.sendMessage !== "function") {
-    throw {
-      severity: "error",
-      code: "METADATA_CHECKER_RUNTIME_API_MISSING",
-      message: "chrome.runtime sendMessage is unavailable",
+  return requestRuntimeMessage({
+    type: "metadata-checker-selection-changed",
+    payload,
+  }).catch((error) => {
+    throw asDiagnostic(error) || {
+      code: asString(error.code) || "METADATA_CHECKER_SELECTION_STATUS_FAILED",
+      severity: asString(error.severity) || "warning",
+      message: asString(error.message || error),
     };
-  }
-  return runtime.sendMessage({
-    type: "metadata-checker-background-process",
-    payload: { limit: 1, max_concurrency: 1 },
   });
 }
 
-function sendPopupRequest(requestType, onErrorCode, onErrorMessage) {
-  requestActiveTab(requestType)
+function getButton(key) {
+  return buttons[key];
+}
+
+function runTabAction(key, requestType, message) {
+  let actionDiagnostic = null;
+  setButtonState(key, "loading", "Working");
+  setActionMessage(message || `processing ${key}`);
+  return Promise.resolve()
+    .then(() => requestTabAction(requestType))
     .then((response) => {
-      renderStatus({
-        last_bridge_status: response || { diagnostics: [makeMissingTabDiagnostic(onErrorMessage)] },
-        last_diagnostic: firstDiagnostic(response) || null,
-      });
+      actionDiagnostic = collectLatestDiagnostic(response, response?.payload, response?.result);
+      setButtonState(key, "success", "Done");
+      clearButtonState(key);
+      setActionMessage("ready");
+      return response;
     })
     .catch((error) => {
-      renderStatus({
-        last_diagnostic: normalizeError(
-          error,
-          onErrorCode,
-          onErrorMessage || "request failed",
-        ),
-      });
+      const diag = asDiagnostic(error) || {
+        code: asString(error.code) || "METADATA_CHECKER_ACTION_FAILED",
+        severity: "error",
+        message: asString(error.message || error),
+      };
+      setButtonState(key, "error", diag.code);
+      setActionMessage(`error: ${diag.code}`, true);
+      clearButtonState(key);
+      actionDiagnostic = diag;
+      return { diagnostics: [diag] };
+    })
+    .finally(() => {
+      loadStatus({ actionDiagnostic });
     });
 }
 
-function requestOpenPanel() {
-  sendPopupRequest(requestTypeByAction.open, "METADATA_CHECKER_POPUP_OPEN_PANEL_FAILED", "openPanel request failed");
-}
-
-function requestHidePanel() {
-  sendPopupRequest(requestTypeByAction.hide, "METADATA_CHECKER_POPUP_HIDE_PANEL_FAILED", "hidePanel request failed");
-}
-
-function requestRefreshBridge() {
-  requestActiveTab(requestTypeByAction.refresh)
+function runRuntimeAction(key, messagePayload, message) {
+  let actionDiagnostic = null;
+  setButtonState(key, "loading", "Working");
+  setActionMessage(message || `processing ${key}`);
+  return Promise.resolve()
+    .then(() => requestRuntimeMessage(messagePayload))
     .then((response) => {
-      renderStatus({
-        last_bridge_status: response || {},
-        last_diagnostic: firstDiagnostic(response) || null,
-      });
+      actionDiagnostic = collectLatestDiagnostic(response, response?.payload, response?.result);
+      setButtonState(key, "success", "Done");
+      clearButtonState(key);
+      setActionMessage("ready");
+      return response;
     })
     .catch((error) => {
-      renderStatus({
-        last_diagnostic: normalizeError(
-          error,
-          "METADATA_CHECKER_POPUP_REFRESH_BRIDGE_FAILED",
-          "refresh bridge request failed",
-        ),
-      });
+      const diag = asDiagnostic(error) || {
+        code: asString(error.code) || "METADATA_CHECKER_ACTION_FAILED",
+        severity: "error",
+        message: asString(error.message || error),
+      };
+      setButtonState(key, "error", diag.code);
+      setActionMessage(`error: ${diag.code}`, true);
+      clearButtonState(key);
+      actionDiagnostic = diag;
+      return { diagnostics: [diag] };
+    })
+    .finally(() => {
+      loadStatus({ actionDiagnostic });
     });
 }
 
-function requestAnalyzeCurrentSelectionFromPopup() {
-  requestAnalyzeCurrentSelection()
-    .then((response) => {
-      renderStatus({
-        last_bridge_status: response || {},
-        last_diagnostic: firstDiagnostic(response) || null,
-      });
+function runCopyDiagnosticAction() {
+  setButtonState("copyDiagnostic", "loading", "Copying");
+  const target = latestActionDiagnostic;
+  const messageText = target ? JSON.stringify(target, null, 2) : "";
+  const nav = typeof navigator === "object" ? navigator : null;
+  if (!nav?.clipboard?.writeText) {
+    setActionMessage("clipboard unavailable", true);
+    setButtonState("copyDiagnostic", "error", "No clipboard");
+    clearButtonState("copyDiagnostic");
+    setTimeout(() => setActionMessage("ready"), 700);
+    return;
+  }
+
+  Promise.resolve(nav.clipboard.writeText(messageText))
+    .then(() => {
+      setButtonState("copyDiagnostic", "success", "Copied");
+      setActionMessage("diagnostic copied");
     })
     .catch((error) => {
-      renderStatus({
-        last_diagnostic: normalizeError(
-          error,
-          "METADATA_CHECKER_POPUP_ANALYZE_FAILED",
-          "analyze failed",
-        ),
-      });
+      const diagnostic = asDiagnostic(error) || {
+        code: "METADATA_CHECKER_COPY_DIAGNOSTIC_FAILED",
+        severity: "warning",
+        message: sanitizeText(asString(error.message || error)),
+      };
+      setButtonState("copyDiagnostic", "error", diagnostic.code);
+      setActionMessage(`error: ${diagnostic.code}`, true);
+      loadStatus({ actionDiagnostic: diagnostic });
+      return;
+    })
+    .finally(() => {
+      clearButtonState("copyDiagnostic");
     });
 }
 
-function requestRetryCurrentSelectionFromPopup() {
-  requestRetryCurrentSelection()
-    .then((response) => {
-      renderStatus({
-        last_bridge_status: response || {},
-        last_diagnostic: firstDiagnostic(response) || null,
-      });
-    })
-    .catch((error) => {
-      renderStatus({
-        last_diagnostic: normalizeError(
-          error,
-          "METADATA_CHECKER_POPUP_RETRY_SELECTION_FAILED",
-          "retry current selection failed",
-        ),
-      });
-    });
-}
+function loadStatus(extraState = {}) {
+  const bridgePromise = requestBridgeStatus();
+  const backgroundPromise = requestBackgroundStatus();
 
-function requestBackgroundProcessFromPopup() {
-  requestBackgroundProcess()
-    .then((response) => {
-      renderStatus({
-        state: response || {},
-        last_diagnostic: firstDiagnostic(response) || null,
-      });
-    })
-    .catch((error) => {
-      renderStatus({
-        last_diagnostic: normalizeError(
-          error,
-          "METADATA_CHECKER_POPUP_BACKGROUND_PROCESS_FAILED",
-          "background process failed",
-        ),
-      });
-    });
-}
-
-function loadStatus() {
-  Promise.allSettled([requestBridgeStatus(), requestBackgroundState()])
+  return Promise.allSettled([bridgePromise, backgroundPromise])
     .then(([bridgeResult, backgroundResult]) => {
-      const bridge = bridgeResult.status === "fulfilled" ? bridgeResult.value : {};
-      const background = backgroundResult.status === "fulfilled" ? backgroundResult.value : {};
-      const bridgeError = bridgeResult.status === "rejected"
-        ? normalizeError(
-          bridgeResult.reason,
-          "METADATA_CHECKER_POPUP_STATUS_FAILED",
-          "status failed",
-        )
-        : null;
-      const backgroundError = backgroundResult.status === "rejected"
-        ? normalizeError(
-          backgroundResult.reason,
-          "METADATA_CHECKER_POPUP_BACKGROUND_STATUS_FAILED",
-          "background status failed",
-        )
-        : null;
-      renderStatus({
-        last_bridge_status: bridge || {},
-        state: background?.state || background || {},
-        last_diagnostic: firstDiagnostic(bridge) || firstDiagnostic(background) || bridgeError || backgroundError || null,
+      const bridge = bridgeResult.status === "fulfilled" ? bridgeResult.value : null;
+      const background = backgroundResult.status === "fulfilled" ? backgroundResult.value : null;
+      latestBridgeState = bridge;
+      latestBackgroundState = background;
+
+      if (bridgeResult.status === "rejected" && backgroundResult.status === "rejected") {
+        render({
+          bridge: null,
+          backgroundState: null,
+          backgroundSelectionResult: {
+            diagnostics: [normalizeError(bridgeResult.reason)].concat(normalizeError(backgroundResult.reason)),
+          },
+          actionDiagnostic: collectLatestDiagnostic(extraState.actionDiagnostic),
+        });
+        return;
+      }
+
+      if (bridgeResult.status === "rejected") {
+        render({
+          bridge,
+          backgroundState: background,
+          backgroundSelectionResult: {
+            diagnostics: [normalizeError(bridgeResult.reason)],
+          },
+          actionDiagnostic: extraState.actionDiagnostic,
+        });
+        return;
+      }
+
+      return requestArtifactSelectionState(normalizeBridgeState(bridge || {})).then((artifactSelectionResult) => {
+        render({
+          bridge,
+          backgroundState: background,
+          artifactSelection: artifactSelectionResult,
+          backgroundSelectionResult: artifactSelectionResult,
+          actionDiagnostic: extraState.actionDiagnostic || null,
+        });
       });
     })
     .catch((error) => {
-      renderStatus({
-        last_diagnostic: normalizeError(
-          error,
-          "METADATA_CHECKER_POPUP_STATUS_FAILED",
-          "status failed",
-        ),
+      render({
+        bridge: latestBridgeState,
+        backgroundState: latestBackgroundState,
+        backgroundSelectionResult: {
+          diagnostics: [normalizeError(error)],
+        },
       });
     });
 }
 
-document.querySelector('[data-action="open-panel"]')?.addEventListener("click", () => {
-  requestOpenPanel();
-});
-document.querySelector('[data-action="hide-panel"]')?.addEventListener("click", () => {
-  requestHidePanel();
-});
-document.querySelector('[data-action="refresh-bridge"]')?.addEventListener("click", () => {
-  requestRefreshBridge();
-});
-document.querySelector('[data-action="process-background"]')?.addEventListener("click", () => {
-  requestBackgroundProcessFromPopup();
-});
-document.querySelector('[data-action="retry-current-selection"]')?.addEventListener("click", () => {
-  requestRetryCurrentSelectionFromPopup();
-});
-document.querySelector('[data-action="analyze"]')?.addEventListener("click", () => {
-  requestAnalyzeCurrentSelectionFromPopup();
-});
+function normalizeError(error) {
+  return asDiagnostic(error) || {
+    code: asString(error.code) || "METADATA_CHECKER_UNKNOWN_ERROR",
+    severity: asString(error.severity) || "error",
+    message: asString(error.message || error),
+  };
+}
 
-loadStatus();
+function bindButtonHandlers() {
+  for (const key of Object.keys(actionButtonDefs)) {
+    const button = document.querySelector(actionButtonDefs[key].selector);
+    if (button) {
+      buttons[key] = button;
+    }
+  }
+
+  getButton("openPanel")?.addEventListener("click", () => {
+    runTabAction("openPanel", actionButtonDefs.openPanel.requestType, actionButtonDefs.openPanel.message);
+  });
+
+  getButton("togglePanel")?.addEventListener("click", () => {
+    runTabAction("togglePanel", actionButtonDefs.togglePanel.requestType, actionButtonDefs.togglePanel.message);
+  });
+
+  getButton("processCurrent")?.addEventListener("click", () => {
+    runTabAction("processCurrent", actionButtonDefs.processCurrent.requestType, actionButtonDefs.processCurrent.message);
+  });
+
+  getButton("processBackground")?.addEventListener("click", () => {
+    runRuntimeAction("processBackground", actionButtonDefs.processBackground.runtimeMessage, actionButtonDefs.processBackground.message);
+  });
+
+  getButton("retryCurrentSelection")?.addEventListener("click", () => {
+    runTabAction("retryCurrentSelection", actionButtonDefs.retryCurrentSelection.requestType, actionButtonDefs.retryCurrentSelection.message);
+  });
+
+  getButton("pauseBackground")?.addEventListener("click", () => {
+    runRuntimeAction("pauseBackground", actionButtonDefs.pauseBackground.runtimeMessage, actionButtonDefs.pauseBackground.message);
+  });
+
+  getButton("resumeBackground")?.addEventListener("click", () => {
+    runRuntimeAction("resumeBackground", actionButtonDefs.resumeBackground.runtimeMessage, actionButtonDefs.resumeBackground.message);
+  });
+
+  getButton("copyDiagnostic")?.addEventListener("click", runCopyDiagnosticAction);
+}
+
+(function init() {
+  setActionMessage("ready");
+  bindButtonHandlers();
+  loadStatus();
+})();
