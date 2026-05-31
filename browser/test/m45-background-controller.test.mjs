@@ -82,7 +82,10 @@ function createFetchStub() {
       parsed.pathname === "/api/meta/services/getFileContent/page-1" ||
       parsed.pathname === "/api/meta/services/getFileContent/table-1"
     ) {
-      return jsonResponse(200, JSON.stringify({ type: "metadata" }));
+      return jsonResponse(200, JSON.stringify({
+        type: "metadata",
+        raw_text: "literal field that must stay raw text",
+      }));
     }
     return jsonResponse(404, {});
   };
@@ -1198,8 +1201,15 @@ test("M45 background fetches raw metadata and calls injected runtime analyzer", 
   );
   assert.equal(runtimeCalls[0].options.project_ref, "xiaoshouyi");
   assert.equal(runtimeCalls[1].sourcePath, "app/Test.app/Page.spg");
-  assert.equal(runtimeCalls[1].rawText, JSON.stringify({ type: "metadata" }));
+  assert.equal(runtimeCalls[1].rawText, JSON.stringify({
+    type: "metadata",
+    raw_text: "literal field that must stay raw text",
+  }));
   assert.equal(runtimeCalls[3].selection.file_id, "page-1");
+  assert.equal(runtimeCalls[3].options.mode, "background");
+  assert.equal(runtimeCalls[3].options.include_priority, false);
+  assert.equal(runtimeCalls[3].options.include_conditions, true);
+  assert.equal(runtimeCalls[3].options.include_dataflow, false);
   assert.equal(controller.state.background.processed, 1);
 });
 
@@ -1406,6 +1416,141 @@ test("M45 offscreen WASM analysis client calls runtime methods through extension
     JSON.stringify({ source_path: "app/Page.spg" }),
     JSON.stringify({ mode: "foreground" }),
   ]);
+});
+
+test("M45 offscreen WASM analysis client surfaces runtime lastError", async () => {
+  const chromeApi = {
+    runtime: {
+      lastError: null,
+      getURL(path) {
+        return `chrome-extension://id/${path}`;
+      },
+      async getContexts() {
+        return [{ documentUrl: "chrome-extension://id/offscreen.html" }];
+      },
+      sendMessage(_message, callback) {
+        chromeApi.runtime.lastError = { message: "offscreen document is closed" };
+        callback();
+        chromeApi.runtime.lastError = null;
+      },
+    },
+    offscreen: {
+      async createDocument() {
+        throw new Error("should not create existing offscreen document");
+      },
+    },
+  };
+  const client = createOffscreenWasmAnalysisClient({ chromeApi });
+
+  await assert.rejects(
+    () => client.loadSuperpageDocument("app/Page.spg", "{}"),
+    /offscreen document is closed/,
+  );
+});
+
+test("M45 offscreen WASM analysis client surfaces diagnostic response failures", async () => {
+  const client = createOffscreenWasmAnalysisClient({
+    chromeApi: {
+      runtime: {
+        getURL(path) {
+          return `chrome-extension://id/${path}`;
+        },
+        async getContexts() {
+          return [{ documentUrl: "chrome-extension://id/offscreen.html" }];
+        },
+        sendMessage(_message, callback) {
+          callback({
+            ok: false,
+            diagnostic: {
+              code: "OFFSCREEN_WASM_CALL_FAILED",
+              message: "forced method failure",
+            },
+          });
+        },
+      },
+      offscreen: {
+        async createDocument() {
+          throw new Error("should not create existing offscreen document");
+        },
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.loadSuperpageDocument("app/Page.spg", "{}"),
+    /forced method failure/,
+  );
+});
+
+test("M45 offscreen WASM analysis client times out missing responses", async () => {
+  const client = createOffscreenWasmAnalysisClient({
+    requestTimeoutMs: 5,
+    chromeApi: {
+      runtime: {
+        getURL(path) {
+          return `chrome-extension://id/${path}`;
+        },
+        async getContexts() {
+          return [{ documentUrl: "chrome-extension://id/offscreen.html" }];
+        },
+        sendMessage() {},
+      },
+      offscreen: {
+        async createDocument() {
+          throw new Error("should not create existing offscreen document");
+        },
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => client.loadSuperpageDocument("app/Page.spg", "{}"),
+    /did not respond in time/,
+  );
+});
+
+test("M45 offscreen WASM analysis client serializes concurrent document creation", async () => {
+  const calls = [];
+  const createDocument = createDeferred();
+  const chromeApi = {
+    runtime: {
+      getURL(path) {
+        return `chrome-extension://id/${path}`;
+      },
+      async getContexts() {
+        calls.push({ method: "getContexts" });
+        return [];
+      },
+      sendMessage(message, callback) {
+        calls.push({ method: "sendMessage", message });
+        callback({
+          ok: true,
+          result: JSON.stringify({ status: "ready", method: message.payload.method }),
+        });
+      },
+    },
+    offscreen: {
+      async createDocument(options) {
+        calls.push({ method: "createDocument", options });
+        await createDocument.promise;
+      },
+    },
+  };
+  const client = createOffscreenWasmAnalysisClient({ chromeApi });
+  const first = client.loadSuperpageDocument("app/First.spg", "{}");
+  const second = client.buildOrUpdateSuperpageGraph("app/Second.spg");
+
+  while (!calls.some((call) => call.method === "createDocument")) {
+    await Promise.resolve();
+  }
+  createDocument.resolve();
+  const results = await Promise.all([first, second]);
+
+  assert.equal(
+    calls.filter((call) => call.method === "createDocument").length,
+    1,
+  );
+  assert.deepEqual(results.map((result) => result.status), ["ready", "ready"]);
 });
 
 test("M45 background records per-file fetch failure and continues queue", async () => {

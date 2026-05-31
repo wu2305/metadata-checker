@@ -61,6 +61,23 @@ offscreen target=chrome-extension://.../offscreen.html
 service_worker version=0.1.13
 ```
 
+本轮真实验收后的可复跑证据采集入口：
+
+```bash
+node browser/tools/m45-real-bi-collect-evidence.mjs \
+  --debugging-url http://127.0.0.1:9222 \
+  --page-url-contains autocrm-test.xiaoshouyi.com \
+  --out-dir browser/artifacts/m45-real-bi-evidence \
+  --observe-ms 1000
+```
+
+脚本输出：
+
+- `browser/artifacts/m45-real-bi-evidence/m45-real-bi-evidence.json`
+- `browser/artifacts/m45-real-bi-evidence/m45-real-bi-panel.png`
+
+JSON 包含脱敏后的 page target、extension/service-worker/offscreen targets、DOM marker、panel shadow DOM 文本和观察窗口内的 console/exception 事件；PNG 是当前真实页面截图，用于补充 panel 可见性证据。
+
 运行中 SW 源码确认包含：
 
 - `createOffscreenWasmAnalysisClient`
@@ -276,7 +293,24 @@ Cache hits/misses
 Retry available
 ```
 
-7. 若出现 `First diagnostic`，按 code 分流：
+7. 采集结构化证据和截图：
+
+```bash
+node browser/tools/m45-real-bi-collect-evidence.mjs \
+  --debugging-url http://127.0.0.1:9222 \
+  --page-url-contains autocrm-test.xiaoshouyi.com \
+  --out-dir browser/artifacts/m45-real-bi-evidence \
+  --observe-ms 1000
+```
+
+需要保留的产物：
+
+```text
+browser/artifacts/m45-real-bi-evidence/m45-real-bi-evidence.json
+browser/artifacts/m45-real-bi-evidence/m45-real-bi-panel.png
+```
+
+8. 若出现 `First diagnostic`，按 code 分流：
 
 - `REMOTE_METADATA_NOT_FOUND` / `REMOTE_METADATA_FETCH_FAILED`：优先查 SW metadata content path 与真实 BI content API。
 - `BACKGROUND_ANALYSIS_FAILED`：继续看 diagnostic message，区分 raw metadata 获取失败、WASM load/build 失败、selection analyze 失败。

@@ -47,6 +47,14 @@ async function createChromiumFixture() {
     ),
   );
   await writeFile(join(extensionChromiumDir, "content.js"), "console.log('content');\n");
+  await writeFile(
+    join(extensionChromiumDir, "offscreen.html"),
+    "<!doctype html><script type=\"module\" src=\"offscreen-runtime.js\"></script>\n",
+  );
+  await writeFile(
+    join(extensionChromiumDir, "offscreen-runtime.js"),
+    "globalThis.__metadataCheckerOffscreenRuntime = true;\n",
+  );
   return { fixtureRoot, extensionCoreDir, extensionChromiumDir };
 }
 
@@ -193,6 +201,10 @@ test("prepareExtensionPackage builds Chromium extension and rewrites manifest", 
     assert.equal(accessCore, true);
     const accessContent = await access(join(outDir, "content.js")).then(() => true, () => false);
     assert.equal(accessContent, true);
+    const copiedOffscreenHtml = await readFile(join(outDir, "offscreen.html"), "utf8");
+    assert.match(copiedOffscreenHtml, /offscreen-runtime\.js/);
+    const copiedOffscreenRuntime = await readFile(join(outDir, "offscreen-runtime.js"), "utf8");
+    assert.match(copiedOffscreenRuntime, /__metadataCheckerOffscreenRuntime/);
 
     assert.equal(result.zip.status, "skipped");
     assert.equal(result.diagnostics.some((item) => item.code === "ZIP_PACKAGING_NOT_SUPPORTED"), true);
@@ -235,7 +247,8 @@ test("Chromium manifest allows WASM compilation in extension pages", async () =>
 });
 
 test("Chromium extension includes offscreen runtime host files", async () => {
-  await access(new URL("../extension-chromium/offscreen.html", import.meta.url));
+  const html = await readFile(new URL("../extension-chromium/offscreen.html", import.meta.url), "utf8");
+  assert.match(html, /offscreen-runtime\.js/);
   await access(new URL("../extension-chromium/offscreen-runtime.js", import.meta.url));
 });
 
