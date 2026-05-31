@@ -5666,3 +5666,166 @@ BI onInitDesigner
     - reload 后复测显示自动 rebootstrap 已推进当前 selection 到后台队列，panel 从 `waiting_for_metadata` 变为 `Background progress: 1/1`、`Background failed: 1`。当前仍需定位单文件分析失败原因；已补 panel 首条 diagnostic code/message 展示，待再次 reload 后读取真实失败码。
     - 后续验收不使用假 BI 服务替代真实环境；继续以真实 `autocrm-test.xiaoshouyi.com` 页面、真实登录态、真实 metadata API 和真实设计器对象为准。
     - 已确认 Chromium MV3 extension 包需要 `wasm-bindgen --target web` 产物，因为 background module service worker 通过动态 `import()` 加载 `metadata_checker.js`；`--target no-modules` 只保留给 BI hook / `importScripts()` 场景。
+  - 2026-05-31 真实环境闭环记录：
+    - 已将 MV3 WASM runtime 从 Service Worker 迁移到 offscreen document；Service Worker 只做 bootstrap、session、远程 API 和 runtime message 编排。
+    - 已在真实 `xiaoshouyi` 页面验证当前 `.spg` raw metadata 拉取、WASM load/build/analyze、foreground artifact ready、后台 failed=0。
+    - 已补 `browser/tools/m45-real-bi-collect-evidence.mjs`，可通过 CDP 自动采集 DOM marker、panel 文本、extension/offscreen target、脱敏 console 和截图路径。
+    - 冷脸验收关注测试完整性后，已补 offscreen runtime 本体 smoke、SW/offscreen bridge failure matrix、package 产物校验、完整 WASM selection/options contract 和大体量 synthetic raw metadata 样本。
+
+#### M46：Local CLI Remote Metadata Index and Analysis
+
+目标：把 M45 在真实浏览器中验证过的远程元数据获取与 raw text 分析链路，沉淀成本地 CLI 可复用能力。用户可以在本地命令行用真实远程服务账号/session 拉取指定 project/module/file 的 `.spg/.tbl`，写入受控 session mirror，构建或增量更新 graphdb，并立即执行 query/analyze。M46 优先复用 M41 native session/provider 能力，不重新发明第二套远程协议。
+
+边界要求：
+
+- Rust/CLI 是主实现；不得把远程下载、index、graph build 的核心逻辑放到 JS。
+- 不修改远程 `.spg` / `.tbl`。
+- token、cookie、password 不进入 stdout/stderr、graphdb、session manifest、cache、diagnostics 或测试 fixture。
+- remote provider 只返回 raw metadata text 和文件元信息，不解析 `.spg/.tbl`、不建图、不做业务推理。
+- 本地 session mirror 可以保存 raw metadata 文件，但必须和凭证存储隔离；默认不持久化凭证。
+- 继续复用已有 scanner、graph store、query/analyze 能力，不为 remote-index 另建一套 graph snapshot。
+
+任务清单：
+
+- [ ] M46.1：CLI 命令契约与参数收敛
+  - 设计并落地一个清晰入口，例如 `remote-index` 或在现有 session 命令中扩展 `--session-refresh --build-graph --analyze`。
+  - 参数至少覆盖：
+    - `--base-url`
+    - `--project`
+    - `--module` / `--source-path` / `--file-id`
+    - `--graph-db-path`
+    - `--session-dir`
+    - `--json`
+    - `--dry-run`
+  - 认证输入只允许通过 env、交互输入或显式一次性参数；输出必须脱敏。
+  - `--help`、README 和错误示例同步更新。
+
+- [ ] M46.2：远程发现与筛选策略
+  - 复用 `/api/me/whoami`、`getPermissionInfo`、`getFileChildren`、`getFileDescendant`、`getFileContent/<file_id>`。
+  - 支持 project/module/source_path/file_id 四种粒度。
+  - 默认只下载 `.spg` / `.tbl`；其它文件只计入 discovered，不进入解析队列。
+  - 支持 current page / explicit file first，避免全量项目下载阻塞单页分析。
+  - 对 encoded permission、gzip body、octet-stream raw content 保持兼容。
+
+- [ ] M46.3：Session mirror 与增量同步
+  - session manifest 记录 remote server、project、file_id、revision/hash、logical source_path、local path、last fetched。
+  - raw metadata 写入 session mirror 时保持项目内逻辑路径，不把 remote URL 或本地绝对路径混入 `source_path`。
+  - 支持 revision/hash/mtime 级别的增量跳过。
+  - 远程删除或不可见文件输出 stable diagnostic，不静默污染旧 graph。
+  - 支持 `--clean-remote-mirror` 或同等显式清理入口，默认不破坏已有 session。
+
+- [ ] M46.4：Graph build / index 主链路
+  - 从 session mirror 调用现有 scanner/build graph 能力。
+  - 支持显式 `--graph-db-path`，并沿用 graphdb lock/read-only 诊断。
+  - 单文件失败不终止整批；输出 processed/failed/skipped/current_file。
+  - graph node/edge 中不写入 token/cookie/password。
+  - 对 `.spg` 和 `.tbl` 均覆盖，避免 CLI 只跑页面样例。
+
+- [ ] M46.5：Analyze / Query 后处理
+  - index 后可选择直接执行：
+    - page summary
+    - component selection analyze
+    - model/table query
+    - dataflow query
+  - JSON 输出使用稳定 envelope：`status`、`summary`、`diagnostics`、`timing`、`graph_db_path`、`session_id`。
+  - human 输出保持低噪声，默认不打印 raw metadata。
+
+- [ ] M46.6：进度、诊断与安全审计
+  - human 模式展示 discovered/downloaded/indexed/skipped/failed。
+  - JSON 模式输出 machine-readable progress summary。
+  - 错误码覆盖 unauthorized/forbidden/not_found/invalid_response/network/content_empty/graph_locked。
+  - 增加敏感信息脱敏测试，覆盖 URL、headers、body、manifest、graphdb metadata、日志。
+
+- [ ] M46.7：测试与真实环境验收
+  - 单元测试：provider contract、URL 构造、raw text 保持、encoded permission、octet-stream content、错误码。
+  - 集成测试：mock remote -> session mirror -> graph build -> query。
+  - 真实 fixture：只保存脱敏目录 shape 和少量 synthetic raw metadata，不保存 token/cookie/raw 业务元数据。
+  - 真实环境验收：使用 `autocrm-test.xiaoshouyi.com` 的已知项目，记录命令、脱敏输出、graphdb 路径、indexed/failed 数量和 query 样例。
+
+验收标准：
+
+- `cargo test` 或影响面 Rust 测试覆盖 remote provider、session mirror、graph build、query 输出和敏感信息脱敏。
+- 一条命令可从真实远程 project 拉取至少一个 `.spg`，写入 session mirror，构建 graphdb，并执行至少一个 query/analyze。
+- 真实验收记录不含 token/cookie/password/raw metadata。
+- remote CLI 和 browser extension 共用同一 remote/session 语义，不出现两套互相矛盾的 source_path/file_id/revision 规则。
+
+#### M47：Browser Popup UI Formalization
+
+目标：把当前 Chromium popup 从调试入口推进成正式、紧凑、可扫描的工具型 UI。popup 不承载主分析结果和图关系渲染；它负责展示插件状态、当前页面/selection 摘要、后台 indexing 进度、诊断、缓存状态和操作入口。常驻分析结果仍由页面内 floating panel 承载。
+
+边界要求：
+
+- popup 不解析 `.spg/.tbl`，不建图，不做业务推理。
+- popup 不读取或展示 token/cookie/password/raw metadata。
+- popup 不替代页面内常驻 panel；失焦关闭不影响后台任务或 panel 状态。
+- 默认不引入 bundler；若引入 npm 依赖，必须先说明必要性、运行环境和测试命令。
+- UI 应是工作型、紧凑、信息密度适中；不做 landing page、营销式 hero 或装饰性大图。
+
+任务清单：
+
+- [ ] M47.1：Popup 信息架构
+  - 分区展示：
+    - extension/session 状态
+    - 当前页面 source_path / file_id / revision
+    - 当前 selection 摘要
+    - indexing progress
+    - cache hits/misses
+    - last diagnostic
+    - artifact readiness
+  - 空状态、未注入、未登录、bridge missing、SW reset、offscreen unavailable 都要有明确稳定文案。
+  - 长路径需要中间截断和 tooltip，不允许撑破 popup 宽度。
+
+- [ ] M47.2：Popup 状态数据 contract
+  - 收敛 popup 读取 background/content state 的 message envelope。
+  - 避免 popup 直接拼接多个不稳定内部字段。
+  - background 返回的数据必须已经脱敏。
+  - 增加 version/build/runtime/offscreen target 的只读 diagnostic 字段。
+
+- [ ] M47.3：操作入口与交互状态
+  - 保留并整理：
+    - open/toggle panel
+    - retry current selection
+    - process current page
+    - pause/resume background indexing
+    - collect evidence / copy sanitized diagnostic
+  - 每个按钮有 loading/disabled/error/success 状态。
+  - 操作失败返回 stable diagnostic，不让 popup 静默无响应。
+
+- [ ] M47.4：视觉设计与组件样式
+  - 建立小型样式 token：spacing、font size、border、status color、focus ring。
+  - 使用紧凑列表、进度条、status badge、icon button、segmented controls。
+  - 不使用大圆角卡片堆叠，不把 section 做成嵌套 card。
+  - 支持 light/dark 或至少不在系统 dark mode 下不可读。
+  - popup 最小宽度和最大高度有固定约束，滚动区域明确。
+
+- [ ] M47.5：诊断与安全 UX
+  - 显示 first diagnostic code/message，并支持复制脱敏诊断。
+  - 明确区分 auth/session、remote metadata、WASM runtime、offscreen、analysis、cache 失败。
+  - 所有 UI 文本和 copied payload 通过敏感信息扫描测试。
+  - 不把 raw `.spg/.tbl`、完整 component JSON、token 或 cookie 放入 DOM。
+
+- [ ] M47.6：可访问性与键盘行为
+  - 所有按钮有可理解的 accessible label。
+  - focus 顺序稳定。
+  - loading 状态不会导致布局跳动。
+  - 文本在窄 popup 中不重叠、不溢出。
+
+- [ ] M47.7：自动化测试
+  - Node smoke 覆盖 popup 渲染状态、message contract、button command、diagnostic 脱敏。
+  - DOM 测试覆盖长路径、空状态、错误状态、progress 状态。
+  - 可见 UI 变更必须补截图验证；若使用 Chrome/Playwright，需要记录启动命令和 artifact 路径。
+  - 真实环境验收至少保留 popup 截图、panel 截图、结构化 evidence JSON。
+
+- [ ] M47.8：真实 BI 验收
+  - 在真实 `autocrm-test.xiaoshouyi.com` 页面打开 popup。
+  - 验证 session ready、current source、file_id、background progress、artifact ready、last diagnostic。
+  - 验证 retry/process/pause/resume/open panel 操作。
+  - 关闭 popup 后 panel 与后台任务继续工作。
+  - 保存截图和脱敏 evidence，不用 marker 单点成功替代 UI 可见性验收。
+
+验收标准：
+
+- popup UI 在未注入、未登录、ready、indexing、analysis failed、offscreen failed 等状态下都有稳定展示。
+- Node/browser smoke 覆盖 message、状态渲染、按钮、脱敏和布局边界。
+- 真实 BI 截图证明 popup 可见 UI 与 panel 协作可用。
+- popup 代码仍保持 JS glue/UI 边界，不承载 Rust core 的解析、建图、查询或业务推理。

@@ -62,3 +62,9 @@
 - [ ] M28：Stdio 请求/响应契约收敛（统一 schema、错误码、负例测试），详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M29：Function Calling 工具层优化（工具拆分、使用边界、anti-drift 读取策略），详见 `docs/real-project-optimization-roadmap.md`
 - [ ] M30：Stdio 性能与容量治理（timing、预算截断、真实项目性能基线），详见 `docs/real-project-optimization-roadmap.md`
+
+## 下一阶段：远程落地与浏览器 UI 正式化
+
+- [x] M45：Remote Metadata Auto Fetch and Background Analysis（真实 BI offscreen WASM 链路已闭环，详见 `docs/real-project-optimization-roadmap.md` 与 `docs/m45-real-bi-test-handoff.md`）
+- [ ] M46：Local CLI Remote Metadata Index and Analysis（本地 CLI 自动下载远程服务器元数据、session mirror、graph index 与 analyze/query），详见 `docs/real-project-optimization-roadmap.md`
+- [ ] M47：Browser Popup UI Formalization（正式 popup 信息架构、视觉设计、操作入口、诊断与真实 UI 验收），详见 `docs/real-project-optimization-roadmap.md`
