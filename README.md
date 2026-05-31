@@ -98,6 +98,9 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 # 查询两个页面之间的关系
 ./target/release/metadata-checker --project-dir /path/to/project --query-cross "page/A" "page/B"
 
+# 拉取远端项目到 session 并建立图索引（用于真实项目场景）
+./target/release/metadata-checker --remote-index <session-id> --base-url https://autocrm-test.xiaoshouyi.com --project analyzer --remote-username <user> --remote-password <pass> --session-sync-mode full
+
 # 展开 DataFlow 子图
 ./target/release/metadata-checker --project-dir /path/to/project --query-dataflow flow.tbl
 

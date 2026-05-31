@@ -167,12 +167,43 @@ fn main() -> Result<()> {
     }
 
     if let Some(ref session_id) = args.session_refresh {
+        if let Some(source) = args
+            .remote_source
+            .as_deref()
+            .filter(|value| value.trim().is_empty())
+        {
+            return print_session_error(
+                "SESSION_INVALID_REMOTE_SOURCE",
+                format!("--remote-source cannot be empty: {source}"),
+            );
+        }
+        if let Some(module) = args
+            .remote_module
+            .as_deref()
+            .filter(|value| value.trim().is_empty())
+        {
+            return print_session_error(
+                "SESSION_INVALID_REMOTE_MODULE",
+                format!("--remote-module cannot be empty: {module}"),
+            );
+        }
+        if let Some(file) = args
+            .remote_file
+            .as_deref()
+            .filter(|value| value.trim().is_empty())
+        {
+            return print_session_error(
+                "SESSION_INVALID_REMOTE_FILE",
+                format!("--remote-file cannot be empty: {file}"),
+            );
+        }
+
         let remote_server = match args.remote_server.as_deref() {
             Some(s) => s,
             None => {
                 return print_session_error(
                     "SESSION_MISSING_REMOTE_SERVER",
-                    "--session-refresh requires --remote-server",
+                    "--session-refresh/--remote-index requires --remote-server/--base-url",
                 );
             }
         };
@@ -181,7 +212,7 @@ fn main() -> Result<()> {
             None => {
                 return print_session_error(
                     "SESSION_MISSING_REMOTE_PROJECT",
-                    "--session-refresh requires --remote-project",
+                    "--session-refresh/--remote-index requires --remote-project/--project",
                 );
             }
         };
@@ -271,6 +302,20 @@ fn main() -> Result<()> {
                             "skipped": report.sync.skipped,
                             "deleted": report.sync.deleted,
                         },
+                        "files": {
+                            "discovered": report.files.discovered,
+                            "analyzable": report.files.analyzable,
+                            "synced": report.files.synced,
+                            "skipped": report.files.skipped,
+                            "failed": report.files.failed,
+                        },
+                        "diagnostics": report.diagnostics
+                            .iter()
+                            .map(|diagnostic| serde_json::json!({
+                                "code": diagnostic.code,
+                                "message": sanitize_session_error_message(&diagnostic.message),
+                            }))
+                            .collect::<Vec<_>>(),
                         "index": {
                             "indexed": report.index.indexed,
                             "unchanged": report.index.unchanged,

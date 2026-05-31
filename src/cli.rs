@@ -241,17 +241,28 @@ pub struct Cli {
     #[arg(long, value_name = "ID", help = "Show session details")]
     pub session_show: Option<String>,
 
-    #[arg(long, value_name = "ID", help = "Refresh session from remote")]
+    #[arg(
+        long,
+        value_name = "ID",
+        alias = "remote-index",
+        help = "Refresh session from remote"
+    )]
     pub session_refresh: Option<String>,
 
     #[arg(
         long,
         value_name = "URL",
+        alias = "base-url",
         help = "Remote BI server URL (e.g. https://autocrm-test.xiaoshouyi.com)"
     )]
     pub remote_server: Option<String>,
 
-    #[arg(long, value_name = "PROJECT", help = "Remote project reference")]
+    #[arg(
+        long,
+        value_name = "PROJECT",
+        alias = "project",
+        help = "Remote project reference"
+    )]
     pub remote_project: Option<String>,
 
     #[arg(long, value_name = "USERNAME", help = "Remote BI username")]
@@ -259,6 +270,27 @@ pub struct Cli {
 
     #[arg(long, value_name = "PASSWORD", help = "Remote BI password")]
     pub remote_password: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "SOURCE",
+        help = "Remote source filter placeholder (reserved, currently no-op)"
+    )]
+    pub remote_source: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "MODULE",
+        help = "Remote module filter placeholder (reserved, currently no-op)"
+    )]
+    pub remote_module: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Remote file filter placeholder (reserved, currently no-op)"
+    )]
+    pub remote_file: Option<String>,
 
     #[arg(long, value_name = "MODE", help = "Session sync mode: full | partial")]
     pub session_sync_mode: Option<String>,

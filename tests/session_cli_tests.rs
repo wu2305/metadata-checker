@@ -227,6 +227,52 @@ fn session_refresh_missing_project_returns_stable_error() {
 }
 
 #[test]
+fn session_refresh_alias_remote_index_missing_server_returns_stable_error() {
+    let root = test_root("refresh-missing-server-alias");
+    let output = run_session_command_raw(&root, &["--remote-index", "s1", "--project", "analyzer"]);
+    assert!(output.status.success());
+    let json = as_json_from_stdout(&output);
+
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "SESSION_MISSING_REMOTE_SERVER");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("base-url")
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_refresh_missing_project_with_base_url_alias_returns_stable_error() {
+    let root = test_root("refresh-missing-project-alias");
+    let output = run_session_command_raw(
+        &root,
+        &[
+            "--session-refresh",
+            "s1",
+            "--base-url",
+            "https://example.com",
+        ],
+    );
+    assert!(output.status.success());
+    let json = as_json_from_stdout(&output);
+
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "SESSION_MISSING_REMOTE_PROJECT");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("project")
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn session_refresh_invalid_sync_mode_returns_stable_error() {
     let root = test_root("refresh-invalid-mode");
     let output = run_session_command_raw(
@@ -457,6 +503,153 @@ fn session_refresh_full_mode_success_with_mock_remote_server() {
             .expect("graph_db_path must be string"),
     );
     assert!(graph_db_path.exists());
+
+    let json_text = serde_json::to_string(&json).expect("serialize output");
+    assert!(!json_text.contains("pass"));
+    assert!(!json_text.contains("JSESSIONID"));
+    assert!(!json_text.contains("cookie"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_refresh_remote_index_alias_success_reuses_mock_server() {
+    let root = test_root("refresh-success-alias");
+    let minimal_superpage = r#"{"pageName":"Page","components":[]}"#;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("read mock server addr");
+    let (request_sender, request_receiver) = mpsc::channel::<(String, String)>();
+
+    thread::spawn(move || {
+        for (path, status, body, set_cookie) in [
+            (
+                "/api/auth/signin",
+                200,
+                r#"{"ok":true}"#,
+                Some("JSESSIONID=abc; Path=/"),
+            ),
+            (
+                "/api/meta/services/getFileDescendant/proj",
+                200,
+                r#"{"children":[{"path":"/proj/app/Page.spg","name":"Page.spg","id":"spg1","revision":"1","isFolder":false}]}"#,
+                None,
+            ),
+            (
+                "/api/meta/services/getFileContent/spg1",
+                200,
+                minimal_superpage,
+                None,
+            ),
+        ] {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 4096];
+            let n = stream.read(&mut request).expect("read request");
+            let request = String::from_utf8_lossy(&request[..n]).to_string();
+
+            let request_line = request.lines().next().unwrap_or_default();
+            let method = if path == "/api/auth/signin" {
+                "POST"
+            } else {
+                "GET"
+            };
+            assert!(
+                request_line == format!("{method} {path} HTTP/1.1"),
+                "expected exact request line for {path}, got: {request_line}"
+            );
+
+            if path != "/api/auth/signin" {
+                let request_lower = request.to_ascii_lowercase();
+                assert!(
+                    request_lower.contains("cookie: jsessionid=abc"),
+                    "expected cookie for {path}, got: {request}"
+                );
+            }
+
+            request_sender
+                .send((path.to_string(), request))
+                .expect("send request snapshot");
+
+            let set_cookie_header = set_cookie
+                .map(|value| format!("Set-Cookie: {value}\r\n"))
+                .unwrap_or_default();
+
+            let response = format!(
+                "HTTP/1.1 {status} OK\r\n{set_cookie_header}Content-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                body.len(),
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
+    });
+
+    let mock_url = format!("http://{addr}");
+    let json = run_session_command(
+        &root,
+        &[
+            "--remote-index",
+            "s2",
+            "--base-url",
+            &mock_url,
+            "--project",
+            "proj",
+            "--remote-source",
+            "app",
+            "--remote-module",
+            "module-a",
+            "--remote-file",
+            "spg1",
+            "--remote-username",
+            "user",
+            "--remote-password",
+            "pass",
+        ],
+    );
+
+    let (_, signin_request) = request_receiver.recv().expect("capture signin request");
+    let (_, descendants_request) = request_receiver
+        .recv()
+        .expect("capture descendants request");
+    let (_, content_request) = request_receiver.recv().expect("capture content request");
+
+    assert!(signin_request.contains("POST /api/auth/signin"));
+    assert!(
+        descendants_request
+            .to_ascii_lowercase()
+            .contains("cookie: jsessionid=abc"),
+        "expected signin cookie on descendants"
+    );
+    assert!(
+        content_request
+            .to_ascii_lowercase()
+            .contains("cookie: jsessionid=abc"),
+        "expected signin cookie on content"
+    );
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["session_id"], "s2");
+    assert_eq!(json["project_ref"], "proj");
+    assert_eq!(json["files"]["discovered"], 1);
+    assert_eq!(json["files"]["analyzable"], 1);
+    assert_eq!(json["files"]["synced"], 1);
+    assert_eq!(json["files"]["failed"], 0);
+    assert_eq!(json["diagnostics"].as_array().unwrap().len(), 0);
+
+    let manifest_text = std::fs::read_to_string(root.join("s2").join("session.json"))
+        .expect("read session manifest");
+    let manifest_json: serde_json::Value =
+        serde_json::from_str(&manifest_text).expect("manifest should be valid JSON");
+    assert_eq!(manifest_json["session_id"].as_str(), Some("s2"));
+    assert_eq!(manifest_json["project_ref"].as_str(), Some("proj"));
+
+    let page_entry = manifest_json["files"]
+        .as_array()
+        .expect("manifest files should be array")
+        .iter()
+        .find(|file| file["source_path"] == "app/Page.spg")
+        .expect("manifest files should contain app/Page.spg");
+    assert_eq!(page_entry["revision"].as_str(), Some("1"));
 
     let json_text = serde_json::to_string(&json).expect("serialize output");
     assert!(!json_text.contains("pass"));
