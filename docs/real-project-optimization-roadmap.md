@@ -5749,83 +5749,74 @@ BI onInitDesigner
 - 真实验收记录不含 token/cookie/password/raw metadata。
 - remote CLI 和 browser extension 共用同一 remote/session 语义，不出现两套互相矛盾的 source_path/file_id/revision 规则。
 
-#### M47：Browser Popup UI Formalization
+#### M47：Browser UI Formalization
 
-目标：把当前 Chromium popup 从调试入口推进成正式、紧凑、可扫描的工具型 UI。popup 不承载主分析结果和图关系渲染；它负责展示插件状态、当前页面/selection 摘要、后台 indexing 进度、诊断、缓存状态和操作入口。常驻分析结果仍由页面内 floating panel 承载。
+目标：一次性完成浏览器端正式 UI 的两个产品面：设计器内嵌 Local Graph popup 与浏览器插件弹出设置页。内嵌 popup 服务当前组件关系，插件弹出页服务全局设置、同步、诊断与运行状态。两者共享设计语言，但职责不能混用。
+
+设计器内嵌 Local Graph popup 详见 `docs/m47-embedded-local-graph-popup-design.md`。
 
 边界要求：
 
-- popup 不解析 `.spg/.tbl`，不建图，不做业务推理。
-- popup 不读取或展示 token/cookie/password/raw metadata。
-- popup 不替代页面内常驻 panel；失焦关闭不影响后台任务或 panel 状态。
-- 默认不引入 bundler；若引入 npm 依赖，必须先说明必要性、运行环境和测试命令。
-- UI 应是工作型、紧凑、信息密度适中；不做 landing page、营销式 hero 或装饰性大图。
+- JS 仍只做 glue/provider/runtime launcher/renderer/test harness，不解析 `.spg/.tbl`，不建图，不做业务推理。
+- 内嵌 popup 不提供 Refresh、手动 Analyze、后台索引控制、session/runtime/offscreen/IndexedDB 健康面板。
+- 插件弹出页更接近设置页，承载 Refresh/Sync、session 状态、runtime/offscreen/IndexedDB 状态、后台索引入口、诊断和设置。
+- 内嵌 popup 展示当前组件局部关系：WASM/Rust 输出 2-hop，视觉默认突出 1-hop，2-hop 半透明虚化，不提供 Depth 切换。
+- 点击邻居节点只显示邻居详情，不反向切换设计器选中组件。
+- 边类型可以通过颜色区分；字段级 detail 只消费 WASM/Rust 输出的 edge evidence，JS 不补推理。
+- 图主体优先使用 ECharts graph 或 canvas；DOM 只负责容器、详情、控制和可访问性文本。
+- 不读取或展示 token/cookie/password/raw metadata/完整 component JSON。
+- 可见 UI 真实验收必须截图，不允许只凭 marker 判定可见性。
 
 任务清单：
 
-- [ ] M47.1：Popup 信息架构
-  - 分区展示：
-    - extension/session 状态
-    - 当前页面 source_path / file_id / revision
-    - 当前 selection 摘要
-    - indexing progress
-    - cache hits/misses
-    - last diagnostic
-    - artifact readiness
-  - 空状态、未注入、未登录、bridge missing、SW reset、offscreen unavailable 都要有明确稳定文案。
-  - 长路径需要中间截断和 tooltip，不允许撑破 popup 宽度。
+- [ ] M47.1：Local Graph 数据 contract
+  - Rust/WASM 支持按 `active_component_id` 输出当前组件 2-hop VisualGraph。
+  - VisualGraph 标记 `focus_node`、`depth=2`、`visible_hop=1`、node hop、edge type 和脱敏 metadata。
+  - edge evidence 若可得，输出具体字段、来源属性、目标属性和规则摘要；若不可得，返回稳定降级字段。
+  - selection payload 继续保持轻量，不包含 raw text 或完整 component JSON。
 
-- [ ] M47.2：Popup 状态数据 contract
-  - 收敛 popup 读取 background/content state 的 message envelope。
-  - 避免 popup 直接拼接多个不稳定内部字段。
-  - background 返回的数据必须已经脱敏。
-  - 增加 version/build/runtime/offscreen target 的只读 diagnostic 字段。
+- [ ] M47.2：内嵌 popup host 与尺寸策略
+  - 固定右下角，尺寸目标不超过九分之一页面。
+  - 参考低代码平台右侧属性栏 `230px-350px` 宽度，默认 `min(350px, 33vw)`。
+  - 真实环境测试右侧属性栏展开/收起时是否遮挡关键控件；必要时锚定到属性栏左侧。
+  - 提供 `mounted/collapsed/hidden`、analysis status、focus component、node/edge count、graph depth/visible hop marker。
 
-- [ ] M47.3：操作入口与交互状态
-  - 保留并整理：
-    - open/toggle panel
-    - retry current selection
-    - process current page
-    - pause/resume background indexing
-    - collect evidence / copy sanitized diagnostic
-  - 每个按钮有 loading/disabled/error/success 状态。
-  - 操作失败返回 stable diagnostic，不让 popup 静默无响应。
+- [ ] M47.3：ECharts/canvas Local Graph 渲染
+  - 图主体使用 ECharts graph 或 canvas 渲染。
+  - 中心节点为当前组件；1-hop 正常权重，2-hop 半透明虚化。
+  - hover/click 节点高亮相关边和邻居，非相关节点降透明。
+  - 点击节点显示详情，不切换设计器选中组件。
+  - 点击边显示关系说明；有 evidence 显示字段级 detail，无 evidence 显示边类型和方向。
 
-- [ ] M47.4：视觉设计与组件样式
-  - 建立小型样式 token：spacing、font size、border、status color、focus ring。
-  - 使用紧凑列表、进度条、status badge、icon button、segmented controls。
-  - 不使用大圆角卡片堆叠，不把 section 做成嵌套 card。
-  - 支持 light/dark 或至少不在系统 dark mode 下不可读。
-  - popup 最小宽度和最大高度有固定约束，滚动区域明确。
+- [ ] M47.4：插件弹出页设置化
+  - popup 从调试控制台改为设置/状态入口。
+  - 保留全局能力：Refresh/Sync、session 状态、runtime/offscreen/IndexedDB 状态、后台索引入口、缓存/诊断、Open full panel、设置项。
+  - 不展示当前组件 Local Graph，不放手动 Analyze 当前组件按钮。
+  - 所有操作有 loading/disabled/error/success 状态和 stable diagnostic。
 
-- [ ] M47.5：诊断与安全 UX
-  - 显示 first diagnostic code/message，并支持复制脱敏诊断。
-  - 明确区分 auth/session、remote metadata、WASM runtime、offscreen、analysis、cache 失败。
-  - 所有 UI 文本和 copied payload 通过敏感信息扫描测试。
-  - 不把 raw `.spg/.tbl`、完整 component JSON、token 或 cookie 放入 DOM。
+- [ ] M47.5：视觉设计与安全 UX
+  - 内嵌 popup 与插件弹出页共享 token：spacing、font size、border、status color、focus ring。
+  - 使用开发工具风格，紧凑、可扫描；不做 landing page、营销式 hero、装饰性大图。
+  - 所有 UI 文本、tooltip、复制内容都通过敏感信息扫描。
+  - 错误状态有 `aria-live` 或结构化状态，不只靠颜色。
 
-- [ ] M47.6：可访问性与键盘行为
-  - 所有按钮有可理解的 accessible label。
-  - focus 顺序稳定。
-  - loading 状态不会导致布局跳动。
-  - 文本在窄 popup 中不重叠、不溢出。
+- [ ] M47.6：自动化测试
+  - Rust/WASM 测试覆盖 2-hop LocalGraph contract、edge type、edge evidence 降级。
+  - Node/browser smoke 覆盖 host marker、状态转换、1-hop/2-hop 视觉权重、node/edge click、pin/collapse。
+  - 插件 popup 测试覆盖设置页状态渲染、message contract、button command、diagnostic 脱敏。
+  - 可见 UI 变更补 Playwright/Chrome 截图。
 
-- [ ] M47.7：自动化测试
-  - Node smoke 覆盖 popup 渲染状态、message contract、button command、diagnostic 脱敏。
-  - DOM 测试覆盖长路径、空状态、错误状态、progress 状态。
-  - 可见 UI 变更必须补截图验证；若使用 Chrome/Playwright，需要记录启动命令和 artifact 路径。
-  - 真实环境验收至少保留 popup 截图、panel 截图、结构化 evidence JSON。
-
-- [ ] M47.8：真实 BI 验收
-  - 在真实 `autocrm-test.xiaoshouyi.com` 页面打开 popup。
-  - 验证 session ready、current source、file_id、background progress、artifact ready、last diagnostic。
-  - 验证 retry/process/pause/resume/open panel 操作。
-  - 关闭 popup 后 panel 与后台任务继续工作。
-  - 保存截图和脱敏 evidence，不用 marker 单点成功替代 UI 可见性验收。
+- [ ] M47.7：真实 BI 复测
+  - 在真实 `autocrm-test.xiaoshouyi.com` 设计器中验证 selection changed 自动更新。
+  - 验证 1-hop 高亮、2-hop 半透明虚化、节点详情、边详情。
+  - 验证右侧属性栏展开/收起时浮层不遮挡关键控件。
+  - 验证插件弹出页的 Refresh/Sync、session/runtime 状态、后台索引入口、诊断复制。
+  - 保存截图和脱敏 evidence JSON，不用 marker 单点成功替代 UI 可见性验收。
 
 验收标准：
 
-- popup UI 在未注入、未登录、ready、indexing、analysis failed、offscreen failed 等状态下都有稳定展示。
-- Node/browser smoke 覆盖 message、状态渲染、按钮、脱敏和布局边界。
-- 真实 BI 截图证明 popup 可见 UI 与 panel 协作可用。
-- popup 代码仍保持 JS glue/UI 边界，不承载 Rust core 的解析、建图、查询或业务推理。
+- 设计器内嵌 popup 能在真实 BI 中自动跟随当前组件显示 2-hop LocalGraph，并默认突出 1-hop。
+- 插件弹出页完成设置页归位，不再混入当前组件关系图。
+- 自动化测试覆盖 contract、渲染、交互、脱敏、布局边界。
+- 真实 BI 截图证明内嵌 popup 与插件弹出页均可见可用。
+- 浏览器 JS 仍保持接入层边界，不承载 Rust core 的解析、建图、查询或业务推理。

@@ -67,4 +67,4 @@
 
 - [x] M45：Remote Metadata Auto Fetch and Background Analysis（真实 BI offscreen WASM 链路已闭环，详见 `docs/real-project-optimization-roadmap.md` 与 `docs/m45-real-bi-test-handoff.md`）
 - [ ] M46：Local CLI Remote Metadata Index and Analysis（本地 CLI 自动下载远程服务器元数据、session mirror、graph index 与 analyze/query），详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M47：Browser Popup UI Formalization（正式 popup 信息架构、视觉设计、操作入口、诊断与真实 UI 验收），详见 `docs/real-project-optimization-roadmap.md`
+- [ ] M47：Browser UI Formalization（设计器内嵌 Local Graph popup、插件弹出设置页、ECharts/canvas 渲染与真实 BI 复测），详见 `docs/real-project-optimization-roadmap.md`
