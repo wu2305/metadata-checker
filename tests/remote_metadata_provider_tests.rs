@@ -6,8 +6,10 @@ use std::thread;
 
 use metadata_checker::remote_metadata::{
     AsyncRemoteMetadataProvider, MetadataContentType, RemoteFileRef, RemoteMetadataErrorCode,
+    diff_visible_manifest,
 };
 use metadata_checker::remote_metadata_provider::ReqwestRemoteMetadataProvider;
+use serde_json::json;
 
 fn serve_once(status: u16, body: &'static str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
@@ -115,4 +117,78 @@ fn reqwest_provider_maps_empty_body_to_invalid_response() {
 
     assert_eq!(err.code, RemoteMetadataErrorCode::RemoteResponseInvalid);
     assert!(err.message.contains("empty"));
+}
+
+#[test]
+fn reqwest_provider_parses_visible_manifest_wrapped_by_result_and_data() {
+    let previous = json!({
+        "result": [
+            {
+                "path": "app/page-old.spg",
+                "revision": "1",
+                "modifyTime": 1000
+            }
+        ]
+    })
+    .to_string();
+
+    let visible = json!({
+        "data": {
+            "result": {
+                "children": [
+                    {
+                        "resourcePath": "app/page-new.spg",
+                        "revision": "1",
+                        "modifyTime": 1000
+                    },
+                    {
+                        "resourcePath": "app/page-old.spg",
+                        "revision": "2",
+                        "modifyTime": 1000
+                    }
+                ]
+            }
+        }
+    })
+    .to_string();
+
+    let diff = diff_visible_manifest("analyzer", &previous, &visible).unwrap();
+
+    assert_eq!(diff.added[0].source_path, "app/page-new.spg");
+    assert_eq!(diff.modified[0].source_path, "app/page-old.spg");
+    assert!(diff.deleted.is_empty());
+    assert!(diff.unchanged.is_empty());
+    assert_eq!(
+        diff.content_queue.len(),
+        2,
+        "added+modified 且可分析的条目都应进入 content_queue"
+    );
+}
+
+#[test]
+fn diff_visible_manifest_marks_modified_when_revision_missing_but_modify_time_changes() {
+    let previous = json!([
+        {
+            "path": "app/revision-missing.spg",
+            "modifyTime": 1000
+        }
+    ])
+    .to_string();
+
+    let visible = json!([
+        {
+            "path": "app/revision-missing.spg",
+            "modifyTime": 2000
+        }
+    ])
+    .to_string();
+
+    let diff = diff_visible_manifest("analyzer", &previous, &visible).unwrap();
+
+    assert_eq!(diff.modified[0].source_path, "app/revision-missing.spg");
+    assert!(!diff.changed_files.is_empty());
+    assert_eq!(
+        diff.content_queue[0].source_path,
+        "app/revision-missing.spg"
+    );
 }

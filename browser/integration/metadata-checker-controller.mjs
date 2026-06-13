@@ -133,6 +133,15 @@ function _findForbiddenSelectionPayload(value, path = "selection", seen = new We
   return null;
 }
 
+function _isPinnedSelection(selection) {
+  return (
+    selection?.pinned === true ||
+    selection?.pin === true ||
+    selection?.pinned === "true" ||
+    selection?.pin === "true"
+  );
+}
+
 export function createMetadataCheckerController(options = {}) {
   const plugin = options.plugin;
   const provider = options.provider;
@@ -203,6 +212,7 @@ export function createMetadataCheckerController(options = {}) {
     return JSON.stringify(
       _sortDeep({
         source_path: selection?.source_path,
+        revision: selection?.revision ?? null,
         active_component_id: selection?.active_component_id ?? null,
         selected_component_ids:
           Array.isArray(selection?.selected_component_ids)
@@ -226,6 +236,22 @@ export function createMetadataCheckerController(options = {}) {
       "selection is stale and will not be rendered",
       target,
     );
+  }
+
+  function _buildEmptySelectionResult(sourcePath) {
+    return {
+      status: "ready",
+      target: sourcePath ?? null,
+      analysis_status: "empty",
+      items: [],
+      diagnostics: [
+        {
+          severity: "info",
+          code: "ANALYSIS_EMPTY_SELECTION",
+          message: "selection has no active or selected components",
+        },
+      ],
+    };
   }
 
   function _setState(newState) {
@@ -461,25 +487,31 @@ export function createMetadataCheckerController(options = {}) {
   }
 
   async function _handleSelectionChanged(selection, selectionSeq) {
-    const initResult = await _ensureInitialized();
-    if (!initResult.ready) {
-      if (typeof renderer.renderError === "function") {
-        renderer.renderError(
-          initResult.error ??
-            _makeErrorEnvelope(
-              "CONTROLLER_NOT_READY",
-              "controller initialization failed",
-            ),
-        );
-      }
-      _renderDiagnosticGraph(initResult.error);
-      return initResult.error;
-    }
-
     if (!selection || typeof selection !== "object") {
       const error = _makeErrorEnvelope(
         "INVALID_SELECTION",
         "selection is required",
+      );
+      if (typeof renderer.renderError === "function") {
+        renderer.renderError(error);
+      }
+      _renderDiagnosticGraph(error);
+      return error;
+    }
+
+    const sourcePath = selection.source_path;
+    const selectedComponentIds = Array.isArray(selection.selected_component_ids)
+      ? selection.selected_component_ids
+      : [];
+    const hasActiveComponent =
+      typeof selection.active_component_id === "string" &&
+      selection.active_component_id.length > 0;
+    const hasSelection = hasActiveComponent || selectedComponentIds.length > 0;
+
+    if (typeof sourcePath === "string" && sourcePath.length > 0 && !_isLogicalPath(sourcePath)) {
+      const error = _makeErrorEnvelope(
+        "INVALID_SELECTION",
+        `source_path is not a logical path: ${sourcePath}`,
       );
       if (typeof renderer.renderError === "function") {
         renderer.renderError(error);
@@ -502,25 +534,58 @@ export function createMetadataCheckerController(options = {}) {
       return error;
     }
 
-    const sourcePath = selection.source_path;
-    const fileId = selection.file_id;
-
-    if (!_isLogicalPath(sourcePath)) {
-      const error = _makeErrorEnvelope(
-        "INVALID_SELECTION",
-        `source_path is not a logical path: ${sourcePath}`,
-      );
-      if (typeof renderer.renderError === "function") {
-        renderer.renderError(error);
-      }
-      _renderDiagnosticGraph(error);
-      return error;
+    if (typeof sourcePath === "string" && sourcePath.length > 0 && !hasSelection) {
+      const emptyResult = _buildEmptySelectionResult(sourcePath);
+      _emitHost(host, "analysis_skipped", {
+        reason: "empty",
+        selection,
+        timestamp: clock(),
+      });
+      return emptyResult;
     }
+
+    const initResult = await _ensureInitialized();
+    if (!initResult.ready) {
+      if (typeof renderer.renderError === "function") {
+        renderer.renderError(
+          initResult.error ??
+            _makeErrorEnvelope(
+              "CONTROLLER_NOT_READY",
+              "controller initialization failed",
+            ),
+        );
+      }
+      _renderDiagnosticGraph(initResult.error);
+      return initResult.error;
+    }
+
+    if (_isPinnedSelection(selection)) {
+      _emitHost(host, "analysis_skipped", {
+        reason: "pinned",
+        selection,
+        timestamp: clock(),
+      });
+      return {
+        status: "ready",
+        target: selection.active_component_id ?? null,
+        items: [],
+        diagnostics: [
+          {
+            severity: "info",
+            code: "ANALYSIS_SKIPPED_PINNED",
+            message: "selection analysis skipped because popup is pinned",
+          },
+        ],
+      };
+    }
+
+    const fileId = selection.file_id;
 
     const fileRef = {
       source_path: sourcePath,
       file_id: fileId,
       project_name: selection.project_name ?? null,
+      revision: selection.revision ?? null,
     };
 
     const cacheKey = _makeAnalysisCacheKey(selection);

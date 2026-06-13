@@ -470,6 +470,168 @@ describe("integration success path", async () => {
     assert.strictEqual(contentCall.args[0].file_id, "");
   });
 
+  it("passes revision from selection to provider fileRef", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/revision.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+            revision: "r2",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+
+    const { createMetadataCheckerPlugin } = await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    await controller.handleSelection({
+      source_path: "pages/revision.spg",
+      file_id: "revision-123",
+      revision: "r2",
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    });
+
+    const contentCall = provider.callLog.find(
+      (c) => c.method === "getFileContent",
+    );
+    assert.strictEqual(contentCall.args[0].revision, "r2");
+  });
+
+  it("skips analyze and render when selection is pinned", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/demo.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+            revision: "r1",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+
+    const { createMetadataCheckerPlugin } = await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    const result = await controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      revision: "r1",
+      pinned: true,
+      selected_component_ids: ["comp-1"],
+      active_component_id: "comp-1",
+    });
+
+    assert.strictEqual(result.status, "ready");
+    assert.strictEqual(
+      result.diagnostics[0]?.code,
+      "ANALYSIS_SKIPPED_PINNED",
+    );
+    assert.strictEqual(renderer.renderCalls.length, 0);
+    assert.strictEqual(host.getEvents("analysis_skipped").length, 1);
+    assert.strictEqual(provider.callLog.some((c) => c.method === "getFileContent"), false);
+    assert.strictEqual(
+      runtimeClient.callLog.some((c) => c.method === "loadSuperpageDocument"),
+      false,
+    );
+  });
+
+  it("returns empty no-op when source_path exists but selection is empty", async () => {
+    const host = createFakeHost();
+    const renderer = createFakeRenderer();
+    const provider = createFakeProvider({
+      fixtures: new Map([
+        [
+          "pages/empty.spg",
+          {
+            raw_text: JSON.stringify({ components: [] }),
+            content_type: "super_page",
+          },
+        ],
+      ]),
+    });
+    const runtimeClient = createFakeRuntimeClient();
+
+    const { createMetadataCheckerPlugin } =
+      await import("../plugin-core/metadata-checker-plugin.mjs");
+    const plugin = createMetadataCheckerPlugin({
+      runtimeClient,
+      host,
+      logger: null,
+    });
+
+    const controller = createController({
+      plugin,
+      provider,
+      runtimeClient,
+      renderer,
+      host,
+      logger: null,
+    });
+
+    const result = await controller.handleSelection({
+      source_path: "pages/empty.spg",
+      file_id: "empty-123",
+    });
+
+    assert.strictEqual(result.status, "ready");
+    assert.strictEqual(result.analysis_status, "empty");
+    assert.strictEqual(
+      result.diagnostics?.[0]?.code,
+      "ANALYSIS_EMPTY_SELECTION",
+    );
+    assert.strictEqual(renderer.renderCalls.length, 0);
+    assert.strictEqual(host.getEvents("analysis_skipped").length, 1);
+    const lastSkipped = host.getEvents("analysis_skipped").at(-1);
+    assert.strictEqual(lastSkipped?.payload?.reason, "empty");
+    assert.strictEqual(provider.callLog.some((c) => c.method === "getFileContent"), false);
+    assert.strictEqual(
+      runtimeClient.callLog.some((c) => c.method === "loadSuperpageDocument"),
+      false,
+    );
+    assert.strictEqual(
+      runtimeClient.callLog.some((c) => c.method === "analyzeSuperpageSelection"),
+      false,
+    );
+  });
+
   it("runtime-first mode loads remote document without page provider fetch", async () => {
     const host = createFakeHost();
     const renderer = createFakeRenderer();
@@ -524,6 +686,7 @@ describe("integration success path", async () => {
       source_path: "pages/demo.spg",
       file_id: "demo-123",
       project_name: "analyzer",
+      revision: null,
     });
     assert.ok(
       runtimeClient.callLog.some(
@@ -1111,6 +1274,17 @@ describe("integration success path", async () => {
       false,
     );
     assert.strictEqual(renderer.renderCalls[0].type, "renderError");
+
+    const emptySelectionWithRawText = await controller.handleSelection({
+      source_path: "pages/demo.spg",
+      file_id: "demo-123",
+      raw_text: "{}",
+    });
+
+    assert.strictEqual(emptySelectionWithRawText.status, "error");
+    assert.strictEqual(emptySelectionWithRawText.diagnostics[0].code, "INVALID_SELECTION");
+    assert.match(emptySelectionWithRawText.diagnostics[0].message, /selection\.raw_text/);
+    assert.strictEqual(renderer.renderCalls.at(-1).type, "renderError");
   });
 });
 

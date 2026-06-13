@@ -255,6 +255,15 @@ async function runRuntimeMessage(context, message) {
   return response;
 }
 
+function markerValue(context, name) {
+  const attribute = `data-metadata-checker-${name}`;
+  return context.document.querySelector(`[${attribute}]`)?.getAttribute(attribute) ?? null;
+}
+
+function waitForSelectionAnalysis() {
+  return new Promise((resolve) => setTimeout(resolve, 70));
+}
+
 test("content script mounts panel host on startup and starts hidden", async () => {
   const context = createFakeWindow({ bridge: defaultBridge() });
   await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
@@ -370,17 +379,31 @@ test("selection change result with foreground artifact keeps panel status ready 
     bridge: defaultBridge(),
     runtimeSendMessage(message, callback) {
       runtimeMessages.push(message);
-      if (message?.type === "metadata-checker-selection-changed" && typeof callback === "function") {
+      if (message?.type === "metadata-checker-analyze-local-graph" && typeof callback === "function") {
         callback({
           ok: true,
-          source_path: "app/Test.spg",
-          foreground_artifact: {
+          artifact: {
+            kind: "metadata-analysis-artifact",
             source_path: "app/Test.spg",
             analysis_status: "ready",
             result: {
               status: "ready",
               target: "app/Test.spg",
-              items: [{ kind: "foreground_selection_item", label: "selection-result" }],
+              items: [
+                {
+                  kind: "foreground_selection_item",
+                  label: "selection-result",
+                  detail: {
+                    visual_graph: {
+                      depth: 2,
+                      visible_hop: 1,
+                      focus_node: "comp:app/Test.spg|a",
+                      nodes: [{ id: "a" }, { id: "b" }, { id: "c" }],
+                      edges: [{ source: "a", target: "b" }, { source: "a", target: "c" }],
+                    },
+                  },
+                },
+              ],
               diagnostics: [{ severity: "warning", code: "SEL_ANALYSIS_OK", message: "foreground artifact ready" }],
             },
           },
@@ -413,7 +436,7 @@ test("selection change result with foreground artifact keeps panel status ready 
     },
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitForSelectionAnalysis();
 
   const state = host.getState();
   assert.equal(state.hostElement?.getAttribute("data-metadata-checker-panel-last-status"), "ready");
@@ -423,7 +446,15 @@ test("selection change result with foreground artifact keeps panel status ready 
   assert.equal(state.lastEnvelope?.diagnostics?.some((item) => item.code === "SEL_QUEUE"), true);
   assert.equal(state.lastEnvelope?.items?.some((item) => item.kind === "background_status"), true);
   assert.equal(state.lastEnvelope?.status !== "idle", true);
-  assert.equal(runtimeMessages.some((message) => message.type === "metadata-checker-selection-changed"), true);
+  assert.equal(runtimeMessages.some((message) => message.type === "metadata-checker-analyze-local-graph"), true);
+  assert.equal(runtimeMessages.some((message) => message.type === "metadata-checker-selection-changed"), false);
+  assert.equal(markerValue(context, "analysis-status"), "ready");
+  assert.equal(markerValue(context, "embedded-popup"), "mounted");
+  assert.equal(markerValue(context, "focus-component"), "comp:app/Test.spg|a");
+  assert.equal(markerValue(context, "graph-depth"), "2");
+  assert.equal(markerValue(context, "graph-visible-hop"), "1");
+  assert.equal(markerValue(context, "graph-node-count"), "3");
+  assert.equal(markerValue(context, "graph-edge-count"), "2");
 });
 
 test("content script retryCurrentSelection replays bridge selection to background queue", async () => {
@@ -449,11 +480,17 @@ test("content script retryCurrentSelection replays bridge selection to backgroun
     },
     runtimeSendMessage(message, callback) {
       runtimeMessages.push(message);
-      if (message?.type === "metadata-checker-selection-changed") {
+      if (message?.type === "metadata-checker-analyze-local-graph") {
         callback?.({
           ok: true,
           artifact_ready: false,
-          indexing_status: "indexing_current_page",
+          artifact: {
+            source_path: "app/Retry.spg",
+            analysis_status: "running",
+            result: {
+              status: "running",
+            },
+          },
           background: {
             status: "queued",
             indexing_status: "indexing_current_page",
@@ -479,7 +516,7 @@ test("content script retryCurrentSelection replays bridge selection to backgroun
   assert.equal(
     runtimeMessages.some(
       (message) =>
-        message.type === "metadata-checker-selection-changed" &&
+        message.type === "metadata-checker-analyze-local-graph" &&
         message.payload.source_path === "app/Retry.spg" &&
         message.payload.active_component_id === "input1",
     ),
@@ -503,12 +540,17 @@ test("selection waiting_for_metadata reboots session and replays current selecti
     }),
     runtimeSendMessage(message, callback) {
       runtimeMessages.push(message);
-      if (message?.type === "metadata-checker-selection-changed") {
-        const selectionCalls = runtimeMessages.filter((item) => item.type === "metadata-checker-selection-changed");
+      if (message?.type === "metadata-checker-analyze-local-graph") {
+        const selectionCalls = runtimeMessages.filter((item) => item.type === "metadata-checker-analyze-local-graph");
         if (selectionCalls.length === 1) {
           callback?.({
             ok: true,
             artifact_ready: false,
+            diagnostics: [{
+              severity: "warning",
+              code: "METADATA_CHECKER_LOCAL_GRAPH_ARTIFACT_MISSING",
+              message: "local graph document artifact is not loaded",
+            }],
             background: {
               status: "waiting_for_metadata",
               indexing_status: "waiting_for_metadata",
@@ -520,9 +562,10 @@ test("selection waiting_for_metadata reboots session and replays current selecti
         callback?.({
           ok: true,
           artifact_ready: true,
-          foreground_artifact: {
+          artifact: {
             source_path: message.payload.source_path,
             analysis_status: "ready",
+            kind: "metadata-analysis-artifact",
             result: { status: "ready", items: [{ kind: "analysis", label: "ready" }] },
           },
           background: {
@@ -560,11 +603,11 @@ test("selection waiting_for_metadata reboots session and replays current selecti
       selection_source: "selectComponents",
     },
   });
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitForSelectionAnalysis();
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(
-    runtimeMessages.filter((message) => message.type === "metadata-checker-selection-changed").length,
+    runtimeMessages.filter((message) => message.type === "metadata-checker-analyze-local-graph").length,
     2,
   );
   assert.equal(
@@ -578,6 +621,172 @@ test("selection waiting_for_metadata reboots session and replays current selecti
   const host = context.__metadata_checker_chromium_content_state__.panelHost;
   assert.equal(host.getState().lastEnvelope?.status, "ready");
   assert.equal(host.getState().lastEnvelope?.items?.some((item) => item.kind === "analysis"), true);
+});
+
+test("selection artifact missing after bootstrap uses offscreen local graph with indexed file id", async () => {
+  const runtimeMessages = [];
+  let localGraphCalls = 0;
+  const context = createFakeWindow({
+    bridge: defaultBridge(),
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return "content-token";
+      },
+    }),
+    runtimeSendMessage(message, callback) {
+      runtimeMessages.push(message);
+      if (message?.type === "metadata-checker-analyze-local-graph") {
+        localGraphCalls += 1;
+        if (localGraphCalls <= 2) {
+          callback?.({
+            ok: false,
+            artifact_ready: false,
+            diagnostics: [{
+              severity: "error",
+              code: "METADATA_CHECKER_LOCAL_GRAPH_ARTIFACT_MISSING",
+              message: "local graph document artifact is not loaded",
+            }],
+            background: {
+              status: "queued",
+              indexing_status: "queued",
+              processed: 3,
+              total: 1300,
+            },
+          });
+          return undefined;
+        }
+        callback?.({
+          ok: true,
+          artifact_ready: true,
+          artifact: {
+            source_path: message.payload.source_path,
+            analysis_status: "ready",
+            kind: "metadata-analysis-artifact",
+            result: {
+              status: "ready",
+              target: message.payload.source_path,
+              items: [{
+                kind: "foreground_selection_item",
+                label: "local graph ready",
+                detail: {
+                  visual_graph: {
+                    depth: 2,
+                    visible_hop: 1,
+                    focus_node: "comp:app/Start.spg|text1",
+                    nodes: [{ id: "text1" }, { id: "model:customer" }],
+                    edges: [{ source: "text1", target: "model:customer" }],
+                  },
+                },
+              }],
+            },
+          },
+          background: {
+            status: "completed",
+            indexing_status: "completed",
+            processed: 4,
+            total: 1300,
+          },
+        });
+        return undefined;
+      }
+      if (message?.type === "metadata-checker-bootstrap-token") {
+        callback?.({
+          ok: true,
+          session: { status: "ready" },
+          visible_index: {
+            status: "ready",
+            projects: [{ project_name: "xiaoshouyi" }],
+            files: [{
+              project_name: "xiaoshouyi",
+              source_path: "app/Start.spg",
+              file_id: "file-start",
+              revision: 7,
+              extension: "spg",
+              analyzable: true,
+            }],
+            analyzable_count: 1,
+          },
+          background: { status: "queued", indexing_status: "queued", processed: 0, total: 1 },
+        });
+        return undefined;
+      }
+      if (message?.type === "metadata-checker-ensure-offscreen-runtime") {
+        callback?.({ ok: true });
+        return undefined;
+      }
+      if (message?.type === "metadata-checker-offscreen-local-graph") {
+        callback?.({
+          ok: true,
+          artifact_ready: true,
+          artifact: {
+            source_path: message.payload.item.source_path,
+            file_id: message.payload.item.file_id,
+            analysis_status: "ready",
+            kind: "metadata-analysis-artifact",
+            result: {
+              status: "ready",
+              target: message.payload.item.source_path,
+              items: [{
+                kind: "foreground_selection_item",
+                label: "local graph ready",
+                detail: {
+                  visual_graph: {
+                    depth: 2,
+                    visible_hop: 1,
+                    focus_node: "comp:app/Start.spg|text1",
+                    nodes: [{ id: "text1" }, { id: "model:customer" }],
+                    edges: [{ source: "text1", target: "model:customer" }],
+                  },
+                },
+              }],
+            },
+          },
+        });
+        return undefined;
+      }
+      callback?.({ ok: true });
+      return undefined;
+    },
+  });
+  await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
+
+  context.__dispatchMessage({
+    __metadata_checker_bridge_source: "page-script",
+    __metadata_checker_bridge_direction: "notification",
+    type: "metadata-checker-selection-changed",
+    payload: {
+      source_path: "app/Start.spg",
+      selected_component_ids: ["text1"],
+      active_component_id: "text1",
+      selection_source: "selectComponents",
+    },
+  });
+  await waitForSelectionAnalysis();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(
+    runtimeMessages.filter((message) => message.type === "metadata-checker-analyze-local-graph").length,
+    2,
+  );
+  assert.equal(
+    runtimeMessages.filter((message) => message.type === "metadata-checker-selection-changed").length,
+    0,
+  );
+  assert.equal(
+    runtimeMessages.some((message) => message.type === "metadata-checker-bootstrap-token"),
+    true,
+  );
+  const offscreenMessage = runtimeMessages.find((message) => message.type === "metadata-checker-offscreen-local-graph");
+  assert.equal(offscreenMessage?.payload?.item?.file_id, "file-start");
+  assert.equal(offscreenMessage?.payload?.item?.revision, 7);
+  const host = context.__metadata_checker_chromium_content_state__.panelHost;
+  assert.equal(host.getState().lastEnvelope?.status, "ready");
+  assert.equal(markerValue(context, "analysis-status"), "ready");
+  assert.equal(markerValue(context, "graph-node-count"), "2");
+  assert.equal(markerValue(context, "graph-edge-count"), "1");
 });
 
 test("content script fetches access token without exposing it through page messages", async () => {
@@ -774,6 +983,135 @@ test("missing bridge sets panel status diagnostic without throwing", async () =>
   assert.equal(
     host.getState().hostElement?.getAttribute("data-metadata-checker-panel-last-status"),
     "error",
+  );
+});
+
+test("refreshBridge triggers background visible manifest refresh and writes markers", async () => {
+  const sentMessages = [];
+  const bridge = {
+    async request(type) {
+      assert.equal(type, "getBridgeStatus");
+      return {
+        payload: {
+          supported: true,
+          bridge_detected: true,
+          page_context: {
+            project_name: "xiaoshouyi",
+            source_path: "app/Test.app/Page.spg",
+          },
+          selection: {
+            project_name: "xiaoshouyi",
+            source_path: "app/Test.app/Page.spg",
+            selected_component_ids: ["input1"],
+          },
+        },
+        diagnostics: [],
+      };
+    },
+  };
+  const context = createFakeWindow({
+    bridge,
+    runtimeSendMessage(message, callback) {
+      sentMessages.push(message);
+      if (message.type === "metadata-checker-refresh-visible-manifest") {
+        callback({
+          ok: true,
+          visible_index: { files: [{ source_path: "app/Test.app/Page.spg" }] },
+          manifest_diff: {
+            added: 1,
+            modified: 2,
+            deleted: 0,
+            unchanged: 3,
+            content_queue_count: 2,
+          },
+          timings: {
+            manifest_fetch_ms: 11,
+            manifest_diff_ms: 7,
+            changed_content_fetch_ms: 13,
+            wasm_update_ms: 17,
+          },
+          diagnostics: [],
+        });
+        return undefined;
+      }
+      callback({ ok: true });
+      return undefined;
+    },
+  });
+  context.location = { origin: "https://autocrm-test.xiaoshouyi.com" };
+  await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
+  context.__metadata_checker_chromium_content_state__.remoteSession = {
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    project_name: "xiaoshouyi",
+  };
+
+  const response = await runRuntimeMessage(context, { action: "refreshBridge" });
+
+  assert.equal(response?.action, "refreshBridge");
+  assert.equal(response?.manifest_diff?.modified, 2);
+  assert.equal(markerValue(context, "manifest-added"), "1");
+  assert.equal(markerValue(context, "manifest-modified"), "2");
+  assert.equal(markerValue(context, "content-queue-count"), "2");
+  assert.equal(markerValue(context, "local-graph-timing-manifest-fetch-ms"), "11");
+  assert.equal(markerValue(context, "local-graph-timing-manifest-diff-ms"), "7");
+  assert.equal(markerValue(context, "local-graph-timing-changed-content-fetch-ms"), "13");
+  assert.equal(markerValue(context, "local-graph-timing-wasm-update-ms"), "17");
+  assert.equal(
+    sentMessages.some((message) => message.type === "metadata-checker-refresh-visible-manifest"),
+    true,
+  );
+});
+
+test("tab-request refreshBridge triggers background visible manifest refresh", async () => {
+  const sentMessages = [];
+  const context = createFakeWindow({
+    bridge: defaultBridge(),
+    runtimeSendMessage(message, callback) {
+      sentMessages.push(message);
+      if (message.type === "metadata-checker-refresh-visible-manifest") {
+        callback({
+          ok: true,
+          visible_index: { files: [{ source_path: "app/Start.spg" }] },
+          manifest_diff: {
+            added: 0,
+            modified: 1,
+            deleted: 0,
+            unchanged: 4,
+            content_queue_count: 1,
+          },
+          timings: {
+            manifest_fetch_ms: 3,
+            manifest_diff_ms: 5,
+            changed_content_fetch_ms: 7,
+            wasm_update_ms: 11,
+          },
+          diagnostics: [],
+        });
+        return undefined;
+      }
+      callback({ ok: true });
+      return undefined;
+    },
+  });
+  context.location = { origin: "https://autocrm-test.xiaoshouyi.com" };
+  await loadScripts(context, "extension-core/panel-host.js", "extension-chromium/content-script.js");
+  context.__metadata_checker_chromium_content_state__.remoteSession = {
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    project_name: "xiaoshouyi",
+  };
+
+  const response = await runRuntimeMessage(context, {
+    type: "metadata-checker-tab-request",
+    request_type: "refreshBridge",
+  });
+
+  assert.equal(response?.ok, true);
+  assert.equal(response?.manifest_diff?.modified, 1);
+  assert.equal(markerValue(context, "manifest-modified"), "1");
+  assert.equal(markerValue(context, "local-graph-timing-wasm-update-ms"), "11");
+  assert.equal(
+    sentMessages.some((message) => message.type === "metadata-checker-refresh-visible-manifest"),
+    true,
   );
 });
 

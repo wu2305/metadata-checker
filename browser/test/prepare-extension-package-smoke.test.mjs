@@ -8,6 +8,7 @@ import {
   parseArgs,
   prepareExtensionPackage,
 } from "../tools/prepare-extension-package.mjs";
+import { buildSpikeVendorBundles } from "../tools/build-spike-vendor-bundle.mjs";
 import {
   parseArgs as parseSafariArgs,
   prepareSafariExtensionPackage,
@@ -132,6 +133,26 @@ test("parseArgs supports required extension package options", () => {
   assert.equal(args.host_match, "https://host.example/*");
   assert.equal(args.wasm_bindgen_js, "/tmp/meta.js");
   assert.equal(args.wasm_file, "/tmp/meta.wasm");
+  assert.equal(args.spike_renderer_artifacts, undefined);
+  assert.equal(args.spike_vendor_artifacts, undefined);
+});
+
+test("parseArgs supports spike renderer artifact folder option", () => {
+  const args = parseArgs([
+    "--spike-renderer-artifacts",
+    "/tmp/spike-artifacts",
+  ]);
+
+  assert.equal(args.spike_renderer_artifacts, "/tmp/spike-artifacts");
+});
+
+test("parseArgs supports spike vendor artifact folder option", () => {
+  const args = parseArgs([
+    "--spike-vendor-artifacts",
+    "/tmp/spike-vendor",
+  ]);
+
+  assert.equal(args.spike_vendor_artifacts, "/tmp/spike-vendor");
 });
 
 test("parseArgs supports required safari package options", () => {
@@ -221,6 +242,38 @@ test("prepareExtensionPackage builds Chromium extension and rewrites manifest", 
   }
 });
 
+test("prepareExtensionPackage keeps acceptance marker files stable", async () => {
+  const fixture = await createChromiumFixture();
+  const outRoot = await mkdtemp(join(tmpdir(), "metadata-checker-ext-out-acceptance-marker-"));
+  const outDir = join(outRoot, "package");
+  const acceptanceMarkerFile = join(
+    fixture.extensionChromiumDir,
+    "m47-real-bi-cdp-acceptance.marker.js",
+  );
+  const markerContent =
+    "export const acceptanceManifest = { added: 1, modified: 0, deleted: 0, unchanged: 8, contentQueueCount: 2 };\n";
+  try {
+    await writeFile(acceptanceMarkerFile, markerContent, "utf8");
+    const result = await prepareExtensionPackage({
+      outDir,
+      extensionCoreDir: fixture.extensionCoreDir,
+      extensionChromiumDir: fixture.extensionChromiumDir,
+      clean: true,
+    });
+
+    const copiedMarker = await readFile(
+      join(outDir, "m47-real-bi-cdp-acceptance.marker.js"),
+      "utf8",
+    );
+    assert.match(copiedMarker, /acceptanceManifest/);
+    assert.equal(result.files.includes("m47-real-bi-cdp-acceptance.marker.js"), true);
+    assertNoSecretOrPathLeak(result);
+  } finally {
+    await rm(fixture.fixtureRoot, { recursive: true, force: true });
+    await rm(outRoot, { recursive: true, force: true });
+  }
+});
+
 test("Chromium manifest loads shared panel host before content script", async () => {
   const manifest = JSON.parse(
     await readFile(new URL("../extension-chromium/manifest.json", import.meta.url), "utf8"),
@@ -271,6 +324,136 @@ test("prepareExtensionPackage writes .wasm as binary", async () => {
     assert.deepStrictEqual(copiedWasm, bytes);
   } finally {
     await rm(fixture.fixtureRoot, { recursive: true, force: true });
+    await rm(outRoot, { recursive: true, force: true });
+  }
+});
+
+test("prepareExtensionPackage can package spike renderer artifacts", async () => {
+  const fixture = await createChromiumFixture();
+  const outRoot = await mkdtemp(join(tmpdir(), "metadata-checker-ext-out-spike-"));
+  const outDir = join(outRoot, "package");
+  const artifactRoot = await mkdtemp(join(tmpdir(), "metadata-checker-spike-artifacts-"));
+  const artifactDir = join(artifactRoot, "pixi-force-assets");
+  const vendorPixi = join(artifactDir, "pixi.min.js");
+  const vendorForce = join(artifactDir, "d3-force-3d.js");
+  try {
+    await mkdir(artifactDir, { recursive: true });
+    await writeFile(vendorPixi, "window.PIXI=\"ok\";\n");
+    await writeFile(vendorForce, "window.d3Force3d=\"ok\";\n");
+
+    const result = await prepareExtensionPackage({
+      outDir,
+      extensionCoreDir: fixture.extensionCoreDir,
+      extensionChromiumDir: fixture.extensionChromiumDir,
+      spikeRendererArtifacts: artifactDir,
+      clean: true,
+    });
+
+    const copiedPixi = await readFile(join(outDir, "spike-renderer", "pixi.min.js"), "utf8");
+    const copiedForce = await readFile(join(outDir, "spike-renderer", "d3-force-3d.js"), "utf8");
+    const manifest = JSON.parse(await readFile(join(outDir, "manifest.json"), "utf8"));
+    assert.equal(copiedPixi, "window.PIXI=\"ok\";\n");
+    assert.equal(copiedForce, "window.d3Force3d=\"ok\";\n");
+    assert.ok(
+      manifest.web_accessible_resources[0].resources.includes("spike-renderer/*.js"),
+    );
+    assert.equal(result.spike_renderer_artifacts.length > 0, true);
+    assert.equal(
+      result.spike_renderer_artifacts.some((item) => item.endsWith("spike-renderer")),
+      true,
+    );
+  } finally {
+    await rm(fixture.fixtureRoot, { recursive: true, force: true });
+    await rm(outRoot, { recursive: true, force: true });
+    await rm(artifactRoot, { recursive: true, force: true });
+  }
+});
+
+test("prepareExtensionPackage can package spike vendor ESM artifacts", async () => {
+  const fixture = await createChromiumFixture();
+  const outRoot = await mkdtemp(join(tmpdir(), "metadata-checker-ext-out-vendor-"));
+  const outDir = join(outRoot, "package");
+  const artifactRoot = await mkdtemp(join(tmpdir(), "metadata-checker-spike-vendor-"));
+  const vendorPixi = join(artifactRoot, "pixi-bundle.mjs");
+  const vendorForce = join(artifactRoot, "d3-force-3d-bundle.mjs");
+  try {
+    await writeFile(vendorPixi, "export const PIXI = {};\n");
+    await writeFile(vendorForce, "export const D3Force3D = {};\n");
+
+    const result = await prepareExtensionPackage({
+      outDir,
+      extensionCoreDir: fixture.extensionCoreDir,
+      extensionChromiumDir: fixture.extensionChromiumDir,
+      spikeVendorArtifacts: artifactRoot,
+      clean: true,
+    });
+    const copiedPixi = await readFile(join(outDir, "spike-vendor", "pixi-bundle.mjs"), "utf8");
+    const copiedForce = await readFile(join(outDir, "spike-vendor", "d3-force-3d-bundle.mjs"), "utf8");
+    const manifest = JSON.parse(await readFile(join(outDir, "manifest.json"), "utf8"));
+
+    assert.equal(copiedPixi, "export const PIXI = {};\n");
+    assert.equal(copiedForce, "export const D3Force3D = {};\n");
+    assert.ok(
+      manifest.web_accessible_resources[0].resources.includes("spike-vendor/*.mjs"),
+    );
+    assert.ok(
+      manifest.web_accessible_resources[0].resources.includes("spike-vendor/*.js"),
+    );
+    assert.equal(result.spike_vendor_artifacts.length > 0, true);
+    assert.equal(
+      result.spike_vendor_artifacts.some((item) => item.endsWith("spike-vendor")),
+      true,
+    );
+
+    await writeFile(vendorPixi, "export const PIXI2 = {};\n");
+    await writeFile(vendorForce, "export const D3Force3D_V2 = {};\n");
+    const repackageResult = await prepareExtensionPackage({
+      outDir,
+      extensionCoreDir: fixture.extensionCoreDir,
+      extensionChromiumDir: fixture.extensionChromiumDir,
+      spikeVendorArtifacts: artifactRoot,
+      clean: true,
+    });
+
+    const copiedPixiV2 = await readFile(join(outDir, "spike-vendor", "pixi-bundle.mjs"), "utf8");
+    const copiedForceV2 = await readFile(join(outDir, "spike-vendor", "d3-force-3d-bundle.mjs"), "utf8");
+    assert.equal(copiedPixiV2, "export const PIXI2 = {};\n");
+    assert.equal(copiedForceV2, "export const D3Force3D_V2 = {};\n");
+    assert.equal(
+      repackageResult.spike_vendor_artifacts.some((item) => item.endsWith("spike-vendor")),
+      true,
+    );
+  } finally {
+    await rm(fixture.fixtureRoot, { recursive: true, force: true });
+    await rm(outRoot, { recursive: true, force: true });
+    await rm(artifactRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildSpikeVendorBundles can rerun and overwrite outputs", async () => {
+  const outRoot = await mkdtemp(join(tmpdir(), "metadata-checker-spike-vendor-build-"));
+  const outDir = join(outRoot, "spike-vendor");
+  const pixiBundlePath = join(outDir, "pixi-bundle.mjs");
+  const forceBundlePath = join(outDir, "d3-force-3d-bundle.mjs");
+  try {
+    const first = await buildSpikeVendorBundles({ outDir });
+    const firstBundle = await readFile(pixiBundlePath, "utf8");
+    assert.equal(first.files.includes("pixi-bundle.mjs"), true);
+    assert.equal(first.outDir, outDir);
+
+    await writeFile(pixiBundlePath, "export const MUTATED = true;");
+    await writeFile(forceBundlePath, "export const MUTATED_FORCE = true;");
+
+    const second = await buildSpikeVendorBundles({ outDir });
+    assert.equal(second.outDir, outDir);
+    assert.equal(second.files.includes("pixi-bundle.mjs"), true);
+    assert.equal(second.files.includes("d3-force-3d-bundle.mjs"), true);
+
+    const secondPixi = await readFile(pixiBundlePath, "utf8");
+    const secondForce = await readFile(forceBundlePath, "utf8");
+    assert.equal(secondPixi.includes("MUTATED"), false);
+    assert.equal(secondForce.includes("MUTATED_FORCE"), false);
+  } finally {
     await rm(outRoot, { recursive: true, force: true });
   }
 });

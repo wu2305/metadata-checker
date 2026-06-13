@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 use crate::remote_metadata::{
-    MetadataContentType, RemoteFileContent, RemoteFileInfo, RemoteFileRef,
+    MetadataContentType, RemoteFileContent, RemoteFileInfo, RemoteFileRef, VisibleManifestEntry,
 };
 
 /// 远程项目基础信息。
@@ -50,6 +50,23 @@ impl RemoteMetafileEntry {
     /// 由文件路径推断内容类型。
     pub fn content_type(&self) -> MetadataContentType {
         MetadataContentType::from_extension(self.source_path.rsplit('.').next().unwrap_or(""))
+    }
+
+    /// 从可见清单条目生成会话文件条目，用于上游 contract 复用。
+    ///
+    /// 可见清单中目录项会被过滤掉，这里保留 `deleted=false`，供
+    /// 会话侧增量同步流程按需写入。
+    pub fn from_visible_manifest_entry(project_ref: &str, entry: &VisibleManifestEntry) -> Self {
+        Self {
+            project_ref: project_ref.to_string(),
+            source_path: entry.source_path.clone(),
+            file_id: entry.id.clone(),
+            revision: entry.revision.clone(),
+            etag: None,
+            mtime: entry.modify_time,
+            size: None,
+            deleted: false,
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 use metadata_checker::browser_orchestrator::{
-    AnalysisArtifact, AnalysisArtifactKey, AnalysisArtifactScope, AnalysisPriority, BackgroundScanTask,
-    BrowserAnalysisOrchestrator, ForegroundRequestState, QueueStatus,
+    AnalysisArtifact, AnalysisArtifactKey, AnalysisArtifactScope, AnalysisPriority,
+    BackgroundScanTask, BrowserAnalysisOrchestrator, ForegroundRequestState, QueueStatus,
 };
 
 fn foreground_key(name: &str, seq: u64) -> AnalysisArtifactKey {
@@ -106,7 +106,10 @@ fn test_tick_returns_completed_task_descriptors_for_artifact_lookup() {
     let tick = orchestrator.tick(2, 1);
     assert_eq!(tick.completed_task_ids.len(), 1);
     assert_eq!(tick.completed_task_descriptors.len(), 1);
-    assert_eq!(tick.completed_task_descriptors[0].source_path, "app/descriptor-complete.spg");
+    assert_eq!(
+        tick.completed_task_descriptors[0].source_path,
+        "app/descriptor-complete.spg"
+    );
     assert_eq!(tick.completed_task_descriptors[0].generation, 8);
 }
 

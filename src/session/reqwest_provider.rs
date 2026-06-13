@@ -290,17 +290,13 @@ impl ReqwestRemoteSessionProvider {
     fn get_text(&self, path: &str) -> Result<String> {
         let url = self.url(path);
         let safe_url = sanitize_session_error_message(&url);
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .map_err(|err| {
-                anyhow!(
-                    "HTTP request failed: {}: {}",
-                    safe_url,
-                    sanitize_session_error_message(&err.to_string())
-                )
-            })?;
+        let response = self.client.get(&url).send().map_err(|err| {
+            anyhow!(
+                "HTTP request failed: {}: {}",
+                safe_url,
+                sanitize_session_error_message(&err.to_string())
+            )
+        })?;
 
         let status = response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -316,15 +312,13 @@ impl ReqwestRemoteSessionProvider {
             return Err(anyhow!("remote session returned HTTP {}", status.as_u16()));
         }
 
-        let text = response
-            .text()
-            .map_err(|err| {
-                anyhow!(
-                    "failed to read response body from {}: {}",
-                    safe_url,
-                    sanitize_session_error_message(&err.to_string())
-                )
-            })?;
+        let text = response.text().map_err(|err| {
+            anyhow!(
+                "failed to read response body from {}: {}",
+                safe_url,
+                sanitize_session_error_message(&err.to_string())
+            )
+        })?;
         if text.trim().is_empty() {
             return Err(anyhow!("remote session response is empty"));
         }

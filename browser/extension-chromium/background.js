@@ -13,6 +13,7 @@ const SENSITIVE_KEY_PATTERN = /(token|cookie|password|secret|auth|credential|cip
 const SENSITIVE_PAIR_PATTERN =
   /["']?(token|cookie|password|secret|auth|credential|cipherpassport)["']?\s*[:=]\s*["']?[^&\s,;}]+/gi;
 const OFFSCREEN_WASM_CALL_MESSAGE = "metadata-checker-offscreen-wasm-call";
+const OFFSCREEN_LOCAL_GRAPH_MESSAGE = "metadata-checker-offscreen-local-graph";
 
 function isObject(value) {
   return value !== null && typeof value === "object";
@@ -24,6 +25,27 @@ function asArray(value) {
 
 function asString(value) {
   return typeof value === "string" ? value : "";
+}
+
+function asNumberOrNull(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.length > 0) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function asNullableString(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return String(value);
 }
 
 function redactText(text) {
@@ -104,6 +126,44 @@ function buildUrl(baseUrl, path) {
   const base = String(baseUrl || "").replace(/\/+$/, "");
   const suffix = String(path || "").replace(/^\/+/, "");
   return `${base}/${suffix}`;
+}
+
+function normalizeVisibleManifestEntry(projectName, file = {}) {
+  const rawPath = asString(file.path || file.resourcePath || resourcePath(file) || file.source_path || file.sourcePath);
+  const sourcePath = rawPath ? normalizeSourcePath(rawPath, projectName) : "";
+  return {
+    id: asNullableString(file.id ?? file.fileId ?? file.file_id) || null,
+    path: rawPath || null,
+    type: asString(file.type ?? file.file_type ?? file.fileType),
+    source_path: sourcePath,
+    isFolder: isFolder(file),
+    revision: asNullableString(file.revision ?? file.modify_version ?? file.modifyVersion),
+    modifyTime: asNumberOrNull(file.modifyTime ?? file.modify_time ?? file.modificationTime),
+    modifier: asNullableString(file.modifier) || asNullableString(file.modifier_name) || asNullableString(file.modifierName),
+    modifierName: asNullableString(file.modifierName ?? file.modifier_name) || asNullableString(file.modifier_name),
+  };
+}
+
+function pickVisibleManifestDiffDetail(value) {
+  if (!isObject(value)) {
+    return null;
+  }
+  if (Array.isArray(value.added) && Array.isArray(value.modified) && Array.isArray(value.deleted)) {
+    return value;
+  }
+  const items = asArray(value.items);
+  const detail = items.find((item) => isObject(item) && item.kind === "visible_manifest_diff");
+  if (detail && isObject(detail.detail)) {
+    return detail.detail;
+  }
+  return null;
+}
+
+function normalizeManifestCount(value, fallback = 0) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return value;
 }
 
 function safeJsonParse(text) {
@@ -402,6 +462,25 @@ export function createWasmAnalysisClient(options = {}) {
     return safeJsonParse(result) ?? result;
   }
 
+  async function callRuntimeWithFallback(methodCandidates, args = []) {
+    const methodList = Array.isArray(methodCandidates)
+      ? methodCandidates.filter((method) => typeof method === "string" && method.length > 0)
+      : [];
+    for (const method of methodList) {
+      const module = await loadRuntime();
+      const fn = module[method];
+      if (typeof fn !== "function") {
+        continue;
+      }
+      const result = await fn(...args);
+      if (typeof result !== "string") {
+        return result;
+      }
+      return safeJsonParse(result) ?? result;
+    }
+    throw new Error(`WASM runtime method missing: ${methodList[0]}`);
+  }
+
   return {
     async initRuntime(optionsArg = {}) {
       if (!initRuntimePromise) {
@@ -425,6 +504,32 @@ export function createWasmAnalysisClient(options = {}) {
         JSON.stringify(selection ?? {}),
         JSON.stringify(optionsArg ?? {}),
       ]);
+    },
+    async analyzeLocalGraph(selection, optionsArg = {}) {
+      return callRuntime("analyzeLocalGraph", [
+        JSON.stringify(selection ?? {}),
+        JSON.stringify(optionsArg ?? {}),
+      ]);
+    },
+    async diffVisibleManifest(previousManifestJson, visibleManifestJson, projectRef = "") {
+      return callRuntimeWithFallback(
+        [
+          "diffVisibleManifest",
+          "diff_visible_manifest",
+          "analyzeVisibleManifestDiff",
+          "visibleManifestDiff",
+          "diffManifest",
+        ],
+        [
+          String(projectRef || ""),
+          typeof previousManifestJson === "string"
+            ? previousManifestJson
+            : JSON.stringify(previousManifestJson ?? []),
+          typeof visibleManifestJson === "string"
+            ? visibleManifestJson
+            : JSON.stringify(visibleManifestJson ?? []),
+        ],
+      );
     },
   };
 }
@@ -508,7 +613,14 @@ export function createOffscreenWasmAnalysisClient(options = {}) {
         clearTimeout(timeout);
         const lastError = chromeApi.runtime.lastError;
         if (lastError) {
-          reject(new Error(lastError.message || "offscreen WASM runtime unavailable"));
+          const message = lastError.message || "offscreen WASM runtime unavailable";
+          if (/receiving end does not exist/i.test(message)) {
+            reject(new Error(
+              "offscreen WASM runtime is not running; reload the extension and verify metadata_checker.js/metadata_checker_bg.wasm are packaged",
+            ));
+            return;
+          }
+          reject(new Error(message));
           return;
         }
         if (!response?.ok) {
@@ -526,6 +638,27 @@ export function createOffscreenWasmAnalysisClient(options = {}) {
       return result;
     }
     return safeJsonParse(result) ?? result;
+  }
+
+  async function callRuntimeWithFallback(methodCandidates, args = []) {
+    const candidates = Array.isArray(methodCandidates)
+      ? methodCandidates.filter((method) => typeof method === "string" && method.length > 0)
+      : [];
+    let lastError = null;
+    for (const method of candidates) {
+      try {
+        return await callRuntime(method, args);
+      } catch (error) {
+        if (!error || !String(error.message || "").includes("WASM runtime method missing")) {
+          throw error;
+        }
+        lastError = error;
+      }
+    }
+    if (lastError) {
+      throw lastError;
+    }
+    throw new Error(`WASM runtime method missing: ${candidates[0]}`);
   }
 
   return {
@@ -551,6 +684,32 @@ export function createOffscreenWasmAnalysisClient(options = {}) {
         JSON.stringify(selection ?? {}),
         JSON.stringify(optionsArg ?? {}),
       ]);
+    },
+    async analyzeLocalGraph(selection, optionsArg = {}) {
+      return callRuntime("analyzeLocalGraph", [
+        JSON.stringify(selection ?? {}),
+        JSON.stringify(optionsArg ?? {}),
+      ]);
+    },
+    async diffVisibleManifest(previousManifestJson, visibleManifestJson, projectRef = "") {
+      return callRuntimeWithFallback(
+        [
+          "diffVisibleManifest",
+          "diff_visible_manifest",
+          "analyzeVisibleManifestDiff",
+          "visibleManifestDiff",
+          "diffManifest",
+        ],
+        [
+          String(projectRef || ""),
+          typeof previousManifestJson === "string"
+            ? previousManifestJson
+            : JSON.stringify(previousManifestJson ?? []),
+          typeof visibleManifestJson === "string"
+            ? visibleManifestJson
+            : JSON.stringify(visibleManifestJson ?? []),
+        ],
+      );
     },
   };
 }
@@ -579,6 +738,12 @@ function createDefaultAnalysisClient() {
     async analyzeSuperpageSelection(...args) {
       return runtimeClient().analyzeSuperpageSelection(...args);
     },
+    async analyzeLocalGraph(...args) {
+      return runtimeClient().analyzeLocalGraph(...args);
+    },
+    async diffVisibleManifest(...args) {
+      return runtimeClient().diffVisibleManifest(...args);
+    },
   };
 }
 
@@ -596,6 +761,7 @@ export function createM45BackgroundController(options = {}) {
     last_diagnostic: null,
     updated_at: null,
     session: null,
+    visible_manifest: [],
     visible_index: {
       status: "idle",
       projects: [],
@@ -750,6 +916,23 @@ export function createM45BackgroundController(options = {}) {
     return Math.max(0, Math.floor(parsed));
   }
 
+  function normalizeLocalGraphOptions(options = {}) {
+    const input = isObject(options) ? options : {};
+    const maxNodes = normalizeQueueLimit(input.max_nodes, undefined);
+    const maxEdges = normalizeQueueLimit(input.max_edges, undefined);
+    const normalized = {
+      depth: 2,
+      visible_hop: 1,
+    };
+    if (maxNodes !== undefined) {
+      normalized.max_nodes = maxNodes;
+    }
+    if (maxEdges !== undefined) {
+      normalized.max_edges = maxEdges;
+    }
+    return normalized;
+  }
+
   function buildForegroundSelectionItem(selection = {}) {
     const sourcePath = asString(selection.source_path ?? selection.sourcePath);
     if (!sourcePath) {
@@ -760,11 +943,13 @@ export function createM45BackgroundController(options = {}) {
       selection.project_name ?? fileInfo.project_name ?? state.visible_index.projects[0]?.project_name,
     );
     const fileNameParts = sourcePath.split(".");
+    const fileId = selection.file_id || fileInfo.file_id || null;
+    const revision = selection.revision ?? fileInfo.revision ?? null;
     return {
       project_name: projectName,
       source_path: sourcePath,
-      file_id: selection.file_id ?? fileInfo.file_id ?? null,
-      revision: selection.revision ?? fileInfo.revision ?? null,
+      file_id: fileId,
+      revision,
       extension: fileInfo.extension ?? fileNameParts.pop()?.toLowerCase() ?? "",
       analyzable: true,
       base_url: state.session?.base_url ?? null,
@@ -775,10 +960,130 @@ export function createM45BackgroundController(options = {}) {
       cache_key: makeCacheKey(state.session?.base_url, {
         project_name: projectName,
         source_path: sourcePath,
-        file_id: selection.file_id ?? fileInfo.file_id ?? null,
-        revision: selection.revision ?? fileInfo.revision ?? "",
+        file_id: fileId,
+        revision: revision ?? "",
       }),
     };
+  }
+
+  function buildLocalGraphSelectionPayload(selection = {}) {
+    const item = buildForegroundSelectionItem(selection);
+    if (!item) {
+      return null;
+    }
+    return {
+      source_path: item.source_path,
+      file_id: item.file_id ?? "",
+      project_name: item.project_name,
+      active_component_id: item.active_component_id ?? null,
+      selected_component_ids: item.selected_component_ids ?? [],
+      cache_key: item.cache_key,
+      revision: item.revision ?? "",
+    };
+  }
+
+  async function getExistingLocalGraphArtifact(item, artifactKey) {
+    function isUsableArtifact(value) {
+      const status = String(value?.analysis_status || value?.result?.status || value?.status || "").toLowerCase();
+      return status === "ready" || status === "empty";
+    }
+    if (artifactKey) {
+      const cachedArtifact = await cache.get(artifactKey);
+      if (isUsableArtifact(cachedArtifact)) {
+        return {
+          key: artifactKey,
+          artifact: cachedArtifact,
+        };
+      }
+    }
+    const sourceArtifactKey = makeAnalysisArtifactKey({
+      project_name: item.project_name,
+      source_path: item.source_path,
+      file_id: item.file_id,
+      revision: item.revision,
+      cache_key: item.cache_key,
+      foreground: false,
+    });
+    const backgroundArtifact = await cache.get(sourceArtifactKey);
+    if (isUsableArtifact(backgroundArtifact)) {
+      return {
+        key: sourceArtifactKey,
+        artifact: backgroundArtifact,
+      };
+    }
+    return null;
+  }
+
+  async function runLocalGraphAnalysis(item, optionsArg = {}, artifactKey) {
+    const baseArtifact = {
+      kind: "metadata-analysis-artifact",
+      source_path: item.source_path,
+      project_name: item.project_name,
+      file_id: item.file_id,
+      revision: item.revision,
+    };
+    if (!analysisClient) {
+      return {
+        ...baseArtifact,
+        analysis_status: "runtime_unavailable",
+        diagnostics: [
+          stableDiagnostic(
+            "LOCAL_GRAPH_ANALYSIS_RUNTIME_UNAVAILABLE",
+            "local graph runtime client is unavailable",
+          ),
+        ],
+      };
+    }
+    if (typeof analysisClient.analyzeLocalGraph !== "function") {
+      return {
+        ...baseArtifact,
+        analysis_status: "runtime_unsupported",
+        diagnostics: [
+          stableDiagnostic(
+            "METADATA_CHECKER_ANALYZE_LOCAL_GRAPH_UNSUPPORTED",
+            "runtime analyzeLocalGraph API is unavailable",
+            "error",
+          ),
+        ],
+      };
+    }
+    try {
+      const normalizedOptions = normalizeLocalGraphOptions(optionsArg);
+      if (typeof analysisClient.buildOrUpdateSuperpageGraph === "function") {
+        await analysisClient.buildOrUpdateSuperpageGraph(item.source_path);
+      }
+      const result = await analysisClient.analyzeLocalGraph(
+        {
+          source_path: item.source_path,
+          file_id: item.file_id ?? "",
+          project_name: item.project_name,
+          active_component_id: item.active_component_id ?? null,
+          selected_component_ids: item.selected_component_ids ?? [],
+        },
+        normalizedOptions,
+      );
+      const artifact = {
+        ...baseArtifact,
+        analysis_status: (result && result.status) || "ready",
+        result: redactForTelemetry(result ?? { status: "ready" }),
+      };
+      if (artifactKey) {
+        await tryCacheSet(artifactKey, artifact);
+      }
+      return artifact;
+    } catch (error) {
+      return {
+        ...baseArtifact,
+        analysis_status: "error",
+        diagnostics: [
+          stableDiagnostic(
+            "METADATA_CHECKER_ANALYZE_LOCAL_GRAPH_FAILED",
+            error?.message || "metadata local graph analysis failed",
+            "error",
+          ),
+        ],
+      };
+    }
   }
 
   async function bootstrapWithAccessToken({ base_url, baseUrl, access_token }) {
@@ -885,6 +1190,13 @@ export function createM45BackgroundController(options = {}) {
     }
     const visibleFiles = files.filter(Boolean);
     const analyzable = visibleFiles.filter((file) => file.analyzable);
+    const projectManifest = projects.find((project) => isObject(project));
+    const projectName = contextProjectName(context)
+      || projectManifest?.project_name
+      || projectManifest?.projectName
+      || projectManifest?.name
+      || "";
+    const visibleManifest = visibleFiles.map((file) => normalizeVisibleManifestEntry(projectName, file));
     state.visible_index = {
       status: "ready",
       projects,
@@ -892,18 +1204,250 @@ export function createM45BackgroundController(options = {}) {
       analyzable_count: analyzable.length,
       indexed_at: clock(),
     };
+    state.visible_manifest = visibleManifest;
     await tryCacheSet(`visible-index|${base}`, state.visible_index);
-    seedBackgroundQueue(analyzable, {
-      base_url: base,
-      current_source_path: context.current_source_path ?? context.currentSourcePath,
-      current_dependency_paths: context.current_dependency_paths ?? context.currentDependencyPaths ?? context.dependency_paths,
-    });
+    const shouldSeedQueue = context.seed_queue !== false;
+    if (shouldSeedQueue) {
+      seedBackgroundQueue(analyzable, {
+        base_url: base,
+        current_source_path: context.current_source_path ?? context.currentSourcePath,
+        current_dependency_paths: context.current_dependency_paths
+          ?? context.currentDependencyPaths
+          ?? context.dependency_paths,
+      });
+    }
     emit(M45_EVENT_TYPES.VISIBLE_METADATA_INDEXED, {
       project_count: projects.length,
       file_count: visibleFiles.length,
       analyzable_count: analyzable.length,
     });
     return state.visible_index;
+  }
+
+  function buildBackgroundQueueItemFromManifestRef(fileRef = {}, context = {}) {
+    const sourcePath = asString(fileRef.source_path);
+    if (!sourcePath) {
+      return null;
+    }
+    const fileInfo = state.visible_index.files.find((file) => file.source_path === sourcePath) ?? {};
+    const projectName = asString(
+      fileRef.project_ref
+      || fileRef.project_name
+      || fileInfo.project_name
+      || contextProjectName(context)
+      || state.visible_index.projects[0]?.project_name,
+    );
+    const fileId = fileRef.file_id ?? fileInfo.file_id ?? null;
+    const revision = fileRef.revision ?? fileInfo.revision ?? null;
+    const baseUrl = context.base_url ?? context.baseUrl ?? state.session?.base_url ?? null;
+    const fileNameParts = sourcePath.split(".");
+    return {
+      project_name: projectName,
+      source_path: sourcePath,
+      file_id: fileId,
+      revision,
+      extension: fileInfo.extension ?? fileNameParts.pop()?.toLowerCase() ?? "",
+      analyzable: true,
+      base_url: baseUrl,
+      priority: 1,
+      foreground: false,
+      active_component_id: null,
+      selected_component_ids: [],
+      cache_key: makeCacheKey(baseUrl, {
+        project_name: projectName,
+        source_path: sourcePath,
+        file_id: fileId,
+        revision: revision ?? "",
+      }),
+    };
+  }
+
+  async function refreshVisibleManifest(context = {}) {
+    const previousManifest = asArray(state.visible_manifest);
+    const timings = {
+      manifest_fetch_ms: 0,
+      manifest_diff_ms: 0,
+      changed_content_fetch_ms: 0,
+      wasm_update_ms: 0,
+    };
+    const manifestFetchStartedAt = clock();
+    let visibleIndex;
+    try {
+      visibleIndex = await listVisibleMetadata({
+        ...context,
+        seed_queue: false,
+      });
+    } catch (error) {
+      const diagnostic = stableDiagnostic(
+        "METADATA_CHECKER_VISIBLE_MANIFEST_REFRESH_FAILED",
+        error?.message || "visible manifest refresh failed",
+        "error",
+      );
+      state.last_diagnostic = diagnostic;
+      return {
+        ok: false,
+        diagnostics: [diagnostic],
+        manifest_diff: {
+          added: null,
+          modified: null,
+          deleted: null,
+          unchanged: null,
+          content_queue_count: null,
+        },
+        timings,
+      };
+    }
+    timings.manifest_fetch_ms = Math.round(clock() - manifestFetchStartedAt);
+
+    if (!analysisClient || typeof analysisClient.diffVisibleManifest !== "function") {
+      const diagnostic = stableDiagnostic(
+        "METADATA_CHECKER_VISIBLE_MANIFEST_DIFF_UNAVAILABLE",
+        "WASM visible manifest diff API is unavailable",
+        "error",
+      );
+      state.last_diagnostic = diagnostic;
+      return {
+        ok: false,
+        diagnostics: [diagnostic],
+        visible_index: visibleIndex,
+        manifest_diff: {
+          added: null,
+          modified: null,
+          deleted: null,
+          unchanged: null,
+          content_queue_count: null,
+        },
+        timings,
+      };
+    }
+
+    const currentManifest = asArray(state.visible_manifest);
+    const projectRef = contextProjectName(context)
+      || state.visible_index.projects[0]?.project_name
+      || currentManifest.find((entry) => asString(entry?.project_name))?.project_name
+      || "";
+    let diffDetail;
+    try {
+      const diffStartedAt = clock();
+      const diffResult = await analysisClient.diffVisibleManifest(
+        JSON.stringify(previousManifest),
+        JSON.stringify(currentManifest),
+        projectRef,
+      );
+      timings.manifest_diff_ms = Math.round(clock() - diffStartedAt);
+      diffDetail = pickVisibleManifestDiffDetail(diffResult);
+    } catch (error) {
+      const diagnostic = stableDiagnostic(
+        "METADATA_CHECKER_VISIBLE_MANIFEST_DIFF_FAILED",
+        error?.message || "visible manifest diff failed",
+        "error",
+      );
+      state.last_diagnostic = diagnostic;
+      return {
+        ok: false,
+        diagnostics: [diagnostic],
+        visible_index: visibleIndex,
+        manifest_diff: {
+          added: null,
+          modified: null,
+          deleted: null,
+          unchanged: null,
+          content_queue_count: null,
+        },
+        timings,
+      };
+    }
+
+    if (!diffDetail) {
+      const diagnostic = stableDiagnostic(
+        "METADATA_CHECKER_VISIBLE_MANIFEST_DIFF_EMPTY",
+        "WASM visible manifest diff did not return a visible_manifest_diff item",
+        "error",
+      );
+      state.last_diagnostic = diagnostic;
+      return {
+        ok: false,
+        diagnostics: [diagnostic],
+        visible_index: visibleIndex,
+        manifest_diff: {
+          added: null,
+          modified: null,
+          deleted: null,
+          unchanged: null,
+          content_queue_count: null,
+        },
+        timings,
+      };
+    }
+
+    if (diffDetail?.timing?.total_ms !== undefined) {
+      timings.manifest_diff_ms = normalizeManifestCount(diffDetail.timing.total_ms, timings.manifest_diff_ms);
+    }
+
+    const contentQueue = asArray(diffDetail.content_queue)
+      .map((fileRef) => buildBackgroundQueueItemFromManifestRef(fileRef, context))
+      .filter(Boolean);
+    if (contentQueue.length > 0) {
+      const seen = new Set();
+      const uniqueQueue = contentQueue.filter((item) => {
+        if (seen.has(item.source_path)) {
+          return false;
+        }
+        seen.add(item.source_path);
+        return true;
+      });
+      state.background.queue = [
+        ...uniqueQueue,
+        ...state.background.queue.filter((item) => !seen.has(item.source_path)),
+      ];
+      state.background.total = Math.max(
+        state.background.total,
+        state.background.processed + state.background.active + state.background.queue.length,
+      );
+      state.background.status = "queued";
+      state.background.indexing_status = "indexing_background";
+      state.background.retry_available = true;
+      const updateStartedAt = clock();
+      const processed = await processBackgroundQueue({
+        limit: normalizeQueueLimit(context.refresh_limit ?? context.limit, uniqueQueue.length),
+        max_concurrency: normalizeMaxConcurrency(context.max_concurrency, state.background.max_concurrency),
+        min_interval_ms: normalizeMinIntervalMs(context.min_interval_ms, state.background.min_interval_ms),
+      });
+      timings.wasm_update_ms = Math.round(clock() - updateStartedAt);
+      timings.changed_content_fetch_ms = processed.artifacts
+        .map((entry) => normalizeManifestCount(entry?.timings?.content_fetch_ms, 0))
+        .reduce((total, value) => total + value, 0);
+    }
+
+    const manifestDiff = {
+      added: normalizeManifestCount(diffDetail.added?.length, 0),
+      modified: normalizeManifestCount(diffDetail.modified?.length, 0),
+      deleted: normalizeManifestCount(diffDetail.deleted?.length, 0),
+      unchanged: normalizeManifestCount(diffDetail.unchanged?.length, 0),
+      content_queue_count: normalizeManifestCount(diffDetail.content_queue?.length, 0),
+      changed_files_count: normalizeManifestCount(diffDetail.changed_files?.length, 0),
+      previous_manifest_count: normalizeManifestCount(diffDetail.previous_manifest_count, previousManifest.length),
+      visible_manifest_count: normalizeManifestCount(diffDetail.visible_manifest_count, currentManifest.length),
+    };
+    emit(M45_EVENT_TYPES.VISIBLE_METADATA_INDEXED, {
+      status: "manifest_refreshed",
+      ...manifestDiff,
+    });
+    return {
+      ok: true,
+      visible_index: visibleIndex,
+      manifest_diff: manifestDiff,
+      timings,
+      diagnostics: asArray(diffDetail.diagnostics).map((item) =>
+        stableDiagnostic(
+          asString(item?.code) || "METADATA_CHECKER_VISIBLE_MANIFEST_DIFF_DIAGNOSTIC",
+          asString(item?.message) || "visible manifest diff diagnostic",
+          "warning",
+        ),
+      ),
+      background: { ...state.background },
+      cache_stats: { ...state.cache_stats },
+    };
   }
 
   function normalizeFile(projectName, file) {
@@ -916,13 +1460,21 @@ export function createM45BackgroundController(options = {}) {
     }
     const sourcePath = normalizeSourcePath(path, projectName);
     const ext = fileExtension(file);
+    const manifestEntry = normalizeVisibleManifestEntry(projectName, file);
     return {
       project_name: projectName,
       source_path: sourcePath,
+      id: manifestEntry.id,
+      path: manifestEntry.path,
+      type: manifestEntry.type,
       file_id: file.id ?? file.fileId ?? file.file_id ?? null,
-      revision: file.revision ?? file.modifyTime ?? file.modify_time ?? null,
+      revision: manifestEntry.revision,
+      modifyTime: manifestEntry.modifyTime,
+      modifier: manifestEntry.modifier,
+      modifierName: manifestEntry.modifierName,
       extension: ext,
       analyzable: SUPPORTED_METADATA_EXTENSIONS.has(ext),
+      isFolder: false,
     };
   }
 
@@ -960,11 +1512,13 @@ export function createM45BackgroundController(options = {}) {
       .map((item) => {
         const indexed = indexedBySource.get(item.source_path) ?? {};
         const projectName = item.project_name || indexed.project_name || "";
+        const fileId = item.file_id || indexed.file_id || null;
+        const revision = item.revision ?? indexed.revision ?? null;
         return {
           ...item,
           project_name: projectName,
-          file_id: item.file_id ?? indexed.file_id ?? null,
-          revision: item.revision ?? indexed.revision ?? null,
+          file_id: fileId,
+          revision,
           extension: indexed.extension || item.extension,
           analyzable: true,
           base_url: base,
@@ -973,8 +1527,8 @@ export function createM45BackgroundController(options = {}) {
           cache_key: makeCacheKey(base, {
             project_name: projectName,
             source_path: item.source_path,
-            file_id: item.file_id ?? indexed.file_id ?? null,
-            revision: item.revision ?? indexed.revision ?? "",
+            file_id: fileId,
+            revision: revision ?? "",
           }),
         };
       })
@@ -1071,6 +1625,9 @@ export function createM45BackgroundController(options = {}) {
 
   async function runBackgroundQueueItem(item) {
     const artifactKey = makeAnalysisArtifactKey(item);
+    const timings = {
+      content_fetch_ms: 0,
+    };
     state.background.current_source_path = item.source_path;
     state.background.indexing_status = item.foreground ? "indexing_current_page" : "indexing_background";
     state.background.retry_available = true;
@@ -1078,11 +1635,19 @@ export function createM45BackgroundController(options = {}) {
     if (cached) {
       state.cache_stats.hits += 1;
       state.background.last_processed_source_path = item.source_path;
-      return { cached, item, artifact_key: artifactKey, cache_hit: true };
+      return {
+        cached,
+        item,
+        artifact_key: artifactKey,
+        cache_hit: true,
+        timings,
+      };
     }
     state.cache_stats.misses += 1;
     try {
+      const fetchStartedAt = clock();
       const rawText = await requestText(item.base_url, metadataContentPath(item));
+      timings.content_fetch_ms = Math.round(clock() - fetchStartedAt);
       await tryCacheSet(`raw-metadata|${item.cache_key}`, {
         kind: "raw-metadata",
         source_path: item.source_path,
@@ -1099,7 +1664,13 @@ export function createM45BackgroundController(options = {}) {
       }
       await tryCacheSet(artifactKey, artifact);
       state.background.last_processed_source_path = item.source_path;
-      return { cached: artifact, item, artifact_key: artifactKey, cache_hit: false };
+      return {
+        cached: artifact,
+        item,
+        artifact_key: artifactKey,
+        cache_hit: false,
+        timings,
+      };
     } catch (error) {
       state.background.failed += 1;
       state.background.last_failed_source_path = item.source_path;
@@ -1119,7 +1690,13 @@ export function createM45BackgroundController(options = {}) {
         diagnostics: [diagnostic],
       };
       await tryCacheSet(artifactKey, artifact);
-      return { cached: artifact, item, artifact_key: artifactKey, cache_hit: false };
+      return {
+        cached: artifact,
+        item,
+        artifact_key: artifactKey,
+        cache_hit: false,
+        timings,
+      };
     }
   }
 
@@ -1466,6 +2043,7 @@ export function createM45BackgroundController(options = {}) {
       && typeof analysisClient.loadSuperpageDocument === "function"
       && typeof analysisClient.buildOrUpdateSuperpageGraph === "function"
       && typeof analysisClient.analyzeSuperpageSelection === "function"
+      && typeof analysisClient.analyzeLocalGraph === "function"
     );
     return {
       available: hasRuntime,
@@ -1528,6 +2106,121 @@ export function createM45BackgroundController(options = {}) {
 
     if (message.type === "metadata-checker-bootstrap-token") {
       return bootstrapAndIndex(message.payload || {});
+    }
+
+    if (message.type === "metadata-checker-refresh-visible-manifest") {
+      return refreshVisibleManifest(message.payload || {});
+    }
+
+    if (message.type === "metadata-checker-ensure-offscreen-runtime") {
+      if (!analysisClient || typeof analysisClient.initRuntime !== "function") {
+        return {
+          ok: false,
+          diagnostics: [
+            stableDiagnostic(
+              "METADATA_CHECKER_LOCAL_GRAPH_RUNTIME_UNAVAILABLE",
+              "local graph runtime client is unavailable",
+              "error",
+            ),
+          ],
+        };
+      }
+      await analysisClient.initRuntime({
+        project_ref: message.payload?.project_name ?? null,
+      });
+      return { ok: true };
+    }
+
+    if (message.type === "metadata-checker-analyze-local-graph") {
+      const payload = buildLocalGraphSelectionPayload(message.payload || {});
+      if (!payload?.source_path) {
+        return {
+          ok: false,
+          diagnostics: [
+            stableDiagnostic(
+              "METADATA_CHECKER_LOCAL_GRAPH_SELECTION_INVALID",
+              "local graph selection is missing source_path",
+              "error",
+            ),
+          ],
+        };
+      }
+
+      const artifactKey = makeAnalysisArtifactKey({
+        project_name: payload.project_name,
+        source_path: payload.source_path,
+        file_id: payload.file_id,
+        revision: payload.revision,
+        cache_key: payload.cache_key,
+        foreground: true,
+        active_component_id: payload.active_component_id,
+        selected_component_ids: payload.selected_component_ids,
+      });
+
+      const existingArtifact = await getExistingLocalGraphArtifact(payload, artifactKey);
+      if (!existingArtifact) {
+        return {
+          ok: false,
+          diagnostics: [
+            stableDiagnostic(
+              "METADATA_CHECKER_LOCAL_GRAPH_ARTIFACT_MISSING",
+              "local graph document artifact is not loaded",
+              "error",
+            ),
+          ],
+          artifact_key: artifactKey,
+          artifact: null,
+          background: { ...state.background },
+          cache_stats: { ...state.cache_stats },
+        };
+      }
+
+      const result = await runLocalGraphAnalysis(
+        payload,
+        message.payload?.options,
+        artifactKey,
+      );
+      if (result?.analysis_status === "runtime_unsupported") {
+        return {
+          ok: false,
+          diagnostics: result.diagnostics ?? [
+            stableDiagnostic(
+              "METADATA_CHECKER_ANALYZE_LOCAL_GRAPH_UNSUPPORTED",
+              "runtime analyzeLocalGraph API is unavailable",
+              "error",
+            ),
+          ],
+          artifact_key: artifactKey,
+          artifact: result,
+          background: { ...state.background },
+          cache_stats: { ...state.cache_stats },
+        };
+      }
+      if (result?.analysis_status === "runtime_unavailable") {
+        return {
+          ok: false,
+          diagnostics: result.diagnostics ?? [
+            stableDiagnostic(
+              "METADATA_CHECKER_LOCAL_GRAPH_RUNTIME_UNAVAILABLE",
+              "local graph runtime client is unavailable",
+              "error",
+            ),
+          ],
+          artifact_key: artifactKey,
+          artifact: result,
+          background: { ...state.background },
+          cache_stats: { ...state.cache_stats },
+        };
+      }
+      return {
+        ok: true,
+        artifact_ready: result?.analysis_status === "ready" || result?.analysis_status === "empty",
+        artifact_key: artifactKey,
+        artifact: result,
+        existing_artifact_source: existingArtifact?.key ?? null,
+        background: { ...state.background },
+        cache_stats: { ...state.cache_stats },
+      };
     }
 
     if (message.type === "metadata-checker-selection-changed") {
@@ -1633,6 +2326,7 @@ export function createM45BackgroundController(options = {}) {
     getState,
     bootstrapWithAccessToken,
     listVisibleMetadata,
+    refreshVisibleManifest,
     seedBackgroundQueue,
     enqueueForegroundSelection,
     processBackgroundQueue,
@@ -1645,7 +2339,7 @@ const controller = createM45BackgroundController();
 
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage?.addListener) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === OFFSCREEN_WASM_CALL_MESSAGE) {
+    if (message?.type === OFFSCREEN_WASM_CALL_MESSAGE || message?.type === OFFSCREEN_LOCAL_GRAPH_MESSAGE) {
       return false;
     }
     controller.handleMessage(message).then(

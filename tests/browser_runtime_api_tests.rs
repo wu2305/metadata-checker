@@ -21,7 +21,9 @@ fn next_source_path(prefix: &str) -> String {
 }
 
 fn with_runtime<T>(f: impl FnOnce(&str) -> T) -> T {
-    let _guard = TEST_RUNTIME_LOCK.lock().unwrap();
+    let _guard = TEST_RUNTIME_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     init_runtime(RuntimeOptions::default());
     let source_path = next_source_path("test");
     f(&source_path)
@@ -83,6 +85,25 @@ fn find_first_item_detail<'a>(
         .iter()
         .find(|item| item.kind == kind)
         .map(|item| &item.detail)
+}
+
+fn visual_graph_item(
+    status: &metadata_checker::browser::BrowserAnalysisEnvelope,
+) -> serde_json::Value {
+    find_first_item_detail(status, "visual_graph")
+        .cloned()
+        .expect("should include visual_graph item")
+}
+
+fn visual_graph_contains_diagnostic(status: &serde_json::Value, code: &str) -> bool {
+    status
+        .get("diagnostics")
+        .and_then(|value| value.as_array())
+        .is_some_and(|diagnostics| {
+            diagnostics
+                .iter()
+                .any(|diag| diag.get("code").and_then(|c| c.as_str()) == Some(code))
+        })
 }
 
 fn assert_task_descriptor_has_source(detail: &serde_json::Value, expected_source: &str) {
@@ -288,7 +309,12 @@ fn test_tick_for_foreground_enqueued_request_includes_selected_components() {
         .expect("started foreground task should include selected_component_ids");
     let selected_ids: Vec<String> = selected_component_ids
         .iter()
-        .map(|value| value.as_str().expect("component id should be string").to_string())
+        .map(|value| {
+            value
+                .as_str()
+                .expect("component id should be string")
+                .to_string()
+        })
         .collect();
     assert_eq!(selected_ids, vec!["btn1".to_string(), "btn2".to_string()]);
 
@@ -614,7 +640,12 @@ fn test_analyze_component_reads_from_graph() {
             "version": "1.0",
             "canvas": {
                 "components": [
-                    { "id": "btn1", "type": "button", "title": "Submit" }
+                    {
+                        "id": "btn1",
+                        "type": "button",
+                        "title": "Submit",
+                        "value": "${m1.name}"
+                    }
                 ]
             },
             "sources": [
@@ -840,6 +871,307 @@ fn test_analyze_include_dataflow_true_reports_unsupported_option() {
                 .iter()
                 .any(|diag| diag.code == "UNSUPPORTED_OPTION"),
             "include_dataflow=true must report UNSUPPORTED_OPTION"
+        );
+    });
+}
+
+#[test]
+fn test_analyze_returns_2hop_local_graph_with_fixed_depth_and_visible_hop() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    {
+                        "id": "input1",
+                        "type": "input",
+                        "title": "Name"
+                    },
+                    {
+                        "id": "label1",
+                        "type": "label",
+                        "title": "Display",
+                        "visibleCondition": "${input1.value}"
+                    },
+                    {
+                        "id": "label2",
+                        "type": "label",
+                        "title": "Echo",
+                        "value": "${label1.value}"
+                    }
+                ]
+            }
+        }"#;
+        load_superpage_document(source_path, raw);
+
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["label1".to_string()],
+            active_component_id: Some("label1".to_string()),
+        };
+        let options = AnalysisOptions {
+            depth: Some(1),
+            visible_hop: Some(3),
+            max_nodes: Some(10),
+            max_edges: Some(20),
+            ..Default::default()
+        };
+        let result = analyze_superpage_selection(selection, options);
+        assert_eq!(result.status, AnalysisStatus::Ready);
+        let graph = visual_graph_item(&result);
+        assert_eq!(graph["status"], "ready");
+        assert_eq!(graph["depth"], 2);
+        assert_eq!(graph["visible_hop"], 1);
+        assert_eq!(graph["target"], "label1");
+        assert!(graph["nodes"].as_array().unwrap().len() >= 3);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "UNSUPPORTED_OPTION")
+        );
+    });
+}
+
+#[test]
+fn test_analyze_with_no_relations_returns_empty_local_graph_status() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    {
+                        "id": "solo",
+                        "type": "button",
+                        "title": "Only Me"
+                    }
+                ]
+            }
+        }"#;
+        load_superpage_document(source_path, raw);
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["solo".to_string()],
+            active_component_id: Some("solo".to_string()),
+        };
+        let result = analyze_superpage_selection(selection, AnalysisOptions::default());
+        assert_eq!(result.status, AnalysisStatus::Ready);
+        let graph = visual_graph_item(&result);
+        assert_eq!(graph["status"], "empty");
+        assert_eq!(graph["edges"].as_array().unwrap().len(), 0);
+        assert_eq!(graph["focus_node"].as_str().is_some(), true);
+    });
+}
+
+#[test]
+fn test_analyze_empty_selection_returns_idle_visual_graph_and_empty_selection_diagnostic() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    { "id": "btn1", "type": "button", "title": "Submit" }
+                ]
+            }
+        }"#;
+        load_superpage_document(source_path, raw);
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec![],
+            active_component_id: None,
+        };
+        let result = analyze_superpage_selection(selection, AnalysisOptions::default());
+        assert_eq!(result.status, AnalysisStatus::Partial);
+        assert_eq!(result.diagnostics[0].code, "EMPTY_SELECTION");
+        let graph = visual_graph_item(&result);
+        assert_eq!(graph["status"], "idle");
+        assert_eq!(graph["nodes"].as_array().unwrap().len(), 0);
+    });
+}
+
+#[test]
+fn test_analyze_local_graph_truncation_removes_dangling_edges_and_keeps_diagnostics() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    {
+                        "id": "input1",
+                        "type": "input"
+                    },
+                    {
+                        "id": "label1",
+                        "type": "label",
+                        "value": "${input1.value}"
+                    }
+                ],
+                "sources": [
+                    { "id": "m_orders", "modelType": "App", "path": "app/models.tbl" }
+                ]
+            }
+        }"#;
+        load_superpage_document(source_path, raw);
+        build_or_update_superpage_graph(source_path);
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["label1".to_string()],
+            active_component_id: Some("label1".to_string()),
+        };
+        let options = AnalysisOptions {
+            max_nodes: Some(2),
+            max_edges: Some(2),
+            ..Default::default()
+        };
+        let result = analyze_superpage_selection(selection, options);
+        assert_eq!(result.status, AnalysisStatus::Ready);
+        let graph = visual_graph_item(&result);
+        assert_eq!(graph["status"], "warning");
+        assert_eq!(graph["truncated"], true);
+        let edges = graph["edges"].as_array().unwrap();
+        let valid_node_ids: std::collections::HashSet<&str> = graph["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|node| node.get("id").and_then(|value| value.as_str()))
+            .collect();
+        assert!(edges.iter().all(|edge| {
+            valid_node_ids.contains(edge["from"].as_str().unwrap())
+                && valid_node_ids.contains(edge["to"].as_str().unwrap())
+        }));
+        assert!(graph["truncated_reason"].is_string());
+        assert_eq!(
+            graph["source_summary"]["total_nodes"],
+            serde_json::json!(graph["nodes"].as_array().unwrap().len())
+        );
+        assert_eq!(
+            graph["source_summary"]["total_edges"],
+            serde_json::json!(graph["edges"].as_array().unwrap().len())
+        );
+    });
+}
+
+#[test]
+fn test_analyze_local_graph_omits_model_edges_without_expression_refs() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    { "id": "text49", "type": "text", "title": "Static Label" }
+                ]
+            },
+            "sources": [
+                { "id": "m1", "modelType": "App", "path": "app/m1.tbl" },
+                { "id": "m2", "modelType": "App", "path": "app/m2.tbl" }
+            ]
+        }"#;
+        load_superpage_document(source_path, raw);
+        build_or_update_superpage_graph(source_path);
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["text49".to_string()],
+            active_component_id: Some("text49".to_string()),
+        };
+        let result = analyze_superpage_selection(selection, AnalysisOptions::default());
+        assert_eq!(result.status, AnalysisStatus::Ready);
+        let graph = visual_graph_item(&result);
+        assert_eq!(graph["status"], "empty");
+        let edges = graph["edges"].as_array().unwrap();
+        assert!(
+            edges.is_empty(),
+            "static components should not inherit page-wide model reads"
+        );
+        assert!(
+            !result.items.iter().any(|item| item.kind == "reads"),
+            "no reads item when component has no model expression refs"
+        );
+    });
+}
+
+#[test]
+fn test_analyze_local_graph_links_model_only_when_expression_refs_model_field() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    {
+                        "id": "label1",
+                        "type": "label",
+                        "title": "Display",
+                        "value": "${m1.name}"
+                    }
+                ]
+            },
+            "sources": [
+                { "id": "m1", "modelType": "App", "path": "app/m1.tbl" },
+                { "id": "m2", "modelType": "App", "path": "app/m2.tbl" }
+            ]
+        }"#;
+        load_superpage_document(source_path, raw);
+        build_or_update_superpage_graph(source_path);
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "test".to_string(),
+            selected_component_ids: vec!["label1".to_string()],
+            active_component_id: Some("label1".to_string()),
+        };
+        let result = analyze_superpage_selection(selection, AnalysisOptions::default());
+        assert_eq!(result.status, AnalysisStatus::Ready);
+        let graph = visual_graph_item(&result);
+        let edges = graph["edges"].as_array().unwrap();
+        let model_edges: Vec<_> = edges
+            .iter()
+            .filter(|edge| edge["label"] == "reads")
+            .collect();
+        assert_eq!(model_edges.len(), 1);
+        assert!(model_edges[0]["to"].as_str().unwrap().contains("m1"));
+        assert!(
+            !model_edges[0]["to"].as_str().unwrap().contains("m2"),
+            "should not fan out to unrelated page sources"
+        );
+        assert_eq!(model_edges[0]["evidence_status"], "available");
+    });
+}
+
+#[test]
+#[ignore = "local real-project diagnostic"]
+fn diagnose_real_page_text49_model_fanout() {
+    let path = "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi/app/价审.app/demo/销售订单价格审批.spg";
+    let raw = std::fs::read_to_string(path).expect("read spg");
+    with_runtime(|_| {
+        let source_path = "app/价审.app/demo/销售订单价格审批.spg";
+        load_superpage_document(source_path, &raw);
+        build_or_update_superpage_graph(source_path);
+        let selection = SuperPageSelection {
+            source_path: source_path.to_string(),
+            file_id: "demo".to_string(),
+            selected_component_ids: vec!["text49".to_string()],
+            active_component_id: Some("text49".to_string()),
+        };
+        let result = analyze_superpage_selection(selection, AnalysisOptions::default());
+        let graph = visual_graph_item(&result);
+        let edges = graph["edges"].as_array().unwrap();
+        let model_edges: Vec<_> = edges
+            .iter()
+            .filter(|edge| edge["label"] == "reads")
+            .collect();
+        eprintln!("status={}", graph["status"]);
+        eprintln!("nodes={}", graph["nodes"].as_array().unwrap().len());
+        eprintln!("edges={}", edges.len());
+        eprintln!("model_reads={}", model_edges.len());
+        for edge in model_edges.iter().take(5) {
+            eprintln!("  {} -> {}", edge["from"], edge["to"]);
+        }
+        assert!(
+            model_edges.is_empty(),
+            "text49 should not fan out to page models"
         );
     });
 }

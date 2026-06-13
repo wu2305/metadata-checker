@@ -69,7 +69,12 @@ fn serve_sequence(responses: Vec<(&'static str, u16, &'static str)>) -> String {
 }
 
 fn serve_sequence_with_headers(
-    responses: Vec<(&'static str, u16, &'static str, Vec<(&'static str, &'static str)>)>,
+    responses: Vec<(
+        &'static str,
+        u16,
+        &'static str,
+        Vec<(&'static str, &'static str)>,
+    )>,
 ) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
     let addr = listener.local_addr().expect("read test server addr");

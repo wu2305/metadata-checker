@@ -100,11 +100,11 @@
         source_path: null,
         file_id: "",
         selected_component_ids: [],
+        selected_component_types: [],
         active_component_id: null,
-        selection_infos: {},
+        revision: null,
         project_name: "",
         timestamp: Date.now(),
-        page_type: "unknown",
       };
     }
 
@@ -112,20 +112,18 @@
       source_path: selection.source_path ?? null,
       file_id: typeof selection.file_id === "string" ? selection.file_id : "",
       selected_component_ids: asArray(selection.selected_component_ids).slice(),
+      selected_component_types: asArray(selection.selected_component_types),
       active_component_id: typeof selection.active_component_id === "string" ? selection.active_component_id : null,
-      selection_infos: isObject(selection.selection_infos)
-        ? selection.selection_infos
-        : isObject(selection.selected_component_infos)
-          ? selection.selected_component_infos
-          : {},
-      selected_component_infos: isObject(selection.selected_component_infos)
-        ? selection.selected_component_infos
-        : isObject(selection.selection_infos)
-          ? selection.selection_infos
-          : {},
+      revision:
+        selection.revision === null || selection.revision === undefined
+          ? null
+          : typeof selection.revision === "string"
+            ? selection.revision
+            : typeof selection.revision === "number"
+              ? String(selection.revision)
+              : null,
       project_name: typeof selection.project_name === "string" ? selection.project_name : "",
       timestamp: typeof selection.timestamp === "number" ? selection.timestamp : Date.now(),
-      page_type: typeof selection.page_type === "string" ? selection.page_type : "unknown",
     };
   }
 
@@ -155,6 +153,26 @@
     }
     const sourcePath = context.source_path;
     return typeof sourcePath === "string" && sourcePath.length > 0 ? sourcePath : null;
+  }
+
+  function extractRevisionFromContext(context) {
+    if (!isObject(context)) {
+      return null;
+    }
+    const sourcePath = extractSourcePathFromContext(context);
+    if (!sourcePath) {
+      return null;
+    }
+    const contextRevision = isObject(context.page_context)
+      ? context.page_context.revision
+      : context.revision;
+    if (typeof contextRevision === "string" && contextRevision.length > 0) {
+      return contextRevision;
+    }
+    if (typeof contextRevision === "number" && Number.isFinite(contextRevision)) {
+      return String(contextRevision);
+    }
+    return null;
   }
 
   function writeSelectionBridgeDiagnostic(code, message, markerValue) {
@@ -257,22 +275,29 @@
     return {
       id: sanitized.id,
       type: typeof sanitized.type === "string" ? sanitized.type : "",
-      name: typeof sanitized.name === "string" ? sanitized.name : "",
     };
   }
 
   function captureSelectionPayload(sourceMethod) {
     const context = getBridgeContext();
     const sourcePath = extractSourcePathFromContext(context);
+    const revision = extractRevisionFromContext(context);
     const builder = root.__metadata_checker_selection_bridge_builder__ || getBuilderFromContext(context);
     if (!builder || typeof builder.getSelectedComponents !== "function") {
       return {
         source_path: sourcePath,
         selected_component_ids: [],
         selected_component_types: [],
-        selected_count: 0,
-        selection_source: sourceMethod,
-        changed_at: Date.now(),
+        active_component_id: null,
+        file_id: typeof context.file_id === "string" ? context.file_id : "",
+        revision,
+        project_name:
+          typeof context.project_name === "string"
+            ? context.project_name
+            : typeof context.page_context?.project_name === "string"
+              ? context.page_context.project_name
+              : "",
+        timestamp: Date.now(),
       };
     }
 
@@ -289,14 +314,27 @@
       ? builder.getSelectedComponent()
       : selectedComponents[0];
     const activeSnapshot = asSelectionComponentSnapshot(activeComponent);
+    const fileId =
+      typeof builder.file_id === "string"
+        ? builder.file_id
+        : context.file_id ?? "";
     return {
       source_path: sourcePath,
       selected_component_ids: snapshot.map((item) => item.id),
       selected_component_types: snapshot.map((item) => item.type),
       active_component_id: activeSnapshot?.id ?? snapshot[0]?.id ?? null,
-      selected_count: snapshot.length,
-      selection_source: sourceMethod,
-      changed_at: Date.now(),
+      file_id:
+        typeof fileId === "string"
+          ? fileId
+          : typeof context.file_id === "string"
+            ? context.file_id
+            : "",
+      revision,
+      project_name:
+        typeof context.page_context?.project_name === "string"
+          ? context.page_context.project_name
+          : "",
+      timestamp: Date.now(),
     };
   }
 
@@ -321,8 +359,6 @@
       root.postMessage({
         type: SELECTION_CHANGED_EVENT_TYPE,
         payload,
-        selection_source: payload.selection_source,
-        changed_at: payload.changed_at,
         __metadata_checker_bridge_source: "page-script",
         __metadata_checker_bridge_direction: "notification",
       }, "*");

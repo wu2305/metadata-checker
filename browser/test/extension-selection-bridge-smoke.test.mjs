@@ -271,9 +271,7 @@ describe("selection bridge", () => {
     assert.deepStrictEqual(payload.selected_component_ids, ["input1", "button1"]);
     assert.deepStrictEqual(payload.selected_component_types, ["input", "button"]);
     assert.strictEqual(payload.active_component_id, "input1");
-    assert.strictEqual(payload.selected_count, 2);
-    assert.strictEqual(payload.selection_source, "selectComponents");
-    assert.equal(typeof payload.changed_at, "number");
+    assert.equal(typeof payload.timestamp, "number");
   });
 
   it("patches deselectComponents and deselectAll", async () => {
@@ -311,7 +309,6 @@ describe("selection bridge", () => {
     assert.deepStrictEqual(second.selected_component_ids, []);
     assert.deepStrictEqual(second.selected_component_types, []);
     assert.strictEqual(second.active_component_id, null);
-    assert.strictEqual(second.selected_count, 0);
   });
 
   it("patches doSelectedChange preferentially and is idempotent", async () => {
@@ -348,7 +345,6 @@ describe("selection bridge", () => {
     const messages = readSelectionPayloads(windowState);
     assert.strictEqual(messages.length, 1);
     const payload = messages[0].payload;
-    assert.strictEqual(payload.selection_source, "doSelectedChange");
     assert.strictEqual(payload.active_component_id, "node1");
   });
 
@@ -489,6 +485,5 @@ describe("selection bridge", () => {
     assert.deepStrictEqual(messages[0].payload.selected_component_ids, ["third", "fourth"]);
     assert.deepStrictEqual(messages[0].payload.selected_component_types, ["button", "container"]);
     assert.strictEqual(messages[0].payload.active_component_id, "third");
-    assert.strictEqual(messages[0].payload.selected_count, 2);
   });
 });

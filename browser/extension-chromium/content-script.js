@@ -22,7 +22,34 @@
 
   const BRIDGE_READY_MARKER = "bridgeReady";
   const SELECTION_CHANGED_MARKER = "metadata-checker-selection-changed";
-  const RUNTIME_MESSAGE_TIMEOUT_MS = 15000;
+  const RUNTIME_MESSAGE_TIMEOUT_MS = 30000;
+  const DEFAULT_GRAPH_DEPTH = 2;
+  const DEFAULT_VISIBLE_HOP = 1;
+  const MARKER_STATUS_IDLE = "idle";
+  const MARKER_STATUS_LOADING = "loading";
+  const MARKER_STATUS_READY = "ready";
+  const MARKER_STATUS_EMPTY = "empty";
+  const MARKER_STATUS_ERROR = "error";
+  const MARKER_STATUS_PINNED = "pinned";
+  const LOCAL_GRAPH_MESSAGE_TYPE = "metadata-checker-analyze-local-graph";
+  const OFFSCREEN_LOCAL_GRAPH_MESSAGE_TYPE = "metadata-checker-offscreen-local-graph";
+  const LOCAL_GRAPH_ARTIFACT_MISSING_CODE = "METADATA_CHECKER_LOCAL_GRAPH_ARTIFACT_MISSING";
+  const LOCAL_GRAPH_RUNTIME_UNAVAILABLE_CODE = "METADATA_CHECKER_LOCAL_GRAPH_RUNTIME_UNAVAILABLE";
+  const ANALYZE_LOCAL_GRAPH_UNSUPPORTED_CODE = "METADATA_CHECKER_ANALYZE_LOCAL_GRAPH_UNSUPPORTED";
+  const LOCAL_GRAPH_ANALYSIS_RUNTIME_UNAVAILABLE_CODE = "LOCAL_GRAPH_ANALYSIS_RUNTIME_UNAVAILABLE";
+  const RUNTIME_NOT_INITIALIZED_CODE = "RUNTIME_NOT_INITIALIZED";
+  const SELECTION_ANALYSIS_DEBOUNCE_MS = 40;
+
+  const sharedSelectionState = {
+    markerSeq: 0,
+    markerSeqInFlight: 0,
+    debounceTimer: null,
+  };
+
+  sharedState.remoteSession = sharedState.remoteSession || null;
+  sharedState.visibleIndex = sharedState.visibleIndex || null;
+  sharedState.graphPanelHostPromise = sharedState.graphPanelHostPromise || null;
+  sharedState.graphPinned = sharedState.graphPinned || false;
 
   function isObject(value) {
     return value !== null && typeof value === "object";
@@ -36,9 +63,37 @@
     return typeof value === "string" ? value : "";
   }
 
+  function asNumber(value, fallback = 0) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.length > 0) {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return fallback;
+  }
+
   function asDiagnostics(value) {
     return asArray(value).filter(
       (item) => isObject(item) && typeof item.code === "string" && typeof item.message === "string",
+    );
+  }
+
+  function hasDiagnosticCode(value, code) {
+    return asDiagnostics(value).some((entry) => entry.code === code);
+  }
+
+  function hasDiagnosticInResult(result, code) {
+    return (
+      hasDiagnosticCode(result?.diagnostics, code)
+      || hasDiagnosticCode(asObject(result?.artifact)?.diagnostics, code)
+      || hasDiagnosticCode(asObject(result?.artifact)?.result?.diagnostics, code)
+      || hasDiagnosticCode(asObject(result?.foreground_artifact)?.diagnostics, code)
+      || hasDiagnosticCode(asObject(result?.foreground_artifact)?.result?.diagnostics, code)
+      || hasDiagnosticCode(asObject(result?.result)?.diagnostics, code)
     );
   }
 
@@ -178,6 +233,218 @@
     doc.documentElement?.appendChild(marker);
   }
 
+  function isPinnedSelection(payload) {
+    return (
+      payload?.pinned === true
+      || payload?.pin === true
+      || payload?.pinned === "true"
+      || payload?.pin === "true"
+    );
+  }
+
+  function normalizeSelectionForStatus(payload) {
+    const sourcePath = asString(payload?.source_path);
+    const activeComponentId = asString(payload?.active_component_id);
+    const selectedComponentIds = asArray(payload?.selected_component_ids);
+    return {
+      sourcePath,
+      activeComponentId,
+      selectedCount: selectedComponentIds.length,
+      isPinned: isPinnedSelection(payload),
+      hasSourcePath: sourcePath.length > 0,
+      hasSelection: selectedComponentIds.length > 0 || activeComponentId.length > 0,
+      timestamp: asNumber(payload?.timestamp, Date.now()),
+    };
+  }
+
+  function isVisualGraphLike(value) {
+    return Boolean(
+      value
+      && typeof value === "object"
+      && Array.isArray(value.nodes)
+      && Array.isArray(value.edges),
+    );
+  }
+
+  function findVisualGraph(value, seen = new Set()) {
+    if (!value || typeof value !== "object" || seen.has(value)) {
+      return null;
+    }
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const graph = findVisualGraph(item, seen);
+        if (graph) {
+          return graph;
+        }
+      }
+      return null;
+    }
+    if (isVisualGraphLike(value)) {
+      return value;
+    }
+    const candidates = [
+      value.graph,
+      value.visual_graph,
+      value.visualGraph,
+      value.node_graph,
+      value.result,
+      value.artifact,
+      value.foreground_artifact,
+      value.detail,
+      value.payload,
+    ];
+    for (const candidate of candidates) {
+      const graph = findVisualGraph(candidate, seen);
+      if (graph) {
+        return graph;
+      }
+    }
+    for (const item of asArray(value.items)) {
+      const graph = findVisualGraph(item, seen);
+      if (graph) {
+        return graph;
+      }
+    }
+    for (const child of Object.values(value)) {
+      const graph = findVisualGraph(child, seen);
+      if (graph) {
+        return graph;
+      }
+    }
+    return null;
+  }
+
+  function normalizeGraphSummary(result) {
+    const direct = asObject(result?.foreground_artifact) ?? asObject(result?.artifact) ?? asObject(result?.result);
+    const graph = findVisualGraph(result) ?? findVisualGraph(direct);
+    return {
+      depth: asNumber(graph?.depth ?? direct?.depth ?? direct?.maxDepth ?? result?.depth ?? direct?.depth_level, DEFAULT_GRAPH_DEPTH),
+      visibleHop: asNumber(graph?.visible_hop ?? graph?.visibleHop ?? direct?.visible_hop ?? direct?.visibleHop ?? result?.visible_hop ?? result?.visibleHop, DEFAULT_VISIBLE_HOP),
+      focus: asString(graph?.focus_node ?? graph?.target ?? direct?.focus_node ?? direct?.target ?? asString(result?.target) ?? ""),
+      nodeCount: asNumber(asArray(graph?.nodes).length, asNumber(direct?.nodeCount, asNumber(direct?.nodes?.length, 0))),
+      edgeCount: asNumber(asArray(graph?.edges).length, asNumber(direct?.edgeCount, asNumber(direct?.edges?.length, 0))),
+      hasGraph: graph ? true : false,
+    };
+  }
+
+  function inferEmbeddedPopupStateFromSelection(selection) {
+    if (!selection.hasSourcePath) {
+      return "hidden";
+    }
+    if (selection.hasSelection) {
+      return "mounted";
+    }
+    return "collapsed";
+  }
+
+  function inferPopupStatusFromResult(result, selection) {
+    if (!selection.hasSourcePath) {
+      return MARKER_STATUS_IDLE;
+    }
+    if (selection.isPinned) {
+      return MARKER_STATUS_PINNED;
+    }
+    if (!selection.hasSelection) {
+      return MARKER_STATUS_EMPTY;
+    }
+    const artifact = asObject(result?.foreground_artifact)
+      || asObject(result?.artifact)
+      || asObject(result?.result)
+      || asObject(result);
+    if (!artifact) {
+      return MARKER_STATUS_ERROR;
+    }
+    const status = coerceStatus(artifact?.analysis_status ?? artifact?.status);
+    if (status === "running" || status === "analyzing" || status === "loading") {
+      return MARKER_STATUS_LOADING;
+    }
+    if (status === "error") {
+      return MARKER_STATUS_ERROR;
+    }
+    if (status === "empty" || status === "") {
+      const summary = normalizeGraphSummary(artifact);
+      if (summary.nodeCount === 0 && summary.edgeCount === 0) {
+        return MARKER_STATUS_EMPTY;
+      }
+      return MARKER_STATUS_READY;
+    }
+    if (result?.ok === false) {
+      return MARKER_STATUS_ERROR;
+    }
+    return MARKER_STATUS_READY;
+  }
+
+  function writeSelectionStatusMarkers(selection, status, options = {}) {
+    const summary = options.summary || {};
+    const focus = asString(
+      options.focus ??
+      selection.activeComponentId ??
+      summary.focus ??
+      "",
+    );
+    writeMarker("embedded-popup", inferEmbeddedPopupStateFromSelection(selection));
+    writeMarker("analysis-status", status);
+    writeMarker("focus-component", focus);
+    writeMarker(
+      "graph-depth",
+      String(asNumber(summary.depth, DEFAULT_GRAPH_DEPTH)),
+    );
+    writeMarker(
+      "graph-visible-hop",
+      String(asNumber(summary.visibleHop, DEFAULT_VISIBLE_HOP)),
+    );
+    writeMarker("graph-node-count", String(asNumber(summary.nodeCount, 0)));
+    writeMarker("graph-edge-count", String(asNumber(summary.edgeCount, 0)));
+    writeMarker("local-graph-status-seq", String(sharedSelectionState.markerSeq));
+  }
+
+  function writeLocalGraphTimingMarkers(timings = {}) {
+    const keys = [
+      "ensure_runtime_ms",
+      "fetch_metadata_ms",
+      "init_runtime_ms",
+      "load_document_ms",
+      "build_graph_ms",
+      "analyze_local_graph_ms",
+      "layout_ms",
+      "render_ms",
+      "total_ms",
+      "manifest_fetch_ms",
+      "manifest_diff_ms",
+      "changed_content_fetch_ms",
+      "wasm_update_ms",
+    ];
+    for (const key of keys) {
+      if (timings[key] !== undefined && timings[key] !== null) {
+        writeMarker(`local-graph-timing-${key.replaceAll("_", "-")}`, String(timings[key]));
+      }
+    }
+  }
+
+  function writeManifestRefreshMarkers(result = {}) {
+    const diff = asObject(result.manifest_diff) || {};
+    const timings = asObject(result.timings) || {};
+    const fields = {
+      "manifest-added": diff.added,
+      "manifest-modified": diff.modified,
+      "manifest-deleted": diff.deleted,
+      "manifest-unchanged": diff.unchanged,
+      "content-queue-count": diff.content_queue_count,
+      "local-graph-manifest-added": diff.added,
+      "local-graph-manifest-modified": diff.modified,
+      "local-graph-manifest-deleted": diff.deleted,
+      "local-graph-manifest-unchanged": diff.unchanged,
+      "local-graph-content-queue-count": diff.content_queue_count,
+    };
+    for (const [name, value] of Object.entries(fields)) {
+      writeMarker(name, value === undefined || value === null ? "" : String(value));
+    }
+    writeLocalGraphTimingMarkers(timings);
+    writeMarker("manifest-refresh-status", result?.ok === false ? "error" : "ready");
+    writeMarker("manifest-refresh-diagnostic-code", asDiagnostics(result?.diagnostics)[0]?.code || "");
+  }
+
   function stableDiagnostic(code, message, severity = "warning") {
     return {
       severity,
@@ -201,6 +468,138 @@
     const host = typeof factory === "function" ? factory() : null;
     sharedState.panelHost = host;
     return host;
+  }
+
+  async function getGraphPanelHost() {
+    if (sharedState.graphPanelHostPromise) {
+      return sharedState.graphPanelHostPromise;
+    }
+    if (!runtime || typeof runtime.getURL !== "function") {
+      return null;
+    }
+    sharedState.graphPanelHostPromise = (async () => {
+      const [
+        graphHostModule,
+        graphRendererModule,
+        vendorLoaderModule,
+      ] = await Promise.all([
+        import(runtime.getURL("spike-renderer/graph-panel-host.mjs")),
+        import(runtime.getURL("spike-renderer/graph-panel-renderer.mjs")),
+        import(runtime.getURL("spike-renderer/extension-vendor-runtime-loader.mjs")),
+      ]);
+      const vendorRuntimeLoader = vendorLoaderModule.createExtensionVendorRuntimeLoader({ runtime });
+      let echartsRuntime = null;
+      try {
+        echartsRuntime = await vendorRuntimeLoader.loadEcharts();
+      } catch (error) {
+        writeMarker(
+          "graph-echarts-vendor-error",
+          error?.message || "extension echarts vendor preload failed",
+        );
+      }
+      writeMarker("graph-echarts-vendor", echartsRuntime ? "loaded" : "missing");
+      if (!echartsRuntime && typeof vendorRuntimeLoader.getLastLoadError === "function") {
+        const loadError = vendorRuntimeLoader.getLastLoadError();
+        if (loadError) {
+          writeMarker("graph-echarts-vendor-error", loadError);
+        }
+      }
+      const renderer = graphRendererModule.createGraphPanelRenderer({
+        document: root.document,
+        renderer: "auto",
+        runtime,
+        vendorRuntimeLoader,
+        echarts: echartsRuntime,
+      });
+      return graphHostModule.createGraphPanelHost({
+        document: root.document,
+        parent: root.document?.body,
+        renderer,
+        onPinChange: async ({ pinned }) => {
+          sharedState.graphPinned = Boolean(pinned);
+          writeMarker("graph-panel-pinned", sharedState.graphPinned ? "true" : "false");
+        },
+        onCopyGraph: async ({ text }) => {
+          writeMarker("graph-copy-text-length", String((text || "").length));
+        },
+      });
+    })().catch((error) => {
+      sharedState.graphPanelHostPromise = null;
+      writeMarker("local-graph-renderer", "error");
+      writeMarker("local-graph-renderer-diagnostic-code", "GRAPH_PANEL_IMPORT_FAILED");
+      writeMarker("local-graph-renderer-diagnostic-message", error?.message || "graph panel import failed");
+      return null;
+    });
+    return sharedState.graphPanelHostPromise;
+  }
+
+  function syncLegacyPanelHostVisibility(visible) {
+    const fallbackHost = getPanelHost();
+    if (!fallbackHost) {
+      return;
+    }
+    if (typeof fallbackHost.setHostVisible === "function") {
+      fallbackHost.setHostVisible(Boolean(visible));
+      return;
+    }
+    if (typeof fallbackHost.togglePanel === "function") {
+      fallbackHost.togglePanel(false);
+    }
+    const hostElement = fallbackHost.getState?.()?.hostElement;
+    if (hostElement?.style) {
+      hostElement.style.display = visible ? "" : "none";
+    }
+  }
+
+  async function ensureGraphPanelLoadingShell(summary = {}) {
+    const host = await getGraphPanelHost();
+    if (!host) {
+      return null;
+    }
+    if (typeof host.showShell === "function") {
+      return host.showShell(summary);
+    }
+    if (typeof host.render === "function") {
+      return host.render({
+        status: "loading",
+        focus_node: summary.focus ?? "",
+        depth: summary.depth ?? DEFAULT_GRAPH_DEPTH,
+        visible_hop: summary.visibleHop ?? DEFAULT_VISIBLE_HOP,
+        nodes: [],
+        edges: [],
+        groups: [],
+        diagnostics: [],
+        truncated: false,
+        source_summary: {
+          total_nodes: 0,
+          total_edges: 0,
+          node_kinds: {},
+          edge_kinds: {},
+        },
+      });
+    }
+    return null;
+  }
+
+  async function renderGraphPanelIfAvailable(result) {
+    const graph = findVisualGraph(result);
+    if (!graph) {
+      syncLegacyPanelHostVisibility(true);
+      return null;
+    }
+    const host = await getGraphPanelHost();
+    if (!host || typeof host.render !== "function") {
+      syncLegacyPanelHostVisibility(true);
+      return null;
+    }
+    const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const renderResult = await host.render(graph);
+    const renderEndedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    writeLocalGraphTimingMarkers({
+      render_ms: Math.max(0, Math.round(renderEndedAt - renderStartedAt)),
+    });
+    syncLegacyPanelHostVisibility(false);
+    return renderResult;
   }
 
   function mountPanelHost() {
@@ -523,9 +922,16 @@
         access_token: tokenResponse.access_token,
         project_name: pageContext.project_name || pageContext.projectName || "",
         current_source_path: pageContext.source_path || "",
-        initial_limit: 3,
+        initial_limit: 0,
       },
     });
+    if (result?.ok) {
+      sharedState.remoteSession = {
+        base_url: root.location?.origin || "",
+        project_name: pageContext.project_name || pageContext.projectName || "",
+      };
+      sharedState.visibleIndex = result.visible_index || null;
+    }
     writeMarker("extension-session", result?.ok ? "ready" : "error");
     writeMarker("extension-background-index-count", String(result?.visible_index?.files?.length ?? 0));
     const diagnosticCode = asDiagnostics(result?.diagnostics)[0]?.code || "";
@@ -537,24 +943,65 @@
     return result;
   }
 
+  function resolveSelectionFromVisibleIndex(selection = {}) {
+    const sourcePath = asString(selection.source_path ?? selection.sourcePath);
+    const files = asArray(sharedState.visibleIndex?.files);
+    const file = files.find((item) => item?.source_path === sourcePath) || {};
+    const projectName = asString(
+      selection.project_name
+      || file.project_name
+      || sharedState.remoteSession?.project_name,
+    );
+    return {
+      ...selection,
+      project_name: projectName || selection.project_name || "",
+      file_id: selection.file_id || file.file_id || "",
+      revision: selection.revision ?? file.revision ?? null,
+      extension: selection.extension || file.extension || "",
+    };
+  }
+
   function needsSessionRebootstrap(result) {
+    const foregroundArtifact = extractForegroundArtifact(result);
+    if (hasDiagnosticInResult(result, LOCAL_GRAPH_ARTIFACT_MISSING_CODE)) {
+      return true;
+    }
     const background = asObject(result?.background) || asObject(result?.state?.background) || {};
     const indexingStatus = coerceStatus(
       result?.indexing_status
       || background.indexing_status
       || background.status,
     );
+    const artifactStatus = coerceStatus(
+      foregroundArtifact?.analysis_status
+      || foregroundArtifact?.status
+      || result?.analysis_status
+      || result?.status,
+    );
     return (
       indexingStatus === "waiting_for_metadata"
       || indexingStatus === "indexing_current_page"
+      || artifactStatus === "waiting_for_metadata"
     ) && result?.artifact_ready !== true;
   }
 
-  async function sendSelectionToBackground(selection, { rebootstrapOnMissingMetadata = true } = {}) {
-    const result = await sendRuntimeMessage({
+  function shouldFallbackToSelectionQueue(result) {
+    return (
+      hasDiagnosticInResult(result, ANALYZE_LOCAL_GRAPH_UNSUPPORTED_CODE)
+      || hasDiagnosticInResult(result, LOCAL_GRAPH_RUNTIME_UNAVAILABLE_CODE)
+      || hasDiagnosticInResult(result, LOCAL_GRAPH_ANALYSIS_RUNTIME_UNAVAILABLE_CODE)
+    );
+  }
+
+  async function sendSelectionToLegacyBackground(selection, { rebootstrapOnMissingMetadata = true } = {}) {
+    return sendRuntimeMessage({
       type: "metadata-checker-selection-changed",
       payload: selection,
     });
+  }
+
+  async function sendSelectionToLegacyBackgroundWithRetry(selection, { rebootstrapOnMissingMetadata = true } = {}) {
+    const result = await sendSelectionToLegacyBackground(selection);
     if (!rebootstrapOnMissingMetadata || !needsSessionRebootstrap(result)) {
       return result;
     }
@@ -564,6 +1011,117 @@
     }
     return sendRuntimeMessage({
       type: "metadata-checker-selection-changed",
+      payload: selection,
+    });
+  }
+
+  async function loadArtifactThenAnalyzeLocalGraph(selection) {
+    writeMarker("local-graph-artifact-load", "queueing");
+    const resolvedSelection = resolveSelectionFromVisibleIndex(selection);
+    const ensured = await sendRuntimeMessage({
+      type: "metadata-checker-ensure-offscreen-runtime",
+      payload: {
+        project_name: resolvedSelection.project_name || sharedState.remoteSession?.project_name || "",
+      },
+    });
+    if (ensured?.ok === false) {
+      writeMarker("local-graph-artifact-load", "queue-error");
+      writeMarker("local-graph-artifact-load-diagnostic-code", asDiagnostics(ensured?.diagnostics)[0]?.code || "");
+      return ensured;
+    }
+    writeMarker("local-graph-artifact-load", "offscreen");
+    const analyzedResult = await sendRuntimeMessage({
+      type: OFFSCREEN_LOCAL_GRAPH_MESSAGE_TYPE,
+      payload: {
+        base_url: sharedState.remoteSession?.base_url || root.location?.origin || "",
+        item: {
+          source_path: resolvedSelection.source_path,
+          project_name: resolvedSelection.project_name || sharedState.remoteSession?.project_name || "",
+          file_id: resolvedSelection.file_id || "",
+          revision: resolvedSelection.revision ?? null,
+          extension: resolvedSelection.extension || "",
+          active_component_id: resolvedSelection.active_component_id ?? null,
+          selected_component_ids: asArray(resolvedSelection.selected_component_ids),
+        },
+        selection: resolvedSelection,
+        options: {
+          depth: DEFAULT_GRAPH_DEPTH,
+          visible_hop: DEFAULT_VISIBLE_HOP,
+        },
+      },
+    });
+    if (shouldFallbackToSelectionQueue(analyzedResult)) {
+      writeMarker("local-graph-artifact-load", "runtime-fallback");
+      return sendSelectionToLegacyBackgroundWithRetry(selection, {
+        rebootstrapOnMissingMetadata: false,
+      });
+    }
+    writeMarker("local-graph-artifact-load", analyzedResult?.ok === false ? "analyze-error" : "offscreen-analyzed");
+    writeMarker("local-graph-artifact-load-diagnostic-code", asDiagnostics(analyzedResult?.diagnostics)[0]?.code || "");
+    if (analyzedResult?.timings) {
+      writeLocalGraphTimingMarkers(analyzedResult.timings);
+      if (analyzedResult.timings.total_ms !== undefined) {
+        writeMarker("local-graph-offscreen-total-ms", String(analyzedResult.timings.total_ms));
+      }
+    }
+    if (analyzedResult?.cache) {
+      writeMarker("local-graph-cache-metadata-hit", String(Boolean(analyzedResult.cache.metadata_cache_hit)));
+      writeMarker("local-graph-cache-document-hit", String(Boolean(analyzedResult.cache.document_cache_hit)));
+    }
+    return analyzedResult;
+  }
+
+  async function sendSelectionToBackground(selection, { rebootstrapOnMissingMetadata = true } = {}) {
+    const firstResult = await sendRuntimeMessage({
+      type: LOCAL_GRAPH_MESSAGE_TYPE,
+      payload: selection,
+    });
+
+    const shouldBootstrapAndRetry =
+      rebootstrapOnMissingMetadata
+      && (
+        hasDiagnosticInResult(firstResult, LOCAL_GRAPH_ARTIFACT_MISSING_CODE)
+        || needsSessionRebootstrap(firstResult)
+      );
+    if (shouldBootstrapAndRetry) {
+      const bootstrapped = await bootstrapRemoteSessionFromPage();
+      if (bootstrapped?.ok === false) {
+        return bootstrapped;
+      }
+      const retriedResult = await sendRuntimeMessage({
+        type: LOCAL_GRAPH_MESSAGE_TYPE,
+        payload: selection,
+      });
+      if (shouldFallbackToSelectionQueue(retriedResult)) {
+        return sendSelectionToLegacyBackgroundWithRetry(selection, { rebootstrapOnMissingMetadata });
+      }
+      if (hasDiagnosticInResult(retriedResult, LOCAL_GRAPH_ARTIFACT_MISSING_CODE)) {
+        return loadArtifactThenAnalyzeLocalGraph(selection);
+      }
+      if (hasDiagnosticInResult(retriedResult, RUNTIME_NOT_INITIALIZED_CODE)) {
+        return loadArtifactThenAnalyzeLocalGraph(selection);
+      }
+      return retriedResult;
+    }
+
+    if (shouldFallbackToSelectionQueue(firstResult)) {
+      return sendSelectionToLegacyBackgroundWithRetry(selection, { rebootstrapOnMissingMetadata });
+    }
+
+    if (hasDiagnosticInResult(firstResult, RUNTIME_NOT_INITIALIZED_CODE)) {
+      return loadArtifactThenAnalyzeLocalGraph(selection);
+    }
+
+    if (!rebootstrapOnMissingMetadata || !needsSessionRebootstrap(firstResult)) {
+      return firstResult;
+    }
+
+    const bootstrapped = await bootstrapRemoteSessionFromPage();
+    if (bootstrapped?.ok === false) {
+      return bootstrapped;
+    }
+    return sendRuntimeMessage({
+      type: LOCAL_GRAPH_MESSAGE_TYPE,
       payload: selection,
     });
   }
@@ -624,24 +1182,143 @@
       return;
     }
     const host = getPanelHost();
-    if (!host || typeof host.updateSelection !== "function") {
+    if (!isObject(message.payload)) {
       return;
     }
-    host.updateSelection(message.payload);
+    const selectionPayload = message.payload;
+    const selectionState = normalizeSelectionForStatus(selectionPayload);
+    const markerSeq = ++sharedSelectionState.markerSeq;
+    sharedSelectionState.markerSeqInFlight = markerSeq;
+
+    const initialStatus = selectionState.hasSourcePath
+      ? (selectionState.hasSelection ? MARKER_STATUS_LOADING : MARKER_STATUS_EMPTY)
+      : MARKER_STATUS_IDLE;
+
+    writeSelectionStatusMarkers(selectionState, initialStatus, {
+      focus: asString(selectionPayload.active_component_id),
+      summary: {
+        focus: asString(selectionPayload.active_component_id),
+        depth: DEFAULT_GRAPH_DEPTH,
+        visibleHop: DEFAULT_VISIBLE_HOP,
+        nodeCount: 0,
+        edgeCount: 0,
+      },
+    });
+
     writeMarker("extension-selection-event", "received");
-    writeMarker("extension-selection-source", asString(message.payload.selection_source));
+    writeMarker(
+      "extension-selection-source",
+      asString(selectionPayload.selection_source || (selectionPayload.isSingleSelection ? "single" : "")),
+    );
     writeMarker(
       "extension-selection-count",
-      String(Array.isArray(message.payload.selected_component_ids) ? message.payload.selected_component_ids.length : 0),
+      String(selectionState.selectedCount),
     );
-    writeMarker("extension-selection-active", asString(message.payload.active_component_id));
-    writeMarker("extension-selection-changed-at", String(message.payload.changed_at || ""));
-    sendSelectionToBackground(message.payload).then((result) => {
+    writeMarker("extension-selection-active", asString(selectionPayload.active_component_id));
+    writeMarker(
+      "extension-selection-changed-at",
+      String(selectionState.timestamp || ""),
+    );
+
+    if (host && typeof host.updateSelection === "function") {
+      host.updateSelection(selectionPayload);
+    }
+    if (selectionState.isPinned || sharedState.graphPinned) {
+      writeSelectionStatusMarkers(selectionState, MARKER_STATUS_PINNED, {
+        focus: asString(selectionPayload.active_component_id),
+      });
+      host?.updatePanel?.({
+        status: MARKER_STATUS_PINNED,
+        target: selectionPayload.source_path,
+        items: [],
+        diagnostics: [{
+          severity: "info",
+          code: "ANALYSIS_SKIPPED_PINNED",
+          message: "selection analysis skipped because popup is pinned",
+        }],
+      });
+      return;
+    }
+
+    if (!selectionState.hasSourcePath) {
+      host?.updatePanel?.({
+        status: MARKER_STATUS_IDLE,
+        target: null,
+        items: [],
+        diagnostics: [],
+      });
+      return;
+    }
+
+    if (!selectionState.hasSelection) {
+      host?.updatePanel?.({
+        status: MARKER_STATUS_EMPTY,
+        target: selectionPayload.source_path,
+        items: [],
+        diagnostics: [],
+      });
+      return;
+    }
+
+    void ensureGraphPanelLoadingShell({
+      focus: asString(selectionPayload.active_component_id),
+      depth: DEFAULT_GRAPH_DEPTH,
+      visibleHop: DEFAULT_VISIBLE_HOP,
+      nodeCount: 0,
+      edgeCount: 0,
+    }).catch(() => {});
+
+    if (sharedSelectionState.debounceTimer && typeof root.clearTimeout === "function") {
+      root.clearTimeout(sharedSelectionState.debounceTimer);
+      sharedSelectionState.debounceTimer = null;
+    }
+    writeMarker("local-graph-selection-debounce-ms", String(SELECTION_ANALYSIS_DEBOUNCE_MS));
+    const runAnalysis = () => sendSelectionToBackground(selectionPayload).then((result) => {
+      if (sharedSelectionState.markerSeqInFlight !== markerSeq) {
+        writeMarker("local-graph-selection-stale", "ignored");
+        return;
+      }
+      const status = inferPopupStatusFromResult(result, selectionState);
+      const summary = normalizeGraphSummary(result);
+      const details = {
+        focus: summary.focus || asString(selectionPayload.active_component_id),
+        depth: summary.depth || DEFAULT_GRAPH_DEPTH,
+        visibleHop: summary.visibleHop,
+        nodeCount: summary.nodeCount,
+        edgeCount: summary.edgeCount,
+      };
       updatePanelWithBackgroundState({
         ...(result || {}),
         source_path: asString(message?.payload?.source_path),
       });
+      renderGraphPanelIfAvailable(result).catch((error) => {
+        writeMarker("local-graph-renderer", "error");
+        writeMarker("local-graph-renderer-diagnostic-code", "GRAPH_PANEL_RENDER_FAILED");
+        writeMarker("local-graph-renderer-diagnostic-message", error?.message || "graph panel render failed");
+      });
+      writeSelectionStatusMarkers(selectionState, status, {
+        focus: details.focus,
+        summary: details,
+      });
+    }).catch((error) => {
+      if (sharedSelectionState.markerSeqInFlight !== markerSeq) {
+        writeMarker("local-graph-selection-stale", "error-ignored");
+        return;
+      }
+      const failed = {
+        ok: false,
+        diagnostics: [stableDiagnostic("METADATA_CHECKER_SELECTION_ANALYSIS_FAILED", error?.message || "selection analysis failed", "error")],
+      };
+      updatePanelWithBackgroundState(failed);
+      writeSelectionStatusMarkers(selectionState, MARKER_STATUS_ERROR, {
+        focus: asString(selectionPayload.active_component_id),
+      });
     });
+    if (typeof root.setTimeout === "function" && SELECTION_ANALYSIS_DEBOUNCE_MS > 0) {
+      sharedSelectionState.debounceTimer = root.setTimeout(runAnalysis, SELECTION_ANALYSIS_DEBOUNCE_MS);
+    } else {
+      runAnalysis();
+    }
   }
 
   function normalizeAction(action) {
@@ -686,15 +1363,86 @@
       };
     }
     const result = await sendSelectionToBackground(selection);
+    const selectionState = normalizeSelectionForStatus(selection);
+    const status = inferPopupStatusFromResult(result, selectionState);
+    const summary = normalizeGraphSummary(result);
     updatePanelWithBackgroundState({
       ...(result || {}),
       source_path: asString(selection.source_path),
+    });
+    renderGraphPanelIfAvailable(result).catch((error) => {
+      writeMarker("local-graph-renderer", "error");
+      writeMarker("local-graph-renderer-diagnostic-code", "GRAPH_PANEL_RENDER_FAILED");
+      writeMarker("local-graph-renderer-diagnostic-message", error?.message || "graph panel render failed");
+    });
+    writeSelectionStatusMarkers(selectionState, status, {
+      focus: summary.focus || asString(selection.active_component_id),
+      summary: {
+        focus: summary.focus || asString(selection.active_component_id),
+        depth: summary.depth || DEFAULT_GRAPH_DEPTH,
+        visibleHop: summary.visibleHop,
+        nodeCount: summary.nodeCount,
+        edgeCount: summary.edgeCount,
+      },
     });
     return {
       ok: result?.ok !== false,
       bridge_status: response,
       background_result: result,
       diagnostics: asDiagnostics(response?.diagnostics).concat(asDiagnostics(result?.diagnostics)),
+    };
+  }
+
+  async function refreshVisibleManifestFromBridge() {
+    const response = await requestPageBridge("getBridgeStatus");
+    forwardStatus(response);
+    writeBridgeProbeMarkers(response);
+    applyPanelStateFromBridge(response, "refreshBridge");
+    const payload = response?.payload || {};
+    if (payload.bridge_detected === false || payload.supported === false) {
+      return {
+        ok: false,
+        bridge_status: response,
+        diagnostics: asDiagnostics(response?.diagnostics).concat(asDiagnostics(payload.diagnostics)),
+      };
+    }
+    if (!sharedState.remoteSession?.base_url) {
+      const bootstrapped = await bootstrapRemoteSessionFromPage();
+      if (bootstrapped?.ok === false) {
+        writeManifestRefreshMarkers(bootstrapped);
+        return {
+          ok: false,
+          bridge_status: response,
+          background_result: bootstrapped,
+          diagnostics: asDiagnostics(response?.diagnostics).concat(asDiagnostics(bootstrapped?.diagnostics)),
+        };
+      }
+    }
+    const pageContext = payload.page_context || {};
+    const selection = payload.selection || {};
+    const backgroundResult = await sendRuntimeMessage({
+      type: "metadata-checker-refresh-visible-manifest",
+      payload: {
+        base_url: sharedState.remoteSession?.base_url || root.location?.origin || "",
+        project_name: pageContext.project_name || pageContext.projectName || selection.project_name || "",
+        current_source_path: pageContext.source_path || selection.source_path || "",
+      },
+    });
+    if (backgroundResult?.visible_index) {
+      sharedState.visibleIndex = backgroundResult.visible_index;
+    }
+    writeManifestRefreshMarkers(backgroundResult || {});
+    updatePanelWithBackgroundState({
+      ...(backgroundResult || {}),
+      source_path: pageContext.source_path || selection.source_path || "",
+    });
+    return {
+      ok: backgroundResult?.ok !== false,
+      bridge_status: response,
+      background_result: backgroundResult,
+      manifest_diff: backgroundResult?.manifest_diff || null,
+      timings: backgroundResult?.timings || null,
+      diagnostics: asDiagnostics(response?.diagnostics).concat(asDiagnostics(backgroundResult?.diagnostics)),
     };
   }
 
@@ -749,9 +1497,6 @@
       const requestType = message?.type === "metadata-checker-tab-request"
         ? (typeof message.request_type === "string" ? message.request_type : null)
         : normalizeAction(message?.action || message?.type);
-      const mappedRequestType = requestType === "refreshBridge"
-        ? "getBridgeStatus"
-        : requestType;
       if (typeof requestType !== "string" || requestType.length === 0) {
         return false;
       }
@@ -767,6 +1512,25 @@
       }
 
       if (message?.type === "metadata-checker-tab-request") {
+        if (requestType === "refreshBridge") {
+          refreshVisibleManifestFromBridge().then((response) => {
+            sendResponse(response);
+          }).catch((error) => {
+            const failed = {
+              ok: false,
+              diagnostics: [
+                stableDiagnostic(
+                  "METADATA_CHECKER_REFRESH_VISIBLE_MANIFEST_FAILED",
+                  error?.message || "visible manifest refresh failed",
+                  "error",
+                ),
+              ],
+            };
+            writeManifestRefreshMarkers(failed);
+            sendResponse(failed);
+          });
+          return true;
+        }
         if (requestType === "retryCurrentSelection") {
           retryCurrentSelectionFromBridge().then((response) => {
             sendResponse(response);
@@ -784,7 +1548,7 @@
           });
           return true;
         }
-        requestPageBridge(mappedRequestType).then((response) => {
+        requestPageBridge(requestType).then((response) => {
           forwardStatus(response);
           sendResponse(response);
         }).catch((error) => {
@@ -808,14 +1572,16 @@
       }
 
       if (requestType === "refreshBridge") {
-        requestPageBridge("getBridgeStatus").then((response) => {
+        refreshVisibleManifestFromBridge().then((response) => {
           sendResponse(wrapPanelCommandResponse("refreshBridge", response));
         }).catch((error) => {
+          const failed = {
+            ok: false,
+            diagnostics: [stableDiagnostic("METADATA_CHECKER_PANEL_COMMAND_FAILED", error?.message || "refresh bridge failed", "error")],
+          };
+          writeManifestRefreshMarkers(failed);
           sendResponse(
-            wrapPanelCommandResponse("refreshBridge", {
-              ok: false,
-              diagnostics: [stableDiagnostic("METADATA_CHECKER_PANEL_COMMAND_FAILED", error?.message || "refresh bridge failed", "error")],
-            }),
+            wrapPanelCommandResponse("refreshBridge", failed),
           );
         });
         return true;
@@ -899,6 +1665,7 @@
   }
 
   writeMarker("extension-content", "loaded");
+  writeMarker("extension-content-fallback-version", "artifact-load-v2");
   root.__metadata_checker_resolve_asset_url = function resolveAssetUrl(path) {
     if (runtime && typeof runtime.getURL === "function") {
       return runtime.getURL(path);

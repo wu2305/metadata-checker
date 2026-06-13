@@ -101,6 +101,31 @@ function _extractFileId(designer, host, logger) {
   return id;
 }
 
+function _extractRevision(designer, host, logger) {
+  const revision =
+    designer?.openFileArgs?.revision ??
+    designer?.getFileInfo?.()?.revision ??
+    designer?.metaFileInfo?.revision ??
+    designer?.fileInfo?.revision ??
+    "";
+  if (typeof revision === "string" && revision !== "") {
+    return revision;
+  }
+  if (typeof revision === "number" && Number.isFinite(revision)) {
+    return String(revision);
+  }
+  if (logger) {
+    _log(logger, "warn", "[glue] revision not available in designer, using empty fallback");
+  }
+  if (typeof host?.emit === "function") {
+    _emitHost(host, "revision_missing", {
+      message: "revision not found in designer, using null fallback",
+      timestamp: Date.now(),
+    });
+  }
+  return null;
+}
+
 function _buildSelection(designer, options = {}) {
   const host = options?.host ?? (typeof options?.emit === "function" ? options : null);
   const logger = options?.logger;
@@ -115,6 +140,7 @@ function _buildSelection(designer, options = {}) {
   }
 
   const fileId = _extractFileId(designer, host, logger);
+  const revision = _extractRevision(designer, host, logger);
 
   const components = builder.getSelectedComponents?.() ?? [];
   const selectedComponentIds = [];
@@ -151,6 +177,7 @@ function _buildSelection(designer, options = {}) {
   return {
     source_path: sourcePath,
     file_id: fileId,
+    revision,
     selected_component_ids: selectedComponentIds,
     active_component_id: activeComponentId,
     timestamp: Date.now(),

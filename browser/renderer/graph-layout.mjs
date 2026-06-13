@@ -81,6 +81,33 @@ function normalizeEdgeKind(kindValue) {
   return "other";
 }
 
+function normalizeEdgePriority(value) {
+  const priority = safeToString(value).toLowerCase();
+  if (priority === "filter" || priority === "condition") return priority;
+  if (priority === "visibility" || priority === "display") return "visibility";
+  if (priority === "source" || priority === "value") return "source";
+  if (priority === "action" || priority === "calculation") return "action";
+  return "other";
+}
+
+function normalizeEvidenceStatus(value, evidence) {
+  const status = safeToString(value).toLowerCase();
+  if (status === "available" || status === "unavailable") return status;
+  return evidence == null || safeToString(evidence).trim() === "" ? "unavailable" : "available";
+}
+
+function priorityRank(priority) {
+  const ranks = {
+    filter: 5,
+    condition: 5,
+    visibility: 4,
+    source: 3,
+    action: 2,
+    other: 1,
+  };
+  return ranks[normalizeEdgePriority(priority)] ?? 1;
+}
+
 function shouldTruncateNodeLabel(node, maxLen) {
   if (node == null || typeof node !== "object") return false;
   if (node.collapsed) return true;
@@ -290,6 +317,10 @@ function normalizeNodesEdges(visualGraph) {
       direction: safeToString(edge.direction || "Forward"),
       label: safeToString(edge.label),
       evidence: edge.evidence == null ? null : safeToString(edge.evidence),
+      priority: normalizeEdgePriority(edge.priority),
+      priorityRank: priorityRank(edge.priority),
+      summary: sanitizeLabel(edge.summary ?? edge.label ?? edge.kind, 120),
+      evidence_status: normalizeEvidenceStatus(edge.evidence_status, edge.evidence),
       metadata: edge?.metadata && typeof edge.metadata === "object" ? edge.metadata : {},
     })),
     groups,
@@ -394,6 +425,27 @@ function computeNodeDepths(normalized, options) {
 
   const collapsed = new Set();
   const renderedNodes = [];
+  const priorityByNode = new Map();
+  const neighborByNode = new Map();
+  for (const edge of normalized.edges) {
+    const priority = normalizeEdgePriority(edge.priority);
+    for (const nodeId of [edge.from, edge.to]) {
+      if (!priorityByNode.has(nodeId)) priorityByNode.set(nodeId, new Map());
+      const priorities = priorityByNode.get(nodeId);
+      priorities.set(priority, (priorities.get(priority) || 0) + 1);
+      if (!neighborByNode.has(nodeId)) neighborByNode.set(nodeId, new Set());
+    }
+    neighborByNode.get(edge.from)?.add(edge.to);
+    neighborByNode.get(edge.to)?.add(edge.from);
+  }
+  function prioritySummary(nodeId) {
+    const map = priorityByNode.get(nodeId);
+    if (!map) return "";
+    return Array.from(map.entries())
+      .sort((left, right) => right[1] - left[1])
+      .map(([priority, count]) => `${priority}:${count}`)
+      .join(", ");
+  }
   for (const node of normalized.nodes) {
     const depth = depths.get(node.id) ?? maxDepth + 1;
     const depthInMeta = node.depth;
@@ -404,6 +456,8 @@ function computeNodeDepths(normalized, options) {
       ...node,
       depth: nodeDepth,
       visualLabel: sanitizeLabel(node.label, options?.nodeLabelMaxLength ?? DEFAULT_RENDER_OPTIONS.nodeLabelMaxLength),
+      neighborCount: neighborByNode.get(node.id)?.size || 0,
+      relatedPrioritySummary: prioritySummary(node.id),
       collapsed: isCollapsed,
       expandable:
         isExpandableNode(node, isCollapsed) || isNodeExpandable(node),
@@ -492,6 +546,10 @@ function computeNodeDepths(normalized, options) {
       direction: "Forward",
       label: "expand",
       evidence: null,
+      priority: "other",
+      priorityRank: priorityRank("other"),
+      summary: "other: expand",
+      evidence_status: "unavailable",
       metadata: { collapsed_group: true, depth: group.depth },
       fromDepth: 0,
       toDepth: group.depth,
@@ -624,9 +682,11 @@ export function layoutGraph(visualGraph, options = {}) {
     toPosition: positions.get(edge.to),
     label: edge.label,
     edgeClass:
-      edge.fromDepth != null && edge.toDepth != null && edge.toDepth <= 1
-        ? "depth-edge"
-        : "weak-edge",
+      edge.priorityRank >= 4 && (edge.fromDepth <= 1 || edge.toDepth <= 1)
+        ? "priority-edge"
+        : edge.fromDepth != null && edge.toDepth != null && edge.toDepth <= 1
+          ? "depth-edge"
+          : "weak-edge",
     direction: edge.direction || "Forward",
   }));
 
@@ -677,46 +737,110 @@ export function buildMermaidText(layout) {
   return lines.join("\n");
 }
 
-export function buildEChartsOption(layout) {
+const ECHARTS_EDGE_COLORS = {
+  filter: "#fbbf24",
+  condition: "#c084fc",
+  visibility: "#a78bfa",
+  source: "#38bdf8",
+  action: "#34d399",
+  other: "#64748b",
+};
+
+function normalizeEchartsPriority(edge) {
+  const value = safeToString(edge?.priority || edge?.kind).toLowerCase();
+  if (value === "filter" || value === "condition") return "filter";
+  if (value === "visibility" || value === "display") return "visibility";
+  if (value === "source" || value === "value") return "source";
+  if (value === "action" || value === "calculation") return "action";
+  return "other";
+}
+
+export function buildEchartsIdMap(layout) {
+  const nodes = Array.isArray(layout.nodes) ? layout.nodes : [];
+  const map = new Map();
+  nodes.forEach((node, index) => {
+    const rawId = safeToString(node.id);
+    const mapped = containsSensitive(rawId) ? `sensitive_${index}` : rawId;
+    map.set(mapped, rawId);
+  });
+  return map;
+}
+
+export function buildEChartsGraphOption(layout, viewport = {}) {
   const nodes = Array.isArray(layout.nodes) ? layout.nodes : [];
   const edges = Array.isArray(layout.edges) ? layout.edges : [];
+  const panelWidth = Math.max(120, Number(viewport.width) || 266);
+  const panelHeight = Math.max(96, Number(viewport.height) || 188);
   const idMap = new Map();
   nodes.forEach((node, index) => {
     const rawId = safeToString(node.id);
-    idMap.set(rawId, containsSensitive(rawId) ? `sensitive_${index}` : rawId);
+    const mapped = containsSensitive(rawId) ? `sensitive_${index}` : rawId;
+    idMap.set(rawId, mapped);
   });
   return {
+    backgroundColor: "transparent",
+    animation: false,
     series: [
       {
         type: "graph",
-        layout: "none",
+        layout: "force",
         roam: true,
-        data: nodes.map((node) => ({
-          id: idMap.get(safeToString(node.id)) ?? safeToString(node.id),
-          name: sanitizeLabel(node.visualLabel ?? node.label, 44),
-          category: node.styleClass,
-          x: node.position?.x ?? 0,
-          y: node.position?.y ?? 0,
-          symbolSize: node.styleClass === "focus" ? 30 : 18,
-          emphasis: {
-            focus: "adjacency",
-          },
-          label: {
-            show: true,
-            formatter: sanitizeLabel(node.visualLabel ?? node.label, 44),
-          },
-        })),
-        links: edges.map((edge) => ({
-          source: idMap.get(safeToString(edge.from)) ?? sanitizeLabel(edge.from, 32),
-          target: idMap.get(safeToString(edge.to)) ?? sanitizeLabel(edge.to, 32),
-          value: sanitizeLabel(edge.label, 24),
-          lineStyle: {
-            width: edge.fromDepth != null && edge.toDepth != null && edge.toDepth <= 3 ? 2 : 1,
-            opacity: edge.toDepth != null && edge.toDepth <= 1 ? 0.95 : 0.45,
-          },
-        })),
+        draggable: false,
+        focusNodeAdjacency: true,
+        force: {
+          initLayout: "circular",
+          repulsion: Math.max(72, Math.min(panelWidth, panelHeight) * 0.52),
+          gravity: 0.12,
+          edgeLength: [32, 68],
+          layoutAnimation: false,
+        },
+        data: nodes.map((node) => {
+          const mappedId = idMap.get(safeToString(node.id)) ?? safeToString(node.id);
+          const isFocus = node.styleClass === "focus";
+          return {
+            id: mappedId,
+            name: sanitizeLabel(node.visualLabel ?? node.label, 44),
+            category: node.styleClass,
+            symbolSize: isFocus ? 22 : node.styleClass === "collapsed" ? 12 : 16,
+            itemStyle: {
+              color: isFocus ? "#93c5fd" : node.styleClass === "depth-2-3" ? "#31537a" : "#60a5fa",
+              borderColor: isFocus ? "#e2e8f0" : "#94a3b8",
+              borderWidth: isFocus ? 1.4 : 0.8,
+              opacity: node.styleClass === "depth-2-3" ? 0.42 : 0.92,
+            },
+            label: {
+              show: true,
+              color: "#e2e8f0",
+              fontSize: 10,
+              formatter: sanitizeLabel(node.visualLabel ?? node.label, 44),
+            },
+          };
+        }),
+        links: edges.map((edge) => {
+          const priority = normalizeEchartsPriority(edge);
+          const color = ECHARTS_EDGE_COLORS[priority] || ECHARTS_EDGE_COLORS.other;
+          const focusEdge = edge.fromDepth != null && edge.toDepth != null && edge.toDepth <= 1;
+          return {
+            source: idMap.get(safeToString(edge.from)) ?? sanitizeLabel(edge.from, 32),
+            target: idMap.get(safeToString(edge.to)) ?? sanitizeLabel(edge.to, 32),
+            value: sanitizeLabel(edge.label, 24),
+            lineStyle: {
+              color,
+              width: priority === "filter" ? 2.2 : priority === "source" ? 1.6 : 1.1,
+              opacity: focusEdge ? 0.9 : 0.38,
+              curveness: 0.06,
+            },
+          };
+        }),
         lineStyle: {
           opacity: 0.85,
+          curveness: 0.06,
+        },
+        emphasis: {
+          focus: "adjacency",
+          lineStyle: {
+            width: 3,
+          },
         },
         categories: [
           { name: "focus" },
@@ -728,3 +852,5 @@ export function buildEChartsOption(layout) {
     ],
   };
 }
+
+export const buildEChartsOption = buildEChartsGraphOption;

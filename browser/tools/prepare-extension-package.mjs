@@ -1,4 +1,4 @@
-import { cp, copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +10,8 @@ const DEFAULT_CHROMIUM_DIR = join(DEFAULT_BROWSER_ROOT, "extension-chromium");
 const DEFAULT_HOST_MATCH = "https://autocrm-test.xiaoshouyi.com/*";
 const DEFAULT_VERSION = "0.0.0";
 const ZIP_DIAGNOSTIC_CODE = "ZIP_PACKAGING_NOT_SUPPORTED";
+const SPIKE_RENDERER_ARTIFACTS_DIAGNOSTIC = "SPIKE_RENDERER_ARTIFACTS_COPY_FAILED";
+const SPIKE_VENDOR_ARTIFACTS_DIAGNOSTIC = "SPIKE_VENDOR_ARTIFACTS_COPY_FAILED";
 
 function stableDiagnostic(code, message, severity = "warning") {
   return {
@@ -29,7 +31,7 @@ function parseHostMatches(hostMatch) {
     .filter(Boolean);
 }
 
-function patchManifest(manifest, { version, hostMatch }) {
+function patchManifest(manifest, { version, hostMatch, extraWebAccessibleResources = [] }) {
   const patched = { ...manifest };
   const matches = parseHostMatches(hostMatch);
 
@@ -57,6 +59,24 @@ function patchManifest(manifest, { version, hostMatch }) {
     }
     return { ...item, matches };
   });
+  if (extraWebAccessibleResources.length > 0) {
+    if (patched.web_accessible_resources.length === 0) {
+      patched.web_accessible_resources = [{ resources: [], matches }];
+    }
+    patched.web_accessible_resources = patched.web_accessible_resources.map((item) => {
+      if (!item || typeof item !== "object") {
+        return item;
+      }
+      const resourceSet = new Set([
+        ...(Array.isArray(item.resources) ? item.resources : []),
+        ...extraWebAccessibleResources,
+      ]);
+      return {
+        ...item,
+        resources: Array.from(resourceSet),
+      };
+    });
+  }
 
   return patched;
 }
@@ -96,10 +116,24 @@ async function copyDirectoryInto(sourceDir, outDir, targetName, label) {
   return targetDir;
 }
 
-async function copyInputFile(sourceFile, outDir) {
-  const target = join(outDir, basename(sourceFile));
+async function copyInputFile(sourceFile, outDir, targetName = null) {
+  const target = join(outDir, targetName || basename(sourceFile));
   await copyFile(sourceFile, target);
   return target;
+}
+
+async function copyInputPath(sourcePath, outDir, targetName, label) {
+  const details = await stat(sourcePath);
+  if (details.isDirectory()) {
+    return copyDirectoryInto(sourcePath, outDir, targetName, label);
+  }
+
+  if (details.isFile()) {
+    await mkdir(dirname(join(outDir, targetName)), { recursive: true });
+    return copyInputFile(sourcePath, outDir, targetName);
+  }
+
+  throw new Error(`${label}: unsupported source type`);
 }
 
 async function writePatchedManifest(manifestPath, options, diagnostics) {
@@ -127,8 +161,20 @@ async function prepareExtensionPackage(options = {}) {
   const outDir = resolve(options.outDir || DEFAULT_OUT_DIR);
   const coreDir = resolve(options.extensionCoreDir || DEFAULT_CORE_DIR);
   const chromiumDir = resolve(options.extensionChromiumDir || DEFAULT_CHROMIUM_DIR);
+  const spikeRendererArtifacts = options.spikeRendererArtifacts;
+  const spikeVendorArtifacts = options.spikeVendorArtifacts;
   const clean = options.clean ?? true;
   const diagnostics = [];
+  const spikeArtifacts = [];
+  const spikeVendorArtifactTargets = [];
+  const extraWebAccessibleResources = [];
+
+  if (spikeRendererArtifacts) {
+    extraWebAccessibleResources.push("spike-renderer/*.mjs", "spike-renderer/*.js");
+  }
+  if (spikeVendorArtifacts) {
+    extraWebAccessibleResources.push("spike-vendor/*.mjs", "spike-vendor/*.js");
+  }
 
   if (clean) {
     await rm(outDir, { force: true, recursive: true });
@@ -142,6 +188,7 @@ async function prepareExtensionPackage(options = {}) {
   await writePatchedManifest(manifestPath, {
     version: options.version || DEFAULT_VERSION,
     hostMatch: options.hostMatch,
+    extraWebAccessibleResources,
   }, diagnostics);
 
   if (options.wasmBindgenJs) {
@@ -154,12 +201,50 @@ async function prepareExtensionPackage(options = {}) {
     await writeFile(target, binary);
   }
 
+  if (spikeRendererArtifacts) {
+    try {
+      const target = await copyInputPath(
+        spikeRendererArtifacts,
+        outDir,
+        "spike-renderer",
+        "spike renderer artifacts",
+      );
+      spikeArtifacts.push(target);
+    } catch (error) {
+      diagnostics.push(stableDiagnostic(
+        SPIKE_RENDERER_ARTIFACTS_DIAGNOSTIC,
+        `failed to include spike renderer artifacts: ${error.message}`,
+      ));
+      throw error;
+    }
+  }
+
+  if (spikeVendorArtifacts) {
+    try {
+      const target = await copyInputPath(
+        spikeVendorArtifacts,
+        outDir,
+        "spike-vendor",
+        "spike vendor artifacts",
+      );
+      spikeVendorArtifactTargets.push(target);
+    } catch (error) {
+      diagnostics.push(stableDiagnostic(
+        SPIKE_VENDOR_ARTIFACTS_DIAGNOSTIC,
+        `failed to include spike vendor artifacts: ${error.message}`,
+      ));
+      throw error;
+    }
+  }
+
   diagnostics.push(reportZipUnavailable());
 
   const files = await collectFiles(outDir);
   return {
     outDir,
     files,
+    spike_renderer_artifacts: spikeArtifacts,
+    spike_vendor_artifacts: spikeVendorArtifactTargets,
     core_files: files.filter((file) => file.startsWith("extension-core/")),
     diagnostics,
     manifest_path: "manifest.json",
@@ -198,6 +283,8 @@ async function main(argv = process.argv.slice(2)) {
     wasmFile: args.wasm_file,
     extensionCoreDir: args.extension_core_dir,
     extensionChromiumDir: args.extension_chromium_dir,
+    spikeRendererArtifacts: args.spike_renderer_artifacts,
+    spikeVendorArtifacts: args.spike_vendor_artifacts,
     clean: args.clean ?? true,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

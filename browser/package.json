@@ -1,0 +1,20 @@
+{
+  "name": "metadata-checker-browser",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Browser packaging helpers for M47 spike prototypes",
+  "type": "module",
+  "scripts": {
+    "build:spike-vendor": "node tools/build-spike-vendor-bundle.mjs",
+    "smoke:prepare-extension-package": "node --test test/prepare-extension-package-smoke.test.mjs",
+    "prepare-extension-package": "node tools/prepare-extension-package.mjs"
+  },
+  "dependencies": {
+    "d3-force-3d": "^3.0.6",
+    "echarts": "^5.6.0",
+    "pixi.js": "^8.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}

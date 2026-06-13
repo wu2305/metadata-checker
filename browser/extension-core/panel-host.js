@@ -448,6 +448,21 @@
       return { visible };
     }
 
+    function setHostVisible(nextVisible) {
+      if (!hostElement || !hostElement.style) {
+        return { visible: false, mounted };
+      }
+      hostElement.style.display = nextVisible ? "" : "none";
+      if (!nextVisible) {
+        visible = false;
+        if (panelElement?.style) {
+          panelElement.style.display = "none";
+        }
+        writeMarkers("hidden");
+      }
+      return { visible: nextVisible, mounted };
+    }
+
     function unmountPanel() {
       if (!mounted || !hostElement || !documentLike || !documentLike.body) {
         mounted = false;
@@ -511,6 +526,7 @@
       updatePanel,
       setPanelStatus,
       togglePanel,
+      setHostVisible,
       updateSelection,
       getState,
     };

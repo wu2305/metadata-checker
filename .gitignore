@@ -1,4 +1,6 @@
 /target
 .metadata-checker.graphdb
 .DS_Store
+/browser/node_modules/
+/.pnpm-store/
 /browser/artifacts/

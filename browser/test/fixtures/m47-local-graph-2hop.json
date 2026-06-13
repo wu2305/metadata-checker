@@ -1,0 +1,127 @@
+{
+  "status": "ready",
+  "target": "component:ButtonSubmit",
+  "focus_node": "cmp_submit_button",
+  "depth": 2,
+  "visible_hop": 1,
+  "source_summary": {
+    "total_nodes": 7,
+    "total_edges": 6,
+    "node_kinds": {
+      "component": 2,
+      "model": 3,
+      "param": 1,
+      "expression": 1
+    },
+    "edge_kinds": {
+      "reads": 2,
+      "writes": 2,
+      "action": 1,
+      "dataflow": 1
+    }
+  },
+  "nodes": [
+    {
+      "id": "cmp_submit_button",
+      "label": "Submit Button",
+      "kind": "component",
+      "metadata": {
+        "depth": 0
+      }
+    },
+    {
+      "id": "mdl_order_status",
+      "label": "Order Status",
+      "kind": "model",
+      "metadata": {
+        "depth": 1
+      }
+    },
+    {
+      "id": "mdl_form_data",
+      "label": "Form Data",
+      "kind": "model",
+      "metadata": {
+        "depth": 1
+      }
+    },
+    {
+      "id": "evt_submit",
+      "label": "Submit Clicked",
+      "kind": "event",
+      "metadata": {
+        "depth": 1
+      }
+    },
+    {
+      "id": "prm_context_user",
+      "label": "Context User",
+      "kind": "param",
+      "metadata": {
+        "depth": 2
+      }
+    },
+    {
+      "id": "expr_has_permission",
+      "label": "Expr Has Permission",
+      "kind": "expression",
+      "metadata": {
+        "depth": 2
+      }
+    },
+    {
+      "id": "mdl_status_code",
+      "label": "Status Code",
+      "kind": "model",
+      "metadata": {
+        "depth": 2
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "cmp_submit_button",
+      "to": "mdl_order_status",
+      "kind": "reads",
+      "direction": "Forward",
+      "label": "reads status",
+      "evidence": "ORDER.status_field"
+    },
+    {
+      "from": "cmp_submit_button",
+      "to": "mdl_form_data",
+      "kind": "reads",
+      "direction": "Forward",
+      "label": "reads form data"
+    },
+    {
+      "from": "cmp_submit_button",
+      "to": "evt_submit",
+      "kind": "action",
+      "direction": "Forward",
+      "label": "submits payload"
+    },
+    {
+      "from": "evt_submit",
+      "to": "prm_context_user",
+      "kind": "dataflow",
+      "direction": "Forward",
+      "label": "resolve context user"
+    },
+    {
+      "from": "mdl_order_status",
+      "to": "expr_has_permission",
+      "kind": "writes",
+      "direction": "Forward",
+      "label": "writes hasPermission"
+    },
+    {
+      "from": "prm_context_user",
+      "to": "mdl_status_code",
+      "kind": "writes",
+      "direction": "Forward",
+      "label": "writes status_code"
+    }
+  ],
+  "diagnostics": []
+}

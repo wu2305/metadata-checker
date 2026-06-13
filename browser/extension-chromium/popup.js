@@ -12,22 +12,12 @@ const SENSITIVE_PAIR_PATTERN =
   /["']?(token|cookie|password|secret|auth|credential|cipherpassport)["']?\s*[:=]\s*(["']?[^\n\r\s,;}]+["']?)/gi;
 
 const actionButtonDefs = {
-  openPanel: { selector: '[data-action="open-panel"]', requestType: "openPanel", message: "open panel" },
-  togglePanel: { selector: '[data-action="toggle-panel"]', requestType: "togglePanel", message: "toggle panel" },
-  processCurrent: {
-    selector: '[data-action="process-current"]',
-    requestType: "analyzeCurrentSelection",
-    message: "process current",
-  },
-  processBackground: {
-    selector: '[data-action="process-background"]',
+  openSettings: { selector: '[data-action="open-settings"]', requestType: "openPanel", message: "open settings" },
+  refreshStatus: { selector: '[data-action="refresh-status"]', message: "refresh status" },
+  syncMetadata: {
+    selector: '[data-action="sync-metadata"]',
     runtimeMessage: { type: "metadata-checker-background-process", payload: { limit: 1, max_concurrency: 1 } },
-    message: "process background",
-  },
-  retryCurrentSelection: {
-    selector: '[data-action="retry-current-selection"]',
-    requestType: "retryCurrentSelection",
-    message: "retry selection",
+    message: "sync metadata",
   },
   pauseBackground: {
     selector: '[data-action="pause-background"]',
@@ -45,10 +35,11 @@ const actionButtonDefs = {
 const fields = {
   sessionStatus: document.querySelector('[data-field="session-status"]'),
   sessionState: document.querySelector('[data-field="session-state"]'),
+  runtimeStatus: document.querySelector('[data-field="runtime-status"]'),
+  offscreenStatus: document.querySelector('[data-field="offscreen-status"]'),
   sourcePath: document.querySelector('[data-field="source-path"]'),
   sourceFileId: document.querySelector('[data-field="source-file-id"]'),
   sourceRevision: document.querySelector('[data-field="source-revision"]'),
-  selectionSummary: document.querySelector('[data-field="selection-summary"]'),
   indexingStatus: document.querySelector('[data-field="indexing-status"]'),
   indexingProgress: document.querySelector('[data-field="indexing-progress"]'),
   indexingProgressBar: document.querySelector('[data-field="indexing-progress-bar"]'),
@@ -147,46 +138,57 @@ function setTruncatedText(node, value, maxLength = 64) {
 function setStatusChip(node, value, tone = "unknown") {
   if (!node) return;
   node.textContent = normalizeText(value);
-  node.className = `status-chip ${tone}`;
+  node.className = `mc-status-chip ${tone}`;
 }
 
 function setActionMessage(text, isError = false) {
   if (!fields.actionMessage) return;
   fields.actionMessage.textContent = normalizeText(text);
-  fields.actionMessage.className = isError ? "action-msg error" : "action-msg";
+  fields.actionMessage.className = isError ? "mc-action-msg error" : "mc-action-msg";
+}
+
+function setButtonTextOnly(button, label) {
+  const text = normalizeText(label);
+  if (typeof button.replaceChildren === "function" && typeof document?.createElement === "function") {
+    const span = document.createElement("span");
+    span.textContent = text;
+    button.replaceChildren(span);
+    return;
+  }
+  button.textContent = text;
 }
 
 function setButtonState(key, state, label) {
   const button = buttons[key];
   if (!button) return;
 
-  if (typeof button.defaultLabel !== "string") {
-    button.defaultLabel = button.textContent;
+  if (typeof button.defaultHTML !== "string") {
+    button.defaultHTML = button.innerHTML;
   }
 
   if (state === "loading") {
     button.disabled = true;
     button.dataset.state = "loading";
-    button.textContent = label ?? "Working";
+    setButtonTextOnly(button, label ?? "Working");
     return;
   }
 
   if (state === "success") {
     button.disabled = true;
     button.dataset.state = "success";
-    button.textContent = label ?? "Done";
+    setButtonTextOnly(button, label ?? "Done");
     return;
   }
 
   if (state === "error") {
     button.disabled = true;
     button.dataset.state = "error";
-    button.textContent = label ?? "Failed";
+    setButtonTextOnly(button, label ?? "Failed");
     return;
   }
 
   button.disabled = false;
-  button.textContent = button.defaultLabel;
+  button.innerHTML = button.defaultHTML;
   if (state) {
     button.dataset.state = state;
   } else {
@@ -219,25 +221,10 @@ function classifyTone(value) {
   if (normalized === "paused" || normalized === "waiting_for_metadata") {
     return "warning";
   }
-  if (normalized === "error") {
+  if (normalized === "error" || normalized === "failed") {
     return "error";
   }
   return "unknown";
-}
-
-function summarizeSelection(selection) {
-  const ids = asArray(selection?.selected_component_ids).slice(0, 3);
-  const count = asArray(selection?.selected_component_ids).length;
-  const active = asString(selection?.active_component_id);
-  const parts = [];
-  if (active) {
-    parts.push(`active=${active}`);
-  }
-  if (ids.length > 0) {
-    parts.push(`ids=${ids.join(",")}`);
-  }
-  parts.push(`selected=${count}`);
-  return parts.join(" | ") || "none";
 }
 
 function normalizeBridgeState(payload) {
@@ -323,16 +310,21 @@ function render(state) {
   const sessionChipText = session.status || "unknown";
   const versionText = asString(version.value || version.version || "na");
   const sessionText = session.status === "ready" && asString(session.base_url)
-    ? `ready @ ${session.base_url} (${versionText ? `v${versionText}` : "v-"}, ${runtime.available ? "runtime:ready" : "runtime:offline"}, ${offscreen.available ? "offscreen:ready" : "offscreen:offline"})`
-    : `${session.status || "not ready"} (${versionText ? `v${versionText}` : "v-"}, ${runtime.available ? "runtime:ready" : "runtime:offline"}, ${offscreen.available ? "offscreen:ready" : "offscreen:offline"})`;
+    ? `ready @ ${session.base_url} (${versionText ? `v${versionText}` : "v-"})`
+    : `${session.status || "not ready"} (${versionText ? `v${versionText}` : "v-"})`;
+
   const sessionTone = classifyTone(session.status);
+  const runtimeTone = runtime.available ? "ready" : "warning";
+  const offscreenTone = offscreen.available ? "ready" : "warning";
+
   setStatusChip(fields.sessionStatus, sessionChipText, sessionTone);
+  setStatusChip(fields.runtimeStatus, runtime.available ? "ready" : "offline", runtimeTone);
+  setStatusChip(fields.offscreenStatus, offscreen.available ? "ready" : "offline", offscreenTone);
   setTruncatedText(fields.sessionState, sessionText, MAX_TEXT_LENGTH);
 
   setTruncatedText(fields.sourcePath, sourcePath || "unbound", MAX_PATH_LENGTH);
   setText(fields.sourceFileId, fileId || "unbound");
   setText(fields.sourceRevision, revision || "unbound");
-  setText(fields.selectionSummary, summarizeSelection(selection));
 
   const bg = background.background || {};
   const statusText = asString(bg.indexing_status || bg.status || "idle");
@@ -484,6 +476,14 @@ function requestArtifactSelectionState(bridgeState) {
   });
 }
 
+function normalizeError(error) {
+  return asDiagnostic(error) || {
+    code: asString(error.code) || "METADATA_CHECKER_UNKNOWN_ERROR",
+    severity: asString(error.severity) || "error",
+    message: asString(error.message || error),
+  };
+}
+
 function getButton(key) {
   return buttons[key];
 }
@@ -545,6 +545,31 @@ function runRuntimeAction(key, messagePayload, message) {
     })
     .finally(() => {
       loadStatus({ actionDiagnostic });
+    });
+}
+
+function runRefreshAction() {
+  setButtonState("refreshStatus", "loading", "Refreshing");
+  setActionMessage("refresh status");
+  return loadStatus()
+    .then((response) => {
+      setButtonState("refreshStatus", "success", "Done");
+      setActionMessage("ready");
+      return response;
+    })
+    .catch((error) => {
+      const diag = asDiagnostic(error) || {
+        code: asString(error.code) || "METADATA_CHECKER_ACTION_FAILED",
+        severity: "error",
+        message: asString(error.message || error),
+      };
+      setButtonState("refreshStatus", "error", diag.code);
+      setActionMessage(`error: ${diag.code}`, true);
+      loadStatus({ actionDiagnostic: diag });
+      return { diagnostics: [diag] };
+    })
+    .finally(() => {
+      clearButtonState("refreshStatus");
     });
 }
 
@@ -638,14 +663,6 @@ function loadStatus(extraState = {}) {
     });
 }
 
-function normalizeError(error) {
-  return asDiagnostic(error) || {
-    code: asString(error.code) || "METADATA_CHECKER_UNKNOWN_ERROR",
-    severity: asString(error.severity) || "error",
-    message: asString(error.message || error),
-  };
-}
-
 function bindButtonHandlers() {
   for (const key of Object.keys(actionButtonDefs)) {
     const button = document.querySelector(actionButtonDefs[key].selector);
@@ -654,24 +671,16 @@ function bindButtonHandlers() {
     }
   }
 
-  getButton("openPanel")?.addEventListener("click", () => {
-    runTabAction("openPanel", actionButtonDefs.openPanel.requestType, actionButtonDefs.openPanel.message);
+  getButton("openSettings")?.addEventListener("click", () => {
+    runTabAction("openSettings", actionButtonDefs.openSettings.requestType, actionButtonDefs.openSettings.message);
   });
 
-  getButton("togglePanel")?.addEventListener("click", () => {
-    runTabAction("togglePanel", actionButtonDefs.togglePanel.requestType, actionButtonDefs.togglePanel.message);
+  getButton("refreshStatus")?.addEventListener("click", () => {
+    runRefreshAction();
   });
 
-  getButton("processCurrent")?.addEventListener("click", () => {
-    runTabAction("processCurrent", actionButtonDefs.processCurrent.requestType, actionButtonDefs.processCurrent.message);
-  });
-
-  getButton("processBackground")?.addEventListener("click", () => {
-    runRuntimeAction("processBackground", actionButtonDefs.processBackground.runtimeMessage, actionButtonDefs.processBackground.message);
-  });
-
-  getButton("retryCurrentSelection")?.addEventListener("click", () => {
-    runTabAction("retryCurrentSelection", actionButtonDefs.retryCurrentSelection.requestType, actionButtonDefs.retryCurrentSelection.message);
+  getButton("syncMetadata")?.addEventListener("click", () => {
+    runRuntimeAction("syncMetadata", actionButtonDefs.syncMetadata.runtimeMessage, actionButtonDefs.syncMetadata.message);
   });
 
   getButton("pauseBackground")?.addEventListener("click", () => {

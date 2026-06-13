@@ -1,6 +1,7 @@
 use crate::output::schema::{AiOutput, Evidence, OutputKind};
 use crate::visualization::graph_model::{
-    SourceSummary, VisualEdge, VisualGraph, VisualGroup, VisualNode,
+    SourceSummary, VisualEdge, VisualGraph, VisualGroup, VisualNode, classify_edge_priority,
+    edge_evidence_status, summarize_edge,
 };
 use crate::visualization::options::{EdgeDirection, EdgeKind, NodeKind, VisualGraphOptions};
 use crate::visualization::sanitizer::{
@@ -264,18 +265,23 @@ impl VisualGraphBuilder {
                             if !seen_edges.contains(&edge_key) {
                                 seen_edges.insert(edge_key);
                                 let kind = Self::parse_edge_kind(edge_type);
+                                let label = sanitize_sensitive_text(edge_type);
+                                let evidence = if _options.include_evidence {
+                                    Some(sanitize_sensitive_text(&evidence.reason))
+                                } else {
+                                    None
+                                };
                                 graph.edges.push(VisualEdge {
                                     from: node_id.clone(),
                                     to: target,
-                                    kind,
-                                    edge_type: Some(sanitize_sensitive_text(edge_type)),
-                                    label: Some(sanitize_sensitive_text(edge_type)),
+                                    edge_type: Some(label.clone()),
+                                    label: Some(label.clone()),
                                     direction: EdgeDirection::Forward,
-                                    evidence: if _options.include_evidence {
-                                        Some(sanitize_sensitive_text(&evidence.reason))
-                                    } else {
-                                        None
-                                    },
+                                    priority: classify_edge_priority(&kind, Some(label.as_str())),
+                                    summary: summarize_edge(&kind, Some(label.as_str())),
+                                    evidence_status: edge_evidence_status(&evidence),
+                                    evidence,
+                                    kind,
                                 });
                             }
                         }
@@ -474,11 +480,14 @@ impl VisualGraphBuilder {
             graph.edges.push(VisualEdge {
                 from,
                 to,
-                kind,
-                edge_type,
-                label,
+                edge_type: edge_type.clone(),
+                label: label.clone(),
                 direction,
+                priority: classify_edge_priority(&kind, label.as_deref()),
+                summary: summarize_edge(&kind, label.as_deref()),
+                evidence_status: "unavailable".to_string(),
                 evidence: None,
+                kind,
             });
         }
     }

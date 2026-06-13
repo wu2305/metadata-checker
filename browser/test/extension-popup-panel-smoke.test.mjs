@@ -15,6 +15,7 @@ class FakeElement {
     this.style = {};
     this.dataset = {};
     this._handlers = new Map();
+    this.innerHTML = "";
   }
 
   addEventListener(type, handler) {
@@ -58,10 +59,11 @@ function createPopupContext({
   const fieldIds = [
     "session-status",
     "session-state",
+    "runtime-status",
+    "offscreen-status",
     "source-path",
     "source-file-id",
     "source-revision",
-    "selection-summary",
     "indexing-status",
     "indexing-progress",
     "indexing-progress-bar",
@@ -74,11 +76,9 @@ function createPopupContext({
   ];
 
   const buttonIds = [
-    "open-panel",
-    "toggle-panel",
-    "process-current",
-    "process-background",
-    "retry-current-selection",
+    "open-settings",
+    "refresh-status",
+    "sync-metadata",
     "pause-background",
     "resume-background",
     "copy-diagnostic",
@@ -217,7 +217,7 @@ function popupStatusFixture({
   return { bridge, state };
 }
 
-test("chromium popup renders ready state with session/indexing/cache/artifact fields", async () => {
+test("chromium popup renders global status fields and hides current-selection analyze controls", async () => {
   const context = createPopupContext({
     sendMessage: async () => popupStatusFixture().bridge,
     runtimeSendMessage: async (message) => {
@@ -241,21 +241,31 @@ test("chromium popup renders ready state with session/indexing/cache/artifact fi
   await flush();
 
   assert.equal(context.document.querySelector('[data-field="session-status"]').textContent, "ready");
+  assert.equal(context.document.querySelector('[data-field="runtime-status"]').textContent, "ready");
+  assert.equal(context.document.querySelector('[data-field="offscreen-status"]').textContent, "ready");
   assert.match(context.document.querySelector('[data-field="session-state"]').textContent, /v1/);
   assert.equal(
     context.document.querySelector('[data-field="source-path"]').textContent,
     "projects/tenant/page.spg",
   );
-  assert.equal(context.document.querySelector('[data-field="source-file-id"]').textContent, "file-001");
-  assert.equal(context.document.querySelector('[data-field="source-revision"]').textContent, "rev-1");
-  assert.equal(context.document.querySelector('[data-field="selection-summary"]').textContent, "active=comp-a | ids=comp-a,comp-b,comp-c | selected=4");
-  assert.equal(context.document.querySelector('[data-field="indexing-status"]').textContent, "indexing_current_page");
-  assert.equal(context.document.querySelector('[data-field="indexing-progress"]').textContent, "2/6 processed, 1 failed, 3 discovered, 1 active");
-  assert.equal(context.document.querySelector('[data-field="cache-hits"]').textContent, "7");
-  assert.equal(context.document.querySelector('[data-field="cache-misses"]').textContent, "5");
-  assert.equal(context.document.querySelector('[data-field="artifact-readiness"]').textContent, "ready (ready)");
+  assert.equal(context.document.querySelector('[data-action="process-current"]'), null);
+  assert.equal(context.document.querySelector('[data-action="retry-current-selection"]'), null);
   const diag = parseDiagnostic(context);
   assert.equal(diag.code, "METADATA_CHECKER_IDLE");
+});
+
+test("chromium popup source stays a settings and status surface, not graph analysis UI", async () => {
+  const [html, script] = await Promise.all([
+    readFile(join(ROOT.pathname, "extension-chromium", "popup.html"), "utf8"),
+    readFile(join(ROOT.pathname, "extension-chromium", "popup.js"), "utf8"),
+  ]);
+  const source = `${html}\n${script}`;
+
+  assert.doesNotMatch(source, /data-action=["']process-current["']/);
+  assert.doesNotMatch(source, /data-action=["']retry-current-selection["']/);
+  assert.doesNotMatch(source, /Analyze current selection/i);
+  assert.doesNotMatch(source, /Graph quick/i);
+  assert.doesNotMatch(source, /metadata-checker-graph-panel|graph-surface|pixi/i);
 });
 
 test("chromium popup shows indexing status and progress ratio", async () => {
@@ -281,6 +291,12 @@ test("chromium popup shows indexing status and progress ratio", async () => {
       if (message.type === "metadata-checker-popup-status") {
         return status.state;
       }
+      if (message.type === "metadata-checker-selection-changed") {
+        return {
+          ok: true,
+          artifact_ready: false,
+        };
+      }
       return { ok: true };
     },
   });
@@ -290,7 +306,6 @@ test("chromium popup shows indexing status and progress ratio", async () => {
   assert.equal(context.document.querySelector('[data-field="indexing-progress"]').textContent, "1/4 processed, 0 failed, 8 discovered, 3 active");
   const width = context.document.querySelector('[data-field="indexing-progress-bar"]').style.width;
   assert.equal(width, "25%");
-  assert.equal(context.document.querySelector('[data-field="selection-summary"]').textContent, "active=comp-a | selected=0");
 });
 
 test("chromium popup surfaces active tab missing diagnostic", async () => {
@@ -300,6 +315,9 @@ test("chromium popup surfaces active tab missing diagnostic", async () => {
     runtimeSendMessage: async (message) => {
       if (message.type === "metadata-checker-popup-status") {
         return popupStatusFixture().state;
+      }
+      if (message.type === "metadata-checker-selection-changed") {
+        return { ok: true, artifact_ready: false };
       }
       return { ok: true };
     },
@@ -320,7 +338,10 @@ test("chromium popup truncates long source path with tooltip", async () => {
         return popupStatusFixture({ sourcePath: longPath }).state;
       }
       if (message.type === "metadata-checker-selection-changed") {
-        return { ok: true, artifact_ready: false };
+        return {
+          ok: true,
+          artifact_ready: false,
+        };
       }
       return { ok: true };
     },
@@ -334,7 +355,7 @@ test("chromium popup truncates long source path with tooltip", async () => {
   assert.equal(sourcePathNode.title, longPath);
 });
 
-test("chromium popup executes actions and shows button messages", async () => {
+test("chromium popup executes global actions and shows button messages", async () => {
   const context = createPopupContext({
     sendMessage: async (_tabId, message) => ({ ok: true, payload: {}, action: message.request_type }),
     runtimeSendMessage: async (message) => {
@@ -354,36 +375,24 @@ test("chromium popup executes actions and shows button messages", async () => {
   await flush();
 
   const actionMessage = context.document.querySelector('[data-field="action-message"]');
-  const openPanel = context.document.querySelector('[data-action="open-panel"]');
-  const togglePanel = context.document.querySelector('[data-action="toggle-panel"]');
-  const processCurrent = context.document.querySelector('[data-action="process-current"]');
-  const processBackground = context.document.querySelector('[data-action="process-background"]');
-  const retry = context.document.querySelector('[data-action="retry-current-selection"]');
+  const openSettings = context.document.querySelector('[data-action="open-settings"]');
+  const refresh = context.document.querySelector('[data-action="refresh-status"]');
+  const sync = context.document.querySelector('[data-action="sync-metadata"]');
   const pause = context.document.querySelector('[data-action="pause-background"]');
   const resume = context.document.querySelector('[data-action="resume-background"]');
 
-  openPanel.click();
-  assert.equal(actionMessage.textContent, "open panel");
+  openSettings.click();
+  assert.equal(actionMessage.textContent, "open settings");
   await flush();
   assert.equal(context.__calls.some((item) => item.source === "tabs.sendMessage" && item.message.request_type === "openPanel"), true);
 
-  togglePanel.click();
-  assert.equal(actionMessage.textContent, "toggle panel");
+  refresh.click();
+  assert.equal(actionMessage.textContent, "refresh status");
   await flush();
-  assert.equal(context.__calls.some((item) => item.source === "tabs.sendMessage" && item.message.request_type === "togglePanel"), true);
 
-  processCurrent.click();
-  assert.equal(actionMessage.textContent, "process current");
-  await flush();
-  assert.equal(context.__calls.some((item) => item.source === "tabs.sendMessage" && item.message.request_type === "analyzeCurrentSelection"), true);
-
-  processBackground.click();
+  sync.click();
   await flush();
   assert.equal(context.__calls.some((item) => item.source === "runtime.sendMessage" && item.message.type === "metadata-checker-background-process"), true);
-
-  retry.click();
-  await flush();
-  assert.equal(context.__calls.some((item) => item.source === "tabs.sendMessage" && item.message.request_type === "retryCurrentSelection"), true);
 
   pause.click();
   await flush();
@@ -432,12 +441,7 @@ test("chromium popup copies redacted diagnostic", async () => {
 
 test("chromium popup marks button failure with stable diagnostic", async () => {
   const context = createPopupContext({
-    sendMessage: async (_tabId, message) => {
-      if (message.request_type === "analyzeCurrentSelection") {
-        return Promise.reject(new Error("analyze failed"));
-      }
-      return {};
-    },
+    sendMessage: async () => popupStatusFixture().bridge,
     runtimeSendMessage: async (message) => {
       if (message.type === "metadata-checker-popup-status") {
         return popupStatusFixture({}).state;
@@ -445,19 +449,53 @@ test("chromium popup marks button failure with stable diagnostic", async () => {
       if (message.type === "metadata-checker-selection-changed") {
         return { ok: true, artifact_ready: false };
       }
-      return {};
+      if (message.type === "metadata-checker-background-process") {
+        throw new Error("sync failed");
+      }
+      return { ok: true };
     },
   });
   await loadPopup(context);
   await flush();
 
-  const processCurrent = context.document.querySelector('[data-action="process-current"]');
-  processCurrent.click();
+  const sync = context.document.querySelector('[data-action="sync-metadata"]');
+  sync.click();
   await flush();
 
   const diag = parseDiagnostic(context);
   assert.equal(diag.code, "METADATA_CHECKER_ACTION_FAILED");
   assert.match(context.document.querySelector('[data-field="action-message"]').textContent, /METADATA_CHECKER_ACTION_FAILED/);
+});
+
+test("chromium popup uses plain text for button error labels", async () => {
+  const maliciousCode = "<img src=x onerror=alert(1)>";
+  const context = createPopupContext({
+    sendMessage: async () => popupStatusFixture().bridge,
+    runtimeSendMessage: async (message) => {
+      if (message.type === "metadata-checker-popup-status") {
+        return popupStatusFixture({}).state;
+      }
+      if (message.type === "metadata-checker-selection-changed") {
+        return { ok: true, artifact_ready: false };
+      }
+      if (message.type === "metadata-checker-background-process") {
+        throw { code: maliciousCode, message: "fail" };
+      }
+      return { ok: true };
+    },
+  });
+
+  await loadPopup(context);
+  await flush();
+
+  const sync = context.document.querySelector('[data-action="sync-metadata"]');
+  sync.click();
+  await flush();
+
+  assert.equal(sync.textContent, maliciousCode);
+  assert.equal(sync.innerHTML.includes("<img"), false);
+  assert.equal(parseDiagnostic(context)?.code, maliciousCode);
+  assert.match(context.document.querySelector('[data-field="action-message"]').textContent, new RegExp(maliciousCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("chromium popup does not use chrome.scripting.executeScript", async () => {

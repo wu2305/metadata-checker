@@ -4,8 +4,8 @@
 //! 仅在 browser-wasm feature 下编译，验证 JS callable 包装层 JSON 解析与透传行为。
 
 use metadata_checker::browser_wasm_bindgen::{
-    js_analysis_orchestrator_status, js_analyze_superpage_selection,
-    js_build_or_update_superpage_graph, js_enqueue_background_tasks,
+    js_analysis_orchestrator_status, js_analyze_local_graph, js_analyze_superpage_selection,
+    js_build_or_update_superpage_graph, js_diff_visible_manifest, js_enqueue_background_tasks,
     js_enqueue_foreground_selection, js_init_runtime, js_load_superpage_document,
     js_runtime_status, js_tick_analysis_orchestrator,
 };
@@ -39,6 +39,18 @@ struct JsEnvelope {
     diagnostics: Vec<JsDiagnostic>,
 }
 
+#[derive(Debug, Deserialize)]
+struct JsVisibleManifestDiff {
+    added: Vec<serde_json::Value>,
+    modified: Vec<serde_json::Value>,
+    deleted: Vec<serde_json::Value>,
+    unchanged: Vec<serde_json::Value>,
+    changed_files: Vec<serde_json::Value>,
+    content_queue: Vec<serde_json::Value>,
+    timing: serde_json::Value,
+    diagnostics: Vec<serde_json::Value>,
+}
+
 static WASM_TEST_RUNTIME_LOCK: Mutex<()> = Mutex::new(());
 static WASM_TEST_SOURCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -63,6 +75,45 @@ fn find_item_detail<'a>(envelope: &'a JsEnvelope, kind: &str) -> Option<&'a serd
         .iter()
         .find(|item| item.kind == kind)
         .map(|item| &item.detail)
+}
+
+fn visual_graph_from_envelope(envelope: &JsEnvelope) -> serde_json::Value {
+    find_item_detail(envelope, "visual_graph")
+        .cloned()
+        .expect("should include visual_graph item")
+}
+
+fn visual_graph_has_diagnostic(envelope: &JsEnvelope, code: &str) -> bool {
+    envelope
+        .items
+        .iter()
+        .find(|item| item.kind == "visual_graph")
+        .and_then(|visual_graph| visual_graph.detail.get("diagnostics"))
+        .and_then(|value| value.as_array())
+        .is_some_and(|diagnostics| {
+            diagnostics
+                .iter()
+                .any(|diag| diag.get("code").and_then(|v| v.as_str()) == Some(code))
+        })
+}
+
+fn find_visible_manifest_diff(envelope: &JsEnvelope) -> JsVisibleManifestDiff {
+    let diff_detail = find_item_detail(envelope, "visible_manifest_diff")
+        .cloned()
+        .expect("should include visible_manifest_diff item");
+    serde_json::from_value(diff_detail).expect("visible_manifest_diff detail should be valid")
+}
+
+fn manifest_source_paths(entries: &[serde_json::Value]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .get("source_path")
+                .and_then(|value| value.as_str())
+                .map(|source_path| source_path.to_string())
+        })
+        .collect()
 }
 
 fn with_runtime<T>(f: impl FnOnce(&str) -> T) -> T {
@@ -384,9 +435,7 @@ fn test_js_tick_emits_started_task_descriptor_for_background_queue() {
         .get("source_path")
         .and_then(|value| value.as_str())
         .expect("started task should include source_path");
-    assert!(
-        source_path == "app/js-wasm-bg-a.spg" || source_path == "app/js-wasm-bg-b.spg"
-    );
+    assert!(source_path == "app/js-wasm-bg-a.spg" || source_path == "app/js-wasm-bg-b.spg");
 }
 
 #[test]
@@ -413,7 +462,12 @@ fn test_js_tick_emits_started_foreground_task_selection_fields() {
         .expect("started foreground task should include selected_component_ids");
     let selected_ids: Vec<String> = selected_component_ids
         .iter()
-        .map(|value| value.as_str().expect("selected component id should be string").to_string())
+        .map(|value| {
+            value
+                .as_str()
+                .expect("selected component id should be string")
+                .to_string()
+        })
         .collect();
     assert_eq!(selected_ids, vec!["btn1".to_string(), "btn2".to_string()]);
 
@@ -504,4 +558,341 @@ fn test_js_analyze_superpage_selection_unknown_component_with_priority_option_re
         assert!(has_diagnostic_code(&envelope, "UNSUPPORTED_OPTION"));
         assert!(has_diagnostic_code(&envelope, "COMPONENT_NOT_FOUND"));
     });
+}
+
+#[test]
+fn test_js_analyze_superpage_selection_empty_options_is_accepted() {
+    with_runtime(|source_path| {
+        let raw = r#"{"version":"1.0","canvas":{"components":[{"id":"input1","type":"input","title":"Input"}]}}"#;
+        let load = js_load_superpage_document(source_path, raw);
+        assert_eq!(parse_js_envelope(&load).status, "ready");
+
+        let selection = format!(
+            r#"{{"source_path":"{}","file_id":"test","selected_component_ids":["input1"],"active_component_id":"input1"}}"#,
+            source_path
+        );
+        let output = js_analyze_superpage_selection(&selection, "{}");
+        let envelope = parse_js_envelope(&output);
+        assert_eq!(envelope.status, "ready");
+        let graph = visual_graph_from_envelope(&envelope);
+        assert_eq!(graph["status"], "empty");
+    });
+}
+
+#[test]
+fn test_js_analyze_local_graph_alias_exports_fixed_local_graph_contract() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    {"id":"input1","type":"input","title":"Input"},
+                    {"id":"label1","type":"label","title":"Label","value":"${input1.value}"}
+                ]
+            }
+        }"#;
+        let load = js_load_superpage_document(source_path, raw);
+        assert_eq!(parse_js_envelope(&load).status, "ready");
+
+        let selection = format!(
+            r#"{{"source_path":"{}","file_id":"test","selected_component_ids":["label1"],"active_component_id":"label1"}}"#,
+            source_path
+        );
+        let output = js_analyze_local_graph(&selection, r#"{"depth":2,"visible_hop":1}"#);
+        let envelope = parse_js_envelope(&output);
+        assert_eq!(envelope.status, "ready");
+        let graph = visual_graph_from_envelope(&envelope);
+        assert_eq!(graph["target"], "label1");
+        assert_eq!(graph["depth"], 2);
+        assert_eq!(graph["visible_hop"], 1);
+        assert_eq!(graph["nodes"].as_array().unwrap().is_empty(), false);
+    });
+}
+
+#[test]
+fn test_js_analyze_superpage_selection_applies_fixed_depth_and_visible_hop() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    {"id":"input1","type":"input","title":"Input"},
+                    {"id":"label1","type":"label","title":"Label","value":"${input1.value}"},
+                    {"id":"btn1","type":"button","title":"Submit","value":"${label1.value}"}
+                ]
+            }
+        }"#;
+        let load = js_load_superpage_document(source_path, raw);
+        let load_envelope = parse_js_envelope(&load);
+        assert_eq!(load_envelope.status, "ready");
+
+        let selection = format!(
+            r#"{{"source_path":"{}","file_id":"test","selected_component_ids":["label1"],"active_component_id":"label1"}}"#,
+            source_path
+        );
+        let options = r#"{"depth":3,"visible_hop":4}"#;
+        let output = js_analyze_superpage_selection(&selection, options);
+        let envelope = parse_js_envelope(&output);
+        assert_eq!(envelope.status, "ready");
+        assert!(has_diagnostic_code(&envelope, "UNSUPPORTED_OPTION"));
+        let graph = visual_graph_from_envelope(&envelope);
+        assert_eq!(graph["depth"], 2);
+        assert_eq!(graph["visible_hop"], 1);
+        assert_eq!(graph["target"], "label1");
+    });
+}
+
+#[test]
+fn test_js_analyze_superpage_selection_empty_selection_returns_idle_visual_graph() {
+    with_runtime(|source_path| {
+        let raw = r#"{"version":"1.0","canvas":{"components":[{"id":"label1","type":"label","title":"Label"}]}}"#;
+        let load = js_load_superpage_document(source_path, raw);
+        assert_eq!(parse_js_envelope(&load).status, "ready");
+
+        let selection = format!(
+            r#"{{"source_path":"{}","file_id":"test","selected_component_ids":[],"active_component_id":null}}"#,
+            source_path
+        );
+        let output = js_analyze_superpage_selection(&selection, "{}");
+        let envelope = parse_js_envelope(&output);
+        assert_eq!(envelope.status, "partial");
+        let graph = visual_graph_from_envelope(&envelope);
+        assert_eq!(graph["status"], "idle");
+    });
+}
+
+#[test]
+fn test_js_analyze_superpage_selection_edge_evidence_unavailable_is_reported_in_visual_graph() {
+    with_runtime(|source_path| {
+        let raw = r#"{
+            "version": "1.0",
+            "canvas": {
+                "components": [
+                    {"id":"label1","type":"label","title":"Label"}
+                ]
+            },
+            "sources":[{"id":"m1","modelType":"App","path":"app/m1.tbl"}]
+        }"#;
+        let load = js_load_superpage_document(source_path, raw);
+        assert_eq!(parse_js_envelope(&load).status, "ready");
+        assert_eq!(
+            parse_js_envelope(&js_build_or_update_superpage_graph(source_path)).status,
+            "ready"
+        );
+
+        let selection = format!(
+            r#"{{"source_path":"{}","file_id":"test","selected_component_ids":["label1"],"active_component_id":"label1"}}"#,
+            source_path
+        );
+        let output = js_analyze_superpage_selection(&selection, "{}");
+        let envelope = parse_js_envelope(&output);
+        assert_eq!(envelope.status, "ready");
+        let graph = find_item_detail(&envelope, "visual_graph").expect("visual graph detail");
+        let edges = graph["edges"].as_array().expect("visual graph edges");
+        assert!(
+            edges
+                .iter()
+                .any(|edge| edge["evidence_status"] == "unavailable"),
+            "visual graph edges should expose unavailable evidence status"
+        );
+        assert!(edges.iter().all(|edge| edge["priority"].is_string()));
+        assert!(edges.iter().all(|edge| edge["summary"].is_string()));
+        assert!(
+            visual_graph_has_diagnostic(&envelope, "EDGE_EVIDENCE_UNAVAILABLE"),
+            "visual graph should report missing edge evidence"
+        );
+    });
+}
+
+#[test]
+fn test_js_diff_visible_manifest_add_modify_delete_unchanged_and_queue() {
+    let previous = serde_json::json!([
+        {
+            "path": "app/a.spg",
+            "revision": "1",
+            "modifyTime": 1000,
+            "modifier": "u1"
+        },
+        {
+            "path": "app/changed.spg",
+            "revision": "1",
+            "modifyTime": 1000,
+            "modifier": "u2"
+        },
+        {
+            "path": "app/unchanged.tbl",
+            "revision": "1",
+            "modifyTime": 1000
+        },
+        {
+            "path": "app/deleted.spg",
+            "revision": "1",
+            "modifyTime": 1000
+        },
+        {
+            "path": "app/old-folder.app",
+            "isFolder": true
+        }
+    ])
+    .to_string();
+    let visible = serde_json::json!({
+        "children": [
+            {
+                "path": "app/a.spg",
+                "revision": "1",
+                "modifyTime": 1000
+            },
+            {
+                "path": "app/changed.spg",
+                "revision": "2",
+                "modifyTime": 1200
+            },
+            {
+                "path": "app/unchanged.tbl",
+                "revision": "1",
+                "modifyTime": 1000
+            },
+            {
+                "path": "app/added.json",
+                "revision": "1",
+                "modifyTime": 1100
+            },
+            {
+                "path": "app/new-folder.app",
+                "isFolder": true
+            }
+        ]
+    })
+    .to_string();
+
+    let output = js_diff_visible_manifest("appProj", &previous, &visible);
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "ready");
+    let diff = find_visible_manifest_diff(&envelope);
+    assert_eq!(
+        manifest_source_paths(&diff.unchanged),
+        vec!["app/a.spg", "app/unchanged.tbl"]
+    );
+    assert_eq!(
+        manifest_source_paths(&diff.modified),
+        vec!["app/changed.spg"]
+    );
+    assert_eq!(manifest_source_paths(&diff.added), vec!["app/added.json"]);
+    assert_eq!(
+        manifest_source_paths(&diff.deleted),
+        vec!["app/deleted.spg"]
+    );
+    assert!(!manifest_source_paths(&diff.changed_files).is_empty());
+    assert_eq!(
+        manifest_source_paths(&diff.changed_files),
+        vec!["app/added.json", "app/changed.spg"]
+    );
+    assert_eq!(
+        manifest_source_paths(&diff.content_queue),
+        vec!["app/added.json", "app/changed.spg"]
+    );
+    assert!(
+        diff.timing
+            .get("total_ms")
+            .and_then(|value| value.as_u64())
+            .is_some()
+    );
+}
+
+#[test]
+fn test_js_diff_visible_manifest_skip_directory_entries() {
+    let previous = serde_json::json!([
+        {
+            "path": "app/folder",
+            "isFolder": true,
+            "modifyTime": 1000
+        },
+        {
+            "path": "app/deleted-folder",
+            "isFolder": true,
+            "modifyTime": 1000
+        }
+    ])
+    .to_string();
+    let visible = serde_json::json!({
+        "data": {
+            "children": [
+                {
+                    "path": "app/folder",
+                    "isFolder": true,
+                    "modifyTime": 2000
+                },
+                {
+                    "path": "app/new-dir",
+                    "isFolder": true,
+                    "modifyTime": 2000
+                },
+                {
+                    "path": "app/keep.spg",
+                    "revision": "1",
+                    "modifyTime": 1000
+                }
+            ]
+        }
+    })
+    .to_string();
+
+    let output = js_diff_visible_manifest("appProj", &previous, &visible);
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "ready");
+    let diff = find_visible_manifest_diff(&envelope);
+    assert_eq!(manifest_source_paths(&diff.added), vec!["app/keep.spg"]);
+    assert_eq!(manifest_source_paths(&diff.modified), Vec::<String>::new());
+    assert_eq!(manifest_source_paths(&diff.deleted), Vec::<String>::new());
+    assert!(manifest_source_paths(&diff.unchanged).is_empty());
+    assert_eq!(
+        manifest_source_paths(&diff.changed_files),
+        vec!["app/keep.spg"]
+    );
+    assert_eq!(
+        manifest_source_paths(&diff.content_queue),
+        vec!["app/keep.spg"]
+    );
+    assert!(
+        diff.diagnostics.iter().any(|diag| diag.get("code")
+            == Some(&serde_json::Value::String(
+                "VISIBLE_MANIFEST_SKIP_DIRECTORY".to_string()
+            ))),
+        "expected visible manifest skip directory diagnostic"
+    );
+}
+
+#[test]
+fn test_js_diff_visible_manifest_revise_missing_but_modify_time_changes() {
+    let previous = serde_json::json!([
+        {
+            "path": "app/revision-missing.spg",
+            "modifyTime": 1000
+        }
+    ])
+    .to_string();
+    let visible = serde_json::json!([
+        {
+            "path": "app/revision-missing.spg",
+            "modifyTime": 2000
+        }
+    ])
+    .to_string();
+
+    let output = js_diff_visible_manifest("appProj", &previous, &visible);
+    let envelope = parse_js_envelope(&output);
+    assert_eq!(envelope.status, "ready");
+    let diff = find_visible_manifest_diff(&envelope);
+    assert_eq!(
+        manifest_source_paths(&diff.modified),
+        vec!["app/revision-missing.spg"]
+    );
+    assert!(
+        manifest_source_paths(&diff.changed_files)
+            .contains(&"app/revision-missing.spg".to_string())
+    );
+    assert_eq!(
+        manifest_source_paths(&diff.content_queue),
+        vec!["app/revision-missing.spg"]
+    );
 }

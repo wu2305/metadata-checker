@@ -12,6 +12,7 @@ use crate::browser::{
     enqueue_orchestrator_background_tasks, enqueue_orchestrator_foreground_selection, init_runtime,
     load_superpage_document, orchestrator_status, runtime_status, tick_orchestrator,
 };
+use crate::remote_metadata::diff_visible_manifest;
 
 fn parse_json_or_error<T>(
     json: &str,
@@ -69,6 +70,19 @@ fn parse_usize_or_error(
             message: format!("{}{}", message_prefix, e),
         }],
     })
+}
+
+fn parse_error_envelope(code: &str, message: impl Into<String>) -> BrowserAnalysisEnvelope {
+    BrowserAnalysisEnvelope {
+        status: AnalysisStatus::Error,
+        target: None,
+        items: vec![],
+        diagnostics: vec![crate::browser::AnalysisDiagnostic {
+            severity: "error".to_string(),
+            code: code.to_string(),
+            message: message.into(),
+        }],
+    }
 }
 
 /// 初始化 WASM runtime，接收 JSON 字符串选项
@@ -138,6 +152,12 @@ pub fn js_analyze_superpage_selection(selection_json: &str, options_json: &str) 
     envelope_to_string(&result)
 }
 
+/// 分析当前组件 Local Graph
+#[wasm_bindgen(js_name = analyzeLocalGraph)]
+pub fn js_analyze_local_graph(selection_json: &str, options_json: &str) -> String {
+    js_analyze_superpage_selection(selection_json, options_json)
+}
+
 /// 将前台请求入队到 orchestrator（JSON 入参）
 #[wasm_bindgen(js_name = enqueueForegroundSelection)]
 pub fn js_enqueue_foreground_selection(selection_json: &str, options_json: &str) -> String {
@@ -183,4 +203,32 @@ pub fn js_analysis_orchestrator_status(limit_json: &str) -> String {
         };
     let result = orchestrator_status(limit);
     envelope_to_string(&result)
+}
+
+/// 对可见清单做新增/变更比对，返回待拉取队列与耗时诊断。
+#[wasm_bindgen(js_name = diffVisibleManifest)]
+pub fn js_diff_visible_manifest(
+    project_ref: &str,
+    previous_manifest_json: &str,
+    visible_manifest_json: &str,
+) -> String {
+    match diff_visible_manifest(project_ref, previous_manifest_json, visible_manifest_json) {
+        Ok(diff) => {
+            let envelope = BrowserAnalysisEnvelope {
+                status: AnalysisStatus::Ready,
+                target: Some(project_ref.to_string()),
+                items: vec![crate::browser::AnalysisItem {
+                    kind: "visible_manifest_diff".to_string(),
+                    label: "Visible Manifest Diff".to_string(),
+                    detail: serde_json::to_value(diff).unwrap_or_else(|_| serde_json::json!({})),
+                }],
+                diagnostics: vec![],
+            };
+            envelope_to_string(&envelope)
+        }
+        Err(error) => envelope_to_string(&parse_error_envelope(
+            "INVALID_VISIBLE_MANIFEST_DIFF",
+            format!("Failed to diff visible manifest: {error}"),
+        )),
+    }
 }

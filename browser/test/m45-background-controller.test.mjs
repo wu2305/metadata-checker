@@ -451,6 +451,170 @@ test("M45 selection message triggers foreground processing with selection-specif
   assert.equal(keys.some((key) => key.includes("analysis-artifact|foreground|")), true);
 });
 
+test("M45 local-graph analyze message forces default depth and visible_hop and normalizes limits", async () => {
+  const cache = createMemoryMetadataCache();
+  const localGraphCalls = [];
+  const controller = createM45BackgroundController({
+    cache,
+    analysisClient: {
+      async initRuntime() {
+        throw new Error("local graph bridge should not reset runtime");
+      },
+      async analyzeLocalGraph(selection, options) {
+        localGraphCalls.push({ method: "analyzeLocalGraph", selection, options });
+        return { status: "ready", target: selection.active_component_id };
+      },
+    },
+    fetchImpl: () => {
+      throw new Error("should not fetch raw text in local graph bridge");
+    },
+  });
+
+  controller.state.session = { base_url: "https://example.test" };
+  controller.state.visible_index = {
+    status: "ready",
+    projects: [{ project_name: "p" }],
+    files: [
+      {
+        project_name: "p",
+        source_path: "app/Test.app/Page.spg",
+        file_id: "page-1",
+        revision: "1",
+        analyzable: true,
+      },
+    ],
+  };
+  await cache.set("analysis-artifact|background|https://example.test|p|app/Test.app/Page.spg|page-1|1", {
+    kind: "metadata-analysis-artifact",
+    source_path: "app/Test.app/Page.spg",
+    project_name: "p",
+    file_id: "page-1",
+    revision: "1",
+    analysis_status: "ready",
+  });
+
+  const result = await controller.handleMessage({
+    type: "metadata-checker-analyze-local-graph",
+    payload: {
+      source_path: "app/Test.app/Page.spg",
+      active_component_id: "input-1",
+      selected_component_ids: ["input-1"],
+      options: {
+        depth: 5,
+        visible_hop: 2,
+        max_nodes: "100",
+        max_edges: "80",
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(localGraphCalls.length, 1);
+  assert.equal(localGraphCalls[0].method, "analyzeLocalGraph");
+  assert.equal(localGraphCalls[0].selection.active_component_id, "input-1");
+  assert.equal(localGraphCalls[0].options.depth, 2);
+  assert.equal(localGraphCalls[0].options.visible_hop, 1);
+  assert.equal(localGraphCalls[0].options.max_nodes, 100);
+  assert.equal(localGraphCalls[0].options.max_edges, 80);
+  assert.equal(result.artifact_ready, true);
+  assert.equal(result.artifact.analysis_status, "ready");
+});
+
+test("M45 local-graph analyze returns unsupported diagnostic when runtime API missing", async () => {
+  const cache = createMemoryMetadataCache();
+  const controller = createM45BackgroundController({
+    cache,
+    analysisClient: {},
+    fetchImpl: () => {
+      throw new Error("should not fetch raw text in local graph bridge");
+    },
+  });
+
+  controller.state.session = { base_url: "https://example.test" };
+  controller.state.visible_index = {
+    status: "ready",
+    projects: [{ project_name: "p" }],
+    files: [
+      {
+        project_name: "p",
+        source_path: "app/Test.app/Page.spg",
+        file_id: "page-1",
+        revision: "1",
+        analyzable: true,
+      },
+    ],
+  };
+  await cache.set("analysis-artifact|background|https://example.test|p|app/Test.app/Page.spg|page-1|1", {
+    kind: "metadata-analysis-artifact",
+    source_path: "app/Test.app/Page.spg",
+    project_name: "p",
+    file_id: "page-1",
+    revision: "1",
+    analysis_status: "ready",
+  });
+
+  const result = await controller.handleMessage({
+    type: "metadata-checker-analyze-local-graph",
+    payload: {
+      source_path: "app/Test.app/Page.spg",
+      active_component_id: "input-1",
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.diagnostics[0].code,
+    "METADATA_CHECKER_ANALYZE_LOCAL_GRAPH_UNSUPPORTED",
+  );
+});
+
+test("M45 local-graph analyze returns artifact missing diagnostic when source not loaded", async () => {
+  const cache = createMemoryMetadataCache();
+  const localGraphCalls = [];
+  const controller = createM45BackgroundController({
+    cache,
+    analysisClient: {
+      async analyzeLocalGraph() {
+        localGraphCalls.push("called");
+        return { status: "ready" };
+      },
+    },
+    fetchImpl: () => {
+      throw new Error("should not fetch raw text in local graph bridge");
+    },
+  });
+
+  controller.state.session = { base_url: "https://example.test" };
+  controller.state.visible_index = {
+    status: "ready",
+    projects: [{ project_name: "p" }],
+    files: [
+      {
+        project_name: "p",
+        source_path: "app/Test.app/Page.spg",
+        file_id: "page-1",
+        revision: "1",
+        analyzable: true,
+      },
+    ],
+  };
+
+  const result = await controller.handleMessage({
+    type: "metadata-checker-analyze-local-graph",
+    payload: {
+      source_path: "app/Test.app/Page.spg",
+      active_component_id: "input-1",
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.diagnostics[0].code,
+    "METADATA_CHECKER_LOCAL_GRAPH_ARTIFACT_MISSING",
+  );
+  assert.equal(localGraphCalls.length, 0);
+});
+
 test("M45 pre-bootstrap selection is replayed and prioritized after visible index ready", async () => {
   const analyzeCalls = [];
   const cache = createMemoryMetadataCache();
@@ -1221,6 +1385,180 @@ test("M45 background fetches raw metadata and calls injected runtime analyzer", 
   assert.equal(runtimeCalls[3].options.include_conditions, true);
   assert.equal(runtimeCalls[3].options.include_dataflow, false);
   assert.equal(controller.state.background.processed, 1);
+});
+
+test("M47 refresh visible manifest uses WASM diff content queue", async () => {
+  let pageRevision = "7";
+  const fetchCalls = [];
+  const fetchImpl = async (url, init = {}) => {
+    fetchCalls.push({ url, init });
+    const parsed = new URL(url);
+    if (parsed.pathname === "/api/me/whoami") {
+      return jsonResponse(200, { userId: "u1", userName: "User One" });
+    }
+    if (parsed.pathname === "/api/me/getPermissionInfo") {
+      return jsonResponse(200, {
+        metaProjects: [{ projectName: "xiaoshouyi", desc: "crm" }],
+      });
+    }
+    if (parsed.pathname === "/api/meta/services/getFileChildren/xiaoshouyi") {
+      return jsonResponse(200, {
+        children: [{ name: "app", parentDir: "/xiaoshouyi", isFolder: true }],
+      });
+    }
+    if (parsed.pathname === "/api/meta/services/getFileDescendant/xiaoshouyi/app") {
+      return jsonResponse(200, {
+        files: [
+          {
+            id: "page-1",
+            name: "Page.spg",
+            parentDir: "/xiaoshouyi/app/Test.app",
+            revision: pageRevision,
+            isFolder: false,
+          },
+          {
+            id: "table-1",
+            name: "Data.tbl",
+            parentDir: "/xiaoshouyi/data/tables",
+            revision: "8",
+            isFolder: false,
+          },
+        ],
+      });
+    }
+    if (parsed.pathname === "/api/meta/services/getFileContent/page-1") {
+      return jsonResponse(200, JSON.stringify({
+        id: "page-1",
+        components: [{ id: "input1", type: "Input" }],
+      }));
+    }
+    if (parsed.pathname === "/api/meta/services/getFileContent/table-1") {
+      return jsonResponse(200, JSON.stringify({ id: "table-1" }));
+    }
+    return jsonResponse(404, {});
+  };
+  const runtimeCalls = [];
+  const controller = createM45BackgroundController({
+    fetchImpl,
+    clock: (() => {
+      let now = 4000;
+      return () => {
+        now += 5;
+        return now;
+      };
+    })(),
+    analysisClient: {
+      async initRuntime(options) {
+        runtimeCalls.push({ method: "initRuntime", options });
+        return { status: "ready" };
+      },
+      async diffVisibleManifest(previousManifestJson, visibleManifestJson, projectRef) {
+        runtimeCalls.push({
+          method: "diffVisibleManifest",
+          previousManifestJson,
+          visibleManifestJson,
+          projectRef,
+        });
+        const previous = JSON.parse(previousManifestJson);
+        const visible = JSON.parse(visibleManifestJson);
+        assert.equal(projectRef, "xiaoshouyi");
+        assert.equal(previous.find((entry) => entry.source_path.endsWith("Page.spg"))?.revision, "7");
+        assert.equal(visible.find((entry) => entry.source_path.endsWith("Page.spg"))?.revision, "9");
+        return {
+          items: [
+            {
+              kind: "visible_manifest_diff",
+              detail: {
+                added: [],
+                modified: [
+                  {
+                    source_path: "app/Test.app/Page.spg",
+                    revision: "9",
+                  },
+                ],
+                deleted: [],
+                unchanged: [
+                  {
+                    source_path: "data/tables/Data.tbl",
+                    revision: "8",
+                  },
+                ],
+                changed_files: [
+                  {
+                    project_ref: "xiaoshouyi",
+                    source_path: "app/Test.app/Page.spg",
+                    file_id: "page-1",
+                    revision: "9",
+                  },
+                ],
+                content_queue: [
+                  {
+                    project_ref: "xiaoshouyi",
+                    source_path: "app/Test.app/Page.spg",
+                    file_id: "page-1",
+                    revision: "9",
+                  },
+                ],
+                previous_manifest_count: previous.length,
+                visible_manifest_count: visible.length,
+                timing: { total_ms: 6 },
+                diagnostics: [],
+              },
+            },
+          ],
+        };
+      },
+      async loadSuperpageDocument(sourcePath, rawText) {
+        runtimeCalls.push({ method: "loadSuperpageDocument", sourcePath, rawText });
+        return { status: "ready" };
+      },
+      async buildOrUpdateSuperpageGraph(sourcePath) {
+        runtimeCalls.push({ method: "buildOrUpdateSuperpageGraph", sourcePath });
+        return { status: "ready" };
+      },
+      async analyzeSuperpageSelection(selection) {
+        runtimeCalls.push({ method: "analyzeSuperpageSelection", selection });
+        return { status: "ready", target: selection.source_path, items: [], diagnostics: [] };
+      },
+    },
+  });
+
+  await controller.bootstrapAndIndex({
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    access_token: "one-shot",
+    project_name: "xiaoshouyi",
+    initial_limit: 0,
+  });
+
+  pageRevision = "9";
+  const result = await controller.refreshVisibleManifest({
+    base_url: "https://autocrm-test.xiaoshouyi.com",
+    project_name: "xiaoshouyi",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.manifest_diff.modified, 1);
+  assert.equal(result.manifest_diff.content_queue_count, 1);
+  assert.equal(result.timings.manifest_diff_ms, 6);
+  assert.deepEqual(
+    runtimeCalls.map((call) => call.method),
+    [
+      "diffVisibleManifest",
+      "initRuntime",
+      "loadSuperpageDocument",
+      "buildOrUpdateSuperpageGraph",
+      "analyzeSuperpageSelection",
+    ],
+  );
+  assert.equal(runtimeCalls[2].sourcePath, "app/Test.app/Page.spg");
+  assert.equal(
+    fetchCalls.filter((call) => new URL(call.url).pathname === "/api/meta/services/getFileContent/page-1").length,
+    1,
+  );
+  assert.equal(
+    fetchCalls.filter((call) => new URL(call.url).pathname === "/api/meta/services/getFileContent/table-1").length,
+    0,
+  );
 });
 
 test("M45 bootstrap maps post-whoami 401 to session cookie diagnostic", async () => {

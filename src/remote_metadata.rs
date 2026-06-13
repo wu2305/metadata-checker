@@ -3,8 +3,39 @@
 //! M40.6：定义 RemoteMetadataProvider trait、请求/响应类型、错误枚举。
 //! 不同运行环境（WASM fetch、Page JS rc、Browser Extension、CLI）共用同一语义 contract。
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
+use std::collections::{BTreeMap, HashMap};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+
+#[cfg(not(target_arch = "wasm32"))]
+type ManifestTimingStart = Instant;
+
+#[cfg(target_arch = "wasm32")]
+type ManifestTimingStart = ();
+
+/// 创建可见清单 diff 计时起点。
+#[cfg(not(target_arch = "wasm32"))]
+fn manifest_timing_start() -> ManifestTimingStart {
+    Instant::now()
+}
+
+/// 创建可见清单 diff 计时起点。
+#[cfg(target_arch = "wasm32")]
+fn manifest_timing_start() -> ManifestTimingStart {}
+
+/// 读取可见清单 diff 阶段耗时。
+#[cfg(not(target_arch = "wasm32"))]
+fn manifest_elapsed_ms(start: &ManifestTimingStart) -> u128 {
+    start.elapsed().as_millis()
+}
+
+/// 读取可见清单 diff 阶段耗时。
+#[cfg(target_arch = "wasm32")]
+fn manifest_elapsed_ms(_start: &ManifestTimingStart) -> u128 {
+    0
+}
 
 /// 校验 source_path 是否为项目内逻辑路径。
 ///
@@ -124,6 +155,355 @@ impl MetadataContentType {
             _ => MetadataContentType::Unknown,
         }
     }
+}
+
+/// 读取可见清单条目时的中间结构。
+///
+/// 支持 BI 常见字段及可选字段，主要用于 JS 可见清单差量比对。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VisibleManifestRawEntry {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(rename = "resourcePath", default)]
+    resource_path: Option<String>,
+    #[serde(rename = "type", default)]
+    file_type: Option<String>,
+    #[serde(rename = "isFolder", default)]
+    is_folder: bool,
+    #[serde(default)]
+    revision: Option<String>,
+    #[serde(
+        rename = "modifyTime",
+        default,
+        deserialize_with = "deserialize_optional_u64"
+    )]
+    modify_time: Option<u64>,
+    #[serde(default)]
+    modifier: Option<String>,
+    #[serde(rename = "modifierName", default)]
+    modifier_name: Option<String>,
+}
+
+/// 可见清单标准化记录。
+///
+/// 输出和 diff 结果统一以 `source_path` 为主键。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VisibleManifestEntry {
+    pub id: Option<String>,
+    pub source_path: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(rename = "type", default)]
+    pub file_type: Option<String>,
+    #[serde(rename = "isFolder", default)]
+    pub is_folder: bool,
+    #[serde(default)]
+    pub revision: Option<String>,
+    #[serde(rename = "modifyTime", default)]
+    pub modify_time: Option<u64>,
+    #[serde(default)]
+    pub modifier: Option<String>,
+    #[serde(rename = "modifierName", default)]
+    pub modifier_name: Option<String>,
+}
+
+impl VisibleManifestRawEntry {
+    fn to_entry(self, project_ref: &str) -> Option<VisibleManifestEntry> {
+        let source_path =
+            derive_visible_manifest_source_path(project_ref, self.path, self.resource_path)?;
+        Some(VisibleManifestEntry {
+            id: self.id,
+            source_path,
+            name: self.name,
+            file_type: self.file_type,
+            is_folder: self.is_folder,
+            revision: self.revision,
+            modify_time: self.modify_time,
+            modifier: self.modifier,
+            modifier_name: self.modifier_name,
+        })
+    }
+}
+
+/// 可见清单差量输出。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VisibleManifestDiff {
+    pub project_ref: String,
+    pub added: Vec<VisibleManifestEntry>,
+    pub modified: Vec<VisibleManifestEntry>,
+    pub deleted: Vec<VisibleManifestEntry>,
+    pub unchanged: Vec<VisibleManifestEntry>,
+    /// 仅新增与变更且可分析的文件。
+    pub changed_files: Vec<RemoteFileRef>,
+    /// 队列内建议拉取内容的文件，避免目录进入队列。
+    pub content_queue: Vec<RemoteFileRef>,
+    pub previous_manifest_count: usize,
+    pub visible_manifest_count: usize,
+    pub timing: VisibleManifestTiming,
+    pub diagnostics: Vec<VisibleManifestDiffDiagnostic>,
+}
+
+/// 可见清单 diff 阶段耗时（毫秒）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VisibleManifestTiming {
+    pub parse_previous_ms: u128,
+    pub parse_visible_ms: u128,
+    pub compare_ms: u128,
+    pub total_ms: u128,
+}
+
+/// 可见清单 diff 诊断信息。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VisibleManifestDiffDiagnostic {
+    pub code: String,
+    pub message: String,
+}
+
+/// 比对可见清单，支持直接数组和 `children/result/data` 包装。
+///
+/// 以 `source_path` 为主键：
+/// - `added`: 上期未出现的新路径；
+/// - `modified`: 修订号或 `modifyTime` 变更；
+/// - `deleted`: 本次不存在的旧文件；
+/// - `unchanged`: 同步字段完全相同；
+///
+/// `changed_files` 表示本次新增/变更文件清单；`content_queue` 进一步筛选出
+/// 可分析的 `.spg/.tbl/.json` 文件，供 JS provider 按队列逐一 fetch。
+pub fn diff_visible_manifest(
+    project_ref: &str,
+    previous_manifest_json: &str,
+    visible_manifest_json: &str,
+) -> Result<VisibleManifestDiff, String> {
+    let total_start = manifest_timing_start();
+    let parse_prev_start = manifest_timing_start();
+    let previous_entries = parse_visible_manifest_entries(previous_manifest_json, project_ref)?;
+    let parse_previous_ms = manifest_elapsed_ms(&parse_prev_start);
+
+    let parse_visible_start = manifest_timing_start();
+    let visible_entries = parse_visible_manifest_entries(visible_manifest_json, project_ref)?;
+    let parse_visible_ms = manifest_elapsed_ms(&parse_visible_start);
+
+    let previous_manifest_count = previous_entries.len();
+    let visible_manifest_count = visible_entries.len();
+    let mut previous_map = entries_to_map(previous_entries);
+    let visible_map = entries_to_map(visible_entries);
+    let mut diagnostics = Vec::new();
+    let mut added = Vec::new();
+    let mut modified = Vec::new();
+    let mut deleted = Vec::new();
+    let mut unchanged = Vec::new();
+    let mut changed_files = Vec::new();
+    let mut content_queue = Vec::new();
+
+    let compare_start = manifest_timing_start();
+    for (source_path, current) in visible_map {
+        if current.is_folder {
+            diagnostics.push(VisibleManifestDiffDiagnostic {
+                code: "VISIBLE_MANIFEST_SKIP_DIRECTORY".to_string(),
+                message: format!("skip directory entry from visible manifest: {source_path}"),
+            });
+            continue;
+        }
+
+        if let Some(previous) = previous_map.remove(&source_path) {
+            if previous.is_folder {
+                diagnostics.push(VisibleManifestDiffDiagnostic {
+                    code: "VISIBLE_MANIFEST_SKIP_DIRECTORY".to_string(),
+                    message: format!(
+                        "skip changed record whose previous snapshot is directory: {source_path}"
+                    ),
+                });
+                continue;
+            }
+
+            if is_file_changed(&previous, &current) {
+                modified.push(current);
+                add_changed_and_queue_items(
+                    modified.last().cloned().expect("modified path must exist"),
+                    project_ref,
+                    &mut changed_files,
+                    &mut content_queue,
+                );
+            } else {
+                unchanged.push(current);
+            }
+            continue;
+        }
+
+        added.push(current.clone());
+        add_changed_and_queue_items(current, project_ref, &mut changed_files, &mut content_queue);
+    }
+
+    for (source_path, previous) in previous_map {
+        if previous.is_folder {
+            diagnostics.push(VisibleManifestDiffDiagnostic {
+                code: "VISIBLE_MANIFEST_SKIP_DIRECTORY".to_string(),
+                message: format!("skip directory entry from previous manifest: {source_path}"),
+            });
+            continue;
+        }
+
+        deleted.push(previous);
+    }
+    let compare_ms = manifest_elapsed_ms(&compare_start);
+
+    added.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+    modified.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+    deleted.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+    unchanged.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+    changed_files.sort_by(|left, right| left.source_path.cmp(&right.source_path));
+    content_queue.sort_by(|left, right| left.source_path.cmp(&right.source_path));
+
+    let timing = VisibleManifestTiming {
+        parse_previous_ms,
+        parse_visible_ms,
+        compare_ms,
+        total_ms: manifest_elapsed_ms(&total_start),
+    };
+
+    Ok(VisibleManifestDiff {
+        project_ref: project_ref.to_string(),
+        added,
+        modified,
+        deleted,
+        unchanged,
+        changed_files,
+        content_queue,
+        previous_manifest_count,
+        visible_manifest_count,
+        timing,
+        diagnostics,
+    })
+}
+
+fn entries_to_map(entries: Vec<VisibleManifestEntry>) -> BTreeMap<String, VisibleManifestEntry> {
+    let mut map = BTreeMap::new();
+    for entry in entries {
+        map.insert(entry.source_path.clone(), entry);
+    }
+    map
+}
+
+fn parse_visible_manifest_entries(
+    manifest_json: &str,
+    project_ref: &str,
+) -> Result<Vec<VisibleManifestEntry>, String> {
+    let value = serde_json::from_str::<Value>(manifest_json)
+        .map_err(|error| format!("invalid manifest json: {}", error))?;
+
+    let items = find_wrapped_manifest_array(&value).ok_or_else(|| {
+        "manifest json must be array or wrapped in children/result/data".to_string()
+    })?;
+
+    let mut entries = Vec::new();
+    for item in items {
+        let raw: VisibleManifestRawEntry =
+            serde_json::from_value(item.clone()).map_err(|error| {
+                format!("manifest item is not a visible manifest object: {}", error)
+            })?;
+        if let Some(entry) = raw.to_entry(project_ref) {
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
+}
+
+fn manifest_entry_to_file_ref(entry: &VisibleManifestEntry, project_ref: &str) -> RemoteFileRef {
+    RemoteFileRef {
+        remote_ref: None,
+        project_ref: project_ref.to_string(),
+        source_path: entry.source_path.clone(),
+        file_id: entry.id.clone(),
+        revision: entry.revision.clone(),
+    }
+}
+
+fn add_changed_and_queue_items(
+    entry: VisibleManifestEntry,
+    project_ref: &str,
+    changed_files: &mut Vec<RemoteFileRef>,
+    content_queue: &mut Vec<RemoteFileRef>,
+) {
+    let file_ref = manifest_entry_to_file_ref(&entry, project_ref);
+    changed_files.push(file_ref.clone());
+    if is_analyzable_content_path(&entry.source_path) {
+        content_queue.push(file_ref);
+    }
+}
+
+fn is_file_changed(previous: &VisibleManifestEntry, current: &VisibleManifestEntry) -> bool {
+    previous.revision != current.revision || previous.modify_time != current.modify_time
+}
+
+fn is_analyzable_content_path(source_path: &str) -> bool {
+    let ext = source_path.rsplit('.').next().unwrap_or("");
+    matches!(ext.to_lowercase().as_str(), "spg" | "tbl" | "json")
+}
+
+fn derive_visible_manifest_source_path(
+    project_ref: &str,
+    path: Option<String>,
+    resource_path: Option<String>,
+) -> Option<String> {
+    let raw_path = resource_path.or(path)?;
+    let normalized = raw_path.replace('\\', "/");
+    let normalized = normalized.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let trimmed = normalized.trim_start_matches('/');
+    let project = project_ref.trim_matches('/');
+    let source_path = if project.is_empty() {
+        trimmed.to_string()
+    } else if trimmed == project {
+        String::new()
+    } else {
+        let prefixed = format!("{project}/");
+        if trimmed.starts_with(&prefixed) {
+            trimmed[prefixed.len()..].to_string()
+        } else {
+            trimmed.to_string()
+        }
+    };
+    if source_path.is_empty() {
+        None
+    } else {
+        Some(source_path)
+    }
+}
+
+fn find_wrapped_manifest_array<'a>(value: &'a Value) -> Option<&'a [Value]> {
+    if let Some(items) = value.as_array() {
+        return Some(items.as_slice());
+    }
+    if let Some(object) = value.as_object() {
+        const WRAPPERS: [&str; 4] = ["children", "result", "data", "file"];
+        for key in WRAPPERS {
+            if let Some(nested) = object.get(key) {
+                if let Some(items) = find_wrapped_manifest_array(nested) {
+                    return Some(items);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn deserialize_optional_u64<'de, D>(deserializer: D) -> std::result::Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| match value {
+        Value::String(value) => value.parse::<u64>().ok(),
+        Value::Number(value) => value.as_u64(),
+        _ => None,
+    }))
 }
 
 /// 远程元数据错误码

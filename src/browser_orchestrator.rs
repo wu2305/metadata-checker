@@ -588,7 +588,8 @@ impl BrowserAnalysisOrchestrator {
 
             self.processed_count += 1;
             result.completed_task_ids.push(task_id);
-            result.completed_task_descriptors
+            result
+                .completed_task_descriptors
                 .push(task_to_orchestrator_descriptor(task_id, &task));
 
             let artifact = AnalysisArtifact {
@@ -677,9 +678,7 @@ impl BrowserAnalysisOrchestrator {
             );
 
             result.started_task_ids.push(task_id);
-            result
-                .started_task_descriptors
-                .push(task_descriptor);
+            result.started_task_descriptors.push(task_descriptor);
             started += 1;
 
             if self.min_interval_ticks > 0 {

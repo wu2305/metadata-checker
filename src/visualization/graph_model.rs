@@ -19,11 +19,20 @@ pub struct VisualGraph {
     pub groups: Vec<VisualGroup>,
     /// 焦点节点 ID
     pub focus_node: Option<String>,
+    /// 当前分析目标（一般为组件 ID 或空）
+    #[serde(default = "default_target")]
+    pub target: String,
+    /// 状态：ready/empty/warning/error/idle
+    #[serde(default = "default_status")]
+    pub status: String,
     /// 诊断信息
     pub diagnostics: Vec<Diagnostic>,
     /// 探索深度
     #[serde(default = "default_depth")]
     pub depth: usize,
+    /// 可视范围 hop 数
+    #[serde(default = "default_visible_hop")]
+    pub visible_hop: usize,
     /// 探索方向（如 both/upstream/downstream）
     #[serde(default = "default_direction")]
     pub direction: String,
@@ -48,8 +57,11 @@ impl VisualGraph {
             edges: Vec::new(),
             groups: Vec::new(),
             focus_node: None,
+            target: default_target(),
+            status: default_status(),
             diagnostics: Vec::new(),
             depth: default_depth(),
+            visible_hop: default_visible_hop(),
             direction: default_direction(),
             collapsed: false,
             truncated: false,
@@ -87,6 +99,8 @@ impl VisualGraph {
                 },
             });
         }
+        graph.target = default_target();
+        graph.status = "error".to_string();
         graph
     }
 }
@@ -134,8 +148,82 @@ pub struct VisualEdge {
     pub label: Option<String>,
     /// 方向
     pub direction: EdgeDirection,
+    /// 关系优先级：filter/visibility/source/action/other
+    #[serde(default = "default_edge_priority")]
+    pub priority: String,
+    /// 关系摘要
+    #[serde(default)]
+    pub summary: String,
+    /// 证据状态：available/unavailable
+    #[serde(default = "default_evidence_status")]
+    pub evidence_status: String,
     /// 证据说明
     pub evidence: Option<String>,
+}
+
+/// 根据边类型和标签推导稳定展示优先级。
+pub fn classify_edge_priority(kind: &EdgeKind, label: Option<&str>) -> String {
+    let kind_text = kind.to_string().to_lowercase();
+    let label_text = label.unwrap_or_default().to_lowercase();
+    let merged = format!("{} {}", kind_text, label_text);
+    if merged.contains("filter")
+        || merged.contains("condition")
+        || merged.contains("validate")
+        || merged.contains("calc_condition")
+        || merged.contains("条件")
+    {
+        "filter".to_string()
+    } else if merged.contains("display")
+        || merged.contains("visible")
+        || merged.contains("visibility")
+        || merged.contains("show")
+        || merged.contains("hide")
+        || merged.contains("controls_component")
+        || merged.contains("显示")
+    {
+        "visibility".to_string()
+    } else if merged.contains("read")
+        || merged.contains("source")
+        || merged.contains("input")
+        || merged.contains("field")
+        || merged.contains("dataflow")
+        || merged.contains("alias")
+    {
+        "source".to_string()
+    } else if merged.contains("action")
+        || merged.contains("write")
+        || merged.contains("trigger")
+        || merged.contains("calc")
+        || merged.contains("output")
+        || merged.contains("set")
+    {
+        "action".to_string()
+    } else {
+        "other".to_string()
+    }
+}
+
+/// 构造稳定边摘要。
+pub fn summarize_edge(kind: &EdgeKind, label: Option<&str>) -> String {
+    let label_text = label.unwrap_or_default();
+    if label_text.is_empty() {
+        kind.to_string()
+    } else {
+        format!("{}: {}", kind, label_text)
+    }
+}
+
+/// 根据证据是否存在返回稳定证据状态。
+pub fn edge_evidence_status(evidence: &Option<String>) -> String {
+    if evidence
+        .as_ref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+    {
+        "available".to_string()
+    } else {
+        "unavailable".to_string()
+    }
 }
 
 fn default_direction() -> String {
@@ -144,6 +232,26 @@ fn default_direction() -> String {
 
 fn default_depth() -> usize {
     1
+}
+
+fn default_visible_hop() -> usize {
+    1
+}
+
+fn default_status() -> String {
+    "ready".to_string()
+}
+
+fn default_edge_priority() -> String {
+    "other".to_string()
+}
+
+fn default_evidence_status() -> String {
+    "unavailable".to_string()
+}
+
+fn default_target() -> String {
+    String::new()
 }
 
 /// 可视化分组
