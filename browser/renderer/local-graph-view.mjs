@@ -50,14 +50,39 @@ function dropWeakModelReads(edges, nodesById) {
   });
 }
 
-function pruneDanglingNodes(nodes, edges, focusNodeId) {
-  const nodeIds = new Set(nodes.map((node) => node.id));
-  const connected = new Set();
-  for (const edge of edges) {
-    if (nodeIds.has(edge.from)) connected.add(edge.from);
-    if (nodeIds.has(edge.to)) connected.add(edge.to);
+function keepFocusReachable(nodes, edges, focusNodeId) {
+  const reachable = new Set([focusNodeId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of edges) {
+      if (reachable.has(edge.from) && !reachable.has(edge.to)) {
+        reachable.add(edge.to);
+        changed = true;
+      }
+      if (reachable.has(edge.to) && !reachable.has(edge.from)) {
+        reachable.add(edge.from);
+        changed = true;
+      }
+    }
   }
-  return nodes.filter((node) => node.id === focusNodeId || connected.has(node.id));
+  return {
+    nodes: nodes.filter((node) => reachable.has(node.id)),
+    edges: edges.filter((edge) => reachable.has(edge.from) && reachable.has(edge.to)),
+  };
+}
+
+export function isSoloFocusGraph(graph) {
+  if (!graph || typeof graph !== "object") {
+    return false;
+  }
+  const focusNodeId = graph.focus_node || graph.focusNodeId;
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  if (!focusNodeId || nodes.length !== 1) {
+    return false;
+  }
+  return nodes[0]?.id === focusNodeId && edges.length === 0;
 }
 
 /**
@@ -76,9 +101,11 @@ export function applyLocalGraphView(graph) {
 
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const filteredEdges = dropWeakModelReads(edges, nodesById);
-  const visibleNodes = pruneDanglingNodes(nodes, filteredEdges, focusNodeId);
+  const reachable = keepFocusReachable(nodes, filteredEdges, focusNodeId);
+  const visibleNodes = reachable.nodes;
+  const visibleEdges = reachable.edges;
 
-  const droppedEdgeCount = edges.length - filteredEdges.length;
+  const droppedEdgeCount = edges.length - visibleEdges.length;
   const droppedNodeCount = nodes.length - visibleNodes.length;
   const diagnostics = Array.isArray(graph.diagnostics) ? [...graph.diagnostics] : [];
   if (droppedEdgeCount > 0 || droppedNodeCount > 0) {
@@ -90,15 +117,23 @@ export function applyLocalGraphView(graph) {
     });
   }
 
+  const soloFocus = isSoloFocusGraph({
+    focus_node: focusNodeId,
+    nodes: visibleNodes,
+    edges: visibleEdges,
+  });
+
   return {
     ...graph,
     nodes: visibleNodes,
-    edges: filteredEdges,
+    edges: visibleEdges,
+    groups: soloFocus ? [] : graph.groups,
+    status: soloFocus && !graph.truncated ? "empty" : graph.status,
     diagnostics,
     source_summary: {
       ...(graph.source_summary && typeof graph.source_summary === "object" ? graph.source_summary : {}),
       total_nodes: visibleNodes.length,
-      total_edges: filteredEdges.length,
+      total_edges: visibleEdges.length,
     },
   };
 }

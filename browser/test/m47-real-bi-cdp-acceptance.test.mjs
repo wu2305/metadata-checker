@@ -279,8 +279,8 @@ function baseSnapshot(overrides = {}) {
       "analysis-status": "ready",
       "graph-depth": "2",
       "graph-visible-hop": "1",
-      "local-graph-renderer": "pixi",
-      "local-graph-renderer-candidate": "pixi",
+      "local-graph-renderer": "echarts",
+      "local-graph-renderer-candidate": "echarts",
       "graph-node-count": "3",
       "graph-edge-count": "2",
       "manifest-added": "1",
@@ -325,7 +325,7 @@ function baseSnapshot(overrides = {}) {
         right: 0,
         bottom: 0,
       },
-      markerRenderer: "pixi",
+      markerRenderer: "echarts",
       markerDepth: "2",
       markerVisibleHop: "1",
       markerNodeCount: "3",
@@ -421,6 +421,7 @@ test("collectPopupAcceptanceChecks should pass on valid hard constraints", () =>
 
   assert.equal(result.failed, false);
   assert.equal(result.checks.renderer.status, "pass");
+  assert.equal(result.checks.renderer.expected, "echarts|pixi");
   assert.equal(result.checks.canvas.status, "pass");
   assert.equal(result.checks.geometry.status, "pass");
   assert.equal(result.checks.selection.status, "pass");
@@ -452,6 +453,26 @@ test("collectPopupAcceptanceChecks should pass on valid hard constraints", () =>
   assert.equal(result.edge_details.length, 1);
   assert.equal(result.screenshot_exists, true);
   assert.equal(result.passing, true);
+});
+
+test("collectPopupAcceptanceChecks should accept pixi renderer as fallback path", () => {
+  const result = collectPopupAcceptanceChecks(
+    baseSnapshot({
+      directMarkers: {
+        ...baseSnapshot().directMarkers,
+        "local-graph-renderer": "pixi",
+      },
+      popup: {
+        ...baseSnapshot().popup,
+        markerRenderer: "pixi",
+      },
+    }),
+    true,
+    "/tmp/shot.png",
+  );
+
+  assert.equal(result.checks.renderer.status, "pass");
+  assert.equal(result.checks.renderer.actual, "pixi");
 });
 
 test("collectPopupAcceptanceChecks should fail when click details omit node or edge contract fields", () => {

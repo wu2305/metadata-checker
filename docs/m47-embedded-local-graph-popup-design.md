@@ -2,13 +2,13 @@
 
 ## 当前结论
 
-M47 正式落地方向确定为：设计器内嵌 Local Graph popup 使用 Rust/WASM 输出 2-hop VisualGraph，浏览器侧在 Chrome extension content script 隔离执行世界中运行 PixiJS + `d3-force-3d` renderer。页面主上下文只保留设计器 selection bridge，不运行 Pixi renderer。
+M47 正式落地方向确定为：设计器内嵌 Local Graph popup 使用 Rust/WASM 输出 2-hop VisualGraph，浏览器侧在 Chrome extension content script 隔离执行世界中运行 **扩展内 bundled ECharts force graph** 作为主 renderer（`renderer=auto` 时优先 `echarts`），PixiJS + `d3-force-3d` 作为回退路径。页面主上下文只保留设计器 selection bridge，不调用 BI 主世界 `commons/echarts`，也不运行 Pixi renderer。
 
-该决策来自 M47 spike 真实环境验证：
+该决策来自 M47 spike 与 M48 真实环境验证：
 
-- 扩展内 ESM vendor bundle 可以被真实 BI 页面加载。
-- 真实 BI 主页面上下文污染了 `Array.prototype.pushAll`，且该属性可枚举，会破坏 Pixi 8 内部 systems 遍历。
-- Chrome isolated world 中没有该污染，同一 bundle 可正常渲染 `renderer=pixi`。
+- 扩展内 ESM vendor bundle（`spike-vendor/echarts*.mjs`、`spike-vendor/pixi*.mjs`）可以被 content script 隔离世界加载。
+- 真实 BI 主页面上下文污染了 `Array.prototype.pushAll`，且该属性可枚举，会破坏 Pixi 8 内部 systems 遍历；同一 bundle 在 Chrome isolated world 可正常渲染。
+- ECharts 在扩展内按需打包 GraphChart，避免依赖报表页主世界 ECharts，且 force 子图更适合右下角小浮层。
 - 因此正式实现必须保持 renderer、vendor bundle、DOM host 编排在 content script / extension isolated world；page-script 只传轻量 selection message。
 
 ## 定位
@@ -463,7 +463,7 @@ M47 必须做真实 BI 环境复测，至少覆盖：
 
 - extension content、page-script、runtime-adapter、session、selection-bridge、onInitDesigner marker。
 - selection changed 自动更新局部图。
-- `renderer=pixi` 在 isolated world 成立。
+- `renderer=echarts`（或回退 `pixi`）在 isolated world 成立。
 - 主页面 `Array.prototype` 污染不影响正式 renderer。
 - 1-hop 高亮、2-hop 半透明。
 - 稠密图有 `+N` 聚合节点，截图中不得出现错误环形结构或全量点云。
@@ -514,7 +514,7 @@ M47 可验收必须同时满足：
 - Rust/WASM 能输出当前组件 2-hop VisualGraph，字段不足时有稳定 diagnostic。
 - 设计器 selection changed 自动驱动 Local Graph 更新。
 - 内嵌 popup 默认显示当前组件高价值 1-hop，2-hop 半透明虚化，隐藏节点以聚合节点计数。
-- Pixi renderer 在真实 BI Chrome isolated world 中可见且 marker 为 `pixi`。
+- 主 renderer 在真实 BI Chrome isolated world 中可见且 marker 为 `echarts`（或回退 `pixi`）；不得依赖 page-script 主世界 ECharts。
 - 浏览器扩展 popup 已回归设置/状态页，不混入当前组件分析能力。
 - 所有必要 marker、截图、JSON evidence 齐全。
 - 影响面自动化测试通过。
@@ -522,6 +522,7 @@ M47 可验收必须同时满足：
 
 ## M47 非目标
 
+- 不在 M47/M48 范围实现 WASM `include_priority` / `include_dataflow` 选项；调用方若传入，runtime 返回稳定 diagnostic，不阻塞主路径 local graph。
 - 不实现完整 graph 搜索、过滤、路径追踪。
 - 不提供 depth 切换。
 - 不在 JS 中解析 `.spg/.tbl`。

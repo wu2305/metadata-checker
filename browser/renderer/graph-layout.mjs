@@ -380,6 +380,40 @@ function computeGraphDepth(normalized) {
 function computeNodeDepths(normalized, options) {
   const maxDepth = parseIntSafe(options?.maxDepth, DEFAULT_RENDER_OPTIONS.maxDepth);
   const focus = normalized.focus_node;
+  if (
+    Array.isArray(normalized.nodes)
+    && normalized.nodes.length === 1
+    && Array.isArray(normalized.edges)
+    && normalized.edges.length === 0
+    && (!focus || normalized.nodes[0]?.id === focus)
+  ) {
+    const soloNode = normalized.nodes[0];
+    return {
+      nodes: [{
+        ...soloNode,
+        depth: 0,
+        visualLabel: sanitizeLabel(soloNode.label, options?.nodeLabelMaxLength ?? DEFAULT_RENDER_OPTIONS.nodeLabelMaxLength),
+        neighborCount: 0,
+        relatedPrioritySummary: "",
+        collapsed: false,
+        expandable: false,
+        truncated: shouldTruncateNodeLabel(soloNode, options?.nodeLabelMaxLength ?? DEFAULT_RENDER_OPTIONS.nodeLabelMaxLength),
+      }],
+      edges: [],
+      depth: 0,
+      truncated: Boolean(normalized.truncated),
+      truncatedReason: safeToString(
+        normalized.truncated_reason ?? normalized.truncatedReason ?? "",
+      ),
+      focus_node: normalized.focus_node,
+      diagnostics: normalized.diagnostics,
+      source_summary: normalized.source_summary,
+      maxDepth: 0,
+      nodeCount: 1,
+      edgeCount: 0,
+      focusDepth: 0,
+    };
+  }
   const adjacency = new Map();
   for (const edge of normalized.edges) {
     if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);

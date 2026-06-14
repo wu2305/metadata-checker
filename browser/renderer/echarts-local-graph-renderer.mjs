@@ -99,6 +99,74 @@ function formatVisibleGraphText(state, layout) {
   return lines.join("\n");
 }
 
+const VIEWPORT_SCALE_DEFAULT = 1;
+const VIEWPORT_SCALE_PRECISION = 2;
+
+function formatTargetString(target) {
+  if (!target?.id) {
+    return "none";
+  }
+  const type = toStringValue(target.type, "node").trim() || "node";
+  return `${type}:${toStringValue(target.id)}`;
+}
+
+function countHighlight(layout, target) {
+  const nodes = new Set();
+  const edges = new Set();
+  if (!target?.id) {
+    const focusId = layout?.focus_node || layout?.focusNodeId;
+    if (focusId) {
+      nodes.add(focusId);
+    }
+    return { nodeCount: nodes.size, edgeCount: edges.size };
+  }
+  if (target.type === "edge") {
+    edges.add(target.id);
+    const edge = (layout?.edges || []).find(
+      (item) => (item.id || `${item.from}->${item.to}`) === target.id,
+    );
+    if (edge?.from) nodes.add(edge.from);
+    if (edge?.to) nodes.add(edge.to);
+    return { nodeCount: nodes.size, edgeCount: edges.size };
+  }
+  nodes.add(target.id);
+  for (const edge of layout?.edges || []) {
+    if (edge.from === target.id || edge.to === target.id) {
+      edges.add(edge.id || `${edge.from}->${edge.to}`);
+      if (edge.from) nodes.add(edge.from);
+      if (edge.to) nodes.add(edge.to);
+    }
+  }
+  return { nodeCount: nodes.size, edgeCount: edges.size };
+}
+
+function writeInteractionMarkers(root, state, layout) {
+  if (!root?.setAttribute) {
+    return;
+  }
+  const focusId = layout?.focus_node || layout?.focusNodeId || "";
+  const hoverTarget = state.hoveredTarget;
+  const lockedTarget = state.lockedTarget;
+  const detailTarget = lockedTarget || hoverTarget;
+  const highlight = countHighlight(layout, detailTarget || (focusId ? { type: "focus", id: focusId } : null));
+  const viewportTarget = state.viewportTarget
+    || (focusId ? { type: "focus", id: focusId } : null);
+  root.setAttribute("data-metadata-checker-graph-hover-target", formatTargetString(hoverTarget));
+  root.setAttribute("data-metadata-checker-graph-locked-target", formatTargetString(lockedTarget));
+  root.setAttribute(
+    "data-metadata-checker-graph-detail-kind",
+    lockedTarget?.type || hoverTarget?.type || (focusId ? "node" : "empty"),
+  );
+  root.setAttribute("data-metadata-checker-graph-highlight-node-count", String(highlight.nodeCount));
+  root.setAttribute("data-metadata-checker-graph-highlight-edge-count", String(highlight.edgeCount));
+  root.setAttribute(
+    "data-metadata-checker-graph-viewport-scale",
+    String(Number((state.viewportScale ?? VIEWPORT_SCALE_DEFAULT).toFixed(VIEWPORT_SCALE_PRECISION))),
+  );
+  root.setAttribute("data-metadata-checker-graph-viewport-target", formatTargetString(viewportTarget));
+  root.setAttribute("data-metadata-checker-graph-density-profile", "compact");
+}
+
 function getCurrentDetailPayload(state, layout) {
   if (state.lockedTarget?.id) {
     if (state.lockedTarget.type === "edge") {
@@ -148,6 +216,8 @@ export function createEchartsLocalGraphRenderer(rawOptions = {}) {
     echartsIdToLayoutId: null,
     lockedTarget: null,
     hoveredTarget: null,
+    viewportScale: VIEWPORT_SCALE_DEFAULT,
+    viewportTarget: null,
   };
 
   function resolveLayoutNodeId(echartsNodeId) {
@@ -206,6 +276,7 @@ export function createEchartsLocalGraphRenderer(rawOptions = {}) {
       if (eventType === "click") {
         state.lockedTarget = { type: "edge", id: payload.edgeId };
         state.hoveredTarget = null;
+        state.viewportTarget = { type: "edge", id: payload.edgeId };
         options.onEdgeClick?.(payload);
       } else if (eventType === "hover") {
         state.hoveredTarget = { type: "edge", id: payload.edgeId };
@@ -215,6 +286,7 @@ export function createEchartsLocalGraphRenderer(rawOptions = {}) {
         options.onEdgeHover?.({ ...payload, event: "hoverEnd" });
       }
       renderInteractionDetail(state.detailHost, getCurrentDetailPayload(state, state.layout));
+      writeInteractionMarkers(rawOptions.root, state, state.layout);
       return;
     }
 
@@ -224,6 +296,7 @@ export function createEchartsLocalGraphRenderer(rawOptions = {}) {
     if (eventType === "click") {
       state.lockedTarget = { type: "node", id: node.id };
       state.hoveredTarget = null;
+      state.viewportTarget = { type: "node", id: node.id };
       options.onNodeClick?.(payload);
     } else if (eventType === "hover") {
       state.hoveredTarget = { type: "node", id: node.id };
@@ -233,6 +306,7 @@ export function createEchartsLocalGraphRenderer(rawOptions = {}) {
       options.onNodeHover?.({ ...payload, event: "hoverEnd" });
     }
     renderInteractionDetail(state.detailHost, getCurrentDetailPayload(state, state.layout));
+    writeInteractionMarkers(rawOptions.root, state, state.layout);
   }
 
   function bindChartInteractions(chart) {
@@ -245,6 +319,13 @@ export function createEchartsLocalGraphRenderer(rawOptions = {}) {
     chart.on("click", (params) => handleChartInteraction(params, "click"));
     chart.on("mouseover", (params) => handleChartInteraction(params, "hover"));
     chart.on("mouseout", (params) => handleChartInteraction(params, "hoverEnd"));
+    chart.on("graphRoam", (params) => {
+      const nextScale = Number(params?.zoom);
+      if (Number.isFinite(nextScale) && nextScale > 0) {
+        state.viewportScale = nextScale;
+      }
+      writeInteractionMarkers(rawOptions.root, state, state.layout);
+    });
   }
 
   function destroyChart() {
@@ -288,9 +369,14 @@ export function createEchartsLocalGraphRenderer(rawOptions = {}) {
       state.echartsIdToLayoutId = buildEchartsIdMap(layout);
       state.lockedTarget = null;
       state.hoveredTarget = null;
+      state.viewportScale = VIEWPORT_SCALE_DEFAULT;
+      state.viewportTarget = layout.focus_node || layout.focusNodeId
+        ? { type: "focus", id: layout.focus_node || layout.focusNodeId }
+        : null;
 
       ensureDetailHost(mountHost);
       renderInteractionDetail(state.detailHost, getCurrentDetailPayload(state, layout));
+      writeInteractionMarkers(root, state, layout);
 
       let chart;
       try {
@@ -344,8 +430,11 @@ export function createEchartsLocalGraphRenderer(rawOptions = {}) {
     },
     clearLockedTarget() {
       state.lockedTarget = null;
+      const focusId = state.layout?.focus_node || state.layout?.focusNodeId;
+      state.viewportTarget = focusId ? { type: "focus", id: focusId } : null;
       if (state.layout) {
         renderInteractionDetail(state.detailHost, getCurrentDetailPayload(state, state.layout));
+        writeInteractionMarkers(rawOptions.root, state, state.layout);
       }
     },
     destroy() {

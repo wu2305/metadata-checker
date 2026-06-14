@@ -1,9 +1,26 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 
-const require = createRequire(import.meta.url);
-const { createPanelHost } = require("../extension-core/panel-host.js");
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+function loadClassicScript(relativePath) {
+  const filename = join(ROOT, relativePath);
+  const context = {
+    console,
+    module: { exports: {} },
+    exports: {},
+    globalThis: {},
+  };
+  context.globalThis = context;
+  vm.runInNewContext(readFileSync(filename, "utf8"), context, { filename });
+  return context.module.exports;
+}
+
+const { createPanelHost } = loadClassicScript("extension-core/panel-host.js");
 
 function createElement(tagName) {
   const element = {

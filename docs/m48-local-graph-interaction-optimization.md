@@ -2,7 +2,7 @@
 
 ## Summary
 
-M48 承接 M47 已验收的 Pixi Local Graph 主路径：`renderer=pixi`、2-hop VisualGraph、1-hop 突出、稠密图聚合为 `+N` 节点。M48 不再重新证明图能显示，而是把右下角 Local Graph 从“可见”推进到“可探索”：用户能在很小的浮层里快速判断当前组件的关键链路、点/边含义、隐藏关系规模，并用明确交互进入完整详情。
+M48 承接 M47 Local Graph 浮层：`renderer=auto` 时优先 **扩展内 ECharts**，失败回退 Pixi；二者共享 Rust/WASM 2-hop VisualGraph、`applyLocalGraphView` 过滤与 `graph-panel-host` 底栏（Pin · Copy · Collapse）。M48 不再重新证明图能显示，而是把右下角 Local Graph 从“可见”推进到“可探索”：用户能在很小的浮层里快速判断当前组件的关键链路、点/边含义、隐藏关系规模。
 
 M48 默认不修改 Rust/WASM VisualGraph contract。JS 仍只做 renderer view model、交互状态、DOM marker 和测试，不解析 `.spg/.tbl`，不建图，不从 raw metadata 推断业务含义。
 
@@ -16,8 +16,15 @@ M48 默认不修改 Rust/WASM VisualGraph contract。JS 仍只做 renderer view 
 - 小浮层保持辅助性质，不扩成 graph dashboard。
 - 真实 BI 验收能证明交互真的可用，而不是只看 marker。
 
+## Renderer 分工（ECharts 主路径 / Pixi 回退）
+
+- **ECharts（`renderer=auto` 优先）**：扩展内 bundled GraphChart + force layout；支持 hover/click 锁定、detail 摘要、`graph-*` 交互 marker、`roam` 缩放；与 Pixi 共用 `applyLocalGraphView` 与 `graph-layout`。
+- **Pixi（回退）**：保留稠密图 `+N` 聚合、四档选边 tier、`d3-force-3d` 视口平移/缩放与完整 M48 截图 smoke；ECharts 不做 `+N` 聚合节点，仅依赖 layout 截断。
+- 真实 BI CDP 验收接受 `local-graph-renderer=echarts|pixi`。
+
 ## Non-Goals
 
+- 不在 M47/M48 实现 WASM `include_priority` / `include_dataflow`（runtime 返回稳定 diagnostic）。
 - 不做完整 graph 搜索、全局过滤器、路径追踪 UI。
 - 不在小浮层里展开全部 aggregate hidden nodes。
 - 不新增 Refresh / Analyze / Sync 控件。
@@ -274,7 +281,7 @@ M48 截图/视觉验收不改动 M47 已验收定义，作为补充清单如下�
 - 验证 click edge/node 后 viewport target marker 正确，设计器 focus node marker 不变。
 - 验证 `copy_graph_text` 类别：复制文本含 `nodes:` 与 `edges:` 段落。
 - 验证底栏仅 pin/copy/toggle 三个按钮（`actionButtonCount === 3`）。
-- 保留 M47 硬性要求：`renderer=pixi`、canvas 非空、`depth=2`、`visible_hop=1`、尺寸约束、selection changed probe。
+- 保留 M47 硬性要求：`renderer=echarts|pixi`、canvas 非空、`depth=2`、`visible_hop=1`、尺寸约束、selection changed probe。
 
 验收：
 

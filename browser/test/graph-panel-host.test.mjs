@@ -177,7 +177,15 @@ function createCanvasResultFixture() {
       { id: "m2", label: "m2", kind: "Model", metadata: { depth: 2 } },
     ],
     edges: [
-      { from: "comp1", to: "m1", kind: "Reads", direction: "Forward", label: "reads" },
+      {
+        from: "comp1",
+        to: "m1",
+        kind: "Reads",
+        direction: "Forward",
+        label: "reads",
+        evidence: "order.amount",
+        evidence_status: "available",
+      },
       { from: "m1", to: "m2", kind: "Writes", direction: "Forward", label: "writes" },
     ],
     source_summary: {
@@ -410,7 +418,15 @@ describe("createGraphPanelHost", () => {
               { id: "model1", label: "model1", kind: "Model", metadata: { depth: 1 } },
             ],
             edges: [
-              { from: "comp1", to: "model1", kind: "Reads", direction: "Forward", label: "reads" },
+              {
+                from: "comp1",
+                to: "model1",
+                kind: "Reads",
+                direction: "Forward",
+                label: "reads",
+                evidence: "order.id",
+                evidence_status: "available",
+              },
             ],
             groups: [],
             focus_node: "comp1",

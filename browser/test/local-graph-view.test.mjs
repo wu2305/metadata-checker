@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { applyLocalGraphView } from "../renderer/local-graph-view.mjs";
+import { applyLocalGraphView, isSoloFocusGraph } from "../renderer/local-graph-view.mjs";
 
 describe("applyLocalGraphView", () => {
   it("drops blanket model fanout without evidence from focus", () => {
@@ -64,5 +64,41 @@ describe("applyLocalGraphView", () => {
     const filtered = applyLocalGraphView(graph);
     assert.equal(filtered.edges.length, 1);
     assert.equal(filtered.edges[0].to, "model:page.spg|m1");
+  });
+
+  it("drops unreachable model nodes and avoids solo-focus aggregate input", () => {
+    const focus = "comp:page.spg|text49";
+    const graph = {
+      focus_node: focus,
+      status: "ready",
+      nodes: [
+        { id: focus, label: "text49", kind: "component" },
+        { id: "model:page.spg|m1", label: "m1", kind: "model" },
+        { id: "model:page.spg|m2", label: "m2", kind: "model" },
+      ],
+      edges: [
+        {
+          from: focus,
+          to: "model:page.spg|m1",
+          kind: "reads",
+          label: "reads",
+          evidence_status: "unavailable",
+        },
+        {
+          from: focus,
+          to: "model:page.spg|m2",
+          kind: "reads",
+          label: "reads",
+          evidence_status: "unavailable",
+        },
+      ],
+      diagnostics: [],
+    };
+
+    const filtered = applyLocalGraphView(graph);
+    assert.equal(filtered.nodes.length, 1);
+    assert.equal(filtered.edges.length, 0);
+    assert.equal(filtered.status, "empty");
+    assert.equal(isSoloFocusGraph(filtered), true);
   });
 });

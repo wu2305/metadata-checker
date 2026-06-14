@@ -8,6 +8,9 @@ const REPO_ROOT = resolve(__dirname, "..", "..");
 const DEFAULT_CHROME_EXECUTABLE =
   "/Users/wuhaocheng/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
 const DEFAULT_USER_DATA_DIR = "/private/tmp/metadata-checker-m47-pixi-chrome-profile";
+
+/** auto 模式优先 ECharts，失败回退 Pixi；真实 BI 验收二者均可。 */
+const ACCEPTED_LOCAL_GRAPH_RENDERERS = new Set(["echarts", "pixi"]);
 const DEFAULT_EXTENSION_DIR = join(
   REPO_ROOT,
   "browser",
@@ -1121,9 +1124,11 @@ function collectPopupAcceptanceChecks(
 
   const checks = {
     renderer: {
-      status: popup?.markerRenderer === "pixi" ? "pass" : "fail",
+      status: ACCEPTED_LOCAL_GRAPH_RENDERERS.has(popup?.markerRenderer || direct["local-graph-renderer"] || "")
+        ? "pass"
+        : "fail",
       actual: popup?.markerRenderer || direct["local-graph-renderer"] || "",
-      expected: "pixi",
+      expected: "echarts|pixi",
       diagnostics: [],
     },
     canvas: {
@@ -1257,14 +1262,14 @@ function collectPopupAcceptanceChecks(
     addDiagnostic(
       checks.renderer.diagnostics,
       "renderer",
-      "M47_REAL_BI_RENDERER_NOT_PIXI",
+      "M47_REAL_BI_RENDERER_UNEXPECTED",
       `renderer marker is ${checks.renderer.actual || "unknown"}`,
       checks.renderer,
     );
     addDiagnostic(
       diagnostics,
       "renderer",
-      "M47_REAL_BI_RENDERER_NOT_PIXI",
+      "M47_REAL_BI_RENDERER_UNEXPECTED",
       `renderer marker is ${checks.renderer.actual || "unknown"}`,
       checks.renderer,
     );

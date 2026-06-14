@@ -1322,6 +1322,23 @@ function buildPixiViewGraph(graph, options) {
   const allNodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
   const allEdges = Array.isArray(graph?.edges) ? graph.edges : [];
   const focusNodeId = graph?.focusNodeId || graph?.focus_node || allNodes[0]?.id || null;
+  if (allNodes.length === 1 && allEdges.length === 0 && allNodes[0]?.id === focusNodeId) {
+    return {
+      nodes: allNodes,
+      edges: [],
+      nodeById: createNodeLookup(allNodes),
+      edgeById: createEdgeLookup([]),
+      visibleRealNodes: allNodes,
+      visibleRealEdges: [],
+      aggregateNodes: [],
+      aggregateEdges: [],
+      hiddenNodes: [],
+      hiddenNodeCount: 0,
+      aggregateNodeCount: 0,
+      visibleNodeCount: 1,
+      visibleEdgeCount: 0,
+    };
+  }
   const visibleRealNodes = pickVisiblePixiNodes(allNodes, allEdges, focusNodeId, options.maxRenderedNodes);
   const visibleNodeIds = new Set(visibleRealNodes.map((node) => node.id));
   const visibleNodeById = createNodeLookup(visibleRealNodes);
