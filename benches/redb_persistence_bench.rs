@@ -1,5 +1,7 @@
 #[path = "common/bench_config.rs"]
 mod bench_config;
+#[path = "common/external_graph_lock.rs"]
+mod external_graph_lock;
 #[path = "common/first_existing_target.rs"]
 mod first_existing_target;
 #[path = "common/real_project.rs"]
@@ -12,6 +14,7 @@ mod sandbox_create;
 use anyhow::Context;
 use bench_config::real_project_criterion_config;
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
+use external_graph_lock::acquire_external_graph_lock;
 use first_existing_target::first_existing_target;
 use metadata_checker::graph::{GraphDB, set_graph_lock_timeout_ms};
 use metadata_checker::graph_store::IndexCommit;
@@ -20,25 +23,11 @@ use metadata_checker::storage_provider::LocalStorageProvider;
 use real_project::require_real_project_dir;
 use restore_file::restore_file;
 use sandbox_create::create_indexed_workspace;
-use std::fs::OpenOptions;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
 const CONTRACT_PAGE_FILE: &str = "app/销售.app/销售/合同协议.spg";
-
-fn lock_file_path(db_path: &Path) -> PathBuf {
-    db_path.with_extension("graphdb.lock")
-}
-
-fn acquire_external_graph_lock(db_path: &Path) -> anyhow::Result<std::fs::File> {
-    let lock_path = lock_file_path(db_path);
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-        .with_context(|| format!("acquire external graph lock {}", lock_path.display()))
-}
 
 fn corrupt_graphdb_header(source: &Path, destination: &Path) -> anyhow::Result<()> {
     let mut bytes =
