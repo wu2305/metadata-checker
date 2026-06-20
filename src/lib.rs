@@ -39,5 +39,6 @@ pub mod stdio_server;
 pub mod storage_provider;
 pub mod superpage;
 pub mod tbl_single;
+pub mod telemetry;
 pub mod tool_contract;
 pub mod visualization;

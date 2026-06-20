@@ -216,6 +216,38 @@ pub fn run_stdio_server(
     Ok(())
 }
 
+/// 解析并处理单行 stdio JSONL 输入，供 benchmark 与集成测试复用。
+pub fn dispatch_stdio_line(runtime: &mut GraphRuntime, line: &str) -> StdioResponse {
+    if line.trim().is_empty() {
+        return error_response(
+            String::new(),
+            "INVALID_JSON",
+            "empty request line".to_string(),
+            vec![],
+        );
+    }
+
+    let request: StdioRequest = match serde_json::from_str(line) {
+        Ok(request) => request,
+        Err(error) => {
+            return error_response(
+                String::new(),
+                "INVALID_JSON",
+                format!("JSON parse error: {}", error),
+                vec![],
+            );
+        }
+    };
+
+    handle_request(runtime, &request)
+}
+
+/// 序列化 stdio 响应并回填 `timing.output_size_bytes`。
+pub fn serialize_stdio_response(resp: &mut StdioResponse) -> Result<String> {
+    serialize_response_with_timing(resp)
+        .map_err(|error| anyhow::anyhow!("serialize stdio response failed: {}", error))
+}
+
 /// 处理单个请求
 fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioResponse {
     let mut diagnostics = Vec::new();

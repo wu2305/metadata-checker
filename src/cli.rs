@@ -5,6 +5,17 @@ use crate::tool_contract::{
 use clap::Parser;
 use std::path::PathBuf;
 
+/// CLI 观测输出模式。
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceMode {
+    /// 不启用观测输出。
+    Off,
+    /// 将 tracing span/event 以 JSON 写入 stderr。
+    Json,
+    /// 通过 OTLP 导出到远程观测平台。
+    Otlp,
+}
+
 /// 命令行参数定义
 ///
 /// 使用 clap 派生宏定义所有 CLI 参数和子命令。
@@ -78,6 +89,28 @@ pub struct Cli {
         help = "Graph database lock acquisition timeout in milliseconds (default: 10000)"
     )]
     pub graph_lock_timeout_ms: u64,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value = "off",
+        help = "Trace output mode: off | json | otlp (default: off)"
+    )]
+    pub trace: TraceMode,
+
+    #[arg(
+        long,
+        value_name = "URL",
+        help = "OTLP HTTP traces endpoint for --trace otlp, e.g. http://localhost:4318/v1/traces"
+    )]
+    pub otlp_endpoint: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "URL",
+        help = "OTLP HTTP metrics endpoint for --trace otlp, e.g. http://localhost:4318/v1/metrics"
+    )]
+    pub otlp_metrics_endpoint: Option<String>,
 
     #[arg(long, help = "Check graph database status and output JSON report")]
     pub check_graph: bool,
@@ -454,5 +487,28 @@ mod tests {
             .expect_err("missing target must fail");
 
         assert_eq!(err.code, ToolErrorCode::MissingTarget);
+    }
+
+    #[test]
+    fn test_cli_trace_options_parse_explicit_mode_and_endpoint() {
+        let cli = Cli::parse_from([
+            "metadata-checker",
+            "--trace",
+            "otlp",
+            "--otlp-endpoint",
+            "http://localhost:4318/v1/traces",
+            "--otlp-metrics-endpoint",
+            "http://localhost:4318/v1/metrics",
+        ]);
+
+        assert_eq!(cli.trace, TraceMode::Otlp);
+        assert_eq!(
+            cli.otlp_endpoint.as_deref(),
+            Some("http://localhost:4318/v1/traces")
+        );
+        assert_eq!(
+            cli.otlp_metrics_endpoint.as_deref(),
+            Some("http://localhost:4318/v1/metrics")
+        );
     }
 }

@@ -1,0 +1,3213 @@
+{
+	"version": "4.19.7",
+	"theme": "mobile",
+	"params": [
+		{
+			"id": "param1",
+			"name": "getTPID",
+			"desc": ""
+		},
+		{
+			"id": "param2",
+			"name": "getReservationNumberUUID",
+			"desc": ""
+		}
+	],
+	"sources": [
+		{
+			"id": "model1",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/fact_transparentChemicalSheet.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model1.name  = param1"
+					}
+				]
+			},
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "name",
+			"queryConditionReturnEmpty": false
+		},
+		{
+			"id": "model2",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/环检阶段照片/fact_checkRightFrontPhoto.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model2.transparentID = param1"
+					}
+				]
+			},
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "fileID",
+			"queryConditionReturnEmpty": false
+		},
+		{
+			"id": "model3",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/环检阶段照片/fact_checkFrontPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model3.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model4",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/环检阶段照片/fact_checkLeftFrontPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model4.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model5",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/环检阶段照片/fact_checkLeftBackPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FilePath1",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model5.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model6",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/环检阶段照片/fact_checkRightBackPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model6.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model7",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/环检阶段照片/fact_dashboardPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model7.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model8",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/环检阶段照片/fact_frontSeatPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FilePath1",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model8.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model9",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/环检阶段照片/fact_rearSeatPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FilePath1",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model9.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model10",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/环检阶段照片/fact_CheckOtherPhoto.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model10.透明化工单编号 = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model11",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/保养_维修中照片/fact_repairBeforePhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model11.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model12",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/保养_维修中照片/fact_repairAfterPhoto.tbl",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model12.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model13",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/保养_维修中照片/fact_oldPartPhoto.tbl",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model13.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model14",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/保养_维修中照片/fact_remakeOtherPhoto.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model14.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model15",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/交车阶段照片/fact_handoverFrontLeftPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model15.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model16",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/交车阶段照片/fact_handoverFrontPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model16.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model17",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/交车阶段照片/fact_handoverFrontRightPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model17.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model18",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/交车阶段照片/fact_handoverBackLeftPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model18.transparentID  = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model19",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/交车阶段照片/fact_handoverBackRightPhoto.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model19.transparentID = param1"
+					}
+				]
+			},
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "FileID",
+			"queryConditionReturnEmpty": false
+		},
+		{
+			"id": "model20",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/交车阶段照片/fact_threeSafetyChecklistsPhoto.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "threeSafetyChecklistsPhotoID",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model20.transparentID = param1"
+					}
+				]
+			}
+		},
+		{
+			"id": "model21",
+			"modelType": "dwtable",
+			"path": "$DATA:/售后/透明化工单照片/交车阶段照片/fact_finshOtherPhoto.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model21.transparentID = param1"
+					}
+				]
+			}
+		}
+	],
+	"refComponentTypes": [
+		"canvas",
+		"panel",
+		"text",
+		"image",
+		"floatpanel",
+		"multipleinput",
+		"button",
+		"combobox"
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"viewSize": "mobile",
+		"width": "100%",
+		"minWidth": "320px",
+		"height": "auto",
+		"minHeight": "320px",
+		"overflow": "y",
+		"position": "center",
+		"components": [
+			{
+				"id": "panel16",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "auto",
+				"minHeight": "44px",
+				"templateName": "panel",
+				"padding": "20px",
+				"fill": "linear-gradient 180deg #d4e2ea 0 bg1 1",
+				"components": [
+					{
+						"id": "panel26",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"display": "inlineflexColumn",
+						"flexDirection": "column",
+						"templateName": "panel_column",
+						"padding": "0px",
+						"margin": "0px",
+						"fill": "none",
+						"components": [
+							{
+								"id": "text16",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"name": "车辆环检",
+								"value": "车辆环检（5+3+N）",
+								"compStyle": "text",
+								"font": {
+									"bold": true,
+									"size": 18
+								}
+							}
+						],
+						"borderRadius": "0px"
+					},
+					{
+						"id": "panel34",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "44px",
+						"templateName": "panel",
+						"boxShadow": "outset 0px 0px 12px 0px #296191 10",
+						"fill": "bg1",
+						"borderRadius": "5px",
+						"padding": "20px",
+						"gapType": "gapSize",
+						"gapSize": 20,
+						"components": [
+							{
+								"id": "text17",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "车俩信息",
+								"name": "标题",
+								"margin": "0px",
+								"padding": "0px",
+								"font": {
+									"bold": true,
+									"color": "font",
+									"size": 16
+								}
+							},
+							{
+								"id": "text23",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "${IF(model1.licensePlate.value IS NULL,model1.vin,model1.licensePlate)}· ${model1.entityType}",
+								"name": "单行文本-业务类型",
+								"position": "relative",
+								"compStyle": "text4",
+								"padding": "0px",
+								"margin": "0px",
+								"font": {
+									"color": "font 85"
+								}
+							}
+						]
+					},
+					{
+						"id": "panel18",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "44px",
+						"templateName": "panel",
+						"name": "主面板",
+						"fill": "bg1",
+						"borderRadius": "5px",
+						"components": [
+							{
+								"id": "panel19",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"templateName": "panel",
+								"margin": "0px",
+								"fill": "none",
+								"borderRadius": "0px",
+								"name": "外观",
+								"components": [
+									{
+										"id": "text18",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "外观",
+										"name": "标题",
+										"margin": "0px",
+										"padding": "0px",
+										"font": {
+											"bold": true,
+											"color": "font",
+											"size": 16
+										}
+									},
+									{
+										"id": "panel20",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"padding": "0px",
+										"overflow": "hidden",
+										"components": [
+											{
+												"id": "image23",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model4.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model4",
+														"attachmentField": "model4.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												],
+												"name": "左前"
+											},
+											{
+												"id": "image22",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model3.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model3",
+														"attachmentField": "model3.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												],
+												"name": "正前"
+											},
+											{
+												"id": "image21",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model2.fileFieId 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model2",
+														"attachmentField": "model2.fileFieId",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												],
+												"name": "右前"
+											}
+										],
+										"flexWrap": "wrap",
+										"gapType": "gapSize",
+										"gapSize": 20
+									},
+									{
+										"id": "panel24",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"padding": "0px",
+										"overflow": "hidden",
+										"components": [
+											{
+												"id": "image25",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model5.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model5",
+														"attachmentField": "model5.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												],
+												"name": "左后"
+											},
+											{
+												"id": "image24",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model6.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model6",
+														"attachmentField": "model6.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												],
+												"name": "右后"
+											}
+										],
+										"flexWrap": "wrap",
+										"gapType": "gapSize",
+										"gapSize": 20
+									}
+								],
+								"gapType": "gapSize",
+								"gapSize": 20
+							},
+							{
+								"id": "panel25",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"templateName": "panel",
+								"name": "内饰",
+								"margin": "0px",
+								"components": [
+									{
+										"id": "text21",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "内饰",
+										"name": "标题",
+										"margin": "0px",
+										"padding": "0px",
+										"font": {
+											"bold": true,
+											"color": "font",
+											"size": 16
+										}
+									},
+									{
+										"id": "panel27",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-内饰",
+										"components": [
+											{
+												"id": "image26",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model7.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model7",
+														"attachmentField": "model7.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image28",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model8.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model8",
+														"attachmentField": "model8.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												],
+												"name": "前排"
+											},
+											{
+												"id": "image27",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model9.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model9",
+														"attachmentField": "model9.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												],
+												"name": "后排"
+											}
+										],
+										"flexWrap": "wrap",
+										"overflow": "hidden",
+										"margin": "0px",
+										"rowJustifyContent": "flex-start",
+										"padding": "0px",
+										"gapType": "gapSize",
+										"gapSize": 20
+									}
+								],
+								"gapType": "gapSize",
+								"gapSize": 20
+							},
+							{
+								"id": "panel28",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"templateName": "panel",
+								"name": "备注",
+								"margin": "0px",
+								"components": [
+									{
+										"id": "text22",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "备注",
+										"name": "标题",
+										"margin": "0px",
+										"padding": "0px",
+										"font": {
+											"bold": true,
+											"color": "font",
+											"size": 16
+										}
+									},
+									{
+										"id": "panel29",
+										"type": "panel",
+										"width": "auto",
+										"height": "auto",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-内饰",
+										"components": [
+											{
+												"id": "floatpanel4",
+												"type": "floatpanel",
+												"width": "auto",
+												"height": "auto",
+												"panel": [
+													{
+														"id": "panel1",
+														"type": "floatpanel.panel",
+														"width": "auto",
+														"height": "auto",
+														"position": "relative",
+														"flexWrap": "nowrap",
+														"components": [
+															{
+																"id": "image29",
+																"type": "image",
+																"width": "200px",
+																"height": "150px",
+																"templateName": "image",
+																"margin": "0px",
+																"image": "cover field model10.FilePath 0 0 100 no-repeat center",
+																"position": "relative",
+																"actions": [
+																	{
+																		"id": "action1",
+																		"actionType": "showFilesGallary",
+																		"triggerType": "click",
+																		"dataRange": "resultset",
+																		"dataSet": "model10",
+																		"attachmentField": "model10.FilePath",
+																		"enableDownload": false
+																	}
+																]
+															}
+														],
+														"flexible": "false",
+														"margin": "0px",
+														"padding": "0px"
+													}
+												],
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"rowJustifyContent": "flex-start",
+												"rowAlignItems": "center",
+												"rowAlignContent": "flex-start",
+												"flexWrap": "wrap",
+												"templateName": "floatpanel",
+												"position": "relative",
+												"padding": "0px",
+												"overflow": "x",
+												"columnAlignItems": "flex-start",
+												"visible": "condition",
+												"visibleCondition": "model10.totalRowCount__ >0",
+												"margin": "0px",
+												"dataSet": "model10",
+												"gapType": "gapSize",
+												"gapSize": 20
+											}
+										],
+										"flexWrap": "wrap",
+										"overflow": "hidden",
+										"margin": "0px",
+										"rowJustifyContent": "flex-start",
+										"padding": "0px",
+										"flexible": "true"
+									},
+									{
+										"id": "panel37",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"padding": "0px",
+										"components": [
+											{
+												"id": "multipleinput4",
+												"type": "multipleinput",
+												"width": "100%",
+												"templateName": "multipleinput",
+												"name": "备注-环检",
+												"height": "100px",
+												"margin": "0px",
+												"border": "1px solid #E2E2E2",
+												"calcEnabled": true,
+												"submitData": true,
+												"autoFilter": false,
+												"toggleFocusOnEnter": true,
+												"submitField": "model1.environmentalInspectionRemark",
+												"exp": "model1.environmentalInspectionRemark",
+												"textAlign": "left",
+												"borderRadius": "3px",
+												"titlePosition": "left",
+												"disable": "condition",
+												"disableCondition": "text1>1",
+												"showTitle": false,
+												"padding": "10px",
+												"font": {
+													"size": 14
+												},
+												"visible": "true"
+											}
+										]
+									}
+								],
+								"gapType": "gapSize",
+								"gapSize": 20
+							}
+						],
+						"boxShadow": "outset 0px 0px 12px 0px #00294C 10",
+						"padding": "20px",
+						"gapType": "gapSize",
+						"gapSize": 20
+					}
+				],
+				"gapType": "gapSize",
+				"gapSize": 20
+			},
+			{
+				"id": "panel30",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "auto",
+				"minHeight": "44px",
+				"templateName": "panel",
+				"name": "维修/保养",
+				"padding": "20px",
+				"fill": "linear-gradient 180deg #F5B241 10 0 #FFFFFF 1",
+				"visible": "true",
+				"visibleCondition": "text1 IN (\"2\")",
+				"components": [
+					{
+						"id": "panel33",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"display": "inlineflexColumn",
+						"flexDirection": "column",
+						"templateName": "panel_column",
+						"padding": "0px",
+						"margin": "0px 0px 20px 0px",
+						"fill": "none",
+						"components": [
+							{
+								"id": "text19",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"name": "车辆环检",
+								"value": "维修/保养中",
+								"compStyle": "text",
+								"font": {
+									"bold": true,
+									"size": 18
+								}
+							}
+						],
+						"borderRadius": "0px"
+					},
+					{
+						"id": "panel31",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "44px",
+						"display": "inlineflexColumn",
+						"flexDirection": "column",
+						"templateName": "panel_column",
+						"name": "维修-保养中",
+						"components": [
+							{
+								"id": "text26",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "维修前",
+								"name": "标题",
+								"margin": "0px",
+								"padding": "0px",
+								"font": {
+									"bold": true,
+									"color": "font",
+									"size": 16
+								}
+							},
+							{
+								"id": "panel32",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"name": "维保1",
+								"components": [
+									{
+										"id": "image30",
+										"type": "image",
+										"width": "200px",
+										"height": "150px",
+										"templateName": "image",
+										"image": "cover field model11.FilePath 0 0 100 no-repeat center",
+										"actions": [
+											{
+												"id": "action1",
+												"actionType": "showFilesGallary",
+												"triggerType": "click",
+												"dataSet": "model11",
+												"attachmentField": "model11.FilePath",
+												"enableDownload": false,
+												"dataRange": "resultset"
+											}
+										]
+									}
+								],
+								"margin": "0px",
+								"flexWrap": "wrap",
+								"overflow": "x",
+								"fill": "#FFFFFF",
+								"borderRadius": "0px",
+								"padding": "0px",
+								"rowJustifyContent": "flex-start"
+							},
+							{
+								"id": "text27",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "维修后",
+								"name": "标题",
+								"margin": "0px",
+								"padding": "0px",
+								"font": {
+									"bold": true,
+									"color": "font",
+									"size": 16
+								}
+							},
+							{
+								"id": "panel38",
+								"type": "panel",
+								"width": "100%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"name": "维保1",
+								"components": [
+									{
+										"id": "floatpanel7",
+										"type": "floatpanel",
+										"width": "100%",
+										"height": "150px",
+										"panel": [
+											{
+												"id": "panel1",
+												"type": "floatpanel.panel",
+												"width": "auto",
+												"height": "auto",
+												"position": "relative",
+												"flexWrap": "nowrap",
+												"components": [
+													{
+														"id": "image31",
+														"type": "image",
+														"width": "200px",
+														"minWidth": "30px",
+														"height": "150px",
+														"minHeight": "30px",
+														"templateName": "image",
+														"image": "cover field model12.FilePath 0 0 100 no-repeat center",
+														"actions": [
+															{
+																"id": "action1",
+																"actionType": "showFilesGallary",
+																"triggerType": "click",
+																"dataSet": "model12",
+																"attachmentField": "model12.FilePath",
+																"enableDownload": false,
+																"dataRange": "resultset"
+															}
+														]
+													}
+												],
+												"flexible": "false",
+												"margin": "0px",
+												"padding": "0px",
+												"compStyle": "panel",
+												"display": "inlineflexRow",
+												"flexDirection": "row"
+											}
+										],
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"rowJustifyContent": "flex-start",
+										"rowAlignItems": "flex-start",
+										"rowAlignContent": "flex-start",
+										"flexWrap": "nowrap",
+										"templateName": "floatpanel",
+										"position": "relative",
+										"padding": "0px",
+										"overflow": "x",
+										"columnAlignItems": "flex-start",
+										"visible": "condition",
+										"visibleCondition": "model12.totalRowCount__>0",
+										"margin": "0px",
+										"dataSet": "model12",
+										"compStyle": "style",
+										"gapType": "gapSize",
+										"gapSize": 20
+									}
+								],
+								"margin": "0px",
+								"flexWrap": "nowrap",
+								"overflow": "hidden",
+								"fill": "#FFFFFF",
+								"borderRadius": "0px",
+								"padding": "0px",
+								"rowJustifyContent": "flex-start",
+								"gapType": "gapSize",
+								"gapSize": 20
+							},
+							{
+								"id": "text20",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "旧件",
+								"name": "标题",
+								"margin": "0px",
+								"padding": "0px",
+								"font": {
+									"bold": true,
+									"color": "font",
+									"size": 16
+								}
+							},
+							{
+								"id": "panel35",
+								"type": "panel",
+								"width": "100%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "floatpanel8",
+										"type": "floatpanel",
+										"width": "100%",
+										"height": "150px",
+										"panel": [
+											{
+												"id": "panel1",
+												"type": "floatpanel.panel",
+												"width": "auto",
+												"height": "auto",
+												"position": "relative",
+												"flexWrap": "nowrap",
+												"components": [
+													{
+														"id": "image32",
+														"type": "image",
+														"width": "200px",
+														"minWidth": "30px",
+														"height": "150px",
+														"minHeight": "30px",
+														"templateName": "image",
+														"image": "cover field model13.FilePath 0 0 100 no-repeat center",
+														"actions": [
+															{
+																"id": "action1",
+																"actionType": "showFilesGallary",
+																"triggerType": "click",
+																"enableDownload": false,
+																"attachmentField": "model13.FilePath",
+																"dataSet": "model13",
+																"dataRange": "resultset"
+															}
+														]
+													}
+												],
+												"flexible": "false",
+												"margin": "0px",
+												"padding": "0px",
+												"compStyle": "panel",
+												"display": "inlineflexRow",
+												"flexDirection": "row"
+											}
+										],
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"rowJustifyContent": "flex-start",
+										"rowAlignItems": "flex-start",
+										"rowAlignContent": "flex-start",
+										"flexWrap": "nowrap",
+										"templateName": "floatpanel",
+										"position": "relative",
+										"padding": "0px",
+										"overflow": "x",
+										"columnAlignItems": "flex-start",
+										"visible": "condition",
+										"visibleCondition": "model13.totalRowCount__>0",
+										"margin": "0px",
+										"dataSet": "model13",
+										"compStyle": "style",
+										"gapType": "gapSize",
+										"gapSize": 20
+									}
+								]
+							},
+							{
+								"id": "text28",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "备注",
+								"name": "标题",
+								"margin": "0px",
+								"padding": "0px",
+								"font": {
+									"bold": true,
+									"color": "font",
+									"size": 16
+								}
+							},
+							{
+								"id": "panel39",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"name": "维保2",
+								"components": [
+									{
+										"id": "floatpanel5",
+										"type": "floatpanel",
+										"width": "100%",
+										"height": "150px",
+										"panel": [
+											{
+												"id": "panel1",
+												"type": "floatpanel.panel",
+												"width": "auto",
+												"height": "auto",
+												"position": "relative",
+												"flexWrap": "nowrap",
+												"components": [
+													{
+														"id": "image33",
+														"type": "image",
+														"width": "200px",
+														"height": "150px",
+														"templateName": "image",
+														"margin": "0px",
+														"image": "cover field model14.FilePath 0 0 100 no-repeat center",
+														"position": "relative",
+														"actions": [
+															{
+																"id": "action1",
+																"actionType": "showFilesGallary",
+																"triggerType": "click",
+																"dataRange": "resultset",
+																"dataSet": "model14",
+																"attachmentField": "model14.FilePath",
+																"enableDownload": false
+															}
+														]
+													}
+												],
+												"flexible": "false",
+												"margin": "0px",
+												"padding": "0px",
+												"compStyle": "panel",
+												"display": "inlineflexRow",
+												"flexDirection": "row"
+											}
+										],
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"rowJustifyContent": "flex-start",
+										"rowAlignItems": "flex-start",
+										"rowAlignContent": "flex-start",
+										"flexWrap": "nowrap",
+										"templateName": "floatpanel",
+										"position": "relative",
+										"padding": "0px",
+										"overflow": "x",
+										"columnAlignItems": "flex-start",
+										"visible": "condition",
+										"visibleCondition": "model14.totalRowCount__>0",
+										"margin": "0px",
+										"dataSet": "model14",
+										"compStyle": "style",
+										"gapType": "gapSize",
+										"gapSize": 20
+									}
+								],
+								"flexWrap": "nowrap",
+								"overflow": "hidden",
+								"margin": "0px",
+								"padding": "0px"
+							},
+							{
+								"id": "multipleinput5",
+								"type": "multipleinput",
+								"width": "auto",
+								"templateName": "multipleinput",
+								"name": "备注-维保",
+								"height": "100px",
+								"margin": "0px",
+								"border": "1px solid #E2E2E2",
+								"submitData": true,
+								"autoFilter": false,
+								"submitField": "model1.repairRemark",
+								"calcEnabled": true,
+								"submitCondition": "model1.repairRemark",
+								"padding": "10px",
+								"flexible": "false",
+								"disable": "condition",
+								"disableCondition": "text1>2",
+								"showTitle": false,
+								"placeholder": "备注信息",
+								"font": {
+									"size": 14
+								}
+							}
+						],
+						"visible": "true",
+						"position": "relative",
+						"visibleCondition": "text1 IN (\"2\")",
+						"compStyle": "style4",
+						"padding": "20px",
+						"gapType": "gapSize",
+						"gapSize": 20
+					}
+				]
+			},
+			{
+				"id": "panel42",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "auto",
+				"minHeight": "44px",
+				"templateName": "panel",
+				"components": [
+					{
+						"id": "panel43",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"display": "inlineflexColumn",
+						"flexDirection": "column",
+						"templateName": "panel_column",
+						"name": "交车确认（5+1+N）",
+						"components": [
+							{
+								"id": "text31",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"name": "交车确认",
+								"value": "交车确认（5+1+N）",
+								"font": {
+									"bold": true,
+									"color": "font",
+									"size": 18
+								},
+								"margin": "0px",
+								"padding": "0px"
+							}
+						],
+						"margin": "0px 0px 20px 0px",
+						"visible": "condition",
+						"visibleCondition": "text1>2",
+						"borderRadius": "0px",
+						"fill": "none",
+						"padding": "0px",
+						"autoHideEmpty": false
+					},
+					{
+						"id": "panel44",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "44px",
+						"templateName": "panel",
+						"borderRadius": "5px",
+						"components": [
+							{
+								"id": "panel45",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"fill": "bg1",
+								"padding": "0px",
+								"borderRadius": "5px",
+								"components": [
+									{
+										"id": "text33",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "外观",
+										"name": "外观：",
+										"margin": "0px",
+										"padding": "0px",
+										"font": {
+											"bold": true,
+											"color": "font",
+											"size": 16
+										}
+									},
+									{
+										"id": "panel46",
+										"type": "panel",
+										"width": "auto",
+										"height": "auto",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-外观",
+										"components": [
+											{
+												"id": "image34",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model15.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model6",
+														"attachmentField": "model6.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image35",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model16.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model5",
+														"attachmentField": "model5.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image36",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model17.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model4",
+														"attachmentField": "model4.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image37",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model18.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model3",
+														"attachmentField": "model3.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image38",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model19.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model2",
+														"attachmentField": "model2.fileFieId",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											}
+										],
+										"margin": "0px",
+										"flexWrap": "wrap",
+										"overflow": "hidden",
+										"fill": "none",
+										"borderRadius": "0px",
+										"padding": "20px",
+										"rowJustifyContent": "flex-start",
+										"gapType": "gapSize",
+										"gapSize": 20
+									}
+								],
+								"visible": "condition"
+							},
+							{
+								"id": "text34",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "安全",
+								"name": "标题",
+								"margin": "0px",
+								"padding": "20px",
+								"font": {
+									"bold": true,
+									"color": "font",
+									"size": 16
+								}
+							},
+							{
+								"id": "panel47",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"name": "横向布局-内饰",
+								"components": [
+									{
+										"id": "image39",
+										"type": "image",
+										"width": "200px",
+										"height": "150px",
+										"templateName": "image",
+										"image": "cover field model20.threeSafetyChecklistsFlie 0 0 100 no-repeat center",
+										"actions": [
+											{
+												"id": "action1",
+												"actionType": "showFilesGallary",
+												"triggerType": "click",
+												"dataSet": "model20",
+												"attachmentField": "model20.threeSafetyChecklistsFlie",
+												"enableDownload": false,
+												"dataRange": "resultset"
+											}
+										]
+									}
+								],
+								"flexWrap": "nowrap",
+								"overflow": "x",
+								"margin": "0px",
+								"padding": "20px"
+							},
+							{
+								"id": "text35",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "备注",
+								"name": "标题",
+								"margin": "0px",
+								"padding": "20px",
+								"font": {
+									"bold": true,
+									"color": "font",
+									"size": 16
+								}
+							},
+							{
+								"id": "panel48",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "panel49",
+										"type": "panel",
+										"width": "auto",
+										"height": "auto",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"visible": "false"
+									},
+									{
+										"id": "panel50",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"padding": "20px",
+										"components": [
+											{
+												"id": "floatpanel6",
+												"type": "floatpanel",
+												"width": "auto",
+												"height": "auto",
+												"panel": [
+													{
+														"id": "panel1",
+														"type": "floatpanel.panel",
+														"width": "auto",
+														"height": "auto",
+														"position": "relative",
+														"flexWrap": "nowrap",
+														"components": [
+															{
+																"id": "image40",
+																"type": "image",
+																"width": "200px",
+																"height": "150px",
+																"templateName": "image",
+																"margin": "0px",
+																"image": "cover field model21.FilePath 0 0 100 no-repeat center",
+																"position": "relative",
+																"actions": [
+																	{
+																		"id": "action1",
+																		"actionType": "showFilesGallary",
+																		"triggerType": "click",
+																		"dataRange": "resultset",
+																		"dataSet": "model21",
+																		"attachmentField": "model21.FilePath",
+																		"enableDownload": false
+																	}
+																]
+															}
+														],
+														"flexible": "false",
+														"margin": "0px",
+														"padding": "0px"
+													}
+												],
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"rowJustifyContent": "flex-start",
+												"rowAlignItems": "flex-start",
+												"rowAlignContent": "flex-start",
+												"flexWrap": "wrap",
+												"templateName": "floatpanel",
+												"position": "relative",
+												"padding": "0px",
+												"overflow": "x",
+												"columnAlignItems": "flex-start",
+												"visible": "condition",
+												"visibleCondition": "model21.totalRowCount__ >0",
+												"margin": "0px",
+												"dataSet": "model21",
+												"gapType": "gapSize",
+												"gapSize": 20
+											}
+										]
+									},
+									{
+										"id": "multipleinput6",
+										"type": "multipleinput",
+										"width": "auto",
+										"templateName": "multipleinput",
+										"name": "备注-交车",
+										"margin": "20px",
+										"border": "1px solid #E2E2E2",
+										"calcEnabled": true,
+										"exp": "model1.deliveryRemark",
+										"submitData": true,
+										"autoFilter": false,
+										"submitField": "model1.deliveryRemark",
+										"borderRadius": "3px",
+										"height": "100px",
+										"disable": "condition",
+										"disableCondition": "text1>3",
+										"visible": "true",
+										"padding": "10px",
+										"showTitle": false,
+										"placeholder": "备注信息",
+										"font": {
+											"size": 14
+										}
+									},
+									{
+										"id": "panel51",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"templateName": "panel",
+										"fill": "bg1",
+										"borderRadius": "0px",
+										"margin": "12px 0px 0px 0px",
+										"components": [
+											{
+												"id": "panel52",
+												"type": "panel",
+												"width": "auto",
+												"minWidth": "20px",
+												"height": "auto",
+												"minHeight": "44px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"rowJustifyContent": "space-between",
+												"components": [
+													{
+														"id": "panel53",
+														"type": "panel",
+														"width": "auto",
+														"minWidth": "20px",
+														"height": "auto",
+														"minHeight": "44px",
+														"display": "inlineflexRow",
+														"flexDirection": "row",
+														"templateName": "panel_row",
+														"components": [
+															{
+																"id": "text36",
+																"type": "text",
+																"width": "auto",
+																"minWidth": "16px",
+																"height": "auto",
+																"minHeight": "16px",
+																"templateName": "text",
+																"value": "工单状态：",
+																"font": {
+																	"bold": true
+																}
+															},
+															{
+																"id": "text37",
+																"type": "text",
+																"width": "auto",
+																"minWidth": "16px",
+																"height": "auto",
+																"minHeight": "16px",
+																"templateName": "text",
+																"name": "服务状态值id",
+																"position": "relative",
+																"value": "${model1.ticketStatus}",
+																"visible": "true",
+																"compStyle": "text4"
+															}
+														]
+													}
+												]
+											}
+										],
+										"padding": "20px",
+										"visible": "true",
+										"borderTop": "1px solid #00294C 10"
+									}
+								]
+							}
+						],
+						"boxShadow": "outset 0px 0px 12px 0px #296191 10",
+						"fill": "bg1"
+					}
+				],
+				"margin": "0px",
+				"fill": "linear-gradient 180deg #419714 10 0 #FFFFFF 1",
+				"borderRadius": "0px",
+				"name": "交车确认",
+				"padding": "20px",
+				"visible": "true"
+			},
+			{
+				"id": "panel22",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "auto",
+				"minHeight": "44px",
+				"display": "inlineflexColumn",
+				"flexDirection": "column",
+				"templateName": "panel_column",
+				"fill": "linear-gradient 180deg #296191 20 0 #878B8F 10 0.1989247311827957",
+				"components": [
+					{
+						"id": "panel23",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "15px",
+						"minHeight": "15px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"fill": "none",
+						"margin": "0px 12px 0px 12px",
+						"components": [
+							{
+								"id": "text2",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "${model1.licensePlate}· ${model1.entityType}",
+								"name": "单行文本-业务类型",
+								"position": "relative",
+								"compStyle": "text4",
+								"padding": "0px 5px 0px 0px"
+							}
+						],
+						"padding": "0px",
+						"borderRadius": "5px",
+						"rowAlignItems": "center",
+						"rowJustifyContent": "flex-end"
+					},
+					{
+						"id": "panel1",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "44px",
+						"templateName": "panel",
+						"components": [
+							{
+								"id": "panel5",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"name": "车辆环检",
+								"components": [
+									{
+										"id": "panel4",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "5+3+N-按钮",
+										"components": [
+											{
+												"id": "text4",
+												"type": "text",
+												"width": "189px",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "16px",
+												"templateName": "text",
+												"name": "车辆环检",
+												"value": "车辆环检（5+3+N）",
+												"font": {
+													"bold": true,
+													"color": "font",
+													"size": 15
+												},
+												"margin": "0px 0px 0px 10px"
+											}
+										]
+									},
+									{
+										"id": "panel3",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "90px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-外观",
+										"components": [
+											{
+												"id": "text3",
+												"type": "text",
+												"width": "48px",
+												"minWidth": "16px",
+												"height": "68px",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "外观：",
+												"name": "外观：",
+												"margin": "0px",
+												"padding": "16px 0px 0px 0px",
+												"font": {
+													"color": "font"
+												}
+											},
+											{
+												"id": "image1",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model2.fileFieId 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model2",
+														"attachmentField": "model2.fileFieId",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image2",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model3.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model3",
+														"attachmentField": "model3.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image3",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model4.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model4",
+														"attachmentField": "model4.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image5",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model6.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model5",
+														"attachmentField": "model5.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image4",
+												"type": "image",
+												"width": "200px",
+												"height": "150px",
+												"templateName": "image",
+												"image": "cover field model5.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model6",
+														"attachmentField": "model6.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											}
+										],
+										"margin": "0px 12px 12px 12px",
+										"flexWrap": "nowrap",
+										"overflow": "hidden",
+										"fill": "bg1",
+										"padding": "0px 6px 0px 6px",
+										"borderRadius": "5px",
+										"rowJustifyContent": "space-between"
+									},
+									{
+										"id": "panel6",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "90px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-内饰",
+										"components": [
+											{
+												"id": "text5",
+												"type": "text",
+												"width": "56px",
+												"minWidth": "16px",
+												"height": "110px",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "内饰：",
+												"name": "内饰：",
+												"margin": "0px",
+												"padding": "0px 0px 0px 6px",
+												"font": {
+													"color": "font"
+												}
+											},
+											{
+												"id": "image8",
+												"type": "image",
+												"width": "25%",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model8.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model8",
+														"attachmentField": "model8.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image7",
+												"type": "image",
+												"width": "25%",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model9.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model9",
+														"attachmentField": "model9.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											},
+											{
+												"id": "image6",
+												"type": "image",
+												"width": "25%",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model7.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model7",
+														"attachmentField": "model7.FilePath",
+														"dataRange": "resultset",
+														"enableDownload": false
+													}
+												]
+											}
+										],
+										"flexWrap": "nowrap",
+										"overflow": "x",
+										"margin": "0px 10px 12px 10px",
+										"rowJustifyContent": "space-between"
+									},
+									{
+										"id": "panel7",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-其他",
+										"components": [
+											{
+												"id": "text6",
+												"type": "text",
+												"width": "56px",
+												"minWidth": "16px",
+												"height": "60px",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "其\n他",
+												"name": "其他：",
+												"margin": "0px",
+												"padding": "0px 0px 0px 6px",
+												"font": {
+													"color": "font"
+												}
+											},
+											{
+												"id": "floatpanel1",
+												"type": "floatpanel",
+												"width": "70%",
+												"height": "auto",
+												"minHeight": "63px",
+												"panel": [
+													{
+														"id": "panel1",
+														"type": "floatpanel.panel",
+														"width": "30%",
+														"height": "auto",
+														"position": "relative",
+														"flexWrap": "nowrap",
+														"components": [
+															{
+																"id": "image15",
+																"type": "image",
+																"width": "100%",
+																"minWidth": "60px",
+																"height": "auto",
+																"minHeight": "60px",
+																"templateName": "image",
+																"margin": "0px 15px 0px 0px",
+																"image": "cover field model10.FilePath 0 0 100 no-repeat center",
+																"position": "relative",
+																"actions": [
+																	{
+																		"id": "action1",
+																		"actionType": "showFilesGallary",
+																		"triggerType": "click",
+																		"dataRange": "resultset",
+																		"dataSet": "model10",
+																		"attachmentField": "model10.FilePath",
+																		"enableDownload": false
+																	}
+																]
+															}
+														],
+														"flexible": "false",
+														"margin": "0px 10px 0px 0px",
+														"padding": "0px"
+													}
+												],
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"rowJustifyContent": "flex-start",
+												"rowAlignItems": "flex-start",
+												"rowAlignContent": "flex-start",
+												"flexWrap": "wrap",
+												"templateName": "floatpanel",
+												"position": "relative",
+												"padding": "0px",
+												"overflow": "x",
+												"columnAlignItems": "flex-start",
+												"visible": "condition",
+												"visibleCondition": "model10.totalRowCount__ >0",
+												"margin": "0px 15px 0px 15px",
+												"dataSet": "model10"
+											}
+										],
+										"flexWrap": "wrap",
+										"overflow": "x",
+										"margin": "0px 12px 12px 12px"
+									},
+									{
+										"id": "text15",
+										"type": "text",
+										"width": "122px",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"visible": "false",
+										"value": "${param1}"
+									},
+									{
+										"id": "panel21",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"padding": "0px 0px 0px 12px",
+										"margin": "0px 0px 12px 0px",
+										"name": "备注-环检",
+										"components": [
+											{
+												"id": "multipleinput1",
+												"type": "multipleinput",
+												"width": "95%",
+												"templateName": "multipleinput",
+												"name": "备注-环检",
+												"height": "56px",
+												"minHeight": "26px",
+												"margin": "20px 0px 0px 0px",
+												"border": "1px solid #E2E2E2",
+												"title": {
+													"type": "title",
+													"value": "备注：",
+													"width": "56px",
+													"textAlign": "center",
+													"padding": "0px 6px 0px 0px",
+													"titlePos": "left",
+													"height": "32px",
+													"minHeight": "26px",
+													"font": {
+														"color": "font"
+													}
+												},
+												"calcEnabled": true,
+												"submitData": true,
+												"autoFilter": false,
+												"toggleFocusOnEnter": true,
+												"submitField": "model1.environmentalInspectionRemark",
+												"exp": "model1.environmentalInspectionRemark",
+												"textAlign": "left",
+												"borderRadius": "3px",
+												"titlePosition": "left",
+												"disable": "condition",
+												"disableCondition": "text1>1"
+											}
+										],
+										"flexible": "true"
+									}
+								],
+								"margin": "0px 0px 12px 0px",
+								"visible": "true",
+								"visibleCondition": "USER_INGROUP($user,'SA') ",
+								"fill": "linear-gradient 180deg #4CC6E0 10 0 #FFFFFF 0.24731182795698925",
+								"borderRadius": "5px",
+								"border": "none"
+							},
+							{
+								"id": "panel8",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"name": "维修-保养中",
+								"components": [
+									{
+										"id": "panel9",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "维修-保养-按钮",
+										"components": [
+											{
+												"id": "text7",
+												"type": "text",
+												"width": "189px",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "16px",
+												"templateName": "text",
+												"name": "维修 保养中",
+												"value": "维修/保养中",
+												"font": {
+													"bold": true,
+													"color": "font",
+													"size": 15
+												},
+												"margin": "0px 0px 0px 10px"
+											}
+										]
+									},
+									{
+										"id": "panel10",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "90px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "维保1",
+										"components": [
+											{
+												"id": "image9",
+												"type": "image",
+												"width": "25%",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model11.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model11",
+														"attachmentField": "model11.FilePath",
+														"enableDownload": false,
+														"dataRange": "resultset"
+													}
+												]
+											},
+											{
+												"id": "image10",
+												"type": "image",
+												"width": "25%",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model12.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model12",
+														"attachmentField": "model12.FilePath",
+														"enableDownload": false,
+														"dataRange": "resultset"
+													}
+												]
+											},
+											{
+												"id": "image11",
+												"type": "image",
+												"width": "25%",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model13.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"enableDownload": false,
+														"attachmentField": "model13.FilePath",
+														"dataSet": "model13",
+														"dataRange": "resultset"
+													}
+												]
+											}
+										],
+										"margin": "0px 12px 12px 12px",
+										"flexWrap": "nowrap",
+										"overflow": "x",
+										"fill": "#FFFFFF",
+										"borderRadius": "5px",
+										"padding": "0px 6px 0px 6px",
+										"rowJustifyContent": "space-between"
+									},
+									{
+										"id": "panel2",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-其他",
+										"components": [
+											{
+												"id": "text14",
+												"type": "text",
+												"width": "56px",
+												"minWidth": "16px",
+												"height": "60px",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "检\n出\n项",
+												"name": "其他：",
+												"margin": "0px",
+												"padding": "0px 0px 0px 6px",
+												"font": {
+													"color": "font"
+												}
+											},
+											{
+												"id": "floatpanel2",
+												"type": "floatpanel",
+												"width": "70%",
+												"height": "auto",
+												"minHeight": "63px",
+												"panel": [
+													{
+														"id": "panel1",
+														"type": "floatpanel.panel",
+														"width": "30%",
+														"height": "auto",
+														"position": "relative",
+														"flexWrap": "nowrap",
+														"components": [
+															{
+																"id": "image12",
+																"type": "image",
+																"width": "100%",
+																"minWidth": "60px",
+																"height": "auto",
+																"minHeight": "60px",
+																"templateName": "image",
+																"margin": "0px 15px 0px 0px",
+																"image": "cover field model14.FilePath 0 0 100 no-repeat center",
+																"position": "relative",
+																"actions": [
+																	{
+																		"id": "action1",
+																		"actionType": "showFilesGallary",
+																		"triggerType": "click",
+																		"dataRange": "resultset",
+																		"dataSet": "model14",
+																		"attachmentField": "model14.FilePath",
+																		"enableDownload": false
+																	}
+																]
+															}
+														],
+														"flexible": "false",
+														"margin": "0px 10px 0px 0px",
+														"padding": "0px"
+													}
+												],
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"rowJustifyContent": "flex-start",
+												"rowAlignItems": "flex-start",
+												"rowAlignContent": "flex-start",
+												"flexWrap": "wrap",
+												"templateName": "floatpanel",
+												"position": "relative",
+												"padding": "0px",
+												"overflow": "x",
+												"columnAlignItems": "flex-start",
+												"visible": "condition",
+												"visibleCondition": "model14.totalRowCount__ >0",
+												"margin": "0px 15px 0px 15px",
+												"dataSet": "model14"
+											}
+										],
+										"flexWrap": "wrap",
+										"overflow": "x",
+										"margin": "0px 12px 12px 12px"
+									},
+									{
+										"id": "multipleinput3",
+										"type": "multipleinput",
+										"width": "330px",
+										"templateName": "multipleinput",
+										"name": "备注-维保",
+										"height": "56px",
+										"minHeight": "26px",
+										"margin": "15px 0px 15px 12px",
+										"border": "1px solid #E2E2E2",
+										"title": {
+											"type": "title",
+											"value": "备注：",
+											"width": "60px",
+											"textAlign": "left",
+											"padding": "0px 0px 0px 6px",
+											"height": "32px",
+											"minHeight": "26px",
+											"font": {
+												"color": "font"
+											}
+										},
+										"submitData": true,
+										"autoFilter": false,
+										"submitField": "model1.repairRemark",
+										"calcEnabled": true,
+										"submitCondition": "model1.repairRemark",
+										"padding": "0px",
+										"flexible": "false",
+										"disable": "condition",
+										"disableCondition": "text1>2",
+										"borderRadius": "5px"
+									}
+								],
+								"visible": "true",
+								"margin": "0px 0px 12px 0px",
+								"padding": "0px 0px 12px 0px",
+								"fill": "linear-gradient 180deg #F5B241 10 0 #FFFFFF 0.25806451612903225",
+								"position": "relative",
+								"borderRadius": "5px",
+								"visibleCondition": "text1 > 1"
+							},
+							{
+								"id": "panel12",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"name": "交车确认（5+1+N）",
+								"components": [
+									{
+										"id": "panel13",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "5+1+N-按钮",
+										"components": [
+											{
+												"id": "text8",
+												"type": "text",
+												"width": "189px",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "16px",
+												"templateName": "text",
+												"name": "交车确认",
+												"value": "交车确认（5+1+N）",
+												"font": {
+													"bold": true,
+													"color": "font",
+													"size": 15
+												},
+												"margin": "0px 0px 0px 10px"
+											},
+											{
+												"id": "button7",
+												"type": "button",
+												"width": "65px",
+												"value": "保存草稿",
+												"templateName": "button",
+												"name": "保存-交车",
+												"fill": "none",
+												"font": {
+													"color": "#296191",
+													"size": 14
+												},
+												"margin": "8px 0px 8px 15px",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "submitData",
+														"triggerType": "click",
+														"submitRange": "component",
+														"submitComponent": [
+															"panel14",
+															"panel15",
+															"multipleinput2"
+														],
+														"successMsg": "交车确认照片已保存",
+														"ignoreHiddenComponents": true,
+														"validateData": false
+													},
+													{
+														"id": "action4",
+														"actionType": "submitData",
+														"triggerType": "click",
+														"submitRange": "component",
+														"submitComponent": [
+															"panel16"
+														]
+													},
+													{
+														"id": "action2",
+														"actionType": "refreshModels",
+														"triggerType": "click",
+														"models": [
+															"model1",
+															"model4"
+														]
+													}
+												],
+												"height": "auto",
+												"disable": "condition",
+												"disableCondition": "text1>3"
+											},
+											{
+												"id": "button5",
+												"type": "button",
+												"width": "54px",
+												"value": "提交",
+												"templateName": "button",
+												"name": "完成-环检",
+												"fill": "none",
+												"font": {
+													"color": "#B12A31",
+													"size": 14
+												},
+												"margin": "8px 4px 8px 10px",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "validateForm",
+														"triggerType": "click",
+														"submitRange": "component",
+														"submitComponent": [
+															"panel12"
+														],
+														"showSuccessMsg": true,
+														"successMsg": "交车确认阶段已完成！",
+														"successMsgType": "dialog"
+													},
+													{
+														"id": "action2",
+														"actionType": "submitData",
+														"triggerType": "click",
+														"submitRange": "component",
+														"submitComponent": [
+															"panel12"
+														],
+														"successMsg": "交车确认阶段完成"
+													},
+													{
+														"id": "action3",
+														"actionType": "updateData",
+														"triggerType": "click",
+														"dataSet": "model1",
+														"dataRange": "resultset",
+														"fieldValues": [
+															{
+																"name": "ticketStatus",
+																"valueType": "exp",
+																"value": "4"
+															}
+														]
+													},
+													{
+														"id": "action4",
+														"actionType": "goBack",
+														"triggerType": "click",
+														"backPage": "page",
+														"url": "/xiaoshouyi/app/售后.app/透明化测试用.mpg"
+													}
+												],
+												"selectedEnabled": false,
+												"disable": "condition",
+												"height": "auto",
+												"flexible": "true",
+												"disableCondition": "text1>3"
+											}
+										]
+									},
+									{
+										"id": "panel14",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "81px",
+										"minHeight": "50px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-外观",
+										"components": [
+											{
+												"id": "text9",
+												"type": "text",
+												"width": "auto",
+												"minWidth": "16px",
+												"height": "75px",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "外观：",
+												"name": "外观：",
+												"margin": "0px",
+												"padding": "0px 0px 0px 6px",
+												"font": {
+													"color": "font"
+												}
+											},
+											{
+												"id": "image16",
+												"type": "image",
+												"width": "48px",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model17.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"enableDownload": false,
+														"dataSet": "model17",
+														"attachmentField": "model17.FilePath",
+														"dataRange": "resultset"
+													}
+												]
+											},
+											{
+												"id": "image14",
+												"type": "image",
+												"width": "48px",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model16.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"enableDownload": false,
+														"dataSet": "model16",
+														"attachmentField": "model16.FilePath",
+														"dataRange": "resultset"
+													}
+												]
+											},
+											{
+												"id": "image13",
+												"type": "image",
+												"width": "48px",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model15.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"enableDownload": false,
+														"dataSet": "model15",
+														"attachmentField": "model15.FilePath",
+														"dataRange": "resultset"
+													}
+												]
+											},
+											{
+												"id": "image17",
+												"type": "image",
+												"width": "48px",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model18.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"enableDownload": false,
+														"dataSet": "model18",
+														"attachmentField": "model18.FilePath",
+														"dataRange": "resultset"
+													}
+												]
+											},
+											{
+												"id": "image18",
+												"type": "image",
+												"width": "48px",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model19.FilePath 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"enableDownload": false,
+														"dataSet": "model19",
+														"attachmentField": "model19.FilePath",
+														"dataRange": "resultset"
+													}
+												]
+											}
+										],
+										"margin": "0px 10px 12px 10px",
+										"flexWrap": "nowrap",
+										"overflow": "hidden",
+										"fill": "#FFFFFF",
+										"borderRadius": "5px",
+										"padding": "8px 0px 0px 0px",
+										"rowJustifyContent": "space-between"
+									},
+									{
+										"id": "panel15",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "131px",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-内饰",
+										"components": [
+											{
+												"id": "text10",
+												"type": "text",
+												"width": "auto",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "安全：",
+												"name": "内饰：",
+												"margin": "0px 10px 0px 0px",
+												"padding": "0px 0px 0px 6px",
+												"font": {
+													"color": "font"
+												}
+											},
+											{
+												"id": "image19",
+												"type": "image",
+												"width": "50%",
+												"minWidth": "30px",
+												"height": "100%",
+												"minHeight": "30px",
+												"templateName": "image",
+												"image": "cover field model20.threeSafetyChecklistsFlie 0 0 100 no-repeat center",
+												"actions": [
+													{
+														"id": "action1",
+														"actionType": "showFilesGallary",
+														"triggerType": "click",
+														"dataSet": "model20",
+														"attachmentField": "model20.threeSafetyChecklistsFlie",
+														"enableDownload": false,
+														"dataRange": "resultset"
+													}
+												]
+											}
+										],
+										"flexWrap": "nowrap",
+										"overflow": "x",
+										"margin": "0px 10px 5px 10px"
+									},
+									{
+										"id": "combobox1",
+										"type": "combobox",
+										"width": "auto",
+										"templateName": "combobox",
+										"dimension": "model1.JJCD",
+										"submitData": false,
+										"autoFilter": false,
+										"title": {
+											"type": "title",
+											"value": "紧急\n程度",
+											"width": "48px",
+											"padding": "0px 0px 0px 6px",
+											"font": {
+												"color": "font"
+											}
+										},
+										"defaultValue": "3",
+										"margin": "7px 10px 7px 10px",
+										"compStyle": "style1",
+										"disable": "condition",
+										"disableCondition": "text1>3",
+										"searchEnabled": "auto",
+										"visible": "false"
+									},
+									{
+										"id": "panel11",
+										"type": "panel",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "44px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"name": "横向布局-其他",
+										"components": [
+											{
+												"id": "text11",
+												"type": "text",
+												"width": "56px",
+												"minWidth": "16px",
+												"height": "60px",
+												"minHeight": "16px",
+												"templateName": "text",
+												"value": "其\n他",
+												"name": "其他：",
+												"margin": "0px",
+												"padding": "0px 0px 0px 6px",
+												"font": {
+													"color": "font"
+												}
+											},
+											{
+												"id": "floatpanel3",
+												"type": "floatpanel",
+												"width": "70%",
+												"height": "auto",
+												"minHeight": "63px",
+												"panel": [
+													{
+														"id": "panel1",
+														"type": "floatpanel.panel",
+														"width": "30%",
+														"height": "auto",
+														"position": "relative",
+														"flexWrap": "nowrap",
+														"components": [
+															{
+																"id": "image20",
+																"type": "image",
+																"width": "100%",
+																"minWidth": "60px",
+																"height": "auto",
+																"minHeight": "60px",
+																"templateName": "image",
+																"margin": "0px 15px 0px 0px",
+																"image": "cover field model21.FilePath 0 0 100 no-repeat center",
+																"position": "relative",
+																"actions": [
+																	{
+																		"id": "action1",
+																		"actionType": "showFilesGallary",
+																		"triggerType": "click",
+																		"dataRange": "resultset",
+																		"dataSet": "model21",
+																		"attachmentField": "model21.FilePath",
+																		"enableDownload": false
+																	}
+																]
+															}
+														],
+														"flexible": "false",
+														"margin": "0px 10px 0px 0px",
+														"padding": "0px"
+													}
+												],
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"rowJustifyContent": "flex-start",
+												"rowAlignItems": "flex-start",
+												"rowAlignContent": "flex-start",
+												"flexWrap": "wrap",
+												"templateName": "floatpanel",
+												"position": "relative",
+												"padding": "0px",
+												"overflow": "x",
+												"columnAlignItems": "flex-start",
+												"visible": "condition",
+												"visibleCondition": "model21.totalRowCount__ >0",
+												"margin": "0px 15px 0px 15px",
+												"dataSet": "model21"
+											}
+										],
+										"flexWrap": "wrap",
+										"overflow": "x",
+										"margin": "0px 12px 12px 12px"
+									},
+									{
+										"id": "multipleinput2",
+										"type": "multipleinput",
+										"width": "auto",
+										"templateName": "multipleinput",
+										"name": "备注-交车",
+										"margin": "20px 10px 15px 10px",
+										"border": "1px solid #E2E2E2",
+										"title": {
+											"type": "title",
+											"value": "备注：",
+											"width": "48px",
+											"textAlign": "center",
+											"padding": "0px 0px 0px 6px",
+											"height": "32px",
+											"minHeight": "26px",
+											"font": {
+												"color": "font"
+											}
+										},
+										"calcEnabled": true,
+										"exp": "model1.deliveryRemark",
+										"submitData": true,
+										"autoFilter": false,
+										"submitField": "model1.deliveryRemark",
+										"borderRadius": "3px",
+										"height": "56px",
+										"minHeight": "26px",
+										"disable": "condition",
+										"disableCondition": "text1>3",
+										"visible": "true"
+									}
+								],
+								"margin": "8px 0px 12px 0px",
+								"visible": "true",
+								"visibleCondition": "text1>2",
+								"borderRadius": "5px",
+								"fill": "linear-gradient 180deg #419714 10 0 #FFFFFF 0.1881720430107527",
+								"padding": "0px 0px 12px 0px",
+								"autoHideEmpty": false
+							},
+							{
+								"id": "panel17",
+								"type": "panel",
+								"width": "auto",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "44px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"name": "底部 服务状态",
+								"margin": "0px 0px 10px 0px",
+								"components": [
+									{
+										"id": "text12",
+										"type": "text",
+										"width": "81px",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"name": "服务状态：",
+										"value": "工单状态：",
+										"font": {
+											"color": "font",
+											"size": 16
+										}
+									},
+									{
+										"id": "text13",
+										"type": "text",
+										"width": "218px",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"name": "服务状态值id",
+										"position": "fullContainer",
+										"textAlign": "right",
+										"value": "${model1.ticketStatus}",
+										"visible": "true",
+										"padding": "0px 10px 0px 0px",
+										"font": {
+											"color": "font",
+											"size": 16
+										}
+									},
+									{
+										"id": "text1",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"name": "服务状态--隐藏",
+										"value": "${model1.ticketStatus.value}",
+										"visible": "false"
+									}
+								],
+								"fill": "#FFFFFF",
+								"padding": "0px 0px 0px 12px",
+								"borderRadius": "5px"
+							}
+						],
+						"margin": "0px 12px 0px 12px",
+						"fill": "none",
+						"borderRadius": "0px"
+					}
+				],
+				"padding": "8px 0px 0px 0px",
+				"visible": "false"
+			}
+		],
+		"customNavBarColr": false,
+		"immersedNavBar": true,
+		"pageBackground": "none",
+		"mobileSize": "pad"
+	}
+}

@@ -128,6 +128,11 @@ impl GraphRuntime {
         project_dir: Option<impl AsRef<Path>>,
     ) -> Result<Self> {
         let path = graph_db_path.as_ref().to_path_buf();
+        #[cfg(feature = "telemetry")]
+        let graph_load_span = crate::telemetry::graph_load_span(&path.to_string_lossy());
+        #[cfg(feature = "telemetry")]
+        let _graph_load_guard = graph_load_span.enter();
+
         let start = Instant::now();
         let graph = GraphDB::open_or_diagnostic(&path).map_err(|e| {
             anyhow::anyhow!(
@@ -156,6 +161,14 @@ impl GraphRuntime {
             .map(|p| p.as_ref().to_path_buf())
             .or_else(|| path.parent().map(|p| p.to_path_buf()));
 
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::record_graph_load(
+            &graph_load_span,
+            graph_load_ms,
+            graph.graph.node_count(),
+            graph.graph.edge_count(),
+        );
+
         Ok(GraphRuntime {
             graph,
             graph_db_path: path,
@@ -183,6 +196,20 @@ impl GraphRuntime {
         use crate::tool_contract::ToolCommand;
         let total_start = Instant::now();
         let mut diagnostics = Vec::new();
+        #[cfg(feature = "telemetry")]
+        let command_label = format!("{:?}", request.command);
+        #[cfg(feature = "telemetry")]
+        let query_span = crate::telemetry::runtime_query_span(
+            &command_label,
+            &request.target,
+            &request.budget,
+            request.intent.as_deref(),
+            request.human,
+            self.graph.graph.node_count(),
+            self.graph.graph.edge_count(),
+        );
+        #[cfg(feature = "telemetry")]
+        let _query_guard = query_span.enter();
 
         // ReloadGraph / CheckReload 需要可变借用 self，在 match 之前单独处理
         if request.command == ToolCommand::ReloadGraph {
@@ -205,13 +232,21 @@ impl GraphRuntime {
                 "Query compute: {} ms before response processing",
                 query_compute_ms
             ));
-            return ResponseProcessor::runtime_response(
+            let response = ResponseProcessor::runtime_response(
                 result,
                 diagnostics,
                 0,
                 query_compute_ms,
                 total_start,
+            )?;
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::record_runtime_response(
+                &query_span,
+                &command_label,
+                &request.budget,
+                &response.timing,
             );
+            return Ok(response);
         }
 
         if request.command == ToolCommand::CheckReload {
@@ -254,16 +289,32 @@ impl GraphRuntime {
                 "Query compute: {} ms before response processing",
                 query_compute_ms
             ));
-            return ResponseProcessor::runtime_response(
+            let response = ResponseProcessor::runtime_response(
                 result,
                 diagnostics,
                 0,
                 query_compute_ms,
                 total_start,
+            )?;
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::record_runtime_response(
+                &query_span,
+                &command_label,
+                &request.budget,
+                &response.timing,
             );
+            return Ok(response);
         }
 
         let query_start = Instant::now();
+        #[cfg(feature = "telemetry")]
+        let query_compute_span = tracing::info_span!(
+            "metadata_checker.stage.query_compute",
+            "metadata_checker.command" = %command_label,
+            "metadata_checker.target" = %request.target,
+        );
+        #[cfg(feature = "telemetry")]
+        let query_compute_guard = query_compute_span.enter();
         let mut result = match request.command {
             ToolCommand::AdviseQuery => {
                 let question_kind = request.intent.as_deref().unwrap_or("auto");
@@ -349,6 +400,8 @@ impl GraphRuntime {
                 serde_json::to_value(status)?
             }
         };
+        #[cfg(feature = "telemetry")]
+        drop(query_compute_guard);
         let query_compute_ms = query_start.elapsed().as_millis();
 
         if request.human {
@@ -385,6 +438,13 @@ impl GraphRuntime {
             "Response processed: serialize {} ms, total {} ms",
             response.timing.serialize_ms, response.timing.total_ms
         ));
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::record_runtime_response(
+            &query_span,
+            &command_label,
+            &request.budget,
+            &response.timing,
+        );
         Ok(response)
     }
 

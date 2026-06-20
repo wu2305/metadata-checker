@@ -1,0 +1,6269 @@
+{
+	"version": "4.19.7",
+	"theme": "mobile",
+	"params": [
+		{
+			"id": "param1",
+			"name": "phone1",
+			"desc": "手机号"
+		},
+		{
+			"id": "param2",
+			"name": "user_depart",
+			"value": "${$user.dept_id}",
+			"desc": "用户的部门"
+		},
+		{
+			"id": "param3",
+			"name": "z_id",
+			"desc": "主键id"
+		},
+		{
+			"id": "param4",
+			"name": "s_id",
+			"desc": "审核表id"
+		},
+		{
+			"id": "param5",
+			"name": "xs",
+			"value": "0",
+			"desc": "显示"
+		},
+		{
+			"id": "param6",
+			"name": "vin",
+			"desc": "车车架号"
+		},
+		{
+			"id": "param7",
+			"name": "sales_manager",
+			"desc": "销售顾问"
+		}
+	],
+	"sources": [
+		{
+			"id": "model1",
+			"modelType": "dwtable",
+			"path": "$DATA:/销售/销售核销单/sales_order.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "id",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model1.id=param3 AND param3 IS NOT NULL"
+					}
+				]
+			}
+		},
+		{
+			"id": "model2",
+			"modelType": "dwtable",
+			"path": "$DATA:/销售/销售核销单/fact_sales_ager_name.tbl",
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model2.yes_id=param3 AND param3 IS NOT NULL"
+					}
+				]
+			}
+		},
+		{
+			"id": "model3",
+			"modelType": "dwtable",
+			"path": "$DATA:/销售/销售核销单/fact_finance_approved.tbl",
+			"dataSetResultType": "oneRowResult",
+			"primaryKey": "id",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model3.id=param4 AND param4 IS NOT NULL"
+					}
+				]
+			}
+		},
+		{
+			"id": "model4",
+			"modelType": "dwtable",
+			"path": "$DATA:/通用/szsys_4_users.tbl",
+			"dataSetResultType": "oneRowResult",
+			"queryConditionReturnEmpty": false,
+			"filter": {
+				"scope": "self",
+				"matchAll": true,
+				"clauses": [
+					{
+						"exp": "model4.USER_ID=param7 AND param7 IS NOT NULL"
+					}
+				]
+			}
+		}
+	],
+	"refComponentTypes": [
+		"canvas",
+		"panel",
+		"text",
+		"input",
+		"numberinput",
+		"combobox",
+		"floatpanel",
+		"signinput",
+		"button",
+		"dialog",
+		"multipleinput"
+	],
+	"canvas": {
+		"id": "canvas",
+		"type": "canvas",
+		"viewSize": "mobile",
+		"width": "100%",
+		"minWidth": "320px",
+		"height": "auto",
+		"minHeight": "320px",
+		"overflow": "y",
+		"position": "center",
+		"components": [
+			{
+				"id": "panel1",
+				"type": "panel",
+				"width": "auto",
+				"minWidth": "20px",
+				"height": "auto",
+				"minHeight": "44px",
+				"templateName": "panel",
+				"components": [
+					{
+						"id": "panel134",
+						"type": "panel",
+						"width": "100%",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "44px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"rowJustifyContent": "space-between",
+						"components": [
+							{
+								"id": "text12",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "返回",
+								"font": {
+									"color": "#0070C0",
+									"size": 13
+								},
+								"position": "relative",
+								"border": "none",
+								"fill": "bg1",
+								"padding": "3px 6px 3px 6px",
+								"textAlign": "center",
+								"borderRadius": "3px",
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "link",
+										"triggerType": "click",
+										"targetType": "app",
+										"path": 0,
+										"displayType": "_self"
+									}
+								],
+								"visible": "condition",
+								"visibleCondition": "param5=1"
+							},
+							{
+								"id": "text9",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "26px",
+								"templateName": "text",
+								"value": "返回",
+								"textAlign": "center",
+								"font": {
+									"color": "bg1"
+								},
+								"visible": "condition",
+								"visibleCondition": "param5=0"
+							},
+							{
+								"id": "text1",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "26px",
+								"templateName": "text",
+								"value": "销售核准单",
+								"textAlign": "center",
+								"font": {
+									"color": "font"
+								}
+							},
+							{
+								"id": "text7",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"templateName": "text",
+								"value": "返回",
+								"font": {
+									"color": "bg1",
+									"size": 13
+								},
+								"position": "relative",
+								"border": "none",
+								"fill": "bg1",
+								"padding": "3px 6px 3px 6px",
+								"textAlign": "center",
+								"borderRadius": "3px"
+							}
+						]
+					},
+					{
+						"id": "panel3",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "20px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel4",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text2",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "卖方名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										}
+									},
+									{
+										"id": "input1",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "20px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.seller_name",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel2",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text4",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "日期",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										}
+									},
+									{
+										"id": "input2",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "20px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.file_generation_date.date",
+										"font": {
+											"size": 10
+										},
+										"submitData": false,
+										"autoFilter": false,
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "text10",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "24px",
+						"templateName": "text",
+						"value": "客户信息",
+						"font": {
+							"bold": true,
+							"color": "font 85",
+							"size": 12
+						},
+						"fill": "#C7ECFF",
+						"border": "none"
+					},
+					{
+						"id": "panel5",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel6",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text6",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "开票入户名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "input4",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.invoice_recipient_name",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel7",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text8",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "联系方式",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "input5",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.customer_contact",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel8",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel9",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text11",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "证件/照号",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "input6",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.customer_id_number",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel10",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "24px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text13",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "开票入户地址",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "input7",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.invoice_recipient_address",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "text19",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "24px",
+						"templateName": "text",
+						"value": "车辆信息",
+						"font": {
+							"bold": true,
+							"color": "font 85",
+							"size": 12
+						},
+						"fill": "#C7ECFF"
+					},
+					{
+						"id": "panel11",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel12",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text15",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "销售合同编号",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "input8",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.contract_no",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel13",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "24px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text17",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "车架号",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "input9",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.vin",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel14",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel15",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text20",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "品牌",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "input11",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.brand",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel16",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "24px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text22",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "车型",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "input12",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.model",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel17",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel18",
+								"type": "panel",
+								"width": "100%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text24",
+										"type": "text",
+										"width": "20%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "外观/内饰色",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "input13",
+										"type": "input",
+										"width": "80%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.exterior_interior_color",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel20",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel21",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text28",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "整车销售指导价",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "numberinput44",
+										"type": "numberinput",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.msrp",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel22",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "24px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text30",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "增配金额",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "numberinput43",
+										"type": "numberinput",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.upgrade_amount",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "text26",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "24px",
+						"templateName": "text",
+						"value": "自营项目",
+						"font": {
+							"bold": true,
+							"color": "font 85",
+							"size": 12
+						},
+						"fill": "#C7ECFF"
+					},
+					{
+						"id": "panel19",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel23",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text27",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "收款项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text32",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "整车",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel24",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text33",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput1",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.reference_price",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel25",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text35",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "合同名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text36",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "《汽车销售合同》",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel26",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "40px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel27",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text37",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "不含税金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput2",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.ex_tax_amount\n\n",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel28",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text39",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税税率",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput4",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.vat_rate",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel29",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text41",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput3",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.vat_amount",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel30",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text43",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "实收金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput5",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.actual_amount",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel31",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel32",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text45",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "收款项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text46",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "用品",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel33",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text47",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput6",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.accessories_ref_price",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel34",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text49",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "合同名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text50",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "《用品销售合同》",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel35",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "40px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel36",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text51",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "不含税金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput7",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.accessories_ex_tax",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel37",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text53",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税税率",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput8",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.accessories_vat_rate",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel38",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text55",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput9",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.accessories_vat",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel39",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text57",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "实收金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput10",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.accessories_actual",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel40",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel41",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text59",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "收款项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text60",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "代办验车上牌服务",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel42",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text61",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput11",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.license_ref_price",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel43",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text63",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "合同名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text64",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "《委托代办车辆上牌登记手续服务合同》",
+										"border": "1px solid bg1@0",
+										"lineHeight": "1"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel44",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "40px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel45",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text65",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "不含税金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput12",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.license_ex_tax",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel46",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text67",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税税率",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput13",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.license_vat_rate",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel47",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text69",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput14",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.license_vat",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel48",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text71",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "实收金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput15",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.license_actual",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel49",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel50",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text73",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "收款项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text74",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "购车贷款咨询代办服务",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel51",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text75",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput16",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.consult_ref_price",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel52",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text77",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "合同名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text78",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "《购车贷款咨询代办服务合同》",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel53",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "40px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel54",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text79",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "不含税金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput17",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.consult_ex_tax",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel55",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text81",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税税率",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput18",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.consult_vat_rate",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel56",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text83",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput19",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.consult_vat",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel57",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text85",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "实收金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput20",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.consult_actual",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel58",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel59",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text87",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "收款项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text88",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "玻璃贴膜保障服务",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel60",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text89",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput21",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.film_ref_price",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel61",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text91",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "合同名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text92",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "《玻璃贴膜保障服务协议》",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel62",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "40px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel63",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text93",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "不含税金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput22",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.film_ex_tax",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel64",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text95",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税税率",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput23",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.film_vat_rate",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel65",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text97",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput24",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.film_vat",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel66",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text99",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "实收金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput25",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.film_actual",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel67",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel68",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text101",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "收款项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text102",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "车辆置换保障服务",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel69",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text103",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput26",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.trade_in_ref_price",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel70",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text105",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "合同名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text106",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "《车辆置换保障服务合同》",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel71",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "40px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel72",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text107",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "不含税金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput27",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.trade_in_ex_tax",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel73",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text109",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税税率",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput28",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.trade_in_vat_rate",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel74",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text111",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput29",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.trade_in_vat",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel75",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text113",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "实收金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput30",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.trade_in_actual",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel76",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel77",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text115",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "收款项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text116",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "延保",
+										"borderRight": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel78",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text117",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "combobox1",
+										"type": "combobox",
+										"width": "auto",
+										"templateName": "combobox",
+										"showTitle": false,
+										"height": "20px",
+										"minHeight": "20px",
+										"margin": "0px",
+										"padding": "0px",
+										"options": [
+											[
+												"0",
+												"否"
+											],
+											[
+												"1",
+												"是"
+											]
+										],
+										"submitData": false,
+										"autoFilter": false,
+										"calcEnabled": true,
+										"exp": "model1.is_warranty",
+										"disable": "true",
+										"font": {
+											"size": 10
+										},
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel79",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text119",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "合同名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "combobox2",
+										"type": "combobox",
+										"width": "auto",
+										"templateName": "combobox",
+										"showTitle": false,
+										"height": "20px",
+										"minHeight": "20px",
+										"padding": "0px",
+										"margin": "0px",
+										"submitData": false,
+										"autoFilter": false,
+										"calcEnabled": true,
+										"exp": "model1.warranty_Bard",
+										"disable": "true",
+										"font": {
+											"size": 10
+										},
+										"dimension": "model1.warranty_Bard",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel146",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "20px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel147",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "16px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"border": "1px solid bg1@0"
+							},
+							{
+								"id": "panel148",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "16px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "numberinput31",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.warranty_ref_price",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel149",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "16px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column"
+							}
+						],
+						"visible": "condition",
+						"visibleCondition": "combobox1.value IS NOT NULL"
+					},
+					{
+						"id": "panel80",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "40px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel81",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text121",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "不含税金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput32",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.warranty_ex_tax",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel82",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text123",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税税率",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput33",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"exp": "model1.warranty_vat_rate",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel83",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text125",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput34",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.warranty_vat",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel84",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text127",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "实收金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput35",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.warranty_actual",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel85",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel86",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text129",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "收款项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text130",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "24px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "基础保养套餐",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel87",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text131",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput36",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.maintenance_ref_price",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel88",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text133",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "合同名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput37",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": true,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"titlePosition": "right",
+										"title": {
+											"type": "title",
+											"titlePos": "right",
+											"width": "auto",
+											"minWidth": "30px",
+											"value": "次",
+											"font": {
+												"size": 10
+											},
+											"textAlign": "center",
+											"border": "1px solid bg1@0"
+										},
+										"disable": "true",
+										"exp": "model1.maintenance_times",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel89",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "40px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel90",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text135",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "不含税金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput38",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.maintenance_ex_tax",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel91",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text137",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税税率",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput40",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"exp": "model1.maintenance_vat_rate",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel92",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text139",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "增值税额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput39",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.maintenance_vat",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel93",
+								"type": "panel",
+								"width": "25%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text141",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "实收金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput41",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.maintenance_actual",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel150",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "20px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "text3",
+								"type": "text",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "20px",
+								"templateName": "text",
+								"fill": "#F2F2F2",
+								"value": "合计",
+								"font": {
+									"bold": true,
+									"color": "font 85",
+									"size": 10
+								},
+								"textAlign": "center",
+								"border": "1px solid bg1@0"
+							},
+							{
+								"id": "numberinput42",
+								"type": "numberinput",
+								"width": "70%",
+								"minWidth": "16px",
+								"templateName": "numberinput",
+								"height": "24px",
+								"minHeight": "16px",
+								"showTitle": false,
+								"padding": "0px",
+								"margin": "0px",
+								"calcEnabled": true,
+								"submitData": false,
+								"autoFilter": false,
+								"font": {
+									"size": 10
+								},
+								"textAlign": "center",
+								"disable": "true",
+								"exp": "model1.total_amount",
+								"border": "1px solid bg1@0"
+							}
+						]
+					},
+					{
+						"id": "panel94",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel95",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text143",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "专享项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text144",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "\"惠出行专享\"保障服务",
+										"border": "1px solid bg1@0",
+										"flexible": "true"
+									}
+								]
+							},
+							{
+								"id": "panel96",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text145",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "input57",
+										"type": "input",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "auto",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"exp": "'免费'",
+										"disable": "true",
+										"flexible": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel97",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text147",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "合同名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text148",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "《\"惠出行专享\"车辆事故维修期间保障服务协议》",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel98",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel99",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text149",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "专享项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text150",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "20px",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "礼遇项目",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel100",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text151",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "参考价格(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput55",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "20px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.gift_ref_price",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel101",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text153",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "类型",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "input10",
+										"type": "input",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "20px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"exp": "model1.gift_type",
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel102",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel103",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text155",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "代收代缴项目",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text156",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "代收代缴购置税",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel104",
+								"type": "panel",
+								"width": "20%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text157",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "收费方",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text158",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"border": "1px solid bg1@0",
+										"value": "税务局"
+									}
+								]
+							},
+							{
+								"id": "panel105",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text159",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "文件名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "text160",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center",
+										"value": "《车辆购置税代缴委托书》",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel106",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel107",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text161",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "受托方",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput45",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"exp": "model1.tax_agent",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel109",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text165",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#F2F2F2",
+										"value": "预估金额(元)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "numberinput46",
+										"type": "numberinput",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"exp": "model1.tax_estimated",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "text163",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "24px",
+						"templateName": "text",
+						"value": "预付款",
+						"font": {
+							"bold": true,
+							"color": "font 85",
+							"size": 12
+						},
+						"fill": "#C7ECFF"
+					},
+					{
+						"id": "panel108",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel110",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text164",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "客户预付款",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "numberinput47",
+										"type": "numberinput",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"exp": "model1.customer_prepayment",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel111",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "24px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text168",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "剩余应付金额",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "numberinput48",
+										"type": "numberinput",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"exp": "model1.remaining_payment",
+										"disable": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "text170",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "24px",
+						"templateName": "text",
+						"value": "置换",
+						"font": {
+							"bold": true,
+							"color": "font 85",
+							"size": 12
+						},
+						"fill": "#C7ECFF"
+					},
+					{
+						"id": "panel112",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel113",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text171",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "二手车价抵扣",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "numberinput49",
+										"type": "numberinput",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.trade_in_deduction",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel114",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "24px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text173",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "剩余应付金额",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "numberinput50",
+										"type": "numberinput",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.trade_in_remaining",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "text175",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "24px",
+						"templateName": "text",
+						"value": "金融",
+						"font": {
+							"bold": true,
+							"color": "font 85",
+							"size": 12
+						},
+						"fill": "#C7ECFF"
+					},
+					{
+						"id": "panel115",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel116",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text176",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "金融机构",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2",
+										"flexible": "true"
+									},
+									{
+										"id": "input14",
+										"type": "input",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.finance_company",
+										"flexible": "true",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel117",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "24px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text178",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "贷款期数(月)",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "numberinput51",
+										"type": "numberinput",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.loan_terms",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "panel118",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel119",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "24px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text180",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "申请贷款金额",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "numberinput52",
+										"type": "numberinput",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.loan_amount",
+										"border": "1px solid bg1@0"
+									}
+								]
+							},
+							{
+								"id": "panel120",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "24px",
+								"height": "auto",
+								"minHeight": "20px",
+								"display": "inlineflexRow",
+								"flexDirection": "row",
+								"templateName": "panel_row",
+								"components": [
+									{
+										"id": "text182",
+										"type": "text",
+										"width": "40%",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "16px",
+										"templateName": "text",
+										"value": "剩余应付金额",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"fill": "#F2F2F2"
+									},
+									{
+										"id": "numberinput53",
+										"type": "numberinput",
+										"width": "60%",
+										"minWidth": "16px",
+										"templateName": "numberinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.finance_remaining",
+										"border": "1px solid bg1@0"
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "text184",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "24px",
+						"templateName": "text",
+						"value": "最终付款金额",
+						"font": {
+							"bold": true,
+							"color": "font 85",
+							"size": 12
+						},
+						"fill": "#F4B084"
+					},
+					{
+						"id": "panel121",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "numberinput54",
+								"type": "numberinput",
+								"width": "100%",
+								"minWidth": "16px",
+								"templateName": "numberinput",
+								"height": "24px",
+								"minHeight": "16px",
+								"showTitle": false,
+								"padding": "0px",
+								"margin": "0px",
+								"calcEnabled": true,
+								"submitData": false,
+								"autoFilter": false,
+								"font": {
+									"size": 10
+								},
+								"textAlign": "center",
+								"disable": "true",
+								"exp": "model1.final_payment",
+								"border": "1px solid bg1@0"
+							}
+						]
+					},
+					{
+						"id": "panel135",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel136",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text14",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "第三方延保名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "input23",
+										"type": "input",
+										"width": "auto",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "26px",
+										"padding": "0px",
+										"margin": "0px",
+										"showTitle": false,
+										"border": "1px solid bg1@0",
+										"submitData": false,
+										"autoFilter": false,
+										"calcEnabled": true,
+										"exp": "model1.third_warranty_name",
+										"disable": "true",
+										"font": {
+											"size": 10
+										}
+									}
+								]
+							},
+							{
+								"id": "panel137",
+								"type": "panel",
+								"width": "50%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text16",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "第三方延保价格",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "input24",
+										"type": "input",
+										"width": "auto",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "26px",
+										"padding": "0px",
+										"margin": "0px",
+										"showTitle": false,
+										"border": "1px solid bg1@0",
+										"submitData": false,
+										"autoFilter": false,
+										"disable": "true",
+										"calcEnabled": true,
+										"exp": "model1.third_warranty_price",
+										"font": {
+											"size": 10
+										}
+									}
+								]
+							}
+						]
+					},
+					{
+						"id": "text185",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "24px",
+						"templateName": "text",
+						"value": "代付款",
+						"font": {
+							"bold": true,
+							"color": "font 85",
+							"size": 12
+						},
+						"fill": "#C7ECFF"
+					},
+					{
+						"id": "panel122",
+						"type": "panel",
+						"width": "100%",
+						"minWidth": "20px",
+						"height": "20px",
+						"minHeight": "20px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "text186",
+								"type": "text",
+								"width": "30%",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "20px",
+								"templateName": "text",
+								"fill": "#D9D9D9",
+								"value": "代付款人",
+								"font": {
+									"color": "font 85",
+									"size": 10
+								},
+								"textAlign": "center"
+							},
+							{
+								"id": "text188",
+								"type": "text",
+								"width": "30%",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "20px",
+								"templateName": "text",
+								"fill": "#D9D9D9",
+								"value": "代付款金额(元)",
+								"font": {
+									"color": "font 85",
+									"size": 10
+								},
+								"textAlign": "center"
+							},
+							{
+								"id": "text190",
+								"type": "text",
+								"width": "40%",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "20px",
+								"templateName": "text",
+								"fill": "#D9D9D9",
+								"value": "文件名称",
+								"font": {
+									"color": "font 85",
+									"size": 10
+								},
+								"textAlign": "center"
+							},
+							{
+								"id": "panel123",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column"
+							},
+							{
+								"id": "panel124",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column"
+							},
+							{
+								"id": "panel125",
+								"type": "panel",
+								"width": "40%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column"
+							}
+						]
+					},
+					{
+						"id": "floatpanel1",
+						"type": "floatpanel",
+						"width": "100%",
+						"minWidth": "150px",
+						"height": "auto",
+						"minHeight": "100px",
+						"panel": [
+							{
+								"id": "panel1",
+								"type": "floatpanel.panel",
+								"width": "auto",
+								"minWidth": "300px",
+								"height": "auto",
+								"minHeight": "100px",
+								"position": "relative",
+								"components": [
+									{
+										"id": "panel129",
+										"type": "panel",
+										"width": "100%",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"components": [
+											{
+												"id": "text197",
+												"type": "text",
+												"width": "30%",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "20px",
+												"templateName": "text",
+												"font": {
+													"size": 10
+												},
+												"textAlign": "center",
+												"value": "${model2.ager_name}",
+												"border": "1px dashed bg1@0"
+											},
+											{
+												"id": "text199",
+												"type": "text",
+												"width": "30%",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "20px",
+												"templateName": "text",
+												"font": {
+													"size": 10
+												},
+												"textAlign": "center",
+												"border": "1px solid bg1@0",
+												"value": "${model2.ager_payment}"
+											},
+											{
+												"id": "text201",
+												"type": "text",
+												"width": "40%",
+												"minWidth": "16px",
+												"height": "auto",
+												"minHeight": "20px",
+												"templateName": "text",
+												"font": {
+													"color": "font 85",
+													"size": 10
+												},
+												"textAlign": "center",
+												"value": "《代付款证明》",
+												"border": "1px solid bg1@0"
+											}
+										]
+									},
+									{
+										"id": "panel126",
+										"type": "panel",
+										"width": "100%",
+										"minWidth": "20px",
+										"height": "auto",
+										"minHeight": "20px",
+										"display": "inlineflexRow",
+										"flexDirection": "row",
+										"templateName": "panel_row",
+										"components": [
+											{
+												"id": "panel127",
+												"type": "panel",
+												"width": "50%",
+												"minWidth": "20px",
+												"height": "auto",
+												"minHeight": "20px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"components": [
+													{
+														"id": "text192",
+														"type": "text",
+														"width": "40%",
+														"minWidth": "16px",
+														"height": "auto",
+														"minHeight": "16px",
+														"templateName": "text",
+														"value": "车款(元)",
+														"font": {
+															"color": "font 85",
+															"size": 10
+														},
+														"fill": "#F2F2F2"
+													},
+													{
+														"id": "text193",
+														"type": "text",
+														"width": "60%",
+														"minWidth": "16px",
+														"height": "auto",
+														"minHeight": "16px",
+														"templateName": "text",
+														"font": {
+															"size": 10
+														},
+														"fill": "none",
+														"border": "1px solid bg1@0",
+														"value": "${model2.agent_car}"
+													}
+												]
+											},
+											{
+												"id": "panel128",
+												"type": "panel",
+												"width": "50%",
+												"minWidth": "24px",
+												"height": "auto",
+												"minHeight": "20px",
+												"display": "inlineflexRow",
+												"flexDirection": "row",
+												"templateName": "panel_row",
+												"components": [
+													{
+														"id": "text194",
+														"type": "text",
+														"width": "40%",
+														"minWidth": "16px",
+														"height": "auto",
+														"minHeight": "16px",
+														"templateName": "text",
+														"value": "其他(元)",
+														"font": {
+															"color": "font 85",
+															"size": 10
+														},
+														"fill": "#F2F2F2"
+													},
+													{
+														"id": "text195",
+														"type": "text",
+														"width": "60%",
+														"minWidth": "16px",
+														"height": "auto",
+														"minHeight": "16px",
+														"templateName": "text",
+														"font": {
+															"size": 10
+														},
+														"fill": "none",
+														"border": "1px solid bg1@0",
+														"value": "${model2.agent_other}"
+													}
+												]
+											}
+										]
+									}
+								],
+								"flexible": "true"
+							}
+						],
+						"display": "inlineflexColumn",
+						"flexDirection": "column",
+						"rowJustifyContent": "flex-start",
+						"rowAlignItems": "flex-start",
+						"rowAlignContent": "flex-start",
+						"flexWrap": "nowrap",
+						"templateName": "floatpanel",
+						"flexible": "false",
+						"dataSet": "model2"
+					},
+					{
+						"id": "panel140",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "26px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row"
+					},
+					{
+						"id": "text212",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "16px",
+						"templateName": "text",
+						"value": "温馨提示：感谢您在我店购买爱车，请您仔细核对所购车辆及服务信息和款项金额，确认无误后签名；",
+						"font": {
+							"color": "font 85",
+							"size": 10
+						}
+					},
+					{
+						"id": "text213",
+						"type": "text",
+						"width": "auto",
+						"minWidth": "16px",
+						"height": "auto",
+						"minHeight": "16px",
+						"templateName": "text",
+						"value": "买方或买方委托的第三方向卖方支付任何款项，均须通过卖方财务收银台或收银室明确的支付方式（包括但不限于微信支付、手机银行支付等）付至指定收款账户。卖方其他任何工作人员无权代表卖方向买方或买方委托的第三方收取任何款项。买方或买方委托的第三方向前述无权收取款项的卖方工作人员支付任何款项，需自行承担由此引发的一切不利后果且卖方不就此承担任何责任。买方不得委托卖方工作人员向卖方或第三方支付任何款项，否则需自行承担由此引发的一切不利后果且卖方不就此承担任何责任。",
+						"font": {
+							"color": "font 85",
+							"size": 10
+						}
+					},
+					{
+						"id": "panel141",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "24px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"components": [
+							{
+								"id": "panel142",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text214",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "销售顾问名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "input15",
+										"type": "input",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.sales_consultant.USER_NAME"
+									}
+								]
+							},
+							{
+								"id": "panel143",
+								"type": "panel",
+								"width": "30%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text216",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "销售经理名称",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "input16",
+										"type": "input",
+										"width": "auto",
+										"minWidth": "16px",
+										"templateName": "txtinput",
+										"height": "24px",
+										"minHeight": "16px",
+										"showTitle": false,
+										"padding": "0px",
+										"margin": "0px",
+										"calcEnabled": true,
+										"submitData": false,
+										"autoFilter": false,
+										"font": {
+											"size": 10
+										},
+										"textAlign": "center",
+										"disable": "true",
+										"exp": "model1.sales_manager.USER_NAME"
+									}
+								]
+							},
+							{
+								"id": "panel144",
+								"type": "panel",
+								"width": "40%",
+								"minWidth": "20px",
+								"height": "auto",
+								"minHeight": "40px",
+								"display": "inlineflexColumn",
+								"flexDirection": "column",
+								"templateName": "panel_column",
+								"components": [
+									{
+										"id": "text218",
+										"type": "text",
+										"width": "auto",
+										"minWidth": "16px",
+										"height": "auto",
+										"minHeight": "20px",
+										"templateName": "text",
+										"fill": "#D9D9D9",
+										"value": "客户",
+										"font": {
+											"color": "font 85",
+											"size": 10
+										},
+										"textAlign": "center"
+									},
+									{
+										"id": "signinput1",
+										"type": "signinput",
+										"width": "auto",
+										"height": "auto",
+										"minHeight": "24px",
+										"templateName": "signinput",
+										"showTitle": false,
+										"margin": "0px",
+										"textAlign": "center",
+										"disable": "true",
+										"rotateButtonVisible": true,
+										"dataSet": "model1",
+										"contentField": "customer_signature"
+									}
+								]
+							}
+						],
+						"margin": "0px 0px 20px 0px"
+					},
+					{
+						"id": "panel145",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "44px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"visible": "false",
+						"components": [
+							{
+								"id": "input3",
+								"type": "input",
+								"width": "39px",
+								"templateName": "txtinput",
+								"showTitle": false,
+								"padding": "0px",
+								"margin": "0px",
+								"calcEnabled": true,
+								"exp": "param3",
+								"submitData": false,
+								"autoFilter": false
+							},
+							{
+								"id": "input17",
+								"type": "input",
+								"width": "39px",
+								"templateName": "txtinput",
+								"showTitle": false,
+								"padding": "0px",
+								"margin": "0px",
+								"calcEnabled": true,
+								"exp": "model1.finance_manager.WXWORK_USER_ID",
+								"submitData": false,
+								"autoFilter": false
+							}
+						],
+						"autoHideEmpty": true
+					},
+					{
+						"id": "panel130",
+						"type": "panel",
+						"width": "100%",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "44px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"templateName": "panel_row",
+						"rowJustifyContent": "center",
+						"components": [
+							{
+								"id": "button1",
+								"type": "button",
+								"width": "auto",
+								"minWidth": "56px",
+								"value": "同意",
+								"templateName": "button",
+								"borderRadius": "5px",
+								"margin": "0px 10px 0px 0px",
+								"actions": [
+									{
+										"id": "action4",
+										"actionType": "setParamValue",
+										"triggerType": "click",
+										"params": [
+											{
+												"name": "param6",
+												"value": "=input9"
+											}
+										]
+									},
+									{
+										"id": "action1",
+										"actionType": "updateData",
+										"triggerType": "click",
+										"enabled": "condition",
+										"dataSet": "model3",
+										"dataRange": "resultset",
+										"fieldValues": [
+											{
+												"name": "manager_approved",
+												"valueType": "exp",
+												"value": "2"
+											},
+											{
+												"name": "manager_time",
+												"valueType": "exp",
+												"value": "NOW()"
+											}
+										],
+										"successMsg": "审批通过成功",
+										"errorMsg": "审批通过失败"
+									},
+									{
+										"id": "action2",
+										"actionType": "webAPI",
+										"triggerType": "click",
+										"enabled": "condition",
+										"url": "/xiaoshouyi/app/集成测试.app/API/qywx/qimessage.action",
+										"params": [
+											{
+												"name": "touser",
+												"value": "=model4.WXWORK_USER_ID"
+											},
+											{
+												"name": "texts",
+												"value": "您的销售核准单已经审批通过，请通过企业微信侧边栏推送给客户进行签字确认。"
+											}
+										]
+									},
+									{
+										"id": "action3",
+										"actionType": "link",
+										"triggerType": "click",
+										"enabled": "condition",
+										"targetType": "app",
+										"path": 1,
+										"displayType": "_self"
+									}
+								]
+							},
+							{
+								"id": "button2",
+								"type": "button",
+								"width": "auto",
+								"minWidth": "56px",
+								"value": "驳回",
+								"templateName": "button",
+								"borderRadius": "5px",
+								"margin": "0px 0px 0px 10px",
+								"actions": [
+									{
+										"id": "action2",
+										"actionType": "showDialog",
+										"triggerType": "click",
+										"dialog": "dialog1"
+									},
+									{
+										"id": "action1",
+										"actionType": "updateData",
+										"triggerType": "click",
+										"dataSet": "model3",
+										"dataRange": "resultset",
+										"fieldValues": [
+											{
+												"name": "manager_approved",
+												"valueType": "exp",
+												"value": "3"
+											},
+											{
+												"name": "manager_time",
+												"valueType": "exp",
+												"value": "NOW()"
+											},
+											{
+												"name": "statuse",
+												"valueType": "exp",
+												"value": "3"
+											}
+										],
+										"enabled": "false"
+									}
+								]
+							}
+						],
+						"visible": "condition",
+						"visibleCondition": "param5=0"
+					}
+				],
+				"overflow": "hidden",
+				"padding": "8px"
+			},
+			{
+				"id": "dialog1",
+				"type": "dialog",
+				"width": "300px",
+				"minWidth": "250px",
+				"maxWidth": "300px",
+				"height": "auto",
+				"minHeight": "60px",
+				"fill": "#FFF",
+				"boxShadow": "outset 0px 0px 8px 0px font 20",
+				"showFloat": false,
+				"borderRadius": "12px",
+				"components": [
+					{
+						"id": "panel131",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "26px",
+						"masterId": "spgdialog-header",
+						"padding": "18px 15px 0px 15px",
+						"components": [
+							{
+								"id": "text5",
+								"type": "text",
+								"width": "auto",
+								"minWidth": "16px",
+								"height": "auto",
+								"minHeight": "16px",
+								"value": "驳回",
+								"flexible": "true",
+								"textAlign": "center",
+								"masterId": "spgdialog-caption",
+								"font": {
+									"bold": true,
+									"size": 18,
+									"color": "black"
+								},
+								"lineHeight": "25px"
+							}
+						]
+					},
+					{
+						"id": "panel132",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "26px",
+						"flexible": "true",
+						"padding": "0px 15px 18px 15px",
+						"masterId": "spgdialog-container",
+						"components": [
+							{
+								"id": "multipleinput1",
+								"type": "multipleinput",
+								"width": "240px",
+								"templateName": "multipleinput",
+								"height": "116px",
+								"minHeight": "26px",
+								"border": "1px solid bg1@0",
+								"margin": "10px 0px 0px 15px",
+								"notNull": true,
+								"title": {
+									"type": "title",
+									"value": "驳回原因",
+									"width": "auto"
+								}
+							}
+						]
+					},
+					{
+						"id": "panel133",
+						"type": "panel",
+						"width": "auto",
+						"minWidth": "20px",
+						"height": "auto",
+						"minHeight": "26px",
+						"padding": "0px",
+						"margin": "0px",
+						"display": "inlineflexRow",
+						"flexDirection": "row",
+						"rowJustifyContent": "center",
+						"rowAlignItems": "center",
+						"borderTop": "1px solid bg2",
+						"masterId": "spgdialog-footer",
+						"borderRadius": "0px",
+						"gapType": "gapLine",
+						"gapLine": "1px solid bg2",
+						"components": [
+							{
+								"id": "button3",
+								"type": "button",
+								"width": "auto",
+								"minWidth": "70px",
+								"height": "44px",
+								"value": "取消",
+								"masterId": "spgdialog-cancel",
+								"compStyle": "style2",
+								"flexible": "true",
+								"font": {
+									"color": "#1B97F9",
+									"size": 17
+								},
+								"padding": "0px",
+								"margin": "0px",
+								"actions": [
+									{
+										"id": "action1",
+										"actionType": "closeDialog"
+									}
+								]
+							},
+							{
+								"id": "button4",
+								"type": "button",
+								"width": "auto",
+								"minWidth": "70px",
+								"height": "44px",
+								"value": "确定",
+								"masterId": "spgdialog-ok",
+								"compStyle": "style2",
+								"flexible": "true",
+								"font": {
+									"color": "#1B97F9",
+									"size": 17,
+									"bold": true
+								},
+								"padding": "0px",
+								"margin": "0px",
+								"actions": [
+									{
+										"id": "action3",
+										"actionType": "validateForm",
+										"triggerType": "click"
+									},
+									{
+										"id": "action2",
+										"actionType": "updateData",
+										"triggerType": "click",
+										"enabled": "condition",
+										"dataSet": "model3",
+										"dataRange": "resultset",
+										"fieldValues": [
+											{
+												"name": "manager_approved",
+												"valueType": "exp",
+												"value": "3"
+											},
+											{
+												"name": "manager_time",
+												"valueType": "exp",
+												"value": "NOW()"
+											},
+											{
+												"name": "manager_Reason",
+												"valueType": "exp",
+												"value": "multipleinput1.value"
+											},
+											{
+												"name": "statuse",
+												"valueType": "exp",
+												"value": "3"
+											}
+										],
+										"successMsg": "驳回成功",
+										"errorMsg": "驳回失败"
+									},
+									{
+										"id": "action5",
+										"actionType": "webAPI",
+										"triggerType": "click",
+										"enabled": "condition",
+										"url": "/xiaoshouyi/app/集成测试.app/API/qywx/qimessage.action",
+										"params": [
+											{
+												"name": "touser",
+												"value": "=model4.WXWORK_USER_ID"
+											},
+											{
+												"name": "texts",
+												"value": "您的销售核准单被<font color=\"warning\">驳回</font> \\n驳回原因：${multipleinput1.value}"
+											}
+										]
+									},
+									{
+										"id": "action1",
+										"actionType": "closeDialog",
+										"enabled": "condition"
+									},
+									{
+										"id": "action4",
+										"actionType": "link",
+										"triggerType": "click",
+										"enabled": "condition",
+										"targetType": "app",
+										"path": 1
+									}
+								]
+							}
+						]
+					}
+				],
+				"templateName": "mobileDialog",
+				"position": "absolute",
+				"top": 1511,
+				"left": 118,
+				"name": "驳回"
+			}
+		]
+	},
+	"referenceResources": [
+		"../合同协议.spg",
+		"审批页面.spg"
+	]
+}

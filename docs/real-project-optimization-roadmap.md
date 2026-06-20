@@ -2602,6 +2602,7 @@ M98 的目标不是现在开始改性能，而是明确未来 M50-M55 的优化�
 ### 推荐拆分：M50-M55
 
 - [ ] M50：性能基线与查询画像
+  - 契约文档：`docs/m50-performance-bench-contract.md`
   - 建立真实项目 benchmark 集：
     - `query_page_logic`
     - `explain`

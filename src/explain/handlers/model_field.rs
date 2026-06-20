@@ -716,10 +716,12 @@ pub(in crate::explain) fn explain_field_graph(
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default();
+            let mut matched_input_field = false;
             for dim in &input_dims {
                 let dim_name = dim.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let dbfield = dim.get("dbfield").and_then(|v| v.as_str()).unwrap_or("");
                 if dim_name == field_name || dbfield == field_name {
+                    matched_input_field = true;
                     let source_field = format!("field:{}.{}", input_model.name, dim_name);
                     lineage.push(serde_json::json!({
                         "target_field": node.id,
@@ -737,6 +739,27 @@ pub(in crate::explain) fn explain_field_graph(
                         }
                     }));
                     break;
+                }
+            }
+            if !matched_input_field {
+                let source_field = format!("field:{}.{}", input_model.name, field_name);
+                // depends 先创建的占位模型可能没有 dimensions；字段节点仍可作为血缘兜底。
+                if graph.get_node(&source_field).ok().flatten().is_some() {
+                    lineage.push(serde_json::json!({
+                        "target_field": node.id,
+                        "source_fields": [source_field],
+                        "source_expr": null,
+                        "transform": "DataFlow chain (input model field node match)",
+                        "via_node": model.id.clone(),
+                        "confidence": "medium",
+                        "evidence": {
+                            "source_file": input_model.path.clone(),
+                            "node_id": input_model.id.clone(),
+                            "edge_type": "DataflowInput",
+                            "raw_expr": null,
+                            "json_path": format!("field node '{}'", field_name),
+                        }
+                    }));
                 }
             }
         }

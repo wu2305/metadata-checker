@@ -463,6 +463,16 @@ fn read_session_manifest_or_print_error(
 fn main() -> Result<()> {
     let args = cli::Cli::parse();
     metadata_checker::graph::set_graph_lock_timeout_ms(args.graph_lock_timeout_ms);
+    let _telemetry_guard =
+        metadata_checker::telemetry::init(metadata_checker::telemetry::TelemetryConfig {
+            mode: match args.trace {
+                cli::TraceMode::Off => metadata_checker::telemetry::TelemetryMode::Off,
+                cli::TraceMode::Json => metadata_checker::telemetry::TelemetryMode::Json,
+                cli::TraceMode::Otlp => metadata_checker::telemetry::TelemetryMode::Otlp,
+            },
+            otlp_endpoint: args.otlp_endpoint.clone(),
+            otlp_metrics_endpoint: args.otlp_metrics_endpoint.clone(),
+        })?;
 
     // Session management commands (M41.12)
     let session_root = args.session_dir.clone().unwrap_or_else(|| {

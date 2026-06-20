@@ -19,6 +19,18 @@ cli-local = [
     "dep:tokio",
     "dep:lz-str",
 ]
+telemetry = [
+    "dep:tracing",
+    "dep:tracing-subscriber",
+]
+telemetry-otlp = [
+    "telemetry",
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:tracing-opentelemetry",
+    "dep:tokio",
+]
 browser-wasm = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
@@ -30,6 +42,11 @@ browser-wasm = [
 [[bin]]
 name = "metadata-checker"
 path = "src/main.rs"
+required-features = ["cli-local"]
+
+[[bin]]
+name = "generate_browser_offscreen_fixtures"
+path = "src/bin/generate_browser_offscreen_fixtures.rs"
 required-features = ["cli-local"]
 
 [lib]
@@ -54,6 +71,14 @@ urlencoding = { version = "2", optional = true }
 base64 = { version = "0.22", optional = true }
 lz-str = { version = "0.2.1", optional = true }
 
+# telemetry only
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["fmt", "json"], optional = true }
+opentelemetry = { version = "0.32", optional = true }
+opentelemetry_sdk = { version = "0.32", features = ["metrics"], optional = true }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-blocking-client"], optional = true }
+tracing-opentelemetry = { version = "0.33", optional = true }
+
 # browser-wasm only
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
@@ -77,4 +102,41 @@ inherits = "release"
 opt-level = 3
 
 [dev-dependencies]
+criterion = "0.5"
 nix = { version = "0.29", features = ["fs"] }
+
+[[bench]]
+name = "parse_bench"
+harness = false
+
+[[bench]]
+name = "query_micro_bench"
+harness = false
+
+[[bench]]
+name = "rebuild_bench"
+harness = false
+
+[[bench]]
+name = "runtime_bench"
+harness = false
+
+[[bench]]
+name = "query_matrix_bench"
+harness = false
+
+[[bench]]
+name = "redb_persistence_bench"
+harness = false
+
+[[bench]]
+name = "stdio_boundary_bench"
+harness = false
+
+[[bench]]
+name = "telemetry_overhead_bench"
+harness = false
+
+[[bench]]
+name = "session_sync_bench"
+harness = false

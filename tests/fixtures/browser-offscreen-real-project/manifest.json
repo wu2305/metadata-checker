@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "project_name": "xiaoshouyi",
+  "fixture_root": "project",
+  "samples": [
+    {
+      "id": "typical_p75_page",
+      "source_path": "app/售后.app/维修透明化/编辑透明化工单完成.spg",
+      "component_count": 132,
+      "reference_count": 35,
+      "raw_bytes": 91840,
+      "components": {
+        "high_reference_component": {
+          "id": "multipleinput2",
+          "component_type": "multipleinput",
+          "reference_count": 2,
+          "child_count": 0
+        },
+        "leaf_component": {
+          "id": "text16",
+          "component_type": "text",
+          "reference_count": 0,
+          "child_count": 0
+        },
+        "container_component": {
+          "id": "panel31",
+          "component_type": "panel",
+          "reference_count": 1,
+          "child_count": 9
+        }
+      }
+    },
+    {
+      "id": "large_raw_page",
+      "source_path": "app/销售.app/销售/合同协议.spg",
+      "component_count": 192,
+      "reference_count": 86,
+      "raw_bytes": 5685091,
+      "components": {
+        "high_reference_component": {
+          "id": "panel36",
+          "component_type": "panel",
+          "reference_count": 3,
+          "child_count": 2
+        },
+        "container_component": {
+          "id": "panel3",
+          "component_type": "panel",
+          "reference_count": 0,
+          "child_count": 18
+        },
+        "leaf_component": {
+          "id": "tabbar1",
+          "component_type": "tabbar",
+          "reference_count": 0,
+          "child_count": 0
+        }
+      }
+    },
+    {
+      "id": "high_component_page",
+      "source_path": "app/销售.app/销售/核销单/销售核准单审批预览.spg",
+      "component_count": 362,
+      "reference_count": 80,
+      "raw_bytes": 160950,
+      "components": {
+        "high_reference_component": {
+          "id": "panel130",
+          "component_type": "panel",
+          "reference_count": 1,
+          "child_count": 2
+        },
+        "container_component": {
+          "id": "panel1",
+          "component_type": "panel",
+          "reference_count": 0,
+          "child_count": 52
+        },
+        "leaf_component": {
+          "id": "text1",
+          "component_type": "text",
+          "reference_count": 0,
+          "child_count": 0
+        }
+      }
+    },
+    {
+      "id": "high_reference_page",
+      "source_path": "app/价审.app/测试/销售订单价格审批-信息补充.spg",
+      "component_count": 189,
+      "reference_count": 375,
+      "raw_bytes": 3600653,
+      "components": {
+        "container_component": {
+          "id": "panel94",
+          "component_type": "panel",
+          "reference_count": 0,
+          "child_count": 14
+        },
+        "high_reference_component": {
+          "id": "input17",
+          "component_type": "input",
+          "reference_count": 49,
+          "child_count": 0
+        },
+        "leaf_component": {
+          "id": "text93",
+          "component_type": "text",
+          "reference_count": 0,
+          "child_count": 0
+        }
+      }
+    },
+    {
+      "id": "worst_combined_page",
+      "source_path": "app/价审.app/demo/销售订单价格审批-信息补充.spg",
+      "component_count": 192,
+      "reference_count": 267,
+      "raw_bytes": 3659344,
+      "components": {
+        "container_component": {
+          "id": "panel94",
+          "component_type": "panel",
+          "reference_count": 0,
+          "child_count": 15
+        },
+        "leaf_component": {
+          "id": "text93",
+          "component_type": "text",
+          "reference_count": 0,
+          "child_count": 0
+        },
+        "high_reference_component": {
+          "id": "input17",
+          "component_type": "input",
+          "reference_count": 16,
+          "child_count": 0
+        }
+      }
+    }
+  ]
+}
