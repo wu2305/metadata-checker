@@ -527,6 +527,67 @@ input3
 - 真实项目 fixture 已上传到 CNB 私有仓库 `wu2305/metadata-checker-real-fixtures`，项目路径为 `xiaoshouyi`，当前固定 `REAL_PROJECT_FIXTURE_REF=c3c0528fdd28e2600e0b0235040fb349b3c2d446`。后续刷新 fixture 时必须更新该 SHA，避免同一主分支提交因为外部 fixture 漂移产生不可复现的性能样本。
 - `full-criterion-bench-ci` 通过 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/real-fixture.yml` 注入 `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 等真实项目 fixture 变量。
 
+## M50 验收收口记录
+
+验收时间：2026-06-20
+
+验收结论：M50 phase-1 可验收。当前验收范围是“性能测量基础设施、真实项目权威 CI 样本、Bencher 趋势上报、覆盖率检测”完成；不把性能阈值 fail、CNB 报告留存预览、浏览器真实环境 perf 或具体查询算法优化纳入本阶段验收。
+
+权威 CI 记录：
+
+| 项目 | 值 |
+|---|---|
+| CNB build SN | `cnb-5r3-1jrhpbnkg` |
+| CNB build URL | `https://cnb.cool/wu2305/metadata-checker/-/build/logs/cnb-5r3-1jrhpbnkg` |
+| event / branch | `push` / `main` |
+| commit | `99632ccd2b5eed4cd4f8d2fb86943e3c17572324` |
+| commit title | `fix: clean up benchmark graph lock` |
+| pipeline result | 7 / 7 success |
+| total duration | 3,961,443 ms |
+
+流水线结果：
+
+| pipeline | 结果 | 耗时 | 验收含义 |
+|---|---|---:|---|
+| `rust-only-ci` | success | 53,459 ms | fmt、bench 编译、单元测试、browser-wasm check 通过 |
+| `rust-coverage-ci` | success | 72,542 ms | `cargo llvm-cov` 生成并上传 `lcov.info` |
+| `browser-wasm-env-probe` | success | 4,341 ms | 真实 `browser-wasm` 目标与 Node wasm-bindgen glue 可构建 |
+| `browser-offscreen-bench-ci` | success | 39,510 ms | 不拉浏览器的真实 WASM offscreen replay bench 通过并上报 Bencher |
+| `fixture-bench-ci` | success | 324,008 ms | fixture `parse_bench` / `query_micro_bench` 通过并上报 Bencher |
+| `full-criterion-bench-ci` | success | 3,960,432 ms | 真实项目完整 Criterion bench 通过并上报 Bencher |
+| `rust-only-ci-branch-push` | success | 7,115 ms | main 下按 stage `if` 跳过，确认没有重复跑分支轻量检查 |
+
+`full-criterion-bench-ci` 分项：
+
+| stage | 结果 | 耗时 |
+|---|---|---:|
+| `checkout real project fixture` | success | 1,748 ms |
+| `real project preflight` | success | 185 ms |
+| `query matrix bench` | success | 759,208 ms |
+| `runtime lifecycle bench` | success | 445,076 ms |
+| `rebuild mutation bench` | success | 1,437,203 ms |
+| `redb persistence bench` | success | 512,401 ms |
+| `stdio boundary bench` | success | 297,121 ms |
+| `telemetry overhead bench` | success | 368,276 ms |
+| `session sync bench` | success | 135,131 ms |
+
+Bencher 上报证据：
+
+| 类别 | report |
+|---|---|
+| browser offscreen p50 | `https://bencher.dev/perf/haocheng-wu-s-project/reports/82cff7ae-9c41-4136-b80c-d2e89e9c9338` |
+| fixture Criterion query micro | `https://bencher.dev/perf/haocheng-wu-s-project/reports/15bb5953-a8d3-4a5c-836c-8f0bc68a98b8` |
+| full Criterion query matrix | `https://bencher.dev/perf/haocheng-wu-s-project/reports/21f850eb-c99f-444a-991d-c50b2146311a` |
+
+验收边界：
+
+- 当前 `main.push` 是 M50 权威性能样本来源；PR 只保留快速验证，不跑真实项目完整 Criterion。
+- 当前不设置 Bencher threshold，不使用 `--error-on-alert`。性能变慢先进入趋势观察，不阻塞 CI。
+- Coverage 当前只要求可生成、可上传、可读；不设置最低覆盖率门禁。
+- `full-criterion-bench-ci` 成本约 66 分钟、8.8 core-hours。以当前单人 PR / 低频 merge 模式可接受；若 merge 频率提高，应拆出手动或定时 full bench。
+- Browser real perf 因浏览器环境干扰因素多，本阶段继续推后；M50 只验收不拉浏览器的真实 WASM offscreen 链路。
+- 后续打开性能阈值前，至少需要积累多次 `main` 样本，并按核心指标分组设置阈值；不从单次样本直接拍阈值。
+
 ---
 
 ## M34 Compact 输出体积基线
