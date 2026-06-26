@@ -1,6 +1,8 @@
 #![cfg(feature = "cli-local")]
 
-use metadata_checker::runtime::{GraphRuntime, RuntimeQueryCommand, RuntimeQueryRequest};
+use metadata_checker::runtime::{
+    GraphRuntime, RuntimeMode, RuntimeQueryCommand, RuntimeQueryRequest,
+};
 use metadata_checker::scanner;
 
 mod common;
@@ -13,6 +15,11 @@ fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
 
     let mut runtime = GraphRuntime::load(&db_path).expect("GraphRuntime::load must succeed");
     assert_eq!(runtime.load_count, 1, "首次加载后 load_count 应为 1");
+    assert!(
+        runtime.dense_snapshot.is_none(),
+        "default runtime load must not build dense snapshot"
+    );
+    assert_eq!(runtime.dense_snapshot_build_ms, 0);
     assert!(
         runtime.graph_load_ms > 0,
         "首次加载 graph_load_ms 应大于 0，实际 {}",
@@ -240,7 +247,155 @@ fn test_runtime_reload_if_changed_after_replace() {
         old_node_count,
         "reload 后 node_count 应一致"
     );
+    assert!(
+        runtime.dense_snapshot.is_none(),
+        "default runtime reload must not build dense snapshot"
+    );
     assert!(runtime.last_reload_error.is_none());
+}
+
+#[test]
+fn test_graph_runtime_can_opt_into_dense_snapshot() {
+    let (temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut runtime =
+        GraphRuntime::load_with_project_dir_and_dense_snapshot(&db_path, Some(&temp_dir))
+            .expect("opt-in dense runtime load must succeed");
+    let dense_snapshot = runtime
+        .dense_snapshot
+        .as_ref()
+        .expect("opt-in runtime load must build dense snapshot");
+    assert_eq!(
+        dense_snapshot.dense_node_count(),
+        runtime.status().node_count
+    );
+    assert_eq!(
+        dense_snapshot.dense_edge_count(),
+        runtime.status().edge_count
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+    scanner::scan_project(&temp_dir, &db_path).expect("re-scan must succeed");
+    let result = runtime
+        .reload_if_changed()
+        .expect("opt-in runtime reload_if_changed must succeed");
+    assert_eq!(result, metadata_checker::runtime::ReloadResult::Reloaded);
+    assert!(
+        runtime.dense_snapshot.is_some(),
+        "opt-in runtime reload must rebuild dense snapshot"
+    );
+}
+
+#[test]
+fn test_graph_runtime_long_lived_mode_builds_read_model() {
+    let (temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(&temp_dir),
+        RuntimeMode::LongLived,
+    )
+    .expect("long-lived runtime load must succeed");
+
+    let read_model = runtime
+        .read_model
+        .as_ref()
+        .expect("long-lived runtime must build read model during init");
+    assert_eq!(
+        read_model.dense_graph.dense_node_count(),
+        runtime.status().node_count
+    );
+    assert_eq!(
+        read_model.dense_graph.dense_edge_count(),
+        runtime.status().edge_count
+    );
+    assert!(
+        runtime.read_model_build_ms > 0,
+        "long-lived runtime should record read model build cost"
+    );
+
+    let previous_read_model = std::sync::Arc::clone(read_model);
+    let _ = std::fs::remove_file(&db_path);
+    scanner::scan_project(&temp_dir, &db_path).expect("re-scan must succeed");
+    let result = runtime
+        .reload_if_changed()
+        .expect("long-lived runtime reload_if_changed must succeed");
+    assert_eq!(result, metadata_checker::runtime::ReloadResult::Reloaded);
+    let reloaded_read_model = runtime
+        .read_model
+        .as_ref()
+        .expect("long-lived runtime reload must rebuild read model");
+    assert!(
+        !std::sync::Arc::ptr_eq(&previous_read_model, reloaded_read_model),
+        "reload should replace read model atomically"
+    );
+}
+
+#[test]
+fn test_graph_runtime_one_shot_mode_does_not_build_read_model() {
+    let (temp_dir, db_path) = common::build_fixture_graphdb();
+    let runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(&temp_dir),
+        RuntimeMode::OneShot,
+    )
+    .expect("one-shot runtime load must succeed");
+
+    assert!(
+        runtime.read_model.is_none(),
+        "one-shot runtime must avoid init-heavy read model"
+    );
+    assert_eq!(runtime.read_model_build_ms, 0);
+}
+
+#[test]
+fn test_graph_runtime_warms_page_logic_availability_cache() {
+    let (temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut baseline_runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(&temp_dir),
+        RuntimeMode::OneShot,
+    )
+    .expect("baseline runtime load must succeed");
+    let mut long_lived_runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(&temp_dir),
+        RuntimeMode::LongLived,
+    )
+    .expect("long-lived runtime load must succeed");
+
+    let request = RuntimeQueryRequest {
+        command: RuntimeQueryCommand::QueryPageLogic,
+        target: "page:app/actions_test.spg".to_string(),
+        budget: "normal".to_string(),
+        human: false,
+        intent: None,
+        page_scope: None,
+        depth: None,
+        check_reload: false,
+    };
+
+    let baseline = baseline_runtime
+        .query(request.clone())
+        .expect("baseline query_page_logic must succeed");
+    let warm_ms = long_lived_runtime
+        .warm_page_logic_availability("page:app/actions_test.spg", "normal")
+        .expect("warm page logic availability must succeed");
+    assert!(warm_ms > 0, "warm should record non-zero init cost");
+    assert!(
+        long_lived_runtime
+            .read_model
+            .as_ref()
+            .expect("long-lived runtime should have read model")
+            .has_page_logic_availability("page:app/actions_test.spg", "normal"),
+        "read model should contain warmed page availability"
+    );
+
+    let warmed = long_lived_runtime
+        .query(request)
+        .expect("warmed query_page_logic must succeed");
+    assert_eq!(
+        warmed.result, baseline.result,
+        "warmed availability cache must preserve runtime query output"
+    );
 }
 
 /// M25 验收：reload 失败时保留旧 graph，仍可查询

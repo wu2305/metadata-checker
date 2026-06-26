@@ -271,6 +271,24 @@
         node tools/run-bencher-criterion-ci.mjs \
           --bench query_matrix_bench \
           --target-dir target/criterion-ci/query-matrix
+    - name: M51 page logic profile report
+      script: |
+        CARGO_TARGET_DIR=target/criterion-ci/m51-profile \
+          cargo run --profile release-fast --bin m51_profile_report -- \
+            --project-dir "$METADATA_CHECKER_REAL_PROJECT_DIR" \
+            --output target/criterion-ci/reports/m51-page-logic-profile.json \
+            --sample-count 3
+        test -s target/criterion-ci/reports/m51-page-logic-profile.json
+        head -c 4000 target/criterion-ci/reports/m51-page-logic-profile.json
+    - name: M51 core profile report
+      script: |
+        CARGO_TARGET_DIR=target/criterion-ci/m51-core-profile \
+          cargo run --profile release-fast --bin m51_core_profile_report -- \
+            --project-dir "$METADATA_CHECKER_REAL_PROJECT_DIR" \
+            --output target/criterion-ci/reports/m51-core-profile.json \
+            --sample-count 1
+        test -s target/criterion-ci/reports/m51-core-profile.json
+        head -c 4000 target/criterion-ci/reports/m51-core-profile.json
     - name: runtime lifecycle bench
       script: |
         node tools/run-bencher-criterion-ci.mjs \

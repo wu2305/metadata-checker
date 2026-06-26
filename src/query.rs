@@ -472,8 +472,15 @@ pub use model::build_query_model_output;
 pub use model::query_model;
 
 mod page_logic;
-pub use page_logic::build_query_page_logic_output;
 pub use page_logic::query_page_logic;
+pub use page_logic::{
+    PageLogicAvailabilityCache, build_page_logic_availability_cache, build_query_page_logic_output,
+    build_query_page_logic_output_profiled,
+    build_query_page_logic_output_profiled_with_availability_cache,
+    build_query_page_logic_output_profiled_with_dense_snapshot,
+    build_query_page_logic_output_with_availability_cache,
+    build_query_page_logic_output_with_dense_snapshot,
+};
 /// 返回匹配节点列表，按名称相似度排序。
 pub fn find_nodes(
     graph: &dyn GraphReadStore,

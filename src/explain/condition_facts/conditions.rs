@@ -1,4 +1,5 @@
 use crate::graph_store::GraphReadStore;
+use std::collections::{HashMap, HashSet};
 
 /// 辅助：从条件节点构建条件对象
 fn build_cond_obj(source: &crate::graph::Node) -> serde_json::Value {
@@ -74,7 +75,7 @@ fn condition_owner_node_id(cond_obj: &serde_json::Value) -> Option<String> {
 }
 
 /// 给条件打上面向解释的作用域标签
-pub(in crate::explain) fn annotate_condition_scope(
+pub(crate) fn annotate_condition_scope(
     mut cond_obj: serde_json::Value,
     scope: &str,
     inherited_from: Option<&str>,
@@ -116,10 +117,7 @@ pub(in crate::explain) fn annotate_condition_scope(
     cond_obj
 }
 
-pub(in crate::explain) fn condition_owned_by_node(
-    cond_obj: &serde_json::Value,
-    node_id: &str,
-) -> bool {
+pub(crate) fn condition_owned_by_node(cond_obj: &serde_json::Value, node_id: &str) -> bool {
     cond_obj
         .get("owner_node_id")
         .and_then(|v| v.as_str())
@@ -168,9 +166,7 @@ fn condition_dedupe_key(cond_obj: &serde_json::Value) -> String {
 }
 
 /// 对条件数组去重，同时保留重复声明的证据来源
-pub(in crate::explain) fn dedupe_conditions(
-    conditions: Vec<serde_json::Value>,
-) -> Vec<serde_json::Value> {
+pub(crate) fn dedupe_conditions(conditions: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
     let mut index_by_key: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
     let mut result: Vec<serde_json::Value> = Vec::new();
@@ -425,7 +421,7 @@ pub(in crate::explain) fn collect_inherited_conditions_by_json_path(
 }
 
 /// 对 `model.totalRowCount__` 门控展开当前页面模型 filter
-pub(in crate::explain) fn expand_total_row_count_gates(
+pub(crate) fn expand_total_row_count_gates(
     graph: &dyn GraphReadStore,
     blocking_conditions: &[serde_json::Value],
     page_path: &str,
@@ -468,7 +464,7 @@ pub(in crate::explain) fn expand_total_row_count_gates(
 }
 
 /// 辅助：分类条件
-pub(in crate::explain) fn classify_condition(cond_obj: &serde_json::Value) -> &'static str {
+pub(crate) fn classify_condition(cond_obj: &serde_json::Value) -> &'static str {
     let condition_type = cond_obj
         .get("condition_type")
         .and_then(|v| v.as_str())
@@ -494,11 +490,110 @@ pub(in crate::explain) fn classify_condition(cond_obj: &serde_json::Value) -> &'
 }
 
 /// 辅助：收集节点的 incoming condition 边
-pub(in crate::explain) fn collect_conditions_for_node(
+pub(crate) fn collect_conditions_for_node(
     graph: &dyn GraphReadStore,
     node_id: &str,
     _page_path: &str,
     seen: &mut std::collections::HashSet<String>,
+) -> Vec<serde_json::Value> {
+    collect_condition_objects_for_node(graph, node_id, seen)
+}
+
+/// 缓存节点条件对象，供 page logic 批量 availability 构造复用。
+pub(crate) struct ConditionCollectorCache {
+    by_node: HashMap<String, Vec<serde_json::Value>>,
+    cache_hits: usize,
+}
+
+impl ConditionCollectorCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            by_node: HashMap::new(),
+            cache_hits: 0,
+        }
+    }
+
+    pub(crate) fn cache_hits(&self) -> usize {
+        self.cache_hits
+    }
+
+    pub(crate) fn collect_for_node(
+        &mut self,
+        graph: &dyn GraphReadStore,
+        node_id: &str,
+        seen: &mut HashSet<String>,
+    ) -> Vec<serde_json::Value> {
+        if let Some(cached) = self.by_node.get(node_id) {
+            self.cache_hits += 1;
+            return filter_seen_conditions(cached.iter().cloned(), seen);
+        }
+        let raw = collect_condition_objects_for_node(graph, node_id, &mut HashSet::new());
+        let result = filter_seen_conditions(raw.iter().cloned(), seen);
+        self.by_node.insert(node_id.to_string(), raw);
+        result
+    }
+
+    pub(crate) fn expand_total_row_count_gates(
+        &mut self,
+        graph: &dyn GraphReadStore,
+        blocking_conditions: &[serde_json::Value],
+        page_path: &str,
+        seen_conditions: &mut HashSet<String>,
+    ) -> Vec<serde_json::Value> {
+        let mut expanded = Vec::new();
+        for blocking in blocking_conditions {
+            let from_condition = blocking
+                .get("condition_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            for model in total_row_count_models(blocking) {
+                let model_id = format!("model:{}", model);
+                let conds = self.collect_for_node(graph, &model_id, seen_conditions);
+                for cond_obj in conds {
+                    let source_file = cond_obj
+                        .get("source_file")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if source_file != page_path {
+                        continue;
+                    }
+                    if cond_obj.get("owner_type").and_then(|v| v.as_str()) != Some("ModelSource") {
+                        continue;
+                    }
+                    if classify_condition(&cond_obj) != "data_empty" {
+                        continue;
+                    }
+                    expanded.push(annotate_condition_scope(
+                        cond_obj,
+                        "expanded_from_total_row_count",
+                        Some(&model_id),
+                        None,
+                        Some(from_condition),
+                    ));
+                }
+            }
+        }
+        expanded
+    }
+}
+
+fn filter_seen_conditions(
+    conditions: impl Iterator<Item = serde_json::Value>,
+    seen: &mut HashSet<String>,
+) -> Vec<serde_json::Value> {
+    conditions
+        .filter(|cond| {
+            cond.get("condition_id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|id| seen.insert(id.to_string()))
+        })
+        .collect()
+}
+
+fn collect_condition_objects_for_node(
+    graph: &dyn GraphReadStore,
+    node_id: &str,
+    seen: &mut HashSet<String>,
 ) -> Vec<serde_json::Value> {
     let mut results = Vec::new();
     if let Some(neighbors) = graph.get_node_edges(node_id).ok().flatten() {

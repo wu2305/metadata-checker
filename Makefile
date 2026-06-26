@@ -9,11 +9,14 @@ TARGETS := \
 	aarch64-unknown-linux-musl \
 	x86_64-pc-windows-gnu
 
-.PHONY: all build release clean test perf-real perf-real-mutation perf-real-runtime perf-real-query perf-fixture perf-cli-cold perf-redb perf-stdio perf-telemetry perf-session perf-browser-offscreen-samples perf-browser-offscreen perf-browser-offscreen-bencher-bmf perf-browser-offscreen-ci help
+.PHONY: all build release clean test perf-real perf-real-mutation perf-real-runtime perf-real-query perf-m51-profile perf-fixture perf-cli-cold perf-redb perf-stdio perf-telemetry perf-session perf-browser-offscreen-samples perf-browser-offscreen perf-browser-offscreen-bencher-bmf perf-browser-offscreen-ci help
 
 BROWSER_OFFSCREEN_FIXTURE_DIR := tests/fixtures/browser-offscreen-real-project
 BROWSER_OFFSCREEN_PROJECT_DIR ?= /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi
 BROWSER_OFFSCREEN_PROJECT_NAME ?= xiaoshouyi
+M51_PROFILE_PROJECT_DIR ?= /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi
+M51_PROFILE_OUTPUT ?= target/m51-profile/page-logic-profile.json
+M51_PROFILE_SAMPLE_COUNT ?= 3
 
 all: release
 
@@ -60,6 +63,12 @@ perf-real-runtime:
 
 perf-real-query:
 	CARGO_TARGET_DIR=$(BENCH_TARGET_DIR)/query-matrix cargo bench --bench query_matrix_bench
+
+perf-m51-profile:
+	cargo run --bin m51_profile_report -- \
+		--project-dir "$(M51_PROFILE_PROJECT_DIR)" \
+		--output "$(M51_PROFILE_OUTPUT)" \
+		--sample-count "$(M51_PROFILE_SAMPLE_COUNT)"
 
 perf-fixture:
 	CARGO_TARGET_DIR=$(BENCH_TARGET_DIR)/parse cargo bench --bench parse_bench
@@ -115,6 +124,7 @@ help:
 	@echo "  perf-real-mutation         Run real-project rebuild Criterion benchmark"
 	@echo "  perf-real-runtime          Run real-project runtime lifecycle Criterion benchmark"
 	@echo "  perf-real-query            Run real-project query matrix Criterion benchmark"
+	@echo "  perf-m51-profile           Write M51 page logic stage profile JSON"
 	@echo "  perf-fixture               Run fixture-based parse and query micro benchmarks"
 	@echo "  perf-cli-cold              Run CLI cold-start hyperfine + trace boundary runner"
 	@echo "  perf-redb                  Run redb persistence/open/lock Criterion benchmark"

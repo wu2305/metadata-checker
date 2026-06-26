@@ -49,6 +49,16 @@ name = "generate_browser_offscreen_fixtures"
 path = "src/bin/generate_browser_offscreen_fixtures.rs"
 required-features = ["cli-local"]
 
+[[bin]]
+name = "m51_profile_report"
+path = "src/bin/m51_profile_report.rs"
+required-features = ["cli-local"]
+
+[[bin]]
+name = "m51_core_profile_report"
+path = "src/bin/m51_core_profile_report.rs"
+required-features = ["cli-local"]
+
 [lib]
 name = "metadata_checker"
 path = "src/lib.rs"

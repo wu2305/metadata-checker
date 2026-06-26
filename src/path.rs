@@ -237,6 +237,11 @@ pub trait PathFinder {
 /// - excluded_anchors: 明确排除的锚点（其他页面同名局部模型）
 pub struct AnchorExtractor;
 
+fn dedup_anchors_preserve_order(anchors: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    anchors.retain(|anchor| seen.insert(anchor.clone()));
+}
+
 impl AnchorExtractor {
     /// 从 query_page_logic 的已知上下文提取锚点
     pub fn extract(
@@ -340,23 +345,26 @@ impl AnchorExtractor {
         }
 
         // 5. 排除锚点：其他页面同名局部模型
-        for ds in data_sources {
-            if let Some(tgt) = ds.get("target_id").and_then(|v| v.as_str()) {
-                if let Some(neighbors) = graph.get_node_edges(tgt).ok().flatten() {
-                    for edge_view in &neighbors.incoming {
-                        let source = &edge_view.node;
-                        let edge = &edge_view.edge;
-                        if matches!(edge.edge_type, crate::graph::EdgeType::DependsOn)
-                            && source.path != page_node.path
-                            && source.id.starts_with("cond:")
-                        {
-                            // 收集其他页面的条件节点作为排除锚点参考
-                            excluded_anchors.push(source.id.clone());
-                        }
+        for tgt in &model_targets {
+            if let Some(neighbors) = graph.get_node_edges(tgt).ok().flatten() {
+                for edge_view in &neighbors.incoming {
+                    let source = &edge_view.node;
+                    let edge = &edge_view.edge;
+                    if matches!(edge.edge_type, crate::graph::EdgeType::DependsOn)
+                        && source.path != page_node.path
+                        && source.id.starts_with("cond:")
+                    {
+                        // 收集其他页面的条件节点作为排除锚点参考
+                        excluded_anchors.push(source.id.clone());
                     }
                 }
             }
         }
+
+        dedup_anchors_preserve_order(&mut source_anchors);
+        dedup_anchors_preserve_order(&mut sink_anchors);
+        dedup_anchors_preserve_order(&mut bridge_anchors);
+        dedup_anchors_preserve_order(&mut excluded_anchors);
 
         PathQuery {
             page_id: page_id.to_string(),
@@ -1387,5 +1395,30 @@ impl PathSelector for DebugAllPathSelector {
             rejected_paths: rejected,
             selection_diagnostics: vec!["DebugAllPathSelector: 按原始分类输出".to_string()],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn anchor_dedup_preserves_first_seen_order() {
+        let mut anchors = vec![
+            "model:a".to_string(),
+            "model:b".to_string(),
+            "model:a".to_string(),
+            "field:x.y".to_string(),
+            "model:b".to_string(),
+        ];
+
+        super::dedup_anchors_preserve_order(&mut anchors);
+
+        assert_eq!(
+            anchors,
+            vec![
+                "model:a".to_string(),
+                "model:b".to_string(),
+                "field:x.y".to_string(),
+            ]
+        );
     }
 }

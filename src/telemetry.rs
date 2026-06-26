@@ -235,6 +235,24 @@ pub fn record_runtime_response(
     record_runtime_metrics(command, budget, timing);
 }
 
+/// 创建通用能力阶段 span。
+#[cfg(feature = "telemetry")]
+pub fn stage_span(stage: &str) -> tracing::Span {
+    tracing::info_span!(
+        "metadata_checker.stage",
+        "metadata_checker.stage.name" = %stage,
+        "metadata_checker.timing.stage_ms" = tracing::field::Empty,
+        "metadata_checker.status" = tracing::field::Empty,
+    )
+}
+
+/// 记录阶段成功完成。
+#[cfg(feature = "telemetry")]
+pub fn record_stage_ok(span: &tracing::Span, duration_ms: u64) {
+    span.record("metadata_checker.timing.stage_ms", duration_ms);
+    span.record("metadata_checker.status", "ok");
+}
+
 /// 记录 runtime 能力指标。
 ///
 /// 指标只用于观测与远程趋势分析；可重复性能测量以 Criterion / runner 为准。
@@ -333,6 +351,15 @@ mod tests {
             config.otlp_metrics_endpoint.as_deref(),
             Some("http://localhost:4318/v1/metrics")
         );
+    }
+
+    #[cfg(feature = "telemetry")]
+    #[test]
+    fn test_stage_span_uses_stable_name() {
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+        let span = stage_span("query_page_logic.edge_scan");
+        let metadata = span.metadata().expect("stage span should have metadata");
+        assert_eq!(metadata.name(), "metadata_checker.stage");
     }
 
     #[cfg(feature = "telemetry-otlp")]

@@ -1,6 +1,8 @@
 use crate::graph::Node;
 use crate::graph_store::GraphReadStore;
+use crate::perf_profile::PerfProfile;
 use anyhow::Result;
+use std::time::Instant;
 
 /// 页面级条件前置条件分组
 pub(super) struct PagePrerequisites {
@@ -16,12 +18,14 @@ pub(super) fn collect_page_prerequisites(
     child_components: &[Node],
     child_actions: &[Node],
     data_sources: &[serde_json::Value],
+    profile: &mut Option<&mut PerfProfile>,
 ) -> Result<PagePrerequisites> {
     let mut display_prerequisites = Vec::new();
     let mut data_prerequisites = Vec::new();
     let mut action_prerequisites = Vec::new();
     let mut seen_conditions: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+    let stage_started = Instant::now();
     for comp in child_components {
         collect_from_node(
             graph,
@@ -33,6 +37,14 @@ pub(super) fn collect_page_prerequisites(
             &mut action_prerequisites,
         )?;
     }
+    record_ms_counter(profile, "prerequisites_component_scan_ms", stage_started);
+    super::set_profile_counter(
+        profile,
+        "prerequisites_component_nodes",
+        child_components.len(),
+    );
+
+    let stage_started = Instant::now();
     for action in child_actions {
         collect_from_node(
             graph,
@@ -44,29 +56,57 @@ pub(super) fn collect_page_prerequisites(
             &mut action_prerequisites,
         )?;
     }
+    record_ms_counter(profile, "prerequisites_action_scan_ms", stage_started);
+    super::set_profile_counter(profile, "prerequisites_action_nodes", child_actions.len());
+
+    let stage_started = Instant::now();
+    let mut data_source_targets = Vec::new();
+    let mut seen_data_source_targets = std::collections::HashSet::new();
     for ds in data_sources {
         if let Some(target_id) = ds.get("target_id").and_then(|v| v.as_str()) {
-            collect_from_node(
-                graph,
-                page_path,
-                target_id,
-                &mut seen_conditions,
-                &mut display_prerequisites,
-                &mut data_prerequisites,
-                &mut action_prerequisites,
-            )?;
+            if seen_data_source_targets.insert(target_id.to_string()) {
+                data_source_targets.push(target_id.to_string());
+            }
         }
     }
+    for target_id in &data_source_targets {
+        collect_from_node(
+            graph,
+            page_path,
+            target_id,
+            &mut seen_conditions,
+            &mut display_prerequisites,
+            &mut data_prerequisites,
+            &mut action_prerequisites,
+        )?;
+    }
+    record_ms_counter(profile, "prerequisites_data_source_scan_ms", stage_started);
+    super::set_profile_counter(
+        profile,
+        "prerequisites_data_source_nodes",
+        data_source_targets.len(),
+    );
 
+    let stage_started = Instant::now();
     sort_by_impact(&mut display_prerequisites);
     sort_by_impact(&mut data_prerequisites);
     sort_by_impact(&mut action_prerequisites);
+    record_ms_counter(profile, "prerequisites_sort_ms", stage_started);
+    super::set_profile_counter(
+        profile,
+        "prerequisites_unique_conditions",
+        seen_conditions.len(),
+    );
 
     Ok(PagePrerequisites {
         display_prerequisites,
         data_prerequisites,
         action_prerequisites,
     })
+}
+
+fn record_ms_counter(profile: &mut Option<&mut PerfProfile>, name: &str, started_at: Instant) {
+    super::set_profile_counter(profile, name, started_at.elapsed().as_millis() as usize);
 }
 
 fn collect_from_node(

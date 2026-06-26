@@ -3,12 +3,15 @@ use crate::answer_contract::{
     build_answer_contract, build_required_followups, build_thinking_frame, build_truncation_guard,
 };
 use crate::dependency::DependencyGraph;
+pub(crate) use crate::explain::condition_facts::{
+    ConditionCollectorCache, annotate_condition_scope, build_answer_facts, classify_condition,
+    collect_conditions_for_node, condition_owned_by_node, dedupe_conditions,
+    expand_total_row_count_gates,
+};
 use crate::explain::condition_facts::{
-    annotate_condition_scope, build_answer_facts, build_context_summary,
-    build_primary_reason_for_intent, build_traversal_policy, build_value_source_context,
-    classify_condition, collect_conditions_for_node, collect_inherited_conditions_by_json_path,
-    component_ancestor_chain, component_json_paths, condition_owned_by_node, dedupe_conditions,
-    expand_total_row_count_gates, partition_paths_for_intent,
+    build_context_summary, build_primary_reason_for_intent, build_traversal_policy,
+    build_value_source_context, collect_inherited_conditions_by_json_path,
+    component_ancestor_chain, component_json_paths, partition_paths_for_intent,
 };
 use crate::explain::evidence::push_relation_evidence;
 use crate::explain::handlers::{
@@ -702,7 +705,11 @@ pub fn build_explain_condition_output_with_intent(
         }
     }
 
-    let value_source_context = build_value_source_context(graph, &target_node, &page_path);
+    let value_source_context = if effective_intent == TraversalIntent::Availability {
+        None
+    } else {
+        build_value_source_context(graph, &target_node, &page_path)
+    };
     blocking_conditions = dedupe_conditions(blocking_conditions);
     data_empty_gates = dedupe_conditions(data_empty_gates);
     supporting_context = dedupe_conditions(supporting_context);
@@ -1021,6 +1028,241 @@ pub fn build_explain_condition_output_with_intent(
     output.details = Some(details);
 
     Ok(serde_json::to_value(output)?)
+}
+
+/// 构造 page logic 内嵌 key model availability 所需的轻量结果。
+///
+/// 该路径复用 explain-condition 的条件收集与 availability facts 规则，但不构造完整
+/// AiOutput、路径选择、answer contract 和大体量 details。它只供 page logic profiling /
+/// benchmark 热点路径使用，默认 explain-condition 输出仍走完整路径。
+pub(crate) fn build_explain_availability_fast_output(
+    graph: &dyn GraphReadStore,
+    target_id: &str,
+    budget: &str,
+) -> Result<serde_json::Value> {
+    let (target_node, scoped_page_node, dataflow_model_id) =
+        if let Some((page_ref, local_model_id)) = parse_scoped_model_target(target_id) {
+            if let Some((scoped_model, page_node, scoped_df_model_id)) =
+                resolve_model_target_in_page(graph, &page_ref, &local_model_id)
+            {
+                (scoped_model, Some(page_node), scoped_df_model_id)
+            } else {
+                let candidates = find_local_candidates(graph, target_id);
+                let out = crate::output::schema::build_target_not_found_output(
+                    crate::output::schema::OutputKind::Explain,
+                    target_id,
+                    &candidates,
+                );
+                return Ok(serde_json::to_value(out)?);
+            }
+        } else if let Some(node) = graph.get_node(target_id).ok().flatten() {
+            (node, None, None)
+        } else {
+            let candidates = find_local_candidates(graph, target_id);
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::Explain,
+                target_id,
+                &candidates,
+            );
+            return Ok(serde_json::to_value(out)?);
+        };
+
+    let is_page_scoped_target = scoped_page_node.is_some();
+    let page_node = if let Some(page_node) = scoped_page_node {
+        page_node
+    } else {
+        match target_node.node_type {
+            crate::graph::NodeType::Page => target_node.clone(),
+            _ => find_parent_page(graph, &target_node.id).unwrap_or(target_node.clone()),
+        }
+    };
+    let page_path = page_node.path.clone();
+
+    let mut blocking_conditions: Vec<serde_json::Value> = Vec::new();
+    let mut data_empty_gates: Vec<serde_json::Value> = Vec::new();
+    let mut supporting_context: Vec<serde_json::Value> = Vec::new();
+    let mut related_context: Vec<serde_json::Value> = Vec::new();
+    let mut seen_conditions: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let target_node_ids: Vec<String> = if target_node.node_type == crate::graph::NodeType::Page {
+        vec![target_node.id.clone()]
+    } else {
+        vec![target_node.id.clone()]
+    };
+
+    for node_id in &target_node_ids {
+        let conds = collect_conditions_for_node(graph, node_id, &page_path, &mut seen_conditions);
+        for cond_obj in conds {
+            let source_file = cond_obj
+                .get("source_file")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let cond_obj = annotate_condition_scope(cond_obj, "direct", None, None, None);
+            if source_file == page_path {
+                let is_model_filter_dependency =
+                    cond_obj.get("owner_type").and_then(|v| v.as_str()) == Some("ModelSource")
+                        && !condition_owned_by_node(&cond_obj, node_id);
+                if is_model_filter_dependency {
+                    let mut ctx = cond_obj;
+                    if let Some(obj) = ctx.as_object_mut() {
+                        obj.insert(
+                            "condition_scope".to_string(),
+                            serde_json::json!("referenced_by_model_filter"),
+                        );
+                        obj.insert(
+                            "note".to_string(),
+                            serde_json::json!(
+                                "该模型过滤条件引用目标组件，但不是目标组件自身或祖先显示条件"
+                            ),
+                        );
+                    }
+                    supporting_context.push(ctx);
+                    continue;
+                }
+
+                match classify_condition(&cond_obj) {
+                    "blocking" => blocking_conditions.push(cond_obj),
+                    "data_empty" => data_empty_gates.push(cond_obj),
+                    _ => supporting_context.push(cond_obj),
+                }
+            } else {
+                let mut rc = cond_obj.clone();
+                if let Some(obj) = rc.as_object_mut() {
+                    obj.insert("note".to_string(), serde_json::json!("非当前页面必要条件"));
+                }
+                related_context.push(rc);
+            }
+        }
+    }
+
+    if target_node.node_type == crate::graph::NodeType::Model && !is_page_scoped_target {
+        let mut page_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for rc in &related_context {
+            if let Some(file) = rc.get("source_file").and_then(|v| v.as_str()) {
+                *page_counts.entry(file.to_string()).or_insert(0) += 1;
+            }
+        }
+        let mut primary_page: Option<String> = None;
+        let mut max_count = 0usize;
+        for (file, count) in page_counts {
+            if count > max_count {
+                max_count = count;
+                primary_page = Some(file);
+            }
+        }
+        if let Some(primary_page) = primary_page {
+            let mut remaining_related: Vec<serde_json::Value> = Vec::new();
+            for mut rc in related_context {
+                let rc_file = rc.get("source_file").and_then(|v| v.as_str()).unwrap_or("");
+                if rc_file == primary_page {
+                    if let Some(obj) = rc.as_object_mut() {
+                        obj.remove("note");
+                    }
+                    match classify_condition(&rc) {
+                        "blocking" => blocking_conditions.push(rc),
+                        "data_empty" => data_empty_gates.push(rc),
+                        _ => supporting_context.push(rc),
+                    }
+                } else {
+                    remaining_related.push(rc);
+                }
+            }
+            related_context = remaining_related;
+        }
+    }
+
+    let expanded_gates = expand_total_row_count_gates(
+        graph,
+        &blocking_conditions,
+        &page_path,
+        &mut seen_conditions,
+    );
+    data_empty_gates.extend(expanded_gates);
+
+    if is_dataflow_model(&target_node) {
+        if let Some(meta) = target_node.meta.as_ref() {
+            let dfm = crate::query::DataFlowMeta::from_meta(meta);
+            for (idx, projection) in dfm.project_filters().iter().enumerate() {
+                let condition_id = format!(
+                    "{}|{}|{}|{}",
+                    target_node.id, projection.node_alias, projection.role, idx
+                );
+                let raw_expr = projection
+                    .expr
+                    .clone()
+                    .or_else(|| {
+                        Some(format!(
+                            "{} {} {}",
+                            projection.left.as_deref().unwrap_or(""),
+                            projection.operator.as_deref().unwrap_or(""),
+                            projection.right.as_deref().unwrap_or("")
+                        ))
+                    })
+                    .unwrap_or_default();
+                data_empty_gates.push(serde_json::json!({
+                    "condition_id": condition_id,
+                    "condition_type": "DataFlowFilter",
+                    "condition_scope": "dataflow_internal",
+                    "raw_expr": raw_expr,
+                    "owner_node_id": target_node.id,
+                    "node_alias": projection.node_alias,
+                    "node_type": projection.node_type,
+                    "role": projection.role,
+                    "left": projection.left,
+                    "operator": projection.operator,
+                    "right": projection.right,
+                    "referenced_fields": projection.referenced_fields,
+                    "referenced_vars": projection.referenced_vars,
+                    "source_file": target_node.path,
+                    "json_path": format!("dataFlow.nodes.{}.filters", projection.node_alias),
+                }));
+            }
+        }
+    }
+
+    blocking_conditions = dedupe_conditions(blocking_conditions);
+    data_empty_gates = dedupe_conditions(data_empty_gates);
+    supporting_context = dedupe_conditions(supporting_context);
+    related_context = dedupe_conditions(related_context);
+
+    let dataflow_meta = if is_dataflow_model(&target_node) {
+        target_node
+            .meta
+            .as_ref()
+            .map(crate::query::DataFlowMeta::from_meta)
+    } else {
+        None
+    };
+    let answer_facts = build_answer_facts(
+        graph,
+        TraversalIntent::Availability,
+        &target_node,
+        &blocking_conditions,
+        &data_empty_gates,
+        &None,
+        &[],
+        budget,
+        dataflow_meta.as_ref(),
+        dataflow_model_id.as_deref(),
+    );
+    let truncation_guard = build_truncation_guard(
+        budget,
+        0,
+        0,
+        0,
+        supporting_context.len(),
+        related_context.len(),
+    );
+
+    Ok(serde_json::json!({
+        "details": {
+            "answer_facts": answer_facts,
+            "data_empty_gates": data_empty_gates,
+            "truncation_guard": truncation_guard,
+        }
+    }))
 }
 
 /// 辅助：在页面范围内查找近似候选目标

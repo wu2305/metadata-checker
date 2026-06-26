@@ -1,11 +1,53 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
+use crate::dense_graph::DenseGraphSnapshot;
 use crate::graph::GraphDB;
 use crate::response_processor::ResponseProcessor;
 pub use crate::response_processor::{RuntimeQueryResponse, RuntimeTiming};
+
+/// Runtime 使用模式，用于区分一次性 CLI 查询和长生命周期服务。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RuntimeMode {
+    /// 一次性查询路径，避免把初始化成本强行前移。
+    OneShot,
+    /// 长生命周期路径，允许在初始化阶段构建可复用读模型。
+    LongLived,
+}
+
+/// Runtime 初始化阶段构建的只读派生模型。
+pub struct RuntimeReadModel {
+    /// 稠密 ID + CSR 风格只读图快照。
+    pub dense_graph: Arc<DenseGraphSnapshot>,
+    /// 预热后的页面 availability 缓存。
+    pub page_logic_availability: HashMap<String, crate::query::PageLogicAvailabilityCache>,
+}
+
+impl RuntimeReadModel {
+    /// 构造 page availability 缓存 key。
+    fn page_logic_availability_key(page_id: &str, budget: &str) -> String {
+        format!("{page_id}\n{budget}")
+    }
+
+    /// 读取预热后的 page availability 缓存。
+    pub fn page_logic_availability(
+        &self,
+        page_id: &str,
+        budget: &str,
+    ) -> Option<&crate::query::PageLogicAvailabilityCache> {
+        self.page_logic_availability
+            .get(&Self::page_logic_availability_key(page_id, budget))
+    }
+
+    /// 判断是否已经预热指定 page/budget。
+    pub fn has_page_logic_availability(&self, page_id: &str, budget: &str) -> bool {
+        self.page_logic_availability(page_id, budget).is_some()
+    }
+}
 
 /// Hot Graph Runtime：在同一进程内复用已加载的 GraphDB
 ///
@@ -34,6 +76,18 @@ pub struct GraphRuntime {
     pub last_reload_error: Option<String>,
     /// graphdb 文件指纹
     pub graph_fingerprint: GraphFingerprint,
+    /// 运行期预构建的稠密只读快照。
+    pub dense_snapshot: Option<Arc<DenseGraphSnapshot>>,
+    /// 稠密快照构建耗时（毫秒）。
+    pub dense_snapshot_build_ms: u128,
+    /// 是否在 runtime load/reload 阶段构建稠密快照。
+    pub dense_snapshot_enabled: bool,
+    /// Runtime 模式。
+    pub runtime_mode: RuntimeMode,
+    /// 长生命周期 runtime 的派生只读模型。
+    pub read_model: Option<Arc<RuntimeReadModel>>,
+    /// 派生只读模型构建耗时（毫秒）。
+    pub read_model_build_ms: u128,
 }
 
 /// Runtime 查询命令枚举
@@ -127,6 +181,31 @@ impl GraphRuntime {
         graph_db_path: impl AsRef<Path>,
         project_dir: Option<impl AsRef<Path>>,
     ) -> Result<Self> {
+        Self::load_with_project_dir_and_mode(graph_db_path, project_dir, RuntimeMode::OneShot)
+    }
+
+    /// 加载 graphdb 并显式构建稠密只读快照。
+    pub fn load_with_project_dir_and_dense_snapshot(
+        graph_db_path: impl AsRef<Path>,
+        project_dir: Option<impl AsRef<Path>>,
+    ) -> Result<Self> {
+        Self::load_with_project_dir_and_mode(graph_db_path, project_dir, RuntimeMode::LongLived)
+    }
+
+    /// 按指定 Runtime 模式加载 graphdb。
+    pub fn load_with_project_dir_and_mode(
+        graph_db_path: impl AsRef<Path>,
+        project_dir: Option<impl AsRef<Path>>,
+        runtime_mode: RuntimeMode,
+    ) -> Result<Self> {
+        Self::load_with_project_dir_internal(graph_db_path, project_dir, runtime_mode)
+    }
+
+    fn load_with_project_dir_internal(
+        graph_db_path: impl AsRef<Path>,
+        project_dir: Option<impl AsRef<Path>>,
+        runtime_mode: RuntimeMode,
+    ) -> Result<Self> {
         let path = graph_db_path.as_ref().to_path_buf();
         #[cfg(feature = "telemetry")]
         let graph_load_span = crate::telemetry::graph_load_span(&path.to_string_lossy());
@@ -156,6 +235,30 @@ impl GraphRuntime {
             size: graph_file_size,
             content_prefix_hash: prefix_hash,
         };
+        let build_read_model = runtime_mode == RuntimeMode::LongLived;
+        let read_model_started = Instant::now();
+        let read_model = if build_read_model {
+            DenseGraphSnapshot::from_graph(&graph)
+                .ok()
+                .map(|dense_graph| {
+                    Arc::new(RuntimeReadModel {
+                        dense_graph: Arc::new(dense_graph),
+                        page_logic_availability: HashMap::new(),
+                    })
+                })
+        } else {
+            None
+        };
+        let read_model_build_ms = if build_read_model {
+            read_model_started.elapsed().as_millis()
+        } else {
+            0
+        };
+        let dense_snapshot = read_model
+            .as_ref()
+            .map(|model| Arc::clone(&model.dense_graph));
+        let dense_snapshot_build_ms = read_model_build_ms;
+        let dense_snapshot_enabled = build_read_model;
 
         let project_dir = project_dir
             .map(|p| p.as_ref().to_path_buf())
@@ -181,12 +284,44 @@ impl GraphRuntime {
             reload_count: 0,
             last_reload_error: None,
             graph_fingerprint: fingerprint,
+            dense_snapshot,
+            dense_snapshot_build_ms,
+            dense_snapshot_enabled,
+            runtime_mode,
+            read_model,
+            read_model_build_ms,
         })
     }
 
     /// 兼容旧签名：从 graph_db_path.parent() 推导 project_dir
     pub fn load(graph_db_path: impl AsRef<Path>) -> Result<Self> {
         Self::load_with_project_dir(graph_db_path, None::<&Path>)
+    }
+
+    /// 在长生命周期 runtime 的初始化阶段预热 page logic availability。
+    pub fn warm_page_logic_availability(&mut self, page_id: &str, budget: &str) -> Result<u128> {
+        let started_at = Instant::now();
+        let cache = crate::query::build_page_logic_availability_cache(
+            &self.graph,
+            page_id,
+            self.project_dir.as_deref(),
+            budget,
+        )?;
+        let Some(read_model) = self.read_model.as_ref() else {
+            return Err(anyhow::anyhow!(
+                "page logic availability warm requires long-lived runtime read model"
+            ));
+        };
+        let mut page_logic_availability = read_model.page_logic_availability.clone();
+        page_logic_availability.insert(
+            RuntimeReadModel::page_logic_availability_key(page_id, budget),
+            cache,
+        );
+        self.read_model = Some(Arc::new(RuntimeReadModel {
+            dense_graph: Arc::clone(&read_model.dense_graph),
+            page_logic_availability,
+        }));
+        Ok(started_at.elapsed().as_millis())
     }
 
     /// 执行查询，复用内存中的 graph
@@ -344,8 +479,16 @@ impl GraphRuntime {
             )?,
             ToolCommand::QueryPageLogic => {
                 let project_dir = self.project_dir.as_deref();
-                crate::query::build_query_page_logic_output(
+                let availability_cache = self.read_model.as_ref().and_then(|model| {
+                    model.page_logic_availability(&request.target, &request.budget)
+                });
+                crate::query::build_query_page_logic_output_with_availability_cache(
                     &self.graph,
+                    self.read_model
+                        .as_ref()
+                        .map(|model| model.dense_graph.as_ref())
+                        .or(self.dense_snapshot.as_deref()),
+                    availability_cache,
                     &request.target,
                     project_dir,
                     &request.budget,
@@ -491,7 +634,11 @@ impl GraphRuntime {
     /// 安全 reload：先加载新图，成功后再替换旧图
     pub fn reload(&mut self) -> Result<()> {
         let project_dir = self.project_dir.clone();
-        match Self::load_with_project_dir(&self.graph_db_path, project_dir.as_deref()) {
+        match Self::load_with_project_dir_internal(
+            &self.graph_db_path,
+            project_dir.as_deref(),
+            self.runtime_mode,
+        ) {
             Ok(new_runtime) => {
                 self.graph = new_runtime.graph;
                 self.loaded_at = new_runtime.loaded_at;
@@ -501,6 +648,12 @@ impl GraphRuntime {
                 self.graph_load_ms = new_runtime.graph_load_ms;
                 self.graph_fingerprint = new_runtime.graph_fingerprint;
                 self.project_dir = new_runtime.project_dir;
+                self.dense_snapshot = new_runtime.dense_snapshot;
+                self.dense_snapshot_build_ms = new_runtime.dense_snapshot_build_ms;
+                self.dense_snapshot_enabled = new_runtime.dense_snapshot_enabled;
+                self.runtime_mode = new_runtime.runtime_mode;
+                self.read_model = new_runtime.read_model;
+                self.read_model_build_ms = new_runtime.read_model_build_ms;
                 self.reload_count += 1;
                 self.last_reload_error = None;
                 Ok(())

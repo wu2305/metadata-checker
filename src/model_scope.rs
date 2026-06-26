@@ -80,6 +80,59 @@ fn collect_page_descendants(graph: &dyn GraphReadStore, root_id: &str) -> Vec<St
     ids
 }
 
+/// 从模型入边反查当前页面内的模型引用路径，避免每个模型都遍历整棵页面子树。
+fn collect_page_model_candidate_paths_from_incoming(
+    graph: &dyn GraphReadStore,
+    page_path: &str,
+    model_id: &str,
+    normalized_model: &str,
+    fallback_model_path: &str,
+) -> Vec<String> {
+    let mut candidate_paths = Vec::new();
+    let mut seen_paths = HashSet::new();
+    let Some(neighbors) = graph.get_node_edges(model_id).ok().flatten() else {
+        return candidate_paths;
+    };
+
+    for edge_view in &neighbors.incoming {
+        let source = &edge_view.node;
+        let edge = &edge_view.edge;
+        let source_file = edge
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("source_file"))
+            .and_then(|v| v.as_str());
+        if source.path != page_path && source_file != Some(page_path) {
+            continue;
+        }
+
+        let meta_target_model = edge
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("target_model"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let to_node_model = model_id.strip_prefix("model:").unwrap_or(model_id);
+        if meta_target_model != normalized_model && to_node_model != normalized_model {
+            continue;
+        }
+
+        let path = edge
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("target_model_path"))
+            .and_then(|v| v.as_str())
+            .filter(|p| !p.is_empty())
+            .unwrap_or(fallback_model_path);
+        if !path.is_empty() && seen_paths.insert(path.to_string()) {
+            candidate_paths.push(path.to_string());
+        }
+    }
+
+    candidate_paths.sort();
+    candidate_paths
+}
+
 fn collect_dataflow_input_paths_by_model(
     graph: &dyn GraphReadStore,
     model_id: &str,
@@ -274,47 +327,54 @@ pub fn resolve_model_target_in_page(
         return None;
     };
 
-    let mut candidate_paths = Vec::new();
-    let mut seen_paths = HashSet::new();
-    for node_id in collect_page_descendants(graph, &page_node.id) {
-        let Some(neighbors) = graph.get_node_edges(&node_id).ok().flatten() else {
-            continue;
-        };
-        for edge_view in &neighbors.outgoing {
-            if edge_view.node.node_type != NodeType::Model {
+    let mut candidate_paths = collect_page_model_candidate_paths_from_incoming(
+        graph,
+        &page_node.path,
+        &model_id,
+        normalized_model,
+        &model_node.path,
+    );
+    if candidate_paths.is_empty() {
+        let mut seen_paths = HashSet::new();
+        for node_id in collect_page_descendants(graph, &page_node.id) {
+            let Some(neighbors) = graph.get_node_edges(&node_id).ok().flatten() else {
                 continue;
-            }
-            let meta_target_model = edge_view
-                .edge
-                .meta
-                .as_ref()
-                .and_then(|m| m.get("target_model"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let to_node_model = edge_view
-                .node
-                .id
-                .strip_prefix("model:")
-                .unwrap_or(&edge_view.node.id);
-            if meta_target_model != normalized_model && to_node_model != normalized_model {
-                continue;
-            }
-            let path = edge_view
-                .edge
-                .meta
-                .as_ref()
-                .and_then(|m| m.get("target_model_path"))
-                .and_then(|v| v.as_str())
-                .filter(|p| !p.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| edge_view.node.path.clone());
-            if !path.is_empty() && seen_paths.insert(path.clone()) {
-                candidate_paths.push(path);
+            };
+            for edge_view in &neighbors.outgoing {
+                if edge_view.node.node_type != NodeType::Model {
+                    continue;
+                }
+                let meta_target_model = edge_view
+                    .edge
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("target_model"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let to_node_model = edge_view
+                    .node
+                    .id
+                    .strip_prefix("model:")
+                    .unwrap_or(&edge_view.node.id);
+                if meta_target_model != normalized_model && to_node_model != normalized_model {
+                    continue;
+                }
+                let path = edge_view
+                    .edge
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("target_model_path"))
+                    .and_then(|v| v.as_str())
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| edge_view.node.path.clone());
+                if !path.is_empty() && seen_paths.insert(path.clone()) {
+                    candidate_paths.push(path);
+                }
             }
         }
+        candidate_paths.sort();
     }
-
-    candidate_paths.sort();
     let target_path = candidate_paths.into_iter().next()?;
 
     let mut scoped_model = model_node.clone();

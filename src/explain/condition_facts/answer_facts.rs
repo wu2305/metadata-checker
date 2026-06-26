@@ -697,7 +697,7 @@ fn build_model_io_facts(
     })
 }
 
-pub(in crate::explain) fn build_primary_reason_for_intent(
+pub(crate) fn build_primary_reason_for_intent(
     intent: TraversalIntent,
     target_node: &crate::graph::Node,
     blocking_conditions: &[serde_json::Value],
@@ -803,10 +803,7 @@ pub(in crate::explain) fn build_primary_reason_for_intent(
     }
 }
 
-pub(in crate::explain) fn build_traversal_policy(
-    intent: TraversalIntent,
-    budget: &str,
-) -> serde_json::Value {
+pub(crate) fn build_traversal_policy(intent: TraversalIntent, budget: &str) -> serde_json::Value {
     let (max_paths, max_steps_per_path) = match budget {
         "compact" => (3, 6),
         "full" => (10, 12),
@@ -841,7 +838,7 @@ pub(in crate::explain) fn build_traversal_policy(
     })
 }
 
-pub(in crate::explain) fn build_answer_facts(
+pub(crate) fn build_answer_facts(
     graph: &dyn GraphReadStore,
     intent: TraversalIntent,
     target_node: &crate::graph::Node,
@@ -946,7 +943,7 @@ fn collect_dataflow_input_paths(
 }
 
 /// 构建上下文数组摘要，用于 compact 模式隐藏大体量旁路明细
-pub(in crate::explain) fn build_context_summary(
+pub(crate) fn build_context_summary(
     items: &[serde_json::Value],
     emitted_count: usize,
     hidden: bool,
