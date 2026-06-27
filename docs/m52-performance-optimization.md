@@ -288,6 +288,35 @@ long_lived_total(N) = long_lived_load + N * long_lived_query
 - N=50 时 warm 版本明显优于 one-shot（30759ms vs 35306ms）。
 - 剩余 query-time 大头已经不是 availability，而是 `path_summary` 和 `prerequisites`。
 
+### 5. redb v2 shadow layout
+
+M52 收口项：完成 redb v2 图布局设计与 shadow build 验证，不切换默认 v1 读写路径。
+
+布局组成：
+
+| 组件 | redb 表 | 内容 |
+|---|---|---|
+| meta | `v2_meta` | schema version、node/edge/field path/file state 计数、content fingerprint |
+| dense id 映射 | `v2_node_ids` | 排序后的 `node_id` 列表，下标即 dense id |
+| node meta | `v2_node_meta` | 与 dense id 对齐的 `node_type/path/name/meta` |
+| out adjacency | `v2_out_adj` | CSR `offsets + entries(adjacent_dense_id, edge_type, field_path_id, meta)` |
+| in adjacency | `v2_in_adj` | 同上，入边视角 |
+| field path 字典 | `v2_field_paths` | 去重后的 `field_path` 字符串表 |
+| file states | `v2_file_states` | 与 v1 等价的 `FileState` 映射 |
+
+实现边界：
+
+- `GraphDB::persist` 在单次 write transaction 内写完 v1 后同步 shadow 写 v2；默认 `open_inner` 仍只 hydrate v1。
+- `read_v2_layout` 在 schema / fingerprint 不匹配时返回 miss，不阻断 v1。
+- `hydrate_graph_from_v2` + `shadow_compare_v1_v2` 提供等价校验，供 M53 hydrate 切入前复用。
+- fingerprint 对 `file_states` 使用排序后的 path 迭代，避免 HashMap 顺序导致误判。
+
+测试覆盖：`tests/m52_redb_v2_shadow_tests.rs`
+
+- scan/persist 后 v2 shadow 与 v1 图等价。
+- round-trip 写入 / 读取 / hydrate 后节点边一致。
+- fingerprint 篡改时 v2 miss、v1 仍可打开。
+
 ## 当前真实项目快照
 
 最后一次 page logic profile：
@@ -307,6 +336,9 @@ long_lived_total(N) = long_lived_load + N * long_lived_query
 
 ## M53 候选
 
+M53 接续基线见 [M53 性能优化接续记录](m53-performance-continuation.md)。
+
+- ~~M52 结束前先完成 redb v2 graph layout 设计和 shadow build 验证~~（已完成，见上文 §5）。
 - 把 `PageAvailabilityIndex` 内部从 batch fast path 包装替换为 build/load-time materialized facts，减少 88 个 key model 的重复 filter / input path / row semantic 构造。
 - 增加 dense-native path finder，直接消费 CSR slices，避免 `GraphReadStore` owned clone 适配器抵消 CSR 收益。
 - 在 `BoundedCausalPathFinder` 内增加候选节点剪枝或 anchor pair 预索引，降低 `path_candidate_search_ms`。
@@ -327,7 +359,7 @@ long_lived_total(N) = long_lived_load + N * long_lived_query
 
 - 不设置性能 fail threshold。
 - 不做 browser real perf。
-- 不改 redb schema。
+- 不切换默认 redb 读写 schema；M52 只允许 v2 layout 设计和 shadow build 验证。
 - 不引入 DuckDB / 图数据库替换。
 - 不改 query 层公开 JSON 语义。
 - 不默认启用 query-time 或 runtime-load dense snapshot，除非真实 profile 证明收益。

@@ -8,78 +8,16 @@
       - .cnb/images/browser-wasm-ci.Dockerfile
       - Cargo.lock
 
-.rust_only_ci: &rust_only_ci
-  name: rust-only-ci
+.rust_ci: &rust_ci
+  name: rust-ci
   runner:
     tags: cnb:arch:amd64
   docker:
-    image: rust:1.95-bookworm
+    <<: *browser_wasm_ci_image
     volumes:
       - /usr/local/cargo/registry
       - /usr/local/cargo/git
       - ./target
-  stages:
-    - name: toolchain
-      script: |
-        rustup component add rustfmt
-        rustc --version
-        cargo --version
-    - name: format
-      script: cargo fmt --check
-    - name: check benches
-      script: cargo check --benches
-    - name: test
-      script: |
-        cargo test -- \
-          --test-threads=1 \
-          --skip test_ai_eval_commands_execute_and_assert \
-          --skip test_cli_explain_component_single_file_contract \
-          --skip test_cli_explain_component_single_file_no_actions_contract
-    - name: browser wasm check
-      script: |
-        rustup target add wasm32-unknown-unknown
-        cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown
-
-.browser_wasm_env_probe: &browser_wasm_env_probe
-  name: browser-wasm-env-probe
-  runner:
-    tags: cnb:arch:amd64
-  docker:
-    <<: *browser_wasm_ci_image
-    volumes:
-      - /usr/local/cargo/registry
-      - /usr/local/cargo/git
-      - ./target/cnb/browser-wasm-probe
-  env:
-    CARGO_TARGET_DIR: target/cnb/browser-wasm-probe
-  stages:
-    - name: toolchain
-      script: |
-        node --version
-        rustc --version
-        cargo --version
-        wasm-bindgen --version
-    - name: build browser wasm node glue
-      script: |
-        cargo build --release --no-default-features --features browser-wasm --target wasm32-unknown-unknown
-        rm -rf target/browser-offscreen-bench-wasm
-        wasm-bindgen \
-          --target nodejs \
-          --out-dir target/browser-offscreen-bench-wasm \
-          "${CARGO_TARGET_DIR}/wasm32-unknown-unknown/release/metadata_checker.wasm"
-        test -f target/browser-offscreen-bench-wasm/metadata_checker.js
-        test -f target/browser-offscreen-bench-wasm/metadata_checker_bg.wasm
-
-.rust_coverage_ci: &rust_coverage_ci
-  name: rust-coverage-ci
-  runner:
-    tags: cnb:arch:amd64
-  docker:
-    <<: *browser_wasm_ci_image
-    volumes:
-      - /usr/local/cargo/registry
-      - /usr/local/cargo/git
-      - ./target/cnb/coverage
   env:
     CARGO_TARGET_DIR: target/cnb/coverage
   stages:
@@ -88,7 +26,11 @@
         rustc --version
         cargo --version
         cargo llvm-cov --version
-    - name: rust coverage
+    - name: format
+      script: cargo fmt --check
+    - name: check benches
+      script: cargo check --benches
+    - name: test and coverage
       script: |
         rm -rf target/debug
         mkdir -p target target/cnb/coverage/llvm-cov-target
@@ -116,9 +58,18 @@
     - name: coverage summary
       script: |
         echo "Rust coverage lines: ${RUST_COVERAGE_LINES:-NA}%"
+    - name: browser wasm check
+      script: |
+        cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown
 
 .browser_offscreen_bench_ci: &browser_offscreen_bench_ci
   name: browser-offscreen-bench-ci
+  ifModify:
+    - src/**
+    - browser/**
+    - Cargo.toml
+    - Cargo.lock
+    - tests/fixtures/browser-offscreen-real-project/**
   runner:
     tags: cnb:arch:amd64
   docker:
@@ -177,6 +128,12 @@
 
 .fixture_bench_ci: &fixture_bench_ci
   name: fixture-bench-ci
+  ifModify:
+    - src/**
+    - benches/**
+    - Cargo.toml
+    - Cargo.lock
+    - tests/fixtures/**
   runner:
     tags: cnb:arch:amd64
   docker:
@@ -188,6 +145,10 @@
   imports:
     - https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/bencher.yml
   stages:
+    - name: criterion warmup
+      script: |
+        CARGO_TARGET_DIR=target/criterion-ci/warmup \
+          cargo build --profile release-fast --lib --bins
     - name: criterion fixture benches
       script: |
         node tools/run-bencher-criterion-ci.mjs \
@@ -199,8 +160,7 @@
           --target-dir target/criterion-ci/query-micro \
           -- --sample-size 10 --warm-up-time 1 --measurement-time 2 --nresamples 1000 --noplot
 
-.full_criterion_bench_ci: &full_criterion_bench_ci
-  name: full-criterion-bench-ci
+.full_criterion_bench_shell: &full_criterion_bench_shell
   runner:
     tags: cnb:arch:amd64
   docker:
@@ -212,68 +172,102 @@
   imports:
     - https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/bencher.yml
     - https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
+
+.full_criterion_toolchain_stage: &full_criterion_toolchain_stage
+  name: toolchain
+  script: |
+    node --version
+    rustc --version
+    cargo --version
+    bencher --version
+
+.full_criterion_checkout_stage: &full_criterion_checkout_stage
+  name: checkout real project fixture
+  script: |
+    if [ -n "${METADATA_CHECKER_REAL_PROJECT_DIR:-}" ]; then
+      echo "use preconfigured METADATA_CHECKER_REAL_PROJECT_DIR"
+      echo "##[set-output real_project_dir=${METADATA_CHECKER_REAL_PROJECT_DIR}]"
+      exit 0
+    fi
+
+    if [ -z "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ]; then
+      echo "REAL_PROJECT_FIXTURE_DEPLOY_TOKEN is required to clone the real-project fixture repository"
+      exit 1
+    fi
+
+    FIXTURE_REPO_URL="${REAL_PROJECT_FIXTURE_REPO_URL:-}"
+    if [ -z "$FIXTURE_REPO_URL" ]; then
+      if [ -z "${REAL_PROJECT_FIXTURE_REPO_SLUG:-}" ]; then
+        echo "REAL_PROJECT_FIXTURE_REPO_URL or REAL_PROJECT_FIXTURE_REPO_SLUG is required"
+        exit 1
+      fi
+      FIXTURE_REPO_URL="https://cnb.cool/${REAL_PROJECT_FIXTURE_REPO_SLUG}.git"
+    fi
+
+    FIXTURE_ROOT="/tmp/metadata-checker-real-fixtures"
+    rm -rf "$FIXTURE_ROOT"
+    git config --global credential.helper store
+    printf "https://cnb:%s@cnb.cool\n" "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" > "$HOME/.git-credentials"
+    chmod 0600 "$HOME/.git-credentials"
+    git clone "$FIXTURE_REPO_URL" "$FIXTURE_ROOT"
+
+    if [ -n "${REAL_PROJECT_FIXTURE_REF:-}" ]; then
+      git -C "$FIXTURE_ROOT" checkout "$REAL_PROJECT_FIXTURE_REF"
+    fi
+
+    REAL_PROJECT_DIR="$FIXTURE_ROOT/${REAL_PROJECT_FIXTURE_PROJECT_PATH:-xiaoshouyi}"
+    echo "##[set-output real_project_dir=${REAL_PROJECT_DIR}]"
+  exports:
+    real_project_dir: METADATA_CHECKER_REAL_PROJECT_DIR
+
+.full_criterion_preflight_stage: &full_criterion_preflight_stage
+  name: real project preflight
+  script: |
+    if [ -z "${METADATA_CHECKER_REAL_PROJECT_DIR:-}" ]; then
+      echo "METADATA_CHECKER_REAL_PROJECT_DIR is required for full real-project benchmarks"
+      exit 1
+    fi
+    test -d "$METADATA_CHECKER_REAL_PROJECT_DIR"
+    METADATA_FILE_COUNT="$(find "$METADATA_CHECKER_REAL_PROJECT_DIR" \( -name '*.spg' -o -name '*.tbl' \) | wc -l)"
+    test "$METADATA_FILE_COUNT" -gt 0
+    find "$METADATA_CHECKER_REAL_PROJECT_DIR" \( -name '*.spg' -o -name '*.tbl' \) | head -n 20
+
+.full_criterion_warmup_stage: &full_criterion_warmup_stage
+  name: criterion warmup
+  script: |
+    CARGO_TARGET_DIR=target/criterion-ci/warmup \
+      cargo build --profile release-fast --lib --bins
+
+.full_criterion_warmup_telemetry_stage: &full_criterion_warmup_telemetry_stage
+  name: criterion warmup
+  script: |
+    CARGO_TARGET_DIR=target/criterion-ci/warmup \
+      cargo build --profile release-fast --lib --bins
+    CARGO_TARGET_DIR=target/criterion-ci/warmup-telemetry \
+      cargo build --profile release-fast --features telemetry --lib
+
+.full_criterion_query_ci: &full_criterion_query_ci
+  <<: *full_criterion_bench_shell
+  name: full-criterion-query-ci
   stages:
-    - name: toolchain
-      script: |
-        node --version
-        rustc --version
-        cargo --version
-        bencher --version
-    - name: checkout real project fixture
-      script: |
-        if [ -n "${METADATA_CHECKER_REAL_PROJECT_DIR:-}" ]; then
-          echo "use preconfigured METADATA_CHECKER_REAL_PROJECT_DIR"
-          echo "##[set-output real_project_dir=${METADATA_CHECKER_REAL_PROJECT_DIR}]"
-          exit 0
-        fi
-
-        if [ -z "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ]; then
-          echo "REAL_PROJECT_FIXTURE_DEPLOY_TOKEN is required to clone the real-project fixture repository"
-          exit 1
-        fi
-
-        FIXTURE_REPO_URL="${REAL_PROJECT_FIXTURE_REPO_URL:-}"
-        if [ -z "$FIXTURE_REPO_URL" ]; then
-          if [ -z "${REAL_PROJECT_FIXTURE_REPO_SLUG:-}" ]; then
-            echo "REAL_PROJECT_FIXTURE_REPO_URL or REAL_PROJECT_FIXTURE_REPO_SLUG is required"
-            exit 1
-          fi
-          FIXTURE_REPO_URL="https://cnb.cool/${REAL_PROJECT_FIXTURE_REPO_SLUG}.git"
-        fi
-
-        FIXTURE_ROOT="/tmp/metadata-checker-real-fixtures"
-        rm -rf "$FIXTURE_ROOT"
-        git config --global credential.helper store
-        printf "https://cnb:%s@cnb.cool\n" "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" > "$HOME/.git-credentials"
-        chmod 0600 "$HOME/.git-credentials"
-        git clone "$FIXTURE_REPO_URL" "$FIXTURE_ROOT"
-
-        if [ -n "${REAL_PROJECT_FIXTURE_REF:-}" ]; then
-          git -C "$FIXTURE_ROOT" checkout "$REAL_PROJECT_FIXTURE_REF"
-        fi
-
-        REAL_PROJECT_DIR="$FIXTURE_ROOT/${REAL_PROJECT_FIXTURE_PROJECT_PATH:-xiaoshouyi}"
-        echo "##[set-output real_project_dir=${REAL_PROJECT_DIR}]"
-      exports:
-        real_project_dir: METADATA_CHECKER_REAL_PROJECT_DIR
-    - name: real project preflight
-      script: |
-        if [ -z "${METADATA_CHECKER_REAL_PROJECT_DIR:-}" ]; then
-          echo "METADATA_CHECKER_REAL_PROJECT_DIR is required for full real-project benchmarks"
-          exit 1
-        fi
-        test -d "$METADATA_CHECKER_REAL_PROJECT_DIR"
-        METADATA_FILE_COUNT="$(find "$METADATA_CHECKER_REAL_PROJECT_DIR" \( -name '*.spg' -o -name '*.tbl' \) | wc -l)"
-        test "$METADATA_FILE_COUNT" -gt 0
-        find "$METADATA_CHECKER_REAL_PROJECT_DIR" \( -name '*.spg' -o -name '*.tbl' \) | head -n 20
+    - <<: *full_criterion_toolchain_stage
+    - <<: *full_criterion_checkout_stage
+    - <<: *full_criterion_preflight_stage
+    - <<: *full_criterion_warmup_stage
     - name: query matrix bench
       script: |
         node tools/run-bencher-criterion-ci.mjs \
           --bench query_matrix_bench \
           --target-dir target/criterion-ci/query-matrix
+    - name: runtime lifecycle bench
+      script: |
+        node tools/run-bencher-criterion-ci.mjs \
+          --bench runtime_bench \
+          --target-dir target/criterion-ci/runtime
     - name: M51 page logic profile report
       script: |
-        CARGO_TARGET_DIR=target/criterion-ci/m51-profile \
+        mkdir -p target/criterion-ci/reports
+        CARGO_TARGET_DIR=target/criterion-ci/warmup \
           cargo run --profile release-fast --bin m51_profile_report -- \
             --project-dir "$METADATA_CHECKER_REAL_PROJECT_DIR" \
             --output target/criterion-ci/reports/m51-page-logic-profile.json \
@@ -282,18 +276,23 @@
         head -c 4000 target/criterion-ci/reports/m51-page-logic-profile.json
     - name: M51 core profile report
       script: |
-        CARGO_TARGET_DIR=target/criterion-ci/m51-core-profile \
+        mkdir -p target/criterion-ci/reports
+        CARGO_TARGET_DIR=target/criterion-ci/warmup \
           cargo run --profile release-fast --bin m51_core_profile_report -- \
             --project-dir "$METADATA_CHECKER_REAL_PROJECT_DIR" \
             --output target/criterion-ci/reports/m51-core-profile.json \
             --sample-count 1
         test -s target/criterion-ci/reports/m51-core-profile.json
         head -c 4000 target/criterion-ci/reports/m51-core-profile.json
-    - name: runtime lifecycle bench
-      script: |
-        node tools/run-bencher-criterion-ci.mjs \
-          --bench runtime_bench \
-          --target-dir target/criterion-ci/runtime
+
+.full_criterion_mutation_ci: &full_criterion_mutation_ci
+  <<: *full_criterion_bench_shell
+  name: full-criterion-mutation-ci
+  stages:
+    - <<: *full_criterion_toolchain_stage
+    - <<: *full_criterion_checkout_stage
+    - <<: *full_criterion_preflight_stage
+    - <<: *full_criterion_warmup_stage
     - name: rebuild mutation bench
       script: |
         node tools/run-bencher-criterion-ci.mjs \
@@ -304,6 +303,15 @@
         node tools/run-bencher-criterion-ci.mjs \
           --bench redb_persistence_bench \
           --target-dir target/criterion-ci/redb
+
+.full_criterion_boundary_ci: &full_criterion_boundary_ci
+  <<: *full_criterion_bench_shell
+  name: full-criterion-boundary-ci
+  stages:
+    - <<: *full_criterion_toolchain_stage
+    - <<: *full_criterion_checkout_stage
+    - <<: *full_criterion_preflight_stage
+    - <<: *full_criterion_warmup_telemetry_stage
     - name: stdio boundary bench
       script: |
         node tools/run-bencher-criterion-ci.mjs \
@@ -311,7 +319,6 @@
           --target-dir target/criterion-ci/stdio
     - name: telemetry overhead bench
       script: |
-        cargo build --profile release-fast --features telemetry
         node tools/run-bencher-criterion-ci.mjs \
           --bench telemetry_overhead_bench \
           --target-dir target/criterion-ci/telemetry \
@@ -348,52 +355,57 @@
     - name: fetch dependencies
       script: cargo fetch
 
-# ponytail: stage 级 if 跳过 main，避免与 main.push 重复跑 rust-only
-.rust_only_ci_branch_push: &rust_only_ci_branch_push
-  name: rust-only-ci-branch-push
+# ponytail: stage 级 if 跳过 main，避免与 main.push 重复跑 rust-ci
+.rust_ci_branch_push: &rust_ci_branch_push
+  name: rust-ci-branch-push
   runner:
     tags: cnb:arch:amd64
   docker:
-    image: rust:1.95-bookworm
+    <<: *browser_wasm_ci_image
     volumes:
       - /usr/local/cargo/registry
       - /usr/local/cargo/git
       - ./target
+  env:
+    CARGO_TARGET_DIR: target/cnb/coverage
   stages:
-    - name: rust only ci
+    - name: rust ci
       if: '[ "$CNB_BRANCH" != "main" ]'
       script: |
-        rustup component add rustfmt
         rustc --version
         cargo --version
+        cargo llvm-cov --version
         cargo fmt --check
         cargo check --benches
-        cargo test -- \
+        rm -rf target/debug
+        mkdir -p target target/cnb/coverage/llvm-cov-target
+        ln -sfn cnb/coverage/llvm-cov-target/debug target/debug
+        cargo llvm-cov test \
+          --workspace \
+          --lcov \
+          --output-path lcov.info \
+          -- \
           --test-threads=1 \
           --skip test_ai_eval_commands_execute_and_assert \
           --skip test_cli_explain_component_single_file_contract \
           --skip test_cli_explain_component_single_file_no_actions_contract
-        rustup target add wasm32-unknown-unknown
+        test -s lcov.info
         cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown
 
 .pr_fast_ci: &pr_fast_ci
-  - *rust_only_ci
-  - *rust_coverage_ci
-  - *browser_wasm_env_probe
+  - *rust_ci
   - *browser_offscreen_bench_ci
 
 .main_authoritative_ci: &main_authoritative_ci
-  - *rust_only_ci
-  - *rust_coverage_ci
-  - *browser_wasm_env_probe
+  - *rust_ci
   - *browser_offscreen_bench_ci_with_bencher
   - *fixture_bench_ci
-  - *full_criterion_bench_ci
+  - *full_criterion_query_ci
+  - *full_criterion_mutation_ci
+  - *full_criterion_boundary_ci
 
 main:
   push: *main_authoritative_ci
-
-# 预留：full real-project bench 可后续在 `$` 下配置 web_trigger / crontab，本任务不实现。
 
 "$":
   vscode:
@@ -401,5 +413,5 @@ main:
 
 "**":
   push:
-    - *rust_only_ci_branch_push
+    - *rust_ci_branch_push
   pull_request: *pr_fast_ci

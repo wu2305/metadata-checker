@@ -48,7 +48,7 @@ pub enum EdgeType {
     DependsOn,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// 图节点
 pub struct Node {
     pub id: String,
@@ -68,7 +68,7 @@ pub struct Edge {
     pub meta: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// 文件状态（用于增量更新）
 pub struct FileState {
     pub file_path: String,
