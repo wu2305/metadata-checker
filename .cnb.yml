@@ -8,10 +8,27 @@
       - .cnb/images/browser-wasm-ci.Dockerfile
       - Cargo.lock
 
+# ponytail: 快 gate 降配 CPU；full criterion 保持 8 核编译与 bench
+.runner_amd64_2: &runner_amd64_2
+  tags: cnb:arch:amd64
+  cpus: 2
+
+.runner_amd64_4: &runner_amd64_4
+  tags: cnb:arch:amd64
+  cpus: 4
+
+.runner_amd64_6: &runner_amd64_6
+  tags: cnb:arch:amd64
+  cpus: 6
+
+.runner_amd64_8: &runner_amd64_8
+  tags: cnb:arch:amd64
+  cpus: 8
+
 .rust_ci: &rust_ci
   name: rust-ci
   runner:
-    tags: cnb:arch:amd64
+    <<: *runner_amd64_4
   docker:
     <<: *browser_wasm_ci_image
     volumes:
@@ -71,7 +88,7 @@
     - Cargo.lock
     - tests/fixtures/browser-offscreen-real-project/**
   runner:
-    tags: cnb:arch:amd64
+    <<: *runner_amd64_2
   docker:
     <<: *browser_wasm_ci_image
     volumes:
@@ -135,7 +152,7 @@
     - Cargo.lock
     - tests/fixtures/**
   runner:
-    tags: cnb:arch:amd64
+    <<: *runner_amd64_4
   docker:
     <<: *browser_wasm_ci_image
     volumes:
@@ -162,7 +179,7 @@
 
 .full_criterion_bench_shell: &full_criterion_bench_shell
   runner:
-    tags: cnb:arch:amd64
+    <<: *runner_amd64_8
   docker:
     <<: *browser_wasm_ci_image
     volumes:
@@ -285,9 +302,9 @@
         test -s target/criterion-ci/reports/m51-core-profile.json
         head -c 4000 target/criterion-ci/reports/m51-core-profile.json
 
-.full_criterion_mutation_ci: &full_criterion_mutation_ci
+.full_criterion_rebuild_ci: &full_criterion_rebuild_ci
   <<: *full_criterion_bench_shell
-  name: full-criterion-mutation-ci
+  name: full-criterion-rebuild-ci
   stages:
     - <<: *full_criterion_toolchain_stage
     - <<: *full_criterion_checkout_stage
@@ -298,6 +315,17 @@
         node tools/run-bencher-criterion-ci.mjs \
           --bench rebuild_bench \
           --target-dir target/criterion-ci/rebuild
+
+.full_criterion_redb_ci: &full_criterion_redb_ci
+  <<: *full_criterion_bench_shell
+  name: full-criterion-redb-ci
+  runner:
+    <<: *runner_amd64_6
+  stages:
+    - <<: *full_criterion_toolchain_stage
+    - <<: *full_criterion_checkout_stage
+    - <<: *full_criterion_preflight_stage
+    - <<: *full_criterion_warmup_stage
     - name: redb persistence bench
       script: |
         node tools/run-bencher-criterion-ci.mjs \
@@ -307,6 +335,8 @@
 .full_criterion_boundary_ci: &full_criterion_boundary_ci
   <<: *full_criterion_bench_shell
   name: full-criterion-boundary-ci
+  runner:
+    <<: *runner_amd64_6
   stages:
     - <<: *full_criterion_toolchain_stage
     - <<: *full_criterion_checkout_stage
@@ -359,7 +389,7 @@
 .rust_ci_branch_push: &rust_ci_branch_push
   name: rust-ci-branch-push
   runner:
-    tags: cnb:arch:amd64
+    <<: *runner_amd64_2
   docker:
     <<: *browser_wasm_ci_image
     volumes:
@@ -401,7 +431,8 @@
   - *browser_offscreen_bench_ci_with_bencher
   - *fixture_bench_ci
   - *full_criterion_query_ci
-  - *full_criterion_mutation_ci
+  - *full_criterion_rebuild_ci
+  - *full_criterion_redb_ci
   - *full_criterion_boundary_ci
 
 main:
