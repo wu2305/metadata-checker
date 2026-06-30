@@ -109,6 +109,33 @@ impl GraphDB {
         Self::open_inner(db_path)
     }
 
+    /// 从已构建的内存图创建 GraphDB，供 v2 hydrate 与 shadow compare 使用。
+    pub(crate) fn from_memory_graph(
+        graph: DiGraph<Node, Edge>,
+        node_indices: HashMap<String, NodeIndex>,
+        db_path: String,
+    ) -> Self {
+        let mut seen_edges = HashSet::new();
+        for edge_ref in graph.edge_references() {
+            let edge = edge_ref.weight();
+            seen_edges.insert((
+                edge.from.clone(),
+                edge.to.clone(),
+                edge.edge_type.clone(),
+                edge.field_path.clone(),
+            ));
+        }
+        Self {
+            graph,
+            node_indices,
+            db_path,
+            is_dirty: false,
+            seen_edges,
+            dirty_nodes: HashSet::new(),
+            removed_nodes: HashSet::new(),
+        }
+    }
+
     fn open_inner(db_path: &Path) -> Result<Self> {
         let db = Database::create(db_path)
             .with_context(|| format!("Failed to create/open database at {:?}", db_path))?;
@@ -700,7 +727,13 @@ impl GraphDB {
             }
         }
 
+        let layout = crate::graph_redb_v2::build_v2_layout(self, file_states)
+            .context("build redb v2 shadow layout")?;
+        crate::graph_redb_v2::write_v2_shadow_tables(&write_txn, &layout)
+            .context("write redb v2 shadow tables")?;
+
         write_txn.commit()?;
+
         self.is_dirty = false;
         self.dirty_nodes.clear();
         self.removed_nodes.clear();

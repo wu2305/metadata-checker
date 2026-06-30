@@ -1872,7 +1872,9 @@ fn test_stdio_server_check_reload_preserves_project_dir_for_external_graphdb() {
     );
 
     std::thread::sleep(std::time::Duration::from_millis(20));
-    std::fs::copy(&db_path, &external_db).expect("touch external graphdb by copying valid db");
+    let _ = std::fs::remove_file(&external_db);
+    metadata_checker::scanner::scan_project(&project_dir, &external_db)
+        .expect("re-scan external graphdb must succeed");
 
     let after = serde_json::json!({
         "request_id": "after",

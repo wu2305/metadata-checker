@@ -507,25 +507,29 @@ input3
 
 | 触发 | 内容 | 角色 |
 |---|---|---|
-| `main` push | rust-only + rust coverage + wasm probe + browser offscreen smoke + fixture criterion + full criterion | merge 后权威记录 |
-| 非 `main` push | rust-only | 分支轻量验证 |
-| PR | rust-only + rust coverage + wasm probe + browser offscreen smoke | 快速反馈 |
+| `main` push | `rust-ci` + browser offscreen smoke + fixture criterion + 3 路并行 full criterion | merge 后权威记录 |
+| 非 `main` push | `rust-ci`（stage `if` 跳过 `main`） | 分支轻量验证 |
+| PR | `rust-ci` + browser offscreen smoke | 快速反馈 |
 
 说明：
 
-- 真实项目完整 Criterion bench 在 `main.push` 运行，用于 merge 后权威趋势记录；CI 会复用 `METADATA_CHECKER_REAL_PROJECT_DIR`，或用只读部署令牌 clone `REAL_PROJECT_FIXTURE_REPO_*` 指定的 fixture 仓库后导出该目录。
+- 真实项目完整 Criterion bench 仍在 `main.push` 运行，拆为 `full-criterion-query-ci`、`full-criterion-mutation-ci`、`full-criterion-boundary-ci` 三路并行；每路含共享 warmup stage，M51 profile 复用 `target/criterion-ci/warmup`。
+- `rust-ci` 合并原 `rust-only-ci` 与 `rust-coverage-ci`：单次 `cargo llvm-cov test` 兼做测试与覆盖率；`target/debug` symlink 兼容集成测试硬编码路径。
+- `browser-wasm-env-probe` 已移除；WASM release 构建由 `browser-offscreen-bench-ci` 覆盖。
+- `fixture-bench-ci` 与 `browser-offscreen-bench-ci` 配置 `ifModify`，仅源码/fixture 变更时编译；full criterion 与 `rust-ci` 始终运行。
 - Rust 覆盖率使用 `cargo-llvm-cov` 生成 `lcov.info`，再交给 CNB `testing:coverage` 上传；当前只要求 coverage 文件存在，不设置全量或增量覆盖率阈值。
 - `make perf-real` 这类 Node runner 仍默认手动或后续定时/web_trigger 触发，不进普通 CI。
 - 当前 CI 不设性能阈值；变慢不 fail，仅报告 JSONL / summary / `browser-offscreen-ci-perf-index.json`。
-- Bencher.dev 为可选上报层：`browser-offscreen-bench-ci`、`fixture-bench-ci` 与 `full-criterion-bench-ci` 通过 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/bencher.yml` 注入 `BENCHER_API_KEY`、`BENCHER_PROJECT`、`BENCHER_TESTBED` 与 `BENCHER_UPLOAD_REQUIRED` 后，CI 会上传 browser offscreen BMF、fixture Criterion 与 full Criterion 结果；未配置时跳过。
+- Bencher.dev 为可选上报层：`browser-offscreen-bench-ci`、`fixture-bench-ci` 与三路 full criterion pipeline 通过 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/bencher.yml` 注入 `BENCHER_API_KEY`、`BENCHER_PROJECT`、`BENCHER_TESTBED` 与 `BENCHER_UPLOAD_REQUIRED` 后，CI 会上传 browser offscreen BMF、fixture Criterion 与 full Criterion 结果；未配置时跳过。
 - PR 事件下的 browser offscreen pipeline 不导入 `bencher.yml`，只生成本地报告；`main.push` 使用带 Bencher import 的同构 pipeline 上报趋势。
 - 当前 Bencher 仅用于趋势留存，不启用 threshold / alert fail。
 - 详细 browser offscreen 契约见 `docs/m50-browser-offscreen-bench-plan.md`。
 - browser WASM 相关 CI 使用 `.cnb/images/browser-wasm-ci.Dockerfile` 作为 CNB `docker.build` 缓存镜像，避免每次构建重复 `apt-get`、`rustup` 和 `cargo install wasm-bindgen-cli`。
 - 同一缓存镜像预装 `bencher` CLI，避免每次流水线临时下载上报工具。
-- browser WASM pipeline 使用独立 `CARGO_TARGET_DIR=target/cnb/...`，避免不同 target 与 bench 产物共享默认 `target`；rust-only CI 保留默认 `target/debug` 以兼容直接执行 CLI 二进制的集成测试。
+- browser WASM pipeline 使用独立 `CARGO_TARGET_DIR=target/cnb/...`，避免不同 target 与 bench 产物共享默认 `target`；`rust-ci` 通过 `target/debug` symlink 兼容直接执行 CLI 二进制的集成测试。
+- `rust-ci` 与 bench pipeline 共用 `browser-wasm-ci` 缓存镜像（registry volume 预热依赖）。
 - 真实项目 fixture 已上传到 CNB 私有仓库 `wu2305/metadata-checker-real-fixtures`，项目路径为 `xiaoshouyi`，当前固定 `REAL_PROJECT_FIXTURE_REF=c3c0528fdd28e2600e0b0235040fb349b3c2d446`。后续刷新 fixture 时必须更新该 SHA，避免同一主分支提交因为外部 fixture 漂移产生不可复现的性能样本。
-- `full-criterion-bench-ci` 通过 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/real-fixture.yml` 注入 `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 等真实项目 fixture 变量。
+- 三路 full criterion pipeline 通过 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/real-fixture.yml` 注入 `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 等真实项目 fixture 变量。
 
 ## M50 验收收口记录
 
@@ -584,7 +588,7 @@ Bencher 上报证据：
 - 当前 `main.push` 是 M50 权威性能样本来源；PR 只保留快速验证，不跑真实项目完整 Criterion。
 - 当前不设置 Bencher threshold，不使用 `--error-on-alert`。性能变慢先进入趋势观察，不阻塞 CI。
 - Coverage 当前只要求可生成、可上传、可读；不设置最低覆盖率门禁。
-- `full-criterion-bench-ci` 成本约 66 分钟、8.8 core-hours。以当前单人 PR / 低频 merge 模式可接受；若 merge 频率提高，应拆出手动或定时 full bench。
+- `main.push` 仍是 M50 权威性能样本来源；full criterion 三路并行后预期 wall time 约 33–38 分钟（待下一次 main push 实测更新）。
 - Browser real perf 因浏览器环境干扰因素多，本阶段继续推后；M50 只验收不拉浏览器的真实 WASM offscreen 链路。
 - 后续打开性能阈值前，至少需要积累多次 `main` 样本，并按核心指标分组设置阈值；不从单次样本直接拍阈值。
 

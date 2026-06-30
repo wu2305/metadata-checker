@@ -221,27 +221,31 @@ M50 runner 最少需要支持：
 
 | 事件 | 进入 CI 的 bench |
 |---|---|
-| `main` push | `fixture-bench-ci`（Criterion parse/query-micro smoke）、`browser-offscreen-bench-ci`（WASM offscreen smoke）、`full-criterion-bench-ci`（真实项目完整 Criterion bench） |
+| `main` push | `fixture-bench-ci`（Criterion parse/query-micro smoke）、`browser-offscreen-bench-ci`（WASM offscreen smoke）、三路并行 full criterion（query / mutation / boundary） |
 | PR | `browser-offscreen-bench-ci` only（无 fixture-bench-ci） |
-| 非 `main` push | 无性能 bench，仅 `rust-only-ci` |
+| 非 `main` push | 无性能 bench，仅 `rust-ci` |
 
 `main` push 是 merge 后的权威记录来源；不在 `pull_request.merged` 重复执行。当前不设性能阈值 fail。
 
 CI 启动成本通过 CNB 原生能力优化：
 
-- browser WASM 相关 pipeline 使用 `.cnb/images/browser-wasm-ci.Dockerfile` 的 `docker.build` 缓存镜像，预装 Node、Rust、`wasm32-unknown-unknown` 与匹配 `Cargo.lock` 的 `wasm-bindgen-cli`。
-- 同一缓存镜像预装 `bencher` CLI，用于把 browser offscreen、Criterion fixture bench 与 main merge 后的完整 Criterion bench 上报到 Bencher.dev。
-- `docker.build.versionBy` 包含 Dockerfile 与 `Cargo.lock`，工具链或 wasm-bindgen 版本变化才重建镜像。
-- browser WASM pipeline 使用独立 `CARGO_TARGET_DIR=target/cnb/...` 与 volume，降低重复编译，同时避免默认 `target` 交叉污染；rust-only CI 保留默认 `target/debug` 以兼容直接执行 CLI 二进制的集成测试。
+- browser WASM 相关 pipeline 使用 `.cnb/images/browser-wasm-ci.Dockerfile` 的 `docker.build` 缓存镜像，预装 Node、Rust、`wasm32-unknown-unknown`、匹配 `Cargo.lock` 的 `wasm-bindgen-cli` 与 `cargo-llvm-cov`。
+- 同一缓存镜像预装 `bencher` CLI 与 `cargo-llvm-cov`；`rust-ci` 与 bench pipeline 共用该镜像。
+- `docker.build.versionBy` 包含 Dockerfile 与 `Cargo.lock`，工具链或依赖变化才重建镜像。
+- `rust-ci` 单次 `cargo llvm-cov test` 替代原 `cargo test` + `cargo llvm-cov test` 双跑；`target/debug` symlink 兼容集成测试。
+- full criterion 拆为三路并行 pipeline，每路含 `criterion warmup` stage；per-bench 仍用独立 `CARGO_TARGET_DIR` 避免 `panic=abort` 与 bench unwind 冲突。
+- browser WASM pipeline 使用独立 `CARGO_TARGET_DIR=target/cnb/...` 与 volume，避免默认 `target` 交叉污染。
 
 Bencher.dev 上报策略：
 
-- Bencher 配置由 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/bencher.yml` 注入到 `browser-offscreen-bench-ci`、`fixture-bench-ci` 与 `full-criterion-bench-ci`。
+- Bencher 配置由 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/bencher.yml` 注入到 `browser-offscreen-bench-ci`、`fixture-bench-ci` 与三路 full criterion pipeline。
 - 仅当 CI 环境中配置 `BENCHER_API_KEY` 与 `BENCHER_PROJECT` 时上报；未配置时跳过，不影响现有 CI。
 - `browser-offscreen-bench-ci` 将 `browser-offscreen-summary.json` 转成 Bencher Metric Format JSON，再通过 `bencher run --adapter json --file ...` 上报。
-- `fixture-bench-ci` 与 `full-criterion-bench-ci` 通过 `tools/run-bencher-criterion-ci.mjs` 捕获 Criterion 输出，再通过 `bencher run --adapter rust_criterion --file ...` 上报。
-- `full-criterion-bench-ci` 跑 `query_matrix_bench`、`runtime_bench`、`rebuild_bench`、`redb_persistence_bench`、`stdio_boundary_bench`、`telemetry_overhead_bench` 与 `session_sync_bench`。
-- 除 `session_sync_bench` 外，完整真实项目 bench 需要真实项目目录。`full-criterion-bench-ci` 会先复用已有 `METADATA_CHECKER_REAL_PROJECT_DIR`；若未配置，则通过只读部署令牌 clone fixture 仓库，并导出 `METADATA_CHECKER_REAL_PROJECT_DIR` 给后续 stages。该目录缺失时主分支性能流水线应失败，避免把 skip 当作成功样本。
+- `fixture-bench-ci` 与三路 full criterion pipeline 通过 `tools/run-bencher-criterion-ci.mjs` 捕获 Criterion 输出，再通过 `bencher run --adapter rust_criterion --file ...` 上报。
+- `full-criterion-query-ci`：`query_matrix_bench`、`runtime_bench`、M51 profile reports。
+- `full-criterion-mutation-ci`：`rebuild_bench`、`redb_persistence_bench`。
+- `full-criterion-boundary-ci`：`stdio_boundary_bench`、`telemetry_overhead_bench`、`session_sync_bench`。
+- 除 `session_sync_bench` 外，完整真实项目 bench 需要真实项目目录。每路 full criterion pipeline 会先复用已有 `METADATA_CHECKER_REAL_PROJECT_DIR`；若未配置，则通过只读部署令牌 clone fixture 仓库，并导出 `METADATA_CHECKER_REAL_PROJECT_DIR` 给后续 stages。该目录缺失时主分支性能流水线应失败，避免把 skip 当作成功样本。
 - `BENCHER_TESTBED` 默认 `cnb-amd64`；`BENCHER_UPLOAD_REQUIRED=true` 时，上报失败才阻塞 CI。
 - 当前不设置 Bencher threshold，也不使用 `--error-on-alert`。阈值需要等 `main` 分支积累稳定样本后再启用。
 
@@ -252,7 +256,7 @@ Bencher.dev 上报策略：
 - metadata files: 501 `.spg` + 828 `.tbl`
 
 真实项目 fixture 的 CNB 密钥仓库文件固定为 `wu2305/metadata-checker-keys/real-fixture.yml`，并由
-`.cnb.yml` 的 `full-criterion-bench-ci` 通过 `imports` 引用。文件内容声明：
+`.cnb.yml` 的三路 full criterion pipeline 通过 `imports` 引用。文件内容声明：
 
 ```yaml
 allow_slugs:
