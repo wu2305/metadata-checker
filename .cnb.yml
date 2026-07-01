@@ -315,7 +315,7 @@
         node tools/run-bencher-criterion-ci.mjs \
           --bench rebuild_bench \
           --target-dir target/criterion-ci/rebuild \
-          -- --sample-size 5 --warm-up-time 1 --measurement-time 5 --nresamples 1000 --noplot
+          -- --sample-size 10 --warm-up-time 1 --measurement-time 5 --nresamples 1000 --noplot
 
 .full_criterion_rebuild_crud_ci: &full_criterion_rebuild_crud_ci
   <<: *full_criterion_bench_shell
@@ -332,7 +332,7 @@
         node tools/run-bencher-criterion-ci.mjs \
           --bench rebuild_crud_bench \
           --target-dir target/criterion-ci/rebuild-crud \
-          -- --sample-size 5 --warm-up-time 1 --measurement-time 5 --nresamples 1000 --noplot
+          -- --sample-size 10 --warm-up-time 1 --measurement-time 5 --nresamples 1000 --noplot
 
 .full_criterion_redb_ci: &full_criterion_redb_ci
   <<: *full_criterion_bench_shell
