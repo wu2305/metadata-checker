@@ -1,11 +1,15 @@
+use crate::mutation_setup::restore_metadata_baseline;
+use crate::runtime_load::load_warm_runtime;
 use crate::sandbox_create::BenchWorkspace;
 use anyhow::{Context, Result, bail, ensure};
+use criterion::{BatchSize, Criterion, black_box};
 use metadata_checker::runtime::{
     GraphRuntime, ReloadResult, RuntimeQueryRequest, RuntimeQueryResponse,
 };
 use metadata_checker::scanner::indexer::ProjectIndexer;
 use serde_json::{Value, json};
-use std::path::Path;
+use std::cell::Cell;
+use std::path::{Path, PathBuf};
 
 /// 读取并解析元数据 JSON。
 pub fn read_metadata_json(path: &Path) -> Result<Value> {
@@ -127,8 +131,45 @@ pub fn append_update_data_action(
     write_metadata_json(path, &root)
 }
 
+/// 注册 CRUD mutation 后的 scan -> check_reload -> query 闭环 benchmark。
+pub fn register_crud_mutation_bench<Setup, Measure>(
+    c: &mut Criterion,
+    workspace: BenchWorkspace,
+    page_path: PathBuf,
+    original: Vec<u8>,
+    bench_name: &'static str,
+    mut setup: Setup,
+    measure: Measure,
+) where
+    Setup: FnMut(usize, &BenchWorkspace, &Path) -> Result<()> + 'static,
+    Measure: Fn(&BenchWorkspace, &mut GraphRuntime, usize) -> Result<()> + Send + Sync + 'static,
+{
+    let mut runtime = load_warm_runtime(&workspace).expect("load warm runtime for CRUD benchmark");
+    let iteration = Cell::new(0_usize);
+    let measure = std::sync::Arc::new(measure);
+
+    c.bench_function(bench_name, |bench| {
+        let measure = measure.clone();
+        bench.iter_batched(
+            || {
+                restore_metadata_baseline(&workspace, &page_path, &original)
+                    .expect("restore CRUD metadata baseline");
+                let step = iteration.get() + 1;
+                iteration.set(step);
+                setup(step, &workspace, &page_path).expect("apply CRUD metadata mutation");
+            },
+            |_| {
+                let step = iteration.get();
+                measure(&workspace, &mut runtime, step).expect("CRUD post-mutation pipeline");
+                black_box(());
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
 /// 变更落盘后的标准闭环：`scan -> check_reload -> query`。
-pub fn run_post_mutation_pipeline(
+pub fn run_post_mutation_query(
     workspace: &BenchWorkspace,
     runtime: &mut GraphRuntime,
     query: RuntimeQueryRequest,
@@ -152,6 +193,15 @@ pub fn run_post_mutation_pipeline(
         }
     }
     runtime.query(query).context("post-mutation business query")
+}
+
+/// 变更落盘后的标准闭环：`scan -> check_reload -> query`。
+pub fn run_post_mutation_pipeline(
+    workspace: &BenchWorkspace,
+    runtime: &mut GraphRuntime,
+    query: RuntimeQueryRequest,
+) -> Result<RuntimeQueryResponse> {
+    run_post_mutation_query(workspace, runtime, query)
 }
 
 /// 判断 find_page 结果中是否包含指定页面节点。

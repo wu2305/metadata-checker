@@ -57,6 +57,7 @@ perf-real:
 
 perf-real-mutation:
 	CARGO_TARGET_DIR=$(BENCH_TARGET_DIR)/rebuild cargo bench --bench rebuild_bench
+	CARGO_TARGET_DIR=$(BENCH_TARGET_DIR)/rebuild-crud cargo bench --bench rebuild_crud_bench
 
 perf-real-runtime:
 	CARGO_TARGET_DIR=$(BENCH_TARGET_DIR)/runtime cargo bench --bench runtime_bench

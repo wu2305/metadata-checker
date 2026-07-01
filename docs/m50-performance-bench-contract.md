@@ -243,7 +243,8 @@ Bencher.dev 上报策略：
 - `browser-offscreen-bench-ci` 将 `browser-offscreen-summary.json` 转成 Bencher Metric Format JSON，再通过 `bencher run --adapter json --file ...` 上报。
 - `fixture-bench-ci` 与四路 full criterion pipeline 通过 `tools/run-bencher-criterion-ci.mjs` 捕获 Criterion 输出，再通过 `bencher run --adapter rust_criterion --file ...` 上报。
 - `full-criterion-query-ci`：`query_matrix_bench`、`runtime_bench`、M51 profile reports。
-- `full-criterion-rebuild-ci`：`rebuild_bench`。
+- `full-criterion-rebuild-ci`：`rebuild_bench`（core rebuild）。
+- `full-criterion-rebuild-crud-ci`：`rebuild_crud_bench`（CRUD 闭环）。
 - `full-criterion-redb-ci`：`redb_persistence_bench`（含 v2 shadow persist 回归观测）。
 - `full-criterion-boundary-ci`：`stdio_boundary_bench`、`telemetry_overhead_bench`、`session_sync_bench`。
 - 除 `session_sync_bench` 外，完整真实项目 bench 需要真实项目目录。每路 full criterion pipeline 会先复用已有 `METADATA_CHECKER_REAL_PROJECT_DIR`；若未配置，则通过只读部署令牌 clone fixture 仓库，并导出 `METADATA_CHECKER_REAL_PROJECT_DIR` 给后续 stages。该目录缺失时主分支性能流水线应失败，避免把 skip 当作成功样本。
@@ -317,17 +318,18 @@ METADATA_CHECKER_REAL_PROJECT_DIR=/path/to/xiaoshouyi \
 
 固定 rebuild 场景：
 
-| scenario | 含义 |
-|---|---|
-| `rebuild_cold_build_empty_graphdb` | 空 graphdb 上完整构建真实项目图 |
-| `rebuild_noop_existing_graphdb` | 无文件变化时重扫、hash、跳过持久化 |
-| `rebuild_dirty_single_spg` | 单个真实 `.spg` 内容变化后的增量 rebuild |
-| `rebuild_dirty_single_tbl` | 单个真实 `.tbl` 内容变化后的增量 rebuild |
-| `rebuild_deleted_single_file` | 删除一个真实元数据文件后的增量 rebuild |
-| `rebuild_added_single_file` | 恢复/新增一个真实元数据文件后的增量 rebuild |
-| `crud_update_component_visibility_then_query` | 结构化修改组件 `visibleCondition` 后的 scan -> check_reload -> explain_condition |
-| `crud_add_action_write_then_query_model` | 追加 `updateData` 写模型动作后的 scan -> check_reload -> query_model |
-| `crud_delete_page_then_find_page` | 删除真实页面后的 scan -> check_reload -> find_page |
+| scenario | bench | 含义 |
+|---|---|---|
+| `rebuild_cold_build_empty_graphdb` | `rebuild_bench` | 空 graphdb 上完整构建真实项目图 |
+| `rebuild_noop_existing_graphdb` | `rebuild_bench` | 无文件变化时重扫、hash、跳过持久化 |
+| `rebuild_dirty_single_tbl` | `rebuild_bench` | 单个真实 `.tbl` 内容变化后的增量 rebuild |
+| `rebuild_deleted_single_file` | `rebuild_bench` | 删除一个真实元数据文件后的增量 rebuild |
+| `rebuild_added_single_file` | `rebuild_bench` | 恢复/新增一个真实元数据文件后的增量 rebuild |
+| `crud_update_component_visibility_then_query` | `rebuild_crud_bench` | 结构化修改组件 `visibleCondition` 后的 scan -> check_reload -> explain_condition |
+| `crud_add_action_write_then_query_model` | `rebuild_crud_bench` | 追加 `updateData` 写模型动作后的 scan -> check_reload -> explain |
+| `crud_delete_page_then_find_page` | `rebuild_crud_bench` | 删除真实页面后的 scan -> check_reload -> find_page |
+
+`rebuild_dirty_single_spg` 由 `redb_persistence_bench` 的 `redb_incremental_persist_dirty_spg` 覆盖，避免与 rebuild 重复采样。
 
 真实项目 runtime lifecycle bench：
 

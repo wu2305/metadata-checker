@@ -1,9 +1,13 @@
 #[path = "common/bench_config.rs"]
 mod bench_config;
+#[path = "common/dirty_file.rs"]
+mod dirty_file;
 #[path = "common/external_graph_lock.rs"]
 mod external_graph_lock;
 #[path = "common/first_existing_target.rs"]
 mod first_existing_target;
+#[path = "common/graphdb_fixture.rs"]
+mod graphdb_fixture;
 #[path = "common/real_project.rs"]
 mod real_project;
 #[path = "common/runtime_exec.rs"]
@@ -13,11 +17,12 @@ mod runtime_request;
 #[path = "common/sandbox_create.rs"]
 mod sandbox_create;
 
-use anyhow::{Context, Result};
 use bench_config::real_project_criterion_config;
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
+use dirty_file::write_dirty_variant;
 use external_graph_lock::acquire_external_graph_lock;
 use first_existing_target::first_existing_target;
+use graphdb_fixture::corrupt_graphdb_header;
 use metadata_checker::graph::set_graph_lock_timeout_ms;
 use metadata_checker::runtime::GraphRuntime;
 use metadata_checker::scanner::indexer::ProjectIndexer;
@@ -34,13 +39,6 @@ const CONTRACT_PAGE_FILE: &str = "app/销售.app/销售/合同协议.spg";
 const CONTRACT_PAGE: &str = "page:app/销售.app/销售/合同协议.spg";
 const INPUT3: &str = "comp:app/销售.app/销售/合同协议.spg|input3";
 
-fn write_dirty_variant(path: &Path, original: &[u8], iteration: usize) -> Result<()> {
-    let mut content = original.to_vec();
-    content.push(b'\n');
-    content.extend(std::iter::repeat(b' ').take((iteration % 31) + 1));
-    std::fs::write(path, content).with_context(|| format!("write dirty variant {}", path.display()))
-}
-
 fn lifecycle_request(command: ToolCommand) -> metadata_checker::runtime::RuntimeQueryRequest {
     metadata_checker::runtime::RuntimeQueryRequest {
         command,
@@ -52,16 +50,6 @@ fn lifecycle_request(command: ToolCommand) -> metadata_checker::runtime::Runtime
         depth: None,
         check_reload: false,
     }
-}
-
-fn corrupt_graphdb_header(source: &Path, destination: &Path) -> Result<()> {
-    let mut bytes =
-        std::fs::read(source).with_context(|| format!("read graphdb {}", source.display()))?;
-    for byte in bytes.iter_mut().take(64) {
-        *byte = 0;
-    }
-    std::fs::write(destination, bytes)
-        .with_context(|| format!("write corrupt graphdb {}", destination.display()))
 }
 
 /// 衡量真实 graphdb 冷加载为 GraphRuntime 的成本。

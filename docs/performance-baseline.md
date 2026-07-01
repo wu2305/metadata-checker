@@ -507,7 +507,7 @@ input3
 
 | 触发 | 内容 | 角色 |
 |---|---|---|
-| `main` push | `rust-ci` + browser offscreen smoke + fixture criterion + 4 路并行 full criterion（query / rebuild / redb / boundary） | merge 后权威记录 |
+| `main` push | `rust-ci` + browser offscreen smoke + fixture criterion + 5 路并行 full criterion（query / rebuild / rebuild-crud / redb / boundary） | merge 后权威记录 |
 | 非 `main` push | `rust-ci`（stage `if` 跳过 `main`） | 分支轻量验证 |
 | PR | `rust-ci` + browser offscreen smoke | 快速反馈 |
 
