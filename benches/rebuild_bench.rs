@@ -161,7 +161,12 @@ fn bench_rebuild_core_scenarios(c: &mut Criterion) {
     let member_page_original =
         std::fs::read(&member_page).expect("read member page before delete/add benches");
     bench_deleted_file_rebuild(c, &delete_add_workspace, &member_page);
-    bench_added_file_rebuild(c, &delete_add_workspace, &member_page, &member_page_original);
+    bench_added_file_rebuild(
+        c,
+        &delete_add_workspace,
+        &member_page,
+        &member_page_original,
+    );
 }
 
 criterion_group! {
