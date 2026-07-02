@@ -164,8 +164,9 @@
   stages:
     - name: criterion warmup
       script: |
-        CARGO_TARGET_DIR=target/criterion-ci/warmup \
-          cargo build --profile release-fast --lib --bins
+        rm -rf target/criterion-ci/warmup-fixture target/criterion-ci/parse target/criterion-ci/query-micro
+        CARGO_TARGET_DIR=target/criterion-ci/warmup-fixture \
+          cargo build --profile release-fast --lib
     - name: criterion fixture benches
       script: |
         node tools/run-bencher-criterion-ci.mjs \
@@ -249,18 +250,46 @@
     test "$METADATA_FILE_COUNT" -gt 0
     find "$METADATA_CHECKER_REAL_PROJECT_DIR" \( -name '*.spg' -o -name '*.tbl' \) | head -n 20
 
-.full_criterion_warmup_stage: &full_criterion_warmup_stage
+.full_criterion_warmup_query_stage: &full_criterion_warmup_query_stage
   name: criterion warmup
   script: |
-    CARGO_TARGET_DIR=target/criterion-ci/warmup \
+    rm -rf target/criterion-ci/warmup-query
+    CARGO_TARGET_DIR=target/criterion-ci/warmup-query \
       cargo build --profile release-fast --lib --bins
 
-.full_criterion_warmup_telemetry_stage: &full_criterion_warmup_telemetry_stage
+.full_criterion_warmup_rebuild_stage: &full_criterion_warmup_rebuild_stage
   name: criterion warmup
   script: |
-    CARGO_TARGET_DIR=target/criterion-ci/warmup \
+    rm -rf target/criterion-ci/warmup-rebuild target/criterion-ci/rebuild
+    CARGO_TARGET_DIR=target/criterion-ci/warmup-rebuild \
       cargo build --profile release-fast --lib --bins
-    CARGO_TARGET_DIR=target/criterion-ci/warmup-telemetry \
+
+.full_criterion_warmup_rebuild_crud_stage: &full_criterion_warmup_rebuild_crud_stage
+  name: criterion warmup
+  script: |
+    rm -rf target/criterion-ci/warmup-rebuild-crud target/criterion-ci/rebuild-crud
+    CARGO_TARGET_DIR=target/criterion-ci/warmup-rebuild-crud \
+      cargo build --profile release-fast --lib --bins
+
+.full_criterion_warmup_redb_stage: &full_criterion_warmup_redb_stage
+  name: criterion warmup
+  script: |
+    rm -rf target/criterion-ci/warmup-redb target/criterion-ci/redb
+    CARGO_TARGET_DIR=target/criterion-ci/warmup-redb \
+      cargo build --profile release-fast --lib --bins
+
+.full_criterion_warmup_boundary_stage: &full_criterion_warmup_boundary_stage
+  name: criterion warmup
+  script: |
+    rm -rf \
+      target/criterion-ci/warmup-boundary \
+      target/criterion-ci/warmup-boundary-telemetry \
+      target/criterion-ci/stdio \
+      target/criterion-ci/telemetry \
+      target/criterion-ci/session
+    CARGO_TARGET_DIR=target/criterion-ci/warmup-boundary \
+      cargo build --profile release-fast --lib --bins
+    CARGO_TARGET_DIR=target/criterion-ci/warmup-boundary-telemetry \
       cargo build --profile release-fast --features telemetry --lib
 
 .full_criterion_query_ci: &full_criterion_query_ci
@@ -270,9 +299,10 @@
     - <<: *full_criterion_toolchain_stage
     - <<: *full_criterion_checkout_stage
     - <<: *full_criterion_preflight_stage
-    - <<: *full_criterion_warmup_stage
+    - <<: *full_criterion_warmup_query_stage
     - name: query matrix bench
       script: |
+        rm -rf target/criterion-ci/query-matrix target/criterion-ci/runtime
         node tools/run-bencher-criterion-ci.mjs \
           --bench query_matrix_bench \
           --target-dir target/criterion-ci/query-matrix
@@ -284,7 +314,7 @@
     - name: M51 page logic profile report
       script: |
         mkdir -p target/criterion-ci/reports
-        CARGO_TARGET_DIR=target/criterion-ci/warmup \
+        CARGO_TARGET_DIR=target/criterion-ci/warmup-query \
           cargo run --profile release-fast --bin m51_profile_report -- \
             --project-dir "$METADATA_CHECKER_REAL_PROJECT_DIR" \
             --output target/criterion-ci/reports/m51-page-logic-profile.json \
@@ -294,7 +324,7 @@
     - name: M51 core profile report
       script: |
         mkdir -p target/criterion-ci/reports
-        CARGO_TARGET_DIR=target/criterion-ci/warmup \
+        CARGO_TARGET_DIR=target/criterion-ci/warmup-query \
           cargo run --profile release-fast --bin m51_core_profile_report -- \
             --project-dir "$METADATA_CHECKER_REAL_PROJECT_DIR" \
             --output target/criterion-ci/reports/m51-core-profile.json \
@@ -309,7 +339,7 @@
     - <<: *full_criterion_toolchain_stage
     - <<: *full_criterion_checkout_stage
     - <<: *full_criterion_preflight_stage
-    - <<: *full_criterion_warmup_stage
+    - <<: *full_criterion_warmup_rebuild_stage
     - name: rebuild core bench
       script: |
         node tools/run-bencher-criterion-ci.mjs \
@@ -326,7 +356,7 @@
     - <<: *full_criterion_toolchain_stage
     - <<: *full_criterion_checkout_stage
     - <<: *full_criterion_preflight_stage
-    - <<: *full_criterion_warmup_stage
+    - <<: *full_criterion_warmup_rebuild_crud_stage
     - name: rebuild crud bench
       script: |
         node tools/run-bencher-criterion-ci.mjs \
@@ -343,7 +373,7 @@
     - <<: *full_criterion_toolchain_stage
     - <<: *full_criterion_checkout_stage
     - <<: *full_criterion_preflight_stage
-    - <<: *full_criterion_warmup_stage
+    - <<: *full_criterion_warmup_redb_stage
     - name: redb persistence bench
       script: |
         node tools/run-bencher-criterion-ci.mjs \
@@ -359,7 +389,7 @@
     - <<: *full_criterion_toolchain_stage
     - <<: *full_criterion_checkout_stage
     - <<: *full_criterion_preflight_stage
-    - <<: *full_criterion_warmup_telemetry_stage
+    - <<: *full_criterion_warmup_boundary_stage
     - name: stdio boundary bench
       script: |
         node tools/run-bencher-criterion-ci.mjs \

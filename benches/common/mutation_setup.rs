@@ -1,6 +1,6 @@
 use crate::restore_file::restore_file;
 use crate::sandbox_create::BenchWorkspace;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use metadata_checker::scanner::indexer::ProjectIndexer;
 use std::path::Path;
 
@@ -11,7 +11,6 @@ pub fn restore_metadata_baseline(
     original: &[u8],
 ) -> Result<()> {
     restore_file(path, original)?;
-    ProjectIndexer::scan(&workspace.project_dir, &workspace.db_path)
-        .context("restore metadata baseline scan")?;
+    ProjectIndexer::scan(&workspace.project_dir, &workspace.db_path)?;
     Ok(())
 }

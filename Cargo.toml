@@ -111,6 +111,9 @@ codegen-units = 1
 inherits = "release"
 opt-level = 3
 
+[profile.bench]
+inherits = "release"
+
 [dev-dependencies]
 criterion = "0.5"
 nix = { version = "0.29", features = ["fs"] }

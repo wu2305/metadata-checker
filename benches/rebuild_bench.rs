@@ -106,8 +106,13 @@ fn bench_deleted_file_rebuild(c: &mut Criterion, workspace: &BenchWorkspace, tar
 }
 
 /// 衡量新增一个真实元数据文件后的增量 rebuild 成本。
-fn bench_added_file_rebuild(c: &mut Criterion, workspace: &BenchWorkspace, target: &Path) {
-    let original = std::fs::read(target).expect("read target file");
+fn bench_added_file_rebuild(
+    c: &mut Criterion,
+    workspace: &BenchWorkspace,
+    target: &Path,
+    original: &[u8],
+) {
+    let original = original.to_vec();
     let project_dir = workspace.project_dir.clone();
     let db_path = workspace.db_path.clone();
     let target = target.to_path_buf();
@@ -120,7 +125,7 @@ fn bench_added_file_rebuild(c: &mut Criterion, workspace: &BenchWorkspace, targe
                 }
                 ProjectIndexer::scan(&project_dir, &db_path)
                     .expect("delete baseline scan should succeed");
-                restore_file(&target, &original).expect("restore target as added file");
+                restore_file(&target, original.as_slice()).expect("restore target as added file");
             },
             |_| {
                 let report = ProjectIndexer::scan(black_box(&project_dir), black_box(&db_path))
@@ -153,8 +158,10 @@ fn bench_rebuild_core_scenarios(c: &mut Criterion) {
         &[MEMBER_REGISTERED_PAGE_FILE],
     )
     .expect("real project should contain member registered page");
+    let member_page_original =
+        std::fs::read(&member_page).expect("read member page before delete/add benches");
     bench_deleted_file_rebuild(c, &delete_add_workspace, &member_page);
-    bench_added_file_rebuild(c, &delete_add_workspace, &member_page);
+    bench_added_file_rebuild(c, &delete_add_workspace, &member_page, &member_page_original);
 }
 
 criterion_group! {

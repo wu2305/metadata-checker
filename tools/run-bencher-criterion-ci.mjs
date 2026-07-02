@@ -152,7 +152,7 @@ async function main() {
   mkdirSync(options.reportDir, { recursive: true });
   const reportPath = join(options.reportDir, `${options.bench}.out`);
 
-  const cargoArgs = ["bench"];
+  const cargoArgs = ["bench", "--profile", "release-fast"];
   if (options.features) {
     cargoArgs.push("--features", options.features);
   }
