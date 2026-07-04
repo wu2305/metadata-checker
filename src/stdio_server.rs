@@ -380,25 +380,34 @@ fn serialize_response_with_timing(resp: &mut StdioResponse) -> serde_json::Resul
     let serialize_start = std::time::Instant::now();
     let mut json = serde_json::to_string(resp)?;
 
+    // 先只收敛 output_size_bytes；serialize_ms 每轮都会增长，不能参与 changed 判定。
     for _ in 0..8 {
         let output_size_bytes = json.len() as u64;
-        let serialize_ms = serialize_start.elapsed().as_millis();
-        let mut changed = false;
-
-        if let Some(timing) = resp.timing.as_mut() {
-            changed =
-                crate::response_processor::ResponseProcessor::update_timing_after_serialization(
-                    timing,
-                    output_size_bytes,
-                    serialize_ms,
-                );
-        }
-
-        if !changed {
+        let Some(timing) = resp.timing.as_mut() else {
             return Ok(json);
+        };
+        if timing.output_size_bytes == output_size_bytes {
+            break;
         }
-
+        timing.output_size_bytes = output_size_bytes;
         json = serde_json::to_string(resp)?;
+    }
+
+    let serialize_ms = serialize_start.elapsed().as_millis();
+    if let Some(timing) = resp.timing.as_mut() {
+        timing.serialize_ms = serialize_ms;
+        timing.total_ms = timing.graph_load_ms + timing.query_compute_ms + serialize_ms;
+    }
+    for _ in 0..4 {
+        json = serde_json::to_string(resp)?;
+        let output_size_bytes = json.len() as u64;
+        let Some(timing) = resp.timing.as_mut() else {
+            return Ok(json);
+        };
+        if timing.output_size_bytes == output_size_bytes {
+            break;
+        }
+        timing.output_size_bytes = output_size_bytes;
     }
 
     Ok(json)
@@ -445,6 +454,38 @@ mod tests {
             value["timing"].is_object(),
             "timing must be present on error response"
         );
+        assert_eq!(
+            value["timing"]["output_size_bytes"].as_u64(),
+            Some(json.len() as u64),
+            "output_size_bytes must match serialized response size"
+        );
+    }
+
+    /// 大响应 + 非零 timing 时，output_size_bytes 仍须与最终 JSON 行长度一致。
+    #[test]
+    fn test_success_response_output_size_matches_serialized_json() {
+        let mut resp = StdioResponse {
+            request_id: "req-explain".to_string(),
+            ok: true,
+            result: Some(serde_json::json!({
+                "kind": "Explain",
+                "summary": { "what_is_it": "x".repeat(8_000) }
+            })),
+            error: None,
+            diagnostics: Vec::new(),
+            timing: Some(crate::runtime::RuntimeTiming {
+                graph_load_ms: 12,
+                query_compute_ms: 345,
+                serialize_ms: 0,
+                total_ms: 0,
+                output_size_bytes: 1,
+            }),
+        };
+
+        let json =
+            serialize_response_with_timing(&mut resp).expect("stdio response must serialize");
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("stdio response must be valid JSON");
         assert_eq!(
             value["timing"]["output_size_bytes"].as_u64(),
             Some(json.len() as u64),

@@ -513,7 +513,8 @@ input3
 
 说明：
 
-- 真实项目完整 Criterion bench 仍在 `main.push` 运行，拆为 `full-criterion-query-ci`、`full-criterion-rebuild-ci`、`full-criterion-redb-ci`、`full-criterion-boundary-ci` 四路并行；每路含共享 warmup stage，M51 profile 复用 `target/criterion-ci/warmup`。
+- 真实项目完整 Criterion bench 仍在 `main.push` 运行，拆为 `full-criterion-query-ci`、`full-criterion-rebuild-ci`、`full-criterion-rebuild-crud-ci`、`full-criterion-redb-ci`、`full-criterion-boundary-ci` 五路并行；每路使用独立 `warmup-*` 目录并在 stage 前清理对应 `target/criterion-ci/*` 子目录，避免并行 pipeline 共享增量产物。
+- `tools/run-bencher-criterion-ci.mjs` 统一 `--profile release-fast` 跑 Criterion；`2026-07-02` 起 Bencher 趋势与此前 `opt-level=z` 的 bench 样本不可直接横比。
 - 快 gate（`rust-ci` 4 核、`browser-offscreen-bench-ci` / `rust-ci-branch-push` 2 核、`fixture-bench-ci` 4 核）降配 CPU；full criterion 保持 8 核（`redb` / `boundary` 为 6 核）。
 - `rust-ci` 合并原 `rust-only-ci` 与 `rust-coverage-ci`：单次 `cargo llvm-cov test` 兼做测试与覆盖率；`target/debug` symlink 兼容集成测试硬编码路径。
 - `browser-wasm-env-probe` 已移除；WASM release 构建由 `browser-offscreen-bench-ci` 覆盖。

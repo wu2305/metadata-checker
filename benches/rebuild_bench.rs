@@ -81,8 +81,13 @@ fn bench_dirty_tbl_rebuild(c: &mut Criterion, workspace: &BenchWorkspace) {
 }
 
 /// 衡量删除一个真实元数据文件后的增量 rebuild 成本。
-fn bench_deleted_file_rebuild(c: &mut Criterion, workspace: &BenchWorkspace, target: &Path) {
-    let original = std::fs::read(target).expect("read target file");
+fn bench_deleted_file_rebuild(
+    c: &mut Criterion,
+    workspace: &BenchWorkspace,
+    target: &Path,
+    original: &[u8],
+) {
+    let original = original.to_vec();
     let project_dir = workspace.project_dir.clone();
     let db_path = workspace.db_path.clone();
     let target = target.to_path_buf();
@@ -90,7 +95,7 @@ fn bench_deleted_file_rebuild(c: &mut Criterion, workspace: &BenchWorkspace, tar
     c.bench_function("rebuild_deleted_single_file", |bench| {
         bench.iter_batched(
             || {
-                restore_metadata_baseline(workspace, &target, &original)
+                restore_metadata_baseline(workspace, &target, original.as_slice())
                     .expect("restore deleted-file baseline");
                 std::fs::remove_file(&target).expect("remove target file");
             },
@@ -160,7 +165,12 @@ fn bench_rebuild_core_scenarios(c: &mut Criterion) {
     .expect("real project should contain member registered page");
     let member_page_original =
         std::fs::read(&member_page).expect("read member page before delete/add benches");
-    bench_deleted_file_rebuild(c, &delete_add_workspace, &member_page);
+    bench_deleted_file_rebuild(
+        c,
+        &delete_add_workspace,
+        &member_page,
+        &member_page_original,
+    );
     bench_added_file_rebuild(
         c,
         &delete_add_workspace,
