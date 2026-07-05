@@ -34,25 +34,25 @@
 
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
-| M40 | 真实 BI 环境测试 | done | browser | [runbook](../m40-real-bi-environment-runbook.md) | | | |
-| M41 | 远程元数据与 Session | done | browser | [m41-plan](../m41-plan.md) | | [m41-plan](../m41-plan.md) | M40 |
-| M42 | Real BI Smoke 与性能记录 | done | browser | [runbook](../m42-real-bi-smoke-and-performance-runbook.md) | | | M41 |
-| M43 | Browser Extension 验收 | done | browser | [runbook](../m43-browser-extension-runbook.md) | | | M42 |
-| M45 | Remote Metadata 自动拉取与后台分析 | done | browser | [handoff](../m45-real-bi-test-handoff.md) | | | M43 |
+| M40 | 真实 BI 环境测试 | done | browser | [runbook](../runbooks/m40-real-bi-environment-runbook.md) | | | |
+| M41 | 远程元数据与 Session | done | browser | [m41-plan](browser/m41-plan.md) | | [m41-plan](browser/m41-plan.md) | M40 |
+| M42 | Real BI Smoke 与性能记录 | done | browser | [runbook](../runbooks/m42-real-bi-smoke-and-performance-runbook.md) | | | M41 |
+| M43 | Browser Extension 验收 | done | browser | [runbook](../runbooks/m43-browser-extension-runbook.md) | | | M42 |
+| M45 | Remote Metadata 自动拉取与后台分析 | done | browser | [handoff](browser/m45-real-bi-test-handoff.md) | | | M43 |
 | M46 | Local CLI Remote Metadata Index | planned | browser | [roadmap](../real-project-optimization-roadmap.md) | | | M45 |
-| M47 | Browser UI 正式化 | planned | browser | [popup 设计](../m47-embedded-local-graph-popup-design.md) | | [pixi spike](../m47-pixi-d3-force-spike-plan.md) | M46 |
-| M48 | Local Graph 交互优化 | planned | browser | [m48](../m48-local-graph-interaction-optimization.md) | | | M47 |
+| M47 | Browser UI 正式化 | planned | browser | [popup 设计](browser/m47-embedded-local-graph-popup-design.md) | | [pixi spike](browser/m47-pixi-d3-force-spike-plan.md) | M46 |
+| M48 | Local Graph 交互优化 | planned | browser | [m48](browser/m48-local-graph-interaction-optimization.md) | | | M47 |
 
 ## Performance 线（M50–M53）
 
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
-| M50 | 性能基线与 Criterion / Bencher 契约 | done | performance | [contract](../m50-performance-bench-contract.md) | | [offscreen plan](../m50-browser-offscreen-bench-plan.md) | |
-| M51 | 性能堵点归因 | done | performance | [diagnosis](../m51-performance-diagnosis.md) | | | M50 |
-| M52 | 性能优化落地（cost model / warm / fragment） | done | performance | [m52](../m52-performance-optimization.md) | | | M51 |
-| M53 | persist / facts / path + redb v2 hydrate | active | performance | [m53](../m53-performance-continuation.md) | [Phase C spec](../specs/2026-07-05-docs-governance-reorg-design.md) | [governance plan](../plans/2026-07-05-docs-governance-reorg-plan.md) | M52 |
+| M50 | 性能基线与 Criterion / Bencher 契约 | done | performance | [contract](performance/m50-performance-bench-contract.md) | | [offscreen plan](performance/m50-browser-offscreen-bench-plan.md) | |
+| M51 | 性能堵点归因 | done | performance | [diagnosis](performance/m51-performance-diagnosis.md) | | | M50 |
+| M52 | 性能优化落地（cost model / warm / fragment） | done | performance | [m52](performance/m52-performance-optimization.md) | | | M51 |
+| M53 | persist / facts / path + redb v2 hydrate | active | performance | [m53](performance/m53-performance-continuation.md) | [Phase C spec](../specs/2026-07-05-docs-governance-reorg-design.md) | [governance plan](../plans/2026-07-05-docs-governance-reorg-plan.md) | M52 |
 
-CI 基线：[performance-baseline.md](../performance-baseline.md)（`release-fast` + `cnb-078`）。
+CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`release-fast` + `cnb-078`）。
 
 ## Formats / AI-eval 远期（M56–M58）
 

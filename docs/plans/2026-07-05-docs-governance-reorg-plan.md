@@ -19,21 +19,14 @@
 - [x] `AGENTS.md` 文档与计划节
 - [x] `performance-baseline.md` 记录 `cnb-078`
 - [x] `CHECKLIST.md` 瘦身 + `archive/checklist-p0-p4.md`
-- [ ] PR merge + 删来源分支
-
-### 分支清理（C1 附带记录，merge 后执行）
-
-```bash
-# 若远程分支已无独有 commit，删除陈旧 feature 分支
-git push cnb --delete codex/m52-redb-v2-and-ci
-git push cnb --delete codex/m52-performance-optimization
-```
+- [x] PR merge + 删来源分支
 
 ## PR-C2：reference + milestones 搬迁
 
-- [ ] `git mv` → `docs/reference/`、`docs/milestones/performance/`、`docs/runbooks/`
-- [ ] 旧路径 stub
-- [ ] 更新 `SKILL.md`、测试与文档链接
+- [x] `git mv` → `docs/reference/`、`docs/milestones/performance/`、`docs/milestones/browser/`、`docs/runbooks/`
+- [x] 旧路径 stub
+- [x] 更新测试与文档链接（`regression_tests.rs`、`INDEX`、`AGENTS`、`README`）
+- [ ] PR merge + 删来源分支
 
 ## PR-C3：roadmap 拆分
 

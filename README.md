@@ -396,7 +396,7 @@ metadata-checker --project-dir ./my-project --explain action:app/page.spg|button
 - 当 PageLogic 细项数量超过 evidence 展开上限时，会输出 `EVIDENCE_SAMPLED` 诊断，提示 evidence 为低噪声采样而非全集
 - 禁止默认读取 raw JSON，必须从 `summary` 开始
 
-详细字段定义见 `docs/schema.md`。
+详细字段定义见 `docs/reference/schema.md`。
 
 ## 测试
 
@@ -438,7 +438,7 @@ cargo test
 ### M9-A 语料清单
 
 - 机器可读清单：`tests/fixtures/corpus/manifest.json`
-- 人类摘要与维护说明：`docs/corpus-manifest.md`
+- 人类摘要与维护说明：`docs/reference/corpus-manifest.md`
 - 仅记录样本路径、大小、文件类型与启发式覆盖标签，不复制真实项目大文件
 - 允许来源仅包含：
   - `/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
@@ -468,7 +468,7 @@ cargo test
 - 风险覆盖标签：`risk_tags` 覆盖 page_logic / explain / context / dataflow / lineage / condition / diagnostic
 - 难度分级：`difficulty` = basic / intermediate / hard
 - 运行约束：`max_command_count` ≤ 3，`allowed_output_sections` 控制模型可读字段
-- 评测记录模板：`docs/ai-eval-run-template.md`
+- 评测记录模板：`docs/reference/ai-eval-run-template.md`
 - 验证：`cargo test --test ai_eval_tests` 覆盖 23 项结构/语义/执行测试
 
 

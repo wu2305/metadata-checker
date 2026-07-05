@@ -1,6 +1,6 @@
 # metadata-checker 文档入口
 
-> 所有文档、里程碑与计划的单一导航。旧路径 `docs/mNN-*.md` 在 PR-C2 迁移完成前可能仍有效；以本页链接为准。
+> 所有文档、里程碑与计划的单一导航。`docs/` 根目录旧路径保留 stub 一周期；以本页链接为准。
 
 ## 治理与协作
 
@@ -15,7 +15,7 @@
 
 | ID | 区域 | 状态 | Journal |
 |----|------|------|---------|
-| **M53** | performance | active | [m53-performance-continuation.md](milestones/performance/m53-performance-continuation.md)（迁移前：`docs/m53-performance-continuation.md`） |
+| **M53** | performance | active | [m53-performance-continuation.md](milestones/performance/m53-performance-continuation.md) |
 | M28–M30 | stdio / FC | planned | [INDEX.md](milestones/INDEX.md) |
 | M46–M48 | browser | planned | [INDEX.md](milestones/INDEX.md) |
 | M56–M58 | formats / ai-eval | planned | [INDEX.md](milestones/INDEX.md) |
@@ -26,11 +26,11 @@
 
 | 目录 | 内容 |
 |------|------|
-| [reference/](reference/) | 活契约：schema、stdio、ai-eval（PR-C2 迁入） |
+| [reference/](reference/) | 活契约：schema、stdio、ai-eval |
 | [milestones/](milestones/) | 里程碑 journal 与 [performance-baseline](milestones/performance/performance-baseline.md) |
 | [specs/](specs/) | 实现前设计（须 `approved` 再编码） |
 | [plans/](plans/) | 实现计划 |
-| [runbooks/](runbooks/) | 真实 BI / 环境操作手册（PR-C2 迁入） |
+| [runbooks/](runbooks/) | 真实 BI / 环境操作手册 |
 | [archive/](archive/) | 已完成 roadmap 章节（PR-C3 迁入） |
 
 ## 设计与计划（Phase C）

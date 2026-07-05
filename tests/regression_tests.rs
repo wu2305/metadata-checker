@@ -1244,7 +1244,7 @@ fn test_m33_fixture_separates_proven_candidate_and_rejected_paths() {
 
 #[test]
 fn test_m31_m32_docs_define_condition_and_value_source_contract() {
-    let schema = std::fs::read_to_string("docs/schema.md").expect("schema doc must be readable");
+    let schema = std::fs::read_to_string("docs/reference/schema.md").expect("schema doc must be readable");
     for term in [
         "condition_scope",
         "direct",
@@ -1260,7 +1260,7 @@ fn test_m31_m32_docs_define_condition_and_value_source_contract() {
     ] {
         assert!(
             schema.contains(term),
-            "docs/schema.md 缺少 explain-condition 契约: {}",
+            "docs/reference/schema.md 缺少 explain-condition 契约: {}",
             term
         );
     }
@@ -5273,7 +5273,7 @@ fn test_skill_md_has_evidence_rules() {
 
 #[test]
 fn test_function_calling_runtime_has_m29_tool_contract() {
-    let doc = std::fs::read_to_string("docs/function-calling-runtime.md")
+    let doc = std::fs::read_to_string("docs/reference/function-calling-runtime.md")
         .expect("function calling runtime doc must be readable");
     let required_terms = [
         "metadata_explain_condition",
@@ -5294,7 +5294,7 @@ fn test_function_calling_runtime_has_m29_tool_contract() {
     for term in required_terms {
         assert!(
             doc.contains(term),
-            "docs/function-calling-runtime.md 缺少 M29 契约术语: {}",
+            "docs/reference/function-calling-runtime.md 缺少 M29 契约术语: {}",
             term
         );
     }
@@ -5302,7 +5302,7 @@ fn test_function_calling_runtime_has_m29_tool_contract() {
 
 #[test]
 fn test_schema_has_m29_function_calling_contract() {
-    let schema = std::fs::read_to_string("docs/schema.md").expect("schema doc must be readable");
+    let schema = std::fs::read_to_string("docs/reference/schema.md").expect("schema doc must be readable");
     let required_terms = [
         "Function Calling 工具层约束",
         "metadata_explain_condition",
@@ -5317,7 +5317,7 @@ fn test_schema_has_m29_function_calling_contract() {
     for term in required_terms {
         assert!(
             schema.contains(term),
-            "docs/schema.md 缺少 M29 契约术语: {}",
+            "docs/reference/schema.md 缺少 M29 契约术语: {}",
             term
         );
     }
@@ -5360,16 +5360,16 @@ fn test_skill_md_has_m29_function_calling_rules() {
 
 #[test]
 fn test_m30_docs_define_stdio_timing_and_capacity_contract() {
-    let schema = std::fs::read_to_string("docs/schema.md").expect("schema doc must be readable");
-    let runtime_doc = std::fs::read_to_string("docs/function-calling-runtime.md")
+    let schema = std::fs::read_to_string("docs/reference/schema.md").expect("schema doc must be readable");
+    let runtime_doc = std::fs::read_to_string("docs/reference/function-calling-runtime.md")
         .expect("function calling runtime doc must be readable");
-    let baseline = std::fs::read_to_string("docs/performance-baseline.md")
+    let baseline = std::fs::read_to_string("docs/milestones/performance/performance-baseline.md")
         .expect("baseline doc must be readable");
 
     for (name, doc) in [
-        ("docs/schema.md", schema.as_str()),
-        ("docs/function-calling-runtime.md", runtime_doc.as_str()),
-        ("docs/performance-baseline.md", baseline.as_str()),
+        ("docs/reference/schema.md", schema.as_str()),
+        ("docs/reference/function-calling-runtime.md", runtime_doc.as_str()),
+        ("docs/milestones/performance/performance-baseline.md", baseline.as_str()),
     ] {
         for term in [
             "output_size_bytes",

@@ -7,8 +7,8 @@
 
 | 线 | 状态 | 入口 |
 |----|------|------|
-| **Phase C** | PR-C1 骨架 + 治理 | [docs/README.md](docs/README.md) |
-| **M53** | active — persist / facts / path → redb v2 | [m53-performance-continuation.md](docs/m53-performance-continuation.md) |
+| **Phase C** | C2 搬迁中；C3 roadmap 拆分待做 | [docs/README.md](docs/README.md) |
+| **M53** | active — persist / facts / path → redb v2 | [m53](docs/milestones/performance/m53-performance-continuation.md) |
 | M28–M30 | planned — Stdio 契约与容量 | [INDEX](docs/milestones/INDEX.md) |
 | M46–M48 | planned — CLI remote + Browser UI | [INDEX](docs/milestones/INDEX.md) |
 

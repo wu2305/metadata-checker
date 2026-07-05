@@ -47,4 +47,4 @@ Phase B  M53 persist / materialized facts / path finder
 Phase A  M53 redb v2 hydrate
 ```
 
-Phase B/A 各需独立 spec，见 [m53-performance-continuation.md](../m53-performance-continuation.md)。
+Phase B/A 各需独立 spec，见 [m53-performance-continuation.md](../milestones/performance/m53-performance-continuation.md)。
