@@ -1,71 +1,18 @@
 # 开发 Checklist
 
-## P0：表达式与依赖正确性
+> **指针文件**：活跃里程碑与 checkbox 以 [docs/milestones/INDEX.md](docs/milestones/INDEX.md) 为准。  
+> 历史 P0–P4 项见 [docs/archive/checklist-p0-p4.md](docs/archive/checklist-p0-p4.md)。
 
-- [x] 换行表达式 fixture：`tests/fixtures/newline_expressions.spg`
-- [x] 换行表达式测试：`test_newline_expression_parsing`
-- [x] 复杂循环 fixture：`tests/fixtures/complex_cycle.spg` (A→B→C→D→B)
-- [x] 循环检测测试：`test_complex_cycle_detection`（A 不在环内，B/C/D 在环内）
-- [x] 同层组件顺序稳定性 fixture：`tests/fixtures/stable_order.spg`
-- [x] 稳定性测试：`test_topological_sort_stability`（多次运行结果一致）
-- [x] 稳定排序规则实现：按元数据出现顺序处理入度为0节点
+## 当前关注
 
-## P1：组件值追溯 fixture
+| 线 | 状态 | 入口 |
+|----|------|------|
+| **Phase C** | PR-C1 骨架 + 治理 | [docs/README.md](docs/README.md) |
+| **M53** | active — persist / facts / path → redb v2 | [m53-performance-continuation.md](docs/m53-performance-continuation.md) |
+| M28–M30 | planned — Stdio 契约与容量 | [INDEX](docs/milestones/INDEX.md) |
+| M46–M48 | planned — CLI remote + Browser UI | [INDEX](docs/milestones/INDEX.md) |
 
-- [x] 单级追溯 fixture：`tests/fixtures/value_trace_single.spg`
-- [x] 多级追溯 fixture：`tests/fixtures/value_trace_multi_level.spg`
-- [x] 多分支追溯 fixture：`tests/fixtures/value_trace_multi_branch.spg`
-- [x] 跨组件类型追溯测试：`test_value_trace_cross_component_types`
-- [x] JSON 输出断言：summary/details/evidence 已覆盖
+## 协作
 
-## P2：输出层来源分类定义
-
-- [x] SourceType 枚举已存在：Param、UserInput、ModelAuto、System、Computed、Constant、Unknown
-- [x] 分类规则已存在：`src/dependency.rs:determine_source_type`
-- [x] 测试覆盖：`test_source_type_param`、`test_source_type_computed`、`test_source_type_model_auto`、`test_source_type_constant`
-
-## P3：性能与规模测试
-
-- [x] 大型文件 fixture：`tests/fixtures/large_page.spg`（150 组件）
-- [x] 大量组件测试：`test_large_page_parsing`
-- [x] 性能阈值测试：`test_large_page_topological_sort_performance`（debug < 2s）
-- [x] 表达式引用数量测试：`test_large_page_expression_refs_count`
-
-## P4：文档收敛
-
-- [x] 更新 docs/schema.md（新增 SourceType 字段说明）
-- [x] 更新 README.md（新增 P0-P3 测试说明）
-- [x] 更新 SKILL.md（新增来源分类 AI 使用指南）
-- [x] 提交变更
-
-## 下一阶段：真实项目 AI 使用效果优化
-
-- [x] M10：表与 DataFlow 单文件输出可理解，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M11：图数据库路径、只读与并发可用性，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M12：Explain 语义摘要与证据质量收敛，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M13：面向 AI 的低噪声 brief 输出模式，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M14：目标定位与命令规范防错，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M15：真实项目 AI 评测集扩展，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M16：SKILL.md 真实使用协议收敛，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M17：条件抽取基础层，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M18：条件依赖图（含页面局部模型到物理表字段的写入归并），详见 `docs/real-project-optimization-roadmap.md`
-- [x] M19：页面数据可用性摘要（含 M18 残留主链路低噪声输出与注意力漂移治理），详见 `docs/real-project-optimization-roadmap.md`
-- [x] M19-FIX：可扩展主链路计算框架（候选路径、分类、可替换 selector、真实项目主链验收），详见 `docs/real-project-optimization-roadmap.md`
-- [x] M20：Why 条件查询能力（目标化主因链路，避免通用 context 漂移），详见 `docs/real-project-optimization-roadmap.md`
-- [x] M21：未知 Action 语义归类，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M22：条件类 AI 评测与协议收敛（含注意力漂移负例断言），详见 `docs/real-project-optimization-roadmap.md`
-- [x] M23：Hot Graph Runtime 基座（进程内复用 GraphDB，暂不做 LazyLoad / stdio server），详见 `docs/real-project-optimization-roadmap.md`
-- [x] M24：Stdio Function Calling Server（JSONL 长驻查询服务），详见 `docs/real-project-optimization-roadmap.md`
-- [x] M25：Runtime Cache 与 Reload（graphdb 变更检测、状态查询、失败降级），详见 `docs/real-project-optimization-roadmap.md`
-- [x] M26：Skill / Function Calling 接入与性能验收，详见 `docs/real-project-optimization-roadmap.md`
-- [x] M27：Stdio 查询命令面扩展（context / query_model / query_page_logic / explain），详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M28：Stdio 请求/响应契约收敛（统一 schema、错误码、负例测试），详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M29：Function Calling 工具层优化（工具拆分、使用边界、anti-drift 读取策略），详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M30：Stdio 性能与容量治理（timing、预算截断、真实项目性能基线），详见 `docs/real-project-optimization-roadmap.md`
-
-## 下一阶段：远程落地与浏览器 UI 正式化
-
-- [x] M45：Remote Metadata Auto Fetch and Background Analysis（真实 BI offscreen WASM 链路已闭环，详见 `docs/real-project-optimization-roadmap.md` 与 `docs/m45-real-bi-test-handoff.md`）
-- [ ] M46：Local CLI Remote Metadata Index and Analysis（本地 CLI 自动下载远程服务器元数据、session mirror、graph index 与 analyze/query），详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M47：Browser UI Formalization（设计器内嵌 Local Graph popup、Pixi 主路径、插件弹出设置页与真实 BI 复测），详见 `docs/real-project-optimization-roadmap.md`
-- [ ] M48：Local Graph Interaction Optimization（四档选点、hover/lock、Pin·Copy·Collapse 底栏、CDP 交互验收），详见 `docs/m48-local-graph-interaction-optimization.md`
+- `main` 只接受 PR merge；见 [governance/workflow.md](docs/governance/workflow.md)
+- 新功能先 spec/plan：见 [governance/planning.md](docs/governance/planning.md)

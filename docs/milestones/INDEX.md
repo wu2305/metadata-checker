@@ -1,0 +1,68 @@
+# 里程碑 INDEX
+
+> 权威状态表。根目录 [CHECKLIST.md](../../CHECKLIST.md) 仅作指针。  
+> M10–M27 详细章节仍位于 [real-project-optimization-roadmap.md](../real-project-optimization-roadmap.md)（PR-C3 拆入 `archive/roadmap/`）。
+
+## AI / Stdio 线（M10–M30）
+
+| id | title | status | area | journal | spec | plan | depends |
+|----|-------|--------|------|---------|------|------|---------|
+| M10 | 表与 DataFlow 单文件输出可理解 | done | ai-eval | [roadmap §M10](../real-project-optimization-roadmap.md) | | | |
+| M11 | 图数据库路径、只读与并发 | done | ai-eval | [roadmap §M11](../real-project-optimization-roadmap.md) | | | |
+| M12 | Explain 语义摘要与证据质量 | done | ai-eval | [roadmap §M12](../real-project-optimization-roadmap.md) | | | |
+| M13 | 面向 AI 的低噪声 brief 输出 | done | ai-eval | [roadmap §M13](../real-project-optimization-roadmap.md) | | | |
+| M14 | 目标定位与命令规范防错 | done | ai-eval | [roadmap §M14](../real-project-optimization-roadmap.md) | | | |
+| M15 | 真实项目 AI 评测集扩展 | done | ai-eval | [roadmap §M15](../real-project-optimization-roadmap.md) | | | |
+| M16 | SKILL.md 真实使用协议收敛 | done | ai-eval | [roadmap §M16](../real-project-optimization-roadmap.md) | | | |
+| M17 | 条件抽取基础层 | done | ai-eval | [roadmap §M17](../real-project-optimization-roadmap.md) | | | |
+| M18 | 条件依赖图 | done | ai-eval | [roadmap §M18](../real-project-optimization-roadmap.md) | | | |
+| M19 | 页面数据可用性摘要 | done | ai-eval | [roadmap §M19](../real-project-optimization-roadmap.md) | | | |
+| M19-FIX | 可扩展主链路计算框架 | done | ai-eval | [roadmap](../real-project-optimization-roadmap.md) | | | |
+| M20 | Why 条件查询 | done | ai-eval | [roadmap §M20](../real-project-optimization-roadmap.md) | | | |
+| M21 | 未知 Action 语义归类 | done | ai-eval | [roadmap §M21](../real-project-optimization-roadmap.md) | | | |
+| M22 | 条件类 AI 评测与协议收敛 | done | ai-eval | [roadmap §M22](../real-project-optimization-roadmap.md) | | | |
+| M23 | Hot Graph Runtime 基座 | done | ai-eval | [roadmap §M23](../real-project-optimization-roadmap.md) | | | |
+| M24 | Stdio Function Calling Server | done | ai-eval | [roadmap §M24](../real-project-optimization-roadmap.md) | | | |
+| M25 | Runtime Cache 与 Reload | done | ai-eval | [roadmap §M25](../real-project-optimization-roadmap.md) | | | |
+| M26 | Skill / FC 接入与性能验收 | done | ai-eval | [roadmap §M26](../real-project-optimization-roadmap.md) | | | |
+| M27 | Stdio 查询命令面扩展 | done | ai-eval | [roadmap §M27](../real-project-optimization-roadmap.md) | | | |
+| M28 | Stdio 请求/响应契约收敛 | planned | ai-eval | [roadmap §M28](../real-project-optimization-roadmap.md) | | | M27 |
+| M29 | Function Calling 工具层优化 | planned | ai-eval | [roadmap §M29](../real-project-optimization-roadmap.md) | | | M28 |
+| M30 | Stdio 性能与容量治理 | planned | ai-eval | [roadmap §M30](../real-project-optimization-roadmap.md) | | | M28 |
+
+## Browser 线（M40–M48）
+
+| id | title | status | area | journal | spec | plan | depends |
+|----|-------|--------|------|---------|------|------|---------|
+| M40 | 真实 BI 环境测试 | done | browser | [runbook](../m40-real-bi-environment-runbook.md) | | | |
+| M41 | 远程元数据与 Session | done | browser | [m41-plan](../m41-plan.md) | | [m41-plan](../m41-plan.md) | M40 |
+| M42 | Real BI Smoke 与性能记录 | done | browser | [runbook](../m42-real-bi-smoke-and-performance-runbook.md) | | | M41 |
+| M43 | Browser Extension 验收 | done | browser | [runbook](../m43-browser-extension-runbook.md) | | | M42 |
+| M45 | Remote Metadata 自动拉取与后台分析 | done | browser | [handoff](../m45-real-bi-test-handoff.md) | | | M43 |
+| M46 | Local CLI Remote Metadata Index | planned | browser | [roadmap](../real-project-optimization-roadmap.md) | | | M45 |
+| M47 | Browser UI 正式化 | planned | browser | [popup 设计](../m47-embedded-local-graph-popup-design.md) | | [pixi spike](../m47-pixi-d3-force-spike-plan.md) | M46 |
+| M48 | Local Graph 交互优化 | planned | browser | [m48](../m48-local-graph-interaction-optimization.md) | | | M47 |
+
+## Performance 线（M50–M53）
+
+| id | title | status | area | journal | spec | plan | depends |
+|----|-------|--------|------|---------|------|------|---------|
+| M50 | 性能基线与 Criterion / Bencher 契约 | done | performance | [contract](../m50-performance-bench-contract.md) | | [offscreen plan](../m50-browser-offscreen-bench-plan.md) | |
+| M51 | 性能堵点归因 | done | performance | [diagnosis](../m51-performance-diagnosis.md) | | | M50 |
+| M52 | 性能优化落地（cost model / warm / fragment） | done | performance | [m52](../m52-performance-optimization.md) | | | M51 |
+| M53 | persist / facts / path + redb v2 hydrate | active | performance | [m53](../m53-performance-continuation.md) | [Phase C spec](../specs/2026-07-05-docs-governance-reorg-design.md) | [governance plan](../plans/2026-07-05-docs-governance-reorg-plan.md) | M52 |
+
+CI 基线：[performance-baseline.md](../performance-baseline.md)（`release-fast` + `cnb-078`）。
+
+## Formats / AI-eval 远期（M56–M58）
+
+| id | title | status | area | journal | spec | plan | depends |
+|----|-------|--------|------|---------|------|------|---------|
+| M56 | Dashboard / Report 格式支持 | planned | formats | — | （待建） | | |
+| M58 | 廉价模型理解力评测 | planned | ai-eval | — | （待建） | | M22 |
+
+## 文档治理（Phase C）
+
+| id | title | status | area | journal | spec | plan | depends |
+|----|-------|--------|------|---------|------|------|---------|
+| Phase C | 文档目录重组与协作规范 | active | governance | [docs README](../README.md) | [design](../specs/2026-07-05-docs-governance-reorg-design.md) | [plan](../plans/2026-07-05-docs-governance-reorg-plan.md) | |

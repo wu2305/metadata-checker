@@ -2,6 +2,8 @@
 
 低代码平台 SuperPage 元数据解析与分析 CLI 工具。
 
+文档与里程碑入口：[docs/README.md](docs/README.md) · 协作规范：[docs/governance/workflow.md](docs/governance/workflow.md)
+
 ## 功能概述
 
 - **解析 `.spg` 文件**：提取组件树、表达式、动作、页面参数和数据源

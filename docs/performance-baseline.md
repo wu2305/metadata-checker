@@ -596,6 +596,45 @@ Bencher 上报证据：
 
 ---
 
+## M50+ CI 基线更新：cnb-078（`release-fast`）
+
+验收时间：2026-07-05
+
+背景：`f1e7285` 修复 Criterion 并行 cache 污染、rebuild bench 顺序与 `serialize_response_with_timing` 收敛后，九路 CI 首次全绿；Criterion 统一 `--profile release-fast`（见 `tools/run-bencher-criterion-ci.mjs`）。**此后 Bencher 趋势与 `opt-level=z` 时代样本不可横比。**
+
+权威 CI 记录：
+
+| 项目 | 值 |
+|---|---|
+| CNB build SN | `cnb-078-1jsmeegk1` |
+| event / branch | `push` / `main` |
+| commit | `f1e7285` |
+| commit title | `fix: stdio serialize timing convergence and rebuild bench symmetry` |
+| pipeline result | 9 / 9 success |
+| 并行 wall time（约） | ~24 min |
+
+流水线结果：
+
+| pipeline | 结果 | 耗时 (ms) | 验收含义 |
+|---|---|---:|---|
+| `rust-ci` | success | 84,000 | fmt、llvm-cov 测试、browser-wasm check |
+| `browser-offscreen-bench-ci` | success | （见 CNB 日志） | WASM offscreen replay + Bencher |
+| `fixture-bench-ci` | success | 595,000 | fixture Criterion + Bencher |
+| `full-criterion-query-ci` | success | 1,423,000 | query matrix Criterion（`release-fast`） |
+| `full-criterion-rebuild-ci` | success | 808,000 | rebuild mutation Criterion |
+| `full-criterion-rebuild-crud-ci` | success | 975,000 | rebuild CRUD Criterion |
+| `full-criterion-redb-ci` | success | 685,000 | redb persistence Criterion |
+| `full-criterion-boundary-ci` | success | 1,087,000 | stdio boundary + telemetry 等 |
+| `rust-ci-branch-push` | success | （见 CNB 日志） | main 下轻量分支检查跳过确认 |
+
+五路 full criterion 说明：
+
+- 每路独立 `warmup-*` 与 `target/criterion-ci/<lane>/`，stage 前 `rm -rf` 对应子目录，避免并行污染。
+- 编译 profile：`release-fast`（`[profile.bench] inherits = "release"`）。
+- 与 `cnb-5r3` 记录相比：pipeline 数 7→9（rust 合并 + criterion 五路拆分）；总 wall 由 ~66 min 降至 ~24 min（并行 + cache 隔离）。
+
+---
+
 ## M34 Compact 输出体积基线
 
 验收时间：2026-05-18

@@ -52,6 +52,16 @@
 - selection payload 只能包含轻量字段，不得包含 `.spg` raw text 或完整 component JSON
 - 真实环境可用 `console.log` 辅助人工观察，但自动化验收必须有 DOM marker 或结构化事件；涉及可见 UI 的真实验收还必须补充截图验证，不能只凭 marker 判定 UI 可见
 
+## 文档与计划
+
+- **入口**：[docs/README.md](docs/README.md) — 导航 governance / milestones / reference / specs / plans
+- **里程碑表**：[docs/milestones/INDEX.md](docs/milestones/INDEX.md)（权威；根目录 `CHECKLIST.md` 仅指针）
+- **协作**：[docs/governance/workflow.md](docs/governance/workflow.md) — **`main` 只接受 PR merge**，merge 后删来源分支
+- **Spec / Plan**：[docs/governance/planning.md](docs/governance/planning.md) — M53 起非 trivial 改动须 `approved` spec；多 PR 须 `approved` plan
+- **PR 模板**：[docs/governance/pr-template.md](docs/governance/pr-template.md)
+- **性能基线**：[docs/performance-baseline.md](docs/performance-baseline.md) — 影响 bench 的 PR 须更新或说明 `Baseline impact`
+- 勿向 [docs/real-project-optimization-roadmap.md](docs/real-project-optimization-roadmap.md) 追加新里程碑（PR-C3 拆档中）
+
 ## 模块职责
 
 | 模块 | 职责 | 修改前必读 |
