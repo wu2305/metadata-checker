@@ -60,7 +60,7 @@
 - **Spec / Plan**：[docs/governance/planning.md](docs/governance/planning.md) — M53 起非 trivial 改动须 `approved` spec；多 PR 须 `approved` plan
 - **PR 模板**：[docs/governance/pr-template.md](docs/governance/pr-template.md)
 - **性能基线**：[docs/milestones/performance/performance-baseline.md](docs/milestones/performance/performance-baseline.md) — 影响 bench 的 PR 须更新或说明 `Baseline impact`
-- 勿向 [docs/real-project-optimization-roadmap.md](docs/real-project-optimization-roadmap.md) 追加新里程碑（PR-C3 拆档中）
+- 勿向 [docs/real-project-optimization-roadmap.md](docs/real-project-optimization-roadmap.md) 追加新里程碑（已拆分至 `docs/archive/roadmap/`）
 
 ## 模块职责
 

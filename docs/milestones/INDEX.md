@@ -1,34 +1,34 @@
 # 里程碑 INDEX
 
 > 权威状态表。根目录 [CHECKLIST.md](../../CHECKLIST.md) 仅作指针。  
-> M10–M27 详细章节仍位于 [real-project-optimization-roadmap.md](../real-project-optimization-roadmap.md)（PR-C3 拆入 `archive/roadmap/`）。
+> M10–M47 历史章节见 [archive/roadmap/README.md](../archive/roadmap/README.md)。
 
 ## AI / Stdio 线（M10–M30）
 
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
-| M10 | 表与 DataFlow 单文件输出可理解 | done | ai-eval | [roadmap §M10](../real-project-optimization-roadmap.md) | | | |
-| M11 | 图数据库路径、只读与并发 | done | ai-eval | [roadmap §M11](../real-project-optimization-roadmap.md) | | | |
-| M12 | Explain 语义摘要与证据质量 | done | ai-eval | [roadmap §M12](../real-project-optimization-roadmap.md) | | | |
-| M13 | 面向 AI 的低噪声 brief 输出 | done | ai-eval | [roadmap §M13](../real-project-optimization-roadmap.md) | | | |
-| M14 | 目标定位与命令规范防错 | done | ai-eval | [roadmap §M14](../real-project-optimization-roadmap.md) | | | |
-| M15 | 真实项目 AI 评测集扩展 | done | ai-eval | [roadmap §M15](../real-project-optimization-roadmap.md) | | | |
-| M16 | SKILL.md 真实使用协议收敛 | done | ai-eval | [roadmap §M16](../real-project-optimization-roadmap.md) | | | |
-| M17 | 条件抽取基础层 | done | ai-eval | [roadmap §M17](../real-project-optimization-roadmap.md) | | | |
-| M18 | 条件依赖图 | done | ai-eval | [roadmap §M18](../real-project-optimization-roadmap.md) | | | |
-| M19 | 页面数据可用性摘要 | done | ai-eval | [roadmap §M19](../real-project-optimization-roadmap.md) | | | |
-| M19-FIX | 可扩展主链路计算框架 | done | ai-eval | [roadmap](../real-project-optimization-roadmap.md) | | | |
-| M20 | Why 条件查询 | done | ai-eval | [roadmap §M20](../real-project-optimization-roadmap.md) | | | |
-| M21 | 未知 Action 语义归类 | done | ai-eval | [roadmap §M21](../real-project-optimization-roadmap.md) | | | |
-| M22 | 条件类 AI 评测与协议收敛 | done | ai-eval | [roadmap §M22](../real-project-optimization-roadmap.md) | | | |
-| M23 | Hot Graph Runtime 基座 | done | ai-eval | [roadmap §M23](../real-project-optimization-roadmap.md) | | | |
-| M24 | Stdio Function Calling Server | done | ai-eval | [roadmap §M24](../real-project-optimization-roadmap.md) | | | |
-| M25 | Runtime Cache 与 Reload | done | ai-eval | [roadmap §M25](../real-project-optimization-roadmap.md) | | | |
-| M26 | Skill / FC 接入与性能验收 | done | ai-eval | [roadmap §M26](../real-project-optimization-roadmap.md) | | | |
-| M27 | Stdio 查询命令面扩展 | done | ai-eval | [roadmap §M27](../real-project-optimization-roadmap.md) | | | |
-| M28 | Stdio 请求/响应契约收敛 | planned | ai-eval | [roadmap §M28](../real-project-optimization-roadmap.md) | | | M27 |
-| M29 | Function Calling 工具层优化 | planned | ai-eval | [roadmap §M29](../real-project-optimization-roadmap.md) | | | M28 |
-| M30 | Stdio 性能与容量治理 | planned | ai-eval | [roadmap §M30](../real-project-optimization-roadmap.md) | | | M28 |
+| M10 | 表与 DataFlow 单文件输出可理解 | done | ai-eval | [archive](../archive/roadmap/m10-dataflow.md) | | | |
+| M11 | 图数据库路径、只读与并发 | done | ai-eval | [archive](../archive/roadmap/m11-archive.md) | | | |
+| M12 | Explain 语义摘要与证据质量 | done | ai-eval | [archive](../archive/roadmap/m12-explain.md) | | | |
+| M13 | 面向 AI 的低噪声 brief 输出 | done | ai-eval | [archive](../archive/roadmap/m13-ai-brief.md) | | | |
+| M14 | 目标定位与命令规范防错 | done | ai-eval | [archive](../archive/roadmap/m14-archive.md) | | | |
+| M15 | 真实项目 AI 评测集扩展 | done | ai-eval | [archive](../archive/roadmap/m15-ai.md) | | | |
+| M16 | SKILL.md 真实使用协议收敛 | done | ai-eval | [archive](../archive/roadmap/m16-skill-md.md) | | | |
+| M17 | 条件抽取基础层 | done | ai-eval | [archive](../archive/roadmap/m17-archive.md) | | | |
+| M18 | 条件依赖图 | done | ai-eval | [archive](../archive/roadmap/m18-archive.md) | | | |
+| M19 | 页面数据可用性摘要 | done | ai-eval | [archive](../archive/roadmap/m19-archive.md) | | | |
+| M19-FIX | 可扩展主链路计算框架 | done | ai-eval | [archive](../archive/roadmap/m19-fix-archive.md) | | | |
+| M20 | Why 条件查询 | done | ai-eval | [archive](../archive/roadmap/m20-why.md) | | | |
+| M21 | 未知 Action 语义归类 | done | ai-eval | [archive](../archive/roadmap/m21-action.md) | | | |
+| M22 | 条件类 AI 评测与协议收敛 | done | ai-eval | [archive](../archive/roadmap/m22-ai.md) | | | |
+| M23 | Hot Graph Runtime 基座 | done | ai-eval | [archive](../archive/roadmap/m23-hot-graph-runtime.md) | | | |
+| M24 | Stdio Function Calling Server | done | ai-eval | [archive](../archive/roadmap/m24-stdio-function-calling-server.md) | | | |
+| M25 | Runtime Cache 与 Reload | done | ai-eval | [archive](../archive/roadmap/m25-runtime-cache-reload.md) | | | |
+| M26 | Skill / FC 接入与性能验收 | done | ai-eval | [archive](../archive/roadmap/m26-skill-function-calling.md) | | | |
+| M27 | Stdio 查询命令面扩展 | done | ai-eval | [archive](../archive/roadmap/m27-stdio.md) | | | |
+| M28 | Stdio 请求/响应契约收敛 | planned | ai-eval | [archive](../archive/roadmap/m28-stdio.md) | | | M27 |
+| M29 | Function Calling 工具层优化 | planned | ai-eval | [archive](../archive/roadmap/m29-function-calling.md) | | | M28 |
+| M30 | Stdio 性能与容量治理 | planned | ai-eval | [archive](../archive/roadmap/m30-stdio.md) | | | M28 |
 
 ## Browser 线（M40–M48）
 
@@ -39,7 +39,7 @@
 | M42 | Real BI Smoke 与性能记录 | done | browser | [runbook](../runbooks/m42-real-bi-smoke-and-performance-runbook.md) | | | M41 |
 | M43 | Browser Extension 验收 | done | browser | [runbook](../runbooks/m43-browser-extension-runbook.md) | | | M42 |
 | M45 | Remote Metadata 自动拉取与后台分析 | done | browser | [handoff](browser/m45-real-bi-test-handoff.md) | | | M43 |
-| M46 | Local CLI Remote Metadata Index | planned | browser | [roadmap](../real-project-optimization-roadmap.md) | | | M45 |
+| M46 | Local CLI Remote Metadata Index | planned | browser | [archive](../archive/roadmap/m46-local-cli-remote-metadata-index-and.md) | | | M45 |
 | M47 | Browser UI 正式化 | planned | browser | [popup 设计](browser/m47-embedded-local-graph-popup-design.md) | | [pixi spike](browser/m47-pixi-d3-force-spike-plan.md) | M46 |
 | M48 | Local Graph 交互优化 | planned | browser | [m48](browser/m48-local-graph-interaction-optimization.md) | | | M47 |
 
@@ -65,4 +65,4 @@ CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`re
 
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
-| Phase C | 文档目录重组与协作规范 | active | governance | [docs README](../README.md) | [design](../specs/2026-07-05-docs-governance-reorg-design.md) | [plan](../plans/2026-07-05-docs-governance-reorg-plan.md) | |
+| Phase C | 文档目录重组与协作规范 | done | governance | [docs README](../README.md) | [design](../specs/2026-07-05-docs-governance-reorg-design.md) | [plan](../plans/2026-07-05-docs-governance-reorg-plan.md) | |

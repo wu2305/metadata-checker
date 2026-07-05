@@ -27,7 +27,7 @@ PR-C2/C3 搬迁后，旧路径保留 ≤1 个 release 周期的 stub：
 
 ## 禁止
 
-- 向 `real-project-optimization-roadmap.md` **追加**新里程碑（已冻结，PR-C3 拆档）
+- 向 `real-project-optimization-roadmap.md` **追加**新里程碑（已拆分至 `archive/roadmap/`）
 - 在 `docs/` 根目录新建无 INDEX 登记的 `mXX-*.md`
 - 静态站点生成（后续单独里程碑）
 

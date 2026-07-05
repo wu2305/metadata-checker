@@ -26,10 +26,11 @@
 - [x] `git mv` → `docs/reference/`、`docs/milestones/performance/`、`docs/milestones/browser/`、`docs/runbooks/`
 - [x] 旧路径 stub
 - [x] 更新测试与文档链接（`regression_tests.rs`、`INDEX`、`AGENTS`、`README`）
-- [ ] PR merge + 删来源分支
+- [x] PR merge + 删来源分支
 
 ## PR-C3：roadmap 拆分
 
-- [ ] 按 `## MNN` 拆到 `docs/archive/roadmap/`
-- [ ] `CHECKLIST.md` 瘦身
-- [ ] `rg` 断链检查
+- [x] `tools/split-roadmap-archive.py` 拆到 `docs/archive/roadmap/`（43 节 + README）
+- [x] `real-project-optimization-roadmap.md` stub
+- [x] `INDEX` / `CHECKLIST` / `AGENTS` 链接更新
+- [ ] PR merge + 删来源分支
