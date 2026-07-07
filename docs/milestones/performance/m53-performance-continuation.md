@@ -113,6 +113,20 @@ one-shot 路径不经过 LongLived read model，故 `availability_materialized_h
 
 M53 核心交付是 **语义等价 + 默认 v2 hydrate + load-time 物化索引**；warm query 数字需多轮采样再写 fail threshold。`redb_commit` 仍 ~10.8s，C 线 commit batch 保持 profile 门控。
 
+### 多轮采样（5× core + 3× page logic，2026-07-07 晚）
+
+| 指标 | p50 | min–max | M52 path-warm（单次） |
+|---|---:|---|---:|
+| `warmed_query_dispatch` | **639ms** | 595–716 | 105 |
+| `warmed_total N=50` | **36400ms** | 33779–40284 | 9395 |
+| `read_model_build` | 3736ms | 3376–3860 | 2743 |
+| `redb_open` | 815ms | 768–831 | 555 |
+| `availability_warm` | 189ms | 170–204 | 833 |
+
+首轮 core（冷 graphdb）`warmed_dispatch=1025ms` 偏慢；稳态 p50 **~640ms**。M52 自身单次波动 105–1818ms，**不宜用单次对比定论**；相对 M52 最优仍慢 ~6×，相对 M52 mat-warm（1818ms）M53 更快。
+
+compact one-shot（3 轮 p50）：wall **694ms**（M52 537）、`path_summary` **435ms**（M52 312）、`key_model_availability` **166ms**（M52 136）。path 仍是 compact 回退主因；首轮 201ms avail 属正常方差。
+
 PR：[#9](https://cnb.cool/wu2305/metadata-checker/-/pulls/9)（CI/docs）、[#10](https://cnb.cool/wu2305/metadata-checker/-/pulls/10)（B1/B2/A）。
 
 ## M53 剩余 / 后续
