@@ -132,9 +132,9 @@ Run: `cargo test m53_materialized --features cli-local`
 - Modify: `docs/milestones/performance/m53-performance-continuation.md`
 - Modify: `docs/milestones/INDEX.md`（spec/plan 链接）
 
-- [ ] **Step 1: journal 填 B1/B2/A before/after**
-- [ ] **Step 2: INDEX 更新 spec/plan 列**
-- [ ] **Step 3: `cargo test --features cli-local` 影响面测试**
+- [x] **Step 1: journal 填 B1/B2/A before/after**
+- [x] **Step 2: INDEX 更新 spec/plan 列**
+- [x] **Step 3: `cargo test --features cli-local` 影响面测试**
 
 ---
 

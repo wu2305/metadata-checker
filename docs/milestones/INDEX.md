@@ -50,7 +50,7 @@
 | M50 | 性能基线与 Criterion / Bencher 契约 | done | performance | [contract](performance/m50-performance-bench-contract.md) | | [offscreen plan](performance/m50-browser-offscreen-bench-plan.md) | |
 | M51 | 性能堵点归因 | done | performance | [diagnosis](performance/m51-performance-diagnosis.md) | | | M50 |
 | M52 | 性能优化落地（cost model / warm / fragment） | done | performance | [m52](performance/m52-performance-optimization.md) | | | M51 |
-| M53 | persist / facts / path + redb v2 hydrate | active | performance | [m53](performance/m53-performance-continuation.md) | [design](../specs/2026-07-06-m53-performance-design.md) | [plan](../plans/2026-07-06-m53-performance-plan.md) (B1–A done) | M52 |
+| M53 | persist / facts / path + redb v2 hydrate | done | performance | [m53](performance/m53-performance-continuation.md) | [design](../specs/2026-07-06-m53-performance-design.md) | [plan](../plans/2026-07-06-m53-performance-plan.md) | M52 |
 
 CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`release-fast` + `cnb-078`）。
 

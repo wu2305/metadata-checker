@@ -1,6 +1,6 @@
 # M53 性能优化落地记录
 
-> 状态：M53 起始基线。M52 已完成 redb v2 graph layout 设计和 shadow build 验证；M53 负责把验证过的 v2 存储体切入实际运行路径。
+> 状态：**done**（B1 / B2 / A 已合并 #9–#10）。B1.2 dataflow facts、C 线 fragment / commit batch 仍 profile 门控，非阻塞。
 
 ## 从 M52 带入的已验证优化
 
@@ -87,6 +87,33 @@ M53 继续保留稳定内容采样 hash：`mtime_changed` 只做诊断，不触�
 - `GraphDB::open_inner` 优先 `read_v2_layout` + `hydrate_graph_from_v2`，失败 fallback v1。
 - `persist` 在写事务前读取 v2；≤32 dirty node 且无 removed 时 `patch_v2_layout_node_meta` 增量更新。
 - 测试：`tests/m53_redb_v2_hydrate_tests.rs`（v2 优先打开、v1 fallback、增量 patch）。
+
+## M53 验收（合并后 profile，`xiaoshouyi`，`sample-count=1`）
+
+报告：`target/m51-profile/m53-core-profile.json`、`m53-page-logic-profile.json`（`release-fast`，2026-07-07）。
+
+### one-shot page logic（合同页 / 会员页）
+
+| 场景 | M52 dense-final | M53 | 变化 |
+|---|---:|---:|---:|
+| `full.key_model_availability` | 4747ms | 3822ms | -19.5% |
+| `normal.key_model_availability` | 4732ms | 3805ms | -19.6% |
+| `compact.key_model_availability` | 136ms | 201ms | +47.8% |
+
+one-shot 路径不经过 LongLived read model，故 `availability_materialized_hits` / `path_dense_adjacency_hits` 为 0；等价性由 `tests/m53_*` 覆盖。
+
+### LongLived runtime（合同页 compact warm）
+
+| 指标 | M52 path-prereq-warm | M53 | 备注 |
+|---|---:|---:|---|
+| `runtime_long_lived_read_model_build_ms` | 2743 | 5837 | load 时预建 materialized facts + dense |
+| `redb_open` | 555 | 866 | v2 hydrate 默认路径 |
+| `runtime_long_lived_warmed_query_dispatch` | 105 | 1025 | 单次采样；本轮 M53 偏慢 |
+| `runtime_long_lived_warmed_total_ms_n50` | 9395 | 58160 | 本轮 M53 更慢，需多轮采样确认 |
+
+M53 核心交付是 **语义等价 + 默认 v2 hydrate + load-time 物化索引**；warm query 数字需多轮采样再写 fail threshold。`redb_commit` 仍 ~10.8s，C 线 commit batch 保持 profile 门控。
+
+PR：[#9](https://cnb.cool/wu2305/metadata-checker/-/pulls/9)（CI/docs）、[#10](https://cnb.cool/wu2305/metadata-checker/-/pulls/10)（B1/B2/A）。
 
 ## M53 剩余 / 后续
 
