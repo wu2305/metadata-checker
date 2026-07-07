@@ -195,16 +195,16 @@ CNB 流水线按分支与事件分层，避免所有 push 都跑重 benchmark。
 
 | 触发 | 流水线 | 用途 |
 |---|---|---|
-| `main` push | `rust-only-ci`、`browser-wasm-env-probe`、`browser-offscreen-bench-ci`、`fixture-bench-ci`、`full-criterion-bench-ci` | merge 后权威性能记录 |
-| 非 `main` push | `rust-only-ci-branch-push`（stage `if` 跳过 main） | 分支轻量验证 |
-| 任意 PR | `rust-only-ci`、`browser-wasm-env-probe`、`browser-offscreen-bench-ci` | PR 快速验证 WASM/offscreen 链路 |
+| `main` push | `rust-ci`、`browser-offscreen-bench-ci`（Bencher）、`fixture-bench-ci`、五路 `full-criterion-*-ci` | merge 后权威性能记录 |
+| 非 `main` push | `rust-ci-branch-push`（stage `if` 跳过 main） | 分支轻量验证 |
+| 任意 PR | `rust-ci`、`browser-offscreen-bench-ci` | PR 快速验证 WASM/offscreen 链路 |
 
 约束：
 
 - 不在 `pull_request.merged` 重复跑 benchmark；merge 后由 `main` push 承担权威记录。
 - 第一版不设性能阈值，bench 失败仅因构建崩溃、fixture/manifest 无效或 timing 字段缺失。
 - `browser-offscreen-bench-ci` 的 `endStages` 输出 `browser-offscreen-ci-perf-index.json` 机器可读索引。
-- `full-criterion-bench-ci` 仅在 `main.push` 运行，复用 `METADATA_CHECKER_REAL_PROJECT_DIR` 或 clone `REAL_PROJECT_FIXTURE_REPO_*` 指定的 fixture 仓库，并把完整 Criterion bench 上报到 Bencher.dev。
+- 五路 `full-criterion-*-ci` 仅在 `main.push` 并行运行，复用 `METADATA_CHECKER_REAL_PROJECT_DIR` 或 clone `REAL_PROJECT_FIXTURE_REPO_*` 指定的 fixture 仓库，并把完整 Criterion bench 上报到 Bencher.dev。
 
 ### 后续：手动 / 定时 full benchmark
 
@@ -215,14 +215,14 @@ CNB 流水线按分支与事件分层，避免所有 push 都跑重 benchmark。
 
 本阶段不实现上述入口，仅在文档与 `.cnb.yml` 注释中预留。
 
-### Rust-only CI
+### Rust CI（合并 rust-only + coverage）
 
-不依赖 Node 环境。因为当前主要是单人 PR，可以偏完整：
+单次 `cargo llvm-cov test` 兼做测试与覆盖率；`target/debug` symlink 兼容集成测试硬编码路径：
 
 ```bash
 cargo fmt --check
 cargo check --benches
-cargo test
+cargo llvm-cov test --workspace --lcov --output-path lcov.info
 cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown
 ```
 
@@ -243,7 +243,7 @@ cargo check --no-default-features --features browser-wasm --target wasm32-unknow
 启动优化：
 
 - `docker.build.versionBy` 绑定 `.cnb/images/browser-wasm-ci.Dockerfile` 与 `Cargo.lock`，仅当工具链定义或 wasm-bindgen 版本变化时重建环境镜像。
-- `CARGO_TARGET_DIR` 对 browser WASM pipeline 隔离到 `target/cnb/browser-wasm-probe` 与 `target/cnb/browser-offscreen`，避免 release / bench / wasm 产物互相污染。
+- `CARGO_TARGET_DIR` 对 browser WASM pipeline 隔离到 `target/cnb/browser-offscreen`，避免 release / bench / wasm 产物互相污染。
 - rust-only CI 保留默认 `target/debug`，因为部分 CLI 集成测试会直接执行 `target/debug/metadata-checker`。
 - browser WASM 构建脚本必须尊重 `CARGO_TARGET_DIR`，否则 CI target 缓存不会生效。
 

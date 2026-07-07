@@ -522,16 +522,16 @@ input3
 - Rust 覆盖率使用 `cargo-llvm-cov` 生成 `lcov.info`，再交给 CNB `testing:coverage` 上传；当前只要求 coverage 文件存在，不设置全量或增量覆盖率阈值。
 - `make perf-real` 这类 Node runner 仍默认手动或后续定时/web_trigger 触发，不进普通 CI。
 - 当前 CI 不设性能阈值；变慢不 fail，仅报告 JSONL / summary / `browser-offscreen-ci-perf-index.json`。
-- Bencher.dev 为可选上报层：`browser-offscreen-bench-ci`、`fixture-bench-ci` 与四路 full criterion pipeline 通过 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/bencher.yml` 注入 `BENCHER_API_KEY`、`BENCHER_PROJECT`、`BENCHER_TESTBED` 与 `BENCHER_UPLOAD_REQUIRED` 后，CI 会上传 browser offscreen BMF、fixture Criterion 与 full Criterion 结果；未配置时跳过。
+- Bencher.dev 为可选上报层：`browser-offscreen-bench-ci`、`fixture-bench-ci` 与五路 full criterion pipeline 通过 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/bencher.yml` 注入 `BENCHER_API_KEY`、`BENCHER_PROJECT`、`BENCHER_TESTBED` 与 `BENCHER_UPLOAD_REQUIRED` 后，CI 会上传 browser offscreen BMF、fixture Criterion 与 full Criterion 结果；未配置时跳过。
 - PR 事件下的 browser offscreen pipeline 不导入 `bencher.yml`，只生成本地报告；`main.push` 使用带 Bencher import 的同构 pipeline 上报趋势。
 - 当前 Bencher 仅用于趋势留存，不启用 threshold / alert fail。
 - 详细 browser offscreen 契约见 [m50-browser-offscreen-bench-plan.md](m50-browser-offscreen-bench-plan.md)。
-- browser WASM 相关 CI 使用 `.cnb/images/browser-wasm-ci.Dockerfile` 作为 CNB `docker.build` 缓存镜像，避免每次构建重复 `apt-get`、`rustup` 和 `cargo install wasm-bindgen-cli`。
+- browser WASM 相关 CI 使用 `.cnb/images/browser-wasm-ci.Dockerfile` 作为 CNB `docker.build` 缓存镜像，避免每次构建重复 `apt-get`、`rustup` 和 `cargo install wasm-bindgen-cli`；镜像层含 `cargo fetch` 预热 registry（`versionBy` 绑定 `Cargo.lock`）。
 - 同一缓存镜像预装 `bencher` CLI，避免每次流水线临时下载上报工具。
 - browser WASM pipeline 使用独立 `CARGO_TARGET_DIR=target/cnb/...`，避免不同 target 与 bench 产物共享默认 `target`；`rust-ci` 通过 `target/debug` symlink 兼容直接执行 CLI 二进制的集成测试。
 - `rust-ci` 与 bench pipeline 共用 `browser-wasm-ci` 缓存镜像（registry volume 预热依赖）。
 - 真实项目 fixture 已上传到 CNB 私有仓库 `wu2305/metadata-checker-real-fixtures`，项目路径为 `xiaoshouyi`，当前固定 `REAL_PROJECT_FIXTURE_REF=c3c0528fdd28e2600e0b0235040fb349b3c2d446`。后续刷新 fixture 时必须更新该 SHA，避免同一主分支提交因为外部 fixture 漂移产生不可复现的性能样本。
-- 四路 full criterion pipeline 通过 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/real-fixture.yml` 注入 `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 等真实项目 fixture 变量。
+- 五路 full criterion pipeline 通过 CNB 密钥仓库文件 `wu2305/metadata-checker-keys/real-fixture.yml` 注入 `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 等真实项目 fixture 变量。
 
 ## M50 验收收口记录
 

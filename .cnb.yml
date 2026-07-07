@@ -166,7 +166,7 @@
       script: |
         rm -rf target/criterion-ci/warmup-fixture target/criterion-ci/parse target/criterion-ci/query-micro
         CARGO_TARGET_DIR=target/criterion-ci/warmup-fixture \
-          cargo build --profile release-fast --lib
+          cargo build --profile release-fast --lib --bins
     - name: criterion fixture benches
       script: |
         node tools/run-bencher-criterion-ci.mjs \

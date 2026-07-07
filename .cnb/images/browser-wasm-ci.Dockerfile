@@ -22,6 +22,9 @@ RUN curl https://sh.rustup.rs -sSf | sh -s -- -y \
     && rustup target add wasm32-unknown-unknown \
     && chmod -R a+w "${RUSTUP_HOME}" "${CARGO_HOME}"
 
+COPY Cargo.toml Cargo.lock /tmp/warmup/
+RUN cd /tmp/warmup && cargo fetch && rm -rf /tmp/warmup
+
 COPY Cargo.lock /tmp/metadata-checker-Cargo.lock
 
 RUN WASM_BINDGEN_VERSION="$(awk '\
