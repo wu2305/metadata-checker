@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 /// 页面逻辑输出中的路径选择结果
+#[derive(Clone)]
 pub(super) struct PageLogicPaths {
     pub(super) primary_paths: Vec<serde_json::Value>,
     pub(super) related_context: Vec<serde_json::Value>,

@@ -5,6 +5,7 @@ use anyhow::Result;
 use std::time::Instant;
 
 /// 页面级条件前置条件分组
+#[derive(Clone)]
 pub(super) struct PagePrerequisites {
     pub(super) display_prerequisites: Vec<serde_json::Value>,
     pub(super) data_prerequisites: Vec<serde_json::Value>,

@@ -163,7 +163,14 @@ fn m52_page_logic_uses_warmed_availability_cache_without_changing_output() -> an
     let graph = fixture_graph("availability-cache-override")?;
     let page_id = "page:app/actions_test.spg";
     let budget = "normal";
-    let availability_cache = build_page_logic_availability_cache(&graph, page_id, None, budget, None)?;
+    let availability_cache = build_page_logic_availability_cache(
+        &graph,
+        None,
+        page_id,
+        None,
+        budget,
+        None,
+    )?;
 
     let (mut baseline, baseline_profile) =
         build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
@@ -200,8 +207,12 @@ fn m52_page_logic_uses_warmed_availability_cache_without_changing_output() -> an
         "cached availability should preserve expanded model count"
     );
     assert!(
-        availability_cache.warm_stage_ms("path_summary").is_none(),
-        "availability warm must not run full page logic path_summary"
+        availability_cache.warm_stage_ms("path_summary").is_some(),
+        "availability warm must materialize path_summary read model"
+    );
+    assert!(
+        availability_cache.warm_stage_ms("prerequisites").is_some(),
+        "availability warm must materialize prerequisites read model"
     );
     assert!(
         availability_cache
@@ -209,5 +220,60 @@ fn m52_page_logic_uses_warmed_availability_cache_without_changing_output() -> an
             .is_some(),
         "availability warm should record materialized facts stage"
     );
+    assert_eq!(
+        cached_profile.counter("prerequisites_read_model_used"),
+        1,
+        "page logic must consume warmed prerequisites cache"
+    );
+    assert_eq!(
+        cached_profile.counter("path_read_model_used"),
+        1,
+        "page logic must consume warmed path_summary cache"
+    );
+    Ok(())
+}
+
+#[test]
+fn m52_page_logic_extended_warm_cache_preserves_compact_output() -> anyhow::Result<()> {
+    let graph = fixture_graph("extended-warm-compact")?;
+    let page_id = "page:app/actions_test.spg";
+    let budget = "compact";
+    let dense_snapshot = DenseGraphSnapshot::from_graph(&graph)?;
+    let availability_cache = build_page_logic_availability_cache(
+        &graph,
+        Some(&dense_snapshot),
+        page_id,
+        None,
+        budget,
+        None,
+    )?;
+
+    let (mut baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
+        &graph,
+        Some(&dense_snapshot),
+        page_id,
+        None,
+        budget,
+    )?;
+    let (mut cached, cached_profile) =
+        build_query_page_logic_output_profiled_with_availability_cache(
+            &graph,
+            Some(&dense_snapshot),
+            Some(&availability_cache),
+            None,
+            page_id,
+            None,
+            budget,
+        )?;
+
+    canonicalize_value(&mut baseline);
+    canonicalize_value(&mut cached);
+    assert_eq!(
+        cached, baseline,
+        "extended warm cache must not change compact page logic output"
+    );
+    assert_eq!(cached_profile.counter("availability_read_model_used"), 1);
+    assert_eq!(cached_profile.counter("prerequisites_read_model_used"), 1);
+    assert_eq!(cached_profile.counter("path_read_model_used"), 1);
     Ok(())
 }

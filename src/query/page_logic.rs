@@ -579,6 +579,8 @@ pub struct PageLogicAvailabilityCache {
     page_id: String,
     budget: String,
     batch: KeyModelAvailabilityBatch,
+    prerequisites: Option<prerequisites::PagePrerequisites>,
+    paths: Option<path_summary::PageLogicPaths>,
     warm_stages: BTreeMap<String, u128>,
 }
 
@@ -596,6 +598,16 @@ impl PageLogicAvailabilityCache {
     /// 查询 warm 阶段耗时。
     pub fn warm_stage_ms(&self, name: &str) -> Option<u128> {
         self.warm_stages.get(name).copied()
+    }
+
+    /// 将缓存的前置条件投影为查询阶段输入。
+    fn project_prerequisites(&self) -> Option<prerequisites::PagePrerequisites> {
+        self.prerequisites.clone()
+    }
+
+    /// 将缓存的路径摘要投影为查询阶段输入。
+    fn project_paths(&self) -> Option<path_summary::PageLogicPaths> {
+        self.paths.clone()
     }
 }
 
@@ -889,13 +901,14 @@ pub fn build_query_page_logic_output_profiled_with_availability_cache(
     Ok((output, profile))
 }
 
-/// 预热页面 availability 读模型缓存。
+/// 预热页面 logic 读模型缓存（availability + prerequisites + path_summary）。
 ///
-/// 第一版通过现有 page logic 输出提取 availability 投影，用于验证“query-time 构造成本前移”。
+/// 通过现有 page logic 子阶段物化读模型，用于验证“query-time 构造成本前移”。
 pub fn build_page_logic_availability_cache(
     graph: &dyn GraphReadStore,
+    dense_snapshot: Option<&crate::dense_graph::DenseGraphSnapshot>,
     page_id: &str,
-    _project_dir: Option<&std::path::Path>,
+    project_dir: Option<&std::path::Path>,
     budget: &str,
     materialized_availability: Option<&MaterializedAvailabilityFactsIndex>,
 ) -> Result<PageLogicAvailabilityCache> {
@@ -913,6 +926,8 @@ pub fn build_page_logic_availability_cache(
                 graph_cache_hits: 0,
                 materialized_hits: 0,
             },
+            prerequisites: None,
+            paths: None,
             warm_stages,
         });
     };
@@ -931,21 +946,34 @@ pub fn build_page_logic_availability_cache(
         collect_started.elapsed().as_millis(),
     );
 
-    let edge_started = Instant::now();
-    let (data_sources, write_targets) =
-        collect_availability_model_edges(graph, &child_components, &child_actions)?;
+    let metadata_started = Instant::now();
+    let metadata::PageFileMetadata {
+        component_json_paths, ..
+    } = metadata::load_page_file_metadata(project_dir, &page_node.path);
     warm_stages.insert(
-        "availability_model_edge_scan".to_string(),
-        edge_started.elapsed().as_millis(),
+        "load_page_metadata".to_string(),
+        metadata_started.elapsed().as_millis(),
     );
 
-    let prerequisites_started = Instant::now();
+    let edge_started = Instant::now();
     let mut ignored_profile = None;
-    let prerequisites::PagePrerequisites {
-        display_prerequisites,
-        data_prerequisites,
-        action_prerequisites: _,
-    } = prerequisites::collect_page_prerequisites(
+    let PageLogicEdgeBundle {
+        data_sources,
+        write_targets,
+        entrypoints,
+        ..
+    } = collect_page_logic_edge_bundle(
+        graph,
+        &page_node,
+        &child_components,
+        &child_actions,
+        &component_json_paths,
+        &mut ignored_profile,
+    )?;
+    warm_stages.insert("edge_scan".to_string(), edge_started.elapsed().as_millis());
+
+    let prerequisites_started = Instant::now();
+    let prerequisites = prerequisites::collect_page_prerequisites(
         graph,
         &page_node.path,
         &child_components,
@@ -954,7 +982,7 @@ pub fn build_page_logic_availability_cache(
         &mut ignored_profile,
     )?;
     warm_stages.insert(
-        "availability_prerequisites".to_string(),
+        "prerequisites".to_string(),
         prerequisites_started.elapsed().as_millis(),
     );
 
@@ -962,8 +990,8 @@ pub fn build_page_logic_availability_cache(
     let key_model_ids = collect_availability_key_model_ids(
         &data_sources,
         &write_targets,
-        &display_prerequisites,
-        &data_prerequisites,
+        &prerequisites.display_prerequisites,
+        &prerequisites.data_prerequisites,
     );
     warm_stages.insert(
         "availability_key_models".to_string(),
@@ -986,152 +1014,60 @@ pub fn build_page_logic_availability_cache(
         materialize_started.elapsed().as_millis(),
     );
 
+    let paths_started = Instant::now();
+    let child_component_refs: Vec<&crate::graph::Node> = child_components.iter().collect();
+    let child_action_refs: Vec<&crate::graph::Node> = child_actions.iter().collect();
+    let paths = path_summary::build_page_logic_paths(
+        graph,
+        dense_snapshot,
+        page_id,
+        &page_node,
+        &child_component_refs,
+        &child_action_refs,
+        &data_sources,
+        &write_targets,
+        &entrypoints,
+        &mut ignored_profile,
+    );
+    warm_stages.insert(
+        "path_summary".to_string(),
+        paths_started.elapsed().as_millis(),
+    );
+
     Ok(PageLogicAvailabilityCache {
         page_id: page_id.to_string(),
         budget: budget.to_string(),
         batch,
+        prerequisites: Some(prerequisites),
+        paths: Some(paths),
         warm_stages,
     })
 }
 
-fn collect_availability_model_edges(
+/// 页面图遍历阶段产出的边与入口集合，供 prerequisites / path_summary 复用。
+struct PageLogicEdgeBundle {
+    data_sources: Vec<serde_json::Value>,
+    write_targets: Vec<serde_json::Value>,
+    navigation: Vec<serde_json::Value>,
+    entrypoints: Vec<serde_json::Value>,
+}
+
+/// 收集 entrypoints 与组件/动作出边，供 page logic 与 warm 缓存共用。
+fn collect_page_logic_edge_bundle(
     graph: &dyn GraphReadStore,
+    page_node: &crate::graph::Node,
     child_components: &[crate::graph::Node],
     child_actions: &[crate::graph::Node],
-) -> Result<(Vec<serde_json::Value>, Vec<serde_json::Value>)> {
-    let mut data_sources = Vec::new();
-    let mut write_targets = Vec::new();
-    for node in child_components.iter().chain(child_actions.iter()) {
-        let Some(neighbors) = graph.get_node_edges(&node.id)? else {
-            continue;
-        };
-        for edge_view in neighbors.outgoing {
-            let target = edge_view.node;
-            let edge = edge_view.edge;
-            match edge.edge_type {
-                crate::graph::EdgeType::Reads
-                | crate::graph::EdgeType::ActionReads
-                | crate::graph::EdgeType::ActionValidates
-                | crate::graph::EdgeType::ActionLoadsData => {
-                    data_sources.push(json!({
-                        "target_id": target.id,
-                    }));
-                }
-                crate::graph::EdgeType::Writes | crate::graph::EdgeType::ActionWrites => {
-                    write_targets.push(json!({
-                        "target_id": target.id,
-                    }));
-                }
-                _ => {}
-            }
-        }
-    }
-    Ok((data_sources, write_targets))
-}
-
-fn collect_availability_key_model_ids(
-    data_sources: &[serde_json::Value],
-    write_targets: &[serde_json::Value],
-    display_prerequisites: &[serde_json::Value],
-    data_prerequisites: &[serde_json::Value],
-) -> Vec<String> {
-    let mut key_model_ids = Vec::new();
-    let mut seen_models: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for ds in data_sources {
-        if let Some(target_id) = ds.get("target_id").and_then(|v| v.as_str()) {
-            if target_id.starts_with("model:") && seen_models.insert(target_id.to_string()) {
-                key_model_ids.push(target_id.to_string());
-            }
-        }
-    }
-    for wt in write_targets {
-        if let Some(target_id) = wt.get("target_id").and_then(|v| v.as_str()) {
-            if target_id.starts_with("model:") && seen_models.insert(target_id.to_string()) {
-                key_model_ids.push(target_id.to_string());
-            }
-        }
-    }
-    for prereq in display_prerequisites
-        .iter()
-        .chain(data_prerequisites.iter())
-    {
-        if let Some(depends_on) = prereq.get("depends_on").and_then(|v| v.as_array()) {
-            for dep in depends_on {
-                let Some(dep) = dep.as_str() else {
-                    continue;
-                };
-                let Some(model_id) = model_id_from_reference(dep) else {
-                    continue;
-                };
-                if seen_models.insert(model_id.clone()) {
-                    key_model_ids.push(model_id);
-                }
-            }
-        }
-    }
-    key_model_ids
-}
-
-fn build_query_page_logic_output_inner(
-    graph: &dyn GraphReadStore,
-    dense_snapshot: Option<&crate::dense_graph::DenseGraphSnapshot>,
-    availability_cache: Option<&PageLogicAvailabilityCache>,
-    materialized_availability: Option<&MaterializedAvailabilityFactsIndex>,
-    page_id: &str,
-    project_dir: Option<&std::path::Path>,
-    budget: &str,
-    mut profile: Option<&mut PerfProfile>,
-) -> Result<serde_json::Value> {
-    let is_compact = budget == "compact";
-    let is_full = budget == "full";
-    let stage_started = Instant::now();
-    let page_node = match graph.get_node(page_id)? {
-        Some(n) => n,
-        None => {
-            record_profile_stage(&mut profile, "target_lookup", stage_started);
-            let candidates = find_candidates(graph, page_id, 5)?;
-            let out = crate::output::schema::build_target_not_found_output(
-                crate::output::schema::OutputKind::PageQuery,
-                page_id,
-                &candidates,
-            );
-            return Ok(serde_json::to_value(out)?);
-        }
-    };
-    record_profile_stage(&mut profile, "target_lookup", stage_started);
+    component_json_paths: &std::collections::HashMap<String, String>,
+    profile: &mut Option<&mut PerfProfile>,
+) -> Result<PageLogicEdgeBundle> {
     let mut edge_cache: HashMap<String, Option<GraphNeighbors>> = HashMap::new();
 
-    // ---- 1. 递归收集页面下所有 Component 节点，再收集它们 Triggers 出的 Action 节点 ----
-    let stage_started = Instant::now();
-    let graph_collect::PageLogicNodes {
-        child_components,
-        child_actions,
-    } = graph_collect::collect_page_logic_nodes(graph, page_id)?;
-    record_profile_stage(&mut profile, "collect_page_nodes", stage_started);
-    set_profile_counter(&mut profile, "child_components", child_components.len());
-    set_profile_counter(&mut profile, "child_actions", child_actions.len());
-    let child_component_refs: Vec<&crate::graph::Node> = child_components.iter().collect();
-    let child_action_refs: Vec<&crate::graph::Node> = child_actions.iter().collect();
-
-    // ---- 2. 从原始文件读取：递归收集组件元数据、action 元数据、visibility_rules ----
-    let stage_started = Instant::now();
-    let metadata::PageFileMetadata {
-        page_inputs,
-        visibility_rules,
-        from_file,
-        component_json_paths,
-        action_meta,
-    } = metadata::load_page_file_metadata(project_dir, &page_node.path);
-    record_profile_stage(&mut profile, "load_page_metadata", stage_started);
-    set_profile_counter(&mut profile, "page_inputs", page_inputs.len());
-    set_profile_counter(&mut profile, "visibility_rules", visibility_rules.len());
-
-    // ---- 3. Entrypoints：只包含用户可触发组件（有 action 的 button/link 等） ----
     let stage_started = Instant::now();
     let mut entrypoints: Vec<serde_json::Value> = Vec::new();
-    for comp in &child_components {
+    for comp in child_components {
         if let Some(neighbors) = cached_node_edges(graph, &mut edge_cache, &comp.id)? {
-            add_profile_counter(&mut profile, "edges_scanned", neighbors.outgoing.len());
+            add_profile_counter(profile, "edges_scanned", neighbors.outgoing.len());
             let has_trigger = neighbors.outgoing.iter().any(|edge_view| {
                 matches!(edge_view.edge.edge_type, crate::graph::EdgeType::Triggers)
             });
@@ -1162,15 +1098,13 @@ fn build_query_page_logic_output_inner(
             }
         }
     }
-    record_profile_stage(&mut profile, "entrypoint_scan", stage_started);
-    set_profile_counter(&mut profile, "entrypoints", entrypoints.len());
+    record_profile_stage(profile, "entrypoint_scan", stage_started);
+    set_profile_counter(profile, "entrypoints", entrypoints.len());
 
-    // ---- 4. 收集所有 Component & Action 的出边，用于 data_sources / write_targets / navigation ----
     let stage_started = Instant::now();
     let mut data_sources: Vec<serde_json::Value> = Vec::new();
     let mut write_targets: Vec<serde_json::Value> = Vec::new();
     let mut navigation: Vec<serde_json::Value> = Vec::new();
-    let mut action_flows: Vec<serde_json::Value> = Vec::new();
 
     let mut all_nodes: Vec<&crate::graph::Node> = Vec::new();
     all_nodes.extend(child_components.iter());
@@ -1178,7 +1112,7 @@ fn build_query_page_logic_output_inner(
 
     for node in &all_nodes {
         if let Some(neighbors) = cached_node_edges(graph, &mut edge_cache, &node.id)? {
-            add_profile_counter(&mut profile, "edges_scanned", neighbors.outgoing.len());
+            add_profile_counter(profile, "edges_scanned", neighbors.outgoing.len());
             for edge_view in &neighbors.outgoing {
                 let target = &edge_view.node;
                 let edge = &edge_view.edge;
@@ -1364,10 +1298,131 @@ fn build_query_page_logic_output_inner(
             }
         }
     }
-    record_profile_stage(&mut profile, "edge_scan", stage_started);
-    set_profile_counter(&mut profile, "data_sources", data_sources.len());
-    set_profile_counter(&mut profile, "write_targets", write_targets.len());
-    set_profile_counter(&mut profile, "navigation", navigation.len());
+    record_profile_stage(profile, "edge_scan", stage_started);
+    set_profile_counter(profile, "data_sources", data_sources.len());
+    set_profile_counter(profile, "write_targets", write_targets.len());
+    set_profile_counter(profile, "navigation", navigation.len());
+
+    Ok(PageLogicEdgeBundle {
+        data_sources,
+        write_targets,
+        navigation,
+        entrypoints,
+    })
+}
+
+fn collect_availability_key_model_ids(
+    data_sources: &[serde_json::Value],
+    write_targets: &[serde_json::Value],
+    display_prerequisites: &[serde_json::Value],
+    data_prerequisites: &[serde_json::Value],
+) -> Vec<String> {
+    let mut key_model_ids = Vec::new();
+    let mut seen_models: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for ds in data_sources {
+        if let Some(target_id) = ds.get("target_id").and_then(|v| v.as_str()) {
+            if target_id.starts_with("model:") && seen_models.insert(target_id.to_string()) {
+                key_model_ids.push(target_id.to_string());
+            }
+        }
+    }
+    for wt in write_targets {
+        if let Some(target_id) = wt.get("target_id").and_then(|v| v.as_str()) {
+            if target_id.starts_with("model:") && seen_models.insert(target_id.to_string()) {
+                key_model_ids.push(target_id.to_string());
+            }
+        }
+    }
+    for prereq in display_prerequisites
+        .iter()
+        .chain(data_prerequisites.iter())
+    {
+        if let Some(depends_on) = prereq.get("depends_on").and_then(|v| v.as_array()) {
+            for dep in depends_on {
+                let Some(dep) = dep.as_str() else {
+                    continue;
+                };
+                let Some(model_id) = model_id_from_reference(dep) else {
+                    continue;
+                };
+                if seen_models.insert(model_id.clone()) {
+                    key_model_ids.push(model_id);
+                }
+            }
+        }
+    }
+    key_model_ids
+}
+
+fn build_query_page_logic_output_inner(
+    graph: &dyn GraphReadStore,
+    dense_snapshot: Option<&crate::dense_graph::DenseGraphSnapshot>,
+    availability_cache: Option<&PageLogicAvailabilityCache>,
+    materialized_availability: Option<&MaterializedAvailabilityFactsIndex>,
+    page_id: &str,
+    project_dir: Option<&std::path::Path>,
+    budget: &str,
+    mut profile: Option<&mut PerfProfile>,
+) -> Result<serde_json::Value> {
+    let is_compact = budget == "compact";
+    let is_full = budget == "full";
+    let stage_started = Instant::now();
+    let page_node = match graph.get_node(page_id)? {
+        Some(n) => n,
+        None => {
+            record_profile_stage(&mut profile, "target_lookup", stage_started);
+            let candidates = find_candidates(graph, page_id, 5)?;
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::PageQuery,
+                page_id,
+                &candidates,
+            );
+            return Ok(serde_json::to_value(out)?);
+        }
+    };
+    record_profile_stage(&mut profile, "target_lookup", stage_started);
+    let mut edge_cache: HashMap<String, Option<GraphNeighbors>> = HashMap::new();
+
+    // ---- 1. 递归收集页面下所有 Component 节点，再收集它们 Triggers 出的 Action 节点 ----
+    let stage_started = Instant::now();
+    let graph_collect::PageLogicNodes {
+        child_components,
+        child_actions,
+    } = graph_collect::collect_page_logic_nodes(graph, page_id)?;
+    record_profile_stage(&mut profile, "collect_page_nodes", stage_started);
+    set_profile_counter(&mut profile, "child_components", child_components.len());
+    set_profile_counter(&mut profile, "child_actions", child_actions.len());
+    let child_component_refs: Vec<&crate::graph::Node> = child_components.iter().collect();
+    let child_action_refs: Vec<&crate::graph::Node> = child_actions.iter().collect();
+
+    // ---- 2. 从原始文件读取：递归收集组件元数据、action 元数据、visibility_rules ----
+    let stage_started = Instant::now();
+    let metadata::PageFileMetadata {
+        page_inputs,
+        visibility_rules,
+        from_file,
+        component_json_paths,
+        action_meta,
+    } = metadata::load_page_file_metadata(project_dir, &page_node.path);
+    record_profile_stage(&mut profile, "load_page_metadata", stage_started);
+    set_profile_counter(&mut profile, "page_inputs", page_inputs.len());
+    set_profile_counter(&mut profile, "visibility_rules", visibility_rules.len());
+
+    // ---- 3-4. Entrypoints 与图边扫描 ----
+    let PageLogicEdgeBundle {
+        data_sources,
+        write_targets,
+        navigation,
+        entrypoints,
+    } = collect_page_logic_edge_bundle(
+        graph,
+        &page_node,
+        &child_components,
+        &child_actions,
+        &component_json_paths,
+        &mut profile,
+    )?;
+    let mut action_flows: Vec<serde_json::Value> = Vec::new();
 
     // ---- 5. Action flows：遍历 Action 节点，聚合 reads/writes/navigation ----
     let stage_started = Instant::now();
@@ -1608,19 +1663,26 @@ fn build_query_page_logic_output_inner(
     set_profile_counter(&mut profile, "action_flows", action_flows.len());
 
     // ---- 5.5 收集页面级条件前置条件（M19） ----
+    let cached_page = availability_cache.filter(|cache| cache.matches(page_id, budget));
     let stage_started = Instant::now();
+    let prerequisites_read_model_used =
+        cached_page.and_then(|cache| cache.project_prerequisites()).is_some();
     let prerequisites::PagePrerequisites {
         display_prerequisites,
         data_prerequisites,
         action_prerequisites,
-    } = prerequisites::collect_page_prerequisites(
-        graph,
-        &page_node.path,
-        &child_components,
-        &child_actions,
-        &data_sources,
-        &mut profile,
-    )?;
+    } = if let Some(cached) = cached_page.and_then(|cache| cache.project_prerequisites()) {
+        cached
+    } else {
+        prerequisites::collect_page_prerequisites(
+            graph,
+            &page_node.path,
+            &child_components,
+            &child_actions,
+            &data_sources,
+            &mut profile,
+        )?
+    };
     record_profile_stage(&mut profile, "prerequisites", stage_started);
     set_profile_counter(
         &mut profile,
@@ -1633,9 +1695,15 @@ fn build_query_page_logic_output_inner(
         "action_prerequisites",
         action_prerequisites.len(),
     );
+    set_profile_counter(
+        &mut profile,
+        "prerequisites_read_model_used",
+        usize::from(prerequisites_read_model_used),
+    );
 
     // ---- 5.6 主链路抽取（M19.5）—— 使用路径计算领域模型 ----
     let stage_started = Instant::now();
+    let path_read_model_used = cached_page.and_then(|cache| cache.project_paths()).is_some();
     let path_summary::PageLogicPaths {
         mut primary_paths,
         mut related_context,
@@ -1643,24 +1711,33 @@ fn build_query_page_logic_output_inner(
         supporting_paths,
         rejected_paths,
         path_selection_diagnostics,
-    } = path_summary::build_page_logic_paths(
-        graph,
-        dense_snapshot,
-        page_id,
-        &page_node,
-        &child_component_refs,
-        &child_action_refs,
-        &data_sources,
-        &write_targets,
-        &entrypoints,
-        &mut profile,
-    );
+    } = if let Some(cached) = cached_page.and_then(|cache| cache.project_paths()) {
+        cached
+    } else {
+        path_summary::build_page_logic_paths(
+            graph,
+            dense_snapshot,
+            page_id,
+            &page_node,
+            &child_component_refs,
+            &child_action_refs,
+            &data_sources,
+            &write_targets,
+            &entrypoints,
+            &mut profile,
+        )
+    };
     record_profile_stage(&mut profile, "path_summary", stage_started);
     set_profile_counter(&mut profile, "primary_paths", primary_paths.len());
     set_profile_counter(&mut profile, "related_context", related_context.len());
     set_profile_counter(&mut profile, "candidate_paths", candidate_paths.len());
     set_profile_counter(&mut profile, "supporting_paths", supporting_paths.len());
     set_profile_counter(&mut profile, "rejected_paths", rejected_paths.len());
+    set_profile_counter(
+        &mut profile,
+        "path_read_model_used",
+        usize::from(path_read_model_used),
+    );
 
     // ---- 6. Risk diagnostics ----
     let stage_started = Instant::now();
@@ -1767,7 +1844,7 @@ fn build_query_page_logic_output_inner(
     }
 
     let key_model_availability_limit = if is_compact { Some(3) } else { None };
-    let cached_availability = availability_cache.filter(|cache| cache.matches(page_id, budget));
+    let cached_availability = cached_page;
     let availability_read_model_used = cached_availability.is_some();
     let (availability_batch, availability_index_build_ms, availability_index_projection_ms) =
         if let Some(cache) = cached_availability {
