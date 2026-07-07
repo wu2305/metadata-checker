@@ -402,6 +402,65 @@ fn test_graph_runtime_warms_page_logic_availability_cache() {
     );
 }
 
+#[test]
+fn test_graph_runtime_page_logic_profiled_collects_b1_b2_counters() {
+    let (temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut long_lived_runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(&temp_dir),
+        RuntimeMode::LongLived,
+    )
+    .expect("long-lived runtime load must succeed");
+    let page_id = "page:app/actions_test.spg";
+    let budget = "normal";
+
+    let (_cold, cold_profile) = long_lived_runtime
+        .query_page_logic_profiled(page_id, budget)
+        .expect("cold profiled query_page_logic must succeed");
+    assert_eq!(
+        cold_profile.counter("path_dense_graph_used"),
+        1,
+        "long-lived cold query must use dense snapshot for path_summary"
+    );
+    assert!(
+        cold_profile.counter("path_dense_adjacency_hits") > 0,
+        "long-lived cold query must traverse dense adjacency during path search"
+    );
+
+    long_lived_runtime
+        .warm_page_logic_availability(page_id, budget)
+        .expect("warm page logic availability must succeed");
+
+    let (_response, profile) = long_lived_runtime
+        .query_page_logic_profiled(page_id, budget)
+        .expect("profiled query_page_logic must succeed");
+
+    assert_eq!(
+        profile.counter("availability_read_model_used"),
+        1,
+        "warmed long-lived query must consume availability read model"
+    );
+    assert!(
+        profile.counter("availability_materialized_hits") > 0,
+        "long-lived warmed query must report materialized availability hits from cache batch"
+    );
+    assert_eq!(
+        profile.counter("prerequisites_read_model_used"),
+        1,
+        "warmed long-lived query must consume prerequisites read model"
+    );
+    assert_eq!(
+        profile.counter("path_read_model_used"),
+        1,
+        "warmed long-lived query must consume path_summary read model"
+    );
+    assert_eq!(
+        profile.counter("path_dense_graph_used"),
+        0,
+        "path cache hit should skip query-time dense path_summary rebuild"
+    );
+}
+
 /// M25 验收：reload 失败时保留旧 graph，仍可查询
 #[test]
 fn test_runtime_reload_failure_preserves_old_graph() {

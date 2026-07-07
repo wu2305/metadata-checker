@@ -333,6 +333,7 @@ impl GraphRuntime {
         };
         let cache = crate::query::build_page_logic_availability_cache(
             &self.graph,
+            read_model.dense_graph.as_deref(),
             page_id,
             self.project_dir.as_deref(),
             budget,
@@ -621,6 +622,54 @@ impl GraphRuntime {
             &response.timing,
         );
         Ok(response)
+    }
+
+    /// profiling 专用：执行 QueryPageLogic 并返回 page logic 归因 counters。
+    ///
+    /// 不改变默认 `query()` 契约；仅供 benchmark / perf_report 验证 B1/B2 集成。
+    #[cfg(feature = "cli-local")]
+    pub fn query_page_logic_profiled(
+        &mut self,
+        target: &str,
+        budget: &str,
+    ) -> Result<(
+        crate::response_processor::RuntimeQueryResponse,
+        crate::perf_profile::PerfProfile,
+    )> {
+        let total_start = Instant::now();
+        let query_start = Instant::now();
+        let availability_cache = self
+            .read_model
+            .as_ref()
+            .and_then(|model| model.page_logic_availability(target, budget));
+        let materialized_availability = self
+            .read_model
+            .as_ref()
+            .map(|model| model.availability_facts.as_ref());
+        let dense_snapshot = self
+            .read_model
+            .as_ref()
+            .and_then(|model| model.dense_graph.as_deref())
+            .or(self.dense_snapshot.as_deref());
+        let (result, profile) =
+            crate::query::build_query_page_logic_output_profiled_with_availability_cache(
+                &self.graph,
+                dense_snapshot,
+                availability_cache,
+                materialized_availability,
+                target,
+                self.project_dir.as_deref(),
+                budget,
+            )?;
+        let query_compute_ms = query_start.elapsed().as_millis();
+        let response = ResponseProcessor::runtime_response(
+            result,
+            Vec::new(),
+            0,
+            query_compute_ms,
+            total_start,
+        )?;
+        Ok((response, profile))
     }
 
     /// 获取当前 graphdb 文件指纹

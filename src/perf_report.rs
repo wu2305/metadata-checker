@@ -903,17 +903,8 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
     );
 
     let started_at = Instant::now();
-    let long_lived_query_response = long_lived_runtime
-        .query(crate::runtime::RuntimeQueryRequest {
-            command: ToolCommand::QueryPageLogic,
-            target: page_logic_target.clone(),
-            budget: "compact".to_string(),
-            human: false,
-            intent: None,
-            page_scope: None,
-            depth: None,
-            check_reload: false,
-        })
+    let (long_lived_query_response, long_lived_query_profile) = long_lived_runtime
+        .query_page_logic_profiled(&page_logic_target, "compact")
         .context("profile long-lived runtime query dispatch")?;
     let long_lived_query_elapsed = started_at.elapsed();
     let long_lived_query_ms = long_lived_query_elapsed.as_millis() as u64;
@@ -926,6 +917,11 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         "runtime_long_lived_query_diagnostics",
         long_lived_query_response.diagnostics.len() as u64,
     );
+    record_runtime_page_logic_profile_counters(
+        &mut profile,
+        "runtime_long_lived_query",
+        &long_lived_query_profile,
+    );
 
     let started_at = Instant::now();
     let warm_ms = long_lived_runtime
@@ -935,17 +931,8 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
     profile.set_counter("runtime_long_lived_availability_warm_ms", warm_ms as u64);
 
     let started_at = Instant::now();
-    let warmed_query_response = long_lived_runtime
-        .query(crate::runtime::RuntimeQueryRequest {
-            command: ToolCommand::QueryPageLogic,
-            target: page_logic_target.clone(),
-            budget: "compact".to_string(),
-            human: false,
-            intent: None,
-            page_scope: None,
-            depth: None,
-            check_reload: false,
-        })
+    let (warmed_query_response, warmed_query_profile) = long_lived_runtime
+        .query_page_logic_profiled(&page_logic_target, "compact")
         .context("profile warmed long-lived runtime query dispatch")?;
     let warmed_query_elapsed = started_at.elapsed();
     let warmed_query_ms = warmed_query_elapsed.as_millis() as u64;
@@ -960,6 +947,11 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
     profile.set_counter(
         "runtime_long_lived_warmed_query_diagnostics",
         warmed_query_response.diagnostics.len() as u64,
+    );
+    record_runtime_page_logic_profile_counters(
+        &mut profile,
+        "runtime_long_lived_warmed_query",
+        &warmed_query_profile,
     );
     for query_count in [1_u64, 5, 10, 50] {
         profile.set_counter(
@@ -987,6 +979,25 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
     );
     profile.finish();
     Ok(profile)
+}
+
+#[cfg(feature = "cli-local")]
+fn record_runtime_page_logic_profile_counters(
+    profile: &mut PerfProfile,
+    prefix: &str,
+    page_logic_profile: &PerfProfile,
+) {
+    for counter in [
+        "availability_materialized_hits",
+        "availability_read_model_used",
+        "path_dense_adjacency_hits",
+        "path_dense_graph_used",
+    ] {
+        profile.set_counter(
+            &format!("{prefix}_{counter}"),
+            page_logic_profile.counter(counter),
+        );
+    }
 }
 
 #[cfg(feature = "cli-local")]
