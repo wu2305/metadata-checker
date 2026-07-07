@@ -11,9 +11,12 @@ use std::time::Instant;
 mod diagnostics;
 mod evidence;
 mod graph_collect;
+mod materialized_availability;
 mod metadata;
 mod path_summary;
 mod prerequisites;
+
+pub use materialized_availability::MaterializedAvailabilityFactsIndex;
 
 /// 提取完整节点 ID 中的组件裸 ID（如 comp:app/a.spg|button1 -> button1）
 fn component_short_id(node_id: &str) -> &str {
@@ -567,6 +570,7 @@ struct KeyModelAvailabilityBatch {
     fallback_count: usize,
     condition_group_count: usize,
     graph_cache_hits: usize,
+    materialized_hits: usize,
 }
 
 /// 预热后的页面 availability 读模型缓存。
@@ -605,6 +609,7 @@ struct PageAvailabilityIndex {
     fallback_count: usize,
     condition_group_count: usize,
     graph_cache_hits: usize,
+    materialized_hits: usize,
 }
 
 impl PageAvailabilityIndex {
@@ -615,9 +620,15 @@ impl PageAvailabilityIndex {
         page_path: &str,
         key_model_ids: &[String],
         availability_limit: Option<usize>,
+        materialized: Option<&MaterializedAvailabilityFactsIndex>,
     ) -> Self {
-        let batch =
-            build_key_model_availability_batch(graph, page_path, key_model_ids, availability_limit);
+        let batch = build_key_model_availability_batch(
+            graph,
+            page_path,
+            key_model_ids,
+            availability_limit,
+            materialized,
+        );
         Self {
             page_id: page_id.to_string(),
             page_path: page_path.to_string(),
@@ -627,6 +638,7 @@ impl PageAvailabilityIndex {
             fallback_count: batch.fallback_count,
             condition_group_count: batch.condition_group_count,
             graph_cache_hits: batch.graph_cache_hits,
+            materialized_hits: batch.materialized_hits,
         }
     }
 
@@ -650,6 +662,7 @@ impl PageAvailabilityIndex {
             fallback_count: self.fallback_count,
             condition_group_count: self.condition_group_count,
             graph_cache_hits: self.graph_cache_hits,
+            materialized_hits: self.materialized_hits,
         }
     }
 }
@@ -660,13 +673,16 @@ fn build_key_model_availability_batch(
     page_path: &str,
     key_model_ids: &[String],
     availability_limit: Option<usize>,
+    materialized: Option<&MaterializedAvailabilityFactsIndex>,
 ) -> KeyModelAvailabilityBatch {
     let cached_graph = AvailabilityGraphCache::new(graph);
     let mut entries = Vec::new();
     let mut fast_path_count = 0usize;
     let mut fallback_count = 0usize;
     let mut condition_group_count = 0usize;
-    let mut condition_cache = crate::explain::ConditionCollectorCache::new();
+    let mut condition_cache = materialized
+        .map(MaterializedAvailabilityFactsIndex::seed_condition_cache)
+        .unwrap_or_else(crate::explain::ConditionCollectorCache::new);
 
     for model_id in key_model_ids {
         if availability_limit.is_some_and(|limit| entries.len() >= limit) {
@@ -697,6 +713,7 @@ fn build_key_model_availability_batch(
         fallback_count,
         condition_group_count,
         graph_cache_hits: cached_graph.cache_hits() + condition_cache.cache_hits(),
+        materialized_hits: condition_cache.materialized_hits(),
     }
 }
 
@@ -725,7 +742,16 @@ pub fn build_query_page_logic_output(
     project_dir: Option<&std::path::Path>,
     budget: &str,
 ) -> Result<serde_json::Value> {
-    build_query_page_logic_output_inner(graph, None, None, page_id, project_dir, budget, None)
+    build_query_page_logic_output_inner(
+        graph,
+        None,
+        None,
+        None,
+        page_id,
+        project_dir,
+        budget,
+        None,
+    )
 }
 
 /// 查询页面级逻辑摘要，并允许复用预构建稠密图快照。
@@ -740,6 +766,7 @@ pub fn build_query_page_logic_output_with_dense_snapshot(
         graph,
         dense_snapshot,
         None,
+        None,
         page_id,
         project_dir,
         budget,
@@ -752,6 +779,7 @@ pub fn build_query_page_logic_output_with_availability_cache(
     graph: &dyn GraphReadStore,
     dense_snapshot: Option<&crate::dense_graph::DenseGraphSnapshot>,
     availability_cache: Option<&PageLogicAvailabilityCache>,
+    materialized_availability: Option<&MaterializedAvailabilityFactsIndex>,
     page_id: &str,
     project_dir: Option<&std::path::Path>,
     budget: &str,
@@ -760,6 +788,7 @@ pub fn build_query_page_logic_output_with_availability_cache(
         graph,
         dense_snapshot,
         availability_cache,
+        materialized_availability,
         page_id,
         project_dir,
         budget,
@@ -800,6 +829,30 @@ pub fn build_query_page_logic_output_profiled_with_dense_snapshot(
         graph,
         dense_snapshot,
         None,
+        None,
+        page_id,
+        project_dir,
+        budget,
+        Some(&mut profile),
+    )?;
+    profile.finish();
+    Ok((output, profile))
+}
+
+/// 查询页面级逻辑摘要，并复用 load-time 物化 availability facts 索引进行 profiling。
+pub fn build_query_page_logic_output_profiled_with_materialized_availability(
+    graph: &dyn GraphReadStore,
+    materialized_availability: Option<&MaterializedAvailabilityFactsIndex>,
+    page_id: &str,
+    project_dir: Option<&std::path::Path>,
+    budget: &str,
+) -> Result<(serde_json::Value, PerfProfile)> {
+    let mut profile = PerfProfile::new("query_page_logic");
+    let output = build_query_page_logic_output_inner(
+        graph,
+        None,
+        None,
+        materialized_availability,
         page_id,
         project_dir,
         budget,
@@ -816,6 +869,7 @@ pub fn build_query_page_logic_output_profiled_with_availability_cache(
     graph: &dyn GraphReadStore,
     dense_snapshot: Option<&crate::dense_graph::DenseGraphSnapshot>,
     availability_cache: Option<&PageLogicAvailabilityCache>,
+    materialized_availability: Option<&MaterializedAvailabilityFactsIndex>,
     page_id: &str,
     project_dir: Option<&std::path::Path>,
     budget: &str,
@@ -825,6 +879,7 @@ pub fn build_query_page_logic_output_profiled_with_availability_cache(
         graph,
         dense_snapshot,
         availability_cache,
+        materialized_availability,
         page_id,
         project_dir,
         budget,
@@ -842,6 +897,7 @@ pub fn build_page_logic_availability_cache(
     page_id: &str,
     _project_dir: Option<&std::path::Path>,
     budget: &str,
+    materialized_availability: Option<&MaterializedAvailabilityFactsIndex>,
 ) -> Result<PageLogicAvailabilityCache> {
     let mut warm_stages = BTreeMap::new();
     let target_started = Instant::now();
@@ -855,6 +911,7 @@ pub fn build_page_logic_availability_cache(
                 fallback_count: 0,
                 condition_group_count: 0,
                 graph_cache_hits: 0,
+                materialized_hits: 0,
             },
             warm_stages,
         });
@@ -921,6 +978,7 @@ pub fn build_page_logic_availability_cache(
         &page_node.path,
         &key_model_ids,
         availability_limit,
+        materialized_availability,
     )
     .project();
     warm_stages.insert(
@@ -1018,6 +1076,7 @@ fn build_query_page_logic_output_inner(
     graph: &dyn GraphReadStore,
     dense_snapshot: Option<&crate::dense_graph::DenseGraphSnapshot>,
     availability_cache: Option<&PageLogicAvailabilityCache>,
+    materialized_availability: Option<&MaterializedAvailabilityFactsIndex>,
     page_id: &str,
     project_dir: Option<&std::path::Path>,
     budget: &str,
@@ -1727,6 +1786,7 @@ fn build_query_page_logic_output_inner(
                 &page_node.path,
                 &key_model_ids,
                 key_model_availability_limit,
+                materialized_availability,
             );
             let build_ms = (index_build_started.elapsed().as_millis() as usize).max(1);
             let projection_started = Instant::now();
@@ -1796,6 +1856,11 @@ fn build_query_page_logic_output_inner(
         &mut profile,
         "availability_condition_groups",
         availability_batch.condition_group_count,
+    );
+    set_profile_counter(
+        &mut profile,
+        "availability_materialized_hits",
+        availability_batch.materialized_hits,
     );
 
     let output_stage_started = Instant::now();

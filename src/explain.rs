@@ -6,7 +6,7 @@ use crate::dependency::DependencyGraph;
 pub(crate) use crate::explain::condition_facts::{
     ConditionCollectorCache, annotate_condition_scope, build_answer_facts, classify_condition,
     collect_conditions_for_node, condition_owned_by_node, dedupe_conditions,
-    expand_total_row_count_gates,
+    expand_total_row_count_gates, precollect_all_node_conditions,
 };
 use crate::explain::condition_facts::{
     build_context_summary, build_primary_reason_for_intent, build_traversal_policy,

@@ -20,6 +20,23 @@ impl DenseNodeId {
     }
 }
 
+/// CSR 邻接切片，避免 path BFS 为每次扩展分配 `GraphNeighbors`。
+pub(crate) struct DenseNeighborSlice<'a> {
+    nodes: &'a [Node],
+    entries: &'a [DenseAdjacencyEntry],
+}
+
+impl<'a> DenseNeighborSlice<'a> {
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub(crate) fn get(&self, index: usize) -> (&'a Node, &'a Edge) {
+        let entry = &self.entries[index];
+        (&self.nodes[entry.adjacent.index()], &entry.edge)
+    }
+}
+
 /// CSR 邻接项，保存邻接节点和边负载。
 #[derive(Debug, Clone)]
 struct DenseAdjacencyEntry {
@@ -151,6 +168,32 @@ impl DenseGraphSnapshot {
         self.node_ids.get(node_id).copied()
     }
 
+    /// 按 node id 返回只读节点引用。
+    pub(crate) fn node_by_id(&self, node_id: &str) -> Option<&Node> {
+        self.dense_id(node_id)
+            .map(|dense_id| &self.nodes[dense_id.index()])
+    }
+
+    /// CSR 出边切片，供 path finder 直接遍历而不构造 `GraphNeighbors`。
+    pub(crate) fn outgoing_neighbors(&self, node_id: &str) -> Option<DenseNeighborSlice<'_>> {
+        let dense_id = self.dense_id(node_id)?;
+        let idx = dense_id.index();
+        Some(DenseNeighborSlice {
+            nodes: &self.nodes,
+            entries: &self.out_edges[self.out_offsets[idx]..self.out_offsets[idx + 1]],
+        })
+    }
+
+    /// CSR 入边切片，供 path finder 直接遍历。
+    pub(crate) fn incoming_neighbors(&self, node_id: &str) -> Option<DenseNeighborSlice<'_>> {
+        let dense_id = self.dense_id(node_id)?;
+        let idx = dense_id.index();
+        Some(DenseNeighborSlice {
+            nodes: &self.nodes,
+            entries: &self.in_edges[self.in_offsets[idx]..self.in_offsets[idx + 1]],
+        })
+    }
+
     fn edge_view(&self, entry: &DenseAdjacencyEntry) -> GraphEdgeView {
         GraphEdgeView {
             node: self.nodes[entry.adjacent.index()].clone(),
@@ -209,4 +252,82 @@ fn flatten_adjacency(
         offsets.push(edges.len());
     }
     (offsets, edges)
+}
+
+/// 只读 CSR 遍历适配器，供 path finder 直接消费稠密邻接。
+pub(crate) struct DensePathTraversal<'a> {
+    snapshot: &'a DenseGraphSnapshot,
+    adjacency_hits: std::cell::Cell<usize>,
+}
+
+impl<'a> DensePathTraversal<'a> {
+    pub(crate) fn new(snapshot: &'a DenseGraphSnapshot) -> Self {
+        Self {
+            snapshot,
+            adjacency_hits: std::cell::Cell::new(0),
+        }
+    }
+
+    pub(crate) fn adjacency_hits(&self) -> usize {
+        self.adjacency_hits.get()
+    }
+}
+
+impl GraphReadStore for DensePathTraversal<'_> {
+    fn get_node(&self, node_id: &str) -> GraphStoreResult<Option<Node>> {
+        Ok(self.snapshot.node_by_id(node_id).cloned())
+    }
+
+    fn get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>> {
+        let outgoing: Vec<GraphEdgeView> = self
+            .snapshot
+            .outgoing_neighbors(node_id)
+            .map(|slice| {
+                self.adjacency_hits
+                    .set(self.adjacency_hits.get() + slice.len());
+                (0..slice.len())
+                    .map(|idx| {
+                        let (node, edge) = slice.get(idx);
+                        GraphEdgeView {
+                            node: node.clone(),
+                            edge: edge.clone(),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let incoming: Vec<GraphEdgeView> = self
+            .snapshot
+            .incoming_neighbors(node_id)
+            .map(|slice| {
+                self.adjacency_hits
+                    .set(self.adjacency_hits.get() + slice.len());
+                (0..slice.len())
+                    .map(|idx| {
+                        let (node, edge) = slice.get(idx);
+                        GraphEdgeView {
+                            node: node.clone(),
+                            edge: edge.clone(),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if outgoing.is_empty() && incoming.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(GraphNeighbors { outgoing, incoming }))
+    }
+
+    fn node_count(&self) -> GraphStoreResult<usize> {
+        self.snapshot.node_count()
+    }
+
+    fn edge_count(&self) -> GraphStoreResult<usize> {
+        self.snapshot.edge_count()
+    }
+
+    fn iter_nodes(&self) -> GraphStoreResult<Box<dyn Iterator<Item = Node> + '_>> {
+        self.snapshot.iter_nodes()
+    }
 }

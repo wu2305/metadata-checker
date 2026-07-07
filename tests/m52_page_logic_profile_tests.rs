@@ -163,7 +163,7 @@ fn m52_page_logic_uses_warmed_availability_cache_without_changing_output() -> an
     let graph = fixture_graph("availability-cache-override")?;
     let page_id = "page:app/actions_test.spg";
     let budget = "normal";
-    let availability_cache = build_page_logic_availability_cache(&graph, page_id, None, budget)?;
+    let availability_cache = build_page_logic_availability_cache(&graph, page_id, None, budget, None)?;
 
     let (mut baseline, baseline_profile) =
         build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
@@ -172,6 +172,7 @@ fn m52_page_logic_uses_warmed_availability_cache_without_changing_output() -> an
             &graph,
             None,
             Some(&availability_cache),
+            None,
             page_id,
             None,
             budget,

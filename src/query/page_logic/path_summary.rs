@@ -83,7 +83,14 @@ pub(super) fn build_page_logic_paths(
 
     let stage_started = Instant::now();
     let finder = crate::path::BoundedCausalPathFinder::default();
-    let mut candidates = finder.find_candidates(&path_graph, &path_query);
+    let (mut candidates, path_dense_adjacency_hits) = if let Some(snapshot) = dense_snapshot {
+        let dense_graph = crate::dense_graph::DensePathTraversal::new(snapshot);
+        let candidates = finder.find_candidates(&dense_graph, &path_query);
+        (candidates, dense_graph.adjacency_hits())
+    } else {
+        (finder.find_candidates(&path_graph, &path_query), 0)
+    };
+    super::set_profile_counter(profile, "path_dense_adjacency_hits", path_dense_adjacency_hits);
     let base_candidate_count = candidates.len();
     record_ms_counter(profile, "path_candidate_search_ms", stage_started);
     super::set_profile_counter(profile, "path_base_candidates", base_candidate_count);

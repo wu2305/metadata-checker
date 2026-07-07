@@ -502,19 +502,40 @@ pub(crate) fn collect_conditions_for_node(
 /// 缓存节点条件对象，供 page logic 批量 availability 构造复用。
 pub(crate) struct ConditionCollectorCache {
     by_node: HashMap<String, Vec<serde_json::Value>>,
+    /// M53：load-time 预收集索引，query-time 只读命中。
+    prefilled: Option<std::sync::Arc<HashMap<String, Vec<serde_json::Value>>>>,
     cache_hits: usize,
+    materialized_hits: usize,
 }
 
 impl ConditionCollectorCache {
     pub(crate) fn new() -> Self {
         Self {
             by_node: HashMap::new(),
+            prefilled: None,
             cache_hits: 0,
+            materialized_hits: 0,
+        }
+    }
+
+    /// 从物化索引种子化缓存，避免 query-time 重复扫描 condition 边。
+    pub(crate) fn from_prefilled(
+        prefilled: std::sync::Arc<HashMap<String, Vec<serde_json::Value>>>,
+    ) -> Self {
+        Self {
+            by_node: HashMap::new(),
+            prefilled: Some(prefilled),
+            cache_hits: 0,
+            materialized_hits: 0,
         }
     }
 
     pub(crate) fn cache_hits(&self) -> usize {
         self.cache_hits
+    }
+
+    pub(crate) fn materialized_hits(&self) -> usize {
+        self.materialized_hits
     }
 
     pub(crate) fn collect_for_node(
@@ -523,6 +544,13 @@ impl ConditionCollectorCache {
         node_id: &str,
         seen: &mut HashSet<String>,
     ) -> Vec<serde_json::Value> {
+        if let Some(prefilled) = &self.prefilled {
+            if let Some(cached) = prefilled.get(node_id) {
+                self.materialized_hits += 1;
+                self.cache_hits += 1;
+                return filter_seen_conditions(cached.iter().cloned(), seen);
+            }
+        }
         if let Some(cached) = self.by_node.get(node_id) {
             self.cache_hits += 1;
             return filter_seen_conditions(cached.iter().cloned(), seen);
@@ -588,6 +616,20 @@ fn filter_seen_conditions(
                 .is_some_and(|id| seen.insert(id.to_string()))
         })
         .collect()
+}
+
+/// 在 graph load 阶段一次性预收集所有节点的 condition 对象。
+pub(crate) fn precollect_all_node_conditions(
+    graph: &dyn GraphReadStore,
+) -> crate::graph_store::GraphStoreResult<HashMap<String, Vec<serde_json::Value>>> {
+    let mut map = HashMap::new();
+    for node in graph.iter_nodes()? {
+        let raw = collect_condition_objects_for_node(graph, &node.id, &mut HashSet::new());
+        if !raw.is_empty() {
+            map.insert(node.id.clone(), raw);
+        }
+    }
+    Ok(map)
 }
 
 fn collect_condition_objects_for_node(

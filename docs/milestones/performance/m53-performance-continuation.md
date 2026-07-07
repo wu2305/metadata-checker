@@ -69,23 +69,32 @@ M53 继续保留稳定内容采样 hash：`mtime_changed` 只做诊断，不触�
 
 ## M53 继续推进的性能问题
 
-1. redb v2 hydrate。
-   基于 M52 已落地的 shadow layout（`graph_redb_v2` + `tests/m52_redb_v2_shadow_tests.rs`），让 `GraphDB::open_inner` 优先从 v2 node meta + out/in adjacency 恢复内存图；v2 缺失或校验失败 fallback v1。
+### B1 materialized availability facts（已完成）
 
-2. redb v2 incremental persist。
-   用 dirty node / deleted node 更新对应 adjacency 和 file state，不再全量清空并重写 edges / file_states。
+- 新增 `MaterializedAvailabilityFactsIndex`：load-time 预收集全图 condition 对象。
+- `RuntimeReadModel` 在 LongLived load 时与 `DenseGraphSnapshot` 一并构建。
+- page logic / warm 路径通过 `ConditionCollectorCache::from_prefilled` 复用，profile counter：`availability_materialized_hits`。
+- 测试：`tests/m53_materialized_availability_tests.rs`（输出等价）。
 
-3. `key_model_availability` 仍是 full / normal 主导成本。
-   下一步应做 build/load-time materialized facts，而不是继续压 JSON shaping。
+### B2 dense-native path finder（已完成）
 
-4. `path_summary` 仍受 candidate search 和 anchor extract 影响。
-   下一步优先让 path finder 直接消费 dense/CSR 数据，避免 owned clone 适配器抵消收益。
+- `DensePathTraversal` 直接遍历 CSR 邻接，候选搜索 bypass `PathGraphCache`。
+- profile counter：`path_dense_adjacency_hits`。
+- 测试：`tests/m53_dense_path_finder_tests.rs`（dense vs baseline 等价）。
 
-5. fragment 需要跨平台落地。
-   native 文件后端已经证明可行；browser 侧应复用已有 IndexedDB cache/provider，不能假设文件系统。
+### A redb v2 hydrate + incremental persist（已完成）
 
-6. long-lived runtime 的 init/load 成本需要分层观察。
-   允许变重，但必须区分 graph load、dense snapshot、read model build、page warm、fragment read。
+- `GraphDB::open_inner` 优先 `read_v2_layout` + `hydrate_graph_from_v2`，失败 fallback v1。
+- `persist` 在写事务前读取 v2；≤32 dirty node 且无 removed 时 `patch_v2_layout_node_meta` 增量更新。
+- 测试：`tests/m53_redb_v2_hydrate_tests.rs`（v2 优先打开、v1 fallback、增量 patch）。
+
+## M53 剩余 / 后续
+
+1. ~~redb v2 hydrate / incremental persist~~（已完成 §A）。
+2. ~~path_summary dense-native~~（已完成 §B2）。
+3. **B1.2**：`key_model_availability` 更深物化（dataflow facts 批量索引）——需真实项目 profile 验证收益。
+4. fragment 跨平台（C 线，profile 门控，非阻塞）。
+5. init/load 分层观测补全（graph load / dense / read model / warm）。
 
 ## M53 不重复做
 

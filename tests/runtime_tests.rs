@@ -299,12 +299,16 @@ fn test_graph_runtime_long_lived_mode_builds_read_model() {
         .read_model
         .as_ref()
         .expect("long-lived runtime must build read model during init");
+    let dense_graph = read_model
+        .dense_graph
+        .as_ref()
+        .expect("long-lived runtime must build dense snapshot during init");
     assert_eq!(
-        read_model.dense_graph.dense_node_count(),
+        dense_graph.dense_node_count(),
         runtime.status().node_count
     );
     assert_eq!(
-        read_model.dense_graph.dense_edge_count(),
+        dense_graph.dense_edge_count(),
         runtime.status().edge_count
     );
     assert!(

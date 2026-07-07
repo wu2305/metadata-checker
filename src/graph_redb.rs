@@ -137,9 +137,27 @@ impl GraphDB {
     }
 
     fn open_inner(db_path: &Path) -> Result<Self> {
+        Self::ensure_redb_tables(db_path)?;
+
+        if let Some(layout) = crate::graph_redb_v2::read_v2_layout(db_path)? {
+            match crate::graph_redb_v2::hydrate_graph_from_v2(
+                &layout,
+                &db_path.to_string_lossy(),
+            ) {
+                Ok(graph) => return Ok(graph),
+                Err(_) => {
+                    // ponytail: v2 hydrate 失败时静默 fallback v1，避免阻断打开路径
+                }
+            }
+        }
+
+        Self::open_inner_v1(db_path)
+    }
+
+    /// 确保 redb 基础表存在。
+    fn ensure_redb_tables(db_path: &Path) -> Result<()> {
         let db = Database::create(db_path)
             .with_context(|| format!("Failed to create/open database at {:?}", db_path))?;
-
         let write_txn = db.begin_write()?;
         {
             let _ = write_txn.open_table(NODES_TABLE)?;
@@ -148,6 +166,13 @@ impl GraphDB {
             let _ = write_txn.open_table(META_TABLE)?;
         }
         write_txn.commit()?;
+        Ok(())
+    }
+
+    /// 从 v1 节点/边表 hydrate 内存图。
+    fn open_inner_v1(db_path: &Path) -> Result<Self> {
+        let db = Database::create(db_path)
+            .with_context(|| format!("Failed to create/open database at {:?}", db_path))?;
 
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
@@ -673,10 +698,45 @@ impl GraphDB {
         }
     }
 
+    /// 为 persist 选择 v2 layout：仅当 dirty 节点全是既有 v2 节点且拓扑未删改时做 meta patch。
+    fn build_v2_layout_for_persist(
+        graph: &GraphDB,
+        file_states: &HashMap<String, FileState>,
+        db_path: &std::path::Path,
+    ) -> Result<crate::graph_redb_v2::RedbV2Layout> {
+        const INCREMENTAL_V2_MAX_DIRTY: usize = 32;
+        let can_try_incremental = graph.removed_nodes.is_empty()
+            && !graph.dirty_nodes.is_empty()
+            && graph.dirty_nodes.len() <= INCREMENTAL_V2_MAX_DIRTY;
+        if can_try_incremental {
+            if let Some(mut existing) = crate::graph_redb_v2::read_v2_layout(db_path)? {
+                let dirty_subset_of_v2 = graph.dirty_nodes.iter().all(|node_id| {
+                    existing.node_ids.iter().any(|existing_id| existing_id == node_id)
+                });
+                if dirty_subset_of_v2 {
+                    crate::graph_redb_v2::patch_v2_layout_node_meta(
+                        &mut existing,
+                        graph,
+                        &graph.dirty_nodes,
+                        file_states,
+                    )
+                    .context("incremental patch v2 layout")?;
+                    return Ok(existing);
+                }
+            }
+        }
+        crate::graph_redb_v2::build_v2_layout(graph, file_states)
+            .context("build redb v2 shadow layout")
+    }
+
     pub fn persist(&mut self, file_states: &HashMap<String, FileState>) -> Result<()> {
         if !self.is_dirty {
             return Ok(());
         }
+
+        let db_path = std::path::Path::new(&self.db_path);
+        let layout = Self::build_v2_layout_for_persist(self, file_states, db_path)?;
+
         let db = Database::create(&self.db_path)?;
         let write_txn = db.begin_write()?;
 
@@ -727,8 +787,6 @@ impl GraphDB {
             }
         }
 
-        let layout = crate::graph_redb_v2::build_v2_layout(self, file_states)
-            .context("build redb v2 shadow layout")?;
         crate::graph_redb_v2::write_v2_shadow_tables(&write_txn, &layout)
             .context("write redb v2 shadow tables")?;
 

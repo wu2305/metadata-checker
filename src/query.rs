@@ -474,10 +474,12 @@ pub use model::query_model;
 mod page_logic;
 pub use page_logic::query_page_logic;
 pub use page_logic::{
-    PageLogicAvailabilityCache, build_page_logic_availability_cache, build_query_page_logic_output,
+    MaterializedAvailabilityFactsIndex, PageLogicAvailabilityCache,
+    build_page_logic_availability_cache, build_query_page_logic_output,
     build_query_page_logic_output_profiled,
     build_query_page_logic_output_profiled_with_availability_cache,
     build_query_page_logic_output_profiled_with_dense_snapshot,
+    build_query_page_logic_output_profiled_with_materialized_availability,
     build_query_page_logic_output_with_availability_cache,
     build_query_page_logic_output_with_dense_snapshot,
 };

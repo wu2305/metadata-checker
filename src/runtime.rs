@@ -21,8 +21,10 @@ pub enum RuntimeMode {
 
 /// Runtime 初始化阶段构建的只读派生模型。
 pub struct RuntimeReadModel {
-    /// 稠密 ID + CSR 风格只读图快照。
-    pub dense_graph: Arc<DenseGraphSnapshot>,
+    /// 稠密 ID + CSR 风格只读图快照；build 失败时为 `None`。
+    pub dense_graph: Option<Arc<DenseGraphSnapshot>>,
+    /// M53：load-time 物化 availability condition facts。
+    pub availability_facts: Arc<crate::query::MaterializedAvailabilityFactsIndex>,
     /// 预热后的页面 availability 缓存。
     pub page_logic_availability: HashMap<String, crate::query::PageLogicAvailabilityCache>,
 }
@@ -238,14 +240,37 @@ impl GraphRuntime {
         let build_read_model = runtime_mode == RuntimeMode::LongLived;
         let read_model_started = Instant::now();
         let read_model = if build_read_model {
-            DenseGraphSnapshot::from_graph(&graph)
+            let dense_graph = DenseGraphSnapshot::from_graph(&graph)
                 .ok()
-                .map(|dense_graph| {
-                    Arc::new(RuntimeReadModel {
-                        dense_graph: Arc::new(dense_graph),
-                        page_logic_availability: HashMap::new(),
-                    })
-                })
+                .map(Arc::new);
+            if dense_graph.is_none() {
+                diagnostics.push(
+                    "DenseGraphSnapshot build failed; long-lived dense path disabled".to_string(),
+                );
+            }
+            let availability_facts = match crate::query::MaterializedAvailabilityFactsIndex::build(&graph)
+            {
+                Ok(index) => Arc::new(index),
+                Err(error) => {
+                    diagnostics.push(format!(
+                        "MaterializedAvailabilityFactsIndex build failed: {error}; using empty index"
+                    ));
+                    Arc::new(crate::query::MaterializedAvailabilityFactsIndex::empty())
+                }
+            };
+            if dense_graph.is_some() || availability_facts.node_count > 0 {
+                Some(Arc::new(RuntimeReadModel {
+                    dense_graph,
+                    availability_facts,
+                    page_logic_availability: HashMap::new(),
+                }))
+            } else {
+                diagnostics.push(
+                    "Long-lived read model skipped: dense snapshot and materialized index both unavailable"
+                        .to_string(),
+                );
+                None
+            }
         } else {
             None
         };
@@ -256,9 +281,9 @@ impl GraphRuntime {
         };
         let dense_snapshot = read_model
             .as_ref()
-            .map(|model| Arc::clone(&model.dense_graph));
+            .and_then(|model| model.dense_graph.as_ref().map(Arc::clone));
         let dense_snapshot_build_ms = read_model_build_ms;
-        let dense_snapshot_enabled = build_read_model;
+        let dense_snapshot_enabled = dense_snapshot.is_some();
 
         let project_dir = project_dir
             .map(|p| p.as_ref().to_path_buf())
@@ -301,24 +326,26 @@ impl GraphRuntime {
     /// 在长生命周期 runtime 的初始化阶段预热 page logic availability。
     pub fn warm_page_logic_availability(&mut self, page_id: &str, budget: &str) -> Result<u128> {
         let started_at = Instant::now();
-        let cache = crate::query::build_page_logic_availability_cache(
-            &self.graph,
-            page_id,
-            self.project_dir.as_deref(),
-            budget,
-        )?;
         let Some(read_model) = self.read_model.as_ref() else {
             return Err(anyhow::anyhow!(
                 "page logic availability warm requires long-lived runtime read model"
             ));
         };
+        let cache = crate::query::build_page_logic_availability_cache(
+            &self.graph,
+            page_id,
+            self.project_dir.as_deref(),
+            budget,
+            Some(read_model.availability_facts.as_ref()),
+        )?;
         let mut page_logic_availability = read_model.page_logic_availability.clone();
         page_logic_availability.insert(
             RuntimeReadModel::page_logic_availability_key(page_id, budget),
             cache,
         );
         self.read_model = Some(Arc::new(RuntimeReadModel {
-            dense_graph: Arc::clone(&read_model.dense_graph),
+            dense_graph: read_model.dense_graph.clone(),
+            availability_facts: Arc::clone(&read_model.availability_facts),
             page_logic_availability,
         }));
         Ok(started_at.elapsed().as_millis())
@@ -482,13 +509,18 @@ impl GraphRuntime {
                 let availability_cache = self.read_model.as_ref().and_then(|model| {
                     model.page_logic_availability(&request.target, &request.budget)
                 });
+                let materialized_availability = self
+                    .read_model
+                    .as_ref()
+                    .map(|model| model.availability_facts.as_ref());
                 crate::query::build_query_page_logic_output_with_availability_cache(
                     &self.graph,
                     self.read_model
                         .as_ref()
-                        .map(|model| model.dense_graph.as_ref())
+                        .and_then(|model| model.dense_graph.as_deref())
                         .or(self.dense_snapshot.as_deref()),
                     availability_cache,
+                    materialized_availability,
                     &request.target,
                     project_dir,
                     &request.budget,

@@ -196,6 +196,43 @@ pub fn build_v2_layout(
     Ok(layout)
 }
 
+/// 增量更新 v2 layout 中 dirty 节点的 meta 与 file_states，不重建邻接。
+///
+/// ponytail: 仅适用于节点 meta 变更且拓扑不变；边变更或 removed node 必须全量 rebuild。
+pub fn patch_v2_layout_node_meta(
+    layout: &mut RedbV2Layout,
+    graph: &GraphDB,
+    dirty_nodes: &std::collections::HashSet<String>,
+    file_states: &HashMap<String, FileState>,
+) -> Result<()> {
+    let dense_by_id: HashMap<&str, usize> = layout
+        .node_ids
+        .iter()
+        .enumerate()
+        .map(|(idx, id)| (id.as_str(), idx))
+        .collect();
+    for node_id in dirty_nodes {
+        let Some(&dense_idx) = dense_by_id.get(node_id.as_str()) else {
+            anyhow::bail!(
+                "incremental v2 patch requires existing node {}, run full rebuild",
+                node_id
+            );
+        };
+        let Some(&graph_idx) = graph.node_indices.get(node_id) else {
+            anyhow::bail!("dirty node {} missing from in-memory graph", node_id);
+        };
+        let node = graph
+            .graph
+            .node_weight(graph_idx)
+            .context("dirty node weight missing")?;
+        layout.nodes[dense_idx] = RedbV2NodeRecord::from_node(node);
+    }
+    layout.file_states = file_states.clone();
+    layout.meta.file_state_count = file_states.len() as u32;
+    layout.meta.content_fingerprint = fingerprint_layout(layout);
+    Ok(())
+}
+
 /// 将 v2 shadow layout 写入已有 write transaction，与 v1 persist 共用单次 commit。
 pub fn write_v2_shadow_tables(
     write_txn: &redb::WriteTransaction,

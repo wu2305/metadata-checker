@@ -856,7 +856,8 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         long_lived_runtime
             .read_model
             .as_ref()
-            .map(|model| model.dense_graph.dense_node_count() as u64)
+            .and_then(|model| model.dense_graph.as_ref())
+            .map(|dense| dense.dense_node_count() as u64)
             .unwrap_or_default(),
     );
     profile.set_counter(
@@ -864,7 +865,8 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         long_lived_runtime
             .read_model
             .as_ref()
-            .map(|model| model.dense_graph.dense_edge_count() as u64)
+            .and_then(|model| model.dense_graph.as_ref())
+            .map(|dense| dense.dense_edge_count() as u64)
             .unwrap_or_default(),
     );
 
