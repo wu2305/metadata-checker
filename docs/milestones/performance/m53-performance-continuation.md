@@ -34,13 +34,36 @@ M53 不再重复做 query-time 临时 fact index。M52 已证明它会变慢。
 
 已验证把 availability / prerequisites / path summary 前移到 long-lived runtime warm 阶段，可以显著降低 query-time。
 
-真实项目 `合同协议.spg` compact 链路：
+真实项目 `合同协议.spg` compact 链路（**史料**，来自从未合并进 `main` 的分支 `codex/m52-performance-optimization` 提交 `15804ea`；该实现未进入当前代码，**下表 105ms 不适用于修复前的 `main`**）：
 
 | 指标 | one-shot | long-lived | long-lived + warm |
 |---|---:|---:|---:|
 | query dispatch | 916ms | 898ms | 105ms |
 | total N=10 | 9758ms | 12292ms | 5195ms |
 | total N=50 | 46398ms | 48212ms | 9395ms |
+
+修复前 `main`（仅 warm `key_model_availability`，2026-07-07 多轮采样 p50）：
+
+| 指标 | p50 | min–max |
+|---|---:|---|
+| `warmed_query_dispatch` | **639ms** | 595–716 |
+| `availability_warm` | 189ms | 170–204 |
+
+任务 C instrumentation（`release-fast`，`sample-count=1`，2026-07-07）确认 B1/B2 在真实 LongLived runtime 路径已生效（`target/m51-profile/m53-c-instrumentation.json`）：
+
+| counter | long-lived query（warm 前） | warmed query |
+|---|---:|---:|
+| `availability_materialized_hits` | 2 | 2 |
+| `availability_read_model_used` | 0 | 1 |
+| `path_dense_graph_used` | 1 | 0（path cache hit 跳过 query-time 重建） |
+| `path_dense_adjacency_hits` | 17774 | 0 |
+
+任务 A 扩展 warm 覆盖 prerequisites + path_summary 后（3 轮 `sample-count=1`，`target/m51-profile/m53-a-extended-warm-*.json`）：
+
+| 指标 | 修复前 p50 | 任务 A p50 | min–max |
+|---|---:|---:|---|
+| `warmed_query_dispatch` | 639ms | **81ms** | 79–82 |
+| `availability_warm` | 189ms | **639ms** | 633–640 |
 
 M53 默认接受 init/load 变重，只要 query-time 和多次查询总成本下降。
 
@@ -104,18 +127,19 @@ one-shot 路径不经过 LongLived read model，故 `availability_materialized_h
 
 ### LongLived runtime（合同页 compact warm）
 
-| 指标 | M52 path-prereq-warm | M53 | 备注 |
-|---|---:|---:|---|
-| `runtime_long_lived_read_model_build_ms` | 2743 | 5837 | load 时预建 materialized facts + dense |
-| `redb_open` | 555 | 866 | v2 hydrate 默认路径 |
-| `runtime_long_lived_warmed_query_dispatch` | 105 | 1025 | 单次采样；本轮 M53 偏慢 |
-| `runtime_long_lived_warmed_total_ms_n50` | 9395 | 58160 | 本轮 M53 更慢，需多轮采样确认 |
+| 指标 | M52 path-prereq-warm（史料） | 修复前 M53 main | 任务 A 后 | 备注 |
+|---|---:|---:|---:|---|
+| `runtime_long_lived_read_model_build_ms` | 2743 | 5837 | ~3153 | load 时预建 materialized facts + dense |
+| `redb_open` | 555 | 866 | ~815 | v2 hydrate 默认路径 |
+| `runtime_long_lived_warmed_query_dispatch` | 105 | 639（p50） | **81（p50）** | 扩展 warm 后恢复预期量级 |
+| `runtime_long_lived_warmed_total_ms_n50` | 9395 | 36400（p50） | **8292** | 单次采样；warm 成本前移 |
+| `runtime_long_lived_availability_warm_ms` | 833 | 189 | **639** | 现覆盖 availability + prerequisites + paths |
 
-M53 核心交付是 **语义等价 + 默认 v2 hydrate + load-time 物化索引**；warm query 数字需多轮采样再写 fail threshold。`redb_commit` 仍 ~10.8s，C 线 commit batch 保持 profile 门控。
+M53 核心交付是 **语义等价 + 默认 v2 hydrate + load-time 物化索引 + 完整 page logic warm**；`redb_commit` 仍 ~10.8s，C 线 commit batch 保持 profile 门控。
 
-### 多轮采样（5× core + 3× page logic，2026-07-07 晚）
+### 多轮采样（5× core + 3× page logic，2026-07-07 晚，修复前 main）
 
-| 指标 | p50 | min–max | M52 path-warm（单次） |
+| 指标 | p50 | min–max | M52 path-warm（史料，单次） |
 |---|---:|---|---:|
 | `warmed_query_dispatch` | **639ms** | 595–716 | 105 |
 | `warmed_total N=50` | **36400ms** | 33779–40284 | 9395 |
@@ -123,7 +147,7 @@ M53 核心交付是 **语义等价 + 默认 v2 hydrate + load-time 物化索引*
 | `redb_open` | 815ms | 768–831 | 555 |
 | `availability_warm` | 189ms | 170–204 | 833 |
 
-首轮 core（冷 graphdb）`warmed_dispatch=1025ms` 偏慢；稳态 p50 **~640ms**。M52 自身单次波动 105–1818ms，**不宜用单次对比定论**；相对 M52 最优仍慢 ~6×，相对 M52 mat-warm（1818ms）M53 更快。
+修复前 main 仅 warm availability，path_summary（~435ms）与 prerequisites（~59ms）仍在 query-time 执行，故 warmed dispatch 仅比 one-shot 快 ~20%。任务 A 后 warmed dispatch p50 **~81ms**（3 轮 79–82ms）。
 
 compact one-shot（3 轮 p50）：wall **694ms**（M52 537）、`path_summary` **435ms**（M52 312）、`key_model_availability` **166ms**（M52 136）。path 仍是 compact 回退主因；首轮 201ms avail 属正常方差。
 
@@ -133,9 +157,10 @@ PR：[#9](https://cnb.cool/wu2305/metadata-checker/-/pulls/9)（CI/docs）、[#1
 
 1. ~~redb v2 hydrate / incremental persist~~（已完成 §A）。
 2. ~~path_summary dense-native~~（已完成 §B2）。
-3. **B1.2**：`key_model_availability` 更深物化（dataflow facts 批量索引）——需真实项目 profile 验证收益。
-4. fragment 跨平台（C 线，profile 门控，非阻塞）。
-5. init/load 分层观测补全（graph load / dense / read model / warm）。
+3. ~~prerequisites / path_summary warm cache~~（已完成，任务 A；与下述 B1.2 不同）。
+4. **B1.2**：`key_model_availability` 更深物化（**dataflow facts** 批量索引，非 prerequisites/paths warm）——需真实项目 profile 验证收益。
+5. fragment 跨平台（C 线，profile 门控，非阻塞）。
+6. init/load 分层观测补全（graph load / dense / read model / warm）。
 
 ## M53 不重复做
 
