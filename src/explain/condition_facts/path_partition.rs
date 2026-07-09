@@ -60,10 +60,11 @@ fn path_reject_reason_for_intent(
         TraversalIntent::Writer => {
             let has_writer_edge =
                 path_has_any_edge(path, &["Writes", "ActionWrites", "FieldWrite"]);
+            // Contains：model→field 结构性桥接，与 Reads/FieldAlias 同属 writer 链路允许边。
             let only_writer_chain_edges = edges.iter().all(|edge| {
                 matches!(
                     edge.as_str(),
-                    "Reads" | "FieldAlias" | "Writes" | "ActionWrites" | "FieldWrite"
+                    "Reads" | "Contains" | "FieldAlias" | "Writes" | "ActionWrites" | "FieldWrite"
                 )
             });
             if has_writer_edge && only_writer_chain_edges {

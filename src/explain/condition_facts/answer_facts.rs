@@ -816,7 +816,7 @@ pub(crate) fn build_traversal_policy(intent: TraversalIntent, budget: &str) -> s
         "allowed_edge_types": match intent {
             TraversalIntent::Display => serde_json::json!(["DependsOn", "Contains"]),
             TraversalIntent::ValueSource => serde_json::json!(["Reads", "FieldAlias", "DataflowOutput", "DataflowInput"]),
-            TraversalIntent::Writer => serde_json::json!(["Reads(target bridge)", "Writes", "ActionWrites", "FieldWrite", "FieldAlias"]),
+            TraversalIntent::Writer => serde_json::json!(["Reads(target bridge)", "Contains", "Writes", "ActionWrites", "FieldWrite", "FieldAlias"]),
             TraversalIntent::Availability => serde_json::json!(["DependsOn", "DataflowInput"]),
             TraversalIntent::Context | TraversalIntent::Auto => serde_json::json!(["Reads", "Writes", "ActionWrites", "FieldWrite", "DependsOn", "Contains"]),
         },

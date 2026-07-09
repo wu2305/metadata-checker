@@ -1,11 +1,14 @@
 .browser_wasm_ci_image: &browser_wasm_ci_image
   build:
     dockerfile: .cnb/images/browser-wasm-ci.Dockerfile
+    # CNB: 未列入 by 的文件在 docker build 上下文中视为不存在；Dockerfile COPY 了 Cargo.toml
     by:
       - .cnb/images/browser-wasm-ci.Dockerfile
+      - Cargo.toml
       - Cargo.lock
     versionBy:
       - .cnb/images/browser-wasm-ci.Dockerfile
+      - Cargo.toml
       - Cargo.lock
 
 # ponytail: 快 gate 降配 CPU；full criterion 保持 8 核编译与 bench

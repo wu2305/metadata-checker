@@ -19,6 +19,8 @@ pub(super) fn collect_page_prerequisites(
     child_components: &[Node],
     child_actions: &[Node],
     data_sources: &[serde_json::Value],
+    _budget: &str,
+    _for_cache_materialization: bool,
     profile: &mut Option<&mut PerfProfile>,
 ) -> Result<PagePrerequisites> {
     let mut display_prerequisites = Vec::new();

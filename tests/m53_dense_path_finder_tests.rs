@@ -51,13 +51,14 @@ fn m53_dense_path_finder_matches_baseline_and_records_hits() -> anyhow::Result<(
     for budget in ["normal", "compact"] {
         let (mut baseline, _) =
             build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
-        let (mut dense_output, profile) = build_query_page_logic_output_profiled_with_dense_snapshot(
-            &graph,
-            Some(&dense),
-            page_id,
-            None,
-            budget,
-        )?;
+        let (mut dense_output, profile) =
+            build_query_page_logic_output_profiled_with_dense_snapshot(
+                &graph,
+                Some(&dense),
+                page_id,
+                None,
+                budget,
+            )?;
         canonicalize_value(&mut baseline);
         canonicalize_value(&mut dense_output);
         assert_eq!(

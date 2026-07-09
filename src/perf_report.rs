@@ -852,6 +852,14 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         long_lived_runtime.read_model_build_ms as u64,
     );
     profile.set_counter(
+        "runtime_availability_facts_build_ms",
+        long_lived_runtime.availability_facts_build_ms as u64,
+    );
+    profile.set_counter(
+        "runtime_page_dependency_index_build_ms",
+        long_lived_runtime.page_dependency_index_build_ms as u64,
+    );
+    profile.set_counter(
         "runtime_long_lived_dense_nodes",
         long_lived_runtime
             .read_model

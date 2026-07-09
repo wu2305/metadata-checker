@@ -320,6 +320,9 @@ CARGO_TARGET_DIR=target/criterion/runtime cargo bench --bench runtime_bench
 | 场景 | 记录目标 |
 |---|---|
 | `runtime_load_graphdb` | graphdb 冷加载为 GraphRuntime |
+| `runtime_load_dense_snapshot_build` | LongLived load 阶段 dense snapshot 单步构建 |
+| `runtime_load_availability_facts_build` | LongLived load 阶段 availability facts 单步构建 |
+| `runtime_load_page_dependency_index_build` | LongLived load 阶段 page dependency index 单步构建 |
 | `runtime_status_warm` | warm status 成本 |
 | `runtime_check_reload_unchanged` | 未变化 check_reload fast path |
 | `runtime_reload_graph` | 强制 reload 成本 |

@@ -175,6 +175,8 @@ fn m52_core_profile_report_records_detailed_stage_contract() -> anyhow::Result<(
                 "runtime_read_model_build_ms",
                 "runtime_long_lived_load_ms",
                 "runtime_long_lived_read_model_build_ms",
+                "runtime_availability_facts_build_ms",
+                "runtime_page_dependency_index_build_ms",
                 "runtime_long_lived_availability_warm_ms",
                 "runtime_long_lived_query_dispatch_ms",
                 "runtime_long_lived_warmed_query_dispatch_ms",

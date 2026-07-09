@@ -22,8 +22,30 @@ RUN curl https://sh.rustup.rs -sSf | sh -s -- -y \
     && rustup target add wasm32-unknown-unknown \
     && chmod -R a+w "${RUSTUP_HOME}" "${CARGO_HOME}"
 
+# CNB docker.build.by 只放进白名单文件；manifest 声明了 bin/bench 目标，
+# cargo fetch 解析时要求对应源文件存在，因此用空 stub 满足路径检查。
 COPY Cargo.toml Cargo.lock /tmp/warmup/
-RUN cd /tmp/warmup && cargo fetch && rm -rf /tmp/warmup
+RUN cd /tmp/warmup \
+    && mkdir -p src/bin benches \
+    && printf '\n' > src/lib.rs \
+    && printf 'fn main() {}\n' > src/main.rs \
+    && printf 'fn main() {}\n' > src/bin/generate_browser_offscreen_fixtures.rs \
+    && printf 'fn main() {}\n' > src/bin/m51_profile_report.rs \
+    && printf 'fn main() {}\n' > src/bin/m51_core_profile_report.rs \
+    && for bench in \
+         parse_bench \
+         query_micro_bench \
+         rebuild_bench \
+         rebuild_crud_bench \
+         runtime_bench \
+         query_matrix_bench \
+         redb_persistence_bench \
+         stdio_boundary_bench \
+         telemetry_overhead_bench \
+         session_sync_bench \
+       ; do printf 'fn main() {}\n' > "benches/${bench}.rs"; done \
+    && cargo fetch \
+    && rm -rf /tmp/warmup
 
 COPY Cargo.lock /tmp/metadata-checker-Cargo.lock
 

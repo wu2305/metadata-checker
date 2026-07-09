@@ -28,6 +28,8 @@ pub(super) fn build_page_logic_paths(
     data_sources: &Vec<serde_json::Value>,
     write_targets: &Vec<serde_json::Value>,
     entrypoints: &Vec<serde_json::Value>,
+    budget: &str,
+    for_cache_materialization: bool,
     profile: &mut Option<&mut PerfProfile>,
 ) -> PageLogicPaths {
     super::set_profile_counter(profile, "dense_snapshot_build_ms", 0);
@@ -91,7 +93,11 @@ pub(super) fn build_page_logic_paths(
     } else {
         (finder.find_candidates(&path_graph, &path_query), 0)
     };
-    super::set_profile_counter(profile, "path_dense_adjacency_hits", path_dense_adjacency_hits);
+    super::set_profile_counter(
+        profile,
+        "path_dense_adjacency_hits",
+        path_dense_adjacency_hits,
+    );
     let base_candidate_count = candidates.len();
     record_ms_counter(profile, "path_candidate_search_ms", stage_started);
     super::set_profile_counter(profile, "path_base_candidates", base_candidate_count);
@@ -178,13 +184,35 @@ pub(super) fn build_page_logic_paths(
     sort_primary_paths_by_confidence(&mut primary_paths);
     record_ms_counter(profile, "path_sort_ms", stage_started);
 
-    PageLogicPaths {
+    let mut paths = PageLogicPaths {
         primary_paths,
         related_context,
         candidate_paths,
         supporting_paths,
         rejected_paths,
         path_selection_diagnostics,
+    };
+    if for_cache_materialization {
+        trim_paths_for_cache_budget(&mut paths, budget);
+    }
+    paths
+}
+
+/// warm cache 物化阶段按 budget 裁剪路径字段，复用输出阶段不输出的分类。
+fn trim_paths_for_cache_budget(paths: &mut PageLogicPaths, budget: &str) {
+    match budget {
+        "compact" => {
+            paths.candidate_paths.clear();
+            paths.supporting_paths.clear();
+            paths.rejected_paths.clear();
+            paths.path_selection_diagnostics.clear();
+        }
+        "normal" => {
+            paths.candidate_paths.clear();
+            paths.rejected_paths.clear();
+            paths.path_selection_diagnostics.clear();
+        }
+        _ => {}
     }
 }
 

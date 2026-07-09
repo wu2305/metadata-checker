@@ -2,6 +2,7 @@ use crate::graph_store::{GraphNeighbors, GraphReadStore};
 use crate::perf_profile::PerfProfile;
 use crate::query::find_candidates;
 use anyhow::Result;
+use serde::Serialize;
 use serde_json::json;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
@@ -13,8 +14,21 @@ mod evidence;
 mod graph_collect;
 mod materialized_availability;
 mod metadata;
+mod page_diff;
 mod path_summary;
 mod prerequisites;
+
+pub use page_diff::PageDependencyIndex;
+
+/// 测试与交叉验证：收集 page logic 遍历口径下的组件与动作节点。
+#[cfg(feature = "cli-local")]
+pub fn collect_page_logic_nodes_for_test(
+    graph: &dyn GraphReadStore,
+    page_id: &str,
+) -> Result<(Vec<crate::graph::Node>, Vec<crate::graph::Node>)> {
+    let collected = graph_collect::collect_page_logic_nodes(graph, page_id)?;
+    Ok((collected.child_components, collected.child_actions))
+}
 
 pub use materialized_availability::MaterializedAvailabilityFactsIndex;
 
@@ -609,6 +623,154 @@ impl PageLogicAvailabilityCache {
     fn project_paths(&self) -> Option<path_summary::PageLogicPaths> {
         self.paths.clone()
     }
+
+    /// warm cache 内存足迹计数（profile 观测用）。
+    #[cfg(feature = "cli-local")]
+    pub fn cache_footprint(&self) -> PageLogicCacheFootprint {
+        let prerequisites = self.prerequisites.as_ref();
+        let paths = self.paths.as_ref();
+        PageLogicCacheFootprint {
+            display_prerequisites: prerequisites
+                .map(|p| p.display_prerequisites.len())
+                .unwrap_or(0),
+            data_prerequisites: prerequisites
+                .map(|p| p.data_prerequisites.len())
+                .unwrap_or(0),
+            action_prerequisites: prerequisites
+                .map(|p| p.action_prerequisites.len())
+                .unwrap_or(0),
+            candidate_paths: paths.map(|p| p.candidate_paths.len()).unwrap_or(0),
+            related_context: paths.map(|p| p.related_context.len()).unwrap_or(0),
+            primary_paths: paths.map(|p| p.primary_paths.len()).unwrap_or(0),
+            supporting_paths: paths.map(|p| p.supporting_paths.len()).unwrap_or(0),
+            rejected_paths: paths.map(|p| p.rejected_paths.len()).unwrap_or(0),
+            key_model_availability: self.batch.entries.len(),
+        }
+    }
+
+    /// 测试用：导出可比较的 warm cache 快照（不含计时字段）。
+    #[cfg(feature = "cli-local")]
+    pub fn warm_cache_test_snapshot(&self) -> serde_json::Value {
+        let footprint = self.cache_footprint();
+        serde_json::json!({
+            "page_id": self.page_id,
+            "budget": self.budget,
+            "footprint": footprint,
+            "batch_fast_path_count": self.batch.fast_path_count,
+            "batch_fallback_count": self.batch.fallback_count,
+            "batch_condition_group_count": self.batch.condition_group_count,
+        })
+    }
+
+    /// 测试用：逐字段比较两条 warm cache 是否等价。
+    #[cfg(feature = "cli-local")]
+    pub fn equals_warm_cache(&self, other: &Self) -> bool {
+        self.warm_cache_diff_reason(other).is_none()
+    }
+
+    /// 测试用：返回 warm cache 不等价时的原因。
+    #[cfg(feature = "cli-local")]
+    pub fn warm_cache_diff_reason(&self, other: &Self) -> Option<String> {
+        if self.page_id != other.page_id {
+            return Some("page_id mismatch".to_string());
+        }
+        if self.budget != other.budget {
+            return Some("budget mismatch".to_string());
+        }
+        if self.batch.entries != other.batch.entries {
+            return Some("availability entries mismatch".to_string());
+        }
+        if self.batch.fast_path_count != other.batch.fast_path_count {
+            return Some("fast_path_count mismatch".to_string());
+        }
+        if self.batch.fallback_count != other.batch.fallback_count {
+            return Some("fallback_count mismatch".to_string());
+        }
+        if self.batch.condition_group_count != other.batch.condition_group_count {
+            return Some("condition_group_count mismatch".to_string());
+        }
+        if self.batch.graph_cache_hits != other.batch.graph_cache_hits {
+            return Some("graph_cache_hits mismatch".to_string());
+        }
+        if self.batch.materialized_hits != other.batch.materialized_hits {
+            return Some("materialized_hits mismatch".to_string());
+        }
+        if !prerequisites_equal(&self.prerequisites, &other.prerequisites) {
+            return Some("prerequisites mismatch".to_string());
+        }
+        if !paths_equal(&self.paths, &other.paths) {
+            return Some("paths mismatch".to_string());
+        }
+        None
+    }
+}
+
+/// warm cache 内存足迹计数。
+#[cfg(feature = "cli-local")]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PageLogicCacheFootprint {
+    /// 显示前置条件条数。
+    pub display_prerequisites: usize,
+    /// 数据前置条件条数。
+    pub data_prerequisites: usize,
+    /// 动作前置条件条数。
+    pub action_prerequisites: usize,
+    /// 候选路径条数。
+    pub candidate_paths: usize,
+    /// 旁路上下文条数。
+    pub related_context: usize,
+    /// 主路径条数。
+    pub primary_paths: usize,
+    /// 支撑路径条数。
+    pub supporting_paths: usize,
+    /// 拒绝路径条数。
+    pub rejected_paths: usize,
+    /// key model availability 条数。
+    pub key_model_availability: usize,
+}
+
+#[cfg(feature = "cli-local")]
+fn prerequisites_equal(
+    left: &Option<prerequisites::PagePrerequisites>,
+    right: &Option<prerequisites::PagePrerequisites>,
+) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            left.display_prerequisites == right.display_prerequisites
+                && left.data_prerequisites == right.data_prerequisites
+                && left.action_prerequisites == right.action_prerequisites
+        }
+        _ => false,
+    }
+}
+
+#[cfg(feature = "cli-local")]
+fn paths_equal(
+    left: &Option<path_summary::PageLogicPaths>,
+    right: &Option<path_summary::PageLogicPaths>,
+) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            json_vec_eq(&left.primary_paths, &right.primary_paths)
+                && json_vec_eq(&left.related_context, &right.related_context)
+                && json_vec_eq(&left.candidate_paths, &right.candidate_paths)
+                && json_vec_eq(&left.supporting_paths, &right.supporting_paths)
+                && json_vec_eq(&left.rejected_paths, &right.rejected_paths)
+                && left.path_selection_diagnostics == right.path_selection_diagnostics
+        }
+        _ => false,
+    }
+}
+
+#[cfg(feature = "cli-local")]
+fn json_vec_eq(left: &[serde_json::Value], right: &[serde_json::Value]) -> bool {
+    let mut left_sorted: Vec<String> = left.iter().map(|value| value.to_string()).collect();
+    let mut right_sorted: Vec<String> = right.iter().map(|value| value.to_string()).collect();
+    left_sorted.sort();
+    right_sorted.sort();
+    left_sorted == right_sorted
 }
 
 /// 页面级 key model availability 派生读模型。
@@ -754,16 +916,7 @@ pub fn build_query_page_logic_output(
     project_dir: Option<&std::path::Path>,
     budget: &str,
 ) -> Result<serde_json::Value> {
-    build_query_page_logic_output_inner(
-        graph,
-        None,
-        None,
-        None,
-        page_id,
-        project_dir,
-        budget,
-        None,
-    )
+    build_query_page_logic_output_inner(graph, None, None, None, page_id, project_dir, budget, None)
 }
 
 /// 查询页面级逻辑摘要，并允许复用预构建稠密图快照。
@@ -948,7 +1101,8 @@ pub fn build_page_logic_availability_cache(
 
     let metadata_started = Instant::now();
     let metadata::PageFileMetadata {
-        component_json_paths, ..
+        component_json_paths,
+        ..
     } = metadata::load_page_file_metadata(project_dir, &page_node.path);
     warm_stages.insert(
         "load_page_metadata".to_string(),
@@ -979,6 +1133,8 @@ pub fn build_page_logic_availability_cache(
         &child_components,
         &child_actions,
         &data_sources,
+        budget,
+        true,
         &mut ignored_profile,
     )?;
     warm_stages.insert(
@@ -1027,6 +1183,8 @@ pub fn build_page_logic_availability_cache(
         &data_sources,
         &write_targets,
         &entrypoints,
+        budget,
+        true,
         &mut ignored_profile,
     );
     warm_stages.insert(
@@ -1665,8 +1823,9 @@ fn build_query_page_logic_output_inner(
     // ---- 5.5 收集页面级条件前置条件（M19） ----
     let cached_page = availability_cache.filter(|cache| cache.matches(page_id, budget));
     let stage_started = Instant::now();
-    let prerequisites_read_model_used =
-        cached_page.and_then(|cache| cache.project_prerequisites()).is_some();
+    let prerequisites_read_model_used = cached_page
+        .and_then(|cache| cache.project_prerequisites())
+        .is_some();
     let prerequisites::PagePrerequisites {
         display_prerequisites,
         data_prerequisites,
@@ -1680,6 +1839,8 @@ fn build_query_page_logic_output_inner(
             &child_components,
             &child_actions,
             &data_sources,
+            budget,
+            false,
             &mut profile,
         )?
     };
@@ -1703,7 +1864,9 @@ fn build_query_page_logic_output_inner(
 
     // ---- 5.6 主链路抽取（M19.5）—— 使用路径计算领域模型 ----
     let stage_started = Instant::now();
-    let path_read_model_used = cached_page.and_then(|cache| cache.project_paths()).is_some();
+    let path_read_model_used = cached_page
+        .and_then(|cache| cache.project_paths())
+        .is_some();
     let path_summary::PageLogicPaths {
         mut primary_paths,
         mut related_context,
@@ -1724,6 +1887,8 @@ fn build_query_page_logic_output_inner(
             &data_sources,
             &write_targets,
             &entrypoints,
+            budget,
+            false,
             &mut profile,
         )
     };

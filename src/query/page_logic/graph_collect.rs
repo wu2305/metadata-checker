@@ -10,7 +10,7 @@ pub(super) struct PageLogicNodes {
 }
 
 /// 递归收集页面下所有组件，以及这些组件直接触发的动作
-pub(super) fn collect_page_logic_nodes(
+pub(crate) fn collect_page_logic_nodes(
     graph: &dyn GraphReadStore,
     page_id: &str,
 ) -> Result<PageLogicNodes> {

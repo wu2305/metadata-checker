@@ -5,6 +5,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
+#[cfg(feature = "cli-local")]
+std::thread_local! {
+    static PAGE_LOGIC_CACHE_WARM_STRUCTURAL_WRITES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static PAGE_LOGIC_CACHE_MAP_CLONE_ELEMENTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 use crate::dense_graph::DenseGraphSnapshot;
 use crate::graph::GraphDB;
 use crate::response_processor::ResponseProcessor;
@@ -19,6 +25,32 @@ pub enum RuntimeMode {
     LongLived,
 }
 
+/// 单页 page logic warm 结果。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BatchWarmPageResult {
+    /// 页面节点 ID。
+    pub page_id: String,
+    /// 输出预算。
+    pub budget: String,
+    /// 是否成功写入 warm cache。
+    pub success: bool,
+    /// 单页 warm 耗时（毫秒）。
+    pub warm_ms: u128,
+    /// 失败时的错误信息。
+    pub error: Option<String>,
+}
+
+/// 批量 page logic warm 报告。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BatchWarmReport {
+    /// 各页 warm 结果。
+    pub pages: Vec<BatchWarmPageResult>,
+    /// 整批总耗时（毫秒）。
+    pub total_ms: u128,
+    /// 本次批量 warm 的结构性写入次数（应为 1）。
+    pub structural_writes: usize,
+}
+
 /// Runtime 初始化阶段构建的只读派生模型。
 pub struct RuntimeReadModel {
     /// 稠密 ID + CSR 风格只读图快照；build 失败时为 `None`。
@@ -27,6 +59,8 @@ pub struct RuntimeReadModel {
     pub availability_facts: Arc<crate::query::MaterializedAvailabilityFactsIndex>,
     /// 预热后的页面 availability 缓存。
     pub page_logic_availability: HashMap<String, crate::query::PageLogicAvailabilityCache>,
+    /// M53：page logic 节点到页面的反向依赖索引。
+    pub page_dependency_index: Arc<crate::query::PageDependencyIndex>,
 }
 
 impl RuntimeReadModel {
@@ -82,6 +116,10 @@ pub struct GraphRuntime {
     pub dense_snapshot: Option<Arc<DenseGraphSnapshot>>,
     /// 稠密快照构建耗时（毫秒）。
     pub dense_snapshot_build_ms: u128,
+    /// availability facts 物化索引构建耗时（毫秒）。
+    pub availability_facts_build_ms: u128,
+    /// page 反向依赖索引构建耗时（毫秒）。
+    pub page_dependency_index_build_ms: u128,
     /// 是否在 runtime load/reload 阶段构建稠密快照。
     pub dense_snapshot_enabled: bool,
     /// Runtime 模式。
@@ -238,18 +276,22 @@ impl GraphRuntime {
             content_prefix_hash: prefix_hash,
         };
         let build_read_model = runtime_mode == RuntimeMode::LongLived;
-        let read_model_started = Instant::now();
+        let mut dense_snapshot_build_ms = 0_u128;
+        let mut availability_facts_build_ms = 0_u128;
+        let mut page_dependency_index_build_ms = 0_u128;
         let read_model = if build_read_model {
-            let dense_graph = DenseGraphSnapshot::from_graph(&graph)
-                .ok()
-                .map(Arc::new);
+            let dense_started = Instant::now();
+            let dense_graph = DenseGraphSnapshot::from_graph(&graph).ok().map(Arc::new);
+            dense_snapshot_build_ms = dense_started.elapsed().as_millis();
             if dense_graph.is_none() {
                 diagnostics.push(
                     "DenseGraphSnapshot build failed; long-lived dense path disabled".to_string(),
                 );
             }
-            let availability_facts = match crate::query::MaterializedAvailabilityFactsIndex::build(&graph)
-            {
+            let facts_started = Instant::now();
+            let availability_facts = match crate::query::MaterializedAvailabilityFactsIndex::build(
+                &graph,
+            ) {
                 Ok(index) => Arc::new(index),
                 Err(error) => {
                     diagnostics.push(format!(
@@ -258,11 +300,24 @@ impl GraphRuntime {
                     Arc::new(crate::query::MaterializedAvailabilityFactsIndex::empty())
                 }
             };
+            availability_facts_build_ms = facts_started.elapsed().as_millis();
             if dense_graph.is_some() || availability_facts.node_count > 0 {
+                let page_dep_started = Instant::now();
+                let page_dependency_index = match crate::query::PageDependencyIndex::build(&graph) {
+                    Ok(index) => Arc::new(index),
+                    Err(error) => {
+                        diagnostics.push(format!(
+                            "PageDependencyIndex build failed: {error}; using empty index"
+                        ));
+                        Arc::new(crate::query::PageDependencyIndex::empty())
+                    }
+                };
+                page_dependency_index_build_ms = page_dep_started.elapsed().as_millis();
                 Some(Arc::new(RuntimeReadModel {
                     dense_graph,
                     availability_facts,
                     page_logic_availability: HashMap::new(),
+                    page_dependency_index,
                 }))
             } else {
                 diagnostics.push(
@@ -275,14 +330,13 @@ impl GraphRuntime {
             None
         };
         let read_model_build_ms = if build_read_model {
-            read_model_started.elapsed().as_millis()
+            dense_snapshot_build_ms + availability_facts_build_ms + page_dependency_index_build_ms
         } else {
             0
         };
         let dense_snapshot = read_model
             .as_ref()
             .and_then(|model| model.dense_graph.as_ref().map(Arc::clone));
-        let dense_snapshot_build_ms = read_model_build_ms;
         let dense_snapshot_enabled = dense_snapshot.is_some();
 
         let project_dir = project_dir
@@ -311,6 +365,8 @@ impl GraphRuntime {
             graph_fingerprint: fingerprint,
             dense_snapshot,
             dense_snapshot_build_ms,
+            availability_facts_build_ms,
+            page_dependency_index_build_ms,
             dense_snapshot_enabled,
             runtime_mode,
             read_model,
@@ -326,30 +382,173 @@ impl GraphRuntime {
     /// 在长生命周期 runtime 的初始化阶段预热 page logic availability。
     pub fn warm_page_logic_availability(&mut self, page_id: &str, budget: &str) -> Result<u128> {
         let started_at = Instant::now();
+        let cache = self.build_page_logic_cache_entry(page_id, budget)?;
+        self.insert_page_logic_cache_entry(page_id, budget, cache)?;
+        Ok(started_at.elapsed().as_millis())
+    }
+
+    /// 批量预热 page logic availability，整批只做一次结构性写入。
+    pub fn warm_page_logic_batch(
+        &mut self,
+        targets: &[(String, String)],
+    ) -> Result<BatchWarmReport> {
+        let started_at = Instant::now();
+        let mut pages = Vec::with_capacity(targets.len());
+        let mut pending: Vec<(String, crate::query::PageLogicAvailabilityCache)> =
+            Vec::with_capacity(targets.len());
+
+        for (page_id, budget) in targets {
+            let page_started = Instant::now();
+            match self.build_page_logic_cache_entry(page_id, budget) {
+                Ok(cache) => {
+                    pending.push((
+                        RuntimeReadModel::page_logic_availability_key(page_id, budget),
+                        cache,
+                    ));
+                    pages.push(BatchWarmPageResult {
+                        page_id: page_id.clone(),
+                        budget: budget.clone(),
+                        success: true,
+                        warm_ms: page_started.elapsed().as_millis(),
+                        error: None,
+                    });
+                }
+                Err(error) => {
+                    pages.push(BatchWarmPageResult {
+                        page_id: page_id.clone(),
+                        budget: budget.clone(),
+                        success: false,
+                        warm_ms: page_started.elapsed().as_millis(),
+                        error: Some(error.to_string()),
+                    });
+                }
+            }
+        }
+
+        let structural_writes = if pending.is_empty() {
+            0
+        } else {
+            self.insert_page_logic_cache_entries(pending)?;
+            1
+        };
+
+        Ok(BatchWarmReport {
+            pages,
+            total_ms: started_at.elapsed().as_millis(),
+            structural_writes,
+        })
+    }
+
+    /// 根据 dirty node 列表摘除 warm cache 中受影响的页面条目。
+    ///
+    /// 只摘除缓存，不自动重新 warm，也不判断是否应该触发 reload。
+    pub fn invalidate_pages_for_dirty_nodes(
+        &mut self,
+        dirty_node_ids: &[String],
+    ) -> Result<Vec<String>> {
+        let Some(read_model) = self.read_model.as_mut() else {
+            return Err(anyhow::anyhow!(
+                "page logic cache invalidation requires long-lived runtime read model"
+            ));
+        };
+        let affected = read_model
+            .page_dependency_index
+            .affected_pages(dirty_node_ids);
+        if affected.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let model = Self::unique_read_model_mut(read_model)?;
+        let mut removed_pages = Vec::new();
+        model.page_logic_availability.retain(|key, _| {
+            let page_id = key.split('\n').next().unwrap_or(key.as_str());
+            if affected.contains(page_id) {
+                if !removed_pages.iter().any(|existing| existing == page_id) {
+                    removed_pages.push(page_id.to_string());
+                }
+                false
+            } else {
+                true
+            }
+        });
+        removed_pages.sort();
+        Ok(removed_pages)
+    }
+
+    /// 构建单条 page logic warm cache 条目（不写回 read model）。
+    fn build_page_logic_cache_entry(
+        &self,
+        page_id: &str,
+        budget: &str,
+    ) -> Result<crate::query::PageLogicAvailabilityCache> {
         let Some(read_model) = self.read_model.as_ref() else {
             return Err(anyhow::anyhow!(
                 "page logic availability warm requires long-lived runtime read model"
             ));
         };
-        let cache = crate::query::build_page_logic_availability_cache(
+        crate::query::build_page_logic_availability_cache(
             &self.graph,
             read_model.dense_graph.as_deref(),
             page_id,
             self.project_dir.as_deref(),
             budget,
             Some(read_model.availability_facts.as_ref()),
-        )?;
-        let mut page_logic_availability = read_model.page_logic_availability.clone();
-        page_logic_availability.insert(
-            RuntimeReadModel::page_logic_availability_key(page_id, budget),
-            cache,
-        );
-        self.read_model = Some(Arc::new(RuntimeReadModel {
-            dense_graph: read_model.dense_graph.clone(),
-            availability_facts: Arc::clone(&read_model.availability_facts),
+        )
+    }
+
+    /// 写入单条 page logic warm cache（原地更新，避免深拷贝整个 map）。
+    fn insert_page_logic_cache_entry(
+        &mut self,
+        page_id: &str,
+        budget: &str,
+        cache: crate::query::PageLogicAvailabilityCache,
+    ) -> Result<()> {
+        let key = RuntimeReadModel::page_logic_availability_key(page_id, budget);
+        self.insert_page_logic_cache_entries(vec![(key, cache)])
+    }
+
+    /// 批量写入 page logic warm cache（一次结构性写入）。
+    fn insert_page_logic_cache_entries(
+        &mut self,
+        entries: Vec<(String, crate::query::PageLogicAvailabilityCache)>,
+    ) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let Some(read_model) = self.read_model.as_mut() else {
+            return Err(anyhow::anyhow!(
+                "page logic availability warm requires long-lived runtime read model"
+            ));
+        };
+        let model = Self::unique_read_model_mut(read_model)?;
+        for (key, cache) in entries {
+            model.page_logic_availability.insert(key, cache);
+        }
+        record_page_logic_cache_structural_write();
+        Ok(())
+    }
+
+    /// 获取唯一持有的 `RuntimeReadModel` 可变引用；若存在额外 Arc 持有者则仅克隆 warm cache map。
+    fn unique_read_model_mut(
+        read_model: &mut Arc<RuntimeReadModel>,
+    ) -> Result<&mut RuntimeReadModel> {
+        if Arc::strong_count(read_model) == 1 {
+            return Ok(Arc::get_mut(read_model)
+                .expect("unique Arc<RuntimeReadModel> must allow in-place mutation"));
+        }
+        let snapshot = Arc::clone(read_model);
+        let page_logic_availability = snapshot.page_logic_availability.clone();
+        #[cfg(feature = "cli-local")]
+        PAGE_LOGIC_CACHE_MAP_CLONE_ELEMENTS.with(|counter| {
+            counter.set(counter.get() + page_logic_availability.len());
+        });
+        *read_model = Arc::new(RuntimeReadModel {
+            dense_graph: snapshot.dense_graph.clone(),
+            availability_facts: Arc::clone(&snapshot.availability_facts),
+            page_dependency_index: Arc::clone(&snapshot.page_dependency_index),
             page_logic_availability,
-        }));
-        Ok(started_at.elapsed().as_millis())
+        });
+        Ok(Arc::get_mut(read_model).expect("fresh Arc must be uniquely owned"))
     }
 
     /// 执行查询，复用内存中的 graph
@@ -731,6 +930,8 @@ impl GraphRuntime {
                 self.project_dir = new_runtime.project_dir;
                 self.dense_snapshot = new_runtime.dense_snapshot;
                 self.dense_snapshot_build_ms = new_runtime.dense_snapshot_build_ms;
+                self.availability_facts_build_ms = new_runtime.availability_facts_build_ms;
+                self.page_dependency_index_build_ms = new_runtime.page_dependency_index_build_ms;
                 self.dense_snapshot_enabled = new_runtime.dense_snapshot_enabled;
                 self.runtime_mode = new_runtime.runtime_mode;
                 self.read_model = new_runtime.read_model;
@@ -766,4 +967,31 @@ impl GraphRuntime {
             last_reload_error: self.last_reload_error.clone(),
         }
     }
+}
+
+/// 记录 page logic warm 结构性写入。
+fn record_page_logic_cache_structural_write() {
+    #[cfg(feature = "cli-local")]
+    PAGE_LOGIC_CACHE_WARM_STRUCTURAL_WRITES.with(|counter| {
+        counter.set(counter.get() + 1);
+    });
+}
+
+/// 重置 warm cache 观测计数器（测试用）。
+#[cfg(feature = "cli-local")]
+pub fn reset_page_logic_cache_write_counters() {
+    PAGE_LOGIC_CACHE_WARM_STRUCTURAL_WRITES.with(|counter| counter.set(0));
+    PAGE_LOGIC_CACHE_MAP_CLONE_ELEMENTS.with(|counter| counter.set(0));
+}
+
+/// 读取 warm 结构性写入次数（测试用）。
+#[cfg(feature = "cli-local")]
+pub fn page_logic_cache_warm_structural_writes() -> usize {
+    PAGE_LOGIC_CACHE_WARM_STRUCTURAL_WRITES.with(|counter| counter.get())
+}
+
+/// 读取 warm cache HashMap 深拷贝元素累计（测试用，应为 0）。
+#[cfg(feature = "cli-local")]
+pub fn page_logic_cache_map_clone_elements() -> usize {
+    PAGE_LOGIC_CACHE_MAP_CLONE_ELEMENTS.with(|counter| counter.get())
 }

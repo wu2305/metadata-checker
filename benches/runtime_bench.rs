@@ -23,7 +23,9 @@ use dirty_file::write_dirty_variant;
 use external_graph_lock::acquire_external_graph_lock;
 use first_existing_target::first_existing_target;
 use graphdb_fixture::corrupt_graphdb_header;
-use metadata_checker::graph::set_graph_lock_timeout_ms;
+use metadata_checker::dense_graph::DenseGraphSnapshot;
+use metadata_checker::graph::{GraphDB, set_graph_lock_timeout_ms};
+use metadata_checker::query::{MaterializedAvailabilityFactsIndex, PageDependencyIndex};
 use metadata_checker::runtime::GraphRuntime;
 use metadata_checker::scanner::indexer::ProjectIndexer;
 use metadata_checker::tool_contract::ToolCommand;
@@ -64,6 +66,42 @@ fn bench_runtime_load(c: &mut Criterion, source_project_dir: &Path) {
             )
             .expect("runtime load should succeed");
             black_box(runtime);
+        });
+    });
+}
+
+/// 衡量 LongLived load 阶段 dense snapshot 单步构建成本。
+fn bench_runtime_load_dense_snapshot_build(c: &mut Criterion, source_project_dir: &Path) {
+    let workspace = create_indexed_workspace("runtime-load-dense", source_project_dir)
+        .expect("create workspace");
+    let graph = GraphDB::open(&workspace.db_path).expect("open graphdb");
+    c.bench_function("runtime_load_dense_snapshot_build", |bench| {
+        bench.iter(|| {
+            black_box(DenseGraphSnapshot::from_graph(black_box(&graph)).ok());
+        });
+    });
+}
+
+/// 衡量 LongLived load 阶段 availability facts 单步构建成本。
+fn bench_runtime_load_availability_facts_build(c: &mut Criterion, source_project_dir: &Path) {
+    let workspace = create_indexed_workspace("runtime-load-facts", source_project_dir)
+        .expect("create workspace");
+    let graph = GraphDB::open(&workspace.db_path).expect("open graphdb");
+    c.bench_function("runtime_load_availability_facts_build", |bench| {
+        bench.iter(|| {
+            black_box(MaterializedAvailabilityFactsIndex::build(black_box(&graph)).ok());
+        });
+    });
+}
+
+/// 衡量 LongLived load 阶段 page dependency index 单步构建成本。
+fn bench_runtime_load_page_dependency_index_build(c: &mut Criterion, source_project_dir: &Path) {
+    let workspace = create_indexed_workspace("runtime-load-page-dep", source_project_dir)
+        .expect("create workspace");
+    let graph = GraphDB::open(&workspace.db_path).expect("open graphdb");
+    c.bench_function("runtime_load_page_dependency_index_build", |bench| {
+        bench.iter(|| {
+            black_box(PageDependencyIndex::build(black_box(&graph)).ok());
         });
     });
 }
@@ -265,6 +303,9 @@ fn bench_runtime_scenarios(c: &mut Criterion) {
     };
 
     bench_runtime_load(c, &source_project_dir);
+    bench_runtime_load_dense_snapshot_build(c, &source_project_dir);
+    bench_runtime_load_availability_facts_build(c, &source_project_dir);
+    bench_runtime_load_page_dependency_index_build(c, &source_project_dir);
     bench_runtime_status(c, &source_project_dir);
     bench_runtime_check_reload_unchanged(c, &source_project_dir);
     bench_runtime_reload_graph(c, &source_project_dir);

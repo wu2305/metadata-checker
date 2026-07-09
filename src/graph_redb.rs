@@ -140,10 +140,7 @@ impl GraphDB {
         Self::ensure_redb_tables(db_path)?;
 
         if let Some(layout) = crate::graph_redb_v2::read_v2_layout(db_path)? {
-            match crate::graph_redb_v2::hydrate_graph_from_v2(
-                &layout,
-                &db_path.to_string_lossy(),
-            ) {
+            match crate::graph_redb_v2::hydrate_graph_from_v2(&layout, &db_path.to_string_lossy()) {
                 Ok(graph) => return Ok(graph),
                 Err(_) => {
                     // ponytail: v2 hydrate 失败时静默 fallback v1，避免阻断打开路径
@@ -711,7 +708,10 @@ impl GraphDB {
         if can_try_incremental {
             if let Some(mut existing) = crate::graph_redb_v2::read_v2_layout(db_path)? {
                 let dirty_subset_of_v2 = graph.dirty_nodes.iter().all(|node_id| {
-                    existing.node_ids.iter().any(|existing_id| existing_id == node_id)
+                    existing
+                        .node_ids
+                        .iter()
+                        .any(|existing_id| existing_id == node_id)
                 });
                 if dirty_subset_of_v2 {
                     crate::graph_redb_v2::patch_v2_layout_node_meta(

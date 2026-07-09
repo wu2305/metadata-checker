@@ -1,6 +1,6 @@
 # M53 性能优化落地记录
 
-> 状态：**done**（B1 / B2 / A 已合并 #9–#10）。B1.2 dataflow facts、C 线 fragment / commit batch 仍 profile 门控，非阻塞。
+> 状态：**done**（B1 / B2 / A 已合并 #9–#10；warm-cache 可扩展性 T1–T3、init/load 分层观测已落地待合入）。B1.2 dataflow facts、`redb_commit` / commit batch 仍 profile 门控，非阻塞。fragment 跨平台已移出 M53（无跨 session 复用需求时不做）。
 
 ## 从 M52 带入的已验证优化
 
@@ -153,14 +153,45 @@ compact one-shot（3 轮 p50）：wall **694ms**（M52 537）、`path_summary` *
 
 PR：[#9](https://cnb.cool/wu2305/metadata-checker/-/pulls/9)（CI/docs）、[#10](https://cnb.cool/wu2305/metadata-checker/-/pulls/10)（B1/B2/A）。
 
+## M53 收尾交付（待合入）
+
+### warm-cache 可扩展性（T1–T3）
+
+规格：`docs/specs/2026-07-07-m53-warm-cache-scalability-design.md`。
+
+| 项 | 内容 |
+|---|---|
+| T1 | `Arc::get_mut` 消除 warm 时 O(P²) map clone；新增 `warm_page_logic_batch` |
+| T2 | warm 物化按 budget 裁剪 path 缓存（compact `candidate_paths` 6706→0）；输出字节级等价 |
+| T3 | `PageDependencyIndex` + `invalidate_pages_for_dirty_nodes`（page-diff 地基；不含触发业务） |
+
+### init/load 分层观测
+
+规格：`docs/specs/2026-07-09-m53-init-load-observability-design.md`。
+
+- `read_model_build_ms` 拆为 dense / availability facts / page dependency index 三段计时。
+- `PageDependencyIndex::build` 失败降级为空索引（与 dense/facts 容错一致）。
+- Criterion：`runtime_load_*_build` 三场景进 Bencher trend（无 fail threshold）。
+
+xiaoshouyi 真实项目 `release-fast` Criterion 单步采样（2026-07-09，p50）：
+
+| 阶段 | p50 | 占 read model 三步之和 |
+|---|---:|---:|
+| `runtime_load_dense_snapshot_build` | 2968ms | 57% |
+| `runtime_load_availability_facts_build` | 1801ms | 35% |
+| `runtime_load_page_dependency_index_build` | 442ms | 8% |
+| 合计 | 5211ms | 100% |
+
 ## M53 剩余 / 后续
 
 1. ~~redb v2 hydrate / incremental persist~~（已完成 §A）。
 2. ~~path_summary dense-native~~（已完成 §B2）。
 3. ~~prerequisites / path_summary warm cache~~（已完成，任务 A；与下述 B1.2 不同）。
-4. **B1.2**：`key_model_availability` 更深物化（**dataflow facts** 批量索引，非 prerequisites/paths warm）——需真实项目 profile 验证收益。
-5. fragment 跨平台（C 线，profile 门控，非阻塞）。
-6. init/load 分层观测补全（graph load / dense / read model / warm）。
+4. ~~warm-cache 可扩展性 T1–T3~~（已完成，见上节）。
+5. ~~init/load 分层观测补全~~（已完成 §init-load-observability）。
+6. **B1.2**：`key_model_availability` 更深物化（**dataflow facts** 批量索引，非 prerequisites/paths warm）——需真实项目 profile 验证收益；可挂后续里程碑。
+7. **`redb_commit` / commit batch**（C 线，profile 门控，非阻塞）。
+8. **runtime page diff 触发**（阈值 / 远程改动量 / 自动 re-warm）——T3 仅地基，业务编排不在 M53。
 
 ## M53 不重复做
 
@@ -169,3 +200,4 @@ PR：[#9](https://cnb.cool/wu2305/metadata-checker/-/pulls/9)（CI/docs）、[#1
 - 不设置性能 fail threshold。
 - 不做 browser real perf。
 - 不改公开 JSON 语义。
+- 不做 fragment 跨平台持久化（已移出 M53；旧 spike 在未合并分支，待有跨 session 复用需求再评估）。

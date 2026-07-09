@@ -20,6 +20,8 @@ fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
         "default runtime load must not build dense snapshot"
     );
     assert_eq!(runtime.dense_snapshot_build_ms, 0);
+    assert_eq!(runtime.availability_facts_build_ms, 0);
+    assert_eq!(runtime.page_dependency_index_build_ms, 0);
     assert!(
         runtime.graph_load_ms > 0,
         "首次加载 graph_load_ms 应大于 0，实际 {}",
@@ -303,17 +305,18 @@ fn test_graph_runtime_long_lived_mode_builds_read_model() {
         .dense_graph
         .as_ref()
         .expect("long-lived runtime must build dense snapshot during init");
-    assert_eq!(
-        dense_graph.dense_node_count(),
-        runtime.status().node_count
-    );
-    assert_eq!(
-        dense_graph.dense_edge_count(),
-        runtime.status().edge_count
-    );
+    assert_eq!(dense_graph.dense_node_count(), runtime.status().node_count);
+    assert_eq!(dense_graph.dense_edge_count(), runtime.status().edge_count);
     assert!(
         runtime.read_model_build_ms > 0,
         "long-lived runtime should record read model build cost"
+    );
+    assert_eq!(
+        runtime.dense_snapshot_build_ms
+            + runtime.availability_facts_build_ms
+            + runtime.page_dependency_index_build_ms,
+        runtime.read_model_build_ms,
+        "read model build ms should equal sum of three stage timings"
     );
 
     let previous_read_model = std::sync::Arc::clone(read_model);
@@ -348,6 +351,8 @@ fn test_graph_runtime_one_shot_mode_does_not_build_read_model() {
         "one-shot runtime must avoid init-heavy read model"
     );
     assert_eq!(runtime.read_model_build_ms, 0);
+    assert_eq!(runtime.availability_facts_build_ms, 0);
+    assert_eq!(runtime.page_dependency_index_build_ms, 0);
 }
 
 #[test]
@@ -614,4 +619,162 @@ fn test_runtime_query_dataflow_returns_real_value() {
         "query_dataflow should return summary, got: {:?}",
         result
     );
+}
+
+#[cfg(feature = "cli-local")]
+mod page_dependency_index_degradation {
+    use metadata_checker::graph::GraphDB;
+    use metadata_checker::graph_store::{
+        GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
+    };
+    use metadata_checker::query::PageDependencyIndex;
+    use metadata_checker::runtime::{GraphRuntime, RuntimeMode};
+    use std::cell::Cell;
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    use super::common;
+
+    /// 在 `get_node_edges` 调用时注入读取失败，用于模拟 PageDependencyIndex 构建降级。
+    struct FailingPageDependencyGraphStore<'a> {
+        inner: &'a GraphDB,
+        fail_on_get_node_edges: bool,
+        get_node_edges_calls: Cell<usize>,
+    }
+
+    impl<'a> FailingPageDependencyGraphStore<'a> {
+        fn fail_on_get_node_edges(inner: &'a GraphDB) -> Self {
+            Self {
+                inner,
+                fail_on_get_node_edges: true,
+                get_node_edges_calls: Cell::new(0),
+            }
+        }
+    }
+
+    impl GraphReadStore for FailingPageDependencyGraphStore<'_> {
+        fn get_node(
+            &self,
+            node_id: &str,
+        ) -> GraphStoreResult<Option<metadata_checker::graph::Node>> {
+            GraphReadStore::get_node(self.inner, node_id)
+        }
+
+        fn get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>> {
+            self.get_node_edges_calls
+                .set(self.get_node_edges_calls.get() + 1);
+            if self.fail_on_get_node_edges {
+                return Err(GraphStoreError::ReadFailed {
+                    reason: format!("injected failure while reading edges for {node_id}"),
+                });
+            }
+            GraphReadStore::get_node_edges(self.inner, node_id)
+        }
+
+        fn node_count(&self) -> GraphStoreResult<usize> {
+            GraphReadStore::node_count(self.inner)
+        }
+
+        fn edge_count(&self) -> GraphStoreResult<usize> {
+            GraphReadStore::edge_count(self.inner)
+        }
+
+        fn iter_nodes(
+            &self,
+        ) -> GraphStoreResult<Box<dyn Iterator<Item = metadata_checker::graph::Node> + '_>>
+        {
+            GraphReadStore::iter_nodes(self.inner)
+        }
+    }
+
+    /// PageDependencyIndex::build 失败时应降级为空索引，并记录非零构建耗时。
+    #[test]
+    fn test_page_dependency_index_build_failure_falls_back_to_empty_index() -> anyhow::Result<()> {
+        let (_temp_dir, db_path) = common::build_fixture_graphdb();
+        let graph = GraphDB::open(&db_path)?;
+        let failing = FailingPageDependencyGraphStore::fail_on_get_node_edges(&graph);
+
+        let started = Instant::now();
+        let (index, diagnostic) = match PageDependencyIndex::build(&failing) {
+            Ok(index) => (Arc::new(index), None),
+            Err(error) => (
+                Arc::new(PageDependencyIndex::empty()),
+                Some(format!(
+                    "PageDependencyIndex build failed: {error}; using empty index"
+                )),
+            ),
+        };
+        let build_ms = started.elapsed().as_millis();
+
+        let diagnostic = diagnostic.expect("build should fail under injected graph read error");
+        assert!(
+            diagnostic.contains("PageDependencyIndex build failed"),
+            "diagnostic must mention build failure: {diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("using empty index"),
+            "diagnostic must mention empty index fallback: {diagnostic}"
+        );
+        assert_eq!(index.indexed_node_count(), 0);
+        assert!(
+            index
+                .affected_pages(&["comp:app/actions_test.spg|input1".to_string()])
+                .is_empty()
+        );
+        assert!(
+            failing.get_node_edges_calls.get() > 0,
+            "build attempt should reach graph edge reads before failing"
+        );
+        let _ = build_ms;
+        Ok(())
+    }
+
+    /// 空 page dependency 索引下，invalidate 应返回空列表且不报错。
+    #[test]
+    fn test_graph_runtime_invalidate_with_empty_page_dependency_index() -> anyhow::Result<()> {
+        let (temp_dir, db_path) = common::build_fixture_graphdb();
+        let mut runtime = GraphRuntime::load_with_project_dir_and_mode(
+            &db_path,
+            Some(&temp_dir),
+            RuntimeMode::LongLived,
+        )?;
+
+        let read_model = runtime
+            .read_model
+            .as_mut()
+            .expect("long-lived runtime must have read model");
+        let model = Arc::get_mut(read_model).expect("fresh runtime read model must be unique");
+        model.page_dependency_index = Arc::new(PageDependencyIndex::empty());
+
+        runtime.warm_page_logic_availability("page:app/actions_test.spg", "normal")?;
+
+        let removed = runtime
+            .invalidate_pages_for_dirty_nodes(&["comp:app/actions_test.spg|input1".to_string()])?;
+        assert!(
+            removed.is_empty(),
+            "empty index must not invalidate any page"
+        );
+
+        assert!(
+            runtime
+                .read_model
+                .as_ref()
+                .expect("read model must remain available")
+                .has_page_logic_availability("page:app/actions_test.spg", "normal"),
+            "empty index invalidation must not remove warmed cache entries"
+        );
+        Ok(())
+    }
+
+    /// PageDependencyIndex::empty 应返回空 affected_pages。
+    #[test]
+    fn test_page_dependency_index_empty_returns_no_affected_pages() {
+        let index = PageDependencyIndex::empty();
+        assert_eq!(index.indexed_node_count(), 0);
+        assert!(
+            index
+                .affected_pages(&["page:app/actions_test.spg".to_string()])
+                .is_empty()
+        );
+    }
 }
