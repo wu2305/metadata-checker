@@ -476,8 +476,8 @@ mod page_logic;
 pub use page_logic::collect_page_logic_nodes_for_test;
 pub use page_logic::query_page_logic;
 pub use page_logic::{
-    MaterializedAvailabilityFactsIndex, PageDependencyIndex, PageLogicAvailabilityCache,
-    build_page_logic_availability_cache, build_query_page_logic_output,
+    MaterializedAvailabilityFactsIndex, PageDependencyIndex, PageDependencyIndexCoverage,
+    PageLogicAvailabilityCache, build_page_logic_availability_cache, build_query_page_logic_output,
     build_query_page_logic_output_profiled,
     build_query_page_logic_output_profiled_with_availability_cache,
     build_query_page_logic_output_profiled_with_dense_snapshot,

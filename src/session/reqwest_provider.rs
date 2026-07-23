@@ -162,6 +162,10 @@ impl BiFileInfo {
 }
 
 /// reqwest-based 远程 session provider。
+///
+/// Clone 共享底层 reqwest Client（连接池与 cookie jar），用于同时充当
+/// active/deleted 清单 transport 与内容 fetch provider。
+#[derive(Clone)]
 pub struct ReqwestRemoteSessionProvider {
     client: Client,
     base_url: String,
@@ -562,6 +566,67 @@ impl ReqwestRemoteSessionProvider {
         if value.is_object() { Some(value) } else { None }
     }
 
+    /// M55：读取项目回收站删除文件完整清单（完整数组、无分页）。
+    ///
+    /// `POST /api/meta/file/getRecyclebinFiles`，body 固定
+    /// `{"projectName": project_ref, "recur": true}`。
+    /// 404 → `DELETE_CHANGE_SOURCE_UNAVAILABLE`；
+    /// 403 → `DELETE_CHANGE_SOURCE_FORBIDDEN`。
+    pub fn list_recyclebin_files(
+        &self,
+        project_ref: &str,
+    ) -> Result<Vec<crate::diff_refresh::BiDeletedMetaFileInfo>> {
+        let url = self.url("/api/meta/file/getRecyclebinFiles");
+        let safe_url = sanitize_session_error_message(&url);
+        let body = serde_json::json!({"projectName": project_ref, "recur": true});
+        let response = self.client.post(&url).json(&body).send().map_err(|err| {
+            anyhow!(
+                "HTTP request failed: {}: {}",
+                safe_url,
+                sanitize_session_error_message(&err.to_string())
+            )
+        })?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(anyhow!(
+                "DELETE_CHANGE_SOURCE_UNAVAILABLE: recyclebin endpoint returned 404"
+            ));
+        }
+        if status == reqwest::StatusCode::FORBIDDEN {
+            return Err(anyhow!(
+                "DELETE_CHANGE_SOURCE_FORBIDDEN: recyclebin endpoint returned 403"
+            ));
+        }
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(anyhow!("remote session returned 401 Unauthorized"));
+        }
+        if !status.is_success() {
+            return Err(anyhow!("remote session returned HTTP {}", status.as_u16()));
+        }
+
+        let raw = response.text().map_err(|err| {
+            anyhow!(
+                "failed to read response body from {}: {}",
+                safe_url,
+                sanitize_session_error_message(&err.to_string())
+            )
+        })?;
+        let json_text = self.decode_structured_payload(&raw, "recyclebin files")?;
+        let parsed = Self::parse_json(&json_text, "recyclebin files")?;
+        let items = Self::find_wrapped_array(&parsed, "recyclebinFiles")
+            .or_else(|| parsed.as_array().map(|array| array.as_slice()))
+            .context("failed to parse recyclebin files: expected array")?;
+
+        items
+            .iter()
+            .map(|item| {
+                serde_json::from_value(item.clone())
+                    .with_context(|| "failed to parse recyclebin file entry".to_string())
+            })
+            .collect()
+    }
+
     /// 读取某个项目或模块路径下的全部后代文件。
     fn list_metafiles_from_descendant_path(
         &self,
@@ -846,7 +911,7 @@ fn looks_like_json_document(input: &str) -> bool {
 }
 
 /// 将 BI 绝对路径转换为项目内逻辑路径。
-fn normalize_source_path(path: &str, project_ref: &str) -> String {
+pub(crate) fn normalize_source_path(path: &str, project_ref: &str) -> String {
     let prefix = format!("/{project_ref}/");
     if path.starts_with(&prefix) {
         path[prefix.len()..].to_string()

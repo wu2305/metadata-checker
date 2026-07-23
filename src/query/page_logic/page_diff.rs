@@ -5,23 +5,39 @@ use std::collections::{HashMap, HashSet};
 
 use super::graph_collect;
 
+/// PageDependencyIndex 的覆盖度标记。
+///
+/// `Full`：索引按 page logic 收集范围完整构建；
+/// `Partial`：构建失败降级为空索引，覆盖无法证明，
+/// 调用方必须保守扩大 invalidation 并输出该标记。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PageDependencyIndexCoverage {
+    Full,
+    Partial,
+}
+
 /// 从 node_id 反查其归属/引用它的所有 page_id。
 ///
 /// 覆盖范围与 `graph_collect::collect_page_logic_nodes` 一致：页面自身、
-/// 递归 Contains 子组件，以及组件 Triggers 的动作节点。
+/// 递归 Contains 子组件、组件 Triggers 的动作节点，以及 M55 起的数据面
+/// 闭包——这些节点沿出边可达的 Model/Field（含共享物理模型、
+/// DataFlow 模型与其输出字段）。
 pub struct PageDependencyIndex {
     node_to_pages: HashMap<String, HashSet<String>>,
+    coverage: PageDependencyIndexCoverage,
 }
 
 impl PageDependencyIndex {
-    /// 构造一个空的反向依赖索引（降级路径使用）。
+    /// 构造一个空的反向依赖索引（降级路径使用，覆盖度为 Partial）。
     pub fn empty() -> Self {
         Self {
             node_to_pages: HashMap::new(),
+            coverage: PageDependencyIndexCoverage::Partial,
         }
     }
 
-    /// 从图数据库构建反向依赖索引。
+    /// 从图数据库构建反向依赖索引（成功时覆盖度为 Full）。
     pub fn build(graph: &dyn GraphReadStore) -> Result<Self> {
         let mut node_to_pages: HashMap<String, HashSet<String>> = HashMap::new();
         for node in graph.iter_nodes()? {
@@ -37,8 +53,22 @@ impl PageDependencyIndex {
             for action in collected.child_actions {
                 register_node_page(&mut node_to_pages, &action.id, &page_id);
             }
+            for model in collected.related_models {
+                register_node_page(&mut node_to_pages, &model.id, &page_id);
+            }
+            for field in collected.related_fields {
+                register_node_page(&mut node_to_pages, &field.id, &page_id);
+            }
         }
-        Ok(Self { node_to_pages })
+        Ok(Self {
+            node_to_pages,
+            coverage: PageDependencyIndexCoverage::Full,
+        })
+    }
+
+    /// 索引覆盖度标记（Full/Partial）。
+    pub fn coverage(&self) -> PageDependencyIndexCoverage {
+        self.coverage
     }
 
     /// 根据 dirty node 列表返回需要失效 warm cache 的 page_id 集合。

@@ -26,6 +26,75 @@ const V2_FIELD_PATHS_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::ne
 const V2_FILE_STATES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("v2_file_states");
 
 const V2_SINGLE_KEY: &str = "bundle";
+/// M56：v2 shadow 状态在 V2_META_TABLE 中的键（独立于 RedbV2Meta blob，
+/// 旧库无该键时视为 Current，向后兼容）。
+const V2_SHADOW_STATE_KEY: &str = "shadow_state";
+/// M56 P1：Stale 期间累计受影响节点 keys 数在 V2_META_TABLE 中的键。
+const V2_STALE_DIRTY_NODES_KEY: &str = "stale_dirty_nodes";
+
+pub use crate::graph_store::V2ShadowState;
+
+/// 在已有 write transaction 中写入 v2 shadow 状态（与 v1 persist 共用单次 commit）。
+pub fn write_v2_shadow_state(
+    write_txn: &redb::WriteTransaction,
+    state: V2ShadowState,
+) -> Result<()> {
+    let mut table = write_txn.open_table(V2_META_TABLE)?;
+    let bytes = serde_json::to_vec(&state).context("serialize v2 shadow state")?;
+    table.insert(V2_SHADOW_STATE_KEY, bytes)?;
+    Ok(())
+}
+
+/// 读取 v2 shadow 状态。
+///
+/// 旧库无 v2_meta 表或无该键时返回 `Current`（向后兼容，维持 v2 优先 hydrate）；
+/// 状态值无法解析时保守返回 `Stale`（v1 hydrate 总是正确的）。
+pub fn read_v2_shadow_state(db_path: &Path) -> Result<V2ShadowState> {
+    if !db_path.exists() {
+        return Ok(V2ShadowState::Current);
+    }
+    let db = Database::open(db_path)
+        .with_context(|| format!("open redb for v2 shadow state read at {:?}", db_path))?;
+    let read_txn = db.begin_read()?;
+    let table = match read_txn.open_table(V2_META_TABLE) {
+        Ok(table) => table,
+        Err(_) => return Ok(V2ShadowState::Current),
+    };
+    let Some(bytes) = table.get(V2_SHADOW_STATE_KEY)? else {
+        return Ok(V2ShadowState::Current);
+    };
+    Ok(serde_json::from_slice(bytes.value().as_slice()).unwrap_or(V2ShadowState::Stale))
+}
+
+/// 在已有 write transaction 中写入 stale 累计受影响节点 keys 数。
+pub fn write_v2_stale_dirty_nodes(write_txn: &redb::WriteTransaction, count: u64) -> Result<()> {
+    let mut table = write_txn.open_table(V2_META_TABLE)?;
+    table.insert(V2_STALE_DIRTY_NODES_KEY, count.to_le_bytes().to_vec())?;
+    Ok(())
+}
+
+/// 读取 stale 累计受影响节点 keys 数（无记录为 0；Current 状态下语义上恒为 0）。
+pub fn read_v2_stale_dirty_nodes(db_path: &Path) -> Result<u64> {
+    if !db_path.exists() {
+        return Ok(0);
+    }
+    let db = Database::open(db_path)
+        .with_context(|| format!("open redb for v2 stale dirty read at {:?}", db_path))?;
+    let read_txn = db.begin_read()?;
+    let table = match read_txn.open_table(V2_META_TABLE) {
+        Ok(table) => table,
+        Err(_) => return Ok(0),
+    };
+    let Some(bytes) = table.get(V2_STALE_DIRTY_NODES_KEY)? else {
+        return Ok(0);
+    };
+    let raw: [u8; 8] = bytes
+        .value()
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("invalid v2 stale_dirty_nodes record"))?;
+    Ok(u64::from_le_bytes(raw))
+}
 
 /// v2 布局元信息。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -192,7 +261,7 @@ pub fn build_v2_layout(
         field_paths,
         file_states: file_states.clone(),
     };
-    layout.meta.content_fingerprint = fingerprint_layout(&layout);
+    layout.meta.content_fingerprint = fingerprint_layout(&layout)?;
     Ok(layout)
 }
 
@@ -229,7 +298,7 @@ pub fn patch_v2_layout_node_meta(
     }
     layout.file_states = file_states.clone();
     layout.meta.file_state_count = file_states.len() as u32;
-    layout.meta.content_fingerprint = fingerprint_layout(layout);
+    layout.meta.content_fingerprint = fingerprint_layout(layout)?;
     Ok(())
 }
 
@@ -243,6 +312,8 @@ pub fn write_v2_shadow_tables(
         let bytes = serde_json::to_vec(&layout.meta).context("serialize v2 meta")?;
         table.insert(V2_SINGLE_KEY, bytes)?;
     }
+    // 全量 layout 写入后 shadow 与 v1 一致，标记 Current
+    write_v2_shadow_state(write_txn, V2ShadowState::Current)?;
     {
         let mut table = write_txn.open_table(V2_NODE_IDS_TABLE)?;
         let bytes = serde_json::to_vec(&layout.node_ids).context("serialize v2 node ids")?;
@@ -343,7 +414,8 @@ pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
         field_paths,
         file_states,
     };
-    if layout.meta.content_fingerprint != fingerprint_layout(&layout) {
+    validate_layout(&layout)?;
+    if layout.meta.content_fingerprint != fingerprint_layout(&layout)? {
         return Ok(None);
     }
     Ok(Some(layout))
@@ -351,13 +423,7 @@ pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
 
 /// 从 v2 layout hydrate 内存图，供 shadow compare 和 M53 预研。
 pub fn hydrate_graph_from_v2(layout: &RedbV2Layout, db_path: &str) -> Result<GraphDB> {
-    if layout.node_ids.len() != layout.nodes.len() {
-        anyhow::bail!(
-            "v2 layout node id/meta length mismatch: {} vs {}",
-            layout.node_ids.len(),
-            layout.nodes.len()
-        );
-    }
+    validate_layout(layout)?;
 
     let mut graph = DiGraph::new();
     let mut node_indices = HashMap::new();
@@ -544,25 +610,98 @@ fn read_single_blob<T: for<'de> Deserialize<'de>>(
     ))
 }
 
-fn fingerprint_layout(layout: &RedbV2Layout) -> u64 {
+fn validate_layout(layout: &RedbV2Layout) -> Result<()> {
+    let node_count = layout.node_ids.len();
+    if layout.nodes.len() != node_count || layout.meta.node_count as usize != node_count {
+        anyhow::bail!("v2 layout node count mismatch");
+    }
+    if layout.node_ids.iter().collect::<HashSet<_>>().len() != node_count {
+        anyhow::bail!("v2 layout contains duplicate node ids");
+    }
+    if layout.meta.field_path_count as usize != layout.field_paths.len() {
+        anyhow::bail!("v2 layout field path count mismatch");
+    }
+    if layout.meta.file_state_count as usize != layout.file_states.len() {
+        anyhow::bail!("v2 layout file state count mismatch");
+    }
+    validate_adjacency(
+        "out",
+        &layout.out_adjacency,
+        node_count,
+        layout.field_paths.len(),
+    )?;
+    validate_adjacency(
+        "in",
+        &layout.in_adjacency,
+        node_count,
+        layout.field_paths.len(),
+    )?;
+    if layout.out_adjacency.entries.len() != layout.in_adjacency.entries.len()
+        || layout.meta.edge_count as usize != layout.out_adjacency.entries.len()
+    {
+        anyhow::bail!("v2 layout edge count mismatch");
+    }
+    Ok(())
+}
+
+fn validate_adjacency(
+    name: &str,
+    adjacency: &RedbV2Adjacency,
+    node_count: usize,
+    field_path_count: usize,
+) -> Result<()> {
+    if adjacency.offsets.len() != node_count + 1
+        || adjacency.offsets.first().copied() != Some(0)
+        || adjacency.offsets.last().copied() != Some(adjacency.entries.len() as u32)
+        || adjacency
+            .offsets
+            .windows(2)
+            .any(|pair| pair[0] > pair[1] || pair[1] as usize > adjacency.entries.len())
+    {
+        anyhow::bail!("v2 {name} adjacency offsets are invalid");
+    }
+    for entry in &adjacency.entries {
+        if entry.adjacent_dense_id as usize >= node_count {
+            anyhow::bail!("v2 {name} adjacency dense id out of range");
+        }
+        if entry
+            .field_path_id
+            .is_some_and(|id| id as usize >= field_path_count)
+        {
+            anyhow::bail!("v2 {name} adjacency field path id out of range");
+        }
+    }
+    Ok(())
+}
+
+fn fingerprint_layout(layout: &RedbV2Layout) -> Result<u64> {
     let mut hasher = XxHash64::default();
-    hasher.write(REDB_V2_SCHEMA_VERSION.as_bytes());
-    hasher.write_u64(layout.node_ids.len() as u64);
-    hasher.write_u64(layout.out_adjacency.entries.len() as u64);
-    hasher.write_u64(layout.field_paths.len() as u64);
-    hasher.write_u64(layout.file_states.len() as u64);
-    for id in &layout.node_ids {
-        hasher.write(id.as_bytes());
-    }
-    for path in &layout.field_paths {
-        hasher.write(path.as_bytes());
-    }
+    hash_serialized(
+        &mut hasher,
+        &(
+            &layout.meta.schema_version,
+            layout.meta.node_count,
+            layout.meta.edge_count,
+            layout.meta.field_path_count,
+            layout.meta.file_state_count,
+            &layout.node_ids,
+            &layout.nodes,
+            &layout.out_adjacency,
+            &layout.in_adjacency,
+            &layout.field_paths,
+        ),
+    )?;
     let mut file_state_paths: Vec<&String> = layout.file_states.keys().collect();
     file_state_paths.sort();
     for path in file_state_paths {
-        let state = &layout.file_states[path];
-        hasher.write(path.as_bytes());
-        hasher.write(state.file_hash.as_bytes());
+        hash_serialized(&mut hasher, &(path, &layout.file_states[path]))?;
     }
-    hasher.finish()
+    Ok(hasher.finish())
+}
+
+fn hash_serialized<T: Serialize>(hasher: &mut XxHash64, value: &T) -> Result<()> {
+    let bytes = serde_json::to_vec(value).context("serialize v2 fingerprint content")?;
+    hasher.write_u64(bytes.len() as u64);
+    hasher.write(&bytes);
+    Ok(())
 }

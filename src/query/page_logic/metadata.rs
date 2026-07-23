@@ -1,35 +1,96 @@
 use serde_json::json;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 /// 从页面原始 .spg 文件读取出的补充元数据
+#[derive(Clone)]
 pub(super) struct PageFileMetadata {
     pub(super) page_inputs: Vec<serde_json::Value>,
     pub(super) visibility_rules: Vec<serde_json::Value>,
     pub(super) from_file: bool,
-    pub(super) component_json_paths: std::collections::HashMap<String, String>,
-    pub(super) action_meta: std::collections::HashMap<String, serde_json::Value>,
+    pub(super) component_json_paths: HashMap<String, String>,
+    pub(super) action_meta: HashMap<String, serde_json::Value>,
 }
 
-/// 加载页面文件中的参数、组件路径、可见性规则和 action 原始属性
+#[derive(Clone)]
+struct CachedPageFileMeta {
+    mtime: SystemTime,
+    size: u64,
+    metadata: PageFileMetadata,
+}
+
+// ponytail: process-local mtime/size cache；上限=无跨进程/无 scanner 索引；升级=索引阶段物化进 RuntimeReadModel。
+fn page_file_meta_cache() -> &'static Mutex<HashMap<PathBuf, CachedPageFileMeta>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedPageFileMeta>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 加载页面文件中的参数、组件路径、可见性规则和 action 原始属性。
+///
+/// 同进程内按绝对路径 + mtime/size 复用解析结果，避免每次 warm 重复读盘解析。
 pub(super) fn load_page_file_metadata(
     project_dir: Option<&std::path::Path>,
     page_path: &str,
 ) -> PageFileMetadata {
+    let empty = || PageFileMetadata {
+        page_inputs: Vec::new(),
+        visibility_rules: Vec::new(),
+        from_file: false,
+        component_json_paths: HashMap::new(),
+        action_meta: HashMap::new(),
+    };
+
+    let Some(proj_dir) = project_dir else {
+        return empty();
+    };
+    let file_path = proj_dir.join(page_path);
+    if !file_path.exists() {
+        return empty();
+    }
+    let Ok(file_meta) = std::fs::metadata(&file_path) else {
+        return empty();
+    };
+    let Ok(mtime) = file_meta.modified() else {
+        return parse_page_file(&file_path, page_path);
+    };
+    let size = file_meta.len();
+
+    if let Ok(cache) = page_file_meta_cache().lock() {
+        if let Some(hit) = cache.get(&file_path) {
+            if hit.mtime == mtime && hit.size == size {
+                return hit.metadata.clone();
+            }
+        }
+    }
+
+    let metadata = parse_page_file(&file_path, page_path);
+    if metadata.from_file {
+        if let Ok(mut cache) = page_file_meta_cache().lock() {
+            cache.insert(
+                file_path,
+                CachedPageFileMeta {
+                    mtime,
+                    size,
+                    metadata: metadata.clone(),
+                },
+            );
+        }
+    }
+    metadata
+}
+
+fn parse_page_file(file_path: &std::path::Path, page_path: &str) -> PageFileMetadata {
     let mut metadata = PageFileMetadata {
         page_inputs: Vec::new(),
         visibility_rules: Vec::new(),
         from_file: false,
-        component_json_paths: std::collections::HashMap::new(),
-        action_meta: std::collections::HashMap::new(),
+        component_json_paths: HashMap::new(),
+        action_meta: HashMap::new(),
     };
 
-    let Some(proj_dir) = project_dir else {
-        return metadata;
-    };
-    let file_path = proj_dir.join(page_path);
-    if !file_path.exists() {
-        return metadata;
-    }
-    let Ok(content) = std::fs::read_to_string(&file_path) else {
+    let Ok(content) = std::fs::read_to_string(file_path) else {
         return metadata;
     };
     let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content) else {
@@ -69,9 +130,9 @@ fn collect_components(
     arr: &[serde_json::Value],
     path_prefix: &str,
     source_file: &str,
-    component_json_paths: &mut std::collections::HashMap<String, String>,
+    component_json_paths: &mut HashMap<String, String>,
     visibility_rules: &mut Vec<serde_json::Value>,
-    action_meta: &mut std::collections::HashMap<String, serde_json::Value>,
+    action_meta: &mut HashMap<String, serde_json::Value>,
 ) {
     for (index, comp) in arr.iter().enumerate() {
         let comp_id = comp.get("id").and_then(|v| v.as_str()).unwrap_or("");

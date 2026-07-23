@@ -85,6 +85,32 @@ impl RuntimeReadModel {
     }
 }
 
+/// M54：replacement read model — 基于候选图预先构建的只读派生模型。
+///
+/// `prepare_replacement` 的产物；`install_replacement` 只 move 已准备对象。
+pub struct PreparedRuntimeReadModel {
+    /// 候选 read model：dense graph / availability facts / PageDependencyIndex
+    /// 已基于候选图重建，warm cache 只保留未受影响页面
+    pub read_model: RuntimeReadModel,
+    /// 候选稠密快照（与 read_model.dense_graph 同源）
+    pub dense_snapshot: Option<Arc<DenseGraphSnapshot>>,
+    /// 是否启用稠密快照
+    pub dense_snapshot_enabled: bool,
+    /// 稠密快照构建耗时（毫秒）
+    pub dense_snapshot_build_ms: u128,
+    /// availability facts 构建耗时（毫秒）
+    pub availability_facts_build_ms: u128,
+    /// PageDependencyIndex 构建耗时（毫秒）
+    pub page_dependency_index_build_ms: u128,
+    /// read model 构建总耗时（毫秒）
+    pub read_model_build_ms: u128,
+    /// 旧、新 PageDependencyIndex 计算的受影响页面并集（已排序）
+    pub invalidated_pages: Vec<String>,
+    /// 页面依赖索引覆盖度：旧、新索引任一为 Partial 即 Partial
+    ///（覆盖无法证明时 invalidated_pages 已保守扩大到全部 warm 页面）
+    pub page_dep_index_coverage: crate::query::PageDependencyIndexCoverage,
+}
+
 /// Hot Graph Runtime：在同一进程内复用已加载的 GraphDB
 ///
 /// M23 目标：把"加载图"和"执行查询"从 CLI 分支中解耦，
@@ -210,6 +236,10 @@ pub struct RuntimeStatus {
     pub graph_file_size: u64,
     /// 上次 reload 错误
     pub last_reload_error: Option<String>,
+    /// Runtime 模式（stdio 产品路径应为 LongLived）。
+    pub runtime_mode: RuntimeMode,
+    /// 是否已构建 LongLived 派生读模型。
+    pub read_model_ready: bool,
 }
 
 impl GraphRuntime {
@@ -475,6 +505,125 @@ impl GraphRuntime {
         Ok(removed_pages)
     }
 
+    /// M54：基于候选图预构建 replacement read model（不改动当前 runtime）。
+    ///
+    /// 重新构建 dense graph、availability facts、PageDependencyIndex；
+    /// 受影响页面取旧、新索引计算结果的并集；warm cache 只复制未受影响页面。
+    pub fn prepare_replacement(
+        &self,
+        candidate: &GraphDB,
+        dirty_ids: &[String],
+    ) -> Result<PreparedRuntimeReadModel> {
+        let Some(current_model) = self.read_model.as_ref() else {
+            return Err(anyhow::anyhow!(
+                "prepare replacement requires long-lived runtime read model"
+            ));
+        };
+
+        let dense_started = Instant::now();
+        let dense_graph = DenseGraphSnapshot::from_graph(candidate).ok().map(Arc::new);
+        let dense_snapshot_build_ms = dense_started.elapsed().as_millis();
+
+        let facts_started = Instant::now();
+        let availability_facts =
+            match crate::query::MaterializedAvailabilityFactsIndex::build(candidate) {
+                Ok(index) => Arc::new(index),
+                Err(_) => Arc::new(crate::query::MaterializedAvailabilityFactsIndex::empty()),
+            };
+        let availability_facts_build_ms = facts_started.elapsed().as_millis();
+
+        let page_dep_started = Instant::now();
+        let page_dependency_index = match crate::query::PageDependencyIndex::build(candidate) {
+            Ok(index) => Arc::new(index),
+            Err(_) => Arc::new(crate::query::PageDependencyIndex::empty()),
+        };
+        let page_dependency_index_build_ms = page_dep_started.elapsed().as_millis();
+
+        // 旧、新索引计算的受影响页面取并集，避免索引差异漏失效
+        let mut affected = current_model
+            .page_dependency_index
+            .affected_pages(dirty_ids);
+        affected.extend(page_dependency_index.affected_pages(dirty_ids));
+
+        // M55：旧、新索引任一覆盖度为 Partial 时无法证明未受影响页面，
+        // 保守扩大 invalidation 到当前 warm cache 的全部页面
+        let page_dep_index_coverage = match (
+            current_model.page_dependency_index.coverage(),
+            page_dependency_index.coverage(),
+        ) {
+            (
+                crate::query::PageDependencyIndexCoverage::Full,
+                crate::query::PageDependencyIndexCoverage::Full,
+            ) => crate::query::PageDependencyIndexCoverage::Full,
+            _ => {
+                for key in current_model.page_logic_availability.keys() {
+                    let page_id = key.split('\n').next().unwrap_or(key.as_str());
+                    affected.insert(page_id.to_string());
+                }
+                crate::query::PageDependencyIndexCoverage::Partial
+            }
+        };
+
+        // warm cache 只复制未受影响页面
+        let page_logic_availability = current_model
+            .page_logic_availability
+            .iter()
+            .filter(|(key, _)| {
+                let page_id = key.split('\n').next().unwrap_or(key.as_str());
+                !affected.contains(page_id)
+            })
+            .map(|(key, cache)| (key.clone(), cache.clone()))
+            .collect();
+
+        let mut invalidated_pages: Vec<String> = affected.into_iter().collect();
+        invalidated_pages.sort();
+        let dense_snapshot_enabled = dense_graph.is_some();
+        let read_model_build_ms =
+            dense_snapshot_build_ms + availability_facts_build_ms + page_dependency_index_build_ms;
+        Ok(PreparedRuntimeReadModel {
+            read_model: RuntimeReadModel {
+                dense_graph: dense_graph.clone(),
+                availability_facts,
+                page_logic_availability,
+                page_dependency_index,
+            },
+            dense_snapshot: dense_graph,
+            dense_snapshot_enabled,
+            dense_snapshot_build_ms,
+            availability_facts_build_ms,
+            page_dependency_index_build_ms,
+            read_model_build_ms,
+            invalidated_pages,
+            page_dep_index_coverage,
+        })
+    }
+
+    /// M54：安装候选图与已准备的 read model；只 move 已准备对象，不返回 Result。
+    ///
+    /// 调用方必须先完成 graph+checkpoint 原子提交再调用本方法；
+    /// 本方法不做任何可能失败的图构建，只更新运行时持有对象与文件指纹。
+    pub fn install_replacement(&mut self, candidate: GraphDB, prepared: PreparedRuntimeReadModel) {
+        self.graph = candidate;
+        self.loaded_at = SystemTime::now();
+        let (graph_file_mtime, graph_file_size) = std::fs::metadata(&self.graph_db_path)
+            .map(|m| (m.modified().ok(), m.len()))
+            .unwrap_or((None, 0));
+        self.graph_file_mtime = graph_file_mtime;
+        self.graph_file_size = graph_file_size;
+        if let Ok(fingerprint) = self.current_fingerprint() {
+            self.graph_fingerprint = fingerprint;
+        }
+        self.read_model = Some(Arc::new(prepared.read_model));
+        self.dense_snapshot = prepared.dense_snapshot;
+        self.dense_snapshot_enabled = prepared.dense_snapshot_enabled;
+        self.dense_snapshot_build_ms = prepared.dense_snapshot_build_ms;
+        self.availability_facts_build_ms = prepared.availability_facts_build_ms;
+        self.page_dependency_index_build_ms = prepared.page_dependency_index_build_ms;
+        self.read_model_build_ms = prepared.read_model_build_ms;
+        self.reload_count += 1;
+        self.last_reload_error = None;
+    }
+
     /// 构建单条 page logic warm cache 条目（不写回 read model）。
     fn build_page_logic_cache_entry(
         &self,
@@ -678,6 +827,13 @@ impl GraphRuntime {
         #[cfg(feature = "telemetry")]
         let query_compute_guard = query_compute_span.enter();
         let mut result = match request.command {
+            ToolCommand::DiffRefresh => {
+                // diff_refresh 不经 RuntimeQueryRequest 通路执行（stdio handler
+                // 与 CLI one-shot 已先行拦截），到达此处一律视为协议错误。
+                return Err(anyhow::anyhow!(
+                    "DIFF_REFRESH_CONTEXT_REQUIRED: diff_refresh is not a runtime query command"
+                ));
+            }
             ToolCommand::AdviseQuery => {
                 let question_kind = request.intent.as_deref().unwrap_or("auto");
                 let page_scope = request.page_scope.as_deref();
@@ -965,6 +1121,8 @@ impl GraphRuntime {
             graph_file_mtime: self.graph_file_mtime,
             graph_file_size: self.graph_file_size,
             last_reload_error: self.last_reload_error.clone(),
+            runtime_mode: self.runtime_mode,
+            read_model_ready: self.read_model.is_some(),
         }
     }
 }

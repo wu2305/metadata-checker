@@ -8,7 +8,7 @@ pub(super) use answer_facts::{
     build_context_summary, build_primary_reason_for_intent, build_traversal_policy,
 };
 pub(crate) use conditions::{
-    ConditionCollectorCache, annotate_condition_scope, classify_condition,
+    ConditionCollectorCache, ConditionFact, annotate_condition_scope, classify_condition,
     collect_conditions_for_node, condition_owned_by_node, dedupe_conditions,
     expand_total_row_count_gates, precollect_all_node_conditions,
 };

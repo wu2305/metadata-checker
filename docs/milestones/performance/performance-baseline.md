@@ -319,10 +319,14 @@ CARGO_TARGET_DIR=target/criterion/runtime cargo bench --bench runtime_bench
 
 | 场景 | 记录目标 |
 |---|---|
-| `runtime_load_graphdb` | graphdb 冷加载为 GraphRuntime |
+| `runtime_load_graphdb` | graphdb 冷加载为 GraphRuntime（OneShot） |
+| `runtime_long_lived_startup` | LongLived 端到端启动（含读模型） |
 | `runtime_load_dense_snapshot_build` | LongLived load 阶段 dense snapshot 单步构建 |
 | `runtime_load_availability_facts_build` | LongLived load 阶段 availability facts 单步构建 |
 | `runtime_load_page_dependency_index_build` | LongLived load 阶段 page dependency index 单步构建 |
+| `runtime_long_lived_warm_pages_1` | LongLived 按需 warm 1 页 |
+| `runtime_long_lived_warm_pages_10` | LongLived 按需 warm 10 页 |
+| `runtime_long_lived_warm_pages_50` | LongLived 按需 warm 50 页 |
 | `runtime_status_warm` | warm status 成本 |
 | `runtime_check_reload_unchanged` | 未变化 check_reload fast path |
 | `runtime_reload_graph` | 强制 reload 成本 |
@@ -331,6 +335,9 @@ CARGO_TARGET_DIR=target/criterion/runtime cargo bench --bench runtime_bench
 | `runtime_load_corrupt_graphdb` | 损坏 graphdb header 的诊断路径 |
 | `runtime_query_page_with_check_reload` | 查询前先执行 check_reload 的 page 查询 |
 | `runtime_explain_condition_with_check_reload` | 查询前先执行 check_reload 的 explain_condition |
+
+> `runtime_selective_rewarm_pages_*` 与 dirty-file 规模曲线归属 **M54–M56** 差量刷新线，不在本 patch 登记。  
+> LongLived startup / warm N 场景前后会经 `benches/common/rss.rs` 打印 `[rss] … KB`（人工观测；不设 CI fail）。
 
 ### Query matrix Criterion bench
 
@@ -633,7 +640,7 @@ Bencher 上报证据：
 五路 full criterion 说明：
 
 - 每路独立 `warmup-*` 与 `target/criterion-ci/<lane>/`，stage 前 `rm -rf` 对应子目录，避免并行污染。
-- 编译 profile：`release-fast`（`[profile.bench] inherits = "release"`）。
+- 编译 profile：`release-fast`（`[profile.bench] inherits = "release-fast"`，与 CI `--profile release-fast` 一致，避免 Criterion 默认走 `opt-level=z`）。
 - 与 `cnb-5r3` 记录相比：pipeline 数 7→9（rust 合并 + criterion 五路拆分）；总 wall 由 ~66 min 降至 ~24 min（并行 + cache 隔离）。
 
 ---

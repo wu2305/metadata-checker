@@ -621,6 +621,57 @@ fn test_runtime_query_dataflow_returns_real_value() {
     );
 }
 
+/// OneShot runtime 无 read model 时 prepare_replacement 必须失败（覆盖 LongLived 前置校验）。
+#[test]
+fn test_prepare_replacement_requires_long_lived_read_model() {
+    let (temp_dir, db_path) = common::build_fixture_graphdb();
+    let runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(&temp_dir),
+        RuntimeMode::OneShot,
+    )
+    .expect("load OneShot runtime");
+    assert!(
+        runtime.read_model.is_none(),
+        "OneShot must not build read model"
+    );
+
+    let candidate = GraphRuntime::load(&db_path).expect("load candidate").graph;
+    let error = match runtime.prepare_replacement(&candidate, &[]) {
+        Ok(_) => panic!("OneShot prepare_replacement must fail"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("prepare replacement requires long-lived runtime read model"),
+        "unexpected error: {error:#}"
+    );
+}
+
+/// DiffRefresh 不经 RuntimeQueryRequest 通路；直接 query 必须返回稳定协议错误。
+#[test]
+fn test_runtime_query_diff_refresh_returns_context_required() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut runtime = GraphRuntime::load(&db_path).expect("load runtime");
+    let error = runtime
+        .query(RuntimeQueryRequest {
+            command: RuntimeQueryCommand::DiffRefresh,
+            target: String::new(),
+            budget: "compact".to_string(),
+            human: false,
+            intent: None,
+            depth: None,
+            check_reload: false,
+            page_scope: None,
+        })
+        .expect_err("diff_refresh via runtime query must fail");
+    assert!(
+        error.to_string().contains("DIFF_REFRESH_CONTEXT_REQUIRED"),
+        "unexpected error: {error:#}"
+    );
+}
+
 #[cfg(feature = "cli-local")]
 mod page_dependency_index_degradation {
     use metadata_checker::graph::GraphDB;

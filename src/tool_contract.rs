@@ -25,6 +25,7 @@ pub enum ToolCommand {
     Status,
     ReloadGraph,
     CheckReload,
+    DiffRefresh,
 }
 
 /// 工具声明，供 CLI / stdio / MCP 共享 help、校验和 tool list。
@@ -376,6 +377,18 @@ impl ToolRegistry {
                 supported_budgets: &[],
                 supported_intents: &[],
             },
+            ToolSpec {
+                command: ToolCommand::DiffRefresh,
+                name: "diff_refresh",
+                aliases: &[],
+                description: "执行一轮远程元数据差量刷新（需启动时绑定 session context）",
+                requires_target: false,
+                requires_graph: false,
+                mutates_runtime: true,
+                supports_human: false,
+                supported_budgets: &[],
+                supported_intents: &[],
+            },
         ]
     }
 
@@ -457,6 +470,7 @@ pub fn validate_target_prefix(command: ToolCommand, target: &str) -> Result<(), 
         ToolCommand::QueryCross => unreachable!("QueryCross handled above"),
         ToolCommand::FindPage | ToolCommand::FindModel | ToolCommand::FindComponent => &[],
         ToolCommand::Status | ToolCommand::ReloadGraph | ToolCommand::CheckReload => &[],
+        ToolCommand::DiffRefresh => &[],
     };
 
     if allowed.is_empty() {
@@ -537,6 +551,7 @@ mod tests {
         assert!(commands.contains(&ToolCommand::Status));
         assert!(commands.contains(&ToolCommand::ReloadGraph));
         assert!(commands.contains(&ToolCommand::CheckReload));
+        assert!(commands.contains(&ToolCommand::DiffRefresh));
     }
 
     #[test]

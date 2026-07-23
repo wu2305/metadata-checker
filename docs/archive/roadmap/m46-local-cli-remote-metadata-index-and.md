@@ -18,6 +18,7 @@
 - remote provider 只返回 raw metadata text 和文件元信息，不解析 `.spg/.tbl`、不建图、不做业务推理。
 - 本地 session mirror 可以保存 raw metadata 文件，但必须和凭证存储隔离；默认不持久化凭证。
 - 继续复用已有 scanner、graph store、query/analyze 能力，不为 remote-index 另建一套 graph snapshot。
+- **复用 M54–M56 差量刷新栈（2026-07-18 固定）**：change detection 用 `MetaFilesChangeSource`（含 `BiMetaFilesChangeSource` 真源实现）、文件差量用 `src/diff_refresh/mirror.rs`、编排用 `DiffRefreshOrchestrator`；M46 不实现第二套 change detection / 拉取栈，只做 CLI 产品化包装。
 
 任务清单：
 

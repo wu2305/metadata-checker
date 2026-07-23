@@ -2,11 +2,30 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
+use crate::diff_refresh::DiffRefreshOrchestrator;
 use crate::response_processor::ResponseProcessor;
 use crate::runtime::{GraphRuntime, RuntimeQueryRequest};
+use crate::session::DiffRefreshRuntimeContext;
+use crate::session::reqwest_provider::sanitize_session_error_message;
 use crate::tool_contract::{
     InvocationAdapter, ToolError, ToolErrorCode, ToolInvocation, ToolRegistry, ToolResponse,
 };
+
+/// stdio 运行期绑定：未绑 context 的纯 runtime，或启动时绑定
+/// `DiffRefreshRuntimeContext` 后持有的 orchestrator。
+enum RuntimeBinding<'a> {
+    Plain(&'a mut GraphRuntime),
+    Bound(&'a mut DiffRefreshOrchestrator),
+}
+
+impl RuntimeBinding<'_> {
+    fn runtime_mut(&mut self) -> &mut GraphRuntime {
+        match self {
+            RuntimeBinding::Plain(runtime) => &mut **runtime,
+            RuntimeBinding::Bound(orchestrator) => orchestrator.runtime_mut(),
+        }
+    }
+}
 
 /// Stdio JSONL 请求
 ///
@@ -160,16 +179,51 @@ impl InvocationAdapter for StdioAdapter {
 ///
 /// 加载 graphdb 一次，进入 stdin/stdout 循环处理请求。
 /// stderr 输出运行日志，stdout 只输出 JSONL 响应。
+/// `diff_refresh_context` 为 Some 时把 runtime 绑入 orchestrator，
+/// 支持 `diff_refresh` 命令；为 None 时该命令返回
+/// `DIFF_REFRESH_CONTEXT_REQUIRED`。
 pub fn run_stdio_server(
     graph_db_path: &std::path::Path,
     project_dir: Option<&std::path::Path>,
+    diff_refresh_context: Option<DiffRefreshRuntimeContext>,
 ) -> Result<()> {
-    let mut runtime = GraphRuntime::load_with_project_dir(graph_db_path, project_dir)
-        .map_err(|e| anyhow::anyhow!("Failed to load graphdb: {}", e))?;
+    // 产品路径必须走 LongLived：构建 DenseGraph / Availability Facts / PageDependencyIndex。
+    let mut runtime = GraphRuntime::load_with_project_dir_and_mode(
+        graph_db_path,
+        project_dir,
+        crate::runtime::RuntimeMode::LongLived,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to load graphdb: {}", e))?;
     eprintln!(
-        "[stdio-server] Graph loaded, {} nodes, ready",
-        runtime.graph.graph.node_count()
+        "[stdio-server] Graph loaded (LongLived), {} nodes, read_model={}, ready",
+        runtime.graph.graph.node_count(),
+        runtime.read_model.is_some()
     );
+
+    let mut binding;
+    let mut orchestrator_storage;
+    match diff_refresh_context {
+        Some(context) => {
+            let session_dir = context.session_manager.session_dir(&context.session_id);
+            orchestrator_storage = Some(DiffRefreshOrchestrator::new(
+                context.session_manager,
+                session_dir,
+                context.manifest,
+                context.source,
+                context.provider,
+                runtime,
+            ));
+            binding = RuntimeBinding::Bound(
+                orchestrator_storage
+                    .as_mut()
+                    .expect("orchestrator storage just initialized"),
+            );
+            eprintln!("[stdio-server] diff refresh context bound");
+        }
+        None => {
+            binding = RuntimeBinding::Plain(&mut runtime);
+        }
+    }
 
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -208,7 +262,7 @@ pub fn run_stdio_server(
             }
         };
 
-        let resp = handle_request(&mut runtime, &request);
+        let resp = handle_request(&mut binding, &request);
         write_response(&mut stdout_lock, resp)?;
     }
 
@@ -218,6 +272,21 @@ pub fn run_stdio_server(
 
 /// 解析并处理单行 stdio JSONL 输入，供 benchmark 与集成测试复用。
 pub fn dispatch_stdio_line(runtime: &mut GraphRuntime, line: &str) -> StdioResponse {
+    dispatch_stdio_line_with_binding(&mut RuntimeBinding::Plain(runtime), line)
+}
+
+/// 处理单行输入（绑定 diff refresh context 的 orchestrator 变体）。
+///
+/// 供测试直接以 fixture/stub 构造的 orchestrator 驱动 `diff_refresh` 命令；
+/// fixture 不作为公开启动参数。
+pub fn dispatch_stdio_line_with_orchestrator(
+    orchestrator: &mut DiffRefreshOrchestrator,
+    line: &str,
+) -> StdioResponse {
+    dispatch_stdio_line_with_binding(&mut RuntimeBinding::Bound(orchestrator), line)
+}
+
+fn dispatch_stdio_line_with_binding(binding: &mut RuntimeBinding, line: &str) -> StdioResponse {
     if line.trim().is_empty() {
         return error_response(
             String::new(),
@@ -239,7 +308,7 @@ pub fn dispatch_stdio_line(runtime: &mut GraphRuntime, line: &str) -> StdioRespo
         }
     };
 
-    handle_request(runtime, &request)
+    handle_request(binding, &request)
 }
 
 /// 序列化 stdio 响应并回填 `timing.output_size_bytes`。
@@ -248,8 +317,44 @@ pub fn serialize_stdio_response(resp: &mut StdioResponse) -> Result<String> {
         .map_err(|error| anyhow::anyhow!("serialize stdio response failed: {}", error))
 }
 
+/// 处理 diff_refresh 命令。
+///
+/// 响应包含 `ok/change_count/invalidated_pages/warm_failures/checkpoint/timing`；
+/// 未绑定 context 时返回 `DIFF_REFRESH_CONTEXT_REQUIRED`；
+/// 错误消息统一脱敏，不含 username/password/cookie/token。
+fn handle_diff_refresh(
+    binding: &mut RuntimeBinding,
+    request_id: &str,
+    diagnostics: Vec<String>,
+) -> StdioResponse {
+    match binding {
+        RuntimeBinding::Bound(orchestrator) => match orchestrator.refresh_once() {
+            Ok(report) => StdioResponse {
+                request_id: request_id.to_string(),
+                ok: true,
+                result: Some(serde_json::to_value(report).unwrap_or(serde_json::Value::Null)),
+                error: None,
+                diagnostics,
+                timing: Some(zero_timing()),
+            },
+            Err(error) => error_response(
+                request_id.to_string(),
+                "DIFF_REFRESH_FAILED",
+                sanitize_session_error_message(&format!("{error:#}")),
+                diagnostics,
+            ),
+        },
+        RuntimeBinding::Plain(_) => error_response(
+            request_id.to_string(),
+            "DIFF_REFRESH_CONTEXT_REQUIRED",
+            "diff_refresh requires a session-bound runtime context (--runtime-session-id)",
+            diagnostics,
+        ),
+    }
+}
+
 /// 处理单个请求
-fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioResponse {
+fn handle_request(binding: &mut RuntimeBinding, request: &StdioRequest) -> StdioResponse {
     let mut diagnostics = Vec::new();
     let adapter = StdioAdapter;
     let invocation = match adapter.parse_input(request.clone()) {
@@ -264,6 +369,13 @@ fn handle_request(runtime: &mut GraphRuntime, request: &StdioRequest) -> StdioRe
         }
     };
     let spec = ToolRegistry::find_by_command(invocation.command).expect("registered command");
+
+    // 处理 diff_refresh 命令：只使用启动时绑定的 context
+    if invocation.command == crate::tool_contract::ToolCommand::DiffRefresh {
+        return handle_diff_refresh(binding, &request.request_id, diagnostics);
+    }
+
+    let runtime = binding.runtime_mut();
 
     // 处理 status 命令
     if invocation.command == crate::tool_contract::ToolCommand::Status {

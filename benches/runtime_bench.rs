@@ -10,6 +10,8 @@ mod first_existing_target;
 mod graphdb_fixture;
 #[path = "common/real_project.rs"]
 mod real_project;
+#[path = "common/rss.rs"]
+mod rss;
 #[path = "common/runtime_exec.rs"]
 mod runtime_exec;
 #[path = "common/runtime_request.rs"]
@@ -26,7 +28,7 @@ use graphdb_fixture::corrupt_graphdb_header;
 use metadata_checker::dense_graph::DenseGraphSnapshot;
 use metadata_checker::graph::{GraphDB, set_graph_lock_timeout_ms};
 use metadata_checker::query::{MaterializedAvailabilityFactsIndex, PageDependencyIndex};
-use metadata_checker::runtime::GraphRuntime;
+use metadata_checker::runtime::{GraphRuntime, RuntimeMode};
 use metadata_checker::scanner::indexer::ProjectIndexer;
 use metadata_checker::tool_contract::ToolCommand;
 use real_project::require_real_project_dir;
@@ -68,6 +70,93 @@ fn bench_runtime_load(c: &mut Criterion, source_project_dir: &Path) {
             black_box(runtime);
         });
     });
+}
+
+/// 衡量 LongLived 端到端启动（含 Dense / Facts / PageDep 读模型）成本。
+fn bench_runtime_long_lived_startup(c: &mut Criterion, source_project_dir: &Path) {
+    let workspace = create_indexed_workspace("runtime-long-lived-startup", source_project_dir)
+        .expect("create workspace");
+    rss::log_rss("before_long_lived_startup_bench");
+    c.bench_function("runtime_long_lived_startup", |bench| {
+        bench.iter(|| {
+            let runtime = GraphRuntime::load_with_project_dir_and_mode(
+                black_box(&workspace.db_path),
+                Some(black_box(&workspace.project_dir)),
+                RuntimeMode::LongLived,
+            )
+            .expect("long-lived runtime load should succeed");
+            assert!(
+                runtime.read_model.is_some(),
+                "LongLived load must build read model"
+            );
+            black_box(runtime);
+        });
+    });
+    rss::log_rss("after_long_lived_startup_bench");
+}
+
+/// 衡量 LongLived load 后按需 warm N 个页面的成本。
+fn bench_runtime_long_lived_warm_pages(
+    c: &mut Criterion,
+    source_project_dir: &Path,
+    page_count: usize,
+) {
+    let workspace = create_indexed_workspace(
+        &format!("runtime-long-lived-warm-{page_count}"),
+        source_project_dir,
+    )
+    .expect("create workspace");
+    let mut runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &workspace.db_path,
+        Some(&workspace.project_dir),
+        RuntimeMode::LongLived,
+    )
+    .expect("long-lived runtime load should succeed");
+    let page_ids = collect_page_ids(&runtime, page_count);
+    let targets: Vec<(String, String)> = page_ids
+        .into_iter()
+        .map(|page_id| (page_id, "compact".to_string()))
+        .collect();
+    let bench_name = format!("runtime_long_lived_warm_pages_{page_count}");
+    rss::log_rss(&format!("before_warm_pages_{page_count}"));
+
+    c.bench_function(&bench_name, |bench| {
+        bench.iter(|| {
+            // 每轮前清空 warm cache，保证测量的是 warm 而非 cache hit。
+            if let Some(read_model) = runtime.read_model.as_mut() {
+                if let Some(model) = std::sync::Arc::get_mut(read_model) {
+                    model.page_logic_availability.clear();
+                }
+            }
+            let report = runtime
+                .warm_page_logic_batch(black_box(&targets))
+                .expect("warm batch should succeed");
+            black_box(report);
+        });
+    });
+    rss::log_rss(&format!("after_warm_pages_{page_count}"));
+}
+
+/// 从已加载 runtime 取前 N 个 Page 节点 id。
+fn collect_page_ids(runtime: &GraphRuntime, limit: usize) -> Vec<String> {
+    use metadata_checker::graph::NodeType;
+    use metadata_checker::graph_store::GraphReadStore;
+
+    let mut page_ids: Vec<String> = runtime
+        .graph
+        .iter_nodes()
+        .expect("iter nodes")
+        .filter(|node| node.node_type == NodeType::Page)
+        .map(|node| node.id)
+        .collect();
+    page_ids.sort();
+    page_ids.truncate(limit);
+    assert!(
+        page_ids.len() == limit,
+        "expected at least {limit} pages in real project, got {}",
+        page_ids.len()
+    );
+    page_ids
 }
 
 /// 衡量 LongLived load 阶段 dense snapshot 单步构建成本。
@@ -303,9 +392,13 @@ fn bench_runtime_scenarios(c: &mut Criterion) {
     };
 
     bench_runtime_load(c, &source_project_dir);
+    bench_runtime_long_lived_startup(c, &source_project_dir);
     bench_runtime_load_dense_snapshot_build(c, &source_project_dir);
     bench_runtime_load_availability_facts_build(c, &source_project_dir);
     bench_runtime_load_page_dependency_index_build(c, &source_project_dir);
+    bench_runtime_long_lived_warm_pages(c, &source_project_dir, 1);
+    bench_runtime_long_lived_warm_pages(c, &source_project_dir, 10);
+    bench_runtime_long_lived_warm_pages(c, &source_project_dir, 50);
     bench_runtime_status(c, &source_project_dir);
     bench_runtime_check_reload_unchanged(c, &source_project_dir);
     bench_runtime_reload_graph(c, &source_project_dir);

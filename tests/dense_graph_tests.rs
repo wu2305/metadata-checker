@@ -27,7 +27,7 @@ fn canonical_neighbors(
     let neighbors = graph.get_node_edges(node_id)?.unwrap_or_else(|| {
         panic!("missing neighbors for {node_id}");
     });
-    let mut outgoing: Vec<String> = neighbors
+    let outgoing: Vec<String> = neighbors
         .outgoing
         .into_iter()
         .map(|view| {
@@ -40,7 +40,7 @@ fn canonical_neighbors(
             )
         })
         .collect();
-    let mut incoming: Vec<String> = neighbors
+    let incoming: Vec<String> = neighbors
         .incoming
         .into_iter()
         .map(|view| {
@@ -53,8 +53,6 @@ fn canonical_neighbors(
             )
         })
         .collect();
-    outgoing.sort();
-    incoming.sort();
     Ok((outgoing, incoming))
 }
 

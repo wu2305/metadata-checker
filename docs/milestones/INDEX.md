@@ -39,11 +39,11 @@
 | M42 | Real BI Smoke 与性能记录 | done | browser | [runbook](../runbooks/m42-real-bi-smoke-and-performance-runbook.md) | | | M41 |
 | M43 | Browser Extension 验收 | done | browser | [runbook](../runbooks/m43-browser-extension-runbook.md) | | | M42 |
 | M45 | Remote Metadata 自动拉取与后台分析 | done | browser | [handoff](browser/m45-real-bi-test-handoff.md) | | | M43 |
-| M46 | Local CLI Remote Metadata Index | planned | browser | [archive](../archive/roadmap/m46-local-cli-remote-metadata-index-and.md) | | | M45 |
+| M46 | Local CLI Remote Metadata Index | planned | browser | [archive](../archive/roadmap/m46-local-cli-remote-metadata-index-and.md) | | | M45, M54 |
 | M47 | Browser UI 正式化 | planned | browser | [popup 设计](browser/m47-embedded-local-graph-popup-design.md) | | [pixi spike](browser/m47-pixi-d3-force-spike-plan.md) | M46 |
 | M48 | Local Graph 交互优化 | planned | browser | [m48](browser/m48-local-graph-interaction-optimization.md) | | | M47 |
 
-## Performance 线（M50–M53）
+## Performance 线（M50–M56）
 
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
@@ -51,15 +51,23 @@
 | M51 | 性能堵点归因 | done | performance | [diagnosis](performance/m51-performance-diagnosis.md) | | | M50 |
 | M52 | 性能优化落地（cost model / warm / fragment） | done | performance | [m52](performance/m52-performance-optimization.md) | | | M51 |
 | M53 | persist / facts / path + redb v2 hydrate | done | performance | [m53](performance/m53-performance-continuation.md) | [design](../specs/2026-07-06-m53-performance-design.md) | [plan](../plans/2026-07-06-m53-performance-plan.md) | M52 |
+| M54 | Diff refresh 通路（fixture META_FILES → rewarm） | active | performance | [m54](performance/m54-diff-refresh-pipeline.md) | [design](../specs/2026-07-12-diff-refresh-pipeline-design.md) | [plan](../plans/2026-07-12-diff-refresh-pipeline-plan.md) | M53 |
+| M55 | Diff refresh 正确性（真 META_FILES + 依赖索引） | active | performance | [m54](performance/m54-diff-refresh-pipeline.md) | [design](../specs/2026-07-12-diff-refresh-pipeline-design.md) | [plan](../plans/2026-07-12-diff-refresh-pipeline-plan.md) | M54 |
+| M56 | Diff refresh persist（redb_commit / commit batch） | active | performance | [m54](performance/m54-diff-refresh-pipeline.md) | [design](../specs/2026-07-12-diff-refresh-pipeline-design.md) | [plan](../plans/2026-07-12-diff-refresh-pipeline-plan.md) | M54 |
 
 CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`release-fast` + `cnb-078`）。
 
-## Formats / AI-eval 远期（M56–M58）
+> M54–M56 共用同一 spec/plan/journal；垂直切片见设计文档。browser **M46** 应复用本线 change-detect / orchestrator，不另起拉取栈。
+
+## Formats / AI-eval（M58–M59）
 
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
-| M56 | Dashboard / Report 格式支持 | planned | formats | — | （待建） | | |
-| M58 | 廉价模型理解力评测 | planned | ai-eval | — | （待建） | | M22 |
+| M58 | 廉价模型理解力评测 | planned | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（draft） | | M22 |
+| M59 | Dashboard / Report 格式支持 | planned | formats | — | （待建） | | |
+
+> 原登记为 M56 的 Dashboard/Report（rpt/dash）已 **后推为 M59**，把 M54–M56 留给差量刷新性能线。  
+> 路线（2026-07-17 确认）：M54–M56 与 **M58 并行**（正确性基座＋验收门）→ M28–M30 契约收敛 → MCP / token 预算 / M59 / 语义层。M58 不再是「远期」。
 
 ## 文档治理（Phase C）
 

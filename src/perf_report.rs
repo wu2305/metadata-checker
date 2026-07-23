@@ -670,6 +670,8 @@ fn profile_rebuild(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         file_states: new_states,
         dirty_nodes: graph.dirty_nodes_set().iter().cloned().collect(),
         deleted_nodes: graph.removed_nodes_set().iter().cloned().collect(),
+        checkpoint: None,
+        delta: None,
     };
     let started_at = Instant::now();
     let cold_report = ProjectIndexer::persist_index(&mut graph, commit)
@@ -783,6 +785,8 @@ fn profile_redb(project_dir: &Path, sample_index: usize) -> Result<PerfProfile> 
             file_states,
             dirty_nodes: graph.dirty_nodes_set().iter().cloned().collect(),
             deleted_nodes: graph.removed_nodes_set().iter().cloned().collect(),
+            checkpoint: None,
+            delta: None,
         })
         .context("profile redb commit")?;
     profile.record_stage("redb_commit", started_at.elapsed());

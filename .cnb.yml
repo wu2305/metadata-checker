@@ -61,9 +61,7 @@
           --output-path lcov.info \
           -- \
           --test-threads=1 \
-          --skip test_ai_eval_commands_execute_and_assert \
-          --skip test_cli_explain_component_single_file_contract \
-          --skip test_cli_explain_component_single_file_no_actions_contract
+          --skip test_ai_eval_commands_execute_and_assert
         test -s lcov.info
     - name: report rust coverage
       type: testing:coverage
@@ -467,9 +465,7 @@
           --output-path lcov.info \
           -- \
           --test-threads=1 \
-          --skip test_ai_eval_commands_execute_and_assert \
-          --skip test_cli_explain_component_single_file_contract \
-          --skip test_cli_explain_component_single_file_no_actions_contract
+          --skip test_ai_eval_commands_execute_and_assert
         test -s lcov.info
         cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown
 

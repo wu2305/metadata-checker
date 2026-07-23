@@ -360,6 +360,8 @@ fn test_memory_graph_store_persist_index_returns_commit_stats() {
         file_states,
         dirty_nodes: vec!["page:home".to_string(), "model:user".to_string()],
         deleted_nodes: vec!["old:removed".to_string()],
+        checkpoint: None,
+        delta: None,
     };
 
     let report =

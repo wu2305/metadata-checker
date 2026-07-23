@@ -150,23 +150,36 @@ pub(super) fn build_page_logic_paths(
     let mut rejected_paths = Vec::new();
     let mut path_selection_diagnostics = Vec::new();
 
+    // budget-aware：warm/cache 物化时不先 JSON 再裁剪；query 非 materialization 仍保留完整分类。
+    let materialize_keep = PathMaterializeKeep::for_budget(for_cache_materialization, budget);
+
     for p in selection.primary_paths {
         primary_paths.push(p.to_json());
     }
-    for p in selection.candidate_paths {
-        candidate_paths.push(p.to_json());
+    if materialize_keep.related_context {
+        for p in selection.related_context {
+            related_context.push(p.to_json());
+        }
     }
-    for p in selection.supporting_paths {
-        supporting_paths.push(p.to_json());
+    if materialize_keep.candidate_paths {
+        for p in selection.candidate_paths {
+            candidate_paths.push(p.to_json());
+        }
     }
-    for p in selection.related_context {
-        related_context.push(p.to_json());
+    if materialize_keep.supporting_paths {
+        for p in selection.supporting_paths {
+            supporting_paths.push(p.to_json());
+        }
     }
-    for p in selection.rejected_paths {
-        rejected_paths.push(p.to_json());
+    if materialize_keep.rejected_paths {
+        for p in selection.rejected_paths {
+            rejected_paths.push(p.to_json());
+        }
     }
-    for d in selection.selection_diagnostics {
-        path_selection_diagnostics.push(d);
+    if materialize_keep.path_selection_diagnostics {
+        for d in selection.selection_diagnostics {
+            path_selection_diagnostics.push(d);
+        }
     }
     record_ms_counter(profile, "path_json_build_ms", stage_started);
     super::set_profile_counter(
@@ -176,7 +189,14 @@ pub(super) fn build_page_logic_paths(
     );
 
     let stage_started = Instant::now();
-    collect_cross_page_side_context(&path_graph, page_id, child_components, &mut related_context);
+    if materialize_keep.related_context {
+        collect_cross_page_side_context(
+            &path_graph,
+            page_id,
+            child_components,
+            &mut related_context,
+        );
+    }
     record_ms_counter(profile, "path_side_context_ms", stage_started);
     super::set_profile_counter(profile, "path_graph_cache_hits", path_graph.cache_hits());
 
@@ -184,35 +204,59 @@ pub(super) fn build_page_logic_paths(
     sort_primary_paths_by_confidence(&mut primary_paths);
     record_ms_counter(profile, "path_sort_ms", stage_started);
 
-    let mut paths = PageLogicPaths {
+    PageLogicPaths {
         primary_paths,
         related_context,
         candidate_paths,
         supporting_paths,
         rejected_paths,
         path_selection_diagnostics,
-    };
-    if for_cache_materialization {
-        trim_paths_for_cache_budget(&mut paths, budget);
     }
-    paths
 }
 
-/// warm cache 物化阶段按 budget 裁剪路径字段，复用输出阶段不输出的分类。
-fn trim_paths_for_cache_budget(paths: &mut PageLogicPaths, budget: &str) {
-    match budget {
-        "compact" => {
-            paths.candidate_paths.clear();
-            paths.supporting_paths.clear();
-            paths.rejected_paths.clear();
-            paths.path_selection_diagnostics.clear();
+/// warm cache 物化时按 budget 决定哪些路径桶需要 JSON 化。
+struct PathMaterializeKeep {
+    related_context: bool,
+    candidate_paths: bool,
+    supporting_paths: bool,
+    rejected_paths: bool,
+    path_selection_diagnostics: bool,
+}
+
+impl PathMaterializeKeep {
+    fn for_budget(for_cache_materialization: bool, budget: &str) -> Self {
+        if !for_cache_materialization {
+            return Self {
+                related_context: true,
+                candidate_paths: true,
+                supporting_paths: true,
+                rejected_paths: true,
+                path_selection_diagnostics: true,
+            };
         }
-        "normal" => {
-            paths.candidate_paths.clear();
-            paths.rejected_paths.clear();
-            paths.path_selection_diagnostics.clear();
+        match budget {
+            "compact" => Self {
+                related_context: true,
+                candidate_paths: false,
+                supporting_paths: false,
+                rejected_paths: false,
+                path_selection_diagnostics: false,
+            },
+            "normal" => Self {
+                related_context: true,
+                candidate_paths: false,
+                supporting_paths: true,
+                rejected_paths: false,
+                path_selection_diagnostics: false,
+            },
+            _ => Self {
+                related_context: true,
+                candidate_paths: true,
+                supporting_paths: true,
+                rejected_paths: true,
+                path_selection_diagnostics: true,
+            },
         }
-        _ => {}
     }
 }
 

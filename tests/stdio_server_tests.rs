@@ -737,6 +737,16 @@ fn test_stdio_server_status() {
         Some(1),
         "status load_count must be 1"
     );
+    assert_eq!(
+        result["runtime_mode"].as_str(),
+        Some("LongLived"),
+        "stdio server must run LongLived runtime"
+    );
+    assert_eq!(
+        result["read_model_ready"].as_bool(),
+        Some(true),
+        "stdio LongLived must expose read_model_ready"
+    );
 
     let _ = child.wait();
 }
@@ -2075,6 +2085,7 @@ fn test_stdio_server_all_registry_commands_accepted() {
             "status" | "reload_graph" | "reload" | "check_reload" | "check-reload" => {
                 serde_json::json!({})
             }
+            "diff_refresh" => serde_json::json!({}),
             other => panic!(
                 "missing request fixture for registry command alias: {}",
                 other
@@ -2115,8 +2126,19 @@ fn test_stdio_server_all_registry_commands_accepted() {
         let mut line = String::new();
         stdout_reader.read_line(&mut line).expect("read line");
         let resp: serde_json::Value = serde_json::from_str(&line).expect("valid JSON");
-        assert_stdio_envelope(&resp, true);
         let code = stdio_error_code(&resp);
+        if commands[i] == "diff_refresh" {
+            // 未绑定 session context 时必须返回稳定错误码，而非 UNKNOWN_COMMAND
+            assert_stdio_envelope(&resp, false);
+            assert_eq!(
+                code,
+                Some("DIFF_REFRESH_CONTEXT_REQUIRED"),
+                "diff_refresh without bound context should require session context, got: {:?}",
+                resp["error"]
+            );
+            continue;
+        }
+        assert_stdio_envelope(&resp, true);
         assert_ne!(
             code,
             Some("UNKNOWN_COMMAND"),
@@ -2280,4 +2302,253 @@ fn test_stdio_server_check_reload_command_returns_unchanged_or_reloaded() {
     );
 
     let _ = child.kill();
+}
+
+/// M55 Task 10：构造 fixture 绑定的 orchestrator（session + 单页 mirror + graph）。
+///
+/// provider 由调用方注入：正常路径用 InMemoryRemoteSessionProvider，
+/// secret-redaction 路径用永远失败且带敏感片段的 test double。
+fn build_bound_orchestrator(
+    name: &str,
+    provider: Box<dyn metadata_checker::session::RemoteSessionProvider>,
+) -> (
+    std::path::PathBuf,
+    metadata_checker::diff_refresh::DiffRefreshOrchestrator,
+) {
+    use metadata_checker::diff_refresh::{DiffRefreshOrchestrator, FixtureMetaFilesChangeSource};
+    use metadata_checker::remote_metadata::{MetadataContentType, RemoteFileContent};
+    use metadata_checker::runtime::{GraphRuntime, RuntimeMode};
+    use metadata_checker::scanner::indexer::ProjectIndexer;
+    use metadata_checker::session::SessionManager;
+    use metadata_checker::session::sync::{
+        SessionSyncItem, SessionSyncMode, project_mirror_root, sync_remote_files_to_session,
+    };
+
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let root = std::env::temp_dir().join(format!(
+        "metadata-checker-stdio-diff-refresh-{name}-{}-{seq}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+
+    let page_v1 = r#"{
+  "version": "4.19.7",
+  "canvas": {"id": "canvas", "type": "canvas", "components": [
+    {"id": "text1", "type": "text", "value": "hello"}
+  ]}
+}"#;
+
+    let manager = SessionManager::new(&root);
+    manager
+        .create_session("s1", "https://bi.test", "proj", "proj", "remote")
+        .expect("create session");
+    let session_dir = manager.session_dir("s1");
+    let mut manifest = manager.read_manifest("s1").expect("read manifest");
+    let content = RemoteFileContent {
+        source_path: "app/page_a.spg".to_string(),
+        file_id: Some("file-a".to_string()),
+        revision: Some("1".to_string()),
+        content_type: MetadataContentType::SuperPage,
+        raw_text: page_v1.to_string(),
+    };
+    sync_remote_files_to_session(
+        &session_dir,
+        &mut manifest,
+        &[SessionSyncItem::new(content)],
+        SessionSyncMode::Partial,
+    )
+    .expect("seed mirror");
+    let db_path = session_dir.join("graph.redb");
+    ProjectIndexer::scan(&project_mirror_root(&session_dir), &db_path).expect("initial scan");
+    manifest.graph_db_path = db_path.to_string_lossy().to_string();
+    manager.write_manifest(&manifest).expect("write manifest");
+
+    // fixture bootstrap：snapshot 中 file-a 为 rev 2 → 产出一个变更事件
+    let fixture = serde_json::json!({
+        "schema_version": 1,
+        "snapshot": {
+            "active": [
+                {"file_id": "file-a", "source_path": "app/page_a.spg", "revision": "2",
+                 "content_type": "super_page", "updated_at_ms": 1000}
+            ],
+            "deleted": []
+        }
+    });
+    let source =
+        FixtureMetaFilesChangeSource::from_json_str(&fixture.to_string()).expect("fixture source");
+
+    let runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(project_mirror_root(&session_dir)),
+        RuntimeMode::LongLived,
+    )
+    .expect("load long-lived runtime");
+
+    let orchestrator = DiffRefreshOrchestrator::new(
+        manager,
+        session_dir,
+        manifest,
+        Box::new(source),
+        provider,
+        runtime,
+    );
+    (root, orchestrator)
+}
+
+/// 正常路径 provider：内存版，内含 page_a rev2 内容。
+fn in_memory_provider_with_page_v2() -> Box<dyn metadata_checker::session::RemoteSessionProvider> {
+    use metadata_checker::remote_metadata::{MetadataContentType, RemoteFileContent};
+    use metadata_checker::session::remote_provider::{
+        InMemoryRemoteSessionProvider, RemoteMetafileEntry, RemoteProjectInfo,
+    };
+
+    let page_v2 = r#"{
+  "version": "4.19.7",
+  "canvas": {"id": "canvas", "type": "canvas", "components": [
+    {"id": "text1", "type": "text", "value": "hello v2"}
+  ]}
+}"#;
+
+    let mut provider = InMemoryRemoteSessionProvider::new();
+    provider
+        .register_project(RemoteProjectInfo {
+            project_ref: "proj".to_string(),
+            project_name: "proj".to_string(),
+            source_origin: "remote".to_string(),
+        })
+        .expect("register project");
+    provider
+        .add_metafile(
+            RemoteMetafileEntry {
+                project_ref: "proj".to_string(),
+                source_path: "app/page_a.spg".to_string(),
+                file_id: Some("file-a".to_string()),
+                revision: Some("2".to_string()),
+                etag: None,
+                mtime: Some(1000),
+                size: None,
+                deleted: false,
+            },
+            RemoteFileContent {
+                source_path: "app/page_a.spg".to_string(),
+                file_id: Some("file-a".to_string()),
+                revision: Some("2".to_string()),
+                content_type: MetadataContentType::SuperPage,
+                raw_text: page_v2.to_string(),
+            },
+        )
+        .expect("add metafile");
+    Box::new(provider)
+}
+
+/// 未绑定 context 时 diff_refresh 返回 DIFF_REFRESH_CONTEXT_REQUIRED。
+#[test]
+fn test_stdio_diff_refresh_requires_bound_context() {
+    let (_temp_dir, db_path) = common::build_fixture_graphdb();
+    let mut runtime =
+        metadata_checker::runtime::GraphRuntime::load(&db_path).expect("load runtime");
+
+    let resp = metadata_checker::stdio_server::dispatch_stdio_line(
+        &mut runtime,
+        r#"{"request_id":"r-diff-1","command":"diff_refresh"}"#,
+    );
+
+    assert_eq!(resp.ok, false);
+    assert_eq!(
+        resp.error.expect("error").code,
+        "DIFF_REFRESH_CONTEXT_REQUIRED"
+    );
+}
+
+/// 绑定 context 时 diff_refresh 执行一轮刷新，响应含
+/// change_count/invalidated_pages/warm_failures/checkpoint/timing。
+#[test]
+fn test_stdio_diff_refresh_with_bound_context() {
+    let (root, mut orchestrator) =
+        build_bound_orchestrator("bound", in_memory_provider_with_page_v2());
+
+    let resp = metadata_checker::stdio_server::dispatch_stdio_line_with_orchestrator(
+        &mut orchestrator,
+        r#"{"request_id":"r-diff-2","command":"diff_refresh"}"#,
+    );
+
+    assert!(
+        resp.ok,
+        "bound diff_refresh should succeed: {:?}",
+        resp.error
+    );
+    let result = resp.result.expect("result");
+    assert_eq!(result["change_count"].as_u64(), Some(1));
+    assert!(result["invalidated_pages"].is_array());
+    assert!(result["warm_failures"].is_array());
+    assert_eq!(
+        result["checkpoint"]["active"]["updated_at_ms"].as_u64(),
+        Some(1000)
+    );
+    assert!(result["timing"].is_object());
+
+    // 第二轮为空 ChangeSet：change_count=0 且不报错
+    let resp2 = metadata_checker::stdio_server::dispatch_stdio_line_with_orchestrator(
+        &mut orchestrator,
+        r#"{"request_id":"r-diff-3","command":"diff_refresh"}"#,
+    );
+    assert!(resp2.ok);
+    assert_eq!(
+        resp2.result.expect("result")["change_count"].as_u64(),
+        Some(0)
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// secret-redaction：provider 错误中的 token/cookie 片段不得出现在响应中。
+#[test]
+fn test_stdio_diff_refresh_error_redacts_secrets() {
+    use metadata_checker::remote_metadata::{RemoteFileContent, RemoteFileInfo, RemoteFileRef};
+    use metadata_checker::session::remote_provider::{
+        RemoteChangeSet, RemoteMetafileEntry, RemoteProjectInfo, RemoteSessionProvider,
+    };
+
+    /// fetch 永远失败且错误消息带敏感片段的 provider。
+    struct LeakyProvider;
+    impl RemoteSessionProvider for LeakyProvider {
+        fn list_projects(&self) -> anyhow::Result<Vec<RemoteProjectInfo>> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+        fn list_metafiles(&self, _p: &str) -> anyhow::Result<Vec<RemoteMetafileEntry>> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+        fn fetch_metafile_info(&self, _f: &RemoteFileRef) -> anyhow::Result<RemoteFileInfo> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+        fn fetch_metafile_content(&self, _f: &RemoteFileRef) -> anyhow::Result<RemoteFileContent> {
+            Err(anyhow::anyhow!(
+                "fetch failed: token=secret-token-123 cookie: secret-cookie-456"
+            ))
+        }
+        fn fetch_changed_since(&self, _p: &str, _r: &str) -> anyhow::Result<RemoteChangeSet> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+    }
+
+    let (root, mut orchestrator) = build_bound_orchestrator("redact", Box::new(LeakyProvider));
+
+    let resp = metadata_checker::stdio_server::dispatch_stdio_line_with_orchestrator(
+        &mut orchestrator,
+        r#"{"request_id":"r-diff-4","command":"diff_refresh"}"#,
+    );
+
+    assert_eq!(resp.ok, false);
+    assert_eq!(
+        resp.error.as_ref().expect("error").code,
+        "DIFF_REFRESH_FAILED"
+    );
+    let serialized = serde_json::to_string(&resp).expect("serialize response");
+    assert!(
+        !serialized.contains("secret-token-123") && !serialized.contains("secret-cookie-456"),
+        "response must not leak secrets: {serialized}"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
 }

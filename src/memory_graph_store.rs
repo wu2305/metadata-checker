@@ -20,6 +20,7 @@ pub struct MemoryGraphStore {
     outgoing: HashMap<String, Vec<(Node, Edge)>>,
     incoming: HashMap<String, Vec<(Node, Edge)>>,
     file_states: HashMap<String, FileState>,
+    checkpoint: Option<crate::diff_refresh::DiffRefreshCheckpoint>,
 }
 
 impl MemoryGraphStore {
@@ -29,7 +30,13 @@ impl MemoryGraphStore {
             outgoing: HashMap::new(),
             incoming: HashMap::new(),
             file_states: HashMap::new(),
+            checkpoint: None,
         }
+    }
+
+    /// 读取最近一次 persist_index 提交的 diff-refresh checkpoint。
+    pub fn diff_refresh_checkpoint(&self) -> Option<&crate::diff_refresh::DiffRefreshCheckpoint> {
+        self.checkpoint.as_ref()
     }
 
     pub fn add_test_node(
@@ -193,6 +200,7 @@ impl IndexStateStore for MemoryGraphStore {
         let deleted = commit.deleted_nodes.len();
         let unchanged = indexed.saturating_sub(dirty);
         self.file_states = commit.file_states;
+        self.checkpoint = commit.checkpoint;
         Ok(IndexReport {
             indexed,
             unchanged,

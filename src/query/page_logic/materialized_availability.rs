@@ -1,15 +1,15 @@
 //! M53：load-time 物化 availability condition facts，供 page logic 批量复用。
 
+use crate::explain::ConditionFact;
 use crate::graph_store::GraphReadStore;
 use anyhow::Result;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// 全图预收集的 condition 索引。
+/// 全图预收集的 typed condition 索引（输出边界再转 JSON）。
 #[derive(Clone)]
 pub struct MaterializedAvailabilityFactsIndex {
-    conditions_by_node: Arc<HashMap<String, Vec<Value>>>,
+    conditions_by_node: Arc<HashMap<String, Vec<ConditionFact>>>,
     /// 带 condition 的节点数。
     pub node_count: usize,
     /// 预收集 condition 对象总数。
@@ -26,7 +26,7 @@ impl MaterializedAvailabilityFactsIndex {
         }
     }
 
-    /// 在 runtime load 阶段扫描全图，一次性收集各节点 condition 对象。
+    /// 在 runtime load 阶段扫描全图，一次性收集各节点 typed condition。
     pub fn build(graph: &dyn GraphReadStore) -> Result<Self> {
         let map = crate::explain::precollect_all_node_conditions(graph)?;
         let node_count = map.len();

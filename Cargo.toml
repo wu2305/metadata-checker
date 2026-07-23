@@ -112,7 +112,7 @@ inherits = "release"
 opt-level = 3
 
 [profile.bench]
-inherits = "release"
+inherits = "release-fast"
 
 [dev-dependencies]
 criterion = "0.5"

@@ -10,6 +10,7 @@ pub mod conditions;
 pub mod context;
 pub mod dense_graph;
 pub mod dependency;
+pub mod diff_refresh;
 pub mod explain;
 pub mod graph;
 #[cfg(feature = "cli-local")]

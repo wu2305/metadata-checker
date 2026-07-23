@@ -170,7 +170,7 @@ fn mark_missing_files_deleted(
     Ok(())
 }
 
-fn checked_relative_path(source_path: &str) -> Result<PathBuf> {
+pub(crate) fn checked_relative_path(source_path: &str) -> Result<PathBuf> {
     if !is_safe_logical_path(source_path) {
         bail!("invalid session source_path: {}", source_path);
     }
@@ -194,7 +194,7 @@ fn is_safe_logical_path(source_path: &str) -> bool {
     true
 }
 
-fn atomic_write_text(path: &Path, text: &str) -> Result<()> {
+pub(crate) fn atomic_write_text(path: &Path, text: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create session file dir {}", parent.display()))?;
@@ -217,7 +217,7 @@ fn atomic_write_text(path: &Path, text: &str) -> Result<()> {
     Ok(())
 }
 
-fn hash_text(text: &str) -> String {
+pub(crate) fn hash_text(text: &str) -> String {
     let mut hasher = DefaultHasher::new();
     text.hash(&mut hasher);
     format!("{:016x}", hasher.finish())

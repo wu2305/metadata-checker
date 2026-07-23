@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "description": "M54 fixture META_FILES 变更源。schema：events 为 poll 事件流，字段与 ChangedRemoteFile 对齐（content_type 使用 snake_case：super_page/table/unknown，previous_source_path 仅改名事件非 null）；snapshot.active 为 bootstrap 活跃快照 { file_id, source_path, revision, content_type, updated_at_ms }；snapshot.deleted 为 bootstrap 删除快照 { file_id, uuid, source_path, updated_at_ms }。时间统一 Unix 毫秒。",
+  "events": [
+    {
+      "event_id": "active:file-b:3",
+      "file_id": "file-b",
+      "source_path": "app/page_b.spg",
+      "previous_source_path": null,
+      "content_type": "super_page",
+      "updated_at_ms": 1000,
+      "deleted": false
+    },
+    {
+      "event_id": "active:file-a:2",
+      "file_id": "file-a",
+      "source_path": "app/page_a.spg",
+      "previous_source_path": null,
+      "content_type": "super_page",
+      "updated_at_ms": 1000,
+      "deleted": false
+    },
+    {
+      "event_id": "deleted:uuid-c-1",
+      "file_id": "file-c",
+      "source_path": "app/page_c.spg",
+      "previous_source_path": null,
+      "content_type": "super_page",
+      "updated_at_ms": 1001,
+      "deleted": true
+    },
+    {
+      "event_id": "active:file-d:2",
+      "file_id": "file-d",
+      "source_path": "app/new_name.spg",
+      "previous_source_path": "app/old_name.spg",
+      "content_type": "super_page",
+      "updated_at_ms": 1002,
+      "deleted": false
+    }
+  ],
+  "snapshot": {
+    "active": [
+      {
+        "file_id": "file-u",
+        "source_path": "app/page_u.spg",
+        "revision": "1",
+        "content_type": "super_page",
+        "updated_at_ms": 2000
+      },
+      {
+        "file_id": "file-v",
+        "source_path": "app/page_v.spg",
+        "revision": "2",
+        "content_type": "super_page",
+        "updated_at_ms": 2001
+      }
+    ],
+    "deleted": [
+      {
+        "file_id": "file-w",
+        "uuid": "uuid-w-1",
+        "source_path": "app/page_w.spg",
+        "updated_at_ms": 1999
+      }
+    ]
+  }
+}

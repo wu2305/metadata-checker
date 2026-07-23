@@ -23,6 +23,7 @@ impl DenseNodeId {
 /// CSR 邻接切片，避免 path BFS 为每次扩展分配 `GraphNeighbors`。
 pub(crate) struct DenseNeighborSlice<'a> {
     nodes: &'a [Node],
+    edge_payloads: &'a [Edge],
     entries: &'a [DenseAdjacencyEntry],
 }
 
@@ -33,15 +34,18 @@ impl<'a> DenseNeighborSlice<'a> {
 
     pub(crate) fn get(&self, index: usize) -> (&'a Node, &'a Edge) {
         let entry = &self.entries[index];
-        (&self.nodes[entry.adjacent.index()], &entry.edge)
+        (
+            &self.nodes[entry.adjacent.index()],
+            &self.edge_payloads[entry.edge_idx as usize],
+        )
     }
 }
 
-/// CSR 邻接项，保存邻接节点和边负载。
+/// CSR 邻接项：邻接节点 + 共享 edge payload 下标。
 #[derive(Debug, Clone)]
 struct DenseAdjacencyEntry {
     adjacent: DenseNodeId,
-    edge: Edge,
+    edge_idx: u32,
 }
 
 /// 稠密只读图快照。
@@ -53,12 +57,14 @@ pub struct DenseGraphSnapshot {
     out_edges: Vec<DenseAdjacencyEntry>,
     in_offsets: Vec<usize>,
     in_edges: Vec<DenseAdjacencyEntry>,
-    edge_types: Vec<EdgeType>,
+    /// 每条逻辑边只存一份 payload；CSR 邻接通过 `edge_idx` 引用。
     edge_payloads: Vec<Edge>,
 }
 
 impl DenseGraphSnapshot {
     /// 从只读图构建稠密快照。
+    ///
+    /// 单次遍历各节点出边：写入一份 edge payload，同时登记 outgoing / incoming 邻接索引。
     pub fn from_graph(graph: &dyn GraphReadStore) -> GraphStoreResult<Self> {
         let nodes: Vec<Node> = graph.iter_nodes()?.collect();
         if nodes.len() > u32::MAX as usize {
@@ -74,8 +80,8 @@ impl DenseGraphSnapshot {
             .collect();
         let mut outgoing_by_node: Vec<Vec<DenseAdjacencyEntry>> = vec![Vec::new(); nodes.len()];
         let mut incoming_by_node: Vec<Vec<DenseAdjacencyEntry>> = vec![Vec::new(); nodes.len()];
-        let mut edge_types = Vec::new();
         let mut edge_payloads = Vec::new();
+        let mut edge_indices = HashMap::new();
 
         for node in &nodes {
             let from_dense =
@@ -97,11 +103,17 @@ impl DenseGraphSnapshot {
                         ),
                     }
                 })?;
-                edge_types.push(edge_view.edge.edge_type.clone());
-                edge_payloads.push(edge_view.edge.clone());
+                if edge_payloads.len() >= u32::MAX as usize {
+                    return Err(GraphStoreError::InvalidArgument {
+                        message: format!("dense graph supports at most {} edges", u32::MAX),
+                    });
+                }
+                let edge_idx = edge_payloads.len() as u32;
+                edge_indices.insert(dense_edge_key(&edge_view.edge), edge_idx);
+                edge_payloads.push(edge_view.edge);
                 outgoing_by_node[from_dense.index()].push(DenseAdjacencyEntry {
                     adjacent: to_dense,
-                    edge: edge_view.edge,
+                    edge_idx,
                 });
             }
         }
@@ -126,9 +138,18 @@ impl DenseGraphSnapshot {
                         ),
                     }
                 })?;
+                let edge_idx = edge_indices
+                    .get(&dense_edge_key(&edge_view.edge))
+                    .copied()
+                    .ok_or_else(|| GraphStoreError::Corrupted {
+                        reason: format!(
+                            "incoming edge {} -> {} missing outgoing payload",
+                            edge_view.edge.from, edge_view.edge.to
+                        ),
+                    })?;
                 incoming_by_node[to_dense.index()].push(DenseAdjacencyEntry {
                     adjacent: from_dense,
-                    edge: edge_view.edge,
+                    edge_idx,
                 });
             }
         }
@@ -143,7 +164,6 @@ impl DenseGraphSnapshot {
             out_edges,
             in_offsets,
             in_edges,
-            edge_types,
             edge_payloads,
         })
     }
@@ -155,11 +175,6 @@ impl DenseGraphSnapshot {
 
     /// 稠密边数。
     pub fn dense_edge_count(&self) -> usize {
-        debug_assert_eq!(
-            self.edge_types.len(),
-            self.edge_payloads.len(),
-            "dense edge type column must mirror edge payload count"
-        );
         self.edge_payloads.len()
     }
 
@@ -180,6 +195,7 @@ impl DenseGraphSnapshot {
         let idx = dense_id.index();
         Some(DenseNeighborSlice {
             nodes: &self.nodes,
+            edge_payloads: &self.edge_payloads,
             entries: &self.out_edges[self.out_offsets[idx]..self.out_offsets[idx + 1]],
         })
     }
@@ -190,6 +206,7 @@ impl DenseGraphSnapshot {
         let idx = dense_id.index();
         Some(DenseNeighborSlice {
             nodes: &self.nodes,
+            edge_payloads: &self.edge_payloads,
             entries: &self.in_edges[self.in_offsets[idx]..self.in_offsets[idx + 1]],
         })
     }
@@ -197,9 +214,19 @@ impl DenseGraphSnapshot {
     fn edge_view(&self, entry: &DenseAdjacencyEntry) -> GraphEdgeView {
         GraphEdgeView {
             node: self.nodes[entry.adjacent.index()].clone(),
-            edge: entry.edge.clone(),
+            edge: self.edge_payloads[entry.edge_idx as usize].clone(),
         }
     }
+}
+
+/// 构造与 GraphDB 去重语义一致的边键。
+fn dense_edge_key(edge: &Edge) -> (String, String, EdgeType, Option<String>) {
+    (
+        edge.from.clone(),
+        edge.to.clone(),
+        edge.edge_type.clone(),
+        edge.field_path.clone(),
+    )
 }
 
 impl GraphReadStore for DenseGraphSnapshot {

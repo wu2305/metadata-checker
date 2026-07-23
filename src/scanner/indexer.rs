@@ -54,6 +54,56 @@ pub enum ParsedGraphContent {
     Tbl(String),
 }
 
+/// 合并多文件待删节点 ID 并去重（保持首次出现顺序）
+fn merge_removed_node_ids<'a>(sources: impl Iterator<Item = &'a [String]>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut merged = Vec::new();
+    for node_ids in sources {
+        for node_id in node_ids {
+            if seen.insert(node_id.clone()) {
+                merged.push(node_id.clone());
+            }
+        }
+    }
+    merged
+}
+
+/// M56：apply 前快照——收集被删节点的 incident edge keys（去重）。
+///
+/// 与 persist 的 `edge_storage_key` 共用同一键格式；persist 只消费，
+/// 不在提交阶段扫描全图 edges。
+fn collect_incident_edge_keys(graph: &GraphDB, node_ids: &[String]) -> Vec<String> {
+    let mut keys = std::collections::HashSet::new();
+    for node_id in node_ids {
+        if let Ok(Some(neighbors)) =
+            crate::graph_store::GraphReadStore::get_node_edges(graph, node_id)
+        {
+            for view in neighbors.outgoing.iter().chain(neighbors.incoming.iter()) {
+                keys.insert(crate::graph_redb::edge_storage_key(&view.edge));
+            }
+        }
+    }
+    keys.into_iter().collect()
+}
+
+/// M56：apply 后快照——收集新增/变更节点的 incident edges（按键去重）。
+fn collect_incident_edges(graph: &GraphDB, node_ids: &[String]) -> Vec<crate::graph::Edge> {
+    let mut seen = std::collections::HashSet::new();
+    let mut edges = Vec::new();
+    for node_id in node_ids {
+        if let Ok(Some(neighbors)) =
+            crate::graph_store::GraphReadStore::get_node_edges(graph, node_id)
+        {
+            for view in neighbors.outgoing.iter().chain(neighbors.incoming.iter()) {
+                if seen.insert(crate::graph_redb::edge_storage_key(&view.edge)) {
+                    edges.push(view.edge.clone());
+                }
+            }
+        }
+    }
+    edges
+}
+
 /// 项目索引器
 ///
 /// M39：把 scan_project 拆为可测试的阶段。
@@ -207,17 +257,51 @@ impl ProjectIndexer {
     }
 
     /// 阶段 4：应用解析后的脏文件更新到图数据库
+    ///
+    /// 委托 `apply_incremental_changes`（空 deleted），共享同一套批删逻辑。
     pub fn apply_graph_updates(
         graph: &mut dyn GraphWriteStore,
         updates: &[ParsedGraphUpdate],
     ) -> Result<HashMap<String, Vec<String>>> {
+        let mut unused_states = HashMap::new();
+        Self::apply_incremental_changes(graph, &mut unused_states, updates, &[])
+    }
+
+    /// 阶段 5：应用删除操作
+    ///
+    /// 委托 `apply_incremental_changes`（空 updates），共享同一套批删逻辑。
+    pub fn apply_deletions(
+        graph: &mut dyn GraphWriteStore,
+        new_states: &mut HashMap<String, FileState>,
+        deleted: &[DeletedFile],
+    ) -> Result<()> {
+        Self::apply_incremental_changes(graph, new_states, &[], deleted).map(|_| ())
+    }
+
+    /// 阶段 4+5 合并入口：一批解析更新 + 删除记录，每轮 apply 最多一次图批删
+    ///
+    /// 合并 dirty 文件的 `previous_node_ids` 与 deleted 文件的 node IDs，
+    /// 去重后单次 `remove_nodes_by_ids`，再应用所有新增节点并移除已删除
+    /// 文件的 file states。indexer 持有的是 `GraphWriteStore` trait 对象，
+    /// 批删固定走 trait 层；`GraphDB` inherent 的同名方法不另建批删路径。
+    pub fn apply_incremental_changes(
+        graph: &mut dyn GraphWriteStore,
+        new_states: &mut HashMap<String, FileState>,
+        updates: &[ParsedGraphUpdate],
+        deleted: &[DeletedFile],
+    ) -> Result<HashMap<String, Vec<String>>> {
+        let merged_removed = merge_removed_node_ids(
+            updates
+                .iter()
+                .map(|update| update.previous_node_ids.as_slice())
+                .chain(deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+        );
+        if !merged_removed.is_empty() {
+            graph.remove_nodes_by_ids(&merged_removed)?;
+        }
+
         let mut touched_nodes = HashMap::new();
-
         for update in updates {
-            if !update.previous_node_ids.is_empty() {
-                graph.remove_nodes_by_ids(&update.previous_node_ids)?;
-            }
-
             let node_ids = match &update.content {
                 ParsedGraphContent::Spg(value) => {
                     process_spg_file_from_value(graph, &update.logical_path, value.clone())?
@@ -229,20 +313,11 @@ impl ProjectIndexer {
             touched_nodes.insert(update.logical_path.clone(), node_ids);
         }
 
-        Ok(touched_nodes)
-    }
-
-    /// 阶段 5：应用删除操作
-    pub fn apply_deletions(
-        graph: &mut dyn GraphWriteStore,
-        new_states: &mut HashMap<String, FileState>,
-        deleted: &[DeletedFile],
-    ) -> Result<()> {
-        for (rel, node_ids) in deleted {
-            graph.remove_nodes_by_ids(node_ids)?;
+        for (rel, _) in deleted {
             new_states.remove(rel);
         }
-        Ok(())
+
+        Ok(touched_nodes)
     }
 
     /// 阶段 6：持久化索引结果
@@ -264,12 +339,38 @@ impl ProjectIndexer {
         let plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
 
         let mut new_states = prev_states.clone();
-        Self::apply_deletions(&mut graph, &mut new_states, &plan.deleted)?;
 
         if !plan.dirty.is_empty() || !plan.deleted.is_empty() {
             let updates =
                 Self::parse_dirty_files(&prev_states, &plan.dirty, project_dir, &provider)?;
-            let parsed_nodes = Self::apply_graph_updates(&mut graph, &updates)?;
+            // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
+            let merged_removed = merge_removed_node_ids(
+                updates
+                    .iter()
+                    .map(|update| update.previous_node_ids.as_slice())
+                    .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+            );
+            let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
+            // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
+            let parsed_nodes = Self::apply_incremental_changes(
+                &mut graph,
+                &mut new_states,
+                &updates,
+                &plan.deleted,
+            )?;
+            // M56：apply 后收集新增/变更节点的 incident edges
+            let new_node_ids: Vec<String> = parsed_nodes
+                .values()
+                .flat_map(|node_ids| node_ids.iter().cloned())
+                .collect();
+            let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+
+            let changed_file_states: Vec<String> = updates
+                .iter()
+                .map(|update| update.logical_path.clone())
+                .collect();
+            let removed_file_paths: Vec<String> =
+                plan.deleted.iter().map(|(rel, _)| rel.clone()).collect();
 
             for update in updates {
                 let logical_path = update.logical_path.clone();
@@ -293,6 +394,19 @@ impl ProjectIndexer {
                 file_states: new_states.clone(),
                 dirty_nodes: graph.dirty_nodes_set().iter().cloned().collect(),
                 deleted_nodes: graph.removed_nodes_set().iter().cloned().collect(),
+                checkpoint: None,
+                // M56：初始全量构建（无 prev states）走显式 full rebuild 路径
+                //（v2 置 Current）；增量提交走 delta 路径（v2 置 Stale）
+                delta: if prev_states.is_empty() {
+                    None
+                } else {
+                    Some(crate::graph_store::IndexDelta {
+                        dirty_edges,
+                        removed_edge_keys,
+                        changed_file_states,
+                        removed_file_paths,
+                    })
+                },
             };
             let report = Self::persist_index(&mut graph, commit)?;
             return Ok(report);
@@ -305,4 +419,120 @@ impl ProjectIndexer {
             deleted: plan.deleted.len(),
         })
     }
+
+    /// M54：候选准备入口 — 打开候选 GraphDB、完成 diff/parse/apply、
+    /// 构造 commit，但不调用 `persist_index`（不写盘）。
+    ///
+    /// 与 `scan` 复用同一套阶段函数；graphdb 文件在 prepare 前后保持不变，
+    /// 由调用方决定何时把 `commit`（可附加 diff-refresh checkpoint）落盘。
+    pub fn prepare(project_dir: &Path, db_path: &Path) -> Result<PreparedIndexUpdate> {
+        let mut graph = GraphDB::open(db_path)?;
+        let prev_states = graph.load_file_states().unwrap_or_default();
+
+        let files = Self::discover_files(project_dir)?;
+        let provider = LocalStorageProvider;
+        let plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
+
+        let mut new_states = prev_states.clone();
+        let updates = Self::parse_dirty_files(&prev_states, &plan.dirty, project_dir, &provider)?;
+        // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
+        let merged_removed = merge_removed_node_ids(
+            updates
+                .iter()
+                .map(|update| update.previous_node_ids.as_slice())
+                .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+        );
+        let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
+        // dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删（与 scan 一致）
+        let parsed_nodes =
+            Self::apply_incremental_changes(&mut graph, &mut new_states, &updates, &plan.deleted)?;
+        // M56：apply 后收集新增/变更节点的 incident edges
+        let new_node_ids: Vec<String> = parsed_nodes
+            .values()
+            .flat_map(|node_ids| node_ids.iter().cloned())
+            .collect();
+        let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+
+        // 完整 dirty IDs：dirty 文件旧节点 ∪ 新增节点（页面失效需覆盖两侧）
+        let mut dirty_node_ids = merge_removed_node_ids(
+            updates
+                .iter()
+                .map(|update| update.previous_node_ids.as_slice()),
+        );
+        let mut seen_dirty: std::collections::HashSet<String> =
+            dirty_node_ids.iter().cloned().collect();
+        for node_ids in parsed_nodes.values() {
+            for node_id in node_ids {
+                if seen_dirty.insert(node_id.clone()) {
+                    dirty_node_ids.push(node_id.clone());
+                }
+            }
+        }
+        let deleted_node_ids =
+            merge_removed_node_ids(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice()));
+
+        let changed_file_states: Vec<String> = updates
+            .iter()
+            .map(|update| update.logical_path.clone())
+            .collect();
+        let removed_file_paths: Vec<String> =
+            plan.deleted.iter().map(|(rel, _)| rel.clone()).collect();
+
+        for update in &updates {
+            let logical_path = update.logical_path.clone();
+            let node_ids = parsed_nodes
+                .get(logical_path.as_str())
+                .cloned()
+                .unwrap_or_default();
+            new_states.insert(
+                logical_path.clone(),
+                FileState {
+                    file_path: logical_path,
+                    file_hash: update.file_hash.clone(),
+                    mtime: update.mtime,
+                    size: update.size,
+                    node_ids,
+                },
+            );
+        }
+
+        let commit = IndexCommit {
+            file_states: new_states,
+            dirty_nodes: graph.dirty_nodes_set().iter().cloned().collect(),
+            deleted_nodes: graph.removed_nodes_set().iter().cloned().collect(),
+            checkpoint: None,
+            // M56：初始全量构建（无 prev states）走显式 full rebuild 路径
+            //（v2 置 Current）；增量提交走 delta 路径（v2 置 Stale）
+            delta: if prev_states.is_empty() {
+                None
+            } else {
+                Some(crate::graph_store::IndexDelta {
+                    dirty_edges,
+                    removed_edge_keys,
+                    changed_file_states,
+                    removed_file_paths,
+                })
+            },
+        };
+        Ok(PreparedIndexUpdate {
+            graph,
+            commit,
+            dirty_node_ids,
+            deleted_node_ids,
+        })
+    }
+}
+
+/// M54：候选索引更新（`ProjectIndexer::prepare` 产物，不落盘）
+///
+/// 不实现 Debug：`GraphDB` 未实现 Debug，且候选图体积不适合日志输出。
+pub struct PreparedIndexUpdate {
+    /// 完成 diff/parse/apply 后的候选图（内存态，尚未持久化）
+    pub graph: GraphDB,
+    /// 提交单元；调用方可附加 diff-refresh checkpoint 后交给 `persist_index`
+    pub commit: IndexCommit,
+    /// 完整 dirty 节点 ID：dirty 文件旧节点与新增节点的并集（去重）
+    pub dirty_node_ids: Vec<String>,
+    /// 完整 deleted 节点 ID：已删除文件节点的并集（去重）
+    pub deleted_node_ids: Vec<String>,
 }

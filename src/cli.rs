@@ -333,6 +333,20 @@ pub struct Cli {
 
     #[arg(long, value_name = "ID", help = "Show session status")]
     pub session_status: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "ID",
+        help = "Run one diff refresh round for a session (reads remote_server/project_ref/graph_db_path from manifest; requires --remote-username/--remote-password)"
+    )]
+    pub session_diff_refresh: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "ID",
+        help = "Bind a session diff refresh context into --serve-stdio (requires --remote-username/--remote-password)"
+    )]
+    pub runtime_session_id: Option<String>,
     #[arg(
         long,
         help = "启动 JSONL stdin/stdout 长驻查询服务（机器协议，非人类 REPL）"

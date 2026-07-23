@@ -1,12 +1,13 @@
 #![cfg(feature = "cli-local")]
 
-use metadata_checker::graph::GraphDB;
+use metadata_checker::graph::{EdgeType, GraphDB, NodeType};
 use metadata_checker::graph_redb_v2::{read_v2_layout, shadow_compare_v1_v2, write_v2_shadow};
 use metadata_checker::scanner::scan_project;
 use redb::{Database, TableDefinition};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const NODES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("nodes");
+const V2_OUT_ADJ_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("v2_out_adj");
 
 fn fixture_graph(test_name: &str) -> anyhow::Result<(GraphDB, std::path::PathBuf)> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
@@ -157,5 +158,115 @@ fn m53_persist_full_rebuild_when_dirty_nodes_include_new_ids() -> anyhow::Result
         "graph after new node persist must match v2 layout: {:?}",
         report
     );
+    Ok(())
+}
+
+/// scanner 式 remove/re-add 同 ID 改边后，v2 必须重建拓扑并在 reopen 后保持新边。
+#[test]
+fn m53_scanner_style_readd_same_ids_rebuilds_v2_topology() -> anyhow::Result<()> {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let db_path = std::env::temp_dir().join(format!(
+        "metadata-checker-m53-redb-v2-readd-topology-{}-{nanos}.db",
+        std::process::id(),
+    ));
+    let mut graph = GraphDB::open(&db_path)?;
+    for id in ["node:a", "node:b", "node:c"] {
+        graph.add_node(
+            id.to_string(),
+            NodeType::Component,
+            "app/test.spg".to_string(),
+            id.to_string(),
+            None,
+        );
+    }
+    graph.add_edge("node:a", "node:b", EdgeType::Contains, None);
+    graph.persist(&std::collections::HashMap::new())?;
+
+    graph.remove_nodes_by_ids(&["node:a".to_string()]);
+    graph.add_node(
+        "node:a".to_string(),
+        NodeType::Component,
+        "app/test.spg".to_string(),
+        "node:a".to_string(),
+        None,
+    );
+    graph.add_edge("node:a", "node:c", EdgeType::Contains, None);
+    graph.persist(&std::collections::HashMap::new())?;
+
+    let layout = read_v2_layout(&db_path)?.expect("updated v2 layout must remain readable");
+    let report = shadow_compare_v1_v2(&graph, &layout)?;
+    assert_eq!(report.equivalent, true, "updated v2 topology must match v1");
+    drop(graph);
+
+    let reopened = GraphDB::open(&db_path)?;
+    let edge_targets: Vec<&str> = reopened
+        .graph
+        .raw_edges()
+        .iter()
+        .filter(|edge| edge.weight.from == "node:a")
+        .map(|edge| edge.weight.to.as_str())
+        .collect();
+    assert_eq!(edge_targets, vec!["node:c"]);
+    Ok(())
+}
+
+/// v2 blob 无法反序列化时，open 必须忽略 v2 并读取有效 v1。
+#[test]
+fn m53_open_falls_back_to_v1_when_v2_blob_is_malformed() -> anyhow::Result<()> {
+    let (graph, db_path) = fixture_graph("malformed-v2-blob")?;
+    let node_count = graph.node_indices.len();
+    let edge_count = graph.graph.edge_count();
+    drop(graph);
+
+    let db = Database::create(&db_path)?;
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(V2_OUT_ADJ_TABLE)?;
+        table.insert("bundle", b"not-json".to_vec())?;
+    }
+    write_txn.commit()?;
+    drop(db);
+
+    assert_eq!(read_v2_layout(&db_path).is_err(), true);
+    let reopened = GraphDB::open(&db_path)?;
+    assert_eq!(reopened.node_indices.len(), node_count);
+    assert_eq!(reopened.graph.edge_count(), edge_count);
+    Ok(())
+}
+
+/// 邻接内容被篡改但仍结构合法时，完整 fingerprint 必须拒绝该 v2 layout。
+#[test]
+fn m53_v2_fingerprint_covers_adjacency_payload() -> anyhow::Result<()> {
+    let (graph, db_path) = fixture_graph("adjacency-fingerprint")?;
+    let node_count = graph.node_indices.len();
+    drop(graph);
+    let mut layout = read_v2_layout(&db_path)?.expect("v2 layout must exist");
+    let entry = layout
+        .out_adjacency
+        .entries
+        .first_mut()
+        .expect("fixture graph must contain an edge");
+    entry.adjacent_dense_id = (entry.adjacent_dense_id + 1) % node_count as u32;
+    write_v2_shadow(&db_path, &layout)?;
+
+    assert_eq!(read_v2_layout(&db_path)?.is_none(), true);
+    let reopened = GraphDB::open(&db_path)?;
+    assert_eq!(reopened.node_indices.len(), node_count);
+    Ok(())
+}
+
+/// CSR offsets 损坏时必须在切片前被拒绝，并 fallback 到 v1。
+#[test]
+fn m53_open_falls_back_to_v1_when_v2_offsets_are_invalid() -> anyhow::Result<()> {
+    let (graph, db_path) = fixture_graph("invalid-v2-offsets")?;
+    let edge_count = graph.graph.edge_count();
+    drop(graph);
+    let mut layout = read_v2_layout(&db_path)?.expect("v2 layout must exist");
+    layout.out_adjacency.offsets.pop();
+    write_v2_shadow(&db_path, &layout)?;
+
+    assert_eq!(read_v2_layout(&db_path).is_err(), true);
+    let reopened = GraphDB::open(&db_path)?;
+    assert_eq!(reopened.graph.edge_count(), edge_count);
     Ok(())
 }

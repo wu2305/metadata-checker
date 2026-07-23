@@ -1,8 +1,41 @@
 use crate::graph_store::GraphReadStore;
 use std::collections::{HashMap, HashSet};
 
-/// 辅助：从条件节点构建条件对象
-fn build_cond_obj(source: &crate::graph::Node) -> serde_json::Value {
+/// load-time 物化的条件事实（输出边界再转 JSON）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConditionFact {
+    pub condition_id: String,
+    pub condition_type: String,
+    pub effect_type: String,
+    pub subject_type: String,
+    pub owner_type: String,
+    pub raw_expr: String,
+    pub normalized_expr: String,
+    pub json_path: String,
+    pub source_file: String,
+    pub referenced_symbols: Vec<String>,
+}
+
+impl ConditionFact {
+    /// 序列化为既有 condition JSON 契约。
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "condition_id": self.condition_id,
+            "condition_type": self.condition_type,
+            "effect_type": self.effect_type,
+            "subject_type": self.subject_type,
+            "owner_type": self.owner_type,
+            "raw_expr": self.raw_expr,
+            "normalized_expr": self.normalized_expr,
+            "json_path": self.json_path,
+            "source_file": self.source_file,
+            "referenced_symbols": self.referenced_symbols,
+        })
+    }
+}
+
+/// 从条件节点构建 typed 事实。
+fn build_condition_fact(source: &crate::graph::Node) -> ConditionFact {
     let meta = source.meta.as_ref().unwrap_or(&serde_json::Value::Null);
     let condition_type = meta
         .get("condition_type")
@@ -35,18 +68,23 @@ fn build_cond_obj(source: &crate::graph::Node) -> serde_json::Value {
                 .collect()
         })
         .unwrap_or_default();
-    serde_json::json!({
-        "condition_id": source.id.clone(),
-        "condition_type": condition_type,
-        "effect_type": effect_type,
-        "subject_type": subject_type,
-        "owner_type": owner_type,
-        "raw_expr": raw_expr,
-        "normalized_expr": normalized_expr,
-        "json_path": json_path,
-        "source_file": source.path,
-        "referenced_symbols": referenced_symbols,
-    })
+    ConditionFact {
+        condition_id: source.id.clone(),
+        condition_type: condition_type.to_string(),
+        effect_type: effect_type.to_string(),
+        subject_type: subject_type.to_string(),
+        owner_type: owner_type.to_string(),
+        raw_expr: raw_expr.to_string(),
+        normalized_expr: normalized_expr.to_string(),
+        json_path: json_path.to_string(),
+        source_file: source.path.clone(),
+        referenced_symbols,
+    }
+}
+
+/// 辅助：从条件节点构建条件 JSON（query/explain 边界）。
+fn build_cond_obj(source: &crate::graph::Node) -> serde_json::Value {
+    build_condition_fact(source).to_json()
 }
 
 /// 从条件对象推断条件所属节点，用于区分直接条件、继承条件和去重来源
@@ -502,8 +540,8 @@ pub(crate) fn collect_conditions_for_node(
 /// 缓存节点条件对象，供 page logic 批量 availability 构造复用。
 pub(crate) struct ConditionCollectorCache {
     by_node: HashMap<String, Vec<serde_json::Value>>,
-    /// M53：load-time 预收集索引，query-time 只读命中。
-    prefilled: Option<std::sync::Arc<HashMap<String, Vec<serde_json::Value>>>>,
+    /// load-time typed 索引；命中后再投影为 JSON。
+    prefilled: Option<std::sync::Arc<HashMap<String, Vec<ConditionFact>>>>,
     cache_hits: usize,
     materialized_hits: usize,
 }
@@ -520,7 +558,7 @@ impl ConditionCollectorCache {
 
     /// 从物化索引种子化缓存，避免 query-time 重复扫描 condition 边。
     pub(crate) fn from_prefilled(
-        prefilled: std::sync::Arc<HashMap<String, Vec<serde_json::Value>>>,
+        prefilled: std::sync::Arc<HashMap<String, Vec<ConditionFact>>>,
     ) -> Self {
         Self {
             by_node: HashMap::new(),
@@ -548,7 +586,7 @@ impl ConditionCollectorCache {
             if let Some(cached) = prefilled.get(node_id) {
                 self.materialized_hits += 1;
                 self.cache_hits += 1;
-                return filter_seen_conditions(cached.iter().cloned(), seen);
+                return filter_seen_conditions(cached.iter().map(ConditionFact::to_json), seen);
             }
         }
         if let Some(cached) = self.by_node.get(node_id) {
@@ -618,13 +656,13 @@ fn filter_seen_conditions(
         .collect()
 }
 
-/// 在 graph load 阶段一次性预收集所有节点的 condition 对象。
+/// 在 graph load 阶段一次性预收集所有节点的 typed condition 事实。
 pub(crate) fn precollect_all_node_conditions(
     graph: &dyn GraphReadStore,
-) -> crate::graph_store::GraphStoreResult<HashMap<String, Vec<serde_json::Value>>> {
+) -> crate::graph_store::GraphStoreResult<HashMap<String, Vec<ConditionFact>>> {
     let mut map = HashMap::new();
     for node in graph.iter_nodes()? {
-        let raw = collect_condition_objects_for_node(graph, &node.id, &mut HashSet::new());
+        let raw = collect_condition_facts_for_node(graph, &node.id, &mut HashSet::new());
         if !raw.is_empty() {
             map.insert(node.id.clone(), raw);
         }
@@ -632,11 +670,11 @@ pub(crate) fn precollect_all_node_conditions(
     Ok(map)
 }
 
-fn collect_condition_objects_for_node(
+fn collect_condition_facts_for_node(
     graph: &dyn GraphReadStore,
     node_id: &str,
     seen: &mut HashSet<String>,
-) -> Vec<serde_json::Value> {
+) -> Vec<ConditionFact> {
     let mut results = Vec::new();
     if let Some(neighbors) = graph.get_node_edges(node_id).ok().flatten() {
         for edge_view in &neighbors.incoming {
@@ -651,9 +689,19 @@ fn collect_condition_objects_for_node(
             if !seen.insert(source.id.clone()) {
                 continue;
             }
-            let cond_obj = build_cond_obj(source);
-            results.push(cond_obj);
+            results.push(build_condition_fact(source));
         }
     }
     results
+}
+
+fn collect_condition_objects_for_node(
+    graph: &dyn GraphReadStore,
+    node_id: &str,
+    seen: &mut HashSet<String>,
+) -> Vec<serde_json::Value> {
+    collect_condition_facts_for_node(graph, node_id, seen)
+        .into_iter()
+        .map(|fact| fact.to_json())
+        .collect()
 }

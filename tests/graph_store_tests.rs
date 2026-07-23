@@ -385,6 +385,8 @@ fn test_persist_index_commits_graph_and_file_states_together() {
         file_states: file_states.clone(),
         dirty_nodes: vec!["page:test".to_string()],
         deleted_nodes: vec![],
+        checkpoint: None,
+        delta: None,
     };
 
     let report =

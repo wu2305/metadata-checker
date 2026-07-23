@@ -156,11 +156,68 @@ impl<T: GraphReadStore + GraphWriteStore + ?Sized> GraphStore for T {}
 /// 索引提交单元
 ///
 /// 一次索引操作产生的图变更 + 文件状态快照。
+/// `checkpoint` 仅 diff-refresh 通路设置，与 graph/file states 在同一
+/// write transaction 提交；其余调用点显式传 `None`。
+/// `delta` 为 M56 增量持久化负载：`Some` 时 persist 只写受影响
+/// node/edge/file-state keys 并把 v2 shadow 标记 Stale；
+/// `None` 时维持全量重写（显式 full rebuild/compaction 路径，v2 置 Current）。
 #[derive(Debug, Clone)]
 pub struct IndexCommit {
     pub file_states: HashMap<String, FileState>,
     pub dirty_nodes: Vec<String>,
     pub deleted_nodes: Vec<String>,
+    /// diff-refresh checkpoint（active/deleted 双 cursor 水位）
+    pub checkpoint: Option<crate::diff_refresh::DiffRefreshCheckpoint>,
+    /// M56 增量持久化 delta；`None` 表示走全量重写路径
+    pub delta: Option<IndexDelta>,
+}
+
+/// M56：增量持久化 delta（由 scanner 在 remove/re-add 时收集，persist 只消费）。
+#[derive(Debug, Clone)]
+pub struct IndexDelta {
+    /// 新增/变更节点的 incident edges（apply 后快照，按键去重）
+    pub dirty_edges: Vec<crate::graph::Edge>,
+    /// 被删节点的 incident edge keys（apply 前快照）
+    pub removed_edge_keys: Vec<String>,
+    /// file state 发生变化的文件路径
+    pub changed_file_states: Vec<String>,
+    /// 已删除文件的路径
+    pub removed_file_paths: Vec<String>,
+}
+
+/// v2 shadow 状态。
+///
+/// `Current`：v2 与 v1 一致，`GraphDB::open` 优先 v2 hydrate；
+/// `Stale`：v1 已有增量提交而 v2 未重建，open 必须跳过 v2 走 v1 hydrate。
+/// 类型放在 graph_store（ungated），供 PersistReport 跨 feature 引用。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum V2ShadowState {
+    Current,
+    Stale,
+}
+
+/// M56：一次 persist 提交的成本报告。
+///
+/// 由 `GraphDB::persist_commit` 返回；`IndexStateStore::persist_index`
+/// 的 `IndexReport` 保持高层摘要不变。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PersistReport {
+    /// 受影响的节点 keys 数（removed + dirty）
+    pub dirty_nodes: usize,
+    /// 受影响的 edge keys 数（delta 路径为 removed+dirty；全量路径为全图边数）
+    pub dirty_edges: usize,
+    /// 受影响的 file-state keys 数（delta 路径为 changed+removed；全量路径为全量 states）
+    pub changed_file_states: usize,
+    /// 本轮实际写入 redb 的字节数（insert 的 key+value 合计；remove 不计）
+    pub bytes_written: u64,
+    /// persist 提交耗时（毫秒）
+    pub commit_ms: u128,
+    /// 是否走了全量 durable rewrite（delta=None 的显式 full rebuild 路径）。
+    /// 空提交（无 dirty 且无 checkpoint）标记 false，因为没有实际写入。
+    pub full_rewrite: bool,
+    /// 提交后的 v2 shadow 状态
+    pub v2_shadow_state: V2ShadowState,
 }
 
 /// 索引报告

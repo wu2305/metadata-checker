@@ -547,6 +547,93 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // M55: one-shot 差量刷新（remote_server/project_ref/graph_db_path 均取自 manifest）
+    if let Some(ref session_id) = args.session_diff_refresh {
+        let Some(_manifest) = read_session_manifest_or_print_error(&session_manager, session_id)?
+        else {
+            return Ok(());
+        };
+        let (username, password) = match (
+            args.remote_username.as_deref(),
+            args.remote_password.as_deref(),
+        ) {
+            (Some(u), Some(p)) => (u, p),
+            _ => {
+                return print_session_error(
+                    "SESSION_AUTH_REQUIRED",
+                    "--session-diff-refresh requires --remote-username and --remote-password",
+                );
+            }
+        };
+        let context = match metadata_checker::session::DiffRefreshRuntimeContext::bind_bi_session(
+            metadata_checker::session::SessionManager::new(&session_root),
+            session_id,
+            username,
+            password,
+        ) {
+            Ok(context) => context,
+            Err(err) => {
+                return print_session_error(
+                    "SESSION_AUTH_REQUIRED",
+                    format!("diff refresh bind failed: {}", format_error_chain(&err)),
+                );
+            }
+        };
+
+        // one-shot：cold LongLived load（prepare_replacement 需要 read model；
+        // 无需跨轮 hot，初始无 warm cache 可保留）
+        let graph_db_path = std::path::PathBuf::from(&context.manifest.graph_db_path);
+        let session_dir = session_manager.session_dir(session_id);
+        let mirror_dir = metadata_checker::session::sync::project_mirror_root(&session_dir);
+        let runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode(
+            &graph_db_path,
+            Some(&mirror_dir),
+            metadata_checker::runtime::RuntimeMode::LongLived,
+        ) {
+            Ok(runtime) => runtime,
+            Err(err) => {
+                return print_session_error(
+                    "DIFF_REFRESH_FAILED",
+                    format!("failed to load session graph: {}", format_error_chain(&err)),
+                );
+            }
+        };
+
+        let mut orchestrator = metadata_checker::diff_refresh::DiffRefreshOrchestrator::new(
+            metadata_checker::session::SessionManager::new(&session_root),
+            session_dir,
+            context.manifest,
+            context.source,
+            context.provider,
+            runtime,
+        );
+        match orchestrator.refresh_once() {
+            Ok(report) => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "ok": true,
+                        "session_id": session_id,
+                        "change_count": report.change_count,
+                        "invalidated_pages": report.invalidated_pages,
+                        "warm_failures": report.warm_failures,
+                        "checkpoint": report.checkpoint,
+                        "last_poll_at": report.last_poll_at,
+                        "page_dep_index_coverage": report.page_dep_index_coverage,
+                        "timing": report.timing,
+                    }))?
+                );
+            }
+            Err(err) => {
+                return print_session_error(
+                    "DIFF_REFRESH_FAILED",
+                    format!("diff refresh failed: {}", format_error_chain(&err)),
+                );
+            }
+        }
+        return Ok(());
+    }
+
     if let Some(ref session_id) = args.session_refresh {
         if let Some(source) = args
             .remote_source
@@ -770,7 +857,61 @@ fn main() -> Result<()> {
             None => anyhow::bail!("--serve-stdio requires --graph-db-path or --project-dir"),
         };
         let project_dir = args.project_dir.as_deref();
-        metadata_checker::stdio_server::run_stdio_server(&db_path, project_dir)?;
+
+        // M55: 可选绑定 session diff refresh context（不写入 manifest）
+        let diff_refresh_context = match args.runtime_session_id.as_deref() {
+            Some(session_id) => {
+                let Some(manifest) =
+                    read_session_manifest_or_print_error(&session_manager, session_id)?
+                else {
+                    return Ok(());
+                };
+                let manifest_db_path = std::path::PathBuf::from(&manifest.graph_db_path);
+                if manifest_db_path != db_path {
+                    return print_session_error(
+                        "DIFF_REFRESH_GRAPH_PATH_MISMATCH",
+                        format!(
+                            "manifest graph_db_path '{}' does not match runtime graph db path '{}'",
+                            manifest.graph_db_path,
+                            db_path.display()
+                        ),
+                    );
+                }
+                let (username, password) = match (
+                    args.remote_username.as_deref(),
+                    args.remote_password.as_deref(),
+                ) {
+                    (Some(u), Some(p)) => (u, p),
+                    _ => {
+                        return print_session_error(
+                            "SESSION_AUTH_REQUIRED",
+                            "--runtime-session-id requires --remote-username and --remote-password",
+                        );
+                    }
+                };
+                match metadata_checker::session::DiffRefreshRuntimeContext::bind_bi_session(
+                    metadata_checker::session::SessionManager::new(&session_root),
+                    session_id,
+                    username,
+                    password,
+                ) {
+                    Ok(context) => Some(context),
+                    Err(err) => {
+                        return print_session_error(
+                            "SESSION_AUTH_REQUIRED",
+                            format!("diff refresh bind failed: {}", format_error_chain(&err)),
+                        );
+                    }
+                }
+            }
+            None => None,
+        };
+
+        metadata_checker::stdio_server::run_stdio_server(
+            &db_path,
+            project_dir,
+            diff_refresh_context,
+        )?;
         return Ok(());
     }
 
@@ -804,7 +945,10 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    if args.project_dir.is_none() && has_session_query_request(&args) {
+    if args.project_dir.is_none()
+        && !(args.input.is_some() && args.explain.is_some())
+        && has_session_query_request(&args)
+    {
         let db_path = args.graph_db_path.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
                 "graph queries require --project-dir, --graph-db-path, or --remote-index"

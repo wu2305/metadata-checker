@@ -32,6 +32,29 @@ const NODES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("nodes"
 const EDGES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("edges");
 const FILE_STATES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("file_states");
 const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
+/// M54：diff-refresh checkpoint 在 META_TABLE 中的键
+const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
+
+/// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约）。
+///
+/// scanner/bench 收集 delta 与 persist 全量/增量写共用同一格式，避免两套键。
+pub fn edge_storage_key(edge: &Edge) -> String {
+    let type_str = serde_json::to_string(&edge.edge_type).unwrap_or_default();
+    format!(
+        "{}|{}|{}|{}",
+        edge.from,
+        edge.to,
+        type_str,
+        edge.field_path.as_deref().unwrap_or("")
+    )
+}
+
+/// M56 P1：Stale 累计重建阈值（受影响节点 keys 数）。
+///
+/// 真图测量（release、77,077 节点）：v1 hydrate 1604ms / v2 hydrate 1408ms
+/// （每轮差 196ms），v2 全量重建 8575ms —— 每轮重建（A/C）要 ~44 轮小 delta
+/// 才回本，不划算；取 1024 节点 keys 作为阈值，超过时本轮同事务重建 v2。
+const V2_STALE_REBUILD_THRESHOLD_NODES: u64 = 1024;
 
 /// 进程间文件锁（用于串行化 graphdb 访问）
 ///
@@ -98,6 +121,10 @@ pub struct GraphDB {
     seen_edges: HashSet<(String, String, EdgeType, Option<String>)>,
     dirty_nodes: HashSet<String>,
     removed_nodes: HashSet<String>,
+    topology_dirty: bool,
+    /// v2 hydrate 失败时的诊断信息（fallback 到 v1 后仍可正常使用，
+    /// 调用方可读取此字段决定是否上报 diagnostic）。
+    v2_hydrate_warning: Option<String>,
 }
 
 type NodeEdgePair<'a> = (&'a Node, &'a Edge);
@@ -133,17 +160,33 @@ impl GraphDB {
             seen_edges,
             dirty_nodes: HashSet::new(),
             removed_nodes: HashSet::new(),
+            topology_dirty: false,
+            v2_hydrate_warning: None,
         }
     }
 
     fn open_inner(db_path: &Path) -> Result<Self> {
         Self::ensure_redb_tables(db_path)?;
 
-        if let Some(layout) = crate::graph_redb_v2::read_v2_layout(db_path)? {
-            match crate::graph_redb_v2::hydrate_graph_from_v2(&layout, &db_path.to_string_lossy()) {
-                Ok(graph) => return Ok(graph),
-                Err(_) => {
-                    // ponytail: v2 hydrate 失败时静默 fallback v1，避免阻断打开路径
+        // M56：v2 shadow 为 Stale 时跳过 v2，从增量更新后的 v1 hydrate；
+        // Current 或旧库无记录（视为 Current，向后兼容）时维持 v2 优先。
+        if crate::graph_redb_v2::read_v2_shadow_state(db_path)?
+            != crate::graph_redb_v2::V2ShadowState::Stale
+        {
+            if let Ok(Some(layout)) = crate::graph_redb_v2::read_v2_layout(db_path) {
+                match crate::graph_redb_v2::hydrate_graph_from_v2(
+                    &layout,
+                    &db_path.to_string_lossy(),
+                ) {
+                    Ok(graph) => return Ok(graph),
+                    Err(error) => {
+                        // v2 hydrate 失败时 fallback v1（始终正确），但记录诊断供调用方上报
+                        let mut graph = Self::open_inner_v1(db_path)?;
+                        graph.v2_hydrate_warning = Some(format!(
+                            "v2 shadow hydrate failed, fell back to v1: {error:#}"
+                        ));
+                        return Ok(graph);
+                    }
                 }
             }
         }
@@ -211,7 +254,16 @@ impl GraphDB {
             seen_edges,
             dirty_nodes: HashSet::new(),
             removed_nodes: HashSet::new(),
+            topology_dirty: false,
+            v2_hydrate_warning: None,
         })
+    }
+
+    /// 读取 v2 hydrate 诊断信息（fallback 到 v1 时记录的失败原因）。
+    ///
+    /// 调用方可据此决定是否上报 diagnostic；`None` 表示 v2 hydrate 正常或未尝试。
+    pub fn v2_hydrate_warning(&self) -> Option<&str> {
+        self.v2_hydrate_warning.as_deref()
     }
 
     /// 检查图数据库状态，返回结构化 AiOutput（不 panic）
@@ -558,6 +610,8 @@ impl GraphDB {
             seen_edges,
             dirty_nodes: HashSet::new(),
             removed_nodes: HashSet::new(),
+            topology_dirty: false,
+            v2_hydrate_warning: None,
         })
     }
 
@@ -593,6 +647,7 @@ impl GraphDB {
         };
         let idx = self.graph.add_node(node);
         self.is_dirty = true;
+        self.topology_dirty = true;
         self.dirty_nodes.insert(id.clone());
         self.removed_nodes.remove(&id);
         self.node_indices.insert(id, idx);
@@ -638,60 +693,50 @@ impl GraphDB {
                 meta,
             };
             self.is_dirty = true;
+            self.topology_dirty = true;
             self.graph.add_edge(from_idx, to_idx, edge);
         }
     }
 
-    /// 批量删除节点并重建索引
+    /// 批量删除节点（in-place，不重建整图）
+    ///
+    /// 使用 petgraph 的 `remove_node` 逐个删除（swap_remove 语义），
+    /// 同时维护 `node_indices` 和 `seen_edges`。每次删除后更新被 swap
+    /// 的节点的索引映射。O(k * avg_degree) 其中 k 为待删节点数，
+    /// 不随全图规模放大。
     pub fn remove_nodes_by_ids(&mut self, node_ids: &[String]) {
         if node_ids.is_empty() {
             return;
         }
         self.is_dirty = true;
+        self.topology_dirty = true;
+
         for id in node_ids {
             self.removed_nodes.insert(id.clone());
             self.dirty_nodes.remove(id);
-        }
 
-        let remove_ids: HashSet<&str> = node_ids.iter().map(String::as_str).collect();
-        let mut new_graph = DiGraph::new();
-        let mut new_indices = HashMap::new();
-        let mut index_map = HashMap::new();
+            // 从 seen_edges 移除涉及该节点的所有边
+            self.seen_edges
+                .retain(|(from, to, _, _)| from != id && to != id);
 
-        for old_idx in self.graph.node_indices() {
-            let Some(node) = self.graph.node_weight(old_idx) else {
-                continue;
-            };
-            if remove_ids.contains(node.id.as_str()) {
-                continue;
+            // 从内存图删除节点（petgraph swap_remove 自动移除关联边，
+            // 但会把末尾节点 swap 到被删位置，需更新其索引）
+            if let Some(&idx) = self.node_indices.get(id) {
+                // petgraph 的 remove_node 用 swap_remove：末尾节点被移到 idx 位置。
+                // 删除前记录末尾节点 ID，删除后更新其索引。
+                let last_node_id = self.graph.node_weights().last().map(|n| n.id.clone());
+                self.graph.remove_node(idx);
+
+                // 末尾节点被 swap 到 idx 位置，更新其索引映射
+                // （被删节点本身是末尾时 last_node_id 为 None，无需更新）
+                if let Some(swap_id) = last_node_id {
+                    // swap_id 不应等于被删 id（删除前它还存在于图中）
+                    if swap_id != *id {
+                        self.node_indices.insert(swap_id, idx);
+                    }
+                }
             }
-
-            let new_idx = new_graph.add_node(node.clone());
-            new_indices.insert(node.id.clone(), new_idx);
-            index_map.insert(old_idx, new_idx);
-        }
-
-        for edge_ref in self.graph.edge_references() {
-            let Some(&from_idx) = index_map.get(&edge_ref.source()) else {
-                continue;
-            };
-            let Some(&to_idx) = index_map.get(&edge_ref.target()) else {
-                continue;
-            };
-            new_graph.add_edge(from_idx, to_idx, edge_ref.weight().clone());
-        }
-
-        self.graph = new_graph;
-        self.node_indices = new_indices;
-        self.seen_edges.clear();
-        for edge_ref in self.graph.edge_references() {
-            let edge = edge_ref.weight();
-            self.seen_edges.insert((
-                edge.from.clone(),
-                edge.to.clone(),
-                edge.edge_type.clone(),
-                edge.field_path.clone(),
-            ));
+            self.node_indices.remove(id);
         }
     }
 
@@ -702,11 +747,12 @@ impl GraphDB {
         db_path: &std::path::Path,
     ) -> Result<crate::graph_redb_v2::RedbV2Layout> {
         const INCREMENTAL_V2_MAX_DIRTY: usize = 32;
-        let can_try_incremental = graph.removed_nodes.is_empty()
+        let can_try_incremental = !graph.topology_dirty
+            && graph.removed_nodes.is_empty()
             && !graph.dirty_nodes.is_empty()
             && graph.dirty_nodes.len() <= INCREMENTAL_V2_MAX_DIRTY;
         if can_try_incremental {
-            if let Some(mut existing) = crate::graph_redb_v2::read_v2_layout(db_path)? {
+            if let Ok(Some(mut existing)) = crate::graph_redb_v2::read_v2_layout(db_path) {
                 let dirty_subset_of_v2 = graph.dirty_nodes.iter().all(|node_id| {
                     existing
                         .node_ids
@@ -730,16 +776,98 @@ impl GraphDB {
     }
 
     pub fn persist(&mut self, file_states: &HashMap<String, FileState>) -> Result<()> {
-        if !self.is_dirty {
-            return Ok(());
-        }
+        self.persist_with_checkpoint(file_states, None)?;
+        Ok(())
+    }
 
-        let db_path = std::path::Path::new(&self.db_path);
-        let layout = Self::build_v2_layout_for_persist(self, file_states, db_path)?;
+    /// M54：持久化图与 file states，并在同一 write transaction 写入
+    /// diff-refresh checkpoint（`META_TABLE`）。
+    ///
+    /// checkpoint-only commit（graph 无 dirty、checkpoint 为 Some）也必须
+    /// 写入 `META_TABLE`；graph 与 checkpoint 要么同时生效要么同时保持旧值。
+    pub fn persist_with_checkpoint(
+        &mut self,
+        file_states: &HashMap<String, FileState>,
+        checkpoint: Option<&crate::diff_refresh::DiffRefreshCheckpoint>,
+    ) -> Result<crate::graph_store::PersistReport> {
+        self.persist_internal(file_states, checkpoint, None)
+    }
+
+    /// M56：按 IndexCommit 持久化并返回本次提交的成本报告。
+    ///
+    /// `commit.delta` 为 `Some` 时走增量路径：edges/file_states 只写受影响
+    /// keys，topology dirty 时只把 v2 shadow 标记 `Stale`（不写全量 v2 blobs）；
+    /// 为 `None` 时维持全量重写（显式 full rebuild/compaction 路径，v2 置 Current）。
+    pub fn persist_commit(
+        &mut self,
+        commit: &crate::graph_store::IndexCommit,
+    ) -> Result<crate::graph_store::PersistReport> {
+        self.persist_internal(
+            &commit.file_states,
+            commit.checkpoint.as_ref(),
+            commit.delta.as_ref(),
+        )
+    }
+
+    fn persist_internal(
+        &mut self,
+        file_states: &HashMap<String, FileState>,
+        checkpoint: Option<&crate::diff_refresh::DiffRefreshCheckpoint>,
+        delta: Option<&crate::graph_store::IndexDelta>,
+    ) -> Result<crate::graph_store::PersistReport> {
+        let commit_started = std::time::Instant::now();
+        // P1 修复：persist 全程持有 graph lock，覆盖预读→写入→提交，
+        // 防止并发 CLI/--build-graph 在 mutate→persist 间隙写入不一致边集
+        let _lock = acquire_graph_db_lock(std::path::Path::new(&self.db_path))?;
+
+        if !self.is_dirty && checkpoint.is_none() {
+            // 空提交：无写入，report 全零（v2 状态读当前值）
+            return Ok(crate::graph_store::PersistReport {
+                dirty_nodes: 0,
+                dirty_edges: 0,
+                changed_file_states: 0,
+                bytes_written: 0,
+                commit_ms: commit_started.elapsed().as_millis(),
+                full_rewrite: false,
+                v2_shadow_state: crate::graph_redb_v2::read_v2_shadow_state(std::path::Path::new(
+                    &self.db_path,
+                ))?,
+            });
+        }
+        let was_dirty = self.is_dirty;
+        let mut bytes_written: u64 = 0;
+        // M56 P1：在打开写库之前预读 stale 状态（redb 单文件单实例，
+        // persist 过程中不能再开读库）
+        let stale_base = if delta.is_some() && was_dirty {
+            crate::graph_redb_v2::read_v2_stale_dirty_nodes(std::path::Path::new(&self.db_path))?
+        } else {
+            0
+        };
+        let prev_shadow_state = if delta.is_some() && !was_dirty {
+            Some(crate::graph_redb_v2::read_v2_shadow_state(
+                std::path::Path::new(&self.db_path),
+            )?)
+        } else {
+            None
+        };
+
+        // delta 路径不构建 v2 layout（topology dirty 只标记 Stale）；
+        // 全量路径维持现状：构建/patch v2 layout 并写 v2 blobs（Current）
+        let layout = if delta.is_none() {
+            let db_path = std::path::Path::new(&self.db_path);
+            Some(Self::build_v2_layout_for_persist(
+                self,
+                file_states,
+                db_path,
+            )?)
+        } else {
+            None
+        };
 
         let db = Database::create(&self.db_path)?;
         let write_txn = db.begin_write()?;
 
+        // nodes：两路径相同（removed/dirty 集合增量写）
         if !self.removed_nodes.is_empty() {
             let mut nodes_table = write_txn.open_table(NODES_TABLE)?;
             for id in &self.removed_nodes {
@@ -754,48 +882,143 @@ impl GraphDB {
                 {
                     let bytes = serde_json::to_vec(node)
                         .with_context(|| format!("Failed to serialize node {}", id))?;
+                    bytes_written += (id.len() + bytes.len()) as u64;
                     nodes_table.insert(id.as_str(), bytes)?;
                 }
             }
         }
 
-        {
-            let mut edges_table = write_txn.open_table(EDGES_TABLE)?;
-            edges_table.retain(|_, _| false)?;
-            for edge_ref in self.graph.edge_references() {
-                let edge = edge_ref.weight();
-                let type_str = serde_json::to_string(&edge.edge_type).unwrap_or_default();
-                let key = format!(
-                    "{}|{}|{}|{}",
-                    edge.from,
-                    edge.to,
-                    type_str,
-                    edge.field_path.as_deref().unwrap_or("")
-                );
-                let bytes = serde_json::to_vec(edge).with_context(|| "Failed to serialize edge")?;
-                edges_table.insert(key.as_str(), bytes)?;
+        let mut dirty_edge_count = 0_usize;
+        let mut changed_state_count = 0_usize;
+        match delta {
+            Some(delta) => {
+                // M56 edges delta：只删/写受影响 keys，不扫描全图
+                {
+                    let mut edges_table = write_txn.open_table(EDGES_TABLE)?;
+                    for key in &delta.removed_edge_keys {
+                        edges_table.remove(key.as_str())?;
+                    }
+                    for edge in &delta.dirty_edges {
+                        let bytes =
+                            serde_json::to_vec(edge).with_context(|| "Failed to serialize edge")?;
+                        let key = edge_storage_key(edge);
+                        bytes_written += (key.len() + bytes.len()) as u64;
+                        edges_table.insert(key.as_str(), bytes)?;
+                    }
+                    dirty_edge_count = delta.removed_edge_keys.len() + delta.dirty_edges.len();
+                }
+                // M56 file_states delta：只删/写受影响 paths
+                {
+                    let mut states_table = write_txn.open_table(FILE_STATES_TABLE)?;
+                    for path in &delta.removed_file_paths {
+                        states_table.remove(path.as_str())?;
+                    }
+                    for path in &delta.changed_file_states {
+                        let state = file_states
+                            .get(path)
+                            .with_context(|| format!("delta changed file state missing: {path}"))?;
+                        let bytes = serde_json::to_vec(state)
+                            .with_context(|| format!("Failed to serialize file state {path}"))?;
+                        bytes_written += (path.len() + bytes.len()) as u64;
+                        states_table.insert(path.as_str(), bytes)?;
+                    }
+                    changed_state_count =
+                        delta.changed_file_states.len() + delta.removed_file_paths.len();
+                }
+            }
+            None => {
+                {
+                    let mut edges_table = write_txn.open_table(EDGES_TABLE)?;
+                    edges_table.retain(|_, _| false)?;
+                    for edge_ref in self.graph.edge_references() {
+                        let edge = edge_ref.weight();
+                        let key = edge_storage_key(edge);
+                        let bytes =
+                            serde_json::to_vec(edge).with_context(|| "Failed to serialize edge")?;
+                        bytes_written += (key.len() + bytes.len()) as u64;
+                        edges_table.insert(key.as_str(), bytes)?;
+                        dirty_edge_count += 1;
+                    }
+                }
+
+                {
+                    let mut states_table = write_txn.open_table(FILE_STATES_TABLE)?;
+                    states_table.retain(|_, _| false)?;
+                    for (path, state) in file_states {
+                        let bytes = serde_json::to_vec(state)
+                            .with_context(|| format!("Failed to serialize file state {}", path))?;
+                        bytes_written += (path.len() + bytes.len()) as u64;
+                        states_table.insert(path.as_str(), bytes)?;
+                        changed_state_count += 1;
+                    }
+                }
             }
         }
 
-        {
-            let mut states_table = write_txn.open_table(FILE_STATES_TABLE)?;
-            states_table.retain(|_, _| false)?;
-            for (path, state) in file_states {
-                let bytes = serde_json::to_vec(state)
-                    .with_context(|| format!("Failed to serialize file state {}", path))?;
-                states_table.insert(path.as_str(), bytes)?;
-            }
+        if let Some(checkpoint) = checkpoint {
+            let bytes = serde_json::to_vec(checkpoint)
+                .context("Failed to serialize diff refresh checkpoint")?;
+            bytes_written += (META_DIFF_REFRESH_CHECKPOINT_KEY.len() + bytes.len()) as u64;
+            let mut meta_table = write_txn.open_table(META_TABLE)?;
+            meta_table.insert(META_DIFF_REFRESH_CHECKPOINT_KEY, bytes)?;
         }
 
-        crate::graph_redb_v2::write_v2_shadow_tables(&write_txn, &layout)
-            .context("write redb v2 shadow tables")?;
+        let v2_shadow_state = match delta {
+            Some(_) => {
+                // graph 未变化（checkpoint-only）时不动 v2 状态
+                if was_dirty {
+                    // M56 P1：累计 stale 受影响节点 keys；超阈值时本轮同事务
+                    // 重建 v2 并置 Current（每轮重建不回本，见阈值常量注释）
+                    let affected = (self.dirty_nodes.len() + self.removed_nodes.len()) as u64;
+                    let accumulated = stale_base + affected;
+                    if accumulated >= V2_STALE_REBUILD_THRESHOLD_NODES {
+                        let layout = crate::graph_redb_v2::build_v2_layout(self, file_states)
+                            .context("rebuild redb v2 shadow layout after stale threshold")?;
+                        crate::graph_redb_v2::write_v2_shadow_tables(&write_txn, &layout)
+                            .context("write redb v2 shadow tables after stale threshold")?;
+                        crate::graph_redb_v2::write_v2_stale_dirty_nodes(&write_txn, 0)?;
+                        crate::graph_store::V2ShadowState::Current
+                    } else {
+                        crate::graph_redb_v2::write_v2_shadow_state(
+                            &write_txn,
+                            crate::graph_redb_v2::V2ShadowState::Stale,
+                        )
+                        .context("mark v2 shadow stale")?;
+                        crate::graph_redb_v2::write_v2_stale_dirty_nodes(&write_txn, accumulated)?;
+                        crate::graph_store::V2ShadowState::Stale
+                    }
+                } else {
+                    prev_shadow_state.expect("prev shadow state captured before opening write db")
+                }
+            }
+            None => {
+                crate::graph_redb_v2::write_v2_shadow_tables(
+                    &write_txn,
+                    layout.as_ref().expect("layout built for full persist path"),
+                )
+                .context("write redb v2 shadow tables")?;
+                // 全量 layout 写入后无 stale 累计
+                crate::graph_redb_v2::write_v2_stale_dirty_nodes(&write_txn, 0)?;
+                crate::graph_store::V2ShadowState::Current
+            }
+        };
 
         write_txn.commit()?;
 
         self.is_dirty = false;
+        let dirty_node_count = self.dirty_nodes.len() + self.removed_nodes.len();
         self.dirty_nodes.clear();
         self.removed_nodes.clear();
-        Ok(())
+        self.topology_dirty = false;
+        Ok(crate::graph_store::PersistReport {
+            dirty_nodes: dirty_node_count,
+            dirty_edges: dirty_edge_count,
+            changed_file_states: changed_state_count,
+            bytes_written,
+            commit_ms: commit_started.elapsed().as_millis(),
+            full_rewrite: delta.is_none(),
+            v2_shadow_state,
+        })
     }
 
     /// 从 redb 加载文件状态
@@ -811,6 +1034,28 @@ impl GraphDB {
             }
         }
         Ok(states)
+    }
+
+    /// M54：加载 diff-refresh checkpoint。
+    ///
+    /// 旧 graphdb 无 `META_TABLE`（或表内无该键）时返回 `None`，
+    /// 由调用方走 bootstrap 初始化路径。
+    pub fn load_diff_refresh_checkpoint(
+        &self,
+    ) -> Result<Option<crate::diff_refresh::DiffRefreshCheckpoint>> {
+        let db = Database::create(&self.db_path)?;
+        let read_txn = db.begin_read()?;
+        let table = match read_txn.open_table(META_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let Some(value) = table.get(META_DIFF_REFRESH_CHECKPOINT_KEY)? else {
+            return Ok(None);
+        };
+        let checkpoint = serde_json::from_slice(value.value().as_slice())
+            .context("Failed to deserialize diff refresh checkpoint")?;
+        Ok(Some(checkpoint))
     }
 
     /// 查找读取指定模型的所有节点
@@ -1186,6 +1431,7 @@ impl GraphWriteStore for GraphDB {
         } else {
             let idx = self.graph.add_node(node);
             self.node_indices.insert(node_id.clone(), idx);
+            self.topology_dirty = true;
         }
         self.is_dirty = true;
         self.dirty_nodes.insert(node_id.clone());
@@ -1242,7 +1488,7 @@ impl IndexStateStore for GraphDB {
     }
 
     fn persist_index(&mut self, commit: IndexCommit) -> GraphStoreResult<IndexReport> {
-        GraphDB::persist(self, &commit.file_states).map_err(|e| GraphStoreError::WriteFailed {
+        GraphDB::persist_commit(self, &commit).map_err(|e| GraphStoreError::WriteFailed {
             reason: format!("{}", e),
         })?;
         Ok(IndexReport {

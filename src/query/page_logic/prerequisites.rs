@@ -19,10 +19,11 @@ pub(super) fn collect_page_prerequisites(
     child_components: &[Node],
     child_actions: &[Node],
     data_sources: &[serde_json::Value],
-    _budget: &str,
-    _for_cache_materialization: bool,
+    budget: &str,
+    for_cache_materialization: bool,
     profile: &mut Option<&mut PerfProfile>,
 ) -> Result<PagePrerequisites> {
+    let _ = (budget, for_cache_materialization);
     let mut display_prerequisites = Vec::new();
     let mut data_prerequisites = Vec::new();
     let mut action_prerequisites = Vec::new();

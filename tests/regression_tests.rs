@@ -6546,3 +6546,342 @@ fn test_real_project_m34_model11_availability_includes_dataflow_filters() {
         "compact related_context_summary must not reintroduce unrelated same-name model files"
     );
 }
+
+// ---------- M55 Task 10：diff refresh 统一命令面 ----------
+
+/// 创建带最小 mirror + graph 的 CLI 测试 session。
+fn create_diff_refresh_cli_session(
+    root: &std::path::Path,
+    session_id: &str,
+    remote_server: &str,
+) -> std::path::PathBuf {
+    let manager = metadata_checker::session::SessionManager::new(root);
+    manager
+        .create_session(session_id, remote_server, "proj", "proj", "remote")
+        .expect("create session");
+    let session_dir = manager.session_dir(session_id);
+    let mirror_dir = session_dir.join("project");
+    std::fs::create_dir_all(&mirror_dir).expect("create mirror dir");
+    std::fs::write(
+        mirror_dir.join("page_a.spg"),
+        r#"{"version":"4.19.7","canvas":{"id":"canvas","type":"canvas","components":[{"id":"text1","type":"text","value":"hello"}]}}"#,
+    )
+    .expect("write spg");
+    let db_path = session_dir.join("graph.redb");
+    scan_project(&mirror_dir, &db_path).expect("scan session graph");
+    let mut manifest = manager.read_manifest(session_id).expect("read manifest");
+    manifest.graph_db_path = db_path.to_string_lossy().to_string();
+    manager.write_manifest(&manifest).expect("write manifest");
+    db_path
+}
+
+fn unique_diff_refresh_session_root(name: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "metadata-checker-cli-diff-refresh-{name}-{}-{nanos}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    root
+}
+
+/// CLI one-shot：缺少用户名/密码时返回 SESSION_AUTH_REQUIRED，
+/// 且不要求用户重复传 remote_server/project_ref/graph_db_path。
+#[test]
+fn test_cli_runtime_session_diff_refresh_requires_auth() {
+    let root = unique_diff_refresh_session_root("one-shot-auth");
+    create_diff_refresh_cli_session(&root, "s1", "https://bi.test");
+
+    let output = run_cli(&[
+        "--session-dir",
+        root.to_str().unwrap(),
+        "--session-diff-refresh",
+        "s1",
+    ]);
+    let value: serde_json::Value = serde_json::from_str(&output).expect("JSON output");
+    assert_eq!(value["ok"].as_bool(), Some(false));
+    assert_eq!(
+        value["error"]["code"].as_str(),
+        Some("SESSION_AUTH_REQUIRED"),
+        "missing auth should fail with stable code: {value}"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// CLI one-shot：session 不存在时返回稳定 envelope（不 panic、不要求重复传参）。
+#[test]
+fn test_cli_runtime_session_diff_refresh_session_not_found() {
+    let root = unique_diff_refresh_session_root("one-shot-missing");
+
+    let output = run_cli(&[
+        "--session-dir",
+        root.to_str().unwrap(),
+        "--session-diff-refresh",
+        "ghost",
+        "--remote-username",
+        "u",
+        "--remote-password",
+        "p",
+    ]);
+    let value: serde_json::Value = serde_json::from_str(&output).expect("JSON output");
+    assert_eq!(value["ok"].as_bool(), Some(false));
+    assert_eq!(value["error"]["code"].as_str(), Some("SESSION_NOT_FOUND"));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// stdio --runtime-session-id：manifest graph_db_path 与 runtime 路径不一致时报错。
+#[test]
+fn test_cli_runtime_stdio_session_graph_path_mismatch() {
+    let root = unique_diff_refresh_session_root("mismatch");
+    create_diff_refresh_cli_session(&root, "s1", "https://bi.test");
+    let other_db = root.join("other.graphdb");
+
+    let output = run_cli(&[
+        "--session-dir",
+        root.to_str().unwrap(),
+        "--serve-stdio",
+        "--runtime-session-id",
+        "s1",
+        "--graph-db-path",
+        other_db.to_str().unwrap(),
+        "--remote-username",
+        "u",
+        "--remote-password",
+        "p",
+    ]);
+    let value: serde_json::Value = serde_json::from_str(&output).expect("JSON output");
+    assert_eq!(value["ok"].as_bool(), Some(false));
+    assert_eq!(
+        value["error"]["code"].as_str(),
+        Some("DIFF_REFRESH_GRAPH_PATH_MISMATCH"),
+        "graph path mismatch should fail with stable code: {value}"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// stdio --runtime-session-id：缺少用户名/密码时返回 SESSION_AUTH_REQUIRED。
+#[test]
+fn test_cli_runtime_stdio_session_requires_auth() {
+    let root = unique_diff_refresh_session_root("stdio-auth");
+    let db_path = create_diff_refresh_cli_session(&root, "s1", "https://bi.test");
+
+    let output = run_cli(&[
+        "--session-dir",
+        root.to_str().unwrap(),
+        "--serve-stdio",
+        "--runtime-session-id",
+        "s1",
+        "--graph-db-path",
+        db_path.to_str().unwrap(),
+    ]);
+    let value: serde_json::Value = serde_json::from_str(&output).expect("JSON output");
+    assert_eq!(value["ok"].as_bool(), Some(false));
+    assert_eq!(
+        value["error"]["code"].as_str(),
+        Some("SESSION_AUTH_REQUIRED"),
+        "missing auth should fail with stable code: {value}"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// secret-redaction：登录失败时 CLI 输出（stdout+stderr）不得包含密码。
+#[test]
+fn test_cli_runtime_session_diff_refresh_redacts_password_on_failure() {
+    use std::io::{Read, Write};
+
+    // 本机回环 401 服务器（不打外网），登录必然失败
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let body = r#"{"ok":false,"message":"invalid credential token=abc"}"#;
+            let response = format!(
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+
+    let root = unique_diff_refresh_session_root("redact");
+    create_diff_refresh_cli_session(&root, "s1", &format!("http://{addr}"));
+
+    let password = "super-secret-pw-123";
+    let bin = std::env::current_dir()
+        .unwrap()
+        .join("target/debug/metadata-checker");
+    let output = std::process::Command::new(&bin)
+        .args([
+            "--session-dir",
+            root.to_str().unwrap(),
+            "--session-diff-refresh",
+            "s1",
+            "--remote-username",
+            "some-user",
+            "--remote-password",
+            password,
+        ])
+        .output()
+        .expect("run cli");
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON output");
+    assert_eq!(value["ok"].as_bool(), Some(false));
+    assert!(
+        !stdout.contains(password) && !stderr.contains(password),
+        "CLI output must not contain password.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        !stdout.contains("token=abc"),
+        "sanitized output must redact token fragment: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// CLI one-shot：登录成功但 graphdb 损坏时返回 DIFF_REFRESH_FAILED（覆盖 load 失败枝）。
+#[test]
+fn test_cli_runtime_session_diff_refresh_graph_load_failure() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let body = r#"{"ok":true}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nSet-Cookie: JSESSIONID=cov; Path=/\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+
+    let root = unique_diff_refresh_session_root("load-fail");
+    let db_path = create_diff_refresh_cli_session(&root, "s1", &format!("http://{addr}"));
+    // 破坏 graphdb：登录后 LongLived load 失败
+    std::fs::write(&db_path, b"not-a-redb-database").expect("corrupt graphdb");
+
+    let output = run_cli(&[
+        "--session-dir",
+        root.to_str().unwrap(),
+        "--session-diff-refresh",
+        "s1",
+        "--remote-username",
+        "u",
+        "--remote-password",
+        "p",
+    ]);
+    let value: serde_json::Value = serde_json::from_str(&output).expect("JSON output");
+    assert_eq!(value["ok"].as_bool(), Some(false));
+    assert_eq!(
+        value["error"]["code"].as_str(),
+        Some("DIFF_REFRESH_FAILED"),
+        "corrupt graph should fail load: {value}"
+    );
+    let message = value["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("failed to load session graph"),
+        "message should mention load failure: {message}"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// CLI one-shot：登录 + 空 META_FILES 快照成功走完 bootstrap checkpoint（覆盖成功输出枝）。
+#[test]
+fn test_cli_runtime_session_diff_refresh_empty_bootstrap_ok() {
+    use std::io::{Read, Write};
+    use std::sync::{Arc, Mutex};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    let hits = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hits_clone = Arc::clone(&hits);
+    std::thread::spawn(move || {
+        // bind: login；bootstrap: recyclebin → active descendant（顺序固定）
+        for _ in 0..3 {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            hits_clone.lock().expect("lock hits").push(req.clone());
+
+            let (status_line, body) = if req.contains("/api/auth/signin") {
+                ("200 OK", r#"{"ok":true}"#)
+            } else if req.contains("getRecyclebinFiles") {
+                ("200 OK", "[]")
+            } else if req.contains("getFileDescendant") {
+                ("200 OK", r#"{"files":[]}"#)
+            } else {
+                ("404 Not Found", r#"{"ok":false}"#)
+            };
+            let set_cookie = if req.contains("/api/auth/signin") {
+                "Set-Cookie: JSESSIONID=cov-ok; Path=/\r\n"
+            } else {
+                ""
+            };
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\n{set_cookie}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+
+    let root = unique_diff_refresh_session_root("empty-ok");
+    create_diff_refresh_cli_session(&root, "s1", &format!("http://{addr}"));
+
+    let output = run_cli(&[
+        "--session-dir",
+        root.to_str().unwrap(),
+        "--session-diff-refresh",
+        "s1",
+        "--remote-username",
+        "u",
+        "--remote-password",
+        "p",
+    ]);
+    let value: serde_json::Value = serde_json::from_str(&output).expect("JSON output");
+    assert_eq!(
+        value["ok"].as_bool(),
+        Some(true),
+        "empty bootstrap should succeed: {value}"
+    );
+    assert_eq!(value["change_count"].as_u64(), Some(0));
+    assert!(
+        value.get("checkpoint").is_some(),
+        "empty bootstrap must persist checkpoint: {value}"
+    );
+    let captured = hits.lock().expect("lock hits");
+    assert!(
+        captured.iter().any(|r| r.contains("/api/auth/signin")),
+        "must login: {captured:?}"
+    );
+    assert!(
+        captured.iter().any(|r| r.contains("getRecyclebinFiles")),
+        "bootstrap must hit recyclebin: {captured:?}"
+    );
+    assert!(
+        captured.iter().any(|r| r.contains("getFileDescendant")),
+        "bootstrap must hit active list: {captured:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}

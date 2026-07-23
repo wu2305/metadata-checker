@@ -18,7 +18,7 @@ mod page_diff;
 mod path_summary;
 mod prerequisites;
 
-pub use page_diff::PageDependencyIndex;
+pub use page_diff::{PageDependencyIndex, PageDependencyIndexCoverage};
 
 /// 测试与交叉验证：收集 page logic 遍历口径下的组件与动作节点。
 #[cfg(feature = "cli-local")]
@@ -1093,6 +1093,8 @@ pub fn build_page_logic_availability_cache(
     let graph_collect::PageLogicNodes {
         child_components,
         child_actions,
+        related_models: _,
+        related_fields: _,
     } = graph_collect::collect_page_logic_nodes(graph, page_id)?;
     warm_stages.insert(
         "collect_page_nodes".to_string(),
@@ -1546,6 +1548,8 @@ fn build_query_page_logic_output_inner(
     let graph_collect::PageLogicNodes {
         child_components,
         child_actions,
+        related_models: _,
+        related_fields: _,
     } = graph_collect::collect_page_logic_nodes(graph, page_id)?;
     record_profile_stage(&mut profile, "collect_page_nodes", stage_started);
     set_profile_counter(&mut profile, "child_components", child_components.len());

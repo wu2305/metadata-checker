@@ -15,10 +15,13 @@
 
 | ID | 区域 | 状态 | Journal |
 |----|------|------|---------|
-| **M53** | performance | active | [m53-performance-continuation.md](milestones/performance/m53-performance-continuation.md) |
+| **M54–M56** | performance（差量刷新） | active（代码完成，待合并） | [m54-diff-refresh-pipeline.md](milestones/performance/m54-diff-refresh-pipeline.md) |
+| patch | performance（产品路径/init/warm） | active | [design](specs/2026-07-13-perf-product-path-init-warm-patch-design.md) / [plan](plans/2026-07-13-perf-product-path-init-warm-patch-plan.md) |
+| M53 | performance | done | [m53-performance-continuation.md](milestones/performance/m53-performance-continuation.md) |
 | M28–M30 | stdio / FC | planned | [INDEX.md](milestones/INDEX.md) |
 | M46–M48 | browser | planned | [INDEX.md](milestones/INDEX.md) |
-| M56–M58 | formats / ai-eval | planned | [INDEX.md](milestones/INDEX.md) |
+| M58 | ai-eval（理解力评测闭环） | planned（spec draft） | [m58](milestones/ai-eval/m58-cheap-model-comprehension-eval.md) / [design](specs/2026-07-17-cheap-model-comprehension-eval-design.md) |
+| M59 | formats（rpt·dash 后推） | planned | [INDEX.md](milestones/INDEX.md) |
 
 完整表见 [milestones/INDEX.md](milestones/INDEX.md)。
 

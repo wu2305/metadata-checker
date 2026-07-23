@@ -1,0 +1,40 @@
+{
+  "description": "M55 录制 fixture：BI 活跃/删除清单。active 覆盖 path 直出与 parentDir+name 兜底、两个同毫秒（1000）更新；deleted 覆盖回收站原始 file_id 重复（file-c 两条墓碑，uuid 不同）并与 active 同毫秒。字段语义：active=id/path|parentDir+name/type/modifyTime/revision → event_id=active:<id>:<revision>；deleted=FILE_ID/PARENT_DIR/NAME/TYPE/deleteTime/uuid → event_id=deleted:<uuid>；时间统一 Unix 毫秒。",
+  "active": [
+    {
+      "id": "file-a",
+      "path": "proj/app/page_a.spg",
+      "type": "spg",
+      "isFolder": false,
+      "modifyTime": 1000,
+      "revision": "2"
+    },
+    {
+      "id": "file-b",
+      "parentDir": "proj/app",
+      "name": "page_b.spg",
+      "type": "spg",
+      "isFolder": false,
+      "modifyTime": 1000,
+      "revision": "3"
+    }
+  ],
+  "deleted": [
+    {
+      "FILE_ID": "file-c",
+      "PARENT_DIR": "proj/app",
+      "NAME": "page_c.spg",
+      "TYPE": "spg",
+      "deleteTime": 1000,
+      "uuid": "uuid-c-1"
+    },
+    {
+      "FILE_ID": "file-c",
+      "PARENT_DIR": "proj/app",
+      "NAME": "page_c.spg",
+      "TYPE": "spg",
+      "deleteTime": 1001,
+      "uuid": "uuid-c-2"
+    }
+  ]
+}
