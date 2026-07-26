@@ -295,6 +295,28 @@ fn canonicalize_json(value: &serde_json::Value) -> serde_json::Value {
     }
 }
 
+fn stable_query_from_mirror_session(session_dir: &Path, page_id: &str) -> serde_json::Value {
+    let expected_db = session_dir.join("m57-phase3-expected.redb");
+    let _ = fs::remove_file(&expected_db);
+    ProjectIndexer::scan(&project_mirror_root(session_dir), &expected_db)
+        .expect("scan session mirror for stable expected query");
+    let mut runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &expected_db,
+        Some(project_mirror_root(session_dir)),
+        RuntimeMode::LongLived,
+    )
+    .expect("load expected mirror runtime");
+    runtime
+        .warm_page_logic_availability(page_id, BUDGET)
+        .expect("warm expected mirror page");
+    let result = runtime
+        .query(page_query_request(page_id))
+        .expect("query expected mirror page")
+        .result;
+    let _ = fs::remove_file(expected_db);
+    result
+}
+
 /// 端到端：page_a 变化后结果与同 mirror 冷 load+warm 的 canonical JSON 相等，
 /// page_b cache 内容保持相同。
 #[test]
@@ -616,7 +638,7 @@ fn m54_diff_refresh_orchestrator_bootstrap_initializes_checkpoint() {
 
     // 只含 revision 变化与远端缺失两个事件
     assert_eq!(report.change_count, 2);
-    // 原子提交配对 checkpoint：active/deleted 各自初始化到快照边界
+    assert_eq!(report.persisted, false);
     let expected_checkpoint = DiffRefreshCheckpoint {
         active: SourceCursor::new(2001, vec!["active:file-v:2".into()]),
         deleted: SourceCursor::new(1999, vec!["deleted:uuid-w-1".into()]),
@@ -627,8 +649,15 @@ fn m54_diff_refresh_orchestrator_bootstrap_initializes_checkpoint() {
         reopened
             .load_diff_refresh_checkpoint()
             .expect("load checkpoint"),
-        Some(expected_checkpoint)
+        None
     );
+
+    let follow_up = orchestrator
+        .refresh_once()
+        .expect("second bootstrap pending follow-up");
+    assert_eq!(follow_up.change_count, 0);
+    assert_eq!(follow_up.persisted, false);
+    assert_eq!(follow_up.checkpoint, Some(expected_checkpoint));
 
     // manifest：file-w 标删除、file-v revision 推进、file-u 不变
     let manifest = orchestrator.manifest();
@@ -856,11 +885,10 @@ fn m57_phase3_install_is_queryable_before_deferred_persist() {
         .query(page_query_request(PAGE_A))
         .expect("query installed runtime")
         .result;
+    let stable_expected = stable_query_from_mirror_session(&session_dir, PAGE_A);
     assert_eq!(
-        serde_json::to_string(&hot_result)
-            .expect("serialize hot result")
-            .contains("phase3-deferred"),
-        true,
+        stable_semantic_view(&hot_result),
+        stable_semantic_view(&stable_expected),
         "installed runtime must expose the new mirror content before persist"
     );
 
@@ -1053,11 +1081,10 @@ fn m57_phase3_persist_failure_keeps_runtime_and_retries() {
         .query(page_query_request(PAGE_A))
         .expect("installed runtime remains queryable after persist failure")
         .result;
+    let retry_expected = stable_query_from_mirror_session(&session_dir, PAGE_A);
     assert_eq!(
-        serde_json::to_string(&hot_result)
-            .expect("serialize hot retry result")
-            .contains("phase3-retry"),
-        true
+        stable_semantic_view(&hot_result),
+        stable_semantic_view(&retry_expected),
     );
     assert_eq!(
         GraphDB::open(&db_path)

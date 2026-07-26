@@ -14,6 +14,7 @@
 //! - 失败语义：mirror/prepare/commit 任一失败直接返回 Err，checkpoint 不推进、
 //!   旧 runtime 保持可用；re-warm 是 best-effort，失败只记入 `warm_failures`。
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -22,10 +23,11 @@ use anyhow::{Context, Result};
 use super::mirror::apply_changeset_to_mirror;
 use super::source::MetaFilesChangeSource;
 use super::tick::run_tick_loop_with_hooks;
-use super::types::{DiffRefreshCheckpoint, MetaFilesWatermark};
+use super::types::{DiffRefreshCheckpoint, MetaFilesWatermark, SourceCursor};
 use crate::diff_refresh::DiffRefreshTickReport;
-use crate::graph_store::PersistReport;
-use crate::runtime::{BatchWarmReport, GraphRuntime};
+use crate::graph::GraphDB;
+use crate::graph_store::{IndexCommit, PersistReport};
+use crate::runtime::{BatchWarmReport, GraphRuntime, RuntimeMode};
 use crate::scanner::indexer::ProjectIndexer;
 use crate::session::RefreshScope;
 use crate::session::SessionManager;
@@ -98,6 +100,7 @@ impl Default for LongLivedPersistPolicy {
 /// re-warm 执行器：默认委托 `GraphRuntime::warm_page_logic_batch`，
 /// 测试可注入失败以覆盖 warm-failure cold fallback 语义。
 type WarmFn = Box<dyn FnMut(&mut GraphRuntime, &[(String, String)]) -> Result<BatchWarmReport>>;
+type PersistFn = Box<dyn FnMut(&mut GraphDB, &IndexCommit) -> Result<PersistReport>>;
 
 /// 差量刷新编排器（持有方见模块注释的生命周期假设）。
 pub struct DiffRefreshOrchestrator {
@@ -109,7 +112,12 @@ pub struct DiffRefreshOrchestrator {
     provider: Box<dyn RemoteSessionProvider>,
     runtime: GraphRuntime,
     persist_policy: LongLivedPersistPolicy,
+    pending_checkpoint: Option<DiffRefreshCheckpoint>,
+    pending_dirty_node_ids: Vec<String>,
+    pending_commit: Option<IndexCommit>,
+    pending_rounds: usize,
     warm_fn: WarmFn,
+    persist_fn: PersistFn,
 }
 
 impl DiffRefreshOrchestrator {
@@ -162,13 +170,23 @@ impl DiffRefreshOrchestrator {
             provider,
             runtime,
             persist_policy: LongLivedPersistPolicy::default(),
+            pending_checkpoint: None,
+            pending_dirty_node_ids: Vec::new(),
+            pending_commit: None,
+            pending_rounds: 0,
             warm_fn: Box::new(|runtime, targets| runtime.warm_page_logic_batch(targets)),
+            persist_fn: Box::new(|graph, commit| graph.persist_commit(commit)),
         }
     }
 
     /// 注入自定义 re-warm 执行器（测试用）。
     pub fn set_warm_fn(&mut self, warm_fn: WarmFn) {
         self.warm_fn = warm_fn;
+    }
+
+    /// 注入自定义持久化执行器（测试可覆盖）。
+    pub fn set_persist_fn(&mut self, persist_fn: PersistFn) {
+        self.persist_fn = persist_fn;
     }
 
     /// 配置长生命周期持久化策略，便于测试与调用方注入固定参数。
@@ -197,11 +215,12 @@ impl DiffRefreshOrchestrator {
 
         // 1. load checkpoint → poll 或 bootstrap
         let stage = Instant::now();
-        let current_checkpoint = self
+        let durable_checkpoint = self
             .runtime
             .graph
             .load_diff_refresh_checkpoint()
             .context("load diff refresh checkpoint")?;
+        let current_checkpoint = self.effective_checkpoint(durable_checkpoint.as_ref());
         let changeset = match &current_checkpoint {
             Some(checkpoint) => {
                 let since = MetaFilesWatermark {
@@ -230,25 +249,61 @@ impl DiffRefreshOrchestrator {
                 .map(|model| model.page_dependency_index.coverage())
                 .unwrap_or(crate::query::PageDependencyIndexCoverage::Partial);
 
+            if let Some(pending_checkpoint) = self.pending_checkpoint.clone() {
+                // 使用 pending watermark 继续轮询，避免重复消费；
+                // 空 poll 仅在 pending 已满阈值或轮次回退时触发持久化。
+                self.pending_rounds = self.pending_rounds.saturating_add(1);
+                if self.should_persist_pending() {
+                    let stage = Instant::now();
+                    let persist_report = self
+                        .persist_pending()
+                        .context("persist pending graph and checkpoint")?;
+                    timing.commit_ms = stage.elapsed().as_millis();
+                    return Ok(Self::new_machine_report(
+                        0,
+                        Vec::new(),
+                        Vec::new(),
+                        Some(pending_checkpoint),
+                        last_poll_at,
+                        coverage,
+                        timing,
+                        Some(persist_report),
+                        true,
+                        0,
+                    ));
+                }
+                return Ok(Self::new_machine_report(
+                    0,
+                    Vec::new(),
+                    Vec::new(),
+                    Some(pending_checkpoint),
+                    last_poll_at,
+                    coverage,
+                    timing,
+                    None,
+                    false,
+                    self.pending_dirty_node_ids.len(),
+                ));
+            }
+
             // 首次 bootstrap 后空结果：持久化 checkpoint-only commit，
             // 使下一轮走 poll 而非重新 bootstrap；已有 checkpoint 的空 poll 不写盘。
-            let (checkpoint, persist_report) = if let Some(checkpoint) = current_checkpoint {
-                (Some(checkpoint), None)
-            } else {
-                let bootstrap_checkpoint: DiffRefreshCheckpoint =
-                    changeset.next_watermark.clone().into();
-                let file_states = self.runtime.graph.load_file_states().unwrap_or_default();
-                let stage = Instant::now();
-                let persist_report = self
-                    .runtime
-                    .graph
-                    .persist_with_checkpoint(&file_states, Some(&bootstrap_checkpoint))
-                    .context("persist bootstrap checkpoint")?;
-                timing.commit_ms = stage.elapsed().as_millis();
-                (Some(bootstrap_checkpoint), Some(persist_report))
-            };
-            let persisted = false;
-
+            let (checkpoint, persist_report, persisted, pending_dirty_total) =
+                if let Some(checkpoint) = current_checkpoint {
+                    (Some(checkpoint), None, false, 0)
+                } else {
+                    let bootstrap_checkpoint: DiffRefreshCheckpoint =
+                        changeset.next_watermark.clone().into();
+                    let file_states = self.runtime.graph.load_file_states().unwrap_or_default();
+                    let stage = Instant::now();
+                    let persist_report = self
+                        .runtime
+                        .graph
+                        .persist_with_checkpoint(&file_states, Some(&bootstrap_checkpoint))
+                        .context("persist bootstrap checkpoint")?;
+                    timing.commit_ms = stage.elapsed().as_millis();
+                    (Some(bootstrap_checkpoint), Some(persist_report), false, 0)
+                };
             return Ok(Self::new_machine_report(
                 0,
                 Vec::new(),
@@ -259,7 +314,7 @@ impl DiffRefreshOrchestrator {
                 timing,
                 persist_report,
                 persisted,
-                0,
+                pending_dirty_total,
             ));
         }
 
@@ -314,29 +369,56 @@ impl DiffRefreshOrchestrator {
         });
         timing.read_model_ms = stage.elapsed().as_millis();
 
-        // 6. persist graph+checkpoint（单 write transaction）
-        let stage = Instant::now();
+        // 6. 按策略持久化（OneShot 先持久化后切换）
         let next_checkpoint: DiffRefreshCheckpoint = changeset.next_watermark.clone().into();
         let mut candidate = prepared.graph;
         let mut commit = prepared.commit;
         commit.checkpoint = Some(next_checkpoint.clone());
-        let persist_report = candidate
-            .persist_commit(&commit)
-            .context("persist graph and checkpoint commit")?;
-        timing.commit_ms = stage.elapsed().as_millis();
-
-        // 7. install replacement（只 move 已准备对象）
-        let stage = Instant::now();
+        let mut persisted = false;
+        let mut persist_report = None;
+        let mut pending_dirty_total = 0usize;
         let invalidated_pages = replacement.invalidated_pages.clone();
         let page_dep_index_coverage = replacement.page_dep_index_coverage;
-        self.runtime.install_replacement(candidate, replacement);
-        timing.swap_ms = stage.elapsed().as_millis();
 
-        // 8. best-effort batch warm：失败只记 warm_failures，不影响已推进的 checkpoint
+        if self.runtime.runtime_mode == RuntimeMode::OneShot {
+            let mut stage = Instant::now();
+            let report = candidate
+                .persist_commit(&commit)
+                .context("persist graph and checkpoint commit")?;
+            timing.commit_ms = stage.elapsed().as_millis();
+            persisted = true;
+            persist_report = Some(report);
+            stage = Instant::now();
+            self.runtime.install_replacement(candidate, replacement);
+            timing.swap_ms = stage.elapsed().as_millis();
+            self.clear_pending_state();
+        } else {
+            let mut stage = Instant::now();
+            self.runtime.install_replacement(candidate, replacement);
+            timing.swap_ms = stage.elapsed().as_millis();
+            self.merge_pending_state(
+                next_checkpoint.clone(),
+                prepared.dirty_node_ids,
+                prepared.deleted_node_ids,
+                commit,
+            );
+            if self.should_persist_pending() {
+                stage = Instant::now();
+                let report = self
+                    .persist_pending()
+                    .context("persist deferred graph and checkpoint")?;
+                timing.commit_ms = stage.elapsed().as_millis();
+                persisted = true;
+                persist_report = Some(report);
+            } else {
+                pending_dirty_total = self.pending_dirty_node_ids.len();
+            }
+        }
+
+        // 7. best-effort batch warm：失败只记 warm_failures，不影响已推进的 checkpoint
         let stage = Instant::now();
         let warm_failures = self.rewarm_best_effort(&rewarm_targets);
         timing.rewarm_ms = stage.elapsed().as_millis();
-        let persisted = true;
 
         Ok(Self::new_machine_report(
             changeset.change_count,
@@ -346,10 +428,74 @@ impl DiffRefreshOrchestrator {
             last_poll_at,
             page_dep_index_coverage,
             timing,
-            Some(persist_report),
+            persist_report,
             persisted,
-            0,
+            pending_dirty_total,
         ))
+    }
+
+    /// 计算当前轮次应使用的 watermark：优先 pending checkpoint，若两者都存在取时间更靠后者。
+    fn effective_checkpoint(
+        &self,
+        durable_checkpoint: Option<&DiffRefreshCheckpoint>,
+    ) -> Option<DiffRefreshCheckpoint> {
+        match (&self.pending_checkpoint, durable_checkpoint) {
+            (None, Some(checkpoint)) => Some(checkpoint.clone()),
+            (Some(checkpoint), None) => Some(checkpoint.clone()),
+            (Some(pending), Some(durable)) => Some(max_checkpoint(pending, durable)),
+            (None, None) => None,
+        }
+    }
+
+    /// 清理 pending 状态。
+    fn clear_pending_state(&mut self) {
+        self.pending_checkpoint = None;
+        self.pending_dirty_node_ids.clear();
+        self.pending_commit = None;
+        self.pending_rounds = 0;
+    }
+
+    /// 合并本轮脏节点并更新 pending 状态为最新 checkpoint/commit。
+    fn merge_pending_state(
+        &mut self,
+        checkpoint: DiffRefreshCheckpoint,
+        dirty_node_ids: Vec<String>,
+        deleted_node_ids: Vec<String>,
+        commit: IndexCommit,
+    ) {
+        let mut merged_dirty = HashSet::new();
+        for id in self.pending_dirty_node_ids.iter() {
+            merged_dirty.insert(id.clone());
+        }
+        for id in dirty_node_ids {
+            merged_dirty.insert(id);
+        }
+        for id in deleted_node_ids {
+            merged_dirty.insert(id);
+        }
+        self.pending_dirty_node_ids = merged_dirty.into_iter().collect();
+        self.pending_dirty_node_ids.sort();
+        self.pending_rounds = self.pending_rounds.saturating_add(1);
+        self.pending_checkpoint = Some(checkpoint);
+        self.pending_commit = Some(commit);
+    }
+
+    /// 当前 pending 状态是否达到持久化阈值或轮次回退条件。
+    fn should_persist_pending(&self) -> bool {
+        self.pending_dirty_node_ids.len() > self.persist_policy.dirty_node_threshold
+            || self.pending_rounds >= self.persist_policy.max_pending_rounds
+    }
+
+    /// 执行 pending 结果的 durable 持久化；成功后清理 pending 状态用于后续轮次。
+    fn persist_pending(&mut self) -> Result<PersistReport> {
+        let commit = self
+            .pending_commit
+            .as_ref()
+            .context("missing pending commit for persistence")?;
+        let report = (self.persist_fn)(&mut self.runtime.graph, commit)
+            .context("persist pending graph and checkpoint")?;
+        self.clear_pending_state();
+        Ok(report)
     }
 
     /// 使用标准线程 sleep 执行一次限流 Tick 循环。
@@ -439,4 +585,33 @@ fn read_env_usize(env_key: &str, fallback: usize) -> usize {
         .ok()
         .and_then(|raw| raw.parse::<usize>().ok())
         .unwrap_or(fallback)
+}
+
+fn max_source_cursor(left: &SourceCursor, right: &SourceCursor) -> SourceCursor {
+    if left.updated_at_ms > right.updated_at_ms {
+        return left.clone();
+    }
+    if left.updated_at_ms < right.updated_at_ms {
+        return right.clone();
+    }
+
+    let mut boundary_event_ids = left
+        .boundary_event_ids
+        .iter()
+        .chain(right.boundary_event_ids.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    boundary_event_ids.sort();
+    boundary_event_ids.dedup();
+    SourceCursor::new(left.updated_at_ms, boundary_event_ids)
+}
+
+fn max_checkpoint(
+    left: &DiffRefreshCheckpoint,
+    right: &DiffRefreshCheckpoint,
+) -> DiffRefreshCheckpoint {
+    DiffRefreshCheckpoint {
+        active: max_source_cursor(&left.active, &right.active),
+        deleted: max_source_cursor(&left.deleted, &right.deleted),
+    }
 }
