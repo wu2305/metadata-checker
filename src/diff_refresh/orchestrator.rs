@@ -170,6 +170,11 @@ impl DiffRefreshOrchestrator {
         runtime: GraphRuntime,
     ) -> Self {
         let graph_db_path = PathBuf::from(&manifest.graph_db_path);
+        let persist_mode = if runtime.runtime_mode == RuntimeMode::OneShot {
+            DiffRefreshPersistMode::Synchronous
+        } else {
+            DiffRefreshPersistMode::Deferred
+        };
         Self {
             session_manager,
             session_dir,
@@ -179,11 +184,7 @@ impl DiffRefreshOrchestrator {
             provider,
             runtime,
             persist_policy: LongLivedPersistPolicy::default(),
-            persist_mode: if runtime.runtime_mode == RuntimeMode::OneShot {
-                DiffRefreshPersistMode::Synchronous
-            } else {
-                DiffRefreshPersistMode::Deferred
-            },
+            persist_mode,
             pending_checkpoint: None,
             pending_dirty_node_ids: Vec::new(),
             pending_commit: None,
