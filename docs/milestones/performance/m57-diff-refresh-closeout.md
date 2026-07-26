@@ -78,3 +78,4 @@
 - M57-2：scope 枚举 JSON 固定为 snake_case（`dd231af`），供后续 SLM runner 直接消费。
 - M57-3：runtime auth error mapping TDD 与实现已通过；401/403 在完整 anyhow chain 中映射为 `SESSION_AUTH_REQUIRED`，普通错误仍为 `DIFF_REFRESH_FAILED`，stdio/one-shot 均保持脱敏诊断。
 - M57-3：专项认证测试 2 passed；stdio 全套 36 passed、1 ignored；M57-0/M57-1/M57-2 影响面测试继续通过。
+- 真实项目 stdio 冒烟：已尝试运行既有 ignored 用例；首次索引报告 `1329 files / 78127 dirty`，超过约 5 分钟未产生终态，已中止，暂不计入通过证据。
