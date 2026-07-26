@@ -35,7 +35,7 @@ impl ConditionFact {
 }
 
 /// 从条件节点构建 typed 事实。
-fn build_condition_fact(source: &crate::graph::Node) -> ConditionFact {
+pub(crate) fn build_condition_fact(source: &crate::graph::Node) -> ConditionFact {
     let meta = source.meta.as_ref().unwrap_or(&serde_json::Value::Null);
     let condition_type = meta
         .get("condition_type")
@@ -670,7 +670,8 @@ pub(crate) fn precollect_all_node_conditions(
     Ok(map)
 }
 
-fn collect_condition_facts_for_node(
+/// 收集指向目标节点的 condition 依赖并构建 typed facts。
+pub(crate) fn collect_condition_facts_for_node(
     graph: &dyn GraphReadStore,
     node_id: &str,
     seen: &mut HashSet<String>,

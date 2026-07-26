@@ -29,7 +29,7 @@ fn test_root(name: &str) -> PathBuf {
     ))
 }
 
-fn page_spg(value: &str) -> String {
+fn page_spg(first_value: &str, second_value: &str) -> String {
     serde_json::json!({
         "version": "4.19.7",
         "theme": "default",
@@ -41,7 +41,8 @@ fn page_spg(value: &str) -> String {
             "type": "canvas",
             "components": [
                 {"id": "input1", "type": "input", "submitField": "model_a.name"},
-                {"id": "text1", "type": "text", "value": value}
+                {"id": "text1", "type": "text", "value": first_value},
+                {"id": "text2", "type": "text", "value": second_value}
             ]
         }
     })
@@ -91,7 +92,7 @@ fn build_project(name: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
     std::fs::create_dir_all(project_dir.join("data"))?;
     std::fs::write(
         project_dir.join("app/page.spg"),
-        page_spg("${model_a.name}"),
+        page_spg("${model_a.name}", "${model_a.id}"),
     )?;
     std::fs::write(
         project_dir.join("data/table.tbl"),
@@ -114,7 +115,7 @@ fn m57_incremental_read_model_matches_full_rebuild() -> anyhow::Result<()> {
 
     std::fs::write(
         project_dir.join("app/page.spg"),
-        page_spg("changed literal"),
+        page_spg("${model_a.id}", "${model_a.name}"),
     )?;
     let prepared_index = ProjectIndexer::prepare(&project_dir, &db_path)?;
     assert_eq!(prepared_index.deleted_node_ids.is_empty(), true);
@@ -191,6 +192,38 @@ fn m57_incremental_read_model_matches_full_rebuild() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// dirty ∪ deleted 导致 node set 变化时，三个派生索引必须统一回退 full。
+#[test]
+fn m57_incremental_read_model_falls_back_for_deleted_nodes() -> anyhow::Result<()> {
+    let (project_dir, db_path) = build_project("deleted-fallback")?;
+    let runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(&project_dir),
+        RuntimeMode::LongLived,
+    )?;
+
+    std::fs::remove_file(project_dir.join("app/page.spg"))?;
+    let prepared_index = ProjectIndexer::prepare(&project_dir, &db_path)?;
+    assert_eq!(prepared_index.deleted_node_ids.is_empty(), false);
+
+    let mut invalidation_ids = prepared_index.dirty_node_ids.clone();
+    invalidation_ids.extend(prepared_index.deleted_node_ids.iter().cloned());
+    let prepared = runtime.prepare_replacement(&prepared_index.graph, &invalidation_ids)?;
+    assert_eq!(prepared.read_model_update_mode, ReadModelUpdateMode::Full);
+    assert_eq!(
+        prepared
+            .read_model
+            .dense_graph
+            .as_ref()
+            .expect("dense model")
+            .dense_node_count(),
+        prepared_index.graph.node_count()?
+    );
+
+    let _ = std::fs::remove_dir_all(project_dir);
+    Ok(())
+}
+
 /// 记录 1/10/100 dirty 规模，作为后续真实项目曲线的统一输出格式。
 #[test]
 fn m57_incremental_read_model_records_dirty_scale_curve() -> anyhow::Result<()> {
@@ -205,6 +238,13 @@ fn m57_incremental_read_model_records_dirty_scale_curve() -> anyhow::Result<()> 
     )?;
     let node_ids: Vec<String> = candidate.iter_nodes()?.map(|node| node.id).collect();
     assert_eq!(node_ids.is_empty(), false);
+
+    let full_started = Instant::now();
+    let _full_dense = DenseGraphSnapshot::from_graph(&candidate)?;
+    let _full_facts = MaterializedAvailabilityFactsIndex::build(&candidate)?;
+    let _full_page_index = PageDependencyIndex::build(&candidate)?;
+    let full_rebuild_ms = full_started.elapsed().as_millis();
+    eprintln!("M57_PHASE2 full_rebuild_ms={full_rebuild_ms}");
 
     let mut curve = BTreeMap::new();
     for dirty_count in [1_usize, 10, 100] {
