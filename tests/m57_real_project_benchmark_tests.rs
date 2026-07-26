@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
+use metadata_checker::graph::GraphDB;
 use metadata_checker::graph_store::GraphReadStore;
+use metadata_checker::graph_store::GraphWriteStore;
 use metadata_checker::runtime::{GraphRuntime, ReadModelUpdateMode, RuntimeMode};
 
 fn load_path(var_name: &str, default_path: &str) -> PathBuf {
@@ -57,19 +59,37 @@ fn m57_real_project_release_dirty_curve() -> Result<()> {
         .graph
         .edge_count()
         .with_context(|| format!("Failed to read edge count: {}", graph_db_path.display()))?;
+    let topology_unchanged = true;
 
     let node_ids: Vec<String> = runtime.graph.iter_nodes()?.map(|node| node.id).collect();
     assert_eq!(node_ids.is_empty(), false);
 
     let mut points = Vec::new();
     for dirty_count in [1_usize, 10, 100] {
-        let dirty_ids = node_ids
+        let mut candidate = GraphDB::open(&graph_db_path)?;
+        let candidate_node_count = candidate.node_count()?;
+        let candidate_edge_count = candidate.edge_count()?;
+        assert_eq!(
+            (candidate_node_count, candidate_edge_count),
+            (node_count, edge_count),
+            "candidate topology must match baseline for dirty_count={dirty_count}"
+        );
+
+        let dirty_ids: Vec<String> = node_ids
             .iter()
             .take(dirty_count)
             .cloned()
             .collect::<Vec<_>>();
+        for dirty_node_id in &dirty_ids {
+            let Some(mut node) = candidate.get_node(dirty_node_id) else {
+                bail!("Unable to find node in candidate graph: {}", dirty_node_id);
+            };
+            node.name = format!("{}-m57-real-benchmark", node.name);
+            candidate.upsert_node(node)?;
+        }
+
         let wall_started = Instant::now();
-        let prepared = runtime.prepare_replacement(&runtime.graph, &dirty_ids)?;
+        let prepared = runtime.prepare_replacement(&candidate, &dirty_ids)?;
         let wall_ms = wall_started.elapsed().as_millis();
         assert_eq!(
             prepared.read_model_update_mode,
@@ -84,6 +104,7 @@ fn m57_real_project_release_dirty_curve() -> Result<()> {
             "dense_snapshot_build_ms": prepared.dense_snapshot_build_ms,
             "availability_facts_build_ms": prepared.availability_facts_build_ms,
             "page_dependency_index_build_ms": prepared.page_dependency_index_build_ms,
+            "topology_unchanged": topology_unchanged,
         }));
     }
 
@@ -96,6 +117,8 @@ fn m57_real_project_release_dirty_curve() -> Result<()> {
         "edge_count": edge_count,
         "runtime_load_ms": runtime_load_ms,
         "full_read_model_ms": full_read_model_ms,
+        "candidate_mutation": "node_name_suffix",
+        "topology_unchanged": topology_unchanged,
         "points": points,
     });
     eprintln!("M57_REAL_PHASE2_BASELINE {summary}");
