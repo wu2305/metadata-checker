@@ -61,6 +61,8 @@
 
 ## 批准的后续切片：M57-1 tick loop
 
+状态：**done**（实现 `8249d6f`；error-chain 修复 `2ec96a8`；TDD `7763b20`）
+
 - 复用现有 `BackoffSchedule`，新增同步 tick runner，驱动 `DiffRefreshOrchestrator::refresh_once`。
 - 网络/临时传输错误才退避；数据格式错误、鉴权错误和未分类错误立即返回，不静默重试。
 - sleep 通过 hook 注入测试，生产入口使用标准线程 sleep；不引入 daemon、多项目并行或第二套刷新栈。

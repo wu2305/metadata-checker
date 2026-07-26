@@ -51,6 +51,8 @@
 | Plan approved | done（2026-07-26） |
 | M57-0 TDD | done（`d452e85`） |
 | M57-0 code | done（`c9302fd`、`145e838`） |
+| M57-1 tick loop TDD | done（`7763b20`） |
+| M57-1 tick loop code | done（`8249d6f`、`2ec96a8`） |
 | Phase 1–3 代码 | pending |
 
 ## 设计决策（2026-07-24）
@@ -65,4 +67,6 @@
 - M57-0：`cargo fmt --check`、`cargo check --features cli-local` 通过。
 - M57-0：M57 报告、stdio bound refresh、session provider、one-shot regression 目标测试通过；stdio 集成测试 `35 passed / 1 ignored`。
 - M57-0：发现并修复已有 checkpoint 的空 poll 不应触发 `persist_with_checkpoint` 全量重写（`145e838`）；该路径现在返回 `persist_report=null` 且不写盘。
-- M57-1：tick loop TDD 已登记；网络退避、数据错误不重试和尝试上限为下一验收门。
+- M57-1：tick loop TDD 已完成；网络退避、数据错误不重试和尝试上限验收通过。
+- M57-1：`m57_tick_loop_tests` 4 passed；`m54_diff_refresh_orchestrator_tests` 5 passed；`m55_meta_files_source_tests` 15 passed；M57 AI contract 与 stdio bound refresh 目标测试通过。
+- M57-1：网络错误读取完整 `anyhow` error chain；401/403、`INVALID_*`、`DIFF_REFRESH_*` 和未分类错误不退避；最后一次可重试失败不 sleep，耗尽以 `exhausted=true` 统计返回。
