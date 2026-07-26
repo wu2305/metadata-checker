@@ -47,12 +47,25 @@ metadata-checker --serve-stdio --project-dir /path/to/project
 }
 ```
 
+### diff_refresh（绑定 session）
+
+`diff_refresh` 只在进程启动时通过 `--runtime-session-id` 绑定了 session 的 stdio 服务中可用；未绑定时返回 `DIFF_REFRESH_CONTEXT_REQUIRED`。每次请求执行一轮差量刷新：
+
+```json
+{
+  "request_id": "req-refresh",
+  "command": "diff_refresh"
+}
+```
+
+成功的 `result` 包含 `schema_version="1.0"`、`kind="DiffRefresh"`、`change_count`、`checkpoint`、`persist_report`、`warm_failures` 和 `timing`。`persist_report` 是实际持久化统计；空 poll 不重写 graph 时为 `null`。认证失败不自动重登，调用方应结束当前进程并重新绑定。
+
 字段说明：
 
 | 字段 | 类型 | 必需 | 说明 |
 |---|---|---|---|
 | `request_id` | string | 是 | 请求标识，响应原样返回 |
-| `command` | string | 是 | 命令名：`explain_condition` / `explain` / `query_model` / `query_page` / `query_cross` / `query_dataflow` / `query_page_logic` / `context` / `find_page` / `find_model` / `find_component` / `advise_query` / `status` / `reload_graph` / `check_reload` |
+| `command` | string | 是 | 命令名：`explain_condition` / `explain` / `query_model` / `query_page` / `query_cross` / `query_dataflow` / `query_page_logic` / `context` / `find_page` / `find_model` / `find_component` / `advise_query` / `status` / `reload_graph` / `check_reload` / `diff_refresh`（需绑定 session） |
 | `target` | string | explain_condition 必需 | 查询目标 |
 | `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal` |
 | `human` | bool | 否 | 是否生成 human_summary，默认 `false`；目前仅 `explain_condition` 支持 |

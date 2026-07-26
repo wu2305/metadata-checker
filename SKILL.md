@@ -107,6 +107,34 @@ metadata-checker --project-dir /path/to/project --query-page-logic 'page:app/销
 - `--explain <ID>`：解释任意节点。
 - `--context <ID> --depth 2 --budget normal`：补查上下游。
 
+## Session 差量刷新路径
+
+已有远端 session 需要更新时，先执行一轮 one-shot 差量刷新：
+
+```bash
+metadata-checker --session-dir ~/.metadata-checker/sessions \
+  --session-diff-refresh <SESSION_ID> \
+  --remote-username '<USER>' --remote-password '<PASSWORD>'
+```
+
+需要在同一进程内连续查询时，启动 stdio 并绑定 session：
+
+```bash
+metadata-checker --session-dir ~/.metadata-checker/sessions \
+  --serve-stdio --runtime-session-id <SESSION_ID> \
+  --remote-username '<USER>' --remote-password '<PASSWORD>'
+```
+
+随后发送 JSONL 请求：
+
+```json
+{"request_id":"refresh-1","command":"diff_refresh"}
+```
+
+`diff_refresh` 是一次刷新操作，不是普通查询；成功结果中的 `persist_report` 来自实际 graph persist，`checkpoint` 表示本轮消费水位。one-shot 和 stdio 均输出单行 JSON，并带 `schema_version="1.0"`、`kind="DiffRefresh"`。不要读取 `timing` 作为业务证据。
+
+凭证边界：密码不写入 session manifest；401/403 返回稳定错误码和脱敏后的服务端 message，不默认静默重登。遇到鉴权失败，重新以用户名/密码绑定 session；不要把密码、token、cookie、cipherPassport 或 Set-Cookie 复制进回答。
+
 ## explain-condition 协议
 
 `--explain-condition` 用于回答显示、可用性、值来源、写入来源问题。

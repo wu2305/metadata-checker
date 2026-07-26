@@ -92,19 +92,41 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 # 6) 拉取远端项目并按维度过滤（source/module/file）后建图
 ./target/release/metadata-checker --remote-index <session-id> --base-url <https://bi.example.com> --project <analyzer> --remote-source <source> --remote-module <module> --remote-file <file> --remote-username <user> --remote-password <pass> --graph-db-path /tmp/remote-analyzer-filtered.graphdb
 
-# 7) 远端索引后直接查询同一图（仅 query 参数展示）
+# 7) 对已有远端 session 执行一轮差量刷新（凭据只在本进程使用，不写入 manifest）
+./target/release/metadata-checker --session-dir ~/.metadata-checker/sessions --session-diff-refresh <session-id> --remote-username <user> --remote-password <pass>
+
+# 8) 远端索引后直接查询同一图（仅 query 参数展示）
 ./target/release/metadata-checker --graph-db-path /tmp/remote-analyzer.graphdb --query-model <model-id>
 
-# 8) 查询页面依赖
+# 9) 查询页面依赖
 ./target/release/metadata-checker --project-dir /path/to/project --query-page "page/合同管理/销售合同"
 ./target/release/metadata-checker --graph-db-path /tmp/my_project.graphdb --query-page "page/合同管理/销售合同"
 
-# 9) 查询两个页面关系
+# 10) 查询两个页面关系
 ./target/release/metadata-checker --project-dir /path/to/project --query-cross "page/A" "page/B"
 ./target/release/metadata-checker --graph-db-path /tmp/my_project.graphdb --query-cross "page/A" "page/B"
 
-# 10) 展开 DataFlow 子图
+# 11) 展开 DataFlow 子图
 ./target/release/metadata-checker --project-dir /path/to/project --query-dataflow flow.tbl
+
+### 长驻 session diff refresh / stdio
+
+已有 session 需要连续查询时，使用 `--serve-stdio --runtime-session-id <ID>` 绑定远端 session；用户名和密码只用于本次进程登录，不落盘。绑定成功后，stdio 请求使用 `diff_refresh` 执行一轮刷新：
+
+```bash
+./target/release/metadata-checker \
+  --session-dir ~/.metadata-checker/sessions \
+  --serve-stdio \
+  --runtime-session-id <session-id> \
+  --remote-username <user> \
+  --remote-password <pass>
+```
+
+```json
+{"request_id":"refresh-1","command":"diff_refresh"}
+```
+
+机器输出为单行 JSON。成功报告包含 `schema_version`、`kind`、`change_count`、`checkpoint`、`persist_report` 和 `timing`；`persist_report` 是实际写入成本，不是估算值。401/403、数据格式错误和未分类错误返回稳定错误码，不自动静默重登；调用方需要重新绑定 session。
 
 # query-model 输出字段说明：
 # - readers: 读取该模型的页面/组件/动作
@@ -219,6 +241,9 @@ Options:
       --remote-source <SOURCE> 远端 source 过滤参数
       --remote-module <MODULE> 远端 module 过滤参数
       --remote-file <FILE> 远端 file 过滤参数
+      --session-diff-refresh <ID> 执行一轮 session 差量刷新（需要远端用户名/密码）
+      --runtime-session-id <ID> 将 session 绑定到 stdio diff_refresh（需要远端用户名/密码）
+      --serve-stdio         启动 JSONL stdin/stdout 长驻查询服务
       --graph-db-path <PATH> 本地/远端都可指定的图数据库路径
   -h, --help                打印帮助信息
   -V, --version             打印版本
