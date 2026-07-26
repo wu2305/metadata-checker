@@ -277,7 +277,7 @@ git commit -m "ci: add m58 cnb ai eval pipeline"
 **Files:**
 - No new files; verify all M58 changes.
 
-- [ ] **Step 1: 运行 CI tester 层**
+- [x] **Step 1: 运行 CI tester 层**
 
 ```bash
 cargo fmt --check
@@ -285,7 +285,7 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests
 cargo test --features cli-local --test ai_eval_tests -- --skip test_ai_eval_commands_execute_and_assert
 ```
 
-- [ ] **Step 2: 运行 release/contract 检查**
+- [x] **Step 2: 运行 release/contract 检查**
 
 ```bash
 cargo check --features cli-local
@@ -304,6 +304,8 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests -- --ignored --no
 ```
 
 验收三个 fixture case、JSON command loop、白名单拒绝、无 token 泄漏和 RunReport 输出。
+
+当前环境未提供 `CNB_TOKEN`、`M58_CNB_REPO`、`M58_CNB_MODEL` 或 `M58_METADATA_CHECKER_BIN`，本轮未执行 live smoke。
 
 - [ ] **Step 4: 完成 journal 与 final review**
 
