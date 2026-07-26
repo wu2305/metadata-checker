@@ -50,12 +50,14 @@
 
 ## 验收门
 
-- [ ] `DiffRefreshReport` 序列化包含 `schema_version=1.0`、`kind=DiffRefresh`、`persist_report`。
-- [ ] 非空 delta 刷新能看到真实 `PersistReport`；空 bootstrap 也能看到 checkpoint-only 的报告。
-- [ ] stdio `diff_refresh` 成功结果与 one-shot 共享上述报告字段。
-- [ ] one-shot stdout 恰好一个 JSON 对象行；稳定错误码不改变。
-- [ ] 401/403 的服务端 message 可诊断但不包含 password、token、cookie、cipherPassport、Set-Cookie。
-- [ ] 失败路径不推进 checkpoint、不吞掉原有错误分类。
+- [x] `DiffRefreshReport` 序列化包含 `schema_version=1.0`、`kind=DiffRefresh`、`persist_report`。
+- [x] 非空 delta 刷新能看到真实 `PersistReport`；空 bootstrap 也能看到 checkpoint-only 的报告。
+- [x] stdio `diff_refresh` 成功结果与 one-shot 共享上述报告字段。
+- [x] one-shot stdout 恰好一个 JSON 对象行；稳定错误码不改变。
+- [x] 401/403 的服务端 message 可诊断但不包含 password、token、cookie、cipherPassport、Set-Cookie。
+- [x] 失败路径不推进 checkpoint、不吞掉原有错误分类。
+
+实现提交：`c9302fd`、`145e838`。TDD 提交：`d452e85`。
 
 ## 后续衔接
 

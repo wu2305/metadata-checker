@@ -49,8 +49,8 @@
 | INDEX / planning / M46 边界调整 | done（本分支） |
 | Spec approved | done（2026-07-26） |
 | Plan approved | done（2026-07-26） |
-| M57-0 TDD | in progress |
-| M57-0 code | pending |
+| M57-0 TDD | done（`d452e85`） |
+| M57-0 code | done（`c9302fd`、`145e838`） |
 | Phase 1–3 代码 | pending |
 
 ## 设计决策（2026-07-24）
@@ -62,4 +62,6 @@
 
 ## 验收记录
 
-（实现后按 phase 追加；每个相关 commit 更新本节或上表）
+- M57-0：`cargo fmt --check`、`cargo check --features cli-local` 通过。
+- M57-0：M57 报告、stdio bound refresh、session provider、one-shot regression 目标测试通过；stdio 集成测试 `35 passed / 1 ignored`。
+- M57-0：发现并修复已有 checkpoint 的空 poll 不应触发 `persist_with_checkpoint` 全量重写（`145e838`）；该路径现在返回 `persist_report=null` 且不写盘。
