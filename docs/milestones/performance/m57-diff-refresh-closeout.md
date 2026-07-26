@@ -89,5 +89,6 @@
 - Phase 1 真实项目 stdio：复用该 graphdb 启动 LongLived，报告 `78127 nodes, read_model=true, ready`；`m57-r1 query_model` 与 `m57-r2 query_page_logic` 均返回 `ok=true`，随后结束进程，计入通过证据。
 - M57-5：`DenseGraphSnapshot`、`MaterializedAvailabilityFactsIndex`、`PageDependencyIndex` 已按 `dirty ∪ deleted` 接入 replacement；稳定 node set 走 incremental，新增/删除统一 full fallback，更新模式由 `ReadModelUpdateMode` 标记。
 - M57-5 等价与曲线：`m57_incremental_read_model_tests` 3 passed；fixture full rebuild 样本 `7 ms`，增量 `dirty=1/10/100` 样本分别为 `0/2/5 ms`（wall `1/3/7 ms`）。
+- M57-5 曲线复跑：同一测试再次得到 full `17 ms`、增量 read-model `2/6/17 ms`（wall `2/6/19 ms`）；毫秒值受机器与编译缓存影响，只作为可观测性样本，不替代 real-project release 基线。
 - M57-5 针对性回归：M54 编排器 `5 passed`、M55 PageDep `5 passed`、M53 Facts `1 passed`、Dense `1 passed`、runtime `19 passed/1 ignored`、rebind `1 passed`。
 - Phase 2 尚未把 fixture 曲线冒充真实项目性能结论；后续需在专用 real graphdb 上补 1/10/100 dirty 的 release 基线，再决定 Phase 2 是否关闭。

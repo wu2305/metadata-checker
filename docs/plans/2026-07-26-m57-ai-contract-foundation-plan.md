@@ -104,7 +104,7 @@
 - `GraphRuntime::prepare_replacement` 使用 `dirty ∪ deleted` 选择派生 read-model 更新路径。
 - 稳定 node set 优先增量更新 Dense/Facts/PageDep；新增/删除导致无法安全局部修补时必须显式回落 full rebuild，不得伪报增量。
 - TDD 固定 full rebuild 等价性，以及 1/10/100 dirty scale curve 的可观测输出。
-- `m57_incremental_read_model_tests` 覆盖稳定 node set 等价、删除回退和 1/10/100 曲线，共 3 passed；fixture 样本 full `7 ms`，增量 read-model `0/2/5 ms`。
+- `m57_incremental_read_model_tests` 覆盖稳定 node set 等价、删除回退和 1/10/100 曲线，共 3 passed；fixture 样本 full `7 ms`，增量 read-model `0/2/5 ms`，复跑为 full `17 ms`、增量 `2/6/17 ms`，仅作可观测性样本。
 
 ## 后续衔接
 
