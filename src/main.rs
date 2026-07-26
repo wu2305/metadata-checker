@@ -6,7 +6,9 @@ use metadata_checker::output;
 use metadata_checker::parser;
 use metadata_checker::priority;
 use metadata_checker::scanner;
-use metadata_checker::session::reqwest_provider::sanitize_session_error_message;
+use metadata_checker::session::reqwest_provider::{
+    is_session_auth_error, sanitize_session_error_message,
+};
 use metadata_checker::tool_contract::{self, InvocationAdapter};
 
 use anyhow::Result;
@@ -617,8 +619,13 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string(&value)?);
             }
             Err(err) => {
+                let code = if is_session_auth_error(&err) {
+                    "SESSION_AUTH_REQUIRED"
+                } else {
+                    "DIFF_REFRESH_FAILED"
+                };
                 return print_session_error(
-                    "DIFF_REFRESH_FAILED",
+                    code,
                     format!("diff refresh failed: {}", format_error_chain(&err)),
                 );
             }

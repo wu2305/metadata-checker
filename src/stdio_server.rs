@@ -6,7 +6,7 @@ use crate::diff_refresh::DiffRefreshOrchestrator;
 use crate::response_processor::ResponseProcessor;
 use crate::runtime::{GraphRuntime, RuntimeQueryRequest};
 use crate::session::DiffRefreshRuntimeContext;
-use crate::session::reqwest_provider::sanitize_session_error_message;
+use crate::session::reqwest_provider::{is_session_auth_error, sanitize_session_error_message};
 use crate::tool_contract::{
     InvocationAdapter, ToolError, ToolErrorCode, ToolInvocation, ToolRegistry, ToolResponse,
 };
@@ -339,7 +339,11 @@ fn handle_diff_refresh(
             },
             Err(error) => error_response(
                 request_id.to_string(),
-                "DIFF_REFRESH_FAILED",
+                if is_session_auth_error(&error) {
+                    "SESSION_AUTH_REQUIRED"
+                } else {
+                    "DIFF_REFRESH_FAILED"
+                },
                 sanitize_session_error_message(&format!("{error:#}")),
                 diagnostics,
             ),
