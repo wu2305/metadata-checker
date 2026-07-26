@@ -2484,9 +2484,14 @@ fn test_stdio_diff_refresh_with_bound_context() {
     assert!(result["warm_failures"].is_array());
     assert_eq!(result["schema_version"].as_str(), Some("1.0"));
     assert_eq!(result["kind"].as_str(), Some("DiffRefresh"));
+    assert_eq!(result["persisted"].as_bool(), Some(false));
     assert!(
-        result["persist_report"].is_object(),
-        "bound diff_refresh must expose persist cost report"
+        result["pending_dirty_total"].as_u64().unwrap_or(0) > 0,
+        "bound first diff_refresh should keep pending dirty nodes: {result:?}"
+    );
+    assert!(
+        result["persist_report"].is_null(),
+        "bound first non-empty deferred diff_refresh should not persist immediately"
     );
     assert_eq!(
         result["checkpoint"]["active"]["updated_at_ms"].as_u64(),
@@ -2500,9 +2505,16 @@ fn test_stdio_diff_refresh_with_bound_context() {
         r#"{"request_id":"r-diff-3","command":"diff_refresh"}"#,
     );
     assert!(resp2.ok);
-    assert_eq!(
-        resp2.result.expect("result")["change_count"].as_u64(),
-        Some(0)
+    let result2 = resp2.result.expect("result");
+    assert_eq!(result2["change_count"].as_u64(), Some(0));
+    assert_eq!(result2["persisted"].as_bool(), Some(false));
+    assert!(
+        result2["pending_dirty_total"].as_u64().unwrap_or(0) > 0,
+        "bound empty poll should keep deferred pending count: {result2:?}"
+    );
+    assert!(
+        result2["persist_report"].is_null(),
+        "bound empty poll should keep pending report as null until durable persist"
     );
 
     let _ = std::fs::remove_dir_all(root);

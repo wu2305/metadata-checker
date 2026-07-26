@@ -6871,11 +6871,16 @@ fn test_cli_runtime_session_diff_refresh_empty_bootstrap_ok() {
     );
     assert_eq!(value["schema_version"].as_str(), Some("1.0"));
     assert_eq!(value["kind"].as_str(), Some("DiffRefresh"));
+    assert_eq!(value["persisted"].as_bool(), Some(false));
     assert!(
         value["persist_report"].is_object(),
         "one-shot output must expose persist cost report: {value}"
     );
     assert_eq!(value["change_count"].as_u64(), Some(0));
+    assert!(
+        value["pending_dirty_total"].as_u64() == Some(0),
+        "empty bootstrap should report zero durable-pending nodes: {value}"
+    );
     assert!(
         value.get("checkpoint").is_some(),
         "empty bootstrap must persist checkpoint: {value}"
@@ -6892,6 +6897,90 @@ fn test_cli_runtime_session_diff_refresh_empty_bootstrap_ok() {
     assert!(
         captured.iter().any(|r| r.contains("getFileDescendant")),
         "bootstrap must hit active list: {captured:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// CLI one-shot：有变更时应使用同步持久化（persisted=true）。
+#[test]
+fn test_cli_runtime_session_diff_refresh_non_empty_bootstrap_sync_persisted() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        // bind: login；bootstrap 变更清单 + 文件内容（空回收站）
+        for _ in 0..6 {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let (status_line, body) = if req.contains("/api/auth/signin") {
+                ("200 OK", r#"{"ok":true}"#)
+            } else if req.contains("getRecyclebinFiles") {
+                ("200 OK", "[]")
+            } else if req.contains("getFileDescendant") {
+                (
+                    "200 OK",
+                    r#"{"files":[{"id":"file-a","path":"app/page_a.spg","type":"spg","isFolder":false,"modifyTime":1000,"revision":"2"}]}"#,
+                )
+            } else if req.contains("getFileContent/file-a") {
+                (
+                    "200 OK",
+                    r#"{"version":"4.19.7","canvas":{"id":"canvas","type":"canvas","components":[{"id":"text1","type":"text","value":"remote one-shot"}]}}"#,
+                )
+            } else {
+                ("404 Not Found", r#"{"ok":false}"#)
+            };
+            let set_cookie = if req.contains("/api/auth/signin") {
+                "Set-Cookie: JSESSIONID=cov-oneshot; Path=/\r\n"
+            } else {
+                ""
+            };
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\n{set_cookie}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+
+    let root = unique_diff_refresh_session_root("non-empty-oneshot");
+    create_diff_refresh_cli_session(&root, "s1", &format!("http://{addr}"));
+
+    let output = run_cli(&[
+        "--session-dir",
+        root.to_str().unwrap(),
+        "--session-diff-refresh",
+        "s1",
+        "--remote-username",
+        "u",
+        "--remote-password",
+        "p",
+    ]);
+    let value: serde_json::Value = serde_json::from_str(&output).expect("JSON output");
+    assert_eq!(
+        value["ok"].as_bool(),
+        Some(true),
+        "non-empty one-shot should succeed: {value}"
+    );
+    assert_eq!(
+        output.lines().count(),
+        1,
+        "machine one-shot output must be exactly one JSON line: {output:?}"
+    );
+    assert_eq!(value["schema_version"].as_str(), Some("1.0"));
+    assert_eq!(value["kind"].as_str(), Some("DiffRefresh"));
+    assert_eq!(value["persisted"].as_bool(), Some(true));
+    assert_eq!(value["persist_report"].is_object(), true);
+    assert_eq!(value["pending_dirty_total"].as_u64(), Some(0));
+    assert_eq!(value["change_count"].as_u64(), Some(1));
+    assert!(
+        value.get("checkpoint").is_some(),
+        "non-empty one-shot should persist checkpoint: {value}"
     );
 
     let _ = std::fs::remove_dir_all(&root);
