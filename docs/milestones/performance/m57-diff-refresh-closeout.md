@@ -22,7 +22,7 @@
 | Phase | 焦点 | 状态 |
 |-------|------|------|
 | 1 | PersistReport、tick+Backoff、stdio 真机冒烟；**SKILL/`--help`/README**；**RefreshScope 自动探索+申明**；**凭证失效/重登/换绑**；M46 边界 | done |
-| 2 | Dense/Facts/PageDep 增量更新 + 规模曲线 | implemented; real-project baseline pending |
+| 2 | Dense/Facts/PageDep 增量更新 + 规模曲线 | done |
 | 3 | LongLived 内存优先 persist（阈值 100 + 10 轮兜底）、失败恢复 e2e | pending |
 
 ## 进度约定
@@ -62,6 +62,7 @@
 | Phase 1 rebind TDD | done（`3eed1af`） |
 | M57-5 Phase 2 incremental read model TDD | done（`4eacb64`） |
 | M57-5 Phase 2 incremental read model code | done（`c80e95c`） |
+| M57-5 real release baseline harness | done（`a07fa2e`、`497a6bc`、`ef59de1`） |
 | Phase 1–3 代码 | pending |
 
 ## 设计决策（2026-07-24）
@@ -91,4 +92,5 @@
 - M57-5 等价与曲线：`m57_incremental_read_model_tests` 3 passed；fixture full rebuild 样本 `7 ms`，增量 `dirty=1/10/100` 样本分别为 `0/2/5 ms`（wall `1/3/7 ms`）。
 - M57-5 曲线复跑：同一测试再次得到 full `17 ms`、增量 read-model `2/6/17 ms`（wall `2/6/19 ms`）；毫秒值受机器与编译缓存影响，只作为可观测性样本，不替代 real-project release 基线。
 - M57-5 针对性回归：M54 编排器 `5 passed`、M55 PageDep `5 passed`、M53 Facts `1 passed`、Dense `1 passed`、runtime `19 passed/1 ignored`、rebind `1 passed`。
-- Phase 2 尚未把 fixture 曲线冒充真实项目性能结论；后续需在专用 real graphdb 上补 1/10/100 dirty 的 release 基线，再决定 Phase 2 是否关闭。
+- M57-5 真实项目 release 基线：`m57_real_project_release_dirty_curve` 使用候选图实际改名 mutation（node set/拓扑不变），`78127 nodes / 150164 edges`；cold full read-model `249906 ms`，dirty `1/10/100` 的 incremental read-model 分别为 `1653/2347/3052 ms`，wall 分别为 `1655/2348/3053 ms`，三档均为 `Incremental`。
+- M57-5 性能门：相对 full 分别约 `151.2x/106.5x/81.9x` 加速；真实 release 曲线通过，Phase 2 关闭。release binary 为 `3781888 bytes`（约 `3.6M`，小于 10MB 约束）。

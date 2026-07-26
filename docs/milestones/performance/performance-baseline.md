@@ -666,3 +666,44 @@ Bencher 上报证据：
 | page-scoped model11 --intent availability --budget compact | 30047 | 通过 page-scoped target 展开 `$DATA:/加工表/小程序/绑车.tbl` 的 DataFlow availability 短事实，不混入其他页面同名 `model11` gates |
 
 后续若 text41 value-source compact 超过 15KB，或 compact 中回退到输出完整 value_source_context / DataFlow 节点树，应视为 M34 注意力漂移回退。page-scoped model11 availability compact 若重新混入其他页面同名 `model11` gates，也应视为 M34 page-scoped 回退。
+
+---
+
+## M57 Phase 2：真实项目 read-model dirty curve
+
+验收时间：2026-07-26
+
+采集命令：
+
+```bash
+cargo build --release --features cli-local
+cargo test --release --features cli-local \
+  --test m57_real_project_benchmark_tests -- --ignored --nocapture
+```
+
+固定输入：
+
+- 项目：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
+- GraphDB：`/private/tmp/m57-xiaoshouyi.graphdb`
+- 模式：release；LongLived runtime
+- mutation：候选图对前 1/10/100 个节点追加 name suffix；node set 与拓扑保持不变，不写回 graphdb
+
+图规模与冷 full 基线：
+
+| 指标 | 实测值 |
+|---|---:|
+| node_count | 78,127 |
+| edge_count | 150,164 |
+| graph_load_ms | 1,688 |
+| full_read_model_ms | 249,906 |
+| release binary | 3,781,888 bytes（约 3.6M） |
+
+增量曲线：
+
+| dirty_count | dense_ms | facts_ms | page_dep_ms | read_model_ms | wall_ms | 相对 full |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 729 | 15 | 909 | 1,653 | 1,655 | 151.2x |
+| 10 | 704 | 15 | 1,628 | 2,347 | 2,348 | 106.5x |
+| 100 | 674 | 16 | 2,362 | 3,052 | 3,053 | 81.9x |
+
+结论：稳定 node set 的真实 dirty replacement 没有回退 full；最大 dirty=100 仍比 cold full read-model 快约 81.9x，满足 M57 Phase 2 性能门。该曲线是 read-model replacement 成本，不包含下一阶段 LongLived 批量 persist；Phase 3 仍需单独验收。
