@@ -696,7 +696,7 @@ cargo test --release --features cli-local \
 | edge_count | 150,164 |
 | graph_load_ms | 1,688 |
 | full_read_model_ms | 249,906 |
-| release binary | 3,781,888 bytes（约 3.6M） |
+| release binary | 3,781,936 bytes（约 3.6M） |
 
 增量曲线：
 

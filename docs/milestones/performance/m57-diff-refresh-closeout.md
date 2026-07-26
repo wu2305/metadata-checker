@@ -97,7 +97,7 @@
 - M57-5 曲线复跑：同一测试再次得到 full `17 ms`、增量 read-model `2/6/17 ms`（wall `2/6/19 ms`）；毫秒值受机器与编译缓存影响，只作为可观测性样本，不替代 real-project release 基线。
 - M57-5 针对性回归：M54 编排器 `5 passed`、M55 PageDep `5 passed`、M53 Facts `1 passed`、Dense `1 passed`、runtime `19 passed/1 ignored`、rebind `1 passed`。
 - M57-5 真实项目 release 基线：`m57_real_project_release_dirty_curve` 使用候选图实际改名 mutation（node set/拓扑不变），`78127 nodes / 150164 edges`；cold full read-model `249906 ms`，dirty `1/10/100` 的 incremental read-model 分别为 `1653/2347/3052 ms`，wall 分别为 `1655/2348/3053 ms`，三档均为 `Incremental`。
-- M57-5 性能门：相对 full 分别约 `151.2x/106.5x/81.9x` 加速；真实 release 曲线通过，Phase 2 关闭。release binary 为 `3781888 bytes`（约 `3.6M`，小于 10MB 约束）。
+- M57-5 性能门：相对 full 分别约 `151.2x/106.5x/81.9x` 加速；真实 release 曲线通过，Phase 2 关闭。Phase 3 复核后 release binary 为 `3781936 bytes`（约 `3.6M`，小于 10MB 约束）。
 - M57-6：M54 orchestrator 全部通过：`cargo test --features cli-local --test m54_diff_refresh_orchestrator_tests`（12 passed）。
 - M57-6：M57 AI 契约/Scope/tick 全部通过：`cargo test --features cli-local --test m57_ai_contract_tests`（1 passed）、`cargo test --features cli-local --test m57_refresh_report_scope_tests`（2 passed）、`cargo test --features cli-local --test m57_tick_loop_tests`（4 passed），合计 7 passed。
 - M57-6：`cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_diff_refresh_with_bound_context --test-threads=1`（1 passed）。
