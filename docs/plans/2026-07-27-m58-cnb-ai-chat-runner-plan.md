@@ -139,19 +139,19 @@ git commit -m "test: enforce m58 json command policy"
 - `CnbChatAdapter::new(endpoint: String, repo: String, token: String, model: String) -> anyhow::Result<Self>`
 - `redact_secret(text: &str, secret: &str) -> String`
 
-- [ ] **Step 1: 实现 FakeModelAdapter**
+- [x] **Step 1: 实现 FakeModelAdapter**
 
 Fake adapter 按顺序返回预置 assistant content，并记录收到的 `ChatRequest`，用于验证每轮 stdout 被作为下一条 user message 传入；队列耗尽返回 error，不伪造成功响应。
 
-- [ ] **Step 2: 实现 CNB request/response DTO**
+- [x] **Step 2: 实现 CNB request/response DTO**
 
 `ChatRequest` 序列化为 `{messages, model, stream:false}`；响应只读取 `choices[0].message.content`，缺少 choices/message/content 时返回结构错误。消息角色只生成 `user` / `assistant`。
 
-- [ ] **Step 3: 实现 CNB adapter**
+- [x] **Step 3: 实现 CNB adapter**
 
 默认 endpoint 为 `https://api.cnb.cool`，完整 URL 为 `https://api.cnb.cool/{repo}/-/ai/chat/completions`。`from_env` 要求 `CNB_TOKEN`、`M58_CNB_REPO`、`M58_CNB_MODEL`，允许 `M58_CNB_API_BASE` 覆盖测试 endpoint；请求使用 blocking reqwest，超时固定 60 秒。HTTP 非 2xx 错误只保留 status 和已脱敏 body 摘要。
 
-- [ ] **Step 4: 添加脱敏测试并提交**
+- [x] **Step 4: 添加脱敏测试并提交**
 
 用本地 `TcpListener` fake endpoint 验证：请求 Authorization 存在但不会进入序列化消息；错误、debug、报告文本均不包含假 token；响应缺字段会失败；Fake adapter 不需要任何环境变量。
 

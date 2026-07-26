@@ -1,10 +1,13 @@
 //! M58 CI tester 的评测 runner 支持代码。
 
 use anyhow::{Context, Result, anyhow, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::ffi::OsString;
+use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// M58 评测分层。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,7 +348,212 @@ impl ValidatedCommand {
 
 /// 判断输入是否含有 shell 注入常见元字符。
 fn contains_shell_metacharacters(value: &str) -> bool {
-    [";", "&&", "||", "`", "$(", "\n", "\r"]
+    [";", "&&", "||", "`", "$(", "\n", "\r", "\0"]
         .iter()
         .any(|marker| value.contains(marker))
+}
+
+/// CNB AI Chat 使用的消息结构。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ChatMessage {
+    /// 消息角色；runner 只生成 user 和 assistant。
+    pub(crate) role: String,
+    /// 消息文本。
+    pub(crate) content: String,
+}
+
+/// CNB AI Chat 请求结构。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct ChatRequest {
+    /// 当前完整对话历史。
+    pub(crate) messages: Vec<ChatMessage>,
+    /// CNB 上配置的模型标识。
+    pub(crate) model: String,
+    /// M58 runner 固定使用非流式响应。
+    pub(crate) stream: bool,
+}
+
+/// CNB AI Chat 响应结构，只消费公开 contract 中的首个 choice。
+#[derive(Debug, Deserialize)]
+struct ChatResponse {
+    choices: Vec<ChatChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatChoice {
+    message: ChatMessage,
+}
+
+/// LLM adapter 的最小同步接口。
+pub(crate) trait ModelAdapter {
+    /// 发送一轮对话并返回 assistant content。
+    fn complete(&mut self, request: &ChatRequest) -> Result<String>;
+}
+
+/// 本地契约测试使用的确定性模型 adapter。
+#[derive(Debug, Default)]
+pub(crate) struct FakeModelAdapter {
+    responses: VecDeque<String>,
+    requests: Vec<ChatRequest>,
+}
+
+impl FakeModelAdapter {
+    /// 按顺序返回预置响应，并记录每次收到的完整请求。
+    pub(crate) fn from_responses(responses: Vec<String>) -> Self {
+        Self {
+            responses: responses.into(),
+            requests: Vec::new(),
+        }
+    }
+
+    /// 返回已记录的请求，供多轮 history 契约测试检查。
+    pub(crate) fn requests(&self) -> &[ChatRequest] {
+        &self.requests
+    }
+}
+
+impl ModelAdapter for FakeModelAdapter {
+    /// 返回下一个 fake 响应；响应耗尽时明确失败。
+    fn complete(&mut self, request: &ChatRequest) -> Result<String> {
+        self.requests.push(request.clone());
+        self.responses
+            .pop_front()
+            .ok_or_else(|| anyhow!("fake model response queue exhausted"))
+    }
+}
+
+/// 通过 CNB AI Chat HTTP API 调用模型的 adapter。
+pub(crate) struct CnbChatAdapter {
+    client: reqwest::blocking::Client,
+    endpoint: String,
+    repo: String,
+    token: String,
+    model: String,
+}
+
+impl fmt::Debug for CnbChatAdapter {
+    /// 只输出非敏感配置，绝不输出 CNB token。
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CnbChatAdapter")
+            .field("endpoint", &self.endpoint)
+            .field("repo", &self.repo)
+            .field("token", &"[REDACTED]")
+            .field("model", &self.model)
+            .finish()
+    }
+}
+
+impl CnbChatAdapter {
+    /// 从 CNB pipeline 环境读取 adapter 配置。
+    pub(crate) fn from_env() -> Result<Self> {
+        let token = required_env("CNB_TOKEN")?;
+        let repo = required_env("M58_CNB_REPO")?;
+        let model = required_env("M58_CNB_MODEL")?;
+        let endpoint = std::env::var("M58_CNB_API_BASE")
+            .unwrap_or_else(|_| "https://api.cnb.cool".to_string());
+        Self::new(endpoint, repo, token, model)
+    }
+
+    /// 创建 CNB adapter；endpoint 可替换为本地 HTTP fake server。
+    pub(crate) fn new(
+        endpoint: String,
+        repo: String,
+        token: String,
+        model: String,
+    ) -> Result<Self> {
+        if endpoint.trim().is_empty() {
+            bail!("CNB API endpoint 不能为空");
+        }
+        if repo.trim().is_empty() {
+            bail!("CNB repo 不能为空");
+        }
+        if token.is_empty() {
+            bail!("CNB token 不能为空");
+        }
+        if model.trim().is_empty() {
+            bail!("CNB model 不能为空");
+        }
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .context("创建 CNB AI Chat HTTP client 失败")?;
+        Ok(Self {
+            client,
+            endpoint: endpoint.trim_end_matches('/').to_string(),
+            repo: repo.trim_matches('/').to_string(),
+            token,
+            model,
+        })
+    }
+
+    /// 返回完整的 CNB 仓库 AI Chat endpoint。
+    fn chat_url(&self) -> String {
+        format!("{}/{}/-/ai/chat/completions", self.endpoint, self.repo)
+    }
+}
+
+impl ModelAdapter for CnbChatAdapter {
+    /// 发送非流式 CNB AI Chat 请求并提取首个 choice 的内容。
+    fn complete(&mut self, request: &ChatRequest) -> Result<String> {
+        let mut payload = request.clone();
+        payload.model = self.model.clone();
+        payload.stream = false;
+        let response = self
+            .client
+            .post(self.chat_url())
+            .bearer_auth(&self.token)
+            .json(&payload)
+            .send()
+            .context("请求 CNB AI Chat 失败")?;
+        let status = response.status();
+        let body = response.text().context("读取 CNB AI Chat 响应失败")?;
+        if !status.is_success() {
+            let summary = redact_secret(&summarize_body(&body), &self.token);
+            bail!("CNB AI Chat HTTP {}: {}", status, summary);
+        }
+
+        let parsed: ChatResponse =
+            serde_json::from_str(&body).context("CNB AI Chat 响应不是合法的 choices JSON")?;
+        let content = parsed
+            .choices
+            .first()
+            .ok_or_else(|| anyhow!("CNB AI Chat 响应缺少 choices[0]"))?
+            .message
+            .content
+            .clone();
+        if content.trim().is_empty() {
+            bail!("CNB AI Chat choices[0].message.content 为空");
+        }
+        Ok(content)
+    }
+}
+
+/// 读取必需的非空环境变量。
+fn required_env(name: &str) -> Result<String> {
+    let value = std::env::var(name).with_context(|| format!("缺少环境变量 {name}"))?;
+    if value.trim().is_empty() {
+        bail!("环境变量 {name} 不能为空");
+    }
+    Ok(value)
+}
+
+/// 截断 HTTP 错误 body，避免把远端大响应写入测试日志。
+fn summarize_body(body: &str) -> String {
+    let compact = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let summary: String = compact.chars().take(512).collect();
+    if compact.chars().count() > 512 {
+        format!("{summary}…")
+    } else {
+        summary
+    }
+}
+
+/// 将敏感 token 从错误或诊断文本中替换掉。
+pub(crate) fn redact_secret(text: &str, secret: &str) -> String {
+    if secret.is_empty() {
+        text.to_string()
+    } else {
+        text.replace(secret, "[REDACTED]")
+    }
 }
