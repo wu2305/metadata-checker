@@ -11,17 +11,17 @@
 
 ### M57-0：SLM 测评基础契约（先行）
 
-- [ ] `DiffRefreshReport` 暴露稳定 `schema_version`、`kind`、`persist_report`。
-- [ ] one-shot 与 stdio 输出共享报告字段；机器模式严格单行 JSON。
-- [ ] 登录 401/403 保留脱敏后的 `message` / `error.message`，稳定错误码不变。
-- [ ] TDD 覆盖非空刷新、空 bootstrap、失败回滚、单行输出和敏感信息边界。
-- [ ] 与 M58 明确边界：M57 不实现 AnswerJudge、ModelAdapter、RunReport 或模型基线。
+- [x] `DiffRefreshReport` 暴露稳定 `schema_version`、`kind`、`persist_report`。
+- [x] one-shot 与 stdio 输出共享报告字段；机器模式严格单行 JSON。
+- [x] 登录 401/403 保留脱敏后的 `message` / `error.message`，稳定错误码不变。
+- [x] TDD 覆盖非空刷新、空 bootstrap、失败回滚、单行输出和敏感信息边界。
+- [x] 与 M58 明确边界：M57 不实现 AnswerJudge、ModelAdapter、RunReport 或模型基线。
 
 ## 三阶段
 
 | Phase | 焦点 | 状态 |
 |-------|------|------|
-| 1 | PersistReport、tick+Backoff、stdio 真机冒烟；**SKILL/`--help`/README**；**RefreshScope 自动探索+申明**；**凭证失效/重登/换绑**；M46 边界 | pending |
+| 1 | PersistReport、tick+Backoff、stdio 真机冒烟；**SKILL/`--help`/README**；**RefreshScope 自动探索+申明**；**凭证失效/重登/换绑**；M46 边界 | in progress |
 | 2 | Dense/Facts/PageDep 增量更新 + 规模曲线 | pending |
 | 3 | LongLived 内存优先 persist（阈值 100 + 10 轮兜底）、失败恢复 e2e | pending |
 
@@ -65,3 +65,4 @@
 - M57-0：`cargo fmt --check`、`cargo check --features cli-local` 通过。
 - M57-0：M57 报告、stdio bound refresh、session provider、one-shot regression 目标测试通过；stdio 集成测试 `35 passed / 1 ignored`。
 - M57-0：发现并修复已有 checkpoint 的空 poll 不应触发 `persist_with_checkpoint` 全量重写（`145e838`）；该路径现在返回 `persist_report=null` 且不写盘。
+- M57-1：tick loop TDD 已登记；网络退避、数据错误不重试和尝试上限为下一验收门。

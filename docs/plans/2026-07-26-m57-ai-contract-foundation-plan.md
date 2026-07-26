@@ -24,7 +24,7 @@
 ### 明确不做
 
 - M58 的 AnswerJudge、模型适配器、模型排行榜和 LLM 层 CI 阈值。
-- M57 的页范围 auto/explore/声明、tick/backoff 调度和 LongLived 100 轮持久化策略；这些仍按 M57 Phase 1–3 清单推进。
+- M57 的页范围 auto/explore/声明和 LongLived 100 轮持久化策略；这些仍按 M57 Phase 1–3 清单推进。tick/backoff 本轮作为已批准计划的下一执行切片落地。
 - 修改 Rust/WASM 核心之外的第二套解析、图查询或输出实现。
 
 ## 文件边界
@@ -58,6 +58,14 @@
 - [x] 失败路径不推进 checkpoint、不吞掉原有错误分类。
 
 实现提交：`c9302fd`、`145e838`。TDD 提交：`d452e85`。
+
+## 批准的后续切片：M57-1 tick loop
+
+- 复用现有 `BackoffSchedule`，新增同步 tick runner，驱动 `DiffRefreshOrchestrator::refresh_once`。
+- 网络/临时传输错误才退避；数据格式错误、鉴权错误和未分类错误立即返回，不静默重试。
+- sleep 通过 hook 注入测试，生产入口使用标准线程 sleep；不引入 daemon、多项目并行或第二套刷新栈。
+- runner 输出稳定统计：尝试次数、成功次数、可重试失败次数、实际安排的退避秒数、成功报告和是否达到尝试上限。
+- TDD 覆盖网络失败后恢复、数据错误不退避、尝试上限和零尝试边界。
 
 ## 后续衔接
 
