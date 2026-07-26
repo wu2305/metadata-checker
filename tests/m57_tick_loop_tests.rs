@@ -31,7 +31,7 @@ fn successful_report() -> DiffRefreshReport {
 #[test]
 fn m57_tick_loop_retries_network_failure_with_backoff() {
     let mut outcomes = VecDeque::from([
-        Err(anyhow!("network unavailable")),
+        Err(anyhow!("network unavailable").context("poll meta files changes")),
         Ok(successful_report()),
     ]);
     let mut delays = Vec::new();
@@ -63,6 +63,21 @@ fn m57_tick_loop_does_not_retry_data_error() {
 
     let error = result.expect_err("data error must stop the tick loop");
     assert!(error.to_string().contains("INVALID_ACTIVE_CHANGE_EVENT"));
+    assert_eq!(delays, Vec::<u64>::new());
+}
+
+/// 鉴权失败不得被识别成普通网络错误并自动重试。
+#[test]
+fn m57_tick_loop_does_not_retry_auth_error() {
+    let mut delays = Vec::new();
+    let result: anyhow::Result<DiffRefreshTickReport> = run_tick_loop_with_hooks(
+        3,
+        || Err(anyhow!("remote session returned 401 Unauthorized")),
+        |delay_secs| delays.push(delay_secs),
+    );
+
+    let error = result.expect_err("auth error must stop the tick loop");
+    assert!(error.to_string().contains("401"));
     assert_eq!(delays, Vec::<u64>::new());
 }
 

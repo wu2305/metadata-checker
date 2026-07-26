@@ -94,7 +94,11 @@ where
 
 /// 识别网络/传输类临时错误；其余错误立即返回。
 fn is_retryable_error(error: &anyhow::Error) -> bool {
-    let message = error.to_string();
+    let message = error
+        .chain()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(" ");
     let normalized = message.to_lowercase();
 
     if is_non_retryable_error(&normalized) {
