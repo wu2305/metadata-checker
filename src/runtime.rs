@@ -85,6 +85,18 @@ impl RuntimeReadModel {
     }
 }
 
+/// 运行时派生模型更新模式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadModelUpdateMode {
+    /// 三个关键索引均走增量更新路径。
+    Incremental,
+    /// 至少一个索引走增量、至少一个索引走回退全量。
+    Mixed,
+    /// 三个关键索引全部回退全量重建。
+    Full,
+}
+
 /// M54：replacement read model — 基于候选图预先构建的只读派生模型。
 ///
 /// `prepare_replacement` 的产物；`install_replacement` 只 move 已准备对象。
@@ -104,6 +116,8 @@ pub struct PreparedRuntimeReadModel {
     pub page_dependency_index_build_ms: u128,
     /// read model 构建总耗时（毫秒）
     pub read_model_build_ms: u128,
+    /// 当前候选 read model 的更新策略。
+    pub read_model_update_mode: ReadModelUpdateMode,
     /// 旧、新 PageDependencyIndex 计算的受影响页面并集（已排序）
     pub invalidated_pages: Vec<String>,
     /// 页面依赖索引覆盖度：旧、新索引任一为 Partial 即 Partial
@@ -507,7 +521,9 @@ impl GraphRuntime {
 
     /// M54：基于候选图预构建 replacement read model（不改动当前 runtime）。
     ///
-    /// 重新构建 dense graph、availability facts、PageDependencyIndex；
+    /// `dirty_ids` 由调用方传入 dirty ∪ deleted 节点集合。稳定 node set 时
+    /// 增量更新 dense graph、availability facts、PageDependencyIndex；
+    /// 新增/删除节点时统一回退 full rebuild。
     /// 受影响页面取旧、新索引计算结果的并集；warm cache 只复制未受影响页面。
     pub fn prepare_replacement(
         &self,
@@ -520,24 +536,87 @@ impl GraphRuntime {
             ));
         };
 
+        let mut dense_snapshot_update_by_incremental = false;
+        let mut availability_update_by_incremental = false;
+        let mut page_dep_update_by_incremental = false;
+
         let dense_started = Instant::now();
-        let dense_graph = DenseGraphSnapshot::from_graph(candidate).ok().map(Arc::new);
+        let dense_graph = if let Some(current_dense_graph) = current_model.dense_graph.as_ref() {
+            match current_dense_graph.try_update_incremental(candidate, dirty_ids) {
+                Ok(Some(next_dense_graph)) => {
+                    dense_snapshot_update_by_incremental = true;
+                    Some(Arc::new(next_dense_graph))
+                }
+                Ok(None) | Err(_) => DenseGraphSnapshot::from_graph(candidate).ok().map(Arc::new),
+            }
+        } else {
+            DenseGraphSnapshot::from_graph(candidate).ok().map(Arc::new)
+        };
         let dense_snapshot_build_ms = dense_started.elapsed().as_millis();
+        // Dense snapshot 的 node-set 校验是三个派生索引共享的安全闸门：
+        // 新增/删除节点时所有索引都必须走 full fallback，避免 Facts/PageDep
+        // 在缺少完整节点目录的情况下误报 incremental。
+        let stable_node_set = dense_snapshot_update_by_incremental;
 
         let facts_started = Instant::now();
-        let availability_facts =
+        let availability_facts = if stable_node_set {
+            match current_model
+                .availability_facts
+                .try_update_incremental(candidate, dirty_ids)
+            {
+                Ok(Some(next_availability_facts)) => {
+                    availability_update_by_incremental = true;
+                    Arc::new(next_availability_facts)
+                }
+                Ok(None) | Err(_) => {
+                    match crate::query::MaterializedAvailabilityFactsIndex::build(candidate) {
+                        Ok(index) => Arc::new(index),
+                        Err(_) => {
+                            Arc::new(crate::query::MaterializedAvailabilityFactsIndex::empty())
+                        }
+                    }
+                }
+            }
+        } else {
             match crate::query::MaterializedAvailabilityFactsIndex::build(candidate) {
                 Ok(index) => Arc::new(index),
                 Err(_) => Arc::new(crate::query::MaterializedAvailabilityFactsIndex::empty()),
-            };
+            }
+        };
         let availability_facts_build_ms = facts_started.elapsed().as_millis();
 
         let page_dep_started = Instant::now();
-        let page_dependency_index = match crate::query::PageDependencyIndex::build(candidate) {
-            Ok(index) => Arc::new(index),
-            Err(_) => Arc::new(crate::query::PageDependencyIndex::empty()),
+        let page_dependency_index = if stable_node_set {
+            match current_model
+                .page_dependency_index
+                .try_update_incremental(candidate, dirty_ids)
+            {
+                Ok(Some(next_page_dep_index)) => {
+                    page_dep_update_by_incremental = true;
+                    Arc::new(next_page_dep_index)
+                }
+                Ok(None) | Err(_) => match crate::query::PageDependencyIndex::build(candidate) {
+                    Ok(index) => Arc::new(index),
+                    Err(_) => Arc::new(crate::query::PageDependencyIndex::empty()),
+                },
+            }
+        } else {
+            match crate::query::PageDependencyIndex::build(candidate) {
+                Ok(index) => Arc::new(index),
+                Err(_) => Arc::new(crate::query::PageDependencyIndex::empty()),
+            }
         };
         let page_dependency_index_build_ms = page_dep_started.elapsed().as_millis();
+
+        let read_model_update_mode = match (
+            dense_snapshot_update_by_incremental,
+            availability_update_by_incremental,
+            page_dep_update_by_incremental,
+        ) {
+            (true, true, true) => ReadModelUpdateMode::Incremental,
+            (false, false, false) => ReadModelUpdateMode::Full,
+            _ => ReadModelUpdateMode::Mixed,
+        };
 
         // 旧、新索引计算的受影响页面取并集，避免索引差异漏失效
         let mut affected = current_model
@@ -593,6 +672,7 @@ impl GraphRuntime {
             availability_facts_build_ms,
             page_dependency_index_build_ms,
             read_model_build_ms,
+            read_model_update_mode,
             invalidated_pages,
             page_dep_index_coverage,
         })

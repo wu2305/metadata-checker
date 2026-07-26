@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Error, Result, anyhow};
 use base64::Engine;
 use lz_str::{decompress_from_base64, decompress_from_encoded_uri_component};
 use regex::Regex;
@@ -59,6 +59,47 @@ pub fn sanitize_session_error_message(message: &str) -> String {
         .to_string();
 
     sanitized
+}
+
+/// 判断错误是否属于 session 鉴权失败（401/403）场景。
+pub fn is_session_auth_error(error: &Error) -> bool {
+    for cause in error.chain() {
+        let message = cause.to_string().to_lowercase();
+        let has_unauthorized =
+            message.contains("unauthorized") || message.contains("authentication");
+        let has_forbidden = message.contains("forbidden");
+        let has_401 = message.contains("401");
+        let has_403 = message.contains("403");
+
+        if (has_401 && has_unauthorized) || (has_403 && has_forbidden) {
+            return true;
+        }
+    }
+    false
+}
+
+fn extract_login_error_message(body: &str) -> Option<String> {
+    let json: Value = serde_json::from_str(body).ok()?;
+    json.get("message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            json.get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            json.get("errorMessage")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            json.get("result")
+                .and_then(|result| result.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
 }
 
 /// BI 项目信息。
@@ -249,19 +290,39 @@ impl ReqwestRemoteSessionProvider {
             .with_context(|| "login HTTP request failed")?;
 
         let status = response.status();
+        let text = response
+            .text()
+            .with_context(|| "failed to read login response")?;
+
         if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(anyhow!("login failed: 401 Unauthorized"));
+            if text.trim().is_empty() {
+                return Err(anyhow!("login failed: 401"));
+            }
+            let message = extract_login_error_message(&text).unwrap_or_else(|| {
+                sanitize_session_error_message(text.chars().take(80).collect::<String>().as_str())
+                    .to_string()
+            });
+            return Err(anyhow!(
+                "login failed: 401: {}",
+                sanitize_session_error_message(&message)
+            ));
         }
         if status == reqwest::StatusCode::FORBIDDEN {
-            return Err(anyhow!("login failed: 403 Forbidden"));
+            if text.trim().is_empty() {
+                return Err(anyhow!("login failed: 403"));
+            }
+            let message = extract_login_error_message(&text).unwrap_or_else(|| {
+                sanitize_session_error_message(text.chars().take(80).collect::<String>().as_str())
+                    .to_string()
+            });
+            return Err(anyhow!(
+                "login failed: 403: {}",
+                sanitize_session_error_message(&message)
+            ));
         }
         if !status.is_success() {
             return Err(anyhow!("login failed: HTTP {}", status.as_u16()));
         }
-
-        let text = response
-            .text()
-            .with_context(|| "failed to read login response")?;
         if text.trim().is_empty() {
             return Err(anyhow!("login failed: response body is empty"));
         }

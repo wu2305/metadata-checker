@@ -7,6 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
+use serde::{Deserialize, Serialize};
 
 use crate::remote_metadata::{MetadataContentType, RemoteFileRef};
 
@@ -33,8 +34,130 @@ pub struct SessionRefreshFilter {
     pub current_source_path: Option<String>,
 }
 
+/// 刷新作用域的实际粒度。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RefreshScopeKind {
+    Project,
+    Module,
+    SourcePath,
+    FileId,
+    Compound,
+}
+
+/// 刷新作用域的推断来源。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RefreshScopeResolution {
+    Explicit,
+    Auto,
+    Fallback,
+}
+
+/// 会话刷新作用域声明。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RefreshScope {
+    /// 作用域类型。
+    pub kind: RefreshScopeKind,
+    /// 作用域对应值，未命中单一显式条件时为空。
+    pub value: Option<String>,
+    /// 作用域来源。
+    pub resolution: RefreshScopeResolution,
+    /// 当前返回是否为显式应用范围。
+    pub applied: bool,
+    /// 可审计的过滤选择器，按 module/source_path/file_id 展示。
+    pub selectors: Vec<String>,
+    /// 无法显式确认时的回落原因。
+    pub fallback_reason: Option<String>,
+}
+
+impl Default for RefreshScope {
+    fn default() -> Self {
+        RefreshScope {
+            kind: RefreshScopeKind::Project,
+            value: None,
+            resolution: RefreshScopeResolution::Fallback,
+            applied: false,
+            selectors: Vec::new(),
+            fallback_reason: Some("refresh scope fallback to project scope".to_string()),
+        }
+    }
+}
+
+/// 从筛选条件解析可审计的刷新作用域。
+pub fn resolve_refresh_scope(filter: Option<&SessionRefreshFilter>) -> RefreshScope {
+    let mut selectors = Vec::new();
+    let mut explicit_kind = None;
+    let mut explicit_value = None;
+
+    if let Some(filter) = filter {
+        if let Some(module) = &filter.module {
+            selectors.push(format!("module:{module}"));
+            if explicit_kind.is_none() {
+                explicit_kind = Some(RefreshScopeKind::Module);
+                explicit_value = Some(module.clone());
+            }
+        }
+        if let Some(source_path) = &filter.source_path {
+            selectors.push(format!("source_path:{source_path}"));
+            if explicit_kind.is_none() {
+                explicit_kind = Some(RefreshScopeKind::SourcePath);
+                explicit_value = Some(source_path.clone());
+            }
+        }
+        if let Some(file_id) = &filter.file_id {
+            selectors.push(format!("file_id:{file_id}"));
+            if explicit_kind.is_none() {
+                explicit_kind = Some(RefreshScopeKind::FileId);
+                explicit_value = Some(file_id.clone());
+            }
+        }
+    }
+
+    if selectors.len() > 1 {
+        return RefreshScope {
+            kind: RefreshScopeKind::Compound,
+            value: None,
+            resolution: RefreshScopeResolution::Explicit,
+            applied: true,
+            selectors,
+            fallback_reason: None,
+        };
+    }
+
+    if selectors.len() == 1 {
+        return RefreshScope {
+            kind: explicit_kind.unwrap_or(RefreshScopeKind::Project),
+            value: explicit_value,
+            resolution: RefreshScopeResolution::Explicit,
+            applied: true,
+            selectors,
+            fallback_reason: None,
+        };
+    }
+
+    if let Some(current_source_path) = filter.and_then(|candidate| {
+        candidate
+            .current_source_path
+            .as_ref()
+            .filter(|path| !path.trim().is_empty())
+            .cloned()
+    }) {
+        return RefreshScope {
+            kind: RefreshScopeKind::SourcePath,
+            value: Some(current_source_path.clone()),
+            resolution: RefreshScopeResolution::Auto,
+            applied: false,
+            selectors: vec![format!("source_path:{current_source_path}")],
+            fallback_reason: Some("current_source_path is an ordering hint".to_string()),
+        };
+    }
+
+    RefreshScope::default()
+}
+
 /// 远程刷新文件处理统计。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionRefreshFileReport {
     /// 发现到的远程文件总量（仅按筛选器后的集合统计）。
     pub discovered: usize,
@@ -46,6 +169,8 @@ pub struct SessionRefreshFileReport {
     pub skipped: usize,
     /// 获取失败文件数。
     pub failed: usize,
+    /// 本次刷新的作用域声明。
+    pub scope: RefreshScope,
 }
 
 /// 远程刷新诊断。
@@ -111,7 +236,10 @@ pub fn sync_project_from_remote_with_filter(
     }
     let ordered = order_remote_entries(filtered, filter);
 
-    let mut file_report = SessionRefreshFileReport::default();
+    let mut file_report = SessionRefreshFileReport {
+        scope: resolve_refresh_scope(filter),
+        ..SessionRefreshFileReport::default()
+    };
     file_report.discovered = ordered.len();
     let analyzable_paths: Vec<String> = ordered
         .iter()

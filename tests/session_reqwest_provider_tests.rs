@@ -454,6 +454,10 @@ fn login_401_returns_stable_error() {
     let err = provider.login("user", "pass", "sys").unwrap_err();
     assert!(err.to_string().contains("401"));
     assert!(
+        err.to_string().contains("invalid credentials"),
+        "401 diagnostics should preserve the sanitized server message: {err}"
+    );
+    assert!(
         !err.to_string().contains("pass"),
         "error must not leak password"
     );

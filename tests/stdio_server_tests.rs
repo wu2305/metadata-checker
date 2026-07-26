@@ -2482,6 +2482,17 @@ fn test_stdio_diff_refresh_with_bound_context() {
     assert_eq!(result["change_count"].as_u64(), Some(1));
     assert!(result["invalidated_pages"].is_array());
     assert!(result["warm_failures"].is_array());
+    assert_eq!(result["schema_version"].as_str(), Some("1.0"));
+    assert_eq!(result["kind"].as_str(), Some("DiffRefresh"));
+    assert_eq!(result["persisted"].as_bool(), Some(false));
+    assert!(
+        result["pending_dirty_total"].as_u64().unwrap_or(0) > 0,
+        "bound first diff_refresh should keep pending dirty nodes: {result:?}"
+    );
+    assert!(
+        result["persist_report"].is_null(),
+        "bound first non-empty deferred diff_refresh should not persist immediately"
+    );
     assert_eq!(
         result["checkpoint"]["active"]["updated_at_ms"].as_u64(),
         Some(1000)
@@ -2494,9 +2505,16 @@ fn test_stdio_diff_refresh_with_bound_context() {
         r#"{"request_id":"r-diff-3","command":"diff_refresh"}"#,
     );
     assert!(resp2.ok);
-    assert_eq!(
-        resp2.result.expect("result")["change_count"].as_u64(),
-        Some(0)
+    let result2 = resp2.result.expect("result");
+    assert_eq!(result2["change_count"].as_u64(), Some(0));
+    assert_eq!(result2["persisted"].as_bool(), Some(false));
+    assert!(
+        result2["pending_dirty_total"].as_u64().unwrap_or(0) > 0,
+        "bound empty poll should keep deferred pending count: {result2:?}"
+    );
+    assert!(
+        result2["persist_report"].is_null(),
+        "bound empty poll should keep pending report as null until durable persist"
     );
 
     let _ = std::fs::remove_dir_all(root);
@@ -2549,6 +2567,62 @@ fn test_stdio_diff_refresh_error_redacts_secrets() {
         !serialized.contains("secret-token-123") && !serialized.contains("secret-cookie-456"),
         "response must not leak secrets: {serialized}"
     );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 运行期请求收到 401 时返回稳定鉴权错误码，而不是泛化成 diff refresh 失败。
+#[test]
+fn test_stdio_diff_refresh_auth_failure_returns_stable_code() {
+    use metadata_checker::remote_metadata::{RemoteFileContent, RemoteFileInfo, RemoteFileRef};
+    use metadata_checker::session::remote_provider::{
+        RemoteChangeSet, RemoteMetafileEntry, RemoteProjectInfo, RemoteSessionProvider,
+    };
+
+    /// 模拟 session 已启动但后续远程内容请求鉴权失效。
+    struct AuthExpiredProvider;
+    impl RemoteSessionProvider for AuthExpiredProvider {
+        fn list_projects(&self) -> anyhow::Result<Vec<RemoteProjectInfo>> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+        fn list_metafiles(&self, _project_ref: &str) -> anyhow::Result<Vec<RemoteMetafileEntry>> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+        fn fetch_metafile_info(&self, _file_ref: &RemoteFileRef) -> anyhow::Result<RemoteFileInfo> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+        fn fetch_metafile_content(
+            &self,
+            _file_ref: &RemoteFileRef,
+        ) -> anyhow::Result<RemoteFileContent> {
+            Err(anyhow::anyhow!(
+                "remote session returned 401 Unauthorized: invalid credential token=expired-token"
+            ))
+        }
+        fn fetch_changed_since(
+            &self,
+            _project_ref: &str,
+            _since_revision: &str,
+        ) -> anyhow::Result<RemoteChangeSet> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+    }
+
+    let (root, mut orchestrator) =
+        build_bound_orchestrator("auth-expired", Box::new(AuthExpiredProvider));
+
+    let resp = metadata_checker::stdio_server::dispatch_stdio_line_with_orchestrator(
+        &mut orchestrator,
+        r#"{"request_id":"r-diff-auth","command":"diff_refresh"}"#,
+    );
+
+    assert_eq!(resp.ok, false);
+    assert_eq!(
+        resp.error.as_ref().expect("error").code,
+        "SESSION_AUTH_REQUIRED"
+    );
+    let serialized = serde_json::to_string(&resp).expect("serialize response");
+    assert!(!serialized.contains("expired-token"));
 
     let _ = std::fs::remove_dir_all(root);
 }

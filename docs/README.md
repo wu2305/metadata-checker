@@ -15,11 +15,13 @@
 
 | ID | 区域 | 状态 | Journal |
 |----|------|------|---------|
-| **M54–M56** | performance（差量刷新） | active（代码完成，待合并） | [m54-diff-refresh-pipeline.md](milestones/performance/m54-diff-refresh-pipeline.md) |
+| **M57** | performance（产品化 + tick 成本；含 M46 handoff） | active（spec/plan approved，M57-0 TDD） | [m57](milestones/performance/m57-diff-refresh-closeout.md) / [design](specs/2026-07-23-m57-diff-refresh-closeout-design.md) / [plan](plans/2026-07-26-m57-ai-contract-foundation-plan.md) |
+| M54–M56 | performance（差量刷新） | done | [m54-diff-refresh-pipeline.md](milestones/performance/m54-diff-refresh-pipeline.md) |
 | patch | performance（产品路径/init/warm） | active | [design](specs/2026-07-13-perf-product-path-init-warm-patch-design.md) / [plan](plans/2026-07-13-perf-product-path-init-warm-patch-plan.md) |
 | M53 | performance | done | [m53-performance-continuation.md](milestones/performance/m53-performance-continuation.md) |
 | M28–M30 | stdio / FC | planned | [INDEX.md](milestones/INDEX.md) |
-| M46–M48 | browser | planned | [INDEX.md](milestones/INDEX.md) |
+| M46 | browser（CLI 包装；depends M57） | planned | [archive](archive/roadmap/m46-local-cli-remote-metadata-index-and.md) |
+| M47–M48 | browser | planned | [INDEX.md](milestones/INDEX.md) |
 | M58 | ai-eval（理解力评测闭环） | planned（spec draft） | [m58](milestones/ai-eval/m58-cheap-model-comprehension-eval.md) / [design](specs/2026-07-17-cheap-model-comprehension-eval-design.md) |
 | M59 | formats（rpt·dash 后推） | planned | [INDEX.md](milestones/INDEX.md) |
 

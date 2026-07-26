@@ -9,8 +9,8 @@ pub(super) use answer_facts::{
 };
 pub(crate) use conditions::{
     ConditionCollectorCache, ConditionFact, annotate_condition_scope, classify_condition,
-    collect_conditions_for_node, condition_owned_by_node, dedupe_conditions,
-    expand_total_row_count_gates, precollect_all_node_conditions,
+    collect_condition_facts_for_node, collect_conditions_for_node, condition_owned_by_node,
+    dedupe_conditions, expand_total_row_count_gates, precollect_all_node_conditions,
 };
 pub(super) use conditions::{
     collect_inherited_conditions_by_json_path, component_ancestor_chain, component_json_paths,

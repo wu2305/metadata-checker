@@ -1,5 +1,5 @@
 use crate::graph::NodeType;
-use crate::graph_store::GraphReadStore;
+use crate::graph_store::{GraphReadStore, GraphStoreResult};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 
@@ -23,6 +23,7 @@ pub enum PageDependencyIndexCoverage {
 /// 递归 Contains 子组件、组件 Triggers 的动作节点，以及 M55 起的数据面
 /// 闭包——这些节点沿出边可达的 Model/Field（含共享物理模型、
 /// DataFlow 模型与其输出字段）。
+#[derive(Clone)]
 pub struct PageDependencyIndex {
     node_to_pages: HashMap<String, HashSet<String>>,
     coverage: PageDependencyIndexCoverage,
@@ -46,7 +47,12 @@ impl PageDependencyIndex {
             }
             let page_id = node.id;
             register_node_page(&mut node_to_pages, &page_id, &page_id);
-            let collected = graph_collect::collect_page_logic_nodes(graph, &page_id)?;
+            let collected =
+                graph_collect::collect_page_logic_nodes(graph, &page_id).map_err(|e| {
+                    crate::graph_store::GraphStoreError::ReadFailed {
+                        reason: e.to_string(),
+                    }
+                })?;
             for component in collected.child_components {
                 register_node_page(&mut node_to_pages, &component.id, &page_id);
             }
@@ -92,6 +98,88 @@ impl PageDependencyIndex {
     #[cfg(feature = "cli-local")]
     pub fn indexed_node_count(&self) -> usize {
         self.node_to_pages.len()
+    }
+
+    /// 基于脏节点列表，尝试局部重建受影响页面的反向依赖映射。
+    ///
+    /// 调用方负责先确认新旧图的 node set 稳定。本方法允许未被旧索引登记的
+    /// dirty 节点成为 no-op；只要它属于受影响页面，页面节点本身会触发该页重建。
+    /// 删除节点仍返回 `Ok(None)`，交给 runtime full fallback。
+    pub fn try_update_incremental(
+        &self,
+        graph: &dyn GraphReadStore,
+        dirty_node_ids: &[String],
+    ) -> GraphStoreResult<Option<Self>> {
+        if self.coverage != PageDependencyIndexCoverage::Full {
+            return Ok(None);
+        }
+
+        if dirty_node_ids.is_empty() {
+            return Ok(Some(self.clone()));
+        }
+
+        let mut dirty_nodes = HashSet::new();
+        let mut affected_pages: HashSet<String> = HashSet::new();
+
+        for node_id in dirty_node_ids {
+            if !dirty_nodes.insert(node_id.as_str()) {
+                continue;
+            }
+
+            if graph.get_node(node_id)?.is_none() {
+                return Ok(None);
+            }
+
+            if let Some(pages) = self.node_to_pages.get(node_id.as_str()) {
+                affected_pages.extend(pages.iter().cloned());
+            }
+        }
+
+        if affected_pages.is_empty() {
+            return Ok(Some(self.clone()));
+        }
+
+        let mut next_node_to_pages = self.node_to_pages.clone();
+        for pages in next_node_to_pages.values_mut() {
+            pages.retain(|page_id| !affected_pages.contains(page_id));
+        }
+        next_node_to_pages.retain(|_, pages| !pages.is_empty());
+
+        for page_id in affected_pages {
+            let Some(page_node) = graph.get_node(&page_id)? else {
+                return Ok(None);
+            };
+
+            if !matches!(page_node.node_type, NodeType::Page) {
+                return Ok(None);
+            }
+
+            let collected =
+                graph_collect::collect_page_logic_nodes(graph, &page_id).map_err(|e| {
+                    crate::graph_store::GraphStoreError::ReadFailed {
+                        reason: e.to_string(),
+                    }
+                })?;
+
+            register_node_page(&mut next_node_to_pages, &page_id, &page_id);
+            for component in collected.child_components {
+                register_node_page(&mut next_node_to_pages, &component.id, &page_id);
+            }
+            for action in collected.child_actions {
+                register_node_page(&mut next_node_to_pages, &action.id, &page_id);
+            }
+            for model in collected.related_models {
+                register_node_page(&mut next_node_to_pages, &model.id, &page_id);
+            }
+            for field in collected.related_fields {
+                register_node_page(&mut next_node_to_pages, &field.id, &page_id);
+            }
+        }
+
+        Ok(Some(Self {
+            node_to_pages: next_node_to_pages,
+            coverage: self.coverage,
+        }))
     }
 }
 

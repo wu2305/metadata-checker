@@ -6,7 +6,9 @@ use metadata_checker::output;
 use metadata_checker::parser;
 use metadata_checker::priority;
 use metadata_checker::scanner;
-use metadata_checker::session::reqwest_provider::sanitize_session_error_message;
+use metadata_checker::session::reqwest_provider::{
+    is_session_auth_error, sanitize_session_error_message,
+};
 use metadata_checker::tool_contract::{self, InvocationAdapter};
 
 use anyhow::Result;
@@ -409,7 +411,7 @@ fn print_session_error(code: &str, message: impl Into<String>) -> Result<()> {
     let safe_message = sanitize_session_error_message(&message.into());
     println!(
         "{}",
-        serde_json::to_string_pretty(&serde_json::json!({
+        serde_json::to_string(&serde_json::json!({
             "ok": false,
             "error": {
                 "code": code,
@@ -580,8 +582,8 @@ fn main() -> Result<()> {
             }
         };
 
-        // one-shot：cold LongLived load（prepare_replacement 需要 read model；
-        // 无需跨轮 hot，初始无 warm cache 可保留）
+        // 以 LongLived 模式加载（prepare_replacement 需要 read model）；
+        // 但本次为 CLI one-shot，强制使用同步持久化，先 persist 后 install。
         let graph_db_path = std::path::PathBuf::from(&context.manifest.graph_db_path);
         let session_dir = session_manager.session_dir(session_id);
         let mirror_dir = metadata_checker::session::sync::project_mirror_root(&session_dir);
@@ -607,26 +609,24 @@ fn main() -> Result<()> {
             context.provider,
             runtime,
         );
+        orchestrator.set_one_shot_mode(true);
         match orchestrator.refresh_once() {
             Ok(report) => {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&serde_json::json!({
-                        "ok": true,
-                        "session_id": session_id,
-                        "change_count": report.change_count,
-                        "invalidated_pages": report.invalidated_pages,
-                        "warm_failures": report.warm_failures,
-                        "checkpoint": report.checkpoint,
-                        "last_poll_at": report.last_poll_at,
-                        "page_dep_index_coverage": report.page_dep_index_coverage,
-                        "timing": report.timing,
-                    }))?
-                );
+                let mut value = serde_json::to_value(&report)?;
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("ok".to_string(), serde_json::json!(true));
+                    obj.insert("session_id".to_string(), serde_json::json!(session_id));
+                }
+                println!("{}", serde_json::to_string(&value)?);
             }
             Err(err) => {
+                let code = if is_session_auth_error(&err) {
+                    "SESSION_AUTH_REQUIRED"
+                } else {
+                    "DIFF_REFRESH_FAILED"
+                };
                 return print_session_error(
-                    "DIFF_REFRESH_FAILED",
+                    code,
                     format!("diff refresh failed: {}", format_error_chain(&err)),
                 );
             }
@@ -798,6 +798,7 @@ fn main() -> Result<()> {
                     };
                     return Ok(());
                 }
+                let files = serde_json::to_value(&report.files)?;
 
                 println!(
                     "{}",
@@ -812,13 +813,7 @@ fn main() -> Result<()> {
                             "skipped": report.sync.skipped,
                             "deleted": report.sync.deleted,
                         },
-                        "files": {
-                            "discovered": report.files.discovered,
-                            "analyzable": report.files.analyzable,
-                            "synced": report.files.synced,
-                            "skipped": report.files.skipped,
-                            "failed": report.files.failed,
-                        },
+                        "files": files,
                         "diagnostics": report.diagnostics
                             .iter()
                             .map(|diagnostic| serde_json::json!({

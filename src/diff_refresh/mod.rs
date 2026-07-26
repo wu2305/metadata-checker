@@ -17,6 +17,8 @@ pub mod mirror;
 pub mod orchestrator;
 #[cfg(feature = "cli-local")]
 pub mod source;
+#[cfg(feature = "cli-local")]
+pub mod tick;
 pub mod types;
 
 #[cfg(feature = "cli-local")]
@@ -29,9 +31,13 @@ pub use fixture_source::FixtureMetaFilesChangeSource;
 #[cfg(feature = "cli-local")]
 pub use mirror::{MirrorApplyReport, apply_changeset_to_mirror};
 #[cfg(feature = "cli-local")]
-pub use orchestrator::{DiffRefreshOrchestrator, DiffRefreshReport, DiffRefreshTiming};
+pub use orchestrator::{
+    DiffRefreshOrchestrator, DiffRefreshReport, DiffRefreshTiming, LongLivedPersistPolicy,
+};
 #[cfg(feature = "cli-local")]
 pub use source::MetaFilesChangeSource;
+#[cfg(feature = "cli-local")]
+pub use tick::{DiffRefreshTickReport, run_tick_loop_with_hooks};
 pub use types::{
     ChangeSet, ChangedRemoteFile, DiffRefreshCheckpoint, MetaFilesWatermark, SourceCursor,
     cursor_accepts,

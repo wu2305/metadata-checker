@@ -7,7 +7,10 @@ use crate::graph::{Edge, EdgeType, Node};
 use crate::graph_store::{
     GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// 稠密快照沿用 GraphDB 的逻辑边去重键。
+type DenseEdgeKey = (String, String, EdgeType, Option<String>);
 
 /// 稠密节点 ID，用于数组下标访问。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -189,6 +192,185 @@ impl DenseGraphSnapshot {
             .map(|dense_id| &self.nodes[dense_id.index()])
     }
 
+    /// 尝试基于 dirty 节点进行稠密快照增量更新。
+    ///
+    /// 若节点集合稳定且 dirty 节点均在新旧图中存在，则重建受影响 source 的出边并补齐
+    /// incoming 视图；否则返回 `Ok(None)`，交给 runtime 执行 full fallback。
+    pub fn try_update_incremental(
+        &self,
+        candidate: &dyn GraphReadStore,
+        dirty_node_ids: &[String],
+    ) -> GraphStoreResult<Option<Self>> {
+        if dirty_node_ids.is_empty() {
+            return Ok(Some(self.clone()));
+        }
+
+        if candidate.node_count()? != self.dense_node_count() {
+            return Ok(None);
+        }
+
+        for node in &self.nodes {
+            if candidate.get_node(&node.id)?.is_none() {
+                return Ok(None);
+            }
+        }
+
+        let mut dirty_set: HashSet<String> = HashSet::new();
+        let mut affected_sources: HashSet<String> = HashSet::new();
+        let mut next_nodes = self.nodes.clone();
+        let mut dirty_outgoing_cache: HashMap<String, Vec<GraphEdgeView>> = HashMap::new();
+
+        for dirty_node_id in dirty_node_ids {
+            if !dirty_set.insert(dirty_node_id.clone()) {
+                continue;
+            }
+
+            let Some(current_node) = self.get_node(dirty_node_id)? else {
+                return Ok(None);
+            };
+            let Some(candidate_node) = candidate.get_node(dirty_node_id)? else {
+                return Ok(None);
+            };
+
+            let Some(dense_id) = self.dense_id(dirty_node_id) else {
+                return Ok(None);
+            };
+
+            let current_neighbors =
+                self.get_node_edges(dirty_node_id)?
+                    .unwrap_or_else(|| GraphNeighbors {
+                        outgoing: Vec::new(),
+                        incoming: Vec::new(),
+                    });
+            let candidate_neighbors =
+                candidate
+                    .get_node_edges(dirty_node_id)?
+                    .unwrap_or_else(|| GraphNeighbors {
+                        outgoing: Vec::new(),
+                        incoming: Vec::new(),
+                    });
+
+            if current_node != candidate_node {
+                affected_sources.insert(dirty_node_id.clone());
+            }
+            next_nodes[dense_id.index()] = candidate_node;
+
+            if !same_edge_multiset(&current_neighbors.outgoing, &candidate_neighbors.outgoing)? {
+                affected_sources.insert(dirty_node_id.clone());
+            }
+
+            if !same_edge_multiset(&current_neighbors.incoming, &candidate_neighbors.incoming)? {
+                let changed_sources = collect_changed_incoming_sources(
+                    &current_neighbors.incoming,
+                    &candidate_neighbors.incoming,
+                )?;
+                affected_sources.extend(changed_sources);
+            }
+
+            if !candidate_neighbors.outgoing.is_empty() {
+                dirty_outgoing_cache.insert(dirty_node_id.clone(), candidate_neighbors.outgoing);
+            }
+        }
+
+        if affected_sources.is_empty() {
+            return Ok(Some(Self {
+                node_ids: self.node_ids.clone(),
+                nodes: next_nodes,
+                out_offsets: self.out_offsets.clone(),
+                out_edges: self.out_edges.clone(),
+                in_offsets: self.in_offsets.clone(),
+                in_edges: self.in_edges.clone(),
+                edge_payloads: self.edge_payloads.clone(),
+            }));
+        }
+
+        let mut outgoing_by_node: Vec<Vec<DenseAdjacencyEntry>> =
+            Vec::with_capacity(self.nodes.len());
+        outgoing_by_node.resize_with(self.nodes.len(), Vec::new);
+        let mut incoming_by_node: Vec<Vec<DenseAdjacencyEntry>> =
+            Vec::with_capacity(self.nodes.len());
+        incoming_by_node.resize_with(self.nodes.len(), Vec::new);
+        let mut edge_payloads: Vec<Edge> = Vec::new();
+        let mut edge_indices: HashMap<DenseEdgeKey, u32> = HashMap::new();
+
+        for source_node in &self.nodes {
+            let Some(source_dense) = self.dense_id(&source_node.id) else {
+                return Ok(None);
+            };
+            let outgoing = if affected_sources.contains(&source_node.id) {
+                if let Some(cached) = dirty_outgoing_cache.remove(&source_node.id) {
+                    cached
+                } else {
+                    candidate
+                        .get_node_edges(&source_node.id)?
+                        .map(|neighbors| neighbors.outgoing)
+                        .unwrap_or_default()
+                }
+            } else {
+                self.out_edges[self.out_offsets[source_dense.index()]
+                    ..self.out_offsets[source_dense.index() + 1]]
+                    .iter()
+                    .map(|entry| self.edge_view(entry))
+                    .collect()
+            };
+
+            for edge_view in outgoing {
+                let Some(target_dense) = self.node_ids.get(&edge_view.edge.to).copied() else {
+                    return Ok(None);
+                };
+                if edge_payloads.len() >= u32::MAX as usize {
+                    return Err(GraphStoreError::InvalidArgument {
+                        message: format!("dense graph supports at most {} edges", u32::MAX),
+                    });
+                }
+                let edge_idx = edge_payloads.len() as u32;
+                edge_payloads.push(edge_view.edge);
+                edge_indices.insert(dense_edge_key(&edge_payloads[edge_idx as usize]), edge_idx);
+                outgoing_by_node[source_dense.index()].push(DenseAdjacencyEntry {
+                    adjacent: target_dense,
+                    edge_idx,
+                });
+            }
+        }
+
+        for (source_id, outgoing) in outgoing_by_node.iter().enumerate() {
+            let source_dense = DenseNodeId(source_id as u32);
+            for outgoing_edge in outgoing {
+                let edge = edge_payloads
+                    .get(outgoing_edge.edge_idx as usize)
+                    .ok_or_else(|| GraphStoreError::Corrupted {
+                        reason: "dense snapshot edge payload missing".to_string(),
+                    })?;
+                let edge_idx = edge_indices
+                    .get(&dense_edge_key(edge))
+                    .copied()
+                    .ok_or_else(|| GraphStoreError::Corrupted {
+                        reason: format!(
+                            "incoming edge {} -> {} missing outgoing payload",
+                            edge.from, edge.to
+                        ),
+                    })?;
+                incoming_by_node[outgoing_edge.adjacent.index()].push(DenseAdjacencyEntry {
+                    adjacent: source_dense,
+                    edge_idx,
+                });
+            }
+        }
+
+        let (out_offsets, out_edges) = flatten_adjacency(outgoing_by_node);
+        let (in_offsets, in_edges) = flatten_adjacency(incoming_by_node);
+
+        Ok(Some(Self {
+            node_ids: self.node_ids.clone(),
+            nodes: next_nodes,
+            out_offsets,
+            out_edges,
+            in_offsets,
+            in_edges,
+            edge_payloads,
+        }))
+    }
+
     /// CSR 出边切片，供 path finder 直接遍历而不构造 `GraphNeighbors`。
     pub(crate) fn outgoing_neighbors(&self, node_id: &str) -> Option<DenseNeighborSlice<'_>> {
         let dense_id = self.dense_id(node_id)?;
@@ -220,13 +402,137 @@ impl DenseGraphSnapshot {
 }
 
 /// 构造与 GraphDB 去重语义一致的边键。
-fn dense_edge_key(edge: &Edge) -> (String, String, EdgeType, Option<String>) {
+fn dense_edge_key(edge: &Edge) -> DenseEdgeKey {
     (
         edge.from.clone(),
         edge.to.clone(),
         edge.edge_type.clone(),
         edge.field_path.clone(),
     )
+}
+
+/// 比较两组边是否具有相同的逻辑键与边内容多重集。
+fn same_edge_multiset(lhs: &[GraphEdgeView], rhs: &[GraphEdgeView]) -> GraphStoreResult<bool> {
+    let lhs_buckets = bucket_edges_by_key(lhs)?;
+    let rhs_buckets = bucket_edges_by_key(rhs)?;
+    if lhs_buckets.len() != rhs_buckets.len() {
+        return Ok(false);
+    }
+
+    for (key, lhs_edges) in lhs_buckets {
+        let Some(rhs_edges) = rhs_buckets.get(&key) else {
+            return Ok(false);
+        };
+        if lhs_edges.len() != rhs_edges.len() {
+            return Ok(false);
+        }
+        if !edge_group_equal(&lhs_edges, rhs_edges)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+/// 收集一个 dirty target 的入边变化所影响的 source 节点。
+fn collect_changed_incoming_sources(
+    old_incoming: &[GraphEdgeView],
+    candidate_incoming: &[GraphEdgeView],
+) -> GraphStoreResult<HashSet<String>> {
+    let mut changed_sources = HashSet::new();
+    let old_buckets = bucket_edges_by_key(old_incoming)?;
+    let candidate_buckets = bucket_edges_by_key(candidate_incoming)?;
+    let mut changed = false;
+
+    for (key, old_edges) in &old_buckets {
+        match candidate_buckets.get(key) {
+            Some(candidate_edges) => {
+                if old_edges.len() != candidate_edges.len()
+                    || !edge_group_equal(old_edges, candidate_edges)?
+                {
+                    changed = true;
+                }
+            }
+            None => {
+                changed = true;
+            }
+        }
+    }
+
+    if !changed {
+        for key in candidate_buckets.keys() {
+            if !old_buckets.contains_key(key) {
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    if !changed {
+        return Ok(changed_sources);
+    }
+
+    for edges in old_buckets.values() {
+        for edge in edges {
+            changed_sources.insert(edge.from.clone());
+        }
+    }
+    for edges in candidate_buckets.values() {
+        for edge in edges {
+            changed_sources.insert(edge.from.clone());
+        }
+    }
+
+    Ok(changed_sources)
+}
+
+/// 按逻辑边键分桶，保留同键边的完整 payload 以比较 meta 变化。
+fn bucket_edges_by_key(
+    edges: &[GraphEdgeView],
+) -> GraphStoreResult<HashMap<DenseEdgeKey, Vec<Edge>>> {
+    let mut buckets: HashMap<DenseEdgeKey, Vec<Edge>> = HashMap::new();
+    for edge_view in edges {
+        buckets
+            .entry(dense_edge_key(&edge_view.edge))
+            .or_default()
+            .push(edge_view.edge.clone());
+    }
+    Ok(buckets)
+}
+
+/// 比较同一逻辑边键分组中的完整边 payload。
+fn edge_group_equal(lhs: &[Edge], rhs: &[Edge]) -> GraphStoreResult<bool> {
+    if lhs.len() != rhs.len() {
+        return Ok(false);
+    }
+
+    let mut matched = vec![false; rhs.len()];
+    for lhs_edge in lhs {
+        let mut found = false;
+        for (idx, rhs_edge) in rhs.iter().enumerate() {
+            if matched[idx] {
+                continue;
+            }
+            if edge_content_equal(lhs_edge, rhs_edge) {
+                matched[idx] = true;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// 比较边的全部可观测字段。
+fn edge_content_equal(lhs: &Edge, rhs: &Edge) -> bool {
+    lhs.from == rhs.from
+        && lhs.to == rhs.to
+        && lhs.edge_type == rhs.edge_type
+        && lhs.field_path == rhs.field_path
+        && lhs.meta == rhs.meta
 }
 
 impl GraphReadStore for DenseGraphSnapshot {
