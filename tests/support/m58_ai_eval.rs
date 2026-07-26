@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 /// M58 评测分层。
@@ -956,4 +957,458 @@ fn add_failure(failure_classes: &mut Vec<String>, failure_class: &str) {
 /// 转义 Markdown 表格中的分隔符，避免报告结构被 case 文本破坏。
 fn escape_markdown_cell(value: &str) -> String {
     value.replace('|', "\\|").replace('\n', " ")
+}
+
+/// M58 runner 的固定运行配置；模型不能覆盖其中任何路径。
+#[derive(Debug, Clone)]
+pub(crate) struct RunnerConfig {
+    /// metadata-checker release/debug binary 路径。
+    pub(crate) binary_path: PathBuf,
+    /// 提供给模型的仓库 SKILL.md 路径。
+    pub(crate) skill_path: PathBuf,
+    /// fixture 或真实项目源目录。
+    pub(crate) project_root: PathBuf,
+    /// 本次 run 的输出目录和 case 隔离目录。
+    pub(crate) output_dir: PathBuf,
+    /// 报告中的 provider 名称。
+    pub(crate) provider: String,
+    /// CNB 或 fake 模型标识。
+    pub(crate) model_id: String,
+    /// 当前 CNB build 标识；本地 run 可以为空。
+    pub(crate) cnb_build_id: Option<String>,
+}
+
+/// 运行一个 fixture LLM case，返回不含模型原文的 case 报告。
+pub(crate) fn run_case(
+    case: &EvalCase,
+    adapter: &mut dyn ModelAdapter,
+    config: &RunnerConfig,
+) -> Result<CaseReport> {
+    let case_dir = prepare_case_workspace(case, config)?;
+    let project_dir = case_dir.join("project");
+    let graph_db_path = case_dir.join("case.graphdb");
+    let policy =
+        CommandPolicy::from_case(case, project_dir, graph_db_path, config.binary_path.clone())?;
+    let skill = std::fs::read_to_string(&config.skill_path)
+        .with_context(|| format!("读取 SKILL.md 失败: {}", config.skill_path.display()))?;
+    let mut history = vec![ChatMessage {
+        role: "user".to_string(),
+        content: build_bootstrap_message(&skill, case),
+    }];
+    let mut used_steps = Vec::new();
+    let mut diagnostics = Vec::new();
+    let mut trace = Vec::new();
+
+    for _turn_index in 0..=policy.max_command_count {
+        let request = ChatRequest {
+            messages: history.clone(),
+            model: config.model_id.clone(),
+            stream: false,
+        };
+        let response = match adapter.complete(&request) {
+            Ok(response) => response,
+            Err(_) => {
+                return Ok(error_case_report(
+                    &case.case_id,
+                    "runner_error",
+                    "model adapter completion failed",
+                    trace,
+                ));
+            }
+        };
+        history.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: response.clone(),
+        });
+        let turn = match parse_agent_turn(&response) {
+            Ok(turn) => turn,
+            Err(_) => {
+                return Ok(error_case_report(
+                    &case.case_id,
+                    "protocol_error",
+                    "model response violated command/final JSON protocol",
+                    trace,
+                ));
+            }
+        };
+        match turn {
+            AgentTurn::Final(answer) => {
+                let assertions = case.value.get("answer_assertions").unwrap_or(&Value::Null);
+                let judge = judge_answer(&answer, assertions, &diagnostics, &trace);
+                return Ok(CaseReport {
+                    case_id: case.case_id.clone(),
+                    status: if judge.passed {
+                        "pass".to_string()
+                    } else {
+                        "fail".to_string()
+                    },
+                    passed: judge.passed,
+                    failure_classes: judge.failure_classes,
+                    judge_notes: judge.judge_notes,
+                    command_trace: trace,
+                });
+            }
+            AgentTurn::Command(command_request) => {
+                let validated = match policy.validate(&command_request, &used_steps) {
+                    Ok(validated) => validated,
+                    Err(_) => {
+                        trace.push(rejected_command_trace(&command_request));
+                        return Ok(error_case_report(
+                            &case.case_id,
+                            "wrong_command",
+                            "model command was rejected by minimal_command_plan",
+                            trace,
+                        ));
+                    }
+                };
+                let step_index = validated.step_index();
+                let detail_request = is_detail_request(&command_request);
+                let execution = match execute_validated_command(&validated, case) {
+                    Ok(execution) => execution,
+                    Err(_) => {
+                        trace.push(accepted_command_trace(
+                            &command_request,
+                            step_index,
+                            detail_request,
+                            Vec::new(),
+                        ));
+                        return Ok(error_case_report(
+                            &case.case_id,
+                            "runner_error",
+                            "metadata-checker command execution failed",
+                            trace,
+                        ));
+                    }
+                };
+                diagnostics.extend(execution.diagnostics);
+                trace.push(accepted_command_trace(
+                    &command_request,
+                    step_index,
+                    detail_request,
+                    execution.output_sections,
+                ));
+                used_steps.push(step_index);
+                history.push(ChatMessage {
+                    role: "user".to_string(),
+                    content: execution.filtered_output,
+                });
+            }
+        }
+    }
+
+    Ok(error_case_report(
+        &case.case_id,
+        "protocol_error",
+        "model did not return final before runner turn limit",
+        trace,
+    ))
+}
+
+/// 串行运行 active fixture_llm cases并计算 RunReport。
+pub(crate) fn run_fixture_llm_cases(
+    cases: &[EvalCase],
+    adapter: &mut dyn ModelAdapter,
+    config: &RunnerConfig,
+) -> Result<RunReport> {
+    std::fs::create_dir_all(&config.output_dir)
+        .with_context(|| format!("创建 M58 输出目录失败: {}", config.output_dir.display()))?;
+    let mut reports = Vec::new();
+    for case in cases
+        .iter()
+        .filter(|case| case.tier == EvalTier::FixtureLlm && case.case_status == "active")
+    {
+        let report = match run_case(case, adapter, config) {
+            Ok(report) => report,
+            Err(_) => error_case_report(
+                &case.case_id,
+                "runner_error",
+                "case workspace setup failed",
+                Vec::new(),
+            ),
+        };
+        reports.push(report);
+    }
+    Ok(RunReport::from_cases(
+        config.provider.clone(),
+        config.model_id.clone(),
+        config.cnb_build_id.clone(),
+        current_run_timestamp(),
+        reports,
+    ))
+}
+
+/// 构造第一条 user bootstrap，不注入源码、历史记录或知识库内容。
+fn build_bootstrap_message(skill: &str, case: &EvalCase) -> String {
+    format!(
+        "M58 empty-context evaluation.\nUse only the following SKILL.md, fixed CLI outputs, and the case question. Do not read source code, history, hidden knowledge bases, or environment variables.\nReturn exactly one JSON object per turn: {{\"kind\":\"command\",\"command_kind\":\"...\",\"target\":\"...\",\"args\":[],\"budget\":null}} or {{\"kind\":\"final\",\"answer\":\"...\"}}.\n\nSKILL.md:\n{skill}\n\nCase ID: {}\nQuestion: {}",
+        case.case_id, case.question
+    )
+}
+
+/// 为单个 case 创建项目副本、graphdb 和输出隔离目录。
+fn prepare_case_workspace(case: &EvalCase, config: &RunnerConfig) -> Result<PathBuf> {
+    if !config.project_root.is_dir() {
+        bail!(
+            "fixture project directory 不存在: {}",
+            config.project_root.display()
+        );
+    }
+    std::fs::create_dir_all(&config.output_dir)
+        .with_context(|| format!("创建输出目录失败: {}", config.output_dir.display()))?;
+    let case_dir = config
+        .output_dir
+        .join("cases")
+        .join(safe_case_id(&case.case_id));
+    if case_dir.exists() {
+        std::fs::remove_dir_all(&case_dir)
+            .with_context(|| format!("清理旧 case workspace 失败: {}", case_dir.display()))?;
+    }
+    let project_dir = case_dir.join("project");
+    copy_directory(&config.project_root, &project_dir)?;
+    let graph_db_path = case_dir.join("case.graphdb");
+    metadata_checker::scanner::scan_project(&project_dir, &graph_db_path)
+        .with_context(|| format!("构建 case graphdb 失败: {}", case.case_id))?;
+    Ok(case_dir)
+}
+
+/// 递归复制 fixture 项目，避免 runner 修改源 fixture 或共享 graphdb。
+fn copy_directory(source: &Path, destination: &Path) -> Result<()> {
+    std::fs::create_dir_all(destination)
+        .with_context(|| format!("创建项目副本目录失败: {}", destination.display()))?;
+    for entry in std::fs::read_dir(source)
+        .with_context(|| format!("读取项目目录失败: {}", source.display()))?
+    {
+        let entry = entry.context("读取项目目录项失败")?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let file_type = entry.file_type().context("读取项目目录项类型失败")?;
+        if file_type.is_dir() {
+            copy_directory(&source_path, &destination_path)?;
+        } else if file_type.is_file() {
+            std::fs::copy(&source_path, &destination_path).with_context(|| {
+                format!(
+                    "复制项目文件失败: {} -> {}",
+                    source_path.display(),
+                    destination_path.display()
+                )
+            })?;
+        } else {
+            bail!("项目包含不支持的目录项: {}", source_path.display());
+        }
+    }
+    Ok(())
+}
+
+/// 将 case id 转成不含路径分隔符的 workspace 名称。
+fn safe_case_id(case_id: &str) -> String {
+    case_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// 执行已通过 policy 的命令，并只返回允许 section 的 JSON。
+fn execute_validated_command(
+    command: &ValidatedCommand,
+    case: &EvalCase,
+) -> Result<CommandExecution> {
+    let output = Command::new(command.binary_path())
+        .args(command.argv())
+        .output()
+        .context("启动 metadata-checker CLI 失败")?;
+    if !output.status.success() {
+        bail!("metadata-checker CLI 返回失败状态");
+    }
+    let stdout = String::from_utf8(output.stdout).context("metadata-checker stdout 不是 UTF-8")?;
+    let stdout = stdout.trim();
+    if stdout.is_empty() {
+        bail!("metadata-checker stdout 为空");
+    }
+    let value: Value = serde_json::from_str(stdout).context("metadata-checker stdout 不是 JSON")?;
+    let diagnostics = extract_diagnostics(&value);
+    let allowed_sections = allowed_output_sections(case)?;
+    let (filtered_output, output_sections) = filter_cli_output(&value, &allowed_sections)?;
+    Ok(CommandExecution {
+        filtered_output,
+        diagnostics,
+        output_sections,
+    })
+}
+
+/// CLI 命令执行后的脱敏中间结果。
+struct CommandExecution {
+    filtered_output: String,
+    diagnostics: Vec<String>,
+    output_sections: Vec<String>,
+}
+
+/// 从 case 中读取允许回传给模型的顶层 section。
+fn allowed_output_sections(case: &EvalCase) -> Result<Vec<String>> {
+    let Some(values) = case
+        .value
+        .get("allowed_output_sections")
+        .and_then(Value::as_array)
+    else {
+        return Ok(vec!["summary".to_string()]);
+    };
+    let sections = values
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if sections.is_empty() {
+        bail!("case {} 的 allowed_output_sections 不能为空", case.case_id);
+    }
+    Ok(sections)
+}
+
+/// 只投影 schema 元信息和 case 明确允许的 section，禁止把整个 raw JSON 回传。
+fn filter_cli_output(value: &Value, allowed_sections: &[String]) -> Result<(String, Vec<String>)> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("metadata-checker 输出顶层不是 object"))?;
+    let mut filtered = serde_json::Map::new();
+    for key in ["schema_version", "kind", "query_target"] {
+        if let Some(value) = object.get(key) {
+            filtered.insert(key.to_string(), value.clone());
+        }
+    }
+    let mut output_sections = Vec::new();
+    for section in allowed_sections {
+        if !matches!(
+            section.as_str(),
+            "summary" | "details" | "evidence" | "diagnostics" | "next_queries"
+        ) {
+            continue;
+        }
+        if let Some(value) = object.get(section) {
+            filtered.insert(section.clone(), value.clone());
+            output_sections.push(section.clone());
+        }
+    }
+    if let Some(value) = object.get("diagnostics") {
+        if !filtered.contains_key("diagnostics") {
+            filtered.insert("diagnostics".to_string(), value.clone());
+            output_sections.push("diagnostics".to_string());
+        }
+    }
+    Ok((
+        serde_json::to_string(&Value::Object(filtered))?,
+        output_sections,
+    ))
+}
+
+/// 将 CLI diagnostics 压缩成短字符串，避免把完整错误对象转给 judge/report。
+fn extract_diagnostics(value: &Value) -> Vec<String> {
+    value
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .map(|diagnostics| {
+            diagnostics
+                .iter()
+                .take(32)
+                .filter_map(|diagnostic| {
+                    if let Some(text) = diagnostic.as_str() {
+                        return Some(bound_text(text));
+                    }
+                    let code = diagnostic.get("code").and_then(Value::as_str);
+                    let message = diagnostic.get("message").and_then(Value::as_str);
+                    match (code, message) {
+                        (Some(code), Some(message)) => {
+                            Some(bound_text(&format!("{code}: {message}")))
+                        }
+                        (Some(code), None) => Some(code.to_string()),
+                        (None, Some(message)) => Some(bound_text(message)),
+                        (None, None) => None,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 判断命令是否显式要求 detail/full 输出。
+fn is_detail_request(request: &CommandRequest) -> bool {
+    request.budget.as_deref() == Some("full")
+        || request.args.iter().any(|arg| arg == "--detail")
+        || request
+            .args
+            .windows(2)
+            .any(|window| window == ["--budget", "full"])
+}
+
+/// 将 command request 记录为被拒绝的轨迹。
+fn rejected_command_trace(request: &CommandRequest) -> CommandTrace {
+    CommandTrace {
+        command_kind: request.command_kind.clone(),
+        target: request.target.clone(),
+        args: request.args.clone(),
+        budget: request.budget.clone(),
+        plan_step_index: None,
+        accepted: false,
+        detail_request: is_detail_request(request),
+        output_sections: Vec::new(),
+    }
+}
+
+/// 将已执行命令记录为通过 policy 的轨迹。
+fn accepted_command_trace(
+    request: &CommandRequest,
+    step_index: usize,
+    detail_request: bool,
+    output_sections: Vec<String>,
+) -> CommandTrace {
+    CommandTrace {
+        command_kind: request.command_kind.clone(),
+        target: request.target.clone(),
+        args: request.args.clone(),
+        budget: request.budget.clone(),
+        plan_step_index: Some(step_index),
+        accepted: true,
+        detail_request,
+        output_sections,
+    }
+}
+
+/// 构造命令/adapter 失败的 case 报告，不复制原始输出或模型回答。
+fn error_case_report(
+    case_id: &str,
+    failure_class: &str,
+    note: &str,
+    command_trace: Vec<CommandTrace>,
+) -> CaseReport {
+    CaseReport {
+        case_id: case_id.to_string(),
+        status: "error".to_string(),
+        passed: false,
+        failure_classes: vec![failure_class.to_string()],
+        judge_notes: vec![note.to_string()],
+        command_trace,
+    }
+}
+
+/// 限制诊断摘要长度。
+fn bound_text(value: &str) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text: String = compact.chars().take(512).collect();
+    if compact.chars().count() > 512 {
+        format!("{text}…")
+    } else {
+        text
+    }
+}
+
+/// 生成不依赖额外时间库的稳定运行时间标识。
+fn current_run_timestamp() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    format!("unix:{seconds}")
 }

@@ -212,19 +212,19 @@ git commit -m "feat: add m58 judge and run report"
 - `run_fixture_llm_cases(cases: &[EvalCase], adapter: &mut dyn ModelAdapter, config: &RunnerConfig) -> anyhow::Result<RunReport>`
 - `RunnerConfig { binary_path, skill_path, project_root, output_dir, provider, model_id, cnb_build_id }`
 
-- [ ] **Step 1: 构造 bootstrap message**
+- [x] **Step 1: 构造 bootstrap message**
 
 读取仓库根目录 `SKILL.md`，追加固定评测协议、JSON command/final schema、当前 case question。由于 CNB 当前公开消息契约只声明 `user`/`assistant`，bootstrap 以第一条 `user` message 发送；不得读源码、历史运行记录或知识库。
 
-- [ ] **Step 2: 实现多轮 loop**
+- [x] **Step 2: 实现多轮 loop**
 
 每个 case 新建 message history；assistant 返回 command 时校验、执行 CLI、收集 stdout/diagnostics，再以 `user` 消息回传仅允许的 CLI JSON 输出；assistant 返回 final 时交给 judge。空 stdout、非 JSON stdout、HTTP failure、协议 failure 都进入 case error，不伪造业务答案。
 
-- [ ] **Step 3: 添加 fake end-to-end 测试**
+- [x] **Step 3: 添加 fake end-to-end 测试**
 
 用三个预置 fake case 验证：模型先 command 后 final；多轮 history 正确；CLI stdout 被回传；错误命令被阻止；answer judge 与 command trace 汇总到 RunReport。
 
-- [ ] **Step 4: 添加 ignored CNB live test**
+- [x] **Step 4: 添加 ignored CNB live test**
 
 `#[test] #[ignore] fn test_m58_cnb_fixture_llm_baseline()` 要求 `CNB_TOKEN`、`M58_CNB_REPO`、`M58_CNB_MODEL` 和 release binary 存在；顺序运行三个 `fixture_llm` case，写入 `target/m58-ai-eval/`，打印不含 prompt/token 的结构化摘要。
 

@@ -62,6 +62,7 @@
 | `ignored_diagnostic` | 存在诊断但回答没有保守表达 |
 | `over_read_details` | 请求 `--detail`、`--budget full` 或未允许的细节路径 |
 | `needs_human_review` | case assertion schema 或自动证据规则无法确定 |
+| `runner_error` | adapter、CLI 或 case workspace 的运行时失败，未伪造业务答案 |
 
 一次 case 可以有多个失败分类；`pass_rate` 只按 `passed` 计数，不按失败分类去重。
 

@@ -5,8 +5,9 @@ mod m58_ai_eval;
 
 use m58_ai_eval::{
     AgentTurn, CaseReport, ChatMessage, ChatRequest, CnbChatAdapter, CommandPolicy, CommandRequest,
-    CommandTrace, FakeModelAdapter, JudgeResult, ModelAdapter, RunReport, fixture_llm_cases,
-    judge_answer, load_eval_cases, parse_agent_turn, redact_secret, write_run_report,
+    CommandTrace, FakeModelAdapter, JudgeResult, ModelAdapter, RunReport, RunnerConfig,
+    fixture_llm_cases, judge_answer, load_eval_cases, parse_agent_turn, redact_secret, run_case,
+    run_fixture_llm_cases, write_run_report,
 };
 use std::ffi::OsString;
 use std::io::{Read, Write};
@@ -423,6 +424,184 @@ fn test_m58_run_report_is_structured_and_redacted() {
     assert_eq!(markdown.contains("answer"), false);
 
     std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 验证 fake runner 真实执行 CLI、多轮回传 stdout，并完成三个 fixture baseline case。
+#[test]
+fn test_m58_fake_runner_executes_fixture_llm_cases() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let selected = fixture_llm_cases(&cases);
+    let output_dir = unique_test_output_dir("m58-fake-runner");
+    let config = fixture_runner_config(output_dir.clone());
+    let responses = build_fake_case_responses(&selected);
+    let mut adapter = FakeModelAdapter::from_responses(responses);
+
+    let report = run_fixture_llm_cases(&selected, &mut adapter, &config).unwrap();
+    assert_eq!(report.cases.len(), 3);
+    assert_eq!(report.pass_rate, 1.0);
+    assert_eq!(report.cases.iter().all(|case| case.status == "pass"), true);
+    assert_eq!(adapter.requests().len(), 6);
+    assert_eq!(adapter.requests()[0].messages[0].role, "user");
+    assert_eq!(
+        adapter.requests()[0].messages[0]
+            .content
+            .contains("SKILL.md"),
+        true
+    );
+    assert_eq!(
+        adapter.requests()[0].messages[0]
+            .content
+            .contains(&selected[0].question),
+        true
+    );
+    for request in adapter.requests().iter().skip(1).step_by(2) {
+        assert_eq!(request.messages.len(), 3);
+        assert_eq!(request.messages[1].role, "assistant");
+        assert_eq!(request.messages[2].role, "user");
+        assert_eq!(request.messages[2].content.starts_with('{'), true);
+        let _: serde_json::Value = serde_json::from_str(&request.messages[2].content).unwrap();
+    }
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 验证模型提出不在 plan 中的命令时 runner 不启动 CLI 并生成 wrong_command。
+#[test]
+fn test_m58_runner_blocks_command_outside_plan() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let output_dir = unique_test_output_dir("m58-blocked-command");
+    let config = fixture_runner_config(output_dir.clone());
+    let response = serde_json::json!({
+        "kind": "command",
+        "command_kind": "--query-page-logic",
+        "target": "page:app/not-in-plan.spg",
+        "args": [],
+        "budget": null
+    });
+    let mut adapter = FakeModelAdapter::from_responses(vec![response.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.status, "error");
+    assert_eq!(report.passed, false);
+    assert_eq!(report.failure_classes, vec!["wrong_command".to_string()]);
+    assert_eq!(report.command_trace.len(), 1);
+    assert_eq!(report.command_trace[0].accepted, false);
+    assert_eq!(report.command_trace[0].plan_step_index, None);
+    assert_eq!(adapter.requests().len(), 1);
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// CNB pipeline 中手动/定时执行的真实 fixture baseline；普通 CI 不运行。
+#[test]
+#[ignore = "requires CNB_TOKEN, M58_CNB_REPO, M58_CNB_MODEL and release binary"]
+fn test_m58_cnb_fixture_llm_baseline() {
+    let binary_path = PathBuf::from(
+        std::env::var_os("M58_METADATA_CHECKER_BIN")
+            .expect("M58_METADATA_CHECKER_BIN must point to release binary"),
+    );
+    assert_eq!(binary_path.is_file(), true);
+    let model_id = std::env::var("M58_CNB_MODEL").expect("M58_CNB_MODEL is required");
+    let output_dir = std::env::var_os("M58_AI_EVAL_OUTPUT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("target/m58-ai-eval"));
+    let config = RunnerConfig {
+        binary_path,
+        skill_path: PathBuf::from("SKILL.md"),
+        project_root: PathBuf::from("tests/fixtures/test_project"),
+        output_dir: output_dir.clone(),
+        provider: "cnb-ai-chat".to_string(),
+        model_id,
+        cnb_build_id: std::env::var("CNB_BUILD_ID").ok(),
+    };
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let mut adapter = CnbChatAdapter::from_env().unwrap();
+    let report = run_fixture_llm_cases(&cases, &mut adapter, &config).unwrap();
+    write_run_report(
+        &report,
+        &output_dir.join("run.json"),
+        &output_dir.join("run.md"),
+    )
+    .unwrap();
+    assert_eq!(report.cases.len(), 3);
+    println!(
+        "{}",
+        serde_json::json!({
+            "provider": report.provider,
+            "model_id": report.model_id,
+            "case_count": report.cases.len(),
+            "pass_rate": report.pass_rate,
+            "failure_classes": report.failure_classes,
+        })
+    );
+}
+
+/// 创建使用当前 integration-test binary 的 runner 配置。
+fn fixture_runner_config(output_dir: PathBuf) -> RunnerConfig {
+    let binary_path = std::env::var_os("CARGO_BIN_EXE_metadata-checker")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("target/debug/metadata-checker"));
+    RunnerConfig {
+        binary_path,
+        skill_path: PathBuf::from("SKILL.md"),
+        project_root: PathBuf::from("tests/fixtures/test_project"),
+        output_dir,
+        provider: "fake".to_string(),
+        model_id: "fake-model".to_string(),
+        cnb_build_id: None,
+    }
+}
+
+/// 为每个 fixture case 构造 command -> final 的确定性 fake 响应。
+fn build_fake_case_responses(cases: &[m58_ai_eval::EvalCase]) -> Vec<String> {
+    let mut responses = Vec::new();
+    for case in cases {
+        let step = &case.value["minimal_command_plan"][0];
+        responses.push(
+            serde_json::json!({
+                "kind": "command",
+                "command_kind": step["command_kind"],
+                "target": step["target"],
+                "args": step["args"],
+                "budget": step["budget"]
+            })
+            .to_string(),
+        );
+        let required = case.value["answer_assertions"]["must_include"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>()
+            .join("、");
+        responses.push(
+            serde_json::json!({
+                "kind": "final",
+                "answer": format!("依据 summary：{required}。可能存在诊断不完整。")
+            })
+            .to_string(),
+        );
+    }
+    responses
+}
+
+/// 为每个测试 run 生成不冲突的临时输出目录。
+fn unique_test_output_dir(prefix: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
 }
 
 /// 构造一个已通过 plan、只读取 summary 的命令轨迹。
