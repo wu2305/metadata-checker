@@ -21,8 +21,8 @@
 
 | Phase | 焦点 | 状态 |
 |-------|------|------|
-| 1 | PersistReport、tick+Backoff、stdio 真机冒烟；**SKILL/`--help`/README**；**RefreshScope 自动探索+申明**；**凭证失效/重登/换绑**；M46 边界 | in progress |
-| 2 | Dense/Facts/PageDep 增量更新 + 规模曲线 | pending |
+| 1 | PersistReport、tick+Backoff、stdio 真机冒烟；**SKILL/`--help`/README**；**RefreshScope 自动探索+申明**；**凭证失效/重登/换绑**；M46 边界 | done |
+| 2 | Dense/Facts/PageDep 增量更新 + 规模曲线 | implemented; real-project baseline pending |
 | 3 | LongLived 内存优先 persist（阈值 100 + 10 轮兜底）、失败恢复 e2e | pending |
 
 ## 进度约定
@@ -60,7 +60,8 @@
 | M57-4 DiffRefresh scope TDD | done（`f0b03f1`） |
 | M57-4 DiffRefresh scope code | done（`c3f9fda`） |
 | Phase 1 rebind TDD | done（`3eed1af`） |
-| M57-5 Phase 2 incremental read model TDD | in progress |
+| M57-5 Phase 2 incremental read model TDD | done（`4eacb64`） |
+| M57-5 Phase 2 incremental read model code | done（`c80e95c`） |
 | Phase 1–3 代码 | pending |
 
 ## 设计决策（2026-07-24）
@@ -84,5 +85,9 @@
 - M57-3：专项认证测试 2 passed；stdio 全套 36 passed、1 ignored；M57-0/M57-1/M57-2 影响面测试继续通过。
 - M57-4：主 `DiffRefreshReport`、stdio、one-shot、tick 共享 `RefreshScope`；无局部 selector 时统一输出 `project/fallback/applied=false`，scope contract 2 passed，stdio 全套回归仍为 36 passed、1 ignored。
 - Phase 1 rebind：同一 session 两次绑定使用不同凭据，manifest 不保存 password/token/cookie；测试 1 passed。
-- M57-5：已先写 Dense/Facts/PageDep 增量 read-model 等价与 1/10/100 dirty curve TDD；当前红灯等待 `ReadModelUpdateMode` 和 runtime 增量路径实现。
-- 真实项目 stdio 冒烟：已尝试运行既有 ignored 用例；首次索引报告 `1329 files / 78127 dirty`，超过约 5 分钟未产生终态，已中止，暂不计入通过证据。
+- Phase 1 真实项目 graphdb：使用独立路径 `/private/tmp/m57-xiaoshouyi.graphdb` 完成 `1329 files / 78127 dirty / 0 deleted` 构建，避免与既有 graphdb 争用。
+- Phase 1 真实项目 stdio：复用该 graphdb 启动 LongLived，报告 `78127 nodes, read_model=true, ready`；`m57-r1 query_model` 与 `m57-r2 query_page_logic` 均返回 `ok=true`，随后结束进程，计入通过证据。
+- M57-5：`DenseGraphSnapshot`、`MaterializedAvailabilityFactsIndex`、`PageDependencyIndex` 已按 `dirty ∪ deleted` 接入 replacement；稳定 node set 走 incremental，新增/删除统一 full fallback，更新模式由 `ReadModelUpdateMode` 标记。
+- M57-5 等价与曲线：`m57_incremental_read_model_tests` 3 passed；fixture full rebuild 样本 `7 ms`，增量 `dirty=1/10/100` 样本分别为 `0/2/5 ms`（wall `1/3/7 ms`）。
+- M57-5 针对性回归：M54 编排器 `5 passed`、M55 PageDep `5 passed`、M53 Facts `1 passed`、Dense `1 passed`、runtime `19 passed/1 ignored`、rebind `1 passed`。
+- Phase 2 尚未把 fixture 曲线冒充真实项目性能结论；后续需在专用 real graphdb 上补 1/10/100 dirty 的 release 基线，再决定 Phase 2 是否关闭。
