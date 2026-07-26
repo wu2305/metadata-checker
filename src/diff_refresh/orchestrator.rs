@@ -15,13 +15,15 @@
 //!   旧 runtime 保持可用；re-warm 是 best-effort，失败只记入 `warm_failures`。
 
 use std::path::PathBuf;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
 
 use super::mirror::apply_changeset_to_mirror;
 use super::source::MetaFilesChangeSource;
+use super::tick::run_tick_loop_with_hooks;
 use super::types::{DiffRefreshCheckpoint, MetaFilesWatermark};
+use crate::diff_refresh::DiffRefreshTickReport;
 use crate::graph_store::PersistReport;
 use crate::runtime::{BatchWarmReport, GraphRuntime};
 use crate::scanner::indexer::ProjectIndexer;
@@ -305,6 +307,29 @@ impl DiffRefreshOrchestrator {
             timing,
             Some(persist_report),
         ))
+    }
+
+    /// 使用标准线程 sleep 执行一次限流 Tick 循环。
+    pub fn run_tick_loop(&mut self, max_attempts: usize) -> Result<DiffRefreshTickReport> {
+        self.run_tick_loop_with_sleep(max_attempts, |delay_secs| {
+            std::thread::sleep(Duration::from_secs(delay_secs))
+        })
+    }
+
+    /// 使用可注入 sleep 的 Tick 循环，便于 TDD 覆盖退避时序。
+    pub fn run_tick_loop_with_sleep<F>(
+        &mut self,
+        max_attempts: usize,
+        mut sleep_fn: F,
+    ) -> Result<DiffRefreshTickReport>
+    where
+        F: FnMut(u64),
+    {
+        run_tick_loop_with_hooks(
+            max_attempts,
+            || self.refresh_once(),
+            |delay_secs| sleep_fn(delay_secs),
+        )
     }
 
     /// 收集 re-warm 目标：当前 warm cache 中受影响页面的 (page_id, budget)。
