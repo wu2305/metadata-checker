@@ -34,7 +34,7 @@
 - `EvalTier::{FixtureStructural, FixtureLlm, RealManual}`
 - `fixture_llm_cases(cases: &[EvalCase]) -> Vec<EvalCase>`
 
-- [ ] **Step 1: 为现有 case 明确 tier**
+- [x] **Step 1: 为现有 case 明确 tier**
 
 将以下三个 fixture case 标记为 `"tier": "fixture_llm"`，作为首个真实 baseline：
 
@@ -46,11 +46,11 @@ field_lineage_model1_name
 
 其余非真实项目 case 标记为 `fixture_structural`，`requires_real_project=true` 的 case 标记为 `real_manual`。不改变既有字段或断言内容。
 
-- [ ] **Step 2: 实现向后兼容 loader**
+- [x] **Step 2: 实现向后兼容 loader**
 
 `load_eval_cases` 读取 `cases` 数组；显式读取 `tier`，缺失时按 `requires_real_project` 回退到 `real_manual`，否则回退到 `fixture_structural`。未知 tier 直接返回带 case_id 的错误。
 
-- [ ] **Step 3: 添加 tier 契约测试**
+- [x] **Step 3: 添加 tier 契约测试**
 
 `tests/m58_cnb_ai_runner_tests.rs` 至少包含：
 
@@ -66,7 +66,7 @@ fn test_m58_fixture_llm_has_three_active_cases() {
 
 同时验证旧 schema 中缺失 `tier` 的临时 JSON 会按默认规则加载。
 
-- [ ] **Step 4: 运行验证并提交**
+- [x] **Step 4: 运行验证并提交**
 
 ```bash
 cargo test --features cli-local --test m58_cnb_ai_runner_tests tier
@@ -88,10 +88,10 @@ Expected: tier tests pass; no production source or release binary changes.
 - `AgentTurn::{Command(CommandRequest), Final(String)}`
 - `parse_agent_turn(content: &str) -> anyhow::Result<AgentTurn>`
 - `CommandPolicy::from_case(case: &EvalCase, project_dir: PathBuf, graph_db_path: PathBuf, binary_path: PathBuf) -> anyhow::Result<CommandPolicy>`
-- `CommandPolicy::validate(&self, request: &CommandRequest, used_count: usize) -> anyhow::Result<ValidatedCommand>`
+- `CommandPolicy::validate(&self, request: &CommandRequest, used_steps: &[usize]) -> anyhow::Result<ValidatedCommand>`
 - `ValidatedCommand::argv(&self) -> Vec<OsString>`
 
-- [ ] **Step 1: 定义严格 envelope**
+- [x] **Step 1: 定义严格 envelope**
 
 仅接受以下两个 JSON 形态，拒绝未知字段、额外 JSON、空字符串和非 object 内容：
 
@@ -102,11 +102,11 @@ Expected: tier tests pass; no production source or release binary changes.
 
 使用 `#[serde(deny_unknown_fields)]` 的内部 payload；模型不能在 JSON 中提供 `project_dir`、`graph_db_path`、`binary_path`、环境变量或 shell 字符串。
 
-- [ ] **Step 2: 精确匹配 minimal_command_plan**
+- [x] **Step 2: 精确匹配 minimal_command_plan**
 
 `CommandPolicy` 将 case 的 `minimal_command_plan` 转成允许集合。命令 kind、target、args、budget 必须与某个尚未使用的 plan step 一致；超过 `max_command_count`、重复 step、未知 target 或未知预算返回 protocol diagnostic。
 
-- [ ] **Step 3: 生成无 shell CLI argv**
+- [x] **Step 3: 生成无 shell CLI argv**
 
 project 命令的 argv 顺序固定为：
 
@@ -116,7 +116,7 @@ metadata-checker --non-human --project-dir <fixed-project-dir> --graph-db-path <
 
 single-file 命令只使用 fixture 内允许的 `.spg` / `.tbl` 路径；所有参数通过 `Command::arg` 传递。拒绝 `;`, `&&`, `||`, backtick、`$(` 等 shell 元字符只是额外防线，真正安全边界是“不调用 shell + 精确 plan 匹配”。
 
-- [ ] **Step 4: 添加协议与安全测试并提交**
+- [x] **Step 4: 添加协议与安全测试并提交**
 
 覆盖 valid command/final、unknown field、malformed JSON、target 越权、project-dir 覆盖、graphdb 覆盖、shell payload、超出 max command count 和重复 plan step。
 
