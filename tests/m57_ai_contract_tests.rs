@@ -36,5 +36,8 @@ fn m57_diff_refresh_report_has_machine_contract_fields() {
     assert_eq!(value["schema_version"].as_str(), Some("1.0"));
     assert_eq!(value["kind"].as_str(), Some("DiffRefresh"));
     assert_eq!(value["persist_report"]["dirty_nodes"].as_u64(), Some(1));
-    assert_eq!(value["persist_report"]["full_rewrite"].as_bool(), Some(false));
+    assert_eq!(
+        value["persist_report"]["full_rewrite"].as_bool(),
+        Some(false)
+    );
 }

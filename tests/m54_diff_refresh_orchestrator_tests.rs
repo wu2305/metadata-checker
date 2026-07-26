@@ -452,6 +452,10 @@ fn m54_diff_refresh_orchestrator_empty_changeset_only_updates_last_poll_at() {
         Some(seeded),
         "checkpoint must not advance"
     );
+    assert_eq!(
+        report.persist_report, None,
+        "an empty poll with an existing checkpoint must not rewrite the graph"
+    );
 
     // graph 与 checkpoint 均未写：重开后保持一致
     let reopened = GraphDB::open(&db_path).expect("reopen graph");

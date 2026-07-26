@@ -191,26 +191,23 @@ impl DiffRefreshOrchestrator {
                 .map(|model| model.page_dependency_index.coverage())
                 .unwrap_or(crate::query::PageDependencyIndexCoverage::Partial);
 
-            // 首次 bootstrap 后空结果：持久化 checkpoint-only commit
-            // 使下一轮走 poll 而非重新 bootstrap；有 checkpoint 时也补充真实 persist_report。
-            let file_states = self.runtime.graph.load_file_states().unwrap_or_default();
-            let stage = Instant::now();
-            let checkpoint = Some(
-                current_checkpoint
-                    .clone()
-                    .unwrap_or_else(|| changeset.next_watermark.clone().into()),
-            );
-            let persist_report = self
-                .runtime
-                .graph
-                .persist_with_checkpoint(
-                    &file_states,
-                    checkpoint
-                        .as_ref()
-                        .map(|value| value as &DiffRefreshCheckpoint),
-                )
-                .context("persist bootstrap checkpoint")?;
-            timing.commit_ms = stage.elapsed().as_millis();
+            // 首次 bootstrap 后空结果：持久化 checkpoint-only commit，
+            // 使下一轮走 poll 而非重新 bootstrap；已有 checkpoint 的空 poll 不写盘。
+            let (checkpoint, persist_report) = if let Some(checkpoint) = current_checkpoint {
+                (Some(checkpoint), None)
+            } else {
+                let bootstrap_checkpoint: DiffRefreshCheckpoint =
+                    changeset.next_watermark.clone().into();
+                let file_states = self.runtime.graph.load_file_states().unwrap_or_default();
+                let stage = Instant::now();
+                let persist_report = self
+                    .runtime
+                    .graph
+                    .persist_with_checkpoint(&file_states, Some(&bootstrap_checkpoint))
+                    .context("persist bootstrap checkpoint")?;
+                timing.commit_ms = stage.elapsed().as_millis();
+                (Some(bootstrap_checkpoint), Some(persist_report))
+            };
 
             return Ok(Self::new_machine_report(
                 0,
@@ -220,7 +217,7 @@ impl DiffRefreshOrchestrator {
                 last_poll_at,
                 coverage,
                 timing,
-                Some(persist_report),
+                persist_report,
             ));
         }
 
