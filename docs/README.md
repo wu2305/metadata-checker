@@ -22,7 +22,7 @@
 | M28–M30 | stdio / FC | planned | [INDEX.md](milestones/INDEX.md) |
 | M46 | browser（CLI 包装；depends M57） | planned | [archive](archive/roadmap/m46-local-cli-remote-metadata-index-and.md) |
 | M47–M48 | browser | planned | [INDEX.md](milestones/INDEX.md) |
-| M58 | ai-eval（理解力评测闭环） | planned（spec draft） | [m58](milestones/ai-eval/m58-cheap-model-comprehension-eval.md) / [design](specs/2026-07-17-cheap-model-comprehension-eval-design.md) |
+| M58 | ai-eval（理解力评测闭环） | active（CNB AI Chat runner） | [m58](milestones/ai-eval/m58-cheap-model-comprehension-eval.md) / [design](specs/2026-07-17-cheap-model-comprehension-eval-design.md) / [plan](plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md) |
 | M59 | formats（rpt·dash 后推） | planned | [INDEX.md](milestones/INDEX.md) |
 
 完整表见 [milestones/INDEX.md](milestones/INDEX.md)。

@@ -1,8 +1,8 @@
 # M58：廉价模型理解力评测
 
-> 状态：**planned**（spec draft 已提交评审，`approved` 后转 active）  
+> 状态：**active**（spec/plan approved；真实 LLM baseline 通过 CNB API trigger 执行）
 > Spec：[2026-07-17-cheap-model-comprehension-eval-design.md](../../specs/2026-07-17-cheap-model-comprehension-eval-design.md)  
-> Plan：（spec 批准后补，多 PR 工作须有 approved plan）
+> Plan：[2026-07-27-m58-cnb-ai-chat-runner-plan.md](../../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)
 
 ## 目标
 
@@ -37,14 +37,15 @@
 
 | 项 | 状态 |
 |----|------|
-| Spec（draft）登记 | done（本文档 PR） |
-| Spec 批准 | pending |
-| Plan | pending |
-| AnswerJudge + 单测 | pending |
-| ModelAdapter + 命令白名单执行 | pending |
-| RunReport schema + 归档 | pending |
+| Spec（CNB AI Chat 版本）登记 | done |
+| Spec 批准 | done（2026-07-27） |
+| Plan | done（2026-07-27，runner 限定 CI tester） |
+| tier loader + fixture 分层 | done |
+| AnswerJudge + 单测 | done |
+| ModelAdapter + 命令白名单执行 | done |
+| RunReport schema + 归档 | done |
 | 基线 run（≥3 fixture_llm case） | pending |
 
 ## 验收记录
 
-（实现后填写：基线 run model_id / pass 率 / 失败分类；judge 与人工判分一致性；密钥脱敏测试）
+本地 fake runner 已覆盖 3 个 `fixture_llm` case，命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport 和 token 脱敏测试通过。真实 CNB baseline 尚未执行，待 `api_trigger_m58_llm` 注入 `CNB_TOKEN`、`M58_CNB_REPO`、`M58_CNB_MODEL` 后记录 model/build、pass 率和失败分类。

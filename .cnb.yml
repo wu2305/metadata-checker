@@ -483,8 +483,48 @@
   - *full_criterion_redb_ci
   - *full_criterion_boundary_ci
 
+.m58_cnb_llm_ci: &m58_cnb_llm_ci
+  name: m58-cnb-llm-eval
+  runner:
+    <<: *runner_amd64_4
+  docker:
+    <<: *browser_wasm_ci_image
+    volumes:
+      - /usr/local/cargo/registry
+      - /usr/local/cargo/git
+      - ./target/cnb/m58-ai-eval-build
+      - ./target/m58-ai-eval
+  env:
+    CARGO_TARGET_DIR: target/cnb/m58-ai-eval-build
+    M58_AI_EVAL_OUTPUT_DIR: target/m58-ai-eval
+  stages:
+    - name: toolchain
+      script: |
+        rustc --version
+        cargo --version
+    - name: build release binary
+      script: cargo build --release --features cli-local --bin metadata-checker
+    - name: run CNB fixture baseline
+      script: |
+        test -n "${CNB_TOKEN:-}"
+        test -n "${M58_CNB_REPO:-}"
+        test -n "${M58_CNB_MODEL:-}"
+        test -f target/cnb/m58-ai-eval-build/release/metadata-checker
+        export M58_METADATA_CHECKER_BIN="$PWD/target/cnb/m58-ai-eval-build/release/metadata-checker"
+        cargo test --features cli-local --test m58_cnb_ai_runner_tests -- --ignored --nocapture
+  endStages:
+    - name: report structured summary
+      script: |
+        test -s target/m58-ai-eval/run.json
+        test -s target/m58-ai-eval/run.md
+        echo "M58 RunReport: target/m58-ai-eval/run.json"
+        grep -E '"(provider|model_id|cnb_build_id|pass_rate|failure_classes|command_trace_stats)"' \
+          target/m58-ai-eval/run.json
+
 main:
   push: *main_authoritative_ci
+  api_trigger_m58_llm:
+    - *m58_cnb_llm_ci
 
 "$":
   vscode:

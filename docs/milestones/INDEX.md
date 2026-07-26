@@ -64,7 +64,7 @@ CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`re
 
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
-| M58 | 廉价模型理解力评测 | planned | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（draft） | | M22 |
+| M58 | 廉价模型理解力评测 | active | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved；CNB AI Chat） | [plan](../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（approved） | M22 |
 | M59 | Dashboard / Report 格式支持 | planned | formats | — | （待建） | | |
 
 > 原登记为 M56 的 Dashboard/Report（rpt/dash）已 **后推为 M59**。  

@@ -243,7 +243,7 @@ git commit -m "feat: add m58 fixture runner"
 - Modify: `docs/milestones/ai-eval/m58-cheap-model-comprehension-eval.md`
 - Modify: `docs/reference/ai-eval-run-template.md`
 
-- [ ] **Step 1: 添加 `api_trigger_m58_llm`**
+- [x] **Step 1: 添加 `api_trigger_m58_llm`**
 
 新增非 PR 事件 pipeline：使用现有 Rust/CNB image，构建 `target/release/metadata-checker`，再执行：
 
@@ -257,15 +257,15 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests -- --ignored --no
 
 流水线不导出 token，不使用 `sandbox: true`（CNB AI Chat API 要求在 pipeline 内使用 `CNB_TOKEN`），不把 live run 加到 `rust-ci` PR gate。
 
-- [ ] **Step 2: 固定 report artifact 边界**
+- [x] **Step 2: 固定 report artifact 边界**
 
 只打印 summary、RunReport 路径和 CNB build 标识；原始模型回答不写入 Git。首次人工确认的结构化结果才复制到 `docs/ai-eval-runs/`。
 
-- [ ] **Step 3: 更新 journal 与运行模板**
+- [x] **Step 3: 更新 journal 与运行模板**
 
 将权威状态从 `planned` 更新为 `active`，把 `Plan` 链接到本计划；运行模板补充 `provider=cnb-ai-chat`、`cnb_build_id`、`protocol=json-command`、`model_id` 和 `case_filter` 字段，仍保持 LLM tier 非阻塞。
 
-- [ ] **Step 4: 提交 pipeline/docs**
+- [x] **Step 4: 提交 pipeline/docs**
 
 ```bash
 git add .cnb.yml docs/milestones/ai-eval/m58-cheap-model-comprehension-eval.md docs/reference/ai-eval-run-template.md
