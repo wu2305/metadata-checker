@@ -409,7 +409,7 @@ fn print_session_error(code: &str, message: impl Into<String>) -> Result<()> {
     let safe_message = sanitize_session_error_message(&message.into());
     println!(
         "{}",
-        serde_json::to_string_pretty(&serde_json::json!({
+        serde_json::to_string(&serde_json::json!({
             "ok": false,
             "error": {
                 "code": code,
@@ -609,20 +609,12 @@ fn main() -> Result<()> {
         );
         match orchestrator.refresh_once() {
             Ok(report) => {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&serde_json::json!({
-                        "ok": true,
-                        "session_id": session_id,
-                        "change_count": report.change_count,
-                        "invalidated_pages": report.invalidated_pages,
-                        "warm_failures": report.warm_failures,
-                        "checkpoint": report.checkpoint,
-                        "last_poll_at": report.last_poll_at,
-                        "page_dep_index_coverage": report.page_dep_index_coverage,
-                        "timing": report.timing,
-                    }))?
-                );
+                let mut value = serde_json::to_value(&report)?;
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("ok".to_string(), serde_json::json!(true));
+                    obj.insert("session_id".to_string(), serde_json::json!(session_id));
+                }
+                println!("{}", serde_json::to_string(&value)?);
             }
             Err(err) => {
                 return print_session_error(

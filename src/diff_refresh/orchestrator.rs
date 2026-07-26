@@ -22,7 +22,7 @@ use anyhow::{Context, Result};
 use super::mirror::apply_changeset_to_mirror;
 use super::source::MetaFilesChangeSource;
 use super::types::{DiffRefreshCheckpoint, MetaFilesWatermark};
-use crate::graph_store::IndexStateStore;
+use crate::graph_store::PersistReport;
 use crate::runtime::{BatchWarmReport, GraphRuntime};
 use crate::scanner::indexer::ProjectIndexer;
 use crate::session::SessionManager;
@@ -45,10 +45,16 @@ pub struct DiffRefreshTiming {
 /// 一轮 diff refresh 的结果报告。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct DiffRefreshReport {
+    /// 稳定机器契约版本号。
+    pub schema_version: String,
+    /// 稳定机器契约类型名。
+    pub kind: String,
     /// 本轮消费的变更事件数（等于 ChangeSet.change_count）。
     pub change_count: usize,
     /// 本轮失效的页面（旧、新 PageDependencyIndex 并集，已排序）。
     pub invalidated_pages: Vec<String>,
+    /// 持久化统计，空提交/仅写 checkpoint 时也应返回真实值。
+    pub persist_report: Option<PersistReport>,
     /// best-effort re-warm 失败的页面（来自 BatchWarmReport.pages[*].success，
     /// 不得仅凭外层 Result::Ok 判定全部成功）。
     pub warm_failures: Vec<String>,
@@ -79,6 +85,30 @@ pub struct DiffRefreshOrchestrator {
 }
 
 impl DiffRefreshOrchestrator {
+    fn new_machine_report(
+        change_count: usize,
+        invalidated_pages: Vec<String>,
+        warm_failures: Vec<String>,
+        checkpoint: Option<DiffRefreshCheckpoint>,
+        last_poll_at: u64,
+        page_dep_index_coverage: crate::query::PageDependencyIndexCoverage,
+        timing: DiffRefreshTiming,
+        persist_report: Option<PersistReport>,
+    ) -> DiffRefreshReport {
+        DiffRefreshReport {
+            schema_version: "1.0".to_string(),
+            kind: "DiffRefresh".to_string(),
+            change_count,
+            invalidated_pages,
+            persist_report,
+            warm_failures,
+            checkpoint,
+            last_poll_at,
+            page_dep_index_coverage,
+            timing,
+        }
+    }
+
     /// 组装编排器；graphdb 路径取自 manifest，调用方需保证
     /// `runtime` 以 LongLived 模式加载同一 graphdb。
     pub fn new(
@@ -162,31 +192,36 @@ impl DiffRefreshOrchestrator {
                 .unwrap_or(crate::query::PageDependencyIndexCoverage::Partial);
 
             // 首次 bootstrap 后空结果：持久化 checkpoint-only commit
-            // 使下一轮走 poll 而非重新 bootstrap
-            let checkpoint = if current_checkpoint.is_none() {
-                let bootstrap_checkpoint: DiffRefreshCheckpoint =
-                    changeset.next_watermark.clone().into();
-                let stage = Instant::now();
-                let file_states = self.runtime.graph.load_file_states().unwrap_or_default();
-                self.runtime
-                    .graph
-                    .persist_with_checkpoint(&file_states, Some(&bootstrap_checkpoint))
-                    .context("persist bootstrap checkpoint")?;
-                timing.commit_ms = stage.elapsed().as_millis();
-                Some(bootstrap_checkpoint)
-            } else {
+            // 使下一轮走 poll 而非重新 bootstrap；有 checkpoint 时也补充真实 persist_report。
+            let file_states = self.runtime.graph.load_file_states().unwrap_or_default();
+            let stage = Instant::now();
+            let checkpoint = Some(
                 current_checkpoint
-            };
+                    .clone()
+                    .unwrap_or_else(|| changeset.next_watermark.clone().into()),
+            );
+            let persist_report = self
+                .runtime
+                .graph
+                .persist_with_checkpoint(
+                    &file_states,
+                    checkpoint
+                        .as_ref()
+                        .map(|value| value as &DiffRefreshCheckpoint),
+                )
+                .context("persist bootstrap checkpoint")?;
+            timing.commit_ms = stage.elapsed().as_millis();
 
-            return Ok(DiffRefreshReport {
-                change_count: 0,
-                invalidated_pages: Vec::new(),
-                warm_failures: Vec::new(),
+            return Ok(Self::new_machine_report(
+                0,
+                Vec::new(),
+                Vec::new(),
                 checkpoint,
                 last_poll_at,
-                page_dep_index_coverage: coverage,
+                coverage,
                 timing,
-            });
+                Some(persist_report),
+            ));
         }
 
         // 3. mirror：失败则 checkpoint 不推进、旧 runtime 保持可用
@@ -246,7 +281,8 @@ impl DiffRefreshOrchestrator {
         let mut candidate = prepared.graph;
         let mut commit = prepared.commit;
         commit.checkpoint = Some(next_checkpoint.clone());
-        IndexStateStore::persist_index(&mut candidate, commit)
+        let persist_report = candidate
+            .persist_commit(&commit)
             .context("persist graph and checkpoint commit")?;
         timing.commit_ms = stage.elapsed().as_millis();
 
@@ -262,15 +298,16 @@ impl DiffRefreshOrchestrator {
         let warm_failures = self.rewarm_best_effort(&rewarm_targets);
         timing.rewarm_ms = stage.elapsed().as_millis();
 
-        Ok(DiffRefreshReport {
-            change_count: changeset.change_count,
+        Ok(Self::new_machine_report(
+            changeset.change_count,
             invalidated_pages,
             warm_failures,
-            checkpoint: Some(next_checkpoint),
+            Some(next_checkpoint),
             last_poll_at,
             page_dep_index_coverage,
             timing,
-        })
+            Some(persist_report),
+        ))
     }
 
     /// 收集 re-warm 目标：当前 warm cache 中受影响页面的 (page_id, budget)。
