@@ -3,11 +3,10 @@
 //! `DiffRefreshOrchestrator` 把 Tasks 2-6 的组件串成一轮原子刷新：
 //! load checkpoint →（缺失则 `bootstrap`，否则 `poll`）→ mirror →
 //! prepare candidate graph → prepare replacement read model →
-//! persist graph+checkpoint（单 write transaction）→ install replacement →
-//! best-effort batch warm。
+//! persist（按运行时策略）+ install replacement → best-effort batch warm。
 //!
 //! 生命周期假设：
-//! - orchestrator 独占持有 `GraphRuntime`（LongLived）与内存 `SessionManifest`；
+//! - orchestrator 独占持有 `GraphRuntime` 与内存 `SessionManifest`；
 //!   manifest 变更后通过 `SessionManager::write_manifest` 落盘。
 //! - `source` / `provider` 以 trait object 注入；fixture 与 BI 真源共用同一编排。
 //! - 单轮语义为「一次 tick」：退避/定时循环由上层（M55）负责。
@@ -88,6 +87,15 @@ pub struct LongLivedPersistPolicy {
     pub max_pending_rounds: usize,
 }
 
+/// 差量刷新持久化执行策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffRefreshPersistMode {
+    /// 延迟持久化：先 install replacement，按 threshold/round 聚合提交。
+    Deferred,
+    /// 同步持久化：先 persist checkpoint，成功后 install replacement。
+    Synchronous,
+}
+
 impl Default for LongLivedPersistPolicy {
     fn default() -> Self {
         Self {
@@ -112,6 +120,7 @@ pub struct DiffRefreshOrchestrator {
     provider: Box<dyn RemoteSessionProvider>,
     runtime: GraphRuntime,
     persist_policy: LongLivedPersistPolicy,
+    persist_mode: DiffRefreshPersistMode,
     pending_checkpoint: Option<DiffRefreshCheckpoint>,
     pending_dirty_node_ids: Vec<String>,
     pending_commit: Option<IndexCommit>,
@@ -170,6 +179,11 @@ impl DiffRefreshOrchestrator {
             provider,
             runtime,
             persist_policy: LongLivedPersistPolicy::default(),
+            persist_mode: if runtime.runtime_mode == RuntimeMode::OneShot {
+                DiffRefreshPersistMode::Synchronous
+            } else {
+                DiffRefreshPersistMode::Deferred
+            },
             pending_checkpoint: None,
             pending_dirty_node_ids: Vec::new(),
             pending_commit: None,
@@ -187,6 +201,15 @@ impl DiffRefreshOrchestrator {
     /// 注入自定义持久化执行器（测试可覆盖）。
     pub fn set_persist_fn(&mut self, persist_fn: PersistFn) {
         self.persist_fn = persist_fn;
+    }
+
+    /// 显式设置单次命令同一次持久化：true 时先 persist 后 install。
+    pub fn set_one_shot_mode(&mut self, one_shot: bool) {
+        self.persist_mode = if one_shot {
+            DiffRefreshPersistMode::Synchronous
+        } else {
+            DiffRefreshPersistMode::Deferred
+        };
     }
 
     /// 配置长生命周期持久化策略，便于测试与调用方注入固定参数。
@@ -380,7 +403,7 @@ impl DiffRefreshOrchestrator {
         let invalidated_pages = replacement.invalidated_pages.clone();
         let page_dep_index_coverage = replacement.page_dep_index_coverage;
 
-        if self.runtime.runtime_mode == RuntimeMode::OneShot {
+        if self.persist_mode == DiffRefreshPersistMode::Synchronous {
             let mut stage = Instant::now();
             let report = candidate
                 .persist_commit(&commit)

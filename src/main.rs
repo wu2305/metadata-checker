@@ -582,8 +582,8 @@ fn main() -> Result<()> {
             }
         };
 
-        // one-shot：cold LongLived load（prepare_replacement 需要 read model；
-        // 无需跨轮 hot，初始无 warm cache 可保留）
+        // 以 LongLived 模式加载（prepare_replacement 需要 read model）；
+        // 但本次为 CLI one-shot，强制使用同步持久化，先 persist 后 install。
         let graph_db_path = std::path::PathBuf::from(&context.manifest.graph_db_path);
         let session_dir = session_manager.session_dir(session_id);
         let mirror_dir = metadata_checker::session::sync::project_mirror_root(&session_dir);
@@ -609,6 +609,7 @@ fn main() -> Result<()> {
             context.provider,
             runtime,
         );
+        orchestrator.set_one_shot_mode(true);
         match orchestrator.refresh_once() {
             Ok(report) => {
                 let mut value = serde_json::to_value(&report)?;
