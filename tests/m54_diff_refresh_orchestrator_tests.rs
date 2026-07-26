@@ -6,12 +6,13 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use anyhow::{Result, anyhow};
 
 use metadata_checker::diff_refresh::{
-    DiffRefreshCheckpoint, DiffRefreshOrchestrator, FixtureMetaFilesChangeSource, SourceCursor,
+    DiffRefreshCheckpoint, DiffRefreshOrchestrator, FixtureMetaFilesChangeSource,
+    LongLivedPersistPolicy, SourceCursor,
 };
 use metadata_checker::graph::GraphDB;
 use metadata_checker::graph_store::{IndexCommit, IndexStateStore};
@@ -721,4 +722,305 @@ fn m54_diff_refresh_orchestrator_warm_failure_falls_back_to_cold() {
         .query(page_query_request(PAGE_A))
         .expect("cold query page_a after warm failure");
     assert!(!cold_result.result.is_null());
+}
+
+/// Phase 3：LongLived 先安装内存 replacement，延迟 persist 期间查询必须立即看到新内容。
+#[test]
+fn m57_phase3_install_is_queryable_before_deferred_persist() {
+    let (manager, session_dir, manifest, db_path) = setup_session("phase3-deferred");
+    let seeded = DiffRefreshCheckpoint {
+        active: SourceCursor::new(500, Vec::new()),
+        deleted: SourceCursor::new(0, Vec::new()),
+    };
+    seed_checkpoint(&db_path, seeded.clone());
+
+    let mut provider = StubProvider::new();
+    provider.register(
+        "app/page_a.spg",
+        "file-a",
+        "2",
+        &spg_variant(PAGE_A_V1, "phase3-deferred"),
+    );
+    let source = FixtureMetaFilesChangeSource::from_json_str(&page_a_event_fixture())
+        .expect("fixture source");
+    let runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(project_mirror_root(&session_dir)),
+        RuntimeMode::LongLived,
+    )
+    .expect("load runtime");
+
+    let mut orchestrator = DiffRefreshOrchestrator::new(
+        manager,
+        session_dir.clone(),
+        manifest,
+        Box::new(source),
+        Box::new(provider),
+        runtime,
+    );
+    orchestrator.set_persist_policy(LongLivedPersistPolicy {
+        dirty_node_threshold: usize::MAX,
+        max_pending_rounds: 10,
+    });
+
+    let report = orchestrator.refresh_once().expect("deferred refresh");
+    let expected_checkpoint = DiffRefreshCheckpoint {
+        active: SourceCursor::new(1000, vec!["active:file-a:2".into()]),
+        deleted: SourceCursor::new(0, Vec::new()),
+    };
+    assert_eq!(report.persisted, false);
+    assert_eq!(report.persist_report, None);
+    assert_eq!(report.pending_dirty_total > 0, true);
+    assert_eq!(report.checkpoint, Some(expected_checkpoint.clone()));
+
+    let durable = GraphDB::open(&db_path).expect("open durable graph");
+    assert_eq!(
+        durable
+            .load_diff_refresh_checkpoint()
+            .expect("load durable checkpoint"),
+        Some(seeded),
+        "deferred refresh must not advance the durable checkpoint"
+    );
+
+    let hot_result = orchestrator
+        .runtime_mut()
+        .query(page_query_request(PAGE_A))
+        .expect("query installed runtime")
+        .result;
+    assert_eq!(
+        serde_json::to_string(&hot_result)
+            .expect("serialize hot result")
+            .contains("phase3-deferred"),
+        true,
+        "installed runtime must expose the new mirror content before persist"
+    );
+
+    let _ = fs::remove_dir_all(root_for_session(&session_dir));
+}
+
+/// Phase 3：pending dirty-node 集合超过阈值时立即提交图与 checkpoint。
+#[test]
+fn m57_phase3_dirty_threshold_persists_pending_graph_and_checkpoint() {
+    let (manager, session_dir, manifest, db_path) = setup_session("phase3-threshold");
+    seed_checkpoint(
+        &db_path,
+        DiffRefreshCheckpoint {
+            active: SourceCursor::new(500, Vec::new()),
+            deleted: SourceCursor::new(0, Vec::new()),
+        },
+    );
+
+    let mut provider = StubProvider::new();
+    provider.register(
+        "app/page_a.spg",
+        "file-a",
+        "2",
+        &spg_variant(PAGE_A_V1, "phase3-threshold"),
+    );
+    let source = FixtureMetaFilesChangeSource::from_json_str(&page_a_event_fixture())
+        .expect("fixture source");
+    let runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(project_mirror_root(&session_dir)),
+        RuntimeMode::LongLived,
+    )
+    .expect("load runtime");
+    let mut orchestrator = DiffRefreshOrchestrator::new(
+        manager,
+        session_dir.clone(),
+        manifest,
+        Box::new(source),
+        Box::new(provider),
+        runtime,
+    );
+    orchestrator.set_persist_policy(LongLivedPersistPolicy {
+        dirty_node_threshold: 0,
+        max_pending_rounds: 10,
+    });
+
+    let report = orchestrator.refresh_once().expect("threshold refresh");
+    assert_eq!(report.persisted, true);
+    assert_eq!(report.pending_dirty_total, 0);
+    assert_eq!(report.persist_report.is_some(), true);
+    assert_eq!(
+        GraphDB::open(&db_path)
+            .expect("open durable graph")
+            .load_diff_refresh_checkpoint()
+            .expect("load durable checkpoint"),
+        Some(DiffRefreshCheckpoint {
+            active: SourceCursor::new(1000, vec!["active:file-a:2".into()]),
+            deleted: SourceCursor::new(0, Vec::new()),
+        })
+    );
+
+    let _ = fs::remove_dir_all(root_for_session(&session_dir));
+}
+
+/// Phase 3：连续 pending round 达到轮次上限时，即使没有新事件也触发 persist。
+#[test]
+fn m57_phase3_round_fallback_persists_after_pending_rounds() {
+    let (manager, session_dir, manifest, db_path) = setup_session("phase3-rounds");
+    let seeded = DiffRefreshCheckpoint {
+        active: SourceCursor::new(500, Vec::new()),
+        deleted: SourceCursor::new(0, Vec::new()),
+    };
+    seed_checkpoint(&db_path, seeded.clone());
+
+    let mut provider = StubProvider::new();
+    provider.register(
+        "app/page_a.spg",
+        "file-a",
+        "2",
+        &spg_variant(PAGE_A_V1, "phase3-rounds"),
+    );
+    let source = FixtureMetaFilesChangeSource::from_json_str(&page_a_event_fixture())
+        .expect("fixture source");
+    let runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(project_mirror_root(&session_dir)),
+        RuntimeMode::LongLived,
+    )
+    .expect("load runtime");
+    let mut orchestrator = DiffRefreshOrchestrator::new(
+        manager,
+        session_dir.clone(),
+        manifest,
+        Box::new(source),
+        Box::new(provider),
+        runtime,
+    );
+    orchestrator.set_persist_policy(LongLivedPersistPolicy {
+        dirty_node_threshold: usize::MAX,
+        max_pending_rounds: 3,
+    });
+
+    let first = orchestrator.refresh_once().expect("first deferred refresh");
+    assert_eq!(first.persisted, false);
+    let second = orchestrator.refresh_once().expect("second pending refresh");
+    assert_eq!(
+        second.change_count, 0,
+        "pending watermark must suppress replay"
+    );
+    assert_eq!(second.persisted, false);
+    let third = orchestrator.refresh_once().expect("round fallback refresh");
+    assert_eq!(third.change_count, 0);
+    assert_eq!(third.persisted, true);
+    assert_eq!(third.pending_dirty_total, 0);
+    assert_eq!(
+        GraphDB::open(&db_path)
+            .expect("open durable graph")
+            .load_diff_refresh_checkpoint()
+            .expect("load durable checkpoint"),
+        Some(DiffRefreshCheckpoint {
+            active: SourceCursor::new(1000, vec!["active:file-a:2".into()]),
+            deleted: SourceCursor::new(0, Vec::new()),
+        })
+    );
+    assert_eq!(
+        GraphDB::open(&db_path)
+            .expect("reopen durable graph")
+            .load_diff_refresh_checkpoint()
+            .expect("load durable checkpoint again")
+            .is_some(),
+        true
+    );
+
+    let _ = fs::remove_dir_all(root_for_session(&session_dir));
+}
+
+/// Phase 3：persist 失败不撤销已安装 runtime，下一轮以 pending commit 重试。
+#[test]
+fn m57_phase3_persist_failure_keeps_runtime_and_retries() {
+    let (manager, session_dir, manifest, db_path) = setup_session("phase3-retry");
+    let seeded = DiffRefreshCheckpoint {
+        active: SourceCursor::new(500, Vec::new()),
+        deleted: SourceCursor::new(0, Vec::new()),
+    };
+    seed_checkpoint(&db_path, seeded.clone());
+
+    let mut provider = StubProvider::new();
+    provider.register(
+        "app/page_a.spg",
+        "file-a",
+        "2",
+        &spg_variant(PAGE_A_V1, "phase3-retry"),
+    );
+    let source = FixtureMetaFilesChangeSource::from_json_str(&page_a_event_fixture())
+        .expect("fixture source");
+    let runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(project_mirror_root(&session_dir)),
+        RuntimeMode::LongLived,
+    )
+    .expect("load runtime");
+    let mut orchestrator = DiffRefreshOrchestrator::new(
+        manager,
+        session_dir.clone(),
+        manifest,
+        Box::new(source),
+        Box::new(provider),
+        runtime,
+    );
+    orchestrator.set_persist_policy(LongLivedPersistPolicy {
+        dirty_node_threshold: 0,
+        max_pending_rounds: 10,
+    });
+
+    let attempts = std::sync::Arc::new(AtomicUsize::new(0));
+    let attempts_for_hook = std::sync::Arc::clone(&attempts);
+    orchestrator.set_persist_fn(Box::new(move |graph, commit| {
+        let attempt = attempts_for_hook.fetch_add(1, Ordering::SeqCst);
+        if attempt == 0 {
+            Err(anyhow!("injected phase3 persist failure"))
+        } else {
+            graph.persist_commit(commit)
+        }
+    }));
+
+    let first = orchestrator.refresh_once();
+    assert_eq!(first.is_err(), true);
+    let hot_result = orchestrator
+        .runtime_mut()
+        .query(page_query_request(PAGE_A))
+        .expect("installed runtime remains queryable after persist failure")
+        .result;
+    assert_eq!(
+        serde_json::to_string(&hot_result)
+            .expect("serialize hot retry result")
+            .contains("phase3-retry"),
+        true
+    );
+    assert_eq!(
+        GraphDB::open(&db_path)
+            .expect("open durable graph after failure")
+            .load_diff_refresh_checkpoint()
+            .expect("load durable checkpoint after failure"),
+        Some(seeded)
+    );
+
+    let retry = orchestrator.refresh_once().expect("retry pending persist");
+    assert_eq!(retry.change_count, 0);
+    assert_eq!(retry.persisted, true);
+    assert_eq!(retry.pending_dirty_total, 0);
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        GraphDB::open(&db_path)
+            .expect("open durable graph after retry")
+            .load_diff_refresh_checkpoint()
+            .expect("load durable checkpoint after retry"),
+        Some(DiffRefreshCheckpoint {
+            active: SourceCursor::new(1000, vec!["active:file-a:2".into()]),
+            deleted: SourceCursor::new(0, Vec::new()),
+        })
+    );
+
+    let _ = fs::remove_dir_all(root_for_session(&session_dir));
+}
+
+/// 从 orchestrator 关联的 session 根目录取测试清理路径。
+fn root_for_session(session_dir: &Path) -> PathBuf {
+    session_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| session_dir.to_path_buf())
 }

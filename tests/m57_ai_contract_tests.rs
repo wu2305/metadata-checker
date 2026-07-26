@@ -19,6 +19,8 @@ fn m57_diff_refresh_report_has_machine_contract_fields() {
         change_count: 1,
         invalidated_pages: vec!["page:app/page.spg".to_string()],
         warm_failures: Vec::new(),
+        persisted: true,
+        pending_dirty_total: 0,
         checkpoint: None,
         last_poll_at: 1000,
         page_dep_index_coverage: PageDependencyIndexCoverage::Full,
@@ -38,6 +40,8 @@ fn m57_diff_refresh_report_has_machine_contract_fields() {
     assert_eq!(value["schema_version"].as_str(), Some("1.0"));
     assert_eq!(value["kind"].as_str(), Some("DiffRefresh"));
     assert_eq!(value["persist_report"]["dirty_nodes"].as_u64(), Some(1));
+    assert_eq!(value["persisted"].as_bool(), Some(true));
+    assert_eq!(value["pending_dirty_total"].as_u64(), Some(0));
     assert_eq!(
         value["persist_report"]["full_rewrite"].as_bool(),
         Some(false)
