@@ -2482,6 +2482,12 @@ fn test_stdio_diff_refresh_with_bound_context() {
     assert_eq!(result["change_count"].as_u64(), Some(1));
     assert!(result["invalidated_pages"].is_array());
     assert!(result["warm_failures"].is_array());
+    assert_eq!(result["schema_version"].as_str(), Some("1.0"));
+    assert_eq!(result["kind"].as_str(), Some("DiffRefresh"));
+    assert!(
+        result["persist_report"].is_object(),
+        "bound diff_refresh must expose persist cost report"
+    );
     assert_eq!(
         result["checkpoint"]["active"]["updated_at_ms"].as_u64(),
         Some(1000)

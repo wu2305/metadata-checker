@@ -6864,6 +6864,17 @@ fn test_cli_runtime_session_diff_refresh_empty_bootstrap_ok() {
         Some(true),
         "empty bootstrap should succeed: {value}"
     );
+    assert_eq!(
+        output.lines().count(),
+        1,
+        "machine one-shot output must be exactly one JSON line: {output:?}"
+    );
+    assert_eq!(value["schema_version"].as_str(), Some("1.0"));
+    assert_eq!(value["kind"].as_str(), Some("DiffRefresh"));
+    assert!(
+        value["persist_report"].is_object(),
+        "one-shot output must expose persist cost report: {value}"
+    );
     assert_eq!(value["change_count"].as_u64(), Some(0));
     assert!(
         value.get("checkpoint").is_some(),

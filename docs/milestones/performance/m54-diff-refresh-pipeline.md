@@ -1,6 +1,6 @@
 # M54–M56：差量刷新一条龙
 
-> 状态：**active**（代码全部完成：M54/M55/M56 实现与验收记录已落盘；INDEX 状态按 plan 约定待 PR 合并后分别改 done）  
+> 状态：**done**（已合入 `main` / `b4ec419`；后续产品化与 tick 成本见 [M57](m57-diff-refresh-closeout.md)）  
 > Spec：[2026-07-12-diff-refresh-pipeline-design.md](../../specs/2026-07-12-diff-refresh-pipeline-design.md)  
 > Plan：[2026-07-12-diff-refresh-pipeline-plan.md](../../plans/2026-07-12-diff-refresh-pipeline-plan.md)
 
@@ -47,10 +47,11 @@ LongLived runtime：`tick → META_FILES(since watermark) → 文件差量 → �
 
 | 项 | 状态 |
 |----|------|
-| Spec / Plan / INDEX 登记 | done（本文档 PR） |
-| M54 通路代码 | done（Tasks 1–8，见验收记录） |
-| M55 正确性 | done（Tasks 9–12 + 真机验收通过，见验收记录） |
-| M56 persist | done（Tasks 13–16，见验收记录） |
+| Spec / Plan / INDEX 登记 | done |
+| M54 通路代码 | done（Tasks 1–8，见验收记录；已合入 main） |
+| M55 正确性 | done（Tasks 9–12 + 真机验收通过；已合入 main） |
+| M56 persist | done（Tasks 13–16，见验收记录；已合入 main） |
+| 后续 | 见 [M57](m57-diff-refresh-closeout.md) |
 
 ## 计划核查记录（2026-07-17）
 
