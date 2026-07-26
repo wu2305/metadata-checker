@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -556,4 +556,404 @@ pub(crate) fn redact_secret(text: &str, secret: &str) -> String {
     } else {
         text.replace(secret, "[REDACTED]")
     }
+}
+
+/// 单个 CLI 命令在一次 LLM case 中的结构化轨迹。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct CommandTrace {
+    /// CLI 命令 kind。
+    pub(crate) command_kind: String,
+    /// 命令 target。
+    pub(crate) target: String,
+    /// 经过 plan 校验的参数。
+    pub(crate) args: Vec<String>,
+    /// 经过 plan 校验的预算。
+    pub(crate) budget: Option<String>,
+    /// 对应的 minimal_command_plan step；拒绝的命令为 None。
+    pub(crate) plan_step_index: Option<usize>,
+    /// 是否通过 runner 白名单。
+    pub(crate) accepted: bool,
+    /// 是否请求了 detail/full 等过度读取路径。
+    pub(crate) detail_request: bool,
+    /// CLI 输出中实际回传的顶层 sections。
+    pub(crate) output_sections: Vec<String>,
+}
+
+/// AnswerJudge 的确定性判分结果。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct JudgeResult {
+    /// 没有失败分类时为 true。
+    pub(crate) passed: bool,
+    /// 一个回答可以同时命中多个失败分类。
+    pub(crate) failure_classes: Vec<String>,
+    /// 不包含原始回答的短诊断说明。
+    pub(crate) judge_notes: Vec<String>,
+}
+
+/// 单个 case 的脱敏报告记录。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct CaseReport {
+    /// case 稳定标识。
+    pub(crate) case_id: String,
+    /// `pass`、`fail` 或 `error`。
+    pub(crate) status: String,
+    /// 是否通过 AnswerJudge。
+    pub(crate) passed: bool,
+    /// 确定性失败分类。
+    pub(crate) failure_classes: Vec<String>,
+    /// 不包含模型原文的短说明。
+    pub(crate) judge_notes: Vec<String>,
+    /// 命令使用轨迹。
+    pub(crate) command_trace: Vec<CommandTrace>,
+}
+
+/// RunReport 中的命令统计快照。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct CommandTraceStats {
+    /// 所有 case 的命令尝试数。
+    pub(crate) total_commands: usize,
+    /// 通过白名单的命令数。
+    pub(crate) accepted_commands: usize,
+    /// 被协议或 policy 拒绝的命令数。
+    pub(crate) rejected_commands: usize,
+    /// 至少执行过一个命令的 case 数。
+    pub(crate) cases_with_commands: usize,
+}
+
+/// M58 一次评测的唯一结构化事实源。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunReport {
+    /// 报告 schema 版本。
+    pub(crate) schema_version: String,
+    /// provider 名称，如 `cnb-ai-chat` 或 `fake`。
+    pub(crate) provider: String,
+    /// 模型标识。
+    pub(crate) model_id: String,
+    /// CNB 构建标识；本地 fake run 可以为空。
+    pub(crate) cnb_build_id: Option<String>,
+    /// 运行开始时间，由 runner 注入。
+    pub(crate) started_at: String,
+    /// 不含 prompt/answer/token 的 case 记录。
+    pub(crate) cases: Vec<CaseReport>,
+    /// 通过 case 数除以总 case 数，空运行固定为 0。
+    pub(crate) pass_rate: f64,
+    /// 按失败分类聚合的数量。
+    pub(crate) failure_classes: BTreeMap<String, usize>,
+    /// 命令轨迹统计。
+    pub(crate) command_trace_stats: CommandTraceStats,
+}
+
+impl RunReport {
+    /// 从 case 记录计算稳定的报告聚合字段。
+    pub(crate) fn from_cases(
+        provider: String,
+        model_id: String,
+        cnb_build_id: Option<String>,
+        started_at: String,
+        cases: Vec<CaseReport>,
+    ) -> Self {
+        let passed_count = cases.iter().filter(|case| case.passed).count();
+        let pass_rate = if cases.is_empty() {
+            0.0
+        } else {
+            passed_count as f64 / cases.len() as f64
+        };
+        let mut failure_classes = BTreeMap::new();
+        let mut command_trace_stats = CommandTraceStats {
+            total_commands: 0,
+            accepted_commands: 0,
+            rejected_commands: 0,
+            cases_with_commands: 0,
+        };
+        for case in &cases {
+            for failure_class in &case.failure_classes {
+                *failure_classes.entry(failure_class.clone()).or_insert(0) += 1;
+            }
+            if !case.command_trace.is_empty() {
+                command_trace_stats.cases_with_commands += 1;
+            }
+            command_trace_stats.total_commands += case.command_trace.len();
+            command_trace_stats.accepted_commands += case
+                .command_trace
+                .iter()
+                .filter(|trace| trace.accepted)
+                .count();
+            command_trace_stats.rejected_commands += case
+                .command_trace
+                .iter()
+                .filter(|trace| !trace.accepted)
+                .count();
+        }
+        Self {
+            schema_version: "1.0.0".to_string(),
+            provider,
+            model_id,
+            cnb_build_id,
+            started_at,
+            cases,
+            pass_rate,
+            failure_classes,
+            command_trace_stats,
+        }
+    }
+}
+
+/// 对 answer_assertions 执行不依赖 LLM 的确定性判分。
+pub(crate) fn judge_answer(
+    answer: &str,
+    assertions: &Value,
+    diagnostics: &[String],
+    trace: &[CommandTrace],
+) -> JudgeResult {
+    let normalized_answer = normalize_for_match(answer);
+    let mut failure_classes = Vec::new();
+    let mut judge_notes = Vec::new();
+
+    let must_include = read_string_assertions(assertions, "must_include", &mut failure_classes);
+    for expected in must_include {
+        if !normalized_answer.contains(&normalize_for_match(&expected)) {
+            add_failure(&mut failure_classes, "missed_fact");
+            judge_notes.push(format!("missing must_include assertion: {expected}"));
+        }
+    }
+
+    let must_not_include =
+        read_string_assertions(assertions, "must_not_include", &mut failure_classes);
+    for forbidden in must_not_include {
+        if normalized_answer.contains(&normalize_for_match(&forbidden)) {
+            add_failure(&mut failure_classes, "hallucination");
+            judge_notes.push(format!("hit must_not_include assertion: {forbidden}"));
+        }
+    }
+
+    let diagnostic_required = read_bool_assertion(
+        assertions,
+        "diagnostic_disclaimer_required",
+        &mut failure_classes,
+    );
+    if diagnostic_required
+        && diagnostics
+            .iter()
+            .any(|diagnostic| !diagnostic.trim().is_empty())
+    {
+        if !contains_conservative_marker(&normalized_answer) {
+            add_failure(&mut failure_classes, "ignored_diagnostic");
+            judge_notes.push("diagnostics 存在但回答没有保守表达".to_string());
+        }
+    }
+
+    let evidence_required = read_bool_assertion(
+        assertions,
+        "evidence_reference_required",
+        &mut failure_classes,
+    );
+    if evidence_required && !contains_evidence_reference(&normalized_answer) {
+        add_failure(&mut failure_classes, "needs_human_review");
+        judge_notes.push("回答没有引用允许的 CLI evidence section".to_string());
+    }
+
+    if trace.is_empty()
+        || trace
+            .iter()
+            .any(|entry| !entry.accepted || entry.plan_step_index.is_none())
+    {
+        add_failure(&mut failure_classes, "wrong_command");
+        judge_notes.push("command trace 为空或包含未通过 plan 的命令".to_string());
+    }
+    if trace.iter().any(|entry| {
+        entry.detail_request
+            || entry.budget.as_deref() == Some("full")
+            || entry.args.iter().any(|arg| arg == "--detail")
+            || entry
+                .args
+                .windows(2)
+                .any(|window| window == ["--budget", "full"])
+    }) {
+        add_failure(&mut failure_classes, "over_read_details");
+        judge_notes.push("command trace 请求了 detail 或 full 输出".to_string());
+    }
+
+    JudgeResult {
+        passed: failure_classes.is_empty(),
+        failure_classes,
+        judge_notes,
+    }
+}
+
+/// 将 RunReport 写成 JSON，并由同一对象生成 Markdown 摘要。
+pub(crate) fn write_run_report(
+    report: &RunReport,
+    json_path: &Path,
+    markdown_path: &Path,
+) -> Result<()> {
+    for path in [json_path, markdown_path] {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("创建评测报告目录失败: {}", parent.display()))?;
+        }
+    }
+    let json = serde_json::to_string_pretty(report).context("序列化 RunReport 失败")?;
+    std::fs::write(json_path, format!("{json}\n"))
+        .with_context(|| format!("写入 JSON 评测报告失败: {}", json_path.display()))?;
+    std::fs::write(markdown_path, render_report_markdown(report))
+        .with_context(|| format!("写入 Markdown 评测报告失败: {}", markdown_path.display()))?;
+    Ok(())
+}
+
+/// 将唯一 JSON 事实源投影为不含模型原文的 Markdown 表格。
+fn render_report_markdown(report: &RunReport) -> String {
+    let mut markdown = String::new();
+    markdown.push_str("# M58 AI Eval Run\n\n");
+    markdown.push_str(&format!(
+        "- provider: `{}`\n- model: `{}`\n- cnb_build_id: `{}`\n- started_at: `{}`\n- pass_rate: `{:.4}`\n\n",
+        escape_markdown_cell(&report.provider),
+        escape_markdown_cell(&report.model_id),
+        escape_markdown_cell(report.cnb_build_id.as_deref().unwrap_or("")),
+        escape_markdown_cell(&report.started_at),
+        report.pass_rate,
+    ));
+    markdown.push_str("| case_id | status | failure_classes | command_count |\n");
+    markdown.push_str("| --- | --- | --- | ---: |\n");
+    for case in &report.cases {
+        let failures = if case.failure_classes.is_empty() {
+            "-".to_string()
+        } else {
+            case.failure_classes.join(", ")
+        };
+        markdown.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            escape_markdown_cell(&case.case_id),
+            escape_markdown_cell(&case.status),
+            escape_markdown_cell(&failures),
+            case.command_trace.len(),
+        ));
+    }
+    markdown.push_str("\n## Failure classes\n\n");
+    for (failure_class, count) in &report.failure_classes {
+        markdown.push_str(&format!("- `{failure_class}`: {count}\n"));
+    }
+    markdown
+}
+
+/// 读取字符串数组断言；schema 异常只进入 needs_human_review，不 panic。
+fn read_string_assertions(
+    assertions: &Value,
+    field: &str,
+    failure_classes: &mut Vec<String>,
+) -> Vec<String> {
+    let Some(value) = assertions.get(field) else {
+        add_failure(failure_classes, "needs_human_review");
+        return Vec::new();
+    };
+    let Some(values) = value.as_array() else {
+        add_failure(failure_classes, "needs_human_review");
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    for item in values {
+        if let Some(value) = item.as_str() {
+            if !value.trim().is_empty() {
+                result.push(value.to_string());
+            }
+        } else {
+            add_failure(failure_classes, "needs_human_review");
+        }
+    }
+    result
+}
+
+/// 读取布尔断言；schema 异常只进入 needs_human_review。
+fn read_bool_assertion(assertions: &Value, field: &str, failure_classes: &mut Vec<String>) -> bool {
+    match assertions.get(field).and_then(Value::as_bool) {
+        Some(value) => value,
+        None => {
+            add_failure(failure_classes, "needs_human_review");
+            false
+        }
+    }
+}
+
+/// 将大小写、空白和常见中英文标点归一化后再做 substring matching。
+fn normalize_for_match(value: &str) -> String {
+    let mut normalized = String::new();
+    for character in value.to_lowercase().chars() {
+        if character.is_whitespace()
+            || matches!(
+                character,
+                ',' | '.'
+                    | ':'
+                    | ';'
+                    | '!'
+                    | '?'
+                    | '，'
+                    | '。'
+                    | '：'
+                    | '；'
+                    | '！'
+                    | '？'
+                    | '、'
+                    | '（'
+                    | '）'
+                    | '('
+                    | ')'
+                    | '['
+                    | ']'
+                    | '【'
+                    | '】'
+            )
+        {
+            normalized.push(' ');
+        } else {
+            normalized.push(character);
+        }
+    }
+    normalized.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// 判断回答是否显式表达不确定或证据边界。
+fn contains_conservative_marker(answer: &str) -> bool {
+    [
+        "不确定",
+        "未知",
+        "可能",
+        "无法确认",
+        "证据不足",
+        "不完整",
+        "需人工",
+        "保守",
+        "uncertain",
+        "unknown",
+        "may",
+        "cannot confirm",
+        "insufficient evidence",
+        "incomplete",
+    ]
+    .iter()
+    .any(|marker| answer.contains(marker))
+}
+
+/// 判断回答是否引用了允许的 CLI 证据 sections。
+fn contains_evidence_reference(answer: &str) -> bool {
+    [
+        "summary",
+        "details",
+        "evidence",
+        "diagnostics",
+        "primary_path",
+        "key_findings",
+    ]
+    .iter()
+    .any(|marker| answer.contains(marker))
+}
+
+/// 向失败分类列表中加入不重复的分类。
+fn add_failure(failure_classes: &mut Vec<String>, failure_class: &str) {
+    if !failure_classes.iter().any(|item| item == failure_class) {
+        failure_classes.push(failure_class.to_string());
+    }
+}
+
+/// 转义 Markdown 表格中的分隔符，避免报告结构被 case 文本破坏。
+fn escape_markdown_cell(value: &str) -> String {
+    value.replace('|', "\\|").replace('\n', " ")
 }

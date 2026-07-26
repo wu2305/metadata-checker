@@ -4,15 +4,16 @@
 mod m58_ai_eval;
 
 use m58_ai_eval::{
-    AgentTurn, ChatMessage, ChatRequest, CnbChatAdapter, CommandPolicy, CommandRequest,
-    FakeModelAdapter, ModelAdapter, fixture_llm_cases, load_eval_cases, parse_agent_turn,
-    redact_secret,
+    AgentTurn, CaseReport, ChatMessage, ChatRequest, CnbChatAdapter, CommandPolicy, CommandRequest,
+    CommandTrace, FakeModelAdapter, JudgeResult, ModelAdapter, RunReport, fixture_llm_cases,
+    judge_answer, load_eval_cases, parse_agent_turn, redact_secret, write_run_report,
 };
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 验证 M58 首批 fixture LLM case 数量与 active 状态。
 #[test]
@@ -274,6 +275,168 @@ fn test_m58_cnb_adapter_rejects_empty_configuration() {
         )
         .is_err()
     );
+}
+
+/// 验证 AnswerJudge 归一化中英文标点并通过正常证据与诊断回答。
+#[test]
+fn test_m58_judge_accepts_evidence_and_conservative_diagnostic() {
+    let assertions = serde_json::json!({
+        "must_include": ["用户入口", "model1"],
+        "must_not_include": ["只读"],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+    });
+    let trace = vec![accepted_trace()];
+    let result: JudgeResult = judge_answer(
+        "结论：页面有用户入口，写入 model1。依据 summary；诊断可能不完整。",
+        &assertions,
+        &["UNKNOWN_ACTION_TYPE".to_string()],
+        &trace,
+    );
+
+    assert_eq!(result.passed, true);
+    assert_eq!(result.failure_classes, Vec::<String>::new());
+    assert_eq!(result.judge_notes, Vec::<String>::new());
+}
+
+/// 验证 AnswerJudge 同时报告遗漏事实、禁用断言、忽略诊断和证据缺失。
+#[test]
+fn test_m58_judge_reports_deterministic_failure_classes() {
+    let assertions = serde_json::json!({
+        "must_include": ["用户入口", "model1"],
+        "must_not_include": ["只读"],
+        "diagnostic_disclaimer_required": true,
+        "evidence_reference_required": true
+    });
+    let result = judge_answer(
+        "页面是只读的。",
+        &assertions,
+        &["UNKNOWN_ACTION_TYPE".to_string()],
+        &[accepted_trace()],
+    );
+
+    assert_eq!(result.passed, false);
+    assert_eq!(
+        result.failure_classes,
+        vec![
+            "missed_fact".to_string(),
+            "hallucination".to_string(),
+            "ignored_diagnostic".to_string(),
+            "needs_human_review".to_string(),
+        ]
+    );
+    assert_eq!(result.judge_notes.len(), 5);
+}
+
+/// 验证命令轨迹会单独标记错误命令和过度读取细节。
+#[test]
+fn test_m58_judge_reports_command_risk_classes() {
+    let assertions = serde_json::json!({
+        "must_include": [],
+        "must_not_include": [],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": false
+    });
+    let over_read_trace = CommandTrace {
+        budget: Some("full".to_string()),
+        detail_request: true,
+        ..accepted_trace()
+    };
+    let rejected_trace = CommandTrace {
+        accepted: false,
+        plan_step_index: None,
+        ..accepted_trace()
+    };
+    let result = judge_answer(
+        "summary 已返回。",
+        &assertions,
+        &[],
+        &[over_read_trace, rejected_trace],
+    );
+
+    assert_eq!(result.passed, false);
+    assert_eq!(
+        result.failure_classes,
+        vec!["wrong_command".to_string(), "over_read_details".to_string()]
+    );
+}
+
+/// 验证 RunReport 聚合字段和 JSON/Markdown 双输出不包含 prompt 或模型原文。
+#[test]
+fn test_m58_run_report_is_structured_and_redacted() {
+    let report = RunReport::from_cases(
+        "fake".to_string(),
+        "test-model".to_string(),
+        Some("build-123".to_string()),
+        "2026-07-27T00:00:00Z".to_string(),
+        vec![
+            CaseReport {
+                case_id: "pass_case".to_string(),
+                status: "pass".to_string(),
+                passed: true,
+                failure_classes: Vec::new(),
+                judge_notes: Vec::new(),
+                command_trace: vec![accepted_trace()],
+            },
+            CaseReport {
+                case_id: "fail_case".to_string(),
+                status: "fail".to_string(),
+                passed: false,
+                failure_classes: vec!["missed_fact".to_string()],
+                judge_notes: vec!["short note".to_string()],
+                command_trace: vec![CommandTrace {
+                    accepted: false,
+                    plan_step_index: None,
+                    ..accepted_trace()
+                }],
+            },
+        ],
+    );
+    assert_eq!(report.pass_rate, 0.5);
+    assert_eq!(report.failure_classes.get("missed_fact"), Some(&1));
+    assert_eq!(report.command_trace_stats.total_commands, 2);
+    assert_eq!(report.command_trace_stats.accepted_commands, 1);
+    assert_eq!(report.command_trace_stats.rejected_commands, 1);
+    assert_eq!(report.command_trace_stats.cases_with_commands, 2);
+
+    let run_id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let output_dir = std::env::temp_dir().join(format!("m58-run-report-{run_id}"));
+    let json_path = output_dir.join("run.json");
+    let markdown_path = output_dir.join("run.md");
+    write_run_report(&report, &json_path, &markdown_path).unwrap();
+
+    let json = std::fs::read_to_string(&json_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed["schema_version"], "1.0.0");
+    assert_eq!(parsed["cases"].as_array().unwrap().len(), 2);
+    assert_eq!(parsed["command_trace_stats"]["accepted_commands"], 1);
+    assert_eq!(json.contains("prompt"), false);
+    assert_eq!(json.contains("answer"), false);
+    assert_eq!(json.contains("CNB_TOKEN"), false);
+    let markdown = std::fs::read_to_string(&markdown_path).unwrap();
+    assert_eq!(markdown.contains("pass_case"), true);
+    assert_eq!(markdown.contains("missed_fact"), true);
+    assert_eq!(markdown.contains("prompt"), false);
+    assert_eq!(markdown.contains("answer"), false);
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 构造一个已通过 plan、只读取 summary 的命令轨迹。
+fn accepted_trace() -> CommandTrace {
+    CommandTrace {
+        command_kind: "--query-page-logic".to_string(),
+        target: "page:app/actions_test.spg".to_string(),
+        args: Vec::new(),
+        budget: Some("compact".to_string()),
+        plan_step_index: Some(0),
+        accepted: true,
+        detail_request: false,
+        output_sections: vec!["summary".to_string()],
+    }
 }
 
 /// 构造最小合法 Chat 请求，供 adapter 异常路径使用。

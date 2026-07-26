@@ -174,7 +174,7 @@ git commit -m "test: add m58 cnb chat adapters"
 - `RunReport { schema_version, provider, model_id, cnb_build_id, started_at, cases, summary }`
 - `write_run_report(report: &RunReport, json_path: &Path, markdown_path: &Path) -> anyhow::Result<()>`
 
-- [ ] **Step 1: 固化确定性判分规则**
+- [x] **Step 1: 固化确定性判分规则**
 
 实现大小写、空白和 Unicode 标点归一化后的 substring matching：
 
@@ -185,15 +185,15 @@ git commit -m "test: add m58 cnb chat adapters"
 - 在 compact/summary 前直接请求 `--detail`、`--budget full` 或未允许的 details → `over_read_details`
 - `evidence_reference_required=true` 时，回答必须出现 `summary`、`details`、`evidence`、`diagnostics`、`primary_path`、`key_findings` 之一；无法确定的规则只记录 `needs_human_review`，不自动放宽。
 
-- [ ] **Step 2: 定义 RunReport snapshot schema**
+- [x] **Step 2: 定义 RunReport snapshot schema**
 
 报告至少包含 `schema_version`、`provider`、`model_id`、`cnb_build_id`、`cases[]`、`pass_rate`、`failure_classes`、`command_trace_stats`；不写 raw token、Authorization header、完整 prompt 或大段模型原文。
 
-- [ ] **Step 3: 实现 JSON 与 Markdown 输出**
+- [x] **Step 3: 实现 JSON 与 Markdown 输出**
 
 JSON 为唯一事实源；Markdown 只由 JSON 重新生成。输出目录由 `M58_AI_EVAL_OUTPUT_DIR` 指定，默认使用 `target/m58-ai-eval`，避免普通测试修改 `docs/ai-eval-runs/`。
 
-- [ ] **Step 4: 添加 judge/report snapshot 与提交**
+- [x] **Step 4: 添加 judge/report snapshot 与提交**
 
 ```bash
 cargo test --features cli-local --test m58_cnb_ai_runner_tests judge report
