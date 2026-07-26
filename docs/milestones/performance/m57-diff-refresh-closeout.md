@@ -59,6 +59,8 @@
 | M57-3 runtime auth code | done（`6bb8364`） |
 | M57-4 DiffRefresh scope TDD | done（`f0b03f1`） |
 | M57-4 DiffRefresh scope code | done（`c3f9fda`） |
+| Phase 1 rebind TDD | done（`3eed1af`） |
+| M57-5 Phase 2 incremental read model TDD | in progress |
 | Phase 1–3 代码 | pending |
 
 ## 设计决策（2026-07-24）
@@ -81,4 +83,6 @@
 - M57-3：runtime auth error mapping TDD 与实现已通过；401/403 在完整 anyhow chain 中映射为 `SESSION_AUTH_REQUIRED`，普通错误仍为 `DIFF_REFRESH_FAILED`，stdio/one-shot 均保持脱敏诊断。
 - M57-3：专项认证测试 2 passed；stdio 全套 36 passed、1 ignored；M57-0/M57-1/M57-2 影响面测试继续通过。
 - M57-4：主 `DiffRefreshReport`、stdio、one-shot、tick 共享 `RefreshScope`；无局部 selector 时统一输出 `project/fallback/applied=false`，scope contract 2 passed，stdio 全套回归仍为 36 passed、1 ignored。
+- Phase 1 rebind：同一 session 两次绑定使用不同凭据，manifest 不保存 password/token/cookie；测试 1 passed。
+- M57-5：已先写 Dense/Facts/PageDep 增量 read-model 等价与 1/10/100 dirty curve TDD；当前红灯等待 `ReadModelUpdateMode` 和 runtime 增量路径实现。
 - 真实项目 stdio 冒烟：已尝试运行既有 ignored 用例；首次索引报告 `1329 files / 78127 dirty`，超过约 5 分钟未产生终态，已中止，暂不计入通过证据。

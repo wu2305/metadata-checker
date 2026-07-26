@@ -97,6 +97,14 @@
 - scope 枚举继续复用 M57-2 的 snake_case JSON 名称，不引入第二套类型或解析栈。
 - scope contract 2 passed；AI contract、tick、stdio 和编排器回归通过。
 
+## 批准的后续切片：M57-5 Phase 2 incremental read model
+
+状态：**TDD in progress**
+
+- `GraphRuntime::prepare_replacement` 使用 `dirty ∪ deleted` 选择派生 read-model 更新路径。
+- 稳定 node set 优先增量更新 Dense/Facts/PageDep；新增/删除导致无法安全局部修补时必须显式回落 full rebuild，不得伪报增量。
+- TDD 固定 full rebuild 等价性，以及 1/10/100 dirty scale curve 的可观测输出。
+
 ## 后续衔接
 
 完成本计划后，M58 才能以固定的 `SKILL.md + CLI/stdio + project path + question` 输入做空上下文 SLM 测试；M58 的 judge 只消费稳定 JSON，不反向依赖 redb 或内部 Rust 类型。
