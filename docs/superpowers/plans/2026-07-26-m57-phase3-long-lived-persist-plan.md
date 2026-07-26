@@ -22,13 +22,13 @@
 ### Task 1: Phase 3 RED contract tests
 
 **Files:**
-- Create: `tests/m57_phase3_long_lived_persist_tests.rs`
+- Modify: `tests/m54_diff_refresh_orchestrator_tests.rs`
 - Modify: `tests/m57_ai_contract_tests.rs`
 - Modify: `tests/m57_refresh_report_scope_tests.rs`
 - Modify: `tests/m57_tick_loop_tests.rs`
 
 **Interfaces:**
-- Tests consume the existing `DiffRefreshOrchestrator::new`, fixture session helpers/patterns, `DiffRefreshReport`, and a test-configurable persist policy/hook that implementation must expose.
+- Tests consume the existing `DiffRefreshOrchestrator::new`, fixture session helpers in `tests/m54_diff_refresh_orchestrator_tests.rs`, `DiffRefreshReport`, and a test-configurable persist policy/hook that implementation must expose.
 - Tests produce executable contracts for immediate install visibility, threshold/round persistence, pending watermark advancement, and retry after persist failure.
 
 - [ ] **Step 1: Write the failing report-field and Phase 3 behavior tests.**
@@ -37,7 +37,7 @@
 - [ ] **Step 2: Run only the new/affected tests to verify RED.**
 
   ```bash
-  cargo test --features cli-local --test m57_phase3_long_lived_persist_tests --test m57_ai_contract_tests --test m57_refresh_report_scope_tests --test m57_tick_loop_tests
+  cargo test --features cli-local --test m54_diff_refresh_orchestrator_tests --test m57_ai_contract_tests --test m57_refresh_report_scope_tests --test m57_tick_loop_tests
   ```
 
   Expected: compile or assertion failures because `DiffRefreshReport` lacks the Phase 3 fields and the orchestrator still persists before install.
@@ -45,7 +45,7 @@
 - [ ] **Step 3: Commit the failing tests.**
 
   ```bash
-  git add tests/m57_phase3_long_lived_persist_tests.rs tests/m57_ai_contract_tests.rs tests/m57_refresh_report_scope_tests.rs tests/m57_tick_loop_tests.rs
+  git add tests/m54_diff_refresh_orchestrator_tests.rs tests/m57_ai_contract_tests.rs tests/m57_refresh_report_scope_tests.rs tests/m57_tick_loop_tests.rs
   git commit -m "test: define m57 long-lived persist policy"
   ```
 
@@ -73,7 +73,7 @@
 
 **Files:**
 - Modify: `src/diff_refresh/orchestrator.rs`
-- Test: `tests/m57_phase3_long_lived_persist_tests.rs`
+- Test: `tests/m54_diff_refresh_orchestrator_tests.rs`
 
 **Interfaces:**
 - The orchestrator keeps `pending_checkpoint`, `pending_dirty_node_ids`, `pending_commit`, and `pending_rounds` private; `refresh_once` remains the public entry point.
@@ -88,13 +88,13 @@
 - [ ] **Step 6: Run the Phase 3 tests until GREEN.**
 
   ```bash
-  cargo test --features cli-local --test m57_phase3_long_lived_persist_tests
+  cargo test --features cli-local --test m54_diff_refresh_orchestrator_tests
   ```
 
 - [ ] **Step 7: Commit the implementation.**
 
   ```bash
-  git add src/diff_refresh/orchestrator.rs src/diff_refresh/mod.rs tests/m57_phase3_long_lived_persist_tests.rs tests/m57_ai_contract_tests.rs tests/m57_refresh_report_scope_tests.rs tests/m57_tick_loop_tests.rs
+  git add src/diff_refresh/orchestrator.rs src/diff_refresh/mod.rs tests/m54_diff_refresh_orchestrator_tests.rs tests/m57_ai_contract_tests.rs tests/m57_refresh_report_scope_tests.rs tests/m57_tick_loop_tests.rs
   git commit -m "feat: add long-lived deferred persist and retry"
   ```
 
@@ -111,7 +111,7 @@
 - [ ] **Step 1: Run M54 orchestrator, M56 persistence, M57 Phase 3, stdio, and report-contract tests.**
 
   ```bash
-  cargo test --features cli-local --test m54_diff_refresh_orchestrator_tests --test m56_incremental_persist_tests --test m57_phase3_long_lived_persist_tests --test m57_ai_contract_tests --test m57_refresh_report_scope_tests --test stdio_server_tests
+  cargo test --features cli-local --test m54_diff_refresh_orchestrator_tests --test m56_incremental_persist_tests --test m57_ai_contract_tests --test m57_refresh_report_scope_tests --test stdio_server_tests
   ```
 
 - [ ] **Step 2: Run `cargo fmt --check`, `cargo check --features cli-local`, and `git diff --check`.**
