@@ -71,7 +71,7 @@
 
 ## 批准的后续切片：M57-2 RefreshScope declaration
 
-状态：**TDD in progress**（本轮先锁定 scope 声明；不改变旧的 current-page 排序语义）
+状态：**done**（实现 `e980b37`；JSON 稳定性修复 `dd231af`；TDD `387871b`）
 
 - 显式 module/source/file 过滤必须在报告中声明为 `applied=true`。
 - 多个显式条件必须声明 `compound`，不能只保留一个条件。

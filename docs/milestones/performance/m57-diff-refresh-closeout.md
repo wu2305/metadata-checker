@@ -53,7 +53,8 @@
 | M57-0 code | done（`c9302fd`、`145e838`） |
 | M57-1 tick loop TDD | done（`7763b20`） |
 | M57-1 tick loop code | done（`8249d6f`、`2ec96a8`） |
-| M57-2 RefreshScope TDD | in progress |
+| M57-2 RefreshScope TDD | done（`387871b`） |
+| M57-2 RefreshScope code | done（`e980b37`、`dd231af`） |
 | Phase 1–3 代码 | pending |
 
 ## 设计决策（2026-07-24）
@@ -71,4 +72,5 @@
 - M57-1：tick loop TDD 已完成；网络退避、数据错误不重试和尝试上限验收通过。
 - M57-1：`m57_tick_loop_tests` 4 passed；`m54_diff_refresh_orchestrator_tests` 5 passed；`m55_meta_files_source_tests` 15 passed；M57 AI contract 与 stdio bound refresh 目标测试通过。
 - M57-1：网络错误读取完整 `anyhow` error chain；401/403、`INVALID_*`、`DIFF_REFRESH_*` 和未分类错误不退避；最后一次可重试失败不 sleep，耗尽以 `exhausted=true` 统计返回。
-- M57-2：已先写 scope declaration TDD；当前红灯为待实现的 `RefreshScopeKind/Resolution` 与 `resolve_refresh_scope` API。
+- M57-2：scope declaration 4 个 TDD 通过；session CLI 17 个测试通过；显式 module/source/file 输出 applied scope，compound 保留全部 selectors，current-page 排序提示和 project fallback 均带稳定原因。
+- M57-2：scope 枚举 JSON 固定为 snake_case（`dd231af`），供后续 SLM runner 直接消费。
