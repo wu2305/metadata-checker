@@ -1004,14 +1004,18 @@ fn m57_phase3_one_shot_sync_mode_forces_persist_before_install() {
             deleted: SourceCursor::new(0, Vec::new()),
         })
     );
-    assert_eq!(
-        orchestrator
-            .runtime()
-            .read_model
-            .as_ref()
-            .expect("read model")
-            .has_page_logic_availability(PAGE_A, BUDGET),
-        true
+    assert!(
+        orchestrator.runtime().read_model.is_some(),
+        "one-shot sync execution should keep read model installed",
+    );
+    let query = orchestrator
+        .runtime_mut()
+        .query(page_query_request(PAGE_A))
+        .expect("query installed runtime page_a")
+        .result;
+    assert!(
+        !query.is_null(),
+        "query should return result in one-shot sync mode"
     );
 
     let _ = fs::remove_dir_all(root_for_session(&session_dir));
