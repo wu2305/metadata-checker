@@ -55,6 +55,7 @@
 | M57-1 tick loop code | done（`8249d6f`、`2ec96a8`） |
 | M57-2 RefreshScope TDD | done（`387871b`） |
 | M57-2 RefreshScope code | done（`e980b37`、`dd231af`） |
+| M57-3 runtime auth TDD | in progress |
 | Phase 1–3 代码 | pending |
 
 ## 设计决策（2026-07-24）
@@ -74,3 +75,4 @@
 - M57-1：网络错误读取完整 `anyhow` error chain；401/403、`INVALID_*`、`DIFF_REFRESH_*` 和未分类错误不退避；最后一次可重试失败不 sleep，耗尽以 `exhausted=true` 统计返回。
 - M57-2：scope declaration 4 个 TDD 通过；session CLI 17 个测试通过；显式 module/source/file 输出 applied scope，compound 保留全部 selectors，current-page 排序提示和 project fallback 均带稳定原因。
 - M57-2：scope 枚举 JSON 固定为 snake_case（`dd231af`），供后续 SLM runner 直接消费。
+- M57-3：已先写 runtime auth error mapping TDD；当前红灯等待 `is_session_auth_error` 与 stdio 稳定码映射实现。

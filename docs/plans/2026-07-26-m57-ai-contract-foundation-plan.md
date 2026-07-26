@@ -78,6 +78,15 @@
 - `current_source_path` 当前仅是排序提示，报告必须标记 `auto` 但未应用，并给出回落原因。
 - 无显式条件时明确回落 `project`，不得静默声称已做局部刷新。
 
+## 批准的后续切片：M57-3 runtime auth error mapping
+
+状态：**TDD in progress**
+
+- 401/403 在 refresh error chain 中统一映射为 `SESSION_AUTH_REQUIRED`。
+- 保留脱敏后的服务端诊断，不输出 password、token、cookie、cipherPassport 或 Set-Cookie。
+- 普通数据错误和未分类错误继续返回 `DIFF_REFRESH_FAILED`，不扩大鉴权分类。
+- 默认不静默重登；调用方重新启动/绑定 session 即为 rebind 路径。
+
 ## 后续衔接
 
 完成本计划后，M58 才能以固定的 `SKILL.md + CLI/stdio + project path + question` 输入做空上下文 SLM 测试；M58 的 judge 只消费稳定 JSON，不反向依赖 redb 或内部 Rust 类型。

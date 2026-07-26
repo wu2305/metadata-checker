@@ -2558,3 +2558,59 @@ fn test_stdio_diff_refresh_error_redacts_secrets() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 运行期请求收到 401 时返回稳定鉴权错误码，而不是泛化成 diff refresh 失败。
+#[test]
+fn test_stdio_diff_refresh_auth_failure_returns_stable_code() {
+    use metadata_checker::remote_metadata::{RemoteFileContent, RemoteFileInfo, RemoteFileRef};
+    use metadata_checker::session::remote_provider::{
+        RemoteChangeSet, RemoteMetafileEntry, RemoteProjectInfo, RemoteSessionProvider,
+    };
+
+    /// 模拟 session 已启动但后续远程内容请求鉴权失效。
+    struct AuthExpiredProvider;
+    impl RemoteSessionProvider for AuthExpiredProvider {
+        fn list_projects(&self) -> anyhow::Result<Vec<RemoteProjectInfo>> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+        fn list_metafiles(&self, _project_ref: &str) -> anyhow::Result<Vec<RemoteMetafileEntry>> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+        fn fetch_metafile_info(&self, _file_ref: &RemoteFileRef) -> anyhow::Result<RemoteFileInfo> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+        fn fetch_metafile_content(
+            &self,
+            _file_ref: &RemoteFileRef,
+        ) -> anyhow::Result<RemoteFileContent> {
+            Err(anyhow::anyhow!(
+                "remote session returned 401 Unauthorized: invalid credential token=expired-token"
+            ))
+        }
+        fn fetch_changed_since(
+            &self,
+            _project_ref: &str,
+            _since_revision: &str,
+        ) -> anyhow::Result<RemoteChangeSet> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+    }
+
+    let (root, mut orchestrator) =
+        build_bound_orchestrator("auth-expired", Box::new(AuthExpiredProvider));
+
+    let resp = metadata_checker::stdio_server::dispatch_stdio_line_with_orchestrator(
+        &mut orchestrator,
+        r#"{"request_id":"r-diff-auth","command":"diff_refresh"}"#,
+    );
+
+    assert_eq!(resp.ok, false);
+    assert_eq!(
+        resp.error.as_ref().expect("error").code,
+        "SESSION_AUTH_REQUIRED"
+    );
+    let serialized = serde_json::to_string(&resp).expect("serialize response");
+    assert!(!serialized.contains("expired-token"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
