@@ -5,6 +5,7 @@
   "cases": [
     {
       "case_id": "page_purpose_actions_test",
+      "tier": "fixture_llm",
       "question": "页面 actions_test 主要做什么？用户能触发哪些逻辑？会影响哪些数据？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -146,6 +147,7 @@
     },
     {
       "case_id": "button_submit_effect",
+      "tier": "fixture_llm",
       "question": "点击 actions_test 页面中的 button1 会发生什么？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -272,6 +274,7 @@
     },
     {
       "case_id": "field_lineage_model1_name",
+      "tier": "fixture_llm",
       "question": "字段 model1.name 的值从哪里来？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -397,6 +400,7 @@
     },
     {
       "case_id": "dataflow_output_source",
+      "tier": "fixture_structural",
       "question": "DataFlow 输出表 dataflow_output 是怎么来的？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -527,6 +531,7 @@
     },
     {
       "case_id": "readonly_page_check",
+      "tier": "fixture_structural",
       "question": "页面 dataflow_embedded 是只读的吗？用户能修改数据吗？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -669,6 +674,7 @@
     },
     {
       "case_id": "param_passing_link",
+      "tier": "fixture_structural",
       "question": "page_relations 页面跳转时传递了哪些参数？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -795,6 +801,7 @@
     },
     {
       "case_id": "diagnostic_affects_answer",
+      "tier": "fixture_structural",
       "question": "actions_test 页面有 UNKNOWN_ACTION_TYPE 诊断，这会影响什么结论？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -923,6 +930,7 @@
     },
     {
       "case_id": "context_button1_neighbors",
+      "tier": "fixture_structural",
       "question": "button1 周围还有哪些关键依赖和影响？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -1052,6 +1060,7 @@
     },
     {
       "case_id": "condition_action_behavior",
+      "tier": "fixture_structural",
       "question": "actions_test 中 button2 的动作在什么条件下执行？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -1164,6 +1173,7 @@
     },
     {
       "case_id": "dataflow_chain_trace",
+      "tier": "fixture_structural",
       "question": "df_a 经过 physical_x 到 df_b 的 DataFlow 链中，字段如何传递？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -1333,6 +1343,7 @@
     },
     {
       "case_id": "real_page_purpose_首页",
+      "tier": "real_manual",
       "question": "售后.app 的首页是什么类型页面？用户能触发哪些操作？页面读取了哪些数据？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1472,6 +1483,7 @@
     },
     {
       "case_id": "real_button_behavior_首页",
+      "tier": "real_manual",
       "question": "售后首页上的 button1 是什么组件？用户点击后会发生什么？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1606,6 +1618,7 @@
     },
     {
       "case_id": "real_high_fanout_model",
+      "tier": "real_manual",
       "question": "fact_saleContract 这个模型在整个项目中扮演什么角色？被哪些地方消费？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1736,6 +1749,7 @@
     },
     {
       "case_id": "real_target_find_首页",
+      "tier": "real_manual",
       "question": "如何在项目中找到名为'首页'的页面？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1848,6 +1862,7 @@
     },
     {
       "case_id": "real_typo_candidate",
+      "tier": "real_manual",
       "question": "如果查询时把 fact_saleContract 拼写成了 fact_saleContrac，系统会怎样处理？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1973,6 +1988,7 @@
     },
     {
       "case_id": "real_dataflow_tbl",
+      "tier": "real_manual",
       "question": "客户信息详情这个 DataFlow 表在整个数据链路中扮演什么角色？有哪些输入和输出？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2110,6 +2126,7 @@
     },
     {
       "case_id": "real_text_dashboard_not_primary_entrypoint",
+      "tier": "real_manual",
       "question": "售后首页中的 text11 这类文本/统计展示组件是否应被当成主要用户入口？它对页面理解有什么作用？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2250,6 +2267,7 @@
     },
     {
       "case_id": "real_tbl_single_fact_saleContract",
+      "tier": "real_manual",
       "question": "单独读取 data/tables/销售/fact_saleContract.tbl 时，这是什么类型的元数据？能否把它当成 SuperPage 或 DataFlow？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2390,6 +2408,7 @@
     },
     {
       "case_id": "fixture_condition_input1_visible_disabled",
+      "tier": "fixture_structural",
       "question": "actions_test 页面中的 input1 为什么不显示或不可用？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
@@ -2525,6 +2544,7 @@
     },
     {
       "case_id": "fixture_condition_button2_action_gate",
+      "tier": "fixture_structural",
       "question": "actions_test 页面中 button2 的 updateData action 在什么条件下才会执行？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
@@ -2635,6 +2655,7 @@
     },
     {
       "case_id": "real_condition_contract_input3_source",
+      "tier": "real_manual",
       "question": "合同协议.spg 中的 input3 值是从哪里来的？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2791,6 +2812,7 @@
     },
     {
       "case_id": "real_condition_contract_display",
+      "tier": "real_manual",
       "question": "合同协议.spg 页面正常显示数据需要满足哪些条件？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2907,6 +2929,7 @@
     },
     {
       "case_id": "real_condition_model22_scope",
+      "tier": "real_manual",
       "question": "model:model22 的数据源过滤条件有哪些？是否有来自其他页面的同名模型条件混入？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -3041,6 +3064,7 @@
     },
     {
       "case_id": "fixture_condition_model_filter_user_var",
+      "tier": "fixture_structural",
       "question": "actions_test 页面中 model1 的数据源过滤条件有哪些？是否涉及系统变量？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
@@ -3172,6 +3196,7 @@
     },
     {
       "case_id": "fixture_condition_direct_dependency",
+      "tier": "fixture_structural",
       "question": "actions_test 页面中 input_chain_a 为什么不显示？它的直接条件引用了哪些组件？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
@@ -3294,6 +3319,7 @@
     },
     {
       "case_id": "fixture_hidden_component_not_failure",
+      "tier": "fixture_structural",
       "question": "actions_test 页面中 panel_test 为什么不显示？隐藏组件 hidden_customer_id 是渲染故障吗？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
