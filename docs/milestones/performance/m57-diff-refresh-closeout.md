@@ -1,6 +1,6 @@
 # M57：Diff refresh 产品化与 tick 成本收口
 
-> 状态：**active**（spec/plan approved；M57-0 TDD 进行中）  
+> 状态：**active**（spec/plan approved；Phase 1 进行中）
 > Spec：[2026-07-23-m57-diff-refresh-closeout-design.md](../../specs/2026-07-23-m57-diff-refresh-closeout-design.md)  
 > Plan：[2026-07-26-m57-ai-contract-foundation-plan.md](../../plans/2026-07-26-m57-ai-contract-foundation-plan.md)（approved）  
 > Depends：M56（`cnb/main` @ `b4ec419` 已合入）
@@ -55,7 +55,8 @@
 | M57-1 tick loop code | done（`8249d6f`、`2ec96a8`） |
 | M57-2 RefreshScope TDD | done（`387871b`） |
 | M57-2 RefreshScope code | done（`e980b37`、`dd231af`） |
-| M57-3 runtime auth TDD | in progress |
+| M57-3 runtime auth TDD | done（`55e5339`） |
+| M57-3 runtime auth code | done（`6bb8364`） |
 | Phase 1–3 代码 | pending |
 
 ## 设计决策（2026-07-24）
@@ -75,4 +76,5 @@
 - M57-1：网络错误读取完整 `anyhow` error chain；401/403、`INVALID_*`、`DIFF_REFRESH_*` 和未分类错误不退避；最后一次可重试失败不 sleep，耗尽以 `exhausted=true` 统计返回。
 - M57-2：scope declaration 4 个 TDD 通过；session CLI 17 个测试通过；显式 module/source/file 输出 applied scope，compound 保留全部 selectors，current-page 排序提示和 project fallback 均带稳定原因。
 - M57-2：scope 枚举 JSON 固定为 snake_case（`dd231af`），供后续 SLM runner 直接消费。
-- M57-3：已先写 runtime auth error mapping TDD；当前红灯等待 `is_session_auth_error` 与 stdio 稳定码映射实现。
+- M57-3：runtime auth error mapping TDD 与实现已通过；401/403 在完整 anyhow chain 中映射为 `SESSION_AUTH_REQUIRED`，普通错误仍为 `DIFF_REFRESH_FAILED`，stdio/one-shot 均保持脱敏诊断。
+- M57-3：专项认证测试 2 passed；stdio 全套 36 passed、1 ignored；M57-0/M57-1/M57-2 影响面测试继续通过。

@@ -80,12 +80,13 @@
 
 ## 批准的后续切片：M57-3 runtime auth error mapping
 
-状态：**TDD in progress**
+状态：**done**（TDD `55e5339`；实现 `6bb8364`）
 
 - 401/403 在 refresh error chain 中统一映射为 `SESSION_AUTH_REQUIRED`。
 - 保留脱敏后的服务端诊断，不输出 password、token、cookie、cipherPassport 或 Set-Cookie。
 - 普通数据错误和未分类错误继续返回 `DIFF_REFRESH_FAILED`，不扩大鉴权分类。
 - 默认不静默重登；调用方重新启动/绑定 session 即为 rebind 路径。
+- `m57_auth_flow_tests` 2 passed；stdio auth failure 专项与 stdio 全套回归通过。
 
 ## 后续衔接
 
