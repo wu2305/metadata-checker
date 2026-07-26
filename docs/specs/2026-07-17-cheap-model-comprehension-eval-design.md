@@ -1,6 +1,6 @@
 # 廉价模型理解力评测设计（M58）
 
-> 状态：draft（2026-07-27 修订 CNB AI Chat API 后待复审；`approved` 后方可开工）
+> 状态：approved（2026-07-27；采用 CNB AI Chat API，runner 实现在 CI tester 内）
 > 范围：把「空上下文廉价模型只凭 SKILL.md + CLI 输出能否正确回答真实业务问题」从一次性人工验收，变成可持续量化的自动化评测闭环。
 > 编号：ai-eval 线 **M58**；depends M22（条件类评测与协议收敛已 done）。
 
