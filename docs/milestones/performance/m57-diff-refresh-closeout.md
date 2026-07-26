@@ -63,8 +63,8 @@
 | M57-5 Phase 2 incremental read model TDD | done（`4eacb64`） |
 | M57-5 Phase 2 incremental read model code | done（`c80e95c`） |
 | M57-5 real release baseline harness | done（`a07fa2e`、`497a6bc`、`ef59de1`） |
-| M57-6 Phase 3 LongLived persist TDD | done（`m57_phase3`） |
-| M57-6 Phase 3 LongLived persist 代码 | done（Task3 实现：`63ab220`） |
+| M57-6 Phase 3 LongLived persist TDD | done（`9784e2f`） |
+| M57-6 Phase 3 LongLived persist 代码 | done（`63ab220`、`17186e1`、`c66e7f7`、`0349f0a`） |
 | Phase 1–3 代码 | done |
 
 ## 设计决策（2026-07-24）

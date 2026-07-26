@@ -25,7 +25,7 @@
 ### 明确不做
 
 - M58 的 AnswerJudge、模型适配器、模型排行榜和 LLM 层 CI 阈值。
-- M57 的页范围 auto/explore/声明；LongLived 100 轮持久化策略已由 M57-6 实现，不属于本计划范围，亦不属于 M58。
+- M57 的页范围 auto/explore/声明；LongLived 10 轮持久化策略已由 M57-6 实现，不属于本计划范围，亦不属于 M58。
 - M58 不实现 judge/model；本计划不增加 AnswerJudge、ModelAdapter、RunReport 或模型基线实现。
 - 修改 Rust/WASM 核心之外的第二套解析、图查询或输出实现。
 
