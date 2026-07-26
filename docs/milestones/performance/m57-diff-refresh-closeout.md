@@ -1,6 +1,6 @@
 # M57：Diff refresh 产品化与 tick 成本收口
 
-> 状态：**active**（spec/plan approved；Phase 1 进行中）
+> 状态：**active**（spec/plan approved；Phase 3 pending）
 > Spec：[2026-07-23-m57-diff-refresh-closeout-design.md](../../specs/2026-07-23-m57-diff-refresh-closeout-design.md)  
 > Plan：[2026-07-26-m57-ai-contract-foundation-plan.md](../../plans/2026-07-26-m57-ai-contract-foundation-plan.md)（approved）  
 > Depends：M56（`cnb/main` @ `b4ec419` 已合入）
@@ -63,7 +63,7 @@
 | M57-5 Phase 2 incremental read model TDD | done（`4eacb64`） |
 | M57-5 Phase 2 incremental read model code | done（`c80e95c`） |
 | M57-5 real release baseline harness | done（`a07fa2e`、`497a6bc`、`ef59de1`） |
-| Phase 1–3 代码 | pending |
+| Phase 1–2 代码 | done（Phase 3 LongLived persist pending） |
 
 ## 设计决策（2026-07-24）
 
