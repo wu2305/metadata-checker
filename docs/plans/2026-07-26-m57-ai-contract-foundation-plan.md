@@ -88,6 +88,14 @@
 - 默认不静默重登；调用方重新启动/绑定 session 即为 rebind 路径。
 - `m57_auth_flow_tests` 2 passed；stdio auth failure 专项与 stdio 全套回归通过。
 
+## 批准的后续切片：M57-4 DiffRefresh scope contract
+
+状态：**TDD in progress**
+
+- `DiffRefreshReport` 是 one-shot、stdio、tick 的共同结果，必须直接带 `RefreshScope`。
+- 无显式 scope 时统一声明 `project/fallback/applied=false`，不得让 SLM runner 将全项目刷新误读成局部刷新。
+- scope 枚举继续复用 M57-2 的 snake_case JSON 名称，不引入第二套类型或解析栈。
+
 ## 后续衔接
 
 完成本计划后，M58 才能以固定的 `SKILL.md + CLI/stdio + project path + question` 输入做空上下文 SLM 测试；M58 的 judge 只消费稳定 JSON，不反向依赖 redb 或内部 Rust 类型。
