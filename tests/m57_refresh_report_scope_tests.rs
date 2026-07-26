@@ -27,12 +27,12 @@ fn m57_diff_refresh_report_declares_project_scope() {
 
     let value = serde_json::to_value(report).expect("serialize diff refresh scope");
     assert_eq!(value["scope"]["kind"].as_str(), Some("project"));
-    assert_eq!(
-        value["scope"]["resolution"].as_str(),
-        Some("fallback")
-    );
+    assert_eq!(value["scope"]["resolution"].as_str(), Some("fallback"));
     assert_eq!(value["scope"]["applied"].as_bool(), Some(false));
-    assert_eq!(value["scope"]["selectors"].as_array().map(Vec::len), Some(0));
+    assert_eq!(
+        value["scope"]["selectors"].as_array().map(Vec::len),
+        Some(0)
+    );
     assert_eq!(
         value["scope"]["fallback_reason"].as_str(),
         Some("refresh scope fallback to project scope")

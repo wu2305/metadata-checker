@@ -7,6 +7,7 @@
 use metadata_checker::diff_refresh::{DiffRefreshReport, DiffRefreshTiming};
 use metadata_checker::graph_store::{PersistReport, V2ShadowState};
 use metadata_checker::query::PageDependencyIndexCoverage;
+use metadata_checker::session::RefreshScope;
 
 /// 报告必须携带稳定版本、类型和真实 PersistReport，不能只靠 change_count 判断刷新是否落盘。
 #[test]
@@ -14,6 +15,7 @@ fn m57_diff_refresh_report_has_machine_contract_fields() {
     let report = DiffRefreshReport {
         schema_version: "1.0".to_string(),
         kind: "DiffRefresh".to_string(),
+        scope: RefreshScope::default(),
         change_count: 1,
         invalidated_pages: vec!["page:app/page.spg".to_string()],
         warm_failures: Vec::new(),

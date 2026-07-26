@@ -11,11 +11,13 @@ use metadata_checker::diff_refresh::{
     DiffRefreshReport, DiffRefreshTickReport, DiffRefreshTiming, run_tick_loop_with_hooks,
 };
 use metadata_checker::query::PageDependencyIndexCoverage;
+use metadata_checker::session::RefreshScope;
 
 fn successful_report() -> DiffRefreshReport {
     DiffRefreshReport {
         schema_version: "1.0".to_string(),
         kind: "DiffRefresh".to_string(),
+        scope: RefreshScope::default(),
         change_count: 0,
         invalidated_pages: Vec::new(),
         persist_report: None,

@@ -27,6 +27,7 @@ use crate::diff_refresh::DiffRefreshTickReport;
 use crate::graph_store::PersistReport;
 use crate::runtime::{BatchWarmReport, GraphRuntime};
 use crate::scanner::indexer::ProjectIndexer;
+use crate::session::RefreshScope;
 use crate::session::SessionManager;
 use crate::session::manifest::SessionManifest;
 use crate::session::remote_provider::RemoteSessionProvider;
@@ -51,6 +52,8 @@ pub struct DiffRefreshReport {
     pub schema_version: String,
     /// 稳定机器契约类型名。
     pub kind: String,
+    /// 本轮刷新执行范围声明；默认回退为 `project/fallback`。
+    pub scope: RefreshScope,
     /// 本轮消费的变更事件数（等于 ChangeSet.change_count）。
     pub change_count: usize,
     /// 本轮失效的页面（旧、新 PageDependencyIndex 并集，已排序）。
@@ -100,6 +103,7 @@ impl DiffRefreshOrchestrator {
         DiffRefreshReport {
             schema_version: "1.0".to_string(),
             kind: "DiffRefresh".to_string(),
+            scope: RefreshScope::default(),
             change_count,
             invalidated_pages,
             persist_report,
