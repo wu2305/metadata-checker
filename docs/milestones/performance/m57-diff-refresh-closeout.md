@@ -1,6 +1,6 @@
 # M57：Diff refresh 产品化与 tick 成本收口
 
-> 状态：**active**（spec/plan approved；Phase 3 pending）
+> 状态：**done**（spec/plan approved；M57-6 LongLived persist 验收通过）
 > Spec：[2026-07-23-m57-diff-refresh-closeout-design.md](../../specs/2026-07-23-m57-diff-refresh-closeout-design.md)  
 > Plan：[2026-07-26-m57-ai-contract-foundation-plan.md](../../plans/2026-07-26-m57-ai-contract-foundation-plan.md)（approved）  
 > Depends：M56（`cnb/main` @ `b4ec419` 已合入）
@@ -23,7 +23,7 @@
 |-------|------|------|
 | 1 | PersistReport、tick+Backoff、stdio 真机冒烟；**SKILL/`--help`/README**；**RefreshScope 自动探索+申明**；**凭证失效/重登/换绑**；M46 边界 | done |
 | 2 | Dense/Facts/PageDep 增量更新 + 规模曲线 | done |
-| 3 | LongLived 内存优先 persist（阈值 100 + 10 轮兜底）、失败恢复 e2e | pending |
+| 3 | LongLived 内存优先 persist（阈值 100 + 10 轮兜底）、失败恢复 e2e | done |
 
 ## 进度约定
 
@@ -63,14 +63,16 @@
 | M57-5 Phase 2 incremental read model TDD | done（`4eacb64`） |
 | M57-5 Phase 2 incremental read model code | done（`c80e95c`） |
 | M57-5 real release baseline harness | done（`a07fa2e`、`497a6bc`、`ef59de1`） |
-| Phase 1–2 代码 | done（Phase 3 LongLived persist pending） |
+| M57-6 Phase 3 LongLived persist TDD | done（`m57_phase3`） |
+| M57-6 Phase 3 LongLived persist 代码 | done（Task3 实现：`63ab220`） |
+| Phase 1–3 代码 | done |
 
 ## 设计决策（2026-07-24）
 
 - **路径确定性**：不做；e2e 继续 `stable_semantic_view`
 - **零写盘 open**：降级；主线改为 LongLived `install` 优先 + 批量 persist
-- **LongLived 可见性**：`install` 后立即可查；崩溃可丢未 persist 轮次
-- **批量 persist**：`dirty∪deleted > 100` 或连续 10 轮未落盘；one-shot 每轮同步
+- **LongLived 可见性**：`install` 后立即可查；崩溃可丢未 persist 轮次，重启后从 durable checkpoint 回放增量
+- **批量 persist**：`dirty∪deleted > 100` 或连续 10 轮未落盘触发；one-shot 每轮同步
 
 ## 验收记录
 
@@ -85,6 +87,8 @@
 - M57-3：runtime auth error mapping TDD 与实现已通过；401/403 在完整 anyhow chain 中映射为 `SESSION_AUTH_REQUIRED`，普通错误仍为 `DIFF_REFRESH_FAILED`，stdio/one-shot 均保持脱敏诊断。
 - M57-3：专项认证测试 2 passed；stdio 全套 36 passed、1 ignored；M57-0/M57-1/M57-2 影响面测试继续通过。
 - M57-4：主 `DiffRefreshReport`、stdio、one-shot、tick 共享 `RefreshScope`；无局部 selector 时统一输出 `project/fallback/applied=false`，scope contract 2 passed，stdio 全套回归仍为 36 passed、1 ignored。
+- M57-6：M57-5 真实项目 long-lived + stdio 路径保持可见性：`runtime` 长驻启动后刷新，查询可见更新；`m57_phase3` 语义变更未改变 query 正确性。
+- M57-6：`m57_phase3` 语义在 stdio 绑定上下文一轮 `diff_refresh` 首次执行后仍通过；`test_stdio_diff_refresh_with_bound_context` 通过。
 - Phase 1 rebind：同一 session 两次绑定使用不同凭据，manifest 不保存 password/token/cookie；测试 1 passed。
 - Phase 1 真实项目 graphdb：使用独立路径 `/private/tmp/m57-xiaoshouyi.graphdb` 完成 `1329 files / 78127 dirty / 0 deleted` 构建，避免与既有 graphdb 争用。
 - Phase 1 真实项目 stdio：复用该 graphdb 启动 LongLived，报告 `78127 nodes, read_model=true, ready`；`m57-r1 query_model` 与 `m57-r2 query_page_logic` 均返回 `ok=true`，随后结束进程，计入通过证据。
@@ -94,3 +98,15 @@
 - M57-5 针对性回归：M54 编排器 `5 passed`、M55 PageDep `5 passed`、M53 Facts `1 passed`、Dense `1 passed`、runtime `19 passed/1 ignored`、rebind `1 passed`。
 - M57-5 真实项目 release 基线：`m57_real_project_release_dirty_curve` 使用候选图实际改名 mutation（node set/拓扑不变），`78127 nodes / 150164 edges`；cold full read-model `249906 ms`，dirty `1/10/100` 的 incremental read-model 分别为 `1653/2347/3052 ms`，wall 分别为 `1655/2348/3053 ms`，三档均为 `Incremental`。
 - M57-5 性能门：相对 full 分别约 `151.2x/106.5x/81.9x` 加速；真实 release 曲线通过，Phase 2 关闭。release binary 为 `3781888 bytes`（约 `3.6M`，小于 10MB 约束）。
+- M57-6：M54 orchestrator 全部通过：`cargo test --features cli-local --test m54_diff_refresh_orchestrator_tests`（12 passed）。
+- M57-6：M57 AI 契约/Scope/tick 全部通过：`cargo test --features cli-local --test m57_ai_contract_tests`（1 passed）、`cargo test --features cli-local --test m57_refresh_report_scope_tests`（2 passed）、`cargo test --features cli-local --test m57_tick_loop_tests`（4 passed），合计 7 passed。
+- M57-6：`cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_diff_refresh_with_bound_context --test-threads=1`（1 passed）。
+- M57-6：持久化策略默认值更新（代码常量 + env）：
+  - `METADATA_CHECKER_PERSIST_DIRTY_THRESHOLD`，默认 `100`
+  - `METADATA_CHECKER_PERSIST_MAX_ROUNDS`，默认 `10`
+- M57-6：标准语义与稳定字段：
+  - LongLived 默认 defer；非空变更首次落地时 `persisted=false`，`pending_dirty_total>0`，`persist_report=null`。
+  - `dirty∪deleted > 100` 或 `pending_rounds >= 10` 时触发持久化；`threshold` 为严格“ > ”边界。
+  - one-shot 始终同步持久化（强制 `persist` 后 `install`），并通过 CLI one-shot 测试返回完整 `DiffRefreshReport`。
+  - `pending` checkpoint 采用 `max(disk_checkpoint, pending_checkpoint)` 做 watermark，空轮次只在阈值/轮次未满足时跳过 durable 写入。
+  - 持久化失败保留已 install 的 runtime 并保留 pending 状态，下一轮可重试；崩溃只能恢复 durable checkpoint，未持久化轮次可能丢失。

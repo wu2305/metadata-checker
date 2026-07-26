@@ -706,4 +706,45 @@ cargo test --release --features cli-local \
 | 10 | 704 | 15 | 1,628 | 2,347 | 2,348 | 106.5x |
 | 100 | 674 | 16 | 2,362 | 3,052 | 3,053 | 81.9x |
 
-结论：稳定 node set 的真实 dirty replacement 没有回退 full；最大 dirty=100 仍比 cold full read-model 快约 81.9x，满足 M57 Phase 2 性能门。该曲线是 read-model replacement 成本，不包含下一阶段 LongLived 批量 persist；Phase 3 仍需单独验收。
+结论：稳定 node set 的真实 dirty replacement 没有回退 full；最大 dirty=100 仍比 cold full read-model 快约 81.9x，满足 M57 Phase 2 性能门。该曲线是 read-model replacement 成本，不包含下一阶段 LongLived 批量 persist；Phase 3 验收记录见下节。
+
+## M57 Phase 3：LongLived 内存优先持久化验收（非性能）
+
+验收时间：2026-07-26（复核）
+
+验收目标：
+
+- `persisted` 与 `pending_dirty_total` 是否与策略一致；
+- one-shot、stdio、tick 的 `DiffRefreshReport` 字段口径统一；
+- 环境变量策略、重试/回退与崩溃恢复语义可复现；
+- 本阶段不新增可比“性能加速”样本，避免与 Phase 2 读模型替换曲线混用。
+
+验收命令与结果（已执行）：
+
+```bash
+cargo test --features cli-local --test m54_diff_refresh_orchestrator_tests
+cargo test --features cli-local --test m57_ai_contract_tests
+cargo test --features cli-local --test m57_refresh_report_scope_tests
+cargo test --features cli-local --test m57_tick_loop_tests
+cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_diff_refresh_with_bound_context --test-threads=1
+```
+
+测试结果：
+
+- `m54_diff_refresh_orchestrator_tests`：12 passed；
+- `m57_ai_contract_tests`：1 passed；
+- `m57_refresh_report_scope_tests`：2 passed；
+- `m57_tick_loop_tests`：4 passed；
+- `test_stdio_diff_refresh_with_bound_context`：1 passed（`--exact`）；
+
+策略与边界：
+
+- 默认 `LongLivedPersistPolicy`：
+  - `METADATA_CHECKER_PERSIST_DIRTY_THRESHOLD=100`；
+  - `METADATA_CHECKER_PERSIST_MAX_ROUNDS=10`；
+- 一般策略：`dirty ∪ deleted > threshold` 或 `pending_rounds >= max_rounds` 时 durable persist；
+- one-shot 默认 `set_one_shot_mode(true)`，每轮同步 persist；
+- LongLived 默认 deferred；`install` 后立即可读，`persist` 可能滞后；
+- 空事件轮次只推进 `pending_rounds`；`persist_report` 可能为 null；
+- 持久化失败不回滚已安装 runtime；下一轮可重试 pending commit；
+- 崩溃恢复仅靠 durable checkpoint，未写盘的 pending 轮次可能丢失，需由下一次 `poll` 重补齐。

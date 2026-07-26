@@ -20,11 +20,13 @@
 - one-shot 成功/失败均输出单个 JSON 对象单行，保留现有稳定错误码。
 - login 401/403 错误保留 JSON body 中的 `message` / `error.message`，并经过现有脱敏逻辑。
 - TDD 覆盖正常、空刷新、错误和敏感信息边界。
+- M57-6 长生命周期持久化已纳入同一套 `DiffRefreshReport` 契约：`persisted`、`pending_dirty_total`、`checkpoint`、`persist_report` 与 `scope` 在 one-shot、stdio、tick 三处一致。
 
 ### 明确不做
 
 - M58 的 AnswerJudge、模型适配器、模型排行榜和 LLM 层 CI 阈值。
-- M57 的页范围 auto/explore/声明和 LongLived 100 轮持久化策略；这些仍按 M57 Phase 1–3 清单推进。tick/backoff 本轮作为已批准计划的下一执行切片落地。
+- M57 的页范围 auto/explore/声明；LongLived 100 轮持久化策略已由 M57-6 实现，不属于本计划范围，亦不属于 M58。
+- M58 不实现 judge/model；本计划不增加 AnswerJudge、ModelAdapter、RunReport 或模型基线实现。
 - 修改 Rust/WASM 核心之外的第二套解析、图查询或输出实现。
 
 ## 文件边界
@@ -110,3 +112,20 @@
 ## 后续衔接
 
 完成本计划后，M58 才能以固定的 `SKILL.md + CLI/stdio + project path + question` 输入做空上下文 SLM 测试；M58 的 judge 只消费稳定 JSON，不反向依赖 redb 或内部 Rust 类型。
+
+## M57-6 LongLived persist：one-shot 与 stdio 契约同步（新增）
+
+状态：**done**（已按 Task 4 文档验收）
+
+- LongLived 默认为 `Deferred`，即 `install` 先于 `persist`，`pending` 聚合后按阈值/轮次持久化。
+- 默认策略从环境变量可覆盖；未设置时采用：
+  - `METADATA_CHECKER_PERSIST_DIRTY_THRESHOLD=100`
+  - `METADATA_CHECKER_PERSIST_MAX_ROUNDS=10`
+- pending watermark 规则：`effective_checkpoint` 取 durable checkpoint 与 pending checkpoint 的较新值；空轮次先推进 `pending_rounds`，只有 `dirty_node_ids > threshold` 或 `pending_rounds >= max_rounds` 时提交 durable。
+- one-shot 运行时调用 `set_one_shot_mode(true)` 强制同步提交（`persist` 后再 `install`）。
+- stdio 运行时使用 LongLived bound-orchestrator，默认走 defer；第一轮非空/未达阈值会返回 `persisted=false`，`pending_dirty_total>0`，并可能出现 `persist_report=null`。
+- 回退边界明确：
+  - 未持久化轮次失败不回滚已 install 的 runtime；
+  - 下一轮沿用 pending 报告进行重试；
+  - 仅可恢复 durable checkpoint，未落盘轮次在崩溃后可丢失（需真实元数据增量补齐）。
+- M58 继续保持边界：只消费 `DiffRefreshReport`（含 `scope` / `pending_dirty_total`）做上下文构建，不实现 AnswerJudge、ModelAdapter、RunReport、模型基线或评分逻辑。
