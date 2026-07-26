@@ -375,6 +375,7 @@ fn test_m58_run_report_is_structured_and_redacted() {
                 case_id: "pass_case".to_string(),
                 status: "pass".to_string(),
                 passed: true,
+                max_command_count: 2,
                 failure_classes: Vec::new(),
                 judge_notes: Vec::new(),
                 command_trace: vec![accepted_trace()],
@@ -383,11 +384,13 @@ fn test_m58_run_report_is_structured_and_redacted() {
                 case_id: "fail_case".to_string(),
                 status: "fail".to_string(),
                 passed: false,
+                max_command_count: 2,
                 failure_classes: vec!["missed_fact".to_string()],
                 judge_notes: vec!["short note".to_string()],
                 command_trace: vec![CommandTrace {
                     accepted: false,
                     plan_step_index: None,
+                    budget_upgrade: true,
                     ..accepted_trace()
                 }],
             },
@@ -399,6 +402,12 @@ fn test_m58_run_report_is_structured_and_redacted() {
     assert_eq!(report.command_trace_stats.accepted_commands, 1);
     assert_eq!(report.command_trace_stats.rejected_commands, 1);
     assert_eq!(report.command_trace_stats.cases_with_commands, 2);
+    assert_eq!(report.command_trace_stats.average_commands_per_case, 1.0);
+    assert_eq!(
+        report.command_trace_stats.max_command_count_exceeded_cases,
+        0
+    );
+    assert_eq!(report.command_trace_stats.budget_upgrade_count, 1);
 
     let run_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -614,6 +623,7 @@ fn accepted_trace() -> CommandTrace {
         plan_step_index: Some(0),
         accepted: true,
         detail_request: false,
+        budget_upgrade: false,
         output_sections: vec!["summary".to_string()],
     }
 }

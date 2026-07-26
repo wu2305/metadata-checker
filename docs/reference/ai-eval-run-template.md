@@ -23,6 +23,7 @@
       "case_id": "page_purpose_actions_test",
       "status": "pass",
       "passed": true,
+      "max_command_count": 2,
       "failure_classes": [],
       "judge_notes": [],
       "command_trace": [
@@ -34,6 +35,7 @@
           "plan_step_index": 0,
           "accepted": true,
           "detail_request": false,
+          "budget_upgrade": false,
           "output_sections": ["summary"]
         }
       ]
@@ -45,7 +47,10 @@
     "total_commands": 1,
     "accepted_commands": 1,
     "rejected_commands": 0,
-    "cases_with_commands": 1
+    "cases_with_commands": 1,
+    "average_commands_per_case": 1.0,
+    "max_command_count_exceeded_cases": 0,
+    "budget_upgrade_count": 0
   }
 }
 ```

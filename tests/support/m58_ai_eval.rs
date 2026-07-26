@@ -576,6 +576,8 @@ pub(crate) struct CommandTrace {
     pub(crate) accepted: bool,
     /// 是否请求了 detail/full 等过度读取路径。
     pub(crate) detail_request: bool,
+    /// 相对 compact 默认预算的升级次数统计标记。
+    pub(crate) budget_upgrade: bool,
     /// CLI 输出中实际回传的顶层 sections。
     pub(crate) output_sections: Vec<String>,
 }
@@ -600,6 +602,8 @@ pub(crate) struct CaseReport {
     pub(crate) status: String,
     /// 是否通过 AnswerJudge。
     pub(crate) passed: bool,
+    /// case 允许的最大命令数。
+    pub(crate) max_command_count: usize,
     /// 确定性失败分类。
     pub(crate) failure_classes: Vec<String>,
     /// 不包含模型原文的短说明。
@@ -609,7 +613,7 @@ pub(crate) struct CaseReport {
 }
 
 /// RunReport 中的命令统计快照。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct CommandTraceStats {
     /// 所有 case 的命令尝试数。
     pub(crate) total_commands: usize,
@@ -619,6 +623,12 @@ pub(crate) struct CommandTraceStats {
     pub(crate) rejected_commands: usize,
     /// 至少执行过一个命令的 case 数。
     pub(crate) cases_with_commands: usize,
+    /// 每个 case 的平均命令尝试数。
+    pub(crate) average_commands_per_case: f64,
+    /// 命令轨迹超过 case 上限的 case 数。
+    pub(crate) max_command_count_exceeded_cases: usize,
+    /// 从 compact 默认预算升级的命令数。
+    pub(crate) budget_upgrade_count: usize,
 }
 
 /// M58 一次评测的唯一结构化事实源。
@@ -665,6 +675,9 @@ impl RunReport {
             accepted_commands: 0,
             rejected_commands: 0,
             cases_with_commands: 0,
+            average_commands_per_case: 0.0,
+            max_command_count_exceeded_cases: 0,
+            budget_upgrade_count: 0,
         };
         for case in &cases {
             for failure_class in &case.failure_classes {
@@ -684,7 +697,20 @@ impl RunReport {
                 .iter()
                 .filter(|trace| !trace.accepted)
                 .count();
+            command_trace_stats.budget_upgrade_count += case
+                .command_trace
+                .iter()
+                .filter(|trace| trace.budget_upgrade)
+                .count();
+            if case.command_trace.len() > case.max_command_count {
+                command_trace_stats.max_command_count_exceeded_cases += 1;
+            }
         }
+        command_trace_stats.average_commands_per_case = if cases.is_empty() {
+            0.0
+        } else {
+            command_trace_stats.total_commands as f64 / cases.len() as f64
+        };
         Self {
             schema_version: "1.0.0".to_string(),
             provider,
@@ -806,12 +832,14 @@ fn render_report_markdown(report: &RunReport) -> String {
     let mut markdown = String::new();
     markdown.push_str("# M58 AI Eval Run\n\n");
     markdown.push_str(&format!(
-        "- provider: `{}`\n- model: `{}`\n- cnb_build_id: `{}`\n- started_at: `{}`\n- pass_rate: `{:.4}`\n\n",
+        "- provider: `{}`\n- model: `{}`\n- cnb_build_id: `{}`\n- started_at: `{}`\n- pass_rate: `{:.4}`\n- average_commands_per_case: `{:.4}`\n- budget_upgrade_count: `{}`\n\n",
         escape_markdown_cell(&report.provider),
         escape_markdown_cell(&report.model_id),
         escape_markdown_cell(report.cnb_build_id.as_deref().unwrap_or("")),
         escape_markdown_cell(&report.started_at),
         report.pass_rate,
+        report.command_trace_stats.average_commands_per_case,
+        report.command_trace_stats.budget_upgrade_count,
     ));
     markdown.push_str("| case_id | status | failure_classes | command_count |\n");
     markdown.push_str("| --- | --- | --- | ---: |\n");
@@ -1010,6 +1038,7 @@ pub(crate) fn run_case(
             Err(_) => {
                 return Ok(error_case_report(
                     &case.case_id,
+                    policy.max_command_count,
                     "runner_error",
                     "model adapter completion failed",
                     trace,
@@ -1025,6 +1054,7 @@ pub(crate) fn run_case(
             Err(_) => {
                 return Ok(error_case_report(
                     &case.case_id,
+                    policy.max_command_count,
                     "protocol_error",
                     "model response violated command/final JSON protocol",
                     trace,
@@ -1043,6 +1073,7 @@ pub(crate) fn run_case(
                         "fail".to_string()
                     },
                     passed: judge.passed,
+                    max_command_count: policy.max_command_count,
                     failure_classes: judge.failure_classes,
                     judge_notes: judge.judge_notes,
                     command_trace: trace,
@@ -1055,6 +1086,7 @@ pub(crate) fn run_case(
                         trace.push(rejected_command_trace(&command_request));
                         return Ok(error_case_report(
                             &case.case_id,
+                            policy.max_command_count,
                             "wrong_command",
                             "model command was rejected by minimal_command_plan",
                             trace,
@@ -1074,6 +1106,7 @@ pub(crate) fn run_case(
                         ));
                         return Ok(error_case_report(
                             &case.case_id,
+                            policy.max_command_count,
                             "runner_error",
                             "metadata-checker command execution failed",
                             trace,
@@ -1098,6 +1131,7 @@ pub(crate) fn run_case(
 
     Ok(error_case_report(
         &case.case_id,
+        policy.max_command_count,
         "protocol_error",
         "model did not return final before runner turn limit",
         trace,
@@ -1121,6 +1155,7 @@ pub(crate) fn run_fixture_llm_cases(
             Ok(report) => report,
             Err(_) => error_case_report(
                 &case.case_id,
+                case_max_command_count(case),
                 "runner_error",
                 "case workspace setup failed",
                 Vec::new(),
@@ -1353,6 +1388,7 @@ fn rejected_command_trace(request: &CommandRequest) -> CommandTrace {
         plan_step_index: None,
         accepted: false,
         detail_request: is_detail_request(request),
+        budget_upgrade: is_budget_upgrade(request),
         output_sections: Vec::new(),
     }
 }
@@ -1372,6 +1408,7 @@ fn accepted_command_trace(
         plan_step_index: Some(step_index),
         accepted: true,
         detail_request,
+        budget_upgrade: is_budget_upgrade(request),
         output_sections,
     }
 }
@@ -1379,6 +1416,7 @@ fn accepted_command_trace(
 /// 构造命令/adapter 失败的 case 报告，不复制原始输出或模型回答。
 fn error_case_report(
     case_id: &str,
+    max_command_count: usize,
     failure_class: &str,
     note: &str,
     command_trace: Vec<CommandTrace>,
@@ -1387,10 +1425,31 @@ fn error_case_report(
         case_id: case_id.to_string(),
         status: "error".to_string(),
         passed: false,
+        max_command_count,
         failure_classes: vec![failure_class.to_string()],
         judge_notes: vec![note.to_string()],
         command_trace,
     }
+}
+
+/// 判断命令预算是否相对 compact 默认值发生升级。
+fn is_budget_upgrade(request: &CommandRequest) -> bool {
+    request
+        .budget
+        .as_deref()
+        .is_some_and(|budget| budget == "normal" || budget == "full")
+        || request
+            .args
+            .windows(2)
+            .any(|window| window[0] == "--budget" && (window[1] == "normal" || window[1] == "full"))
+}
+
+/// 从 case schema 读取最大命令数，供 workspace 初始化失败记录使用。
+fn case_max_command_count(case: &EvalCase) -> usize {
+    case.value
+        .get("max_command_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize
 }
 
 /// 限制诊断摘要长度。
