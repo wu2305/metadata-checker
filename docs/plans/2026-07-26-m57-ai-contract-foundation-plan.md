@@ -69,6 +69,15 @@
 - runner 输出稳定统计：尝试次数、成功次数、可重试失败次数、实际安排的退避秒数、成功报告和是否达到尝试上限。
 - TDD 覆盖网络失败后恢复、数据错误不退避、尝试上限和零尝试边界。
 
+## 批准的后续切片：M57-2 RefreshScope declaration
+
+状态：**TDD in progress**（本轮先锁定 scope 声明；不改变旧的 current-page 排序语义）
+
+- 显式 module/source/file 过滤必须在报告中声明为 `applied=true`。
+- 多个显式条件必须声明 `compound`，不能只保留一个条件。
+- `current_source_path` 当前仅是排序提示，报告必须标记 `auto` 但未应用，并给出回落原因。
+- 无显式条件时明确回落 `project`，不得静默声称已做局部刷新。
+
 ## 后续衔接
 
 完成本计划后，M58 才能以固定的 `SKILL.md + CLI/stdio + project path + question` 输入做空上下文 SLM 测试；M58 的 judge 只消费稳定 JSON，不反向依赖 redb 或内部 Rust 类型。
