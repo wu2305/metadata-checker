@@ -90,11 +90,12 @@
 
 ## 批准的后续切片：M57-4 DiffRefresh scope contract
 
-状态：**TDD in progress**
+状态：**done**（TDD `f0b03f1`；实现 `c3f9fda`）
 
 - `DiffRefreshReport` 是 one-shot、stdio、tick 的共同结果，必须直接带 `RefreshScope`。
 - 无显式 scope 时统一声明 `project/fallback/applied=false`，不得让 SLM runner 将全项目刷新误读成局部刷新。
 - scope 枚举继续复用 M57-2 的 snake_case JSON 名称，不引入第二套类型或解析栈。
+- scope contract 2 passed；AI contract、tick、stdio 和编排器回归通过。
 
 ## 后续衔接
 
