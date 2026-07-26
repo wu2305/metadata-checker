@@ -790,6 +790,7 @@ fn main() -> Result<()> {
                     };
                     return Ok(());
                 }
+                let files = serde_json::to_value(&report.files)?;
 
                 println!(
                     "{}",
@@ -804,13 +805,7 @@ fn main() -> Result<()> {
                             "skipped": report.sync.skipped,
                             "deleted": report.sync.deleted,
                         },
-                        "files": {
-                            "discovered": report.files.discovered,
-                            "analyzable": report.files.analyzable,
-                            "synced": report.files.synced,
-                            "skipped": report.files.skipped,
-                            "failed": report.files.failed,
-                        },
+                        "files": files,
                         "diagnostics": report.diagnostics
                             .iter()
                             .map(|diagnostic| serde_json::json!({
