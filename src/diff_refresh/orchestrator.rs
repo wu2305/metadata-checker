@@ -60,6 +60,10 @@ pub struct DiffRefreshReport {
     pub invalidated_pages: Vec<String>,
     /// 持久化统计，空提交/仅写 checkpoint 时也应返回真实值。
     pub persist_report: Option<PersistReport>,
+    /// 本轮是否完成了 durable graph 的持久化提交。
+    pub persisted: bool,
+    /// 本轮仍待持久化提交的脏节点总数（用于 pending 追踪）。
+    pub pending_dirty_total: usize,
     /// best-effort re-warm 失败的页面（来自 BatchWarmReport.pages[*].success，
     /// 不得仅凭外层 Result::Ok 判定全部成功）。
     pub warm_failures: Vec<String>,
@@ -71,6 +75,24 @@ pub struct DiffRefreshReport {
     /// invalidated_pages 已保守扩大到全部 warm 页面。
     pub page_dep_index_coverage: crate::query::PageDependencyIndexCoverage,
     pub timing: DiffRefreshTiming,
+}
+
+/// 长生命周期持久化策略控制配置。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LongLivedPersistPolicy {
+    /// 允许累积的脏节点上限，超过后触发持久化或转入待决流程。
+    pub dirty_node_threshold: usize,
+    /// 最大 pending 轮次，达到上限应触发持久化回退。
+    pub max_pending_rounds: usize,
+}
+
+impl Default for LongLivedPersistPolicy {
+    fn default() -> Self {
+        Self {
+            dirty_node_threshold: read_env_usize("METADATA_CHECKER_PERSIST_DIRTY_THRESHOLD", 100),
+            max_pending_rounds: read_env_usize("METADATA_CHECKER_PERSIST_MAX_ROUNDS", 10),
+        }
+    }
 }
 
 /// re-warm 执行器：默认委托 `GraphRuntime::warm_page_logic_batch`，
@@ -86,6 +108,7 @@ pub struct DiffRefreshOrchestrator {
     source: Box<dyn MetaFilesChangeSource>,
     provider: Box<dyn RemoteSessionProvider>,
     runtime: GraphRuntime,
+    persist_policy: LongLivedPersistPolicy,
     warm_fn: WarmFn,
 }
 
@@ -99,6 +122,8 @@ impl DiffRefreshOrchestrator {
         page_dep_index_coverage: crate::query::PageDependencyIndexCoverage,
         timing: DiffRefreshTiming,
         persist_report: Option<PersistReport>,
+        persisted: bool,
+        pending_dirty_total: usize,
     ) -> DiffRefreshReport {
         DiffRefreshReport {
             schema_version: "1.0".to_string(),
@@ -107,6 +132,8 @@ impl DiffRefreshOrchestrator {
             change_count,
             invalidated_pages,
             persist_report,
+            persisted,
+            pending_dirty_total,
             warm_failures,
             checkpoint,
             last_poll_at,
@@ -134,6 +161,7 @@ impl DiffRefreshOrchestrator {
             source,
             provider,
             runtime,
+            persist_policy: LongLivedPersistPolicy::default(),
             warm_fn: Box::new(|runtime, targets| runtime.warm_page_logic_batch(targets)),
         }
     }
@@ -141,6 +169,11 @@ impl DiffRefreshOrchestrator {
     /// 注入自定义 re-warm 执行器（测试用）。
     pub fn set_warm_fn(&mut self, warm_fn: WarmFn) {
         self.warm_fn = warm_fn;
+    }
+
+    /// 配置长生命周期持久化策略，便于测试与调用方注入固定参数。
+    pub fn set_persist_policy(&mut self, policy: LongLivedPersistPolicy) {
+        self.persist_policy = policy;
     }
 
     /// 读取当前内存 manifest（mirror 后的最新状态）。
@@ -214,6 +247,7 @@ impl DiffRefreshOrchestrator {
                 timing.commit_ms = stage.elapsed().as_millis();
                 (Some(bootstrap_checkpoint), Some(persist_report))
             };
+            let persisted = persist_report.is_some();
 
             return Ok(Self::new_machine_report(
                 0,
@@ -224,6 +258,8 @@ impl DiffRefreshOrchestrator {
                 coverage,
                 timing,
                 persist_report,
+                persisted,
+                0,
             ));
         }
 
@@ -300,6 +336,7 @@ impl DiffRefreshOrchestrator {
         let stage = Instant::now();
         let warm_failures = self.rewarm_best_effort(&rewarm_targets);
         timing.rewarm_ms = stage.elapsed().as_millis();
+        let persisted = true;
 
         Ok(Self::new_machine_report(
             changeset.change_count,
@@ -310,6 +347,8 @@ impl DiffRefreshOrchestrator {
             page_dep_index_coverage,
             timing,
             Some(persist_report),
+            persisted,
+            0,
         ))
     }
 
@@ -392,4 +431,12 @@ fn now_unix_millis() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// 读取环境变量中的 usize 配置，读取失败时使用回退值。
+fn read_env_usize(env_key: &str, fallback: usize) -> usize {
+    std::env::var(env_key)
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(fallback)
 }

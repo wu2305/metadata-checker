@@ -31,7 +31,9 @@ pub use fixture_source::FixtureMetaFilesChangeSource;
 #[cfg(feature = "cli-local")]
 pub use mirror::{MirrorApplyReport, apply_changeset_to_mirror};
 #[cfg(feature = "cli-local")]
-pub use orchestrator::{DiffRefreshOrchestrator, DiffRefreshReport, DiffRefreshTiming};
+pub use orchestrator::{
+    DiffRefreshOrchestrator, DiffRefreshReport, DiffRefreshTiming, LongLivedPersistPolicy,
+};
 #[cfg(feature = "cli-local")]
 pub use source::MetaFilesChangeSource;
 #[cfg(feature = "cli-local")]
