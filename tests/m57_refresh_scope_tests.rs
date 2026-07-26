@@ -26,6 +26,9 @@ fn m57_scope_declares_explicit_module_filter() {
     assert_eq!(scope.applied, true);
     assert_eq!(scope.selectors, vec!["module:app/sales"]);
     assert_eq!(scope.fallback_reason, None);
+    let value = serde_json::to_value(scope).expect("serialize refresh scope");
+    assert_eq!(value["kind"].as_str(), Some("module"));
+    assert_eq!(value["resolution"].as_str(), Some("explicit"));
 }
 
 /// 多个显式条件必须声明 compound，不能只展示其中一个条件。
@@ -68,7 +71,10 @@ fn m57_scope_does_not_misreport_current_page_hint_as_filter() {
     assert_eq!(scope.kind, RefreshScopeKind::SourcePath);
     assert_eq!(scope.resolution, RefreshScopeResolution::Auto);
     assert_eq!(scope.applied, false);
-    assert_eq!(scope.fallback_reason.as_deref(), Some("current_source_path is an ordering hint"));
+    assert_eq!(
+        scope.fallback_reason.as_deref(),
+        Some("current_source_path is an ordering hint")
+    );
 }
 
 /// 没有显式过滤或当前页提示时必须明确回落到 project。

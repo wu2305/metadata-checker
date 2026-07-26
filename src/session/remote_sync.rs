@@ -34,7 +34,9 @@ pub struct SessionRefreshFilter {
     pub current_source_path: Option<String>,
 }
 
+/// 刷新作用域的实际粒度。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum RefreshScopeKind {
     Project,
     Module,
@@ -43,7 +45,9 @@ pub enum RefreshScopeKind {
     Compound,
 }
 
+/// 刷新作用域的推断来源。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum RefreshScopeResolution {
     Explicit,
     Auto,
