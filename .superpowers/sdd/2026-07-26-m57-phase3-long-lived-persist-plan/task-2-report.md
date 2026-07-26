@@ -1,19 +1,16 @@
-Task 2 Interface Scope Report
+Task 2 Fix 报告（2026-07-26）
 
-- 已完成：仅在 `src/diff_refresh/orchestrator.rs` 与 `src/diff_refresh/mod.rs` 实现 `LongLivedPersistPolicy` 与 `DiffRefreshReport` 报告字段接口公开化，不触及持久化行为分支。
-- 新增项：
-  - `LongLivedPersistPolicy`：`dirty_node_threshold`、`max_pending_rounds`，默认值通过环境变量读取，回退至 `100` / `10`。
-  - `DiffRefreshOrchestrator::set_persist_policy(policy)`：新增配置入口，保持构造函数签名不变。
-  - `DiffRefreshReport`：新增 `persisted`、`pending_dirty_total`，并通过 `new_machine_report` 填充。
-  - `diff_refresh::mod` 中导出 `LongLivedPersistPolicy`。
-- 未实现项（符合 Task 2 范围）：
-  - 未添加 `set_persist_fn` 或 pending 回放/延迟落盘决策逻辑。
-  - `persist_policy` 当前仅存储配置，不影响现有提交路径。
+- 修复点：将 `DiffRefreshOrchestrator::refresh_once` 中「首次 bootstrap 空变更集 checkpoint-only」路径的
+  `persisted` 从 `persist_report.is_some()` 改为固定 `false`，与 `durable graph` 提交语义对齐。
+- 未改行为：`Graph + checkpoint` 正常提交分支仍返回 `persisted = true`；已有 checkpoint 的空 Poll 仍返回
+  `persisted = false`。
+- 覆盖：补充了 `m54_diff_refresh_orchestrator_tests` 中空变更集分支与首次 bootstrap 空变更集测试中的
+  `persisted` 断言（最小范围内）。
 
-测试与验证：
-- `cargo fmt --check` 通过。
-- 报告契约测试通过：
-  - `cargo test --features cli-local --test m57_ai_contract_tests -- --nocapture`
-  - `cargo test --features cli-local --test m57_refresh_report_scope_tests -- --nocapture`
-  - `cargo test --features cli-local --test m57_tick_loop_tests -- --nocapture`
-- 行为类测试未执行（按要求留给 Task 3），`m54` 中与长生命周期 pending 持久化相关断言预期仍为后续实现目标。
+验证：
+- `cargo fmt`
+- `cargo test --test m57_ai_contract_tests --features cli-local`（通过）
+- `cargo test --test m57_refresh_report_scope_tests --features cli-local`（通过）
+- `cargo test --test m57_tick_loop_tests --features cli-local`（通过）
+- `cargo test --test m54_diff_refresh_orchestrator_tests --features cli-local` 目前受现有测试文件未修复的
+  `set_persist_fn` 编译错误阻断（与本次修改无关）。

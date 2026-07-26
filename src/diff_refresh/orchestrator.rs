@@ -247,7 +247,7 @@ impl DiffRefreshOrchestrator {
                 timing.commit_ms = stage.elapsed().as_millis();
                 (Some(bootstrap_checkpoint), Some(persist_report))
             };
-            let persisted = persist_report.is_some();
+            let persisted = false;
 
             return Ok(Self::new_machine_report(
                 0,

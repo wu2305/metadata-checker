@@ -408,7 +408,8 @@ fn m54_diff_refresh_orchestrator_end_to_end_equivalence() {
     );
 }
 
-/// 空 ChangeSet：不写 graph/checkpoint，只更新 report 的 last_poll_at。
+/// 空 ChangeSet：首次无 checkpoint 时需 checkpoint-only 落盘；已有 checkpoint 时仅更新
+/// `last_poll_at`，不推进 checkpoint。
 #[test]
 fn m54_diff_refresh_orchestrator_empty_changeset_only_updates_last_poll_at() {
     let (manager, session_dir, manifest, db_path) = setup_session("empty");
@@ -457,6 +458,7 @@ fn m54_diff_refresh_orchestrator_empty_changeset_only_updates_last_poll_at() {
         report.persist_report, None,
         "an empty poll with an existing checkpoint must not rewrite the graph"
     );
+    assert_eq!(report.persisted, false);
 
     // graph 与 checkpoint 均未写：重开后保持一致
     let reopened = GraphDB::open(&db_path).expect("reopen graph");
@@ -473,6 +475,73 @@ fn m54_diff_refresh_orchestrator_empty_changeset_only_updates_last_poll_at() {
         metadata_checker::graph_store::GraphReadStore::node_count(&reopened).expect("node count"),
         baseline_nodes
     );
+}
+
+/// 首次 bootstrap 的空变更集是 checkpoint-only，应返回 persisted=false。
+#[test]
+fn m54_diff_refresh_orchestrator_bootstrap_empty_changeset_is_not_durable_persist() {
+    let root = test_root("bootstrap-empty");
+    let manager = SessionManager::new(&root);
+    manager
+        .create_session("s1", "https://bi.test", "proj", "proj", "remote")
+        .expect("create session");
+    let session_dir = manager.session_dir("s1");
+    let mut manifest = manager.read_manifest("s1").expect("read manifest");
+
+    seed_file(
+        &session_dir,
+        &mut manifest,
+        "app/page_a.spg",
+        "file-a",
+        "1",
+        PAGE_A_V1,
+    );
+
+    let db_path = session_dir.join("graph.redb");
+    ProjectIndexer::scan(&project_mirror_root(&session_dir), &db_path).expect("initial scan");
+    manifest.graph_db_path = db_path.to_string_lossy().to_string();
+    manager.write_manifest(&manifest).expect("write manifest");
+
+    let source = FixtureMetaFilesChangeSource::from_json_str(
+        r#"{"schema_version":1,"snapshot":{"active":[{"file_id":"file-a","source_path":"app/page_a.spg","revision":"1","content_type":"super_page","updated_at_ms":1000}]}}"#,
+    )
+    .expect("empty bootstrap fixture source");
+    let provider = StubProvider::new();
+    let runtime = GraphRuntime::load_with_project_dir_and_mode(
+        &db_path,
+        Some(project_mirror_root(&session_dir)),
+        RuntimeMode::LongLived,
+    )
+    .expect("load runtime");
+
+    let mut orchestrator = DiffRefreshOrchestrator::new(
+        manager,
+        session_dir.clone(),
+        manifest,
+        Box::new(source),
+        Box::new(provider),
+        runtime,
+    );
+    let report = orchestrator
+        .refresh_once()
+        .expect("bootstrap empty refresh");
+
+    assert_eq!(report.change_count, 0);
+    assert_eq!(report.persisted, false);
+    assert_eq!(
+        report.persist_report.is_some(),
+        true,
+        "bootstrap empty should persist checkpoint metadata"
+    );
+    assert_eq!(
+        report.checkpoint,
+        Some(DiffRefreshCheckpoint {
+            active: SourceCursor::new(1000, vec!["active:file-a:1".into()]),
+            deleted: SourceCursor::new(0, Vec::new()),
+        })
+    );
+
+    let _ = fs::remove_dir_all(root);
 }
 
 /// 首次调用无 checkpoint 时走 bootstrap：只拉不一致文件、删除远端缺失文件、
