@@ -289,12 +289,12 @@ fn test_m58_cnb_sse_rejects_empty_choices_without_leaking_token() {
     assert!(error.contains("CNB AI Chat"));
 }
 
-/// 验证 CNB SSE chunk 缺失 choices 时会返回明确错误且不泄漏 token。
+/// 验证 CNB SSE chunk 里 delta 缺失时会返回明确错误且不泄漏 token。
 #[test]
-fn test_m58_cnb_sse_rejects_missing_choices_without_leaking_token() {
+fn test_m58_cnb_sse_rejects_missing_delta_without_leaking_token() {
     let token = "m58-missing-choices-secret";
     let response_body = concat!(
-        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m58\"}\n\n",
+        "data: {\"choices\":[{}]}\n\n",
         "data: [DONE]\n\n",
     );
     let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
@@ -309,7 +309,29 @@ fn test_m58_cnb_sse_rejects_missing_choices_without_leaking_token() {
     let error = adapter.complete(&empty_chat_request()).unwrap_err().to_string();
     server.join().unwrap();
     assert!(!error.contains(token));
-    assert!(error.contains("CNB AI Chat SSE chunk 缺少 choices"));
+    assert!(error.contains("CNB AI Chat SSE chunk 缺少 delta"));
+}
+
+/// 验证 CNB SSE delta 里的 provider 额外字段不会影响 content 拼接。
+#[test]
+fn test_m58_cnb_sse_accepts_provider_delta_extra_fields_without_leaking_token() {
+    let token = "m58-extra-fields-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"chain\",\"function_call\":null,\"refusal\":null,\"tool_calls\":[],\"content\":\"{\\\"kind\\\":\\\"final\\\",\\\"answer\\\":\\\"ok\\\"}\",\"extra_fields\":{\"provider\":\"cnb\"}}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let content = adapter.complete(&empty_chat_request()).unwrap();
+    server.join().unwrap();
+    assert_eq!(content, r#"{"kind":"final","answer":"ok"}"#);
 }
 
 /// 验证 CNB HTTP 错误和缺字段响应不会泄漏 token 或伪造成功。

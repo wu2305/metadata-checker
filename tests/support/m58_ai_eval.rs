@@ -383,14 +383,12 @@ struct SseChatChunk {
 
 /// CNB SSE choice 中的增量内容载体。
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ChatChoice {
     delta: Option<ChatDelta>,
 }
 
 /// CNB SSE delta 里的文本片段。
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ChatDelta {
     content: Option<String>,
 }
