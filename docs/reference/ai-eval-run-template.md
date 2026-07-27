@@ -104,7 +104,7 @@ bootstrap 必须显式约束：
 - 实际 command turn 必须依据 `SKILL.md` 和 question 自主选择 `command_kind`、`target`、`args`、`budget`；不要从 case metadata 注入最小计划。
 - 页面目标必须保留标准相对路径：`page:app/<relative-file>.spg`。
 - 第一轮先走最小允许查询：默认使用 `--budget compact`；仅在 `diagnostics`/`OUTPUT_TRUNCATED` 不足时再升级到 `normal` 或 `full`。`budget` 仅表示查询深度，不是路径或目标前缀。
-- 后续 `user` 消息只作为 CLI 证据读取；先看 `summary`，证据够了就立刻 `final`。
+- 后续 `user` 消息只作为 CLI 证据读取；先看 `summary`，再读声明的主证据块。若主证据块为空或 `result=null`，不要直接作答；仍有查询机会时，用同一 `target` 执行 `--explain`、`args=[]`、`budget=compact` 作为受限 fallback，否则明确说明证据不足。
 - 遇到 `diagnostics`、`OUTPUT_TRUNCATED` 或其他不确定性时，final answer 必须保守说明，禁止猜测。
 
 runner 保持 strict parse：malformed JSON、Markdown fence、解释性前缀等都记为 `protocol_error`，不会自动剥离或重试后继续执行。

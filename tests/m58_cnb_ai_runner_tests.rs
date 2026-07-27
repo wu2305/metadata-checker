@@ -620,7 +620,7 @@ fn test_m58_fake_runner_executes_fixture_llm_cases() {
     assert_eq!(report.cases.len(), 3);
     assert_eq!(report.pass_rate, 1.0);
     assert_eq!(report.cases.iter().all(|case| case.status == "pass"), true);
-    assert_eq!(adapter.requests().len(), 6);
+    assert_eq!(adapter.requests().len(), 7);
     assert_eq!(adapter.requests()[0].messages[0].role, "user");
     assert_eq!(
         adapter.requests()[0].messages[0]
@@ -634,8 +634,13 @@ fn test_m58_fake_runner_executes_fixture_llm_cases() {
             .contains(&selected[0].question),
         true
     );
-    for request in adapter.requests().iter().skip(1).step_by(2) {
-        assert_eq!(request.messages.len(), 3);
+    for request in adapter
+        .requests()
+        .iter()
+        .filter(|request| request.messages.len() > 1)
+    {
+        assert_eq!(request.messages.len() % 2, 1);
+        assert_eq!(request.messages.last().unwrap().role, "user");
         assert_eq!(request.messages[1].role, "assistant");
         assert_eq!(request.messages[2].role, "user");
         assert_eq!(request.messages[2].content.starts_with('{'), true);
@@ -679,6 +684,8 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("页面整体逻辑 -> --query-page-logic"));
     assert!(bootstrap.contains("单组件/按钮/动作 -> --explain"));
     assert!(bootstrap.contains("writer/value-source/condition -> --explain-condition"));
+    assert!(bootstrap.contains("主证据块为空或 result=null 时，不要直接作答"));
+    assert!(bootstrap.contains("用同一 target 执行 --explain 作为受限 fallback"));
     assert!(bootstrap.contains("compact"));
     assert!(bootstrap.contains("compact / normal / full"));
     assert!(bootstrap.contains("页面目标保留 `page:app/<relative-file>.spg`"));
@@ -944,17 +951,18 @@ fn fixture_runner_config(output_dir: PathBuf) -> RunnerConfig {
 fn build_fake_case_responses(cases: &[m58_ai_eval::EvalCase]) -> Vec<String> {
     let mut responses = Vec::new();
     for case in cases {
-        let step = &case.value["minimal_command_plan"][0];
-        responses.push(
-            serde_json::json!({
-                "kind": "command",
-                "command_kind": step["command_kind"],
-                "target": step["target"],
-                "args": step["args"],
-                "budget": step["budget"]
-            })
-            .to_string(),
-        );
+        for step in case.value["minimal_command_plan"].as_array().unwrap() {
+            responses.push(
+                serde_json::json!({
+                    "kind": "command",
+                    "command_kind": step["command_kind"],
+                    "target": step["target"],
+                    "args": step["args"],
+                    "budget": step["budget"]
+                })
+                .to_string(),
+            );
+        }
         let required = case.value["answer_assertions"]["must_include"]
             .as_array()
             .unwrap()

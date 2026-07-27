@@ -271,7 +271,8 @@
       "question": "字段 model1.name 的值从哪里来？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain-condition 'field:model1.name' --intent writer --budget compact"
+        "--project-dir tests/fixtures/test_project --explain-condition 'field:model1.name' --intent writer --budget compact",
+        "--project-dir tests/fixtures/test_project --explain field:model1.name --budget compact"
       ],
       "expected_facts": [
         "model1.name 被页面 action 写入",
@@ -287,21 +288,24 @@
           "path": "summary",
           "op": "contains_field_path",
           "field_path": "written_by_count",
-          "description": "summary 有 written_by_count"
+          "description": "fallback summary 有 written_by_count",
+          "command_index": 1
         },
         {
           "path": "evidence",
           "op": "array_any",
           "field": "edge_type",
           "value": "ActionWrites",
-          "description": "evidence 中有 ActionWrites 边"
+          "description": "fallback evidence 中有 ActionWrites 边",
+          "command_index": 1
         },
         {
           "path": "evidence",
           "op": "array_any",
           "field": "edge_type",
           "value": "Writes",
-          "description": "evidence 中有 Writes 边"
+          "description": "fallback evidence 中有 Writes 边",
+          "command_index": 1
         }
       ],
       "answer_rubric": {
@@ -325,6 +329,13 @@
           "args": ["--intent", "writer"],
           "requires_project_dir": true,
           "budget": "compact"
+        },
+        {
+          "command_kind": "--explain",
+          "target": "field:model1.name",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": "compact"
         }
       ],
       "expected_output_assertions": [
@@ -332,13 +343,38 @@
           "path": "summary",
           "op": "contains_field_path",
           "field_path": "intent",
-          "description": "summary 包含 intent"
+          "description": "writer 查询 summary 包含 intent",
+          "command_index": 0
         },
         {
           "path": "summary.intent",
           "op": "eq",
           "value": "writer",
-          "description": "intent 为 writer"
+          "description": "writer 查询 intent 为 writer",
+          "command_index": 0
+        },
+        {
+          "path": "summary",
+          "op": "contains_field_path",
+          "field_path": "written_by_count",
+          "description": "fallback summary 有 written_by_count",
+          "command_index": 1
+        },
+        {
+          "path": "evidence",
+          "op": "array_any",
+          "field": "edge_type",
+          "value": "ActionWrites",
+          "description": "fallback evidence 中有 ActionWrites 边",
+          "command_index": 1
+        },
+        {
+          "path": "evidence",
+          "op": "array_any",
+          "field": "edge_type",
+          "value": "Writes",
+          "description": "fallback evidence 中有 Writes 边",
+          "command_index": 1
         }
       ],
       "risk_tags": [
@@ -350,6 +386,7 @@
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
+        "details",
         "evidence"
       ],
       "answer_assertions": {

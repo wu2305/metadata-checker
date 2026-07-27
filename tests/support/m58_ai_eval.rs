@@ -1252,9 +1252,10 @@ Rules:\\n\
 5. budget 字段仅在命令需要时设置，合法值为 compact / normal / full（compact 作为默认第一轮；仅在 diagnostics 或 OUTPUT_TRUNCATED 时升级）。\\n\
 6. 命令 JSON 示例：{{\"kind\":\"command\",\"command_kind\":\"--query-page-logic\",\"target\":\"page:<relative-page-path>.spg\",\"args\":[],\"budget\":\"compact\"}}。\\n\
 7. This is only a shape example, not the current case answer/target/plan. Choose actual command_kind/target/args/budget from SKILL.md and the question.\\n\
-8. After each command, use the next user message as the only evidence. Read summary first and only read more if needed.\\n\
-9. As soon as you have enough evidence, return {{\"kind\":\"final\",\"answer\":\"...\"}}.\\n\
-10. If the evidence contains diagnostics, truncation, or uncertainty, mention that explicitly in the final answer and do not guess.\\n\
+8. After each command, use the next user message as the only evidence. Read summary first, then read the declared primary fact block and only read more if needed.\\n\
+9. 主证据块为空或 result=null 时，不要直接作答；如果仍有查询机会，用同一 target 执行 --explain 作为受限 fallback，args=[]、budget=compact；否则明确说明证据不足。\\n\
+10. As soon as you have enough evidence, return {{\"kind\":\"final\",\"answer\":\"...\"}}.\\n\
+11. If the evidence contains diagnostics, truncation, or uncertainty, mention that explicitly in the final answer and do not guess.\\n\
 \\n\
 SKILL.md:\\n\
 {skill}\\n\
