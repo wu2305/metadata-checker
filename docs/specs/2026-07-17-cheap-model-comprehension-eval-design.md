@@ -6,6 +6,12 @@
 
 本次修订将 LLM runner 的首选后端从通用 OpenAI-compatible endpoint 调整为 CNB AI Chat API。依据 [CNB OpenAPI 文档](https://docs.cnb.cool/zh/develops/openapi.html) 与当前 [Swagger 契约](https://api.cnb.cool/swagger.json)：接口为 `POST /{repo}/-/ai/chat/completions`，请求包含 `messages`、`model`、`stream`，认证使用仅允许在 CNB 流水线内调用的 `CNB_TOKEN`。当前契约未公开 `tools` / `tool_calls` 字段，因此 M58 使用可验证的 JSON 命令协议，不假设未声明的原生 tool calling 能力。
 
+## 2026-07-28 执行修订
+
+首次真实 CNB 探测确认当前服务不接受 `stream:false`，返回 `400 Non-stream chat request is currently not supported`；`stream:true` 返回 SSE `data:` 分片并以 `data: [DONE]` 结束。因此 `CnbChatAdapter` 固定发送 `stream:true`，只拼接 `choices[].delta.content`，不把 provider-specific SSE 逻辑带入 `metadata-checker` 主工具。
+
+本阶段增加小模型稳健性目标：bootstrap 必须先给出最小决策流程、严格 JSON 形态、查询预算和证据边界；模型输出的每一轮仍由 `CommandPolicy` 精确校验，提示词优化不得放宽命令白名单或答案判分。每次提示词/runner 逻辑调整都通过同一组 fake fixture、真实 CNB smoke 和 `RunReport` 指标比较，不能只凭单次主观回答判断改进。
+
 ## 背景
 
 M9-D/E/F 与 M15/M16/M22 已交付：
@@ -59,7 +65,7 @@ ai_eval_cases.json (tier=fixture_llm)
 ### 组件契约
 
 - **CaseLoader**：复用现有 `ai_eval_cases.json` schema，新增可选字段 `tier`（`fixture_structural` / `fixture_llm` / `real_manual`）；缺省按现有规则归类（`requires_real_project: true` → `real_manual`，其余 → 两层皆可）。新增字段必须向后兼容，`tests/ai_eval_tests.rs` 现有断言不得因加字段而失败。
-- **ModelAdapter**：首个真实后端为 `CnbChatAdapter`，在 CNB 流水线内向 `POST /{repo}/-/ai/chat/completions` 发送 `{ messages, model, stream: false }`。`CNB_TOKEN`、仓库 slug、model id 从流水线环境变量读取；token 只放在 Authorization header，不进入消息、请求日志、响应日志或报告。`FakeModelAdapter` 用于本地单测和无凭证回归。
+- **ModelAdapter**：首个真实后端为 `CnbChatAdapter`，在 CNB 流水线内向 `POST /{repo}/-/ai/chat/completions` 发送 `{ messages, model, stream: true }`，解析 SSE `data:` 分片并拼接 assistant delta content。`CNB_TOKEN`、仓库 slug、model id 从流水线环境变量读取；token 只放在 Authorization header，不进入消息、请求日志、响应日志或报告。`FakeModelAdapter` 用于本地单测和无凭证回归。
 - **消息协议**：遵循当前 CNB Swagger 暴露的 `user` / `assistant` 消息与字符串 `content`。模型命令必须返回单个 JSON 对象，例如 `{"kind":"command","command_kind":"--query-page-logic","target":"page:app/actions_test.spg","args":[],"budget":"compact"}`；最终回答返回 `{"kind":"final","answer":"..."}`。解析失败、字段未知或违反命令预算时记录 runner protocol diagnostic，不把未执行的命令当作真实证据。
 - **命令执行**：只允许 `minimal_command_plan` 派生的命令 kind、target 形态、参数和 budget；project-dir、graphdb 路径和二进制路径由 runner 固定，模型不能提供或覆盖这些路径，也不能注入 shell。直接调用 `target/release/metadata-checker`（或 cargo 构建产物），复用 M9 系列的临时目录 + graphdb 隔离与串行锁约定（见 `docs/reference/ai-eval.md` 串行执行/GraphDB 隔离两节）。
 - **AnswerJudge**：输入回答文本 + `answer_assertions` + 该 case 收集到的 diagnostics；输出 `passed`、`failure_classes[]`（五类，可多个）、`judge_notes`。`evidence_reference_required` 与 `diagnostic_disclaimer_required` 的判定规则必须写成可单测的确定性函数；无法确定性判定的子项标 `needs_human_review`，**不得**为追求自动化率而放宽判分。
