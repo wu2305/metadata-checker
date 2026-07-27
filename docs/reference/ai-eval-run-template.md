@@ -94,12 +94,13 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests
 
 ## 空上下文边界
 
-bootstrap 只包含仓库 `SKILL.md`、固定 binary/project 路径、JSON 协议和 case question。不得读取源码、历史运行记录、CNB Knowledge Base 或其他隐藏上下文；也不得注入 `expected_facts`、`must_include`、`CNB_TOKEN`、答案键或隐藏 case 数据。CLI stdout 以新的 `user` 消息回传给模型。
+bootstrap 只包含仓库 `SKILL.md`、固定 binary/project 路径、JSON 协议和 case question。不得读取源码、历史运行记录、CNB Knowledge Base 或其他隐藏上下文；也不得注入 `expected_facts`、`must_include`、`minimal_command_plan`、`CNB_TOKEN`、答案键或隐藏 case 数据。CLI stdout 以新的 `user` 消息回传给模型。
 
 bootstrap 必须显式约束：
 
 - 每轮只返回一个 raw JSON object；禁止 Markdown fence、解释性前缀或后缀。
-- command turn 必须逐字段复制允许命令的 `command_kind`、`target`、`args`、`budget`；不要自造 budget 或参数。
+- bootstrap 里的 command JSON 只能给固定 schema / shape example，例如 `{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>","args":[],"budget":null}`；这不是当前 case 的答案，也不是允许 target。
+- 实际 command turn 必须依据 `SKILL.md` 和 question 自主选择 `command_kind`、`target`、`args`、`budget`；不要从 case metadata 注入最小计划。
 - 第一轮先走最小允许查询；若 skill 明示 compact 路径，则先用 compact，只有证据不足或输出截断时才升级。
 - 后续 `user` 消息只作为 CLI 证据读取；先看 `summary`，证据够了就立刻 `final`。
 - 遇到 `diagnostics`、`OUTPUT_TRUNCATED` 或其他不确定性时，final answer 必须保守说明，禁止猜测。

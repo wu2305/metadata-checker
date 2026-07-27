@@ -611,6 +611,9 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     ))
     .unwrap();
     let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let first_plan_target = case.value["minimal_command_plan"][0]["target"]
+        .as_str()
+        .unwrap();
     let output_dir = unique_test_output_dir("m58-bootstrap-contract");
     let config = fixture_runner_config(output_dir.clone());
     let mut adapter = FakeModelAdapter::from_responses(vec![
@@ -639,14 +642,21 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("Do not include answer keys"));
     assert!(bootstrap.contains("Do not include expected_facts"));
     assert!(bootstrap.contains("Do not include must_include"));
+    assert!(bootstrap.contains("shape example"));
+    assert!(
+        bootstrap.contains(
+            "This is only a shape example, not the current case answer or allowed target."
+        )
+    );
     assert!(bootstrap.contains(
-        r#"{"kind":"command","command_kind":"--query-page-logic","target":"page:app/actions_test.spg","args":[],"budget":null}"#
+        r#"{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>","args":[],"budget":null}"#
     ));
     assert!(bootstrap.contains(r#"{"kind":"final","answer":"..."}"#));
     assert!(bootstrap.contains(&case.question));
 
     assert!(!bootstrap_prefix.contains("tests/fixtures/corpus/ai_eval/ai_eval_cases.json"));
     assert!(!bootstrap_prefix.contains("docs/reference/m58-gemma4-test-prompt.md"));
+    assert!(!bootstrap.contains(first_plan_target));
     assert!(!bootstrap.contains("按钮可以提交数据到 model1"));
     assert!(!bootstrap.contains("按钮可以删除 model2 数据"));
     assert!(!bootstrap.contains("没有任何写入操作"));
