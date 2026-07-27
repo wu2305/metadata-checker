@@ -819,7 +819,10 @@ fn test_m58_fake_runner_records_protocol_error_after_valid_planned_command() {
     assert_eq!(adapter.requests()[1].messages.len(), 3);
     assert_eq!(adapter.requests()[1].messages[1].role, "assistant");
     assert_eq!(adapter.requests()[1].messages[2].role, "user");
-    assert_eq!(adapter.requests()[1].messages[2].content.starts_with('{'), true);
+    assert_eq!(
+        adapter.requests()[1].messages[2].content.starts_with('{'),
+        true
+    );
 
     std::fs::remove_dir_all(output_dir).unwrap();
 }
