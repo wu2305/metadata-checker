@@ -240,7 +240,10 @@ fn test_m58_cnb_sse_rejects_invalid_json_without_leaking_token() {
     )
     .unwrap();
 
-    let error = adapter.complete(&empty_chat_request()).unwrap_err().to_string();
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
     server.join().unwrap();
     assert!(!error.contains(token));
     assert!(error.contains("CNB AI Chat"));
@@ -260,7 +263,10 @@ fn test_m58_cnb_sse_rejects_done_only_stream_without_leaking_token() {
     )
     .unwrap();
 
-    let error = adapter.complete(&empty_chat_request()).unwrap_err().to_string();
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
     server.join().unwrap();
     assert!(!error.contains(token));
     assert!(error.contains("CNB AI Chat"));
@@ -270,10 +276,7 @@ fn test_m58_cnb_sse_rejects_done_only_stream_without_leaking_token() {
 #[test]
 fn test_m58_cnb_sse_rejects_empty_choices_without_leaking_token() {
     let token = "m58-empty-choices-secret";
-    let response_body = concat!(
-        "data: {\"choices\":[]}\n\n",
-        "data: [DONE]\n\n",
-    );
+    let response_body = concat!("data: {\"choices\":[]}\n\n", "data: [DONE]\n\n",);
     let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
     let mut adapter = CnbChatAdapter::new(
         endpoint,
@@ -283,7 +286,10 @@ fn test_m58_cnb_sse_rejects_empty_choices_without_leaking_token() {
     )
     .unwrap();
 
-    let error = adapter.complete(&empty_chat_request()).unwrap_err().to_string();
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
     server.join().unwrap();
     assert!(!error.contains(token));
     assert!(error.contains("CNB AI Chat"));
@@ -293,10 +299,7 @@ fn test_m58_cnb_sse_rejects_empty_choices_without_leaking_token() {
 #[test]
 fn test_m58_cnb_sse_rejects_missing_delta_without_leaking_token() {
     let token = "m58-missing-choices-secret";
-    let response_body = concat!(
-        "data: {\"choices\":[{}]}\n\n",
-        "data: [DONE]\n\n",
-    );
+    let response_body = concat!("data: {\"choices\":[{}]}\n\n", "data: [DONE]\n\n",);
     let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
     let mut adapter = CnbChatAdapter::new(
         endpoint,
@@ -306,7 +309,10 @@ fn test_m58_cnb_sse_rejects_missing_delta_without_leaking_token() {
     )
     .unwrap();
 
-    let error = adapter.complete(&empty_chat_request()).unwrap_err().to_string();
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
     server.join().unwrap();
     assert!(!error.contains(token));
     assert!(error.contains("CNB AI Chat SSE chunk 缺少 delta"));
@@ -597,6 +603,59 @@ fn test_m58_fake_runner_executes_fixture_llm_cases() {
     std::fs::remove_dir_all(output_dir).unwrap();
 }
 
+/// 验证 bootstrap 明确约束小模型的 JSON 协议、最小查询顺序与保守结论规则。
+#[test]
+fn test_m58_bootstrap_prompt_contract_for_small_model() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let output_dir = unique_test_output_dir("m58-bootstrap-contract");
+    let config = fixture_runner_config(output_dir.clone());
+    let mut adapter = FakeModelAdapter::from_responses(vec![
+        serde_json::json!({
+            "kind": "final",
+            "answer": "证据不足，无法给出结论。"
+        })
+        .to_string(),
+    ]);
+
+    let _report = run_case(&case, &mut adapter, &config).unwrap();
+    let bootstrap = &adapter.requests()[0].messages[0].content;
+    let bootstrap_prefix = bootstrap.split("\n\nSKILL.md:\n").next().unwrap();
+
+    assert_eq!(adapter.requests()[0].messages[0].role, "user");
+    assert!(bootstrap.contains("raw JSON object"));
+    assert!(bootstrap.contains("No Markdown fences"));
+    assert!(bootstrap.contains("smallest allowed query"));
+    assert!(bootstrap.contains("compact"));
+    assert!(bootstrap.contains("next user message as the only evidence"));
+    assert!(bootstrap.contains("enough evidence"));
+    assert!(bootstrap.contains("diagnostics"));
+    assert!(bootstrap.contains("truncation"));
+    assert!(bootstrap.contains("do not guess"));
+    assert!(bootstrap.contains("Do not include hidden context"));
+    assert!(bootstrap.contains("Do not include answer keys"));
+    assert!(bootstrap.contains("Do not include expected_facts"));
+    assert!(bootstrap.contains("Do not include must_include"));
+    assert!(bootstrap.contains(
+        r#"{"kind":"command","command_kind":"--query-page-logic","target":"page:app/actions_test.spg","args":[],"budget":null}"#
+    ));
+    assert!(bootstrap.contains(r#"{"kind":"final","answer":"..."}"#));
+    assert!(bootstrap.contains(&case.question));
+
+    assert!(!bootstrap_prefix.contains("tests/fixtures/corpus/ai_eval/ai_eval_cases.json"));
+    assert!(!bootstrap_prefix.contains("docs/reference/m58-gemma4-test-prompt.md"));
+    assert!(!bootstrap.contains("按钮可以提交数据到 model1"));
+    assert!(!bootstrap.contains("按钮可以删除 model2 数据"));
+    assert!(!bootstrap.contains("没有任何写入操作"));
+    assert!(!bootstrap.contains("Authorization: Bearer"));
+    assert!(!bootstrap.contains("m58-test-secret-token"));
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
 /// 验证模型提出不在 plan 中的命令时 runner 不启动 CLI 并生成 wrong_command。
 #[test]
 fn test_m58_runner_blocks_command_outside_plan() {
@@ -624,6 +683,85 @@ fn test_m58_runner_blocks_command_outside_plan() {
     assert_eq!(report.command_trace[0].accepted, false);
     assert_eq!(report.command_trace[0].plan_step_index, None);
     assert_eq!(adapter.requests().len(), 1);
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 验证首轮 malformed JSON 即记 protocol_error，runner 不会修复后继续执行后续合法命令。
+#[test]
+fn test_m58_fake_runner_records_protocol_error_for_malformed_response_before_valid_command() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let output_dir = unique_test_output_dir("m58-malformed-protocol");
+    let config = fixture_runner_config(output_dir.clone());
+    let step = &case.value["minimal_command_plan"][0];
+    let malformed = format!(
+        "```json\n{}\n```",
+        serde_json::json!({
+            "kind": "command",
+            "command_kind": step["command_kind"],
+            "target": step["target"],
+            "args": step["args"],
+            "budget": step["budget"]
+        })
+    );
+    let valid_command = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": step["target"],
+        "args": step["args"],
+        "budget": step["budget"]
+    })
+    .to_string();
+    let mut adapter = FakeModelAdapter::from_responses(vec![malformed, valid_command]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.status, "error");
+    assert_eq!(report.passed, false);
+    assert_eq!(report.failure_classes, vec!["protocol_error".to_string()]);
+    assert_eq!(report.command_trace, Vec::<CommandTrace>::new());
+    assert_eq!(adapter.requests().len(), 1);
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 验证合法命令后，带 diagnostic disclaimer 的 final 仍可通过现有 judge。
+#[test]
+fn test_m58_fake_runner_accepts_valid_command_then_final_with_diagnostic_disclaimer() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let output_dir = unique_test_output_dir("m58-valid-command-final");
+    let config = fixture_runner_config(output_dir.clone());
+    let step = &case.value["minimal_command_plan"][0];
+    let mut adapter = FakeModelAdapter::from_responses(vec![
+        serde_json::json!({
+            "kind": "command",
+            "command_kind": step["command_kind"],
+            "target": step["target"],
+            "args": step["args"],
+            "budget": step["budget"]
+        })
+        .to_string(),
+        serde_json::json!({
+            "kind": "final",
+            "answer": "结论：页面有用户入口、按钮 action 和写入目标。依据 summary 和 details，按钮会写入 model1，也会删除 model2；诊断可能不完整。"
+        })
+        .to_string(),
+    ]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.status, "pass");
+    assert_eq!(report.passed, true);
+    assert_eq!(report.failure_classes, Vec::<String>::new());
+    assert_eq!(report.command_trace.len(), 1);
+    assert_eq!(report.command_trace[0].accepted, true);
+    assert_eq!(adapter.requests().len(), 2);
 
     std::fs::remove_dir_all(output_dir).unwrap();
 }

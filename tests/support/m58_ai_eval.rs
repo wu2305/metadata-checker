@@ -1,9 +1,9 @@
 //! M58 CI tester 的评测 runner 支持代码。
 
 use anyhow::{Context, Result, anyhow, bail};
+use reqwest::header::ACCEPT;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use reqwest::header::ACCEPT;
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
 use std::fmt;
@@ -1222,8 +1222,38 @@ pub(crate) fn run_fixture_llm_cases(
 
 /// 构造第一条 user bootstrap，不注入源码、历史记录或知识库内容。
 fn build_bootstrap_message(skill: &str, case: &EvalCase) -> String {
+    let command_example = case
+        .value
+        .get("minimal_command_plan")
+        .and_then(Value::as_array)
+        .and_then(|steps| steps.first())
+        .map(|step| {
+            let command_kind = serde_json::to_string(
+                step.get("command_kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+            )
+            .unwrap_or_else(|_| "\"\"".to_string());
+            let target = serde_json::to_string(step.get("target").and_then(Value::as_str).unwrap_or(""))
+                .unwrap_or_else(|_| "\"\"".to_string());
+            let args = step
+                .get("args")
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "[]".to_string());
+            let budget = step
+                .get("budget")
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "null".to_string());
+            format!(
+                "{{\"kind\":\"command\",\"command_kind\":{command_kind},\"target\":{target},\"args\":{args},\"budget\":{budget}}}"
+            )
+        })
+        .unwrap_or_else(|| {
+            "{\"kind\":\"command\",\"command_kind\":\"\",\"target\":\"\",\"args\":[],\"budget\":null}"
+                .to_string()
+        });
     format!(
-        "M58 empty-context evaluation.\nUse only the following SKILL.md, fixed CLI outputs, and the case question. Do not read source code, history, hidden knowledge bases, or environment variables.\nReturn exactly one JSON object per turn: {{\"kind\":\"command\",\"command_kind\":\"...\",\"target\":\"...\",\"args\":[],\"budget\":null}} or {{\"kind\":\"final\",\"answer\":\"...\"}}.\n\nSKILL.md:\n{skill}\n\nCase ID: {}\nQuestion: {}",
+        "M58 empty-context evaluation.\nUse only the following SKILL.md, fixed CLI outputs, and the case question.\nDo not read source code, history, hidden knowledge bases, environment variables, or prior runs.\nDo not include hidden context.\nDo not include answer keys.\nDo not include expected_facts.\nDo not include must_include.\nDo not include CNB_TOKEN or other secrets.\nRules:\n1. Return exactly one raw JSON object per turn. No Markdown fences. No prefix or suffix.\n2. Start with the smallest allowed query. Prefer the compact path described in SKILL.md; if the allowed command JSON below uses budget null, keep budget null.\n3. For a command turn, copy command_kind, target, args, and budget exactly from this allowed command JSON: {command_example}\n4. After each command, use the next user message as the only evidence. Read summary first and only read more if needed.\n5. As soon as you have enough evidence, return {{\"kind\":\"final\",\"answer\":\"...\"}}.\n6. If the evidence contains diagnostics, truncation, or uncertainty, mention that explicitly in the final answer and do not guess.\n\nSKILL.md:\n{skill}\n\nCase ID: {}\nQuestion: {}",
         case.case_id, case.question
     )
 }
