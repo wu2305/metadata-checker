@@ -541,6 +541,9 @@
         echo "M58 RunReport: target/m58-ai-eval/run.json"
         grep -E '"(provider|model_id|cnb_build_id|pass_rate|failure_classes|command_trace_stats)"' \
           target/m58-ai-eval/run.json
+        echo "M58 command trace fields (safe diagnostic subset):"
+        grep -E '"(case_id|command_kind|target|args|budget|plan_step_index|accepted|detail_request|budget_upgrade|output_sections)"' \
+          target/m58-ai-eval/run.json
 
 main:
   push: *main_authoritative_ci
