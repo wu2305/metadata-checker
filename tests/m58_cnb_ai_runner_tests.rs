@@ -679,6 +679,8 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     // 校验 bootstrap 使用通用路由与预算语义规则，不泄露 case 计划元数据。
     assert!(bootstrap.contains("raw JSON object"));
     assert!(bootstrap.contains("No Markdown fences"));
+    assert!(bootstrap.contains("每轮只输出一行 JSON"));
+    assert!(bootstrap.contains("final 对象只能有 kind 和 answer 两个键"));
     assert!(bootstrap.contains("smallest allowed query"));
     assert!(bootstrap.contains("先按问题意图选命令"));
     assert!(bootstrap.contains("页面整体逻辑 -> --query-page-logic"));
@@ -701,6 +703,11 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("页面整体回答至少说明入口/写入计数和一个 action"));
     assert!(bootstrap.contains("按钮/动作回答至少说明组件、action 和写入目标"));
     assert!(bootstrap.contains("字段回答至少说明字段和写入者或来源"));
+    assert!(
+        bootstrap.contains(
+            "裸 field 的一次 compact --explain 已有 summary 和 evidence 后立即返回 final"
+        )
+    );
     assert!(bootstrap.contains("M58 runner routing override"));
     assert!(bootstrap.contains("裸 field 必须使用 --explain"));
     assert!(bootstrap.contains(
@@ -806,6 +813,11 @@ fn test_m58_fake_runner_records_protocol_error_for_malformed_response_before_val
     assert_eq!(report.status, "error");
     assert_eq!(report.passed, false);
     assert_eq!(report.failure_classes, vec!["protocol_error".to_string()]);
+    assert_eq!(report.judge_notes.len(), 1);
+    assert!(
+        report.judge_notes[0].starts_with("model response violated command/final JSON protocol: ")
+    );
+    assert!(!report.judge_notes[0].contains("```"));
     assert_eq!(report.command_trace, Vec::<CommandTrace>::new());
     assert_eq!(adapter.requests().len(), 1);
 

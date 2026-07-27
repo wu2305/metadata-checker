@@ -1110,12 +1110,12 @@ pub(crate) fn run_case(
         // 这里解析的是已拿到的 assistant content，故 malformed/fence 均判为模型协议错误。
         let turn = match parse_agent_turn(&response) {
             Ok(turn) => turn,
-            Err(_) => {
+            Err(error) => {
                 return Ok(error_case_report(
                     &case.case_id,
                     policy.max_command_count,
                     "protocol_error",
-                    "model response violated command/final JSON protocol",
+                    &format_protocol_error_note(&error),
                     trace,
                 ));
             }
@@ -1245,7 +1245,7 @@ Do not include minimal plans.\\n\
 Do not include CNB_TOKEN or other secrets.\\n\
 Do not include actual case target or fixture answers.\\n\
 Rules:\\n\
-1. Return exactly one raw JSON object per turn. No Markdown fences. No prefix or suffix.\\n\
+1. Return exactly one raw JSON object per turn. No Markdown fences. No prefix or suffix. 每轮只输出一行 JSON；final 对象只能有 kind 和 answer 两个键，answer 必须是简短字符串，不能添加 sources、evidence 或其他键。\\n\
 2. Start with the smallest allowed query.\\n\
 3. 先按问题意图选命令：单组件/按钮/动作 -> --explain（点击/按钮/组件/动作 -> --explain）；点击/按钮/组件/动作问题不得使用 --query-page-logic；页面整体逻辑 -> --query-page-logic（页面整体问题才允许 --query-page-logic）；writer/value-source/condition -> --explain-condition 并按 SKILL.md 选择 --intent；裸 field 的值/来源/写入 -> --explain（不要对裸 field 先选 --explain-condition）。\\n\
 4. target 必须是规范化路径，页面目标保留 `page:app/<relative-file>.spg`；page:app/<relative-file>.spg；不得删除 app/ 或 .spg。\\n\
@@ -1254,7 +1254,7 @@ Rules:\\n\
 7. This is only a shape example, not the current case answer/target/plan. Choose actual command_kind/target/args/budget from SKILL.md and the question.\\n\
 8. After each command, use the next user message as the only evidence. Read summary first, then read the declared primary fact block and only read more if needed.\\n\
 9. 主证据块为空或 result=null 时，不要直接作答；如果仍有查询机会，用同一 target 执行 --explain 作为受限 fallback，args=[]、budget=compact；否则明确说明证据不足。\\n\
-10. final answer 必须包含至少一个 literal section name（summary/details/evidence/diagnostics）；页面整体回答至少说明入口/写入计数和一个 action；按钮/动作回答至少说明组件、action 和写入目标；字段回答至少说明字段和写入者或来源。\\n\
+10. final answer 必须包含至少一个 literal section name（summary/details/evidence/diagnostics）；页面整体回答至少说明入口/写入计数和一个 action；按钮/动作回答至少说明组件、action 和写入目标；字段回答至少说明字段和写入者或来源。裸 field 的一次 compact --explain 已有 summary 和 evidence 后立即返回 final，不要再发第二条命令。\\n\
 11. As soon as you have enough evidence, return {{\"kind\":\"final\",\"answer\":\"...\"}}.\\n\
 12. If the evidence contains diagnostics, truncation, or uncertainty, mention that explicitly in the final answer and do not guess.\\n\
 \\n\
@@ -1523,6 +1523,12 @@ fn error_case_report(
         judge_notes: vec![note.to_string()],
         command_trace,
     }
+}
+
+/// 生成不含模型原文的协议错误摘要，便于 CI 判断是 JSON 语法还是封装字段失败。
+fn format_protocol_error_note(error: &anyhow::Error) -> String {
+    let summary = error.to_string().replace(['\r', '\n'], " ");
+    format!("model response violated command/final JSON protocol: {summary}")
 }
 
 /// 判断命令预算是否相对 compact 默认值发生升级。

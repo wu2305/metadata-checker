@@ -98,7 +98,7 @@ bootstrap 只包含仓库 `SKILL.md`、固定 binary/project 路径、JSON 协�
 
 bootstrap 必须显式约束：
 
-- 每轮只返回一个 raw JSON object；禁止 Markdown fence、解释性前缀或后缀。
+- 每轮只返回一个 raw JSON object；禁止 Markdown fence、解释性前缀或后缀；`final` 只能有 `kind` 和 `answer` 两个键，`answer` 使用简短字符串且单行输出。
 - 先按问题意图选命令，再选最小查询范围：单组件/按钮/动作（包括“点击后发生什么”）-> `--explain`，不得误用 `--query-page-logic`；页面整体逻辑 -> `--query-page-logic`；writer/value-source/condition -> `--explain-condition` 且携带 `--intent`（如 `display`、`value-source`、`writer`）。
 - 裸 `field:<model>.<field>` 的值/来源/写入问题优先使用 `--explain field:<model>.<field>`；不要因为“值从哪里来”把直接字段关系误选成 `--explain-condition`。
 - 按钮/点击问题必须使用 `--explain comp:app/<relative-file>.spg|<component-id>`，不得使用 `--query-page-logic`。
@@ -107,6 +107,7 @@ bootstrap 必须显式约束：
 - 页面目标必须保留标准相对路径：`page:app/<relative-file>.spg`。
 - target 构造固定为 `page:app/<relative-file>.spg`、`comp:app/<relative-file>.spg|<component-id>` 或 `field:<model>.<field>`；不得删除 `app/` 或 `.spg`。`budget` 只能放在 command JSON 顶层字段，不得塞入 `args`。
 - final answer 至少引用一个 literal section name（`summary` / `details` / `evidence` / `diagnostics`）；page final 必须 literal 包含“用户入口、按钮、写入目标、action”，field final 必须 literal 包含“页面 action、写入、字段”，并以 CLI 实际事实填充名称和数量。
+- 裸 field 的一次 compact `--explain` 已有 `summary` 和 `evidence` 后立即返回 final，不要再发第二条命令。
 - 第一轮先走最小允许查询：默认使用 `--budget compact`；仅在 `diagnostics`/`OUTPUT_TRUNCATED` 不足时再升级到 `normal` 或 `full`。`budget` 仅表示查询深度，不是路径或目标前缀。
 - 后续 `user` 消息只作为 CLI 证据读取；先看 `summary`，再读声明的主证据块。若主证据块为空或 `result=null`，不要直接作答；仍有查询机会时，用同一 `target` 执行 `--explain`、`args=[]`、`budget=compact` 作为受限 fallback，否则明确说明证据不足。
 - 遇到 `diagnostics`、`OUTPUT_TRUNCATED` 或其他不确定性时，final answer 必须保守说明，禁止猜测。
@@ -116,5 +117,6 @@ runner 保持 strict parse：malformed JSON、Markdown fence、解释性前缀�
 边界说明：
 
 - `parse_agent_turn` 只接收 **adapter 已成功返回的 assistant content**，对内容执行 strict JSON 协议解析。
+- 每轮只输出一行 JSON；`final` 对象只能包含 `kind` 和 `answer` 两个键，`answer` 是简短字符串，不得添加 `sources`、`evidence` 等额外键。
 - `protocol_error` 仅表示模型返回内容不符合 `command/final` 协议（如 fenced JSON、非 JSON、解释性前缀）。
 - `runner_error` 表示在模型内容到达 runner 之前失败，典型是 `CnbChatAdapter` 的 HTTP 请求/SSE 解析失败、provider 运行时不可达、超时、CLI 执行失败、以及 workspace 构建失败等；这类不属于模型协议层错误。
