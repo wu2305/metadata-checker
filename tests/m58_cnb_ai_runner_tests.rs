@@ -703,6 +703,9 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("字段回答至少说明字段和写入者或来源"));
     assert!(bootstrap.contains("M58 runner routing override"));
     assert!(bootstrap.contains("裸 field 必须使用 --explain"));
+    assert!(bootstrap.contains(
+        "按钮/点击问题必须使用 --explain 和 comp:app/<relative-file>.spg|<component-id>"
+    ));
     assert!(bootstrap.contains("页面整体最终回答必须明确写出用户入口、写入目标和 action"));
     assert!(bootstrap.contains("page final 必须 literal 包含 用户入口、按钮、写入目标、action"));
     assert!(bootstrap.contains("field final 必须 literal 包含 页面 action、写入、字段"));
