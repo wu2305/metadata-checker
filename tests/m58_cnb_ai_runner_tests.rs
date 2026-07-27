@@ -620,7 +620,7 @@ fn test_m58_fake_runner_executes_fixture_llm_cases() {
     assert_eq!(report.cases.len(), 3);
     assert_eq!(report.pass_rate, 1.0);
     assert_eq!(report.cases.iter().all(|case| case.status == "pass"), true);
-    assert_eq!(adapter.requests().len(), 7);
+    assert_eq!(adapter.requests().len(), 6);
     assert_eq!(adapter.requests()[0].messages[0].role, "user");
     assert_eq!(
         adapter.requests()[0].messages[0]
@@ -686,6 +686,7 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("writer/value-source/condition -> --explain-condition"));
     assert!(bootstrap.contains("点击/按钮/组件/动作 -> --explain"));
     assert!(bootstrap.contains("页面整体问题才允许 --query-page-logic"));
+    assert!(bootstrap.contains("裸 field 的值/来源/写入 -> --explain"));
     assert!(bootstrap.contains("page:app/<relative-file>.spg；不得删除 app/ 或 .spg"));
     assert!(bootstrap.contains("budget 只能放在 JSON 顶层字段，不能放进 args"));
     assert!(bootstrap.contains("主证据块为空或 result=null 时，不要直接作答"));
@@ -696,6 +697,10 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(!bootstrap.contains("compact path"));
     assert!(bootstrap.contains("next user message as the only evidence"));
     assert!(bootstrap.contains("enough evidence"));
+    assert!(bootstrap.contains("final answer 必须包含至少一个 literal section name"));
+    assert!(bootstrap.contains("页面整体回答至少说明入口/写入计数和一个 action"));
+    assert!(bootstrap.contains("按钮/动作回答至少说明组件、action 和写入目标"));
+    assert!(bootstrap.contains("字段回答至少说明字段和写入者或来源"));
     assert!(bootstrap.contains("diagnostics"));
     assert!(bootstrap.contains("truncation"));
     assert!(bootstrap.contains("do not guess"));

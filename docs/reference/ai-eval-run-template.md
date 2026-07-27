@@ -100,6 +100,7 @@ bootstrap 必须显式约束：
 
 - 每轮只返回一个 raw JSON object；禁止 Markdown fence、解释性前缀或后缀。
 - 先按问题意图选命令，再选最小查询范围：单组件/按钮/动作（包括“点击后发生什么”）-> `--explain`，不得误用 `--query-page-logic`；页面整体逻辑 -> `--query-page-logic`；writer/value-source/condition -> `--explain-condition` 且携带 `--intent`（如 `display`、`value-source`、`writer`）。
+- 裸 `field:<model>.<field>` 的值/来源/写入问题优先使用 `--explain field:<model>.<field>`；不要因为“值从哪里来”把直接字段关系误选成 `--explain-condition`。
 - command JSON 只给固定 schema / shape example，例如 `{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>.spg","args":[],"budget":"compact"}`；这不是当前 case 的答案，也不是允许 target。
 - 实际 command turn 必须依据 `SKILL.md` 和 question 自主选择 `command_kind`、`target`、`args`、`budget`；不要从 case metadata 注入最小计划。
 - 页面目标必须保留标准相对路径：`page:app/<relative-file>.spg`。
