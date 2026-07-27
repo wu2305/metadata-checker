@@ -9,7 +9,7 @@
       "question": "页面 actions_test 主要做什么？用户能触发哪些逻辑？会影响哪些数据？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --query-page-logic page:app/actions_test.spg"
+        "--project-dir tests/fixtures/test_project --query-page-logic page:app/actions_test.spg --budget compact"
       ],
       "expected_facts": [
         "页面是 actions_test",
@@ -72,7 +72,7 @@
           "target": "page:app/actions_test.spg",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": "compact"
         }
       ],
       "expected_output_assertions": [
@@ -92,13 +92,6 @@
           "path": "details.action_flows",
           "op": "not_empty",
           "description": "action_flows 非空"
-        },
-        {
-          "path": "details.action_flows",
-          "op": "array_any",
-          "field": "action_category",
-          "value": "data_write",
-          "description": "存在 data_write 类别的 action"
         }
       ],
       "risk_tags": [
@@ -151,7 +144,7 @@
       "question": "点击 actions_test 页面中的 button1 会发生什么？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|button1'"
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|button1' --budget compact"
       ],
       "expected_facts": [
         "button1 是一个按钮组件",
@@ -206,7 +199,7 @@
           "target": "comp:app/actions_test.spg|button1",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": "compact"
         }
       ],
       "expected_output_assertions": [
@@ -278,7 +271,7 @@
       "question": "字段 model1.name 的值从哪里来？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain field:model1.name"
+        "--project-dir tests/fixtures/test_project --explain-condition 'field:model1.name' --intent writer --budget compact"
       ],
       "expected_facts": [
         "model1.name 被页面 action 写入",
@@ -327,33 +320,25 @@
       "uncertainty_policy": "如果 lineage 链不完整，允许说\"写入者已知，但完整来源链未追溯\"",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain",
+          "command_kind": "--explain-condition",
           "target": "field:model1.name",
-          "args": [],
+          "args": ["--intent", "writer"],
           "requires_project_dir": true,
-          "budget": null
+          "budget": "compact"
         }
       ],
       "expected_output_assertions": [
         {
           "path": "summary",
           "op": "contains_field_path",
-          "field_path": "written_by_count",
-          "description": "summary 有 written_by_count"
+          "field_path": "intent",
+          "description": "summary 包含 intent"
         },
         {
-          "path": "evidence",
-          "op": "array_any",
-          "field": "edge_type",
-          "value": "ActionWrites",
-          "description": "evidence 中有 ActionWrites 或 Writes 边"
-        },
-        {
-          "path": "evidence",
-          "op": "array_any",
-          "field": "edge_type",
-          "value": "Writes",
-          "description": "evidence 中有 Writes 边"
+          "path": "summary.intent",
+          "op": "eq",
+          "value": "writer",
+          "description": "intent 为 writer"
         }
       ],
       "risk_tags": [

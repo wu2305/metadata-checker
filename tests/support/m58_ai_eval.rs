@@ -336,6 +336,12 @@ impl ValidatedCommand {
             argv.push(OsString::from(&self.step.target));
         }
         argv.extend(self.step.args.iter().map(OsString::from));
+        if let Some(budget) = &self.step.budget {
+            if !budget.is_empty() {
+                argv.push(OsString::from("--budget"));
+                argv.push(OsString::from(budget));
+            }
+        }
         argv
     }
 
@@ -1228,8 +1234,33 @@ pub(crate) fn run_fixture_llm_cases(
 /// 构造第一条 user bootstrap，不注入源码、历史记录或知识库内容。
 fn build_bootstrap_message(skill: &str, case: &EvalCase) -> String {
     format!(
-        "M58 empty-context evaluation.\nUse only the following SKILL.md, fixed CLI outputs, and the case question.\nDo not read source code, history, hidden knowledge bases, environment variables, prior runs, or case metadata.\nDo not include hidden context.\nDo not include answer keys.\nDo not include expected_facts.\nDo not include must_include.\nDo not include minimal plans.\nDo not include CNB_TOKEN or other secrets.\nRules:\n1. Return exactly one raw JSON object per turn. No Markdown fences. No prefix or suffix.\n2. Start with the smallest allowed query. Prefer the compact path described in SKILL.md.\n3. Command shape example only: {{\"kind\":\"command\",\"command_kind\":\"--query-page-logic\",\"target\":\"page:<relative-page-path>\",\"args\":[],\"budget\":null}}\n4. This is only a shape example, not the current case answer or allowed target. Choose the actual command_kind, target, args, and budget from SKILL.md and the question.\n5. After each command, use the next user message as the only evidence. Read summary first and only read more if needed.\n6. As soon as you have enough evidence, return {{\"kind\":\"final\",\"answer\":\"...\"}}.\n7. If the evidence contains diagnostics, truncation, or uncertainty, mention that explicitly in the final answer and do not guess.\n\nSKILL.md:\n{skill}\n\nCase ID: {}\nQuestion: {}",
-        case.case_id, case.question
+        "M58 empty-context evaluation.\\n\
+Use only the following SKILL.md, fixed CLI outputs, and the current case question.\\n\
+Do not read source code, history, hidden knowledge bases, environment variables, prior runs, or case metadata.\\n\
+Do not include hidden context.\\n\
+Do not include answer keys.\\n\
+Do not include expected_facts.\\n\
+Do not include must_include.\\n\
+Do not include minimal plans.\\n\
+Do not include CNB_TOKEN or other secrets.\\n\
+Do not include actual case target or fixture answers.\\n\
+Rules:\\n\
+1. Return exactly one raw JSON object per turn. No Markdown fences. No prefix or suffix.\\n\
+2. Start with the smallest allowed query.\\n\
+3. 先按问题意图选命令：页面整体逻辑 -> --query-page-logic；单组件/按钮/动作 -> --explain；writer/value-source/condition -> --explain-condition 并按 SKILL.md 选择 --intent。\\n\
+4. target 必须是规范化路径，页面目标保留 `page:app/<relative-file>.spg`。\\n\
+5. budget 字段仅在命令需要时设置，合法值为 compact / normal / full（compact 作为默认第一轮；仅在 diagnostics 或 OUTPUT_TRUNCATED 时升级）。\\n\
+6. 命令 JSON 示例：{{\"kind\":\"command\",\"command_kind\":\"--query-page-logic\",\"target\":\"page:<relative-page-path>.spg\",\"args\":[],\"budget\":\"compact\"}}。\\n\
+7. This is only a shape example, not the current case answer/target/plan. Choose actual command_kind/target/args/budget from SKILL.md and the question.\\n\
+8. After each command, use the next user message as the only evidence. Read summary first and only read more if needed.\\n\
+9. As soon as you have enough evidence, return {{\"kind\":\"final\",\"answer\":\"...\"}}.\\n\
+10. If the evidence contains diagnostics, truncation, or uncertainty, mention that explicitly in the final answer and do not guess.\\n\
+\\n\
+SKILL.md:\\n\
+{skill}\\n\
+\\n\
+Case Question: {}",
+        case.question
     )
 }
 

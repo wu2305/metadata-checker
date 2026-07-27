@@ -94,14 +94,16 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests
 
 ## 空上下文边界
 
-bootstrap 只包含仓库 `SKILL.md`、固定 binary/project 路径、JSON 协议和 case question。不得读取源码、历史运行记录、CNB Knowledge Base 或其他隐藏上下文；也不得注入 `expected_facts`、`must_include`、`minimal_command_plan`、`CNB_TOKEN`、答案键或隐藏 case 数据。CLI stdout 以新的 `user` 消息回传给模型。
+bootstrap 只包含仓库 `SKILL.md`、固定 binary/project 路径、JSON 协议和当前问题。不得读取源码、历史运行记录、CNB Knowledge Base 或其他隐藏上下文；也不得注入 `expected_facts`、`must_include`、`minimal_command_plan`、`CNB_TOKEN`、答案键或隐藏 case 数据。CLI stdout 以新的 `user` 消息回传给模型。Bootstrap 不得包含任何实际 case 的 target/answer。
 
 bootstrap 必须显式约束：
 
 - 每轮只返回一个 raw JSON object；禁止 Markdown fence、解释性前缀或后缀。
-- bootstrap 里的 command JSON 只能给固定 schema / shape example，例如 `{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>","args":[],"budget":null}`；这不是当前 case 的答案，也不是允许 target。
+- 先按问题意图选命令，再选最小查询范围：页面整体逻辑 -> `--query-page-logic`；单组件/按钮/动作 -> `--explain`；writer/value-source/condition -> `--explain-condition` 且携带 `--intent`（如 `display`、`value-source`、`writer`）。
+- command JSON 只给固定 schema / shape example，例如 `{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>.spg","args":[],"budget":"compact"}`；这不是当前 case 的答案，也不是允许 target。
 - 实际 command turn 必须依据 `SKILL.md` 和 question 自主选择 `command_kind`、`target`、`args`、`budget`；不要从 case metadata 注入最小计划。
-- 第一轮先走最小允许查询；若 skill 明示 compact 路径，则先用 compact，只有证据不足或输出截断时才升级。
+- 页面目标必须保留标准相对路径：`page:app/<relative-file>.spg`。
+- 第一轮先走最小允许查询：默认使用 `--budget compact`；仅在 `diagnostics`/`OUTPUT_TRUNCATED` 不足时再升级到 `normal` 或 `full`。`budget` 仅表示查询深度，不是路径或目标前缀。
 - 后续 `user` 消息只作为 CLI 证据读取；先看 `summary`，证据够了就立刻 `final`。
 - 遇到 `diagnostics`、`OUTPUT_TRUNCATED` 或其他不确定性时，final answer 必须保守说明，禁止猜测。
 

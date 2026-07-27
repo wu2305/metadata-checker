@@ -118,7 +118,7 @@ fn test_m58_command_policy_binds_paths_and_steps() {
         command_kind: "--query-page-logic".to_string(),
         target: "page:app/actions_test.spg".to_string(),
         args: Vec::new(),
-        budget: None,
+        budget: Some("compact".to_string()),
     };
 
     let validated = policy.validate(&request, &[]).unwrap();
@@ -134,6 +134,8 @@ fn test_m58_command_policy_binds_paths_and_steps() {
             graph_db_path.into_os_string(),
             OsString::from("--query-page-logic"),
             OsString::from("page:app/actions_test.spg"),
+            OsString::from("--budget"),
+            OsString::from("compact"),
         ]
     );
     assert!(policy.validate(&request, &[0]).is_err());
@@ -669,10 +671,18 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     let bootstrap_prefix = bootstrap.split("\n\nSKILL.md:\n").next().unwrap();
 
     assert_eq!(adapter.requests()[0].messages[0].role, "user");
+    // 校验 bootstrap 使用通用路由与预算语义规则，不泄露 case 计划元数据。
     assert!(bootstrap.contains("raw JSON object"));
     assert!(bootstrap.contains("No Markdown fences"));
     assert!(bootstrap.contains("smallest allowed query"));
+    assert!(bootstrap.contains("先按问题意图选命令"));
+    assert!(bootstrap.contains("页面整体逻辑 -> --query-page-logic"));
+    assert!(bootstrap.contains("单组件/按钮/动作 -> --explain"));
+    assert!(bootstrap.contains("writer/value-source/condition -> --explain-condition"));
     assert!(bootstrap.contains("compact"));
+    assert!(bootstrap.contains("compact / normal / full"));
+    assert!(bootstrap.contains("页面目标保留 `page:app/<relative-file>.spg`"));
+    assert!(!bootstrap.contains("compact path"));
     assert!(bootstrap.contains("next user message as the only evidence"));
     assert!(bootstrap.contains("enough evidence"));
     assert!(bootstrap.contains("diagnostics"));
@@ -682,15 +692,15 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("Do not include answer keys"));
     assert!(bootstrap.contains("Do not include expected_facts"));
     assert!(bootstrap.contains("Do not include must_include"));
-    assert!(bootstrap.contains("shape example"));
     assert!(
-        bootstrap.contains(
-            "This is only a shape example, not the current case answer or allowed target."
-        )
+        bootstrap
+            .contains("This is only a shape example, not the current case answer/target/plan.")
     );
     assert!(bootstrap.contains(
-        r#"{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>","args":[],"budget":null}"#
+        r#"{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>.spg","args":[],"budget":"compact"}"#
     ));
+    assert!(bootstrap.contains("page:app/<relative-file>.spg"));
+    assert!(bootstrap.contains("Case Question:"));
     assert!(bootstrap.contains(r#"{"kind":"final","answer":"..."}"#));
     assert!(bootstrap.contains(&case.question));
 
