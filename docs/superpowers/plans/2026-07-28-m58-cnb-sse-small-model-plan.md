@@ -194,11 +194,11 @@ cargo build --release --features cli-local --bin metadata-checker
 git diff --check
 ```
 
-- [ ] **Step 2: Push the current branch and create a draft CNB PR**
+- [x] **Step 2: Push the current branch and create the CNB PR**
 
-Push `codex/m58-slm-eval-foundation` to the CNB remote and create a draft PR against `main`. Use CNB PR diff/review APIs for the independent review; do not claim the previous timed-out local reviewer as evidence.
+Push `codex/m58-slm-eval-foundation` to the CNB remote and create the PR against `main`. PR #14 exists; CNB API does not expose draft/WIP creation, so it is a normal PR. Use CNB PR diff/review APIs for the independent review; do not claim the previous timed-out local reviewer as evidence.
 
-- [ ] **Step 3: Trigger the real SSE smoke on the pushed commit**
+- [x] **Step 3: Trigger the real SSE smoke on the pushed commit**
 
 Use the logged-in CNB CLI to trigger the feature branch and exact SHA:
 
@@ -207,16 +207,17 @@ cnb build start-build --repo wu2305/metadata-checker \
   --branch codex/m58-slm-eval-foundation \
   --sha "$(git rev-parse HEAD)" \
   --event api_trigger_m58_llm \
-  --sync true \
-  --data '{"env":{"M58_CNB_MODEL":"deepseek-v4-flash"}}'
+  --env-type object \
+  --env-additionalProperties '{"M58_CNB_MODEL":"deepseek-v4-flash"}' \
+  --sync false
 ```
 
-The pipeline supplies `CNB_TOKEN`, derives `M58_CNB_REPO`, builds `M58_METADATA_CHECKER_BIN`, and writes `target/m58-ai-eval/run.json` and `run.md`. Poll status/logs if asynchronous output is returned.
+The pipeline supplies `CNB_TOKEN`, derives `M58_CNB_REPO`, builds `M58_METADATA_CHECKER_BIN`, and writes `target/m58-ai-eval/run.json` and `run.md`. Poll status/logs if asynchronous output is returned. The successful run for commit `b1221dd9343ff01ad9b39af16e5ec749ec76b8d2` used CNB build `cnb-54f-1juijih5i`.
 
-- [ ] **Step 4: Record the first real result and optimization baseline**
+- [x] **Step 4: Record the first real result and optimization baseline**
 
-Record provider, model, build ID, pass rate, failure classes, average/max command metrics, and budget upgrade count. Do not copy raw prompts, raw model answers, token values, or authorization headers into repository docs. Any prompt or logic change must be compared against this baseline using the same three fixture cases.
+Record provider=`cnb-ai-chat`, model=`deepseek-v4-flash`, build ID=`cnb-54f-1juijih5i`, pass rate=`1.0`, empty failure classes, one compact command per case, no budget upgrades. Do not copy raw prompts, raw model answers, token values, or authorization headers into repository docs. Prompt/logic changes were compared against the same three fixture cases; the final run is 3/3.
 
-- [ ] **Step 5: Run final review and commit documentation**
+- [x] **Step 5: Run final review and commit documentation**
 
-Run the official CNB code review on the draft PR, address P0/P1/P2 findings, then update the plan checklist and milestone journal with exact live evidence. Commit only the documentation and code changes belonging to this plan.
+Run the official CNB code review on PR #14, address P0/P1/P2 findings, then update the plan checklist and milestone journal with exact live evidence. Commit only the documentation and code changes belonging to this plan.

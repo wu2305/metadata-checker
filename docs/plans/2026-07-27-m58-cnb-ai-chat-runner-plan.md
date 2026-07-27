@@ -145,11 +145,11 @@ Fake adapter 按顺序返回预置 assistant content，并记录收到的 `ChatR
 
 - [x] **Step 2: 实现 CNB request/response DTO**
 
-`ChatRequest` 序列化为 `{messages, model, stream:false}`；响应只读取 `choices[0].message.content`，缺少 choices/message/content 时返回结构错误。消息角色只生成 `user` / `assistant`。
+`ChatRequest` 在 CNB adapter 中固定序列化为 `{messages, model, stream:true}`，并要求 `Accept: text/event-stream`；响应按 `data:` SSE 行拼接 `choices[].delta.content`，以 `[DONE]` 结束。消息角色只生成 `user` / `assistant`，缺少 choices/delta/content 或 malformed SSE 时返回结构错误。
 
 - [x] **Step 3: 实现 CNB adapter**
 
-默认 endpoint 为 `https://api.cnb.cool`，完整 URL 为 `https://api.cnb.cool/{repo}/-/ai/chat/completions`。`from_env` 要求 `CNB_TOKEN`、`M58_CNB_REPO`、`M58_CNB_MODEL`，允许 `M58_CNB_API_BASE` 覆盖测试 endpoint；请求使用 blocking reqwest，超时固定 60 秒。HTTP 非 2xx 错误只保留 status 和已脱敏 body 摘要。
+默认 endpoint 为 `https://api.cnb.cool`，完整 URL 为 `https://api.cnb.cool/{repo}/-/ai/chat/completions`。`from_env` 读取 `CNB_TOKEN`、`M58_CNB_REPO`、`M58_CNB_MODEL`，其中 pipeline 在进入 live test 前从 `CNB_REPO_SLUG` / `deepseek-v4-flash` 补齐缺省值；允许 `M58_CNB_API_BASE` 覆盖测试 endpoint。请求使用 blocking reqwest，超时固定 60 秒。HTTP 非 2xx 错误只保留 status 和已脱敏 body 摘要。
 
 - [x] **Step 4: 添加脱敏测试并提交**
 
@@ -245,13 +245,11 @@ git commit -m "feat: add m58 fixture runner"
 
 - [x] **Step 1: 添加 `api_trigger_m58_llm`**
 
-新增非 PR 事件 pipeline：使用现有 Rust/CNB image，构建 `target/release/metadata-checker`，再执行：
+新增非 PR 事件 pipeline：使用现有 Rust/CNB image，构建 release binary，在独立 subshell 中从 `CNB_REPO_SLUG` / `deepseek-v4-flash` 补齐 `M58_CNB_REPO` / `M58_CNB_MODEL`，再执行：
 
 ```bash
 test -n "${CNB_TOKEN:-}"
-test -n "${M58_CNB_REPO:-}"
-test -n "${M58_CNB_MODEL:-}"
-export M58_METADATA_CHECKER_BIN="$PWD/target/release/metadata-checker"
+export M58_METADATA_CHECKER_BIN="$PWD/target/cnb/m58-ai-eval-build/release/metadata-checker"
 cargo test --features cli-local --test m58_cnb_ai_runner_tests -- --ignored --nocapture
 ```
 
@@ -295,7 +293,7 @@ git diff --check
 
 确认 `src/`、`src/main.rs`、`src/stdio_server.rs` 没有 M58 runner 代码，release binary 没有新增 runner 面。
 
-- [ ] **Step 3: 真实 CNB smoke**
+- [x] **Step 3: 真实 CNB smoke**
 
 在非 PR pipeline 中执行：
 
@@ -305,8 +303,8 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests -- --ignored --no
 
 验收三个 fixture case、JSON command loop、白名单拒绝、无 token 泄漏和 RunReport 输出。
 
-当前环境未提供 `CNB_TOKEN`、`M58_CNB_REPO`、`M58_CNB_MODEL` 或 `M58_METADATA_CHECKER_BIN`，本轮未执行 live smoke。
+已在 CNB feature branch pipeline 执行：`cnb-54f-1juijih5i`，provider=`cnb-ai-chat`、model=`deepseek-v4-flash`，3 个 fixture case 全部通过，`pass_rate=1.0`，SSE/command trace/脱敏报告均通过。
 
-- [ ] **Step 4: 完成 journal 与 final review**
+- [x] **Step 4: 完成 journal 与 final review**
 
-记录真实 provider/model/build、通过率、失败分类和未确定项；请求独立只读 review，确认无 P0/P1/P2 后再提交 M58 PR。
+已记录真实 provider/model/build、通过率和失败分类；CNB PR #14 的独立 review comment 未发现 P0/P1/P2。该 PR 为普通 PR（CNB API 不提供 draft/WIP 设置），自审批准仍受平台限制，不将其表述为 self-approval。

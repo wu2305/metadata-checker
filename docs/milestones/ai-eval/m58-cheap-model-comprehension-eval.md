@@ -44,8 +44,10 @@
 | AnswerJudge + 单测 | done |
 | ModelAdapter + 命令白名单执行 | done |
 | RunReport schema + 归档 | done |
-| 基线 run（≥3 fixture_llm case） | pending |
+| 基线 run（≥3 fixture_llm case） | done（CNB `deepseek-v4-flash`，3/3） |
 
 ## 验收记录
 
-本地 fake runner 已覆盖 3 个 `fixture_llm` case，命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport 和 token 脱敏测试通过。当前 CNB adapter 使用 SSE（`stream:true`、`text/event-stream`）；真实 CNB baseline 尚未执行，待 `api_trigger_m58_llm` 提供 `CNB_TOKEN`，`M58_CNB_REPO` / `M58_CNB_MODEL` 作为可覆盖项，默认分别从 `CNB_REPO_SLUG` / `deepseek-v4-flash` 推导后记录 model/build、pass 率和失败分类。runtime contract preflight 需在独立 subshell 中用与 live stage 完全相同的 export 语义验证缺省回退与显式 override 保持。
+本地 fake runner 已覆盖 3 个 `fixture_llm` case，命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport、SSE 和 token 脱敏测试通过。真实 CNB baseline 已由 `api_trigger_m58_llm` 在 feature branch 执行：provider=`cnb-ai-chat`、model=`deepseek-v4-flash`、build=`cnb-54f-1juijih5i`、pass rate=`1.0`、failure classes 为空；三个 case 均只发出一个 `compact` 命令，未发生 budget upgrade，页面/按钮/字段命令分别通过最小计划校验。报告只保留结构化摘要和脱敏 command trace，不归档 prompt、模型原文或 token。runtime contract preflight 的缺省回退与显式 override 已通过同一 live stage 验证。
+
+提示词优化记录：早期 live run 暴露页面路径、按钮 target、裸 field 命令和 final JSON 收尾问题；随后固定 `page/comp/field` target 路由、compact-first、final literal 标签和单行 JSON 键集合，最终在 commit `b1221dd` 的 CNB run 中达到 3/3。该结果是当前 fixture/模型组合的基线，不等同于多模型或真实项目泛化结论。
