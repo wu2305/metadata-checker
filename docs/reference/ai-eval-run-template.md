@@ -88,7 +88,7 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests
 - `M58_CNB_MODEL`：可选覆盖项；未显式设置时默认 `deepseek-v4-flash`；
 - `M58_CNB_API_BASE`：可选，仅用于测试 endpoint 覆盖。
 
-`api_trigger_m58_llm` 先跑 runtime contract preflight：验证仅有 `CNB_TOKEN + CNB_REPO_SLUG` 时，空/缺失的 `M58_CNB_REPO` 会回退到 `CNB_REPO_SLUG`，空/缺失的 `M58_CNB_MODEL` 会回退到 `deepseek-v4-flash`，同时确认显式覆盖不会被默认值覆盖。
+`api_trigger_m58_llm` 先跑 runtime contract preflight：在独立 subshell 中执行与 live stage 完全相同的 `export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"` 与 `export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"`，验证仅有 `CNB_TOKEN + CNB_REPO_SLUG` 时空/缺失的 `M58_CNB_REPO` 会回退到 `CNB_REPO_SLUG`、空/缺失的 `M58_CNB_MODEL` 会回退到 `deepseek-v4-flash`，同时确认显式覆盖不会被默认值覆盖。
 
 `M58_METADATA_CHECKER_BIN` 由 build stage 生成的 release binary 路径提供，不是本地凭据或手工配置要求。运行前先构建 release binary，使用每个 case 独立的 graphdb，并串行执行 case，避免 redb 锁冲突。报告默认写入 `target/m58-ai-eval/`；发布或归档前只上传结构化 JSON/Markdown。
 

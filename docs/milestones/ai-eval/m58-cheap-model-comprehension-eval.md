@@ -48,4 +48,4 @@
 
 ## 验收记录
 
-本地 fake runner 已覆盖 3 个 `fixture_llm` case，命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport 和 token 脱敏测试通过。当前 CNB adapter 使用 SSE（`stream:true`、`text/event-stream`）；真实 CNB baseline 尚未执行，待 `api_trigger_m58_llm` 提供 `CNB_TOKEN`，`M58_CNB_REPO` / `M58_CNB_MODEL` 作为可覆盖项，默认分别从 `CNB_REPO_SLUG` / `deepseek-v4-flash` 推导后记录 model/build、pass 率和失败分类。
+本地 fake runner 已覆盖 3 个 `fixture_llm` case，命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport 和 token 脱敏测试通过。当前 CNB adapter 使用 SSE（`stream:true`、`text/event-stream`）；真实 CNB baseline 尚未执行，待 `api_trigger_m58_llm` 提供 `CNB_TOKEN`，`M58_CNB_REPO` / `M58_CNB_MODEL` 作为可覆盖项，默认分别从 `CNB_REPO_SLUG` / `deepseek-v4-flash` 推导后记录 model/build、pass 率和失败分类。runtime contract preflight 需在独立 subshell 中用与 live stage 完全相同的 export 语义验证缺省回退与显式 override 保持。

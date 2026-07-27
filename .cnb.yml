@@ -507,19 +507,22 @@
         test -n "${CNB_TOKEN:-}"
         test -n "${CNB_REPO_SLUG:-}"
 
-        m58_cnb_repo=""
-        m58_cnb_model=""
-        resolved_repo="${m58_cnb_repo:-${CNB_REPO_SLUG:?}}"
-        resolved_model="${m58_cnb_model:-deepseek-v4-flash}"
-        test "${resolved_repo}" = "${CNB_REPO_SLUG}"
-        test "${resolved_model}" = "deepseek-v4-flash"
+        (
+          unset M58_CNB_REPO M58_CNB_MODEL
+          export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"
+          export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"
+          test "${M58_CNB_REPO}" = "${CNB_REPO_SLUG}"
+          test "${M58_CNB_MODEL}" = "deepseek-v4-flash"
+        )
 
-        m58_cnb_repo="override/repo"
-        m58_cnb_model="override-model"
-        resolved_repo="${m58_cnb_repo:-${CNB_REPO_SLUG:?}}"
-        resolved_model="${m58_cnb_model:-deepseek-v4-flash}"
-        test "${resolved_repo}" = "override/repo"
-        test "${resolved_model}" = "override-model"
+        (
+          export M58_CNB_REPO="override/repo"
+          export M58_CNB_MODEL="override-model"
+          export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"
+          export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"
+          test "${M58_CNB_REPO}" = "override/repo"
+          test "${M58_CNB_MODEL}" = "override-model"
+        )
     - name: build release binary
       script: cargo build --release --features cli-local --bin metadata-checker
     - name: run CNB fixture baseline
