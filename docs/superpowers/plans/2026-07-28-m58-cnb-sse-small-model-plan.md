@@ -41,11 +41,11 @@
 - Add private `parse_sse_content(body: &str) -> anyhow::Result<String>` in `tests/support/m58_ai_eval.rs`.
 - `CnbChatAdapter::complete` must send JSON `stream: true`, `Accept: text/event-stream`, and return concatenated `choices[].delta.content`.
 
-- [ ] **Step 1: Write the failing SSE success test**
+- [x] **Step 1: Write the failing SSE success test**
 
 Change the fake CNB response in `test_m58_cnb_adapter_sends_redacted_safe_request` to three `data:` JSON chunks plus `data: [DONE]`. Assert the returned assistant content is the concatenation, request JSON has `stream == true`, and request headers include `accept: text/event-stream`.
 
-- [ ] **Step 2: Run the focused test to verify RED**
+- [x] **Step 2: Run the focused test to verify RED**
 
 Run:
 
@@ -55,11 +55,11 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests test_m58_cnb_adap
 
 Expected: FAIL because the current adapter sends `stream:false` and attempts to parse a non-stream `message` object.
 
-- [ ] **Step 3: Write failing edge-case tests**
+- [x] **Step 3: Write failing edge-case tests**
 
 Add focused tests for an SSE stream with invalid JSON, a stream containing only `[DONE]`, and a chunk whose `choices` array is empty. Assert each returns an error without including the token.
 
-- [ ] **Step 4: Run edge-case tests to verify RED**
+- [x] **Step 4: Run edge-case tests to verify RED**
 
 Run:
 
@@ -69,15 +69,15 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests test_m58_cnb_sse 
 
 Expected: the new tests fail because no SSE parser exists.
 
-- [ ] **Step 5: Implement the minimal parser and request change**
+- [x] **Step 5: Implement the minimal parser and request change**
 
 Add serde DTOs for `choices[].delta.content: Option<String>`. Parse non-empty `data:` lines, stop at `[DONE]`, concatenate content fragments, reject malformed JSON, missing choices, and blank final content. Set `stream=true` regardless of the caller preference and add the SSE `Accept` header. Keep HTTP error body summarization and token redaction unchanged.
 
-- [ ] **Step 6: Run focused tests to verify GREEN**
+- [x] **Step 6: Run focused tests to verify GREEN**
 
 Run the two commands above. Expected: all focused SSE and adapter tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests/support/m58_ai_eval.rs tests/m58_cnb_ai_runner_tests.rs docs/specs/2026-07-17-cheap-model-comprehension-eval-design.md
@@ -96,11 +96,11 @@ git commit -m "fix: support cnb streaming chat responses"
 - Live stage sets `M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"`.
 - `M58_METADATA_CHECKER_BIN` remains a build-stage derived path, not a local credential/config requirement.
 
-- [ ] **Step 1: Write the failing pipeline contract check**
+- [x] **Step 1: Write the failing pipeline contract check**
 
 Add a CI Tester assertion or shell preflight test that the live script can run with only `CNB_TOKEN` and built-in `CNB_REPO_SLUG`, while using `deepseek-v4-flash` if no model override is passed. The current `.cnb.yml` must fail this check because it requires both M58 variables before deriving them.
 
-- [ ] **Step 2: Run the contract check to verify RED**
+- [x] **Step 2: Run the contract check to verify RED**
 
 Run the repository's official validator and a shell extraction check:
 
@@ -111,15 +111,15 @@ rg -n "M58_CNB_REPO|M58_CNB_MODEL|api_trigger_m58_llm" .cnb.yml
 
 Expected: schema passes but semantic validator warns that the API trigger is under `main`; the script still contains unconditional variable checks.
 
-- [ ] **Step 3: Implement the minimal pipeline fix**
+- [x] **Step 3: Implement the minimal pipeline fix**
 
 Move `api_trigger_m58_llm` from `main` to `$`. In the live stage, derive the repo from `CNB_REPO_SLUG`, default the observed current CNB model to `deepseek-v4-flash`, keep explicit trigger overrides, then check `CNB_TOKEN` and the release binary. Do not echo token or prompt contents.
 
-- [ ] **Step 4: Run validator and local contract checks to verify GREEN**
+- [x] **Step 4: Run validator and local contract checks to verify GREEN**
 
 Run the official validator, `cargo test --features cli-local --test m58_cnb_ai_runner_tests`, and `git diff --check`. Expected: validator has no semantic warning and no project file is modified by the check.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .cnb.yml tests/support/m58_ai_eval.rs docs/reference/ai-eval-run-template.md
@@ -137,11 +137,11 @@ git commit -m "ci: make m58 cnb runner self-configuring"
 - Keep `build_bootstrap_message(skill: &str, case: &EvalCase) -> String` private and deterministic.
 - Add a focused prompt contract test that checks required decision rules are present without embedding answer keys or hidden case data.
 
-- [ ] **Step 1: Write failing bootstrap contract tests**
+- [x] **Step 1: Write failing bootstrap contract tests**
 
 Add tests asserting the bootstrap explicitly tells the model to: emit one raw JSON object without Markdown fences; copy command kind/target/args/budget from `SKILL.md`; start with the smallest allowed query and compact budget; use the next user message as evidence; stop after enough evidence; and mention diagnostics/truncation instead of guessing. Assert it does not contain `expected_facts`, `must_include`, `CNB_TOKEN`, or source paths outside the fixed skill text.
 
-- [ ] **Step 2: Run prompt tests to verify RED**
+- [x] **Step 2: Run prompt tests to verify RED**
 
 Run:
 
@@ -151,15 +151,15 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests bootstrap -- --no
 
 Expected: FAIL because the current bootstrap does not state all small-model decision rules.
 
-- [ ] **Step 3: Implement concise prompt guidance**
+- [x] **Step 3: Implement concise prompt guidance**
 
 Rewrite only the bootstrap instruction text. Use short numbered rules, one command JSON example, one final JSON example, and explicit post-command behavior. Do not inject minimal plans, answer assertions, expected facts, hidden documents, model metadata, or prior case answers. Keep `SKILL.md` and the case question as the only case-specific inputs.
 
-- [ ] **Step 4: Add protocol recovery tests**
+- [x] **Step 4: Add protocol recovery tests**
 
 Add a fake-runner test for a model that first returns a fenced JSON object or explanatory prefix, then a valid command. The runner must keep the strict protocol and record `protocol_error`; it must not silently repair or execute the malformed command. Add a separate test showing a valid command followed by a final answer with diagnostic disclaimer passes the existing judge.
 
-- [ ] **Step 5: Run prompt and runner tests to verify GREEN**
+- [x] **Step 5: Run prompt and runner tests to verify GREEN**
 
 Run:
 
@@ -167,7 +167,7 @@ Run:
 cargo test --features cli-local --test m58_cnb_ai_runner_tests bootstrap protocol fake_runner -- --nocapture
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/support/m58_ai_eval.rs tests/m58_cnb_ai_runner_tests.rs docs/reference/ai-eval-run-template.md
@@ -181,7 +181,7 @@ git commit -m "test: harden m58 small-model protocol prompt"
 - Modify: `docs/milestones/ai-eval/m58-cheap-model-comprehension-eval.md`
 - Modify: `docs/reference/ai-eval-run-template.md`
 
-- [ ] **Step 1: Run the complete local verification set**
+- [x] **Step 1: Run the complete local verification set**
 
 Run:
 
