@@ -380,6 +380,7 @@ fn test_m58_cnb_adapter_redacts_http_error_and_rejects_invalid_response() {
     missing_choice_server.join().unwrap();
 }
 
+/// 验证 CNB HTTP/transport 失败在没有 assistant content 时归为 runner_error。
 #[test]
 fn test_m58_fake_runner_records_runner_error_for_cnb_transport_failure() {
     let cases = load_eval_cases(Path::new(
