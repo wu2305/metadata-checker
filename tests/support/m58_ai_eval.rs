@@ -1266,6 +1266,7 @@ M58 runner routing override (apply after SKILL.md):\\n\\
 - 页面整体最终回答必须明确写出用户入口、写入目标和 action，并引用 literal section name。\\n\\
 - 按钮/点击问题必须使用 --explain 和 comp:app/<relative-file>.spg|<component-id>；不得使用 --query-page-logic。\\n\\
 page final 必须 literal 包含 用户入口、按钮、写入目标、action。\\n\\
+页面 final 使用固定标签：用户入口：...；按钮：...；写入目标：...；action：...；不要用同义词替换这些标签。\\n\\
 field final 必须 literal 包含 页面 action、写入、字段。\\n\\
 \\n\\
 Case Question: {}",

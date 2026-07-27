@@ -715,6 +715,11 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     ));
     assert!(bootstrap.contains("页面整体最终回答必须明确写出用户入口、写入目标和 action"));
     assert!(bootstrap.contains("page final 必须 literal 包含 用户入口、按钮、写入目标、action"));
+    assert!(
+        bootstrap.contains(
+            "页面 final 使用固定标签：用户入口：...；按钮：...；写入目标：...；action：..."
+        )
+    );
     assert!(bootstrap.contains("field final 必须 literal 包含 页面 action、写入、字段"));
     assert!(bootstrap.contains("diagnostics"));
     assert!(bootstrap.contains("truncation"));

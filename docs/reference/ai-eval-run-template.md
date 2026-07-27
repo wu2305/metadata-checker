@@ -114,6 +114,8 @@ bootstrap 必须显式约束：
 
 runner 保持 strict parse：malformed JSON、Markdown fence、解释性前缀等都记为 `protocol_error`，不会自动剥离或重试后继续执行。
 
+页面 final 使用固定标签“用户入口：...；按钮：...；写入目标：...；action：...”，不要用同义词替换这些标签。
+
 边界说明：
 
 - `parse_agent_turn` 只接收 **adapter 已成功返回的 assistant content**，对内容执行 strict JSON 协议解析。
