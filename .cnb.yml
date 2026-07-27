@@ -502,6 +502,24 @@
       script: |
         rustc --version
         cargo --version
+    - name: runtime contract preflight
+      script: |
+        test -n "${CNB_TOKEN:-}"
+        test -n "${CNB_REPO_SLUG:-}"
+
+        m58_cnb_repo=""
+        m58_cnb_model=""
+        resolved_repo="${m58_cnb_repo:-${CNB_REPO_SLUG:?}}"
+        resolved_model="${m58_cnb_model:-deepseek-v4-flash}"
+        test "${resolved_repo}" = "${CNB_REPO_SLUG}"
+        test "${resolved_model}" = "deepseek-v4-flash"
+
+        m58_cnb_repo="override/repo"
+        m58_cnb_model="override-model"
+        resolved_repo="${m58_cnb_repo:-${CNB_REPO_SLUG:?}}"
+        resolved_model="${m58_cnb_model:-deepseek-v4-flash}"
+        test "${resolved_repo}" = "override/repo"
+        test "${resolved_model}" = "override-model"
     - name: build release binary
       script: cargo build --release --features cli-local --bin metadata-checker
     - name: run CNB fixture baseline
