@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use reqwest::header::ACCEPT;
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
 use std::fmt;
@@ -370,19 +371,24 @@ pub(crate) struct ChatRequest {
     pub(crate) messages: Vec<ChatMessage>,
     /// CNB 上配置的模型标识。
     pub(crate) model: String,
-    /// M58 runner 固定使用非流式响应。
+    /// 是否请求流式响应。
     pub(crate) stream: bool,
 }
 
-/// CNB AI Chat 响应结构，只消费公开 contract 中的首个 choice。
+/// CNB SSE 响应中的单个增量块。
 #[derive(Debug, Deserialize)]
-struct ChatResponse {
+struct SseChatChunk {
     choices: Vec<ChatChoice>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChatChoice {
-    message: ChatMessage,
+    delta: ChatDelta,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatDelta {
+    content: Option<String>,
 }
 
 /// LLM adapter 的最小同步接口。
@@ -495,15 +501,16 @@ impl CnbChatAdapter {
 }
 
 impl ModelAdapter for CnbChatAdapter {
-    /// 发送非流式 CNB AI Chat 请求并提取首个 choice 的内容。
+    /// 发送流式 CNB AI Chat 请求并拼接 SSE 增量内容。
     fn complete(&mut self, request: &ChatRequest) -> Result<String> {
         let mut payload = request.clone();
         payload.model = self.model.clone();
-        payload.stream = false;
+        payload.stream = true;
         let response = self
             .client
             .post(self.chat_url())
             .bearer_auth(&self.token)
+            .header(ACCEPT, "text/event-stream")
             .json(&payload)
             .send()
             .context("请求 CNB AI Chat 失败")?;
@@ -514,20 +521,54 @@ impl ModelAdapter for CnbChatAdapter {
             bail!("CNB AI Chat HTTP {}: {}", status, summary);
         }
 
-        let parsed: ChatResponse =
-            serde_json::from_str(&body).context("CNB AI Chat 响应不是合法的 choices JSON")?;
-        let content = parsed
-            .choices
-            .first()
-            .ok_or_else(|| anyhow!("CNB AI Chat 响应缺少 choices[0]"))?
-            .message
-            .content
-            .clone();
-        if content.trim().is_empty() {
-            bail!("CNB AI Chat choices[0].message.content 为空");
-        }
-        Ok(content)
+        parse_sse_content(&body)
     }
+}
+
+/// 解析 CNB SSE 响应并拼接所有增量文本。
+fn parse_sse_content(body: &str) -> Result<String> {
+    let mut content = String::new();
+    let mut saw_done = false;
+
+    for line in body.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some(payload) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let payload = payload.trim_start();
+        if payload.is_empty() {
+            continue;
+        }
+        if payload == "[DONE]" {
+            saw_done = true;
+            break;
+        }
+
+        let chunk: SseChatChunk =
+            serde_json::from_str(payload).context("CNB AI Chat SSE chunk 不是合法 JSON")?;
+        let mut saw_choice = false;
+        for choice in chunk.choices {
+            saw_choice = true;
+            if let Some(fragment) = choice.delta.content {
+                content.push_str(&fragment);
+            }
+        }
+        if !saw_choice {
+            bail!("CNB AI Chat SSE chunk 缺少 choices[0]");
+        }
+    }
+
+    if !saw_done {
+        bail!("CNB AI Chat SSE 响应缺少 [DONE]");
+    }
+    if content.trim().is_empty() {
+        bail!("CNB AI Chat SSE 内容为空");
+    }
+
+    Ok(content)
 }
 
 /// 读取必需的非空环境变量。

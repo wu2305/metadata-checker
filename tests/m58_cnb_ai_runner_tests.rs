@@ -175,8 +175,13 @@ fn test_m58_fake_adapter_records_history_and_fails_when_empty() {
 #[test]
 fn test_m58_cnb_adapter_sends_redacted_safe_request() {
     let token = "m58-test-secret-token";
-    let response_body = r#"{"choices":[{"message":{"role":"assistant","content":"{\"kind\":\"final\",\"answer\":\"ok\"}"}}]}"#;
-    let (endpoint, server) = spawn_fake_cnb_server("200 OK", response_body);
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"kind\\\":\\\"final\\\",\\\"answer\\\":\\\"\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"\\\"}\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
     let mut adapter = CnbChatAdapter::new(
         endpoint,
         "org/repo".to_string(),
@@ -211,9 +216,77 @@ fn test_m58_cnb_adapter_sends_redacted_safe_request() {
     assert!(!request_body.contains(token));
     let request_json: serde_json::Value = serde_json::from_str(request_body).unwrap();
     assert_eq!(request_json["model"], "configured-model");
-    assert_eq!(request_json["stream"], false);
+    assert_eq!(request_json["stream"], true);
     assert_eq!(request_json["messages"][0]["role"], "user");
     assert_eq!(request_json["messages"][0]["content"], "question");
+    assert!(raw_request_lower.contains("accept: text/event-stream"));
+}
+
+/// 验证 CNB SSE 流里的非法 JSON 不会泄漏 token。
+#[test]
+fn test_m58_cnb_sse_rejects_invalid_json_without_leaking_token() {
+    let token = "m58-invalid-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"{\"}}]}\n\n",
+        "data: {not-json m58-invalid-secret}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter.complete(&empty_chat_request()).unwrap_err().to_string();
+    server.join().unwrap();
+    assert!(!error.contains(token));
+    assert!(error.contains("CNB AI Chat"));
+}
+
+/// 验证 CNB SSE 流只有 [DONE] 时会返回错误。
+#[test]
+fn test_m58_cnb_sse_rejects_done_only_stream_without_leaking_token() {
+    let token = "m58-done-only-secret";
+    let response_body = "data: [DONE]\n\n";
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter.complete(&empty_chat_request()).unwrap_err().to_string();
+    server.join().unwrap();
+    assert!(!error.contains(token));
+    assert!(error.contains("CNB AI Chat"));
+}
+
+/// 验证 CNB SSE 流中空 choices 数组会被拒绝。
+#[test]
+fn test_m58_cnb_sse_rejects_empty_choices_without_leaking_token() {
+    let token = "m58-empty-choices-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter.complete(&empty_chat_request()).unwrap_err().to_string();
+    server.join().unwrap();
+    assert!(!error.contains(token));
+    assert!(error.contains("CNB AI Chat"));
 }
 
 /// 验证 CNB HTTP 错误和缺字段响应不会泄漏 token 或伪造成功。
@@ -222,6 +295,7 @@ fn test_m58_cnb_adapter_redacts_http_error_and_rejects_invalid_response() {
     let token = "m58-error-secret";
     let (endpoint, error_server) = spawn_fake_cnb_server(
         "500 Internal Server Error",
+        "application/json",
         r#"{"error":"m58-error-secret"}"#,
     );
     let mut adapter = CnbChatAdapter::new(
@@ -242,7 +316,8 @@ fn test_m58_cnb_adapter_redacts_http_error_and_rejects_invalid_response() {
         "token=[REDACTED]"
     );
 
-    let (endpoint, missing_choice_server) = spawn_fake_cnb_server("200 OK", r#"{"choices":[]}"#);
+    let (endpoint, missing_choice_server) =
+        spawn_fake_cnb_server("200 OK", "application/json", r#"{"choices":[]}"#);
     let mut adapter = CnbChatAdapter::new(
         endpoint,
         "org/repo".to_string(),
@@ -641,16 +716,21 @@ fn empty_chat_request() -> ChatRequest {
 }
 
 /// 启动一次性 fake CNB HTTP 服务并返回收到的原始请求。
-fn spawn_fake_cnb_server(status: &str, response_body: &str) -> (String, JoinHandle<String>) {
+fn spawn_fake_cnb_server(
+    status: &str,
+    content_type: &str,
+    response_body: &str,
+) -> (String, JoinHandle<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let status = status.to_string();
+    let content_type = content_type.to_string();
     let response_body = response_body.to_string();
     let server = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
         let request = read_http_request(&mut stream);
         let response = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
             response_body.len()
         );
         stream.write_all(response.as_bytes()).unwrap();
