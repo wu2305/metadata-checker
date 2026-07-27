@@ -701,6 +701,9 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("页面整体回答至少说明入口/写入计数和一个 action"));
     assert!(bootstrap.contains("按钮/动作回答至少说明组件、action 和写入目标"));
     assert!(bootstrap.contains("字段回答至少说明字段和写入者或来源"));
+    assert!(bootstrap.contains("M58 runner routing override"));
+    assert!(bootstrap.contains("裸 field 必须使用 --explain"));
+    assert!(bootstrap.contains("页面整体最终回答必须明确写出用户入口、写入目标和 action"));
     assert!(bootstrap.contains("diagnostics"));
     assert!(bootstrap.contains("truncation"));
     assert!(bootstrap.contains("do not guess"));

@@ -1261,6 +1261,10 @@ Rules:\\n\
 SKILL.md:\\n\
 {skill}\\n\
 \\n\
+M58 runner routing override (apply after SKILL.md):\\n\\
+- 裸 field 必须使用 --explain；不要使用 --explain-condition 来替代字段关系查询。\\n\\
+- 页面整体最终回答必须明确写出用户入口、写入目标和 action，并引用 literal section name。\\n\\
+\\n\\
 Case Question: {}",
         case.question
     )
