@@ -684,6 +684,10 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("页面整体逻辑 -> --query-page-logic"));
     assert!(bootstrap.contains("单组件/按钮/动作 -> --explain"));
     assert!(bootstrap.contains("writer/value-source/condition -> --explain-condition"));
+    assert!(bootstrap.contains("点击/按钮/组件/动作 -> --explain"));
+    assert!(bootstrap.contains("页面整体问题才允许 --query-page-logic"));
+    assert!(bootstrap.contains("page:app/<relative-file>.spg；不得删除 app/ 或 .spg"));
+    assert!(bootstrap.contains("budget 只能放在 JSON 顶层字段，不能放进 args"));
     assert!(bootstrap.contains("主证据块为空或 result=null 时，不要直接作答"));
     assert!(bootstrap.contains("用同一 target 执行 --explain 作为受限 fallback"));
     assert!(bootstrap.contains("compact"));

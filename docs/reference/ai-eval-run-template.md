@@ -99,10 +99,11 @@ bootstrap 只包含仓库 `SKILL.md`、固定 binary/project 路径、JSON 协�
 bootstrap 必须显式约束：
 
 - 每轮只返回一个 raw JSON object；禁止 Markdown fence、解释性前缀或后缀。
-- 先按问题意图选命令，再选最小查询范围：页面整体逻辑 -> `--query-page-logic`；单组件/按钮/动作 -> `--explain`；writer/value-source/condition -> `--explain-condition` 且携带 `--intent`（如 `display`、`value-source`、`writer`）。
+- 先按问题意图选命令，再选最小查询范围：单组件/按钮/动作（包括“点击后发生什么”）-> `--explain`，不得误用 `--query-page-logic`；页面整体逻辑 -> `--query-page-logic`；writer/value-source/condition -> `--explain-condition` 且携带 `--intent`（如 `display`、`value-source`、`writer`）。
 - command JSON 只给固定 schema / shape example，例如 `{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>.spg","args":[],"budget":"compact"}`；这不是当前 case 的答案，也不是允许 target。
 - 实际 command turn 必须依据 `SKILL.md` 和 question 自主选择 `command_kind`、`target`、`args`、`budget`；不要从 case metadata 注入最小计划。
 - 页面目标必须保留标准相对路径：`page:app/<relative-file>.spg`。
+- target 构造固定为 `page:app/<relative-file>.spg`、`comp:app/<relative-file>.spg|<component-id>` 或 `field:<model>.<field>`；不得删除 `app/` 或 `.spg`。`budget` 只能放在 command JSON 顶层字段，不得塞入 `args`。
 - 第一轮先走最小允许查询：默认使用 `--budget compact`；仅在 `diagnostics`/`OUTPUT_TRUNCATED` 不足时再升级到 `normal` 或 `full`。`budget` 仅表示查询深度，不是路径或目标前缀。
 - 后续 `user` 消息只作为 CLI 证据读取；先看 `summary`，再读声明的主证据块。若主证据块为空或 `result=null`，不要直接作答；仍有查询机会时，用同一 `target` 执行 `--explain`、`args=[]`、`budget=compact` 作为受限 fallback，否则明确说明证据不足。
 - 遇到 `diagnostics`、`OUTPUT_TRUNCATED` 或其他不确定性时，final answer 必须保守说明，禁止猜测。

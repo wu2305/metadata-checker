@@ -1247,9 +1247,9 @@ Do not include actual case target or fixture answers.\\n\
 Rules:\\n\
 1. Return exactly one raw JSON object per turn. No Markdown fences. No prefix or suffix.\\n\
 2. Start with the smallest allowed query.\\n\
-3. 先按问题意图选命令：页面整体逻辑 -> --query-page-logic；单组件/按钮/动作 -> --explain；writer/value-source/condition -> --explain-condition 并按 SKILL.md 选择 --intent。\\n\
-4. target 必须是规范化路径，页面目标保留 `page:app/<relative-file>.spg`。\\n\
-5. budget 字段仅在命令需要时设置，合法值为 compact / normal / full（compact 作为默认第一轮；仅在 diagnostics 或 OUTPUT_TRUNCATED 时升级）。\\n\
+3. 先按问题意图选命令：单组件/按钮/动作 -> --explain（点击/按钮/组件/动作 -> --explain）；点击/按钮/组件/动作问题不得使用 --query-page-logic；页面整体逻辑 -> --query-page-logic（页面整体问题才允许 --query-page-logic）；writer/value-source/condition -> --explain-condition 并按 SKILL.md 选择 --intent。\\n\
+4. target 必须是规范化路径，页面目标保留 `page:app/<relative-file>.spg`；page:app/<relative-file>.spg；不得删除 app/ 或 .spg。\\n\
+5. budget 字段仅在命令需要时设置，合法值为 compact / normal / full（compact 作为默认第一轮；仅在 diagnostics 或 OUTPUT_TRUNCATED 时升级）。budget 只能放在 JSON 顶层字段，不能放进 args。\\n\
 6. 命令 JSON 示例：{{\"kind\":\"command\",\"command_kind\":\"--query-page-logic\",\"target\":\"page:<relative-page-path>.spg\",\"args\":[],\"budget\":\"compact\"}}。\\n\
 7. This is only a shape example, not the current case answer/target/plan. Choose actual command_kind/target/args/budget from SKILL.md and the question.\\n\
 8. After each command, use the next user message as the only evidence. Read summary first, then read the declared primary fact block and only read more if needed.\\n\
