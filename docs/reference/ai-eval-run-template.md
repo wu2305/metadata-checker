@@ -1,6 +1,6 @@
 # M58 AI Eval 运行报告模板
 
-用于记录 CI tester 内的空上下文小模型评测。runner 只把 `SKILL.md`、固定项目路径、metadata-checker release binary 和当前问题提供给模型；模型通过 CNB AI Chat API 返回 JSON `command` / `final` 消息。
+用于记录 CI tester 内的空上下文小模型评测。runner 只把 `SKILL.md`、固定项目路径、metadata-checker release binary 和当前问题提供给模型；模型通过 CNB AI Chat API 的 SSE 流返回 JSON `command` / `final` 消息。
 
 ## 记录原则
 
@@ -83,12 +83,12 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests
 
 真实 `fixture_llm` baseline 通过 `.cnb.yml` 的 `api_trigger_m58_llm` pipeline 运行，不进入 PR 阻塞 CI。pipeline 必须提供：
 
-- `CNB_TOKEN`：仅用于 `Authorization: Bearer ...`；
-- `M58_CNB_REPO`：当前仓库路径；
-- `M58_CNB_MODEL`：CNB AI Chat 模型标识；
+- `CNB_TOKEN`：仅用于 `Authorization: Bearer ...`，属于 pipeline-only 密钥；
+- `M58_CNB_REPO`：可选覆盖项；未显式设置时回退到 `CNB_REPO_SLUG`；
+- `M58_CNB_MODEL`：可选覆盖项；未显式设置时默认 `deepseek-v4-flash`；
 - `M58_CNB_API_BASE`：可选，仅用于测试 endpoint 覆盖。
 
-运行前构建 release binary，使用每个 case 独立的 graphdb，并串行执行 case，避免 redb 锁冲突。报告默认写入 `target/m58-ai-eval/`；发布或归档前只上传结构化 JSON/Markdown。
+`M58_METADATA_CHECKER_BIN` 由 build stage 生成的 release binary 路径提供，不是本地凭据或手工配置要求。运行前先构建 release binary，使用每个 case 独立的 graphdb，并串行执行 case，避免 redb 锁冲突。报告默认写入 `target/m58-ai-eval/`；发布或归档前只上传结构化 JSON/Markdown。
 
 ## 空上下文边界
 

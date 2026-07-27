@@ -506,9 +506,9 @@
       script: cargo build --release --features cli-local --bin metadata-checker
     - name: run CNB fixture baseline
       script: |
+        export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"
+        export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"
         test -n "${CNB_TOKEN:-}"
-        test -n "${M58_CNB_REPO:-}"
-        test -n "${M58_CNB_MODEL:-}"
         test -f target/cnb/m58-ai-eval-build/release/metadata-checker
         export M58_METADATA_CHECKER_BIN="$PWD/target/cnb/m58-ai-eval-build/release/metadata-checker"
         cargo test --features cli-local --test m58_cnb_ai_runner_tests -- --ignored --nocapture
@@ -523,12 +523,12 @@
 
 main:
   push: *main_authoritative_ci
-  api_trigger_m58_llm:
-    - *m58_cnb_llm_ci
 
 "$":
   vscode:
     - *cloud_native_dev_env
+  api_trigger_m58_llm:
+    - *m58_cnb_llm_ci
 
 "**":
   push:
