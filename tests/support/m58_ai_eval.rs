@@ -375,18 +375,22 @@ pub(crate) struct ChatRequest {
     pub(crate) stream: bool,
 }
 
-/// CNB SSE 响应中的单个增量块。
+/// CNB SSE 流中的单个增量块，包含一个 choices 列表。
 #[derive(Debug, Deserialize)]
 struct SseChatChunk {
-    choices: Vec<ChatChoice>,
+    choices: Option<Vec<ChatChoice>>,
 }
 
+/// CNB SSE choice 中的增量内容载体。
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ChatChoice {
-    delta: ChatDelta,
+    delta: Option<ChatDelta>,
 }
 
+/// CNB SSE delta 里的文本片段。
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ChatDelta {
     content: Option<String>,
 }
@@ -549,15 +553,20 @@ fn parse_sse_content(body: &str) -> Result<String> {
 
         let chunk: SseChatChunk =
             serde_json::from_str(payload).context("CNB AI Chat SSE chunk 不是合法 JSON")?;
-        let mut saw_choice = false;
-        for choice in chunk.choices {
-            saw_choice = true;
-            if let Some(fragment) = choice.delta.content {
+        let choices = chunk
+            .choices
+            .ok_or_else(|| anyhow!("CNB AI Chat SSE chunk 缺少 choices"))?;
+        if choices.is_empty() {
+            bail!("CNB AI Chat SSE chunk 缺少 choices");
+        }
+
+        for choice in choices {
+            let delta = choice
+                .delta
+                .ok_or_else(|| anyhow!("CNB AI Chat SSE chunk 缺少 delta"))?;
+            if let Some(fragment) = delta.content {
                 content.push_str(&fragment);
             }
-        }
-        if !saw_choice {
-            bail!("CNB AI Chat SSE chunk 缺少 choices[0]");
         }
     }
 
