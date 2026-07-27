@@ -380,6 +380,45 @@ fn test_m58_cnb_adapter_redacts_http_error_and_rejects_invalid_response() {
     missing_choice_server.join().unwrap();
 }
 
+#[test]
+fn test_m58_fake_runner_records_runner_error_for_cnb_transport_failure() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let output_dir = unique_test_output_dir("m58-cnb-transport-runner-error");
+    let config = fixture_runner_config(output_dir.clone());
+    let token = "m58-runner-transport-token";
+    let (endpoint, error_server) = spawn_fake_cnb_server(
+        "500 Internal Server Error",
+        "application/json",
+        r#"{"error":"service unavailable"}"#,
+    );
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "fake-model".to_string(),
+    )
+    .unwrap();
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    error_server.join().unwrap();
+
+    assert_eq!(report.status, "error");
+    assert_eq!(report.passed, false);
+    assert_eq!(report.failure_classes, vec!["runner_error".to_string()]);
+    assert_eq!(report.command_trace, Vec::<CommandTrace>::new());
+    assert_eq!(
+        report.judge_notes,
+        vec!["model adapter completion failed".to_string()]
+    );
+    assert!(!report.judge_notes[0].contains(token));
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
 /// 验证 adapter 不接受缺失的连接配置。
 #[test]
 fn test_m58_cnb_adapter_rejects_empty_configuration() {

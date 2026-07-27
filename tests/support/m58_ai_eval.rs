@@ -157,6 +157,8 @@ struct RawFinalEnvelope {
 }
 
 /// 解析模型的 JSON command/final 消息。
+/// 该解析只处理 adapter 已返回的 assistant content，输入必须是单一 JSON 对象；
+/// 任何 malformed、Markdown fence、解释性前缀/后缀都直接返回错误，而不做修复。
 pub(crate) fn parse_agent_turn(content: &str) -> Result<AgentTurn> {
     let value: Value = serde_json::from_str(content).context("模型响应不是合法 JSON")?;
     let kind = value
@@ -1081,6 +1083,8 @@ pub(crate) fn run_case(
             model: config.model_id.clone(),
             stream: false,
         };
+        // 只有 adapter 成功返回 assistant content 时，runner 才进入协议解析路径。
+        // adapter/HTTP/SSE 层失败说明 provider/runtime 未产出可解析文本，归为 runner_error。
         let response = match adapter.complete(&request) {
             Ok(response) => response,
             Err(_) => {
@@ -1097,6 +1101,7 @@ pub(crate) fn run_case(
             role: "assistant".to_string(),
             content: response.clone(),
         });
+        // 这里解析的是已拿到的 assistant content，故 malformed/fence 均判为模型协议错误。
         let turn = match parse_agent_turn(&response) {
             Ok(turn) => turn,
             Err(_) => {

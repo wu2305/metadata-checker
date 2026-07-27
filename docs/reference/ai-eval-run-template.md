@@ -67,7 +67,7 @@
 | `ignored_diagnostic` | 存在诊断但回答没有保守表达 |
 | `over_read_details` | 请求 `--detail`、`--budget full` 或未允许的细节路径 |
 | `needs_human_review` | case assertion schema 或自动证据规则无法确定 |
-| `runner_error` | adapter、CLI 或 case workspace 的运行时失败，未伪造业务答案 |
+| `runner_error` | adapter、CLI 或 case workspace 的运行时失败，未伪造业务答案；包含 CNB HTTP/transport/SSE 级别异常或 JSON 未返回前就失败的适配层问题 |
 
 一次 case 可以有多个失败分类；`pass_rate` 只按 `passed` 计数，不按失败分类去重。
 
@@ -106,3 +106,9 @@ bootstrap 必须显式约束：
 - 遇到 `diagnostics`、`OUTPUT_TRUNCATED` 或其他不确定性时，final answer 必须保守说明，禁止猜测。
 
 runner 保持 strict parse：malformed JSON、Markdown fence、解释性前缀等都记为 `protocol_error`，不会自动剥离或重试后继续执行。
+
+边界说明：
+
+- `parse_agent_turn` 只接收 **adapter 已成功返回的 assistant content**，对内容执行 strict JSON 协议解析。
+- `protocol_error` 仅表示模型返回内容不符合 `command/final` 协议（如 fenced JSON、非 JSON、解释性前缀）。
+- `runner_error` 表示在模型内容到达 runner 之前失败，典型是 `CnbChatAdapter` 的 HTTP 请求/SSE 解析失败、provider 运行时不可达、超时、CLI 执行失败、以及 workspace 构建失败等；这类不属于模型协议层错误。
