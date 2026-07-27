@@ -776,6 +776,54 @@ fn test_m58_fake_runner_accepts_valid_command_then_final_with_diagnostic_disclai
     std::fs::remove_dir_all(output_dir).unwrap();
 }
 
+/// 验证合法 planned command 已执行并记录后，第二轮 fenced 响应会记为 protocol_error 且不重试。
+#[test]
+fn test_m58_fake_runner_records_protocol_error_after_valid_planned_command() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let output_dir = unique_test_output_dir("m58-post-command-protocol-error");
+    let config = fixture_runner_config(output_dir.clone());
+    let step = &case.value["minimal_command_plan"][0];
+    let valid_command = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": step["target"],
+        "args": step["args"],
+        "budget": step["budget"]
+    })
+    .to_string();
+    let malformed_followup = format!(
+        "```json\n{}\n```",
+        serde_json::json!({
+            "kind": "final",
+            "answer": "这条 fenced final 不应被接受"
+        })
+    );
+    let mut adapter = FakeModelAdapter::from_responses(vec![valid_command, malformed_followup]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.status, "error");
+    assert_eq!(report.passed, false);
+    assert_eq!(report.failure_classes, vec!["protocol_error".to_string()]);
+    assert_eq!(report.command_trace.len(), 1);
+    assert_eq!(report.command_trace[0].accepted, true);
+    assert_eq!(report.command_trace[0].plan_step_index, Some(0));
+    assert_eq!(
+        report.command_trace[0].target,
+        step["target"].as_str().unwrap().to_string()
+    );
+    assert_eq!(adapter.requests().len(), 2);
+    assert_eq!(adapter.requests()[1].messages.len(), 3);
+    assert_eq!(adapter.requests()[1].messages[1].role, "assistant");
+    assert_eq!(adapter.requests()[1].messages[2].role, "user");
+    assert_eq!(adapter.requests()[1].messages[2].content.starts_with('{'), true);
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
 /// CNB pipeline 中手动/定时执行的真实 fixture baseline；普通 CI 不运行。
 #[test]
 #[ignore = "requires CNB_TOKEN, M58_CNB_REPO, M58_CNB_MODEL and release binary"]
