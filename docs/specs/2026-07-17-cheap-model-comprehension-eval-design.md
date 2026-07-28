@@ -109,3 +109,42 @@ ai_eval_cases.json (tier=fixture_llm)
 - **M28–M30**：M58 报告中的 wrong_command / over_read_details 分布是契约收敛的输入数据。
 - **M22**：评测集与判分规则的直接前代，本 spec 复用其 schema，不另起格式。
 - **MCP**：runner 只打 CLI 二进制，不依赖未来 MCP 层。
+
+## M58.1 多 trial 与 Skill 理解难度扩展（2026-07-28）
+
+### 目标
+
+M58 的首个真实 baseline 只证明了 3 个 fixture case 在一个模型和一次运行中的端到端可用性；它不能证明 Skill 被稳定理解，也不能区分命令选择、证据消费、最终回答和 runner 故障。M58.1 保持现有 CNB adapter 与空上下文边界，增加可重复的 trial 维度和任务难度描述。
+
+### 设计决策
+
+1. `CnbChatAdapter` 继续留在 CI Tester 的 `ModelAdapter` 实现中；`metadata-checker` CLI、stdio 和 `SKILL.md` 不引入 CNB provider 逻辑。
+2. `RunnerConfig.trial_count` 默认值为 `1`，保证普通 fake/结构测试行为不变；CNB live stage 显式设置大于 1 的 trial 数。
+3. 每个 trial 都创建独立的 case workspace、graphdb 和 message history；adapter 不接收上一 trial 的 history，确保重复运行是独立尝试。
+4. `CaseReport` 保留现有脱敏字段，并增加 `trial_index`、`task_family`、`difficulty`；`RunReport` 同时给出 trial 级 `pass_rate`、case 级稳定通过率、失败分类和命令轨迹统计。
+5. case 可选 `evaluation_dimensions` 对象描述 `task_family`、`target_resolution`、`distractor_count`、`dependency_depth`、`stateful`、`error_injection` 和 `output_truncation`。缺失时按既有 `risk_tags` / `difficulty` 做兼容默认，不把答案键或最小命令计划注入 bootstrap。
+6. 初始 fixture LLM 集合优先复用已有 fixture structural case，覆盖正向路由、负向结论、诊断、导航、DataFlow、condition 和 hard 多跳场景；不把真实大项目自动加入 live tier。
+
+### 指标
+
+- `trial_pass_rate`：所有 trial 通过数 / trial 总数。
+- `case_stable_pass_rate`：同一 case 的所有 trial 均通过的 case 数 / case 总数。
+- `cases_with_flaky_trials`：同一 case 同时出现 pass 和 fail 的数量。
+- `command_trace_stats`：保留现有命令数、拒绝数、预算升级和过度读取统计，并增加按 trial 统计的平均值。
+- `failure_classes`：继续区分 `wrong_command`、`over_read_details`、`missed_fact`、`hallucination`、`ignored_diagnostic`、`protocol_error` 和 `runner_error`；runner/provider 故障不得计作模型业务答案。
+
+### 执行分层
+
+| 层 | 默认 trial 数 | 入口 | 门禁 |
+|---|---:|---|---|
+| `fixture_structural` | 0 | 确定性 CLI 输出测试 | 每次 CI 阻塞 |
+| `fixture_llm` fake | 1 | 本地 fake runner | 每次 CI 可运行，不调用网络 |
+| `fixture_llm` CNB | 3（可覆盖） | CNB 手动/定时 pipeline | 初期只观测趋势；安全泄漏和 runner 污染仍为硬失败 |
+| `real_manual` | 由人工决定 | 人工/Agent | 不进入自动层 |
+
+### 验收
+
+1. 现有 1-trial fake 测试和报告 schema 继续通过。
+2. 多 trial fake 测试证明每个 trial 使用新的 history/workspace，且同一 case 的 pass/fail 混合结果会被报告为 flaky，而不是被平均值隐藏。
+3. fixture LLM case 覆盖至少 10 个不同任务，包含至少一个 negative、diagnostic、condition 和 multi-step case；每个 case 具有可审计的任务 family/difficulty 元数据。
+4. 真实 CNB 运行报告不包含 token、Authorization、prompt 或模型原文，并输出 trial 级与 case 稳定性指标。
