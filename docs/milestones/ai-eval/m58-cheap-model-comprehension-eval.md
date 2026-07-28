@@ -1,6 +1,6 @@
 # M58：廉价模型理解力评测
 
-> 状态：**active**（spec/plan approved；真实 LLM baseline 通过 CNB API trigger 执行）
+> 状态：**active**（spec/plan approved；M58.1 多 trial/任务维度已落地，新的 CNB live baseline 待运行）
 > Spec：[2026-07-17-cheap-model-comprehension-eval-design.md](../../specs/2026-07-17-cheap-model-comprehension-eval-design.md)  
 > Plan：[2026-07-27-m58-cnb-ai-chat-runner-plan.md](../../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)
 
@@ -44,10 +44,12 @@
 | AnswerJudge + 单测 | done |
 | ModelAdapter + 命令白名单执行 | done |
 | RunReport schema + 归档 | done |
-| 基线 run（≥3 fixture_llm case） | done（CNB `deepseek-v4-flash`，3/3） |
+| 历史基线 run（3 fixture_llm case，单 trial） | done（CNB `deepseek-v4-flash`，3/3；仅作 smoke） |
+| M58.1 多 trial runner、稳定性指标与任务维度 | done（本地 fake，13 active fixture_llm case） |
+| M58.1 CNB 3-trial live baseline | pending（需在分支推送后触发 `api_trigger_m58_llm`） |
 
 ## 验收记录
 
-本地 fake runner 已覆盖 3 个 `fixture_llm` case，命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport、SSE 和 token 脱敏测试通过。真实 CNB baseline 已由 `api_trigger_m58_llm` 在 feature branch 执行：provider=`cnb-ai-chat`、model=`deepseek-v4-flash`、build=`cnb-54f-1juijih5i`、pass rate=`1.0`、failure classes 为空；三个 case 均只发出一个 `compact` 命令，未发生 budget upgrade，页面/按钮/字段命令分别通过最小计划校验。报告只保留结构化摘要和脱敏 command trace，不归档 prompt、模型原文或 token。runtime contract preflight 的缺省回退与显式 override 已通过同一 live stage 验证。
+本地 fake runner 已覆盖 13 个 active `fixture_llm` case，覆盖 page/action/lineage/dataflow/navigation/diagnostic/context/condition 等任务族；每个 case 都有 `evaluation_dimensions`，并通过独立 trial、命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport、SSE 和 token 脱敏测试。历史真实 CNB smoke 曾由 `api_trigger_m58_llm` 执行：provider=`cnb-ai-chat`、model=`deepseek-v4-flash`、build=`cnb-54f-1juijih5i`、单 trial pass rate=`1.0`、failure classes 为空；它只证明当时三个 case 的一次端到端路径可用，不证明 Skill 的稳定理解或任务泛化。新的 live runner 默认每个 case 执行 3 个独立 trial，报告同时输出 `trial_pass_rate`、`case_stable_pass_rate` 和 `cases_with_flaky_trials`；只保留结构化摘要和脱敏 command trace，不归档 prompt、模型原文或 token。runtime contract preflight 的缺省回退与显式 override 已通过同一 live stage 验证。
 
 提示词优化记录：早期 live run 暴露页面路径、按钮 target、裸 field 命令和 final JSON 收尾问题；随后固定 `page/comp/field` target 路由、compact-first、final literal 标签和单行 JSON 键集合，最终在 commit `b1221dd` 的 CNB run 中达到 3/3。该结果是当前 fixture/模型组合的基线，不等同于多模型或真实项目泛化结论。

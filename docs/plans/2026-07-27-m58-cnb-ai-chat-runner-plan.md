@@ -7,6 +7,8 @@
 
 **Architecture:** runner 只存在于 `tests/` 评测支持代码，不进入 `src/`、release 二进制、stdio 或 MCP。`CnbChatAdapter` 在 CNB 流水线内使用 `CNB_TOKEN` 调用 `POST /{repo}/-/ai/chat/completions`；本地测试使用 `FakeModelAdapter`。模型只能返回 JSON command/final 消息，runner 对命令做 case plan 精确匹配后直接通过 `std::process::Command` 执行 CLI，不经过 shell。
 
+> M58.1 扩展（多 trial、任务族和 Skill 理解难度维度）由 [2026-07-28-m58-multi-trial-skill-eval-plan.md](../superpowers/plans/2026-07-28-m58-multi-trial-skill-eval-plan.md) 追踪；本文件保留首个 CNB runner 的实现记录。
+
 **Tech Stack:** Rust integration test、`serde`/`serde_json`、`reqwest::blocking`、现有 `metadata-checker` release binary、CNB `.cnb.yml` `api_trigger_m58_llm` pipeline。
 
 ## Global Constraints
@@ -30,7 +32,7 @@
 
 **Interfaces:**
 - `load_eval_cases(path: &Path) -> anyhow::Result<Vec<EvalCase>>`
-- `EvalCase { case_id, question, tier, case_status, difficulty, value }`
+- `EvalCase { case_id, question, tier, case_status, difficulty, task_family, evaluation_dimensions, value }`
 - `EvalTier::{FixtureStructural, FixtureLlm, RealManual}`
 - `fixture_llm_cases(cases: &[EvalCase]) -> Vec<EvalCase>`
 
@@ -171,7 +173,7 @@ git commit -m "test: add m58 cnb chat adapters"
 **Interfaces:**
 - `JudgeResult { passed: bool, failure_classes: Vec<String>, judge_notes: Vec<String> }`
 - `judge_answer(answer: &str, assertions: &Value, diagnostics: &[String], trace: &[CommandTrace]) -> JudgeResult`
-- `RunReport { schema_version, provider, model_id, cnb_build_id, started_at, cases, summary }`
+- `RunReport { schema_version, provider, model_id, cnb_build_id, started_at, cases, trial_pass_rate, case_stable_pass_rate, cases_with_flaky_trials, summary }`
 - `write_run_report(report: &RunReport, json_path: &Path, markdown_path: &Path) -> anyhow::Result<()>`
 
 - [x] **Step 1: 固化确定性判分规则**
@@ -222,11 +224,11 @@ git commit -m "feat: add m58 judge and run report"
 
 - [x] **Step 3: 添加 fake end-to-end 测试**
 
-用三个预置 fake case 验证：模型先 command 后 final；多轮 history 正确；CLI stdout 被回传；错误命令被阻止；answer judge 与 command trace 汇总到 RunReport。
+用首批预置 fake case 验证：模型先 command 后 final；多轮 history 正确；CLI stdout 被回传；错误命令被阻止；answer judge 与 command trace 汇总到 RunReport。当前 M58.1 已扩展为 13 个 active `fixture_llm` case，并由独立 multi-trial 计划覆盖稳定性指标。
 
 - [x] **Step 4: 添加 ignored CNB live test**
 
-`#[test] #[ignore] fn test_m58_cnb_fixture_llm_baseline()` 要求 `CNB_TOKEN`、`M58_CNB_REPO`、`M58_CNB_MODEL` 和 release binary 存在；顺序运行三个 `fixture_llm` case，写入 `target/m58-ai-eval/`，打印不含 prompt/token 的结构化摘要。
+`#[test] #[ignore] fn test_m58_cnb_fixture_llm_baseline()` 要求 `CNB_TOKEN`、`M58_CNB_REPO`、`M58_CNB_MODEL` 和 release binary 存在；顺序运行 active `fixture_llm` case，live pipeline 通过 `M58_AI_EVAL_TRIALS=3` 执行独立 trial，写入 `target/m58-ai-eval/`，打印不含 prompt/token 的结构化摘要。
 
 ```bash
 cargo test --features cli-local --test m58_cnb_ai_runner_tests fake_runner

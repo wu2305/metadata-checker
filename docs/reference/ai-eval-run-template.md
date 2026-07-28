@@ -6,14 +6,14 @@
 
 - JSON `RunReport` 是唯一事实源，Markdown 只由同一对象生成。
 - 不写入 CNB token、Authorization header、完整 prompt、模型原始回答或大段 CLI 输出。
-- 每次记录 provider、model、CNB build、case 状态、失败分类和命令轨迹统计。
+- 每次记录 provider、model、CNB build、trial/case 稳定性、失败分类和命令轨迹统计。
 - `fixture_structural` 不调用模型；`fixture_llm` 使用 fixture 项目；`real_manual` 只在明确的人工/手动入口执行。
 
 ## RunReport 格式
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "provider": "cnb-ai-chat",
   "model_id": "gpt-5.4-mini",
   "cnb_build_id": "build-20260727",
@@ -21,6 +21,9 @@
   "cases": [
     {
       "case_id": "page_purpose_actions_test",
+      "trial_index": 0,
+      "task_family": "page_logic",
+      "difficulty": "basic",
       "status": "pass",
       "passed": true,
       "max_command_count": 2,
@@ -42,6 +45,11 @@
     }
   ],
   "pass_rate": 1.0,
+  "trial_pass_rate": 1.0,
+  "trial_count": 1,
+  "case_count": 1,
+  "case_stable_pass_rate": 1.0,
+  "cases_with_flaky_trials": 0,
   "failure_classes": {},
   "command_trace_stats": {
     "total_commands": 1,
@@ -49,6 +57,7 @@
     "rejected_commands": 0,
     "cases_with_commands": 1,
     "average_commands_per_case": 1.0,
+    "average_commands_per_trial": 1.0,
     "max_command_count_exceeded_cases": 0,
     "budget_upgrade_count": 0
   }
@@ -69,7 +78,9 @@
 | `needs_human_review` | case assertion schema 或自动证据规则无法确定 |
 | `runner_error` | adapter、CLI 或 case workspace 的运行时失败，未伪造业务答案；包含 CNB HTTP/transport/SSE 级别异常或 JSON 未返回前就失败的适配层问题 |
 
-一次 case 可以有多个失败分类；`pass_rate` 只按 `passed` 计数，不按失败分类去重。
+一次 trial 可以有多个失败分类；`trial_pass_rate` 按 trial 行计数，`case_stable_pass_rate` 只有同一 case 的所有 trial 都通过才计为通过。为兼容旧消费者，`pass_rate` 与 `trial_pass_rate` 保持同值；`cases_with_flaky_trials` 单独标出同一 case 试验结果不稳定的情况。
+
+`task_family` 和 `difficulty` 用于按能力切片；case 原始的 `evaluation_dimensions`（如 `target_resolution`、`distractor_count`、`dependency_depth`、`stateful`、`error_injection`、`output_truncation`）保留在评测集，不进入模型 bootstrap。
 
 ## 本地验证
 
@@ -86,11 +97,12 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests
 - `CNB_TOKEN`：仅用于 `Authorization: Bearer ...`，属于 pipeline-only 密钥；
 - `M58_CNB_REPO`：可选覆盖项；未显式设置时回退到 `CNB_REPO_SLUG`；
 - `M58_CNB_MODEL`：可选覆盖项；未显式设置时默认 `deepseek-v4-flash`；
+- `M58_AI_EVAL_TRIALS`：live 默认 `3`；本地/fake runner 默认 `1`，每个 trial 使用独立 history、workspace 和 graphdb；
 - `M58_CNB_API_BASE`：可选，仅用于测试 endpoint 覆盖。
 
 `api_trigger_m58_llm` 先跑 runtime contract preflight：在独立 subshell 中执行与 live stage 完全相同的 `export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"` 与 `export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"`，验证仅有 `CNB_TOKEN + CNB_REPO_SLUG` 时空/缺失的 `M58_CNB_REPO` 会回退到 `CNB_REPO_SLUG`、空/缺失的 `M58_CNB_MODEL` 会回退到 `deepseek-v4-flash`，同时确认显式覆盖不会被默认值覆盖。
 
-`M58_METADATA_CHECKER_BIN` 由 build stage 生成的 release binary 路径提供，不是本地凭据或手工配置要求。运行前先构建 release binary，使用每个 case 独立的 graphdb，并串行执行 case，避免 redb 锁冲突。报告默认写入 `target/m58-ai-eval/`；发布或归档前只上传结构化 JSON/Markdown。
+`M58_METADATA_CHECKER_BIN` 由 build stage 生成的 release binary 路径提供，不是本地凭据或手工配置要求。运行前先构建 release binary，使用每个 case/trial 独立的 graphdb，并串行执行 case，避免 redb 锁冲突。报告默认写入 `target/m58-ai-eval/`；发布或归档前只上传结构化 JSON/Markdown。
 
 ## 空上下文边界
 

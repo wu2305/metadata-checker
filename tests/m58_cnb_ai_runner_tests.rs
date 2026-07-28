@@ -77,6 +77,24 @@ fn test_m58_fixture_llm_covers_skill_comprehension_families() {
     );
 }
 
+/// 验证 CNB live 入口明确启用多 trial，而本地报告文档暴露稳定性指标。
+#[test]
+fn test_m58_live_trial_contract_is_explicit() {
+    let pipeline = std::fs::read_to_string(".cnb.yml").unwrap();
+    assert!(pipeline.contains("M58_AI_EVAL_TRIALS: \"3\""));
+    assert!(pipeline.contains("test \"${M58_AI_EVAL_TRIALS:-0}\" -gt 1"));
+
+    let template = std::fs::read_to_string("docs/reference/ai-eval-run-template.md").unwrap();
+    for field in [
+        "trial_pass_rate",
+        "case_stable_pass_rate",
+        "cases_with_flaky_trials",
+        "M58_AI_EVAL_TRIALS",
+    ] {
+        assert!(template.contains(field), "报告模板缺少 {field}");
+    }
+}
+
 /// 验证 fixture case 可以声明供报告和难度分析使用的任务维度。
 #[test]
 fn test_m58_loader_exposes_evaluation_dimensions() {

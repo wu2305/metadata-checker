@@ -206,9 +206,9 @@ M9-F 将 `minimal_command_plan` 从字符串数组升级为结构化对象：
 字段说明：
 - `command_kind`：主命令，如 `--query-page-logic`、`--explain`、`--context`、`--query-dataflow`
 - `target`：目标 ID，如 `page:app/foo.spg`、`model:model1`、`field:model1.name`
-- `args`：额外参数数组，如 `["--depth", "2", "--budget", "normal"]`
+- `args`：额外参数数组，如 `["--depth", "2"]`；预算不能重复放入 args
 - `requires_project_dir`：是否必须配合 `--project-dir`
-- `budget`：若 args 含 `--budget`，提取的预算值
+- `budget`：命令顶层预算值，合法值为 `compact` / `normal` / `full`
 
 `required_commands` 由 `minimal_command_plan` 确定性展开得到：
 ```
@@ -237,6 +237,30 @@ M9-F 将 `minimal_command_plan` 从字符串数组升级为结构化对象：
 - `difficulty`：`basic` / `intermediate` / `hard`
 - `max_command_count`：模型最多允许的 CLI 调用次数（默认 <= 3）
 - `allowed_output_sections`：模型允许读取的输出字段（默认包含 `summary`，按需加入 `details`/`evidence`）
+
+### M58 Skill 理解维度
+
+`fixture_llm` case 还可以声明 `evaluation_dimensions`，用于解释模型为何失败以及按能力切片：
+
+```json
+{
+  "task_family": "dataflow",
+  "target_resolution": "explicit",
+  "distractor_count": 2,
+  "dependency_depth": 3,
+  "stateful": false,
+  "error_injection": false,
+  "output_truncation": true
+}
+```
+
+- `task_family`：主要能力族，如 `page_logic`、`navigation`、`dataflow`、`condition`、`diagnostic`。
+- `target_resolution`：目标是显式给出、需要搜索，还是跨文件解析。
+- `distractor_count`：相似命令/关系带来的干扰数量。
+- `dependency_depth`：需要跟踪的依赖链深度。
+- `stateful`、`error_injection`、`output_truncation`：分别表示状态保持、错误/诊断和输出预算是否是任务难点。
+
+一次对话只适合作为 smoke，不足以证明 Skill 被稳定理解。M58 live runner 默认每个 active `fixture_llm` case 执行 3 个独立 trial，并同时报告 `trial_pass_rate`、`case_stable_pass_rate` 和 `cases_with_flaky_trials`；单 trial 结果只证明该次路径可用。
 
 ### answer_style_policy 回答风格
 

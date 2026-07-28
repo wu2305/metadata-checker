@@ -497,6 +497,7 @@
   env:
     CARGO_TARGET_DIR: target/cnb/m58-ai-eval-build
     M58_AI_EVAL_OUTPUT_DIR: target/m58-ai-eval
+    M58_AI_EVAL_TRIALS: "3"
   stages:
     - name: toolchain
       script: |
@@ -529,6 +530,7 @@
       script: |
         export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"
         export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"
+        test "${M58_AI_EVAL_TRIALS:-0}" -gt 1
         test -n "${CNB_TOKEN:-}"
         test -f target/cnb/m58-ai-eval-build/release/metadata-checker
         export M58_METADATA_CHECKER_BIN="$PWD/target/cnb/m58-ai-eval-build/release/metadata-checker"
@@ -539,7 +541,7 @@
         test -s target/m58-ai-eval/run.json
         test -s target/m58-ai-eval/run.md
         echo "M58 RunReport: target/m58-ai-eval/run.json"
-        grep -E '"(provider|model_id|cnb_build_id|pass_rate|failure_classes|judge_notes|command_trace_stats)"' \
+        grep -E '"(provider|model_id|cnb_build_id|pass_rate|trial_pass_rate|trial_count|case_count|case_stable_pass_rate|cases_with_flaky_trials|failure_classes|judge_notes|command_trace_stats)"' \
           target/m58-ai-eval/run.json
         echo "M58 command trace fields (safe diagnostic subset):"
         grep -E -A 8 '"(case_id|command_kind|target|args|budget|plan_step_index|accepted|detail_request|budget_upgrade|output_sections)"' \
