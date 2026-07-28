@@ -137,4 +137,4 @@
 - [x] Run the existing CNB live trigger with `M58_AI_EVAL_TRIALS=3` after the branch is pushed.
 - [x] Verify the report has no token, Authorization header, prompt, or raw model answer.
 - [x] Summarize per-case trial outcomes and update the milestone with the actual build ID and failure classes.
-- [ ] Run the independent CNB review, address P0/P1/P2 findings, and only then mark this extension complete.
+- [x] Run the independent CNB review, address P0/P1/P2 findings, and only then mark this extension complete（最终复验范围 `fcfc59d..6ad0d43`，P0/P1/P2/P3 均无；CNB `cnb-voo-1jujgnsbf` 完成 13×3 baseline）。
