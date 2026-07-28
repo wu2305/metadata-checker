@@ -46,10 +46,12 @@
 | RunReport schema + 归档 | done |
 | 历史基线 run（3 fixture_llm case，单 trial） | done（CNB `deepseek-v4-flash`，3/3；仅作 smoke） |
 | M58.1 多 trial runner、稳定性指标与任务维度 | done（本地 fake，13 active fixture_llm case） |
-| M58.1 CNB 3-trial live baseline | pending（需在分支推送后触发 `api_trigger_m58_llm`） |
+| M58.1 CNB 3-trial live baseline | done（SN `cnb-u1g-1juj6fivd`；结果为观察基线，不设模型通过门槛） |
 
 ## 验收记录
 
 本地 fake runner 已覆盖 13 个 active `fixture_llm` case，覆盖 page/action/lineage/dataflow/navigation/diagnostic/context/condition 等任务族；每个 case 都有 `evaluation_dimensions`，并通过独立 trial、命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport、SSE 和 token 脱敏测试。历史真实 CNB smoke 曾由 `api_trigger_m58_llm` 执行：provider=`cnb-ai-chat`、model=`deepseek-v4-flash`、build=`cnb-54f-1juijih5i`、单 trial pass rate=`1.0`、failure classes 为空；它只证明当时三个 case 的一次端到端路径可用，不证明 Skill 的稳定理解或任务泛化。新的 live runner 默认每个 case 执行 3 个独立 trial，报告同时输出 `trial_pass_rate`、`case_stable_pass_rate` 和 `cases_with_flaky_trials`；只保留结构化摘要和脱敏 command trace，不归档 prompt、模型原文或 token。runtime contract preflight 的缺省回退与显式 override 已通过同一 live stage 验证。
+
+最新 CNB 3-trial baseline（2026-07-28，SN `cnb-u1g-1juj6fivd`）完成 13 个 case、39 个 trial，pipeline 和 runner 均成功，但模型理解结果较低：`trial_pass_rate=0.1026`、`case_stable_pass_rate=0.0769`、`cases_with_flaky_trials=1`；失败分类为 `wrong_command=30`、`needs_human_review=4`、`missed_fact=1`。`page_purpose_actions_test` 为 3/3，通过；`field_lineage_model1_name` 为 1/3，通过并被标为 flaky；其余 case 当前均未稳定通过。该结果将作为后续修改 Skill 路由、命令计划和模型选择的对照基线，不能解释为 CNB API 或 metadata-checker runner 故障。
 
 提示词优化记录：早期 live run 暴露页面路径、按钮 target、裸 field 命令和 final JSON 收尾问题；随后固定 `page/comp/field` target 路由、compact-first、final literal 标签和单行 JSON 键集合，最终在 commit `b1221dd` 的 CNB run 中达到 3/3。该结果是当前 fixture/模型组合的基线，不等同于多模型或真实项目泛化结论。

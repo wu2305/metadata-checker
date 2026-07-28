@@ -134,7 +134,7 @@
 
 ### Task 5: Live baseline and review
 
-- [ ] Run the existing CNB live trigger with `M58_AI_EVAL_TRIALS=3` after the branch is pushed.
-- [ ] Verify the report has no token, Authorization header, prompt, or raw model answer.
-- [ ] Summarize per-case trial outcomes and update the milestone with the actual build ID and failure classes.
+- [x] Run the existing CNB live trigger with `M58_AI_EVAL_TRIALS=3` after the branch is pushed.
+- [x] Verify the report has no token, Authorization header, prompt, or raw model answer.
+- [x] Summarize per-case trial outcomes and update the milestone with the actual build ID and failure classes.
 - [ ] Run the independent CNB review, address P0/P1/P2 findings, and only then mark this extension complete.
