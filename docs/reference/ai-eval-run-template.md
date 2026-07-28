@@ -34,7 +34,7 @@
           "command_kind": "--query-page-logic",
           "target": "page:app/actions_test.spg",
           "args": [],
-          "budget": null,
+          "budget": "compact",
           "plan_step_index": 0,
           "accepted": true,
           "detail_request": false,
