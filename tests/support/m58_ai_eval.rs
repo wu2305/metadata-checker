@@ -34,6 +34,25 @@ impl EvalTier {
     }
 }
 
+/// 用于解释 case 难度和任务覆盖面的结构化维度。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct EvaluationDimensions {
+    /// 任务所属的主要能力族，例如 page_logic 或 condition。
+    pub(crate) task_family: String,
+    /// 模型需要如何得到 target，例如 explicit、search 或 cross_file。
+    pub(crate) target_resolution: String,
+    /// 评测中预期存在的相似工具/命令干扰数量。
+    pub(crate) distractor_count: usize,
+    /// 任务中需要跟踪的依赖深度。
+    pub(crate) dependency_depth: usize,
+    /// 是否需要跨多个状态/回合保持上下文。
+    pub(crate) stateful: bool,
+    /// 是否显式注入工具或环境错误。
+    pub(crate) error_injection: bool,
+    /// 是否将截断/预算升级作为任务难点。
+    pub(crate) output_truncation: bool,
+}
+
 /// 已加载的评测 case；原始 JSON 保留给判分器读取既有断言。
 #[derive(Debug, Clone)]
 pub(crate) struct EvalCase {
@@ -47,6 +66,10 @@ pub(crate) struct EvalCase {
     pub(crate) case_status: String,
     /// case 难度。
     pub(crate) difficulty: String,
+    /// case 的主要任务族，供报告按能力切片。
+    pub(crate) task_family: String,
+    /// case 的结构化难度维度。
+    pub(crate) evaluation_dimensions: EvaluationDimensions,
     /// 原始 case JSON。
     pub(crate) value: Value,
 }
@@ -87,6 +110,26 @@ pub(crate) fn load_eval_cases(path: &Path) -> Result<Vec<EvalCase>> {
                     }
                 }
             };
+            let difficulty = value
+                .get("difficulty")
+                .and_then(Value::as_str)
+                .unwrap_or("basic")
+                .to_string();
+            let task_family = value
+                .get("evaluation_dimensions")
+                .and_then(|dimensions| dimensions.get("task_family"))
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    value
+                        .get("risk_tags")
+                        .and_then(Value::as_array)
+                        .and_then(|tags| tags.first())
+                        .and_then(Value::as_str)
+                })
+                .unwrap_or("unclassified")
+                .to_string();
+            let evaluation_dimensions =
+                parse_evaluation_dimensions(&value, &task_family, &difficulty)?;
 
             Ok(EvalCase {
                 case_id: case_id.to_string(),
@@ -97,15 +140,66 @@ pub(crate) fn load_eval_cases(path: &Path) -> Result<Vec<EvalCase>> {
                     .and_then(Value::as_str)
                     .unwrap_or("active")
                     .to_string(),
-                difficulty: value
-                    .get("difficulty")
-                    .and_then(Value::as_str)
-                    .unwrap_or("basic")
-                    .to_string(),
+                difficulty,
+                task_family,
+                evaluation_dimensions,
                 value: value.clone(),
             })
         })
         .collect()
+}
+
+/// 读取可选的难度维度，并为旧 schema 提供稳定默认值。
+fn parse_evaluation_dimensions(
+    value: &Value,
+    task_family: &str,
+    _difficulty: &str,
+) -> Result<EvaluationDimensions> {
+    let dimensions = value
+        .get("evaluation_dimensions")
+        .and_then(Value::as_object);
+    let string_dimension = |name: &str, default: &str| -> Result<String> {
+        match dimensions.and_then(|object| object.get(name)) {
+            None => Ok(default.to_string()),
+            Some(raw) => raw
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| anyhow!("evaluation_dimensions.{name} 必须是字符串")),
+        }
+    };
+    let usize_dimension = |name: &str, default: usize| -> Result<usize> {
+        match dimensions.and_then(|object| object.get(name)) {
+            None => Ok(default),
+            Some(raw) => raw
+                .as_u64()
+                .map(|number| number as usize)
+                .ok_or_else(|| anyhow!("evaluation_dimensions.{name} 必须是非负整数")),
+        }
+    };
+    let bool_dimension = |name: &str, default: bool| -> Result<bool> {
+        match dimensions.and_then(|object| object.get(name)) {
+            None => Ok(default),
+            Some(raw) => raw
+                .as_bool()
+                .ok_or_else(|| anyhow!("evaluation_dimensions.{name} 必须是布尔值")),
+        }
+    };
+    let dependency_default = value
+        .get("minimal_command_plan")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(1)
+        .max(1);
+
+    Ok(EvaluationDimensions {
+        task_family: string_dimension("task_family", task_family)?,
+        target_resolution: string_dimension("target_resolution", "explicit")?,
+        distractor_count: usize_dimension("distractor_count", 0)?,
+        dependency_depth: usize_dimension("dependency_depth", dependency_default)?,
+        stateful: bool_dimension("stateful", false)?,
+        error_injection: bool_dimension("error_injection", false)?,
+        output_truncation: bool_dimension("output_truncation", false)?,
+    })
 }
 
 /// 选择 active 的 fixture LLM case。
@@ -654,6 +748,12 @@ pub(crate) struct JudgeResult {
 pub(crate) struct CaseReport {
     /// case 稳定标识。
     pub(crate) case_id: String,
+    /// 同一 case 内的独立 trial 序号，从 0 开始。
+    pub(crate) trial_index: usize,
+    /// case 的主要任务族。
+    pub(crate) task_family: String,
+    /// case 的难度标签。
+    pub(crate) difficulty: String,
     /// `pass`、`fail` 或 `error`。
     pub(crate) status: String,
     /// 是否通过 AnswerJudge。
@@ -681,6 +781,8 @@ pub(crate) struct CommandTraceStats {
     pub(crate) cases_with_commands: usize,
     /// 每个 case 的平均命令尝试数。
     pub(crate) average_commands_per_case: f64,
+    /// 每个 trial 的平均命令尝试数。
+    pub(crate) average_commands_per_trial: f64,
     /// 命令轨迹超过 case 上限的 case 数。
     pub(crate) max_command_count_exceeded_cases: usize,
     /// 从 compact 默认预算升级的命令数。
@@ -704,6 +806,16 @@ pub(crate) struct RunReport {
     pub(crate) cases: Vec<CaseReport>,
     /// 通过 case 数除以总 case 数，空运行固定为 0。
     pub(crate) pass_rate: f64,
+    /// 所有 trial 的通过率；与 pass_rate 保持兼容同值。
+    pub(crate) trial_pass_rate: f64,
+    /// trial 行总数。
+    pub(crate) trial_count: usize,
+    /// 去重后的 case 总数。
+    pub(crate) case_count: usize,
+    /// 所有 trial 均通过的 case 比例。
+    pub(crate) case_stable_pass_rate: f64,
+    /// 同一 case 同时出现通过和失败的数量。
+    pub(crate) cases_with_flaky_trials: usize,
     /// 按失败分类聚合的数量。
     pub(crate) failure_classes: BTreeMap<String, usize>,
     /// 命令轨迹统计。
@@ -725,6 +837,28 @@ impl RunReport {
         } else {
             passed_count as f64 / cases.len() as f64
         };
+        let mut case_results = BTreeMap::<String, (usize, usize)>::new();
+        for case in &cases {
+            let entry = case_results.entry(case.case_id.clone()).or_default();
+            entry.0 += 1;
+            if case.passed {
+                entry.1 += 1;
+            }
+        }
+        let stable_case_count = case_results
+            .values()
+            .filter(|(trial_count, passed_count)| *trial_count > 0 && trial_count == passed_count)
+            .count();
+        let flaky_case_count = case_results
+            .values()
+            .filter(|(trial_count, passed_count)| *passed_count > 0 && passed_count < trial_count)
+            .count();
+        let case_count = case_results.len();
+        let case_stable_pass_rate = if case_count == 0 {
+            0.0
+        } else {
+            stable_case_count as f64 / case_count as f64
+        };
         let mut failure_classes = BTreeMap::new();
         let mut command_trace_stats = CommandTraceStats {
             total_commands: 0,
@@ -732,6 +866,7 @@ impl RunReport {
             rejected_commands: 0,
             cases_with_commands: 0,
             average_commands_per_case: 0.0,
+            average_commands_per_trial: 0.0,
             max_command_count_exceeded_cases: 0,
             budget_upgrade_count: 0,
         };
@@ -767,14 +902,21 @@ impl RunReport {
         } else {
             command_trace_stats.total_commands as f64 / cases.len() as f64
         };
+        command_trace_stats.average_commands_per_trial =
+            command_trace_stats.average_commands_per_case;
         Self {
-            schema_version: "1.0.0".to_string(),
+            schema_version: "1.1.0".to_string(),
             provider,
             model_id,
             cnb_build_id,
             started_at,
             cases,
             pass_rate,
+            trial_pass_rate: pass_rate,
+            trial_count: case_results.values().map(|(count, _)| count).sum(),
+            case_count,
+            case_stable_pass_rate,
+            cases_with_flaky_trials: flaky_case_count,
             failure_classes,
             command_trace_stats,
         }
@@ -888,17 +1030,25 @@ fn render_report_markdown(report: &RunReport) -> String {
     let mut markdown = String::new();
     markdown.push_str("# M58 AI Eval Run\n\n");
     markdown.push_str(&format!(
-        "- provider: `{}`\n- model: `{}`\n- cnb_build_id: `{}`\n- started_at: `{}`\n- pass_rate: `{:.4}`\n- average_commands_per_case: `{:.4}`\n- budget_upgrade_count: `{}`\n\n",
+        "- provider: `{}`\n- model: `{}`\n- cnb_build_id: `{}`\n- started_at: `{}`\n- pass_rate: `{:.4}`\n- trial_pass_rate: `{:.4}`\n- trial_count: `{}`\n- case_count: `{}`\n- case_stable_pass_rate: `{:.4}`\n- cases_with_flaky_trials: `{}`\n- average_commands_per_case: `{:.4}`\n- average_commands_per_trial: `{:.4}`\n- budget_upgrade_count: `{}`\n\n",
         escape_markdown_cell(&report.provider),
         escape_markdown_cell(&report.model_id),
         escape_markdown_cell(report.cnb_build_id.as_deref().unwrap_or("")),
         escape_markdown_cell(&report.started_at),
         report.pass_rate,
+        report.trial_pass_rate,
+        report.trial_count,
+        report.case_count,
+        report.case_stable_pass_rate,
+        report.cases_with_flaky_trials,
         report.command_trace_stats.average_commands_per_case,
+        report.command_trace_stats.average_commands_per_trial,
         report.command_trace_stats.budget_upgrade_count,
     ));
-    markdown.push_str("| case_id | status | failure_classes | command_count |\n");
-    markdown.push_str("| --- | --- | --- | ---: |\n");
+    markdown.push_str(
+        "| case_id | trial_index | task_family | difficulty | status | failure_classes | command_count |\n",
+    );
+    markdown.push_str("| --- | ---: | --- | --- | --- | --- | ---: |\n");
     for case in &report.cases {
         let failures = if case.failure_classes.is_empty() {
             "-".to_string()
@@ -906,8 +1056,11 @@ fn render_report_markdown(report: &RunReport) -> String {
             case.failure_classes.join(", ")
         };
         markdown.push_str(&format!(
-            "| {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} |\n",
             escape_markdown_cell(&case.case_id),
+            case.trial_index,
+            escape_markdown_cell(&case.task_family),
+            escape_markdown_cell(&case.difficulty),
             escape_markdown_cell(&case.status),
             escape_markdown_cell(&failures),
             case.command_trace.len(),
@@ -1060,6 +1213,8 @@ pub(crate) struct RunnerConfig {
     pub(crate) model_id: String,
     /// 当前 CNB build 标识；本地 run 可以为空。
     pub(crate) cnb_build_id: Option<String>,
+    /// 每个 fixture LLM case 执行的独立 trial 数。
+    pub(crate) trial_count: usize,
 }
 
 /// 运行一个 fixture LLM case，返回不含模型原文的 case 报告。
@@ -1068,7 +1223,17 @@ pub(crate) fn run_case(
     adapter: &mut dyn ModelAdapter,
     config: &RunnerConfig,
 ) -> Result<CaseReport> {
-    let case_dir = prepare_case_workspace(case, config)?;
+    run_case_for_trial(case, adapter, config, 0)
+}
+
+/// 运行一个指定 trial 的 fixture LLM case。
+fn run_case_for_trial(
+    case: &EvalCase,
+    adapter: &mut dyn ModelAdapter,
+    config: &RunnerConfig,
+    trial_index: usize,
+) -> Result<CaseReport> {
+    let case_dir = prepare_case_workspace(case, config, trial_index)?;
     let project_dir = case_dir.join("project");
     let graph_db_path = case_dir.join("case.graphdb");
     let policy =
@@ -1095,7 +1260,8 @@ pub(crate) fn run_case(
             Ok(response) => response,
             Err(_) => {
                 return Ok(error_case_report(
-                    &case.case_id,
+                    case,
+                    trial_index,
                     policy.max_command_count,
                     "runner_error",
                     "model adapter completion failed",
@@ -1112,7 +1278,8 @@ pub(crate) fn run_case(
             Ok(turn) => turn,
             Err(error) => {
                 return Ok(error_case_report(
-                    &case.case_id,
+                    case,
+                    trial_index,
                     policy.max_command_count,
                     "protocol_error",
                     &format_protocol_error_note(&error),
@@ -1126,6 +1293,9 @@ pub(crate) fn run_case(
                 let judge = judge_answer(&answer, assertions, &diagnostics, &trace);
                 return Ok(CaseReport {
                     case_id: case.case_id.clone(),
+                    trial_index,
+                    task_family: case.task_family.clone(),
+                    difficulty: case.difficulty.clone(),
                     status: if judge.passed {
                         "pass".to_string()
                     } else {
@@ -1144,7 +1314,8 @@ pub(crate) fn run_case(
                     Err(_) => {
                         trace.push(rejected_command_trace(&command_request));
                         return Ok(error_case_report(
-                            &case.case_id,
+                            case,
+                            trial_index,
                             policy.max_command_count,
                             "wrong_command",
                             "model command was rejected by minimal_command_plan",
@@ -1164,7 +1335,8 @@ pub(crate) fn run_case(
                             Vec::new(),
                         ));
                         return Ok(error_case_report(
-                            &case.case_id,
+                            case,
+                            trial_index,
                             policy.max_command_count,
                             "runner_error",
                             "metadata-checker command execution failed",
@@ -1189,7 +1361,8 @@ pub(crate) fn run_case(
     }
 
     Ok(error_case_report(
-        &case.case_id,
+        case,
+        trial_index,
         policy.max_command_count,
         "protocol_error",
         "model did not return final before runner turn limit",
@@ -1203,6 +1376,9 @@ pub(crate) fn run_fixture_llm_cases(
     adapter: &mut dyn ModelAdapter,
     config: &RunnerConfig,
 ) -> Result<RunReport> {
+    if config.trial_count == 0 {
+        bail!("trial_count 必须大于 0");
+    }
     std::fs::create_dir_all(&config.output_dir)
         .with_context(|| format!("创建 M58 输出目录失败: {}", config.output_dir.display()))?;
     let mut reports = Vec::new();
@@ -1210,17 +1386,20 @@ pub(crate) fn run_fixture_llm_cases(
         .iter()
         .filter(|case| case.tier == EvalTier::FixtureLlm && case.case_status == "active")
     {
-        let report = match run_case(case, adapter, config) {
-            Ok(report) => report,
-            Err(_) => error_case_report(
-                &case.case_id,
-                case_max_command_count(case),
-                "runner_error",
-                "case workspace setup failed",
-                Vec::new(),
-            ),
-        };
-        reports.push(report);
+        for trial_index in 0..config.trial_count {
+            let report = match run_case_for_trial(case, adapter, config, trial_index) {
+                Ok(report) => report,
+                Err(_) => error_case_report(
+                    case,
+                    trial_index,
+                    case_max_command_count(case),
+                    "runner_error",
+                    "case workspace setup failed",
+                    Vec::new(),
+                ),
+            };
+            reports.push(report);
+        }
     }
     Ok(RunReport::from_cases(
         config.provider.clone(),
@@ -1275,7 +1454,11 @@ Case Question: {}",
 }
 
 /// 为单个 case 创建项目副本、graphdb 和输出隔离目录。
-fn prepare_case_workspace(case: &EvalCase, config: &RunnerConfig) -> Result<PathBuf> {
+fn prepare_case_workspace(
+    case: &EvalCase,
+    config: &RunnerConfig,
+    trial_index: usize,
+) -> Result<PathBuf> {
     if !config.project_root.is_dir() {
         bail!(
             "fixture project directory 不存在: {}",
@@ -1287,7 +1470,8 @@ fn prepare_case_workspace(case: &EvalCase, config: &RunnerConfig) -> Result<Path
     let case_dir = config
         .output_dir
         .join("cases")
-        .join(safe_case_id(&case.case_id));
+        .join(safe_case_id(&case.case_id))
+        .join(format!("trial-{trial_index}"));
     if case_dir.exists() {
         std::fs::remove_dir_all(&case_dir)
             .with_context(|| format!("清理旧 case workspace 失败: {}", case_dir.display()))?;
@@ -1509,14 +1693,18 @@ fn accepted_command_trace(
 
 /// 构造命令/adapter 失败的 case 报告，不复制原始输出或模型回答。
 fn error_case_report(
-    case_id: &str,
+    case: &EvalCase,
+    trial_index: usize,
     max_command_count: usize,
     failure_class: &str,
     note: &str,
     command_trace: Vec<CommandTrace>,
 ) -> CaseReport {
     CaseReport {
-        case_id: case_id.to_string(),
+        case_id: case.case_id.clone(),
+        trial_index,
+        task_family: case.task_family.clone(),
+        difficulty: case.difficulty.clone(),
         status: "error".to_string(),
         passed: false,
         max_command_count,

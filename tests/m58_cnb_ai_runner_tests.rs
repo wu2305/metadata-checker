@@ -33,6 +33,75 @@ fn test_m58_fixture_llm_has_three_active_cases() {
     assert!(selected[0].value.is_object());
 }
 
+/// 验证 fixture case 可以声明供报告和难度分析使用的任务维度。
+#[test]
+fn test_m58_loader_exposes_evaluation_dimensions() {
+    let temp_path = std::env::temp_dir().join(format!(
+        "m58-evaluation-dimensions-{}-{}.json",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let content = r#"{
+        "schema_version":"1.3",
+        "cases":[{
+            "case_id":"dimension_case",
+            "question":"q",
+            "tier":"fixture_llm",
+            "case_status":"active",
+            "difficulty":"hard",
+            "risk_tags":["condition"],
+            "evaluation_dimensions":{
+                "task_family":"condition",
+                "target_resolution":"search",
+                "distractor_count":2,
+                "dependency_depth":3,
+                "stateful":true,
+                "error_injection":false,
+                "output_truncation":true
+            }
+        }]
+    }"#;
+    std::fs::write(&temp_path, content).unwrap();
+
+    let cases = load_eval_cases(&temp_path).unwrap();
+    assert_eq!(cases[0].task_family, "condition");
+    assert_eq!(cases[0].difficulty, "hard");
+    assert_eq!(cases[0].evaluation_dimensions.target_resolution, "search");
+    assert_eq!(cases[0].evaluation_dimensions.distractor_count, 2);
+    assert_eq!(cases[0].evaluation_dimensions.dependency_depth, 3);
+    assert_eq!(cases[0].evaluation_dimensions.stateful, true);
+    assert_eq!(cases[0].evaluation_dimensions.output_truncation, true);
+
+    std::fs::remove_file(temp_path).unwrap();
+}
+
+/// 验证 runner 不接受零次 trial，避免生成看似成功的空报告。
+#[test]
+fn test_m58_runner_rejects_zero_trial_count() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let selected = fixture_llm_cases(&cases);
+    let output_dir = unique_test_output_dir("m58-zero-trials");
+    let mut config = fixture_runner_config(output_dir.clone());
+    config.trial_count = 0;
+    let mut adapter = FakeModelAdapter::from_responses(Vec::new());
+
+    let error = run_fixture_llm_cases(&selected, &mut adapter, &config)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("trial_count"));
+    assert_eq!(adapter.requests().len(), 0);
+
+    if output_dir.exists() {
+        std::fs::remove_dir_all(output_dir).unwrap();
+    }
+}
+
 /// 验证旧 schema 缺失 tier 时仍按真实项目规则回退。
 #[test]
 fn test_m58_loader_defaults_missing_tier() {
@@ -541,6 +610,9 @@ fn test_m58_run_report_is_structured_and_redacted() {
         vec![
             CaseReport {
                 case_id: "pass_case".to_string(),
+                trial_index: 0,
+                task_family: "page_logic".to_string(),
+                difficulty: "basic".to_string(),
                 status: "pass".to_string(),
                 passed: true,
                 max_command_count: 2,
@@ -550,6 +622,9 @@ fn test_m58_run_report_is_structured_and_redacted() {
             },
             CaseReport {
                 case_id: "fail_case".to_string(),
+                trial_index: 0,
+                task_family: "page_logic".to_string(),
+                difficulty: "basic".to_string(),
                 status: "fail".to_string(),
                 passed: false,
                 max_command_count: 2,
@@ -588,19 +663,72 @@ fn test_m58_run_report_is_structured_and_redacted() {
 
     let json = std::fs::read_to_string(&json_path).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["schema_version"], "1.0.0");
+    assert_eq!(parsed["schema_version"], "1.1.0");
     assert_eq!(parsed["cases"].as_array().unwrap().len(), 2);
     assert_eq!(parsed["command_trace_stats"]["accepted_commands"], 1);
+    assert_eq!(parsed["trial_pass_rate"], 0.5);
+    assert_eq!(parsed["trial_count"], 2);
+    assert_eq!(parsed["case_count"], 2);
+    assert_eq!(parsed["case_stable_pass_rate"], 0.5);
+    assert_eq!(parsed["cases_with_flaky_trials"], 0);
     assert_eq!(json.contains("prompt"), false);
     assert_eq!(json.contains("answer"), false);
     assert_eq!(json.contains("CNB_TOKEN"), false);
     let markdown = std::fs::read_to_string(&markdown_path).unwrap();
     assert_eq!(markdown.contains("pass_case"), true);
     assert_eq!(markdown.contains("missed_fact"), true);
+    assert_eq!(markdown.contains("case_stable_pass_rate"), true);
+    assert_eq!(markdown.contains("trial_index"), true);
     assert_eq!(markdown.contains("prompt"), false);
     assert_eq!(markdown.contains("answer"), false);
 
     std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 验证 RunReport 不会用 trial 平均值掩盖同一 case 的不稳定结果。
+#[test]
+fn test_m58_run_report_tracks_trial_stability() {
+    let report = RunReport::from_cases(
+        "fake".to_string(),
+        "test-model".to_string(),
+        None,
+        "2026-07-28T00:00:00Z".to_string(),
+        vec![
+            CaseReport {
+                case_id: "same_case".to_string(),
+                trial_index: 0,
+                task_family: "page_logic".to_string(),
+                difficulty: "basic".to_string(),
+                status: "pass".to_string(),
+                passed: true,
+                max_command_count: 1,
+                failure_classes: Vec::new(),
+                judge_notes: Vec::new(),
+                command_trace: vec![accepted_trace()],
+            },
+            CaseReport {
+                case_id: "same_case".to_string(),
+                trial_index: 1,
+                task_family: "page_logic".to_string(),
+                difficulty: "basic".to_string(),
+                status: "error".to_string(),
+                passed: false,
+                max_command_count: 1,
+                failure_classes: vec!["protocol_error".to_string()],
+                judge_notes: vec!["protocol failure".to_string()],
+                command_trace: Vec::new(),
+            },
+        ],
+    );
+
+    assert_eq!(report.pass_rate, 0.5);
+    assert_eq!(report.trial_pass_rate, 0.5);
+    assert_eq!(report.trial_count, 2);
+    assert_eq!(report.case_count, 1);
+    assert_eq!(report.case_stable_pass_rate, 0.0);
+    assert_eq!(report.cases_with_flaky_trials, 1);
+    assert_eq!(report.cases[1].trial_index, 1);
+    assert_eq!(report.cases[1].task_family, "page_logic");
 }
 
 /// 验证 fake runner 真实执行 CLI、多轮回传 stdout，并完成三个 fixture baseline case。
@@ -646,6 +774,40 @@ fn test_m58_fake_runner_executes_fixture_llm_cases() {
         assert_eq!(request.messages[2].content.starts_with('{'), true);
         let _: serde_json::Value = serde_json::from_str(&request.messages[2].content).unwrap();
     }
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 验证同一 fixture case 的多个 trial 使用独立 history 并各自产生报告行。
+#[test]
+fn test_m58_fake_runner_executes_multiple_independent_trials() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let selected = fixture_llm_cases(&cases);
+    let output_dir = unique_test_output_dir("m58-multi-trial-runner");
+    let mut config = fixture_runner_config(output_dir.clone());
+    config.trial_count = 2;
+    let one_trial_responses = build_fake_case_responses(&selected[..1]);
+    let mut responses = one_trial_responses.clone();
+    responses.extend(one_trial_responses);
+    let mut adapter = FakeModelAdapter::from_responses(responses);
+
+    let report = run_fixture_llm_cases(&selected[..1], &mut adapter, &config).unwrap();
+    assert_eq!(report.cases.len(), 2);
+    assert_eq!(report.cases[0].trial_index, 0);
+    assert_eq!(report.cases[1].trial_index, 1);
+    assert_eq!(report.pass_rate, 1.0);
+    assert_eq!(report.case_stable_pass_rate, 1.0);
+    assert_eq!(report.cases_with_flaky_trials, 0);
+    assert_eq!(adapter.requests().len(), 4);
+    assert_eq!(
+        adapter.requests()[0].messages[0],
+        adapter.requests()[2].messages[0]
+    );
+    assert_eq!(adapter.requests()[0].messages.len(), 1);
+    assert_eq!(adapter.requests()[2].messages.len(), 1);
 
     std::fs::remove_dir_all(output_dir).unwrap();
 }
@@ -939,6 +1101,10 @@ fn test_m58_cnb_fixture_llm_baseline() {
         provider: "cnb-ai-chat".to_string(),
         model_id,
         cnb_build_id: std::env::var("CNB_BUILD_ID").ok(),
+        trial_count: std::env::var("M58_AI_EVAL_TRIALS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(3),
     };
     let cases = load_eval_cases(Path::new(
         "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
@@ -978,6 +1144,7 @@ fn fixture_runner_config(output_dir: PathBuf) -> RunnerConfig {
         provider: "fake".to_string(),
         model_id: "fake-model".to_string(),
         cnb_build_id: None,
+        trial_count: 1,
     }
 }
 
