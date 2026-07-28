@@ -9,6 +9,7 @@ use m58_ai_eval::{
     fixture_llm_cases, judge_answer, load_eval_cases, parse_agent_turn, redact_secret, run_case,
     run_fixture_llm_cases, write_run_report,
 };
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -16,21 +17,64 @@ use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// 验证 M58 首批 fixture LLM case 数量与 active 状态。
+/// 验证 M58 首批 fixture LLM case 仍保持 active 且首个 case 顺序稳定。
 #[test]
-fn test_m58_fixture_llm_has_three_active_cases() {
+fn test_m58_fixture_llm_has_active_cases() {
     let cases = load_eval_cases(Path::new(
         "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
     ))
     .unwrap();
     let selected = fixture_llm_cases(&cases);
 
-    assert_eq!(selected.len(), 3);
+    assert!(selected.len() >= 3);
     assert!(selected.iter().all(|case| case.case_status == "active"));
     assert_eq!(selected[0].case_id, "page_purpose_actions_test");
     assert!(!selected[0].question.is_empty());
     assert_eq!(selected[0].difficulty, "basic");
     assert!(selected[0].value.is_object());
+}
+
+/// 验证 fixture LLM 集合覆盖多个 Skill 理解任务族，而不是只测一轮页面问答。
+#[test]
+fn test_m58_fixture_llm_covers_skill_comprehension_families() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let selected = fixture_llm_cases(&cases);
+    let task_families = selected
+        .iter()
+        .map(|case| case.task_family.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert!(selected.len() >= 10);
+    for task_family in [
+        "page_logic",
+        "dataflow",
+        "navigation",
+        "diagnostic",
+        "condition",
+    ] {
+        assert!(
+            task_families.contains(task_family),
+            "缺少任务族 {task_family}"
+        );
+    }
+    assert!(
+        selected
+            .iter()
+            .any(|case| case.evaluation_dimensions.error_injection)
+    );
+    assert!(
+        selected
+            .iter()
+            .any(|case| case.evaluation_dimensions.output_truncation)
+    );
+    assert!(
+        selected
+            .iter()
+            .any(|case| case.evaluation_dimensions.dependency_depth >= 2)
+    );
 }
 
 /// 验证 fixture case 可以声明供报告和难度分析使用的任务维度。
@@ -731,7 +775,7 @@ fn test_m58_run_report_tracks_trial_stability() {
     assert_eq!(report.cases[1].task_family, "page_logic");
 }
 
-/// 验证 fake runner 真实执行 CLI、多轮回传 stdout，并完成三个 fixture baseline case。
+/// 验证 fake runner 真实执行 CLI、多轮回传 stdout，并完成全部 fixture LLM case。
 #[test]
 fn test_m58_fake_runner_executes_fixture_llm_cases() {
     let cases = load_eval_cases(Path::new(
@@ -742,13 +786,25 @@ fn test_m58_fake_runner_executes_fixture_llm_cases() {
     let output_dir = unique_test_output_dir("m58-fake-runner");
     let config = fixture_runner_config(output_dir.clone());
     let responses = build_fake_case_responses(&selected);
+    let expected_request_count = responses.len();
     let mut adapter = FakeModelAdapter::from_responses(responses);
 
     let report = run_fixture_llm_cases(&selected, &mut adapter, &config).unwrap();
-    assert_eq!(report.cases.len(), 3);
-    assert_eq!(report.pass_rate, 1.0);
+    assert_eq!(report.cases.len(), selected.len());
+    assert_eq!(report.case_count, selected.len());
+    assert_eq!(
+        report.pass_rate,
+        1.0,
+        "fake fixture failures: {:?}",
+        report
+            .cases
+            .iter()
+            .filter(|case| !case.passed)
+            .map(|case| (&case.case_id, &case.status, &case.failure_classes))
+            .collect::<Vec<_>>()
+    );
     assert_eq!(report.cases.iter().all(|case| case.status == "pass"), true);
-    assert_eq!(adapter.requests().len(), 6);
+    assert_eq!(adapter.requests().len(), expected_request_count);
     assert_eq!(adapter.requests()[0].messages[0].role, "user");
     assert_eq!(
         adapter.requests()[0].messages[0]
@@ -1110,6 +1166,7 @@ fn test_m58_cnb_fixture_llm_baseline() {
         "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
     ))
     .unwrap();
+    let expected_case_count = fixture_llm_cases(&cases).len();
     let mut adapter = CnbChatAdapter::from_env().unwrap();
     let report = run_fixture_llm_cases(&cases, &mut adapter, &config).unwrap();
     write_run_report(
@@ -1118,7 +1175,7 @@ fn test_m58_cnb_fixture_llm_baseline() {
         &output_dir.join("run.md"),
     )
     .unwrap();
-    assert_eq!(report.cases.len(), 3);
+    assert_eq!(report.case_count, expected_case_count);
     println!(
         "{}",
         serde_json::json!({

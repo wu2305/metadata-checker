@@ -1,6 +1,6 @@
 {
-  "schema_version": "1.2.0",
-  "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、运行器规范",
+  "schema_version": "1.3.0",
+  "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、多 trial Skill 理解评估",
   "eval_count": 26,
   "cases": [
     {
@@ -100,6 +100,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "page_logic",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 1,
+        "stateful": false,
+        "error_injection": true,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -228,6 +237,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "action",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 1,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -355,6 +373,15 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "lineage",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -394,7 +421,7 @@
     },
     {
       "case_id": "dataflow_output_source",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "DataFlow 输出表 dataflow_output 是怎么来的？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -486,6 +513,15 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "dataflow",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -525,7 +561,7 @@
     },
     {
       "case_id": "readonly_page_check",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "页面 dataflow_embedded 是只读的吗？用户能修改数据吗？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -630,6 +666,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "page_logic",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 1,
+        "stateful": false,
+        "error_injection": true,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary"
@@ -668,7 +713,7 @@
     },
     {
       "case_id": "param_passing_link",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "page_relations 页面跳转时传递了哪些参数？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -756,6 +801,15 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "navigation",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -795,7 +849,7 @@
     },
     {
       "case_id": "diagnostic_affects_answer",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "actions_test 页面有 UNKNOWN_ACTION_TYPE 诊断，这会影响什么结论？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -887,6 +941,15 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "diagnostic",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 1,
+        "stateful": false,
+        "error_injection": true,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -924,7 +987,7 @@
     },
     {
       "case_id": "context_button1_neighbors",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "button1 周围还有哪些关键依赖和影响？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -981,9 +1044,7 @@
           "target": "comp:app/actions_test.spg|button1",
           "args": [
             "--depth",
-            "2",
-            "--budget",
-            "normal"
+            "2"
           ],
           "requires_project_dir": true,
           "budget": "normal"
@@ -1015,6 +1076,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "context",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -1054,7 +1124,7 @@
     },
     {
       "case_id": "condition_action_behavior",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "actions_test 中 button2 的动作在什么条件下执行？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -1128,6 +1198,15 @@
       ],
       "case_status": "active",
       "difficulty": "hard",
+      "evaluation_dimensions": {
+        "task_family": "condition",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -1167,7 +1246,7 @@
     },
     {
       "case_id": "dataflow_chain_trace",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "df_a 经过 physical_x 到 df_b 的 DataFlow 链中，字段如何传递？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -1297,6 +1376,15 @@
       ],
       "case_status": "active",
       "difficulty": "hard",
+      "evaluation_dimensions": {
+        "task_family": "dataflow",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 3,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -2402,7 +2490,7 @@
     },
     {
       "case_id": "fixture_condition_input1_visible_disabled",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "actions_test 页面中的 input1 为什么不显示或不可用？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
@@ -2466,10 +2554,7 @@
         {
           "command_kind": "--explain-condition",
           "target": "comp:app/actions_test.spg|input1",
-          "args": [
-            "--budget",
-            "compact"
-          ],
+          "args": [],
           "requires_project_dir": true,
           "budget": "compact"
         }
@@ -2503,6 +2588,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "condition",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 1,
       "allowed_output_sections": [
         "summary",
@@ -2538,7 +2632,7 @@
     },
     {
       "case_id": "fixture_condition_button2_action_gate",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "actions_test 页面中 button2 的 updateData action 在什么条件下才会执行？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
@@ -2593,10 +2687,7 @@
         {
           "command_kind": "--explain-condition",
           "target": "comp:app/actions_test.spg|button2",
-          "args": [
-            "--budget",
-            "compact"
-          ],
+          "args": [],
           "requires_project_dir": true,
           "budget": "compact"
         }
@@ -2617,6 +2708,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "condition",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 1,
       "allowed_output_sections": [
         "summary",
@@ -3058,7 +3158,7 @@
     },
     {
       "case_id": "fixture_condition_model_filter_user_var",
-      "tier": "fixture_structural",
+      "tier": "fixture_llm",
       "question": "actions_test 页面中 model1 的数据源过滤条件有哪些？是否涉及系统变量？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
@@ -3120,10 +3220,7 @@
         {
           "command_kind": "--explain-condition",
           "target": "model:model1",
-          "args": [
-            "--budget",
-            "compact"
-          ],
+          "args": [],
           "requires_project_dir": true,
           "budget": "compact"
         }
@@ -3157,6 +3254,15 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "condition",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 1,
       "allowed_output_sections": [
         "summary",
