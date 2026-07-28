@@ -7,7 +7,7 @@ use m58_ai_eval::{
     AgentTurn, CaseReport, ChatMessage, ChatRequest, CnbChatAdapter, CommandPolicy, CommandRequest,
     CommandTrace, FakeModelAdapter, JudgeResult, ModelAdapter, RunReport, RunnerConfig,
     fixture_llm_cases, judge_answer, load_eval_cases, parse_agent_turn, redact_secret, run_case,
-    run_fixture_llm_cases, write_run_report,
+    run_fixture_llm_cases, validate_fixture_llm_case_count, write_run_report,
 };
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -32,6 +32,25 @@ fn test_m58_fixture_llm_has_active_cases() {
     assert!(!selected[0].question.is_empty());
     assert_eq!(selected[0].difficulty, "basic");
     assert!(selected[0].value.is_object());
+}
+
+/// 验证 live baseline 锁定 13 个 active fixture LLM case，避免评测集静默缩水。
+#[test]
+fn test_m58_live_runner_requires_exact_fixture_llm_case_count() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let selected = fixture_llm_cases(&cases);
+    assert_eq!(selected.len(), 13);
+
+    let mut reduced = cases.clone();
+    reduced.retain(|case| case.case_id != "condition_action_behavior");
+    let error = validate_fixture_llm_case_count(&reduced, 13)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("fixture_llm case count"));
+    assert!(error.contains("expected 13"));
 }
 
 /// 验证 fixture LLM 集合覆盖多个 Skill 理解任务族，而不是只测一轮页面问答。
@@ -433,6 +452,56 @@ fn test_m58_cnb_sse_rejects_invalid_json_without_leaking_token() {
     server.join().unwrap();
     assert!(!error.contains(token));
     assert!(error.contains("CNB AI Chat"));
+}
+
+/// 验证成功响应必须声明 text/event-stream，避免把普通 JSON 当成 SSE 解析。
+#[test]
+fn test_m58_cnb_sse_rejects_non_event_stream_content_type() {
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "application/json", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        "m58-content-type-secret".to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
+    server.join().unwrap();
+    assert!(error.contains("Content-Type"));
+    assert!(error.contains("text/event-stream"));
+}
+
+/// 验证 SSE 中意外的非 data 行不会被静默忽略。
+#[test]
+fn test_m58_cnb_sse_rejects_unexpected_non_data_line() {
+    let response_body = concat!(
+        "unexpected: m58-invalid-sse-line\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        "m58-sse-line-secret".to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
+    server.join().unwrap();
+    assert!(error.contains("unexpected SSE line"));
 }
 
 /// 验证 CNB SSE 流只有 [DONE] 时会返回错误。
@@ -842,6 +911,9 @@ fn test_m58_run_report_tracks_trial_stability() {
     assert_eq!(report.case_count, 1);
     assert_eq!(report.case_stable_pass_rate, 0.0);
     assert_eq!(report.cases_with_flaky_trials, 1);
+    assert_eq!(report.command_trace_stats.cases_with_commands, 1);
+    assert_eq!(report.command_trace_stats.average_commands_per_case, 1.0);
+    assert_eq!(report.command_trace_stats.average_commands_per_trial, 0.5);
     assert_eq!(report.cases[1].trial_index, 1);
     assert_eq!(report.cases[1].task_family, "page_logic");
 }
@@ -1237,7 +1309,8 @@ fn test_m58_cnb_fixture_llm_baseline() {
         "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
     ))
     .unwrap();
-    let expected_case_count = fixture_llm_cases(&cases).len();
+    let expected_case_count = 13;
+    validate_fixture_llm_case_count(&cases, expected_case_count).unwrap();
     let mut adapter = CnbChatAdapter::from_env().unwrap();
     let report = run_fixture_llm_cases(&cases, &mut adapter, &config).unwrap();
     write_run_report(

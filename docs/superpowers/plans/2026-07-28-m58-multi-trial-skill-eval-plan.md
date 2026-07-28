@@ -88,7 +88,7 @@
 - Modify: `docs/reference/ai-eval.md`
 
 **Interfaces:**
-- Active `fixture_llm` selection contains at least 10 cases across page logic, explain, dataflow/lineage, navigation, diagnostic, condition, positive and negative task families.
+- Active `fixture_llm` selection contains exactly 13 cases across page logic, explain, dataflow/lineage, navigation, diagnostic, condition, positive and negative task families; the live baseline rejects any count drift.
 - Existing `tests/ai_eval_tests.rs` structural behavior remains unchanged.
 
 - [x] **Step 1: Write failing coverage assertions**

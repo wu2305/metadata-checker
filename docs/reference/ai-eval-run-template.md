@@ -66,6 +66,8 @@
 
 `judge_notes` 只能是短的确定性诊断，不得复制模型回答。`command_trace` 只保留参数、plan step 和 section 元数据，不保留 stdout 全文。
 
+多 trial 报告中，`cases_with_commands` 按去重后的 `case_id` 计数；`average_commands_per_case` 的分母是去重后的 `case_count`，`average_commands_per_trial` 的分母是报告中的 trial 行数，避免 trial 数增加后 case 维度被重复放大。
+
 ## 失败分类
 
 | 分类 | 说明 |

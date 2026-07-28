@@ -1,10 +1,10 @@
 //! M58 CI tester 的评测 runner 支持代码。
 
 use anyhow::{Context, Result, anyhow, bail};
-use reqwest::header::ACCEPT;
+use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -209,6 +209,15 @@ pub(crate) fn fixture_llm_cases(cases: &[EvalCase]) -> Vec<EvalCase> {
         .filter(|case| case.tier == EvalTier::FixtureLlm && case.case_status == "active")
         .cloned()
         .collect()
+}
+
+/// 校验 live baseline 使用固定数量的 active fixture LLM case。
+pub(crate) fn validate_fixture_llm_case_count(cases: &[EvalCase], expected: usize) -> Result<()> {
+    let actual = fixture_llm_cases(cases).len();
+    if actual != expected {
+        bail!("fixture_llm case count mismatch: expected {expected}, got {actual}");
+    }
+    Ok(())
 }
 
 /// 模型返回的命令请求。
@@ -623,10 +632,20 @@ impl ModelAdapter for CnbChatAdapter {
             .send()
             .context("请求 CNB AI Chat 失败")?;
         let status = response.status();
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         let body = response.text().context("读取 CNB AI Chat 响应失败")?;
         if !status.is_success() {
             let summary = redact_secret(&summarize_body(&body), &self.token);
             bail!("CNB AI Chat HTTP {}: {}", status, summary);
+        }
+        let media_type = content_type.split(';').next().unwrap_or("").trim();
+        if !media_type.eq_ignore_ascii_case("text/event-stream") {
+            bail!("CNB AI Chat 响应 Content-Type 必须为 text/event-stream，实际为 {content_type}");
         }
 
         parse_sse_content(&body)
@@ -644,7 +663,7 @@ fn parse_sse_content(body: &str) -> Result<String> {
             continue;
         }
         let Some(payload) = line.strip_prefix("data:") else {
-            continue;
+            bail!("CNB AI Chat SSE contains unexpected SSE line");
         };
         let payload = payload.trim_start();
         if payload.is_empty() {
@@ -864,6 +883,7 @@ impl RunReport {
             stable_case_count as f64 / case_count as f64
         };
         let mut failure_classes = BTreeMap::new();
+        let mut case_ids_with_commands = BTreeSet::new();
         let mut command_trace_stats = CommandTraceStats {
             total_commands: 0,
             accepted_commands: 0,
@@ -879,7 +899,7 @@ impl RunReport {
                 *failure_classes.entry(failure_class.clone()).or_insert(0) += 1;
             }
             if !case.command_trace.is_empty() {
-                command_trace_stats.cases_with_commands += 1;
+                case_ids_with_commands.insert(case.case_id.clone());
             }
             command_trace_stats.total_commands += case.command_trace.len();
             command_trace_stats.accepted_commands += case
@@ -901,13 +921,17 @@ impl RunReport {
                 command_trace_stats.max_command_count_exceeded_cases += 1;
             }
         }
-        command_trace_stats.average_commands_per_case = if cases.is_empty() {
+        command_trace_stats.cases_with_commands = case_ids_with_commands.len();
+        command_trace_stats.average_commands_per_case = if case_count == 0 {
+            0.0
+        } else {
+            command_trace_stats.total_commands as f64 / case_count as f64
+        };
+        command_trace_stats.average_commands_per_trial = if cases.is_empty() {
             0.0
         } else {
             command_trace_stats.total_commands as f64 / cases.len() as f64
         };
-        command_trace_stats.average_commands_per_trial =
-            command_trace_stats.average_commands_per_case;
         Self {
             schema_version: "1.1.0".to_string(),
             provider,
