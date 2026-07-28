@@ -284,6 +284,59 @@ fn test_m58_command_policy_binds_paths_and_steps() {
     );
 }
 
+/// 验证 plan 未声明预算时，模型显式 compact 仍使用默认预算语义。
+#[test]
+fn test_m58_command_policy_defaults_missing_budget_to_compact() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "readonly_page_check")
+        .unwrap();
+    assert_eq!(
+        case.value["minimal_command_plan"][0]["budget"],
+        serde_json::Value::Null
+    );
+    let policy = CommandPolicy::from_case(
+        case,
+        PathBuf::from("/private/tmp/m58-fixed-project"),
+        PathBuf::from("/private/tmp/m58-fixed.graphdb"),
+        PathBuf::from("/private/tmp/metadata-checker"),
+    )
+    .unwrap();
+
+    let validated = policy
+        .validate(
+            &CommandRequest {
+                command_kind: "--query-page-logic".to_string(),
+                target: "page:app/dataflow_embedded.spg".to_string(),
+                args: Vec::new(),
+                budget: Some("compact".to_string()),
+            },
+            &[],
+        )
+        .unwrap();
+    assert_eq!(validated.argv().last(), Some(&OsString::from("compact")));
+
+    let default_validated = policy
+        .validate(
+            &CommandRequest {
+                command_kind: "--query-page-logic".to_string(),
+                target: "page:app/dataflow_embedded.spg".to_string(),
+                args: Vec::new(),
+                budget: None,
+            },
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        default_validated.argv().last(),
+        Some(&OsString::from("compact"))
+    );
+}
+
 /// 验证 fake adapter 按顺序返回响应，并记录每轮对话 history。
 #[test]
 fn test_m58_fake_adapter_records_history_and_fails_when_empty() {

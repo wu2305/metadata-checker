@@ -400,7 +400,7 @@ impl CommandPolicy {
                     && step.command_kind == request.command_kind
                     && step.target == request.target
                     && step.args == request.args
-                    && step.budget == request.budget
+                    && budgets_match(&step.budget, &request.budget)
             })
             .map(|(index, _)| index)
             .ok_or_else(|| anyhow!("模型命令不匹配任何未使用的 minimal_command_plan step"))?;
@@ -430,11 +430,10 @@ impl ValidatedCommand {
             argv.push(OsString::from(&self.step.target));
         }
         argv.extend(self.step.args.iter().map(OsString::from));
-        if let Some(budget) = &self.step.budget {
-            if !budget.is_empty() {
-                argv.push(OsString::from("--budget"));
-                argv.push(OsString::from(budget));
-            }
+        let budget = self.step.budget.as_deref().unwrap_or("compact");
+        if !budget.is_empty() {
+            argv.push(OsString::from("--budget"));
+            argv.push(OsString::from(budget));
         }
         argv
     }
@@ -455,6 +454,11 @@ fn contains_shell_metacharacters(value: &str) -> bool {
     [";", "&&", "||", "`", "$(", "\n", "\r", "\0"]
         .iter()
         .any(|marker| value.contains(marker))
+}
+
+/// 将缺失预算按 compact 默认值比较，兼容 plan 和模型的两种省略写法。
+fn budgets_match(plan_budget: &Option<String>, request_budget: &Option<String>) -> bool {
+    plan_budget.as_deref().unwrap_or("compact") == request_budget.as_deref().unwrap_or("compact")
 }
 
 /// CNB AI Chat 使用的消息结构。
