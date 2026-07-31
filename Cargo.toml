@@ -100,6 +100,14 @@ web-sys = { version = "0.3", optional = true, features = [
     "Window",
 ] }
 
+[profile.dev]
+# 测试内直接调用 scan_project 扫描真实项目；debug 未优化时代价极高。
+# 只优化本 crate 与依赖的代码生成，保留 debug 断言与符号。
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 opt-level = "z"
 lto = true

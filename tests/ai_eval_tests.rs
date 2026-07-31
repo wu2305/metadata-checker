@@ -1,5 +1,7 @@
 #![cfg(feature = "cli-local")]
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -457,9 +459,14 @@ fn test_ai_eval_commands_execute_and_assert() {
             if graph_strategy == "none_single_file" {
                 None
             } else {
+                // graphdb 按 project_dir 复用：多个 case 指向同一真实项目时只扫描一次。
+                // 图构建后只读，case 之间不会互相污染。
+                let pd = case["project_dir"].as_str().unwrap_or("");
+                let mut hasher = DefaultHasher::new();
+                pd.hash(&mut hasher);
                 let db = std::env::temp_dir().join(format!(
-                    "metadata-checker-ai-eval-{}.graphdb",
-                    case_id.replace("/", "_")
+                    "metadata-checker-ai-eval-proj-{:016x}.graphdb",
+                    hasher.finish()
                 ));
                 Some(db)
             }
