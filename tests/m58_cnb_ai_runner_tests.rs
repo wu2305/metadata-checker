@@ -737,6 +737,8 @@ fn test_m58_judge_reports_deterministic_failure_classes() {
         &[accepted_trace()],
     );
 
+    // 证据要求由 command trace 判定：这里存在已接受命令，因此不再因为回答里
+    // 没有出现 summary/details 等内部 section 名而失败。
     assert_eq!(result.passed, false);
     assert_eq!(
         result.failure_classes,
@@ -744,10 +746,52 @@ fn test_m58_judge_reports_deterministic_failure_classes() {
             "missed_fact".to_string(),
             "hallucination".to_string(),
             "ignored_diagnostic".to_string(),
-            "needs_human_review".to_string(),
         ]
     );
-    assert_eq!(result.judge_notes.len(), 5);
+    assert_eq!(result.judge_notes.len(), 4);
+}
+
+/// 验证 must_include 同义组：命中任意一个等价表述即视为覆盖该事实。
+#[test]
+fn test_m58_judge_accepts_must_include_synonym_group() {
+    let assertions = serde_json::json!({
+        "must_include": ["只读", ["无写入", "没有写入", "不写入"]],
+        "must_not_include": [],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": false
+    });
+
+    // 简短回答只用了同义组里的第二个表述，仍应通过。
+    let result = judge_answer("该页面只读，没有写入。", &assertions, &[], &[accepted_trace()]);
+    assert_eq!(result.failure_classes, Vec::<String>::new());
+    assert_eq!(result.passed, true);
+
+    // 同义组里一个表述都没命中时才算 missed_fact。
+    let miss = judge_answer("该页面只读。", &assertions, &[], &[accepted_trace()]);
+    assert_eq!(miss.failure_classes, vec!["missed_fact".to_string()]);
+}
+
+/// 验证证据要求检查的是「回答是否基于已执行命令」，而不是回答里的关键词。
+#[test]
+fn test_m58_judge_reports_ungrounded_answer() {
+    let assertions = serde_json::json!({
+        "must_include": [],
+        "must_not_include": [],
+        "diagnostic_disclaimer_required": false,
+        "evidence_reference_required": true
+    });
+
+    // 没有任何命令：既没有证据，也没有命令轨迹。
+    let ungrounded = judge_answer("页面写入 model1。", &assertions, &[], &[]);
+    assert_eq!(
+        ungrounded.failure_classes,
+        vec!["ungrounded_answer".to_string(), "no_command".to_string()]
+    );
+
+    // 有已接受命令时，即使回答里没有出现 summary 等英文 section 名也算有证据。
+    let grounded = judge_answer("页面写入 model1。", &assertions, &[], &[accepted_trace()]);
+    assert_eq!(grounded.failure_classes, Vec::<String>::new());
+    assert_eq!(grounded.passed, true);
 }
 
 /// 验证命令轨迹会单独标记错误命令和过度读取细节。
@@ -776,10 +820,15 @@ fn test_m58_judge_reports_command_risk_classes() {
         &[over_read_trace, rejected_trace],
     );
 
+    // 被 plan 拒绝的命令单独记为 command_rejected，与「已执行但无对应 plan step」
+    // 的 wrong_command 区分开，便于判断是真实路由错误还是仅偏离手写 plan。
     assert_eq!(result.passed, false);
     assert_eq!(
         result.failure_classes,
-        vec!["wrong_command".to_string(), "over_read_details".to_string()]
+        vec![
+            "command_rejected".to_string(),
+            "over_read_details".to_string()
+        ]
     );
 }
 
@@ -1365,11 +1414,18 @@ fn build_fake_case_responses(cases: &[m58_ai_eval::EvalCase]) -> Vec<String> {
                 .to_string(),
             );
         }
+        // must_include 每一项可以是字符串或同义组；fake 回答取第一个表述即可满足。
         let required = case.value["answer_assertions"]["must_include"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|value| value.as_str().unwrap())
+            .map(|value| match value {
+                serde_json::Value::Array(alternatives) => alternatives
+                    .first()
+                    .and_then(serde_json::Value::as_str)
+                    .expect("同义组至少需要一个字符串表述"),
+                other => other.as_str().expect("must_include 项必须是字符串或同义组"),
+            })
             .collect::<Vec<_>>()
             .join("、");
         responses.push(

@@ -962,11 +962,19 @@ pub(crate) fn judge_answer(
     let mut failure_classes = Vec::new();
     let mut judge_notes = Vec::new();
 
-    let must_include = read_string_assertions(assertions, "must_include", &mut failure_classes);
-    for expected in must_include {
-        if !normalized_answer.contains(&normalize_for_match(&expected)) {
+    // must_include 的每一项是一个同义组：命中任意一个表述即视为覆盖该事实。
+    // 小模型回答简短，不应因为没有复述内部术语而判失败。
+    let must_include = read_alternative_assertions(assertions, "must_include", &mut failure_classes);
+    for alternatives in must_include {
+        let hit = alternatives
+            .iter()
+            .any(|expected| normalized_answer.contains(&normalize_for_match(expected)));
+        if !hit {
             add_failure(&mut failure_classes, "missed_fact");
-            judge_notes.push(format!("missing must_include assertion: {expected}"));
+            judge_notes.push(format!(
+                "missing must_include assertion: {}",
+                alternatives.join(" | ")
+            ));
         }
     }
 
@@ -1000,18 +1008,37 @@ pub(crate) fn judge_answer(
         "evidence_reference_required",
         &mut failure_classes,
     );
-    if evidence_required && !contains_evidence_reference(&normalized_answer) {
-        add_failure(&mut failure_classes, "needs_human_review");
-        judge_notes.push("回答没有引用允许的 CLI evidence section".to_string());
+    // 证据要求应当检查回答是否真的建立在已执行的 CLI 命令之上，而不是要求
+    // 回答里出现 summary/details 这类内部 section 英文名——后者只会训练模型
+    // 复述固定词，与证据强度无关。
+    if evidence_required {
+        let grounded = trace.iter().any(|entry| entry.accepted);
+        if !grounded {
+            add_failure(&mut failure_classes, "ungrounded_answer");
+            judge_notes
+                .push("要求证据但没有任何被接受的 CLI 命令可作为回答依据".to_string());
+        }
     }
 
-    if trace.is_empty()
-        || trace
+    // 原实现把三种完全不同的情况压成同一个 wrong_command，导致无法判断
+    // 「模型没选命令」「命令被 plan 拒绝」是不是同一个问题。拆开分类，
+    // 便于区分真实路由错误与仅仅偏离手写 plan 的合理命令。
+    if trace.is_empty() {
+        add_failure(&mut failure_classes, "no_command");
+        judge_notes.push("模型没有执行任何 CLI 命令".to_string());
+    } else {
+        let rejected = trace.iter().filter(|entry| !entry.accepted).count();
+        if rejected > 0 {
+            add_failure(&mut failure_classes, "command_rejected");
+            judge_notes.push(format!("{rejected} 条命令未通过 minimal_command_plan 校验"));
+        }
+        if trace
             .iter()
-            .any(|entry| !entry.accepted || entry.plan_step_index.is_none())
-    {
-        add_failure(&mut failure_classes, "wrong_command");
-        judge_notes.push("command trace 为空或包含未通过 plan 的命令".to_string());
+            .any(|entry| entry.accepted && entry.plan_step_index.is_none())
+        {
+            add_failure(&mut failure_classes, "wrong_command");
+            judge_notes.push("命令已执行但没有对应的 plan step".to_string());
+        }
     }
     if trace.iter().any(|entry| {
         entry.detail_request
@@ -1102,6 +1129,46 @@ fn render_report_markdown(report: &RunReport) -> String {
 }
 
 /// 读取字符串数组断言；schema 异常只进入 needs_human_review，不 panic。
+/// 读取「同义组」断言：每一项可以是单个字符串，也可以是一组等价表述。
+/// 字符串等价于只有一个元素的同义组，保持既有 case 文件向后兼容。
+fn read_alternative_assertions(
+    assertions: &Value,
+    field: &str,
+    failure_classes: &mut Vec<String>,
+) -> Vec<Vec<String>> {
+    let Some(value) = assertions.get(field) else {
+        add_failure(failure_classes, "needs_human_review");
+        return Vec::new();
+    };
+    let Some(values) = value.as_array() else {
+        add_failure(failure_classes, "needs_human_review");
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    for item in values {
+        match item {
+            Value::String(single) if !single.trim().is_empty() => {
+                result.push(vec![single.to_string()]);
+            }
+            Value::Array(group) => {
+                let alternatives: Vec<String> = group
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .map(str::to_string)
+                    .collect();
+                if alternatives.is_empty() {
+                    add_failure(failure_classes, "needs_human_review");
+                } else {
+                    result.push(alternatives);
+                }
+            }
+            _ => add_failure(failure_classes, "needs_human_review"),
+        }
+    }
+    result
+}
+
 fn read_string_assertions(
     assertions: &Value,
     field: &str,

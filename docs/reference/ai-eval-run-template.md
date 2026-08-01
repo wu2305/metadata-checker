@@ -74,11 +74,18 @@
 |------|------|
 | `missed_fact` | 遗漏 `answer_assertions.must_include` |
 | `hallucination` | 命中 `must_not_include` 或无依据禁用结论 |
-| `wrong_command` | 命令未通过 `minimal_command_plan` 精确匹配 |
+| `no_command` | 模型没有执行任何 CLI 命令 |
+| `command_rejected` | 命令未通过 `minimal_command_plan` 精确匹配而被拒绝 |
+| `wrong_command` | 命令已执行但没有对应的 plan step |
+| `ungrounded_answer` | 要求证据但没有任何被接受的命令可作为依据 |
 | `ignored_diagnostic` | 存在诊断但回答没有保守表达 |
 | `over_read_details` | 请求 `--detail`、`--budget full` 或未允许的细节路径 |
-| `needs_human_review` | case assertion schema 或自动证据规则无法确定 |
+| `needs_human_review` | case assertion schema 无法解析 |
 | `runner_error` | adapter、CLI 或 case workspace 的运行时失败，未伪造业务答案；包含 CNB HTTP/transport/SSE 级别异常或 JSON 未返回前就失败的适配层问题 |
+
+`missed_fact` 按「同义组」判定：`answer_assertions.must_include` 的每一项可以是单个字符串，也可以是一组等价表述，命中任意一个即视为覆盖该事实。小模型回答简短，不应因为没有复述内部术语而判失败；断言也不得要求 CLI 输出中不存在的词。
+
+证据要求（`evidence_reference_required`）检查回答是否建立在已被接受的命令之上，不再要求回答文本里出现 `summary` / `details` 等内部 section 英文名——后者只会训练模型复述固定词，与证据强度无关。
 
 一次 trial 可以有多个失败分类；`trial_pass_rate` 按 trial 行计数，`case_stable_pass_rate` 只有同一 case 的所有 trial 都通过才计为通过。为兼容旧消费者，`pass_rate` 与 `trial_pass_rate` 保持同值；`cases_with_flaky_trials` 单独标出同一 case 试验结果不稳定的情况。
 

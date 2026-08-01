@@ -117,9 +117,19 @@
       "answer_assertions": {
         "must_include": [
           "用户入口",
-          "写入目标",
+          [
+            "写入目标",
+            "写入",
+            "writes",
+            "写到"
+          ],
           "action",
-          "按钮",
+          [
+            "按钮",
+            "button",
+            "buttonWebAPI",
+            "button1"
+          ],
           "model1",
           "model2"
         ],
@@ -682,8 +692,20 @@
       "answer_assertions": {
         "must_include": [
           "只读",
-          "无写入",
-          "无入口",
+          [
+            "无写入",
+            "没有写入",
+            "不写入",
+            "writes 为空",
+            "无写入目标"
+          ],
+          [
+            "无入口",
+            "没有入口",
+            "无用户入口",
+            "没有用户入口",
+            "无交互入口"
+          ],
           "readonly_dashboard"
         ],
         "must_not_include": [
