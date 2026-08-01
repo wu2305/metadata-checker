@@ -1128,9 +1128,9 @@ fn render_report_markdown(report: &RunReport) -> String {
     markdown
 }
 
-/// 读取字符串数组断言；schema 异常只进入 needs_human_review，不 panic。
 /// 读取「同义组」断言：每一项可以是单个字符串，也可以是一组等价表述。
 /// 字符串等价于只有一个元素的同义组，保持既有 case 文件向后兼容。
+/// schema 异常只进入 needs_human_review，不 panic。
 fn read_alternative_assertions(
     assertions: &Value,
     field: &str,
@@ -1169,6 +1169,7 @@ fn read_alternative_assertions(
     result
 }
 
+/// 读取字符串数组断言；schema 异常只进入 needs_human_review，不 panic。
 fn read_string_assertions(
     assertions: &Value,
     field: &str,
