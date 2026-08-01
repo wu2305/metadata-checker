@@ -546,6 +546,10 @@
         echo "M58 command trace fields (safe diagnostic subset):"
         grep -E -A 8 '"(case_id|command_kind|target|args|budget|plan_step_index|accepted|detail_request|budget_upgrade|output_sections)"' \
           target/m58-ai-eval/run.json
+        # 路由混淆矩阵是工具接口指标，需要单独打印：上面的字段 grep 只匹配键名所在行，
+        # 拿不到 command_routing_confusion 对象内的条目。
+        echo "M58 command routing confusion (<task_family> -> chosen command):"
+        sed -n '/"command_routing_confusion"/,/}/p' target/m58-ai-eval/run.json
 
 main:
   push: *main_authoritative_ci
