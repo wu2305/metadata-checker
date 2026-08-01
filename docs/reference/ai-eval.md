@@ -37,9 +37,17 @@ M9-A/B/C 保证**语料和输出契约稳定**；M9-D 保证**AI 能基于稳定
 |------|------|
 | missed_fact | 遗漏 expected_fact |
 | hallucination | 出现 forbidden_claim 或无依据推断 |
-| wrong_command | 选用的 CLI 命令与 minimal_command_plan 偏差过大 |
+| no_command | 模型没有执行任何 CLI 命令 |
+| command_rejected | 命令未通过 `minimal_command_plan` 精确匹配而被拒绝，trial 立即结束 |
+| wrong_command | 命令已执行但没有对应的 plan step |
+| ungrounded_answer | 要求证据但没有任何被接受的命令可作为依据 |
 | ignored_diagnostic | 遇到诊断未降级，仍做确定性结论 |
 | over_read_details | 未先读 summary 而直接读取大量 raw details |
+
+`command_rejected` 是**工具接口指标，不是模型能力指标**：它统计的是模型按 `SKILL.md`
+选出的命令与人工最小计划不一致的次数，即 CLI 动词表面对读者是否自解释。这类失败会在
+执行 CLI 前终止 trial，因此它与 `missed_fact` 互斥，两者把 trial 分成「路由阶段失败」
+和「路由成功但理解失败」两段，可分别归因到命令表面设计和输出可读性。
 
 ## 维护
 

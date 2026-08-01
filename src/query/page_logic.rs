@@ -1973,8 +1973,7 @@ fn build_query_page_logic_output_inner(
     // 与同级 top_* 列表保持同一上限：summary 是 details 的真子集，不能比
     // details.primary_paths（compact 截断为 5）还长。primary_path 单条体积远大于
     // 其它 summary 项，取 10 会让 summary 反而比它所摘要的 details 更大。
-    let key_primary_paths: Vec<serde_json::Value> =
-        primary_paths.iter().take(3).cloned().collect();
+    let key_primary_paths: Vec<serde_json::Value> = primary_paths.iter().take(3).cloned().collect();
 
     // M35.7: 从 data_sources 和 write_targets 中自动发现关键模型，
     // 并内嵌每个模型的 availability 摘要。

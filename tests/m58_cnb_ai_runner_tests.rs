@@ -762,7 +762,12 @@ fn test_m58_judge_accepts_must_include_synonym_group() {
     });
 
     // 简短回答只用了同义组里的第二个表述，仍应通过。
-    let result = judge_answer("该页面只读，没有写入。", &assertions, &[], &[accepted_trace()]);
+    let result = judge_answer(
+        "该页面只读，没有写入。",
+        &assertions,
+        &[],
+        &[accepted_trace()],
+    );
     assert_eq!(result.failure_classes, Vec::<String>::new());
     assert_eq!(result.passed, true);
 
@@ -896,7 +901,7 @@ fn test_m58_run_report_is_structured_and_redacted() {
 
     let json = std::fs::read_to_string(&json_path).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["schema_version"], "1.1.0");
+    assert_eq!(parsed["schema_version"], "1.2.0");
     assert_eq!(parsed["cases"].as_array().unwrap().len(), 2);
     assert_eq!(parsed["command_trace_stats"]["accepted_commands"], 1);
     assert_eq!(parsed["trial_pass_rate"], 0.5);
@@ -965,6 +970,83 @@ fn test_m58_run_report_tracks_trial_stability() {
     assert_eq!(report.command_trace_stats.average_commands_per_trial, 0.5);
     assert_eq!(report.cases[1].trial_index, 1);
     assert_eq!(report.cases[1].task_family, "page_logic");
+}
+
+/// 验证被拒绝的命令按 `<task_family> -> <命令>` 聚合成路由混淆矩阵。
+///
+/// 这是工具接口指标：它回答「哪类问题会被误路由到哪个 CLI 动词」，
+/// 是决定合并/改名命令的依据，因此必须与 accepted 命令严格区分开。
+#[test]
+fn test_m58_run_report_aggregates_command_routing_confusion() {
+    let rejected = |kind: &str| CommandTrace {
+        command_kind: kind.to_string(),
+        target: "page:app/actions_test.spg".to_string(),
+        args: Vec::new(),
+        budget: Some("compact".to_string()),
+        plan_step_index: None,
+        accepted: false,
+        detail_request: false,
+        budget_upgrade: false,
+        output_sections: Vec::new(),
+    };
+    let case = |case_id: &str, family: &str, trace: Vec<CommandTrace>| CaseReport {
+        case_id: case_id.to_string(),
+        trial_index: 0,
+        task_family: family.to_string(),
+        difficulty: "basic".to_string(),
+        status: "error".to_string(),
+        passed: false,
+        max_command_count: 1,
+        failure_classes: vec!["command_rejected".to_string()],
+        judge_notes: Vec::new(),
+        command_trace: trace,
+    };
+
+    let report = RunReport::from_cases(
+        "fake".to_string(),
+        "test-model".to_string(),
+        None,
+        "2026-07-28T00:00:00Z".to_string(),
+        vec![
+            case("a", "page_logic", vec![rejected("--explain")]),
+            case("b", "page_logic", vec![rejected("--explain")]),
+            case("c", "page_logic", vec![rejected("--explain-condition")]),
+            case("d", "field_lineage", vec![rejected("--explain")]),
+            // accepted 命令不得进入混淆矩阵。
+            CaseReport {
+                case_id: "e".to_string(),
+                trial_index: 0,
+                task_family: "page_logic".to_string(),
+                difficulty: "basic".to_string(),
+                status: "pass".to_string(),
+                passed: true,
+                max_command_count: 1,
+                failure_classes: Vec::new(),
+                judge_notes: Vec::new(),
+                command_trace: vec![accepted_trace()],
+            },
+        ],
+    );
+
+    assert_eq!(report.command_routing_confusion.len(), 3);
+    assert_eq!(
+        report.command_routing_confusion["page_logic -> --explain"],
+        2
+    );
+    assert_eq!(
+        report.command_routing_confusion["page_logic -> --explain-condition"],
+        1
+    );
+    assert_eq!(
+        report.command_routing_confusion["field_lineage -> --explain"],
+        1
+    );
+    assert_eq!(
+        report
+            .command_routing_confusion
+            .contains_key("page_logic -> --query-page-logic"),
+        false
+    );
 }
 
 /// 验证 fake runner 真实执行 CLI、多轮回传 stdout，并完成全部 fixture LLM case。
@@ -1162,7 +1244,9 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     std::fs::remove_dir_all(output_dir).unwrap();
 }
 
-/// 验证模型提出不在 plan 中的命令时 runner 不启动 CLI 并生成 wrong_command。
+/// 验证模型提出不在 plan 中的命令时 runner 不启动 CLI 并生成 command_rejected。
+/// 这条路径会立即结束 trial，是 live run 中唯一实际产生拒绝分类的位置，
+/// 因此必须与 judge_answer 的分类保持一致，否则 command_rejected 永远不可达。
 #[test]
 fn test_m58_runner_blocks_command_outside_plan() {
     let cases = load_eval_cases(Path::new(
@@ -1184,7 +1268,7 @@ fn test_m58_runner_blocks_command_outside_plan() {
     let report = run_case(&case, &mut adapter, &config).unwrap();
     assert_eq!(report.status, "error");
     assert_eq!(report.passed, false);
-    assert_eq!(report.failure_classes, vec!["wrong_command".to_string()]);
+    assert_eq!(report.failure_classes, vec!["command_rejected".to_string()]);
     assert_eq!(report.command_trace.len(), 1);
     assert_eq!(report.command_trace[0].accepted, false);
     assert_eq!(report.command_trace[0].plan_step_index, None);

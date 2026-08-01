@@ -843,6 +843,14 @@ pub(crate) struct RunReport {
     pub(crate) failure_classes: BTreeMap<String, usize>,
     /// 命令轨迹统计。
     pub(crate) command_trace_stats: CommandTraceStats,
+    /// 被拒绝命令的路由混淆矩阵，键为 `<task_family> -> <模型选择的 command_kind>`。
+    ///
+    /// 这是**工具接口指标**：命令被拒绝说明模型读完 `SKILL.md` 后选错了动词，
+    /// 即 CLI 表面对某类问题不是自解释的。按 task_family 聚合可以直接读出
+    /// 「哪类问题会被误路由到哪个动词」，从而定位需要合并或改名的命令，
+    /// 而不必把它当成模型能力不足。
+    #[serde(default)]
+    pub(crate) command_routing_confusion: BTreeMap<String, usize>,
 }
 
 impl RunReport {
@@ -883,6 +891,7 @@ impl RunReport {
             stable_case_count as f64 / case_count as f64
         };
         let mut failure_classes = BTreeMap::new();
+        let mut command_routing_confusion = BTreeMap::<String, usize>::new();
         let mut case_ids_with_commands = BTreeSet::new();
         let mut command_trace_stats = CommandTraceStats {
             total_commands: 0,
@@ -920,6 +929,14 @@ impl RunReport {
             if case.command_trace.len() > case.max_command_count {
                 command_trace_stats.max_command_count_exceeded_cases += 1;
             }
+            for trace in case.command_trace.iter().filter(|trace| !trace.accepted) {
+                // command_kind 来自模型，长度不受控；截断避免单条异常输出撑大报告键空间。
+                // 该值已原样记录在 command_trace 中，这里不引入新的信息泄露。
+                let chosen: String = trace.command_kind.chars().take(64).collect();
+                *command_routing_confusion
+                    .entry(format!("{} -> {}", case.task_family, chosen))
+                    .or_insert(0) += 1;
+            }
         }
         command_trace_stats.cases_with_commands = case_ids_with_commands.len();
         command_trace_stats.average_commands_per_case = if case_count == 0 {
@@ -933,7 +950,7 @@ impl RunReport {
             command_trace_stats.total_commands as f64 / cases.len() as f64
         };
         Self {
-            schema_version: "1.1.0".to_string(),
+            schema_version: "1.2.0".to_string(),
             provider,
             model_id,
             cnb_build_id,
@@ -947,6 +964,7 @@ impl RunReport {
             cases_with_flaky_trials: flaky_case_count,
             failure_classes,
             command_trace_stats,
+            command_routing_confusion,
         }
     }
 }
@@ -964,7 +982,8 @@ pub(crate) fn judge_answer(
 
     // must_include 的每一项是一个同义组：命中任意一个表述即视为覆盖该事实。
     // 小模型回答简短，不应因为没有复述内部术语而判失败。
-    let must_include = read_alternative_assertions(assertions, "must_include", &mut failure_classes);
+    let must_include =
+        read_alternative_assertions(assertions, "must_include", &mut failure_classes);
     for alternatives in must_include {
         let hit = alternatives
             .iter()
@@ -1015,8 +1034,7 @@ pub(crate) fn judge_answer(
         let grounded = trace.iter().any(|entry| entry.accepted);
         if !grounded {
             add_failure(&mut failure_classes, "ungrounded_answer");
-            judge_notes
-                .push("要求证据但没有任何被接受的 CLI 命令可作为回答依据".to_string());
+            judge_notes.push("要求证据但没有任何被接受的 CLI 命令可作为回答依据".to_string());
         }
     }
 
@@ -1124,6 +1142,15 @@ fn render_report_markdown(report: &RunReport) -> String {
     markdown.push_str("\n## Failure classes\n\n");
     for (failure_class, count) in &report.failure_classes {
         markdown.push_str(&format!("- `{failure_class}`: {count}\n"));
+    }
+    markdown.push_str("\n## Command routing confusion\n\n");
+    if report.command_routing_confusion.is_empty() {
+        markdown.push_str("- 无被拒绝命令\n");
+    } else {
+        markdown.push_str("被拒绝的命令按 `<task_family> -> <模型选择的命令>` 聚合，用于定位需要合并或改名的 CLI 动词。\n\n");
+        for (route, count) in &report.command_routing_confusion {
+            markdown.push_str(&format!("- `{}`: {count}\n", escape_markdown_cell(route)));
+        }
     }
     markdown
 }
@@ -1399,7 +1426,7 @@ fn run_case_for_trial(
                             case,
                             trial_index,
                             policy.max_command_count,
-                            "wrong_command",
+                            "command_rejected",
                             "model command was rejected by minimal_command_plan",
                             trace,
                         ));

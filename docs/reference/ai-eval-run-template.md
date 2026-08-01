@@ -13,7 +13,7 @@
 
 ```json
 {
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "provider": "cnb-ai-chat",
   "model_id": "gpt-5.4-mini",
   "cnb_build_id": "build-20260727",
@@ -60,7 +60,8 @@
     "average_commands_per_trial": 1.0,
     "max_command_count_exceeded_cases": 0,
     "budget_upgrade_count": 0
-  }
+  },
+  "command_routing_confusion": {}
 }
 ```
 
@@ -75,7 +76,7 @@
 | `missed_fact` | 遗漏 `answer_assertions.must_include` |
 | `hallucination` | 命中 `must_not_include` 或无依据禁用结论 |
 | `no_command` | 模型没有执行任何 CLI 命令 |
-| `command_rejected` | 命令未通过 `minimal_command_plan` 精确匹配而被拒绝 |
+| `command_rejected` | 命令未通过 `minimal_command_plan` 精确匹配而被拒绝；该 trial 在执行 CLI 前立即结束 |
 | `wrong_command` | 命令已执行但没有对应的 plan step |
 | `ungrounded_answer` | 要求证据但没有任何被接受的命令可作为依据 |
 | `ignored_diagnostic` | 存在诊断但回答没有保守表达 |
@@ -86,6 +87,21 @@
 `missed_fact` 按「同义组」判定：`answer_assertions.must_include` 的每一项可以是单个字符串，也可以是一组等价表述，命中任意一个即视为覆盖该事实。小模型回答简短，不应因为没有复述内部术语而判失败；断言也不得要求 CLI 输出中不存在的词。
 
 证据要求（`evidence_reference_required`）检查回答是否建立在已被接受的命令之上，不再要求回答文本里出现 `summary` / `details` 等内部 section 英文名——后者只会训练模型复述固定词，与证据强度无关。
+
+`command_rejected` 由 runner 在 `policy.validate` 失败时直接产出，并立即结束该 trial，
+因此它与 `judge_answer` 产出的所有分类（`missed_fact`、`hallucination`、`ungrounded_answer` 等）
+互斥。这把 trial 划成两段互不重叠的归因区间：
+
+- **路由段**：`no_command` + `command_rejected`，衡量 CLI 动词表面是否自解释；
+- **理解段**：其余判分分类，衡量命令输出是否可读。
+
+因此报告应分别看「路由成功率 = 未被拒绝的 trial / 总 trial」和「路由成功后的通过率」，
+不要只看 `trial_pass_rate`——后者会把命令表面缺陷记成模型能力不足。
+
+`command_routing_confusion` 把每条被拒绝的命令按 `<task_family> -> <模型选择的 command_kind>`
+聚合。这是**工具指标而非模型指标**：它直接指出哪类问题会被误路由到哪个动词，是决定合并、
+改名或补充 `SKILL.md` 路由规则的依据。`command_kind` 来自模型，键中截断到 64 字符；该值
+已原样存在 `command_trace` 中，不构成新的信息泄露。
 
 一次 trial 可以有多个失败分类；`trial_pass_rate` 按 trial 行计数，`case_stable_pass_rate` 只有同一 case 的所有 trial 都通过才计为通过。为兼容旧消费者，`pass_rate` 与 `trial_pass_rate` 保持同值；`cases_with_flaky_trials` 单独标出同一 case 试验结果不稳定的情况。
 

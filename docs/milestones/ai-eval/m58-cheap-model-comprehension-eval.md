@@ -46,7 +46,7 @@
 | RunReport schema + 归档 | done |
 | 历史基线 run（3 fixture_llm case，单 trial） | done（CNB `deepseek-v4-flash`，3/3；仅作 smoke） |
 | M58.1 多 trial runner、稳定性指标与任务维度 | done（本地 fake，13 active fixture_llm case） |
-| M58.1 CNB 3-trial live baseline | done（最新 SN `cnb-voo-1jujgnsbf`；结果为观察基线，不设模型通过门槛） |
+| M58.1 CNB 3-trial live baseline | done（最新 SN `cnb-ubg-1juus86tj`；结果为观察基线，不设模型通过门槛） |
 
 ## 验收记录
 
@@ -56,4 +56,17 @@
 
 在独立 review 修复三项 contract 缺口后，最终 CNB 3-trial baseline（2026-07-28，SN `cnb-voo-1jujgnsbf`）再次完成 13 个 case、39 个 trial，且 exact case-count guard、SSE Content-Type/line validation、runner 和脱敏报告 stage 均成功：`trial_pass_rate=0.051282`、`case_stable_pass_rate=0.0`、`cases_with_flaky_trials=2`；失败分类为 `wrong_command=21`、`missed_fact=10`、`needs_human_review=7`、`hallucination=4`、`ignored_diagnostic=3`、`protocol_error=3`。分数变化属于模型多 trial 随机性和 contract 收紧后的观测变化；没有 case 达到三次全通过，结果仍只作为后续 Skill 路由、命令计划和模型选择的对照基线，不能解释为模型已通过。
 
-提示词优化记录：早期 live run 暴露页面路径、按钮 target、裸 field 命令和 final JSON 收尾问题；随后固定 `page/comp/field` target 路由、compact-first、final literal 标签和单行 JSON 键集合，最终在 commit `b1221dd` 的 CNB run 中达到 3/3。该结果是当前 fixture/模型组合的基线，不等同于多模型或真实项目泛化结论。
+提示词优化记录：早期 live run 暴露页面路径、按钮 target、裸 field 命令和 final JSON 收尾问题；随后固定 `page/comp/field` target 路由、compact-first、final literal 标签和单行 JSON 键集合。commit `b1221dd` 的 CNB run 曾在当时的 3 个 smoke case 上达到 3/3；该数字只覆盖那一版 3-case 集合，不适用于其后的 13-case baseline。
+
+### 判分器修复后的基线（2026-08-01，SN `cnb-ubg-1juus86tj`）
+
+在修复三项判分器缺陷——`must_include` 改为同义组、证据检查改为「是否存在被接受的命令」而非复述英文 section 名、`wrong_command` 拆分为 `no_command`/`command_rejected`/`wrong_command`——并把 `key_primary_paths` 从 10 条收敛到 3 条（与同级 `top_*` 一致，compact 输出 131,190 → 102,158 字节）后，CNB 3-trial baseline 完成 13 个 case、39 个 trial：`trial_pass_rate=0.2308`、`case_stable_pass_rate=0.2308`、`cases_with_flaky_trials=0`；失败分类为 `wrong_command=23`、`missed_fact=7`，`hallucination`、`ignored_diagnostic`、`needs_human_review`、`protocol_error` 全部归零。
+
+两项结构性变化值得单独记录：
+
+- `case_stable_pass_rate` 与 `trial_pass_rate` 完全相等且 `cases_with_flaky_trials=0`，即每个 case 都是 3/3 通过或 3/3 失败，评测结果首次完全确定。此前所有 baseline 都存在 2–3 个 flaky case。
+- 失败分类恰好划分全部 trial：`9 通过 + 7 missed_fact + 23 wrong_command = 39`。由于命令被拒绝会在执行 CLI 前终止 trial，这个划分把分数拆成两段独立指标：**路由成功率 16/39 = 41%**，**路由成功后的理解通过率 9/16 = 56%**。
+
+结论：`trial_pass_rate=0.2308` 不是理解能力指标。真正的瓶颈在命令路由，即 `--query-*` 动词表面对模型不是自解释的；这属于工具接口缺陷，不是模型能力不足。此外 `deepseek-v4-flash` 在此期间发生过模型能力更新，跨 baseline 的绝对分数不可直接比较，但上述分段归因不受影响。
+
+该 run 中 23 次拒绝全部由 runner 的 `policy.validate` 失败路径产出，当时该路径仍硬编码 `wrong_command`，使 `command_rejected` 实际不可达；随后已修正，并新增 `command_routing_confusion`（按 `<task_family> -> <模型选择的命令>` 聚合被拒绝命令），下一次 run 起可直接读出具体的误路由动词对。
