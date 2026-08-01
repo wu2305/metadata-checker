@@ -1265,20 +1265,6 @@ fn contains_conservative_marker(answer: &str) -> bool {
     .any(|marker| answer.contains(marker))
 }
 
-/// 判断回答是否引用了允许的 CLI 证据 sections。
-fn contains_evidence_reference(answer: &str) -> bool {
-    [
-        "summary",
-        "details",
-        "evidence",
-        "diagnostics",
-        "primary_path",
-        "key_findings",
-    ]
-    .iter()
-    .any(|marker| answer.contains(marker))
-}
-
 /// 向失败分类列表中加入不重复的分类。
 fn add_failure(failure_classes: &mut Vec<String>, failure_class: &str) {
     if !failure_classes.iter().any(|item| item == failure_class) {
