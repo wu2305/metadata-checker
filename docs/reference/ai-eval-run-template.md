@@ -105,6 +105,12 @@
 改名或补充 `SKILL.md` 路由规则的依据。`command_kind` 来自模型，键中截断到 64 字符；该值
 已原样存在 `command_trace` 中，不构成新的信息泄露。
 
+target 比较按 CLI 自身的规范化进行，而不是逐字符相等：`--query-dataflow` 的裸名与 `model:` 前缀
+写法在 CLI 内部解析到同一个节点、输出逐字节相同，因此视为同一条命令。否则「动词选对、实体也选对，
+只是多写了一个类型前缀」会被记成路由失败，`command_rejected` 与本表就会谎报并不存在的接口缺陷。
+放宽只限 `--query-dataflow`（其 CLI 参数就写作 `<MODEL>`，前缀是可选修饰）；其它命令的
+`comp:` / `action:` / `field:` 前缀是消歧义所必需的，剥掉仍判拒绝。
+
 `command_route_usage` 与之互补，把每条**被接受**的命令按
 `<task_family> -> <command_kind> (primary|alternate)` 聚合。`minimal_command_plan`
 支持语义等价的 `alternatives` 之后，「模型选中规范动词」与「模型选了另一条同样能拿到
@@ -137,6 +143,13 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests
 `api_trigger_m58_llm` 先跑 runtime contract preflight：在独立 subshell 中执行与 live stage 完全相同的 `export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"` 与 `export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"`，验证仅有 `CNB_TOKEN + CNB_REPO_SLUG` 时空/缺失的 `M58_CNB_REPO` 会回退到 `CNB_REPO_SLUG`、空/缺失的 `M58_CNB_MODEL` 会回退到 `deepseek-v4-flash`，同时确认显式覆盖不会被默认值覆盖。
 
 `M58_METADATA_CHECKER_BIN` 由 build stage 生成的 release binary 路径提供，不是本地凭据或手工配置要求。运行前先构建 release binary，使用每个 case/trial 独立的 graphdb，并串行执行 case，避免 redb 锁冲突。报告默认写入 `target/m58-ai-eval/`；发布或归档前只上传结构化 JSON/Markdown。
+
+report stage 整份输出 `run.md`，不再用 `grep` 逐字段抽取 `run.json`。`grep` 只能匹配键名所在行，
+`failure_classes`、`command_trace_stats` 这类聚合对象的体永远打不出来，`grep -A N` 又会把命令轨迹
+从中间截断——一次 live 评测跑完，日志里不足以判断模型为什么失败，只能回到本地重跑。`run.md`
+由同一份 `RunReport` 投影而来，除既有汇总外还包含 `## Judge notes (failing cases)`（失败 case 的
+确定性诊断）和 `## Command trace`（逐条命令的 kind/target/args/budget/plan_step_index/route/accepted
+等经 plan 校验过的入参），因此路径编造、动词误选这类失败可以直接从 CI 日志复盘，全程不含模型原文。
 
 ## 空上下文边界
 

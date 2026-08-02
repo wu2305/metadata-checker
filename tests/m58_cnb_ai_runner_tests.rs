@@ -114,6 +114,34 @@ fn test_m58_live_trial_contract_is_explicit() {
     }
 }
 
+/// CI 报告阶段必须整份输出 run.md。
+///
+/// 之前这一阶段用 `grep` 逐字段捞 run.json：grep 只匹配键名所在行，failure_classes /
+/// command_trace_stats 这类聚合对象的体永远打不出来，`grep -A N` 又把命令轨迹从中间截断。
+/// 结果是一次 CI 评测跑完，日志里没有足够信息判断模型为什么失败。
+#[test]
+fn test_m58_ci_report_stage_emits_full_markdown_report() {
+    let pipeline = std::fs::read_to_string(".cnb.yml").unwrap();
+    assert!(pipeline.contains("cat target/m58-ai-eval/run.md"));
+    assert!(
+        !pipeline.contains("target/m58-ai-eval/run.json\n        echo"),
+        "报告阶段不应再用 grep 逐字段抽取 run.json"
+    );
+}
+
+/// AI 评测集执行测试必须真的在 CI 里跑。
+///
+/// 它曾经在 main 与分支两条流水线里都被 `--skip` 掉，于是评测集回归在 CI 上永远是绿的。
+/// 缺真实项目语料现在由测试内的存在性门禁显式跳过，不再需要整条测试消失。
+#[test]
+fn test_m58_ai_eval_execution_test_is_not_skipped_in_ci() {
+    let pipeline = std::fs::read_to_string(".cnb.yml").unwrap();
+    assert!(
+        !pipeline.contains("--skip test_ai_eval_commands_execute_and_assert"),
+        "AI 评测执行测试不应在 CI 中被跳过"
+    );
+}
+
 /// 验证 fixture case 可以声明供报告和难度分析使用的任务维度。
 #[test]
 fn test_m58_loader_exposes_evaluation_dimensions() {
@@ -917,6 +945,11 @@ fn test_m58_run_report_is_structured_and_redacted() {
     assert_eq!(markdown.contains("missed_fact"), true);
     assert_eq!(markdown.contains("case_stable_pass_rate"), true);
     assert_eq!(markdown.contains("trial_index"), true);
+    // 命令轨迹与 judge 诊断必须在报告本体里。之前它们只能靠 CI 日志 grep 反推，
+    // 而 grep 拿不到对象体、`-A N` 又会截断，导致失败无法复盘。
+    assert_eq!(markdown.contains("## Command trace"), true);
+    assert_eq!(markdown.contains("## Judge notes"), true);
+    assert_eq!(markdown.contains("short note"), true);
     assert_eq!(markdown.contains("prompt"), false);
     assert_eq!(markdown.contains("answer"), false);
 
@@ -1405,6 +1438,99 @@ fn test_m58_runner_accepts_plan_alternative_and_records_route() {
     assert!(
         !trace.output_sections.is_empty(),
         "备选命令必须真的执行过 CLI 并回传 section"
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// `--query-dataflow` 的裸名与 `model:` 前缀写法必须视为同一条命令。
+///
+/// CLI 内部会把两种写法规范化到同一个节点，输出逐字节相同。精确字符串比较会把
+/// 「动词选对、实体也选对，只是多写了一个类型前缀」记成路由失败，让 command_rejected
+/// 和 command_routing_confusion 谎报工具表面的缺陷。
+#[test]
+fn test_m58_runner_accepts_dataflow_target_with_model_prefix() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "dataflow_output_source")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+    assert_eq!(step["command_kind"], "--query-dataflow");
+    assert_eq!(step["target"], "dataflow_output");
+
+    let output_dir = unique_test_output_dir("m58-dataflow-prefix");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": "--query-dataflow",
+        "target": "model:dataflow_output",
+        "args": step["args"],
+        "budget": step["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary：dataflow_output 由 DataFlow 的输出节点产生。",
+    });
+    let mut adapter =
+        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 1);
+    let trace = &report.command_trace[0];
+    assert!(trace.accepted, "带 model: 前缀的等价 target 必须被接受");
+    assert_eq!(trace.plan_step_index, Some(0));
+    assert_eq!(trace.route.as_deref(), Some("primary"));
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 类型前缀的放宽只针对 `--query-dataflow`；其它命令的前缀是消歧义所必需的。
+#[test]
+fn test_m58_runner_still_rejects_stripped_prefix_for_other_commands() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "fixture_condition_input1_visible_disabled")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+    let stripped = step["target"]
+        .as_str()
+        .unwrap()
+        .split_once(':')
+        .expect("target 必须带类型前缀")
+        .1
+        .to_string();
+
+    let output_dir = unique_test_output_dir("m58-prefix-strict");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": stripped,
+        "args": step["args"],
+        "budget": step["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary。",
+    });
+    let mut adapter =
+        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 1);
+    assert!(
+        !report.command_trace[0].accepted,
+        "非 dataflow 命令剥掉类型前缀后不应被接受"
     );
 
     std::fs::remove_dir_all(output_dir).unwrap();

@@ -328,13 +328,34 @@ struct PlanVariant {
 }
 
 impl PlanVariant {
-    /// 与模型命令做精确比较；budget 的两种省略写法视为相同。
+    /// 与模型命令比较；budget 的两种省略写法视为相同，target 按 CLI 自身的规范化比较。
     fn matches(&self, request: &CommandRequest) -> bool {
         self.command_kind == request.command_kind
-            && self.target == request.target
+            && targets_match(&self.command_kind, &self.target, &request.target)
             && self.args == request.args
             && budgets_match(&self.budget, &request.budget)
     }
+}
+
+/// `--query-dataflow` 的 target 在 CLI 内部会被规范化成 `model:<name>`：裸名和带前缀写法
+/// 解析到同一个节点，输出逐字节相同。用精确字符串比较会把「动词选对、实体也选对，只是多写了
+/// 一个类型前缀」记成路由失败，于是 `command_rejected` 和 `command_routing_confusion` 里混进
+/// 了根本不是接口缺陷的条目——评测本身谎报了工具表面的质量。
+///
+/// 只对 `--query-dataflow` 放宽：它的 CLI 参数就写作 `<MODEL>`，前缀是可选修饰。其它命令的
+/// `comp:` / `action:` / `field:` 前缀是消歧义所必需的，不能一并剥掉。
+fn targets_match(command_kind: &str, plan_target: &str, request_target: &str) -> bool {
+    if plan_target == request_target {
+        return true;
+    }
+    if command_kind != "--query-dataflow" {
+        return false;
+    }
+    strip_dataflow_prefix(plan_target) == strip_dataflow_prefix(request_target)
+}
+
+fn strip_dataflow_prefix(target: &str) -> &str {
+    target.strip_prefix("model:").unwrap_or(target)
 }
 
 /// 命令命中 plan 的方式。
@@ -1246,6 +1267,71 @@ fn render_report_markdown(report: &RunReport) -> String {
         markdown.push_str("被接受的命令按 `<task_family> -> <命令> (primary|alternate)` 聚合。`alternate` 表示模型走的是等价备选路由而非规范动词，占比越高说明规范动词越不自解释。\n\n");
         for (route, count) in &report.command_route_usage {
             markdown.push_str(&format!("- `{}`: {count}\n", escape_markdown_cell(route)));
+        }
+    }
+
+    // judge_notes 是不含模型原文的确定性诊断，是「为什么判 missed_fact」的唯一线索；
+    // 只列失败 case，通过的 case 没有可复盘的东西。
+    markdown.push_str("\n## Judge notes (failing cases)\n\n");
+    let mut has_notes = false;
+    for case in &report.cases {
+        if case.passed || case.judge_notes.is_empty() {
+            continue;
+        }
+        has_notes = true;
+        markdown.push_str(&format!(
+            "- `{}` trial {}: {}\n",
+            escape_markdown_cell(&case.case_id),
+            case.trial_index,
+            case.judge_notes
+                .iter()
+                .map(|note| escape_markdown_cell(note))
+                .collect::<Vec<_>>()
+                .join("; "),
+        ));
+    }
+    if !has_notes {
+        markdown.push_str("- 无\n");
+    }
+
+    // 逐条命令轨迹必须落在报告里，不能靠 CI 日志 grep 反推：grep 只能匹配键名所在行，
+    // 拿不到对象体，被截断的轨迹会让「模型编了个不存在的路径」这类失败无法复盘。
+    // 这些字段都是被 plan 校验过的命令入参，不含模型原文。
+    markdown.push_str("\n## Command trace\n\n");
+    if report
+        .cases
+        .iter()
+        .all(|case| case.command_trace.is_empty())
+    {
+        markdown.push_str("- 无命令\n");
+    } else {
+        markdown.push_str(
+            "| case_id | trial_index | command_kind | target | args | budget | plan_step_index | route | accepted | detail_request | budget_upgrade | output_sections |\n",
+        );
+        markdown.push_str(
+            "| --- | ---: | --- | --- | --- | --- | ---: | --- | --- | --- | --- | --- |\n",
+        );
+        for case in &report.cases {
+            for trace in &case.command_trace {
+                markdown.push_str(&format!(
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+                    escape_markdown_cell(&case.case_id),
+                    case.trial_index,
+                    escape_markdown_cell(&trace.command_kind),
+                    escape_markdown_cell(&trace.target),
+                    escape_markdown_cell(&trace.args.join(" ")),
+                    escape_markdown_cell(trace.budget.as_deref().unwrap_or("-")),
+                    trace
+                        .plan_step_index
+                        .map(|index| index.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    escape_markdown_cell(trace.route.as_deref().unwrap_or("-")),
+                    trace.accepted,
+                    trace.detail_request,
+                    trace.budget_upgrade,
+                    escape_markdown_cell(&trace.output_sections.join(" ")),
+                ));
+            }
         }
     }
     markdown

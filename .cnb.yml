@@ -50,6 +50,9 @@
       script: cargo fmt --check
     - name: check benches
       script: cargo check --benches
+    # AI 评测执行测试之前被整条排除，因为语料里的真实项目 case 指向维护者本机路径，
+    # 在 CI 上必然失败。现在缺语料由测试内的存在性门禁显式跳过，
+    # fixture case 可以正常在 CI 跑——继续 skip 只会让 AI 评测集的回归无人发现。
     - name: test and coverage
       script: |
         rm -rf target/debug
@@ -60,8 +63,7 @@
           --lcov \
           --output-path lcov.info \
           -- \
-          --test-threads=1 \
-          --skip test_ai_eval_commands_execute_and_assert
+          --test-threads=1
         test -s lcov.info
     - name: report rust coverage
       type: testing:coverage
@@ -459,6 +461,8 @@
   env:
     CARGO_TARGET_DIR: target/cnb/coverage
   stages:
+    # 同 main 分支：AI 评测执行测试不再被排除，
+    # 缺真实项目语料现在是测试内的显式跳过，而不是整条测试消失。
     - name: rust ci
       if: '[ "$CNB_BRANCH" != "main" ]'
       script: |
@@ -475,8 +479,7 @@
           --lcov \
           --output-path lcov.info \
           -- \
-          --test-threads=1 \
-          --skip test_ai_eval_commands_execute_and_assert
+          --test-threads=1
         test -s lcov.info
         cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown
 
@@ -552,18 +555,12 @@
         test -s target/m58-ai-eval/run.json
         test -s target/m58-ai-eval/run.md
         echo "M58 RunReport: target/m58-ai-eval/run.json"
-        grep -E '"(provider|model_id|cnb_build_id|pass_rate|trial_pass_rate|trial_count|case_count|case_stable_pass_rate|cases_with_flaky_trials|failure_classes|judge_notes|command_trace_stats)"' \
-          target/m58-ai-eval/run.json
-        echo "M58 command trace fields (safe diagnostic subset):"
-        grep -E -A 8 '"(case_id|command_kind|target|args|budget|plan_step_index|accepted|detail_request|budget_upgrade|output_sections)"' \
-          target/m58-ai-eval/run.json
-        # 路由混淆矩阵是工具接口指标，需要单独打印：上面的字段 grep 只匹配键名所在行，
-        # 拿不到 command_routing_confusion 对象内的条目。
-        echo "M58 command routing confusion (<task_family> -> chosen command):"
-        sed -n '/"command_routing_confusion"/,/}/p' target/m58-ai-eval/run.json
-        # 被接受命令的实际路由；alternate 占比高说明规范动词不是模型的自然选择。
-        echo "M58 command route usage (<task_family> -> command (primary|alternate)):"
-        sed -n '/"command_route_usage"/,/}/p' target/m58-ai-eval/run.json
+        # 这里必须整份 cat run.md，不能再用 grep 逐字段捞。
+        # grep 只匹配键名所在行，failure_classes / command_trace_stats 这类聚合对象的
+        # 体永远打不出来，`grep -A N` 又会把命令轨迹从中间截断——两种都让 CI 日志无法复盘，
+        # 只能回到本地重跑。run.md 由 render_report_markdown 从同一份 RunReport 投影而来，
+        # 是确定性的且不含模型原文，本身就是给人看的那一份。
+        cat target/m58-ai-eval/run.md
 
 main:
   push: *main_authoritative_ci

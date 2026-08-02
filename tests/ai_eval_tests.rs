@@ -2,7 +2,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 static CLI_LOCK: Mutex<()> = Mutex::new(());
@@ -436,6 +436,7 @@ fn test_ai_eval_commands_execute_and_assert() {
     let temp_str = temp_dir.to_str().unwrap();
     let cases = load_ai_eval_cases();
     let mut failures: Vec<String> = Vec::new();
+    let mut skipped_missing_corpus: Vec<String> = Vec::new();
 
     for case in &cases {
         let case_id = case["case_id"].as_str().unwrap_or("?").to_string();
@@ -443,6 +444,19 @@ fn test_ai_eval_commands_execute_and_assert() {
             .get("requires_real_project")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+
+        // 真实项目语料只存在于维护者本机，CI 与其它机器上 project_dir 根本不存在。
+        // scan_project 对缺失目录返回 Ok，于是「语料缺失」会伪装成一串断言失败，
+        // 把真正的回归淹没掉。这里显式跳过并计数，让缺语料和判分失败不再同形。
+        if is_real_project {
+            let declared_project_dir = case["project_dir"].as_str().unwrap_or("");
+            if declared_project_dir.is_empty() || !Path::new(declared_project_dir).exists() {
+                skipped_missing_corpus
+                    .push(format!("{case_id} (project_dir={declared_project_dir})"));
+                continue;
+            }
+        }
+
         let cmds = case["required_commands"]
             .as_array()
             .expect("required_commands 必须是数组");
@@ -563,6 +577,14 @@ fn test_ai_eval_commands_execute_and_assert() {
 
     // 清理临时目录
     let _ = std::fs::remove_dir_all(&temp_dir);
+
+    if !skipped_missing_corpus.is_empty() {
+        println!(
+            "AI eval 跳过 {} 个真实项目 case（本机没有对应语料）:\n  {}",
+            skipped_missing_corpus.len(),
+            skipped_missing_corpus.join("\n  ")
+        );
+    }
 
     if !failures.is_empty() {
         panic!(
