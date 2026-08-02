@@ -544,6 +544,10 @@
       script: |
         export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"
         export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"
+        # 不设置时完全不发 reasoning_effort，请求体与历史基线逐字节相同。
+        # 设为 low/medium/high 会打开模型思考（实测：不带该字段时 reasoning_content 恒为空，
+        # 该 build 的 ai-audit 也显示 thinking_tokens=0）。
+        export M58_CNB_REASONING_EFFORT="${M58_CNB_REASONING_EFFORT:-}"
         test "${M58_AI_EVAL_TRIALS:-0}" -gt 1
         test -n "${CNB_TOKEN:-}"
         test -f target/cnb/m58-ai-eval-build/release/metadata-checker

@@ -13,7 +13,7 @@
 
 ```json
 {
-  "schema_version": "1.3.0",
+  "schema_version": "1.4.0",
   "provider": "cnb-ai-chat",
   "model_id": "gpt-5.4-mini",
   "cnb_build_id": "build-20260727",
@@ -63,7 +63,9 @@
     "budget_upgrade_count": 0
   },
   "command_routing_confusion": {},
-  "command_route_usage": {}
+  "command_route_usage": {},
+  "reasoning_effort": null,
+  "reasoning_chars": 0
 }
 ```
 
@@ -147,7 +149,24 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests
   与请求不一致时直接失败——否则换成 `gemma4-31b` 只会得到一份标着 gemma4、实际由默认模型
   回答的报告，跨模型对比会静默失效。换模型前先用一次 `ai-chat-completions` 确认该模型真的被路由；
 - `M58_AI_EVAL_TRIALS`：live 默认 `3`；本地/fake runner 默认 `1`，每个 trial 使用独立 history、workspace 和 graphdb；
-- `M58_CNB_API_BASE`：可选，仅用于测试 endpoint 覆盖。
+- `M58_CNB_API_BASE`：可选，仅用于测试 endpoint 覆盖；
+- `M58_CNB_REASONING_EFFORT`：可选，取值 `low` / `medium` / `high`。**不设置时完全不发该字段，
+  模型在零思考状态下作答**——已实测：不带该字段时 SSE 的 `reasoning_content` 恒为 0 字符，
+  对应 build 的 `ai-audit` 也显示 `thinking_tokens: 0`；带上任意取值即产出推理内容。
+  该字段不在 CNB swagger 声明的 body schema 里，属于实测可用的透传参数，因此 runner 会在
+  请求了推理却收到 0 字符时直接失败，避免产出一份「标着开了推理、实际没推理」的基线。
+  报告中的 `reasoning_effort` 与 `reasoning_chars` 记录本次 run 的实际情况；只记长度不记原文。
+
+服务端每次构建的真实 AI 用量可以从 OpenAPI 取到，它是模型与思考量的权威来源：
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.cnb.cool/<repo>/-/build/logs/ai-audit/<sn>/<pipelineId>"
+```
+
+返回按模型名拆分的 `prompt_tokens` / `completion_tokens` / `thinking_tokens` /
+`prompt_cached_tokens` / `request_count` / `milli_credit`，可用来交叉验证报告里的 `model_id`
+和推理是否真的发生，以及核算每次 run 的实际成本。
 
 `api_trigger_m58_llm` 先跑 runtime contract preflight：在独立 subshell 中执行与 live stage 完全相同的 `export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"` 与 `export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"`，验证仅有 `CNB_TOKEN + CNB_REPO_SLUG` 时空/缺失的 `M58_CNB_REPO` 会回退到 `CNB_REPO_SLUG`、空/缺失的 `M58_CNB_MODEL` 会回退到 `deepseek-v4-flash`，同时确认显式覆盖不会被默认值覆盖。
 

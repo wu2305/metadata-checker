@@ -594,6 +594,13 @@ pub(crate) struct ChatRequest {
     pub(crate) model: String,
     /// 是否请求流式响应。
     pub(crate) stream: bool,
+    /// 推理力度。CNB 的 swagger body schema 只声明了 messages/model/stream，但该端点
+    /// 实测会把 `reasoning_effort` 透传给上游：不带该字段时 `reasoning_content` 恒为空
+    /// （多次实测均为 0 字符），带上任意取值就会产出 200~340 字符的推理内容。
+    /// 因此默认必须是 None——省略字段时序列化出的请求体与历史基线逐字节一致，
+    /// 已有的 run 仍然可比。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning_effort: Option<String>,
 }
 
 /// CNB SSE 流中的单个增量块，包含一个 choices 列表。
@@ -615,6 +622,9 @@ struct ChatChoice {
 #[derive(Debug, Deserialize)]
 struct ChatDelta {
     content: Option<String>,
+    /// 模型的思考内容。只用来统计长度，绝不进入 history、报告或日志。
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }
 
 /// LLM adapter 的最小同步接口。
@@ -662,6 +672,14 @@ pub(crate) struct CnbChatAdapter {
     repo: String,
     token: String,
     model: String,
+    /// 透传给上游的 reasoning_effort；None 表示完全不发该字段。
+    reasoning_effort: Option<String>,
+    /// 本 adapter 累计收到的 reasoning_content 字符数。
+    ///
+    /// 只记长度不记内容：推理原文和模型回答一样不允许进报告。这个计数的用途是证明
+    /// `reasoning_effort` 真的生效了——该字段未被 swagger 声明，如果哪天上游默默忽略它，
+    /// 报告会像模型名被静默替换那样，标着「开了推理」其实一次都没推理。
+    reasoning_chars: usize,
 }
 
 impl fmt::Debug for CnbChatAdapter {
@@ -685,7 +703,23 @@ impl CnbChatAdapter {
         let model = required_env("M58_CNB_MODEL")?;
         let endpoint = std::env::var("M58_CNB_API_BASE")
             .unwrap_or_else(|_| "https://api.cnb.cool".to_string());
-        Self::new(endpoint, repo, token, model)
+        let mut adapter = Self::new(endpoint, repo, token, model)?;
+        // 缺省不发 reasoning_effort，保持与历史基线逐字节相同的请求体。
+        adapter.reasoning_effort = std::env::var("M58_CNB_REASONING_EFFORT")
+            .ok()
+            .map(|effort| effort.trim().to_string())
+            .filter(|effort| !effort.is_empty());
+        Ok(adapter)
+    }
+
+    /// 覆盖 reasoning_effort，供测试与显式配置使用。
+    pub(crate) fn set_reasoning_effort(&mut self, reasoning_effort: Option<String>) {
+        self.reasoning_effort = reasoning_effort;
+    }
+
+    /// 累计收到的 reasoning_content 字符数（不含内容本身）。
+    pub(crate) fn reasoning_chars(&self) -> usize {
+        self.reasoning_chars
     }
 
     /// 创建 CNB adapter；endpoint 可替换为本地 HTTP fake server。
@@ -717,6 +751,8 @@ impl CnbChatAdapter {
             repo: repo.trim_matches('/').to_string(),
             token,
             model,
+            reasoning_effort: None,
+            reasoning_chars: 0,
         })
     }
 
@@ -732,6 +768,7 @@ impl ModelAdapter for CnbChatAdapter {
         let mut payload = request.clone();
         payload.model = self.model.clone();
         payload.stream = true;
+        payload.reasoning_effort = self.reasoning_effort.clone();
         let response = self
             .client
             .post(self.chat_url())
@@ -757,7 +794,8 @@ impl ModelAdapter for CnbChatAdapter {
             bail!("CNB AI Chat 响应 Content-Type 必须为 text/event-stream，实际为 {content_type}");
         }
 
-        let (content, served_model) = parse_sse_content(&body)?;
+        let (content, served_model, reasoning_chars) = parse_sse_content(&body)?;
+        self.reasoning_chars += reasoning_chars;
         // CNB 对未知模型名不会报错，而是静默用默认模型服务请求（已实测：
         // 请求 `definitely-not-a-real-model-xyz` 同样返回 deepseek-v4-flash）。
         // 不校验的话，把 M58_CNB_MODEL 换成 gemma4-31b 只会得到一份「标着 gemma4、
@@ -777,9 +815,10 @@ impl ModelAdapter for CnbChatAdapter {
 }
 
 /// 解析 CNB SSE 响应，返回拼接后的文本与实际服务模型。
-fn parse_sse_content(body: &str) -> Result<(String, Option<String>)> {
+fn parse_sse_content(body: &str) -> Result<(String, Option<String>, usize)> {
     let mut content = String::new();
     let mut served_model: Option<String> = None;
+    let mut reasoning_chars = 0usize;
     let mut saw_done = false;
 
     for line in body.lines() {
@@ -818,6 +857,10 @@ fn parse_sse_content(body: &str) -> Result<(String, Option<String>)> {
             if let Some(fragment) = delta.content {
                 content.push_str(&fragment);
             }
+            // 只累加长度：推理原文与模型回答同级敏感，不允许离开这个函数。
+            if let Some(reasoning) = delta.reasoning_content {
+                reasoning_chars += reasoning.chars().count();
+            }
         }
     }
 
@@ -828,7 +871,7 @@ fn parse_sse_content(body: &str) -> Result<(String, Option<String>)> {
         bail!("CNB AI Chat SSE 内容为空");
     }
 
-    Ok((content, served_model))
+    Ok((content, served_model, reasoning_chars))
 }
 
 /// 读取必需的非空环境变量。
@@ -990,6 +1033,16 @@ pub(crate) struct RunReport {
     /// 能力为代价：`alternate` 占比高说明规范动词不是模型的自然选择。
     #[serde(default)]
     pub(crate) command_route_usage: BTreeMap<String, usize>,
+    /// 本次 run 请求的 reasoning_effort；None 表示完全没有发该字段。
+    ///
+    /// 必须落在报告里：不发该字段时模型的 `reasoning_content` 恒为空，等于整个 run 在零思考
+    /// 状态下跑完。不记录的话，「开了推理」和「没开推理」的两份报告长得一模一样，无法比较。
+    pub(crate) reasoning_effort: Option<String>,
+    /// 本次 run 收到的 reasoning_content 总字符数（不含内容本身）。
+    ///
+    /// 用于证明 `reasoning_effort` 真的生效：该字段未被 CNB swagger 声明，上游一旦默默忽略它，
+    /// 这里会是 0，报告就不会谎称跑的是「带思考」的基线。
+    pub(crate) reasoning_chars: usize,
 }
 
 impl RunReport {
@@ -1098,7 +1151,7 @@ impl RunReport {
             command_trace_stats.total_commands as f64 / cases.len() as f64
         };
         Self {
-            schema_version: "1.3.0".to_string(),
+            schema_version: "1.4.0".to_string(),
             provider,
             model_id,
             cnb_build_id,
@@ -1114,7 +1167,19 @@ impl RunReport {
             command_trace_stats,
             command_routing_confusion,
             command_route_usage,
+            reasoning_effort: None,
+            reasoning_chars: 0,
         }
+    }
+
+    /// 记录本次 run 实际请求的推理力度与收到的推理字符数。
+    pub(crate) fn set_reasoning(
+        &mut self,
+        reasoning_effort: Option<String>,
+        reasoning_chars: usize,
+    ) {
+        self.reasoning_effort = reasoning_effort;
+        self.reasoning_chars = reasoning_chars;
     }
 }
 
@@ -1252,7 +1317,7 @@ fn render_report_markdown(report: &RunReport) -> String {
     let mut markdown = String::new();
     markdown.push_str("# M58 AI Eval Run\n\n");
     markdown.push_str(&format!(
-        "- provider: `{}`\n- model: `{}`\n- cnb_build_id: `{}`\n- started_at: `{}`\n- pass_rate: `{:.4}`\n- trial_pass_rate: `{:.4}`\n- trial_count: `{}`\n- case_count: `{}`\n- case_stable_pass_rate: `{:.4}`\n- cases_with_flaky_trials: `{}`\n- average_commands_per_case: `{:.4}`\n- average_commands_per_trial: `{:.4}`\n- budget_upgrade_count: `{}`\n\n",
+        "- provider: `{}`\n- model: `{}`\n- cnb_build_id: `{}`\n- started_at: `{}`\n- pass_rate: `{:.4}`\n- trial_pass_rate: `{:.4}`\n- trial_count: `{}`\n- case_count: `{}`\n- case_stable_pass_rate: `{:.4}`\n- cases_with_flaky_trials: `{}`\n- average_commands_per_case: `{:.4}`\n- average_commands_per_trial: `{:.4}`\n- budget_upgrade_count: `{}`\n- reasoning_effort: `{}`\n- reasoning_chars: `{}`\n\n",
         escape_markdown_cell(&report.provider),
         escape_markdown_cell(&report.model_id),
         escape_markdown_cell(report.cnb_build_id.as_deref().unwrap_or("")),
@@ -1266,6 +1331,8 @@ fn render_report_markdown(report: &RunReport) -> String {
         report.command_trace_stats.average_commands_per_case,
         report.command_trace_stats.average_commands_per_trial,
         report.command_trace_stats.budget_upgrade_count,
+        escape_markdown_cell(report.reasoning_effort.as_deref().unwrap_or("none")),
+        report.reasoning_chars,
     ));
     markdown.push_str(
         "| case_id | trial_index | task_family | difficulty | status | failure_classes | command_count |\n",
@@ -1586,6 +1653,7 @@ fn run_case_for_trial(
             messages: history.clone(),
             model: config.model_id.clone(),
             stream: false,
+            reasoning_effort: None,
         };
         // 只有 adapter 成功返回 assistant content 时，runner 才进入协议解析路径。
         // adapter/HTTP/SSE 层失败说明 provider/runtime 未产出可解析文本，归为 runner_error。

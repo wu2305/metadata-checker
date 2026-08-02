@@ -395,6 +395,7 @@ fn test_m58_fake_adapter_records_history_and_fails_when_empty() {
         }],
         model: "ignored-by-fake".to_string(),
         stream: false,
+        reasoning_effort: None,
     };
 
     assert_eq!(adapter.complete(&request).unwrap(), "first");
@@ -432,6 +433,7 @@ fn test_m58_cnb_adapter_sends_redacted_safe_request() {
         }],
         model: "caller-override-model".to_string(),
         stream: true,
+        reasoning_effort: None,
     };
     assert_eq!(
         adapter.complete(&request).unwrap(),
@@ -505,6 +507,62 @@ fn test_m58_cnb_sse_rejects_non_event_stream_content_type() {
     server.join().unwrap();
     assert!(error.contains("Content-Type"));
     assert!(error.contains("text/event-stream"));
+}
+
+/// 缺省不得发送 reasoning_effort，否则历史基线不可比。
+///
+/// CNB swagger 的 body schema 只声明 messages/model/stream。多发一个字段会改变请求体，
+/// 之前所有 run 都是在不带该字段的条件下跑出来的。
+#[test]
+fn test_m58_chat_request_omits_reasoning_effort_by_default() {
+    let request = ChatRequest {
+        messages: Vec::new(),
+        model: "m".to_string(),
+        stream: true,
+        reasoning_effort: None,
+    };
+    let body = serde_json::to_string(&request).unwrap();
+    assert!(
+        !body.contains("reasoning_effort"),
+        "缺省请求体不得包含 reasoning_effort: {body}"
+    );
+
+    let with_effort = ChatRequest {
+        reasoning_effort: Some("high".to_string()),
+        ..request
+    };
+    let body = serde_json::to_string(&with_effort).unwrap();
+    assert!(body.contains("\"reasoning_effort\":\"high\""));
+}
+
+/// 统计 reasoning_content 长度，但绝不把推理原文带出解析层。
+///
+/// 该计数是 `reasoning_effort` 是否真的生效的唯一证据：不带该字段时实测恒为 0。
+#[test]
+fn test_m58_cnb_adapter_counts_reasoning_chars_without_leaking_them() {
+    let secret_reasoning = "让我想想这道题目的解法";
+    let response_body = format!(
+        "data: {{\"model\":\"model\",\"choices\":[{{\"delta\":{{\"reasoning_content\":\"{secret_reasoning}\"}}}}]}}\n\n\
+         data: {{\"model\":\"model\",\"choices\":[{{\"delta\":{{\"content\":\"ok\"}}}}]}}\n\n\
+         data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", &response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        "m58-reasoning-secret".to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let content = adapter.complete(&empty_chat_request()).unwrap();
+    server.join().unwrap();
+    assert_eq!(content, "ok", "推理内容不得混进 assistant content");
+    assert_eq!(
+        adapter.reasoning_chars(),
+        secret_reasoning.chars().count(),
+        "必须按字符数统计推理长度"
+    );
 }
 
 /// 验证服务端静默换模型时会报错，而不是产出一份标着错误模型名的基线。
@@ -980,7 +1038,7 @@ fn test_m58_run_report_is_structured_and_redacted() {
 
     let json = std::fs::read_to_string(&json_path).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["schema_version"], "1.3.0");
+    assert_eq!(parsed["schema_version"], "1.4.0");
     assert_eq!(parsed["cases"].as_array().unwrap().len(), 2);
     assert_eq!(parsed["command_trace_stats"]["accepted_commands"], 1);
     assert_eq!(parsed["trial_pass_rate"], 0.5);
@@ -1882,7 +1940,23 @@ fn test_m58_cnb_fixture_llm_baseline() {
     let expected_case_count = 13;
     validate_fixture_llm_case_count(&cases, expected_case_count).unwrap();
     let mut adapter = CnbChatAdapter::from_env().unwrap();
-    let report = run_fixture_llm_cases(&cases, &mut adapter, &config).unwrap();
+    let reasoning_effort = std::env::var("M58_CNB_REASONING_EFFORT")
+        .ok()
+        .map(|effort| effort.trim().to_string())
+        .filter(|effort| !effort.is_empty());
+    let mut report = run_fixture_llm_cases(&cases, &mut adapter, &config).unwrap();
+    report.set_reasoning(reasoning_effort.clone(), adapter.reasoning_chars());
+    // reasoning_effort 不在 CNB swagger 声明的 body schema 里，是实测出来的透传字段。
+    // 上游一旦默默忽略它，这份报告会标着「开了推理」而实际一次都没推理——和模型名被
+    // 静默替换是同一类静默失效，必须在写报告前就失败。
+    if reasoning_effort.is_some() {
+        assert!(
+            adapter.reasoning_chars() > 0,
+            "请求了 reasoning_effort={:?} 但整个 run 没有收到任何 reasoning_content；\
+             该字段可能已不再被上游接受，这份结果不能当作带推理的基线",
+            reasoning_effort
+        );
+    }
     write_run_report(
         &report,
         &output_dir.join("run.json"),
@@ -1994,6 +2068,7 @@ fn empty_chat_request() -> ChatRequest {
         }],
         model: "model".to_string(),
         stream: false,
+        reasoning_effort: None,
     }
 }
 
