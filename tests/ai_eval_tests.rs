@@ -437,6 +437,7 @@ fn test_ai_eval_commands_execute_and_assert() {
     let cases = load_ai_eval_cases();
     let mut failures: Vec<String> = Vec::new();
     let mut skipped_missing_corpus: Vec<String> = Vec::new();
+    let mut executed_cases = 0usize;
 
     for case in &cases {
         let case_id = case["case_id"].as_str().unwrap_or("?").to_string();
@@ -456,6 +457,8 @@ fn test_ai_eval_commands_execute_and_assert() {
                 continue;
             }
         }
+
+        executed_cases += 1;
 
         let cmds = case["required_commands"]
             .as_array()
@@ -585,6 +588,24 @@ fn test_ai_eval_commands_execute_and_assert() {
             skipped_missing_corpus.join("\n  ")
         );
     }
+
+    // libtest 只在测试失败时回放 println，绿色跑不会显示上面的跳过清单。
+    // 所以「跳过面扩大到把整个评测集吃掉」必须是一个断言，否则 CI 会安静地退化成空跑——
+    // 这正是这条测试原本被整条 --skip 掉时的失败方式。fixture case 永远不走跳过分支。
+    let fixture_case_count = cases
+        .iter()
+        .filter(|case| {
+            !case
+                .get("requires_real_project")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        })
+        .count();
+    assert!(
+        executed_cases >= fixture_case_count && fixture_case_count > 0,
+        "AI eval 实际执行 {executed_cases} 个 case，少于 fixture case 数 {fixture_case_count}；\
+         跳过清单: {skipped_missing_corpus:?}"
+    );
 
     if !failures.is_empty() {
         panic!(
