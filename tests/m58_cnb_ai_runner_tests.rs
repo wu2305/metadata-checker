@@ -1407,8 +1407,11 @@ fn test_m58_runner_accepts_plan_alternative_and_records_route() {
         .find(|case| case.case_id == "fixture_condition_input1_visible_disabled")
         .expect("case 必须存在")
         .clone();
-    let alternative = &case.value["minimal_command_plan"][0]["alternatives"][0];
+    // 必须挑一条真正收窄输出的备选。`--intent auto` 那条是 CLI 默认值的显式写法，
+    // 与 primary 逐字节等价，会（正确地）归类成 primary 而不是 alternate。
+    let alternative = &case.value["minimal_command_plan"][0]["alternatives"][1];
     assert_eq!(alternative["args"][0], "--intent");
+    assert_eq!(alternative["args"][1], "display");
 
     let output_dir = unique_test_output_dir("m58-plan-alternative");
     let config = fixture_runner_config(output_dir.clone());
@@ -1434,7 +1437,10 @@ fn test_m58_runner_accepts_plan_alternative_and_records_route() {
     assert_eq!(trace.plan_step_index, Some(0));
     assert_eq!(trace.route.as_deref(), Some("alternate"));
     // trace 记录的必须是模型选的写法，而不是 plan 的规范写法。
-    assert_eq!(trace.args, vec!["--intent".to_string(), "auto".to_string()]);
+    assert_eq!(
+        trace.args,
+        vec!["--intent".to_string(), "display".to_string()]
+    );
     assert!(
         !trace.output_sections.is_empty(),
         "备选命令必须真的执行过 CLI 并回传 section"
@@ -1485,6 +1491,89 @@ fn test_m58_runner_accepts_dataflow_target_with_model_prefix() {
     assert!(trace.accepted, "带 model: 前缀的等价 target 必须被接受");
     assert_eq!(trace.plan_step_index, Some(0));
     assert_eq!(trace.route.as_deref(), Some("primary"));
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 显式写出默认值 `--intent auto` 必须与整个省略视为同一条命令。
+///
+/// 两种写法在所有命令/target 上输出逐字节相同，把它记成路由失败等于谎报接口缺陷。
+#[test]
+fn test_m58_runner_accepts_explicit_default_intent_auto() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "fixture_condition_model_filter_user_var")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+    assert_eq!(step["args"].as_array().unwrap().len(), 0);
+
+    let output_dir = unique_test_output_dir("m58-intent-auto");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": step["target"],
+        "args": ["--intent", "auto"],
+        "budget": step["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary：model1 的过滤条件见 availability。",
+    });
+    let mut adapter =
+        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 1);
+    assert!(
+        report.command_trace[0].accepted,
+        "显式写出默认 --intent auto 必须被接受"
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 会真正收窄输出的 `--intent` 取值不能被一并放宽。
+#[test]
+fn test_m58_runner_still_rejects_narrowing_intent() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "fixture_condition_model_filter_user_var")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+
+    let output_dir = unique_test_output_dir("m58-intent-narrowing");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": step["target"],
+        "args": ["--intent", "availability"],
+        "budget": step["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary。",
+    });
+    let mut adapter =
+        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 1);
+    assert!(
+        !report.command_trace[0].accepted,
+        "--intent availability 会丢掉 model_io_facts，不能与默认写法等同"
+    );
 
     std::fs::remove_dir_all(output_dir).unwrap();
 }

@@ -111,6 +111,11 @@ target 比较按 CLI 自身的规范化进行，而不是逐字符相等：`--qu
 放宽只限 `--query-dataflow`（其 CLI 参数就写作 `<MODEL>`，前缀是可选修饰）；其它命令的
 `comp:` / `action:` / `field:` 前缀是消歧义所必需的，剥掉仍判拒绝。
 
+同理，`--intent auto` 是 CLI 默认值，显式写出与整个省略在所有命令/target 上输出逐字节相同，
+比较前一并去掉；因此 plan 里 `--intent auto` 形式的 alternative 会归类成 `primary` 而不是
+`alternate`——它本来就不是另一条路由。其它 `--intent` 取值不放宽：`--intent availability`
+对 model target 会真的丢掉 `model_io_facts`，选错了必须照实记为拒绝。
+
 `command_route_usage` 与之互补，把每条**被接受**的命令按
 `<task_family> -> <command_kind> (primary|alternate)` 聚合。`minimal_command_plan`
 支持语义等价的 `alternatives` 之后，「模型选中规范动词」与「模型选了另一条同样能拿到

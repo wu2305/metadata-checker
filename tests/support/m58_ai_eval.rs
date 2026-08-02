@@ -332,7 +332,7 @@ impl PlanVariant {
     fn matches(&self, request: &CommandRequest) -> bool {
         self.command_kind == request.command_kind
             && targets_match(&self.command_kind, &self.target, &request.target)
-            && self.args == request.args
+            && normalize_args(&self.args) == normalize_args(&request.args)
             && budgets_match(&self.budget, &request.budget)
     }
 }
@@ -356,6 +356,26 @@ fn targets_match(command_kind: &str, plan_target: &str, request_target: &str) ->
 
 fn strip_dataflow_prefix(target: &str) -> &str {
     target.strip_prefix("model:").unwrap_or(target)
+}
+
+/// `--intent auto` 是 CLI 的默认值，显式写出与整个省略在所有命令/target 上输出逐字节相同，
+/// 因此在比较前一并去掉。否则「写全默认值」这种无害写法会被记成路由失败，和 `model:` 前缀
+/// 一样让 `command_rejected` 谎报并不存在的接口缺陷。
+///
+/// 其它 `--intent` 取值不能一并放宽：例如 `--intent availability` 会真的收窄输出
+/// （对 model target 会丢掉 `model_io_facts`），选错了就是选错了，必须照实记为拒绝。
+fn normalize_args(args: &[String]) -> Vec<&str> {
+    let mut normalized = Vec::with_capacity(args.len());
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--intent" && args.get(index + 1).is_some_and(|value| value == "auto") {
+            index += 2;
+            continue;
+        }
+        normalized.push(args[index].as_str());
+        index += 1;
+    }
+    normalized
 }
 
 /// 命令命中 plan 的方式。
