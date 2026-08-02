@@ -165,7 +165,7 @@ pub struct AiOutput {
 | `target_id` | string | 目标节点 ID |
 | `target_type` | string | `Component` / `Model` / `Field` / `Page` |
 | `target_name` | string | 目标名称 |
-| `intent` | string | M33 起的遍历意图：`auto` / `display` / `value-source` / `writer` / `availability` / `context` |
+| `intent` | string | M33 起的遍历意图：`auto` / `display` / `value-source` / `writer` / `availability` / `context` / `action`（M58） |
 | `primary_reason` | string | 主因一句话说明 |
 | `answer_facts_count` | number | M33 `answer_facts` 中 fact block 数量 |
 | `blocking_conditions_count` | number | 阻塞条件数量（visible/disable/action condition） |
@@ -179,7 +179,7 @@ pub struct AiOutput {
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `target` | object | 目标节点信息：`node_id`、`node_type`、`name`、`path` |
-| `answer_facts` | object | M33 起面向 AI 直接回答的目标节点事实层，只展开当前 intent 激活的 display/value_source/writer/availability/context facts |
+| `answer_facts` | object | M33 起面向 AI 直接回答的目标节点事实层，只展开当前 intent 激活的 display/value_source/writer/availability/context/action facts |
 | `traversal_policy` | object | M33 起记录当前 intent 的允许边类型、方向、path budget 和停止条件 |
 | `proven_paths` | array | M33 已证明路径；compact 模式默认隐藏明细 |
 | `candidate_paths` | array | M33 候选路径；compact 模式默认隐藏明细 |
@@ -258,6 +258,7 @@ pub struct AiOutput {
 | `answer_facts.value_source_facts` | 仅在 value-source 或适用 auto intent 中出现；值来源事实，包含 `raw_expr`、`bare_symbol`、`nearest_data_context`、`field_path`、`table_source_path`、`proven_physical_input` |
 | `answer_facts.writer_facts` | 仅在 writer 或适用 auto intent 中出现；写入/生成事实，包含 writer path 摘要；无写入证明时 `missing_evidence` 必须说明 |
 | `answer_facts.availability_facts` | 仅在 availability 或适用 auto intent 中出现；数据可用性事实，包含 filter / totalRowCount__ gates |
+| `answer_facts.action_facts` | 仅在 action intent 中出现；`actions[]` 是目标自己挂的动作（Triggers 边），每条给出可直接执行的 `action_target`、`action_kind`、`trigger` 和 `gate_conditions[]`；`related_actions[]` 是门禁条件引用了本目标、但属于别的组件的动作 |
 | `answer_facts.context_facts` | 仅在 context intent 中出现；周边关系事实；宽上下文仍建议用 `--context` |
 | `answer_facts.model_io_facts` | 仅在 `model:` auto intent 中出现；给出模型读写摘要，避免模型 auto 只有 availability facts |
 | `answer_facts.traversal_policy` | intent 对应的 `allowed_edge_types`、`directions`、`max_paths`、`max_steps_per_path`、`stop_conditions` |
@@ -483,7 +484,7 @@ M34 在 \`answer_facts\` 中增加 DataFlow 内部字段级来源和可用性投
 | `depth` | number | `context` 可选 | 非负整数，默认 `1` |
 | `human` | boolean | 否 | 目前仅 `explain_condition` 支持；不支持 human 的命令会返回 `HUMAN_MODE_NOT_SUPPORTED` 诊断 |
 | `check_reload` | boolean | 否 | 查询前检测 graphdb 是否需要 reload |
-| `intent` | string | 否 | `explain_condition` 专用：`auto` / `display` / `value-source` / `writer` / `availability` / `context`，默认 `auto` |
+| `intent` | string | 否 | `explain_condition` 专用：`auto` / `display` / `value-source` / `writer` / `availability` / `context` / `action`，默认 `auto` |
 | `page_scope` | string | 否 | `advise_query` 专用：限定查询建议的页面范围 |
 
 成功响应：

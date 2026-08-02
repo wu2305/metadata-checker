@@ -639,6 +639,148 @@ fn graph_edge_ref(node: &crate::graph::Node, edge: &crate::graph::Edge) -> serde
     })
 }
 
+/// M58：action 轴事实块。
+///
+/// 数据全部来自既有图和既有 blocking_conditions，不新增任何解析：`Triggers` 边给出
+/// 组件挂了哪些动作，`owner_type = Action` 的条件给出每个动作的门禁表达式。
+/// 它存在的理由是用户问句里不可能出现内部 action id，而 `--explain` 又要求
+/// `action:<页面>|<组件>|<动作>` 这种精确文法；这里把可直接执行的 target 交回给模型。
+fn build_action_facts(
+    graph: &dyn GraphReadStore,
+    target_node: &crate::graph::Node,
+    blocking_conditions: &[serde_json::Value],
+    budget: &str,
+) -> serde_json::Value {
+    let max_actions = match budget {
+        "compact" => 3,
+        "full" => 10,
+        _ => 5,
+    };
+
+    // 动作门禁条件按所属动作归组；owner_node_id 已经是规范 action target。
+    let mut gates_by_action: std::collections::BTreeMap<String, Vec<&serde_json::Value>> =
+        std::collections::BTreeMap::new();
+    for cond in blocking_conditions {
+        if cond.get("owner_type").and_then(|v| v.as_str()) != Some("Action") {
+            continue;
+        }
+        let owner = match cond.get("owner_node_id").and_then(|v| v.as_str()) {
+            Some(owner) => owner.to_string(),
+            None => continue,
+        };
+        gates_by_action.entry(owner).or_default().push(cond);
+    }
+
+    let mut actions = Vec::new();
+    if let Some(neighbors) = graph.get_node_edges(&target_node.id).ok().flatten() {
+        for edge_view in neighbors.outgoing.iter() {
+            if edge_view.edge.edge_type != crate::graph::EdgeType::Triggers {
+                continue;
+            }
+            let node = &edge_view.node;
+            let gates = gates_by_action.remove(&node.id).unwrap_or_default();
+            actions.push(action_fact_entry(&node.id, Some(node), &gates, budget));
+        }
+    }
+
+    // 剩下的动作不挂在目标上，只是条件里引用了目标（例如 input1 的值门禁着
+    // button2 的动作）。它们是「为什么点不动」的关键证据，但绝不能算成目标自己的
+    // 动作，否则模型会把 button2 的动作说成 input1 的。
+    let mut related_actions = Vec::new();
+    for (action_target, gates) in gates_by_action {
+        related_actions.push(action_fact_entry(&action_target, None, &gates, budget));
+    }
+
+    let action_count = actions.len();
+    let related_action_count = related_actions.len();
+    actions.truncate(max_actions);
+    related_actions.truncate(max_actions);
+
+    let mut evidence_refs: Vec<serde_json::Value> = blocking_conditions
+        .iter()
+        .filter(|cond| cond.get("owner_type").and_then(|v| v.as_str()) == Some("Action"))
+        .map(evidence_ref_from_condition)
+        .collect();
+    evidence_refs.truncate(8);
+
+    let gated_count = actions
+        .iter()
+        .filter(|action| {
+            action
+                .get("gate_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+                > 0
+        })
+        .count();
+
+    let mut missing_evidence: Vec<String> = Vec::new();
+    if action_count == 0 {
+        missing_evidence.push(
+            "目标上没有 Triggers 出边，说明目标自己不挂动作；related_actions 里的动作属于别的组件"
+                .to_string(),
+        );
+    }
+    if action_count > actions.len() {
+        missing_evidence.push(format!(
+            "{} 个动作中只列出前 {} 个，用 --budget full 展开全部",
+            action_count,
+            actions.len()
+        ));
+    }
+    if action_count > 0 && gated_count == 0 {
+        missing_evidence
+            .push("列出的动作没有门禁条件，说明触发不受条件限制，而不是查询不完整".to_string());
+    }
+
+    serde_json::json!({
+        "result": if action_count == 0 && related_action_count == 0 {
+            "no_action_found"
+        } else if action_count == 0 {
+            "only_related_action_gate_found"
+        } else if gated_count > 0 {
+            "action_gate_condition_found"
+        } else {
+            "actions_found_without_gate"
+        },
+        "confidence": if action_count == 0 { "low" } else { "high" },
+        "action_count": action_count,
+        "actions": actions,
+        // 目标只是被这些动作的门禁条件引用，动作本身属于 action_target 里的那个组件。
+        "related_action_count": related_action_count,
+        "related_actions": related_actions,
+        "paths": [],
+        "evidence_refs": evidence_refs,
+        "missing_evidence": missing_evidence,
+    })
+}
+
+/// 单个动作的事实条目；`action_target` 可直接作为 `--explain` 的参数。
+fn action_fact_entry(
+    action_target: &str,
+    node: Option<&crate::graph::Node>,
+    gates: &[&serde_json::Value],
+    budget: &str,
+) -> serde_json::Value {
+    let gate_facts: Vec<serde_json::Value> = gates
+        .iter()
+        .map(|cond| compact_condition_fact_for_budget(cond, budget))
+        .collect();
+    serde_json::json!({
+        "action_target": action_target,
+        "action_id": action_target.rsplit('|').next(),
+        // 节点名形如 `<动作类型>:<动作 id>`，是模型判断「点了之后做什么」的第一手线索。
+        "action_kind": node.map(|node| node.name.as_str()),
+        "trigger": node
+            .and_then(|node| node.meta.as_ref())
+            .and_then(|meta| meta.get("triggerType"))
+            .and_then(|v| v.as_str()),
+        "gate_count": gate_facts.len(),
+        "gate_conditions": gate_facts,
+        "next_command": crate::output::schema::format_next_query("--explain {}", action_target),
+    })
+}
+
 fn build_model_io_facts(
     graph: &dyn GraphReadStore,
     target_node: &crate::graph::Node,
@@ -759,6 +901,45 @@ pub(crate) fn build_primary_reason_for_intent(
             }
             return format!("目标 {} 未发现明确数据可用性门控", target_node.id);
         }
+        TraversalIntent::Action => {
+            let action_count = answer_facts
+                .get("action_facts")
+                .and_then(|v| v.get("action_count"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let related_count = answer_facts
+                .get("action_facts")
+                .and_then(|v| v.get("related_action_count"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            if action_count == 0 {
+                return format!(
+                    "目标 {} 自己不挂动作，但被 {} 个其他动作的门禁条件引用",
+                    target_node.id, related_count
+                );
+            }
+            let gated = answer_facts
+                .get("action_facts")
+                .and_then(|v| v.get("actions"))
+                .and_then(|v| v.as_array())
+                .map(|actions| {
+                    actions
+                        .iter()
+                        .filter(|action| {
+                            action
+                                .get("gate_count")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0)
+                                > 0
+                        })
+                        .count()
+                })
+                .unwrap_or(0);
+            return format!(
+                "目标 {} 挂了 {} 个动作，其中 {} 个有门禁条件",
+                target_node.id, action_count, gated
+            );
+        }
         TraversalIntent::Context | TraversalIntent::Auto => {}
     }
 
@@ -818,6 +999,7 @@ pub(crate) fn build_traversal_policy(intent: TraversalIntent, budget: &str) -> s
             TraversalIntent::ValueSource => serde_json::json!(["Reads", "FieldAlias", "DataflowOutput", "DataflowInput"]),
             TraversalIntent::Writer => serde_json::json!(["Reads(target bridge)", "Contains", "Writes", "ActionWrites", "FieldWrite", "FieldAlias"]),
             TraversalIntent::Availability => serde_json::json!(["DependsOn", "DataflowInput"]),
+            TraversalIntent::Action => serde_json::json!(["Triggers", "ActionWrites", "DependsOn"]),
             TraversalIntent::Context | TraversalIntent::Auto => serde_json::json!(["Reads", "Writes", "ActionWrites", "FieldWrite", "DependsOn", "Contains"]),
         },
         "directions": match intent {
@@ -825,6 +1007,7 @@ pub(crate) fn build_traversal_policy(intent: TraversalIntent, budget: &str) -> s
             TraversalIntent::Display => serde_json::json!(["incoming", "ancestor"]),
             TraversalIntent::ValueSource => serde_json::json!(["outgoing", "upstream"]),
             TraversalIntent::Availability => serde_json::json!(["incoming", "filter_refs"]),
+            TraversalIntent::Action => serde_json::json!(["outgoing", "owned_by_target"]),
             TraversalIntent::Context | TraversalIntent::Auto => serde_json::json!(["incoming", "outgoing"]),
         },
         "stop_conditions": match intent {
@@ -832,6 +1015,7 @@ pub(crate) fn build_traversal_policy(intent: TraversalIntent, budget: &str) -> s
             TraversalIntent::ValueSource => serde_json::json!(["proven_physical_input_found", "table_source_path_found", "field_origin_unprovable"]),
             TraversalIntent::Writer => serde_json::json!(["writer_path_found"]),
             TraversalIntent::Availability => serde_json::json!(["filter_or_total_row_count_gate_found"]),
+            TraversalIntent::Action => serde_json::json!(["action_gate_condition_found", "no_action_owned_condition"]),
             TraversalIntent::Context | TraversalIntent::Auto => serde_json::json!(["path_budget_exhausted"]),
         },
         "rank_rules": ["field-level paths before model-level paths", "proven paths before candidates", "paths with evidence before inferred paths"],
@@ -890,6 +1074,12 @@ pub(crate) fn build_answer_facts(
                 "evidence_refs": [],
                 "missing_evidence": ["use --context for broad surrounding context"],
             }),
+        );
+    }
+    if answer_fact_enabled(intent, target_node, AnswerFactKind::Action) {
+        facts.insert(
+            "action_facts".to_string(),
+            build_action_facts(graph, target_node, blocking_conditions, budget),
         );
     }
     if answer_fact_enabled(intent, target_node, AnswerFactKind::ModelIo) {

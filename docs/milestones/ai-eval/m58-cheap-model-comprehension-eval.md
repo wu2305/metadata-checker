@@ -88,7 +88,21 @@ RunReport 升到 `1.3.0`，新增 `command_route_usage`（按 `<task_family> -> 
 
 本地 `ai_eval_tests` 25/25、`m58_cnb_ai_runner_tests` 41 通过（1 个 live 测试按 token 门控 ignored），未触发 CI。
 
-#### 阻塞项：`--advise-query` 路由预言机暂不可用
+#### 工具接口缺陷修复（2026-08-02，经用户显式授权）
+
+下面三项原本记在「明确不做」里（不改 SKILL.md / 输出 schema / answer_contract），由用户显式授权后修复。它们都是**工具接口缺陷**，不是模型能力问题：
+
+1. **`--advise-query` 双前缀**：`--question-kind availability` 对已带前缀的 target 再拼一层，产出 `model:comp:app/x.spg|button2` 这种无效 target。改为统一走 `scoped_target()`：已带 `comp:`/`field:`/`model:`/`page:`/`action:`/`dataflow:`/`cond:` 前缀的原样返回，裸 ID 才按 question-kind 补前缀。同一个缺陷在 display/value-source/writer 上也存在（page_scope 与带前缀 target 同时给出时），一并修掉。
+2. **`--advise-query` 不发标准信封**：载荷原本是顶层裸 JSON，任何按 `AiOutput` 转发的消费方（例如 M58 runner 的 `filter_cli_output`）只会拿到 `{}`。现在统一走 `AiOutput`，新增 `OutputKind::QueryAdvice`，路由载荷原样放进 `details`（键名不变），`summary` 给出 `question_kind`/`primary_command`/`primary_target`，`next_queries` 给出可直接执行的命令串。`docs/reference/function-calling-runtime.md` 早就写着该工具返回 `result.summary`、`result.details`——这次是实现向已发布契约对齐。顺带：未识别的 question-kind 此前静默回退到 auto，现在会带 `UNKNOWN_QUESTION_KIND` 诊断。
+3. **补齐 action 轴**：新增 `TraversalIntent::Action`、`--intent action`、`--question-kind action` 与 `answer_facts.action_facts`。事实全部来自既有图与既有 blocking_conditions，不新增解析：`Triggers` 边给出目标挂了哪些动作，`owner_type = Action` 的条件给出门禁表达式。关键在于它把用户问句里不可能出现的 action id 以可直接执行的 `action:<页面>|<组件>|<动作>` 交回给模型，渐进披露因此变成工具保证而不是运气。
+
+修复过程中发现并一并修掉一个更早的缺陷：动作条件的 `owner_node_id` 此前算成 `action:<文件>|<组件>`，丢掉了动作段，指向一个不存在的节点——模型照着查必然落空。
+
+一个刻意的区分：组件被别的动作的门禁条件引用时（例如 `input1.value=='test'` 挡住 `button2` 的 action1），这些动作放在 `related_actions[]` 而不是 `actions[]`。它们是「为什么点不动」的关键证据，但把它们说成 input1 自己的动作就是幻觉。实测 `--intent action` 打在 `comp:...|input1` 上返回 `action_count=0`、`related_action_count=1`。
+
+`--intent action` 未并入 `auto`：既有 auto 查询的输出体积保持不变，action_facts 只在显式请求时出现。
+
+#### 阻塞项（已于 2026-08-02 修复，保留记录）
 
 `--advise-query --question-kind {display|value-source|availability|writer|page-logic|model-relationships}` 本可作为确定性路由预言机，直接验证「把推理搬进 Rust」这一主张，但两处输出层缺陷挡住了实验，且都落在「不得擅自修改输出逻辑」的约束内，故只记录不修改：
 
@@ -96,3 +110,5 @@ RunReport 升到 `1.3.0`，新增 `command_route_usage`（按 `<task_family> -> 
 2. `--advise-query` 不发标准 `AiOutput` 信封（载荷是顶层 `primary_command`/`primary_target`/`followup_rules`），而 runner 的 `filter_cli_output` 只转发 `schema_version`/`kind`/`query_target` 加 `{summary, details, evidence, diagnostics, next_queries}`，模型会收到 `{}`。
 
 同时记录一个结构性观察：组件的三条属性轴中，display 与 value 由 `--intent` 在组件 target 上寻址，**actions 没有对应的 intent**，必须同时换动词（`--explain`）和换 target 文法（`action:`）；`--advise-query --question-kind` 同样缺 action 一类。这是路由不自解释的根因之一，是否补齐待决策。
+
+上述两项阻塞与 action 轴缺失已在 2026-08-02 全部修复（见上一节），路由预言机实验不再被挡住。下一次 CNB live run 可以直接观察 `command_route_usage` 与 `command_routing_confusion` 的变化。

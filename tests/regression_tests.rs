@@ -949,6 +949,93 @@ fn test_m33_writer_intent_fixture_outputs_writer_paths() {
     );
 }
 
+/// M58：action intent 必须交出可直接执行的 `action:` target 与动作门禁。
+///
+/// 用户问句里不可能出现内部 action id，因此组件级查询能否暴露它，
+/// 决定了模型能不能走到动作级命令。
+#[test]
+fn test_m58_action_intent_exposes_executable_action_target() {
+    let (_db_path, graph) = setup_graph_db("m58_action_intent");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/actions_test.spg|button2",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Action,
+    )
+    .expect("explain-condition must succeed");
+    let action_facts = result
+        .get("details")
+        .and_then(|v| v.get("answer_facts"))
+        .and_then(|v| v.get("action_facts"))
+        .expect("action intent 必须输出 action_facts");
+
+    assert_eq!(
+        action_facts.get("action_count").and_then(|v| v.as_u64()),
+        Some(1)
+    );
+    let action = &action_facts
+        .get("actions")
+        .and_then(|v| v.as_array())
+        .unwrap()[0];
+    assert_eq!(
+        action.get("action_target").and_then(|v| v.as_str()),
+        Some("action:app/actions_test.spg|button2|action1"),
+        "action_target 必须是可直接喂给 --explain 的节点 ID"
+    );
+    assert_eq!(action.get("gate_count").and_then(|v| v.as_u64()), Some(1));
+    assert!(
+        action
+            .get("gate_conditions")
+            .map(|v| v.to_string())
+            .unwrap_or_default()
+            .contains("input1.value"),
+        "动作门禁表达式必须原样给出"
+    );
+    assert!(
+        result
+            .get("details")
+            .and_then(|v| v.get("answer_facts"))
+            .and_then(|v| v.get("value_source_facts"))
+            .is_none(),
+        "action intent 不应扩散到 value_source_facts"
+    );
+}
+
+/// M58：被动作条件引用的组件不能被说成拥有那个动作。
+#[test]
+fn test_m58_action_intent_separates_related_actions_from_owned() {
+    let (_db_path, graph) = setup_graph_db("m58_action_intent_related");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/actions_test.spg|input1",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Action,
+    )
+    .expect("explain-condition must succeed");
+    let action_facts = result
+        .get("details")
+        .and_then(|v| v.get("answer_facts"))
+        .and_then(|v| v.get("action_facts"))
+        .expect("action intent 必须输出 action_facts");
+
+    assert_eq!(
+        action_facts.get("action_count").and_then(|v| v.as_u64()),
+        Some(0),
+        "input1 自己不挂动作"
+    );
+    assert_eq!(
+        action_facts
+            .get("related_action_count")
+            .and_then(|v| v.as_u64()),
+        Some(1),
+        "input1 被 button2 的动作门禁引用，必须作为 related 交出"
+    );
+    assert_eq!(
+        action_facts.get("result").and_then(|v| v.as_str()),
+        Some("only_related_action_gate_found")
+    );
+}
+
 #[test]
 fn test_m33_availability_intent_fixture_stops_at_filter_vars() {
     let (_db_path, graph) = setup_graph_db("m33_availability_fixture");

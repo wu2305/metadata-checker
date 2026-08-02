@@ -240,7 +240,7 @@ pub struct Cli {
         long,
         value_name = "INTENT",
         default_value = "auto",
-        help = "Traversal intent for --explain-condition: auto | display | value-source | writer | availability | context"
+        help = "Traversal intent for --explain-condition: auto | display | value-source | writer | availability | context | action"
     )]
     pub intent: String,
 
@@ -257,7 +257,7 @@ pub struct Cli {
     #[arg(
         long,
         value_name = "KIND",
-        help = "Question kind for --advise-query: display | value-source | availability | writer | page-logic | model-relationships"
+        help = "Question kind for --advise-query: display | value-source | availability | writer | action | page-logic | model-relationships"
     )]
     pub question_kind: Option<String>,
 

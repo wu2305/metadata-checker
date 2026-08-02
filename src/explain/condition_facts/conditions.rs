@@ -107,7 +107,22 @@ fn condition_owner_node_id(cond_obj: &serde_json::Value) -> Option<String> {
         "Component" | "FieldDefault" => Some(format!("comp:{}|{}", source_file, owner_token)),
         "ModelSource" => Some(format!("model:{}", owner_token)),
         "Page" => Some(format!("page:{}", source_file)),
-        "Action" => Some(format!("action:{}|{}", source_file, owner_token)),
+        // 动作条件 id 形如 `cond:<文件>|<组件>#<动作>#conditionExp`，
+        // 而动作节点 id 是 `action:<文件>|<组件>|<动作>`。此前只取到组件段，
+        // 拼出的 owner_node_id 指向一个不存在的节点，模型照着查必然落空。
+        "Action" => {
+            let action_token = condition_id
+                .split('|')
+                .nth(1)
+                .and_then(|s| s.split('#').nth(1));
+            match action_token {
+                Some(action_token) if !action_token.is_empty() => Some(format!(
+                    "action:{}|{}|{}",
+                    source_file, owner_token, action_token
+                )),
+                _ => Some(format!("action:{}|{}", source_file, owner_token)),
+            }
+        }
         _ => Some(owner_token.to_string()),
     }
 }

@@ -43,7 +43,7 @@ description: |
 | 这个组件显示什么值/值来自哪张表？ | `metadata_explain_condition` 或 `--explain-condition 'comp:PAGE|ID' --intent value-source --budget compact` | `details.answer_facts.value_source_facts`、必要时读 `details.value_source_context` | 裸字段 `${FIELD}` 不是表名 |
 | 这个字段被谁写入/生成？ | `metadata_explain_condition` 或 `--explain-condition 'field:MODEL.FIELD' --intent writer --budget compact` | `details.answer_facts.writer_facts`、`details.primary_path` | `related_context` 不是必要条件 |
 | 为什么数据源可能为空？ | `metadata_explain_condition` 或 `--explain-condition 'model:ID' --intent availability --budget compact` | `details.answer_facts.availability_facts` | DataFlow filter 不是组件显示门禁 |
-| 这个按钮/动作做什么？ | `metadata_explain` 或 `--explain 'comp:PAGE|button'` / `--explain 'action:PAGE|button|action'` | `summary.what_is_it`、`details.triggers`、`details.writes_models` | Page Contains 是位置，不是触发 |
+| 这个按钮/动作做什么/为什么点不动？ | 先 `--explain-condition 'comp:PAGE|ID' --intent action --budget compact` 拿到 action target，再 `--explain 'action:PAGE|button|action'` | `details.answer_facts.action_facts.actions[].action_target`、`gate_conditions`；动作级再读 `summary.what_is_it`、`details.triggers`、`details.writes_models` | `action_facts.related_actions` 是别的组件的动作，只是门禁引用了本目标 |
 | 这个页面做什么/有哪些逻辑？ | `metadata_query_page_logic` 或 `--query-page-logic 'page:PAGE' --budget compact` | `summary.key_findings`、`details.action_flows` | compact 数组可能截断 |
 | 谁读写这个模型/表？ | `metadata_query_model` 或 `--query-model MODEL --budget compact` | `summary`、`details.read_by`、`details.write_by`、`details.consumed_by_dataflows` | `read_by_count=0` 不等于未使用 |
 | 周围还有什么关系？ | `metadata_context` 或 `--context 'ID' --depth 2 --budget normal` | upstream/downstream 摘要 | context 是补充，不是主答案 |
@@ -51,7 +51,7 @@ description: |
 ## Single Thinking Flow
 
 所有机器输出都按同一条阅读流消费：
-1. 判断 intent / question kind：从 `summary.intent`、用户问题和命令类型确认 display、value-source、writer、availability、page-logic、model-relationships 等意图。
+1. 判断 intent / question kind：从 `summary.intent`、用户问题和命令类型确认 display、value-source、writer、availability、action、page-logic、model-relationships 等意图。
 2. 先读 `summary`：优先看 `summary.what_is_it`、`summary.primary_reason`、`summary.key_findings`、`summary.evidence_summary` 和计数字段。
 3. 对 explain-condition 和 advise-query，读 `details.answer_contract`：确认 `primary_fact_path`、`forbidden_fact_paths[]`、`must_read_summary_first`。
 4. 只深入主证据块：按 `primary_fact_path` 读取 `details.answer_facts.<fact_block>`，不要把 forbidden fact block 混成同一结论。
@@ -152,6 +152,7 @@ intent 到 fact block 映射：
 | `value-source` | `details.answer_facts.value_source_facts` |
 | `writer` | `details.answer_facts.writer_facts` |
 | `availability` | `details.answer_facts.availability_facts` |
+| `action` | `details.answer_facts.action_facts` |
 
 关键字段：
 - `details.answer_contract.primary_fact_path`：本次唯一主证据路径。
@@ -372,6 +373,13 @@ availability intent：
 - 页面局部 model 优先使用 page-scoped target，例如 `model:app/售后.app/绑定车辆/会员已注册.spg|model11`。
 - 读取 `details.answer_facts.availability_facts.dataflow_availability`、`dataflow_table`、`physical_inputs[]`、`source_filters[]`、`output_filters[]`、`join_rules[]`、`union_rules[]`、`referenced_vars[]`。
 - DataFlow filter 描述 model 数据可用性，不是组件自身 direct/inherited visibleCondition。
+
+action intent：
+- 用户问句里不会出现内部 action id，所以先在组件上查 `--intent action`，
+  再用 `details.answer_facts.action_facts.actions[].action_target` 作为下一条命令的 target。
+- `actions[]` 是目标自己挂的动作（图上的 Triggers 边）；`related_actions[]` 是别的组件的动作，
+  只是它们的门禁条件引用了本目标——回答「为什么点不动」要用它，但不能说成本目标的动作。
+- `gate_conditions[].raw_expr` 是动作门禁原文；组件自身的 visibleCondition/disableCondition 不是动作门禁。
 
 compact 约束：
 - compact 模式不展开完整 DataFlow 节点树；优先读取 `answer_facts` 中的短事实。

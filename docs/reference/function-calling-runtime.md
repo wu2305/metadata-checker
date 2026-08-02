@@ -40,7 +40,7 @@ stdin 每行一个 JSON 对象：
 | `command` | string | 是 | `explain_condition` / `explain` / `query_model` / `query_page` / `query_cross` / `query_dataflow` / `query_page_logic` / `context` / `find_page` / `find_model` / `find_component` / `advise_query` / `status` / `reload_graph` / `check_reload` |
 | `target` | string | 查询类命令必需 | 查询目标 |
 | `budget` | string | 否 | `compact` / `normal` / `full`，默认 `normal`；非法值返回 `INVALID_BUDGET` |
-| `intent` | string | 否 | `explain_condition` 专用：`auto` / `display` / `value-source` / `writer` / `availability` / `context`，非法值返回 `INVALID_INTENT` |
+| `intent` | string | 否 | `explain_condition` 专用：`auto` / `display` / `value-source` / `writer` / `availability` / `context` / `action`，非法值返回 `INVALID_INTENT` |
 | `human` | bool | 否 | 是否生成 human_summary，默认 `false`（目前仅 `explain_condition` 支持） |
 | `depth` | usize | 否 | `context` 命令专用，默认 `1`；非法值返回 `INVALID_DEPTH` |
 | `check_reload` | bool | 否 | 查询前检测 graphdb 变更，默认 `false` |
@@ -84,13 +84,13 @@ Function calling 层应暴露少量任务型工具，而不是让 AI 直接拼�
 
 | Tool | 参数 |
 |---|---|
-| `metadata_explain_condition` | `target: string`, `intent?: auto|display|value-source|writer|availability|context`, `budget?: compact|normal|full`, `human?: false`, `check_reload?: boolean` |
+| `metadata_explain_condition` | `target: string`, `intent?: auto|display|value-source|writer|availability|context|action`, `budget?: compact|normal|full`, `human?: false`, `check_reload?: boolean` |
 | `metadata_explain` | `target: string`, `budget?: compact|normal|full` |
 | `metadata_context` | `target: string`, `depth?: number`, `budget?: compact|normal|full` |
 | `metadata_query_model` | `target: string`, `budget?: compact|normal|full` |
 | `metadata_query_page` | `target: string`, `budget?: compact|normal|full` |
 | `metadata_query_page_logic` | `target: string`, `budget?: compact|normal|full`, `check_reload?: boolean` |
-| `metadata_advise_query` | `target: string`, `page_scope?: string`, `intent?: auto|display|value-source|writer|availability|context`, `budget?: compact|normal|full` |
+| `metadata_advise_query` | `target: string`, `page_scope?: string`, `intent?`（即 question-kind）`: display|value-source|availability|writer|action|page-logic|model-relationships`, `budget?: compact|normal|full` |
 | `metadata_runtime_status` | 无业务参数 |
 | `metadata_runtime_reload` | 无业务参数 |
 | `metadata_runtime_check_reload` | 无业务参数 |

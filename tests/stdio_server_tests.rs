@@ -499,16 +499,22 @@ fn test_stdio_server_advise_query_accepts_bare_target_with_page_scope() {
     assert_stdio_envelope(&resp, true);
     assert_output_size_matches_line(&resp, &line);
     assert_eq!(resp["ok"].as_bool(), Some(true));
+    // M58：advise_query 也走标准 AiOutput 信封，路由载荷在 details 下。
+    assert_eq!(resp["result"]["kind"].as_str(), Some("QueryAdvice"));
     assert_eq!(
-        resp["result"]["primary_command"].as_str(),
+        resp["result"]["summary"]["primary_command"].as_str(),
         Some("--explain-condition")
     );
     assert_eq!(
-        resp["result"]["primary_target"].as_str(),
+        resp["result"]["details"]["primary_command"].as_str(),
+        Some("--explain-condition")
+    );
+    assert_eq!(
+        resp["result"]["details"]["primary_target"].as_str(),
         Some("comp:app/actions_test.spg|text_bare_field_child")
     );
     assert_eq!(
-        resp["result"]["primary_fact_path"].as_str(),
+        resp["result"]["details"]["primary_fact_path"].as_str(),
         Some("value_source_facts")
     );
 

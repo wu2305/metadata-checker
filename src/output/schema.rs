@@ -84,6 +84,8 @@ pub enum OutputKind {
     Table,
     DataFlow,
     GraphDbCheck,
+    /// `--advise-query` 的路由建议。
+    QueryAdvice,
 }
 
 /// 证据结构

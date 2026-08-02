@@ -207,6 +207,7 @@ impl ToolRegistry {
                     "writer",
                     "availability",
                     "context",
+                    "action",
                 ],
             },
             ToolSpec {
@@ -429,11 +430,11 @@ pub fn validate_budget(budget: &str) -> Result<(), ToolError> {
 pub fn validate_intent(intent: &str) -> Result<(), ToolError> {
     match intent {
         "auto" | "display" | "value-source" | "value_source" | "writer" | "availability"
-        | "context" => Ok(()),
+        | "context" | "action" => Ok(()),
         other => Err(ToolError::new(
             ToolErrorCode::InvalidIntent,
             format!(
-                "Invalid intent '{}'. Expected: auto | display | value-source | writer | availability | context",
+                "Invalid intent '{}'. Expected: auto | display | value-source | writer | availability | context | action",
                 other
             ),
         )),
