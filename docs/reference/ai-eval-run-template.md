@@ -141,7 +141,11 @@ cargo test --features cli-local --test m58_cnb_ai_runner_tests
 
 - `CNB_TOKEN`：仅用于 `Authorization: Bearer ...`，属于 pipeline-only 密钥；
 - `M58_CNB_REPO`：可选覆盖项；未显式设置时回退到 `CNB_REPO_SLUG`；
-- `M58_CNB_MODEL`：可选覆盖项；未显式设置时默认 `deepseek-v4-flash`；
+- `M58_CNB_MODEL`：可选覆盖项；未显式设置时默认 `deepseek-v4-flash`。**该端点对未知模型名不报错，
+  而是静默用默认模型服务请求**（实测请求 `definitely-not-a-real-model-xyz` 同样由
+  `deepseek-v4-flash` 应答）。adapter 因此按 SSE chunk 里的 `model` 字段校验实际服务模型，
+  与请求不一致时直接失败——否则换成 `gemma4-31b` 只会得到一份标着 gemma4、实际由默认模型
+  回答的报告，跨模型对比会静默失效。换模型前先用一次 `ai-chat-completions` 确认该模型真的被路由；
 - `M58_AI_EVAL_TRIALS`：live 默认 `3`；本地/fake runner 默认 `1`，每个 trial 使用独立 history、workspace 和 graphdb；
 - `M58_CNB_API_BASE`：可选，仅用于测试 endpoint 覆盖。
 

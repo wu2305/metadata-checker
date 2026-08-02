@@ -507,6 +507,57 @@ fn test_m58_cnb_sse_rejects_non_event_stream_content_type() {
     assert!(error.contains("text/event-stream"));
 }
 
+/// 验证服务端静默换模型时会报错，而不是产出一份标着错误模型名的基线。
+///
+/// CNB 对未知模型名不报错，而是用默认模型服务请求（实测请求
+/// `definitely-not-a-real-model-xyz` 同样返回 deepseek-v4-flash）。M58 的目的就是拿不同
+/// 便宜模型做对比，如果不校验，把 M58_CNB_MODEL 换成 gemma4-31b 只会得到一份「标着
+/// gemma4、实际由默认模型回答」的报告，整个对比静默失效。
+#[test]
+fn test_m58_cnb_adapter_rejects_silently_substituted_model() {
+    let response_body = concat!(
+        "data: {\"model\":\"deepseek-v4-flash\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        "m58-model-swap-secret".to_string(),
+        "gemma4-31b".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
+    server.join().unwrap();
+    assert!(error.contains("deepseek-v4-flash"), "错误必须点名实际模型");
+    assert!(error.contains("gemma4-31b"), "错误必须点名请求的模型");
+}
+
+/// 服务端回报的模型与请求一致时不得误报。
+#[test]
+fn test_m58_cnb_adapter_accepts_matching_served_model() {
+    let response_body = concat!(
+        "data: {\"model\":\"gemma4-31b\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        "m58-model-match-secret".to_string(),
+        "gemma4-31b".to_string(),
+    )
+    .unwrap();
+
+    let content = adapter.complete(&empty_chat_request()).unwrap();
+    server.join().unwrap();
+    assert_eq!(content, "ok");
+}
+
 /// 验证 SSE 中意外的非 data 行不会被静默忽略。
 #[test]
 fn test_m58_cnb_sse_rejects_unexpected_non_data_line() {

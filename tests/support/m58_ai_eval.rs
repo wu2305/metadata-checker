@@ -600,6 +600,9 @@ pub(crate) struct ChatRequest {
 #[derive(Debug, Deserialize)]
 struct SseChatChunk {
     choices: Option<Vec<ChatChoice>>,
+    /// 实际服务本次请求的模型。CNB 对未知模型名会静默回退，必须按这个字段校验。
+    #[serde(default)]
+    model: Option<String>,
 }
 
 /// CNB SSE choice 中的增量内容载体。
@@ -754,13 +757,29 @@ impl ModelAdapter for CnbChatAdapter {
             bail!("CNB AI Chat 响应 Content-Type 必须为 text/event-stream，实际为 {content_type}");
         }
 
-        parse_sse_content(&body)
+        let (content, served_model) = parse_sse_content(&body)?;
+        // CNB 对未知模型名不会报错，而是静默用默认模型服务请求（已实测：
+        // 请求 `definitely-not-a-real-model-xyz` 同样返回 deepseek-v4-flash）。
+        // 不校验的话，把 M58_CNB_MODEL 换成 gemma4-31b 只会得到一份「标着 gemma4、
+        // 实际由默认模型回答」的报告——整个跨模型对比会静默失效，而这正是 M58 的目的。
+        if let Some(served_model) = served_model
+            && served_model != self.model
+        {
+            bail!(
+                "CNB AI Chat 实际服务模型为 {served_model}，与请求的 {} 不一致；\
+                 该端点对未知模型名会静默回退，这份结果不能当作 {} 的基线",
+                self.model,
+                self.model
+            );
+        }
+        Ok(content)
     }
 }
 
-/// 解析 CNB SSE 响应并拼接所有增量文本。
-fn parse_sse_content(body: &str) -> Result<String> {
+/// 解析 CNB SSE 响应，返回拼接后的文本与实际服务模型。
+fn parse_sse_content(body: &str) -> Result<(String, Option<String>)> {
     let mut content = String::new();
+    let mut served_model: Option<String> = None;
     let mut saw_done = false;
 
     for line in body.lines() {
@@ -782,6 +801,9 @@ fn parse_sse_content(body: &str) -> Result<String> {
 
         let chunk: SseChatChunk =
             serde_json::from_str(payload).context("CNB AI Chat SSE chunk 不是合法 JSON")?;
+        if let Some(model) = chunk.model.filter(|model| !model.trim().is_empty()) {
+            served_model.get_or_insert(model);
+        }
         let choices = chunk
             .choices
             .ok_or_else(|| anyhow!("CNB AI Chat SSE chunk 缺少 choices"))?;
@@ -806,7 +828,7 @@ fn parse_sse_content(body: &str) -> Result<String> {
         bail!("CNB AI Chat SSE 内容为空");
     }
 
-    Ok(content)
+    Ok((content, served_model))
 }
 
 /// 读取必需的非空环境变量。
