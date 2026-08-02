@@ -419,7 +419,11 @@
       - /usr/local/cargo/git
       - ./target/cnb/workspace
   services:
-    - vscode
+    # 默认 10 分钟检测不到 http/ssh 心跳就关环境；远程 SSH 里两次操作之间
+    # 很容易超过 10 分钟，放宽到 1 小时避免会话被回收。
+    - name: vscode
+      options:
+        keepAliveTimeout: 1h
     - docker
   env:
     CARGO_TARGET_DIR: target/cnb/workspace
@@ -431,6 +435,13 @@
         cargo --version
         wasm-bindgen --version
         bencher --version
+    # Remote-SSH 的前置条件在镜像里（.cnb/images/browser-wasm-ci.Dockerfile 预装
+    # openssh-server）。这里只做断言：缺了就在开环境时立刻失败，
+    # 而不是等到 VSCode/Cursor 连不上才发现。
+    - name: remote ssh preflight
+      script: |
+        test -x /usr/sbin/sshd || command -v sshd
+        test -d /run/sshd
     - name: fetch dependencies
       script: cargo fetch
 
