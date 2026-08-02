@@ -70,3 +70,29 @@
 结论：`trial_pass_rate=0.2308` 不是理解能力指标。真正的瓶颈在命令路由，即 `--query-*` 动词表面对模型不是自解释的；这属于工具接口缺陷，不是模型能力不足。此外 `deepseek-v4-flash` 在此期间发生过模型能力更新，跨 baseline 的绝对分数不可直接比较，但上述分段归因不受影响。
 
 该 run 中 23 次拒绝全部由 runner 的 `policy.validate` 失败路径产出，当时该路径仍硬编码 `wrong_command`，使 `command_rejected` 实际不可达；随后已修正，并新增 `command_routing_confusion`（按 `<task_family> -> <模型选择的命令>` 聚合被拒绝命令），下一次 run 起可直接读出具体的误路由动词对。
+
+### 等价路由与发现步骤（RunReport 1.3.0，2026-08-02）
+
+上一节把瓶颈定位到路由后，检查 4 个提问最模糊的 case 发现：`minimal_command_plan` 此前只承认一条规范写法，模型任何等价写法都算 `command_rejected`。这在本项目里是错误的判分口径——**终端用户没有能力精确提问，而 `.spg` 文件大到无法进入模型上下文**，所以模型必须在没有任何工具输出的情况下盲选第一条命令。提问模糊是被测条件本身，不是 fixture 缺陷；把问句改精确等于把 benchmark 改简单。
+
+因此 plan 放宽为两种手段，用途严格区分：
+
+- `alternatives`：与 primary 拿到**同一批事实**的等价写法，直接算路由成功，但在报告里保留 `alternate` 标记。
+- 追加 plan step：first guess 拿不到全部事实时的补救/发现步骤。模型仍要自己意识到需要补查，只是不再被一次拒绝直接判死。
+
+红线：**拿不到事实的动词不得写进 `alternatives`**，死路必须继续记为 `command_rejected`，否则等于把路由失败洗成理解失败。四个 case 的每条候选写法都用真实 CLI 跑过、逐条核对事实可达性后才写入。
+
+渐进披露有实证支撑：组件级 `--explain-condition comp:app/actions_test.spg|button2` 的输出里 `condition_id` 就是 `cond:app/actions_test.spg|button2#action1#conditionExp`，即粗查会自己暴露内部 action id 与条件字段名，动作级命令因此作为第二步而非唯一入口。
+
+RunReport 升到 `1.3.0`，新增 `command_route_usage`（按 `<task_family> -> <命令> (primary|alternate)` 聚合**被接受**的命令）。它与 `command_routing_confusion` 互斥互补：后者记被拒绝的误路由，前者记走通的路径分布；`alternate` 占比高说明规范动词不是模型的自然选择，是工具接口信号而非模型失分。命令 trace 同时记录 `route`，且 runner 执行的是**模型实际写的那一条**而不是 plan 的规范命令，否则报告里的 trace 与真正跑过的 CLI 不是同一个命令。
+
+本地 `ai_eval_tests` 25/25、`m58_cnb_ai_runner_tests` 41 通过（1 个 live 测试按 token 门控 ignored），未触发 CI。
+
+#### 阻塞项：`--advise-query` 路由预言机暂不可用
+
+`--advise-query --question-kind {display|value-source|availability|writer|page-logic|model-relationships}` 本可作为确定性路由预言机，直接验证「把推理搬进 Rust」这一主张，但两处输出层缺陷挡住了实验，且都落在「不得擅自修改输出逻辑」的约束内，故只记录不修改：
+
+1. `--question-kind availability` 的 `primary_target` 是 `model:comp:app/actions_test.spg|button2`（双前缀），模型照此构造的 target 无效。其余五个 kind 干净；而 `availability` 恰好是上述 case 涉及的那条轴。
+2. `--advise-query` 不发标准 `AiOutput` 信封（载荷是顶层 `primary_command`/`primary_target`/`followup_rules`），而 runner 的 `filter_cli_output` 只转发 `schema_version`/`kind`/`query_target` 加 `{summary, details, evidence, diagnostics, next_queries}`，模型会收到 `{}`。
+
+同时记录一个结构性观察：组件的三条属性轴中，display 与 value 由 `--intent` 在组件 target 上寻址，**actions 没有对应的 intent**，必须同时换动词（`--explain`）和换 target 文法（`action:`）；`--advise-query --question-kind` 同样缺 action 一类。这是路由不自解释的根因之一，是否补齐待决策。

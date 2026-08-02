@@ -1069,7 +1069,26 @@
             "2"
           ],
           "requires_project_dir": true,
-          "budget": "normal"
+          "budget": "normal",
+          "alternatives": [
+            {
+              "command_kind": "--explain",
+              "target": "comp:app/actions_test.spg|button1",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": null
+            },
+            {
+              "command_kind": "--context",
+              "target": "comp:app/actions_test.spg|button1",
+              "args": [
+                "--depth",
+                "2"
+              ],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
         }
       ],
       "expected_output_assertions": [
@@ -1150,7 +1169,8 @@
       "question": "actions_test 中 button2 的动作在什么条件下执行？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain 'action:app/actions_test.spg|button2|action1'"
+        "--project-dir tests/fixtures/test_project --explain 'action:app/actions_test.spg|button2|action1'",
+        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|button2' --budget compact"
       ],
       "expected_facts": [
         "button2 触发 updateData 类型 action",
@@ -1198,19 +1218,58 @@
           "args": [],
           "requires_project_dir": true,
           "budget": null
+        },
+        {
+          "command_kind": "--explain-condition",
+          "target": "comp:app/actions_test.spg|button2",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": "compact",
+          "alternatives": [
+            {
+              "command_kind": "--explain-condition",
+              "target": "comp:app/actions_test.spg|button2",
+              "args": [
+                "--intent",
+                "availability"
+              ],
+              "requires_project_dir": true,
+              "budget": "compact"
+            },
+            {
+              "command_kind": "--explain-condition",
+              "target": "comp:app/actions_test.spg|button2",
+              "args": [
+                "--intent",
+                "auto"
+              ],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
         }
       ],
       "expected_output_assertions": [
         {
           "path": "details.condition.raw_expr",
           "op": "exists",
-          "description": "details.condition.raw_expr 非空"
+          "description": "details.condition.raw_expr 非空",
+          "command_index": 0
         },
         {
           "path": "details.condition.refs",
           "op": "array_contains",
           "value": "input1",
-          "description": "details.condition.refs 包含字符串 input1"
+          "description": "details.condition.refs 包含字符串 input1",
+          "command_index": 0
+        },
+        {
+          "path": "details.blocking_conditions",
+          "op": "array_any",
+          "field": "condition_type",
+          "value": "ActionConditionExp",
+          "description": "补查组件级条件时必须给出 ActionConditionExp",
+          "command_index": 1
         }
       ],
       "risk_tags": [
@@ -2519,7 +2578,8 @@
       "real_project_target": null,
       "source_path": null,
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|input1' --budget compact"
+        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|input1' --budget compact",
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|input1'"
       ],
       "expected_facts": [
         "input1 的显示受 visibleCondition 控制",
@@ -2578,7 +2638,46 @@
           "target": "comp:app/actions_test.spg|input1",
           "args": [],
           "requires_project_dir": true,
-          "budget": "compact"
+          "budget": "compact",
+          "alternatives": [
+            {
+              "command_kind": "--explain-condition",
+              "target": "comp:app/actions_test.spg|input1",
+              "args": [
+                "--intent",
+                "auto"
+              ],
+              "requires_project_dir": true,
+              "budget": "compact"
+            },
+            {
+              "command_kind": "--explain-condition",
+              "target": "comp:app/actions_test.spg|input1",
+              "args": [
+                "--intent",
+                "display"
+              ],
+              "requires_project_dir": true,
+              "budget": "compact"
+            },
+            {
+              "command_kind": "--explain-condition",
+              "target": "comp:app/actions_test.spg|input1",
+              "args": [
+                "--intent",
+                "availability"
+              ],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
+        },
+        {
+          "command_kind": "--explain",
+          "target": "comp:app/actions_test.spg|input1",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
         }
       ],
       "expected_output_assertions": [
@@ -2586,21 +2685,30 @@
           "path": "summary.blocking_conditions_count",
           "op": "gt",
           "value": 0,
-          "description": "必须有阻塞条件"
+          "description": "必须有阻塞条件",
+          "command_index": 0
         },
         {
           "path": "details.blocking_conditions",
           "op": "array_any",
           "field": "condition_type",
           "value": "VisibleCondition",
-          "description": "必须包含 VisibleCondition"
+          "description": "必须包含 VisibleCondition",
+          "command_index": 0
         },
         {
           "path": "details.blocking_conditions",
           "op": "array_any",
           "field": "condition_type",
           "value": "EnableCondition",
-          "description": "必须包含 EnableCondition"
+          "description": "必须包含 EnableCondition",
+          "command_index": 0
+        },
+        {
+          "path": "summary.what_is_it",
+          "op": "exists",
+          "description": "补救命令至少要给出组件是什么",
+          "command_index": 1
         }
       ],
       "risk_tags": [
@@ -2619,7 +2727,7 @@
         "error_injection": false,
         "output_truncation": true
       },
-      "max_command_count": 1,
+      "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
         "details"
@@ -2661,7 +2769,8 @@
       "real_project_target": null,
       "source_path": null,
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|button2' --budget compact"
+        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|button2' --budget compact",
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|button2'"
       ],
       "expected_facts": [
         "button2 的 action 有 conditionExp 限制",
@@ -2711,7 +2820,36 @@
           "target": "comp:app/actions_test.spg|button2",
           "args": [],
           "requires_project_dir": true,
-          "budget": "compact"
+          "budget": "compact",
+          "alternatives": [
+            {
+              "command_kind": "--explain-condition",
+              "target": "comp:app/actions_test.spg|button2",
+              "args": [
+                "--intent",
+                "availability"
+              ],
+              "requires_project_dir": true,
+              "budget": "compact"
+            },
+            {
+              "command_kind": "--explain-condition",
+              "target": "comp:app/actions_test.spg|button2",
+              "args": [
+                "--intent",
+                "auto"
+              ],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
+        },
+        {
+          "command_kind": "--explain",
+          "target": "comp:app/actions_test.spg|button2",
+          "args": [],
+          "requires_project_dir": true,
+          "budget": null
         }
       ],
       "expected_output_assertions": [
@@ -2720,7 +2858,14 @@
           "op": "array_any",
           "field": "condition_type",
           "value": "ActionConditionExp",
-          "description": "必须包含 ActionConditionExp"
+          "description": "必须包含 ActionConditionExp",
+          "command_index": 0
+        },
+        {
+          "path": "summary.what_is_it",
+          "op": "exists",
+          "description": "补救命令至少要给出组件是什么",
+          "command_index": 1
         }
       ],
       "risk_tags": [
@@ -2739,7 +2884,7 @@
         "error_injection": false,
         "output_truncation": true
       },
-      "max_command_count": 1,
+      "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
         "details"

@@ -316,14 +316,73 @@ pub(crate) fn parse_agent_turn(content: &str) -> Result<AgentTurn> {
     }
 }
 
-/// 评测计划中的单个命令步骤。
+/// 计划步骤的一种可接受写法。
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-struct PlanStep {
+struct PlanVariant {
     command_kind: String,
     target: String,
+    #[serde(default)]
     args: Vec<String>,
     requires_project_dir: bool,
     budget: Option<String>,
+}
+
+impl PlanVariant {
+    /// 与模型命令做精确比较；budget 的两种省略写法视为相同。
+    fn matches(&self, request: &CommandRequest) -> bool {
+        self.command_kind == request.command_kind
+            && self.target == request.target
+            && self.args == request.args
+            && budgets_match(&self.budget, &request.budget)
+    }
+}
+
+/// 命令命中 plan 的方式。
+///
+/// 放宽接受面之后仍然要能区分路由质量，否则「模型选对动词」和「模型选了另一条也能拿到
+/// 事实的路」会被压成同一个数字。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RouteKind {
+    /// 命中 milestone 文档记录的规范命令。
+    Primary,
+    /// 命中语义等价的备选命令。
+    Alternate,
+}
+
+impl RouteKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Alternate => "alternate",
+        }
+    }
+}
+
+/// 评测计划中的单个命令步骤。
+///
+/// `primary` 是规范命令，`alternatives` 是语义等价的其它路由写法。真实用户提问是模糊的，
+/// 且 `.spg` 不进模型上下文，模型只能在没看过任何数据前盲选动词；因此凡是能拿到同一批
+/// 事实的命令都应算路由成功，否则评测测的是「有没有猜中我们写下的动词」而不是「工具表面
+/// 能不能被走通」。具体走了哪一条仍逐条记录在 `command_trace` 与 `RunReport` 中。
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+struct PlanStep {
+    #[serde(flatten)]
+    primary: PlanVariant,
+    #[serde(default)]
+    alternatives: Vec<PlanVariant>,
+}
+
+impl PlanStep {
+    /// 返回命中的写法，primary 优先。
+    fn match_variant(&self, request: &CommandRequest) -> Option<(&PlanVariant, RouteKind)> {
+        if self.primary.matches(request) {
+            return Some((&self.primary, RouteKind::Primary));
+        }
+        self.alternatives
+            .iter()
+            .find(|variant| variant.matches(request))
+            .map(|variant| (variant, RouteKind::Alternate))
+    }
 }
 
 /// 通过 case plan 固定命令路径和运行目录。
@@ -340,7 +399,10 @@ pub(crate) struct CommandPolicy {
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedCommand {
     step_index: usize,
-    step: PlanStep,
+    /// 实际命中的写法；必须执行模型选的那一条，而不是 plan 的规范命令，
+    /// 否则报告里的 trace 与真正跑过的 CLI 不是同一个命令。
+    variant: PlanVariant,
+    route: RouteKind,
     project_dir: PathBuf,
     graph_db_path: PathBuf,
     binary_path: PathBuf,
@@ -400,23 +462,21 @@ impl CommandPolicy {
         if contains_shell_metacharacters(&request.target) {
             bail!("target 包含禁止的 shell 元字符");
         }
-        let step_index = self
+        let (step_index, variant, route) = self
             .steps
             .iter()
             .enumerate()
-            .find(|(index, step)| {
-                !used_steps.contains(index)
-                    && step.command_kind == request.command_kind
-                    && step.target == request.target
-                    && step.args == request.args
-                    && budgets_match(&step.budget, &request.budget)
+            .filter(|(index, _)| !used_steps.contains(index))
+            .find_map(|(index, step)| {
+                step.match_variant(request)
+                    .map(|(variant, route)| (index, variant.clone(), route))
             })
-            .map(|(index, _)| index)
             .ok_or_else(|| anyhow!("模型命令不匹配任何未使用的 minimal_command_plan step"))?;
 
         Ok(ValidatedCommand {
             step_index,
-            step: self.steps[step_index].clone(),
+            variant,
+            route,
             project_dir: self.project_dir.clone(),
             graph_db_path: self.graph_db_path.clone(),
             binary_path: self.binary_path.clone(),
@@ -428,18 +488,18 @@ impl ValidatedCommand {
     /// 返回不经过 shell 的 CLI 参数。
     pub(crate) fn argv(&self) -> Vec<OsString> {
         let mut argv = vec![OsString::from("--non-human")];
-        if self.step.requires_project_dir {
+        if self.variant.requires_project_dir {
             argv.push(OsString::from("--project-dir"));
             argv.push(self.project_dir.as_os_str().to_os_string());
             argv.push(OsString::from("--graph-db-path"));
             argv.push(self.graph_db_path.as_os_str().to_os_string());
-            argv.push(OsString::from(&self.step.command_kind));
-            argv.push(OsString::from(&self.step.target));
+            argv.push(OsString::from(&self.variant.command_kind));
+            argv.push(OsString::from(&self.variant.target));
         } else {
-            argv.push(OsString::from(&self.step.target));
+            argv.push(OsString::from(&self.variant.target));
         }
-        argv.extend(self.step.args.iter().map(OsString::from));
-        let budget = self.step.budget.as_deref().unwrap_or("compact");
+        argv.extend(self.variant.args.iter().map(OsString::from));
+        let budget = self.variant.budget.as_deref().unwrap_or("compact");
         if !budget.is_empty() {
             argv.push(OsString::from("--budget"));
             argv.push(OsString::from(budget));
@@ -450,6 +510,11 @@ impl ValidatedCommand {
     /// 返回 plan step 索引，用于阻止重复执行。
     pub(crate) fn step_index(&self) -> usize {
         self.step_index
+    }
+
+    /// 返回命中方式，用于在 trace 中保留路由信号。
+    pub(crate) fn route(&self) -> RouteKind {
+        self.route
     }
 
     /// 返回 runner 选定的二进制路径。
@@ -745,6 +810,9 @@ pub(crate) struct CommandTrace {
     pub(crate) budget: Option<String>,
     /// 对应的 minimal_command_plan step；拒绝的命令为 None。
     pub(crate) plan_step_index: Option<usize>,
+    /// 命中方式：`primary` 规范命令、`alternate` 等价备选；拒绝的命令为 None。
+    #[serde(default)]
+    pub(crate) route: Option<String>,
     /// 是否通过 runner 白名单。
     pub(crate) accepted: bool,
     /// 是否请求了 detail/full 等过度读取路径。
@@ -851,6 +919,14 @@ pub(crate) struct RunReport {
     /// 而不必把它当成模型能力不足。
     #[serde(default)]
     pub(crate) command_routing_confusion: BTreeMap<String, usize>,
+    /// 被接受命令的实际路由分布，键为 `<task_family> -> <命令> (<primary|alternate>)`。
+    ///
+    /// plan 接受语义等价的备选命令后，「模型选中规范动词」与「模型选了另一条同样能拿到
+    /// 事实的路」都会记为 accepted。若只看通过率，这两种情况无法区分，工具表面是否自
+    /// 解释的信号就被抹平了。这里保留每一条实际走过的路由，使放宽接受面不以丢失诊断
+    /// 能力为代价：`alternate` 占比高说明规范动词不是模型的自然选择。
+    #[serde(default)]
+    pub(crate) command_route_usage: BTreeMap<String, usize>,
 }
 
 impl RunReport {
@@ -892,6 +968,7 @@ impl RunReport {
         };
         let mut failure_classes = BTreeMap::new();
         let mut command_routing_confusion = BTreeMap::<String, usize>::new();
+        let mut command_route_usage = BTreeMap::<String, usize>::new();
         let mut case_ids_with_commands = BTreeSet::new();
         let mut command_trace_stats = CommandTraceStats {
             total_commands: 0,
@@ -937,6 +1014,14 @@ impl RunReport {
                     .entry(format!("{} -> {}", case.task_family, chosen))
                     .or_insert(0) += 1;
             }
+            for trace in case.command_trace.iter().filter(|trace| trace.accepted) {
+                // 与上面同样的截断理由：command_kind 来自模型，长度不受控。
+                let chosen: String = trace.command_kind.chars().take(64).collect();
+                let route = trace.route.as_deref().unwrap_or("primary");
+                *command_route_usage
+                    .entry(format!("{} -> {} ({})", case.task_family, chosen, route))
+                    .or_insert(0) += 1;
+            }
         }
         command_trace_stats.cases_with_commands = case_ids_with_commands.len();
         command_trace_stats.average_commands_per_case = if case_count == 0 {
@@ -950,7 +1035,7 @@ impl RunReport {
             command_trace_stats.total_commands as f64 / cases.len() as f64
         };
         Self {
-            schema_version: "1.2.0".to_string(),
+            schema_version: "1.3.0".to_string(),
             provider,
             model_id,
             cnb_build_id,
@@ -965,6 +1050,7 @@ impl RunReport {
             failure_classes,
             command_trace_stats,
             command_routing_confusion,
+            command_route_usage,
         }
     }
 }
@@ -1149,6 +1235,16 @@ fn render_report_markdown(report: &RunReport) -> String {
     } else {
         markdown.push_str("被拒绝的命令按 `<task_family> -> <模型选择的命令>` 聚合，用于定位需要合并或改名的 CLI 动词。\n\n");
         for (route, count) in &report.command_routing_confusion {
+            markdown.push_str(&format!("- `{}`: {count}\n", escape_markdown_cell(route)));
+        }
+    }
+
+    markdown.push_str("\n## Command route usage\n\n");
+    if report.command_route_usage.is_empty() {
+        markdown.push_str("- 无被接受命令\n");
+    } else {
+        markdown.push_str("被接受的命令按 `<task_family> -> <命令> (primary|alternate)` 聚合。`alternate` 表示模型走的是等价备选路由而非规范动词，占比越高说明规范动词越不自解释。\n\n");
+        for (route, count) in &report.command_route_usage {
             markdown.push_str(&format!("- `{}`: {count}\n", escape_markdown_cell(route)));
         }
     }
@@ -1433,6 +1529,7 @@ fn run_case_for_trial(
                     }
                 };
                 let step_index = validated.step_index();
+                let route = validated.route();
                 let detail_request = is_detail_request(&command_request);
                 let execution = match execute_validated_command(&validated, case) {
                     Ok(execution) => execution,
@@ -1440,6 +1537,7 @@ fn run_case_for_trial(
                         trace.push(accepted_command_trace(
                             &command_request,
                             step_index,
+                            route,
                             detail_request,
                             Vec::new(),
                         ));
@@ -1457,6 +1555,7 @@ fn run_case_for_trial(
                 trace.push(accepted_command_trace(
                     &command_request,
                     step_index,
+                    route,
                     detail_request,
                     execution.output_sections,
                 ));
@@ -1773,6 +1872,7 @@ fn rejected_command_trace(request: &CommandRequest) -> CommandTrace {
         args: request.args.clone(),
         budget: request.budget.clone(),
         plan_step_index: None,
+        route: None,
         accepted: false,
         detail_request: is_detail_request(request),
         budget_upgrade: is_budget_upgrade(request),
@@ -1784,6 +1884,7 @@ fn rejected_command_trace(request: &CommandRequest) -> CommandTrace {
 fn accepted_command_trace(
     request: &CommandRequest,
     step_index: usize,
+    route: RouteKind,
     detail_request: bool,
     output_sections: Vec<String>,
 ) -> CommandTrace {
@@ -1793,6 +1894,7 @@ fn accepted_command_trace(
         args: request.args.clone(),
         budget: request.budget.clone(),
         plan_step_index: Some(step_index),
+        route: Some(route.as_str().to_string()),
         accepted: true,
         detail_request,
         budget_upgrade: is_budget_upgrade(request),

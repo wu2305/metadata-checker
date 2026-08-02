@@ -13,7 +13,7 @@
 
 ```json
 {
-  "schema_version": "1.2.0",
+  "schema_version": "1.3.0",
   "provider": "cnb-ai-chat",
   "model_id": "gpt-5.4-mini",
   "cnb_build_id": "build-20260727",
@@ -36,6 +36,7 @@
           "args": [],
           "budget": "compact",
           "plan_step_index": 0,
+          "route": "primary",
           "accepted": true,
           "detail_request": false,
           "budget_upgrade": false,
@@ -61,7 +62,8 @@
     "max_command_count_exceeded_cases": 0,
     "budget_upgrade_count": 0
   },
-  "command_routing_confusion": {}
+  "command_routing_confusion": {},
+  "command_route_usage": {}
 }
 ```
 
@@ -102,6 +104,13 @@
 聚合。这是**工具指标而非模型指标**：它直接指出哪类问题会被误路由到哪个动词，是决定合并、
 改名或补充 `SKILL.md` 路由规则的依据。`command_kind` 来自模型，键中截断到 64 字符；该值
 已原样存在 `command_trace` 中，不构成新的信息泄露。
+
+`command_route_usage` 与之互补，把每条**被接受**的命令按
+`<task_family> -> <command_kind> (primary|alternate)` 聚合。`minimal_command_plan`
+支持语义等价的 `alternatives` 之后，「模型选中规范动词」与「模型选了另一条同样能拿到
+事实的路」都会记为 accepted；只看通过率无法区分两者，工具表面是否自解释的信号就被抹平。
+读法：某个 task_family 里 `alternate` 占比越高，说明规范动词越不是模型的自然选择，
+越应该考虑合并或改名。两张表互斥且互补——同一条命令只会进其中一张。
 
 一次 trial 可以有多个失败分类；`trial_pass_rate` 按 trial 行计数，`case_stable_pass_rate` 只有同一 case 的所有 trial 都通过才计为通过。为兼容旧消费者，`pass_rate` 与 `trial_pass_rate` 保持同值；`cases_with_flaky_trials` 单独标出同一 case 试验结果不稳定的情况。
 

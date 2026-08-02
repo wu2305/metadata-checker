@@ -561,6 +561,9 @@
         # 拿不到 command_routing_confusion 对象内的条目。
         echo "M58 command routing confusion (<task_family> -> chosen command):"
         sed -n '/"command_routing_confusion"/,/}/p' target/m58-ai-eval/run.json
+        # 被接受命令的实际路由；alternate 占比高说明规范动词不是模型的自然选择。
+        echo "M58 command route usage (<task_family> -> command (primary|alternate)):"
+        sed -n '/"command_route_usage"/,/}/p' target/m58-ai-eval/run.json
 
 main:
   push: *main_authoritative_ci

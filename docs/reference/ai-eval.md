@@ -49,6 +49,23 @@ M9-A/B/C 保证**语料和输出契约稳定**；M9-D 保证**AI 能基于稳定
 执行 CLI 前终止 trial，因此它与 `missed_fact` 互斥，两者把 trial 分成「路由阶段失败」
 和「路由成功但理解失败」两段，可分别归因到命令表面设计和输出可读性。
 
+### 等价路由与发现步骤
+
+真实终端用户没有能力把问题问准确，`.spg` 也大到不可能进模型上下文；模型必须在**没有
+读过任何数据之前**，只凭问句和 `SKILL.md` 盲选第一条命令。据此 `minimal_command_plan`
+的每个 step 支持两种放宽：
+
+- `alternatives`：与 primary 拿到同一批事实的等价写法。模型选中其中任意一条都算路由
+  成功。判定用的是「能不能拿到事实」，不是「有没有猜中我们写下的动词」。
+- 追加 plan step：first guess 走不通时的补救/细化步骤。已实测组件级
+  `--explain-condition` 的 `blocking_conditions.condition_id` 会给出
+  `...|button2#action1#conditionExp`，即先粗后细可以自行发现内部 action id，
+  因此需要内部 id 的命令只能作为第二步，不能作为唯一入口——问句里永远不会出现它。
+
+**拿不到事实的动词不得写进 `alternatives`**：死路必须继续记为 `command_rejected`，
+否则等于把路由失败洗成理解失败。放宽接受面之后，实际走过的路由记录在
+`command_route_usage`，`alternate` 占比越高说明规范动词越不自解释。
+
 ## 维护
 
 - 新增 eval case：编辑 `ai_eval_cases.json`，同步更新 `tests/ai_eval_tests.rs`。

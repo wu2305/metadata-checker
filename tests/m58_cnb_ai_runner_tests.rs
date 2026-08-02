@@ -901,7 +901,7 @@ fn test_m58_run_report_is_structured_and_redacted() {
 
     let json = std::fs::read_to_string(&json_path).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["schema_version"], "1.2.0");
+    assert_eq!(parsed["schema_version"], "1.3.0");
     assert_eq!(parsed["cases"].as_array().unwrap().len(), 2);
     assert_eq!(parsed["command_trace_stats"]["accepted_commands"], 1);
     assert_eq!(parsed["trial_pass_rate"], 0.5);
@@ -984,6 +984,7 @@ fn test_m58_run_report_aggregates_command_routing_confusion() {
         args: Vec::new(),
         budget: Some("compact".to_string()),
         plan_step_index: None,
+        route: None,
         accepted: false,
         detail_request: false,
         budget_upgrade: false,
@@ -1047,6 +1048,85 @@ fn test_m58_run_report_aggregates_command_routing_confusion() {
             .contains_key("page_logic -> --query-page-logic"),
         false
     );
+    // 反过来，accepted 命令必须出现在 route usage 里，两张表互补且不重叠。
+    assert_eq!(
+        report.command_route_usage["page_logic -> --query-page-logic (primary)"],
+        1
+    );
+    assert_eq!(report.command_route_usage.len(), 1);
+}
+
+/// 验证被接受命令按 `<task_family> -> <命令> (primary|alternate)` 聚合。
+///
+/// plan 接受等价备选之后，「选中规范动词」和「选了另一条等价路」都算 accepted。
+/// 若不分开统计，工具表面是否自解释的信号会被通过率抹平，
+/// 这张表就是放宽接受面之后仍能定位可疑动词的依据。
+#[test]
+fn test_m58_run_report_aggregates_command_route_usage() {
+    let accepted = |kind: &str, route: &str| CommandTrace {
+        command_kind: kind.to_string(),
+        target: "comp:app/actions_test.spg|input1".to_string(),
+        args: Vec::new(),
+        budget: Some("compact".to_string()),
+        plan_step_index: Some(0),
+        route: Some(route.to_string()),
+        accepted: true,
+        detail_request: false,
+        budget_upgrade: false,
+        output_sections: vec!["summary".to_string()],
+    };
+    let case = |case_id: &str, family: &str, trace: Vec<CommandTrace>| CaseReport {
+        case_id: case_id.to_string(),
+        trial_index: 0,
+        task_family: family.to_string(),
+        difficulty: "basic".to_string(),
+        status: "pass".to_string(),
+        passed: true,
+        max_command_count: 2,
+        failure_classes: Vec::new(),
+        judge_notes: Vec::new(),
+        command_trace: trace,
+    };
+
+    let report = RunReport::from_cases(
+        "fake".to_string(),
+        "test-model".to_string(),
+        None,
+        "2026-08-02T00:00:00Z".to_string(),
+        vec![
+            case(
+                "a",
+                "condition",
+                vec![accepted("--explain-condition", "primary")],
+            ),
+            case(
+                "b",
+                "condition",
+                vec![accepted("--explain-condition", "alternate")],
+            ),
+            case(
+                "c",
+                "condition",
+                vec![accepted("--explain-condition", "alternate")],
+            ),
+            case("d", "context", vec![accepted("--explain", "alternate")]),
+        ],
+    );
+
+    assert_eq!(
+        report.command_route_usage["condition -> --explain-condition (primary)"],
+        1
+    );
+    assert_eq!(
+        report.command_route_usage["condition -> --explain-condition (alternate)"],
+        2
+    );
+    assert_eq!(
+        report.command_route_usage["context -> --explain (alternate)"],
+        1
+    );
+    // 被接受的命令不得同时进入混淆矩阵。
+    assert!(report.command_routing_confusion.is_empty());
 }
 
 /// 验证 fake runner 真实执行 CLI、多轮回传 stdout，并完成全部 fixture LLM case。
@@ -1272,7 +1352,98 @@ fn test_m58_runner_blocks_command_outside_plan() {
     assert_eq!(report.command_trace.len(), 1);
     assert_eq!(report.command_trace[0].accepted, false);
     assert_eq!(report.command_trace[0].plan_step_index, None);
+    assert_eq!(report.command_trace[0].route, None);
     assert_eq!(adapter.requests().len(), 1);
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 验证 plan step 的 alternatives 被接受，且 runner 执行的是模型真正选的那条命令。
+///
+/// 真实用户问句是模糊的，且 `.spg` 不进模型上下文，模型只能盲选动词；因此语义等价的
+/// 写法都必须算路由成功。但接受面放宽后有个必须守住的前提：执行的命令要和 trace 记录
+/// 的命令一致，否则报告会声称跑了 primary、实际跑的却是别的命令。
+#[test]
+fn test_m58_runner_accepts_plan_alternative_and_records_route() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "fixture_condition_input1_visible_disabled")
+        .expect("case 必须存在")
+        .clone();
+    let alternative = &case.value["minimal_command_plan"][0]["alternatives"][0];
+    assert_eq!(alternative["args"][0], "--intent");
+
+    let output_dir = unique_test_output_dir("m58-plan-alternative");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": alternative["command_kind"],
+        "target": alternative["target"],
+        "args": alternative["args"],
+        "budget": alternative["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary：input1 的 visibleCondition 依赖 input2，\
+                   disableCondition 依赖 input1 自身取值。",
+    });
+    let mut adapter =
+        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 1);
+    let trace = &report.command_trace[0];
+    assert!(trace.accepted, "等价备选命令必须被接受");
+    assert_eq!(trace.plan_step_index, Some(0));
+    assert_eq!(trace.route.as_deref(), Some("alternate"));
+    // trace 记录的必须是模型选的写法，而不是 plan 的规范写法。
+    assert_eq!(trace.args, vec!["--intent".to_string(), "auto".to_string()]);
+    assert!(
+        !trace.output_sections.is_empty(),
+        "备选命令必须真的执行过 CLI 并回传 section"
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 验证 primary 命令仍记为 primary，使放宽接受面不会抹平路由质量信号。
+#[test]
+fn test_m58_runner_records_primary_route_for_canonical_command() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "fixture_condition_input1_visible_disabled")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+
+    let output_dir = unique_test_output_dir("m58-plan-primary");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": step["target"],
+        "args": step["args"],
+        "budget": step["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary：input1 受 visibleCondition 与 disableCondition 控制，\
+                   分别依赖 input2 和 input1。",
+    });
+    let mut adapter =
+        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 1);
+    assert_eq!(report.command_trace[0].route.as_deref(), Some("primary"));
 
     std::fs::remove_dir_all(output_dir).unwrap();
 }
@@ -1540,6 +1711,7 @@ fn accepted_trace() -> CommandTrace {
         args: Vec::new(),
         budget: Some("compact".to_string()),
         plan_step_index: Some(0),
+        route: Some("primary".to_string()),
         accepted: true,
         detail_request: false,
         budget_upgrade: false,
