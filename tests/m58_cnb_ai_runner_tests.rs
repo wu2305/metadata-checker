@@ -710,6 +710,160 @@ fn test_m58_cnb_sse_rejects_missing_delta_without_leaking_token() {
     assert!(error.contains("CNB AI Chat SSE chunk 缺少 delta"));
 }
 
+/// 思考把输出预算吃光时，报错必须点名 finish_reason=length。
+///
+/// 这是 reasoning_effort=high 那次 A/B 里 `button_submit_effect` 3/3 失败的形态：
+/// 旧代码统一报「SSE 内容为空」，既看不出是被截断还是上游没返回，也看不出思考
+/// 已经烧掉了多少预算，只能靠重跑猜。
+#[test]
+fn test_m58_cnb_sse_reports_length_truncation_when_thinking_exhausts_budget() {
+    let token = "m58-length-truncation-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"想了很久\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
+    server.join().unwrap();
+    assert!(!error.contains(token));
+    assert!(
+        error.contains("finish_reason=length"),
+        "必须点名截断原因，实际为: {error}"
+    );
+    assert!(
+        error.contains("thinking 4 字符"),
+        "必须带上思考规模，实际为: {error}"
+    );
+}
+
+/// 模型只思考、不回答时，报错要和「上游什么都没返回」区分开。
+#[test]
+fn test_m58_cnb_sse_reports_reasoning_only_response() {
+    let token = "m58-reasoning-only-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"只想不说\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
+    server.join().unwrap();
+    assert!(!error.contains(token));
+    assert!(
+        error.contains("只返回了思考内容") && error.contains("finish_reason=stop"),
+        "实际为: {error}"
+    );
+}
+
+/// 回答完整但被 length 截断，同样要失败，而不是把半截 JSON 交给 judge。
+#[test]
+fn test_m58_cnb_adapter_rejects_truncated_answer() {
+    let token = "m58-truncated-answer-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"kind\\\":\\\"fin\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
+    server.join().unwrap();
+    assert!(!error.contains(token));
+    assert!(error.contains("回答被输出预算截断"), "实际为: {error}");
+}
+
+/// 内联 `<think>` 段必须被剥掉并计入 reasoning_chars，不得混进 assistant content。
+///
+/// CNB 上的 deepseek 走 `reasoning_content` 旁路，但 M58 要换的 gemma4 / nemotron
+/// 普遍把思考内联在 content 里。不剥的话思考原文会进 history、进报告、进 judge 输入。
+/// 起止标记会被 SSE 切在不同 chunk，所以必须在拼接完成后剥。
+#[test]
+fn test_m58_cnb_sse_strips_inline_think_block_split_across_chunks() {
+    let token = "m58-inline-think-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"<thi\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"nk>四个字符\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"</think>ok\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let content = adapter.complete(&empty_chat_request()).unwrap();
+    server.join().unwrap();
+    assert_eq!(content, "ok", "内联思考不得混进 assistant content");
+    assert_eq!(
+        adapter.reasoning_chars(),
+        "四个字符".chars().count(),
+        "内联思考必须计入 reasoning_chars"
+    );
+}
+
+/// 只有内联思考、没有回答时，剥完是空串，必须报「只返回了思考内容」。
+#[test]
+fn test_m58_cnb_sse_reports_inline_think_only_response() {
+    let token = "m58-inline-think-only-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"<think>还没想完\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
+    server.join().unwrap();
+    assert!(!error.contains(token));
+    assert!(error.contains("只返回了思考内容"), "实际为: {error}");
+}
+
 /// 验证 CNB SSE delta 里的 provider 额外字段不会影响 content 拼接。
 #[test]
 fn test_m58_cnb_sse_accepts_provider_delta_extra_fields_without_leaking_token() {

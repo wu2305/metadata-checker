@@ -616,6 +616,11 @@ struct SseChatChunk {
 #[derive(Debug, Deserialize)]
 struct ChatChoice {
     delta: Option<ChatDelta>,
+    /// 上游给出的结束原因。`length` 表示输出预算被耗尽——开了 reasoning 之后
+    /// 思考会先把预算吃掉，回答就成了空串。不解析这个字段，「模型想太久被截断」
+    /// 和「上游真的什么都没返回」在报告里长得一模一样。
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 /// CNB SSE delta 里的文本片段。
@@ -805,13 +810,21 @@ impl ModelAdapter for CnbChatAdapter {
             bail!("CNB AI Chat 响应 Content-Type 必须为 text/event-stream，实际为 {content_type}");
         }
 
-        let (content, served_model, reasoning_chars) = parse_sse_content(&body)?;
-        self.reasoning_chars += reasoning_chars;
+        let parsed = parse_sse_content(&body)?;
+        self.reasoning_chars += parsed.reasoning_chars;
+        // 有回答但被截断同样是坏结果：答案会缺尾巴（JSON 协议体往往解析不了），
+        // 只是不像空回答那样显眼。让它以确定性文案失败，而不是当成正常回答喂给 judge。
+        if parsed.finish_reason.as_deref() == Some("length") {
+            bail!(
+                "CNB AI Chat 回答被输出预算截断：finish_reason=length（thinking {} 字符）",
+                parsed.reasoning_chars
+            );
+        }
         // CNB 对未知模型名不会报错，而是静默用默认模型服务请求（已实测：
         // 请求 `definitely-not-a-real-model-xyz` 同样返回 deepseek-v4-flash）。
         // 不校验的话，把 M58_CNB_MODEL 换成 gemma4-31b 只会得到一份「标着 gemma4、
         // 实际由默认模型回答」的报告——整个跨模型对比会静默失效，而这正是 M58 的目的。
-        if let Some(served_model) = served_model
+        if let Some(served_model) = parsed.served_model
             && served_model != self.model
         {
             bail!(
@@ -821,15 +834,62 @@ impl ModelAdapter for CnbChatAdapter {
                 self.model
             );
         }
-        Ok(content)
+        Ok(parsed.content)
     }
 }
 
+/// 一次 SSE 流的解析结果。
+struct SseParse {
+    /// 已剥掉思考内容的 assistant 回答。
+    content: String,
+    /// 实际服务本次请求的模型。
+    served_model: Option<String>,
+    /// 思考内容的总字符数（两个通道之和），不含思考原文。
+    reasoning_chars: usize,
+    /// 上游最后给出的非空 finish_reason。
+    finish_reason: Option<String>,
+}
+
+/// 把 assistant 文本里的 `<think>…</think>` 段落切掉，返回（回答, 被切掉的字符数）。
+///
+/// CNB 当前的 deepseek 走的是 `reasoning_content` 旁路通道，但 M58 的目的正是换成
+/// gemma4 / nemotron 这类便宜模型，而它们普遍把思考内联在 content 里。不剥的话，
+/// 思考原文会跟着 assistant content 进 history、进报告、进 judge 的输入——既污染
+/// 上下文，也让「答案」里混进模型的自言自语。剥在拼接完成后做，因为 `<think>`
+/// 起止标记会被 SSE 切在两个 chunk 里。
+fn split_inline_thinking(raw: &str) -> (String, usize) {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+    let mut answer = String::with_capacity(raw.len());
+    let mut thinking_chars = 0usize;
+    let mut rest = raw;
+
+    while let Some(open_at) = rest.find(OPEN) {
+        answer.push_str(&rest[..open_at]);
+        let after_open = &rest[open_at + OPEN.len()..];
+        match after_open.find(CLOSE) {
+            Some(close_at) => {
+                thinking_chars += after_open[..close_at].chars().count();
+                rest = &after_open[close_at + CLOSE.len()..];
+            }
+            None => {
+                // 没有闭合标记 = 思考写到一半被截断，后面不可能还有回答。
+                thinking_chars += after_open.chars().count();
+                rest = "";
+                break;
+            }
+        }
+    }
+    answer.push_str(rest);
+    (answer, thinking_chars)
+}
+
 /// 解析 CNB SSE 响应，返回拼接后的文本与实际服务模型。
-fn parse_sse_content(body: &str) -> Result<(String, Option<String>, usize)> {
+fn parse_sse_content(body: &str) -> Result<SseParse> {
     let mut content = String::new();
     let mut served_model: Option<String> = None;
     let mut reasoning_chars = 0usize;
+    let mut finish_reason: Option<String> = None;
     let mut saw_done = false;
 
     for line in body.lines() {
@@ -862,6 +922,12 @@ fn parse_sse_content(body: &str) -> Result<(String, Option<String>, usize)> {
         }
 
         for choice in choices {
+            if let Some(reason) = choice
+                .finish_reason
+                .filter(|reason| !reason.trim().is_empty())
+            {
+                finish_reason = Some(reason);
+            }
             let delta = choice
                 .delta
                 .ok_or_else(|| anyhow!("CNB AI Chat SSE chunk 缺少 delta"))?;
@@ -878,11 +944,35 @@ fn parse_sse_content(body: &str) -> Result<(String, Option<String>, usize)> {
     if !saw_done {
         bail!("CNB AI Chat SSE 响应缺少 [DONE]");
     }
+
+    let (content, inline_thinking_chars) = split_inline_thinking(&content);
+    reasoning_chars += inline_thinking_chars;
+
     if content.trim().is_empty() {
-        bail!("CNB AI Chat SSE 内容为空");
+        // 「内容为空」有三种成因，之前它们共用同一句报错，在 CI 日志里无法归因：
+        // 预算被思考吃光、模型只思考不回答、上游真的什么都没发。分开报。
+        let reason = finish_reason.as_deref().unwrap_or("<none>");
+        if reason == "length" {
+            bail!(
+                "CNB AI Chat 未返回回答内容：finish_reason=length，\
+                 模型在思考阶段耗尽输出预算（thinking {reasoning_chars} 字符）"
+            );
+        }
+        if reasoning_chars > 0 {
+            bail!(
+                "CNB AI Chat 只返回了思考内容、没有回答内容\
+                 （thinking {reasoning_chars} 字符，finish_reason={reason}）"
+            );
+        }
+        bail!("CNB AI Chat SSE 内容为空（finish_reason={reason}）");
     }
 
-    Ok((content, served_model, reasoning_chars))
+    Ok(SseParse {
+        content,
+        served_model,
+        reasoning_chars,
+        finish_reason,
+    })
 }
 
 /// 读取必需的非空环境变量。
