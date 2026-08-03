@@ -748,6 +748,67 @@ fn test_m58_cnb_sse_reports_length_truncation_when_thinking_exhausts_budget() {
     );
 }
 
+/// 有服务端 usage 时，空回答的报错要给出权威 token 数，而不只是客户端字符数。
+///
+/// 报文形状照抄真实抓包：deepseek 把 usage 挂在最后一个带 choices 的 chunk 上，
+/// 且除末个 chunk 外 finish_reason 一律是空串（不是 null）。
+#[test]
+fn test_m58_cnb_sse_reports_server_usage_on_empty_answer() {
+    let token = "m58-usage-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"想\"},\"finish_reason\":\"\"}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"length\"}],\
+         \"usage\":{\"completion_tokens\":64,\"completion_thinking_tokens\":64}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let error = adapter
+        .complete(&empty_chat_request())
+        .unwrap_err()
+        .to_string();
+    server.join().unwrap();
+    assert!(!error.contains(token));
+    assert!(error.contains("finish_reason=length"), "实际为: {error}");
+    assert!(
+        error.contains("completion_tokens=64") && error.contains("thinking_tokens=64"),
+        "必须带上服务端权威 token 计数，实际为: {error}"
+    );
+}
+
+/// 末尾只带 usage、不带 choices 的收尾 chunk 不能被当成坏流。
+///
+/// deepseek 把 usage 挂在最后一个 choices chunk 上，但 M58 要换的模型未必；
+/// OpenAI 兼容流普遍会多发一个 choices 为空的 usage chunk。
+#[test]
+fn test_m58_cnb_sse_accepts_trailing_usage_only_chunk() {
+    let token = "m58-usage-only-chunk-secret";
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: {\"choices\":[],\"usage\":{\"completion_tokens\":7,\"completion_thinking_tokens\":0}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+
+    let content = adapter.complete(&empty_chat_request()).unwrap();
+    server.join().unwrap();
+    assert_eq!(content, "ok");
+}
+
 /// 模型只思考、不回答时，报错要和「上游什么都没返回」区分开。
 #[test]
 fn test_m58_cnb_sse_reports_reasoning_only_response() {

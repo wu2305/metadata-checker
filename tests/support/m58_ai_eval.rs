@@ -607,9 +607,23 @@ pub(crate) struct ChatRequest {
 #[derive(Debug, Deserialize)]
 struct SseChatChunk {
     choices: Option<Vec<ChatChoice>>,
+    /// 末个 chunk 上的服务端用量。这是权威的 token 计数（客户端按字符数统计只是代理指标），
+    /// 空回答时它直接说明预算烧在了哪里。
+    #[serde(default)]
+    usage: Option<ChatUsage>,
     /// 实际服务本次请求的模型。CNB 对未知模型名会静默回退，必须按这个字段校验。
     #[serde(default)]
     model: Option<String>,
+}
+
+/// 服务端返回的用量统计，只取归因空回答需要的两个字段。
+#[derive(Debug, Deserialize)]
+struct ChatUsage {
+    #[serde(default)]
+    completion_tokens: Option<u64>,
+    /// 思考消耗的 token。与 ai-audit 的 thinking_tokens 同源，但按请求给出。
+    #[serde(default)]
+    completion_thinking_tokens: Option<u64>,
 }
 
 /// CNB SSE choice 中的增量内容载体。
@@ -884,12 +898,32 @@ fn split_inline_thinking(raw: &str) -> (String, usize) {
     (answer, thinking_chars)
 }
 
+/// 把预算信息拼成一句短诊断。有服务端 usage 就用它（权威的 token 计数），
+/// 没有就退回客户端的字符数代理指标。
+fn format_usage(usage: Option<&ChatUsage>, reasoning_chars: usize) -> String {
+    match usage {
+        Some(usage) => format!(
+            "completion_tokens={}, thinking_tokens={}, thinking {reasoning_chars} 字符",
+            usage
+                .completion_tokens
+                .map(|tokens| tokens.to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+            usage
+                .completion_thinking_tokens
+                .map(|tokens| tokens.to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+        ),
+        None => format!("thinking {reasoning_chars} 字符"),
+    }
+}
+
 /// 解析 CNB SSE 响应，返回拼接后的文本与实际服务模型。
 fn parse_sse_content(body: &str) -> Result<SseParse> {
     let mut content = String::new();
     let mut served_model: Option<String> = None;
     let mut reasoning_chars = 0usize;
     let mut finish_reason: Option<String> = None;
+    let mut usage: Option<ChatUsage> = None;
     let mut saw_done = false;
 
     for line in body.lines() {
@@ -914,10 +948,18 @@ fn parse_sse_content(body: &str) -> Result<SseParse> {
         if let Some(model) = chunk.model.filter(|model| !model.trim().is_empty()) {
             served_model.get_or_insert(model);
         }
-        let choices = chunk
-            .choices
-            .ok_or_else(|| anyhow!("CNB AI Chat SSE chunk 缺少 choices"))?;
+        let carries_usage = chunk.usage.is_some();
+        if carries_usage {
+            usage = chunk.usage;
+        }
+        let choices = chunk.choices.unwrap_or_default();
         if choices.is_empty() {
+            // 只带 usage、不带 choices 的收尾 chunk 是 OpenAI 兼容流的常见形态
+            // （deepseek 把 usage 挂在最后一个 choices chunk 上，但换模型后未必）。
+            // 其余情况下的空 choices 仍然说明流坏了。
+            if carries_usage {
+                continue;
+            }
             bail!("CNB AI Chat SSE chunk 缺少 choices");
         }
 
@@ -952,17 +994,14 @@ fn parse_sse_content(body: &str) -> Result<SseParse> {
         // 「内容为空」有三种成因，之前它们共用同一句报错，在 CI 日志里无法归因：
         // 预算被思考吃光、模型只思考不回答、上游真的什么都没发。分开报。
         let reason = finish_reason.as_deref().unwrap_or("<none>");
+        let budget = format_usage(usage.as_ref(), reasoning_chars);
         if reason == "length" {
             bail!(
-                "CNB AI Chat 未返回回答内容：finish_reason=length，\
-                 模型在思考阶段耗尽输出预算（thinking {reasoning_chars} 字符）"
+                "CNB AI Chat 未返回回答内容：finish_reason=length，模型在思考阶段耗尽输出预算（{budget}）"
             );
         }
         if reasoning_chars > 0 {
-            bail!(
-                "CNB AI Chat 只返回了思考内容、没有回答内容\
-                 （thinking {reasoning_chars} 字符，finish_reason={reason}）"
-            );
+            bail!("CNB AI Chat 只返回了思考内容、没有回答内容（{budget}，finish_reason={reason}）");
         }
         bail!("CNB AI Chat SSE 内容为空（finish_reason={reason}）");
     }
