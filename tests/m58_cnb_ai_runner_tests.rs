@@ -803,10 +803,15 @@ fn test_m58_fake_runner_records_runner_error_for_cnb_transport_failure() {
     assert_eq!(report.passed, false);
     assert_eq!(report.failure_classes, vec!["runner_error".to_string()]);
     assert_eq!(report.command_trace, Vec::<CommandTrace>::new());
-    assert_eq!(
-        report.judge_notes,
-        vec!["model adapter completion failed".to_string()]
+    // 诊断必须带上 HTTP 状态，否则 CI 日志里区分不了「上游 500」和「模型答错」。
+    assert_eq!(report.judge_notes.len(), 1);
+    assert!(
+        report.judge_notes[0].starts_with("model adapter completion failed: "),
+        "实际为: {}",
+        report.judge_notes[0]
     );
+    assert!(report.judge_notes[0].contains("HTTP 500"));
+    // 诊断进了报告，token 仍然不能进。
     assert!(!report.judge_notes[0].contains(token));
 
     std::fs::remove_dir_all(output_dir).unwrap();
@@ -2123,4 +2128,35 @@ fn read_http_request(stream: &mut TcpStream) -> String {
         bytes.extend_from_slice(&chunk[..read]);
     }
     String::from_utf8(bytes[..header_end + content_length].to_vec()).unwrap()
+}
+
+/// adapter 层失败必须把原始错误带进 judge_notes。
+///
+/// 之前这里是 `Err(_) => "model adapter completion failed"`，错误被整个丢掉。
+/// 在 reasoning_effort 的 A/B 里，7 个 trial 因此变成无法归因的 runner_error：
+/// 既看不出是超时、HTTP 错误，还是模型被静默替换，只能重跑。诊断本身是我们自己
+/// 构造的确定性文本（且已 redact token），进报告是安全的。
+#[test]
+fn test_m58_runner_surfaces_adapter_error_in_judge_notes() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let output_dir = unique_test_output_dir("m58-adapter-error-note");
+    let config = fixture_runner_config(output_dir.clone());
+    // 空队列的 FakeModelAdapter 会以确定性文案失败，等价于 live run 里的 adapter 层错误。
+    let mut adapter = FakeModelAdapter::from_responses(vec![]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+
+    assert_eq!(report.status, "error");
+    assert_eq!(report.failure_classes, vec!["runner_error".to_string()]);
+    let note = report.judge_notes.join(" ");
+    assert!(
+        note.contains("fake model response queue exhausted"),
+        "runner_error 的 judge_notes 必须包含 adapter 原始错误，实际为: {note}"
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
 }

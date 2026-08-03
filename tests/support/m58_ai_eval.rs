@@ -682,6 +682,14 @@ pub(crate) struct CnbChatAdapter {
     reasoning_chars: usize,
 }
 
+/// 构造带指定超时的 HTTP client。
+fn build_http_client(timeout: Duration) -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .context("创建 CNB AI Chat HTTP client 失败")
+}
+
 impl fmt::Debug for CnbChatAdapter {
     /// 只输出非敏感配置，绝不输出 CNB token。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -709,6 +717,12 @@ impl CnbChatAdapter {
             .ok()
             .map(|effort| effort.trim().to_string())
             .filter(|effort| !effort.is_empty());
+        // 开了推理之后单次响应要多花几倍时间（实测 completion+thinking token 从 6k 涨到 38k），
+        // 60s 的默认超时会把「模型想得久」变成 runner_error，读起来像模型答错了。
+        // 不开推理时保持 60s 不变，控制组请求路径与历史基线一致。
+        if adapter.reasoning_effort.is_some() {
+            adapter.client = build_http_client(Duration::from_secs(300))?;
+        }
         Ok(adapter)
     }
 
@@ -741,10 +755,7 @@ impl CnbChatAdapter {
         if model.trim().is_empty() {
             bail!("CNB model 不能为空");
         }
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .context("创建 CNB AI Chat HTTP client 失败")?;
+        let client = build_http_client(Duration::from_secs(60))?;
         Ok(Self {
             client,
             endpoint: endpoint.trim_end_matches('/').to_string(),
@@ -1659,13 +1670,20 @@ fn run_case_for_trial(
         // adapter/HTTP/SSE 层失败说明 provider/runtime 未产出可解析文本，归为 runner_error。
         let response = match adapter.complete(&request) {
             Ok(response) => response,
-            Err(_) => {
+            Err(error) => {
+                // 丢掉 error 会让 runner_error 变成一句无法复盘的「失败了」——reasoning_effort
+                // 的 A/B 里正是这类空诊断把 7 个 trial 变成不可解释的噪声。adapter 层的错误
+                // 全部是我们自己构造的确定性文本（HTTP 状态、SSE 解析、模型替换断言），
+                // 不含模型回答，可以安全落进 judge_notes；仍然截断以免异常长的响应体灌进报告。
                 return Ok(error_case_report(
                     case,
                     trial_index,
                     policy.max_command_count,
                     "runner_error",
-                    "model adapter completion failed",
+                    &format!(
+                        "model adapter completion failed: {}",
+                        truncate_diagnostic(&format!("{error:#}"))
+                    ),
                     trace,
                 ));
             }
@@ -2099,6 +2117,17 @@ fn accepted_command_trace(
 }
 
 /// 构造命令/adapter 失败的 case 报告，不复制原始输出或模型回答。
+/// judge_notes 是给人在 CI 日志里读的短诊断，不是日志转储。
+/// 按字符（不是字节）截断，避免把多字节错误信息切成非法 UTF-8。
+fn truncate_diagnostic(message: &str) -> String {
+    const MAX_CHARS: usize = 200;
+    let mut normalized: String = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() > MAX_CHARS {
+        normalized = normalized.chars().take(MAX_CHARS).collect::<String>() + "…";
+    }
+    normalized
+}
+
 fn error_case_report(
     case: &EvalCase,
     trial_index: usize,
