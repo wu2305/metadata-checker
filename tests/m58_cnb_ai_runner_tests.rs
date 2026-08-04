@@ -236,13 +236,13 @@ fn test_m58_loader_defaults_missing_tier() {
 #[test]
 fn test_m58_agent_turn_protocol_accepts_command_and_final() {
     let command = parse_agent_turn(
-        r#"{"kind":"command","command_kind":"--query-page-logic","target":"page:app/actions_test.spg","args":[],"budget":null}"#,
+        r#"{"kind":"command","command_kind":"--relations","target":"page:app/actions_test.spg","args":[],"budget":null}"#,
     )
     .unwrap();
     assert_eq!(
         command,
         AgentTurn::Command(CommandRequest {
-            command_kind: "--query-page-logic".to_string(),
+            command_kind: "--relations".to_string(),
             target: "page:app/actions_test.spg".to_string(),
             args: Vec::new(),
             budget: None,
@@ -293,14 +293,14 @@ fn test_m58_command_policy_binds_paths_and_steps() {
     )
     .unwrap();
     let request = CommandRequest {
-        command_kind: "--query-page-logic".to_string(),
+        command_kind: "--relations".to_string(),
         target: "page:app/actions_test.spg".to_string(),
         args: Vec::new(),
         budget: Some("compact".to_string()),
     };
 
-    let validated = policy.validate(&request, &[]).unwrap();
-    assert_eq!(validated.step_index(), 0);
+    let validated = policy.validate(&request, &[], 0).unwrap();
+    assert_eq!(validated.step_index(), Some(0));
     assert_eq!(validated.binary_path(), binary_path.as_path());
     assert_eq!(
         validated.argv(),
@@ -310,14 +310,14 @@ fn test_m58_command_policy_binds_paths_and_steps() {
             project_dir.into_os_string(),
             OsString::from("--graph-db-path"),
             graph_db_path.into_os_string(),
-            OsString::from("--query-page-logic"),
+            OsString::from("--relations"),
             OsString::from("page:app/actions_test.spg"),
             OsString::from("--budget"),
             OsString::from("compact"),
         ]
     );
-    assert!(policy.validate(&request, &[0]).is_err());
-    assert!(policy.validate(&request, &[0, 1]).is_err());
+    assert!(policy.validate(&request, &[0], 0).is_err());
+    assert!(policy.validate(&request, &[0, 1], 0).is_err());
     assert!(
         policy
             .validate(
@@ -326,6 +326,7 @@ fn test_m58_command_policy_binds_paths_and_steps() {
                     ..request
                 },
                 &[],
+                0,
             )
             .is_err()
     );
@@ -357,12 +358,13 @@ fn test_m58_command_policy_defaults_missing_budget_to_compact() {
     let validated = policy
         .validate(
             &CommandRequest {
-                command_kind: "--query-page-logic".to_string(),
+                command_kind: "--relations".to_string(),
                 target: "page:app/dataflow_embedded.spg".to_string(),
                 args: Vec::new(),
                 budget: Some("compact".to_string()),
             },
             &[],
+            0,
         )
         .unwrap();
     assert_eq!(validated.argv().last(), Some(&OsString::from("compact")));
@@ -370,12 +372,13 @@ fn test_m58_command_policy_defaults_missing_budget_to_compact() {
     let default_validated = policy
         .validate(
             &CommandRequest {
-                command_kind: "--query-page-logic".to_string(),
+                command_kind: "--relations".to_string(),
                 target: "page:app/dataflow_embedded.spg".to_string(),
                 args: Vec::new(),
                 budget: None,
             },
             &[],
+            0,
         )
         .unwrap();
     assert_eq!(
@@ -1488,12 +1491,12 @@ fn test_m58_run_report_aggregates_command_routing_confusion() {
     assert_eq!(
         report
             .command_routing_confusion
-            .contains_key("page_logic -> --query-page-logic"),
+            .contains_key("page_logic -> --relations"),
         false
     );
     // 反过来，accepted 命令必须出现在 route usage 里，两张表互补且不重叠。
     assert_eq!(
-        report.command_route_usage["page_logic -> --query-page-logic (primary)"],
+        report.command_route_usage["page_logic -> --relations (primary)"],
         1
     );
     assert_eq!(report.command_route_usage.len(), 1);
@@ -1696,21 +1699,42 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("No Markdown fences"));
     assert!(bootstrap.contains("每轮只输出一行 JSON"));
     assert!(bootstrap.contains("final 对象只能有 kind 和 answer 两个键"));
-    assert!(bootstrap.contains("smallest allowed query"));
-    assert!(bootstrap.contains("先按问题意图选命令"));
-    assert!(bootstrap.contains("页面整体逻辑 -> --query-page-logic"));
-    assert!(bootstrap.contains("单组件/按钮/动作 -> --explain"));
-    assert!(bootstrap.contains("writer/value-source/condition -> --explain-condition"));
-    assert!(bootstrap.contains("点击/按钮/组件/动作 -> --explain"));
-    assert!(bootstrap.contains("页面整体问题才允许 --query-page-logic"));
-    assert!(bootstrap.contains("裸 field 的值/来源/写入 -> --explain"));
-    assert!(bootstrap.contains("page:app/<relative-file>.spg；不得删除 app/ 或 .spg"));
+    // 三动词表面：路由规则必须是一张表，不是六条用分号串起来的散句。
+    assert!(bootstrap.contains("只有三个查询动词"));
+    assert!(bootstrap.contains("`--find`"));
+    assert!(bootstrap.contains("`--explain`"));
+    assert!(bootstrap.contains("`--relations`"));
+    assert!(bootstrap.contains("动词只决定问什么，target 前缀决定去哪"));
+    assert!(bootstrap.contains("同一个按钮写成 comp: 还是 action: 返回同一组事实块"));
+
+    // M58 里 SKILL.md 的快速分流表说按钮问题先走 --explain-condition，bootstrap 第 3 条
+    // 却说按钮问题走 --explain——同一份 prompt 里两条互相矛盾的路由指令，模型只能靠猜，
+    // 34 条拒绝（占全部拒绝 30%）就来自这次二选一。这几条断言锁住矛盾不会被写回来。
+    assert!(
+        !bootstrap.contains("单组件/按钮/动作 -> --explain"),
+        "旧的分号串式路由规则必须移除"
+    );
+    assert!(
+        !bootstrap.contains("writer/value-source/condition -> --explain-condition"),
+        "不得再要求模型在 --explain 与 --explain-condition 之间二选一"
+    );
+    assert!(
+        !bootstrap.contains("点击/按钮/组件/动作问题不得使用 --query-page-logic"),
+        "禁令式路由规则已由前缀分流取代"
+    );
+
+    // 占位符必须消失：M58 里模型两次把 `comp:app/<relative-file>.spg|button1` 原样当成
+    // 真实路径发了出来。prompt 里出现的路径样子，模型就会照抄。
+    assert!(
+        !bootstrap.contains("<relative-file>"),
+        "bootstrap 不得包含会被原样抄写的路径占位符"
+    );
+    assert!(bootstrap.contains("绝对不要自己拼造文件路径"));
+    assert!(bootstrap.contains("先用 --find"));
+
     assert!(bootstrap.contains("budget 只能放在 JSON 顶层字段，不能放进 args"));
-    assert!(bootstrap.contains("主证据块为空或 result=null 时，不要直接作答"));
-    assert!(bootstrap.contains("用同一 target 执行 --explain 作为受限 fallback"));
     assert!(bootstrap.contains("compact"));
     assert!(bootstrap.contains("compact / normal / full"));
-    assert!(bootstrap.contains("页面目标保留 `page:app/<relative-file>.spg`"));
     assert!(!bootstrap.contains("compact path"));
     assert!(bootstrap.contains("next user message as the only evidence"));
     assert!(bootstrap.contains("enough evidence"));
@@ -1718,16 +1742,10 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("页面整体回答至少说明入口/写入计数和一个 action"));
     assert!(bootstrap.contains("按钮/动作回答至少说明组件、action 和写入目标"));
     assert!(bootstrap.contains("字段回答至少说明字段和写入者或来源"));
-    assert!(
-        bootstrap.contains(
-            "裸 field 的一次 compact --explain 已有 summary 和 evidence 后立即返回 final"
-        )
-    );
-    assert!(bootstrap.contains("M58 runner routing override"));
-    assert!(bootstrap.contains("裸 field 必须使用 --explain"));
-    assert!(bootstrap.contains(
-        "按钮/点击问题必须使用 --explain 和 comp:app/<relative-file>.spg|<component-id>"
-    ));
+
+    // 回答形状的约束保留，但必须和选命令的规则分开：混在一起正是上面那次矛盾的来源。
+    assert!(bootstrap.contains("M58 runner answer-shape override"));
+    assert!(bootstrap.contains("只约束最终回答的写法，不改变上面的选命令规则"));
     assert!(bootstrap.contains("页面整体最终回答必须明确写出用户入口、写入目标和 action"));
     assert!(bootstrap.contains("page final 必须 literal 包含 用户入口、按钮、写入目标、action"));
     assert!(
@@ -1748,9 +1766,8 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
             .contains("This is only a shape example, not the current case answer/target/plan.")
     );
     assert!(bootstrap.contains(
-        r#"{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>.spg","args":[],"budget":"compact"}"#
+        r#"{"kind":"command","command_kind":"--explain","target":"<target>","args":[],"budget":"compact"}"#
     ));
-    assert!(bootstrap.contains("page:app/<relative-file>.spg"));
     assert!(bootstrap.contains("Case Question:"));
     assert!(bootstrap.contains(r#"{"kind":"final","answer":"..."}"#));
     assert!(bootstrap.contains(&case.question));
@@ -1814,14 +1831,12 @@ fn test_m58_runner_accepts_plan_alternative_and_records_route() {
     .unwrap();
     let case = cases
         .iter()
-        .find(|case| case.case_id == "fixture_condition_input1_visible_disabled")
+        .find(|case| case.case_id == "condition_action_behavior")
         .expect("case 必须存在")
         .clone();
-    // 必须挑一条真正收窄输出的备选。`--intent auto` 那条是 CLI 默认值的显式写法，
-    // 与 primary 逐字节等价，会（正确地）归类成 primary 而不是 alternate。
-    let alternative = &case.value["minimal_command_plan"][0]["alternatives"][1];
-    assert_eq!(alternative["args"][0], "--intent");
-    assert_eq!(alternative["args"][1], "display");
+    // 规范写法是 action: target，等价备选是同一个按钮的 comp: 写法。
+    let alternative = &case.value["minimal_command_plan"][0]["alternatives"][0];
+    assert_eq!(alternative["target"], "comp:app/actions_test.spg|button2");
 
     let output_dir = unique_test_output_dir("m58-plan-alternative");
     let config = fixture_runner_config(output_dir.clone());
@@ -1834,8 +1849,7 @@ fn test_m58_runner_accepts_plan_alternative_and_records_route() {
     });
     let final_answer = serde_json::json!({
         "kind": "final",
-        "answer": "见 summary：input1 的 visibleCondition 依赖 input2，\
-                   disableCondition 依赖 input1 自身取值。",
+        "answer": "见 summary：button2 的 action 受门禁条件约束。",
     });
     let mut adapter =
         FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
@@ -1847,10 +1861,7 @@ fn test_m58_runner_accepts_plan_alternative_and_records_route() {
     assert_eq!(trace.plan_step_index, Some(0));
     assert_eq!(trace.route.as_deref(), Some("alternate"));
     // trace 记录的必须是模型选的写法，而不是 plan 的规范写法。
-    assert_eq!(
-        trace.args,
-        vec!["--intent".to_string(), "display".to_string()]
-    );
+    assert_eq!(trace.target, "comp:app/actions_test.spg|button2");
     assert!(
         !trace.output_sections.is_empty(),
         "备选命令必须真的执行过 CLI 并回传 section"
@@ -1859,57 +1870,14 @@ fn test_m58_runner_accepts_plan_alternative_and_records_route() {
     std::fs::remove_dir_all(output_dir).unwrap();
 }
 
-/// `--query-dataflow` 的裸名与 `model:` 前缀写法必须视为同一条命令。
+/// `--intent` 不再是拒绝的理由。
 ///
-/// CLI 内部会把两种写法规范化到同一个节点，输出逐字节相同。精确字符串比较会把
-/// 「动词选对、实体也选对，只是多写了一个类型前缀」记成路由失败，让 command_rejected
-/// 和 command_routing_confusion 谎报工具表面的缺陷。
+/// 这一条与它取代的旧断言方向相反，理由在数据里：SKILL.md 要求模型「按问题选 intent」，
+/// plan 却因为自己没写 intent 而拒绝写了 intent 的命令。M58 六轮里 17 条拒绝出自这里，
+/// 其中 `--intent display` 回答「为什么不显示」恰恰是最该给分的选择。接口不能一边要求、
+/// 一边惩罚；intent 是否用得好由回答质量去衡量，不该冒充路由缺陷。
 #[test]
-fn test_m58_runner_accepts_dataflow_target_with_model_prefix() {
-    let cases = load_eval_cases(Path::new(
-        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
-    ))
-    .unwrap();
-    let case = cases
-        .iter()
-        .find(|case| case.case_id == "dataflow_output_source")
-        .expect("case 必须存在")
-        .clone();
-    let step = &case.value["minimal_command_plan"][0];
-    assert_eq!(step["command_kind"], "--query-dataflow");
-    assert_eq!(step["target"], "dataflow_output");
-
-    let output_dir = unique_test_output_dir("m58-dataflow-prefix");
-    let config = fixture_runner_config(output_dir.clone());
-    let command = serde_json::json!({
-        "kind": "command",
-        "command_kind": "--query-dataflow",
-        "target": "model:dataflow_output",
-        "args": step["args"],
-        "budget": step["budget"],
-    });
-    let final_answer = serde_json::json!({
-        "kind": "final",
-        "answer": "见 summary：dataflow_output 由 DataFlow 的输出节点产生。",
-    });
-    let mut adapter =
-        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
-
-    let report = run_case(&case, &mut adapter, &config).unwrap();
-    assert_eq!(report.command_trace.len(), 1);
-    let trace = &report.command_trace[0];
-    assert!(trace.accepted, "带 model: 前缀的等价 target 必须被接受");
-    assert_eq!(trace.plan_step_index, Some(0));
-    assert_eq!(trace.route.as_deref(), Some("primary"));
-
-    std::fs::remove_dir_all(output_dir).unwrap();
-}
-
-/// 显式写出默认值 `--intent auto` 必须与整个省略视为同一条命令。
-///
-/// 两种写法在所有命令/target 上输出逐字节相同，把它记成路由失败等于谎报接口缺陷。
-#[test]
-fn test_m58_runner_accepts_explicit_default_intent_auto() {
+fn test_m58_runner_accepts_narrowing_intent_without_counting_it_as_misroute() {
     let cases = load_eval_cases(Path::new(
         "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
     ))
@@ -1920,47 +1888,10 @@ fn test_m58_runner_accepts_explicit_default_intent_auto() {
         .expect("case 必须存在")
         .clone();
     let step = &case.value["minimal_command_plan"][0];
-    assert_eq!(step["args"].as_array().unwrap().len(), 0);
-
-    let output_dir = unique_test_output_dir("m58-intent-auto");
-    let config = fixture_runner_config(output_dir.clone());
-    let command = serde_json::json!({
-        "kind": "command",
-        "command_kind": step["command_kind"],
-        "target": step["target"],
-        "args": ["--intent", "auto"],
-        "budget": step["budget"],
-    });
-    let final_answer = serde_json::json!({
-        "kind": "final",
-        "answer": "见 summary：model1 的过滤条件见 availability。",
-    });
-    let mut adapter =
-        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
-
-    let report = run_case(&case, &mut adapter, &config).unwrap();
-    assert_eq!(report.command_trace.len(), 1);
     assert!(
-        report.command_trace[0].accepted,
-        "显式写出默认 --intent auto 必须被接受"
+        (step["args"].as_array()).is_none_or(|args| args.is_empty()),
+        "规范写法不带 intent，正是这条测试要覆盖的差异"
     );
-
-    std::fs::remove_dir_all(output_dir).unwrap();
-}
-
-/// 会真正收窄输出的 `--intent` 取值不能被一并放宽。
-#[test]
-fn test_m58_runner_still_rejects_narrowing_intent() {
-    let cases = load_eval_cases(Path::new(
-        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
-    ))
-    .unwrap();
-    let case = cases
-        .iter()
-        .find(|case| case.case_id == "fixture_condition_model_filter_user_var")
-        .expect("case 必须存在")
-        .clone();
-    let step = &case.value["minimal_command_plan"][0];
 
     let output_dir = unique_test_output_dir("m58-intent-narrowing");
     let config = fixture_runner_config(output_dir.clone());
@@ -1980,10 +1911,127 @@ fn test_m58_runner_still_rejects_narrowing_intent() {
 
     let report = run_case(&case, &mut adapter, &config).unwrap();
     assert_eq!(report.command_trace.len(), 1);
-    assert!(
-        !report.command_trace[0].accepted,
-        "--intent availability 会丢掉 model_io_facts，不能与默认写法等同"
+    let trace = &report.command_trace[0];
+    assert!(trace.accepted, "写了 intent 不该被记成路由失败");
+    // 但它必须仍然如实出现在 trace 里，否则过度收窄就变得不可见了。
+    assert_eq!(
+        trace.args,
+        vec!["--intent".to_string(), "availability".to_string()]
     );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// `--find` 不占 plan 步数。
+///
+/// M58 里 `context_button1_neighbors` 问的是「button1 周围还有什么」——根本没给页面。
+/// 模型 8 次选择先 `--find-component button1` 定位，全部被记成路由失败：它做对了，只是
+/// plan 没给它做对的余地。定位不是回答，不该消费回答的预算。
+#[test]
+fn test_m58_runner_lets_discovery_precede_the_plan_step() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "context_button1_neighbors")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+
+    let output_dir = unique_test_output_dir("m58-free-discovery");
+    let config = fixture_runner_config(output_dir.clone());
+    let find = serde_json::json!({
+        "kind": "command",
+        "command_kind": "--find",
+        "target": "button1",
+        "args": [],
+        "budget": "compact",
+    });
+    let planned = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": step["target"],
+        "args": step["args"],
+        "budget": step["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary：button1 的上下游依赖见 details。",
+    });
+    let mut adapter = FakeModelAdapter::from_responses(vec![
+        find.to_string(),
+        planned.to_string(),
+        final_answer.to_string(),
+    ]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 2);
+
+    let discovery = &report.command_trace[0];
+    assert!(discovery.accepted, "定位命令必须被接受");
+    assert_eq!(
+        discovery.plan_step_index, None,
+        "定位命令不占 plan 步数，否则后面的正题就没预算了"
+    );
+
+    let answer_step = &report.command_trace[1];
+    assert!(answer_step.accepted);
+    assert_eq!(answer_step.plan_step_index, Some(0));
+    assert!(
+        !report
+            .failure_classes
+            .contains(&"command_rejected".to_string()),
+        "先定位再回答不该被记成路由失败：{:?}",
+        report.failure_classes
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 模型/DataFlow 关系查询的裸名与 `model:` 前缀写法必须视为同一条命令。
+///
+/// CLI 内部会把两种写法规范化到同一个节点，输出逐字节相同。精确字符串比较会把
+/// 「动词选对、实体也选对，只是多写了一个类型前缀」记成路由失败，让 command_rejected
+/// 和 command_routing_confusion 谎报工具表面的缺陷。
+#[test]
+fn test_m58_runner_accepts_dataflow_target_with_model_prefix() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "dataflow_output_source")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+    assert_eq!(step["command_kind"], "--relations");
+    assert_eq!(step["target"], "model:dataflow_output");
+
+    let output_dir = unique_test_output_dir("m58-dataflow-prefix");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": "--relations",
+        "target": "dataflow_output",
+        "args": step["args"],
+        "budget": step["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary：dataflow_output 由 DataFlow 的输出节点产生。",
+    });
+    let mut adapter =
+        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 1);
+    let trace = &report.command_trace[0];
+    assert!(trace.accepted, "省略 model: 前缀的等价 target 必须被接受");
+    assert_eq!(trace.plan_step_index, Some(0));
+    assert_eq!(trace.route.as_deref(), Some("primary"));
 
     std::fs::remove_dir_all(output_dir).unwrap();
 }
@@ -2347,7 +2395,7 @@ fn unique_test_output_dir(prefix: &str) -> PathBuf {
 /// 构造一个已通过 plan、只读取 summary 的命令轨迹。
 fn accepted_trace() -> CommandTrace {
     CommandTrace {
-        command_kind: "--query-page-logic".to_string(),
+        command_kind: "--relations".to_string(),
         target: "page:app/actions_test.spg".to_string(),
         args: Vec::new(),
         budget: Some("compact".to_string()),

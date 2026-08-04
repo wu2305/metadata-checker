@@ -151,8 +151,9 @@ fn run_surface(
                 target: Some(call.target.clone()),
                 budget: args.budget.clone(),
                 human: args.is_human(),
-                // intent 只收窄补充块，不改变主结论；表面层不再要求模型选它。
-                intent: None,
+                // 表面层不再要求模型选 intent，但写了就必须透传：`--intent writer` 不只是
+                // 收窄，auto 遍历根本不产出 writer_facts。丢掉它等于悄悄换掉了用户要的答案。
+                intent: Some(args.intent.clone()),
                 page_scope: None,
                 depth: args.depth,
                 check_reload: false,
@@ -193,6 +194,21 @@ fn merge_supplement(base: &mut serde_json::Value, key: &str, supplement: serde_j
             .or_insert_with(|| serde_json::json!({}));
         if let Some(target) = slot.as_object_mut() {
             target.insert(key.to_string(), details);
+        }
+    }
+    // 补充块的 summary 计数要能被看到，否则合并反而让模型少拿到事实：
+    // `--relations model:X` 的 DataFlow 输入输出计数就在补充调用的 summary 里。
+    // 主调用永远优先，只补它没有的键——summary 的语义由主命令定义，不能被覆盖。
+    if let (Some(extra), Some(base_summary)) = (
+        supplement
+            .get("summary")
+            .and_then(serde_json::Value::as_object),
+        object.get_mut("summary").and_then(|s| s.as_object_mut()),
+    ) {
+        for (field, value) in extra {
+            base_summary
+                .entry(field.clone())
+                .or_insert_with(|| value.clone());
         }
     }
     for field in ["evidence", "diagnostics"] {

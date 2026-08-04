@@ -328,12 +328,21 @@ struct PlanVariant {
 }
 
 impl PlanVariant {
-    /// 与模型命令比较；budget 的两种省略写法视为相同，target 按 CLI 自身的规范化比较。
+    /// 与模型命令比较：只比动词和 target。
+    ///
+    /// budget 和 intent 都被排除在判据之外，因为它们**都不改变结论的对错**：
+    ///
+    /// - `--budget` 只控制输出大小。M58 里 `page_purpose_actions_test` 有 2 条命令动词对、
+    ///   target 对，仅因为写了 `normal` 而不是 `compact` 就被记成路由失败。多花预算是
+    ///   浪费，不是走错路，`budget_upgrade` 列已经如实记录了它。
+    /// - `--intent` 只收窄 `condition_facts` 的输出。SKILL.md 要求模型按问题选 intent，
+    ///   plan 却因为它没写 intent 而拒绝写了 intent 的命令——`--intent display` 回答
+    ///   「为什么不显示」恰恰是对的，却贡献了 17 条拒绝。接口不能一边要求、一边惩罚。
+    ///
+    /// 两者仍逐条记录在 `command_trace` 里，过度用量看得见，只是不再冒充路由缺陷。
     fn matches(&self, request: &CommandRequest) -> bool {
         self.command_kind == request.command_kind
             && targets_match(&self.command_kind, &self.target, &request.target)
-            && normalize_args(&self.args) == normalize_args(&request.args)
-            && budgets_match(&self.budget, &request.budget)
     }
 }
 
@@ -342,13 +351,16 @@ impl PlanVariant {
 /// 一个类型前缀」记成路由失败，于是 `command_rejected` 和 `command_routing_confusion` 里混进
 /// 了根本不是接口缺陷的条目——评测本身谎报了工具表面的质量。
 ///
-/// 只对 `--query-dataflow` 放宽：它的 CLI 参数就写作 `<MODEL>`，前缀是可选修饰。其它命令的
+/// 只对模型/DataFlow 关系查询放宽：它们的 CLI 参数本来就写作 `<MODEL>`，前缀是可选修饰。
 /// `comp:` / `action:` / `field:` 前缀是消歧义所必需的，不能一并剥掉。
 fn targets_match(command_kind: &str, plan_target: &str, request_target: &str) -> bool {
     if plan_target == request_target {
         return true;
     }
-    if command_kind != "--query-dataflow" {
+    if !matches!(
+        command_kind,
+        "--relations" | "--query-dataflow" | "--query-model"
+    ) {
         return false;
     }
     strip_dataflow_prefix(plan_target) == strip_dataflow_prefix(request_target)
@@ -356,26 +368,6 @@ fn targets_match(command_kind: &str, plan_target: &str, request_target: &str) ->
 
 fn strip_dataflow_prefix(target: &str) -> &str {
     target.strip_prefix("model:").unwrap_or(target)
-}
-
-/// `--intent auto` 是 CLI 的默认值，显式写出与整个省略在所有命令/target 上输出逐字节相同，
-/// 因此在比较前一并去掉。否则「写全默认值」这种无害写法会被记成路由失败，和 `model:` 前缀
-/// 一样让 `command_rejected` 谎报并不存在的接口缺陷。
-///
-/// 其它 `--intent` 取值不能一并放宽：例如 `--intent availability` 会真的收窄输出
-/// （对 model target 会丢掉 `model_io_facts`），选错了就是选错了，必须照实记为拒绝。
-fn normalize_args(args: &[String]) -> Vec<&str> {
-    let mut normalized = Vec::with_capacity(args.len());
-    let mut index = 0;
-    while index < args.len() {
-        if args[index] == "--intent" && args.get(index + 1).is_some_and(|value| value == "auto") {
-            index += 2;
-            continue;
-        }
-        normalized.push(args[index].as_str());
-        index += 1;
-    }
-    normalized
 }
 
 /// 命令命中 plan 的方式。
@@ -436,10 +428,19 @@ pub(crate) struct CommandPolicy {
     binary_path: PathBuf,
 }
 
+/// 一次 trial 里允许的免费 `--find` 次数。
+///
+/// 定位不是回答，不该占用 plan 步数：M58 里 `context_button1_neighbors` 问的是
+/// 「button1 周围还有什么」，根本没给页面，模型 8 次选择先 `--find-component button1`
+/// 都被记成路由失败——它做对了，只是 plan 没给它做对的余地。给两次，够定位加一次纠正，
+/// 又不至于让模型靠反复搜索绕过命令数上限。
+const MAX_DISCOVERY_COMMANDS: usize = 2;
+
 /// 经白名单校验后可执行的命令。
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedCommand {
-    step_index: usize,
+    /// 命中的 plan step；`None` 表示这是一次不占步数的定位命令。
+    step_index: Option<usize>,
     /// 实际命中的写法；必须执行模型选的那一条，而不是 plan 的规范命令，
     /// 否则报告里的 trace 与真正跑过的 CLI 不是同一个命令。
     variant: PlanVariant,
@@ -491,17 +492,39 @@ impl CommandPolicy {
         })
     }
 
-    /// 校验模型命令只能使用尚未消费的 plan step。
+    /// 校验模型命令只能使用尚未消费的 plan step；`--find` 例外，见 [`MAX_DISCOVERY_COMMANDS`]。
     pub(crate) fn validate(
         &self,
         request: &CommandRequest,
         used_steps: &[usize],
+        discovery_used: usize,
     ) -> Result<ValidatedCommand> {
-        if used_steps.len() >= self.max_command_count {
-            bail!("命令数超过 max_command_count={}", self.max_command_count);
-        }
         if contains_shell_metacharacters(&request.target) {
             bail!("target 包含禁止的 shell 元字符");
+        }
+
+        if request.command_kind == "--find" {
+            if discovery_used >= MAX_DISCOVERY_COMMANDS {
+                bail!("定位命令数超过 {MAX_DISCOVERY_COMMANDS}");
+            }
+            return Ok(ValidatedCommand {
+                step_index: None,
+                variant: PlanVariant {
+                    command_kind: request.command_kind.clone(),
+                    target: request.target.clone(),
+                    args: Vec::new(),
+                    budget: Some("compact".to_string()),
+                    requires_project_dir: true,
+                },
+                route: RouteKind::Primary,
+                project_dir: self.project_dir.clone(),
+                graph_db_path: self.graph_db_path.clone(),
+                binary_path: self.binary_path.clone(),
+            });
+        }
+
+        if used_steps.len() >= self.max_command_count {
+            bail!("命令数超过 max_command_count={}", self.max_command_count);
         }
         let (step_index, variant, route) = self
             .steps
@@ -515,7 +538,7 @@ impl CommandPolicy {
             .ok_or_else(|| anyhow!("模型命令不匹配任何未使用的 minimal_command_plan step"))?;
 
         Ok(ValidatedCommand {
-            step_index,
+            step_index: Some(step_index),
             variant,
             route,
             project_dir: self.project_dir.clone(),
@@ -548,8 +571,8 @@ impl ValidatedCommand {
         argv
     }
 
-    /// 返回 plan step 索引，用于阻止重复执行。
-    pub(crate) fn step_index(&self) -> usize {
+    /// 返回 plan step 索引，用于阻止重复执行；定位命令不占步数，返回 `None`。
+    pub(crate) fn step_index(&self) -> Option<usize> {
         self.step_index
     }
 
@@ -569,11 +592,6 @@ fn contains_shell_metacharacters(value: &str) -> bool {
     [";", "&&", "||", "`", "$(", "\n", "\r", "\0"]
         .iter()
         .any(|marker| value.contains(marker))
-}
-
-/// 将缺失预算按 compact 默认值比较，兼容 plan 和模型的两种省略写法。
-fn budgets_match(plan_budget: &Option<String>, request_budget: &Option<String>) -> bool {
-    plan_budget.as_deref().unwrap_or("compact") == request_budget.as_deref().unwrap_or("compact")
 }
 
 /// CNB AI Chat 使用的消息结构。
@@ -1823,6 +1841,7 @@ fn run_case_for_trial(
         content: build_bootstrap_message(&skill, case),
     }];
     let mut used_steps = Vec::new();
+    let mut discovery_used = 0usize;
     let mut diagnostics = Vec::new();
     let mut trace = Vec::new();
 
@@ -1909,7 +1928,8 @@ fn run_case_for_trial(
                 });
             }
             AgentTurn::Command(command_request) => {
-                let validated = match policy.validate(&command_request, &used_steps) {
+                let validated = match policy.validate(&command_request, &used_steps, discovery_used)
+                {
                     Ok(validated) => validated,
                     Err(_) => {
                         trace.push(rejected_command_trace(&command_request));
@@ -1954,7 +1974,11 @@ fn run_case_for_trial(
                     detail_request,
                     execution.output_sections,
                 ));
-                used_steps.push(step_index);
+                match step_index {
+                    Some(index) => used_steps.push(index),
+                    // 定位命令不占 plan 步数，只吃自己的定位额度。
+                    None => discovery_used += 1,
+                }
                 history.push(ChatMessage {
                     role: "user".to_string(),
                     content: execution.filtered_output,
@@ -2028,25 +2052,26 @@ Do not include CNB_TOKEN or other secrets.\\n\
 Do not include actual case target or fixture answers.\\n\
 Rules:\\n\
 1. Return exactly one raw JSON object per turn. No Markdown fences. No prefix or suffix. 每轮只输出一行 JSON；final 对象只能有 kind 和 answer 两个键，answer 必须是简短字符串，不能添加 sources、evidence 或其他键。\\n\
-2. Start with the smallest allowed query.\\n\
-3. 先按问题意图选命令：单组件/按钮/动作 -> --explain（点击/按钮/组件/动作 -> --explain）；点击/按钮/组件/动作问题不得使用 --query-page-logic；页面整体逻辑 -> --query-page-logic（页面整体问题才允许 --query-page-logic）；writer/value-source/condition -> --explain-condition 并按 SKILL.md 选择 --intent；裸 field 的值/来源/写入 -> --explain（不要对裸 field 先选 --explain-condition）。\\n\
-4. target 必须是规范化路径，页面目标保留 `page:app/<relative-file>.spg`；page:app/<relative-file>.spg；不得删除 app/ 或 .spg。\\n\
+2. 只有三个查询动词，按问题选一个：\\n\
+   - `--find`：不知道目标叫什么全名/在哪个文件时用。\\n\
+   - `--explain`：问某一个节点是什么、做什么、为什么这样表现（显示、可用、值来源、写入、动作门禁都算）。\\n\
+   - `--relations`：问某个页面或模型和别人的关系（页面整体逻辑、谁读写这张表、DataFlow 链路）。\\n\
+3. 动词只决定问什么，target 前缀决定去哪。同一个按钮写成 comp: 还是 action: 返回同一组事实块，不必纠结；--explain 一次就同时给出语义和条件成因，不需要分两条命令。\\n\
+4. 不知道确切 target 就直接把裸名交给命令，或先用 --find；工具会归一并在 diagnostics 里写明。绝对不要自己拼造文件路径，也不要把说明文字里的占位符当成真实路径。\\n\
 5. budget 字段仅在命令需要时设置，合法值为 compact / normal / full（compact 作为默认第一轮；仅在 diagnostics 或 OUTPUT_TRUNCATED 时升级）。budget 只能放在 JSON 顶层字段，不能放进 args。\\n\
-6. 命令 JSON 示例：{{\"kind\":\"command\",\"command_kind\":\"--query-page-logic\",\"target\":\"page:<relative-page-path>.spg\",\"args\":[],\"budget\":\"compact\"}}。\\n\
+6. 命令 JSON 形状：{{\"kind\":\"command\",\"command_kind\":\"--explain\",\"target\":\"<target>\",\"args\":[],\"budget\":\"compact\"}}。\\n\
 7. This is only a shape example, not the current case answer/target/plan. Choose actual command_kind/target/args/budget from SKILL.md and the question.\\n\
 8. After each command, use the next user message as the only evidence. Read summary first, then read the declared primary fact block and only read more if needed.\\n\
-9. 主证据块为空或 result=null 时，不要直接作答；如果仍有查询机会，用同一 target 执行 --explain 作为受限 fallback，args=[]、budget=compact；否则明确说明证据不足。\\n\
-10. final answer 必须包含至少一个 literal section name（summary/details/evidence/diagnostics）；页面整体回答至少说明入口/写入计数和一个 action；按钮/动作回答至少说明组件、action 和写入目标；字段回答至少说明字段和写入者或来源。裸 field 的一次 compact --explain 已有 summary 和 evidence 后立即返回 final，不要再发第二条命令。\\n\
+9. 主证据块为空或 result=null 时，不要直接作答；如果仍有查询机会，换一个更合适的 target 重试；否则明确说明证据不足。\\n\
+10. final answer 必须包含至少一个 literal section name（summary/details/evidence/diagnostics）；页面整体回答至少说明入口/写入计数和一个 action；按钮/动作回答至少说明组件、action 和写入目标；字段回答至少说明字段和写入者或来源。证据已足够时立即返回 final，不要再补命令。\\n\
 11. As soon as you have enough evidence, return {{\"kind\":\"final\",\"answer\":\"...\"}}.\\n\
 12. If the evidence contains diagnostics, truncation, or uncertainty, mention that explicitly in the final answer and do not guess.\\n\
 \\n\
 SKILL.md:\\n\
 {skill}\\n\
 \\n\
-M58 runner routing override (apply after SKILL.md):\\n\\
-- 裸 field 必须使用 --explain；不要使用 --explain-condition 来替代字段关系查询。\\n\\
+M58 runner answer-shape override (apply after SKILL.md; 只约束最终回答的写法，不改变上面的选命令规则):\\n\\
 - 页面整体最终回答必须明确写出用户入口、写入目标和 action，并引用 literal section name。\\n\\
-- 按钮/点击问题必须使用 --explain 和 comp:app/<relative-file>.spg|<component-id>；不得使用 --query-page-logic。\\n\\
 page final 必须 literal 包含 用户入口、按钮、写入目标、action。\\n\\
 页面 final 使用固定标签：用户入口：...；按钮：...；写入目标：...；action：...；不要用同义词替换这些标签。\\n\\
 field final 必须 literal 包含 页面 action、写入、字段。\\n\\
@@ -2278,7 +2303,7 @@ fn rejected_command_trace(request: &CommandRequest) -> CommandTrace {
 /// 将已执行命令记录为通过 policy 的轨迹。
 fn accepted_command_trace(
     request: &CommandRequest,
-    step_index: usize,
+    step_index: Option<usize>,
     route: RouteKind,
     detail_request: bool,
     output_sections: Vec<String>,
@@ -2288,7 +2313,7 @@ fn accepted_command_trace(
         target: request.target.clone(),
         args: request.args.clone(),
         budget: request.budget.clone(),
-        plan_step_index: Some(step_index),
+        plan_step_index: step_index,
         route: Some(route.as_str().to_string()),
         accepted: true,
         detail_request,

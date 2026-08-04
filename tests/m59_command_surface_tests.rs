@@ -7,7 +7,7 @@
 //! 后续改动把已经收敛掉的歧义重新放回去。
 
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn bin() -> PathBuf {
@@ -36,7 +36,7 @@ fn workspace(tag: &str) -> PathBuf {
     db
 }
 
-fn surface(db: &PathBuf, args: &[&str]) -> Value {
+fn surface(db: &Path, args: &[&str]) -> Value {
     let mut argv = vec![
         "--non-human".to_string(),
         "--project-dir".to_string(),

@@ -289,7 +289,10 @@ fn test_ai_eval_assertions_structure() {
 /// 命令白名单校验
 #[test]
 fn test_ai_eval_command_whitelist() {
+    // 三动词表面 + 仍然可用的旧动词别名。
     let required_subcommands = [
+        "--find",
+        "--relations",
         "--query-page-logic",
         "--explain",
         "--explain-condition",
