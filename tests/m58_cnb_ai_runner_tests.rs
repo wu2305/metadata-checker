@@ -1806,6 +1806,10 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
 /// 验证模型提出不在 plan 中的命令时 runner 不启动 CLI 并生成 command_rejected。
 /// 这条路径会立即结束 trial，是 live run 中唯一实际产生拒绝分类的位置，
 /// 因此必须与 judge_answer 的分类保持一致，否则 command_rejected 永远不可达。
+///
+/// target 必须是图里真实存在、但不是本 case 要问的那个节点：寻址不到的 target 现在会
+/// 交给工具去回答（见 test_m58_runner_lets_the_tool_answer_an_unaddressable_target），
+/// 拒绝只留给「去错了地方」。
 #[test]
 fn test_m58_runner_blocks_command_outside_plan() {
     let cases = load_eval_cases(Path::new(
@@ -1818,7 +1822,7 @@ fn test_m58_runner_blocks_command_outside_plan() {
     let response = serde_json::json!({
         "kind": "command",
         "command_kind": "--query-page-logic",
-        "target": "page:app/not-in-plan.spg",
+        "target": "page:app/page_relations.spg",
         "args": [],
         "budget": null
     });

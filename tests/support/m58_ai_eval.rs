@@ -372,6 +372,12 @@ impl TargetResolver {
         }
     }
 
+    /// 是否真的读到了图。读不到时所有归一判断都不成立，调用方必须退回纯字符串比较，
+    /// 否则「归一不出真实节点」会对每一个 target 都成立。
+    fn has_graph(&self) -> bool {
+        !self.known_ids.is_empty()
+    }
+
     /// 归一到真实节点 id；归一不了返回 `None`。
     fn canonical(&self, target: &str) -> Option<String> {
         use metadata_checker::route::PrefixedTargetResolution;
@@ -694,7 +700,8 @@ impl CommandPolicy {
                     // 这和 `--find` 免费是同一条理由：只交回候选、不交回答案的命令是定位，
                     // 不是回答。同样吃 MAX_DISCOVERY_COMMANDS 的额度，编不出真实 target 的
                     // 模型仍然会用完额度后失败。
-                    None if self.resolver.canonical(&request.target).is_none()
+                    None if self.resolver.has_graph()
+                        && self.resolver.canonical(&request.target).is_none()
                         && discovery_used < MAX_DISCOVERY_COMMANDS =>
                     {
                         return Ok(self.locating_command(request));
