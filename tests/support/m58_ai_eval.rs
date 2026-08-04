@@ -494,8 +494,9 @@ pub(crate) struct CommandPolicy {
 /// 请求的 budget 是否严格高于上一次跑这一步时用的 budget。
 ///
 /// 只认升级，不认原样重发：同一个 budget 再发一遍拿到的是同一份输出，那是模型在原地
-/// 打转，仍然应当算失败。
-fn is_budget_upgrade(previous: &str, request: &CommandRequest) -> bool {
+/// 打转，仍然应当算失败。与 [`is_budget_upgrade`] 不同——那个只判断相对 compact 默认值
+/// 是否升级，用于 trace 记账，不涉及两次调用之间的比较。
+fn escalates_budget(previous: &str, request: &CommandRequest) -> bool {
     let rank = |budget: &str| match budget {
         "compact" => Some(0),
         "normal" => Some(1),
@@ -635,7 +636,7 @@ impl CommandPolicy {
                 .filter(|(index, _)| {
                     used_steps
                         .iter()
-                        .any(|(used, budget)| used == index && is_budget_upgrade(budget, request))
+                        .any(|(used, budget)| used == index && escalates_budget(budget, request))
                 })
                 .find_map(|(index, step)| {
                     step.match_variant(request, &self.resolver)

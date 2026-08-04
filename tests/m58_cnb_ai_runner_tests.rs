@@ -316,8 +316,15 @@ fn test_m58_command_policy_binds_paths_and_steps() {
             OsString::from("compact"),
         ]
     );
-    assert!(policy.validate(&request, &[0], 0).is_err());
-    assert!(policy.validate(&request, &[0, 1], 0).is_err());
+    // 同 budget 重发：那一步已被消费，且没有升级，仍然拒绝。
+    let used = |steps: &[usize]| -> Vec<(usize, String)> {
+        steps
+            .iter()
+            .map(|index| (*index, "compact".to_string()))
+            .collect()
+    };
+    assert!(policy.validate(&request, &used(&[0]), 0).is_err());
+    assert!(policy.validate(&request, &used(&[0, 1]), 0).is_err());
     assert!(
         policy
             .validate(
