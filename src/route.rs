@@ -379,6 +379,12 @@ pub fn normalize_prefixed_target<'a>(
             // 前缀是模型唯一还得自己判断的东西，而冒号后面写对了就已经唯一确定了节点。
             if id[id_prefix.len()..].eq_ignore_ascii_case(content) {
                 by_content.push(id.to_string());
+            } else if have
+                .last()
+                .is_some_and(|segment| file_matches(segment, last_want))
+            {
+                // 前缀写错、名字对得上：交回真实节点，模型下一轮换个前缀就行。
+                by_tail.push(id.to_string());
             }
             continue;
         }
@@ -716,12 +722,24 @@ mod tests {
 
     /// 尾段身份不同的节点不能互相归一。
     ///
-    /// 归一只补路径，不能改节点——否则等于在 Rust 里替模型换了个问题回答。
+    /// 归一只补路径，不能改节点——否则等于在 Rust 里替模型换了个问题回答。同一个文件里
+    /// 的其它组件可以作为 candidates 交回去，但那是「你要不要看看这些」，不是答案。
     #[test]
     fn test_normalization_never_changes_node_identity() {
         match normalize("comp:app/actions_test.spg|no_such_component") {
-            PrefixedTargetResolution::NotFound { candidates } => assert!(candidates.is_empty()),
-            other => panic!("expected not found, got {other:?}"),
+            PrefixedTargetResolution::NotFound { candidates } => {
+                assert!(
+                    !candidates
+                        .contains(&"comp:app/actions_test.spg|no_such_component".to_string())
+                );
+                assert!(
+                    candidates
+                        .iter()
+                        .all(|candidate| candidate.starts_with("comp:app/actions_test.spg|")),
+                    "候选只能是同文件里的真实兄弟节点：{candidates:?}"
+                );
+            }
+            other => panic!("归一不得改变节点身份，实际 {other:?}"),
         }
     }
 
