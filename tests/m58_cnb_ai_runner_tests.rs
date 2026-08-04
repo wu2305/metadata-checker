@@ -1730,7 +1730,18 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
         "bootstrap 不得包含会被原样抄写的路径占位符"
     );
     assert!(bootstrap.contains("绝对不要自己拼造文件路径"));
-    assert!(bootstrap.contains("先用 --find"));
+
+    // M59 评测里 109 条拒绝有 83% 是 `page:actions_test` 这种「前缀写对、路径没写全」的
+    // 写法。补全已经由 Rust 做掉，prompt 必须把这件事说出来——否则模型仍然会为了凑出
+    // 完整路径去编，或者多花一轮 --find。
+    assert!(
+        bootstrap.contains("target 只写你确实知道的部分"),
+        "bootstrap 必须说明 target 可以只写已知部分"
+    );
+    assert!(
+        bootstrap.contains("RESOLVED_TARGET") && bootstrap.contains("candidate_targets"),
+        "bootstrap 必须说明补全和歧义两种反馈"
+    );
 
     assert!(bootstrap.contains("budget 只能放在 JSON 顶层字段，不能放进 args"));
     assert!(bootstrap.contains("compact"));

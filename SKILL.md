@@ -27,9 +27,9 @@ description: |
 调用层边界：
 | 场景 | target 写法 | 示例 |
 |---|---|---|
-| Shell / CLI | 含 `|`、中文、`$`、空格、括号时用单引号 | `--explain 'comp:app/售后.app/首页.spg|button1'` |
-| stdio JSON | 不带 shell 单引号 | `"target":"comp:app/售后.app/首页.spg|button1"` |
-| Function Calling | 不带 shell 单引号，由 wrapper 传 JSON payload | `{ "target": "comp:app/售后.app/首页.spg|button1" }` |
+| Shell / CLI | 含 `|`、中文、`$`、空格、括号时用单引号 | `--explain 'comp:首页.spg|button1'` |
+| stdio JSON | 不带 shell 单引号 | `"target":"comp:首页.spg|button1"` |
+| Function Calling | 不带 shell 单引号，由 wrapper 传 JSON payload | `{ "target": "comp:首页.spg|button1" }` |
 
 `--human` 和 `--interactive` 只用于人工探索，不用于自动化/机器消费。
 
@@ -92,10 +92,13 @@ description: |
 | dataflow | `model:dataflow_output` | DataFlow 在图中也是 Model 类型 |
 
 定位步骤：
-1. 不知道精确目标：用 `--find <KEYWORD>`，它跨页面/模型/组件一起搜。也可以直接把裸名
-   交给 `--explain`：唯一命中会自动归一（`diagnostics` 里留 `RESOLVED_TARGET`），有歧义
-   则返回 `AMBIGUOUS_TARGET` 和真实的 `candidate_targets`。**永远不要自己拼路径**：
-   本文档示例里的大写占位段只是格式说明，不是可以照抄进 target 的真实路径。
+1. **target 只写你确实知道的部分，剩下的交给工具补全。** 文件路径可以省成文件名、
+   可以省掉扩展名，也可以整个省掉：`page:首页`、`comp:首页.spg|button1`、
+   `comp:button1` 都会被定位到真实节点，`diagnostics` 里留 `RESOLVED_TARGET` 说明补成
+   了什么。唯一命中就直接返回结果；有歧义则返回 `AMBIGUOUS_TARGET` 和真实的
+   `candidate_targets`，从候选里挑一个重发即可。
+   **永远不要自己拼路径**——写不出来的那一段就别写，补全是确定性的图查询，猜出来的
+   路径只会变成一次无效调用。本文档示例里的大写占位段只是格式说明，不是真实路径。
 2. 页面内局部 model ID：用 `--resolve-model-page 'page:...' --resolve-model model5` 映射到真实全局模型。
 3. 拼写错误或不存在：读取 `TARGET_NOT_FOUND` 和 `candidate_targets`，从候选确认，不要自动替用户选。
 4. 目标含特殊字符时，CLI 用单引号；stdio / function calling JSON payload 不加单引号。

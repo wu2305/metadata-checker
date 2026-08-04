@@ -133,12 +133,130 @@ fn test_bare_target_is_resolved_by_the_tool() {
         .cloned()
         .unwrap_or_default();
     assert!(
-        diagnostics
-            .iter()
-            .filter_map(Value::as_str)
-            .any(|note| note.contains("RESOLVED_TARGET")),
+        has_diagnostic(&diagnostics, "RESOLVED_TARGET"),
         "归一必须留痕，实际 diagnostics：{diagnostics:?}"
     );
+}
+
+/// diagnostics 必须是结构化对象，不能混入裸字符串。
+///
+/// `AiOutput.diagnostics` 是 `Vec<Diagnostic>`；表面层曾往里塞 `format!` 出来的字符串，
+/// 按结构解析这个数组的调用方会直接崩在这里。
+#[test]
+fn test_surface_diagnostics_are_structured_objects() {
+    let db = workspace("diagnostic-shape");
+    let output = surface(&db, &["--explain", "input_chain_a"]);
+
+    let diagnostics = output
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert!(!diagnostics.is_empty(), "{output}");
+    for entry in &diagnostics {
+        let object = entry
+            .as_object()
+            .unwrap_or_else(|| panic!("diagnostics 元素必须是对象：{entry}"));
+        for field in ["code", "severity", "message", "location"] {
+            assert!(object.contains_key(field), "缺少 {field}：{entry}");
+        }
+    }
+}
+
+/// 前缀写对、文件路径没写全的 target 由 Rust 补全。
+///
+/// M59 评测里 109 条拒绝有 83% 是这一类：模型学会了写前缀，于是只处理裸名的归一
+/// 再也没被触发过（117 次 trial 里只生效 1 次）。
+#[test]
+fn test_partially_qualified_target_is_completed() {
+    let db = workspace("partial-target");
+    for target in [
+        "page:actions_test",
+        "page:actions_test.spg",
+        "page:app/actions_test",
+    ] {
+        let output = surface(&db, &["--relations", target]);
+        assert_ne!(
+            output.get("ok").and_then(Value::as_bool),
+            Some(false),
+            "'{target}' 应当被补全：{output}"
+        );
+        let keys = detail_keys(&output);
+        assert!(keys.iter().any(|key| key == "entrypoints"), "{keys:?}");
+    }
+}
+
+/// 组件 target 的文件段同样可以只写文件名。
+#[test]
+fn test_partially_qualified_component_target_is_completed() {
+    let db = workspace("partial-component");
+    let output = surface(&db, &["--explain", "comp:actions_test|button2"]);
+
+    assert_ne!(
+        output.get("ok").and_then(Value::as_bool),
+        Some(false),
+        "{output}"
+    );
+    let diagnostics = output
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        has_diagnostic(&diagnostics, "RESOLVED_TARGET"),
+        "补全必须留痕：{diagnostics:?}"
+    );
+}
+
+/// 模型编出来的文件路径不该让命令一无所获。
+///
+/// 评测里 `comp:app/售后.app/首页.spg|button1` 这类捏造路径出现 19 次，底层返回的候选
+/// 是 0 条。只要 `|` 后面的节点身份还在，要么唯一定位、要么交回真实候选。
+#[test]
+fn test_hallucinated_path_yields_resolution_or_real_candidates() {
+    let db = workspace("hallucinated-path");
+    let output = surface(&db, &["--explain", "comp:app/no_such_page.spg|button1"]);
+
+    // button1 在 fixture 里跨两个页面重名，因此这里应当是「如实报歧义 + 真实候选」。
+    let candidates = output
+        .get("candidate_targets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert!(!candidates.is_empty(), "必须交出真实候选：{output}");
+    assert!(
+        candidates
+            .iter()
+            .filter_map(Value::as_str)
+            .all(|candidate| candidate.starts_with("comp:") && candidate.contains("button1")),
+        "候选必须是可直接使用的规范 target：{candidates:?}"
+    );
+}
+
+/// 写全的合法 target 不能被归一改写。
+#[test]
+fn test_exact_target_is_not_rewritten() {
+    let db = workspace("exact-untouched");
+    let output = surface(&db, &["--explain", "comp:app/actions_test.spg|button2"]);
+
+    let diagnostics = output
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !has_diagnostic(&diagnostics, "RESOLVED_TARGET"),
+        "精确 target 不该触发归一：{diagnostics:?}"
+    );
+}
+
+fn has_diagnostic(diagnostics: &[Value], code: &str) -> bool {
+    diagnostics.iter().any(|entry| {
+        entry
+            .get("code")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == code)
+    })
 }
 
 /// 裸名有歧义时交出候选，而不是让模型继续猜路径。

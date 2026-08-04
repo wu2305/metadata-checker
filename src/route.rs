@@ -259,6 +259,156 @@ pub fn resolve_bare_target(bare: &str, find_output: &serde_json::Value) -> BareT
     }
 }
 
+/// 带前缀但没写全的 target 的归一结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrefixedTargetResolution {
+    /// target 本身就是一个真实节点 id，不需要动。
+    Exact,
+    /// 唯一命中，可直接替换。
+    Resolved { target: String, diagnostic: String },
+    /// 多个候选；交回候选，不猜。
+    Ambiguous { candidates: Vec<String> },
+    /// 没有结构性命中；`candidates` 是尾段同名的近似项，可能为空。
+    NotFound { candidates: Vec<String> },
+}
+
+/// 候选列表的硬上限：交回候选是为了让模型下一轮能直接用，几十条candidates 和不给
+/// 一样没用。
+const MAX_CANDIDATES: usize = 12;
+
+/// 可以被省略的元数据文件扩展名。
+const METADATA_EXTENSIONS: &[&str] = &[".spg", ".tbl"];
+
+fn strip_metadata_extension(value: &str) -> &str {
+    METADATA_EXTENSIONS
+        .iter()
+        .find_map(|extension| {
+            value
+                .len()
+                .checked_sub(extension.len())
+                .filter(|split| value[*split..].eq_ignore_ascii_case(extension))
+                .map(|split| &value[..split])
+        })
+        .unwrap_or(value)
+}
+
+/// 拆成 (前缀, `|` 分隔的段)。没有合法前缀时返回 `None`。
+fn split_prefixed(target: &str) -> Option<(&'static str, Vec<&str>)> {
+    let prefix = TARGET_PREFIXES
+        .iter()
+        .find(|prefix| target.starts_with(**prefix))?;
+    Some((prefix, target[prefix.len()..].split('|').collect()))
+}
+
+/// 第一段之外的段必须逐段相等——那是节点自身的身份，不允许模糊。
+fn tail_matches(have: &[&str], want: &[&str]) -> bool {
+    have.iter()
+        .zip(want.iter())
+        .skip(1)
+        .all(|(left, right)| left.eq_ignore_ascii_case(right))
+}
+
+/// 文件段按「路径后缀 + 忽略扩展名」匹配。
+///
+/// `actions_test`、`actions_test.spg`、`app/actions_test.spg` 都应该指向
+/// `app/actions_test.spg`：模型知道页面叫什么，不知道它在仓库里的哪一层。
+fn file_matches(have: &str, want: &str) -> bool {
+    let have = strip_metadata_extension(have).to_lowercase();
+    let want = strip_metadata_extension(want).to_lowercase();
+    have == want || have.ends_with(&format!("/{want}"))
+}
+
+/// 把「带前缀但没写全」的 target 归一成真实节点 id。
+///
+/// M59 的评测暴露了一个新问题：三动词收敛之后模型几乎总能选对动词，但 109 条拒绝里
+/// 有 91 条（83%）栽在 target 的写法上——`page:actions_test`、`comp:actions_test|button1`、
+/// `comp:actions_test.spg|button1`。[`resolve_bare_target`] 只在完全没有前缀时才触发，
+/// 而新表面恰恰教会了模型总是写前缀，于是归一在 117 次 trial 里只生效了 1 次。
+///
+/// 这里补上另一半：前缀写对了、文件路径没写全的，同样由 Rust 确定性地定位。分三档，
+/// 每一档都要么唯一命中、要么如实交回候选，不存在「取第一个」：
+///
+/// 1. target 就是真实 id —— 原样通过。
+/// 2. 文件段按路径后缀匹配、其余段完全一致 —— `page:actions_test`。
+/// 3. 文件路径根本不存在，但其余段唯一确定一个节点 —— `comp:app/未知页面.spg|button1`
+///    这类模型凭空编出来的路径。评测里 19 条拒绝属于此类，此前一个候选都拿不到。
+pub fn normalize_prefixed_target<'a>(
+    target: &str,
+    known_ids: impl IntoIterator<Item = &'a str>,
+) -> PrefixedTargetResolution {
+    let Some((prefix, want)) = split_prefixed(target) else {
+        return PrefixedTargetResolution::NotFound {
+            candidates: Vec::new(),
+        };
+    };
+
+    // 文件段后缀命中，其余段完全一致。
+    let mut by_file: Vec<String> = Vec::new();
+    // 文件段对不上，但其余段完全一致——模型编了路径，节点身份是对的。
+    let mut by_identity: Vec<String> = Vec::new();
+    // 尾段同名的近似项，仅在前两档都空时作为 candidates 交回。
+    let mut by_tail: Vec<String> = Vec::new();
+    let last_want = want.last().copied().unwrap_or_default();
+
+    for id in known_ids {
+        if id == target {
+            return PrefixedTargetResolution::Exact;
+        }
+        let Some((id_prefix, have)) = split_prefixed(id) else {
+            continue;
+        };
+
+        if id_prefix == prefix && have.len() == want.len() && tail_matches(&have, &want) {
+            if file_matches(have[0], want[0]) {
+                by_file.push(id.to_string());
+                continue;
+            }
+            // 只有一段的 target（`page:`、`model:`）没有可用来定身份的尾段，
+            // 放进这一档等于把整个仓库的同类节点都当候选。
+            if want.len() >= 2 {
+                by_identity.push(id.to_string());
+                continue;
+            }
+        }
+
+        if have
+            .last()
+            .is_some_and(|segment| file_matches(segment, last_want))
+        {
+            by_tail.push(id.to_string());
+        }
+    }
+
+    for (tier, note) in [
+        (&mut by_file, "补全文件路径"),
+        (&mut by_identity, "target 里的文件路径不存在，按节点身份定位"),
+    ] {
+        tier.sort();
+        match tier.len() {
+            0 => continue,
+            1 => {
+                let resolved = tier[0].clone();
+                return PrefixedTargetResolution::Resolved {
+                    diagnostic: format!("RESOLVED_TARGET: '{target}' -> '{resolved}'（{note}）"),
+                    target: resolved,
+                };
+            }
+            _ => {
+                tier.truncate(MAX_CANDIDATES);
+                return PrefixedTargetResolution::Ambiguous {
+                    candidates: std::mem::take(tier),
+                };
+            }
+        }
+    }
+
+    by_tail.sort();
+    by_tail.truncate(MAX_CANDIDATES);
+    PrefixedTargetResolution::NotFound {
+        candidates: by_tail,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,6 +552,124 @@ mod tests {
         match resolve_bare_target("button1", &output) {
             BareTargetResolution::Ambiguous { candidates } => assert_eq!(candidates.len(), 2),
             other => panic!("expected ambiguous, got {other:?}"),
+        }
+    }
+
+    /// 评测里真实出现过的节点 id 子集。
+    const KNOWN: &[&str] = &[
+        "page:app/actions_test.spg",
+        "page:app/page_relations.spg",
+        "comp:app/actions_test.spg|button1",
+        "comp:app/actions_test.spg|button2",
+        "comp:app/page_relations.spg|button1",
+        "comp:app/actions_test.spg|input_chain_a",
+        "action:app/actions_test.spg|button2|action1",
+        "model:model1",
+    ];
+
+    fn normalize(target: &str) -> PrefixedTargetResolution {
+        normalize_prefixed_target(target, KNOWN.iter().copied())
+    }
+
+    /// 真实 id 原样通过，不能被归一改写。
+    #[test]
+    fn test_exact_prefixed_target_is_untouched() {
+        assert_eq!(
+            normalize("comp:app/actions_test.spg|button1"),
+            PrefixedTargetResolution::Exact
+        );
+    }
+
+    /// 省掉目录和扩展名的页面 target 必须能定位。
+    ///
+    /// M59 评测里 `page:actions_test` 这一类占了拒绝的大头：模型知道页面叫什么，
+    /// 不知道它在仓库的哪一层——而那是一次确定性图查询。
+    #[test]
+    fn test_page_target_without_directory_or_extension_resolves() {
+        for target in ["page:actions_test", "page:actions_test.spg"] {
+            match normalize(target) {
+                PrefixedTargetResolution::Resolved { target: resolved, .. } => {
+                    assert_eq!(resolved, "page:app/actions_test.spg");
+                }
+                other => panic!("{target} 应当归一，实际 {other:?}"),
+            }
+        }
+    }
+
+    /// 组件 target 的文件段同样可以只写文件名。
+    #[test]
+    fn test_component_target_with_bare_file_resolves() {
+        match normalize("comp:actions_test|button2") {
+            PrefixedTargetResolution::Resolved { target, .. } => {
+                assert_eq!(target, "comp:app/actions_test.spg|button2");
+            }
+            other => panic!("expected resolved, got {other:?}"),
+        }
+    }
+
+    /// 文件段没写、组件名跨页面重名时，交回真实候选而不是猜一个。
+    #[test]
+    fn test_ambiguous_file_segment_returns_real_candidates() {
+        match normalize("comp:unknown_page.spg|button1") {
+            PrefixedTargetResolution::Ambiguous { candidates } => {
+                assert_eq!(
+                    candidates,
+                    vec![
+                        "comp:app/actions_test.spg|button1".to_string(),
+                        "comp:app/page_relations.spg|button1".to_string(),
+                    ]
+                );
+            }
+            other => panic!("expected ambiguous, got {other:?}"),
+        }
+    }
+
+    /// 模型编出来的路径 + 唯一的节点身份 = 可以确定性定位。
+    ///
+    /// `comp:app/售后.app/首页.spg|button1` 这种凭空捏造的路径在评测里出现 19 次，
+    /// 此前一条候选都拿不到。只要 `|` 后面的身份唯一，路径写错并不妨碍定位。
+    #[test]
+    fn test_hallucinated_path_resolves_by_node_identity() {
+        match normalize("comp:app/does_not_exist.spg|input_chain_a") {
+            PrefixedTargetResolution::Resolved { target, diagnostic } => {
+                assert_eq!(target, "comp:app/actions_test.spg|input_chain_a");
+                assert!(diagnostic.contains("RESOLVED_TARGET"), "{diagnostic}");
+            }
+            other => panic!("expected resolved, got {other:?}"),
+        }
+    }
+
+    /// 尾段身份不同的节点不能互相归一。
+    ///
+    /// 归一只补路径，不能改节点——否则等于在 Rust 里替模型换了个问题回答。
+    #[test]
+    fn test_normalization_never_changes_node_identity() {
+        match normalize("comp:app/actions_test.spg|no_such_component") {
+            PrefixedTargetResolution::NotFound { candidates } => assert!(candidates.is_empty()),
+            other => panic!("expected not found, got {other:?}"),
+        }
+    }
+
+    /// 前缀写错时，交回尾段同名的真实节点，让模型下一轮能换前缀。
+    #[test]
+    fn test_wrong_prefix_still_yields_tail_candidates() {
+        match normalize("model:button2") {
+            PrefixedTargetResolution::NotFound { candidates } => {
+                assert!(
+                    candidates.contains(&"comp:app/actions_test.spg|button2".to_string()),
+                    "{candidates:?}"
+                );
+            }
+            other => panic!("expected not found with candidates, got {other:?}"),
+        }
+    }
+
+    /// 单段 target 不走身份档，否则一个 `page:` 会把全仓库的页面当候选。
+    #[test]
+    fn test_single_segment_target_does_not_match_every_page() {
+        match normalize("page:nowhere") {
+            PrefixedTargetResolution::NotFound { candidates } => assert!(candidates.is_empty()),
+            other => panic!("expected not found, got {other:?}"),
         }
     }
 

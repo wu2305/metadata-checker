@@ -2057,7 +2057,7 @@ Rules:\\n\
    - `--explain`：问某一个节点是什么、做什么、为什么这样表现（显示、可用、值来源、写入、动作门禁都算）。\\n\
    - `--relations`：问某个页面或模型和别人的关系（页面整体逻辑、谁读写这张表、DataFlow 链路）。\\n\
 3. 动词只决定问什么，target 前缀决定去哪。同一个按钮写成 comp: 还是 action: 返回同一组事实块，不必纠结；--explain 一次就同时给出语义和条件成因，不需要分两条命令。\\n\
-4. 不知道确切 target 就直接把裸名交给命令，或先用 --find；工具会归一并在 diagnostics 里写明。绝对不要自己拼造文件路径，也不要把说明文字里的占位符当成真实路径。\\n\
+4. target 只写你确实知道的部分：文件路径可以只写文件名、可以省掉扩展名、也可以整个省掉（page:首页、comp:首页.spg|button1、comp:button1 都能被定位）。工具会补全并在 diagnostics 里留 RESOLVED_TARGET；有歧义会返回 candidate_targets，从里面挑一个重发。绝对不要自己拼造文件路径——写不出来的那一段就别写，也不要把说明文字里的占位符当成真实路径。\\n\
 5. budget 字段仅在命令需要时设置，合法值为 compact / normal / full（compact 作为默认第一轮；仅在 diagnostics 或 OUTPUT_TRUNCATED 时升级）。budget 只能放在 JSON 顶层字段，不能放进 args。\\n\
 6. 命令 JSON 形状：{{\"kind\":\"command\",\"command_kind\":\"--explain\",\"target\":\"<target>\",\"args\":[],\"budget\":\"compact\"}}。\\n\
 7. This is only a shape example, not the current case answer/target/plan. Choose actual command_kind/target/args/budget from SKILL.md and the question.\\n\

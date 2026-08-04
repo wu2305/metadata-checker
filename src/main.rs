@@ -79,10 +79,10 @@ fn run_surface(
     surface: metadata_checker::route::Surface,
     raw_target: &str,
 ) -> Result<serde_json::Value> {
-    use metadata_checker::route::{self, BareTargetResolution};
+    use metadata_checker::route::{self, BareTargetResolution, PrefixedTargetResolution};
     use metadata_checker::tool_contract::ToolCommand;
 
-    let mut diagnostics: Vec<String> = Vec::new();
+    let mut diagnostics: Vec<serde_json::Value> = Vec::new();
     let mut target = raw_target.trim().to_string();
 
     // `--find` 本身就是定位动词，不需要先定位。
@@ -105,7 +105,7 @@ fn run_surface(
                 target: resolved,
                 diagnostic,
             } => {
-                diagnostics.push(diagnostic);
+                diagnostics.push(surface_diagnostic("RESOLVED_TARGET", diagnostic));
                 target = resolved;
             }
             // 歧义和查不到都不猜：把候选如实交回去，模型下一轮可以直接用规范 target。
@@ -140,6 +140,37 @@ fn run_surface(
         }
     }
 
+    // 带前缀但没写全的 target 走另一条归一。裸名归一只在完全没有前缀时触发，而新表面
+    // 恰恰教会了模型总是写前缀——M59 评测里 117 次 trial 只有 1 次走到了裸名那条路，
+    // 剩下的拒绝里 83% 是 `page:actions_test` 这种前缀对、路径没写全的写法。
+    let mut near_miss: Vec<String> = Vec::new();
+    if surface != route::Surface::Find && route::has_type_prefix(&target) && !target.contains(',') {
+        match normalize_target_against_graph(runtime, &target) {
+            PrefixedTargetResolution::Exact => {}
+            PrefixedTargetResolution::Resolved {
+                target: resolved,
+                diagnostic,
+            } => {
+                diagnostics.push(surface_diagnostic("RESOLVED_TARGET", diagnostic));
+                target = resolved;
+            }
+            PrefixedTargetResolution::Ambiguous { candidates } => {
+                return Ok(serde_json::json!({
+                    "ok": false,
+                    "error": {
+                        "code": "AMBIGUOUS_TARGET",
+                        "message": format!("'{target}' 匹配到多个节点，请用其中一个规范 target 重试"),
+                    },
+                    "candidate_targets": candidates,
+                    "diagnostics": diagnostics,
+                }));
+            }
+            // 归一失败不等于 target 无效：`field:` / `model:` 这类 target 未必是图节点，
+            // 照样能被下游命令正确回答。这里只把近似候选留到真的失败时再用。
+            PrefixedTargetResolution::NotFound { candidates } => near_miss = candidates,
+        }
+    }
+
     let plan = route::route(surface, &target, args.depth)?;
     let mut merged: Option<serde_json::Value> = None;
 
@@ -167,11 +198,28 @@ fn run_surface(
                     merge_supplement(base, key, value);
                 }
             }
+            // 主调用失败但我们手上有近似候选时，把候选交回去。底层的候选是按名字模糊
+            // 打分出来的（`same prefix (component)` 这类），完全忽略文件段，模型拿到也
+            // 用不上；结构性近似项才是下一轮能直接用的东西。
+            (Err(error), None) if !near_miss.is_empty() => {
+                return Ok(serde_json::json!({
+                    "ok": false,
+                    "error": {
+                        "code": "TARGET_NOT_FOUND",
+                        "message": format!("找不到 '{target}'：{error}"),
+                    },
+                    "candidate_targets": near_miss,
+                    "diagnostics": diagnostics,
+                }));
+            }
             (Err(error), None) => return Err(error),
             // 补充块不适用于当前节点类型是正常的，记一条 diagnostic 就够了；
             // 让它拖垮整条命令等于换个方式重造「选错动词就一无所获」。
             (Err(error), Some(key)) => {
-                diagnostics.push(format!("SUPPLEMENT_UNAVAILABLE: {key}: {error}"));
+                diagnostics.push(surface_diagnostic(
+                    "SUPPLEMENT_UNAVAILABLE",
+                    format!("补充块 '{key}' 取不到：{error}"),
+                ));
             }
         }
     }
@@ -181,6 +229,23 @@ fn run_surface(
         append_diagnostics(&mut result, &diagnostics);
     }
     Ok(result)
+}
+
+/// 拿真实节点 id 集合归一一个带前缀的 target。
+///
+/// 先试 O(1) 的精确命中，命中就完全不扫图——绝大多数调用走这条路，归一不该给正确
+/// 写法的 target 加成本。
+fn normalize_target_against_graph(
+    runtime: &metadata_checker::runtime::GraphRuntime,
+    target: &str,
+) -> metadata_checker::route::PrefixedTargetResolution {
+    if runtime.graph.node_indices.contains_key(target) {
+        return metadata_checker::route::PrefixedTargetResolution::Exact;
+    }
+    metadata_checker::route::normalize_prefixed_target(
+        target,
+        runtime.graph.node_indices.keys().map(String::as_str),
+    )
 }
 
 /// 把补充调用的 details 折进主输出的 `details.<key>`，并合并它的 evidence。
@@ -223,7 +288,21 @@ fn merge_supplement(base: &mut serde_json::Value, key: &str, supplement: serde_j
 }
 
 /// 把路由层自己产生的诊断追加到输出的 `diagnostics` 数组。
-fn append_diagnostics(result: &mut serde_json::Value, diagnostics: &[String]) {
+/// 构造一条符合 `AiOutput.diagnostics` 结构的诊断。
+///
+/// 这个数组里其余元素全是 `{code, severity, message, location, suggestion}` 对象，
+/// 表面层此前往里塞裸字符串，任何按结构解析 diagnostics 的调用方都会在这里炸掉。
+fn surface_diagnostic(code: &str, message: String) -> serde_json::Value {
+    serde_json::json!({
+        "severity": "info",
+        "code": code,
+        "message": message,
+        "location": { "source_file": null, "node_id": null, "json_path": null },
+        "suggestion": null,
+    })
+}
+
+fn append_diagnostics(result: &mut serde_json::Value, diagnostics: &[serde_json::Value]) {
     let Some(object) = result.as_object_mut() else {
         return;
     };
