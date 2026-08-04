@@ -218,7 +218,16 @@
           "target": "comp:app/actions_test.spg|button1",
           "args": [],
           "requires_project_dir": true,
-          "budget": "compact"
+          "budget": "compact",
+          "alternatives": [
+            {
+              "command_kind": "--explain",
+              "target": "action:app/actions_test.spg|button1|action1",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
         }
       ],
       "expected_output_assertions": [
@@ -1074,10 +1083,10 @@
           "alternatives": [
             {
               "command_kind": "--explain",
-              "target": "comp:app/actions_test.spg|button1",
+              "target": "action:app/actions_test.spg|button1|action1",
               "args": [],
               "requires_project_dir": true,
-              "budget": null
+              "budget": "compact"
             }
           ]
         }

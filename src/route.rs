@@ -312,6 +312,17 @@ fn tail_matches(have: &[&str], want: &[&str]) -> bool {
         .all(|(left, right)| left.eq_ignore_ascii_case(right))
 }
 
+/// `want` 的尾部是否逐段等于 `have` 的全部段。
+///
+/// 用来识别「多写了限定段」：真实 id 的段整段落在写出来的段的尾部。
+fn tail_ends_with(want: &[&str], have: &[&str]) -> bool {
+    have.len() < want.len()
+        && want[want.len() - have.len()..]
+            .iter()
+            .zip(have.iter())
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
+}
+
 /// 文件段按「路径后缀 + 忽略扩展名」匹配。
 ///
 /// `actions_test`、`actions_test.spg`、`app/actions_test.spg` 都应该指向
@@ -358,6 +369,10 @@ pub fn normalize_prefixed_target<'a>(
     let mut by_content: Vec<String> = Vec::new();
     // 写出来的段全对，只是少写了后面的段。
     let mut by_partial: Vec<String> = Vec::new();
+    // 只写了节点自己的名字，一个路径段都没有。
+    let mut by_name: Vec<String> = Vec::new();
+    // 比真实 id 多写了限定段——`model:actions_test|model1` 里的页面作用域。
+    let mut by_overqualified: Vec<String> = Vec::new();
     // 文件段对不上，但其余段完全一致——模型编了路径，节点身份是对的。
     let mut by_identity: Vec<String> = Vec::new();
     // 以下两档只作为 candidates 交回，不参与归一。
@@ -411,6 +426,26 @@ pub fn normalize_prefixed_target<'a>(
             continue;
         }
 
+        // 多写了限定段：`model:actions_test|model1`——问题里说的是「actions_test 页面中
+        // 的 model1」，模型照着 SKILL.md 的 page-scoped 写法加了作用域，而这个模型在图里
+        // 是全局的。真实 id 的段整段落在写出来的段的尾部，就是同一个节点。
+        if have.len() < want.len() && tail_ends_with(&want, &have) {
+            by_overqualified.push(id.to_string());
+            continue;
+        }
+
+        // 只写了节点自己的名字，一个路径段都没有：`comp:button1`。
+        //
+        // 这是 SKILL.md 明说支持的写法（「文件路径……也可以整个省掉」），必须真的支持。
+        if want.len() == 1
+            && have
+                .last()
+                .is_some_and(|segment| file_matches(segment, want[0]))
+        {
+            by_name.push(id.to_string());
+            continue;
+        }
+
         // 最后一段写错、前面全对：交回真实的兄弟节点当 candidates。
         if have.len() == want.len()
             && have.len() >= 2
@@ -433,6 +468,8 @@ pub fn normalize_prefixed_target<'a>(
         (&mut by_file, "补全文件路径"),
         (&mut by_content, "更正类型前缀"),
         (&mut by_partial, "补全省略的尾段"),
+        (&mut by_overqualified, "去掉多写的限定段"),
+        (&mut by_name, "按节点名定位"),
         (
             &mut by_identity,
             "target 里的文件路径不存在，按节点身份定位",
@@ -796,6 +833,52 @@ mod tests {
                 );
             }
             other => panic!("expected not found with siblings, got {other:?}"),
+        }
+    }
+
+    /// 只写节点名、一个路径段都没有的写法必须真的能用。
+    ///
+    /// SKILL.md 明说「文件路径……也可以整个省掉」。M59 评测里 `comp:button1` 出现 3 次；
+    /// 文档承诺了却不支持，比一开始就不承诺更糟。
+    #[test]
+    fn test_bare_name_under_a_prefix_resolves() {
+        match normalize("comp:input_chain_a") {
+            PrefixedTargetResolution::Resolved { target, .. } => {
+                assert_eq!(target, "comp:app/actions_test.spg|input_chain_a");
+            }
+            other => panic!("expected resolved, got {other:?}"),
+        }
+    }
+
+    /// 只写节点名但重名时如实报歧义。
+    #[test]
+    fn test_bare_name_under_a_prefix_reports_ambiguity() {
+        match normalize("comp:button1") {
+            PrefixedTargetResolution::Ambiguous { candidates } => {
+                assert_eq!(
+                    candidates,
+                    vec![
+                        "comp:app/actions_test.spg|button1".to_string(),
+                        "comp:app/page_relations.spg|button1".to_string(),
+                    ]
+                );
+            }
+            other => panic!("expected ambiguous, got {other:?}"),
+        }
+    }
+
+    /// 多写了限定段的 target 要能去掉多余的部分。
+    ///
+    /// `fixture_condition_model_filter_user_var` 问的是「actions_test 页面中 model1 的
+    /// 过滤条件」，模型照着 SKILL.md 的 page-scoped 写法加了页面作用域，而这个模型在图里
+    /// 是全局的 `model:model1`。3 次 trial 全部死在这一步。
+    #[test]
+    fn test_overqualified_target_drops_the_extra_scope() {
+        match normalize("model:actions_test|model1") {
+            PrefixedTargetResolution::Resolved { target, .. } => {
+                assert_eq!(target, "model:model1");
+            }
+            other => panic!("expected resolved, got {other:?}"),
         }
     }
 

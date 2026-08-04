@@ -602,6 +602,24 @@ impl CommandPolicy {
         })
     }
 
+    /// 构造一条不占 plan 步数的定位命令。
+    fn locating_command(&self, request: &CommandRequest) -> ValidatedCommand {
+        ValidatedCommand {
+            step_index: None,
+            variant: PlanVariant {
+                command_kind: request.command_kind.clone(),
+                target: request.target.clone(),
+                args: Vec::new(),
+                budget: Some("compact".to_string()),
+                requires_project_dir: true,
+            },
+            route: RouteKind::Primary,
+            project_dir: self.project_dir.clone(),
+            graph_db_path: self.graph_db_path.clone(),
+            binary_path: self.binary_path.clone(),
+        }
+    }
+
     /// 校验模型命令只能使用尚未消费的 plan step；`--find` 例外，见 [`MAX_DISCOVERY_COMMANDS`]。
     pub(crate) fn validate(
         &self,
@@ -617,20 +635,7 @@ impl CommandPolicy {
             if discovery_used >= MAX_DISCOVERY_COMMANDS {
                 bail!("定位命令数超过 {MAX_DISCOVERY_COMMANDS}");
             }
-            return Ok(ValidatedCommand {
-                step_index: None,
-                variant: PlanVariant {
-                    command_kind: request.command_kind.clone(),
-                    target: request.target.clone(),
-                    args: Vec::new(),
-                    budget: Some("compact".to_string()),
-                    requires_project_dir: true,
-                },
-                route: RouteKind::Primary,
-                project_dir: self.project_dir.clone(),
-                graph_db_path: self.graph_db_path.clone(),
-                binary_path: self.binary_path.clone(),
-            });
+            return Ok(self.locating_command(request));
         }
 
         if used_steps.len() >= self.max_command_count {
@@ -661,22 +666,44 @@ impl CommandPolicy {
             // 是否冗余由 max_command_count 兜底，答得对不对由最终答案决定；`command_trace`
             // 仍逐条记录，多花的命令看得见。原样重发同一条命令仍然拒绝——那拿到的是同一
             // 份输出，模型在原地打转。
-            None => self
-                .steps
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| {
-                    used_steps
-                        .iter()
-                        .filter(|used| used.step_index == *index)
-                        .all(|used| used.yields_something_new(request))
-                        && used_steps.iter().any(|used| used.step_index == *index)
-                })
-                .find_map(|(index, step)| {
-                    step.match_variant(request, &self.resolver)
-                        .map(|(variant, route)| (index, variant.clone(), route))
-                })
-                .ok_or_else(|| anyhow!("模型命令不匹配任何未使用的 minimal_command_plan step"))?,
+            None => {
+                let retried = self
+                    .steps
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| {
+                        used_steps
+                            .iter()
+                            .filter(|used| used.step_index == *index)
+                            .all(|used| used.yields_something_new(request))
+                            && used_steps.iter().any(|used| used.step_index == *index)
+                    })
+                    .find_map(|(index, step)| {
+                        step.match_variant(request, &self.resolver)
+                            .map(|(variant, route)| (index, variant.clone(), route))
+                    });
+                match retried {
+                    Some(retried) => retried,
+                    // 工具寻址不到的 target 交给工具去说，别替它判负。
+                    //
+                    // 归一不出真实节点时，CLI 返回的是 AMBIGUOUS_TARGET / TARGET_NOT_FOUND
+                    // 加一串真实候选——那正是它该说的话，也正是模型下一轮能用的东西。在
+                    // 这里直接拒绝，整条 trial 立刻判负，模型永远看不到候选，评测于是测不到
+                    // 「工具能不能帮人把目标找对」这件事，而那恰恰是这套接口的核心承诺。
+                    //
+                    // 这和 `--find` 免费是同一条理由：只交回候选、不交回答案的命令是定位，
+                    // 不是回答。同样吃 MAX_DISCOVERY_COMMANDS 的额度，编不出真实 target 的
+                    // 模型仍然会用完额度后失败。
+                    None if self.resolver.canonical(&request.target).is_none()
+                        && discovery_used < MAX_DISCOVERY_COMMANDS =>
+                    {
+                        return Ok(self.locating_command(request));
+                    }
+                    None => {
+                        bail!("模型命令不匹配任何未使用的 minimal_command_plan step");
+                    }
+                }
+            }
         };
 
         // 执行模型写的那个 target，不是 plan 的规范写法。两者现在可能只是归一后相等，
