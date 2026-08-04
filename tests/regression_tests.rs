@@ -99,7 +99,9 @@ fn test_cli_context_option_parses() {
         "compact",
     ]);
     assert_eq!(cli.context, Some("button1".to_string()));
-    assert_eq!(cli.depth, 2);
+    // depth 从「默认 1」改成 Option：`--explain` 只有在显式给了深度时才补邻居块，
+    // 否则每次调用都要多付一次上下文的钱。
+    assert_eq!(cli.depth, Some(2));
     assert_eq!(cli.budget, "compact");
 }
 

@@ -974,6 +974,12 @@ impl GraphRuntime {
                     &request.budget,
                 )?
             }
+            ToolCommand::Find => serde_json::to_value(crate::query::find_nodes(
+                &self.graph,
+                &request.target,
+                None,
+                20,
+            )?)?,
             ToolCommand::FindPage => serde_json::to_value(crate::query::find_nodes(
                 &self.graph,
                 &request.target,

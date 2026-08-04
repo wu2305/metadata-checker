@@ -33,6 +33,7 @@ pub mod remote_metadata;
 #[cfg(any(feature = "cli-local", feature = "browser-wasm"))]
 pub mod remote_metadata_provider;
 pub mod response_processor;
+pub mod route;
 #[cfg(feature = "cli-local")]
 pub mod runtime;
 pub mod scanner;

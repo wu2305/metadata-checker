@@ -68,6 +68,157 @@ fn has_session_query_request(args: &cli::Cli) -> bool {
         || args.advise_query.is_some()
 }
 
+/// 执行一次三动词表面调用：裸名归一 -> 路由展开 -> 逐条执行 -> 合并输出。
+///
+/// 合并保留主调用的 `summary` / `details` / `evidence` / `diagnostics` 顶层形状，补充调用
+/// 的 `details` 折进 `details.<merge_key>`。模型被教的输出契约不变，只是一次能拿到的事实
+/// 更全——这正是让 `--explain` 与 `--explain-condition` 的区分不可观测的手段。
+fn run_surface(
+    runtime: &mut metadata_checker::runtime::GraphRuntime,
+    args: &cli::Cli,
+    surface: metadata_checker::route::Surface,
+    raw_target: &str,
+) -> Result<serde_json::Value> {
+    use metadata_checker::route::{self, BareTargetResolution};
+    use metadata_checker::tool_contract::ToolCommand;
+
+    let mut diagnostics: Vec<String> = Vec::new();
+    let mut target = raw_target.trim().to_string();
+
+    // `--find` 本身就是定位动词，不需要先定位。
+    if surface != route::Surface::Find && !route::has_type_prefix(&target) {
+        let found = run_cli_runtime_tool(
+            runtime,
+            cli::CliToolInput {
+                command: ToolCommand::Find,
+                target: Some(target.clone()),
+                budget: args.budget.clone(),
+                human: false,
+                intent: None,
+                page_scope: None,
+                depth: None,
+                check_reload: false,
+            },
+        )?;
+        match route::resolve_bare_target(&target, &found) {
+            BareTargetResolution::Resolved {
+                target: resolved,
+                diagnostic,
+            } => {
+                diagnostics.push(diagnostic);
+                target = resolved;
+            }
+            // 歧义和查不到都不猜：把候选如实交回去，模型下一轮可以直接用规范 target。
+            // 这比返回一个 INVALID_TARGET 让它自己编路径要短一轮，也不会编出
+            // `comp:app/未知页面.spg|button1` 这种东西。
+            BareTargetResolution::Ambiguous { candidates } => {
+                return Ok(serde_json::json!({
+                    "ok": false,
+                    "error": {
+                        "code": "AMBIGUOUS_TARGET",
+                        "message": format!("'{target}' 匹配到多个节点，请用其中一个规范 target 重试"),
+                    },
+                    "candidate_targets": candidates,
+                    "diagnostics": diagnostics,
+                }));
+            }
+            BareTargetResolution::NotFound => {
+                return Ok(serde_json::json!({
+                    "ok": false,
+                    "error": {
+                        "code": "TARGET_NOT_FOUND",
+                        "message": format!("找不到 '{target}'，先用 --find 定位"),
+                    },
+                    "candidate_targets": found
+                        .get("details")
+                        .and_then(|details| details.get("matches"))
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                    "diagnostics": diagnostics,
+                }));
+            }
+        }
+    }
+
+    let plan = route::route(surface, &target, args.depth)?;
+    let mut merged: Option<serde_json::Value> = None;
+
+    for call in &plan.calls {
+        let outcome = run_cli_runtime_tool(
+            runtime,
+            cli::CliToolInput {
+                command: call.command,
+                target: Some(call.target.clone()),
+                budget: args.budget.clone(),
+                human: args.is_human(),
+                // intent 只收窄补充块，不改变主结论；表面层不再要求模型选它。
+                intent: None,
+                page_scope: None,
+                depth: args.depth,
+                check_reload: false,
+            },
+        );
+
+        match (outcome, call.merge_key) {
+            (Ok(value), None) => merged = Some(value),
+            (Ok(value), Some(key)) => {
+                if let Some(base) = merged.as_mut() {
+                    merge_supplement(base, key, value);
+                }
+            }
+            (Err(error), None) => return Err(error),
+            // 补充块不适用于当前节点类型是正常的，记一条 diagnostic 就够了；
+            // 让它拖垮整条命令等于换个方式重造「选错动词就一无所获」。
+            (Err(error), Some(key)) => {
+                diagnostics.push(format!("SUPPLEMENT_UNAVAILABLE: {key}: {error}"));
+            }
+        }
+    }
+
+    let mut result = merged.unwrap_or(serde_json::Value::Null);
+    if !diagnostics.is_empty() {
+        append_diagnostics(&mut result, &diagnostics);
+    }
+    Ok(result)
+}
+
+/// 把补充调用的 details 折进主输出的 `details.<key>`，并合并它的 evidence。
+fn merge_supplement(base: &mut serde_json::Value, key: &str, supplement: serde_json::Value) {
+    let Some(object) = base.as_object_mut() else {
+        return;
+    };
+    if let Some(details) = supplement.get("details").cloned() {
+        let slot = object
+            .entry("details")
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(target) = slot.as_object_mut() {
+            target.insert(key.to_string(), details);
+        }
+    }
+    for field in ["evidence", "diagnostics"] {
+        let Some(extra) = supplement.get(field).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        let slot = object.entry(field).or_insert_with(|| serde_json::json!([]));
+        if let Some(existing) = slot.as_array_mut() {
+            existing.extend(extra.iter().cloned());
+        }
+    }
+}
+
+/// 把路由层自己产生的诊断追加到输出的 `diagnostics` 数组。
+fn append_diagnostics(result: &mut serde_json::Value, diagnostics: &[String]) {
+    let Some(object) = result.as_object_mut() else {
+        return;
+    };
+    object
+        .entry("diagnostics")
+        .or_insert_with(|| serde_json::json!([]));
+    if let Some(existing) = object.get_mut("diagnostics").and_then(|d| d.as_array_mut()) {
+        existing.extend(diagnostics.iter().map(|note| serde_json::json!(note)));
+    }
+}
+
 fn run_query_commands(
     args: &cli::Cli,
     runtime: &mut metadata_checker::runtime::GraphRuntime,
@@ -241,19 +392,34 @@ fn run_query_commands(
         return Ok(true);
     }
 
-    if let Some(ref explain_id) = args.explain {
-        let result = run_cli_runtime_tool(
+    if let Some(ref keyword) = args.find {
+        let result = run_surface(
             runtime,
-            cli::CliToolInput {
-                command: metadata_checker::tool_contract::ToolCommand::Explain,
-                target: Some(explain_id.clone()),
-                budget: args.budget.clone(),
-                human: args.is_human(),
-                intent: None,
-                page_scope: None,
-                depth: None,
-                check_reload: false,
-            },
+            args,
+            metadata_checker::route::Surface::Find,
+            keyword,
+        )?;
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(true);
+    }
+
+    if let Some(ref explain_id) = args.explain {
+        let result = run_surface(
+            runtime,
+            args,
+            metadata_checker::route::Surface::Explain,
+            explain_id,
+        )?;
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(true);
+    }
+
+    if let Some(ref relations_target) = args.relations {
+        let result = run_surface(
+            runtime,
+            args,
+            metadata_checker::route::Surface::Relations,
+            relations_target,
         )?;
         println!("{}", serde_json::to_string_pretty(&result)?);
         return Ok(true);
@@ -288,7 +454,7 @@ fn run_query_commands(
                 human: args.is_human(),
                 intent: None,
                 page_scope: None,
-                depth: Some(args.depth),
+                depth: Some(args.depth.unwrap_or(1)),
                 check_reload: false,
             },
         )?;

@@ -129,6 +129,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "MODEL",
         help = "Query relationships for a specific model (requires --project-dir)"
     )]
@@ -136,6 +137,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "PAGE",
         help = "Query relationships for a specific page (requires --project-dir)"
     )]
@@ -143,6 +145,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "PAGES",
         num_args = 2,
         help = "Query cross-file relations between two pages (requires --project-dir)"
@@ -151,6 +154,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "MODEL",
         help = "Expand and query a DataFlow model's internal subgraph (requires --project-dir)"
     )]
@@ -158,13 +162,28 @@ pub struct Cli {
 
     #[arg(
         long,
-        value_name = "ID",
-        help = "Explain a component, action, model, field, page, or dataflow by ID"
+        value_name = "KEYWORD",
+        help = "Locate a page, model, or component by name and return its canonical target"
+    )]
+    pub find: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "TARGET",
+        help = "What is this node, what does it do, and why does it behave that way. Accepts comp: action: field: model: page: dataflow: (bare names are resolved)"
     )]
     pub explain: Option<String>,
 
     #[arg(
         long,
+        value_name = "TARGET",
+        help = "Who reads/writes this node and what it connects to. Accepts page: model: dataflow:, or 'page:A,page:B' for cross-page relations"
+    )]
+    pub relations: Option<String>,
+
+    #[arg(
+        long,
+        hide = true,
         value_name = "ID",
         help = "Output minimal closure context around a target node (requires --project-dir)"
     )]
@@ -173,10 +192,9 @@ pub struct Cli {
     #[arg(
         long,
         value_name = "N",
-        default_value = "1",
-        help = "Context depth for --context (default: 1)"
+        help = "Include upstream/downstream neighbours N hops out in --explain (omit for none)"
     )]
-    pub depth: usize,
+    pub depth: Option<usize>,
 
     #[arg(
         long,
@@ -188,6 +206,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "PAGE",
         help = "Query page-level logic summary (requires --project-dir)"
     )]
@@ -195,6 +214,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "KEYWORD",
         help = "Find pages matching keyword (requires --project-dir)"
     )]
@@ -202,6 +222,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "KEYWORD",
         help = "Find models matching keyword (requires --project-dir)"
     )]
@@ -209,6 +230,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "KEYWORD",
         help = "Find components matching keyword (requires --project-dir)"
     )]
@@ -231,6 +253,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "TARGET",
         help = "Explain why a component/model/field behaves as it does (visible/disabled/data-empty). Supports comp:PAGE|ID, model:ID, field:MODEL.FIELD (requires --project-dir)"
     )]
@@ -246,6 +269,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        hide = true,
         value_name = "TARGET",
         help = "M35: Generate structured query advice for a target. Combines with --advise-query-page and --question-kind."
     )]

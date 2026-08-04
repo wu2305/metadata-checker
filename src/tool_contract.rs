@@ -18,6 +18,11 @@ pub enum ToolCommand {
     QueryCross,
     QueryDataflow,
     QueryPageLogic,
+    /// 不带类型过滤的统一搜索，对应 `--find`。
+    ///
+    /// `FindPage`/`FindModel`/`FindComponent` 只差一个 node_type 过滤器，而提问者说
+    /// 「button1 在哪」时恰恰不知道它是什么类型——知道了就不必找了。
+    Find,
     FindPage,
     FindModel,
     FindComponent,
@@ -295,6 +300,18 @@ impl ToolRegistry {
                 supported_intents: &[],
             },
             ToolSpec {
+                command: ToolCommand::Find,
+                name: "find",
+                aliases: &[],
+                description: "按关键词定位页面/模型/组件，返回规范 target",
+                requires_target: true,
+                requires_graph: true,
+                mutates_runtime: false,
+                supports_human: false,
+                supported_budgets: &["compact", "normal", "full"],
+                supported_intents: &[],
+            },
+            ToolSpec {
                 command: ToolCommand::FindPage,
                 name: "find_page",
                 aliases: &["find-page"],
@@ -469,7 +486,10 @@ pub fn validate_target_prefix(command: ToolCommand, target: &str) -> Result<(), 
         ToolCommand::AdviseQuery => &[],
         ToolCommand::QueryDataflow => &["model:", "dataflow:"],
         ToolCommand::QueryCross => unreachable!("QueryCross handled above"),
-        ToolCommand::FindPage | ToolCommand::FindModel | ToolCommand::FindComponent => &[],
+        ToolCommand::Find
+        | ToolCommand::FindPage
+        | ToolCommand::FindModel
+        | ToolCommand::FindComponent => &[],
         ToolCommand::Status | ToolCommand::ReloadGraph | ToolCommand::CheckReload => &[],
         ToolCommand::DiffRefresh => &[],
     };
