@@ -335,11 +335,17 @@ fn test_relations_on_page_returns_page_logic() {
 /// 拒绝本身不贵，贵的是拒绝之后模型还得再猜一轮。
 #[test]
 fn test_wrong_verb_error_names_the_right_verb() {
+    // 不能省掉 --graph-db-path：默认路径指向 fixture 目录里的 .metadata-checker.graphdb，
+    // 那是个 gitignore 掉的构建产物，在干净检出上不存在，命令会先报 GRAPH_DB_NOT_FOUND
+    // 而根本走不到路由。
+    let db = workspace("wrong-verb");
     let output = Command::new(bin())
         .args([
             "--non-human",
             "--project-dir",
             "tests/fixtures/test_project",
+            "--graph-db-path",
+            db.to_str().unwrap(),
             "--relations",
             "comp:app/actions_test.spg|button2",
         ])
