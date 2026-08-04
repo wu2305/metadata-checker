@@ -340,9 +340,53 @@ impl PlanVariant {
     ///   「为什么不显示」恰恰是对的，却贡献了 17 条拒绝。接口不能一边要求、一边惩罚。
     ///
     /// 两者仍逐条记录在 `command_trace` 里，过度用量看得见，只是不再冒充路由缺陷。
-    fn matches(&self, request: &CommandRequest) -> bool {
+    fn matches(&self, request: &CommandRequest, resolver: &TargetResolver) -> bool {
         self.command_kind == request.command_kind
-            && targets_match(&self.command_kind, &self.target, &request.target)
+            && targets_match(&self.command_kind, &self.target, &request.target, resolver)
+    }
+}
+
+/// 用工具自己的归一逻辑判断两个 target 是不是同一个节点。
+///
+/// M59 评测里 109 条拒绝有 91 条是 `page:actions_test` 这种没写全的 target。工具现在会
+/// 确定性地把它补成 `page:app/actions_test.spg`，但 plan 是逐字符比较 target 的，命令在
+/// 进 CLI 之前就被判负了——评测于是测的是「有没有原样打出我们写下的那个字符串」，而
+/// 不是「工具能不能被走通」。这与此前放宽 budget / intent / `model:` 前缀是同一件事：
+/// 接口不能一边把某件事做掉，一边为没做那件事扣分。
+///
+/// 判据仍然是确定性的、且完全来自被测工具本身：调用 `route::normalize_prefixed_target`，
+/// 只有归一到同一个真实节点 id 才算命中。归一不了、或归一到别的节点，一律照旧拒绝。
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TargetResolver {
+    known_ids: Vec<String>,
+}
+
+impl TargetResolver {
+    /// 从 case 的 graphdb 读出全部节点 id。读不到就退化成纯字符串比较。
+    fn from_graph_db(graph_db_path: &Path) -> Self {
+        let Ok(runtime) = metadata_checker::runtime::GraphRuntime::load(graph_db_path) else {
+            return Self::default();
+        };
+        Self {
+            known_ids: runtime.graph.node_indices.keys().cloned().collect(),
+        }
+    }
+
+    /// 归一到真实节点 id；归一不了返回 `None`。
+    fn canonical(&self, target: &str) -> Option<String> {
+        use metadata_checker::route::PrefixedTargetResolution;
+        if self.known_ids.is_empty() {
+            return None;
+        }
+        match metadata_checker::route::normalize_prefixed_target(
+            target,
+            self.known_ids.iter().map(String::as_str),
+        ) {
+            PrefixedTargetResolution::Exact => Some(target.to_string()),
+            PrefixedTargetResolution::Resolved { target, .. } => Some(target),
+            PrefixedTargetResolution::Ambiguous { .. }
+            | PrefixedTargetResolution::NotFound { .. } => None,
+        }
     }
 }
 
@@ -353,17 +397,30 @@ impl PlanVariant {
 ///
 /// 只对模型/DataFlow 关系查询放宽：它们的 CLI 参数本来就写作 `<MODEL>`，前缀是可选修饰。
 /// `comp:` / `action:` / `field:` 前缀是消歧义所必需的，不能一并剥掉。
-fn targets_match(command_kind: &str, plan_target: &str, request_target: &str) -> bool {
+fn targets_match(
+    command_kind: &str,
+    plan_target: &str,
+    request_target: &str,
+    resolver: &TargetResolver,
+) -> bool {
     if plan_target == request_target {
         return true;
     }
-    if !matches!(
+    if matches!(
         command_kind,
         "--relations" | "--query-dataflow" | "--query-model"
-    ) {
-        return false;
+    ) && strip_dataflow_prefix(plan_target) == strip_dataflow_prefix(request_target)
+    {
+        return true;
     }
-    strip_dataflow_prefix(plan_target) == strip_dataflow_prefix(request_target)
+    // 两个写法归一到同一个真实节点，就是同一条命令。见 [`TargetResolver`]。
+    match (
+        resolver.canonical(plan_target),
+        resolver.canonical(request_target),
+    ) {
+        (Some(plan), Some(request)) => plan == request,
+        _ => false,
+    }
 }
 
 fn strip_dataflow_prefix(target: &str) -> &str {
@@ -407,13 +464,17 @@ struct PlanStep {
 
 impl PlanStep {
     /// 返回命中的写法，primary 优先。
-    fn match_variant(&self, request: &CommandRequest) -> Option<(&PlanVariant, RouteKind)> {
-        if self.primary.matches(request) {
+    fn match_variant(
+        &self,
+        request: &CommandRequest,
+        resolver: &TargetResolver,
+    ) -> Option<(&PlanVariant, RouteKind)> {
+        if self.primary.matches(request, resolver) {
             return Some((&self.primary, RouteKind::Primary));
         }
         self.alternatives
             .iter()
-            .find(|variant| variant.matches(request))
+            .find(|variant| variant.matches(request, resolver))
             .map(|variant| (variant, RouteKind::Alternate))
     }
 }
@@ -426,6 +487,8 @@ pub(crate) struct CommandPolicy {
     project_dir: PathBuf,
     graph_db_path: PathBuf,
     binary_path: PathBuf,
+    /// 用工具自己的归一逻辑比较 target；见 [`TargetResolver`]。
+    resolver: TargetResolver,
 }
 
 /// 一次 trial 里允许的免费 `--find` 次数。
@@ -483,12 +546,14 @@ impl CommandPolicy {
             );
         }
 
+        let resolver = TargetResolver::from_graph_db(&graph_db_path);
         Ok(Self {
             steps,
             max_command_count,
             project_dir,
             graph_db_path,
             binary_path,
+            resolver,
         })
     }
 
@@ -532,10 +597,16 @@ impl CommandPolicy {
             .enumerate()
             .filter(|(index, _)| !used_steps.contains(index))
             .find_map(|(index, step)| {
-                step.match_variant(request)
+                step.match_variant(request, &self.resolver)
                     .map(|(variant, route)| (index, variant.clone(), route))
             })
             .ok_or_else(|| anyhow!("模型命令不匹配任何未使用的 minimal_command_plan step"))?;
+
+        // 执行模型写的那个 target，不是 plan 的规范写法。两者现在可能只是归一后相等，
+        // 换成 plan 的写法等于替模型把 target 补全了——那条补全路径正是被测对象本身，
+        // 而且 trace 里记的命令会和真正跑过的 CLI 不是同一条。
+        let mut variant = variant;
+        variant.target = request.target.clone();
 
         Ok(ValidatedCommand {
             step_index: Some(step_index),

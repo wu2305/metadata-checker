@@ -2047,6 +2047,95 @@ fn test_m58_runner_accepts_dataflow_target_with_model_prefix() {
     std::fs::remove_dir_all(output_dir).unwrap();
 }
 
+/// 没写全但能被工具确定性补全的 target 必须视为同一条命令。
+///
+/// M59 评测里 109 条拒绝有 91 条长这样：`page:actions_test` 少了目录和扩展名。工具现在
+/// 会把它补成 `page:app/actions_test.spg`，但 plan 是逐字符比较 target 的，命令在进 CLI
+/// 之前就被判负——评测测的于是是「有没有原样打出我们写下的字符串」，而不是「工具能不能
+/// 被走通」。判据仍然完全来自被测工具本身：只有归一到同一个真实节点才算命中。
+#[test]
+fn test_m58_runner_accepts_target_the_tool_resolves() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "page_purpose_actions_test")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+    assert_eq!(step["target"], "page:app/actions_test.spg");
+
+    let output_dir = unique_test_output_dir("m58-partial-target");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": "page:actions_test",
+        "args": step["args"],
+        "budget": step["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary。",
+    });
+    let mut adapter =
+        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 1);
+    let trace = &report.command_trace[0];
+    assert!(trace.accepted, "工具能补全的 target 必须被接受");
+    assert_eq!(trace.plan_step_index, Some(0));
+    // trace 必须记模型真正发的那个写法，否则报告与跑过的 CLI 对不上。
+    assert_eq!(trace.target, "page:actions_test");
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 归一不到真实节点的 target 仍然拒绝。
+///
+/// 放宽的是「工具能确定性补全」，不是「差不多就行」。
+#[test]
+fn test_m58_runner_still_rejects_unresolvable_target() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "page_purpose_actions_test")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+
+    let output_dir = unique_test_output_dir("m58-unresolvable-target");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": "page:app/售后.app/首页.spg",
+        "args": step["args"],
+        "budget": step["budget"],
+    });
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary。",
+    });
+    let mut adapter =
+        FakeModelAdapter::from_responses(vec![command.to_string(), final_answer.to_string()]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 1);
+    assert!(
+        !report.command_trace[0].accepted,
+        "图里根本不存在的页面不该被接受"
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
 /// 类型前缀的放宽只针对 `--query-dataflow`；其它命令的前缀是消歧义所必需的。
 #[test]
 fn test_m58_runner_still_rejects_stripped_prefix_for_other_commands() {
