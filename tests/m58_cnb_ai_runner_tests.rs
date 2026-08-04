@@ -866,6 +866,87 @@ fn test_m58_cnb_adapter_rejects_truncated_answer() {
     assert!(error.contains("回答被输出预算截断"), "实际为: {error}");
 }
 
+/// 流完好但模型只思考不作答时，trial 必须判 protocol_error 而不是 runner_error。
+///
+/// M58 评的是「模型能否借助工具答对」，判据只能是它的**回答**。连接、鉴权、SSE 帧、
+/// `[DONE]`、模型身份全部正常，只是模型把 completion 预算花光在思考上——责任在模型。
+/// 记成 runner_error 等于用我们这侧的基础设施故障替模型背锅：reasoning_effort 的 A/B
+/// 里 15 个 trial 被算在错误的账上，直接影响 pass_rate 的可比性。
+#[test]
+fn test_m58_runner_classifies_reasoning_only_answer_as_protocol_error() {
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"想了很久\"},\"finish_reason\":\"\"}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\
+         \"usage\":{\"completion_tokens\":114,\"completion_thinking_tokens\":114}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        "m58-protocol-error-secret".to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let output_dir = unique_test_output_dir("m58-reasoning-only-protocol");
+    let config = fixture_runner_config(output_dir.clone());
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    server.join().unwrap();
+
+    assert_eq!(report.failure_classes, vec!["protocol_error".to_string()]);
+    let note = report.judge_notes.join(" ");
+    assert!(
+        note.contains("model returned no usable answer"),
+        "protocol_error 必须写明是模型没给回答，实际为: {note}"
+    );
+    assert!(
+        note.contains("只返回了思考内容"),
+        "judge_notes 必须保留确定性归因，实际为: {note}"
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 边界另一侧：一个思考字符都没有的空流仍然是我们这侧的传输问题，判 runner_error。
+///
+/// 没有这条，上面那条改动会把所有空回答一律洗成 protocol_error，真正的上游故障
+/// 就被算进模型的账，方向刚好反了。
+#[test]
+fn test_m58_runner_keeps_runner_error_for_empty_stream_without_thinking() {
+    let response_body = concat!(
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new(
+        endpoint,
+        "org/repo".to_string(),
+        "m58-runner-error-secret".to_string(),
+        "model".to_string(),
+    )
+    .unwrap();
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = fixture_llm_cases(&cases).into_iter().next().unwrap();
+    let output_dir = unique_test_output_dir("m58-empty-stream-runner-error");
+    let config = fixture_runner_config(output_dir.clone());
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    server.join().unwrap();
+
+    assert_eq!(report.failure_classes, vec!["runner_error".to_string()]);
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
 /// 内联 `<think>` 段必须被剥掉并计入 reasoning_chars，不得混进 assistant content。
 ///
 /// CNB 上的 deepseek 走 `reasoning_content` 旁路，但 M58 要换的 gemma4 / nemotron

@@ -829,10 +829,12 @@ impl ModelAdapter for CnbChatAdapter {
         // 有回答但被截断同样是坏结果：答案会缺尾巴（JSON 协议体往往解析不了），
         // 只是不像空回答那样显眼。让它以确定性文案失败，而不是当成正常回答喂给 judge。
         if parsed.finish_reason.as_deref() == Some("length") {
-            bail!(
-                "CNB AI Chat 回答被输出预算截断：finish_reason=length（thinking {} 字符）",
-                parsed.reasoning_chars
-            );
+            return Err(anyhow!(ModelAnswerError {
+                diagnostic: format!(
+                    "CNB AI Chat 回答被输出预算截断：finish_reason=length（thinking {} 字符）",
+                    parsed.reasoning_chars
+                ),
+            }));
         }
         // CNB 对未知模型名不会报错，而是静默用默认模型服务请求（已实测：
         // 请求 `definitely-not-a-real-model-xyz` 同样返回 deepseek-v4-flash）。
@@ -850,6 +852,33 @@ impl ModelAdapter for CnbChatAdapter {
         }
         Ok(parsed.content)
     }
+}
+
+/// 模型返回了一次结构完整的响应，但里面没有可用的回答文本（空回答或被截断的回答）。
+///
+/// 与 runner_error 的区别在于责任方：连接、鉴权、SSE 帧、`[DONE]`、模型身份全部正常，
+/// 是模型自己把 completion 预算花在思考上、没有产出回答。M58 评的是「模型能否借助工具
+/// 答对」，判据只能是它的**回答**；把「只思考不作答」记成我们的 runner_error，等于用
+/// 基础设施故障掩盖模型的协议违规，A/B 里 15 个 trial 因此被算在错误的账上。
+#[derive(Debug)]
+pub(crate) struct ModelAnswerError {
+    diagnostic: String,
+}
+
+impl std::fmt::Display for ModelAnswerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.diagnostic)
+    }
+}
+
+impl std::error::Error for ModelAnswerError {}
+
+/// 判断一条 adapter 错误链上是否挂着 [`ModelAnswerError`]。
+///
+/// 用 `chain()` 而不是 `downcast_ref()`：错误在 adapter 里会被 `context()` 包一层，
+/// 只看最外层类型会漏判。
+pub(crate) fn is_model_answer_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| cause.is::<ModelAnswerError>())
 }
 
 /// 一次 SSE 流的解析结果。
@@ -995,13 +1024,22 @@ fn parse_sse_content(body: &str) -> Result<SseParse> {
         // 预算被思考吃光、模型只思考不回答、上游真的什么都没发。分开报。
         let reason = finish_reason.as_deref().unwrap_or("<none>");
         let budget = format_usage(usage.as_ref(), reasoning_chars);
+        // 前两种是模型把预算花在思考上、自己没写回答——责任在模型，判 protocol_error。
+        // 第三种（一个 thinking 字符都没有）说明上游确实什么都没发，那才是我们这侧的
+        // 传输问题，继续留在 runner_error。
         if reason == "length" {
-            bail!(
-                "CNB AI Chat 未返回回答内容：finish_reason=length，模型在思考阶段耗尽输出预算（{budget}）"
-            );
+            return Err(anyhow!(ModelAnswerError {
+                diagnostic: format!(
+                    "CNB AI Chat 未返回回答内容：finish_reason=length，模型在思考阶段耗尽输出预算（{budget}）"
+                ),
+            }));
         }
         if reasoning_chars > 0 {
-            bail!("CNB AI Chat 只返回了思考内容、没有回答内容（{budget}，finish_reason={reason}）");
+            return Err(anyhow!(ModelAnswerError {
+                diagnostic: format!(
+                    "CNB AI Chat 只返回了思考内容、没有回答内容（{budget}，finish_reason={reason}）"
+                ),
+            }));
         }
         bail!("CNB AI Chat SSE 内容为空（finish_reason={reason}）");
     }
@@ -1796,7 +1834,8 @@ fn run_case_for_trial(
             reasoning_effort: None,
         };
         // 只有 adapter 成功返回 assistant content 时，runner 才进入协议解析路径。
-        // adapter/HTTP/SSE 层失败说明 provider/runtime 未产出可解析文本，归为 runner_error。
+        // adapter/HTTP/SSE 层失败说明 provider/runtime 未产出可解析文本，归为 runner_error；
+        // 唯一例外是 ModelAnswerError（流完好但模型没给回答），见下方分类。
         let response = match adapter.complete(&request) {
             Ok(response) => response,
             Err(error) => {
@@ -1804,13 +1843,26 @@ fn run_case_for_trial(
                 // 的 A/B 里正是这类空诊断把 7 个 trial 变成不可解释的噪声。adapter 层的错误
                 // 全部是我们自己构造的确定性文本（HTTP 状态、SSE 解析、模型替换断言），
                 // 不含模型回答，可以安全落进 judge_notes；仍然截断以免异常长的响应体灌进报告。
+                //
+                // 「流是好的、但模型没给出回答」不是基础设施故障，判 protocol_error：
+                // M58 只按模型的回答记分，思考不算交付。
+                let failure_class = if is_model_answer_error(&error) {
+                    "protocol_error"
+                } else {
+                    "runner_error"
+                };
                 return Ok(error_case_report(
                     case,
                     trial_index,
                     policy.max_command_count,
-                    "runner_error",
+                    failure_class,
                     &format!(
-                        "model adapter completion failed: {}",
+                        "{}: {}",
+                        if failure_class == "protocol_error" {
+                            "model returned no usable answer"
+                        } else {
+                            "model adapter completion failed"
+                        },
                         truncate_diagnostic(&format!("{error:#}"))
                     ),
                     trace,
