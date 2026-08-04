@@ -329,13 +329,19 @@ fn file_matches(have: &str, want: &str) -> bool {
 /// `comp:actions_test.spg|button1`。[`resolve_bare_target`] 只在完全没有前缀时才触发，
 /// 而新表面恰恰教会了模型总是写前缀，于是归一在 117 次 trial 里只生效了 1 次。
 ///
-/// 这里补上另一半：前缀写对了、文件路径没写全的，同样由 Rust 确定性地定位。分三档，
-/// 每一档都要么唯一命中、要么如实交回候选，不存在「取第一个」：
+/// 这里补上另一半：前缀写对了、其余部分没写全的，同样由 Rust 确定性地定位。按可信度
+/// 从高到低分档，每一档都要么唯一命中、要么如实交回候选，不存在「取第一个」：
 ///
 /// 1. target 就是真实 id —— 原样通过。
 /// 2. 文件段按路径后缀匹配、其余段完全一致 —— `page:actions_test`。
-/// 3. 文件路径根本不存在，但其余段唯一确定一个节点 —— `comp:app/未知页面.spg|button1`
+/// 3. 前缀写错但冒号后面完全一致 —— `dataflow:df_b` 指的就是 `model:df_b`，
+///    DataFlow 在图里是 Model 类型，SKILL.md 说了但模型照着前缀表写。
+/// 4. 段数少写但已写的段逐段匹配 —— `action:actions_test|button2` 少了 action id。
+/// 5. 文件路径根本不存在，但其余段唯一确定一个节点 —— `comp:app/未知页面.spg|button1`
 ///    这类模型凭空编出来的路径。评测里 19 条拒绝属于此类，此前一个候选都拿不到。
+///
+/// 全部落空时交回近似候选：尾段同名的节点，或最后一段写错、前面全对的兄弟节点
+/// （`action:app/x.spg|button2|updateData` -> button2 上真实存在的那些 action）。
 pub fn normalize_prefixed_target<'a>(
     target: &str,
     known_ids: impl IntoIterator<Item = &'a str>,
@@ -348,10 +354,17 @@ pub fn normalize_prefixed_target<'a>(
 
     // 文件段后缀命中，其余段完全一致。
     let mut by_file: Vec<String> = Vec::new();
+    // 冒号后面逐字一致，只有前缀写错了。
+    let mut by_content: Vec<String> = Vec::new();
+    // 写出来的段全对，只是少写了后面的段。
+    let mut by_partial: Vec<String> = Vec::new();
     // 文件段对不上，但其余段完全一致——模型编了路径，节点身份是对的。
     let mut by_identity: Vec<String> = Vec::new();
-    // 尾段同名的近似项，仅在前两档都空时作为 candidates 交回。
+    // 以下两档只作为 candidates 交回，不参与归一。
     let mut by_tail: Vec<String> = Vec::new();
+    let mut by_sibling: Vec<String> = Vec::new();
+
+    let content = &target[prefix.len()..];
     let last_want = want.last().copied().unwrap_or_default();
 
     for id in known_ids {
@@ -362,7 +375,15 @@ pub fn normalize_prefixed_target<'a>(
             continue;
         };
 
-        if id_prefix == prefix && have.len() == want.len() && tail_matches(&have, &want) {
+        if id_prefix != prefix {
+            // 前缀是模型唯一还得自己判断的东西，而冒号后面写对了就已经唯一确定了节点。
+            if id[id_prefix.len()..].eq_ignore_ascii_case(content) {
+                by_content.push(id.to_string());
+            }
+            continue;
+        }
+
+        if have.len() == want.len() && tail_matches(&have, &want) {
             if file_matches(have[0], want[0]) {
                 by_file.push(id.to_string());
                 continue;
@@ -375,6 +396,25 @@ pub fn normalize_prefixed_target<'a>(
             }
         }
 
+        // 少写了尾段：已写出来的部分必须逐段对上，才算「写了一半」而不是「写了别的」。
+        if have.len() > want.len()
+            && file_matches(have[0], want[0])
+            && tail_matches(&have[..want.len()], &want)
+        {
+            by_partial.push(id.to_string());
+            continue;
+        }
+
+        // 最后一段写错、前面全对：交回真实的兄弟节点当 candidates。
+        if have.len() == want.len()
+            && have.len() >= 2
+            && file_matches(have[0], want[0])
+            && tail_matches(&have[..have.len() - 1], &want[..want.len() - 1])
+        {
+            by_sibling.push(id.to_string());
+            continue;
+        }
+
         if have
             .last()
             .is_some_and(|segment| file_matches(segment, last_want))
@@ -385,6 +425,8 @@ pub fn normalize_prefixed_target<'a>(
 
     for (tier, note) in [
         (&mut by_file, "补全文件路径"),
+        (&mut by_content, "更正类型前缀"),
+        (&mut by_partial, "补全省略的尾段"),
         (
             &mut by_identity,
             "target 里的文件路径不存在，按节点身份定位",
@@ -409,11 +451,12 @@ pub fn normalize_prefixed_target<'a>(
         }
     }
 
-    by_tail.sort();
-    by_tail.truncate(MAX_CANDIDATES);
-    PrefixedTargetResolution::NotFound {
-        candidates: by_tail,
-    }
+    let mut candidates = by_tail;
+    candidates.append(&mut by_sibling);
+    candidates.sort();
+    candidates.dedup();
+    candidates.truncate(MAX_CANDIDATES);
+    PrefixedTargetResolution::NotFound { candidates }
 }
 
 #[cfg(test)]
@@ -693,6 +736,48 @@ mod tests {
                 );
             }
             other => panic!("expected not found with candidates, got {other:?}"),
+        }
+    }
+
+    /// 前缀写错但冒号后面写对了，直接更正前缀。
+    ///
+    /// DataFlow 在图里是 Model 类型，SKILL.md 里写了，模型还是照着前缀表发了
+    /// `dataflow:df_b`。冒号后面逐字一致时节点已经唯一确定，没有可猜的余地。
+    #[test]
+    fn test_wrong_prefix_with_exact_content_is_corrected() {
+        match normalize_prefixed_target("dataflow:model1", KNOWN.iter().copied()) {
+            PrefixedTargetResolution::Resolved { target, .. } => assert_eq!(target, "model:model1"),
+            other => panic!("expected resolved, got {other:?}"),
+        }
+    }
+
+    /// 少写了尾段时按已写出来的部分补全。
+    ///
+    /// `action:actions_test|button2` 少了 action id；已写的段全对，补全是确定性的。
+    #[test]
+    fn test_partially_written_segments_are_completed() {
+        match normalize("action:actions_test|button2") {
+            PrefixedTargetResolution::Resolved { target, .. } => {
+                assert_eq!(target, "action:app/actions_test.spg|button2|action1");
+            }
+            other => panic!("expected resolved, got {other:?}"),
+        }
+    }
+
+    /// 最后一段写错、前面全对时，交回真实的兄弟节点。
+    ///
+    /// `|updateData` 在评测里出现 6 次，图里根本没有这个 action。补全不该猜，但也不该
+    /// 让模型两手空空——button2 上真实存在哪些 action 是确定的。
+    #[test]
+    fn test_wrong_last_segment_returns_real_siblings() {
+        match normalize("action:app/actions_test.spg|button2|updateData") {
+            PrefixedTargetResolution::NotFound { candidates } => {
+                assert_eq!(
+                    candidates,
+                    vec!["action:app/actions_test.spg|button2|action1"]
+                );
+            }
+            other => panic!("expected not found with siblings, got {other:?}"),
         }
     }
 

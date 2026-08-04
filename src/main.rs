@@ -228,7 +228,33 @@ fn run_surface(
     if !diagnostics.is_empty() {
         append_diagnostics(&mut result, &diagnostics);
     }
+    // 底层命令找不到目标时未必返回 Err——它也可能返回一个 ok 的壳子，只在 diagnostics
+    // 里记一条 TARGET_NOT_FOUND。那种输出对模型等于什么都没说，而我们手上正好有结构性
+    // 近似候选。
+    if !near_miss.is_empty() && has_diagnostic_code(&result, "TARGET_NOT_FOUND") {
+        if let Some(object) = result.as_object_mut() {
+            object.insert(
+                "candidate_targets".to_string(),
+                serde_json::json!(near_miss),
+            );
+        }
+    }
     Ok(result)
+}
+
+/// 输出的 diagnostics 里是否有指定 code。
+fn has_diagnostic_code(result: &serde_json::Value, code: &str) -> bool {
+    result
+        .get("diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                entry
+                    .get("code")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| value == code)
+            })
+        })
 }
 
 /// 拿真实节点 id 集合归一一个带前缀的 target。
