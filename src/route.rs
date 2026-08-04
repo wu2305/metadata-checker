@@ -385,7 +385,10 @@ pub fn normalize_prefixed_target<'a>(
 
     for (tier, note) in [
         (&mut by_file, "补全文件路径"),
-        (&mut by_identity, "target 里的文件路径不存在，按节点身份定位"),
+        (
+            &mut by_identity,
+            "target 里的文件路径不存在，按节点身份定位",
+        ),
     ] {
         tier.sort();
         match tier.len() {
@@ -615,7 +618,9 @@ mod tests {
     fn test_page_target_without_directory_or_extension_resolves() {
         for target in ["page:actions_test", "page:actions_test.spg"] {
             match normalize(target) {
-                PrefixedTargetResolution::Resolved { target: resolved, .. } => {
+                PrefixedTargetResolution::Resolved {
+                    target: resolved, ..
+                } => {
                     assert_eq!(resolved, "page:app/actions_test.spg");
                 }
                 other => panic!("{target} 应当归一，实际 {other:?}"),
