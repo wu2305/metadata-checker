@@ -43,11 +43,7 @@ fn run_cli(args: &[&str]) -> String {
     let _guard = CLI_LOCK.lock().unwrap();
     let bin = std::env::var_os("CARGO_BIN_EXE_metadata-checker")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .unwrap()
-                .join("target/debug/metadata-checker")
-        });
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker")));
     let cmd_output = std::process::Command::new(&bin)
         .args(args)
         .output()

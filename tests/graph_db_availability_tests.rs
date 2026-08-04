@@ -7,9 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn bin() -> PathBuf {
-    std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker")
+    PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"))
 }
 
 fn run_cli(args: &[&str]) -> String {

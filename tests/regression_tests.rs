@@ -1375,9 +1375,7 @@ fn test_m31_m32_docs_define_condition_and_value_source_contract() {
 /// 通过编译后的二进制 CLI 捕获 JSON 输出
 fn run_cli(args: &[&str]) -> String {
     let _guard = CLI_LOCK.lock().unwrap();
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"));
     let cmd_output = std::process::Command::new(&bin)
         .args(args)
         .output()
@@ -1387,9 +1385,7 @@ fn run_cli(args: &[&str]) -> String {
 
 fn run_cli_stderr(args: &[&str]) -> String {
     let _guard = CLI_LOCK.lock().unwrap();
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"));
     let cmd_output = std::process::Command::new(&bin)
         .args(args)
         .output()
@@ -6806,9 +6802,7 @@ fn test_cli_runtime_session_diff_refresh_redacts_password_on_failure() {
     create_diff_refresh_cli_session(&root, "s1", &format!("http://{addr}"));
 
     let password = "super-secret-pw-123";
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"));
     let output = std::process::Command::new(&bin)
         .args([
             "--session-dir",

@@ -40,9 +40,7 @@ struct SnapshotCase {
 /// 运行 CLI 命令并返回 stdout
 fn run_cli(args: &[&str]) -> String {
     let _guard = CLI_LOCK.lock().unwrap();
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"));
     let cmd_output = std::process::Command::new(&bin)
         .args(args)
         .output()

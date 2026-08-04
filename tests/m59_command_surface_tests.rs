@@ -10,10 +10,13 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// 由 Cargo 注入的二进制路径。
+///
+/// 不能写死 `target/debug/metadata-checker`：远端开发环境和 CI 用的是自定义
+/// `CARGO_TARGET_DIR`（分别是 `target/cnb/workspace` 和 `target/cnb/coverage`），
+/// 写死路径的测试在本地全绿、一上远端就全部 NotFound。
 fn bin() -> PathBuf {
-    std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker")
+    PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"))
 }
 
 /// 每个用例独占一份 graphdb，避免并行测试互相抢锁。

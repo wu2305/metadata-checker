@@ -377,9 +377,7 @@ fn test_repl_interactive_priority() {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"));
     if !bin.exists() {
         eprintln!("Binary not found, skipping integration test");
         return;
