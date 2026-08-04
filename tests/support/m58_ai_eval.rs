@@ -491,21 +491,48 @@ pub(crate) struct CommandPolicy {
     resolver: TargetResolver,
 }
 
-/// 请求的 budget 是否严格高于上一次跑这一步时用的 budget。
-///
-/// 只认升级，不认原样重发：同一个 budget 再发一遍拿到的是同一份输出，那是模型在原地
-/// 打转，仍然应当算失败。与 [`is_budget_upgrade`] 不同——那个只判断相对 compact 默认值
-/// 是否升级，用于 trace 记账，不涉及两次调用之间的比较。
-fn escalates_budget(previous: &str, request: &CommandRequest) -> bool {
-    let rank = |budget: &str| match budget {
-        "compact" => Some(0),
-        "normal" => Some(1),
-        "full" => Some(2),
-        _ => None,
-    };
-    match (rank(previous), request.budget.as_deref().and_then(rank)) {
-        (Some(previous), Some(requested)) => requested > previous,
-        _ => false,
+/// 一次已执行命令的身份，用于判断重发是否能拿到新东西。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExecutedCommand {
+    step_index: usize,
+    command_kind: String,
+    target: String,
+    budget: String,
+}
+
+impl ExecutedCommand {
+    /// 供测试构造一条已执行记录。
+    pub(crate) fn for_test(step_index: usize, request: &CommandRequest) -> Self {
+        Self::from_request(step_index, request)
+    }
+
+    fn from_request(step_index: usize, request: &CommandRequest) -> Self {
+        Self {
+            step_index,
+            command_kind: request.command_kind.clone(),
+            target: request.target.clone(),
+            budget: request
+                .budget
+                .clone()
+                .unwrap_or_else(|| "compact".to_string()),
+        }
+    }
+
+    /// 这次请求相对本条已执行命令，能不能拿到不一样的输出。
+    fn yields_something_new(&self, request: &CommandRequest) -> bool {
+        if self.command_kind != request.command_kind || self.target != request.target {
+            return true;
+        }
+        let rank = |budget: &str| match budget {
+            "compact" => Some(0),
+            "normal" => Some(1),
+            "full" => Some(2),
+            _ => None,
+        };
+        match (rank(&self.budget), request.budget.as_deref().and_then(rank)) {
+            (Some(previous), Some(requested)) => requested > previous,
+            _ => false,
+        }
     }
 }
 
@@ -579,7 +606,7 @@ impl CommandPolicy {
     pub(crate) fn validate(
         &self,
         request: &CommandRequest,
-        used_steps: &[(usize, String)],
+        used_steps: &[ExecutedCommand],
         discovery_used: usize,
     ) -> Result<ValidatedCommand> {
         if contains_shell_metacharacters(&request.target) {
@@ -613,7 +640,7 @@ impl CommandPolicy {
             .steps
             .iter()
             .enumerate()
-            .filter(|(index, _)| !used_steps.iter().any(|(used, _)| used == index))
+            .filter(|(index, _)| !used_steps.iter().any(|used| used.step_index == *index))
             .find_map(|(index, step)| {
                 step.match_variant(request, &self.resolver)
                     .map(|(variant, route)| (index, variant.clone(), route))
@@ -621,14 +648,19 @@ impl CommandPolicy {
 
         let (step_index, variant, route) = match matched {
             Some(matched) => matched,
-            // 同一步、更高 budget 的重发是重试，不是走错路。
+            // 已消费的 step 上换个写法再问一次，只要能拿到不一样的输出，就不是走错路。
             //
-            // SKILL.md 和 bootstrap 都明确要求「compact 作为默认第一轮，仅在 diagnostics
-            // 或 OUTPUT_TRUNCATED 时升级」。M59 评测里 `field_lineage_model1_name` 9 次
-            // trial 全部这样死：模型第一条命令完全正确、被接受，看到 compact 不够之后按
-            // 指示升到 normal，plan 里那一步已被消费，于是整条 trial 记成 command_rejected。
-            // 接口不能一边要求升级 budget，一边把升级判成路由失败——这与此前把 budget、
-            // intent 排除出判据是同一件事。重试仍然照常吃 max_command_count 的额度。
+            // 拒绝会让整条 trial 立刻判负，所以它必须只留给「工具服务不了」和「去错了
+            // 地方」。M59 评测里死在这上面的全是既没走错、工具也答得出来的命令：
+            //
+            // - `field_lineage_model1_name` 9 次 trial 全部因为按 SKILL.md 的指示把 budget
+            //   从 compact 升到 normal。接口不能一边要求升级、一边把升级判成路由失败。
+            // - `dataflow_output_source` 7 次因为先 `--relations` 再 `--explain` 同一个节点，
+            //   而这两条本来就都写在同一个 step 的可接受写法里。
+            //
+            // 是否冗余由 max_command_count 兜底，答得对不对由最终答案决定；`command_trace`
+            // 仍逐条记录，多花的命令看得见。原样重发同一条命令仍然拒绝——那拿到的是同一
+            // 份输出，模型在原地打转。
             None => self
                 .steps
                 .iter()
@@ -636,7 +668,9 @@ impl CommandPolicy {
                 .filter(|(index, _)| {
                     used_steps
                         .iter()
-                        .any(|(used, budget)| used == index && escalates_budget(budget, request))
+                        .filter(|used| used.step_index == *index)
+                        .all(|used| used.yields_something_new(request))
+                        && used_steps.iter().any(|used| used.step_index == *index)
                 })
                 .find_map(|(index, step)| {
                     step.match_variant(request, &self.resolver)
@@ -2089,13 +2123,9 @@ fn run_case_for_trial(
                     execution.output_sections,
                 ));
                 match step_index {
-                    Some(index) => used_steps.push((
-                        index,
-                        command_request
-                            .budget
-                            .clone()
-                            .unwrap_or_else(|| "compact".to_string()),
-                    )),
+                    Some(index) => {
+                        used_steps.push(ExecutedCommand::from_request(index, &command_request))
+                    }
                     // 定位命令不占 plan 步数，只吃自己的定位额度。
                     None => discovery_used += 1,
                 }

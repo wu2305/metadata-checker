@@ -5,9 +5,10 @@ mod m58_ai_eval;
 
 use m58_ai_eval::{
     AgentTurn, CaseReport, ChatMessage, ChatRequest, CnbChatAdapter, CommandPolicy, CommandRequest,
-    CommandTrace, FakeModelAdapter, JudgeResult, ModelAdapter, RunReport, RunnerConfig,
-    fixture_llm_cases, judge_answer, load_eval_cases, parse_agent_turn, redact_secret, run_case,
-    run_fixture_llm_cases, validate_fixture_llm_case_count, write_run_report,
+    CommandTrace, ExecutedCommand, FakeModelAdapter, JudgeResult, ModelAdapter, RunReport,
+    RunnerConfig, fixture_llm_cases, judge_answer, load_eval_cases, parse_agent_turn,
+    redact_secret, run_case, run_fixture_llm_cases, validate_fixture_llm_case_count,
+    write_run_report,
 };
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -316,11 +317,11 @@ fn test_m58_command_policy_binds_paths_and_steps() {
             OsString::from("compact"),
         ]
     );
-    // 同 budget 重发：那一步已被消费，且没有升级，仍然拒绝。
-    let used = |steps: &[usize]| -> Vec<(usize, String)> {
+    // 原样重发：那一步已被消费，且拿到的是同一份输出，仍然拒绝。
+    let used = |steps: &[usize]| -> Vec<ExecutedCommand> {
         steps
             .iter()
-            .map(|index| (*index, "compact".to_string()))
+            .map(|index| ExecutedCommand::for_test(*index, &request))
             .collect()
     };
     assert!(policy.validate(&request, &used(&[0]), 0).is_err());
@@ -2101,7 +2102,7 @@ fn test_m58_runner_accepts_target_the_tool_resolves() {
     std::fs::remove_dir_all(output_dir).unwrap();
 }
 
-/// 同一步、更高 budget 的重发是重试，不是走错路。
+/// 已消费的 step 上换个写法再问一次，只要能拿到不一样的输出，就不是走错路。
 ///
 /// SKILL.md 和 bootstrap 都要求「compact 作为默认第一轮，仅在 diagnostics 或
 /// OUTPUT_TRUNCATED 时升级」。M59 评测里 `field_lineage_model1_name` 9 次 trial 全部这样
@@ -2160,7 +2161,57 @@ fn test_m58_runner_accepts_budget_upgrade_retry() {
     std::fs::remove_dir_all(output_dir).unwrap();
 }
 
-/// 同一个 budget 原样重发仍然拒绝：那是原地打转，不是重试。
+/// 同一个 step 的另一种可接受写法必须能接着用。
+///
+/// `dataflow_output_source` 的 plan 把 `--relations model:dataflow_output` 和
+/// `--explain model:dataflow_output` 都写成了这一步的可接受写法。M59 评测里模型先后发了
+/// 这两条，7 次 trial 因此判负——两条都是 plan 自己认可的路由，先后发出去不是走错路。
+#[test]
+fn test_m58_runner_accepts_the_other_variant_of_a_used_step() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "dataflow_output_source")
+        .expect("case 必须存在")
+        .clone();
+
+    let output_dir = unique_test_output_dir("m58-other-variant");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = |kind: &str| {
+        serde_json::json!({
+            "kind": "command",
+            "command_kind": kind,
+            "target": "model:dataflow_output",
+            "args": [],
+            "budget": "compact",
+        })
+        .to_string()
+    };
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary：dataflow_output 由 DataFlow 的输出节点产生。",
+    });
+    let mut adapter = FakeModelAdapter::from_responses(vec![
+        command("--relations"),
+        command("--explain"),
+        final_answer.to_string(),
+    ]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 2);
+    assert!(report.command_trace[0].accepted);
+    assert!(
+        report.command_trace[1].accepted,
+        "plan 自己认可的另一种写法不该被记成路由失败"
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 原样重发同一条命令仍然拒绝：拿到的是同一份输出，模型在原地打转。
 #[test]
 fn test_m58_runner_rejects_identical_command_replay() {
     let cases = load_eval_cases(Path::new(
