@@ -283,11 +283,15 @@ fn strip_metadata_extension(value: &str) -> &str {
     METADATA_EXTENSIONS
         .iter()
         .find_map(|extension| {
-            value
-                .len()
-                .checked_sub(extension.len())
-                .filter(|split| value[*split..].eq_ignore_ascii_case(extension))
-                .map(|split| &value[..split])
+            // 真实项目里的路径大量是中文（`app/售后.app/首页.spg`），按字节下标切
+            // 会切进多字节字符中间直接 panic。
+            let split = value.len().checked_sub(extension.len())?;
+            if !value.is_char_boundary(split) {
+                return None;
+            }
+            value[split..]
+                .eq_ignore_ascii_case(extension)
+                .then(|| &value[..split])
         })
         .unwrap_or(value)
 }
@@ -572,6 +576,29 @@ mod tests {
     }
 
     /// 真实 id 原样通过，不能被归一改写。
+    /// 中文路径不能把归一切崩。
+    ///
+    /// 真实项目里 `app/售后.app/首页.spg` 是常态，按字节下标切扩展名会切进多字节
+    /// 字符中间；这条断言在 fixture 之外的真实语料上才会触发。
+    #[test]
+    fn test_multibyte_paths_do_not_panic() {
+        let known = ["comp:app/售后.app/首页.spg|button1", "field:app_table.金额"];
+        for target in [
+            "comp:首页|button1",
+            "comp:首页.spg|button1",
+            "field:金额",
+            "page:售后",
+        ] {
+            let _ = normalize_prefixed_target(target, known.iter().copied());
+        }
+        match normalize_prefixed_target("comp:首页|button1", known.iter().copied()) {
+            PrefixedTargetResolution::Resolved { target, .. } => {
+                assert_eq!(target, "comp:app/售后.app/首页.spg|button1");
+            }
+            other => panic!("expected resolved, got {other:?}"),
+        }
+    }
+
     #[test]
     fn test_exact_prefixed_target_is_untouched() {
         assert_eq!(
