@@ -2094,6 +2094,102 @@ fn test_m58_runner_accepts_target_the_tool_resolves() {
     std::fs::remove_dir_all(output_dir).unwrap();
 }
 
+/// 同一步、更高 budget 的重发是重试，不是走错路。
+///
+/// SKILL.md 和 bootstrap 都要求「compact 作为默认第一轮，仅在 diagnostics 或
+/// OUTPUT_TRUNCATED 时升级」。M59 评测里 `field_lineage_model1_name` 9 次 trial 全部这样
+/// 死：第一条命令完全正确、被接受，模型按指示升到 normal，plan 里那一步已被消费，整条
+/// trial 记成 command_rejected。接口不能一边要求升级 budget，一边把升级判成路由失败。
+#[test]
+fn test_m58_runner_accepts_budget_upgrade_retry() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "field_lineage_model1_name")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+
+    let output_dir = unique_test_output_dir("m58-budget-retry");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = |budget: &str| {
+        serde_json::json!({
+            "kind": "command",
+            "command_kind": step["command_kind"],
+            "target": step["target"],
+            "args": step["args"],
+            "budget": budget,
+        })
+        .to_string()
+    };
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "见 summary 和 details：字段 name 的写入来自页面 action。",
+    });
+    let mut adapter = FakeModelAdapter::from_responses(vec![
+        command("compact"),
+        command("normal"),
+        final_answer.to_string(),
+    ]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 2);
+    assert!(report.command_trace[0].accepted);
+    assert!(
+        report.command_trace[1].accepted,
+        "按 SKILL.md 指示升级 budget 不该被记成路由失败"
+    );
+    assert!(
+        !report
+            .failure_classes
+            .contains(&"command_rejected".to_string()),
+        "{:?}",
+        report.failure_classes
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 同一个 budget 原样重发仍然拒绝：那是原地打转，不是重试。
+#[test]
+fn test_m58_runner_rejects_identical_command_replay() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "field_lineage_model1_name")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+
+    let output_dir = unique_test_output_dir("m58-identical-replay");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = serde_json::json!({
+        "kind": "command",
+        "command_kind": step["command_kind"],
+        "target": step["target"],
+        "args": step["args"],
+        "budget": "compact",
+    })
+    .to_string();
+    let mut adapter = FakeModelAdapter::from_responses(vec![command.clone(), command]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 2);
+    assert!(report.command_trace[0].accepted);
+    assert!(
+        !report.command_trace[1].accepted,
+        "同 budget 原样重发拿到的是同一份输出，仍然是失败"
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
 /// 归一不到真实节点的 target 仍然拒绝。
 ///
 /// 放宽的是「工具能确定性补全」，不是「差不多就行」。

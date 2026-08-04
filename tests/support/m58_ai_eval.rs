@@ -491,6 +491,23 @@ pub(crate) struct CommandPolicy {
     resolver: TargetResolver,
 }
 
+/// 请求的 budget 是否严格高于上一次跑这一步时用的 budget。
+///
+/// 只认升级，不认原样重发：同一个 budget 再发一遍拿到的是同一份输出，那是模型在原地
+/// 打转，仍然应当算失败。
+fn is_budget_upgrade(previous: &str, request: &CommandRequest) -> bool {
+    let rank = |budget: &str| match budget {
+        "compact" => Some(0),
+        "normal" => Some(1),
+        "full" => Some(2),
+        _ => None,
+    };
+    match (rank(previous), request.budget.as_deref().and_then(rank)) {
+        (Some(previous), Some(requested)) => requested > previous,
+        _ => false,
+    }
+}
+
 /// 一次 trial 里允许的免费 `--find` 次数。
 ///
 /// 定位不是回答，不该占用 plan 步数：M58 里 `context_button1_neighbors` 问的是
@@ -561,7 +578,7 @@ impl CommandPolicy {
     pub(crate) fn validate(
         &self,
         request: &CommandRequest,
-        used_steps: &[usize],
+        used_steps: &[(usize, String)],
         discovery_used: usize,
     ) -> Result<ValidatedCommand> {
         if contains_shell_metacharacters(&request.target) {
@@ -591,16 +608,41 @@ impl CommandPolicy {
         if used_steps.len() >= self.max_command_count {
             bail!("命令数超过 max_command_count={}", self.max_command_count);
         }
-        let (step_index, variant, route) = self
+        let matched = self
             .steps
             .iter()
             .enumerate()
-            .filter(|(index, _)| !used_steps.contains(index))
+            .filter(|(index, _)| !used_steps.iter().any(|(used, _)| used == index))
             .find_map(|(index, step)| {
                 step.match_variant(request, &self.resolver)
                     .map(|(variant, route)| (index, variant.clone(), route))
-            })
-            .ok_or_else(|| anyhow!("模型命令不匹配任何未使用的 minimal_command_plan step"))?;
+            });
+
+        let (step_index, variant, route) = match matched {
+            Some(matched) => matched,
+            // 同一步、更高 budget 的重发是重试，不是走错路。
+            //
+            // SKILL.md 和 bootstrap 都明确要求「compact 作为默认第一轮，仅在 diagnostics
+            // 或 OUTPUT_TRUNCATED 时升级」。M59 评测里 `field_lineage_model1_name` 9 次
+            // trial 全部这样死：模型第一条命令完全正确、被接受，看到 compact 不够之后按
+            // 指示升到 normal，plan 里那一步已被消费，于是整条 trial 记成 command_rejected。
+            // 接口不能一边要求升级 budget，一边把升级判成路由失败——这与此前把 budget、
+            // intent 排除出判据是同一件事。重试仍然照常吃 max_command_count 的额度。
+            None => self
+                .steps
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| {
+                    used_steps
+                        .iter()
+                        .any(|(used, budget)| used == index && is_budget_upgrade(budget, request))
+                })
+                .find_map(|(index, step)| {
+                    step.match_variant(request, &self.resolver)
+                        .map(|(variant, route)| (index, variant.clone(), route))
+                })
+                .ok_or_else(|| anyhow!("模型命令不匹配任何未使用的 minimal_command_plan step"))?,
+        };
 
         // 执行模型写的那个 target，不是 plan 的规范写法。两者现在可能只是归一后相等，
         // 换成 plan 的写法等于替模型把 target 补全了——那条补全路径正是被测对象本身，
@@ -2046,7 +2088,13 @@ fn run_case_for_trial(
                     execution.output_sections,
                 ));
                 match step_index {
-                    Some(index) => used_steps.push(index),
+                    Some(index) => used_steps.push((
+                        index,
+                        command_request
+                            .budget
+                            .clone()
+                            .unwrap_or_else(|| "compact".to_string()),
+                    )),
                     // 定位命令不占 plan 步数，只吃自己的定位额度。
                     None => discovery_used += 1,
                 }
