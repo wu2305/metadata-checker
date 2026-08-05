@@ -1604,9 +1604,9 @@ pub(crate) fn judge_answer(
         &mut failure_classes,
     );
     if diagnostic_required
-        && diagnostics
-            .iter()
-            .any(|diagnostic| !diagnostic.trim().is_empty())
+        && diagnostics.iter().any(|diagnostic| {
+            !diagnostic.trim().is_empty() && diagnostic_demands_hedging(diagnostic)
+        })
     {
         if !contains_conservative_marker(&normalized_answer) {
             add_failure(&mut failure_classes, "ignored_diagnostic");
@@ -1941,6 +1941,19 @@ fn normalize_for_match(value: &str) -> String {
 }
 
 /// 判断回答是否显式表达不确定或证据边界。
+/// 这条诊断是否要求答案降级表达。
+///
+/// 「没有写入目标」「没有用户入口」是判定结果，不是证据缺失：readonly_page_check 的
+/// uncertainty_policy 自己就写着「页面确实无任何 action 时可明确回答只读」，而它的
+/// must_include 要的正是「只读」。对这类诊断也要求模型说「可能/不确定」，等于一边要
+/// 它下确定结论、一边罚它下确定结论。用工具自己的影响分类来区分，未登记的 code 一律
+/// 按需要降级处理。
+pub(crate) fn diagnostic_demands_hedging(diagnostic: &str) -> bool {
+    use metadata_checker::output::answer_effect::{AnswerImpact, answer_effect};
+    let code = diagnostic.split(':').next().unwrap_or_default().trim();
+    !matches!(answer_effect(code), Some((AnswerImpact::Determinate, _)))
+}
+
 fn contains_conservative_marker(answer: &str) -> bool {
     [
         "不确定",

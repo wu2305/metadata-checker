@@ -2816,3 +2816,21 @@ fn test_m58_bootstrap_never_mandates_a_forbidden_word() {
         }
     }
 }
+
+/// 确定性的「没有」不该被当成必须降级表达的诊断。
+#[test]
+fn test_m58_determinate_absence_does_not_demand_hedging() {
+    // 「这页没有写入目标」是判定，不是证据不足；要求它说「可能」会和同一条 case 要求
+    // 的「只读」直接打架。
+    assert!(!m58_ai_eval::diagnostic_demands_hedging(
+        "NO_WRITE_TARGETS: Page has no detected write targets"
+    ));
+    assert!(!m58_ai_eval::diagnostic_demands_hedging("NO_ENTRYPOINTS"));
+    // 语义没解析出来、输出被截断，仍然必须降级。
+    assert!(m58_ai_eval::diagnostic_demands_hedging(
+        "UNKNOWN_ACTION_TYPE: Unknown action type 'x' encountered"
+    ));
+    assert!(m58_ai_eval::diagnostic_demands_hedging("OUTPUT_TRUNCATED"));
+    // 没登记过的 code 一律按保守处理。
+    assert!(m58_ai_eval::diagnostic_demands_hedging("SOME_FUTURE_CODE"));
+}
