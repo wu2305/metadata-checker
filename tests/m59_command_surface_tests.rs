@@ -393,3 +393,91 @@ fn test_legacy_verbs_still_work() {
         );
     }
 }
+
+/// 只读页要在输出里把「只读」说出来，而不是留下三个 0 让模型自己推。
+#[test]
+fn test_a_readonly_page_states_its_absences_in_words() {
+    let db = workspace("readonly-words");
+    let output = surface(&db, &["--relations", "page:app/dataflow_embedded.spg"]);
+    let summary = &output["summary"];
+    let conclusion = summary["conclusion"].as_str().expect("conclusion");
+    assert!(conclusion.contains("只读"), "{conclusion}");
+    assert!(conclusion.contains("无写入"), "{conclusion}");
+
+    let absent: Vec<&str> = summary["absent"]
+        .as_array()
+        .expect("absent")
+        .iter()
+        .map(|item| item["what"].as_str().unwrap())
+        .collect();
+    assert!(absent.contains(&"write_targets"), "{absent:?}");
+    assert!(absent.contains(&"entrypoints"), "{absent:?}");
+}
+
+/// 语义不确定的诊断要给出「对结论意味着什么」，否则模型只能忽略它。
+#[test]
+fn test_an_uncertain_diagnostic_lowers_stated_confidence() {
+    let db = workspace("confidence");
+    let output = surface(&db, &["--relations", "page:app/actions_test.spg"]);
+    let confidence = &output["summary"]["confidence"];
+    assert_eq!(confidence["level"], "reduced");
+    let reasons = confidence["reasons"].as_array().expect("reasons");
+    let unknown_action = reasons
+        .iter()
+        .find(|reason| reason["code"] == "UNKNOWN_ACTION_TYPE")
+        .expect("UNKNOWN_ACTION_TYPE 的影响必须被说出来");
+    assert!(
+        unknown_action["effect"]
+            .as_str()
+            .unwrap()
+            .contains("保守回答")
+    );
+    assert!(
+        output["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .iter()
+            .any(|entry| entry["code"] == "UNKNOWN_ACTION_TYPE"
+                && entry["answer_effect"].is_string())
+    );
+}
+
+/// 确定的「没有」不该把一个本来能确定的答案降级。
+#[test]
+fn test_a_confirmed_absence_keeps_confidence_full() {
+    let db = workspace("absence-confidence");
+    let output = surface(&db, &["--relations", "page:app/dataflow_embedded.spg"]);
+    assert_eq!(output["summary"]["confidence"]["level"], "full");
+}
+
+/// 歧义 target 要给出能直接照抄执行的下一条命令，而不只是候选 id。
+#[test]
+fn test_ambiguous_target_hands_back_runnable_commands() {
+    let db = workspace("ambiguous-next");
+    let output = surface(&db, &["--explain", "comp:button1"]);
+    assert_eq!(output["error"]["code"], "AMBIGUOUS_TARGET");
+    let next: Vec<&str> = output["next_queries"]
+        .as_array()
+        .expect("next_queries")
+        .iter()
+        .map(|item| item.as_str().unwrap())
+        .collect();
+    assert!(!next.is_empty());
+    assert!(next.iter().all(|command| command.starts_with("--explain ")));
+    // 重发原命令是 M59 评测里真实发生过的失败：错误信息必须明说不要这么做。
+    let message = output["error"]["message"].as_str().unwrap();
+    assert!(message.contains("不要重复"), "{message}");
+}
+
+/// 跳转要把目标页面说出来，且不能把参数节点当成页面。
+#[test]
+fn test_navigation_names_the_target_page() {
+    let db = workspace("nav-statement");
+    let output = surface(&db, &["--relations", "page:app/page_relations.spg"]);
+    let statement = output["summary"]["navigation_statement"]
+        .as_str()
+        .expect("navigation_statement");
+    assert!(statement.contains("目标页面为："), "{statement}");
+    assert!(statement.contains("page:"), "{statement}");
+    assert!(!statement.contains("目标页面为：param"), "{statement}");
+}

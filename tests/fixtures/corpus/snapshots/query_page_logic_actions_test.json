@@ -164,6 +164,7 @@
   "query_target": "page:app/actions_test.spg",
   "schema_version": "1.0",
   "summary": {
+    "absent": [],
     "action_prerequisites_count": 1,
     "data_prerequisites_count": 7,
     "data_source_count": 28,
