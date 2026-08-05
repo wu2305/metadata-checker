@@ -907,6 +907,116 @@ fn compact_key_model_availability_details(
     })
 }
 
+/// 由 page_role 与各项计数生成一句确定的页面结论。
+///
+/// 只按 role 分支套模板，不认得任何具体页面：同样的计数必然得到同一句话。
+fn page_conclusion(
+    page_role: &str,
+    page_name: &str,
+    entrypoints: usize,
+    write_targets: usize,
+    navigation: usize,
+    data_sources: usize,
+) -> String {
+    match page_role {
+        "readonly_dashboard" => format!(
+            "页面 {page_name} 是只读仪表板（page_role=readonly_dashboard）：无用户入口（entrypoint_count=0）、\
+             无写入目标（write_target_count=0），只读取 {data_sources} 个数据源，用户无法通过该页面更改数据。"
+        ),
+        "data_maintenance_page" => format!(
+            "页面 {page_name} 是数据维护页（page_role=data_maintenance_page）：有 {entrypoints} 个用户入口，\
+             写入 {write_targets} 个目标，无页面跳转，用户可以通过该页面更改数据。"
+        ),
+        "navigation_page" => format!(
+            "页面 {page_name} 是导航页（page_role=navigation_page）：有 {entrypoints} 个用户入口、\
+             {navigation} 个跳转，无写入目标（write_target_count=0），用户无法通过该页面更改数据。"
+        ),
+        "mixed_interaction_page" => format!(
+            "页面 {page_name} 既写数据又跳转（page_role=mixed_interaction_page）：有 {entrypoints} 个用户入口，\
+             写入 {write_targets} 个目标，{navigation} 个跳转。"
+        ),
+        _ => format!(
+            "页面 {page_name} 有 {entrypoints} 个用户入口，但没有解析到写入目标或跳转\
+             （page_role=unknown）；这可能是页面确实只做展示，也可能是动作没被解析出来，结论应保守回答。"
+        ),
+    }
+}
+
+/// 把跳转关系归纳成一句话：跳去哪些目标页面，其中哪些带了参数。
+///
+/// 没有跳转时返回 None——这种情况由 `absent` 负责说明，两处都说会自相矛盾。
+fn navigation_statement(navigation: &[serde_json::Value]) -> Option<String> {
+    if navigation.is_empty() {
+        return None;
+    }
+    let mut targets: Vec<String> = Vec::new();
+    let mut param_targets: Vec<String> = Vec::new();
+    for entry in navigation {
+        let Some(to) = entry.get("to").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let name = entry
+            .get("to_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(to)
+            .to_string();
+        let label = format!("{name}（{to}）");
+        let passes_param = entry.get("type").and_then(|v| v.as_str()) == Some("PassesParam");
+        if passes_param && !param_targets.contains(&label) {
+            param_targets.push(label.clone());
+        }
+        if !targets.contains(&label) {
+            targets.push(label);
+        }
+    }
+    if targets.is_empty() {
+        return None;
+    }
+    let mut statement = format!(
+        "该页面共 {} 条跳转关系，目标页面为：{}。",
+        navigation.len(),
+        targets.join("、")
+    );
+    if param_targets.is_empty() {
+        statement.push_str("这些跳转没有解析到参数传递。");
+    } else {
+        statement.push_str(&format!(
+            "其中向目标页面 {} 传递了参数（PassesParam 边），参数取值见 details.navigation 的 raw_expr。",
+            param_targets.join("、")
+        ));
+    }
+    Some(statement)
+}
+
+/// 把判定出来的「没有」写成事实。
+///
+/// 只登记确实为 0 的项：空数组在 JSON 里和「被截断成空」无法区分，模型只能猜。
+fn absent_facts(
+    entrypoints: usize,
+    write_targets: usize,
+    navigation: usize,
+    data_sources: usize,
+) -> Vec<serde_json::Value> {
+    [
+        (
+            entrypoints,
+            "entrypoints",
+            "该页面没有用户可触发入口（无入口）",
+        ),
+        (
+            write_targets,
+            "write_targets",
+            "该页面没有写入目标（无写入）",
+        ),
+        (navigation, "navigation", "该页面没有页面跳转"),
+        (data_sources, "data_sources", "该页面没有读取任何数据源"),
+    ]
+    .into_iter()
+    .filter(|(count, _, _)| *count == 0)
+    .map(|(_, what, statement)| serde_json::json!({ "what": what, "statement": statement }))
+    .collect()
+}
+
 /// 查询页面级逻辑摘要
 ///
 /// 输出 page_inputs、data_sources、write_targets、entrypoints、action_flows、visibility_rules、navigation、risk_diagnostics。
@@ -1956,6 +2066,30 @@ fn build_query_page_logic_output_inner(
         navigation.len()
     );
 
+    // what_is_it 是四个计数的拼接，「入口 0、写入 0」到「这页是只读的、用户改不了数据」
+    // 之间还有一步推理，此前留给模型自己走。这一步是确定的：同样的计数永远得到同样的
+    // 结论，正是应该留在工具里的部分。
+    let conclusion = page_conclusion(
+        page_role,
+        &page_node.name,
+        entrypoints.len(),
+        write_targets.len(),
+        navigation.len(),
+        data_sources.len(),
+    );
+
+    // 跳转的目标页面藏在 details.navigation[*].to 里，compact 预算下这个数组还会被截断，
+    // 于是「跳去哪、带没带参数」这个问句里最核心的事实反而是最容易丢的。
+    let navigation_statement = navigation_statement(&navigation);
+
+    // 空数组和「被截断成空」在 JSON 里长得一样。判定出来的「没有」要作为事实说出来。
+    let absent = absent_facts(
+        entrypoints.len(),
+        write_targets.len(),
+        navigation.len(),
+        data_sources.len(),
+    );
+
     // Build top-N lists for brief mode
     let top_entrypoints: Vec<serde_json::Value> = entrypoints.iter().take(3).cloned().collect();
     let top_data_sources: Vec<serde_json::Value> = data_sources.iter().take(3).cloned().collect();
@@ -2116,6 +2250,9 @@ fn build_query_page_logic_output_inner(
         "page_id": page_id,
         "page_name": page_node.name,
         "what_is_it": what_is_it,
+        "conclusion": conclusion,
+        "absent": absent,
+        "navigation_statement": navigation_statement,
         "page_role": page_role,
         "entrypoint_count": entrypoints.len(),
         "data_source_count": data_sources.len(),
@@ -2141,13 +2278,18 @@ fn build_query_page_logic_output_inner(
     let risk_diagnostics: Vec<serde_json::Value> = diagnostics
         .iter()
         .map(|d| {
-            serde_json::json!({
+            let mut entry = serde_json::json!({
                 "severity": format!("{:?}", d.severity),
                 "code": d.code,
                 "message": d.message,
                 "location": d.location,
                 "suggestion": d.suggestion,
-            })
+            });
+            // 这里是手写的 json，绕过了 Diagnostic 的序列化，得自己补 answer_effect。
+            if let Some((_, effect)) = crate::output::answer_effect::answer_effect(&d.code) {
+                entry["answer_effect"] = serde_json::json!(effect);
+            }
+            entry
         })
         .collect();
 

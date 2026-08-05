@@ -112,15 +112,12 @@ fn run_surface(
             // 这比返回一个 INVALID_TARGET 让它自己编路径要短一轮，也不会编出
             // `comp:app/未知页面.spg|button1` 这种东西。
             BareTargetResolution::Ambiguous { candidates } => {
-                return Ok(serde_json::json!({
-                    "ok": false,
-                    "error": {
-                        "code": "AMBIGUOUS_TARGET",
-                        "message": format!("'{target}' 匹配到多个节点，请用其中一个规范 target 重试"),
-                    },
-                    "candidate_targets": candidates,
-                    "diagnostics": diagnostics,
-                }));
+                return Ok(ambiguous_target_error(
+                    surface,
+                    &target,
+                    &candidates,
+                    diagnostics,
+                ));
             }
             BareTargetResolution::NotFound => {
                 return Ok(serde_json::json!({
@@ -155,15 +152,12 @@ fn run_surface(
                 target = resolved;
             }
             PrefixedTargetResolution::Ambiguous { candidates } => {
-                return Ok(serde_json::json!({
-                    "ok": false,
-                    "error": {
-                        "code": "AMBIGUOUS_TARGET",
-                        "message": format!("'{target}' 匹配到多个节点，请用其中一个规范 target 重试"),
-                    },
-                    "candidate_targets": candidates,
-                    "diagnostics": diagnostics,
-                }));
+                return Ok(ambiguous_target_error(
+                    surface,
+                    &target,
+                    &candidates,
+                    diagnostics,
+                ));
             }
             // 归一失败不等于 target 无效：`field:` / `model:` 这类 target 未必是图节点，
             // 照样能被下游命令正确回答。这里只把近似候选留到真的失败时再用。
@@ -206,9 +200,12 @@ fn run_surface(
                     "ok": false,
                     "error": {
                         "code": "TARGET_NOT_FOUND",
-                        "message": format!("找不到 '{target}'：{error}"),
+                        "message": format!(
+                            "找不到 '{target}'：{error}。改用 next_queries 里的命令重试，不要重复这一条。"
+                        ),
                     },
                     "candidate_targets": near_miss,
+                    "next_queries": retry_commands(surface, &near_miss),
                     "diagnostics": diagnostics,
                 }));
             }
@@ -239,7 +236,75 @@ fn run_surface(
             );
         }
     }
+    attach_confidence(&mut result);
     Ok(result)
+}
+
+/// 把「这次输出的诊断对结论意味着什么」写进 summary。
+///
+/// 诊断散在 `diagnostics` 和 `details.risk_diagnostics` 两处，compact 预算下后者还会被
+/// 截断；模型要自己扫两个数组、认出哪些 code 会削弱结论，实际上没人做得到这一步。
+fn attach_confidence(result: &mut serde_json::Value) {
+    let mut codes: Vec<String> = Vec::new();
+    for path in [
+        &["diagnostics"][..],
+        &["details", "risk_diagnostics"][..],
+        &["details", "risk_diagnostics", "items"][..],
+    ] {
+        let mut cursor = Some(&*result);
+        for key in path {
+            cursor = cursor.and_then(|value| value.get(key));
+        }
+        let Some(entries) = cursor.and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        codes.extend(
+            entries
+                .iter()
+                .filter_map(|entry| entry.get("code").and_then(serde_json::Value::as_str))
+                .map(ToString::to_string),
+        );
+    }
+    let Some(summary) = result.get_mut("summary").and_then(|s| s.as_object_mut()) else {
+        return;
+    };
+    summary.insert(
+        "confidence".to_string(),
+        metadata_checker::output::answer_effect::confidence_value(codes.iter().map(String::as_str)),
+    );
+}
+
+/// 把候选渲染成可以直接照抄执行的命令。
+///
+/// 只把候选 id 列成数组是不够的：M59 评测里模型拿到两个候选之后，重发了一模一样的
+/// 那条歧义命令，把仅有的两次命令机会用光。候选要以「下一条命令」的形态出现。
+fn retry_commands(surface: metadata_checker::route::Surface, candidates: &[String]) -> Vec<String> {
+    candidates
+        .iter()
+        .take(5)
+        .map(|candidate| format!("{} '{candidate}'", surface.as_str()))
+        .collect()
+}
+
+/// 歧义 target 的统一错误形态：候选 + 可直接执行的下一条命令 + 别重发原命令。
+fn ambiguous_target_error(
+    surface: metadata_checker::route::Surface,
+    target: &str,
+    candidates: &[String],
+    diagnostics: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "ok": false,
+        "error": {
+            "code": "AMBIGUOUS_TARGET",
+            "message": format!(
+                "'{target}' 匹配到多个节点。从 next_queries 里挑一条直接执行，不要重复这一条命令。"
+            ),
+        },
+        "candidate_targets": candidates,
+        "next_queries": retry_commands(surface, candidates),
+        "diagnostics": diagnostics,
+    })
 }
 
 /// 输出的 diagnostics 里是否有指定 code。

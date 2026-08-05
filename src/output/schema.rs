@@ -156,13 +156,36 @@ pub enum Confidence {
 }
 
 /// 诊断结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// 序列化时会按 `code` 补一条 `answer_effect`：`message` 与 `suggestion` 是写给工具
+/// 维护者的（"Check if this action type is supported by metadata-checker"），消费输出
+/// 的模型从中读不出这条诊断对结论意味着什么。影响只由 code 决定，所以由序列化统一
+/// 补齐，而不是让上百处构造点各写一遍。
+#[derive(Debug, Clone, Deserialize)]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
     pub code: String,
     pub message: String,
     pub location: Location,
     pub suggestion: Option<String>,
+}
+
+impl Serialize for Diagnostic {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let effect = crate::output::answer_effect::answer_effect(&self.code);
+        let mut state =
+            serializer.serialize_struct("Diagnostic", 5 + usize::from(effect.is_some()))?;
+        state.serialize_field("severity", &self.severity)?;
+        state.serialize_field("code", &self.code)?;
+        state.serialize_field("message", &self.message)?;
+        state.serialize_field("location", &self.location)?;
+        state.serialize_field("suggestion", &self.suggestion)?;
+        if let Some((_, effect)) = effect {
+            state.serialize_field("answer_effect", effect)?;
+        }
+        state.end()
+    }
 }
 
 /// 诊断严重级别
