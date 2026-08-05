@@ -2083,6 +2083,7 @@ fn test_stdio_server_all_registry_commands_accepted() {
             "query_page_logic" | "query-page-logic" => {
                 serde_json::json!({"target": "page:app/actions_test.spg"})
             }
+            "find" => serde_json::json!({"target": "actions"}),
             "find_page" | "find-page" => serde_json::json!({"target": "actions"}),
             "find_model" | "find-model" => serde_json::json!({"target": "model1"}),
             "find_component" | "find-component" => serde_json::json!({"target": "button"}),
