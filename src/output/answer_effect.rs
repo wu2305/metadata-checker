@@ -19,6 +19,8 @@ pub enum AnswerImpact {
     Determinate,
     /// 寻址问题：影响的是这条命令能不能答，而不是答案的置信度。
     Addressing,
+    /// 路由过程的说明：命令是怎么被送到节点上的，与答案内容无关。
+    Routing,
 }
 
 impl AnswerImpact {
@@ -28,6 +30,7 @@ impl AnswerImpact {
             Self::Partial => "partial",
             Self::Determinate => "determinate",
             Self::Addressing => "addressing",
+            Self::Routing => "routing",
         }
     }
 }
@@ -35,7 +38,7 @@ impl AnswerImpact {
 /// 诊断 code 对结论的影响。未登记的 code 返回 None——宁可不说，也不要瞎说一句
 /// 「这可能影响结论」让模型对所有答案都降级。
 pub fn answer_effect(code: &str) -> Option<(AnswerImpact, &'static str)> {
-    use AnswerImpact::{Addressing, Determinate, Partial, Uncertain};
+    use AnswerImpact::{Addressing, Determinate, Partial, Routing, Uncertain};
     let entry = match code {
         // ---- 语义不确定：结论要保守回答 ----
         "UNKNOWN_ACTION_TYPE" => (
@@ -141,6 +144,15 @@ pub fn answer_effect(code: &str) -> Option<(AnswerImpact, &'static str)> {
         "AMBIGUOUS_TARGET" => (
             Addressing,
             "target 匹配到多个节点；从 candidate_targets 里挑一个完整写法重试，不要重复同一条命令。",
+        ),
+        // ---- 路由说明：与答案内容无关 ----
+        "RESOLVED_TARGET" => (
+            Routing,
+            "你写的 target 已按图中真实节点补全，命令查的就是你要的节点；这不影响结论的确定性。",
+        ),
+        "SUPPLEMENT_UNAVAILABLE" => (
+            Partial,
+            "有一个补充事实块没取到，本次结论只覆盖已返回的部分。",
         ),
         _ => return None,
     };

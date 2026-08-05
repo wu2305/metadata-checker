@@ -2833,4 +2833,8 @@ fn test_m58_determinate_absence_does_not_demand_hedging() {
     assert!(m58_ai_eval::diagnostic_demands_hedging("OUTPUT_TRUNCATED"));
     // 没登记过的 code 一律按保守处理。
     assert!(m58_ai_eval::diagnostic_demands_hedging("SOME_FUTURE_CODE"));
+    // 「target 已补全」讲的是命令怎么送到节点上的，与答案有多确定无关。
+    assert!(!m58_ai_eval::diagnostic_demands_hedging(
+        "RESOLVED_TARGET: 补全文件路径"
+    ));
 }

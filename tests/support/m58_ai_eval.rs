@@ -1943,6 +1943,10 @@ fn normalize_for_match(value: &str) -> String {
 /// 判断回答是否显式表达不确定或证据边界。
 /// 这条诊断是否要求答案降级表达。
 ///
+/// RESOLVED_TARGET 是「你写的 target 我替你补全了」——它讲的是命令怎么送到节点上的，
+/// 与答案有多确定无关。readonly_page_check 里模型写 `page:dataflow_embedded`、工具补成
+/// 全路径，结果这条路由说明让整个答案被要求降级，9/9 全灭。
+///
 /// 「没有写入目标」「没有用户入口」是判定结果，不是证据缺失：readonly_page_check 的
 /// uncertainty_policy 自己就写着「页面确实无任何 action 时可明确回答只读」，而它的
 /// must_include 要的正是「只读」。对这类诊断也要求模型说「可能/不确定」，等于一边要
@@ -1951,7 +1955,10 @@ fn normalize_for_match(value: &str) -> String {
 pub(crate) fn diagnostic_demands_hedging(diagnostic: &str) -> bool {
     use metadata_checker::output::answer_effect::{AnswerImpact, answer_effect};
     let code = diagnostic.split(':').next().unwrap_or_default().trim();
-    !matches!(answer_effect(code), Some((AnswerImpact::Determinate, _)))
+    !matches!(
+        answer_effect(code),
+        Some((AnswerImpact::Determinate | AnswerImpact::Routing, _))
+    )
 }
 
 fn contains_conservative_marker(answer: &str) -> bool {
