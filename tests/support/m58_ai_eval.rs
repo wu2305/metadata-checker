@@ -2222,7 +2222,7 @@ pub(crate) fn run_fixture_llm_cases(
 }
 
 /// 构造第一条 user bootstrap，不注入源码、历史记录或知识库内容。
-fn build_bootstrap_message(skill: &str, case: &EvalCase) -> String {
+pub(crate) fn build_bootstrap_message(skill: &str, case: &EvalCase) -> String {
     format!(
         "M58 empty-context evaluation.\\n\
 Use only the following SKILL.md, fixed CLI outputs, and the current case question.\\n\
@@ -2240,14 +2240,14 @@ Rules:\\n\
    - `--find`：不知道目标叫什么全名/在哪个文件时用。\\n\
    - `--explain`：问某一个节点是什么、做什么、为什么这样表现（显示、可用、值来源、写入、动作门禁都算）。\\n\
    - `--relations`：问某个页面或模型和别人的关系（页面整体逻辑、谁读写这张表、DataFlow 链路）。\\n\
-3. 动词只决定问什么，target 前缀决定去哪。同一个按钮写成 comp: 还是 action: 返回同一组事实块，不必纠结；--explain 一次就同时给出语义和条件成因，不需要分两条命令。\\n\
+3. 动词只决定问什么，target 前缀决定去哪。同一个组件写成 comp: 还是 action: 返回同一组事实块，不必纠结；--explain 一次就同时给出语义和条件成因，不需要分两条命令。\\n\
 4. target 只写你确实知道的部分：文件路径可以只写文件名、可以省掉扩展名、也可以整个省掉（page:首页、comp:首页.spg|button1、comp:button1 都能被定位）。工具会补全并在 diagnostics 里留 RESOLVED_TARGET；有歧义会返回 candidate_targets，从里面挑一个重发。绝对不要自己拼造文件路径——写不出来的那一段就别写，也不要把说明文字里的占位符当成真实路径。\\n\
 5. budget 字段仅在命令需要时设置，合法值为 compact / normal / full（compact 作为默认第一轮；仅在 diagnostics 或 OUTPUT_TRUNCATED 时升级）。budget 只能放在 JSON 顶层字段，不能放进 args。\\n\
 6. 命令 JSON 形状：{{\"kind\":\"command\",\"command_kind\":\"--explain\",\"target\":\"<target>\",\"args\":[],\"budget\":\"compact\"}}。\\n\
 7. This is only a shape example, not the current case answer/target/plan. Choose actual command_kind/target/args/budget from SKILL.md and the question.\\n\
 8. After each command, use the next user message as the only evidence. Read summary first, then read the declared primary fact block and only read more if needed.\\n\
 9. 主证据块为空或 result=null 时，不要直接作答；如果仍有查询机会，换一个更合适的 target 重试；否则明确说明证据不足。\\n\
-10. final answer 必须包含至少一个 literal section name（summary/details/evidence/diagnostics）；页面整体回答至少说明入口/写入计数和一个 action；按钮/动作回答至少说明组件、action 和写入目标；字段回答至少说明字段和写入者或来源。证据已足够时立即返回 final，不要再补命令。\\n\
+10. final answer 必须包含至少一个 literal section name（summary/details/evidence/diagnostics）；页面整体回答至少说明入口/写入计数和一个 action；组件或动作类问题的回答至少说明组件、action 和写入目标；字段回答至少说明字段和写入者或来源。证据已足够时立即返回 final，不要再补命令。\\n\
 11. As soon as you have enough evidence, return {{\"kind\":\"final\",\"answer\":\"...\"}}.\\n\
 12. If the evidence contains diagnostics, truncation, or uncertainty, mention that explicitly in the final answer and do not guess.\\n\
 \\n\
@@ -2255,9 +2255,10 @@ SKILL.md:\\n\
 {skill}\\n\
 \\n\
 M58 runner answer-shape override (apply after SKILL.md; 只约束最终回答的写法，不改变上面的选命令规则):\\n\\
-- 页面整体最终回答必须明确写出用户入口、写入目标和 action，并引用 literal section name。\\n\\
-page final 必须 literal 包含 用户入口、按钮、写入目标、action。\\n\\
-页面 final 使用固定标签：用户入口：...；按钮：...；写入目标：...；action：...；不要用同义词替换这些标签。\\n\\
+- 页面整体最终回答必须写出用户入口与写入目标的实际情况（有就说有多少、是什么；没有就说没有），并引用 literal section name。\\n\\
+- summary.conclusion 存在时，final answer 必须逐字照抄它给出的结论表述，不要换成同义词。\\n\\
+- summary.absent 非空时，把其中每条 statement 的说法逐条写进 final answer。\\n\\
+- summary.confidence.level 不是 full 时，必须按 summary.confidence.statement 与各 reason 的 effect 保守表达。\\n\\
 field final 必须 literal 包含 页面 action、写入、字段。\\n\\
 \\n\\
 Case Question: {}",

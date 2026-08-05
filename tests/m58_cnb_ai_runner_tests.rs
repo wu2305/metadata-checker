@@ -1713,7 +1713,7 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("`--explain`"));
     assert!(bootstrap.contains("`--relations`"));
     assert!(bootstrap.contains("动词只决定问什么，target 前缀决定去哪"));
-    assert!(bootstrap.contains("同一个按钮写成 comp: 还是 action: 返回同一组事实块"));
+    assert!(bootstrap.contains("同一个组件写成 comp: 还是 action: 返回同一组事实块"));
 
     // M58 里 SKILL.md 的快速分流表说按钮问题先走 --explain-condition，bootstrap 第 3 条
     // 却说按钮问题走 --explain——同一份 prompt 里两条互相矛盾的路由指令，模型只能靠猜，
@@ -1759,19 +1759,17 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     assert!(bootstrap.contains("enough evidence"));
     assert!(bootstrap.contains("final answer 必须包含至少一个 literal section name"));
     assert!(bootstrap.contains("页面整体回答至少说明入口/写入计数和一个 action"));
-    assert!(bootstrap.contains("按钮/动作回答至少说明组件、action 和写入目标"));
+    assert!(bootstrap.contains("组件或动作类问题的回答至少说明组件、action 和写入目标"));
     assert!(bootstrap.contains("字段回答至少说明字段和写入者或来源"));
 
     // 回答形状的约束保留，但必须和选命令的规则分开：混在一起正是上面那次矛盾的来源。
     assert!(bootstrap.contains("M58 runner answer-shape override"));
     assert!(bootstrap.contains("只约束最终回答的写法，不改变上面的选命令规则"));
-    assert!(bootstrap.contains("页面整体最终回答必须明确写出用户入口、写入目标和 action"));
-    assert!(bootstrap.contains("page final 必须 literal 包含 用户入口、按钮、写入目标、action"));
-    assert!(
-        bootstrap.contains(
-            "页面 final 使用固定标签：用户入口：...；按钮：...；写入目标：...；action：..."
-        )
-    );
+    assert!(bootstrap.contains("页面整体最终回答必须写出用户入口与写入目标的实际情况"));
+    // 回答形状跟着工具输出走，不替某一个页面的样子立模板。
+    assert!(bootstrap.contains("summary.conclusion 存在时，final answer 必须逐字照抄"));
+    assert!(bootstrap.contains("summary.absent 非空时"));
+    assert!(bootstrap.contains("summary.confidence.level 不是 full 时"));
     assert!(bootstrap.contains("field final 必须 literal 包含 页面 action、写入、字段"));
     assert!(bootstrap.contains("diagnostics"));
     assert!(bootstrap.contains("truncation"));
@@ -2782,4 +2780,39 @@ fn test_m58_runner_surfaces_adapter_error_in_judge_notes() {
     );
 
     std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 提示词不能强制模型说出某个 case 明令禁止的词。
+///
+/// `readonly_page_check` 禁止「按钮」，而 runner 的回答形状 override 曾经硬性要求每个
+/// 页面回答都 literal 包含「按钮」并使用固定标签——那条 case 因此 9/9 全灭，无论工具
+/// 输出多准确都不可能通过。这和文件里已经记过两次的 budget / intent 是同一类问题：
+/// 接口不能一边要求、一边惩罚。回答形状只能跟着工具输出走，不能替某一个页面的样子
+/// 立规矩。
+#[test]
+fn test_m58_bootstrap_never_mandates_a_forbidden_word() {
+    let cases = m58_ai_eval::load_eval_cases(std::path::Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .expect("load cases");
+    for case in &cases {
+        // 只看 runner 自己的提示词，不含 SKILL.md：SKILL.md 是工具文档，本来就会出现
+        // 「按钮」这类词，它没有强制模型把这个词写进答案。
+        let prompt = m58_ai_eval::build_bootstrap_message("", case);
+        let forbidden = case
+            .value
+            .get("answer_assertions")
+            .and_then(|a| a.get("must_not_include"))
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for word in forbidden {
+            let word = word.as_str().unwrap_or_default();
+            assert!(
+                !prompt.contains(word),
+                "case {} 禁止「{word}」，提示词里却出现了这个词——模型会照抄",
+                case.case_id
+            );
+        }
+    }
 }

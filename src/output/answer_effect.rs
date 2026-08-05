@@ -40,7 +40,7 @@ pub fn answer_effect(code: &str) -> Option<(AnswerImpact, &'static str)> {
         // ---- 语义不确定：结论要保守回答 ----
         "UNKNOWN_ACTION_TYPE" => (
             Uncertain,
-            "存在未识别的 action 类型，这些 action 的语义分类不确定；涉及它们的结论应保守回答，不要给出确定性判断。",
+            "存在未识别的 action 类型，这些 action 的语义不确定（action_category=unknown）；涉及它们的结论应保守回答，不要给出确定性判断。",
         ),
         "UNKNOWN_QUESTION_KIND" => (
             Uncertain,
