@@ -945,44 +945,46 @@ fn page_conclusion(
 /// 把跳转关系归纳成一句话：跳去哪些目标页面，其中哪些带了参数。
 ///
 /// 没有跳转时返回 None——这种情况由 `absent` 负责说明，两处都说会自相矛盾。
+///
+/// navigation 数组里混着三类边：真正跳去页面的（`to` 是 page 节点）、传参的
+/// （PassesParam 的 `to` 是**参数节点** `param:目标详情/param1`，不是页面）、以及
+/// ActionControlsComponent 这种根本不是跳转的。把参数节点当成目标页面念出来就是在
+/// 编事实，所以按 `to` 的类型分开处理。
 fn navigation_statement(navigation: &[serde_json::Value]) -> Option<String> {
     if navigation.is_empty() {
         return None;
     }
-    let mut targets: Vec<String> = Vec::new();
-    let mut param_targets: Vec<String> = Vec::new();
+    let mut page_targets: Vec<String> = Vec::new();
+    let mut params: Vec<String> = Vec::new();
     for entry in navigation {
         let Some(to) = entry.get("to").and_then(|v| v.as_str()) else {
             continue;
         };
-        let name = entry
-            .get("to_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or(to)
-            .to_string();
+        let name = entry.get("to_name").and_then(|v| v.as_str()).unwrap_or(to);
         let label = format!("{name}（{to}）");
-        let passes_param = entry.get("type").and_then(|v| v.as_str()) == Some("PassesParam");
-        if passes_param && !param_targets.contains(&label) {
-            param_targets.push(label.clone());
-        }
-        if !targets.contains(&label) {
-            targets.push(label);
+        if entry.get("type").and_then(|v| v.as_str()) == Some("PassesParam") {
+            if !params.contains(&label) {
+                params.push(label);
+            }
+        } else if to.starts_with("page:") && !page_targets.contains(&label) {
+            page_targets.push(label);
         }
     }
-    if targets.is_empty() {
+    if page_targets.is_empty() && params.is_empty() {
         return None;
     }
-    let mut statement = format!(
-        "该页面共 {} 条跳转关系，目标页面为：{}。",
-        navigation.len(),
-        targets.join("、")
-    );
-    if param_targets.is_empty() {
+    let mut statement = if page_targets.is_empty() {
+        // 只解析到传参、没解析到跳去哪一页：这是解析缺口，不能反过来说成「没有跳转」。
+        "该页面的跳转目标页面未解析出来。".to_string()
+    } else {
+        format!("该页面跳转的目标页面为：{}。", page_targets.join("、"))
+    };
+    if params.is_empty() {
         statement.push_str("这些跳转没有解析到参数传递。");
     } else {
         statement.push_str(&format!(
-            "其中向目标页面 {} 传递了参数（PassesParam 边），参数取值见 details.navigation 的 raw_expr。",
-            param_targets.join("、")
+            "跳转时通过 PassesParam 边向目标页面传递了参数：{}，参数取值见 details.navigation 的 raw_expr。",
+            params.join("、")
         ));
     }
     Some(statement)
@@ -2580,4 +2582,76 @@ pub fn query_page_logic(
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod answer_statement_tests {
+    use super::*;
+
+    #[test]
+    fn a_readonly_page_says_so_in_words() {
+        let conclusion = page_conclusion("readonly_dashboard", "报表页", 0, 0, 0, 3);
+        assert!(conclusion.contains("只读"));
+        assert!(conclusion.contains("无写入"));
+        assert!(conclusion.contains("无用户入口"));
+        // 只读页的结论里出现「按钮」会把答案带向「有按钮但不可点」这种错误方向。
+        assert!(!conclusion.contains("按钮"));
+    }
+
+    #[test]
+    fn a_writable_page_is_not_described_as_readonly() {
+        let conclusion = page_conclusion("data_maintenance_page", "工单维护", 4, 2, 0, 3);
+        assert!(!conclusion.contains("只读"));
+        assert!(conclusion.contains("写入 2 个目标"));
+        assert!(conclusion.contains("可以"));
+    }
+
+    #[test]
+    fn an_unclassifiable_page_asks_for_a_conservative_answer() {
+        // role=unknown 意味着「没解析到动作」和「确实只做展示」区分不开，不能当成只读断言。
+        let conclusion = page_conclusion("unknown", "怪页", 2, 0, 0, 0);
+        assert!(!conclusion.contains("只读"));
+        assert!(conclusion.contains("保守回答"));
+    }
+
+    #[test]
+    fn only_real_zeros_are_reported_as_absent() {
+        let absent = absent_facts(0, 0, 2, 5);
+        let kinds: Vec<&str> = absent
+            .iter()
+            .map(|item| item["what"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, vec!["entrypoints", "write_targets"]);
+        assert!(absent_facts(1, 1, 1, 1).is_empty());
+    }
+
+    #[test]
+    fn param_nodes_are_never_called_target_pages() {
+        // PassesParam 的 to 是参数节点，不是页面；把它念成「目标页面 param1」就是编事实。
+        let navigation = vec![
+            serde_json::json!({
+                "to": "page:app/详情.spg", "to_name": "详情", "type": "OpensPage",
+            }),
+            serde_json::json!({
+                "to": "param:详情/orderId", "to_name": "orderId", "type": "PassesParam",
+            }),
+        ];
+        let statement = navigation_statement(&navigation).unwrap();
+        assert!(statement.contains("目标页面为：详情（page:app/详情.spg）"));
+        assert!(statement.contains("传递了参数：orderId（param:详情/orderId）"));
+        assert!(!statement.contains("目标页面为：orderId"));
+    }
+
+    #[test]
+    fn a_control_edge_is_not_a_navigation_target() {
+        let navigation = vec![serde_json::json!({
+            "to": "comp:app/a.spg|b", "to_name": "b", "type": "ActionControlsComponent",
+        })];
+        assert!(navigation_statement(&navigation).is_none());
+    }
+
+    #[test]
+    fn no_navigation_says_nothing_here_and_leaves_it_to_absent() {
+        assert!(navigation_statement(&[]).is_none());
+    }
 }
