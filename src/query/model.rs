@@ -268,10 +268,36 @@ pub fn build_query_model_output(
             .with_node_id(model_id),
         );
     }
+    // 模型级关系答不了「这个字段是从哪一路传过来的」——那是 `--explain field:X.y`。
+    // 此前的 next_queries 里没有任何指向字段的入口，链式血缘的问题（df_a -> physical_x
+    // -> df_b）走到第二步就只能靠模型自己猜出 `field:` 这个前缀存在。已经出现在边上的
+    // 字段名是确定的事实，直接拼成可执行命令交回去。
+    let model_name = model_id.strip_prefix("model:").unwrap_or(model_id);
+    let mut field_names: Vec<String> = Vec::new();
+    for entry in readers.iter().chain(writers.iter()) {
+        let Some(path) = entry.get("field_path").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let leaf = path.rsplit('.').next().unwrap_or(path);
+        if !leaf.is_empty() && !field_names.contains(&leaf.to_string()) {
+            field_names.push(leaf.to_string());
+        }
+    }
     output.next_queries = vec![
-        format_next_query("--explain {} for full semantic summary", model_id),
-        format_next_query("--query-dataflow {} for internal subgraph", model_id),
+        format_next_query("--explain {}", model_id),
+        format_next_query("--query-dataflow {}", model_id),
     ];
+    for field in field_names.iter().take(3) {
+        output.next_queries.push(format_next_query(
+            "--explain {}",
+            &format!("field:{model_name}.{field}"),
+        ));
+    }
+    if field_names.is_empty() {
+        output.next_queries.push(format!(
+            "--explain 'field:{model_name}.<字段名>'（单个字段的上游来源与下游去向，跨 DataFlow 的链式传递要逐字段查）"
+        ));
+    }
 
     if is_compact {
         let truncated_arrays = [

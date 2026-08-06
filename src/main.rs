@@ -85,6 +85,19 @@ fn run_surface(
     let mut diagnostics: Vec<serde_json::Value> = Vec::new();
     let mut target = raw_target.trim().to_string();
 
+    // 只写了前缀、没写名字（`--relations page:`）是一次「这个项目里有哪些页面」的探查，
+    // 不是一个写错的 target。问题本身就是模糊的（用户不知道页面叫什么，元数据也塞不进
+    // 上下文），模型第一步做发现式探查是对的做法；此前工具用 TARGET_NOT_FOUND 回应它，
+    // 白白烧掉一次命令机会，模型接着就开始编路径。列出来才是这条命令的正确答案。
+    if surface != route::Surface::Find {
+        if let Some(prefix) = route::TARGET_PREFIXES
+            .iter()
+            .find(|prefix| target == **prefix)
+        {
+            return Ok(enumerate_prefix_targets(runtime, surface, prefix));
+        }
+    }
+
     // `--find` 本身就是定位动词，不需要先定位。
     if surface != route::Surface::Find && !route::has_type_prefix(&target) {
         let found = run_cli_runtime_tool(
@@ -112,12 +125,14 @@ fn run_surface(
             // 这比返回一个 INVALID_TARGET 让它自己编路径要短一轮，也不会编出
             // `comp:app/未知页面.spg|button1` 这种东西。
             BareTargetResolution::Ambiguous { candidates } => {
-                return Ok(ambiguous_target_error(
+                return answer_ambiguous_target(
+                    runtime,
+                    args,
                     surface,
                     &target,
                     &candidates,
                     diagnostics,
-                ));
+                );
             }
             BareTargetResolution::NotFound => {
                 return Ok(serde_json::json!({
@@ -152,12 +167,14 @@ fn run_surface(
                 target = resolved;
             }
             PrefixedTargetResolution::Ambiguous { candidates } => {
-                return Ok(ambiguous_target_error(
+                return answer_ambiguous_target(
+                    runtime,
+                    args,
                     surface,
                     &target,
                     &candidates,
                     diagnostics,
-                ));
+                );
             }
             // 归一失败不等于 target 无效：`field:` / `model:` 这类 target 未必是图节点，
             // 照样能被下游命令正确回答。这里只把近似候选留到真的失败时再用。
@@ -165,6 +182,33 @@ fn run_surface(
         }
     }
 
+    execute_resolved_target(
+        runtime,
+        args,
+        surface,
+        &target,
+        &near_miss,
+        diagnostics,
+        &args.budget,
+    )
+}
+
+/// 在一个已经归一好的 target 上执行路由计划并合并输出。
+///
+/// 从 [`run_surface`] 里拆出来，是为了让「一个 target 匹配到多个节点」时能对每个候选
+/// 各跑一遍——见 [`answer_ambiguous_target`]。
+fn execute_resolved_target(
+    runtime: &mut metadata_checker::runtime::GraphRuntime,
+    args: &cli::Cli,
+    surface: metadata_checker::route::Surface,
+    target: &str,
+    near_miss: &[String],
+    mut diagnostics: Vec<serde_json::Value>,
+    budget: &str,
+) -> Result<serde_json::Value> {
+    use metadata_checker::route;
+
+    let target = target.to_string();
     let plan = route::route(surface, &target, args.depth)?;
     let mut merged: Option<serde_json::Value> = None;
 
@@ -174,7 +218,7 @@ fn run_surface(
             cli::CliToolInput {
                 command: call.command,
                 target: Some(call.target.clone()),
-                budget: args.budget.clone(),
+                budget: budget.to_string(),
                 human: args.is_human(),
                 // 表面层不再要求模型选 intent，但写了就必须透传：`--intent writer` 不只是
                 // 收窄，auto 遍历根本不产出 writer_facts。丢掉它等于悄悄换掉了用户要的答案。
@@ -205,7 +249,7 @@ fn run_surface(
                         ),
                     },
                     "candidate_targets": near_miss,
-                    "next_queries": retry_commands(surface, &near_miss),
+                    "next_queries": retry_commands(surface, near_miss),
                     "diagnostics": diagnostics,
                 }));
             }
@@ -236,9 +280,186 @@ fn run_surface(
             );
         }
     }
+    augment_field_lineage_queries(&mut result);
+    enforce_budget_size(&mut result, budget);
+    dedupe_diagnostics(&mut result);
     attach_confidence(&mut result);
     Ok(result)
 }
+
+/// 把 DataFlow 子图里已解析出的字段名拼成可执行的字段血缘命令。
+///
+/// `--relations model:df_a` 回答的是模型级关系，而「这个字段是从哪一路传过来的」只有
+/// `--explain field:X.y` 能答。字段名就在合并进来的 `details.dataflow_subgraph.field_traces`
+/// 里，但那是补充块——生成 next_queries 的 model.rs 看不到它，只能给一个 `<字段名>` 占位符。
+/// 合并发生在这一层，就在这一层把占位符换成真实字段。
+fn augment_field_lineage_queries(result: &mut serde_json::Value) {
+    let Some(target) = result
+        .get("query_target")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
+    else {
+        return;
+    };
+    let Some(model_name) = target.strip_prefix("model:").map(ToString::to_string) else {
+        return;
+    };
+
+    let mut fields: Vec<String> = Vec::new();
+    if let Some(traces) = result
+        .get("details")
+        .and_then(|details| details.get("dataflow_subgraph"))
+        .and_then(|subgraph| subgraph.get("field_traces"))
+        .and_then(serde_json::Value::as_array)
+    {
+        for trace in traces {
+            let Some(field) = trace.get("field").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            if !field.is_empty() && !fields.iter().any(|known| known == field) {
+                fields.push(field.to_string());
+            }
+        }
+    }
+    if fields.is_empty() {
+        return;
+    }
+
+    let Some(queries) = result
+        .get_mut("next_queries")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    // 占位符版本已经没有用了：手上有真实字段名，就别再让模型去猜一个。
+    queries.retain(|query| {
+        !query
+            .as_str()
+            .is_some_and(|text| text.contains("field:") && text.contains("<字段名>"))
+    });
+    for field in fields.iter().take(3) {
+        let command = metadata_checker::output::schema::format_next_query(
+            "--explain {}",
+            &format!("field:{model_name}.{field}"),
+        );
+        if !queries.iter().any(|q| q.as_str() == Some(command.as_str())) {
+            queries.push(serde_json::json!(command));
+        }
+    }
+}
+
+/// 打印三动词表面的结果。
+///
+/// 给模型读的那份不缩进：缩进和换行占了输出的三到四成字节，一个事实都不携带，
+/// 而模型正是按字节被淹的。人要读的那份（`--human` / `--interactive`）照旧缩进。
+fn print_surface_result(args: &cli::Cli, result: &serde_json::Value) -> Result<()> {
+    if args.is_human() {
+        println!("{}", serde_json::to_string_pretty(result)?);
+    } else {
+        println!("{}", serde_json::to_string(result)?);
+    }
+    Ok(())
+}
+
+/// 各预算档下整条输出的字节上限。full 不设限。
+fn budget_byte_cap(budget: &str) -> Option<usize> {
+    match budget {
+        "compact" => Some(8_000),
+        "normal" => Some(40_000),
+        _ => None,
+    }
+}
+
+fn json_byte_len(value: &serde_json::Value) -> usize {
+    serde_json::to_string(value).map(|text| text.len()).unwrap_or(0)
+}
+
+/// 让 `--budget compact` 真的是 compact——但一个事实都不能少。
+///
+/// 各命令自己按「条目数」截断，表面层还会把补充块整个折进 `details`：
+/// `--explain comp:...|input1 --budget compact` 实测 23948 字节，光 condition_facts 就有
+/// 10114。评测里这条用例 6 次有 4 次挂在「模型响应不是合法 JSON」——模型不是答错，是被淹了。
+///
+/// 第一版按大小砍 `details` 里最大的那一块，测试立刻抓到了它在干什么：
+/// `blocking_conditions` 被整块换成省略说明，`action_flows` 里唯一一条
+/// `category=unknown` 的记录被砍掉——正是那两条用例要问的东西。按大小挑要删什么，
+/// 删掉的必然是信息量最大的条目，因为它们最长。
+///
+/// 第二版改成「递归删掉值为空的键」，快照测试又抓到了另一个问题：`details.reads` 是
+/// `[]` 时整个键消失，消费方看到的不再是「读取 0 个」而是「没有这个字段」。M58 存在的
+/// 理由就是不让模型在这种地方猜，用一种歧义换另一种不划算，而且它只省下 5% 字节。
+///
+/// 最后留下的只有一件事：按名字截断确定的外围块（[`PERIPHERAL_DETAIL_BLOCKS`]），
+/// 并如实记一条 OUTPUT_TRUNCATED。真正的字节大头另有其人——给模型的那份 JSON 不再缩进
+/// （见 [`print_surface_result`]），那是纯粹的字节，不含任何事实。
+///
+/// 收到底还超预算就到此为止：宁可输出偏长，也不拿答案换字节。
+fn enforce_budget_size(result: &mut serde_json::Value, budget: &str) {
+    let Some(cap) = budget_byte_cap(budget) else {
+        return;
+    };
+    let before = json_byte_len(result);
+    if before <= cap {
+        return;
+    }
+    // 外围块逐档收紧，直到进预算或收无可收。收到 1 条就停：留一条样例比留 0 条更能
+    // 让模型知道这里有东西、以及它长什么样。
+    let mut totals: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    let floor = if budget == "compact" { 1 } else { 2 };
+    for keep in [8usize, 5, 3, 2, 1] {
+        if json_byte_len(result) <= cap || keep < floor {
+            break;
+        }
+        let Some(map) = result
+            .get_mut("details")
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            break;
+        };
+        for key in PERIPHERAL_DETAIL_BLOCKS {
+            let Some(items) = map.get_mut(*key).and_then(serde_json::Value::as_array_mut) else {
+                continue;
+            };
+            if items.len() > keep {
+                totals.entry(key).or_insert(items.len());
+                items.truncate(keep);
+            }
+        }
+    }
+    let truncated: Vec<String> = totals
+        .iter()
+        .map(|(key, total)| {
+            let kept = result
+                .get("details")
+                .and_then(|details| details.get(*key))
+                .and_then(serde_json::Value::as_array)
+                .map_or(0, Vec::len);
+            format!("{key}（{total} -> {kept}）")
+        })
+        .collect();
+
+    if !truncated.is_empty() {
+        let note = surface_diagnostic(
+            "OUTPUT_TRUNCATED",
+            format!(
+                "--budget {budget} 放不下全部外围上下文，已截断：{}。这些是围绕目标的周边节点，不是问题本身的事实；条数见 summary 里对应的 *_count，需要全集请提高 --budget。",
+                truncated.join("、")
+            ),
+        );
+        append_diagnostics(result, &[note]);
+    }
+}
+
+/// 预算不够时可以按条数截断的 details 块。
+///
+/// 只列「围绕目标的周边信息」：它们的完整条数在 summary 的 `*_count` 里另有记录，
+/// 截断不会让任何一句结论变得无法作答。`--relations page:page_relations` 实测 103874
+/// 字节的 details 里，光 related_context 就占 75166——问「跳转传了哪些参数」时，
+/// 这 31 条周边节点一条都用不上，却挤掉了模型读到 navigation 的机会。
+///
+/// 反过来，condition_facts / action_flows / navigation / blocking_conditions 这些
+/// 永远不进这张表：它们就是被问的那个事实本身。
+const PERIPHERAL_DETAIL_BLOCKS: &[&str] = &["related_context", "primary_paths"];
 
 /// 把「这次输出的诊断对结论意味着什么」写进 summary。
 ///
@@ -284,6 +505,282 @@ fn retry_commands(surface: metadata_checker::route::Surface, candidates: &[Strin
         .take(5)
         .map(|candidate| format!("{} '{candidate}'", surface.as_str()))
         .collect()
+}
+
+/// 枚举输出最多列出多少个节点。
+const MAX_ENUMERATED_TARGETS: usize = 40;
+
+/// 把「只写了前缀」当成一次枚举查询来回答：列出该类型下的全部节点。
+///
+/// 返回的是一条正常答案（`ok: true`），不是错误：模型问「有哪些页面」，工具知道答案。
+fn enumerate_prefix_targets(
+    runtime: &metadata_checker::runtime::GraphRuntime,
+    surface: metadata_checker::route::Surface,
+    prefix: &str,
+) -> serde_json::Value {
+    let mut ids: Vec<&str> = runtime
+        .graph
+        .node_indices
+        .keys()
+        .map(String::as_str)
+        .filter(|id| id.starts_with(prefix))
+        .collect();
+    ids.sort_unstable();
+    let total = ids.len();
+    let shown: Vec<&str> = ids.into_iter().take(MAX_ENUMERATED_TARGETS).collect();
+
+    let mut diagnostics = Vec::new();
+    if total == 0 {
+        diagnostics.push(surface_diagnostic(
+            "NO_MATCHES_FOUND",
+            format!("图里没有 '{prefix}' 类型的节点。"),
+        ));
+    }
+    if total > shown.len() {
+        diagnostics.push(surface_diagnostic(
+            "OUTPUT_TRUNCATED",
+            format!("共 {total} 个，只列出前 {}。", shown.len()),
+        ));
+    }
+
+    let what_is_it = if total == 0 {
+        format!("图里没有 '{prefix}' 类型的节点。")
+    } else {
+        format!(
+            "'{prefix}' 类型的节点共 {total} 个，全名如下；挑一个完整 id 作为 target 再问一次。"
+        )
+    };
+
+    let mut result = serde_json::json!({
+        "schema_version": "1.0",
+        "kind": "QueryAdvice",
+        "query_target": prefix,
+        "summary": {
+            "what_is_it": what_is_it,
+            "resolved_count": total,
+            "shown_count": shown.len(),
+            "targets": shown,
+        },
+        "details": { "targets": shown },
+        "evidence": [],
+        "diagnostics": diagnostics,
+        "next_queries": retry_commands(
+            surface,
+            &shown.iter().map(|id| (*id).to_string()).collect::<Vec<_>>(),
+        ),
+    });
+    attach_confidence(&mut result);
+    result
+}
+
+/// 候选少到可以全答的上限。
+///
+/// 超过这个数就只能交回候选：把十几个节点的答案拼在一条输出里，模型读到的是噪音。
+const MAX_ANSWERED_CANDIDATES: usize = 3;
+
+/// 候选很少时，对每个候选分别作答，而不是交回一个错误让模型再猜一轮。
+///
+/// M59 评测里 `--explain comp:button1` 恰好匹配两个节点（actions_test 与 page_relations
+/// 各有一个 button1），问题本身（「button1 周围还有哪些依赖」）没给任何可用来消歧的信息。
+/// 此前工具返回 AMBIGUOUS_TARGET，模型把仅有的两次命令机会花在重发同一条命令上，
+/// 那条用例 6 次 trial 全挂。
+///
+/// 不做排序：任何「挑一个最像的」规则在这里都是随意的断点，只不过恰好在这个 fixture 上
+/// 选对。两个节点都是合法答案，就都答出来，由 answers[*].target 标明各是哪一个。
+fn answer_ambiguous_target(
+    runtime: &mut metadata_checker::runtime::GraphRuntime,
+    args: &cli::Cli,
+    surface: metadata_checker::route::Surface,
+    target: &str,
+    candidates: &[String],
+    diagnostics: Vec<serde_json::Value>,
+) -> Result<serde_json::Value> {
+    if candidates.len() > MAX_ANSWERED_CANDIDATES {
+        return Ok(ambiguous_target_error(
+            surface,
+            target,
+            candidates,
+            diagnostics,
+        ));
+    }
+
+    // 同一个预算现在要装下 N 份答案，所以每份都降一档。预算是「这次输出能有多大」的
+    // 承诺，不是「每个节点能有多大」——按原档跑两遍就等于悄悄把输出翻倍。
+    let per_candidate_budget = if candidates.len() > 1 {
+        match args.budget.as_str() {
+            "full" => "normal",
+            _ => "compact",
+        }
+    } else {
+        args.budget.as_str()
+    };
+
+    let mut answers: Vec<(String, serde_json::Value)> = Vec::new();
+    for candidate in candidates {
+        // 单个候选答不出来不该拖垮整条命令：其余候选的答案照样是模型要的事实。
+        if let Ok(value) = execute_resolved_target(
+            runtime,
+            args,
+            surface,
+            candidate,
+            &[],
+            Vec::new(),
+            per_candidate_budget,
+        ) {
+            answers.push((candidate.clone(), value));
+        }
+    }
+    if answers.is_empty() {
+        return Ok(ambiguous_target_error(
+            surface,
+            target,
+            candidates,
+            diagnostics,
+        ));
+    }
+
+    Ok(combine_candidate_answers(
+        surface,
+        target,
+        candidates,
+        answers,
+        diagnostics,
+        &args.budget,
+    ))
+}
+
+/// 把逐个候选的答案拼成一条输出。
+///
+/// 形状对每个候选是对称的：没有哪一个被放在「主答案」的位置上，因为没有依据这么排。
+fn combine_candidate_answers(
+    surface: metadata_checker::route::Surface,
+    target: &str,
+    candidates: &[String],
+    answers: Vec<(String, serde_json::Value)>,
+    mut diagnostics: Vec<serde_json::Value>,
+    budget: &str,
+) -> serde_json::Value {
+    let answered: Vec<&str> = answers.iter().map(|(id, _)| id.as_str()).collect();
+    let schema_version = answers[0]
+        .1
+        .get("schema_version")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!("1.0"));
+    let kind = answers[0]
+        .1
+        .get("kind")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
+    let mut evidence: Vec<serde_json::Value> = Vec::new();
+    let mut next_queries: Vec<serde_json::Value> = Vec::new();
+    let summary_answers: Vec<serde_json::Value> = answers
+        .iter()
+        .map(|(id, value)| {
+            serde_json::json!({
+                "target": id,
+                "summary": value.get("summary").cloned().unwrap_or(serde_json::Value::Null),
+            })
+        })
+        .collect();
+    let detail_answers: Vec<serde_json::Value> = answers
+        .iter()
+        .map(|(id, value)| {
+            serde_json::json!({
+                "target": id,
+                "details": value.get("details").cloned().unwrap_or(serde_json::Value::Null),
+            })
+        })
+        .collect();
+    for (_, value) in &answers {
+        if let Some(items) = value.get("evidence").and_then(serde_json::Value::as_array) {
+            evidence.extend(items.iter().cloned());
+        }
+        if let Some(items) = value.get("diagnostics").and_then(serde_json::Value::as_array) {
+            diagnostics.extend(items.iter().cloned());
+        }
+        if let Some(items) = value.get("next_queries").and_then(serde_json::Value::as_array) {
+            next_queries.extend(items.iter().cloned());
+        }
+    }
+
+    diagnostics.push(surface_diagnostic(
+        "AMBIGUOUS_TARGET_ANSWERED",
+        format!(
+            "'{target}' 匹配到 {} 个节点，已对每个节点分别作答；答案在 summary.answers / details.answers 里按 target 分组，回答时要说明结论属于哪一个节点。",
+            answered.len()
+        ),
+    ));
+
+    // 两三份完整 details 拼起来会超出预算。这里不能像单目标那样按大小逐块砍——
+    // details.answers 是一个每候选一项的数组，砍掉一半就等于悄悄替模型挑了一个候选，
+    // 而「不替它挑」正是全答模式存在的理由。要么整块留，要么整块省掉。
+    let summary_bytes = json_byte_len(&serde_json::json!(summary_answers));
+    let details_bytes = json_byte_len(&serde_json::json!(detail_answers));
+    let cap = budget_byte_cap(budget).unwrap_or(usize::MAX);
+    let details = if summary_bytes.saturating_add(details_bytes) > cap {
+        diagnostics.push(surface_diagnostic(
+            "OUTPUT_TRUNCATED",
+            format!(
+                "多候选合并输出放不进 --budget {budget}，details 已整体省略；summary.answers 里每个候选的结论都是完整的，需要细节请用 next_queries 里的单目标命令。"
+            ),
+        ));
+        serde_json::json!({
+            "answers_omitted": "多候选答案的 details 已省略；summary.answers 里有每个候选的结论，需要细节请用 next_queries 里的单目标命令。",
+        })
+    } else {
+        serde_json::json!({ "answers": detail_answers })
+    };
+
+    let mut result = serde_json::json!({
+        "schema_version": schema_version,
+        "kind": kind,
+        "query_target": target,
+        "summary": {
+            "what_is_it": format!(
+                "'{target}' 匹配到 {} 个节点，以下对每个节点分别作答。",
+                answered.len()
+            ),
+            "resolved_count": answered.len(),
+            "answered_targets": answered,
+            "answers": summary_answers,
+        },
+        "details": details,
+        "evidence": evidence,
+        "diagnostics": diagnostics,
+        "next_queries": if next_queries.is_empty() {
+            serde_json::json!(retry_commands(surface, candidates))
+        } else {
+            serde_json::json!(next_queries)
+        },
+    });
+    dedupe_diagnostics(&mut result);
+    attach_confidence(&mut result);
+    result
+}
+
+/// 同一条诊断在一次输出里只说一遍。
+///
+/// 归一层和底层命令会各记一条 TARGET_NOT_FOUND，多候选合并还会把相同的诊断带进来
+/// 好几份。重复的诊断不增加任何事实，只是把 diagnostics 撑长，让真正重要的那条更难被读到。
+fn dedupe_diagnostics(result: &mut serde_json::Value) {
+    let Some(entries) = result
+        .get_mut("diagnostics")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    entries.retain(|entry| {
+        let key = |field: &str| {
+            entry
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        seen.insert((key("code"), key("message")))
+    });
 }
 
 /// 歧义 target 的统一错误形态：候选 + 可直接执行的下一条命令 + 别重发原命令。
@@ -585,7 +1082,7 @@ fn run_query_commands(
             metadata_checker::route::Surface::Find,
             keyword,
         )?;
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        print_surface_result(args, &result)?;
         return Ok(true);
     }
 
@@ -596,7 +1093,7 @@ fn run_query_commands(
             metadata_checker::route::Surface::Explain,
             explain_id,
         )?;
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        print_surface_result(args, &result)?;
         return Ok(true);
     }
 
@@ -607,7 +1104,7 @@ fn run_query_commands(
             metadata_checker::route::Surface::Relations,
             relations_target,
         )?;
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        print_surface_result(args, &result)?;
         return Ok(true);
     }
 

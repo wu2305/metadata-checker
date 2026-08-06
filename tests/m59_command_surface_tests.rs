@@ -217,20 +217,29 @@ fn test_hallucinated_path_yields_resolution_or_real_candidates() {
     let db = workspace("hallucinated-path");
     let output = surface(&db, &["--explain", "comp:app/no_such_page.spg|button1"]);
 
-    // button1 在 fixture 里跨两个页面重名，因此这里应当是「如实报歧义 + 真实候选」。
-    let candidates = output
-        .get("candidate_targets")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    assert!(!candidates.is_empty(), "必须交出真实候选：{output}");
+    // button1 在 fixture 里跨两个页面重名：编出来的路径被丢掉，两个真实节点都要答。
+    let answered = answered_targets(&output);
+    assert!(answered.len() >= 2, "必须对每个真实候选作答：{output}");
     assert!(
-        candidates
+        answered
             .iter()
-            .filter_map(Value::as_str)
             .all(|candidate| candidate.starts_with("comp:") && candidate.contains("button1")),
-        "候选必须是可直接使用的规范 target：{candidates:?}"
+        "答案必须挂在可直接使用的规范 target 上：{answered:?}"
     );
+}
+
+/// 全答模式下被回答的那些 target。
+fn answered_targets(output: &Value) -> Vec<String> {
+    output["summary"]["answered_targets"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// 写全的合法 target 不能被归一改写。
@@ -259,35 +268,43 @@ fn has_diagnostic(diagnostics: &[Value], code: &str) -> bool {
     })
 }
 
-/// 裸名有歧义时交出候选，而不是让模型继续猜路径。
+/// 裸名有歧义、候选又很少时，对每个候选分别作答，而不是交回一个错误。
 ///
 /// M58 里模型对「button1 周围还有什么」的应对是 `comp:app/未知页面.spg|button1`（3 次）
-/// 和把 bootstrap 占位符原样抄成 `comp:app/<relative-file>.spg|button1`（2 次）。给回
-/// 真实候选，下一轮就能用规范 target。
+/// 和把 bootstrap 占位符原样抄成 `comp:app/<relative-file>.spg|button1`（2 次）。M59 改成
+/// 交回真实候选之后，模型转而把仅有的两次命令机会花在重发同一条歧义命令上——那条用例
+/// 6 次 trial 全挂。问题本身（「button1 周围还有哪些依赖」）没给任何可用来消歧的信息，
+/// 两个节点都是合法答案，所以两个都答。
 #[test]
-fn test_ambiguous_bare_target_returns_real_candidates() {
+fn test_ambiguous_bare_target_answers_every_candidate() {
     let db = workspace("bare-ambiguous");
     // button1 同时存在于 actions_test.spg 和 page_relations.spg。
     let output = surface(&db, &["--explain", "button1"]);
 
-    assert_eq!(
-        output
-            .get("error")
-            .and_then(|error| error.get("code"))
-            .and_then(Value::as_str),
-        Some("AMBIGUOUS_TARGET"),
-        "{output}"
+    assert!(
+        output.get("error").is_none(),
+        "候选少到能全答时不该返回错误：{output}"
     );
-    let candidates = output
-        .get("candidate_targets")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    assert!(candidates.len() >= 2, "必须交出候选：{candidates:?}");
+    let candidates = answered_targets(&output);
+    assert!(candidates.len() >= 2, "必须逐个作答：{candidates:?}");
+    // 每个候选都要带自己的结论，不能只报一句「匹配到多个」。
+    let answers = output["summary"]["answers"].as_array().expect("answers");
+    assert_eq!(answers.len(), candidates.len(), "{output}");
+    assert!(
+        answers
+            .iter()
+            .all(|answer| answer["summary"]["what_is_it"].is_string()),
+        "每个候选都要有自己的 summary：{output}"
+    );
+    // 谁是谁必须说清楚，否则两份答案混在一起比不答更糟。
+    let diagnostics = output["diagnostics"].as_array().cloned().unwrap_or_default();
+    assert!(
+        has_diagnostic(&diagnostics, "AMBIGUOUS_TARGET_ANSWERED"),
+        "{diagnostics:?}"
+    );
     assert!(
         candidates
             .iter()
-            .filter_map(Value::as_str)
             .all(|candidate| candidate.starts_with("comp:")),
         "候选必须是可直接使用的规范 target：{candidates:?}"
     );
@@ -450,23 +467,43 @@ fn test_a_confirmed_absence_keeps_confidence_full() {
     assert_eq!(output["summary"]["confidence"]["level"], "full");
 }
 
-/// 歧义 target 要给出能直接照抄执行的下一条命令，而不只是候选 id。
+/// 带前缀的歧义 target 同样逐个作答，并留下能继续深挖单个节点的命令。
+///
+/// 交回候选让模型自己再问一轮曾经是这里的行为。它没用：模型会把仅剩的命令机会用来
+/// 重发同一条命令。能答就答，next_queries 留给「想单独看某一个」的下一步。
 #[test]
-fn test_ambiguous_target_hands_back_runnable_commands() {
+fn test_ambiguous_prefixed_target_answers_every_candidate() {
     let db = workspace("ambiguous-next");
     let output = surface(&db, &["--explain", "comp:button1"]);
-    assert_eq!(output["error"]["code"], "AMBIGUOUS_TARGET");
+    assert!(output.get("error").is_none(), "{output}");
+    assert_eq!(answered_targets(&output).len(), 2, "{output}");
     let next: Vec<&str> = output["next_queries"]
         .as_array()
         .expect("next_queries")
         .iter()
-        .map(|item| item.as_str().unwrap())
+        .filter_map(Value::as_str)
         .collect();
     assert!(!next.is_empty());
-    assert!(next.iter().all(|command| command.starts_with("--explain ")));
-    // 重发原命令是 M59 评测里真实发生过的失败：错误信息必须明说不要这么做。
-    let message = output["error"]["message"].as_str().unwrap();
-    assert!(message.contains("不要重复"), "{message}");
+    // 每个被回答的节点都要留下可以单独深挖它的下一条命令。
+    for target in answered_targets(&output) {
+        assert!(
+            next.iter().any(|command| command.contains(&target)),
+            "{target} 没有对应的 next_query：{next:?}"
+        );
+    }
+}
+
+/// 不歧义的 target 不该被全答模式改变形状。
+///
+/// 全答会把 summary 换成 `answers` 数组。绝大多数调用是明确的单目标，它们读到的
+/// 必须还是原来那个 summary，否则等于为了救一条用例把其余全部改坏。
+#[test]
+fn test_unambiguous_target_keeps_single_answer_shape() {
+    let db = workspace("unambiguous-shape");
+    let output = surface(&db, &["--explain", "comp:app/actions_test.spg|button1"]);
+    assert!(output.get("error").is_none(), "{output}");
+    assert!(output["summary"]["answers"].is_null(), "{output}");
+    assert!(output["summary"]["what_is_it"].is_string(), "{output}");
 }
 
 /// 跳转要把目标页面说出来，且不能把参数节点当成页面。
@@ -480,4 +517,72 @@ fn test_navigation_names_the_target_page() {
     assert!(statement.contains("目标页面为："), "{statement}");
     assert!(statement.contains("page:"), "{statement}");
     assert!(!statement.contains("目标页面为：param"), "{statement}");
+}
+
+/// 跳转和传参必须出现在 conclusion 本身。
+///
+/// 导航页的 conclusion 以「无写入目标、用户无法通过该页面更改数据」收尾。模型读完这句
+/// 就去回答「跳转传了哪些参数」，答出来的是「无参数」——而 PassesParam 边就在同一次输出
+/// 的 details 里。conclusion 是最被信任的那一句，页面最主要的行为必须写在里面。
+#[test]
+fn test_page_conclusion_states_parameter_passing() {
+    let db = workspace("conclusion-params");
+    let output = surface(&db, &["--relations", "page:app/page_relations.spg"]);
+    let conclusion = output["summary"]["conclusion"]
+        .as_str()
+        .expect("conclusion");
+    assert!(conclusion.contains("参数"), "{conclusion}");
+    assert!(conclusion.contains("目标详情"), "{conclusion}");
+}
+
+/// 只写前缀是一次「有哪些页面」的探查，不是写错的 target。
+///
+/// 问题天生模糊（用户说不清、元数据也塞不进上下文），模型第一步做发现式探查是对的。
+/// 此前工具用 TARGET_NOT_FOUND 回应，白白烧掉一次命令机会，模型接着就开始编路径。
+#[test]
+fn test_bare_prefix_enumerates_instead_of_erroring() {
+    let db = workspace("prefix-enumeration");
+    let output = surface(&db, &["--relations", "page:"]);
+    assert!(output.get("error").is_none(), "{output}");
+    let targets = output["summary"]["targets"]
+        .as_array()
+        .expect("targets")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(targets.len() >= 2, "{targets:?}");
+    assert!(targets.iter().all(|id| id.starts_with("page:")), "{targets:?}");
+    // 列出来还不够：下一条命令要能直接照抄。
+    let next = output["next_queries"].as_array().expect("next_queries");
+    assert!(
+        next.iter()
+            .filter_map(Value::as_str)
+            .all(|command| command.starts_with("--relations ")),
+        "{next:?}"
+    );
+}
+
+/// 模型级关系要给出通往字段血缘的入口。
+///
+/// `--relations model:X` 答的是模型级关系；「这个字段是从哪一路传过来的」只有
+/// `--explain field:X.y` 能答。字段名就在合并进来的 DataFlow 子图里，模型不该自己猜。
+#[test]
+fn test_model_relations_offer_field_lineage_commands() {
+    let db = workspace("field-lineage-next");
+    let output = surface(&db, &["--relations", "model:df_b"]);
+    let next: Vec<&str> = output["next_queries"]
+        .as_array()
+        .expect("next_queries")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(
+        next.iter().any(|command| command.contains("field:df_b.")),
+        "{next:?}"
+    );
+    // 占位符是「你自己去猜一个字段名」，有真实字段名时不该再出现。
+    assert!(
+        !next.iter().any(|command| command.contains("<字段名>")),
+        "{next:?}"
+    );
 }

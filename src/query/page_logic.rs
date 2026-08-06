@@ -2071,7 +2071,11 @@ fn build_query_page_logic_output_inner(
     // what_is_it 是四个计数的拼接，「入口 0、写入 0」到「这页是只读的、用户改不了数据」
     // 之间还有一步推理，此前留给模型自己走。这一步是确定的：同样的计数永远得到同样的
     // 结论，正是应该留在工具里的部分。
-    let conclusion = page_conclusion(
+    // 跳转的目标页面藏在 details.navigation[*].to 里，compact 预算下这个数组还会被截断，
+    // 于是「跳去哪、带没带参数」这个问句里最核心的事实反而是最容易丢的。
+    let navigation_statement = navigation_statement(&navigation);
+
+    let mut conclusion = page_conclusion(
         page_role,
         &page_node.name,
         entrypoints.len(),
@@ -2080,9 +2084,13 @@ fn build_query_page_logic_output_inner(
         data_sources.len(),
     );
 
-    // 跳转的目标页面藏在 details.navigation[*].to 里，compact 预算下这个数组还会被截断，
-    // 于是「跳去哪、带没带参数」这个问句里最核心的事实反而是最容易丢的。
-    let navigation_statement = navigation_statement(&navigation);
+    // 跳转和传参必须进 conclusion 本身，不能只留在 navigation_statement 里。
+    // 导航页的 conclusion 以「无写入目标、用户无法通过该页面更改数据」收尾，模型读完
+    // 这一句就去回答「跳转传了哪些参数」，答出来的是「无参数」——而 PassesParam 边就在
+    // 同一次输出的 details 里。conclusion 是最被信任的那句话，页面最主要的行为就该写在里面。
+    if let Some(statement) = navigation_statement.as_deref() {
+        conclusion.push_str(statement);
+    }
 
     // 空数组和「被截断成空」在 JSON 里长得一样。判定出来的「没有」要作为事实说出来。
     let absent = absent_facts(

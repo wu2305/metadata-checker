@@ -145,6 +145,10 @@ pub fn answer_effect(code: &str) -> Option<(AnswerImpact, &'static str)> {
             Addressing,
             "target 匹配到多个节点；从 candidate_targets 里挑一个完整写法重试，不要重复同一条命令。",
         ),
+        "AMBIGUOUS_TARGET_ANSWERED" => (
+            Partial,
+            "target 匹配到多个节点，工具已对每个节点分别作答；结论按 answers[*].target 分组，回答时要说明说的是哪一个节点，不要把它们混成一个答案。",
+        ),
         // ---- 路由说明：与答案内容无关 ----
         "RESOLVED_TARGET" => (
             Routing,
