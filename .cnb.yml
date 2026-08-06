@@ -412,8 +412,8 @@
 
 # kimi-code CLI 安装步骤在 cloud-native-dev-env 与 kimi-code-harness-smoke 中各内联一份
 #（CNB schema 要求顶层锚点必须是 array/object，无法给裸脚本字符串做锚点复用）。
-# install.sh 把二进制放到 ~/.local/bin；软链进 /usr/local/bin 保证后续 stage 与
-# 远程 SSH 会话不依赖 PATH 调整也能直接命中 kimi。
+# install.sh 把二进制装到 ~/.kimi-code/bin（PATH 写进 ~/.bashrc，但 CI stage 不 source 它）；
+# 软链进 /usr/local/bin 保证后续 stage 与远程 SSH 会话不依赖 PATH 也能直接命中 kimi。
 
 .cloud_native_dev_env: &cloud_native_dev_env
   name: cloud-native-dev-env
@@ -456,7 +456,9 @@
         curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
         export PATH="$HOME/.local/bin:$PATH"
         KIMI_BIN="$(command -v kimi || true)"
-        if [ -z "$KIMI_BIN" ] && [ -x "$HOME/.local/bin/kimi" ]; then KIMI_BIN="$HOME/.local/bin/kimi"; fi
+        for KCAND in "$HOME/.kimi-code/bin/kimi" "$HOME/.local/bin/kimi"; do
+          if [ -z "$KIMI_BIN" ] && [ -x "$KCAND" ]; then KIMI_BIN="$KCAND"; fi
+        done
         test -n "$KIMI_BIN"
         ln -sf "$KIMI_BIN" /usr/local/bin/kimi
         kimi --version
@@ -644,7 +646,9 @@
         curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
         export PATH="$HOME/.local/bin:$PATH"
         KIMI_BIN="$(command -v kimi || true)"
-        if [ -z "$KIMI_BIN" ] && [ -x "$HOME/.local/bin/kimi" ]; then KIMI_BIN="$HOME/.local/bin/kimi"; fi
+        for KCAND in "$HOME/.kimi-code/bin/kimi" "$HOME/.local/bin/kimi"; do
+          if [ -z "$KIMI_BIN" ] && [ -x "$KCAND" ]; then KIMI_BIN="$KCAND"; fi
+        done
         test -n "$KIMI_BIN"
         ln -sf "$KIMI_BIN" /usr/local/bin/kimi
         kimi --version
