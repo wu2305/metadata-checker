@@ -709,11 +709,12 @@
         REAL_DIR="target/real-project/succbi_project_container"
         AUTH_HEADER="Authorization: Basic $(printf '%s:%s' "${CNB_TOKEN_USER_NAME:-cnb}" "${CNB_TOKEN:?}" | base64 -w0)"
         rm -rf "$REAL_DIR"
+        # git 的报错走 stderr，显式 2>&1 合流，否则 CNB 日志只剩 Cloning into 一行无法归因。
         if ! git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --filter=blob:none --sparse \
-            "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR"; then
+            "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR" 2>&1; then
           echo "partial clone 失败，去掉 blob filter 重试"
           git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --sparse \
-            "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR"
+            "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR" 2>&1
         fi
         git -C "$REAL_DIR" sparse-checkout set projects/xiaoshouyi
         test -d "$REAL_DIR/projects/xiaoshouyi"
