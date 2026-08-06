@@ -700,6 +700,32 @@
           exit 1
         fi
         echo "KIMI_HARNESS_TOOL_CALLING=supported"
+    - name: fetch real project corpus
+      script: |
+        # 验证 CNB_TOKEN 跨仓库 clone：把真实项目语料（succbi_project_container 里的
+        # projects/xiaoshouyi，约 156MB）sparse 拉进工作区，为真实项目冒烟铺路。
+        # 凭证只走 http.extraHeader 请求头，不落盘、不进 remote URL、日志不回显展开值。
+        test -n "${CNB_TOKEN:-}"
+        REAL_DIR="target/real-project/succbi_project_container"
+        AUTH_HEADER="Authorization: Basic $(printf '%s:%s' "${CNB_TOKEN_USER_NAME:-cnb}" "${CNB_TOKEN:?}" | base64 -w0)"
+        rm -rf "$REAL_DIR"
+        if ! git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --filter=blob:none --sparse \
+            "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR"; then
+          echo "partial clone 失败，去掉 blob filter 重试"
+          git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --sparse \
+            "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR"
+        fi
+        git -C "$REAL_DIR" sparse-checkout set projects/xiaoshouyi
+        test -d "$REAL_DIR/projects/xiaoshouyi"
+        SPG_COUNT="$(find "$REAL_DIR/projects/xiaoshouyi" -name '*.spg' | wc -l)"
+        TBL_COUNT="$(find "$REAL_DIR/projects/xiaoshouyi" -name '*.tbl' | wc -l)"
+        echo "REAL_PROJECT_READY spg=${SPG_COUNT} tbl=${TBL_COUNT}"
+        test "$SPG_COUNT" -gt 0
+        du -sh "$REAL_DIR/projects/xiaoshouyi"
+        if grep -qF "$CNB_TOKEN" "$REAL_DIR/.git/config" 2>/dev/null; then
+          echo "CNB_TOKEN persisted in git config"
+          exit 1
+        fi
     - name: kimi-code harness smoke run
       script: |
         # KIMI_MODEL_* 是官方临时模型通道：从环境变量合成 in-memory provider，
