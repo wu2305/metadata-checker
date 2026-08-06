@@ -740,21 +740,9 @@
       script: |
         OUT_DIR="target/kimi-harness-smoke"
         ls -lh "$OUT_DIR" || true
-        echo '--- tool calls in transcript ---'
-        # 从 stream-json 里提取每一次工具调用的名称和命令，直接回答「模型到底跑了什么」。
-        node -e '
-          const fs=require("fs");
-          for(const l of fs.readFileSync(process.argv[1],"utf8").split("\n").filter(Boolean)){
-            let m; try{m=JSON.parse(l)}catch{continue}
-            const tcs=m.tool_calls||(m.message&&m.message.tool_calls);
-            if(!tcs)continue;
-            for(const tc of tcs){
-              const f=tc.function||{};
-              let a=f.arguments; if(typeof a==="string"){try{a=JSON.parse(a)}catch{}}
-              const cmd=(a&&(a.command||a.cmd))||"";
-              console.log("TOOL_CALL",f.name,cmd?String(cmd).slice(0,240):"");
-            }
-          }' "$OUT_DIR/smoke-transcript.jsonl" 2>/dev/null || true
+        echo '--- tool calls in transcript (raw, truncated) ---'
+        # 直接打出含 tool_calls 的原始 JSONL 行并截断，不假设 stream-json 的字段嵌套形态。
+        grep '"tool_calls"' "$OUT_DIR/smoke-transcript.jsonl" 2>/dev/null | cut -c1-1200 || true
         echo '--- transcript tail ---'
         tail -c 4000 "$OUT_DIR/smoke-transcript.jsonl" 2>/dev/null || true
         echo '--- stderr tail ---'
