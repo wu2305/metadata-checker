@@ -1083,6 +1083,13 @@
           "alternatives": [
             {
               "command_kind": "--explain",
+              "target": "comp:button1",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": "compact"
+            },
+            {
+              "command_kind": "--explain",
               "target": "action:app/actions_test.spg|button1|action1",
               "args": [],
               "requires_project_dir": true,

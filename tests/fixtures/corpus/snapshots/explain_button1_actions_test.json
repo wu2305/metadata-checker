@@ -57,7 +57,6 @@
     "page": "actions_test",
     "page_id": "page:app/actions_test.spg",
     "primary_paths_count": 0,
-    "primary_reason": "目标 comp:app/actions_test.spg|button1 未发现明确的阻塞条件或数据链路",
     "read_count": 0,
     "rejected_paths_count": 0,
     "related_context_count": 0,

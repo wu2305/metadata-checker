@@ -12,6 +12,50 @@ use std::io::{self, Write};
 
 use super::super::find_parent_page;
 
+/// 把字段的血缘归纳成一句话：这个字段的值是从哪些字段、经过哪一段传过来的。
+///
+/// M59 评测里 `dataflow_chain_trace` 问的是 df_a -> physical_x -> df_b 的链式传递。
+/// 工具算得出来——`details.lineage` 里两条记录写着 `source_fields: ["field:physical_x.id"]`
+/// 和 `["field:df_a.id"]`，`transform` 都是 "DataFlow chain"——但 summary 只给一个
+/// `lineage_count: 2`，同时 `primary_reason` 还写着「未发现明确的阻塞条件或数据链路」。
+/// 模型读到的是「没有链路」，于是答「没有链式传递」。
+///
+/// 数出 2 条和说出「df_b.id 来自 physical_x.id 和 df_a.id，经 DataFlow 链式传递」之间那步
+/// 推理是确定的，正是应该留在工具里的部分。
+fn lineage_statement(field_id: &str, lineage: &[Value]) -> Option<String> {
+    let mut sources: Vec<String> = Vec::new();
+    let mut via_dataflow = false;
+    for entry in lineage {
+        if entry
+            .get("transform")
+            .and_then(Value::as_str)
+            .is_some_and(|transform| transform.contains("DataFlow chain"))
+        {
+            via_dataflow = true;
+        }
+        let Some(fields) = entry.get("source_fields").and_then(Value::as_array) else {
+            continue;
+        };
+        for source in fields.iter().filter_map(Value::as_str) {
+            if !sources.iter().any(|known| known == source) {
+                sources.push(source.to_string());
+            }
+        }
+    }
+    if sources.is_empty() {
+        return None;
+    }
+    let how = if via_dataflow {
+        "经 DataFlow 链式传递（lineage）"
+    } else {
+        "经字段传递（lineage）"
+    };
+    Some(format!(
+        "字段 {field_id} 的值{how}来自：{}。逐条来源、经过哪个节点、依据哪条边，见 details.lineage 的 source_fields / via_node / evidence。",
+        sources.join("、")
+    ))
+}
+
 pub(in crate::explain) fn explain_model_graph(
     graph: &dyn GraphReadStore,
     node: &crate::graph::Node,
@@ -843,6 +887,7 @@ pub(in crate::explain) fn explain_field_graph(
         "written_by_count": write_count,
         "produced_by_dataflow_count": produced_by.len(),
         "lineage_count": lineage.len(),
+        "lineage_statement": lineage_statement(&node.id, &lineage),
         "determined_by_count": det_count,
     });
 

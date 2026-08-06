@@ -339,7 +339,7 @@ fn augment_field_lineage_queries(result: &mut serde_json::Value) {
     });
     for field in fields.iter().take(3) {
         let command = metadata_checker::output::schema::format_next_query(
-            "--explain {}",
+            "--explain {} for field-level lineage",
             &format!("field:{model_name}.{field}"),
         );
         if !queries.iter().any(|q| q.as_str() == Some(command.as_str())) {

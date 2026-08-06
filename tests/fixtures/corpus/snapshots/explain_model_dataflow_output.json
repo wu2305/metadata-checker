@@ -76,7 +76,6 @@
     "internal_node_count": 3,
     "output_count": 1,
     "primary_paths_count": 0,
-    "primary_reason": "目标 model:dataflow_output 未发现明确的阻塞条件或数据链路",
     "rejected_paths_count": 0,
     "related_context_count": 0,
     "supporting_context_count": 0,

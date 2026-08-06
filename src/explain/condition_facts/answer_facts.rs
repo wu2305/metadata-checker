@@ -980,7 +980,14 @@ pub(crate) fn build_primary_reason_for_intent(
     } else if value_source_context.is_some() {
         format!("目标 {} 的裸字段值来源已解析到最近数据容器", target_node.id)
     } else {
-        format!("目标 {} 未发现明确的阻塞条件或数据链路", target_node.id)
+        // 这句只覆盖「阻塞条件 / 主路径」这一次遍历的结果。早先写成「未发现数据链路」，
+        // 和同一份 summary 里的 `lineage_count: 2` 直接打架——模型信了这句，答「没有链式
+        // 传递」。字段血缘是另一条通路（details.lineage / summary.lineage_statement），
+        // 这里不能替它下结论。
+        format!(
+            "目标 {} 未发现阻塞条件，也没有解析出主路径（primary_path）；字段级来源另见 lineage_statement 与 details.lineage，本句不覆盖它",
+            target_node.id
+        )
     }
 }
 

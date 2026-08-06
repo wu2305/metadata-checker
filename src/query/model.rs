@@ -284,12 +284,12 @@ pub fn build_query_model_output(
         }
     }
     output.next_queries = vec![
-        format_next_query("--explain {}", model_id),
-        format_next_query("--query-dataflow {}", model_id),
+        format_next_query("--explain {} for full semantic summary", model_id),
+        format_next_query("--query-dataflow {} for internal subgraph", model_id),
     ];
     for field in field_names.iter().take(3) {
         output.next_queries.push(format_next_query(
-            "--explain {}",
+            "--explain {} for field-level lineage",
             &format!("field:{model_name}.{field}"),
         ));
     }
