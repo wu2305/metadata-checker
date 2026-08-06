@@ -710,10 +710,14 @@
         AUTH_HEADER="Authorization: Basic $(printf '%s:%s' "${CNB_TOKEN_USER_NAME:-cnb}" "${CNB_TOKEN:?}" | base64 -w0)"
         rm -rf "$REAL_DIR"
         # git 的报错走 stderr，显式 2>&1 合流，否则 CNB 日志只剩 Cloning into 一行无法归因。
+        # 语料在 cnb 的 xiaoshouyi-corpus 分支（succbi_project_container 的 main 是
+        # 无关历史，只有 projects/ACT，没有 xiaoshouyi）。
         if ! git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --filter=blob:none --sparse \
+            --branch xiaoshouyi-corpus \
             "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR" 2>&1; then
           echo "partial clone 失败，去掉 blob filter 重试"
           git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --sparse \
+            --branch xiaoshouyi-corpus \
             "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR" 2>&1
         fi
         git -C "$REAL_DIR" sparse-checkout set projects/xiaoshouyi
