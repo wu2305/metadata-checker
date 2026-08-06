@@ -410,6 +410,11 @@
           --bench session_sync_bench \
           --target-dir target/criterion-ci/session
 
+# kimi-code CLI 安装步骤在 cloud-native-dev-env 与 kimi-code-harness-smoke 中各内联一份
+#（CNB schema 要求顶层锚点必须是 array/object，无法给裸脚本字符串做锚点复用）。
+# install.sh 把二进制放到 ~/.local/bin；软链进 /usr/local/bin 保证后续 stage 与
+# 远程 SSH 会话不依赖 PATH 调整也能直接命中 kimi。
+
 .cloud_native_dev_env: &cloud_native_dev_env
   name: cloud-native-dev-env
   runner:
@@ -446,6 +451,53 @@
         test -d /run/sshd
     - name: fetch dependencies
       script: cargo fetch
+    - name: install kimi-code
+      script: |
+        curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+        export PATH="$HOME/.local/bin:$PATH"
+        KIMI_BIN="$(command -v kimi || true)"
+        if [ -z "$KIMI_BIN" ] && [ -x "$HOME/.local/bin/kimi" ]; then KIMI_BIN="$HOME/.local/bin/kimi"; fi
+        test -n "$KIMI_BIN"
+        ln -sf "$KIMI_BIN" /usr/local/bin/kimi
+        kimi --version
+    - name: configure kimi-code cnb-ai-chat provider
+      script: |
+        # 目标：开发环境创建完成后，用户打开终端即可 `kimi`，默认模型走 CNB AI Chat。
+        # endpoint 契约：POST https://api.cnb.cool/{repo}/-/ai/chat/completions，
+        # 仅支持 stream=true，认证用构建凭证 CNB_TOKEN。
+        # kimi-code 不从 shell 环境读凭证，api_key 必须落在 config.toml；
+        # vscode 事件若未注入 CNB_TOKEN，则写入占位符并打印手工配置指引，不让开环境失败。
+        mkdir -p "$HOME/.kimi-code"
+        KC_BASE_URL="https://api.cnb.cool/${CNB_REPO_SLUG:-OWNER/REPO}/-/ai"
+        KC_API_KEY="${CNB_TOKEN:-__PUT_CNB_TOKEN_HERE__}"
+        {
+          echo '# 由 .cnb.yml cloud-native-dev-env configure 阶段生成，可手工修改'
+          echo 'default_model = "cnb-ai-chat/deepseek-v4-flash"'
+          echo ''
+          echo '[providers.cnb-ai-chat]'
+          echo 'type = "openai"'
+          echo "base_url = \"${KC_BASE_URL}\""
+          echo "api_key = \"${KC_API_KEY}\""
+          echo ''
+          echo '[models."cnb-ai-chat/deepseek-v4-flash"]'
+          echo 'provider = "cnb-ai-chat"'
+          echo 'model = "deepseek-v4-flash"'
+          echo '# max_context_size 是保守估计值，按网关实际窗口调整'
+          echo 'max_context_size = 131072'
+          echo 'capabilities = ["tool_use"]'
+        } > "$HOME/.kimi-code/config.toml"
+        chmod 600 "$HOME/.kimi-code/config.toml"
+        # metadata-checker 使用协议挂到用户级 skill 目录，环境内任意 kimi 会话可发现。
+        mkdir -p "$HOME/.agents/skills/metadata-checker"
+        cp SKILL.md "$HOME/.agents/skills/metadata-checker/SKILL.md"
+        if [ "$KC_API_KEY" = "__PUT_CNB_TOKEN_HERE__" ]; then
+          echo "[kimi-code] 当前事件未注入 CNB_TOKEN，config.toml 已写入占位符。"
+          echo "[kimi-code] 使用前把 ~/.kimi-code/config.toml 的 api_key 换成有效 token，"
+          echo "[kimi-code] 或用 KIMI_MODEL_NAME/KIMI_MODEL_API_KEY/KIMI_MODEL_BASE_URL 临时注入。"
+        else
+          kimi doctor config
+          echo "[kimi-code] provider=cnb-ai-chat default_model=cnb-ai-chat/deepseek-v4-flash 配置完成"
+        fi
 
 # ponytail: stage 级 if 跳过 main，避免与 main.push 重复跑 rust-ci
 .rust_ci_branch_push: &rust_ci_branch_push
@@ -566,6 +618,129 @@
         # 是确定性的且不含模型原文，本身就是给人看的那一份。
         cat target/m58-ai-eval/run.md
 
+# M58 哑协议 runner 的对照实验：同一廉价模型（deepseek-v4-flash，CNB AI Chat endpoint），
+# 但换成真实 agent harness（kimi-code CLI）+ SKILL.md skill。harness 场景没有命令白名单、
+# 没有 trial 截杀，模型自己读 SKILL.md、自己从命令错误里恢复——这才是要验证的部署配置。
+# 只由 api_trigger 手动触发，属于发现性实验，不进任何 CI 阻塞层。
+.kimi_harness_smoke_ci: &kimi_harness_smoke_ci
+  name: kimi-code-harness-smoke
+  runner:
+    <<: *runner_amd64_4
+  docker:
+    <<: *browser_wasm_ci_image
+    volumes:
+      - /usr/local/cargo/registry
+      - /usr/local/cargo/git
+      - ./target/cnb/kimi-harness-build
+      - ./target/kimi-harness-smoke
+  env:
+    CARGO_TARGET_DIR: target/cnb/kimi-harness-build
+    KIMI_CODE_HOME: target/kimi-harness-smoke/kimi-home
+    KIMI_DISABLE_TELEMETRY: "1"
+    KIMI_CODE_NO_AUTO_UPDATE: "1"
+  stages:
+    - name: install kimi-code
+      script: |
+        curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+        export PATH="$HOME/.local/bin:$PATH"
+        KIMI_BIN="$(command -v kimi || true)"
+        if [ -z "$KIMI_BIN" ] && [ -x "$HOME/.local/bin/kimi" ]; then KIMI_BIN="$HOME/.local/bin/kimi"; fi
+        test -n "$KIMI_BIN"
+        ln -sf "$KIMI_BIN" /usr/local/bin/kimi
+        kimi --version
+    - name: build release binary
+      script: cargo build --release --features cli-local --bin metadata-checker
+    - name: probe CNB AI Chat endpoint
+      script: |
+        # 探测两个能力：
+        # 1) 基础流式补全（契约要求 stream=true；M58 实测 stream=false 返回 400）
+        # 2) 原生 tool calling —— kimi-code 作为 harness 依赖它。当前 Swagger 契约未公开
+        #    tools/tool_calls 字段，这里给实测结论。若不支持就带明确诊断失败，
+        #    避免跑出「kimi 全程没调工具」的假性结论还被当成模型能力问题。
+        # 脱敏约定：token 只出现在 Authorization header，永不打印请求头；
+        # 响应 body 不含凭证，失败时只截前 2000 字节做诊断。
+        test -n "${CNB_TOKEN:-}"
+        test -n "${CNB_REPO_SLUG:-}"
+        CHAT_URL="https://api.cnb.cool/${CNB_REPO_SLUG}/-/ai/chat/completions"
+        OUT_DIR="target/kimi-harness-smoke"
+        mkdir -p "$OUT_DIR"
+
+        BASIC_CODE="$(curl -sS -N -o "$OUT_DIR/probe_basic.sse" -w '%{http_code}' \
+          -X POST "$CHAT_URL" \
+          -H "Authorization: Bearer ${CNB_TOKEN}" \
+          -H 'Content-Type: application/json' \
+          -H 'Accept: text/event-stream' \
+          -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"Reply with the single word: ok"}]}')"
+        echo "basic chat probe http=${BASIC_CODE}"
+        test "$BASIC_CODE" = "200"
+        grep -q '^data:' "$OUT_DIR/probe_basic.sse"
+        grep -q '\[DONE\]' "$OUT_DIR/probe_basic.sse"
+
+        TOOLS_CODE="$(curl -sS -N -o "$OUT_DIR/probe_tools.sse" -w '%{http_code}' \
+          -X POST "$CHAT_URL" \
+          -H "Authorization: Bearer ${CNB_TOKEN}" \
+          -H 'Content-Type: application/json' \
+          -H 'Accept: text/event-stream' \
+          -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"What is the weather in Beijing right now?"}],"tools":[{"type":"function","function":{"name":"get_current_weather","description":"Get the current weather of a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"tool_choice":"required"}')"
+        echo "tool calling probe http=${TOOLS_CODE}"
+        if [ "$TOOLS_CODE" != "200" ]; then
+          echo "KIMI_HARNESS_TOOL_CALLING=unsupported(http ${TOOLS_CODE})"
+          echo "CNB AI Chat 拒绝 tools 字段；kimi-code harness 需要原生 tool calling，实验到此为止。"
+          head -c 2000 "$OUT_DIR/probe_tools.sse"
+          exit 1
+        fi
+        if ! grep -q 'tool_calls' "$OUT_DIR/probe_tools.sse"; then
+          echo "KIMI_HARNESS_TOOL_CALLING=no_tool_calls_in_response"
+          echo "endpoint 接受请求但未返回 tool_calls；kimi-code 无法作为 harness 工作。"
+          head -c 2000 "$OUT_DIR/probe_tools.sse"
+          exit 1
+        fi
+        echo "KIMI_HARNESS_TOOL_CALLING=supported"
+    - name: kimi-code harness smoke run
+      script: |
+        # KIMI_MODEL_* 是官方临时模型通道：从环境变量合成 in-memory provider，
+        # 不落盘 config.toml，CNB_TOKEN 不会写进任何文件。
+        export KIMI_MODEL_NAME="deepseek-v4-flash"
+        export KIMI_MODEL_PROVIDER_TYPE="openai"
+        export KIMI_MODEL_API_KEY="${CNB_TOKEN:?}"
+        export KIMI_MODEL_BASE_URL="https://api.cnb.cool/${CNB_REPO_SLUG:?}/-/ai"
+        export KIMI_MODEL_MAX_CONTEXT_SIZE="131072"
+        export KIMI_MODEL_CAPABILITIES="tool_use"
+
+        OUT_DIR="target/kimi-harness-smoke"
+        mkdir -p "$OUT_DIR/skills/metadata-checker" "$KIMI_CODE_HOME"
+        cp SKILL.md "$OUT_DIR/skills/metadata-checker/SKILL.md"
+        ln -sf "$PWD/target/cnb/kimi-harness-build/release/metadata-checker" /usr/local/bin/metadata-checker
+
+        # 问句复用 fixture_llm case page_purpose_actions_test，补一句项目位置
+        #（harness 里没有 runner 代填 project-dir，真实用户也得自己说）。
+        timeout 900 kimi -p "低代码项目 tests/fixtures/test_project 中，页面 actions_test 主要做什么？用户能触发哪些逻辑？会影响哪些数据？" \
+          --skills-dir "$PWD/$OUT_DIR/skills" \
+          --output-format stream-json \
+          > "$OUT_DIR/smoke-transcript.jsonl" \
+          2> "$OUT_DIR/smoke-stderr.log"
+        test -s "$OUT_DIR/smoke-transcript.jsonl"
+
+        if grep -qF "$CNB_TOKEN" "$OUT_DIR/smoke-transcript.jsonl" "$OUT_DIR/smoke-stderr.log"; then
+          echo "CNB_TOKEN leaked into kimi output"
+          exit 1
+        fi
+        echo "tool_call_messages=$(grep -c '"tool_calls"' "$OUT_DIR/smoke-transcript.jsonl" || true)"
+        echo "metadata_checker_invocations=$(grep -c 'metadata-checker' "$OUT_DIR/smoke-transcript.jsonl" || true)"
+        grep -q 'metadata-checker' "$OUT_DIR/smoke-transcript.jsonl" || {
+          echo "模型全程没有调用 metadata-checker；transcript 见 $OUT_DIR/smoke-transcript.jsonl"
+          exit 1
+        }
+  endStages:
+    - name: report smoke summary
+      script: |
+        OUT_DIR="target/kimi-harness-smoke"
+        ls -lh "$OUT_DIR" || true
+        echo '--- transcript tail ---'
+        tail -c 4000 "$OUT_DIR/smoke-transcript.jsonl" 2>/dev/null || true
+        echo '--- stderr tail ---'
+        tail -n 30 "$OUT_DIR/smoke-stderr.log" 2>/dev/null || true
+
 main:
   push: *main_authoritative_ci
 
@@ -574,6 +749,8 @@ main:
     - *cloud_native_dev_env
   api_trigger_m58_llm:
     - *m58_cnb_llm_ci
+  api_trigger_kimi_harness_smoke:
+    - *kimi_harness_smoke_ci
 
 "**":
   push:
