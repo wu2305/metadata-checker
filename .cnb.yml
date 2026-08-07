@@ -808,6 +808,53 @@
           2> "$OUT_DIR/smoke-stderr-q6.log" || Q6_EXIT=$?
         echo "Q6 exit=$Q6_EXIT tool_calls=$(grep -c '"tool_calls"' "$OUT_DIR/smoke-transcript-q6.jsonl" || true) metadata_checker_invocations=$(grep -c 'metadata-checker' "$OUT_DIR/smoke-transcript-q6.jsonl" || true)"
 
+        # 每问答案摘要（软报告，不判红）：取 transcript 中最后一条 assistant 文本，
+        # 统计期望关键词命中。stage 日志体量小、不被截断，是判读答案质量的主入口；
+        # endStages 的原始 dump 只用于深查。期望关键词取自
+        # tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json 的 expected_facts。
+        python3 - "$OUT_DIR" <<'PYEOF'
+        import json, sys
+        out = sys.argv[1]
+        expect = {
+            1: ["panel35", "totalRowCount", "ISSHOW"],
+            2: ["潜客信息跟进", "fact_qwSidebar", "跨页"],
+            3: ["11", "12", "潜客信息跟进"],
+            4: ["32", "153", "46"],
+            5: ["model22.phoneNumber"],
+            6: ["117", "15"],
+        }
+        def walk(o):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    if k == "content" and isinstance(v, str):
+                        yield v
+                    else:
+                        yield from walk(v)
+            elif isinstance(o, list):
+                for i in o:
+                    yield from walk(i)
+        for n in range(1, 7):
+            final = ""
+            try:
+                lines = open(f"{out}/smoke-transcript-q{n}.jsonl", encoding="utf-8", errors="replace").read().splitlines()
+            except FileNotFoundError:
+                continue
+            for ln in lines:
+                if "assistant" not in ln:
+                    continue
+                try:
+                    obj = json.loads(ln)
+                except Exception:
+                    continue
+                texts = [t for t in walk(obj) if t.strip()]
+                if texts:
+                    final = "".join(texts)
+            hits = [k for k in expect[n] if k in final]
+            print(f"Q{n}_ANSWER len={len(final)} expected_hits={len(hits)}/{len(expect[n])} hits={hits}")
+            head = final[:300].replace("\n", " ")
+            print(f"Q{n}_ANSWER_HEAD {head}")
+        PYEOF
+
         if grep -qF "$CNB_TOKEN" "$OUT_DIR"/smoke-transcript-q*.jsonl "$OUT_DIR"/smoke-stderr-q*.log 2>/dev/null; then
           echo "CNB_TOKEN leaked into kimi output"
           exit 1
@@ -828,14 +875,15 @@
         OUT_DIR="target/kimi-harness-smoke"
         ls -lh "$OUT_DIR" || true
         # 对六问分别 dump 含 tool_calls 的原始 JSONL 行（截断）与答案尾部，
-        # 不假设 stream-json 的字段嵌套形态。
+        # 不假设 stream-json 的字段嵌套形态。CNB stage 日志有 ~115KB 上限、
+        # 从头截断，六问全量 dump 会丢前面的问题，因此每段都压小。
         for n in 1 2 3 4 5 6; do
           echo "===== Q${n} tool calls (raw, truncated) ====="
-          grep '"tool_calls"' "$OUT_DIR/smoke-transcript-q${n}.jsonl" 2>/dev/null | cut -c1-1200 || true
+          grep '"tool_calls"' "$OUT_DIR/smoke-transcript-q${n}.jsonl" 2>/dev/null | cut -c1-600 || true
           echo "===== Q${n} transcript tail ====="
-          tail -c 4000 "$OUT_DIR/smoke-transcript-q${n}.jsonl" 2>/dev/null || true
+          tail -c 2000 "$OUT_DIR/smoke-transcript-q${n}.jsonl" 2>/dev/null || true
           echo "===== Q${n} stderr tail ====="
-          tail -n 30 "$OUT_DIR/smoke-stderr-q${n}.log" 2>/dev/null || true
+          tail -n 10 "$OUT_DIR/smoke-stderr-q${n}.log" 2>/dev/null || true
         done
 
 main:
