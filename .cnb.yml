@@ -808,52 +808,17 @@
           2> "$OUT_DIR/smoke-stderr-q6.log" || Q6_EXIT=$?
         echo "Q6 exit=$Q6_EXIT tool_calls=$(grep -c '"tool_calls"' "$OUT_DIR/smoke-transcript-q6.jsonl" || true) metadata_checker_invocations=$(grep -c 'metadata-checker' "$OUT_DIR/smoke-transcript-q6.jsonl" || true)"
 
-        # 每问答案摘要（软报告，不判红）：取 transcript 中最后一条 assistant 文本，
-        # 统计期望关键词命中。stage 日志体量小、不被截断，是判读答案质量的主入口；
-        # endStages 的原始 dump 只用于深查。期望关键词取自
-        # tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json 的 expected_facts。
-        python3 - "$OUT_DIR" <<'PYEOF'
-        import json, sys
-        out = sys.argv[1]
-        expect = {
-            1: ["panel35", "totalRowCount", "ISSHOW"],
-            2: ["潜客信息跟进", "fact_qwSidebar", "跨页"],
-            3: ["13", "6", "潜客信息跟进"],
-            4: ["25", "105", "32"],
-            5: ["model22.phoneNumber"],
-            6: ["112", "15"],
-        }
-        def walk(o):
-            if isinstance(o, dict):
-                for k, v in o.items():
-                    if k == "content" and isinstance(v, str):
-                        yield v
-                    else:
-                        yield from walk(v)
-            elif isinstance(o, list):
-                for i in o:
-                    yield from walk(i)
-        for n in range(1, 7):
-            final = ""
-            try:
-                lines = open(f"{out}/smoke-transcript-q{n}.jsonl", encoding="utf-8", errors="replace").read().splitlines()
-            except FileNotFoundError:
-                continue
-            for ln in lines:
-                if "assistant" not in ln:
-                    continue
-                try:
-                    obj = json.loads(ln)
-                except Exception:
-                    continue
-                texts = [t for t in walk(obj) if t.strip()]
-                if texts:
-                    final = "".join(texts)
-            hits = [k for k in expect[n] if k in final]
-            print(f"Q{n}_ANSWER len={len(final)} expected_hits={len(hits)}/{len(expect[n])} hits={hits}")
-            head = final[:300].replace("\n", " ")
-            print(f"Q{n}_ANSWER_HEAD {head}")
-        PYEOF
+        # 语义 judge（软报告，不判红）：LLM 逐条判 must_mention / should_mention /
+        # must_not_mention，替代原关键词命中统计——关键词对措辞变体太脆，判读必须基于
+        # 语义。judge 复用 M58 的 CNB SSE adapter；infra 故障让测试失败，语义 pass/fail
+        # 校准期只报告。judge.md 是判读答案质量的主入口，endStages 的原始 dump 只用于深查。
+        export M58_CNB_REPO="${CNB_REPO_SLUG:?}"
+        export M58_CNB_MODEL="${KIMI_JUDGE_MODEL:-deepseek-v4-flash}"
+        export KIMI_SMOKE_TRANSCRIPT_DIR="$OUT_DIR"
+        export KIMI_JUDGE_OUTPUT_DIR="$OUT_DIR"
+        cargo test --features cli-local --test kimi_harness_judge_tests -- --ignored --nocapture
+        test -s "$OUT_DIR/judge.json"
+        cat "$OUT_DIR/judge.md"
 
         if grep -qF "$CNB_TOKEN" "$OUT_DIR"/smoke-transcript-q*.jsonl "$OUT_DIR"/smoke-stderr-q*.log 2>/dev/null; then
           echo "CNB_TOKEN leaked into kimi output"
