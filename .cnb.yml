@@ -747,9 +747,10 @@
         cp SKILL.md "$OUT_DIR/skills/metadata-checker/SKILL.md"
         ln -sf "$PWD/target/cnb/kimi-harness-build/release/metadata-checker" /usr/local/bin/metadata-checker
 
-        # 三问真实项目 benchmark：取自 tests/fixtures/corpus/ai_eval/
-        # xiaoshouyi_large_real_cases.json，覆盖 display 条件 / writer 链 / 模型读写
-        # 关系三个族。每问独立 kimi -p（全新上下文），问题自带项目路径
+        # 六问真实项目 benchmark：取自 tests/fixtures/corpus/ai_eval/
+        # xiaoshouyi_large_real_cases.json。Q1-Q3 为 hard/expert（display 条件 /
+        # writer 链 / 模型读写关系），Q4-Q6 为 easy（页面概览 / 单组件表达式 /
+        # 模型读写计数，均单次查询可答）。每问独立 kimi -p（全新上下文），问题自带项目路径
         #（harness 里没有 runner 代填 project-dir，真实用户也得自己说）。
         # 不预建图：模型是否按 SKILL.md 自己 check-graph → build-graph → query
         # 正是被测行为的一部分。
@@ -783,25 +784,52 @@
           2> "$OUT_DIR/smoke-stderr-q3.log" || Q3_EXIT=$?
         echo "Q3 exit=$Q3_EXIT tool_calls=$(grep -c '"tool_calls"' "$OUT_DIR/smoke-transcript-q3.jsonl" || true) metadata_checker_invocations=$(grep -c 'metadata-checker' "$OUT_DIR/smoke-transcript-q3.jsonl" || true)"
 
+        Q4_EXIT=0
+        timeout 1800 kimi -p "低代码项目 $REAL_PROJECT_DIR 中，app/售后.app/绑定车辆/会员已注册.spg 这个页面主要做什么？它有多少个用户入口、读取多少个数据源、写入多少个目标？" \
+          --skills-dir "$PWD/$OUT_DIR/skills" \
+          --output-format stream-json \
+          > "$OUT_DIR/smoke-transcript-q4.jsonl" \
+          2> "$OUT_DIR/smoke-stderr-q4.log" || Q4_EXIT=$?
+        echo "Q4 exit=$Q4_EXIT tool_calls=$(grep -c '"tool_calls"' "$OUT_DIR/smoke-transcript-q4.jsonl" || true) metadata_checker_invocations=$(grep -c 'metadata-checker' "$OUT_DIR/smoke-transcript-q4.jsonl" || true)"
+
+        Q5_EXIT=0
+        timeout 1800 kimi -p "低代码项目 $REAL_PROJECT_DIR 中，app/销售.app/销售/合同协议.spg 里 input3 这个组件的取值表达式是什么？它读取哪个字段？" \
+          --skills-dir "$PWD/$OUT_DIR/skills" \
+          --output-format stream-json \
+          > "$OUT_DIR/smoke-transcript-q5.jsonl" \
+          2> "$OUT_DIR/smoke-stderr-q5.log" || Q5_EXIT=$?
+        echo "Q5 exit=$Q5_EXIT tool_calls=$(grep -c '"tool_calls"' "$OUT_DIR/smoke-transcript-q5.jsonl" || true) metadata_checker_invocations=$(grep -c 'metadata-checker' "$OUT_DIR/smoke-transcript-q5.jsonl" || true)"
+
+        Q6_EXIT=0
+        timeout 1800 kimi -p "在低代码项目 $REAL_PROJECT_DIR 中，fact_saleContract 这张表被多少个节点读取、被多少个节点写入？" \
+          --skills-dir "$PWD/$OUT_DIR/skills" \
+          --output-format stream-json \
+          > "$OUT_DIR/smoke-transcript-q6.jsonl" \
+          2> "$OUT_DIR/smoke-stderr-q6.log" || Q6_EXIT=$?
+        echo "Q6 exit=$Q6_EXIT tool_calls=$(grep -c '"tool_calls"' "$OUT_DIR/smoke-transcript-q6.jsonl" || true) metadata_checker_invocations=$(grep -c 'metadata-checker' "$OUT_DIR/smoke-transcript-q6.jsonl" || true)"
+
         if grep -qF "$CNB_TOKEN" "$OUT_DIR"/smoke-transcript-q*.jsonl "$OUT_DIR"/smoke-stderr-q*.log 2>/dev/null; then
           echo "CNB_TOKEN leaked into kimi output"
           exit 1
         fi
-        if [ "$Q1_EXIT" -ne 0 ] || [ "$Q2_EXIT" -ne 0 ] || [ "$Q3_EXIT" -ne 0 ]; then
-          echo "kimi infra failure (q1=$Q1_EXIT q2=$Q2_EXIT q3=$Q3_EXIT)"
+        if [ "$Q1_EXIT" -ne 0 ] || [ "$Q2_EXIT" -ne 0 ] || [ "$Q3_EXIT" -ne 0 ] || [ "$Q4_EXIT" -ne 0 ] || [ "$Q5_EXIT" -ne 0 ] || [ "$Q6_EXIT" -ne 0 ]; then
+          echo "kimi infra failure (q1=$Q1_EXIT q2=$Q2_EXIT q3=$Q3_EXIT q4=$Q4_EXIT q5=$Q5_EXIT q6=$Q6_EXIT)"
           exit 1
         fi
         test -s "$OUT_DIR/smoke-transcript-q1.jsonl"
         test -s "$OUT_DIR/smoke-transcript-q2.jsonl"
         test -s "$OUT_DIR/smoke-transcript-q3.jsonl"
+        test -s "$OUT_DIR/smoke-transcript-q4.jsonl"
+        test -s "$OUT_DIR/smoke-transcript-q5.jsonl"
+        test -s "$OUT_DIR/smoke-transcript-q6.jsonl"
   endStages:
     - name: report smoke summary
       script: |
         OUT_DIR="target/kimi-harness-smoke"
         ls -lh "$OUT_DIR" || true
-        # 对三问分别 dump 含 tool_calls 的原始 JSONL 行（截断）与答案尾部，
+        # 对六问分别 dump 含 tool_calls 的原始 JSONL 行（截断）与答案尾部，
         # 不假设 stream-json 的字段嵌套形态。
-        for n in 1 2 3; do
+        for n in 1 2 3 4 5 6; do
           echo "===== Q${n} tool calls (raw, truncated) ====="
           grep '"tool_calls"' "$OUT_DIR/smoke-transcript-q${n}.jsonl" 2>/dev/null | cut -c1-1200 || true
           echo "===== Q${n} transcript tail ====="

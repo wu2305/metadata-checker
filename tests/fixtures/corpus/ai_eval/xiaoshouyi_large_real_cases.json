@@ -17,7 +17,7 @@
     "command_style": "cargo run -- <args>",
     "graph_db_path": "/tmp/xiaoshouyi-large-real-cases.graphdb"
   },
-  "eval_count": 5,
+  "eval_count": 8,
   "cases": [
     {
       "case_id": "xiaoshouyi_text41_display_conditions",
@@ -526,6 +526,231 @@
         "forbidden_practices": [
           "在截断输出上做全量结论",
           "把 consumed_by_dataflows 当作 readers/writers 的替代证据"
+        ]
+      }
+    },
+    {
+      "case_id": "xiaoshouyi_member_registered_page_overview",
+      "difficulty": "easy",
+      "risk_tags": [
+        "page_overview",
+        "single_query",
+        "summary_counts"
+      ],
+      "question": "/xiaoshouyi/app/售后.app/绑定车辆/会员已注册.spg 这个页面主要做什么？它有多少个用户入口、读取多少个数据源、写入多少个目标？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "source_path": "app/售后.app/绑定车辆/会员已注册.spg",
+      "real_project_target": "page:app/售后.app/绑定车辆/会员已注册.spg",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --relations 'page:app/售后.app/绑定车辆/会员已注册.spg' --budget compact"
+      ],
+      "minimal_command_plan": [
+        {
+          "command_kind": "--relations",
+          "target": "page:app/售后.app/绑定车辆/会员已注册.spg",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "standard_answer": {
+        "summary": "会员已注册是一个 mixed_interaction_page：summary 显示 25 个用户入口（entrypoint_count=25）、读取 105 个数据源（data_source_count=105）、写入 32 个目标（write_target_count=32）、19 个跳转（navigation_count=19）。",
+        "must_mention": [
+          "entrypoint_count=25",
+          "data_source_count=105",
+          "write_target_count=32"
+        ],
+        "should_mention": [
+          "page_role=mixed_interaction_page",
+          "navigation_count=19"
+        ],
+        "must_not_mention": [
+          "页面没有写入动作",
+          "拒答或称需要逐个组件人工统计"
+        ]
+      },
+      "expected_facts": [
+        "summary.entrypoint_count=25",
+        "summary.data_source_count=105",
+        "summary.write_target_count=32",
+        "summary.navigation_count=19",
+        "summary.page_role=mixed_interaction_page"
+      ],
+      "forbidden_claims": [
+        "不调用工具直接猜数字",
+        "把 key_model_count=25 当成入口数之外的矛盾结论"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.entrypoint_count",
+          "op": "eq",
+          "value": 25,
+          "description": "页面应有 25 个用户入口"
+        },
+        {
+          "path": "summary.data_source_count",
+          "op": "eq",
+          "value": 105,
+          "description": "页面应读取 105 个数据源"
+        },
+        {
+          "path": "summary.write_target_count",
+          "op": "eq",
+          "value": 32,
+          "description": "页面应写入 32 个目标"
+        }
+      ],
+      "answer_style_policy": {
+        "principles": [
+          "直接引用 summary 计数字段回答，一次查询即可"
+        ],
+        "forbidden_practices": [
+          "逐组件展开罗列代替 summary 计数"
+        ]
+      }
+    },
+    {
+      "case_id": "xiaoshouyi_contract_input3_value_expr",
+      "difficulty": "easy",
+      "risk_tags": [
+        "value_expr",
+        "single_component",
+        "single_query"
+      ],
+      "question": "/xiaoshouyi/app/销售.app/销售/合同协议.spg 里 input3 这个组件的取值表达式是什么？它读取哪个字段？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "source_path": "app/销售.app/销售/合同协议.spg",
+      "real_project_target": "comp:app/销售.app/销售/合同协议.spg|input3",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --explain 'comp:app/销售.app/销售/合同协议.spg|input3' --budget compact"
+      ],
+      "minimal_command_plan": [
+        {
+          "command_kind": "--explain",
+          "target": "comp:app/销售.app/销售/合同协议.spg|input3",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "standard_answer": {
+        "summary": "input3 是 input 组件，what_is_it 显示「读取 model22」。details.reads 给出取值表达式 raw_expr=model22.phoneNumber，field_path=model22.phoneNumber，并经 FieldAlias 对应物理字段 fact_qwSidebar.phoneNumber。",
+        "must_mention": [
+          "model22.phoneNumber",
+          "读取 model22"
+        ],
+        "should_mention": [
+          "fact_qwSidebar.phoneNumber"
+        ],
+        "must_not_mention": [
+          "input3 没有取值表达式",
+          "input3 的值是本页计算生成"
+        ]
+      },
+      "expected_facts": [
+        "summary.what_is_it 包含 读取 model22",
+        "details.reads 包含 raw_expr=model22.phoneNumber",
+        "details.reads 包含 field_path=fact_qwSidebar.phoneNumber"
+      ],
+      "forbidden_claims": [
+        "不调用工具直接猜字段名",
+        "把 writer 链问题混进取值表达式回答"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "details.reads",
+          "op": "array_any_contains_substring",
+          "field": "raw_expr",
+          "value": "model22.phoneNumber",
+          "description": "input3 的取值表达式必须是 model22.phoneNumber"
+        }
+      ],
+      "answer_style_policy": {
+        "principles": [
+          "用 reads.raw_expr 直接回答取值表达式"
+        ],
+        "forbidden_practices": [
+          "把跨页 writer 分析当作本问题答案"
+        ]
+      }
+    },
+    {
+      "case_id": "xiaoshouyi_fact_salecontract_read_write_counts",
+      "difficulty": "easy",
+      "risk_tags": [
+        "model_fanout",
+        "summary_counts",
+        "output_truncation_awareness"
+      ],
+      "question": "xiaoshouyi 项目中 fact_saleContract 这张表被多少个节点读取、被多少个节点写入？",
+      "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+      "source_path": "data/tables/主数据/fact_saleContract.tbl",
+      "real_project_target": "model:fact_saleContract",
+      "required_commands": [
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --relations 'model:fact_saleContract' --budget compact"
+      ],
+      "minimal_command_plan": [
+        {
+          "command_kind": "--relations",
+          "target": "model:fact_saleContract",
+          "args": [
+            "--budget",
+            "compact"
+          ],
+          "requires_project_dir": true,
+          "budget": "compact"
+        }
+      ],
+      "standard_answer": {
+        "summary": "fact_saleContract 是高扇出模型：summary 显示被 112 个节点读取（read_by_count=112）、被 15 个节点写入（written_by_count=15），另有 55 个 DataFlow 消费（consumed_by_dataflow_count=55）。compact 下 readers/writers 列表截断为前 5 条，但 summary 计数是全量。",
+        "must_mention": [
+          "read_by_count=112",
+          "written_by_count=15"
+        ],
+        "should_mention": [
+          "consumed_by_dataflow_count=55",
+          "compact 截断不影响 summary 计数"
+        ],
+        "must_not_mention": [
+          "fact_saleContract 只被 5 个节点读取",
+          "把截断后的列表长度当成总数"
+        ]
+      },
+      "expected_facts": [
+        "summary.read_by_count=112",
+        "summary.written_by_count=15",
+        "summary.consumed_by_dataflow_count=55"
+      ],
+      "forbidden_claims": [
+        "不调用工具直接猜数字",
+        "把 OUTPUT_TRUNCATED 后的 5 条列表当成完整计数"
+      ],
+      "expected_output_assertions": [
+        {
+          "path": "summary.read_by_count",
+          "op": "eq",
+          "value": 112,
+          "description": "fact_saleContract 应有 112 个读取节点"
+        },
+        {
+          "path": "summary.written_by_count",
+          "op": "eq",
+          "value": 15,
+          "description": "fact_saleContract 应有 15 个写入节点"
+        }
+      ],
+      "answer_style_policy": {
+        "principles": [
+          "直接引用 summary 的 read_by_count/written_by_count 回答"
+        ],
+        "forbidden_practices": [
+          "用截断列表长度代替 summary 计数"
         ]
       }
     }
