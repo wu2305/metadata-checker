@@ -11,14 +11,14 @@
     "真实项目 graphdb 较大，串行运行 case；并发运行容易触发 redb lock。",
     "建议命令追加 --graph-lock-timeout-ms 30000。",
     "模型只应读取 SKILL.md、CLI 输出和本文件中的问题，不应读取源码或历史对话。",
-    "expected_facts 的权威基准是 cnb 的 xiaoshouyi-corpus 分支干净检出（CI 冒烟流水线也用它）。本地工作副本带有约 707 个未跟踪 .spg/.tbl 与大量未提交修改，节点计数会与语料分支显著不同（如 fact_qwSidebar 读写数、fact_saleContract 读取数），不要用本地脏副本校核计数。",
-    "标记 status=stale_on_corpus 的 case 在当前语料快照（xiaoshouyi-corpus@5dcc964e）上工具返回空结果，语料更新前不应纳入评分。"
+    "expected_facts 的权威基准是 cnb 的 xiaoshouyi-corpus 分支 @ 6920ac51（与本地 succ-definitions 工作区当前状态一致，CI 冒烟流水线也 clone 该分支）。语料再次更新后必须重建 graphdb 复核全部计数。",
+    "已知行为差异：旧动词 --explain-condition 保留 'model:PAGE|model11' 的页面限定，facts 嵌套在 details.answer_facts.*；新动词 --explain 会把页面限定退化为全局 'model:model11' 解析到其他页面同名模型，facts 嵌套在 details.condition_facts.answer_facts.*。本文件 required_commands 统一使用 --explain-condition，断言路径与之对应。"
   ],
   "verified_with": {
     "date": "2026-08-07",
     "command_style": "cargo run -- <args>",
-    "graph_db_path": "/tmp/xiaoshouyi-corpus.graphdb",
-    "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 5dcc964e（干净 sparse 检出）",
+    "graph_db_path": "/tmp/xiaoshouyi-v2.graphdb",
+    "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
     "binary": "metadata-checker @ 3e49dc6 release（cli-local）"
   },
   "eval_count": 8,
@@ -88,20 +88,20 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "details.condition_facts.answer_facts.display_facts.has_direct_condition",
+          "path": "details.answer_facts.display_facts.has_direct_condition",
           "op": "eq",
           "value": false,
           "description": "text41 不应被判定为自身有 direct visibleCondition"
         },
         {
-          "path": "details.condition_facts.answer_facts.display_facts.inherited_conditions",
+          "path": "details.answer_facts.display_facts.inherited_conditions",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "model11.totalRowCount__ > 0",
           "description": "继承祖先容器的 totalRowCount__ 显示门控"
         },
         {
-          "path": "details.condition_facts.answer_facts.display_facts.expanded_data_gates",
+          "path": "details.answer_facts.display_facts.expanded_data_gates",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "model11.ISSHOW == 1",
@@ -123,8 +123,6 @@
     {
       "case_id": "xiaoshouyi_text41_value_source_dataflow_origin",
       "difficulty": "hard",
-      "status": "stale_on_corpus",
-      "stale_reason": "语料快照 xiaoshouyi-corpus@5dcc964e 的 会员已注册.spg 版本中，text41 的 value-source 查询返回空（value_source_context not available）；本 case 的事实派生自本地更新的页面版本，语料更新前不可用于评分。",
       "risk_tags": [
         "value_source",
         "bare_field",
@@ -195,19 +193,19 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "details.condition_facts.answer_facts.value_source_facts.nearest_data_context",
+          "path": "details.answer_facts.value_source_facts.nearest_data_context",
           "op": "eq",
           "value": "sliderpanel2",
           "description": "裸字段必须通过最近数据容器解析"
         },
         {
-          "path": "details.condition_facts.answer_facts.value_source_facts.field_path",
+          "path": "details.answer_facts.value_source_facts.field_path",
           "op": "eq",
           "value": "model11.CUSTOMAUTOMYAUTOLIST",
           "description": "裸字段应被归一为 model11.CUSTOMAUTOMYAUTOLIST"
         },
         {
-          "path": "details.condition_facts.answer_facts.value_source_facts.proven_physical_input",
+          "path": "details.answer_facts.value_source_facts.proven_physical_input",
           "op": "eq",
           "value": "$DATA:/主数据/fact_autoCustomerAutoRel.tbl.车辆VIN",
           "description": "必须输出已证明的字段级物理来源"
@@ -227,8 +225,6 @@
     {
       "case_id": "xiaoshouyi_model11_availability_dataflow_filters",
       "difficulty": "expert",
-      "status": "stale_on_corpus",
-      "stale_reason": "语料快照 xiaoshouyi-corpus@5dcc964e 上，按页面限定 target 查询 model11 availability 返回空 gates（该快照的页面版本尚无本 case 派生所用的 DataFlow 绑定）；语料更新前不可用于评分。注意：旧动词 --explain-condition 能保留页面限定，新动词 --explain 会把 'model:PAGE|model11' 退化为全局 'model:model11' 并解析到其他页面同名模型，属已知行为差异。",
       "risk_tags": [
         "data_availability",
         "page_scoped_model",
@@ -302,20 +298,20 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "details.condition_facts.answer_facts.availability_facts.dataflow_table",
+          "path": "details.answer_facts.availability_facts.dataflow_table",
           "op": "eq",
           "value": "$DATA:/加工表/小程序/绑车.tbl",
           "description": "page-scoped model11 必须解析到 DataFlow 表"
         },
         {
-          "path": "details.condition_facts.answer_facts.availability_facts.gates",
+          "path": "details.answer_facts.availability_facts.gates",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "[是否展示] == 1",
           "description": "必须包含 DataFlow 源过滤"
         },
         {
-          "path": "details.condition_facts.answer_facts.availability_facts.gates",
+          "path": "details.answer_facts.availability_facts.gates",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "$user.WECHAT_UNIONID",
@@ -365,7 +361,7 @@
         }
       ],
       "standard_answer": {
-        "summary": "input3 在合同协议页面不是本页计算出来的值。writer 链路显示：input3 读取 model22.phoneNumber，model22.phoneNumber 通过 FieldAlias 对应物理表字段 fact_qwSidebar.phoneNumber。该物理字段存在跨页写入动作，关键路径包括 app/销售.app/销售/潜客信息跟进.spg 的 button1.action1 与 button1.action4 写入 fact_qwSidebar.phoneNumber，以及 app/销售.app/销售/客户.spg 的 button1.action2 写入同一字段。回答时必须说明这是跨页 writer 链路，不是只在合同协议页面内生成。",
+        "summary": "input3 在合同协议页面不是本页计算出来的值。writer 链路显示：input3 读取 model22.phoneNumber，model22.phoneNumber 通过 FieldAlias 对应物理表字段 fact_qwSidebar.phoneNumber。该物理字段存在跨页写入动作，关键路径包括 app/销售.app/销售/潜客信息跟进.spg 的 button1.action1 与 button1.action4 写入 fact_qwSidebar.phoneNumber，以及 app/销售.app/销售/保客信息.spg 的 button3.action4 写入同一字段。回答时必须说明这是跨页 writer 链路，不是只在合同协议页面内生成。",
         "must_mention": [
           "input3",
           "model22.phoneNumber",
@@ -374,11 +370,11 @@
           "潜客信息跟进.spg",
           "button1|action1",
           "button1|action4",
-          "客户.spg button1|action2",
+          "保客信息.spg button3|action4",
           "跨页写入"
         ],
         "should_mention": [
-          "保客信息.spg button3 action1/action4 也是同一字段的 writer",
+          "保客信息.spg button3 action1 也写同一表字段",
           "writer intent 与 display/value-source intent 不同"
         ],
         "must_not_mention": [
@@ -394,7 +390,7 @@
         "路径包含 field:fact_qwSidebar.phoneNumber",
         "路径包含 action:app/销售.app/销售/潜客信息跟进.spg|button1|action1",
         "路径包含 action:app/销售.app/销售/潜客信息跟进.spg|button1|action4",
-        "路径包含 action:app/销售.app/销售/客户.spg|button1|action2"
+        "路径包含 action:app/销售.app/销售/保客信息.spg|button3|action4"
       ],
       "forbidden_claims": [
         "只查询合同协议页面后断言没有写入",
@@ -404,14 +400,14 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "details.condition_facts.answer_facts.writer_facts.paths",
+          "path": "details.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
           "field": "result",
           "value": "field:model22.phoneNumber>field:fact_qwSidebar.phoneNumber>action:app/销售.app/销售/潜客信息跟进.spg|button1|action1",
           "description": "必须有 action1 跨页写入路径"
         },
         {
-          "path": "details.condition_facts.answer_facts.writer_facts.paths",
+          "path": "details.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
           "field": "result",
           "value": "field:model22.phoneNumber>field:fact_qwSidebar.phoneNumber>action:app/销售.app/销售/潜客信息跟进.spg|button1|action4",
@@ -459,10 +455,10 @@
         }
       ],
       "standard_answer": {
-        "summary": "fact_qwSidebar 是高扇出模型：summary 显示 read_by_count=11、written_by_count=12、consumed_by_dataflow_count=10，并且是 DataFlowParticipant。读关系中可以看到 合同协议.spg 的 input3 读取 fact_qwSidebar.phoneNumber（表达式 model22.phoneNumber）。写关系中可以看到 潜客信息跟进.spg 的 button1.action1/action4 写 fact_qwSidebar.phoneNumber（action1 还写 phone_time）；客户.spg 的 button1.action1/action2 写 phoneNumber/staffId/qwContactId/externalUserId/addTime；保客信息.spg 的 button3.action1/action4 也写 phoneNumber/phone_time。应使用 normal budget 避免 compact 截断关键 writer。",
+        "summary": "fact_qwSidebar 是高扇出模型：summary 显示 read_by_count=13、written_by_count=6、consumed_by_dataflow_count=10，并且是 DataFlowParticipant。读关系中可以看到 合同协议.spg 的 input3 读取 fact_qwSidebar.phoneNumber（表达式 model22.phoneNumber）。写关系中可以看到 潜客信息跟进.spg 的 button1.action1/action4 写 fact_qwSidebar.phoneNumber（action1 还写 phone_time）；保客信息.spg 的 button3.action1/action4 也写 phoneNumber/phone_time。应使用 normal budget 避免 compact 截断关键 writer。",
         "must_mention": [
-          "read_by_count=11",
-          "written_by_count=12",
+          "read_by_count=13",
+          "written_by_count=6",
           "consumed_by_dataflow_count=10",
           "DataFlowParticipant",
           "合同协议.spg input3 reads fact_qwSidebar.phoneNumber",
@@ -471,7 +467,6 @@
           "normal budget 避免截断"
         ],
         "should_mention": [
-          "客户.spg button1 action1/action2 也写该表多个字段",
           "保客信息.spg button3 action1/action4 也写同一表字段",
           "consumed_by_dataflows 包含多个 DataFlow 输入"
         ],
@@ -483,12 +478,12 @@
         ]
       },
       "expected_facts": [
-        "summary.read_by_count=11",
-        "summary.written_by_count=12",
+        "summary.read_by_count=13",
+        "summary.written_by_count=6",
         "summary.consumed_by_dataflow_count=10",
         "readers 包含 app/销售.app/销售/合同协议.spg 的 input3",
         "writers 包含 app/销售.app/销售/潜客信息跟进.spg button1 action1/action4",
-        "writers 包含 app/销售.app/销售/客户.spg button1 action1/action2"
+        "writers 包含 app/销售.app/销售/保客信息.spg button3 action1/action4"
       ],
       "forbidden_claims": [
         "没有跨页 writer",
@@ -500,14 +495,14 @@
         {
           "path": "summary.read_by_count",
           "op": "eq",
-          "value": 11,
-          "description": "fact_qwSidebar 应有 11 个读取节点"
+          "value": 13,
+          "description": "fact_qwSidebar 应有 13 个读取节点"
         },
         {
           "path": "summary.written_by_count",
           "op": "eq",
-          "value": 12,
-          "description": "fact_qwSidebar 应有 12 个写入节点"
+          "value": 6,
+          "description": "fact_qwSidebar 应有 6 个写入节点"
         },
         {
           "path": "details.readers",
@@ -563,15 +558,15 @@
         }
       ],
       "standard_answer": {
-        "summary": "会员已注册是一个 mixed_interaction_page：summary 显示 32 个用户入口（entrypoint_count=32）、读取 153 个数据源（data_source_count=153）、写入 46 个目标（write_target_count=46）、27 个跳转（navigation_count=27）。",
+        "summary": "会员已注册是一个 mixed_interaction_page：summary 显示 25 个用户入口（entrypoint_count=25）、读取 105 个数据源（data_source_count=105）、写入 32 个目标（write_target_count=32）、19 个跳转（navigation_count=19）。",
         "must_mention": [
-          "entrypoint_count=32",
-          "data_source_count=153",
-          "write_target_count=46"
+          "entrypoint_count=25",
+          "data_source_count=105",
+          "write_target_count=32"
         ],
         "should_mention": [
           "page_role=mixed_interaction_page",
-          "navigation_count=27"
+          "navigation_count=19"
         ],
         "must_not_mention": [
           "页面没有写入动作",
@@ -579,34 +574,34 @@
         ]
       },
       "expected_facts": [
-        "summary.entrypoint_count=32",
-        "summary.data_source_count=153",
-        "summary.write_target_count=46",
-        "summary.navigation_count=27",
+        "summary.entrypoint_count=25",
+        "summary.data_source_count=105",
+        "summary.write_target_count=32",
+        "summary.navigation_count=19",
         "summary.page_role=mixed_interaction_page"
       ],
       "forbidden_claims": [
         "不调用工具直接猜数字",
-        "把 key_model_count=35 当成入口数并给出矛盾结论"
+        "把 key_model_count=25 当成入口数并给出矛盾结论"
       ],
       "expected_output_assertions": [
         {
           "path": "summary.entrypoint_count",
           "op": "eq",
-          "value": 32,
-          "description": "页面应有 32 个用户入口"
+          "value": 25,
+          "description": "页面应有 25 个用户入口"
         },
         {
           "path": "summary.data_source_count",
           "op": "eq",
-          "value": 153,
-          "description": "页面应读取 153 个数据源"
+          "value": 105,
+          "description": "页面应读取 105 个数据源"
         },
         {
           "path": "summary.write_target_count",
           "op": "eq",
-          "value": 46,
-          "description": "页面应写入 46 个目标"
+          "value": 32,
+          "description": "页面应写入 32 个目标"
         }
       ],
       "answer_style_policy": {
@@ -714,13 +709,13 @@
         }
       ],
       "standard_answer": {
-        "summary": "fact_saleContract 是高扇出模型：summary 显示被 117 个节点读取（read_by_count=117）、被 15 个节点写入（written_by_count=15），另有 53 个 DataFlow 消费（consumed_by_dataflow_count=53）。compact 下 readers/writers 列表截断为前 5 条，但 summary 计数是全量。",
+        "summary": "fact_saleContract 是高扇出模型：summary 显示被 112 个节点读取（read_by_count=112）、被 15 个节点写入（written_by_count=15），另有 55 个 DataFlow 消费（consumed_by_dataflow_count=55）。compact 下 readers/writers 列表截断为前 5 条，但 summary 计数是全量。",
         "must_mention": [
-          "read_by_count=117",
+          "read_by_count=112",
           "written_by_count=15"
         ],
         "should_mention": [
-          "consumed_by_dataflow_count=53",
+          "consumed_by_dataflow_count=55",
           "compact 截断不影响 summary 计数"
         ],
         "must_not_mention": [
@@ -729,9 +724,9 @@
         ]
       },
       "expected_facts": [
-        "summary.read_by_count=117",
+        "summary.read_by_count=112",
         "summary.written_by_count=15",
-        "summary.consumed_by_dataflow_count=53"
+        "summary.consumed_by_dataflow_count=55"
       ],
       "forbidden_claims": [
         "不调用工具直接猜数字",
@@ -741,8 +736,8 @@
         {
           "path": "summary.read_by_count",
           "op": "eq",
-          "value": 117,
-          "description": "fact_saleContract 应有 117 个读取节点"
+          "value": 112,
+          "description": "fact_saleContract 应有 112 个读取节点"
         },
         {
           "path": "summary.written_by_count",
