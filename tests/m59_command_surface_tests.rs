@@ -297,7 +297,10 @@ fn test_ambiguous_bare_target_answers_every_candidate() {
         "每个候选都要有自己的 summary：{output}"
     );
     // 谁是谁必须说清楚，否则两份答案混在一起比不答更糟。
-    let diagnostics = output["diagnostics"].as_array().cloned().unwrap_or_default();
+    let diagnostics = output["diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert!(
         has_diagnostic(&diagnostics, "AMBIGUOUS_TARGET_ANSWERED"),
         "{diagnostics:?}"
@@ -551,7 +554,10 @@ fn test_bare_prefix_enumerates_instead_of_erroring() {
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
     assert!(targets.len() >= 2, "{targets:?}");
-    assert!(targets.iter().all(|id| id.starts_with("page:")), "{targets:?}");
+    assert!(
+        targets.iter().all(|id| id.starts_with("page:")),
+        "{targets:?}"
+    );
     // 列出来还不够：下一条命令要能直接照抄。
     let next = output["next_queries"].as_array().expect("next_queries");
     assert!(
