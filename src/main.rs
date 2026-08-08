@@ -337,13 +337,14 @@ fn augment_field_lineage_queries(result: &mut serde_json::Value) {
             .as_str()
             .is_some_and(|text| text.contains("field:") && text.contains("<字段名>"))
     });
-    for field in fields.iter().take(3) {
+    // 排在最前面：模型几乎总是照抄第一条，而字段级来源正是这次调用没能回答的那部分。
+    for (offset, field) in fields.iter().take(3).enumerate() {
         let command = metadata_checker::output::schema::format_next_query(
-            "--explain {} for field-level lineage",
+            "--explain {} for field-level lineage (chain across DataFlows)",
             &format!("field:{model_name}.{field}"),
         );
         if !queries.iter().any(|q| q.as_str() == Some(command.as_str())) {
-            queries.push(serde_json::json!(command));
+            queries.insert(offset.min(queries.len()), serde_json::json!(command));
         }
     }
 }
@@ -371,7 +372,9 @@ fn budget_byte_cap(budget: &str) -> Option<usize> {
 }
 
 fn json_byte_len(value: &serde_json::Value) -> usize {
-    serde_json::to_string(value).map(|text| text.len()).unwrap_or(0)
+    serde_json::to_string(value)
+        .map(|text| text.len())
+        .unwrap_or(0)
 }
 
 /// 让 `--budget compact` 真的是 compact——但一个事实都不能少。
@@ -573,6 +576,46 @@ fn enumerate_prefix_targets(
     result
 }
 
+/// 从一份答案里摘出直接相邻的节点 id。
+///
+/// 全答模式下 details 常常放不进预算（两三份完整 details 拼起来就超了），于是
+/// `summary.answers[*].summary` 成了模型唯一读得到的东西——而它只有计数，没有名字。
+/// 评测里 `context_button1_neighbors` 12 次有 10 次少了 `action1`：那个 id 明明在
+/// evidence 里，但模型不去翻 evidence。「周围有哪些依赖」问的就是这些名字，
+/// 它们必须出现在答案里，而不是只出现在证据里。
+fn key_related_nodes(answer: &serde_json::Value) -> Vec<String> {
+    let mut nodes: Vec<String> = Vec::new();
+    let Some(details) = answer.get("details").and_then(serde_json::Value::as_object) else {
+        return nodes;
+    };
+    for key in [
+        "triggers",
+        "affects",
+        "writes",
+        "reads",
+        "triggered_by",
+        "navigation",
+        "lineage",
+    ] {
+        let Some(items) = details.get(key).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for item in items.iter().take(6) {
+            for field in ["node_id", "id", "to", "from"] {
+                if let Some(id) = item.get(field).and_then(serde_json::Value::as_str)
+                    && !id.is_empty()
+                    && !nodes.iter().any(|known| known == id)
+                {
+                    nodes.push(id.to_string());
+                    break;
+                }
+            }
+        }
+    }
+    nodes.truncate(12);
+    nodes
+}
+
 /// 候选少到可以全答的上限。
 ///
 /// 超过这个数就只能交回候选：把十几个节点的答案拼在一条输出里，模型读到的是噪音。
@@ -680,6 +723,7 @@ fn combine_candidate_answers(
             serde_json::json!({
                 "target": id,
                 "summary": value.get("summary").cloned().unwrap_or(serde_json::Value::Null),
+                "key_nodes": key_related_nodes(value),
             })
         })
         .collect();
@@ -696,10 +740,16 @@ fn combine_candidate_answers(
         if let Some(items) = value.get("evidence").and_then(serde_json::Value::as_array) {
             evidence.extend(items.iter().cloned());
         }
-        if let Some(items) = value.get("diagnostics").and_then(serde_json::Value::as_array) {
+        if let Some(items) = value
+            .get("diagnostics")
+            .and_then(serde_json::Value::as_array)
+        {
             diagnostics.extend(items.iter().cloned());
         }
-        if let Some(items) = value.get("next_queries").and_then(serde_json::Value::as_array) {
+        if let Some(items) = value
+            .get("next_queries")
+            .and_then(serde_json::Value::as_array)
+        {
             next_queries.extend(items.iter().cloned());
         }
     }

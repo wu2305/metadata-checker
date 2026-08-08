@@ -803,7 +803,16 @@
           "target": "page:app/page_relations.spg",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": null,
+          "alternatives": [
+            {
+              "command_kind": "--relations",
+              "target": "page:",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
         }
       ],
       "expected_output_assertions": [

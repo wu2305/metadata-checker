@@ -283,16 +283,21 @@ pub fn build_query_model_output(
             field_names.push(leaf.to_string());
         }
     }
-    output.next_queries = vec![
-        format_next_query("--explain {} for full semantic summary", model_id),
-        format_next_query("--query-dataflow {} for internal subgraph", model_id),
-    ];
+    // 顺序即建议。模型几乎总是照抄第一条，而这次调用刚刚回答完模型级关系——再来一条
+    // `--explain model:X` 基本是重复。评测里 `dataflow_chain_trace` 12 次有 10 次栽在这里：
+    // 第一步走对了，第二步照抄第一条 next_query 回到模型级，再也走不到字段。
+    // 还不知道的是字段级来源，就把它排在最前面。
+    output.next_queries = Vec::new();
     for field in field_names.iter().take(3) {
         output.next_queries.push(format_next_query(
-            "--explain {} for field-level lineage",
+            "--explain {} for field-level lineage (chain across DataFlows)",
             &format!("field:{model_name}.{field}"),
         ));
     }
+    output.next_queries.extend([
+        format_next_query("--query-dataflow {} for internal subgraph", model_id),
+        format_next_query("--explain {} for full semantic summary", model_id),
+    ]);
     if field_names.is_empty() {
         output.next_queries.push(format!(
             "--explain 'field:{model_name}.<字段名>'（单个字段的上游来源与下游去向，跨 DataFlow 的链式传递要逐字段查）"

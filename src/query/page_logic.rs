@@ -950,24 +950,60 @@ fn page_conclusion(
 /// （PassesParam 的 `to` 是**参数节点** `param:目标详情/param1`，不是页面）、以及
 /// ActionControlsComponent 这种根本不是跳转的。把参数节点当成目标页面念出来就是在
 /// 编事实，所以按 `to` 的类型分开处理。
-fn navigation_statement(navigation: &[serde_json::Value]) -> Option<String> {
+fn navigation_statement(
+    navigation: &[serde_json::Value],
+    action_flows: &[serde_json::Value],
+) -> Option<String> {
     if navigation.is_empty() {
         return None;
     }
     let mut page_targets: Vec<String> = Vec::new();
     let mut params: Vec<String> = Vec::new();
+    // 发起跳转的那些 action 的 id，用来回查它们的类型。
+    let mut source_actions: Vec<String> = Vec::new();
     for entry in navigation {
         let Some(to) = entry.get("to").and_then(|v| v.as_str()) else {
             continue;
         };
         let name = entry.get("to_name").and_then(|v| v.as_str()).unwrap_or(to);
-        let label = format!("{name}（{to}）");
+        if let Some(from) = entry.get("from").and_then(|v| v.as_str())
+            && from.starts_with("action:")
+            && !source_actions.iter().any(|known| known == from)
+        {
+            source_actions.push(from.to_string());
+        }
         if entry.get("type").and_then(|v| v.as_str()) == Some("PassesParam") {
+            // 参数只报名字没用——问「传了哪些参数」的人要的是传了什么值。
+            let label = match entry.get("raw_expr").and_then(|v| v.as_str()) {
+                Some(expr) if !expr.is_empty() => format!("{name}（{to}，取值 {expr}）"),
+                _ => format!("{name}（{to}）"),
+            };
             if !params.contains(&label) {
                 params.push(label);
             }
-        } else if to.starts_with("page:") && !page_targets.contains(&label) {
-            page_targets.push(label);
+        } else if to.starts_with("page:") {
+            let label = format!("{name}（{to}）");
+            if !page_targets.contains(&label) {
+                page_targets.push(label);
+            }
+        }
+    }
+
+    // 跳转是哪种 action 干的（link / showDialog / ...）是这个问句的核心事实之一，
+    // 而它只存在于 action_flows 里，navigation 边上没有。
+    let mut action_types: Vec<String> = Vec::new();
+    for flow in action_flows {
+        let Some(node_id) = flow.get("node_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if !source_actions.iter().any(|known| known == node_id) {
+            continue;
+        }
+        if let Some(action_type) = flow.get("action_type").and_then(|v| v.as_str())
+            && !action_type.is_empty()
+            && !action_types.iter().any(|known| known == action_type)
+        {
+            action_types.push(action_type.to_string());
         }
     }
     if page_targets.is_empty() && params.is_empty() {
@@ -979,11 +1015,17 @@ fn navigation_statement(navigation: &[serde_json::Value]) -> Option<String> {
     } else {
         format!("该页面跳转的目标页面为：{}。", page_targets.join("、"))
     };
+    if !action_types.is_empty() {
+        statement.push_str(&format!(
+            "跳转由 action_type={} 的动作发起。",
+            action_types.join(" / ")
+        ));
+    }
     if params.is_empty() {
         statement.push_str("这些跳转没有解析到参数传递。");
     } else {
         statement.push_str(&format!(
-            "跳转时通过 PassesParam 边向目标页面传递了参数：{}，参数取值见 details.navigation 的 raw_expr。",
+            "跳转时通过 PassesParam 边向目标页面传递了参数：{}。逐条依据见 details.navigation。",
             params.join("、")
         ));
     }
@@ -2073,7 +2115,7 @@ fn build_query_page_logic_output_inner(
     // 结论，正是应该留在工具里的部分。
     // 跳转的目标页面藏在 details.navigation[*].to 里，compact 预算下这个数组还会被截断，
     // 于是「跳去哪、带没带参数」这个问句里最核心的事实反而是最容易丢的。
-    let navigation_statement = navigation_statement(&navigation);
+    let navigation_statement = navigation_statement(&navigation, &action_flows);
 
     let mut conclusion = page_conclusion(
         page_role,
@@ -2644,7 +2686,7 @@ mod answer_statement_tests {
                 "to": "param:详情/orderId", "to_name": "orderId", "type": "PassesParam",
             }),
         ];
-        let statement = navigation_statement(&navigation).unwrap();
+        let statement = navigation_statement(&navigation, &[]).unwrap();
         assert!(statement.contains("目标页面为：详情（page:app/详情.spg）"));
         assert!(statement.contains("传递了参数：orderId（param:详情/orderId）"));
         assert!(!statement.contains("目标页面为：orderId"));
@@ -2655,11 +2697,78 @@ mod answer_statement_tests {
         let navigation = vec![serde_json::json!({
             "to": "comp:app/a.spg|b", "to_name": "b", "type": "ActionControlsComponent",
         })];
-        assert!(navigation_statement(&navigation).is_none());
+        assert!(navigation_statement(&navigation, &[]).is_none());
     }
 
     #[test]
     fn no_navigation_says_nothing_here_and_leaves_it_to_absent() {
-        assert!(navigation_statement(&[]).is_none());
+        assert!(navigation_statement(&[], &[]).is_none());
+    }
+
+    #[test]
+    fn passed_param_reports_the_value_expression_not_just_the_name() {
+        // 问「传了哪些参数」的人要的是传了什么值，只报名字等于没回答。
+        let navigation = vec![serde_json::json!({
+            "to": "param:详情/orderId",
+            "to_name": "orderId",
+            "type": "PassesParam",
+            "raw_expr": "table1.selectedRow.id",
+        })];
+        let statement = navigation_statement(&navigation, &[]).unwrap();
+        assert!(
+            statement.contains("orderId（param:详情/orderId，取值 table1.selectedRow.id）"),
+            "{statement}"
+        );
+        // 只解析到传参、没解析到目标页面时，不能反过来说成「没有跳转」。
+        assert!(statement.contains("目标页面未解析出来"), "{statement}");
+    }
+
+    #[test]
+    fn navigation_names_the_action_type_that_triggered_it() {
+        // action_type 只存在于 action_flows，navigation 边上没有；跳转是 link 还是
+        // showDialog 是这个问句的核心事实之一。
+        let navigation = vec![serde_json::json!({
+            "from": "action:app/a.spg|button1|action1",
+            "to": "page:app/详情.spg",
+            "to_name": "详情",
+            "type": "OpensPage",
+        })];
+        let action_flows = vec![
+            serde_json::json!({
+                "node_id": "action:app/a.spg|button1|action1", "action_type": "link",
+            }),
+            // 不是本次跳转的发起者，不能混进来。
+            serde_json::json!({
+                "node_id": "action:app/a.spg|button9|action1", "action_type": "showDialog",
+            }),
+        ];
+        let statement = navigation_statement(&navigation, &action_flows).unwrap();
+        assert!(statement.contains("action_type=link"), "{statement}");
+        assert!(!statement.contains("showDialog"), "{statement}");
+    }
+
+    #[test]
+    fn repeated_action_type_is_reported_once() {
+        let navigation = vec![
+            serde_json::json!({
+                "from": "action:app/a.spg|button1|action1",
+                "to": "page:app/x.spg", "to_name": "x", "type": "OpensPage",
+            }),
+            serde_json::json!({
+                "from": "action:app/a.spg|button2|action1",
+                "to": "page:app/y.spg", "to_name": "y", "type": "OpensPage",
+            }),
+        ];
+        let action_flows = vec![
+            serde_json::json!({
+                "node_id": "action:app/a.spg|button1|action1", "action_type": "link",
+            }),
+            serde_json::json!({
+                "node_id": "action:app/a.spg|button2|action1", "action_type": "link",
+            }),
+        ];
+        let statement = navigation_statement(&navigation, &action_flows).unwrap();
+        assert!(statement.contains("action_type=link"), "{statement}");
+        assert_eq!(statement.matches("link").count(), 1, "{statement}");
     }
 }
