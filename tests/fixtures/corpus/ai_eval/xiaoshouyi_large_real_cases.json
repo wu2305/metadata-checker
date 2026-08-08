@@ -21,6 +21,16 @@
     "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
     "binary": "metadata-checker @ 3e49dc6 release（cli-local）"
   },
+  "provenance": {
+    "extracted_by": "Kimi-K3",
+    "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
+    "validated_by": [
+      "python 脚本核对",
+      "metadata-checker CLI 实跑核对",
+      "人工确认"
+    ],
+    "note": "本批 8 个 case 共用同一 provenance。后续新增 case 必须逐 case 写入本字段，不再复用批级记录。"
+  },
   "eval_count": 8,
   "cases": [
     {
@@ -33,6 +43,11 @@
         "avoid_value_source_drift"
       ],
       "question": "/xiaoshouyi/app/售后.app/绑定车辆/会员已注册.spg 这个页面中，text41 哪些情况下会显示？",
+      "smoke": {
+        "enabled": true,
+        "order": 1,
+        "question_template": "低代码项目 {project_dir} 中，app/售后.app/绑定车辆/会员已注册.spg 这个页面里 text41 在哪些情况下会显示？"
+      },
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "source_path": "app/售后.app/绑定车辆/会员已注册.spg",
       "real_project_target": "comp:app/售后.app/绑定车辆/会员已注册.spg|text41",
@@ -131,6 +146,9 @@
         "physical_table_origin"
       ],
       "question": "/xiaoshouyi/app/售后.app/绑定车辆/会员已注册.spg 这个页面中，text41 如果显示，显示的数据来源于哪一张物理表？",
+      "smoke": {
+        "enabled": false
+      },
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "source_path": "app/售后.app/绑定车辆/会员已注册.spg",
       "real_project_target": "comp:app/售后.app/绑定车辆/会员已注册.spg|text41",
@@ -233,6 +251,9 @@
         "same_model_name_noise"
       ],
       "question": "/xiaoshouyi/app/售后.app/绑定车辆/会员已注册.spg 中 model11 什么时候有数据？",
+      "smoke": {
+        "enabled": false
+      },
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "source_path": "app/售后.app/绑定车辆/会员已注册.spg",
       "real_project_target": "model:app/售后.app/绑定车辆/会员已注册.spg|model11",
@@ -340,6 +361,11 @@
         "avoid_current_page_only"
       ],
       "question": "/xiaoshouyi/app/销售.app/销售/合同协议.spg 中 input3 这个值是怎么生成或写入系统的？",
+      "smoke": {
+        "enabled": true,
+        "order": 2,
+        "question_template": "低代码项目 {project_dir} 中，app/销售.app/销售/合同协议.spg 里 input3 这个值是怎么生成或写入系统的？"
+      },
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "source_path": "app/销售.app/销售/合同协议.spg",
       "real_project_target": "comp:app/销售.app/销售/合同协议.spg|input3",
@@ -436,6 +462,11 @@
         "normal_budget"
       ],
       "question": "xiaoshouyi 项目中 fact_qwSidebar 这张表有哪些关键读写关系？尤其说明 合同协议.spg 的 input3 和 潜客信息跟进.spg 的写入是否都能查到。",
+      "smoke": {
+        "enabled": true,
+        "order": 3,
+        "question_template": "在低代码项目 {project_dir} 中，fact_qwSidebar 这张表有哪些关键读写关系？尤其说明 合同协议.spg 的 input3 读取和 潜客信息跟进.spg 的写入是否都能查到。"
+      },
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "source_path": "data/tables/主数据/fact_qwSidebar.tbl",
       "real_project_target": "model:fact_qwSidebar",
@@ -539,6 +570,11 @@
         "summary_counts"
       ],
       "question": "/xiaoshouyi/app/售后.app/绑定车辆/会员已注册.spg 这个页面主要做什么？它有多少个用户入口、读取多少个数据源、写入多少个目标？",
+      "smoke": {
+        "enabled": true,
+        "order": 4,
+        "question_template": "低代码项目 {project_dir} 中，app/售后.app/绑定车辆/会员已注册.spg 这个页面主要做什么？它有多少个用户入口、读取多少个数据源、写入多少个目标？"
+      },
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "source_path": "app/售后.app/绑定车辆/会员已注册.spg",
       "real_project_target": "page:app/售后.app/绑定车辆/会员已注册.spg",
@@ -622,6 +658,11 @@
         "single_query"
       ],
       "question": "/xiaoshouyi/app/销售.app/销售/合同协议.spg 里 input3 这个组件的取值表达式是什么？它读取哪个字段？",
+      "smoke": {
+        "enabled": true,
+        "order": 5,
+        "question_template": "低代码项目 {project_dir} 中，app/销售.app/销售/合同协议.spg 里 input3 这个组件的取值表达式是什么？它读取哪个字段？"
+      },
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "source_path": "app/销售.app/销售/合同协议.spg",
       "real_project_target": "comp:app/销售.app/销售/合同协议.spg|input3",
@@ -690,6 +731,11 @@
         "output_truncation_awareness"
       ],
       "question": "xiaoshouyi 项目中 fact_saleContract 这张表被多少个节点读取、被多少个节点写入？",
+      "smoke": {
+        "enabled": true,
+        "order": 6,
+        "question_template": "在低代码项目 {project_dir} 中，fact_saleContract 这张表被多少个节点读取、被多少个节点写入？"
+      },
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "source_path": "data/tables/销售/fact_saleContract.tbl",
       "real_project_target": "model:fact_saleContract",

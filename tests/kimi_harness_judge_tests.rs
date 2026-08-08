@@ -7,9 +7,9 @@ mod m58_ai_eval;
 
 use anyhow::{Context, Result, bail};
 use kimi_smoke_judge::{
-    AssertionVerdict, CaseJudgement, ForbiddenCheck, MAX_ANSWER_CHARS, SMOKE_QUESTION_CASES,
-    SmokeCase, StandardAnswer, Verdict, build_judge_request, extract_final_answer, judge_case,
-    load_smoke_cases, parse_judge_response, render_judge_markdown,
+    AssertionVerdict, CaseJudgement, ForbiddenCheck, MAX_ANSWER_CHARS, SmokeCase, StandardAnswer,
+    Verdict, build_judge_request, extract_final_answer, judge_case, load_smoke_cases,
+    parse_judge_response, render_judge_markdown, smoke_subset,
 };
 use m58_ai_eval::{CnbChatAdapter, FakeModelAdapter};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,7 @@ fn sample_case() -> SmokeCase {
                 "DataFlow 字段来源就是显示条件".to_string(),
             ],
         },
+        smoke: Default::default(),
     }
 }
 
@@ -90,20 +91,41 @@ fn test_load_smoke_cases_tolerates_missing_fields() {
     assert_eq!(cases[0].standard_answer.must_mention.len(), 0);
 }
 
-/// 验证六问映射与冒烟 fixture 中的 case_id 完全一致。
+/// 验证冒烟子集直接从 fixture 的 `smoke` 字段导出，且顺序连续无重复。
 #[test]
-fn test_smoke_question_cases_mapping_matches_fixture() {
+fn test_smoke_subset_derives_from_fixture() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json");
     let cases = load_smoke_cases(&path).unwrap();
-    assert_eq!(SMOKE_QUESTION_CASES.len(), 6);
-    for (index, (question_no, case_id)) in SMOKE_QUESTION_CASES.iter().enumerate() {
-        assert_eq!(*question_no, format!("q{}", index + 1));
+    let subset = smoke_subset(&cases).unwrap();
+    assert_eq!(subset.len(), 6);
+    for (index, case) in subset.iter().enumerate() {
+        assert_eq!(
+            case.smoke.order,
+            index as u32 + 1,
+            "{} 的 order 与位置不符，order 必须从 1 起连续",
+            case.case_id
+        );
         assert!(
-            cases.iter().any(|case| case.case_id == *case_id),
-            "fixture 中找不到 {question_no} 映射的 {case_id}"
+            case.smoke.question_template.contains("{project_dir}"),
+            "{} 的 question_template 缺少 {{project_dir}} 占位符",
+            case.case_id
         );
     }
+}
+
+/// 验证没有任何 `smoke.enabled` 时报错。
+///
+/// 空子集会让判分产出「零 case、全绿」的报告——那比失败更危险，它看起来像通过。
+#[test]
+fn test_smoke_subset_rejects_empty_selection() {
+    let cases = vec![SmokeCase {
+        case_id: "c1".to_string(),
+        question: String::new(),
+        standard_answer: StandardAnswer::default(),
+        smoke: Default::default(),
+    }];
+    assert!(smoke_subset(&cases).is_err());
 }
 
 /// 验证多行 transcript 提取：最后一个非空 assistant 拼接结果为最终答案。
@@ -466,12 +488,11 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
 
     let mut judgements = Vec::new();
     let mut infra_errors: Vec<String> = Vec::new();
-    for (question_no, case_id) in SMOKE_QUESTION_CASES {
-        let Some(case) = cases.iter().find(|case| case.case_id == case_id) else {
-            bail!("case 文件缺少六问映射的 {case_id}");
-        };
-        // 冒烟 stage 的标准文件名优先，t-q{n}.jsonl 是手工导出 transcript 的兼容名。
+    for case in smoke_subset(&cases)? {
+        let question_no = format!("q{}", case.smoke.order);
+        // 冒烟 stage 现按 case_id 命名 transcript，q{n} 两种是历史/手工导出的兼容名。
         let transcript_path = [
+            transcript_dir.join(format!("smoke-transcript-{}.jsonl", case.case_id)),
             transcript_dir.join(format!("smoke-transcript-{question_no}.jsonl")),
             transcript_dir.join(format!("t-{question_no}.jsonl")),
         ]
@@ -479,6 +500,15 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
         .find(|path| path.is_file());
         let answer = match transcript_path {
             Some(path) => {
+                // 命中兼容名必须出声：手工导出的旧 transcript 会被静默当成本次结果判分，
+                // 那是一份看起来正常、其实评的是上一次运行的报告。
+                if !path.ends_with(format!("smoke-transcript-{}.jsonl", case.case_id)) {
+                    println!(
+                        "警告：{} 使用兼容名 transcript {}，不是本次 stage 产出的 case_id 命名文件",
+                        case.case_id,
+                        path.display()
+                    );
+                }
                 let content = std::fs::read_to_string(&path)
                     .with_context(|| format!("读取 transcript 失败: {}", path.display()))?;
                 extract_final_answer(&content)
@@ -511,10 +541,11 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
     }
 
     // 每 case 一行摘要，CI 靠 --nocapture 直接读日志；语义 pass/fail 只报告不断言。
-    for ((question_no, _), judgement) in SMOKE_QUESTION_CASES.iter().zip(&judgements) {
+    // case_id 自身就是标识，不再和一份外部顺序表按位置 zip——那种耦合在任一侧
+    // 跳过元素时会静默错位，把 A 的分数印成 B 的。
+    for judgement in &judgements {
         println!(
-            "{} {} {} must={}/{} contradicted={} violations={}",
-            question_no.to_uppercase(),
+            "{} {} must={}/{} contradicted={} violations={}",
             judgement.case_id,
             status_label(judgement),
             judgement.must_supported,

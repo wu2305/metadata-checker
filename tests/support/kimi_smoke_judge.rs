@@ -18,15 +18,23 @@ pub(crate) const MAX_ANSWER_CHARS: usize = 12_000;
 /// `ChatRequest.model` 的占位值：真实模型由 adapter（`CnbChatAdapter`）发送时覆盖。
 const JUDGE_MODEL_PLACEHOLDER: &str = "kimi-smoke-judge";
 
-/// 六问与 case_id 的固定映射，与 .cnb.yml 冒烟 stage 的六问一一对应。
-pub(crate) const SMOKE_QUESTION_CASES: [(&str, &str); 6] = [
-    ("q1", "xiaoshouyi_text41_display_conditions"),
-    ("q2", "xiaoshouyi_contract_input3_writer_chain"),
-    ("q3", "xiaoshouyi_fact_qwsidebar_model_relationships"),
-    ("q4", "xiaoshouyi_member_registered_page_overview"),
-    ("q5", "xiaoshouyi_contract_input3_value_expr"),
-    ("q6", "xiaoshouyi_fact_salecontract_read_write_counts"),
-];
+/// case 上的冒烟配置：是否入冒烟子集、顺序、问题模板。
+///
+/// 这三项此前分居三处——`.cnb.yml` 里六段复制粘贴的问题文本、本文件里
+/// `q{n} -> case_id` 的硬编码表、以及 case 文件里的断言。改一个 case 要动三个地方，
+/// 且没有任何机制保证三者一致。现在 case 文件是唯一事实源。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct SmokeConfig {
+    /// 是否纳入冒烟子集。
+    #[serde(default)]
+    pub(crate) enabled: bool,
+    /// 冒烟内的执行顺序，从 1 开始。
+    #[serde(default)]
+    pub(crate) order: u32,
+    /// 问题模板，`{project_dir}` 由 pipeline 代入真实项目路径。
+    #[serde(default)]
+    pub(crate) question_template: String,
+}
 
 /// 冒烟 case 的参考答案断言；字段缺失时按空处理，容忍 case 文件 schema 演进。
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -56,6 +64,9 @@ pub(crate) struct SmokeCase {
     /// 语义 judge 消费的断言集合。
     #[serde(default)]
     pub(crate) standard_answer: StandardAnswer,
+    /// 冒烟子集配置；缺失视为不入冒烟。
+    #[serde(default)]
+    pub(crate) smoke: SmokeConfig,
 }
 
 /// case 文件的顶层结构。
@@ -73,9 +84,22 @@ pub(crate) fn load_smoke_cases(path: &Path) -> Result<Vec<SmokeCase>> {
     Ok(file.cases)
 }
 
+/// 按 `smoke.order` 取出冒烟子集。
+///
+/// 返回空集合直接报错：判分阶段拿到空列表会产出一份「零 case、全绿」的报告，
+/// 那比失败更危险——它看起来像通过。
+pub(crate) fn smoke_subset(cases: &[SmokeCase]) -> Result<Vec<&SmokeCase>> {
+    let mut selected: Vec<&SmokeCase> = cases.iter().filter(|case| case.smoke.enabled).collect();
+    if selected.is_empty() {
+        bail!("case 文件里没有任何 smoke.enabled 的 case");
+    }
+    selected.sort_by_key(|case| case.smoke.order);
+    Ok(selected)
+}
+
 /// 从 kimi-code `--output-format stream-json` 的 JSONL transcript 提取最终答案。
 ///
-/// 与 .cnb.yml 原 python 摘要同一条逻辑：逐行读，行内含 "assistant" 才解析 JSON，
+/// 逐行读，行内含 "assistant" 才解析 JSON，
 /// 递归收集所有 key 为 "content" 的字符串值并拼接，最后一个非空拼接结果就是最终答案。
 pub(crate) fn extract_final_answer(transcript_jsonl: &str) -> String {
     let mut final_answer = String::new();
