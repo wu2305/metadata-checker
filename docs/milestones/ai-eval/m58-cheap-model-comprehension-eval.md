@@ -1,8 +1,19 @@
 # M58：廉价模型理解力评测
 
-> 状态：**active**（spec/plan approved；M58.1 多 trial/任务维度已落地，CNB live baseline 已完成，待独立 review 收口）
-> Spec：[2026-07-17-cheap-model-comprehension-eval-design.md](../../specs/2026-07-17-cheap-model-comprehension-eval-design.md)  
-> Plan：[2026-07-27-m58-cnb-ai-chat-runner-plan.md](../../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)
+> 状态：**active**（M58/M58.1 JSON-command runner 已**冻结**；主路径转为 M58.2 agent harness）
+> Spec：[2026-07-17-cheap-model-comprehension-eval-design.md](../../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved，描述已冻结的 runner）  
+> Spec（当前）：[2026-08-09-slm-eval-harness-design.md](../../specs/2026-08-09-slm-eval-harness-design.md)（draft）  
+> Plan：[2026-07-27-m58-cnb-ai-chat-runner-plan.md](../../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done，对应冻结 runner）
+
+## 冻结公告（2026-08-09）
+
+`tests/support/m58_ai_eval.rs`（2,608 行）+ `tests/m58_cnb_ai_runner_tests.rs`（2,840 行）= **5,448 行**自研 JSON-command agent loop **冻结**：保留既有 baseline 记录，不再新增 case，不再作为主路径演进。既有测试继续运行，不删除。
+
+**对其分数的正确解读**：本文档下方记录的所有 `trial_pass_rate` 均来自该 runner。最后一次为 `0.2308`，其中 23/39 trial 死在 `wrong_command`——命令被 `policy.validate` 拒绝，发生在执行 CLI **之前**。这些数字主要测量该 runner 自身的命令白名单与路由约束，**不是模型的理解力**；引用它们作为模型能力结论是错误的。
+
+冻结原因：CNB AI Chat 实测支持原生 tool calling（见 M58.2 spec 事实 3），推翻了 2026-07-17 spec 中"契约未公开 tools/tool_calls"的前提。该前提正是自研哑协议 runner 存在的唯一理由。主路径改为真实 agent harness（kimi-code CLI）+ 判分外移，详见 [M58.2 spec](../../specs/2026-08-09-slm-eval-harness-design.md)。
+
+该 runner 回答的仍是一个真实但不同的问题：不具备 tool calling 的模型能否驱动白名单协议。作为该问题的记录保留。
 
 ## 目标
 
