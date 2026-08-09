@@ -97,6 +97,111 @@ pub(crate) fn smoke_subset(cases: &[SmokeCase]) -> Result<Vec<&SmokeCase>> {
     Ok(selected)
 }
 
+/// `records.jsonl` 的一行：阶段 A 与所有下游消费者之间的契约。
+///
+/// 这个结构体是契约的**唯一权威定义**，但产出方是 `.cnb.yml` 里的一段 node
+/// 脚本——两侧跨语言，字段名对不上时 serde 会在下游（Phase 2 grid、墙钟预算）
+/// 才炸，而那时 pipeline 早已跑完、算力已经花掉。
+/// `test_cnb_record_emitter_matches_trial_record_schema` 因此直接解析 `.cnb.yml`
+/// 比对两侧字段名，把这类错字拦在 `cargo test` 而不是 CI 里。
+///
+/// `deny_unknown_fields`：多出的字段同样是错字信号（写错的键会同时表现为
+/// 「多一个未知字段」和「少一个必需字段」），不静默吞掉。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TrialRecord {
+    /// case 稳定标识，对应 case 文件的 `case_id`。
+    pub(crate) case_id: String,
+    /// 冒烟内执行顺序。
+    pub(crate) order: u32,
+    /// 难度层，用于分层统计。
+    pub(crate) difficulty: String,
+    /// prompt 变体名；Phase 2 之前恒为 `baseline`。
+    pub(crate) variant: String,
+    /// 同一 (variant, case) 下的重复次数序号，从 1 开始。
+    pub(crate) trial: u32,
+    /// 被测 harness 的退出码。
+    pub(crate) exit_code: i32,
+    /// 单 trial 墙钟毫秒；Phase 2 的预算输入。
+    pub(crate) wall_clock_ms: i64,
+    /// transcript 中出现 `tool_calls` 的行数（软信号）。
+    pub(crate) tool_calls: u32,
+    /// transcript 中提及 metadata-checker 的行数（软信号）。
+    pub(crate) metadata_checker_invocations: u32,
+    /// transcript 字节数；0 表示空产出。
+    pub(crate) transcript_bytes: u64,
+    /// transcript 路径，判分阶段据此定位答案。
+    pub(crate) transcript_path: String,
+    /// stderr 日志路径。
+    pub(crate) stderr_path: String,
+}
+
+/// `TrialRecord` 的字段名清单，供跨语言 schema 比对使用。
+///
+/// 手写而非派生：`deny_unknown_fields` 的错误信息里虽然含字段名，但依赖
+/// serde 错误文本做断言太脆。这份清单与结构体不同步时，
+/// `test_trial_record_field_list_matches_struct` 会判红。
+pub(crate) const TRIAL_RECORD_FIELDS: [&str; 12] = [
+    "case_id",
+    "order",
+    "difficulty",
+    "variant",
+    "trial",
+    "exit_code",
+    "wall_clock_ms",
+    "tool_calls",
+    "metadata_checker_invocations",
+    "transcript_bytes",
+    "transcript_path",
+    "stderr_path",
+];
+
+/// 解析并校验 `records.jsonl`。
+///
+/// 除 schema 外还检查三件下游会静默受害的事：空文件（下游会算出「零 trial 全绿」）、
+/// 负墙钟（`date +%s%3N` 缺失时 `Number("") - Number("")` 得到 NaN，
+/// JSON 里落成 `null`，而 `null` 反序列化到 i64 会失败——这正是要它失败的地方）、
+/// 以及 (case_id, variant, trial) 撞号（配对网格会把两条记录之一悄悄覆盖掉）。
+pub(crate) fn parse_trial_records(jsonl: &str) -> Result<Vec<TrialRecord>> {
+    let mut records = Vec::new();
+    for (index, line) in jsonl.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let record: TrialRecord = serde_json::from_str(line).with_context(|| {
+            format!("records.jsonl 第 {} 行不符合 TrialRecord schema", index + 1)
+        })?;
+        if record.case_id.is_empty() {
+            bail!("records.jsonl 第 {} 行 case_id 为空", index + 1);
+        }
+        if record.wall_clock_ms < 0 {
+            bail!(
+                "records.jsonl 第 {} 行 wall_clock_ms 为负数（{}）：计时取值出错",
+                index + 1,
+                record.wall_clock_ms
+            );
+        }
+        records.push(record);
+    }
+    if records.is_empty() {
+        bail!("records.jsonl 没有任何记录：下游会据此产出一份「零 trial」的空报告");
+    }
+
+    let mut seen = BTreeSet::new();
+    for record in &records {
+        let key = (record.case_id.clone(), record.variant.clone(), record.trial);
+        if !seen.insert(key) {
+            bail!(
+                "records.jsonl 中 (case_id={}, variant={}, trial={}) 重复",
+                record.case_id,
+                record.variant,
+                record.trial
+            );
+        }
+    }
+    Ok(records)
+}
+
 /// 从 kimi-code `--output-format stream-json` 的 JSONL transcript 提取最终答案。
 ///
 /// 逐行读，行内含 "assistant" 才解析 JSON，

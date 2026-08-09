@@ -8,8 +8,9 @@ mod m58_ai_eval;
 use anyhow::{Context, Result, bail};
 use kimi_smoke_judge::{
     AssertionVerdict, CaseJudgement, ForbiddenCheck, MAX_ANSWER_CHARS, SmokeCase, StandardAnswer,
-    Verdict, build_judge_request, extract_final_answer, judge_case, load_smoke_cases,
-    parse_judge_response, render_judge_markdown, smoke_subset,
+    TRIAL_RECORD_FIELDS, Verdict, build_judge_request, extract_final_answer, judge_case,
+    load_smoke_cases, parse_judge_response, parse_trial_records, render_judge_markdown,
+    smoke_subset,
 };
 use m58_ai_eval::{CnbChatAdapter, FakeModelAdapter};
 use std::path::{Path, PathBuf};
@@ -126,6 +127,145 @@ fn test_smoke_subset_rejects_empty_selection() {
         smoke: Default::default(),
     }];
     assert!(smoke_subset(&cases).is_err());
+}
+
+/// 一行合法 record，字段顺序与 `.cnb.yml` 的 node 发射器一致。
+fn sample_record_line() -> String {
+    r#"{"case_id":"c1","order":1,"difficulty":"easy","variant":"baseline","trial":1,"exit_code":0,"wall_clock_ms":1234,"tool_calls":3,"metadata_checker_invocations":2,"transcript_bytes":4096,"transcript_path":"out/t.jsonl","stderr_path":"out/t.log"}"#
+        .to_string()
+}
+
+/// 从 `.cnb.yml` 里那段 node 发射器抽出它实际写出的字段名。
+///
+/// 定位 `JSON.stringify({` 到配对的 `})`，逐行取 `key:` 或简写 `key,`。
+fn cnb_emitted_record_fields() -> Vec<String> {
+    let cnb = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".cnb.yml"))
+        .expect("读取 .cnb.yml 失败");
+    let start = cnb
+        .find("process.stdout.write(JSON.stringify({")
+        .expect(".cnb.yml 里找不到 records.jsonl 的 node 发射器；若已改写请同步本测试");
+    let body_start = start + cnb[start..].find('{').unwrap();
+    let body_start = body_start + cnb[body_start..].find('{').unwrap() + 1;
+    let end = body_start
+        + cnb[body_start..]
+            .find("}) + \"\\n\"")
+            .expect("node 发射器的对象字面量没有正常结束");
+
+    cnb[body_start..end]
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let name = trimmed
+                .split_once(':')
+                .map(|(key, _)| key)
+                .unwrap_or_else(|| trimmed.trim_end_matches(','));
+            let name = name.trim();
+            let is_ident = !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+            is_ident.then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// `TRIAL_RECORD_FIELDS` 与结构体本身同步。
+///
+/// 清单是给跨语言比对用的手写副本，漂了就等于比对了个寂寞。用一行合法 JSON
+/// 逐字段删除、断言每次都反序列化失败，来证明清单里每一项都确实是必需字段。
+#[test]
+fn test_trial_record_field_list_matches_struct() {
+    let line = sample_record_line();
+    let full: serde_json::Value = serde_json::from_str(&line).unwrap();
+    // serde_json 的 Map 按 key 排序，样例行的书写顺序在这里已经丢了，只能比集合；
+    // 顺序一致性由 test_cnb_record_emitter_matches_trial_record_schema 保证。
+    let mut keys: Vec<&str> = full
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    keys.sort_unstable();
+    let mut expected: Vec<&str> = TRIAL_RECORD_FIELDS.to_vec();
+    expected.sort_unstable();
+    assert_eq!(
+        keys, expected,
+        "样例 record 的字段与 TRIAL_RECORD_FIELDS 不一致"
+    );
+
+    for field in TRIAL_RECORD_FIELDS {
+        let mut reduced = full.clone();
+        reduced.as_object_mut().unwrap().remove(field);
+        assert!(
+            parse_trial_records(&reduced.to_string()).is_err(),
+            "删掉 {field} 后仍能解析，说明它不是必需字段，清单与结构体已漂移"
+        );
+    }
+}
+
+/// `.cnb.yml` 的 node 发射器与 Rust 侧 schema 字段名一致。
+///
+/// 这是本组测试真正拦住的东西：产出方是 shell 里的 JS，消费方是 Rust，
+/// 中间没有编译期联系。一个 `transcript_byte`（少个 s）今天要等 Phase 2
+/// 读 records 时才炸，那时 pipeline 的算力已经花完了。
+#[test]
+fn test_cnb_record_emitter_matches_trial_record_schema() {
+    let emitted = cnb_emitted_record_fields();
+    assert_eq!(
+        emitted, TRIAL_RECORD_FIELDS,
+        ".cnb.yml 发射的 record 字段与 TrialRecord 不一致（左：.cnb.yml，右：Rust）"
+    );
+}
+
+/// 合法 records.jsonl 正常解析，空行被跳过。
+#[test]
+fn test_parse_trial_records_accepts_valid_lines() {
+    let second = sample_record_line()
+        .replace("\"c1\"", "\"c2\"")
+        .replace("\"order\":1", "\"order\":2");
+    let jsonl = format!("{}\n\n{}\n", sample_record_line(), second);
+    let records = parse_trial_records(&jsonl).unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].case_id, "c1");
+    assert_eq!(records[0].wall_clock_ms, 1234);
+    assert_eq!(records[1].order, 2);
+}
+
+/// 多出的字段判红：写错的键会同时表现为「多一个未知字段」，不能静默吞掉。
+#[test]
+fn test_parse_trial_records_rejects_unknown_field() {
+    let line = sample_record_line().replace("\"tool_calls\"", "\"toolCalls\"");
+    let err = parse_trial_records(&line).unwrap_err().to_string();
+    assert!(err.contains("TrialRecord schema"), "实际错误：{err}");
+}
+
+/// 计时缺失时 node 侧会写出 `null`（`Number("") - Number("")` = NaN），必须判红。
+#[test]
+fn test_parse_trial_records_rejects_null_wall_clock() {
+    let line = sample_record_line().replace("\"wall_clock_ms\":1234", "\"wall_clock_ms\":null");
+    assert!(parse_trial_records(&line).is_err());
+}
+
+/// 负墙钟同样是计时出错，不是一个可以照单全收的数。
+#[test]
+fn test_parse_trial_records_rejects_negative_wall_clock() {
+    let line = sample_record_line().replace("\"wall_clock_ms\":1234", "\"wall_clock_ms\":-5");
+    let err = parse_trial_records(&line).unwrap_err().to_string();
+    assert!(err.contains("wall_clock_ms"), "实际错误：{err}");
+}
+
+/// 空文件判红：下游会据此产出「零 trial 全绿」的空报告。
+#[test]
+fn test_parse_trial_records_rejects_empty_input() {
+    assert!(parse_trial_records("\n\n").is_err());
+}
+
+/// (case_id, variant, trial) 撞号判红：配对网格会悄悄覆盖掉其中一条。
+#[test]
+fn test_parse_trial_records_rejects_duplicate_key() {
+    let jsonl = format!("{}\n{}\n", sample_record_line(), sample_record_line());
+    let err = parse_trial_records(&jsonl).unwrap_err().to_string();
+    assert!(err.contains("重复"), "实际错误：{err}");
 }
 
 /// 验证多行 transcript 提取：最后一个非空 assistant 拼接结果为最终答案。
@@ -485,6 +625,25 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
         .unwrap_or_else(|| transcript_dir.clone());
     std::fs::create_dir_all(&output_dir)
         .with_context(|| format!("创建 judge 输出目录失败: {}", output_dir.display()))?;
+
+    // records.jsonl 是阶段 A 交给所有下游的契约文件，在这里就地校验一次。
+    // 判分 stage 是 pipeline 里最后一个读它的 Rust 环节；放到 Phase 2 才发现字段
+    // 对不上，意味着一整轮 pipeline 的算力已经花掉了。文件不存在不算错——
+    // 单独重跑判分时本来就没有它。
+    let records_path = transcript_dir.join("records.jsonl");
+    if records_path.is_file() {
+        let content = std::fs::read_to_string(&records_path)
+            .with_context(|| format!("读取 records 失败: {}", records_path.display()))?;
+        let records = parse_trial_records(&content)
+            .with_context(|| format!("records.jsonl 校验失败: {}", records_path.display()))?;
+        println!(
+            "records.jsonl 校验通过：{} 条 trial，总墙钟 {} ms",
+            records.len(),
+            records.iter().map(|r| r.wall_clock_ms).sum::<i64>()
+        );
+    } else {
+        println!("未找到 {}，跳过 records 校验", records_path.display());
+    }
 
     let mut judgements = Vec::new();
     let mut infra_errors: Vec<String> = Vec::new();
