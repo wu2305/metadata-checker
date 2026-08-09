@@ -931,6 +931,36 @@
           tail -n 10 "$OUT_DIR/smoke-stderr-${CASE_ID}.log" 2>/dev/null || true
         done
 
+# M58.2 issue 归档方案的前置探针：验证构建凭证 CNB_TOKEN 是否有 repo-issue:rw，
+# 以及 pipeline 内 curl 建 issue、挂预建标签的行为。一次性非致命实验：任何失败只打印
+# 不判红，产出的测试 issue 由本地善后关闭，不进任何 CI 阻塞层。
+.issue_archive_probe_ci: &issue_archive_probe_ci
+  name: issue-archive-probe
+  runner:
+    <<: *runner_amd64_2
+  docker:
+    <<: *browser_wasm_ci_image
+  stages:
+    - name: probe issue write permission
+      script: |
+        # 脱敏约定：token 只出现在 Authorization header，永不打印请求头。
+        API="https://api.cnb.cool/${CNB_REPO_SLUG}/-/issues"
+        CODE=$(curl -sS -o /tmp/probe-create.json -w "%{http_code}" -X POST "$API" \
+          -H "Authorization: Bearer ${CNB_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d '{"title":"[test] pipeline token issue 写权限探针（验证后关闭）","body":"probe from pipeline","labels":["m58-smoke-record"]}' || echo "curl-error")
+        echo "create-issue http=$CODE"
+        head -c 800 /tmp/probe-create.json 2>/dev/null || true
+        NUMBER=$(grep -o '"number": *[0-9"]*' /tmp/probe-create.json 2>/dev/null | head -n1 | tr -dc '0-9')
+        echo "issue number=${NUMBER:-none}"
+        if [ -n "$NUMBER" ]; then
+          LCODE=$(curl -sS -o /tmp/probe-labels.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CNB_TOKEN}" \
+            "$API/$NUMBER/labels" || echo "curl-error")
+          echo "list-labels http=$LCODE"
+          head -c 800 /tmp/probe-labels.json 2>/dev/null || true
+        fi
+
 main:
   push: *main_authoritative_ci
 
@@ -941,6 +971,8 @@ main:
     - *m58_cnb_llm_ci
   api_trigger_kimi_harness_smoke:
     - *kimi_harness_smoke_ci
+  api_trigger_issue_archive_probe:
+    - *issue_archive_probe_ci
 
 "**":
   push:
