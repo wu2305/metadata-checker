@@ -42,7 +42,11 @@ CNB AI Chat 当前只提供 `deepseek-v4-flash`（外部实测，2026-08-08；�
 
 `xiaoshouyi_large_real_cases.json`：8 个 case，难度分布 3 easy / 2 hard / 3 expert。`verified_with` 只记录**校验**信息（日期、corpus @ `6920ac51`、binary @ `3e49dc6`）。
 
-提取过程此前完全无记录，现已补进 fixture 的顶层 `provenance` 字段：这批 case 由 Kimi-K3 提取并自答，经 python 脚本与 metadata-checker CLI 实跑校验，再由人确认。**但该字段是事后追记的口述，不是可追溯的证据**——校验脚本、CLI 输出和人工确认记录都不在仓库里，无法复核。新增 case 必须逐 case 写 `provenance`，并保留可复核的产物。
+提取过程此前完全无记录，现已补进 fixture 的顶层 `provenance` 字段：这批 case 由 Kimi-K3 提取并自答，此后**据称**经 python 脚本与 metadata-checker CLI 实跑校验、再由人确认。
+
+这三项校验在字段里刻意写成 `claimed_validation`，并以 `evidence_status: recalled_unverifiable` 和空的 `evidence_artifacts` 标注：**校验脚本、CLI 输出、人工确认记录都不在仓库里，无法复核。** 用一组新的不可核查断言去填 provenance 缺口，等于把缺口藏起来——那比留着缺口更糟，因为它读起来像已经解决了。可复核的部分只有 `verified_with` 记录的重新校验（corpus @ `6920ac51` / binary @ `3e49dc6`）。
+
+新增 case 必须逐 case 写 `provenance`，并把产物落到 `evidence_artifacts` 指向的路径。
 
 推论：n=8 且每个难度层只有 2–3 个 case。这足以做调试仪表，**不足以回答产品问题**（"廉价模型 + SKILL.md 到底够不够用"）。语料扩充是与本设计并行的独立轨道，并且新 case 必须写入 `provenance`。
 
@@ -54,8 +58,9 @@ stage 脚本默认由 `sh` 解释，`browser-wasm-ci` 基于 `node:22-bookworm`�
 
 两个直接教训，已写进实现：
 
-- `bash -n` 和 bash 下的 stub 干跑**都查不出这类缺陷**。shell 兼容性必须用 `dash` 实跑验证。
+- `bash -n` 和 bash 下的 stub 干跑**都查不出这类缺陷**。shell 兼容性必须用 `dash` 实跑验证。验证方法已固化为可重跑的脚本 `scripts/cnb-smoke-dry-run.sh`（stage 脚本从 `.cnb.yml` 逐字提取，dash 执行，含故障注入），流程见 [runbook](../runbooks/m58-cnb-shell-dry-run.md)。
 - stage 脚本必须显式 `set -eu`。CNB 未文档化是否启用 errexit；实测 dash 无 `-e` 时，记录数硬断言与空子集拒绝都只打印错误然后继续，一样是假绿。
+- **故障路径必须有人验证它真的会红。** 干跑脚本对 `--fault empty|dup|noeat` 断言非零退出：一个只在正常路径上验过的守卫，等于没有守卫。
 
 ## 冻结：M58 JSON-command runner
 
@@ -106,6 +111,15 @@ stage 脚本默认由 `sh` 解释，`browser-wasm-ci` 基于 `node:22-bookworm`�
 其中"无 assistant 时返回空串"意味着 **`""` 是合法返回值**。因此一个实现有缺陷的抽取器（例如用 jq 草率重写）会**静默**产出空答案，判分结果是全部 `not_mentioned`——一个看起来完全合理的零分。这是最难发现的失效模式。
 
 设计决定：**不重写抽取器**。拆分 `kimi_smoke_judge.rs`，抽取逻辑连同其单测保留在 Rust 并运行在 CNB 内，只退役判分半边。
+
+### records.jsonl 是跨语言契约，必须有守卫
+
+阶段 A 的产出方是 `.cnb.yml` 里的一段 node 脚本，消费方（判分、grid、墙钟预算）是 Rust——两侧跨语言，**中间没有任何编译期联系**。一个 `transcript_byte`（少个 s）不会在产出侧报错，要等下游读 records 时才炸，而那时一整轮 pipeline 的算力已经花掉了。
+
+`TrialRecord`（`tests/support/kimi_smoke_judge.rs`）是该契约的唯一权威定义，配两道守卫：
+
+- `test_cnb_record_emitter_matches_trial_record_schema` 直接解析 `.cnb.yml` 取出 node 发射的字段名，与 Rust 侧比对，把错字拦在 `cargo test`（不需要跑 CI）。
+- 判分 stage 就地校验真实 `records.jsonl`：schema（`deny_unknown_fields`）、空文件、负墙钟、`(case_id, variant, trial)` 撞号。这几项的共同点是**下游会静默受害**——空文件会产出「零 trial 全绿」的报告，撞号会让配对网格悄悄覆盖掉一条记录。
 
 ### 墙钟与图预算
 

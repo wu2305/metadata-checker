@@ -24,12 +24,14 @@
   "provenance": {
     "extracted_by": "Kimi-K3",
     "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
-    "validated_by": [
+    "evidence_status": "recalled_unverifiable",
+    "claimed_validation": [
       "python 脚本核对",
       "metadata-checker CLI 实跑核对",
       "人工确认"
     ],
-    "note": "本批 8 个 case 共用同一 provenance。后续新增 case 必须逐 case 写入本字段，不再复用批级记录。"
+    "evidence_artifacts": [],
+    "note": "本批 8 个 case 共用同一 provenance，且是事后追记：claimed_validation 三项在仓库里没有对应产物（脚本、CLI 输出、确认记录都未留存），evidence_artifacts 为空即表示无法复核。此处刻意不写成已验证事实——用新的不可核查断言去填 provenance 缺口，等于把缺口藏起来。verified_with 记录的重新校验（corpus @ 6920ac51 / binary @ 3e49dc6）才是可复核的部分。后续新增 case 必须逐 case 写本字段，并把产物落到 evidence_artifacts 指向的路径。"
   },
   "eval_count": 8,
   "cases": [

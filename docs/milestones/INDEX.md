@@ -64,7 +64,7 @@ CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`re
 
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
-| M58 | 廉价模型理解力评测 | active | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved；JSON-command runner 已冻结）<br>[design M58.2](../specs/2026-08-09-slm-eval-harness-design.md)（draft；agent harness，当前路径） | [plan](../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done） | M22 |
+| M58 | 廉价模型理解力评测 | active | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved；JSON-command runner 已冻结）<br>[design M58.2](../specs/2026-08-09-slm-eval-harness-design.md)（draft；agent harness，当前路径） | [plan](../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done）<br>[runbook](../runbooks/m58-cnb-shell-dry-run.md)（CNB stage 本地 dash 干跑） | M22 |
 | M59 | Dashboard / Report 格式支持 | planned | formats | — | （待建） | | |
 
 > 原登记为 M56 的 Dashboard/Report（rpt/dash）已 **后推为 M59**。  
