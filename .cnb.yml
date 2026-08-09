@@ -944,10 +944,12 @@
     - name: probe issue write permission
       script: |
         # 脱敏约定：token 只出现在 Authorization header，永不打印请求头。
+        # CNB API 要求显式 Accept: application/vnd.cnb.api+json，缺失时 406（errcode 406）。
+        AUTH="Authorization: Bearer ${CNB_TOKEN}"
+        ACCEPT="Accept: application/vnd.cnb.api+json"
         API="https://api.cnb.cool/${CNB_REPO_SLUG}/-/issues"
         CODE=$(curl -sS -o /tmp/probe-create.json -w "%{http_code}" -X POST "$API" \
-          -H "Authorization: Bearer ${CNB_TOKEN}" \
-          -H "Content-Type: application/json" \
+          -H "$AUTH" -H "$ACCEPT" -H "Content-Type: application/json" \
           -d '{"title":"[test] pipeline token issue 写权限探针（验证后关闭）","body":"probe from pipeline","labels":["m58-smoke-record"]}' || echo "curl-error")
         echo "create-issue http=$CODE"
         head -c 800 /tmp/probe-create.json 2>/dev/null || true
@@ -955,10 +957,14 @@
         echo "issue number=${NUMBER:-none}"
         if [ -n "$NUMBER" ]; then
           LCODE=$(curl -sS -o /tmp/probe-labels.json -w "%{http_code}" \
-            -H "Authorization: Bearer ${CNB_TOKEN}" \
+            -H "$AUTH" -H "$ACCEPT" \
             "$API/$NUMBER/labels" || echo "curl-error")
           echo "list-labels http=$LCODE"
           head -c 800 /tmp/probe-labels.json 2>/dev/null || true
+          CCODE=$(curl -sS -o /dev/null -w "%{http_code}" -X PATCH "$API/$NUMBER" \
+            -H "$AUTH" -H "$ACCEPT" -H "Content-Type: application/json" \
+            -d '{"state":"closed","state_reason":"completed"}' || echo "curl-error")
+          echo "close-issue http=$CCODE"
         fi
 
 main:
