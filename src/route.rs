@@ -335,7 +335,7 @@ fn file_matches(have: &str, want: &str) -> bool {
 
 /// 把「带前缀但没写全」的 target 归一成真实节点 id。
 ///
-/// M59 的评测暴露了一个新问题：三动词收敛之后模型几乎总能选对动词，但 109 条拒绝里
+/// M58.3 的评测暴露了一个新问题：三动词收敛之后模型几乎总能选对动词，但 109 条拒绝里
 /// 有 91 条（83%）栽在 target 的写法上——`page:actions_test`、`comp:actions_test|button1`、
 /// `comp:actions_test.spg|button1`。[`resolve_bare_target`] 只在完全没有前缀时才触发，
 /// 而新表面恰恰教会了模型总是写前缀，于是归一在 117 次 trial 里只生效了 1 次。
@@ -698,7 +698,7 @@ mod tests {
 
     /// 省掉目录和扩展名的页面 target 必须能定位。
     ///
-    /// M59 评测里 `page:actions_test` 这一类占了拒绝的大头：模型知道页面叫什么，
+    /// M58.3 评测里 `page:actions_test` 这一类占了拒绝的大头：模型知道页面叫什么，
     /// 不知道它在仓库的哪一层——而那是一次确定性图查询。
     #[test]
     fn test_page_target_without_directory_or_extension_resolves() {
@@ -838,7 +838,7 @@ mod tests {
 
     /// 只写节点名、一个路径段都没有的写法必须真的能用。
     ///
-    /// SKILL.md 明说「文件路径……也可以整个省掉」。M59 评测里 `comp:button1` 出现 3 次；
+    /// SKILL.md 明说「文件路径……也可以整个省掉」。M58.3 评测里 `comp:button1` 出现 3 次；
     /// 文档承诺了却不支持，比一开始就不承诺更糟。
     #[test]
     fn test_bare_name_under_a_prefix_resolves() {

@@ -1,6 +1,6 @@
 #![cfg(feature = "cli-local")]
 
-//! M59 三动词命令表面测试。
+//! M58.3 三动词命令表面测试。
 //!
 //! 每条断言都对应 M58 六轮干净评测里一类具体的被拒命令。115 条拒绝中约八成不是模型
 //! 选错动词，而是命令表面无法从问题里判定；这里锁住让它变得可判定的那些行为，防止
@@ -21,7 +21,7 @@ fn bin() -> PathBuf {
 
 /// 每个用例独占一份 graphdb，避免并行测试互相抢锁。
 fn workspace(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("m59-surface-{tag}"));
+    let dir = std::env::temp_dir().join(format!("m58-3-surface-{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create workspace");
     let db = dir.join("case.graphdb");
@@ -165,7 +165,7 @@ fn test_surface_diagnostics_are_structured_objects() {
 
 /// 前缀写对、文件路径没写全的 target 由 Rust 补全。
 ///
-/// M59 评测里 109 条拒绝有 83% 是这一类：模型学会了写前缀，于是只处理裸名的归一
+/// M58.3 评测里 109 条拒绝有 83% 是这一类：模型学会了写前缀，于是只处理裸名的归一
 /// 再也没被触发过（117 次 trial 里只生效 1 次）。
 #[test]
 fn test_partially_qualified_target_is_completed() {
@@ -271,7 +271,7 @@ fn has_diagnostic(diagnostics: &[Value], code: &str) -> bool {
 /// 裸名有歧义、候选又很少时，对每个候选分别作答，而不是交回一个错误。
 ///
 /// M58 里模型对「button1 周围还有什么」的应对是 `comp:app/未知页面.spg|button1`（3 次）
-/// 和把 bootstrap 占位符原样抄成 `comp:app/<relative-file>.spg|button1`（2 次）。M59 改成
+/// 和把 bootstrap 占位符原样抄成 `comp:app/<relative-file>.spg|button1`（2 次）。M58.3 改成
 /// 交回真实候选之后，模型转而把仅有的两次命令机会花在重发同一条歧义命令上——那条用例
 /// 6 次 trial 全挂。问题本身（「button1 周围还有哪些依赖」）没给任何可用来消歧的信息，
 /// 两个节点都是合法答案，所以两个都答。
@@ -590,5 +590,97 @@ fn test_model_relations_offer_field_lineage_commands() {
     assert!(
         !next.iter().any(|command| command.contains("<字段名>")),
         "{next:?}"
+    );
+}
+
+/// 跨页 target 的每一侧独立归一：逗号只是分隔符，不是豁免归一的理由。
+///
+/// 此前整串含逗号就跳过归一，`page:actions_test,page:page_relations` 被原样发给
+/// QueryCross，拿不存在的节点 id 查出 0 条路径再以 full confidence 交回「没有关系」。
+#[test]
+fn test_relations_cross_normalizes_each_side_independently() {
+    let db = workspace("cross-normalize-sides");
+    let output = surface(
+        &db,
+        &["--relations", "page:actions_test,page:page_relations"],
+    );
+    assert!(
+        output.get("ok").and_then(Value::as_bool) != Some(false),
+        "归一后应正常执行: {}",
+        output
+    );
+    assert_eq!(
+        output["query_target"].as_str().expect("query_target"),
+        "page:app/actions_test.spg <-> page:app/page_relations.spg"
+    );
+    let resolved = output["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .filter(|entry| entry["code"].as_str() == Some("RESOLVED_TARGET"))
+        .count();
+    assert_eq!(resolved, 2, "两侧都应归一: {}", output["diagnostics"]);
+}
+
+/// 归一不出的一侧必须如实报 TARGET_NOT_FOUND，不能变成确认的空结果。
+#[test]
+fn test_relations_cross_reports_unresolvable_side() {
+    let db = workspace("cross-unresolvable-side");
+    let output = surface(&db, &["--relations", "page:actions_test,page:不存在的页面"]);
+    assert_eq!(output["ok"].as_bool(), Some(false));
+    assert_eq!(output["error"]["code"].as_str(), Some("TARGET_NOT_FOUND"));
+    assert!(
+        output["error"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("page:不存在的页面"),
+        "{}",
+        output["error"]
+    );
+}
+
+/// graphdb-only 模式不需要 --project-dir 就能跑新表面的两个动词。
+fn surface_graphdb_only(db: &Path, args: &[&str]) -> Value {
+    let mut argv = vec![
+        "--non-human".to_string(),
+        "--graph-db-path".to_string(),
+        db.to_str().unwrap().to_string(),
+        "--budget".to_string(),
+        "compact".to_string(),
+    ];
+    argv.extend(args.iter().map(|arg| arg.to_string()));
+    let output = Command::new(bin()).args(&argv).output().expect("run cli");
+    let stdout = String::from_utf8(output.stdout).expect("utf-8");
+    serde_json::from_str(&stdout).unwrap_or_else(|error| {
+        panic!(
+            "输出不是 JSON: {error}\nstdout: {stdout}\nstderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+/// `--find` 此前不在 graphdb-only 门控名单里，带库查询被错当成缺参数拒绝。
+#[test]
+fn test_graphdb_only_find_works_without_project_dir() {
+    let db = workspace("graphdb-only-find");
+    let output = surface_graphdb_only(&db, &["--find", "actions_test"]);
+    let matches = output["details"]["matches"].as_array().expect("matches");
+    assert!(
+        matches
+            .iter()
+            .any(|entry| entry["id"].as_str() == Some("page:app/actions_test.spg")),
+        "{matches:?}"
+    );
+}
+
+/// `--relations` 同上门控遗漏。
+#[test]
+fn test_graphdb_only_relations_works_without_project_dir() {
+    let db = workspace("graphdb-only-relations");
+    let output = surface_graphdb_only(&db, &["--relations", "page:app/actions_test.spg"]);
+    assert_eq!(
+        output["query_target"].as_str(),
+        Some("page:app/actions_test.spg"),
+        "{output}"
     );
 }

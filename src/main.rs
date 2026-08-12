@@ -61,6 +61,8 @@ fn has_session_query_request(args: &cli::Cli) -> bool {
         || args.explain.is_some()
         || args.explain_condition.is_some()
         || args.context.is_some()
+        || args.find.is_some()
+        || args.relations.is_some()
         || args.find_page.is_some()
         || args.find_model.is_some()
         || args.find_component.is_some()
@@ -152,8 +154,69 @@ fn run_surface(
         }
     }
 
+    // 跨页协议 `page:A,page:B` 的每一侧独立归一。此前整串含逗号就跳过归一，
+    // `page:actions_test,page:page_relations` 这种两侧都没写全的 target 被原样发给
+    // QueryCross：拿不存在的节点 id 查出 0 条路径，再以 full confidence 交回
+    // 「两页没有关系」。查不到/有歧义必须如实说，不能变成确认的空结果。
+    if surface == route::Surface::Relations && target.contains(',') {
+        let sides: Vec<String> = target
+            .split(',')
+            .map(|side| side.trim().to_string())
+            .collect();
+        let mut resolved_sides: Vec<String> = Vec::with_capacity(sides.len());
+        for (index, side) in sides.iter().enumerate() {
+            // 缺 page: 前缀的一侧交给下游 query_cross 协议校验报 INVALID_TARGET，
+            // 这里只补「前缀对、路径没写全」的归一。
+            if !route::has_type_prefix(side) {
+                resolved_sides.push(side.clone());
+                continue;
+            }
+            match normalize_target_against_graph(runtime, side) {
+                PrefixedTargetResolution::Exact => resolved_sides.push(side.clone()),
+                PrefixedTargetResolution::Resolved {
+                    target: resolved,
+                    diagnostic,
+                } => {
+                    diagnostics.push(surface_diagnostic("RESOLVED_TARGET", diagnostic));
+                    resolved_sides.push(resolved);
+                }
+                PrefixedTargetResolution::Ambiguous { candidates } => {
+                    return Ok(serde_json::json!({
+                        "ok": false,
+                        "error": {
+                            "code": "AMBIGUOUS_TARGET",
+                            "message": format!(
+                                "'{side}' 匹配到多个节点。从 next_queries 里挑一条直接执行，不要重复这一条命令。"
+                            ),
+                        },
+                        "candidate_targets": candidates,
+                        "next_queries": cross_retry_commands(
+                            surface, &sides, index, &candidates, &resolved_sides
+                        ),
+                        "diagnostics": diagnostics,
+                    }));
+                }
+                PrefixedTargetResolution::NotFound { candidates } => {
+                    return Ok(serde_json::json!({
+                        "ok": false,
+                        "error": {
+                            "code": "TARGET_NOT_FOUND",
+                            "message": format!("找不到 '{side}'，改用 next_queries 里的命令重试，或先用 --find 定位"),
+                        },
+                        "candidate_targets": candidates,
+                        "next_queries": cross_retry_commands(
+                            surface, &sides, index, &candidates, &resolved_sides
+                        ),
+                        "diagnostics": diagnostics,
+                    }));
+                }
+            }
+        }
+        target = resolved_sides.join(",");
+    }
+
     // 带前缀但没写全的 target 走另一条归一。裸名归一只在完全没有前缀时触发，而新表面
-    // 恰恰教会了模型总是写前缀——M59 评测里 117 次 trial 只有 1 次走到了裸名那条路，
+    // 恰恰教会了模型总是写前缀——M58.3 评测里 117 次 trial 只有 1 次走到了裸名那条路，
     // 剩下的拒绝里 83% 是 `page:actions_test` 这种前缀对、路径没写全的写法。
     let mut near_miss: Vec<String> = Vec::new();
     if surface != route::Surface::Find && route::has_type_prefix(&target) && !target.contains(',') {
@@ -500,13 +563,39 @@ fn attach_confidence(result: &mut serde_json::Value) {
 
 /// 把候选渲染成可以直接照抄执行的命令。
 ///
-/// 只把候选 id 列成数组是不够的：M59 评测里模型拿到两个候选之后，重发了一模一样的
+/// 只把候选 id 列成数组是不够的：M58.3 评测里模型拿到两个候选之后，重发了一模一样的
 /// 那条歧义命令，把仅有的两次命令机会用光。候选要以「下一条命令」的形态出现。
 fn retry_commands(surface: metadata_checker::route::Surface, candidates: &[String]) -> Vec<String> {
     candidates
         .iter()
         .take(5)
         .map(|candidate| format!("{} '{candidate}'", surface.as_str()))
+        .collect()
+}
+
+/// 为跨页查询构造重试命令：把失败侧换成真实候选，其余侧保留已归一的结果。
+///
+/// 通用的 [`retry_commands`] 只会把候选拼成单页命令，模型照抄之后问题就从
+/// 「两页的关系」悄悄换成了「一页的逻辑」——重试命令必须保住原来的问句。
+fn cross_retry_commands(
+    surface: metadata_checker::route::Surface,
+    sides: &[String],
+    failed_index: usize,
+    candidates: &[String],
+    resolved_sides: &[String],
+) -> Vec<String> {
+    candidates
+        .iter()
+        .take(5)
+        .map(|candidate| {
+            let mut parts = sides.to_vec();
+            // resolved_sides 与 sides 的前 failed_index 项一一对应（每侧循环只 push 一次）。
+            for (resolved_index, resolved) in resolved_sides.iter().enumerate() {
+                parts[resolved_index] = resolved.clone();
+            }
+            parts[failed_index] = candidate.clone();
+            format!("{} '{}'", surface.as_str(), parts.join(","))
+        })
         .collect()
 }
 
@@ -623,7 +712,7 @@ const MAX_ANSWERED_CANDIDATES: usize = 3;
 
 /// 候选很少时，对每个候选分别作答，而不是交回一个错误让模型再猜一轮。
 ///
-/// M59 评测里 `--explain comp:button1` 恰好匹配两个节点（actions_test 与 page_relations
+/// M58.3 评测里 `--explain comp:button1` 恰好匹配两个节点（actions_test 与 page_relations
 /// 各有一个 button1），问题本身（「button1 周围还有哪些依赖」）没给任何可用来消歧的信息。
 /// 此前工具返回 AMBIGUOUS_TARGET，模型把仅有的两次命令机会花在重发同一条命令上，
 /// 那条用例 6 次 trial 全挂。

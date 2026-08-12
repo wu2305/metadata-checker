@@ -1018,3 +1018,121 @@ fn session_remote_index_respects_graph_db_path_override() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 带 mock 远端跑一遍 refresh-and-query，返回查询输出的 JSON。
+///
+/// `--find`/`--relations` 此前不在 `has_session_query_request` 名单里：refresh 照常
+/// 完成，但请求的查询被静默跳过，stdout 是 refresh 报告而不是查询结果。
+fn run_refresh_query_with_mock_page(tag: &str, query_args: &[&str]) -> serde_json::Value {
+    let root = test_root(tag);
+    let page = r#"{"pageName":"Foo","components":[]}"#;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("read mock server addr");
+    let mock_url = format!("http://{addr}");
+
+    thread::spawn(move || {
+        for _ in 0..6 {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 4096];
+            let n = stream.read(&mut request).expect("read request");
+            let request = String::from_utf8_lossy(&request[..n]).to_string();
+            let request_line = request.lines().next().unwrap_or_default();
+            let request_path = request_line.split_whitespace().nth(1).unwrap_or("");
+            if request_path == "/api/auth/signin" {
+                let body = r#"{"ok":true}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nSet-Cookie: JSESSIONID=abc; Path=/\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+            if request_path == "/api/meta/services/getFileDescendant/proj" {
+                let body = r#"{"children":[{"path":"/proj/app/Foo.spg","name":"Foo.spg","id":"foo-id","revision":"1","isFolder":false}]}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+            if request_path == "/api/meta/services/getFileContent/foo-id" {
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{page}",
+                    page.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+                continue;
+            }
+            let response =
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
+    });
+
+    let mut args = vec![
+        "--remote-index",
+        "s1",
+        "--base-url",
+        &mock_url,
+        "--project",
+        "proj",
+        "--remote-file",
+        "foo-id",
+        "--remote-username",
+        "user",
+        "--remote-password",
+        "pass",
+    ];
+    args.extend_from_slice(query_args);
+    let output = run_session_command_raw(&root, &args);
+    assert!(
+        output.status.success(),
+        "command failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = as_json_from_stdout(&output);
+    let _ = std::fs::remove_dir_all(root);
+    json
+}
+
+#[test]
+fn session_refresh_remote_index_find_outputs_query_result() {
+    let json = run_refresh_query_with_mock_page("refresh-query-find", &["--find", "Foo"]);
+    assert!(
+        !json.as_object().unwrap().contains_key("session_id"),
+        "应输出查询结果而不是 refresh 报告: {json}"
+    );
+    let matches = json["details"]["matches"]
+        .as_array()
+        .expect("find 应返回 matches");
+    assert!(
+        matches
+            .iter()
+            .any(|entry| entry["id"].as_str() == Some("page:app/Foo.spg")),
+        "{matches:?}"
+    );
+}
+
+#[test]
+fn session_refresh_remote_index_relations_outputs_query_result() {
+    let json = run_refresh_query_with_mock_page(
+        "refresh-query-relations",
+        &["--relations", "page:app/Foo.spg"],
+    );
+    assert!(
+        !json.as_object().unwrap().contains_key("session_id"),
+        "应输出查询结果而不是 refresh 报告: {json}"
+    );
+    assert_eq!(json["query_target"], "page:app/Foo.spg");
+}

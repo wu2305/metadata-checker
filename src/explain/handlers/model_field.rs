@@ -14,7 +14,7 @@ use super::super::find_parent_page;
 
 /// 把字段的血缘归纳成一句话：这个字段的值是从哪些字段、经过哪一段传过来的。
 ///
-/// M59 评测里 `dataflow_chain_trace` 问的是 df_a -> physical_x -> df_b 的链式传递。
+/// M58.3 评测里 `dataflow_chain_trace` 问的是 df_a -> physical_x -> df_b 的链式传递。
 /// 工具算得出来——`details.lineage` 里两条记录写着 `source_fields: ["field:physical_x.id"]`
 /// 和 `["field:df_a.id"]`，`transform` 都是 "DataFlow chain"——但 summary 只给一个
 /// `lineage_count: 2`，同时 `primary_reason` 还写着「未发现明确的阻塞条件或数据链路」。
