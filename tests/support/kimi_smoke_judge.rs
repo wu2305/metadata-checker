@@ -442,7 +442,9 @@ struct RawForbiddenCheck {
 ///
 /// 容忍 ```json 围栏与前后多余文字（取第一个 `{` 到最后一个 `}`）；未知 verdict
 /// 字符串直接报错；编号对不上断言的条目忽略但记录进 overall_note。pass 规则在
-/// 这里确定：`must_supported == must_total` 且没有任何禁令被违反。
+/// 这里确定：`must_supported == must_total` 且没有任何禁令被违反。禁令检查必须
+/// 完整——漏检的禁令不可能违规，会把「judge 没查」变成「答案没违反」的假通过，
+/// 因此漏检一律按 judge 基础设施故障报错，而不是给被测答案计分。
 pub(crate) fn parse_judge_response(case: &SmokeCase, raw: &str) -> Result<CaseJudgement> {
     let start = raw
         .find('{')
@@ -471,6 +473,24 @@ pub(crate) fn parse_judge_response(case: &SmokeCase, raw: &str) -> Result<CaseJu
         &case.standard_answer.must_not_mention,
         &mut ignored,
     );
+
+    // 禁令检查必须完整（编号唯一由 map_forbidden_checks 的 ignored 登记保证）：
+    // 漏检的禁令不可能违规，`violations == 0` 会把 judge 的遗漏变成被测答案的
+    // 假通过。这是 judge 输出不完整，按判分基础设施故障上抛，不计 pass/fail。
+    let forbidden_total = case.standard_answer.must_not_mention.len();
+    if forbidden_checks.len() != forbidden_total {
+        bail!(
+            "case {} 的 judge 响应禁令检查不完整：{}/{} 条（无效或重复编号: {}）",
+            case.case_id,
+            forbidden_checks.len(),
+            forbidden_total,
+            if ignored.is_empty() {
+                "无".to_string()
+            } else {
+                ignored.join(", ")
+            }
+        );
+    }
 
     let must_supported = verdicts
         .iter()

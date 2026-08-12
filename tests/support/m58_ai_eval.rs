@@ -348,7 +348,7 @@ impl PlanVariant {
 
 /// 用工具自己的归一逻辑判断两个 target 是不是同一个节点。
 ///
-/// M59 评测里 109 条拒绝有 91 条是 `page:actions_test` 这种没写全的 target。工具现在会
+/// M58.3 评测里 109 条拒绝有 91 条是 `page:actions_test` 这种没写全的 target。工具现在会
 /// 确定性地把它补成 `page:app/actions_test.spg`，但 plan 是逐字符比较 target 的，命令在
 /// 进 CLI 之前就被判负了——评测于是测的是「有没有原样打出我们写下的那个字符串」，而
 /// 不是「工具能不能被走通」。这与此前放宽 budget / intent / `model:` 前缀是同一件事：
@@ -609,21 +609,30 @@ impl CommandPolicy {
     }
 
     /// 构造一条不占 plan 步数的定位命令。
-    fn locating_command(&self, request: &CommandRequest) -> ValidatedCommand {
-        ValidatedCommand {
+    fn locating_command(&self, request: &CommandRequest) -> Result<ValidatedCommand> {
+        validate_request_args(&request.args)?;
+        if let Some(budget) = request.budget.as_deref() {
+            validate_request_budget(budget)?;
+        }
+        Ok(ValidatedCommand {
             step_index: None,
             variant: PlanVariant {
                 command_kind: request.command_kind.clone(),
                 target: request.target.clone(),
-                args: Vec::new(),
-                budget: Some("compact".to_string()),
+                args: request.args.clone(),
+                budget: Some(
+                    request
+                        .budget
+                        .clone()
+                        .unwrap_or_else(|| "compact".to_string()),
+                ),
                 requires_project_dir: true,
             },
             route: RouteKind::Primary,
             project_dir: self.project_dir.clone(),
             graph_db_path: self.graph_db_path.clone(),
             binary_path: self.binary_path.clone(),
-        }
+        })
     }
 
     /// 校验模型命令只能使用尚未消费的 plan step；`--find` 例外，见 [`MAX_DISCOVERY_COMMANDS`]。
@@ -641,7 +650,7 @@ impl CommandPolicy {
             if discovery_used >= MAX_DISCOVERY_COMMANDS {
                 bail!("定位命令数超过 {MAX_DISCOVERY_COMMANDS}");
             }
-            return Ok(self.locating_command(request));
+            return self.locating_command(request);
         }
 
         if used_steps.len() >= self.max_command_count {
@@ -662,7 +671,7 @@ impl CommandPolicy {
             // 已消费的 step 上换个写法再问一次，只要能拿到不一样的输出，就不是走错路。
             //
             // 拒绝会让整条 trial 立刻判负，所以它必须只留给「工具服务不了」和「去错了
-            // 地方」。M59 评测里死在这上面的全是既没走错、工具也答得出来的命令：
+            // 地方」。M58.3 评测里死在这上面的全是既没走错、工具也答得出来的命令：
             //
             // - `field_lineage_model1_name` 9 次 trial 全部因为按 SKILL.md 的指示把 budget
             //   从 compact 升到 normal。接口不能一边要求升级、一边把升级判成路由失败。
@@ -704,7 +713,7 @@ impl CommandPolicy {
                         && self.resolver.canonical(&request.target).is_none()
                         && discovery_used < MAX_DISCOVERY_COMMANDS =>
                     {
-                        return Ok(self.locating_command(request));
+                        return self.locating_command(request);
                     }
                     None => {
                         bail!("模型命令不匹配任何未使用的 minimal_command_plan step");
@@ -718,6 +727,19 @@ impl CommandPolicy {
         // 而且 trace 里记的命令会和真正跑过的 CLI 不是同一条。
         let mut variant = variant;
         variant.target = request.target.clone();
+
+        // args 和 budget 同理：模型请求的 `--intent availability` 必须真的带着 intent 跑，
+        // compact 截断后升级 normal 的重试必须真的用 normal 跑。此前两者被静默丢掉——
+        // trace 记的是模型请求的值、执行的是 plan 的值，评测报告描述的就不是真正量过的
+        // CLI 调用。取值先过合法性校验，白名单外的旗标一律拒绝。
+        validate_request_args(&request.args)?;
+        if let Some(budget) = request.budget.as_deref() {
+            validate_request_budget(budget)?;
+        }
+        variant.args = request.args.clone();
+        if request.budget.is_some() {
+            variant.budget = request.budget.clone();
+        }
 
         Ok(ValidatedCommand {
             step_index: Some(step_index),
@@ -774,6 +796,44 @@ fn contains_shell_metacharacters(value: &str) -> bool {
     [";", "&&", "||", "`", "$(", "\n", "\r", "\0"]
         .iter()
         .any(|marker| value.contains(marker))
+}
+
+/// 校验模型请求的 args 只含三动词表面真实支持的旗标。
+///
+/// args 会原样进入 argv：放进白名单外的旗标，CLI 要么报错、要么悄悄改变行为，而
+/// trace 记的都是同一条命令——不许出现「记的和跑的不一致」的灰色地带。budget 只能
+/// 走 JSON 顶层字段（SKILL.md 也是这么要求的），混进 args 直接拒绝并说明写法。
+fn validate_request_args(args: &[String]) -> Result<()> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--intent" => {
+                let value = iter.next().ok_or_else(|| anyhow!("--intent 缺少取值"))?;
+                metadata_checker::explain::TraversalIntent::parse(value)
+                    .with_context(|| format!("--intent 取值无效: {value}"))?;
+            }
+            "--depth" => {
+                let value = iter.next().ok_or_else(|| anyhow!("--depth 缺少取值"))?;
+                if value.parse::<usize>().is_err() {
+                    bail!("--depth 取值无效: {value}");
+                }
+            }
+            "--detail" => {}
+            "--budget" => {
+                bail!("budget 只能放在 JSON 顶层 budget 字段，不能放进 args");
+            }
+            other => bail!("args 含不允许的参数: {other}"),
+        }
+    }
+    Ok(())
+}
+
+/// budget 只接受三档；其余取值让模型重写，不能带进 argv。
+fn validate_request_budget(budget: &str) -> Result<()> {
+    match budget {
+        "compact" | "normal" | "full" => Ok(()),
+        other => bail!("budget 取值无效: {other}（合法值: compact / normal / full）"),
+    }
 }
 
 /// CNB AI Chat 使用的消息结构。

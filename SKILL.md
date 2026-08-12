@@ -69,9 +69,9 @@ description: |
 所有机器输出都按同一条阅读流消费：
 1. 判断 intent / question kind：从 `summary.intent`、用户问题和命令类型确认 display、value-source、writer、availability、action、page-logic、model-relationships 等意图。
 2. 先读 `summary`：优先看 `summary.what_is_it`、`summary.primary_reason`、`summary.key_findings`、`summary.evidence_summary` 和计数字段。
-3. 对 explain-condition 和 advise-query，读 `details.answer_contract`：确认 `primary_fact_path`、`forbidden_fact_paths[]`、`must_read_summary_first`。
-4. 只深入主证据块：按 `primary_fact_path` 读取 `details.answer_facts.<fact_block>`，不要把 forbidden fact block 混成同一结论。
-5. 查容量和后续动作：若 `details.truncation_guard.safe_to_answer_full_relationships=false` 或有 `OUTPUT_TRUNCATED`，按 `required_budget_for_complete_answer` 从 `--budget compact` 升级到 `normal` 或 `--budget full`；若 `details.required_followups[]` 中 `must_run_for_complete_answer=true`，先执行 followup。
+3. 读 answer contract：`--explain` 在 `details.condition_facts.answer_contract`（旧命令 `--explain-condition` 在 `details.answer_contract`，`--advise-query` 直接给 `details.primary_fact_path` / `details.forbidden_fact_paths[]`）：确认 `primary_fact_path`、`forbidden_fact_paths[]`、`must_read_summary_first`。
+4. 只深入主证据块：按 `primary_fact_path` 读取 `details.condition_facts.answer_facts.<fact_block>`，不要把 forbidden fact block 混成同一结论。
+5. 查容量和后续动作：若 `details.condition_facts.truncation_guard.safe_to_answer_full_relationships=false` 或有 `OUTPUT_TRUNCATED`，按 `required_budget_for_complete_answer` 从 `--budget compact` 升级到 `normal` 或 `--budget full`；若 `details.condition_facts.required_followups[]` 中 `must_run_for_complete_answer=true`，先执行 followup。
 6. 需要核验时再读 `evidence`：优先使用 `confidence=high` 且有真实 `source_file` / `json_path` 的证据。
 7. 有 `diagnostics` 时降级回答：按 Diagnostics & Fallback Matrix 说明限制、下一步和不确定性。
 8. 最终回答声明使用的 fact block 或证据类型，例如“根据 display_facts...”。
@@ -169,22 +169,22 @@ metadata-checker --session-dir ~/.metadata-checker/sessions \
 - `field:MODEL.FIELD`
 - `page:PATH`
 
-intent 到 fact block 映射：
+intent 到 fact block 映射（`--explain` 下全部位于 `details.condition_facts.*`；旧命令 `--explain-condition` 输出同一组块，但位于 `details.*` 顶层）：
 | intent | 主证据块 |
 |---|---|
-| `display` | `details.answer_facts.display_facts` |
-| `value-source` | `details.answer_facts.value_source_facts` |
-| `writer` | `details.answer_facts.writer_facts` |
-| `availability` | `details.answer_facts.availability_facts` |
-| `action` | `details.answer_facts.action_facts` |
+| `display` | `details.condition_facts.answer_facts.display_facts` |
+| `value-source` | `details.condition_facts.answer_facts.value_source_facts` |
+| `writer` | `details.condition_facts.answer_facts.writer_facts` |
+| `availability` | `details.condition_facts.answer_facts.availability_facts` |
+| `action` | `details.condition_facts.answer_facts.action_facts` |
 
 关键字段：
-- `details.answer_contract.primary_fact_path`：本次唯一主证据路径。
-- `details.answer_contract.forbidden_fact_paths[]`：不能混入主结论的证据块。
-- `details.answer_facts.*.paths[].steps[].why_included`：每一步为什么被纳入链路，用它过滤普通图邻居。
-- `details.thinking_frame`：缺什么、不能用什么、下一步怎么查。
-- `details.truncation_guard`：当前 budget 是否足以回答全量关系。
-- `details.required_followups[]`：完整答案必须执行或建议执行的后续查询。
+- `details.condition_facts.answer_contract.primary_fact_path`：本次唯一主证据路径。
+- `details.condition_facts.answer_contract.forbidden_fact_paths[]`：不能混入主结论的证据块。
+- `details.condition_facts.answer_facts.*.paths[].steps[].why_included`：每一步为什么被纳入链路，用它过滤普通图邻居。
+- `details.condition_facts.thinking_frame`：缺什么、不能用什么、下一步怎么查。
+- `details.condition_facts.truncation_guard`：当前 budget 是否足以回答全量关系。
+- `details.condition_facts.required_followups[]`：完整答案必须执行或建议执行的后续查询。
 
 ### Display Logic Gating Hierarchy
 
@@ -193,7 +193,7 @@ intent 到 fact block 映射：
 按以下 if-else 读取 `condition_scope`：
 1. If `condition_scope = direct`：这是目标组件自身的显示/禁用/只读条件。
 2. Else if `condition_scope = inherited`：这是祖先容器条件，是目标组件能显示的必要门禁。
-3. If direct 或 inherited 条件引用 `modelX.totalRowCount__`：继续读取 `details.data_empty_gates` 中 `condition_scope = expanded_from_total_row_count` 的展开规则。
+3. If direct 或 inherited 条件引用 `modelX.totalRowCount__`：继续读取 `details.condition_facts.data_empty_gates` 中 `condition_scope = expanded_from_total_row_count` 的展开规则。
 4. Else if `condition_scope = referenced_by_model_filter`：这是其他模型 filter 反向引用目标组件，只能作为 supporting context，不是目标显示门禁。
 5. 若存在 `deduped_condition_ids` / `deduped_owner_node_ids`，只在审计重复条件时使用。
 
@@ -356,11 +356,12 @@ metadata-checker table.tbl --budget compact
 关键字段：
 - `summary.what_is_it`：页面一句话摘要。
 - `summary.page_role`：`form_submit_page` / `readonly_dashboard` / `navigation_page` / `data_maintenance_page` / `mixed_interaction_page` / `unknown`。
+- `summary.page_jump_count`：真实页面跳转数量（只统计指向页面节点的边）。`page_role` 与结论中的「跳转」以此为准；`summary.navigation_count` 是导航相关边总数，含组件控制与传参边，两者不要混用。
 - `details.entrypoints`：用户可触发入口，不含普通 input。
 - `details.action_flows`：动作链，含 `action_id`、`action_type`、`action_category`、`semantic_summary`、`component_id`、`trigger_type`、`blocks_on`、`condition`、`reads`、`writes`、`navigation`、`sets_params`、`passes_params`。
 - `details.data_sources`：页面读取的模型和字段。
 - `details.write_targets`：页面写入的模型和字段。
-- `details.navigation`：跳转、嵌入、参数传递关系。
+- `details.navigation`：跳转、嵌入、参数传递、组件控制关系（`to` 以 `page:` 开头的才是页面跳转）。
 - `details.visibility_rules`：visible/hidden/disabled/readonly 规则。
 - `details.risk_diagnostics`：`NO_WRITE_TARGETS`、`NO_ENTRYPOINTS`、`ACTION_FLOW_INCOMPLETE`、`EVIDENCE_SAMPLED`、`UNRESOLVED_PAGE_NAVIGATION`、`UNRESOLVED_MODEL_WRITE`、`VISIBILITY_RULE_UNRESOLVED`。
 
@@ -386,21 +387,21 @@ metadata-checker table.tbl --budget compact
 
 ## DataFlow Projection
 
-当目标字段或页面 model 指向 DataFlow 加工表时，`explain_condition` 会在 `details.answer_facts.<fact_block>` 下输出 DataFlow 内部投影短事实。
+当目标字段或页面 model 指向 DataFlow 加工表时，`--explain` 会在 `details.condition_facts.answer_facts.<fact_block>` 下输出 DataFlow 内部投影短事实。
 
 value-source intent：
-- 读取 `details.answer_facts.value_source_facts.dataflow_table`、`dataflow_output_field`、`physical_source_fields[]`、`via`、`original_node`、`original_field`、`candidate_inputs[]`。
+- 读取 `details.condition_facts.answer_facts.value_source_facts.dataflow_table`、`dataflow_output_field`、`physical_source_fields[]`、`via`、`original_node`、`original_field`、`candidate_inputs[]`。
 - `physical_source_fields[]` 非空时才可把 `proven_physical_input` 当作字段级物理来源证明。
 - 只有 `candidate_inputs[]` 或 `table_source_path` 时，只能说候选来源。
 
 availability intent：
 - 页面局部 model 优先使用 page-scoped target，例如 `model:app/售后.app/绑定车辆/会员已注册.spg|model11`。
-- 读取 `details.answer_facts.availability_facts.dataflow_availability`、`dataflow_table`、`physical_inputs[]`、`source_filters[]`、`output_filters[]`、`join_rules[]`、`union_rules[]`、`referenced_vars[]`。
+- 读取 `details.condition_facts.answer_facts.availability_facts.dataflow_availability`、`dataflow_table`、`physical_inputs[]`、`source_filters[]`、`output_filters[]`、`join_rules[]`、`union_rules[]`、`referenced_vars[]`。
 - DataFlow filter 描述 model 数据可用性，不是组件自身 direct/inherited visibleCondition。
 
 action intent：
 - 用户问句里不会出现内部 action id，所以先在组件上查 `--intent action`，
-  再用 `details.answer_facts.action_facts.actions[].action_target` 作为下一条命令的 target。
+  再用 `details.condition_facts.answer_facts.action_facts.actions[].action_target` 作为下一条命令的 target。
 - `actions[]` 是目标自己挂的动作（图上的 Triggers 边）；`related_actions[]` 是别的组件的动作，
   只是它们的门禁条件引用了本目标——回答「为什么点不动」要用它，但不能说成本目标的动作。
 - `gate_conditions[].raw_expr` 是动作门禁原文；组件自身的 visibleCondition/disableCondition 不是动作门禁。

@@ -755,6 +755,22 @@
         cp SKILL.md "$OUT_DIR/skills/metadata-checker/SKILL.md"
         ln -sf "$PWD/target/cnb/kimi-harness-build/release/metadata-checker" /usr/local/bin/metadata-checker
 
+        # token 脱敏：node 做字面量替换（token 可能含正则元字符，不能走 sed 正则），
+        # 空 token 时不动文件。endStages 是独立脚本块、函数不共享，那边另有一份定义。
+        redact_token() {
+          [ -n "${CNB_TOKEN:-}" ] || return 0
+          [ -f "$1" ] || return 0
+          node -e '
+            const fs = require("fs");
+            const [file, token] = process.argv.slice(1);
+            if (!token) process.exit(0);
+            const text = fs.readFileSync(file, "utf8");
+            if (text.includes(token)) {
+              fs.writeFileSync(file, text.split(token).join("[REDACTED_CNB_TOKEN]"));
+            }
+          ' "$1" "${CNB_TOKEN:-}"
+        }
+
         # 问题文本不在本文件里。唯一事实源是 xiaoshouyi_large_real_cases.json 的
         # cases[].smoke：`enabled` 选子集，`order` 定顺序，`question_template` 里的
         # {project_dir} 由本 stage 代入。此前六问是六段复制粘贴的 bash，问题文本与断言
@@ -824,6 +840,17 @@
             2> "$STDERR_LOG" || CASE_EXIT=$?
           END_MS="$(date +%s%3N)"
 
+          # 每次调用后立刻扫 token：kimi -p 自动批准工具调用，模型跑个 env 或 CLI 打印
+          # 请求头都可能把 KIMI_MODEL_API_KEY（即 CNB_TOKEN）写进 transcript/stderr。
+          # 一旦发现立刻就地脱敏并判 infra 失败——留着原文，后面的记录投影与
+          # endStages dump 会把它带进 CI 日志。
+          if [ -n "${CNB_TOKEN:-}" ] && grep -qF "$CNB_TOKEN" "$TRANSCRIPT" "$STDERR_LOG" 2>/dev/null; then
+            echo "CNB_TOKEN leaked into kimi output for $CASE_ID; redacted in place"
+            redact_token "$TRANSCRIPT"
+            redact_token "$STDERR_LOG"
+            INFRA_FAILED=1
+          fi
+
           TOOL_CALLS="$(grep -c '"tool_calls"' "$TRANSCRIPT" 2>/dev/null || true)"
           MC_INVOCATIONS="$(grep -c 'metadata-checker' "$TRANSCRIPT" 2>/dev/null || true)"
           TRANSCRIPT_BYTES="$(wc -c < "$TRANSCRIPT" 2>/dev/null || echo 0)"
@@ -880,12 +907,17 @@
         export KIMI_JUDGE_OUTPUT_DIR="$OUT_DIR"
         cargo test --features cli-local --test kimi_harness_judge_tests -- --ignored --nocapture
         test -s "$OUT_DIR/judge.json"
-        cat "$OUT_DIR/judge.md"
 
-        if grep -qF "$CNB_TOKEN" "$OUT_DIR"/smoke-transcript-*.jsonl "$OUT_DIR"/smoke-stderr-*.log 2>/dev/null; then
-          echo "CNB_TOKEN leaked into kimi output"
+        # 兜底扫描必须在任何 dump 之前：逐 case 扫描之后这里本应扫不到，扫到说明有
+        # 未覆盖的产物（比如 judge 转述了含 token 的答案）。先全量脱敏再判红——带着
+        # 原文退出，endStages 的原始 dump 就会把 token 打进 CI 日志。
+        if [ -n "${CNB_TOKEN:-}" ] && grep -rqF "$CNB_TOKEN" "$OUT_DIR" 2>/dev/null; then
+          echo "CNB_TOKEN leaked into smoke artifacts; redacting everything before exit"
+          find "$OUT_DIR" -type f | while read -r f; do redact_token "$f"; done
           exit 1
         fi
+        cat "$OUT_DIR/judge.md"
+
         if [ "$INFRA_FAILED" -ne 0 ]; then
           echo "kimi infra failure; see per-case exit codes above and $RECORDS"
           exit 1
@@ -897,6 +929,22 @@
         # 缺文件是常态（前面的 stage 可能在任意一步失败），不该再掩盖真正的失败原因。
         set -u
         OUT_DIR="target/kimi-harness-smoke"
+        # 独立脱敏：前面的 stage 可能在任意一步失败、跳过逐 case 扫描（endStages 本来就
+        # 为这种场景存在），dump 原始产物前必须自己再过一遍，不能把含 token 的原文
+        # 打进日志。定义与 main stage 相同，文件改动不会随 stage 带过来。
+        redact_token() {
+          [ -n "${CNB_TOKEN:-}" ] || return 0
+          [ -f "$1" ] || return 0
+          node -e '
+            const fs = require("fs");
+            const [file, token] = process.argv.slice(1);
+            if (!token) process.exit(0);
+            const text = fs.readFileSync(file, "utf8");
+            if (text.includes(token)) {
+              fs.writeFileSync(file, text.split(token).join("[REDACTED_CNB_TOKEN]"));
+            }
+          ' "$1" "${CNB_TOKEN:-}"
+        }
         ls -lh "$OUT_DIR" || true
         # records.jsonl 是给下游读的；这里额外投影一份人读的表，
         # 免得复盘时先得自己解析 JSONL。
@@ -923,6 +971,10 @@
           [ -e "$TRANSCRIPT" ] || continue
           CASE_ID="$(basename "$TRANSCRIPT" .jsonl)"
           CASE_ID="${CASE_ID#smoke-transcript-}"
+          # dump 前就地脱敏：无论前面的 stage 在哪一步断掉，这里都不能成为
+          # token 进 CI 日志的通道。
+          redact_token "$TRANSCRIPT"
+          redact_token "$OUT_DIR/smoke-stderr-${CASE_ID}.log"
           echo "===== ${CASE_ID} tool calls (raw, truncated) ====="
           grep '"tool_calls"' "$TRANSCRIPT" 2>/dev/null | cut -c1-600 || true
           echo "===== ${CASE_ID} transcript tail ====="

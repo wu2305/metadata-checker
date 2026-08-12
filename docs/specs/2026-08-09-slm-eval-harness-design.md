@@ -1,6 +1,6 @@
 # SLM 评测 harness 设计（M58.2）
 
-> 状态：draft（2026-08-09；待批准）
+> 状态：approved（用户确认 2026-08-11；随 Codex 评审 P1 整改落地）
 > 范围：把 M58 自研 JSON-command runner 冻结，改以真实 agent harness（kimi-code CLI）+ 外移判分作为评测主路径；固化此前只存在于代码与 commit 里的约束与结论。
 > 编号：ai-eval 线 **M58.2**；前序 [2026-07-17-cheap-model-comprehension-eval-design.md](2026-07-17-cheap-model-comprehension-eval-design.md)（approved）。
 

@@ -1,8 +1,8 @@
 # M58：廉价模型理解力评测
 
 > 状态：**active**（M58/M58.1 JSON-command runner 已**冻结**；主路径转为 M58.2 agent harness）
-> Spec：[2026-07-17-cheap-model-comprehension-eval-design.md](../../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved，描述已冻结的 runner）  
-> Spec（当前）：[2026-08-09-slm-eval-harness-design.md](../../specs/2026-08-09-slm-eval-harness-design.md)（draft）  
+> Spec：[2026-07-17-cheap-model-comprehension-eval-design.md](../../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved，描述已冻结的 runner）
+> Spec（当前）：[2026-08-09-slm-eval-harness-design.md](../../specs/2026-08-09-slm-eval-harness-design.md)（approved）
 > Plan：[2026-07-27-m58-cnb-ai-chat-runner-plan.md](../../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done，对应冻结 runner）
 
 ## 冻结公告（2026-08-09）

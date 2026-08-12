@@ -406,7 +406,10 @@ fn test_parse_judge_response_fails_when_must_not_fully_supported() {
             {"id": 2, "verdict": "not_mentioned", "note": "没提 panel35"},
             {"id": 3, "verdict": "contradicted", "note": "答案说成了 totalRowCount__ == 0"},
         ],
-        "forbidden": [],
+        "forbidden": [
+            {"id": 1, "violated": false, "note": "未违规"},
+            {"id": 2, "violated": false, "note": "未违规"},
+        ],
         "overall_note": "有缺漏",
     })
     .to_string();
@@ -429,6 +432,7 @@ fn test_parse_judge_response_fails_on_forbidden_violation() {
         ],
         "forbidden": [
             {"id": 1, "violated": true, "note": "答案声称 text41 自己配置了条件"},
+            {"id": 2, "violated": false, "note": "未违规"},
         ],
         "overall_note": "有违禁表述",
     })
@@ -477,6 +481,8 @@ fn test_parse_judge_response_ignores_out_of_range_ids_with_record() {
             {"id": 2, "verdict": "contradicted", "note": "重复编号"},
         ],
         "forbidden": [
+            {"id": 1, "violated": false, "note": "未违规"},
+            {"id": 2, "violated": false, "note": "未违规"},
             {"id": 0, "violated": true, "note": "非法编号"},
         ],
         "overall_note": "完成",
@@ -490,6 +496,44 @@ fn test_parse_judge_response_ignores_out_of_range_ids_with_record() {
     assert!(judgement.overall_note.contains("忽略"));
     assert!(judgement.overall_note.contains("assertions#99"));
     assert!(judgement.overall_note.contains("forbidden#0"));
+}
+
+/// 验证 judge 漏检全部禁令时按基础设施故障报错，而不是拿 `violations == 0` 假通过。
+#[test]
+fn test_parse_judge_response_errors_when_forbidden_omitted() {
+    let case = sample_case();
+    let raw = serde_json::json!({
+        "assertions": [
+            {"id": 1, "verdict": "supported", "note": "覆盖"},
+            {"id": 2, "verdict": "supported", "note": "覆盖"},
+            {"id": 3, "verdict": "supported", "note": "覆盖"},
+        ],
+        "overall_note": "忘了查禁令",
+    })
+    .to_string();
+    let error = parse_judge_response(&case, &raw).unwrap_err().to_string();
+    assert!(error.contains("禁令检查不完整"), "{error}");
+    assert!(error.contains("0/2"), "{error}");
+}
+
+/// 验证禁令只覆盖了一部分同样报错——漏检的禁令不可能违规，必然酿成假通过。
+#[test]
+fn test_parse_judge_response_errors_on_partial_forbidden_coverage() {
+    let case = sample_case();
+    let raw = serde_json::json!({
+        "assertions": [
+            {"id": 1, "verdict": "supported", "note": "覆盖"},
+            {"id": 2, "verdict": "supported", "note": "覆盖"},
+            {"id": 3, "verdict": "supported", "note": "覆盖"},
+        ],
+        "forbidden": [
+            {"id": 1, "violated": false, "note": "只查了一条"},
+        ],
+    })
+    .to_string();
+    let error = parse_judge_response(&case, &raw).unwrap_err().to_string();
+    assert!(error.contains("禁令检查不完整"), "{error}");
+    assert!(error.contains("1/2"), "{error}");
 }
 
 /// 验证 judge_case 端到端走 FakeModelAdapter：请求送达、响应解析为 CaseJudgement。

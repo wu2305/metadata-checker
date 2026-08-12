@@ -317,6 +317,38 @@ fn test_m58_command_policy_binds_paths_and_steps() {
             OsString::from("compact"),
         ]
     );
+    // 模型写的 args 必须进入真正执行的 argv：带 `--intent availability` 的请求必须
+    // 真的带着 intent 跑，否则 trace 记的与跑的不是同一条命令。
+    let with_intent = CommandRequest {
+        args: vec!["--intent".to_string(), "availability".to_string()],
+        ..request.clone()
+    };
+    let validated = policy.validate(&with_intent, &[], 0).unwrap();
+    assert_eq!(
+        validated.argv(),
+        vec![
+            OsString::from("--non-human"),
+            OsString::from("--project-dir"),
+            OsString::from("/private/tmp/m58-fixed-project"),
+            OsString::from("--graph-db-path"),
+            OsString::from("/private/tmp/m58-fixed.graphdb"),
+            OsString::from("--relations"),
+            OsString::from("page:app/actions_test.spg"),
+            OsString::from("--intent"),
+            OsString::from("availability"),
+            OsString::from("--budget"),
+            OsString::from("compact"),
+        ]
+    );
+    // compact → normal 的升级重试必须真的用 normal 执行（plan 这步的 budget 是
+    // compact，此前重试两次跑的都是 plan 的 budget，模型永远拿不到不截断的输出）。
+    let used_step0 = vec![ExecutedCommand::for_test(0, &request)];
+    let upgraded = CommandRequest {
+        budget: Some("normal".to_string()),
+        ..request.clone()
+    };
+    let validated = policy.validate(&upgraded, &used_step0, 0).unwrap();
+    assert_eq!(validated.argv().last(), Some(&OsString::from("normal")));
     // 原样重发：那一步已被消费，且拿到的是同一份输出，仍然拒绝。
     let used = |steps: &[usize]| -> Vec<ExecutedCommand> {
         steps
@@ -392,6 +424,112 @@ fn test_m58_command_policy_defaults_missing_budget_to_compact() {
     assert_eq!(
         default_validated.argv().last(),
         Some(&OsString::from("compact"))
+    );
+
+    // plan 没声明 budget 不等于丢弃模型的取值：显式要 full 必须真的用 full 执行。
+    let full_validated = policy
+        .validate(
+            &CommandRequest {
+                command_kind: "--relations".to_string(),
+                target: "page:app/dataflow_embedded.spg".to_string(),
+                args: Vec::new(),
+                budget: Some("full".to_string()),
+            },
+            &[],
+            0,
+        )
+        .unwrap();
+    assert_eq!(full_validated.argv().last(), Some(&OsString::from("full")));
+}
+
+/// 白名单外的 args、写错位置的 budget、非法取值都必须拒绝，不能带进 argv。
+#[test]
+fn test_m58_command_policy_rejects_invalid_args_and_budget() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "page_purpose_actions_test")
+        .unwrap();
+    let policy = CommandPolicy::from_case(
+        case,
+        PathBuf::from("/private/tmp/m58-fixed-project"),
+        PathBuf::from("/private/tmp/m58-fixed.graphdb"),
+        PathBuf::from("/private/tmp/metadata-checker"),
+    )
+    .unwrap();
+    let base = CommandRequest {
+        command_kind: "--relations".to_string(),
+        target: "page:app/actions_test.spg".to_string(),
+        args: Vec::new(),
+        budget: Some("compact".to_string()),
+    };
+    // budget 混进 args：SKILL.md 明确要求放 JSON 顶层字段。
+    assert!(
+        policy
+            .validate(
+                &CommandRequest {
+                    args: vec!["--budget".to_string(), "normal".to_string()],
+                    ..base.clone()
+                },
+                &[],
+                0
+            )
+            .is_err()
+    );
+    // 白名单外旗标。
+    assert!(
+        policy
+            .validate(
+                &CommandRequest {
+                    args: vec!["--human".to_string()],
+                    ..base.clone()
+                },
+                &[],
+                0
+            )
+            .is_err()
+    );
+    // 非法 intent 取值。
+    assert!(
+        policy
+            .validate(
+                &CommandRequest {
+                    args: vec!["--intent".to_string(), "everything".to_string()],
+                    ..base.clone()
+                },
+                &[],
+                0
+            )
+            .is_err()
+    );
+    // intent 缺取值。
+    assert!(
+        policy
+            .validate(
+                &CommandRequest {
+                    args: vec!["--intent".to_string()],
+                    ..base.clone()
+                },
+                &[],
+                0
+            )
+            .is_err()
+    );
+    // 非法 budget 取值。
+    assert!(
+        policy
+            .validate(
+                &CommandRequest {
+                    budget: Some("huge".to_string()),
+                    ..base.clone()
+                },
+                &[],
+                0
+            )
+            .is_err()
     );
 }
 
@@ -1739,7 +1877,7 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     );
     assert!(bootstrap.contains("绝对不要自己拼造文件路径"));
 
-    // M59 评测里 109 条拒绝有 83% 是 `page:actions_test` 这种「前缀写对、路径没写全」的
+    // M58.3 评测里 109 条拒绝有 83% 是 `page:actions_test` 这种「前缀写对、路径没写全」的
     // 写法。补全已经由 Rust 做掉，prompt 必须把这件事说出来——否则模型仍然会为了凑出
     // 完整路径去编，或者多花一轮 --find。
     assert!(
@@ -2059,7 +2197,7 @@ fn test_m58_runner_accepts_dataflow_target_with_model_prefix() {
 
 /// 没写全但能被工具确定性补全的 target 必须视为同一条命令。
 ///
-/// M59 评测里 109 条拒绝有 91 条长这样：`page:actions_test` 少了目录和扩展名。工具现在
+/// M58.3 评测里 109 条拒绝有 91 条长这样：`page:actions_test` 少了目录和扩展名。工具现在
 /// 会把它补成 `page:app/actions_test.spg`，但 plan 是逐字符比较 target 的，命令在进 CLI
 /// 之前就被判负——评测测的于是是「有没有原样打出我们写下的字符串」，而不是「工具能不能
 /// 被走通」。判据仍然完全来自被测工具本身：只有归一到同一个真实节点才算命中。
@@ -2107,7 +2245,7 @@ fn test_m58_runner_accepts_target_the_tool_resolves() {
 /// 已消费的 step 上换个写法再问一次，只要能拿到不一样的输出，就不是走错路。
 ///
 /// SKILL.md 和 bootstrap 都要求「compact 作为默认第一轮，仅在 diagnostics 或
-/// OUTPUT_TRUNCATED 时升级」。M59 评测里 `field_lineage_model1_name` 9 次 trial 全部这样
+/// OUTPUT_TRUNCATED 时升级」。M58.3 评测里 `field_lineage_model1_name` 9 次 trial 全部这样
 /// 死：第一条命令完全正确、被接受，模型按指示升到 normal，plan 里那一步已被消费，整条
 /// trial 记成 command_rejected。接口不能一边要求升级 budget，一边把升级判成路由失败。
 #[test]
@@ -2166,7 +2304,7 @@ fn test_m58_runner_accepts_budget_upgrade_retry() {
 /// 同一个 step 的另一种可接受写法必须能接着用。
 ///
 /// `dataflow_output_source` 的 plan 把 `--relations model:dataflow_output` 和
-/// `--explain model:dataflow_output` 都写成了这一步的可接受写法。M59 评测里模型先后发了
+/// `--explain model:dataflow_output` 都写成了这一步的可接受写法。M58.3 评测里模型先后发了
 /// 这两条，7 次 trial 因此判负——两条都是 plan 自己认可的路由，先后发出去不是走错路。
 #[test]
 fn test_m58_runner_accepts_the_other_variant_of_a_used_step() {
