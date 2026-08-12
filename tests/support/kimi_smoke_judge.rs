@@ -124,10 +124,16 @@ pub(crate) struct TrialRecord {
     pub(crate) exit_code: i32,
     /// 单 trial 墙钟毫秒；Phase 2 的预算输入。
     pub(crate) wall_clock_ms: i64,
-    /// transcript 中出现 `tool_calls` 的行数（软信号）。
+    /// 结构化解析 tool_calls 事件得到的真实工具调用次数（不再是 grep 行数——grep
+    /// 会把 assistant 复述与工具返回里的字面值也算成调用，实跑出现过 13 次
+    /// tool_calls 对 15 次「调用」的假数据）。
     pub(crate) tool_calls: u32,
-    /// transcript 中提及 metadata-checker 的行数（软信号）。
+    /// 其中真正调用 metadata-checker 二进制的次数（按 argv 判定，不含复述/返回文本）。
     pub(crate) metadata_checker_invocations: u32,
+    /// 绕过工具直接读写项目原始 .spg/.tbl 的调用次数（启发式下限，见 .cnb.yml 解析段注释）。
+    pub(crate) raw_fallback_calls: u32,
+    /// 是否发生 raw fallback；true 时本 trial 不计入工具分，只算任务完成。
+    pub(crate) raw_fallback: bool,
     /// transcript 字节数；0 表示空产出。
     pub(crate) transcript_bytes: u64,
     /// transcript 路径，判分阶段据此定位答案。
@@ -141,7 +147,7 @@ pub(crate) struct TrialRecord {
 /// 手写而非派生：`deny_unknown_fields` 的错误信息里虽然含字段名，但依赖
 /// serde 错误文本做断言太脆。这份清单与结构体不同步时，
 /// `test_trial_record_field_list_matches_struct` 会判红。
-pub(crate) const TRIAL_RECORD_FIELDS: [&str; 12] = [
+pub(crate) const TRIAL_RECORD_FIELDS: [&str; 14] = [
     "case_id",
     "order",
     "difficulty",
@@ -151,6 +157,8 @@ pub(crate) const TRIAL_RECORD_FIELDS: [&str; 12] = [
     "wall_clock_ms",
     "tool_calls",
     "metadata_checker_invocations",
+    "raw_fallback_calls",
+    "raw_fallback",
     "transcript_bytes",
     "transcript_path",
     "stderr_path",
@@ -441,10 +449,12 @@ struct RawForbiddenCheck {
 /// 解析 judge 的原始响应为确定性判分结果。
 ///
 /// 容忍 ```json 围栏与前后多余文字（取第一个 `{` 到最后一个 `}`）；未知 verdict
-/// 字符串直接报错；编号对不上断言的条目忽略但记录进 overall_note。pass 规则在
-/// 这里确定：`must_supported == must_total` 且没有任何禁令被违反。禁令检查必须
-/// 完整——漏检的禁令不可能违规，会把「judge 没查」变成「答案没违反」的假通过，
-/// 因此漏检一律按 judge 基础设施故障报错，而不是给被测答案计分。
+/// 字符串直接报错。judge 输出必须是对全部编号断言的**完整、唯一、不自相矛盾**的
+/// 判定：编号缺失/重复意味着有断言没被查，布尔与 note 自声明矛盾意味着判定本身
+/// 不可信（CNB 实跑出现过 `violated=true` 但 note 自写「故violated=false」）。两者
+/// 都会把「judge 没查好」变成「答案没问题」的假通过，一律按 judge 基础设施故障
+/// 上抛，不给被测答案计分。pass 规则在这里确定：`must_supported == must_total`
+/// 且没有任何禁令被违反。
 pub(crate) fn parse_judge_response(case: &SmokeCase, raw: &str) -> Result<CaseJudgement> {
     let start = raw
         .find('{')
@@ -472,23 +482,43 @@ pub(crate) fn parse_judge_response(case: &SmokeCase, raw: &str) -> Result<CaseJu
         &response.forbidden,
         &case.standard_answer.must_not_mention,
         &mut ignored,
-    );
+    )?;
 
-    // 禁令检查必须完整（编号唯一由 map_forbidden_checks 的 ignored 登记保证）：
-    // 漏检的禁令不可能违规，`violations == 0` 会把 judge 的遗漏变成被测答案的
-    // 假通过。这是 judge 输出不完整，按判分基础设施故障上抛，不计 pass/fail。
+    // judge 输出完整性强校验：无效/重复编号、任何一段漏判都按基础设施故障上抛。
+    // 漏检的断言不可能被判失败，`violations == 0` 会把 judge 的遗漏变成被测答案的
+    // 假通过（实跑中 judge 漏掉全部禁令检查仍拿到 pass），不计 pass/fail。
+    if !ignored.is_empty() {
+        bail!(
+            "case {} 的 judge 响应含无效或重复编号: {}",
+            case.case_id,
+            ignored.join(", ")
+        );
+    }
+    let must_total = case.standard_answer.must_mention.len();
+    if verdicts.len() != must_total {
+        bail!(
+            "case {} 的 judge 响应 must 判定不完整：{}/{} 条",
+            case.case_id,
+            verdicts.len(),
+            must_total
+        );
+    }
     let forbidden_total = case.standard_answer.must_not_mention.len();
     if forbidden_checks.len() != forbidden_total {
         bail!(
-            "case {} 的 judge 响应禁令检查不完整：{}/{} 条（无效或重复编号: {}）",
+            "case {} 的 judge 响应禁令检查不完整：{}/{} 条",
             case.case_id,
             forbidden_checks.len(),
-            forbidden_total,
-            if ignored.is_empty() {
-                "无".to_string()
-            } else {
-                ignored.join(", ")
-            }
+            forbidden_total
+        );
+    }
+    let bonus_total = case.standard_answer.should_mention.len();
+    if bonus_verdicts.len() != bonus_total {
+        bail!(
+            "case {} 的 judge 响应 bonus 判定不完整：{}/{} 条",
+            case.case_id,
+            bonus_verdicts.len(),
+            bonus_total
         );
     }
 
@@ -508,22 +538,8 @@ pub(crate) fn parse_judge_response(case: &SmokeCase, raw: &str) -> Result<CaseJu
         .iter()
         .filter(|check| check.violated)
         .count();
-    let must_total = case.standard_answer.must_mention.len();
     let passed = must_supported == must_total && violations == 0;
-
-    let mut overall_note = response.overall_note;
-    if !ignored.is_empty() {
-        let record = format!(
-            "（Rust 侧忽略了 {} 条编号无效或重复的判定: {}）",
-            ignored.len(),
-            ignored.join(", ")
-        );
-        overall_note = if overall_note.is_empty() {
-            record
-        } else {
-            format!("{overall_note} {record}")
-        };
-    }
+    let overall_note = response.overall_note;
 
     Ok(CaseJudgement {
         case_id: case.case_id.clone(),
@@ -558,6 +574,11 @@ fn map_assertion_verdicts(
             ignored.push(format!("{section}#{}", raw.id));
             continue;
         }
+        // 结构化判定与 note 自声明冲突时，总有一侧是错的，且无法判断信哪侧，
+        // 按 judge 基础设施故障上抛而不是猜。
+        if let Some(conflict) = assertion_note_conflict(&verdict, &raw.note) {
+            bail!("judge 输出自相矛盾：{section}#{} {conflict}", raw.id);
+        }
         verdicts.push(AssertionVerdict {
             id: raw.id,
             verdict,
@@ -574,13 +595,16 @@ fn map_forbidden_checks(
     raw_entries: &[RawForbiddenCheck],
     forbidden: &[String],
     ignored: &mut Vec<String>,
-) -> Vec<ForbiddenCheck> {
+) -> Result<Vec<ForbiddenCheck>> {
     let mut seen = BTreeSet::new();
     let mut checks = Vec::new();
     for raw in raw_entries {
         if raw.id == 0 || raw.id > forbidden.len() || !seen.insert(raw.id) {
             ignored.push(format!("forbidden#{}", raw.id));
             continue;
+        }
+        if let Some(conflict) = forbidden_note_conflict(raw.violated, &raw.note) {
+            bail!("judge 输出自相矛盾：forbidden#{} {conflict}", raw.id);
         }
         checks.push(ForbiddenCheck {
             id: raw.id,
@@ -590,7 +614,64 @@ fn map_forbidden_checks(
         });
     }
     checks.sort_by_key(|check| check.id);
-    checks
+    Ok(checks)
+}
+
+/// 从 note 提取显式自声明的布尔判定，返回最后一次声明。
+///
+/// judge 的 note 是自由文本，只认 `key=值` / `key: 值` / `key为值` 形态的明确自声明
+/// （实跑矛盾样本是「故violated=false」）；叙述性措辞不比对，避免误伤正常解释。
+/// 取最后一次：judge 会在 note 里自我修正，最终声明才是结论——若它与结构化字段
+/// 冲突，无论哪侧对，这份输出都不可信。
+fn declared_bool_in_note(note: &str, key: &str) -> Option<bool> {
+    let pattern = regex::Regex::new(&format!(
+        r"(?i)(?:^|[^a-zA-Z_]){}\s*(?:[=:：]|为)\s*(true|false)",
+        regex::escape(key)
+    ))
+    .expect("note 自声明正则编译失败");
+    pattern
+        .captures_iter(note)
+        .filter_map(|captures| captures.get(1))
+        .last()
+        .map(|value| value.as_str().eq_ignore_ascii_case("true"))
+}
+
+/// 断言判定与 note 自声明是否冲突；无自声明返回 None（不比对）。
+fn assertion_note_conflict(verdict: &Verdict, note: &str) -> Option<String> {
+    if let Some(declared) = declared_bool_in_note(note, "supported") {
+        let actual = matches!(verdict, Verdict::Supported);
+        if declared != actual {
+            return Some(format!(
+                "verdict={} 但 note 自声明 supported={declared}",
+                verdict.as_str()
+            ));
+        }
+    }
+    let word_pattern = regex::Regex::new(
+        r"(?i)(?:^|[^a-zA-Z_])verdict\s*(?:[=:：]|为)\s*(supported|not_mentioned|contradicted)",
+    )
+    .expect("verdict 自声明正则编译失败");
+    if let Some(declared) = word_pattern
+        .captures_iter(note)
+        .filter_map(|captures| captures.get(1))
+        .last()
+    {
+        let declared = declared.as_str().to_ascii_lowercase();
+        if declared != verdict.as_str() {
+            return Some(format!(
+                "verdict={} 但 note 自声明 verdict={declared}",
+                verdict.as_str()
+            ));
+        }
+    }
+    None
+}
+
+/// 禁令布尔与 note 自声明是否冲突；无自声明返回 None。
+fn forbidden_note_conflict(violated: bool, note: &str) -> Option<String> {
+    let declared = declared_bool_in_note(note, "violated")?;
+    (declared != violated)
+        .then(|| format!("violated={violated} 但 note 自声明 violated={declared}"))
 }
 
 /// 用给定 adapter 对单个 case 的答案做语义判分。
@@ -606,31 +687,146 @@ pub(crate) fn judge_case(
     parse_judge_response(case, &raw)
 }
 
-/// 把判分结果渲染成 Markdown 报告：先汇总表，再每 case 一节含逐条 verdict 表。
-pub(crate) fn render_judge_markdown(judgements: &[CaseJudgement]) -> String {
+/// 把判分结果渲染成 Markdown 报告：先汇总表与得分口径，再每 case 一节含逐条 verdict 表。
+///
+/// records（records.jsonl 的 trial 记录）按 case_id 关联进来，区分两个得分口径：
+/// task_score 是任务完成率（含绕过工具完成的 case），tool_score 只统计真正调用
+/// metadata-checker 且无 raw fallback 的 case——绕过工具拿到的 PASS 不是工具分，
+/// 这是「unrestricted agent 任务完成率」与「工具支撑力」两条不同的度量线。
+pub(crate) fn render_judge_markdown(
+    judgements: &[CaseJudgement],
+    records: &[TrialRecord],
+) -> String {
+    let record_by_case: std::collections::BTreeMap<&str, &TrialRecord> = records
+        .iter()
+        .map(|record| (record.case_id.as_str(), record))
+        .collect();
+
     let mut markdown = String::new();
     markdown.push_str("# Kimi Harness Smoke 语义 Judge\n\n");
-    markdown.push_str("| case_id | 结果 | must 命中 | contradicted | bonus 命中 | violations |\n");
-    markdown.push_str("| --- | --- | ---: | ---: | ---: | ---: |\n");
+    markdown.push_str("| case_id | 结果 | must 命中 | contradicted | bonus 命中 | violations | tool_calls | mc | raw fallback |\n");
+    markdown.push_str("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
     for judgement in judgements {
+        let record = record_by_case.get(judgement.case_id.as_str());
+        let (tool_calls, mc, raw) = match record {
+            Some(record) => (
+                record.tool_calls.to_string(),
+                record.metadata_checker_invocations.to_string(),
+                if record.raw_fallback {
+                    format!("是({})", record.raw_fallback_calls)
+                } else {
+                    "否".to_string()
+                },
+            ),
+            None => ("—".to_string(), "—".to_string(), "—".to_string()),
+        };
         markdown.push_str(&format!(
-            "| {} | {} | {}/{} | {} | {}/{} | {} |\n",
+            "| {} | {} | {}/{} | {} | {}/{} | {} | {} | {} | {} |\n",
             escape_markdown_cell(&judgement.case_id),
-            if judgement.passed { "PASS" } else { "FAIL" },
+            status_label(judgement),
             judgement.must_supported,
             judgement.must_total,
             judgement.contradicted_count,
             judgement.bonus_supported,
             judgement.bonus_total,
             judgement.violations,
+            tool_calls,
+            mc,
+            raw,
         ));
     }
+
+    // 得分口径：task_score 量任务完成，tool_score 量工具支撑。raw fallback 与
+    // 未调用工具的 case 不进 tool_score——它们证明的是 agent 不借助工具也能完成，
+    // 恰恰是工具支撑力的反例而不是证据。
+    let measured: Vec<&CaseJudgement> = judgements
+        .iter()
+        .filter(|judgement| !is_infra_placeholder(judgement))
+        .collect();
+    let task_pass = measured.iter().filter(|judgement| judgement.passed).count();
+    let tool_eligible: Vec<&CaseJudgement> = measured
+        .iter()
+        .filter(|judgement| {
+            record_by_case
+                .get(judgement.case_id.as_str())
+                .map(|record| record.metadata_checker_invocations > 0 && !record.raw_fallback)
+                .unwrap_or(false)
+        })
+        .copied()
+        .collect();
+    let tool_pass = tool_eligible
+        .iter()
+        .filter(|judgement| judgement.passed)
+        .count();
+    let raw_cases = measured
+        .iter()
+        .filter(|judgement| {
+            record_by_case
+                .get(judgement.case_id.as_str())
+                .map(|record| record.raw_fallback)
+                .unwrap_or(false)
+        })
+        .map(|judgement| judgement.case_id.as_str())
+        .collect::<Vec<_>>();
+    let no_tool_cases = measured
+        .iter()
+        .filter(|judgement| {
+            record_by_case
+                .get(judgement.case_id.as_str())
+                .map(|record| record.metadata_checker_invocations == 0 && !record.raw_fallback)
+                .unwrap_or(false)
+        })
+        .map(|judgement| judgement.case_id.as_str())
+        .collect::<Vec<_>>();
+    let no_record_cases = measured
+        .iter()
+        .filter(|judgement| !record_by_case.contains_key(judgement.case_id.as_str()))
+        .map(|judgement| judgement.case_id.as_str())
+        .collect::<Vec<_>>();
+    let infra_cases = judgements
+        .iter()
+        .filter(|judgement| is_infra_placeholder(judgement))
+        .map(|judgement| judgement.case_id.as_str())
+        .collect::<Vec<_>>();
+
+    markdown.push_str("\n## 得分口径\n\n");
+    markdown.push_str(&format!(
+        "- task_score：{}/{}（全部非 INFRA case，含绕过工具完成的；即任务完成率）\n",
+        task_pass,
+        measured.len()
+    ));
+    if tool_eligible.is_empty() {
+        markdown
+            .push_str("- tool_score：—（无有效 case：全部绕过工具或未调用 metadata-checker）\n");
+    } else {
+        markdown.push_str(&format!(
+            "- tool_score：{}/{}（仅 mc>0 且无 raw fallback 的 case；绕过工具完成的不进工具分）\n",
+            tool_pass,
+            tool_eligible.len()
+        ));
+    }
+    markdown.push_str(&format!(
+        "- raw fallback case（不计入 tool_score）：{}\n",
+        join_or_none(&raw_cases)
+    ));
+    markdown.push_str(&format!(
+        "- 未调用 metadata-checker 的 case（不计入 tool_score）：{}\n",
+        join_or_none(&no_tool_cases)
+    ));
+    markdown.push_str(&format!(
+        "- 缺少 record 的 case（工具统计未知）：{}\n",
+        join_or_none(&no_record_cases)
+    ));
+    markdown.push_str(&format!(
+        "- INFRA 占位 case（不进任何分数）：{}\n",
+        join_or_none(&infra_cases)
+    ));
 
     for judgement in judgements {
         markdown.push_str(&format!(
             "\n## {} — {}\n\n",
             judgement.case_id,
-            if judgement.passed { "PASS" } else { "FAIL" },
+            status_label(judgement),
         ));
         markdown.push_str(&format!(
             "- must 命中：{}/{}\n- contradicted：{}\n- bonus 命中：{}/{}\n- violations：{}\n",
@@ -641,6 +837,12 @@ pub(crate) fn render_judge_markdown(judgements: &[CaseJudgement]) -> String {
             judgement.bonus_total,
             judgement.violations,
         ));
+        if let Some(record) = record_by_case.get(judgement.case_id.as_str()) {
+            markdown.push_str(&format!(
+                "- 工具调用：{} 次（metadata-checker {} 次；raw fallback {} 次）\n",
+                record.tool_calls, record.metadata_checker_invocations, record.raw_fallback_calls,
+            ));
+        }
 
         let violated: Vec<&ForbiddenCheck> = judgement
             .forbidden_checks
@@ -707,6 +909,31 @@ pub(crate) fn render_judge_markdown(judgements: &[CaseJudgement]) -> String {
         ));
     }
     markdown
+}
+
+/// INFRA 占位判定：transcript 缺失、答案为空或 judge 调用失败时的占位行。
+fn is_infra_placeholder(judgement: &CaseJudgement) -> bool {
+    judgement.overall_note.starts_with("infra:")
+}
+
+/// 报告中的状态标记：infra 占位与语义 PASS/FAIL 区分开。
+fn status_label(judgement: &CaseJudgement) -> &'static str {
+    if is_infra_placeholder(judgement) {
+        "INFRA"
+    } else if judgement.passed {
+        "PASS"
+    } else {
+        "FAIL"
+    }
+}
+
+/// 列表渲染：空列表显示「无」，避免空行被读成「没有这个问题」。
+fn join_or_none(cases: &[&str]) -> String {
+    if cases.is_empty() {
+        "无".to_string()
+    } else {
+        cases.join("、")
+    }
 }
 
 /// 转义 Markdown 表格单元格中的分隔符与换行，避免报告结构被断言文本破坏。

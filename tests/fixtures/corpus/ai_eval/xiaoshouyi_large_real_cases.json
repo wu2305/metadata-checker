@@ -21,6 +21,7 @@
     "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
     "binary": "metadata-checker @ 3e49dc6 release（cli-local）"
   },
+  "corpus_pin_sha": "6920ac51",
   "provenance": {
     "extracted_by": "Kimi-K3",
     "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",

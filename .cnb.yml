@@ -727,6 +727,29 @@
         echo "REAL_PROJECT_READY spg=${SPG_COUNT} tbl=${TBL_COUNT}"
         test "$SPG_COUNT" -gt 0
         du -sh "$REAL_DIR/projects/xiaoshouyi"
+        # 语料可复现性：case 标准答案固定在 corpus_pin_sha；HEAD 漂移即判红并打出
+        # 实际 SHA。静默漂移会让任何失败都无法归因给工具、模型还是 oracle。
+        # 判红后的出路：把 xiaoshouyi-corpus 分支 reset 回基准，或重新校验 case 后
+        # 更新 fixture 的 corpus_pin_sha。不在 pipeline 里自动 checkout——partial clone
+        # 的惰性 blob 拉取不带授权头，这条修复路径在本地无法验证，不做没有验证的事。
+        CASES_JSON="tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json"
+        CORPUS_PIN="$(node -pe 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).corpus_pin_sha ?? ""' "$CASES_JSON")"
+        CORPUS_SHA="$(git -C "$REAL_DIR" rev-parse HEAD)"
+        if [ -z "$CORPUS_PIN" ]; then
+          echo "case 文件未声明 corpus_pin_sha，只记录实际 HEAD，不做漂移检查"
+        else
+          case "$CORPUS_SHA" in
+            "$CORPUS_PIN"*) echo "corpus HEAD 与 case 基准一致：$CORPUS_SHA" ;;
+            *)
+              echo "corpus 漂移：HEAD=${CORPUS_SHA}，case 基准=${CORPUS_PIN}" >&2
+              echo "case 的计数/链路断言钉在基准版本上，漂移后跑出的任何结果都无法归因。" >&2
+              echo "修复：把 xiaoshouyi-corpus 分支 reset 回基准，或重新校验 case 后更新 corpus_pin_sha。" >&2
+              exit 1
+              ;;
+          esac
+        fi
+        echo "REAL_PROJECT_CORPUS_SHA=$CORPUS_SHA"
+        printf '%s\n' "$CORPUS_SHA" > target/real-project/corpus.sha
         if grep -qF "$CNB_TOKEN" "$REAL_DIR/.git/config" 2>/dev/null; then
           echo "CNB_TOKEN persisted in git config"
           exit 1
@@ -754,6 +777,10 @@
         mkdir -p "$OUT_DIR/skills/metadata-checker" "$KIMI_CODE_HOME"
         cp SKILL.md "$OUT_DIR/skills/metadata-checker/SKILL.md"
         ln -sf "$PWD/target/cnb/kimi-harness-build/release/metadata-checker" /usr/local/bin/metadata-checker
+        # 清理上一轮残留：CNB 缓存 workspace，过期 transcript/records 会混进本轮报告与
+        # endStage dump——Aug 7 的 q1-q6 旧文件曾让复盘把上一轮会话当成本轮证据。
+        rm -f "$OUT_DIR"/smoke-transcript-*.jsonl "$OUT_DIR"/smoke-stderr-*.log \
+          "$OUT_DIR"/records.jsonl "$OUT_DIR"/judge.json "$OUT_DIR"/judge.md "$OUT_DIR"/judge-test.log
 
         # token 脱敏：node 做字面量替换（token 可能含正则元字符，不能走 sed 正则），
         # 空 token 时不动文件。endStages 是独立脚本块、函数不共享，那边另有一份定义。
@@ -770,6 +797,39 @@
             }
           ' "$1" "${CNB_TOKEN:-}"
         }
+
+        # run.json：本轮评测的身份清单。records.jsonl 逐 trial 记墙钟与调用，run.json
+        # 记版本面——语料 SHA、工具二进制、SKILL、kimi 与模型别名。缺了这些，任何失败
+        # 都无法归因到工具、模型还是 oracle。无下游消费者，字段演进自由。
+        REPO_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+        CORPUS_SHA="$(cat target/real-project/corpus.sha 2>/dev/null || echo unknown)"
+        KIMI_VERSION="$(kimi --version 2>/dev/null | head -n 1 || echo unknown)"
+        BIN_PATH="$(command -v metadata-checker || true)"
+        if [ -n "$BIN_PATH" ]; then
+          BIN_SHA="$(sha256sum "$BIN_PATH" | cut -d' ' -f1)"
+        else
+          BIN_SHA="unknown"
+        fi
+        SKILL_SHA="$(sha256sum "$OUT_DIR/skills/metadata-checker/SKILL.md" | cut -d' ' -f1)"
+        node -e '
+          const fs = require("fs");
+          const [outPath, recordedAt, repoSha, corpusSha, kimiVersion, binSha, skillSha,
+                 agentModel, judgeModel] = process.argv.slice(1);
+          const manifest = {
+            recorded_at: recordedAt,
+            repo_sha: repoSha,
+            corpus_sha: corpusSha,
+            kimi_version: kimiVersion,
+            metadata_checker_sha256: binSha,
+            skill_sha256: skillSha,
+            agent_model: agentModel,
+            judge_model: judgeModel,
+          };
+          fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2) + "\n");
+        ' "$OUT_DIR/run.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REPO_SHA" "$CORPUS_SHA" \
+          "$KIMI_VERSION" "$BIN_SHA" "$SKILL_SHA" \
+          "${KIMI_MODEL_NAME:-unknown}" "${KIMI_JUDGE_MODEL:-deepseek-v4-flash}"
+        cat "$OUT_DIR/run.json"
 
         # 问题文本不在本文件里。唯一事实源是 xiaoshouyi_large_real_cases.json 的
         # cases[].smoke：`enabled` 选子集，`order` 定顺序，`question_template` 里的
@@ -822,7 +882,8 @@
 
         # 硬断言只留 infra 级（kimi 退出码、transcript 非空、token 泄漏）；
         # 是否调用 metadata-checker 只软报告不判红——真实文件读不动时
-        # 绕过工具是数据信号，不是故障。
+        # 绕过工具是数据信号，不是故障。raw fallback 逐 case 记进 record，
+        # judge.md 的 tool_score 只统计真正用工具的 case。
         # POSIX 下拿一个真制表符只能这样：`IFS=$'\t'` 是 bash 专属。
         TAB="$(printf '\t')"
         INFRA_FAILED=0
@@ -851,13 +912,47 @@
             INFRA_FAILED=1
           fi
 
-          TOOL_CALLS="$(grep -c '"tool_calls"' "$TRANSCRIPT" 2>/dev/null || true)"
-          MC_INVOCATIONS="$(grep -c 'metadata-checker' "$TRANSCRIPT" 2>/dev/null || true)"
+          # 工具调用统计改为结构化解析 stream-json 的 tool_calls 事件（真实形状：
+          # {"role":"assistant","tool_calls":[{"function":{"name":"Bash","arguments":"{...}"}}]}），
+          # 不再 grep 行数——grep 把 assistant 复述与工具返回里的 'metadata-checker'
+          # 字样都算成调用，实跑出现过 13 次 tool_calls 对 15 次「调用」的假数据。
+          # raw fallback：绕过 metadata-checker 直接读写项目原始 .spg/.tbl（启发式下限：
+          # 与 metadata-checker 调用混在同一行命令里的直接读文件抓不到）。
+          # raw_fallback=true 的 trial 不计入工具分，只在 task_score 里算任务完成。
+          TOOL_STATS="$(node -e '
+            const fs = require("fs");
+            let toolCalls = 0, mcInvocations = 0, rawFallbackCalls = 0;
+            for (const line of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
+              if (!line.includes("tool_calls")) continue;
+              let msg;
+              try { msg = JSON.parse(line); } catch { continue; }
+              const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+              for (const call of calls) {
+                toolCalls += 1;
+                let args = {};
+                try { args = JSON.parse((call.function && call.function.arguments) || "{}"); } catch {}
+                const command = typeof args.command === "string" ? args.command : "";
+                const path = typeof args.path === "string" ? args.path : "";
+                const invokesMc = /(^|[\/\s])metadata-checker(\s|$)/.test(command);
+                if (invokesMc) mcInvocations += 1;
+                if (!invokesMc && /\.(spg|tbl)(["\x27\s),;]|$)/.test(command + " " + path)) {
+                  rawFallbackCalls += 1;
+                }
+              }
+            }
+            process.stdout.write([toolCalls, mcInvocations, rawFallbackCalls].join("\t"));
+          ' "$TRANSCRIPT")"
+          TOOL_CALLS="$(printf '%s' "$TOOL_STATS" | cut -f1)"
+          MC_INVOCATIONS="$(printf '%s' "$TOOL_STATS" | cut -f2)"
+          RAW_FALLBACK_CALLS="$(printf '%s' "$TOOL_STATS" | cut -f3)"
+          RAW_FALLBACK=0
+          if [ "$RAW_FALLBACK_CALLS" -gt 0 ]; then RAW_FALLBACK=1; fi
           TRANSCRIPT_BYTES="$(wc -c < "$TRANSCRIPT" 2>/dev/null || echo 0)"
 
           node -e '
             const [caseId, order, difficulty, variant, trial, exitCode, startMs, endMs,
-                   toolCalls, mcInvocations, transcript, stderrLog, bytes] = process.argv.slice(1);
+                   toolCalls, mcInvocations, rawFallbackCalls, rawFallback,
+                   transcript, stderrLog, bytes] = process.argv.slice(1);
             process.stdout.write(JSON.stringify({
               case_id: caseId,
               order: Number(order),
@@ -866,17 +961,20 @@
               trial: Number(trial),
               exit_code: Number(exitCode),
               wall_clock_ms: Number(endMs) - Number(startMs),
-              tool_calls: Number(toolCalls || 0),
-              metadata_checker_invocations: Number(mcInvocations || 0),
+              tool_calls: Number(toolCalls),
+              metadata_checker_invocations: Number(mcInvocations),
+              raw_fallback_calls: Number(rawFallbackCalls),
+              raw_fallback: rawFallback === "1",
               transcript_bytes: Number(bytes || 0),
               transcript_path: transcript,
               stderr_path: stderrLog,
             }) + "\n");
           ' "$CASE_ID" "$ORDER" "$DIFFICULTY" "$VARIANT" "$TRIAL" "$CASE_EXIT" \
             "$START_MS" "$END_MS" "$TOOL_CALLS" "$MC_INVOCATIONS" \
+            "$RAW_FALLBACK_CALLS" "$RAW_FALLBACK" \
             "$TRANSCRIPT" "$STDERR_LOG" "$TRANSCRIPT_BYTES" >> "$RECORDS"
 
-          echo "[$ORDER/$DIFFICULTY] $CASE_ID exit=$CASE_EXIT $(( (END_MS - START_MS) / 1000 ))s tool_calls=$TOOL_CALLS metadata_checker_invocations=$MC_INVOCATIONS"
+          echo "[$ORDER/$DIFFICULTY] $CASE_ID exit=$CASE_EXIT $(( (END_MS - START_MS) / 1000 ))s tool_calls=$TOOL_CALLS mc=$MC_INVOCATIONS raw_fallback=$RAW_FALLBACK"
 
           if [ "$CASE_EXIT" -ne 0 ]; then INFRA_FAILED=1; fi
           if [ ! -s "$TRANSCRIPT" ]; then
@@ -976,10 +1074,16 @@
                 Math.round(r.wall_clock_ms / 1000) + "s",
                 "tool_calls=" + r.tool_calls,
                 "mc=" + r.metadata_checker_invocations,
+                "raw_fallback=" + (r.raw_fallback ? "Y(" + r.raw_fallback_calls + ")" : "n"),
                 "bytes=" + r.transcript_bytes,
               ].join("  "));
             }
           ' "$OUT_DIR/records.jsonl" || true
+        fi
+        # run.json 是本轮身份清单（语料/二进制/SKILL/kimi/模型别名），复盘归因先看它。
+        if [ -s "$OUT_DIR/run.json" ]; then
+          echo "===== run manifest ====="
+          cat "$OUT_DIR/run.json" || true
         fi
         # 逐 case dump 含 tool_calls 的原始 JSONL 行（截断）与答案尾部，
         # 不假设 stream-json 的字段嵌套形态。CNB stage 日志有 ~115KB 上限、

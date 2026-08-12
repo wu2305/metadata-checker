@@ -131,7 +131,7 @@ fn test_smoke_subset_rejects_empty_selection() {
 
 /// 一行合法 record，字段顺序与 `.cnb.yml` 的 node 发射器一致。
 fn sample_record_line() -> String {
-    r#"{"case_id":"c1","order":1,"difficulty":"easy","variant":"baseline","trial":1,"exit_code":0,"wall_clock_ms":1234,"tool_calls":3,"metadata_checker_invocations":2,"transcript_bytes":4096,"transcript_path":"out/t.jsonl","stderr_path":"out/t.log"}"#
+    r#"{"case_id":"c1","order":1,"difficulty":"easy","variant":"baseline","trial":1,"exit_code":0,"wall_clock_ms":1234,"tool_calls":3,"metadata_checker_invocations":2,"raw_fallback_calls":1,"raw_fallback":true,"transcript_bytes":4096,"transcript_path":"out/t.jsonl","stderr_path":"out/t.log"}"#
         .to_string()
 }
 
@@ -406,6 +406,9 @@ fn test_parse_judge_response_fails_when_must_not_fully_supported() {
             {"id": 2, "verdict": "not_mentioned", "note": "没提 panel35"},
             {"id": 3, "verdict": "contradicted", "note": "答案说成了 totalRowCount__ == 0"},
         ],
+        "bonus": [
+            {"id": 1, "verdict": "not_mentioned", "note": "未展开"},
+        ],
         "forbidden": [
             {"id": 1, "violated": false, "note": "未违规"},
             {"id": 2, "violated": false, "note": "未违规"},
@@ -429,6 +432,9 @@ fn test_parse_judge_response_fails_on_forbidden_violation() {
             {"id": 1, "verdict": "supported", "note": "覆盖"},
             {"id": 2, "verdict": "supported", "note": "覆盖"},
             {"id": 3, "verdict": "supported", "note": "覆盖"},
+        ],
+        "bonus": [
+            {"id": 1, "verdict": "not_mentioned", "note": "未展开"},
         ],
         "forbidden": [
             {"id": 1, "violated": true, "note": "答案声称 text41 自己配置了条件"},
@@ -468,9 +474,10 @@ fn test_parse_judge_response_rejects_response_without_json() {
     assert!(error.contains("找不到 JSON 对象"));
 }
 
-/// 验证编号越界或重复的条目被忽略但记录在 overall_note 中，且不计入统计。
+/// 验证编号越界或重复的条目按 judge 基础设施故障报错——无效编号意味着对应断言
+/// 没被查，静默忽略会把「judge 漏判」变成「答案没问题」的假通过。
 #[test]
-fn test_parse_judge_response_ignores_out_of_range_ids_with_record() {
+fn test_parse_judge_response_rejects_out_of_range_or_duplicate_ids() {
     let case = sample_case();
     let raw = serde_json::json!({
         "assertions": [
@@ -480,6 +487,9 @@ fn test_parse_judge_response_ignores_out_of_range_ids_with_record() {
             {"id": 99, "verdict": "supported", "note": "幽灵条目"},
             {"id": 2, "verdict": "contradicted", "note": "重复编号"},
         ],
+        "bonus": [
+            {"id": 1, "verdict": "not_mentioned", "note": "未展开"},
+        ],
         "forbidden": [
             {"id": 1, "violated": false, "note": "未违规"},
             {"id": 2, "violated": false, "note": "未违规"},
@@ -488,14 +498,10 @@ fn test_parse_judge_response_ignores_out_of_range_ids_with_record() {
         "overall_note": "完成",
     })
     .to_string();
-    let judgement = parse_judge_response(&case, &raw).unwrap();
-    assert!(judgement.passed);
-    assert_eq!(judgement.must_supported, 3);
-    assert_eq!(judgement.violations, 0);
-    assert!(judgement.overall_note.contains("完成"));
-    assert!(judgement.overall_note.contains("忽略"));
-    assert!(judgement.overall_note.contains("assertions#99"));
-    assert!(judgement.overall_note.contains("forbidden#0"));
+    let error = parse_judge_response(&case, &raw).unwrap_err().to_string();
+    assert!(error.contains("无效或重复编号"), "{error}");
+    assert!(error.contains("assertions#99"), "{error}");
+    assert!(error.contains("forbidden#0"), "{error}");
 }
 
 /// 验证 judge 漏检全部禁令时按基础设施故障报错，而不是拿 `violations == 0` 假通过。
@@ -534,6 +540,123 @@ fn test_parse_judge_response_errors_on_partial_forbidden_coverage() {
     let error = parse_judge_response(&case, &raw).unwrap_err().to_string();
     assert!(error.contains("禁令检查不完整"), "{error}");
     assert!(error.contains("1/2"), "{error}");
+}
+
+/// 验证 must 漏判时按基础设施故障报错——少判一条就有断言没被查，pass 会是假通过。
+#[test]
+fn test_parse_judge_response_errors_when_must_incomplete() {
+    let case = sample_case();
+    let raw = serde_json::json!({
+        "assertions": [
+            {"id": 1, "verdict": "supported", "note": "覆盖"},
+            {"id": 2, "verdict": "supported", "note": "覆盖"},
+        ],
+        "bonus": [
+            {"id": 1, "verdict": "not_mentioned", "note": "未展开"},
+        ],
+        "forbidden": [
+            {"id": 1, "violated": false, "note": "未违规"},
+            {"id": 2, "violated": false, "note": "未违规"},
+        ],
+    })
+    .to_string();
+    let error = parse_judge_response(&case, &raw).unwrap_err().to_string();
+    assert!(error.contains("must 判定不完整"), "{error}");
+    assert!(error.contains("2/3"), "{error}");
+}
+
+/// 验证 bonus 漏判同样报错：bonus 不计 pass，但漏判说明 judge 没按清单逐条检查，
+/// 其余判定也不可信。
+#[test]
+fn test_parse_judge_response_errors_when_bonus_incomplete() {
+    let case = sample_case();
+    let raw = serde_json::json!({
+        "assertions": [
+            {"id": 1, "verdict": "supported", "note": "覆盖"},
+            {"id": 2, "verdict": "supported", "note": "覆盖"},
+            {"id": 3, "verdict": "supported", "note": "覆盖"},
+        ],
+        "forbidden": [
+            {"id": 1, "violated": false, "note": "未违规"},
+            {"id": 2, "violated": false, "note": "未违规"},
+        ],
+    })
+    .to_string();
+    let error = parse_judge_response(&case, &raw).unwrap_err().to_string();
+    assert!(error.contains("bonus 判定不完整"), "{error}");
+    assert!(error.contains("0/1"), "{error}");
+}
+
+/// 验证布尔与解释矛盾的禁令判定报错：`violated=true` 但 note 自写「故violated=false」
+/// 是 CNB 实跑出现过的样本——结构化字段与自声明总有一侧是错的，输出不可信。
+#[test]
+fn test_parse_judge_response_rejects_self_contradicting_forbidden() {
+    let case = sample_case();
+    let raw = serde_json::json!({
+        "assertions": [
+            {"id": 1, "verdict": "supported", "note": "覆盖"},
+            {"id": 2, "verdict": "supported", "note": "覆盖"},
+            {"id": 3, "verdict": "supported", "note": "覆盖"},
+        ],
+        "bonus": [
+            {"id": 1, "verdict": "not_mentioned", "note": "未展开"},
+        ],
+        "forbidden": [
+            {"id": 1, "violated": true, "note": "答案措辞像违规，但细看不构成，故violated=false"},
+            {"id": 2, "violated": false, "note": "未违规"},
+        ],
+    })
+    .to_string();
+    let error = parse_judge_response(&case, &raw).unwrap_err().to_string();
+    assert!(error.contains("自相矛盾"), "{error}");
+    assert!(error.contains("forbidden#1"), "{error}");
+}
+
+/// 验证断言判定与 note 自声明矛盾时报错：`verdict=supported` 与「supported=false」冲突。
+#[test]
+fn test_parse_judge_response_rejects_self_contradicting_assertion() {
+    let case = sample_case();
+    let raw = serde_json::json!({
+        "assertions": [
+            {"id": 1, "verdict": "supported", "note": "答案没提到，supported=false"},
+            {"id": 2, "verdict": "supported", "note": "覆盖"},
+            {"id": 3, "verdict": "supported", "note": "覆盖"},
+        ],
+        "bonus": [
+            {"id": 1, "verdict": "not_mentioned", "note": "未展开"},
+        ],
+        "forbidden": [
+            {"id": 1, "violated": false, "note": "未违规"},
+            {"id": 2, "violated": false, "note": "未违规"},
+        ],
+    })
+    .to_string();
+    let error = parse_judge_response(&case, &raw).unwrap_err().to_string();
+    assert!(error.contains("自相矛盾"), "{error}");
+    assert!(error.contains("assertions#1"), "{error}");
+}
+
+/// 验证叙述性 note 不误伤：没有 `字段=值` 形态的显式自声明时不做矛盾比对。
+#[test]
+fn test_parse_judge_response_tolerates_narrative_note() {
+    let case = sample_case();
+    let raw = serde_json::json!({
+        "assertions": [
+            {"id": 1, "verdict": "supported", "note": "答案说自身无直接条件，这点成立"},
+            {"id": 2, "verdict": "supported", "note": "不算完全准确，但继承了 panel35 的意思到了"},
+            {"id": 3, "verdict": "supported", "note": "不支持过度解读，表达式一致"},
+        ],
+        "bonus": [
+            {"id": 1, "verdict": "not_mentioned", "note": "未展开"},
+        ],
+        "forbidden": [
+            {"id": 1, "violated": false, "note": "不构成违反"},
+            {"id": 2, "violated": false, "note": "未违规"},
+        ],
+    })
+    .to_string();
+    let judgement = parse_judge_response(&case, &raw).unwrap();
+    assert!(judgement.passed);
 }
 
 /// 验证 judge_case 端到端走 FakeModelAdapter：请求送达、响应解析为 CaseJudgement。
@@ -598,7 +721,7 @@ fn test_render_judge_markdown_contains_key_sections() {
         overall_note: "失败原因".to_string(),
     };
     let failing_for_escape = failing.clone();
-    let markdown = render_judge_markdown(&[passing, failing]);
+    let markdown = render_judge_markdown(&[passing, failing], &[]);
     assert!(markdown.contains("case_pass"));
     assert!(markdown.contains("case_fail"));
     assert!(markdown.contains("PASS"));
@@ -609,6 +732,10 @@ fn test_render_judge_markdown_contains_key_sections() {
     assert!(markdown.contains("违反的禁令"));
     assert!(markdown.contains("禁令丙"));
     assert!(markdown.contains("失败原因"));
+    // 没有 records 时两个 case 都算「缺少 record」，tool_score 无有效 case。
+    assert!(markdown.contains("task_score：1/2"), "{markdown}");
+    assert!(markdown.contains("tool_score：—"), "{markdown}");
+    assert!(markdown.contains("缺少 record 的 case"), "{markdown}");
     // Markdown 表格分隔符被转义，断言文本不会破坏报告结构。
     let escaped = CaseJudgement {
         overall_note: "无".to_string(),
@@ -620,8 +747,56 @@ fn test_render_judge_markdown_contains_key_sections() {
         }],
         ..failing_for_escape
     };
-    let escaped_markdown = render_judge_markdown(&[escaped]);
+    let escaped_markdown = render_judge_markdown(&[escaped], &[]);
     assert!(escaped_markdown.contains("含\\|管道"));
+}
+
+/// 验证得分口径拆分：raw fallback 的 PASS 只进 task_score，不进 tool_score。
+#[test]
+fn test_render_judge_markdown_splits_tool_score() {
+    let judged = |case_id: &str, passed: bool| CaseJudgement {
+        case_id: case_id.to_string(),
+        passed,
+        must_supported: 1,
+        must_total: 1,
+        contradicted_count: 0,
+        bonus_supported: 0,
+        bonus_total: 0,
+        violations: 0,
+        verdicts: vec![AssertionVerdict {
+            id: 1,
+            verdict: Verdict::Supported,
+            note: "覆盖".to_string(),
+            assertion: "断言".to_string(),
+        }],
+        bonus_verdicts: Vec::new(),
+        forbidden_checks: Vec::new(),
+        overall_note: "完成".to_string(),
+    };
+    let judgements = vec![
+        judged("case_tool_pass", true),
+        judged("case_raw_pass", true),
+        judged("case_tool_fail", false),
+    ];
+    let record = |case_id: &str, mc: u32, raw_calls: u32, raw: bool| {
+        format!(
+            r#"{{"case_id":"{case_id}","order":1,"difficulty":"easy","variant":"baseline","trial":1,"exit_code":0,"wall_clock_ms":100,"tool_calls":3,"metadata_checker_invocations":{mc},"raw_fallback_calls":{raw_calls},"raw_fallback":{raw},"transcript_bytes":100,"transcript_path":"t.jsonl","stderr_path":"t.log"}}"#
+        )
+    };
+    let records = parse_trial_records(&format!(
+        "{}\n{}\n{}\n",
+        record("case_tool_pass", 3, 0, false),
+        record("case_raw_pass", 0, 2, true),
+        record("case_tool_fail", 2, 0, false),
+    ))
+    .unwrap();
+    let markdown = render_judge_markdown(&judgements, &records);
+    assert!(markdown.contains("task_score：2/3"), "{markdown}");
+    assert!(markdown.contains("tool_score：1/2"), "{markdown}");
+    assert!(
+        markdown.contains("raw fallback case（不计入 tool_score）：case_raw_pass"),
+        "{markdown}"
+    );
 }
 
 /// CNB pipeline 中对 kimi harness 六问冒烟 transcript 做语义判分；普通测试不运行。
@@ -675,15 +850,16 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
     // 对不上，意味着一整轮 pipeline 的算力已经花掉了。文件不存在不算错——
     // 单独重跑判分时本来就没有它。
     let records_path = transcript_dir.join("records.jsonl");
+    let mut trial_records = Vec::new();
     if records_path.is_file() {
         let content = std::fs::read_to_string(&records_path)
             .with_context(|| format!("读取 records 失败: {}", records_path.display()))?;
-        let records = parse_trial_records(&content)
+        trial_records = parse_trial_records(&content)
             .with_context(|| format!("records.jsonl 校验失败: {}", records_path.display()))?;
         println!(
             "records.jsonl 校验通过：{} 条 trial，总墙钟 {} ms",
-            records.len(),
-            records.iter().map(|r| r.wall_clock_ms).sum::<i64>()
+            trial_records.len(),
+            trial_records.iter().map(|r| r.wall_clock_ms).sum::<i64>()
         );
     } else {
         println!("未找到 {}，跳过 records 校验", records_path.display());
@@ -717,10 +893,12 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
                 extract_final_answer(&content)
             }
             None => {
-                // transcript 缺失记 infra 占位，不让整场失败。
+                // transcript 缺失记 infra 占位并计入 infra_errors：评测基础设施
+                // 已经失效时测试必须失败，不能拿占位报告当成功（Codex 评审 P2）。
                 let reason = format!("{question_no} transcript 缺失");
                 println!("{reason}，记 infra 占位");
                 judgements.push(infra_judgement(case, &reason));
+                infra_errors.push(reason);
                 continue;
             }
         };
@@ -728,6 +906,7 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
             let reason = format!("{question_no} 最终答案为空");
             println!("{reason}，记 infra 占位");
             judgements.push(infra_judgement(case, &reason));
+            infra_errors.push(reason);
             continue;
         }
         match judge_case(case, &answer, &mut adapter) {
@@ -757,7 +936,7 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
             judgement.violations,
         );
     }
-    let markdown = render_judge_markdown(&judgements);
+    let markdown = render_judge_markdown(&judgements, &trial_records);
     std::fs::write(
         output_dir.join("judge.json"),
         format!("{}\n", serde_json::to_string_pretty(&judgements)?),

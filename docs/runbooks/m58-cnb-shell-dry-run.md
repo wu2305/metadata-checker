@@ -40,9 +40,11 @@ scripts/cnb-smoke-dry-run.sh --fault judgeleak # judge 产物与 stdout 含 toke
 |------|----------|
 | `date` | macOS 的 BSD date 没有 `%3N`（毫秒）；stub 补 GNU 行为 |
 | `timeout` | BSD 无此命令；stub 丢掉时长后直接 exec |
-| `kimi` | 不调真模型；产出结构合法的 stream-json transcript |
+| `kimi` | 不调真模型；产出与真实 stream-json 同形的 transcript（assistant 行携带 tool_calls 数组），让 mc/raw fallback 结构化解析真正跑起来 |
 | `cargo` | judge 需要 `CNB_TOKEN` 与真模型；stub 伪造 `judge.json` / `judge.md` 契约 |
 | `ln` | stage 会往 `/usr/local/bin` 建链接，开发机上不该写那里 |
+| `metadata-checker` | stage 用 `command -v` 定位二进制算 sha256 写 run.json，开发机上没有真身 |
+| `sha256sum` | macOS 没有 GNU coreutils；stub 用 `shasum -a 256` 顶，镜像里有真身 |
 
 stub 补的是**镜像里本来就有、开发机上没有**的 GNU 行为。任何为了「让脚本跑起来」而改写 stage 语法的做法都会让这次验证失去意义。
 
@@ -50,7 +52,7 @@ stub 补的是**镜像里本来就有、开发机上没有**的 GNU 行为。任
 
 ## 覆盖边界
 
-干跑验证的是 shell 语义、控制流、故障路径判红、judge 日志的脱敏顺序、records 字段与取值。它**不**验证：真实模型行为、真实项目图构建、判分质量、墙钟量级（stub 是毫秒级，真跑是分钟级）。
+干跑验证的是 shell 语义、控制流、故障路径判红、judge 日志的脱敏顺序、records 字段与取值，以及三组新行为：mc/raw fallback 的结构化计数（kimi stub 对「入口」一问额外模拟直接读 `.spg`）、开跑时清理上一轮残留产物、`run.json` 身份清单产出。它**不**验证：真实模型行为、真实项目图构建、判分质量、墙钟量级（stub 是毫秒级，真跑是分钟级），也不覆盖 `fetch real project corpus` stage 的 corpus pin/检出逻辑——那是独立 stage，干跑没有 git stub。
 
 因此干跑通过**不等于**验收通过。stage 的真实验收是在 CNB 上跑一次 `api_trigger_kimi_harness_smoke`。
 

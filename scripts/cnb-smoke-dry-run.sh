@@ -54,10 +54,16 @@ shift            # 丢掉时长；干跑不验超时行为
 exec "$@"
 STUB
 
-# kimi stub：产出结构上合法的 stream-json transcript，含 tool_calls 与
-# metadata-checker 字样，好让下游的软计数拿到非零值。
+# kimi stub：产出与真实 stream-json 同形的 transcript——assistant 行携带 tool_calls
+# 数组（function.arguments 是 JSON 字符串），让 stage 的结构化解析真正跑起来。
+# 每个问题都模拟一次 metadata-checker 调用；「入口」一问额外模拟绕过工具直接读
+# 原始 .spg，覆盖 raw fallback 分类路径。
 cat > "$STUB_BIN/kimi" <<'STUB'
 #!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then
+  echo "kimi-stub 0.0.0"
+  exit 0
+fi
 QUESTION=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -65,8 +71,25 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_calls\",\"text\":\"metadata-checker query\"}]}}"
-printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"stub answer for: ${QUESTION:0:60}\"}]}}"
+printf '%s\n' '{"role":"assistant","content":"先查图状态","tool_calls":[{"type":"function","id":"call_1","function":{"name":"Bash","arguments":"{\"command\":\"metadata-checker --check-graph\"}"}}]}'
+case "$QUESTION" in
+  *入口*)
+    printf '%s\n' '{"role":"assistant","content":"绕开工具直接读文件","tool_calls":[{"type":"function","id":"call_2","function":{"name":"Bash","arguments":"{\"command\":\"grep -n input3 合同协议.spg | head\"}"}}]}'
+    ;;
+esac
+printf '%s\n' "{\"role\":\"assistant\",\"content\":\"stub answer for: ${QUESTION:0:60}\"}"
+STUB
+
+# metadata-checker stub：stage 用 command -v 定位二进制算 sha256，开发机上没有真身。
+cat > "$STUB_BIN/metadata-checker" <<'STUB'
+#!/usr/bin/env bash
+echo '{"kind":"Stub"}'
+STUB
+
+# sha256sum stub：macOS 没有 GNU coreutils，用 shasum 顶；CNB 镜像里有真身。
+cat > "$STUB_BIN/sha256sum" <<'STUB'
+#!/usr/bin/env bash
+exec shasum -a 256 "$@"
 STUB
 
 # cargo stub：judge 要 CNB_TOKEN 和真模型，干跑不碰。伪造它的产出契约即可。
@@ -101,6 +124,10 @@ cp "$REPO_ROOT/SKILL.md" "$WORK/SKILL.md"
 mkdir -p "$WORK/tests/fixtures/corpus/ai_eval"
 CASES="$WORK/tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json"
 cp "$REPO_ROOT/tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json" "$CASES"
+
+# 预置上一轮的过期 transcript：stage 开跑时必须清掉它，否则旧文件会混进本轮报告。
+mkdir -p "$WORK/target/kimi-harness-smoke"
+printf '%s\n' '{"role":"assistant","content":"stale"}' > "$WORK/target/kimi-harness-smoke/smoke-transcript-q1.jsonl"
 
 # 故障注入：改输入数据或外部命令行为，不改 stage 脚本本身。
 DRY_RUN_JUDGE_LEAK=0
@@ -193,6 +220,18 @@ RECORDS="$WORK/target/kimi-harness-smoke/records.jsonl"
 if [ -s "$RECORDS" ]; then
   echo "=== records.jsonl ($(wc -l < "$RECORDS" | tr -d ' ') lines) ==="
   cat "$RECORDS"
+fi
+
+if [ "$FAULT" = "none" ]; then
+  # 结构化解析真实生效：每个问题恰好 1 次 mc 调用；只有「入口」一问 raw_fallback=true。
+  grep -q '"metadata_checker_invocations":1' "$RECORDS" || { echo "FAIL: mc 结构化计数异常" >&2; exit 1; }
+  [ "$(grep -c '"raw_fallback":true' "$RECORDS")" = "1" ] || { echo "FAIL: 期望恰好 1 条 raw_fallback=true" >&2; exit 1; }
+  [ "$(grep -c '"raw_fallback":false' "$RECORDS")" = "5" ] || { echo "FAIL: 期望 5 条 raw_fallback=false" >&2; exit 1; }
+  # 卫生清理：预置的过期 transcript 必须被 stage 清掉。
+  [ ! -e "$WORK/target/kimi-harness-smoke/smoke-transcript-q1.jsonl" ] || { echo "FAIL: 过期 transcript 未被清理" >&2; exit 1; }
+  # run.json 身份清单已产出且含版本字段。
+  grep -q '"corpus_sha"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 corpus_sha" >&2; exit 1; }
+  grep -q '"kimi_version": "kimi-stub 0.0.0"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json kimi_version 异常" >&2; exit 1; }
 fi
 
 # 期望：正常路径绿，注入的故障必须红。红不了才是这个脚本要抓的东西。
