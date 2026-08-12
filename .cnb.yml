@@ -883,7 +883,7 @@
         # 硬断言只留 infra 级（kimi 退出码、transcript 非空、token 泄漏）；
         # 是否调用 metadata-checker 只软报告不判红——真实文件读不动时
         # 绕过工具是数据信号，不是故障。raw fallback 逐 case 记进 record，
-        # judge.md 的 tool_score 只统计真正用工具的 case。
+        # judge.md 按固定分母分行为分层报告，fallback 不作计分准入。
         # POSIX 下拿一个真制表符只能这样：`IFS=$'\t'` 是 bash 专属。
         TAB="$(printf '\t')"
         INFRA_FAILED=0
@@ -1021,11 +1021,14 @@
         cat "$JUDGE_LOG"
         if [ "$TOKEN_LEAKED" -ne 0 ]; then exit 1; fi
         if [ "$JUDGE_EXIT" -ne 0 ]; then
+          # judge.md 已由测试在报错前写出（judge infra 失败路径同样产出逐条依据）。
+          # 报告不在失败分支里打印，统一由 endStages 脱敏后无条件发布——失败路径
+          # 同样需要逐条依据复核，不能随退出码一起埋掉。
           echo "judge infra failure; captured test exit=$JUDGE_EXIT"
           exit "$JUDGE_EXIT"
         fi
         test -s "$OUT_DIR/judge.json"
-        cat "$OUT_DIR/judge.md"
+        test -s "$OUT_DIR/judge.md"
 
         if [ "$INFRA_FAILED" -ne 0 ]; then
           echo "kimi infra failure; see per-case exit codes above and $RECORDS"
@@ -1084,6 +1087,13 @@
         if [ -s "$OUT_DIR/run.json" ]; then
           echo "===== run manifest ====="
           cat "$OUT_DIR/run.json" || true
+        fi
+        # judge.md 是判分的主报告（得分口径 + 逐条 verdict）：无论 main stage 成功、
+        # judge infra 判红还是中途断掉，只要文件存在就在脱敏后无条件发布——失败路径
+        # 的逐条依据恰恰是复核对象，不能随非零退出码一起埋掉。
+        if [ -s "$OUT_DIR/judge.md" ]; then
+          echo "===== judge.md ====="
+          cat "$OUT_DIR/judge.md" || true
         fi
         # 逐 case dump 含 tool_calls 的原始 JSONL 行（截断）与答案尾部，
         # 不假设 stream-json 的字段嵌套形态。CNB stage 日志有 ~115KB 上限、

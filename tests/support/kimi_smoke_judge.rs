@@ -132,7 +132,8 @@ pub(crate) struct TrialRecord {
     pub(crate) metadata_checker_invocations: u32,
     /// 绕过工具直接读写项目原始 .spg/.tbl 的调用次数（启发式下限，见 .cnb.yml 解析段注释）。
     pub(crate) raw_fallback_calls: u32,
-    /// 是否发生 raw fallback；true 时本 trial 不计入工具分，只算任务完成。
+    /// 是否发生 raw fallback。仅作诊断信号：同一命令混用工具与直读会漏标，ls/test
+    /// 一个 .spg 路径会误标，因此不作为任何计分的准入条件。
     pub(crate) raw_fallback: bool,
     /// transcript 字节数；0 表示空产出。
     pub(crate) transcript_bytes: u64,
@@ -440,7 +441,8 @@ struct RawAssertionVerdict {
 #[derive(Debug, Deserialize)]
 struct RawForbiddenCheck {
     id: usize,
-    #[serde(default)]
+    // violated 是判分必需字段，故意不带 default：judge 只回 {"id":1} 时若默认成
+    // false，「漏查」会被记成「未违反」并通过完整性检查——缺失必须是 judge infra 错误。
     violated: bool,
     #[serde(default)]
     note: String,
@@ -687,39 +689,57 @@ pub(crate) fn judge_case(
     parse_judge_response(case, &raw)
 }
 
-/// 把判分结果渲染成 Markdown 报告：先汇总表与得分口径，再每 case 一节含逐条 verdict 表。
+/// 把判分结果渲染成 Markdown 报告：先汇总表与行为分层，再每 case 一节含逐条 verdict 表。
 ///
-/// records（records.jsonl 的 trial 记录）按 case_id 关联进来，区分两个得分口径：
-/// task_score 是任务完成率（含绕过工具完成的 case），tool_score 只统计真正调用
-/// metadata-checker 且无 raw fallback 的 case——绕过工具拿到的 PASS 不是工具分，
-/// 这是「unrestricted agent 任务完成率」与「工具支撑力」两条不同的度量线。
+/// records（records.jsonl 的 trial 记录）按 case_id 分组关联——同一 case 可有多条
+/// (variant, trial) 记录，全部保留，不允许后写入的覆盖先写入的。报告只设一个分数：
+/// task_score（非 INFRA case 的任务完成率，分母固定为全部非 INFRA case）。
+/// **不设 tool_score**：按运行后行为（是否调用工具、是否 raw fallback）筛选分母
+/// 有选择偏差——困难 case 更易 fallback 并被移出分母，剩下 2/2 也不能解释为工具
+/// 成功率。工具贡献只能由 forced/tool-disabled 配对实验（Phase 2）归因。报告改为
+/// 按固定分母输出行为分层（tool-only / mixed / raw-only / no-tool），分层是行为
+/// 描述而不是分数；raw_fallback 只是启发式诊断信号，不作为任何计分准入条件。
 pub(crate) fn render_judge_markdown(
     judgements: &[CaseJudgement],
     records: &[TrialRecord],
 ) -> String {
-    let record_by_case: std::collections::BTreeMap<&str, &TrialRecord> = records
-        .iter()
-        .map(|record| (record.case_id.as_str(), record))
-        .collect();
+    let mut records_by_case: std::collections::BTreeMap<&str, Vec<&TrialRecord>> =
+        std::collections::BTreeMap::new();
+    for record in records {
+        records_by_case
+            .entry(record.case_id.as_str())
+            .or_default()
+            .push(record);
+    }
+    // 同一 case 多条记录时逐 trial 列出，不允许覆盖；单条保持单列直读。
+    let fmt_records = |records: &[&TrialRecord], pick: &dyn Fn(&TrialRecord) -> String| -> String {
+        match records {
+            [] => "—".to_string(),
+            [single] => pick(single),
+            many => many
+                .iter()
+                .map(|record| format!("t{}:{}", record.trial, pick(record)))
+                .collect::<Vec<_>>()
+                .join("；"),
+        }
+    };
+    let raw_label = |record: &TrialRecord| {
+        if record.raw_fallback {
+            format!("是({})", record.raw_fallback_calls)
+        } else {
+            "否".to_string()
+        }
+    };
 
     let mut markdown = String::new();
     markdown.push_str("# Kimi Harness Smoke 语义 Judge\n\n");
     markdown.push_str("| case_id | 结果 | must 命中 | contradicted | bonus 命中 | violations | tool_calls | mc | raw fallback |\n");
     markdown.push_str("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
     for judgement in judgements {
-        let record = record_by_case.get(judgement.case_id.as_str());
-        let (tool_calls, mc, raw) = match record {
-            Some(record) => (
-                record.tool_calls.to_string(),
-                record.metadata_checker_invocations.to_string(),
-                if record.raw_fallback {
-                    format!("是({})", record.raw_fallback_calls)
-                } else {
-                    "否".to_string()
-                },
-            ),
-            None => ("—".to_string(), "—".to_string(), "—".to_string()),
-        };
+        let records = records_by_case
+            .get(judgement.case_id.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         markdown.push_str(&format!(
             "| {} | {} | {}/{} | {} | {}/{} | {} | {} | {} | {} |\n",
             escape_markdown_cell(&judgement.case_id),
@@ -730,59 +750,62 @@ pub(crate) fn render_judge_markdown(
             judgement.bonus_supported,
             judgement.bonus_total,
             judgement.violations,
-            tool_calls,
-            mc,
-            raw,
+            fmt_records(records, &|record| record.tool_calls.to_string()),
+            fmt_records(records, &|record| record
+                .metadata_checker_invocations
+                .to_string()),
+            fmt_records(records, &raw_label),
         ));
     }
 
-    // 得分口径：task_score 量任务完成，tool_score 量工具支撑。raw fallback 与
-    // 未调用工具的 case 不进 tool_score——它们证明的是 agent 不借助工具也能完成，
-    // 恰恰是工具支撑力的反例而不是证据。
+    // task_score 是唯一分数，分母固定为全部非 INFRA case。行为分层按 trial 统计，
+    // 分母固定为全部有 record 的非 INFRA trial，不做任何行为筛选。
     let measured: Vec<&CaseJudgement> = judgements
         .iter()
         .filter(|judgement| !is_infra_placeholder(judgement))
         .collect();
     let task_pass = measured.iter().filter(|judgement| judgement.passed).count();
-    let tool_eligible: Vec<&CaseJudgement> = measured
-        .iter()
-        .filter(|judgement| {
-            record_by_case
-                .get(judgement.case_id.as_str())
-                .map(|record| record.metadata_checker_invocations > 0 && !record.raw_fallback)
-                .unwrap_or(false)
-        })
-        .copied()
-        .collect();
-    let tool_pass = tool_eligible
-        .iter()
-        .filter(|judgement| judgement.passed)
-        .count();
-    let raw_cases = measured
-        .iter()
-        .filter(|judgement| {
-            record_by_case
-                .get(judgement.case_id.as_str())
-                .map(|record| record.raw_fallback)
-                .unwrap_or(false)
-        })
-        .map(|judgement| judgement.case_id.as_str())
-        .collect::<Vec<_>>();
-    let no_tool_cases = measured
-        .iter()
-        .filter(|judgement| {
-            record_by_case
-                .get(judgement.case_id.as_str())
-                .map(|record| record.metadata_checker_invocations == 0 && !record.raw_fallback)
-                .unwrap_or(false)
-        })
-        .map(|judgement| judgement.case_id.as_str())
-        .collect::<Vec<_>>();
-    let no_record_cases = measured
-        .iter()
-        .filter(|judgement| !record_by_case.contains_key(judgement.case_id.as_str()))
-        .map(|judgement| judgement.case_id.as_str())
-        .collect::<Vec<_>>();
+
+    // 四个互斥行为分层，下标与输出顺序一致。
+    const STRATA: [&str; 4] = [
+        "tool-only（mc>0，无 raw fallback）",
+        "mixed（mc>0 且有 raw fallback）",
+        "raw-only（mc=0，绕过工具直读原始文件）",
+        "no-tool（mc=0 且无 raw fallback）",
+    ];
+    let mut stratum_trials = [0usize; 4];
+    let mut stratum_pass = [0usize; 4];
+    let mut stratum_cases: [Vec<String>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut no_record_cases: Vec<&str> = Vec::new();
+    for judgement in &measured {
+        let records = records_by_case
+            .get(judgement.case_id.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        if records.is_empty() {
+            no_record_cases.push(judgement.case_id.as_str());
+            continue;
+        }
+        for record in records {
+            let index = match (record.metadata_checker_invocations > 0, record.raw_fallback) {
+                (true, false) => 0,
+                (true, true) => 1,
+                (false, true) => 2,
+                (false, false) => 3,
+            };
+            stratum_trials[index] += 1;
+            if judgement.passed {
+                stratum_pass[index] += 1;
+            }
+            // 多 trial 时带 trial 号，避免两条记录在同一分层里看起来像一个 case。
+            let label = if records.len() > 1 {
+                format!("{}(t{})", judgement.case_id, record.trial)
+            } else {
+                judgement.case_id.clone()
+            };
+            stratum_cases[index].push(label);
+        }
+    }
     let infra_cases = judgements
         .iter()
         .filter(|judgement| is_infra_placeholder(judgement))
@@ -795,24 +818,25 @@ pub(crate) fn render_judge_markdown(
         task_pass,
         measured.len()
     ));
-    if tool_eligible.is_empty() {
-        markdown
-            .push_str("- tool_score：—（无有效 case：全部绕过工具或未调用 metadata-checker）\n");
-    } else {
-        markdown.push_str(&format!(
-            "- tool_score：{}/{}（仅 mc>0 且无 raw fallback 的 case；绕过工具完成的不进工具分）\n",
-            tool_pass,
-            tool_eligible.len()
-        ));
+    markdown.push_str(
+        "- 不设 tool_score：按运行后行为筛选分母有选择偏差（困难 case 更易 fallback 并被移出\n  分母），工具贡献须由 forced/tool-disabled 配对实验（Phase 2）归因。以下按固定\n  分母报告行为分层（行为描述，不是分数）：\n",
+    );
+    for index in 0..STRATA.len() {
+        if stratum_trials[index] == 0 {
+            markdown.push_str(&format!("- {}：0 trial\n", STRATA[index]));
+        } else {
+            markdown.push_str(&format!(
+                "- {}：{} trial，PASS {} —— {}\n",
+                STRATA[index],
+                stratum_trials[index],
+                stratum_pass[index],
+                stratum_cases[index].join("、"),
+            ));
+        }
     }
-    markdown.push_str(&format!(
-        "- raw fallback case（不计入 tool_score）：{}\n",
-        join_or_none(&raw_cases)
-    ));
-    markdown.push_str(&format!(
-        "- 未调用 metadata-checker 的 case（不计入 tool_score）：{}\n",
-        join_or_none(&no_tool_cases)
-    ));
+    markdown.push_str(
+        "- raw_fallback 是启发式诊断信号（同一命令混用工具与直读会漏标；ls/test .spg 路径\n  会误标），不作为计分准入条件。\n",
+    );
     markdown.push_str(&format!(
         "- 缺少 record 的 case（工具统计未知）：{}\n",
         join_or_none(&no_record_cases)
@@ -837,10 +861,23 @@ pub(crate) fn render_judge_markdown(
             judgement.bonus_total,
             judgement.violations,
         ));
-        if let Some(record) = record_by_case.get(judgement.case_id.as_str()) {
+        let case_records = records_by_case
+            .get(judgement.case_id.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        for record in case_records {
+            // 多 trial 时逐条列出并带 trial 号；单条保持原样直读。
+            let trial_prefix = if case_records.len() > 1 {
+                format!("（trial {}）", record.trial)
+            } else {
+                String::new()
+            };
             markdown.push_str(&format!(
-                "- 工具调用：{} 次（metadata-checker {} 次；raw fallback {} 次）\n",
-                record.tool_calls, record.metadata_checker_invocations, record.raw_fallback_calls,
+                "- 工具调用{}：{} 次（metadata-checker {} 次；raw fallback {} 次）\n",
+                trial_prefix,
+                record.tool_calls,
+                record.metadata_checker_invocations,
+                record.raw_fallback_calls,
             ));
         }
 

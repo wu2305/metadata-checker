@@ -542,6 +542,28 @@ fn test_parse_judge_response_errors_on_partial_forbidden_coverage() {
     assert!(error.contains("1/2"), "{error}");
 }
 
+/// 验证禁令条目缺 violated 字段直接报错——violated 是判分必需字段，默认成 false
+/// 会把「judge 漏查」记成「未违反」并通过完整性检查，缺失必须是 judge infra 错误。
+#[test]
+fn test_parse_judge_response_rejects_missing_violated_field() {
+    let case = sample_case();
+    let raw = serde_json::json!({
+        "assertions": [
+            {"id": 1, "verdict": "supported", "note": "覆盖"},
+            {"id": 2, "verdict": "supported", "note": "覆盖"},
+            {"id": 3, "verdict": "supported", "note": "覆盖"},
+        ],
+        "forbidden": [
+            {"id": 1, "violated": false, "note": "查过"},
+            {"id": 2, "note": "只写了 note 忘了布尔"},
+        ],
+    })
+    .to_string();
+    // {:#} 展开 anyhow 错误链：顶层 context 是「不是合法 JSON」，字段名在 serde 的 source 里。
+    let error = format!("{:#}", parse_judge_response(&case, &raw).unwrap_err());
+    assert!(error.contains("missing field `violated`"), "{error}");
+}
+
 /// 验证 must 漏判时按基础设施故障报错——少判一条就有断言没被查，pass 会是假通过。
 #[test]
 fn test_parse_judge_response_errors_when_must_incomplete() {
@@ -732,9 +754,9 @@ fn test_render_judge_markdown_contains_key_sections() {
     assert!(markdown.contains("违反的禁令"));
     assert!(markdown.contains("禁令丙"));
     assert!(markdown.contains("失败原因"));
-    // 没有 records 时两个 case 都算「缺少 record」，tool_score 无有效 case。
+    // 没有 records 时两个 case 都算「缺少 record」，行为分层全部为空。
     assert!(markdown.contains("task_score：1/2"), "{markdown}");
-    assert!(markdown.contains("tool_score：—"), "{markdown}");
+    assert!(markdown.contains("不设 tool_score"), "{markdown}");
     assert!(markdown.contains("缺少 record 的 case"), "{markdown}");
     // Markdown 表格分隔符被转义，断言文本不会破坏报告结构。
     let escaped = CaseJudgement {
@@ -751,9 +773,11 @@ fn test_render_judge_markdown_contains_key_sections() {
     assert!(escaped_markdown.contains("含\\|管道"));
 }
 
-/// 验证得分口径拆分：raw fallback 的 PASS 只进 task_score，不进 tool_score。
+/// 验证得分口径：只有固定分母的 task_score 与四个互斥行为分层；不设 tool_score——
+/// 按运行后行为筛选分母有选择偏差（困难 case 更易 fallback 并被移出分母），
+/// raw_fallback 只是启发式诊断信号，不作为计分准入。
 #[test]
-fn test_render_judge_markdown_splits_tool_score() {
+fn test_render_judge_markdown_reports_fixed_denominator_strata() {
     let judged = |case_id: &str, passed: bool| CaseJudgement {
         case_id: case_id.to_string(),
         passed,
@@ -776,7 +800,7 @@ fn test_render_judge_markdown_splits_tool_score() {
     let judgements = vec![
         judged("case_tool_pass", true),
         judged("case_raw_pass", true),
-        judged("case_tool_fail", false),
+        judged("case_mixed_fail", false),
     ];
     let record = |case_id: &str, mc: u32, raw_calls: u32, raw: bool| {
         format!(
@@ -787,16 +811,88 @@ fn test_render_judge_markdown_splits_tool_score() {
         "{}\n{}\n{}\n",
         record("case_tool_pass", 3, 0, false),
         record("case_raw_pass", 0, 2, true),
-        record("case_tool_fail", 2, 0, false),
+        record("case_mixed_fail", 2, 1, true),
     ))
     .unwrap();
     let markdown = render_judge_markdown(&judgements, &records);
+    // task_score 分母固定为全部非 INFRA case，含绕过工具完成的。
     assert!(markdown.contains("task_score：2/3"), "{markdown}");
-    assert!(markdown.contains("tool_score：1/2"), "{markdown}");
+    // 不设 tool_score，并说明为什么（选择偏差 + 配对实验归因）。
+    assert!(markdown.contains("不设 tool_score"), "{markdown}");
+    assert!(markdown.contains("配对实验"), "{markdown}");
+    // 行为分层分母固定：三个 trial 各自进入唯一分层，fallback 的 PASS 不再被移出分母。
     assert!(
-        markdown.contains("raw fallback case（不计入 tool_score）：case_raw_pass"),
+        markdown.contains("tool-only（mc>0，无 raw fallback）：1 trial，PASS 1 —— case_tool_pass"),
         "{markdown}"
     );
+    assert!(
+        markdown
+            .contains("raw-only（mc=0，绕过工具直读原始文件）：1 trial，PASS 1 —— case_raw_pass"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("mixed（mc>0 且有 raw fallback）：1 trial，PASS 0 —— case_mixed_fail"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("no-tool（mc=0 且无 raw fallback）：0 trial"),
+        "{markdown}"
+    );
+    // raw_fallback 只作诊断信号的声明必须在报告里。
+    assert!(markdown.contains("启发式诊断信号"), "{markdown}");
+}
+
+/// 验证同一 case 的多条 (variant, trial) 记录不被覆盖：汇总表逐 trial 列出，
+/// 分层按 trial 计数并带 trial 号。Phase 2 加重复 trial 后统计不得依赖输入顺序。
+#[test]
+fn test_render_judge_markdown_keeps_multiple_trials_per_case() {
+    let judgement = CaseJudgement {
+        case_id: "case_multi".to_string(),
+        passed: true,
+        must_supported: 1,
+        must_total: 1,
+        contradicted_count: 0,
+        bonus_supported: 0,
+        bonus_total: 0,
+        violations: 0,
+        verdicts: vec![AssertionVerdict {
+            id: 1,
+            verdict: Verdict::Supported,
+            note: "覆盖".to_string(),
+            assertion: "断言".to_string(),
+        }],
+        bonus_verdicts: Vec::new(),
+        forbidden_checks: Vec::new(),
+        overall_note: "完成".to_string(),
+    };
+    let record = |trial: u32, mc: u32, raw: bool| {
+        format!(
+            r#"{{"case_id":"case_multi","order":1,"difficulty":"easy","variant":"baseline","trial":{trial},"exit_code":0,"wall_clock_ms":100,"tool_calls":3,"metadata_checker_invocations":{mc},"raw_fallback_calls":0,"raw_fallback":{raw},"transcript_bytes":100,"transcript_path":"t.jsonl","stderr_path":"t.log"}}"#
+        )
+    };
+    // 故意按 trial 2 在前的顺序输入：输出不得依赖顺序。
+    let records = parse_trial_records(&format!(
+        "{}\n{}\n",
+        record(2, 0, false),
+        record(1, 3, false)
+    ))
+    .unwrap();
+    let markdown = render_judge_markdown(&[judgement], &records);
+    // 汇总表 mc 列逐 trial 列出，而不是后者覆盖前者。
+    assert!(markdown.contains("t1:3"), "{markdown}");
+    assert!(markdown.contains("t2:0"), "{markdown}");
+    // 分层按 trial 计数：tool-only 与 no-tool 各 1 条，case 标签带 trial 号。
+    assert!(
+        markdown.contains("tool-only（mc>0，无 raw fallback）：1 trial，PASS 1 —— case_multi(t1)"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("no-tool（mc=0 且无 raw fallback）：1 trial，PASS 1 —— case_multi(t2)"),
+        "{markdown}"
+    );
+    // 每 case 节逐 trial 列出工具调用。
+    assert!(markdown.contains("工具调用（trial 1）"), "{markdown}");
+    assert!(markdown.contains("工具调用（trial 2）"), "{markdown}");
 }
 
 /// CNB pipeline 中对 kimi harness 六问冒烟 transcript 做语义判分；普通测试不运行。

@@ -5,8 +5,8 @@
 # 或 `bash -n` 都查不出 bash 专属语法——`IFS=$'\t'` 在 dash 下按字母 t 切分，
 # 而退出码、记录数断言、token 检查会全部照常通过，是一次完整的静默假绿。
 # 这个脚本因此坚持两件事：
-#   1. stage 脚本从 .cnb.yml **逐字提取**，不手抄。手抄的副本会和真身漂移，
-#      而漂移的方向恰好是「我以为我验过了」。
+#   1. stage 与 endStage 脚本从 .cnb.yml **逐字提取**，不手抄。手抄的副本会和
+#      真身漂移，而漂移的方向恰好是「我以为我验过了」。
 #   2. 用 dash 执行，不是 bash。
 #
 # 外部依赖用 stub 顶替（kimi / cargo / 网络都不真跑），只验 shell 语义与控制流。
@@ -177,9 +177,10 @@ esac
 
 # --- 逐字提取 stage 脚本 -----------------------------------------------
 STAGE_SH="$SANDBOX/stage.sh"
-python3 - "$REPO_ROOT/.cnb.yml" "$STAGE_SH" <<'PY'
+ENDSTAGE_SH="$SANDBOX/endstage.sh"
+python3 - "$REPO_ROOT/.cnb.yml" "$STAGE_SH" "$ENDSTAGE_SH" <<'PY'
 import sys, yaml
-cnb_path, out_path = sys.argv[1], sys.argv[2]
+cnb_path, out_path, endstage_path = sys.argv[1], sys.argv[2], sys.argv[3]
 doc = yaml.safe_load(open(cnb_path, encoding="utf-8"))
 pipeline = doc["$"]["api_trigger_kimi_harness_smoke"][0]
 stages = [s for s in pipeline["stages"] if s.get("name") == "kimi-code harness smoke run"]
@@ -187,6 +188,11 @@ if len(stages) != 1:
     raise SystemExit(f"expected exactly 1 smoke stage, found {len(stages)}")
 open(out_path, "w", encoding="utf-8").write(stages[0]["script"])
 print(f"extracted stage script: {len(stages[0]['script'].splitlines())} lines")
+endstages = [s for s in pipeline.get("endStages", []) if s.get("name") == "report smoke summary"]
+if len(endstages) != 1:
+    raise SystemExit(f"expected exactly 1 report smoke summary endStage, found {len(endstages)}")
+open(endstage_path, "w", encoding="utf-8").write(endstages[0]["script"])
+print(f"extracted endStage script: {len(endstages[0]['script'].splitlines())} lines")
 PY
 
 # --- 执行 ---------------------------------------------------------------
@@ -216,6 +222,26 @@ fi
 cat "$STAGE_LOG"
 echo "=== stage exit=$STAGE_EXIT ==="
 
+# endStage 与 CNB 行为一致：无论 main stage 退出码如何都执行——失败路径的报告
+# 发布（judge.md、records 投影、run manifest）正是它的职责。同样 dash + 逐字脚本。
+echo "=== running endStage under dash ==="
+ENDSTAGE_LOG="$SANDBOX/endstage.log"
+set +e
+(
+  cd "$WORK"
+  PATH="$STUB_BIN:$PATH" \
+  CNB_TOKEN="stub-token-not-a-real-secret" \
+  dash "$ENDSTAGE_SH"
+) > "$ENDSTAGE_LOG" 2>&1
+ENDSTAGE_EXIT=$?
+set -e
+if grep -qF "stub-token-not-a-real-secret" "$ENDSTAGE_LOG"; then
+  echo "FAIL: CNB_TOKEN 出现在 endStage 日志中" >&2
+  exit 1
+fi
+cat "$ENDSTAGE_LOG"
+echo "=== endStage exit=$ENDSTAGE_EXIT ==="
+
 RECORDS="$WORK/target/kimi-harness-smoke/records.jsonl"
 if [ -s "$RECORDS" ]; then
   echo "=== records.jsonl ($(wc -l < "$RECORDS" | tr -d ' ') lines) ==="
@@ -232,6 +258,10 @@ if [ "$FAULT" = "none" ]; then
   # run.json 身份清单已产出且含版本字段。
   grep -q '"corpus_sha"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 corpus_sha" >&2; exit 1; }
   grep -q '"kimi_version": "kimi-stub 0.0.0"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json kimi_version 异常" >&2; exit 1; }
+  # endStage 无条件发布 judge.md（stub 内容）与 run manifest。
+  grep -q "===== judge.md =====" "$ENDSTAGE_LOG" || { echo "FAIL: endStage 未发布 judge.md" >&2; exit 1; }
+  grep -q "# stub judge" "$ENDSTAGE_LOG" || { echo "FAIL: endStage judge.md 内容缺失" >&2; exit 1; }
+  grep -q "===== run manifest =====" "$ENDSTAGE_LOG" || { echo "FAIL: endStage 未发布 run.json" >&2; exit 1; }
 fi
 
 # 期望：正常路径绿，注入的故障必须红。红不了才是这个脚本要抓的东西。
@@ -244,6 +274,12 @@ if [ "$EXPECT_OK" = "1" ] && [ "$STAGE_EXIT" != "0" ]; then
 fi
 if [ "$EXPECT_OK" = "0" ] && [ "$STAGE_EXIT" = "0" ]; then
   echo "FAIL: fault=$FAULT 本应判红，实际退出 0（静默假绿）" >&2; exit 1
+fi
+if [ "$FAULT" = "judgeleak" ]; then
+  # 失败路径同样交付报告：main stage 判红后，endStage 仍须发布脱敏后的 judge.md——
+  # 判分依据不能随非零退出码一起埋掉。
+  grep -q "===== judge.md =====" "$ENDSTAGE_LOG" || { echo "FAIL: 失败路径 endStage 未发布 judge.md" >&2; exit 1; }
+  grep -q "stub judge" "$ENDSTAGE_LOG" || { echo "FAIL: 失败路径 judge.md 内容缺失" >&2; exit 1; }
 fi
 # 花括号是必需的：紧跟其后的全角括号会被 bash 当成变量名的一部分。
 echo "OK: fault=$FAULT 行为符合预期（exit=${STAGE_EXIT}）"
