@@ -596,7 +596,7 @@
         }
       ],
       "standard_answer": {
-        "summary": "会员已注册是一个 mixed_interaction_page：summary 显示 25 个用户入口（entrypoint_count=25）、读取 105 个数据源（data_source_count=105）、写入 32 个目标（write_target_count=32）、19 个跳转（navigation_count=19）。",
+        "summary": "会员已注册是一个 mixed_interaction_page：summary 显示 25 个用户入口（entrypoint_count=25）、读取 105 个数据源（data_source_count=105）、写入 32 个目标（write_target_count=32）、7 个页面跳转（page_jump_count=7；navigation_count=19 还包含组件控制与传参边）。",
         "must_mention": [
           "entrypoint_count=25",
           "data_source_count=105",
@@ -604,7 +604,7 @@
         ],
         "should_mention": [
           "page_role=mixed_interaction_page",
-          "navigation_count=19"
+          "page_jump_count=7"
         ],
         "must_not_mention": [
           "页面没有写入动作",
@@ -615,7 +615,7 @@
         "summary.entrypoint_count=25",
         "summary.data_source_count=105",
         "summary.write_target_count=32",
-        "summary.navigation_count=19",
+        "summary.page_jump_count=7",
         "summary.page_role=mixed_interaction_page"
       ],
       "forbidden_claims": [
@@ -640,6 +640,12 @@
           "op": "eq",
           "value": 32,
           "description": "页面应写入 32 个目标"
+        },
+        {
+          "path": "summary.page_jump_count",
+          "op": "eq",
+          "value": 7,
+          "description": "页面应有 7 个真实页面跳转（page_jump_count 只统计页面目标边）"
         }
       ],
       "answer_style_policy": {

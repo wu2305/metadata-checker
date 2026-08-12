@@ -164,7 +164,12 @@
   "query_target": "page:app/actions_test.spg",
   "schema_version": "1.0",
   "summary": {
-    "absent": [],
+    "absent": [
+      {
+        "statement": "未解析到页面跳转",
+        "what": "navigation"
+      }
+    ],
     "action_prerequisites_count": 1,
     "data_prerequisites_count": 7,
     "data_source_count": 28,
@@ -500,8 +505,9 @@
     ],
     "navigation_count": 3,
     "page_id": "page:app/actions_test.spg",
+    "page_jump_count": 0,
     "page_name": "actions_test",
-    "page_role": "mixed_interaction_page",
+    "page_role": "data_maintenance_page",
     "primary_paths_count": 35,
     "related_context_count": 86,
     "risk_count": 2,

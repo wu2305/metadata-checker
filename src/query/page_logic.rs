@@ -925,7 +925,7 @@ fn page_conclusion(
         ),
         "data_maintenance_page" => format!(
             "页面 {page_name} 是数据维护页（page_role=data_maintenance_page）：有 {entrypoints} 个用户入口，\
-             写入 {write_targets} 个目标，无页面跳转，用户可以通过该页面更改数据。"
+             写入 {write_targets} 个目标，未解析到页面跳转，用户可以通过该页面更改数据。"
         ),
         "navigation_page" => format!(
             "页面 {page_name} 是导航页（page_role=navigation_page）：有 {entrypoints} 个用户入口、\
@@ -1052,7 +1052,7 @@ fn absent_facts(
             "write_targets",
             "该页面没有写入目标（无写入）",
         ),
-        (navigation, "navigation", "该页面没有页面跳转"),
+        (navigation, "navigation", "未解析到页面跳转"),
         (data_sources, "data_sources", "该页面没有读取任何数据源"),
     ]
     .into_iter()
@@ -2089,13 +2089,26 @@ fn build_query_page_logic_output_inner(
     set_profile_counter(&mut profile, "diagnostics", diagnostics.len());
 
     // ---- 7. Summary & page_role ----
+    // navigation 数组混着三类边（见 navigation_statement 的注释）：真正跳去页面的、
+    // 传参的（PassesParam 的 to 是参数节点）、控制组件的（ActionControlsComponent）。
+    // page_role 和「几个跳转」只能由真正指向页面节点的边决定——否则 showDialog 多的
+    // 数据维护页会被误分类成「既写数据又跳转」的混合交互页。
+    let page_jump_count = navigation
+        .iter()
+        .filter(|entry| {
+            entry
+                .get("to")
+                .and_then(|value| value.as_str())
+                .is_some_and(|to| to.starts_with("page:"))
+        })
+        .count();
     let page_role = if entrypoints.is_empty() {
         "readonly_dashboard"
-    } else if !write_targets.is_empty() && !navigation.is_empty() {
+    } else if !write_targets.is_empty() && page_jump_count > 0 {
         "mixed_interaction_page"
     } else if !write_targets.is_empty() {
         "data_maintenance_page"
-    } else if !navigation.is_empty() {
+    } else if page_jump_count > 0 {
         "navigation_page"
     } else {
         "unknown"
@@ -2107,7 +2120,7 @@ fn build_query_page_logic_output_inner(
         entrypoints.len(),
         data_sources.len(),
         write_targets.len(),
-        navigation.len()
+        page_jump_count
     );
 
     // what_is_it 是四个计数的拼接，「入口 0、写入 0」到「这页是只读的、用户改不了数据」
@@ -2122,7 +2135,7 @@ fn build_query_page_logic_output_inner(
         &page_node.name,
         entrypoints.len(),
         write_targets.len(),
-        navigation.len(),
+        page_jump_count,
         data_sources.len(),
     );
 
@@ -2135,10 +2148,11 @@ fn build_query_page_logic_output_inner(
     }
 
     // 空数组和「被截断成空」在 JSON 里长得一样。判定出来的「没有」要作为事实说出来。
+    // 跳转同样只认页面目标边：组件控制/传参边存在不代表有页面跳转。
     let absent = absent_facts(
         entrypoints.len(),
         write_targets.len(),
-        navigation.len(),
+        page_jump_count,
         data_sources.len(),
     );
 
@@ -2310,6 +2324,7 @@ fn build_query_page_logic_output_inner(
         "data_source_count": data_sources.len(),
         "write_target_count": write_targets.len(),
         "navigation_count": navigation.len(),
+        "page_jump_count": page_jump_count,
         "risk_count": diagnostics.len(),
         "top_entrypoints": top_entrypoints,
         "top_data_sources": top_data_sources,
