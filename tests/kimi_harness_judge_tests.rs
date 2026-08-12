@@ -765,7 +765,8 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
     .with_context(|| "写入 judge.json 失败".to_string())?;
     std::fs::write(output_dir.join("judge.md"), &markdown)
         .with_context(|| "写入 judge.md 失败".to_string())?;
-    println!("{markdown}");
+    // judge 文本可能转述被测答案。CNB stage 会先扫描并脱敏整个输出目录，再决定是否
+    // 打印 judge.md；这里不能通过 --nocapture 绕过那条日志边界。
 
     if !infra_errors.is_empty() {
         bail!("judge infra 故障: {}", infra_errors.join("; "));

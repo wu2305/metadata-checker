@@ -342,18 +342,54 @@ fn test_m58_command_policy_binds_paths_and_steps() {
     );
     // compact → normal 的升级重试必须真的用 normal 执行（plan 这步的 budget 是
     // compact，此前重试两次跑的都是 plan 的 budget，模型永远拿不到不截断的输出）。
-    let used_step0 = vec![ExecutedCommand::for_test(0, &request)];
+    let used_step0 = vec![ExecutedCommand::for_test(0, &request).unwrap()];
     let upgraded = CommandRequest {
         budget: Some("normal".to_string()),
         ..request.clone()
     };
     let validated = policy.validate(&upgraded, &used_step0, 0).unwrap();
     assert_eq!(validated.argv().last(), Some(&OsString::from("normal")));
+    // 参数身份按语义比较：改变 intent 会拿到不同证据，应允许；只调换参数顺序不会。
+    let first_args = CommandRequest {
+        args: vec![
+            "--intent".to_string(),
+            "display".to_string(),
+            "--detail".to_string(),
+        ],
+        ..request.clone()
+    };
+    let used_first_args = vec![ExecutedCommand::for_test(0, &first_args).unwrap()];
+    let changed_intent = CommandRequest {
+        args: vec![
+            "--detail".to_string(),
+            "--intent".to_string(),
+            "action".to_string(),
+        ],
+        ..request.clone()
+    };
+    assert!(
+        policy
+            .validate(&changed_intent, &used_first_args, 0)
+            .is_ok()
+    );
+    let reordered_args = CommandRequest {
+        args: vec![
+            "--detail".to_string(),
+            "--intent".to_string(),
+            "display".to_string(),
+        ],
+        ..request.clone()
+    };
+    assert!(
+        policy
+            .validate(&reordered_args, &used_first_args, 0)
+            .is_err()
+    );
     // 原样重发：那一步已被消费，且拿到的是同一份输出，仍然拒绝。
     let used = |steps: &[usize]| -> Vec<ExecutedCommand> {
         steps
             .iter()
-            .map(|index| ExecutedCommand::for_test(*index, &request))
+            .map(|index| ExecutedCommand::for_test(*index, &request).unwrap())
             .collect()
     };
     assert!(policy.validate(&request, &used(&[0]), 0).is_err());
@@ -2444,6 +2480,101 @@ fn test_m58_runner_rejects_identical_command_replay() {
     assert!(
         !report.command_trace[1].accepted,
         "同 budget 原样重发拿到的是同一份输出，仍然是失败"
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// 同一查询改变会影响输出的参数时必须允许重试。
+///
+/// `--intent` 会选择不同遍历意图；只比较 kind/target/budget 会把第二份真实不同的证据
+/// 错判成原样重放。参数的顺序和等价别名由 policy 归一，不能靠字符串差异绕过限制。
+#[test]
+fn test_m58_runner_accepts_retry_with_different_effective_args() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "page_purpose_actions_test")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+
+    let output_dir = unique_test_output_dir("m58-effective-args-retry");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = |intent: &str| {
+        serde_json::json!({
+            "kind": "command",
+            "command_kind": step["command_kind"],
+            "target": step["target"],
+            "args": ["--intent", intent],
+            "budget": step["budget"],
+        })
+        .to_string()
+    };
+    let final_answer = serde_json::json!({
+        "kind": "final",
+        "answer": "display 与 action 意图提供了不同的页面证据。",
+    });
+    let mut adapter = FakeModelAdapter::from_responses(vec![
+        command("display"),
+        command("action"),
+        final_answer.to_string(),
+    ]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 2);
+    assert!(report.command_trace.iter().all(|trace| trace.accepted));
+    assert!(
+        !report
+            .failure_classes
+            .contains(&"command_rejected".to_string()),
+        "有效参数变化不应被判成原样重放：{:?}",
+        report.failure_classes
+    );
+
+    std::fs::remove_dir_all(output_dir).unwrap();
+}
+
+/// target 的不同拼写若归一到同一图节点，仍然属于同一条查询。
+#[test]
+fn test_m58_runner_rejects_canonical_equivalent_target_replay() {
+    let cases = load_eval_cases(Path::new(
+        "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
+    ))
+    .unwrap();
+    let case = cases
+        .iter()
+        .find(|case| case.case_id == "page_purpose_actions_test")
+        .expect("case 必须存在")
+        .clone();
+    let step = &case.value["minimal_command_plan"][0];
+
+    let output_dir = unique_test_output_dir("m58-canonical-target-replay");
+    let config = fixture_runner_config(output_dir.clone());
+    let command = |target: &str| {
+        serde_json::json!({
+            "kind": "command",
+            "command_kind": step["command_kind"],
+            "target": target,
+            "args": step["args"],
+            "budget": step["budget"],
+        })
+        .to_string()
+    };
+    let mut adapter = FakeModelAdapter::from_responses(vec![
+        command("page:actions_test"),
+        command("page:app/actions_test.spg"),
+    ]);
+
+    let report = run_case(&case, &mut adapter, &config).unwrap();
+    assert_eq!(report.command_trace.len(), 2);
+    assert!(report.command_trace[0].accepted);
+    assert!(
+        !report.command_trace[1].accepted,
+        "归一到同一节点的 target 换写法后仍应拒绝原样重放"
     );
 
     std::fs::remove_dir_all(output_dir).unwrap();

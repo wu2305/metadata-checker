@@ -942,14 +942,34 @@ fn page_conclusion(
     }
 }
 
+/// 判断 navigation 明细是否为动作触发的真实页面跳转。
+///
+/// navigation 数组里混着四类边：动作触发的真实页面跳转、页面嵌入、传参，以及组件
+/// 控制。`EmbedsPage` 只表示页面结构中嵌了另一个页面，不代表用户发生跳转；传参的
+/// `to` 又是参数节点而非页面。把它们统称为目标页面会改变页面角色，因此必须同时按
+/// edge type 和 target type 分类。
+fn is_page_jump_entry(entry: &serde_json::Value) -> bool {
+    matches!(
+        entry.get("type").and_then(|value| value.as_str()),
+        Some("OpensPage" | "ActionNavigates")
+    ) && entry
+        .get("to")
+        .and_then(|value| value.as_str())
+        .is_some_and(|to| to.starts_with("page:"))
+}
+
+/// 页面嵌入数量与真实跳转分开统计，供调用方判断页面组合关系。
+fn is_page_embed_entry(entry: &serde_json::Value) -> bool {
+    entry.get("type").and_then(|value| value.as_str()) == Some("EmbedsPage")
+        && entry
+            .get("to")
+            .and_then(|value| value.as_str())
+            .is_some_and(|to| to.starts_with("page:"))
+}
+
 /// 把跳转关系归纳成一句话：跳去哪些目标页面，其中哪些带了参数。
 ///
 /// 没有跳转时返回 None——这种情况由 `absent` 负责说明，两处都说会自相矛盾。
-///
-/// navigation 数组里混着三类边：真正跳去页面的（`to` 是 page 节点）、传参的
-/// （PassesParam 的 `to` 是**参数节点** `param:目标详情/param1`，不是页面）、以及
-/// ActionControlsComponent 这种根本不是跳转的。把参数节点当成目标页面念出来就是在
-/// 编事实，所以按 `to` 的类型分开处理。
 fn navigation_statement(
     navigation: &[serde_json::Value],
     action_flows: &[serde_json::Value],
@@ -966,12 +986,6 @@ fn navigation_statement(
             continue;
         };
         let name = entry.get("to_name").and_then(|v| v.as_str()).unwrap_or(to);
-        if let Some(from) = entry.get("from").and_then(|v| v.as_str())
-            && from.starts_with("action:")
-            && !source_actions.iter().any(|known| known == from)
-        {
-            source_actions.push(from.to_string());
-        }
         if entry.get("type").and_then(|v| v.as_str()) == Some("PassesParam") {
             // 参数只报名字没用——问「传了哪些参数」的人要的是传了什么值。
             let label = match entry.get("raw_expr").and_then(|v| v.as_str()) {
@@ -981,10 +995,16 @@ fn navigation_statement(
             if !params.contains(&label) {
                 params.push(label);
             }
-        } else if to.starts_with("page:") {
+        } else if is_page_jump_entry(entry) {
             let label = format!("{name}（{to}）");
             if !page_targets.contains(&label) {
                 page_targets.push(label);
+            }
+            if let Some(from) = entry.get("from").and_then(|v| v.as_str())
+                && from.starts_with("action:")
+                && !source_actions.iter().any(|known| known == from)
+            {
+                source_actions.push(from.to_string());
             }
         }
     }
@@ -2089,18 +2109,15 @@ fn build_query_page_logic_output_inner(
     set_profile_counter(&mut profile, "diagnostics", diagnostics.len());
 
     // ---- 7. Summary & page_role ----
-    // navigation 数组混着三类边（见 navigation_statement 的注释）：真正跳去页面的、
-    // 传参的（PassesParam 的 to 是参数节点）、控制组件的（ActionControlsComponent）。
-    // page_role 和「几个跳转」只能由真正指向页面节点的边决定——否则 showDialog 多的
-    // 数据维护页会被误分类成「既写数据又跳转」的混合交互页。
+    // navigation 数组混着动作跳转、页面嵌入、传参和组件控制。page_role 与「几个跳转」
+    // 只能由 OpensPage / ActionNavigates 决定；EmbedsPage 是组合关系，不是用户跳转。
     let page_jump_count = navigation
         .iter()
-        .filter(|entry| {
-            entry
-                .get("to")
-                .and_then(|value| value.as_str())
-                .is_some_and(|to| to.starts_with("page:"))
-        })
+        .filter(|entry| is_page_jump_entry(entry))
+        .count();
+    let page_embed_count = navigation
+        .iter()
+        .filter(|entry| is_page_embed_entry(entry))
         .count();
     let page_role = if entrypoints.is_empty() {
         "readonly_dashboard"
@@ -2325,6 +2342,7 @@ fn build_query_page_logic_output_inner(
         "write_target_count": write_targets.len(),
         "navigation_count": navigation.len(),
         "page_jump_count": page_jump_count,
+        "page_embed_count": page_embed_count,
         "risk_count": diagnostics.len(),
         "top_entrypoints": top_entrypoints,
         "top_data_sources": top_data_sources,
@@ -2713,6 +2731,19 @@ mod answer_statement_tests {
             "to": "comp:app/a.spg|b", "to_name": "b", "type": "ActionControlsComponent",
         })];
         assert!(navigation_statement(&navigation, &[]).is_none());
+    }
+
+    #[test]
+    fn an_embedded_page_is_not_a_user_jump() {
+        let embedded = serde_json::json!({
+            "from": "comp:app/a.spg|subpage1",
+            "to": "page:app/embedded.spg",
+            "to_name": "embedded",
+            "type": "EmbedsPage",
+        });
+        assert!(!is_page_jump_entry(&embedded));
+        assert!(is_page_embed_entry(&embedded));
+        assert!(navigation_statement(&[embedded], &[]).is_none());
     }
 
     #[test]

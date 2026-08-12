@@ -637,7 +637,8 @@ Anti-drift 读取规则：
 | `data_source_count` | number | 读取的数据源数量 |
 | `write_target_count` | number | 写入目标数量 |
 | `navigation_count` | number | 导航相关边总数（含跳转/嵌入、传参、组件控制边） |
-| `page_jump_count` | number | 真实页面跳转数量（只统计指向页面节点的边；page_role 与结论中的「跳转」以此为准） |
+| `page_jump_count` | number | 真实页面跳转数量（只统计指向页面节点的 `OpensPage` / `ActionNavigates` 边；page_role 与结论中的「跳转」以此为准） |
+| `page_embed_count` | number | 嵌入页面数量（只统计 `EmbedsPage` 边；表示页面组合关系，不是用户跳转） |
 | `risk_count` | number | 风险诊断数量 |
 
 ### details 字段
@@ -1110,8 +1111,9 @@ AI 被问"这个 DataFlow 从哪里来、输出到哪里"时：
 | `entrypoint_count` | int | 用户可触发入口数量 |
 | `data_source_count` | int | 数据源读取数量 |
 | `write_target_count` | int | 写入目标数量 |
-| `navigation_count` | int | 导航相关边总数（含页面跳转、传参、组件控制边） |
-| `page_jump_count` | int | 真实页面跳转数量（只统计指向页面节点的边；page_role 与结论中的「跳转」以此为准） |
+| `navigation_count` | int | 导航相关边总数（含页面跳转/嵌入、传参、组件控制边） |
+| `page_jump_count` | int | 真实页面跳转数量（只统计指向页面节点的 `OpensPage` / `ActionNavigates` 边；page_role 与结论中的「跳转」以此为准） |
+| `page_embed_count` | int | 嵌入页面数量（只统计 `EmbedsPage` 边；表示页面组合关系，不是用户跳转） |
 | `display_prerequisites_count` | int | 显示前置条件数量 |
 | `data_prerequisites_count` | int | 数据前置条件数量 |
 | `action_prerequisites_count` | int | 动作前置条件数量 |

@@ -17,6 +17,7 @@
 #   scripts/cnb-smoke-dry-run.sh --fault empty   # 无 smoke.enabled，期望判红
 #   scripts/cnb-smoke-dry-run.sh --fault dup     # smoke.order 撞号，期望判红
 #   scripts/cnb-smoke-dry-run.sh --fault noeat   # 循环中途少产一条 record，期望判红
+#   scripts/cnb-smoke-dry-run.sh --fault judgeleak # judge 输出 token，期望先脱敏再判红
 set -euo pipefail
 
 FAULT="none"
@@ -74,7 +75,12 @@ cat > "$STUB_BIN/cargo" <<'STUB'
 OUT="${KIMI_JUDGE_OUTPUT_DIR:-target/kimi-harness-smoke}"
 mkdir -p "$OUT"
 echo '[]' > "$OUT/judge.json"
-echo '# stub judge' > "$OUT/judge.md"
+if [ "${DRY_RUN_JUDGE_LEAK:-0}" = "1" ]; then
+  printf '# stub judge %s\n' "${CNB_TOKEN:-}" > "$OUT/judge.md"
+  printf '[stub cargo] model echoed %s\n' "${CNB_TOKEN:-}"
+else
+  echo '# stub judge' > "$OUT/judge.md"
+fi
 echo "[stub cargo] $*"
 STUB
 
@@ -96,7 +102,8 @@ mkdir -p "$WORK/tests/fixtures/corpus/ai_eval"
 CASES="$WORK/tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json"
 cp "$REPO_ROOT/tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json" "$CASES"
 
-# 故障注入：改的是输入数据，不是 stage 脚本本身。
+# 故障注入：改输入数据或外部命令行为，不改 stage 脚本本身。
+DRY_RUN_JUDGE_LEAK=0
 case "$FAULT" in
   none) ;;
   empty)
@@ -133,6 +140,11 @@ exec "$REAL_NODE" "\$@"
 STUB
     chmod +x "$STUB_BIN/node"
     ;;
+  judgeleak)
+    # 模拟 judge 将模型控制的 token 同时写进产物和 stdout。stage 必须先捕获 stdout，
+    # 扫描并脱敏所有产物，再打印日志并判红。
+    DRY_RUN_JUDGE_LEAK=1
+    ;;
   *) echo "unknown fault: $FAULT" >&2; exit 2 ;;
 esac
 
@@ -152,6 +164,7 @@ PY
 
 # --- 执行 ---------------------------------------------------------------
 echo "=== running stage under dash (fault=$FAULT) ==="
+STAGE_LOG="$SANDBOX/stage.log"
 set +e
 (
   cd "$WORK"
@@ -159,10 +172,21 @@ set +e
   KIMI_CODE_HOME="$SANDBOX/kimi-home" \
   CNB_TOKEN="stub-token-not-a-real-secret" \
   CNB_REPO_SLUG="wu2305/metadata-checker" \
+  DRY_RUN_JUDGE_LEAK="$DRY_RUN_JUDGE_LEAK" \
   dash "$STAGE_SH"
-)
+) > "$STAGE_LOG" 2>&1
 STAGE_EXIT=$?
 set -e
+if grep -qF "stub-token-not-a-real-secret" "$STAGE_LOG"; then
+  echo "FAIL: CNB_TOKEN 出现在 stage 日志中" >&2
+  exit 1
+fi
+if [ -d "$WORK/target/kimi-harness-smoke" ] \
+  && grep -rqF "stub-token-not-a-real-secret" "$WORK/target/kimi-harness-smoke"; then
+  echo "FAIL: CNB_TOKEN 在 stage 结束后仍留在产物中" >&2
+  exit 1
+fi
+cat "$STAGE_LOG"
 echo "=== stage exit=$STAGE_EXIT ==="
 
 RECORDS="$WORK/target/kimi-harness-smoke/records.jsonl"

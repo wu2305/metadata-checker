@@ -514,12 +514,22 @@ fn test_unambiguous_target_keeps_single_answer_shape() {
 fn test_navigation_names_the_target_page() {
     let db = workspace("nav-statement");
     let output = surface(&db, &["--relations", "page:app/page_relations.spg"]);
+    let summary = &output["summary"];
+    assert_eq!(summary["page_jump_count"], 1, "{output}");
+    assert_eq!(summary["page_embed_count"], 1, "{output}");
     let statement = output["summary"]["navigation_statement"]
         .as_str()
         .expect("navigation_statement");
     assert!(statement.contains("目标页面为："), "{statement}");
     assert!(statement.contains("page:"), "{statement}");
     assert!(!statement.contains("目标页面为：param"), "{statement}");
+    assert!(
+        !statement.contains("dataflow_embedded"),
+        "嵌入页不能被描述为用户跳转目标：{statement}"
+    );
+    let conclusion = summary["conclusion"].as_str().expect("conclusion");
+    assert!(conclusion.contains("1 个跳转"), "{conclusion}");
+    assert!(!conclusion.contains("2 个跳转"), "{conclusion}");
 }
 
 /// 跳转和传参必须出现在 conclusion 本身。

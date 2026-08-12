@@ -645,7 +645,7 @@
           "path": "summary.page_jump_count",
           "op": "eq",
           "value": 7,
-          "description": "页面应有 7 个真实页面跳转（page_jump_count 只统计页面目标边）"
+          "description": "页面应有 7 个真实页面跳转（page_jump_count 只统计 OpensPage / ActionNavigates 边）"
         }
       ],
       "answer_style_policy": {

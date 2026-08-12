@@ -356,7 +356,9 @@ metadata-checker table.tbl --budget compact
 关键字段：
 - `summary.what_is_it`：页面一句话摘要。
 - `summary.page_role`：`form_submit_page` / `readonly_dashboard` / `navigation_page` / `data_maintenance_page` / `mixed_interaction_page` / `unknown`。
-- `summary.page_jump_count`：真实页面跳转数量（只统计指向页面节点的边）。`page_role` 与结论中的「跳转」以此为准；`summary.navigation_count` 是导航相关边总数，含组件控制与传参边，两者不要混用。
+- `summary.page_jump_count`：真实页面跳转数量（只统计指向页面节点的 `OpensPage` / `ActionNavigates` 边）。`page_role` 与结论中的「跳转」以此为准。
+- `summary.page_embed_count`：嵌入页面数量（只统计 `EmbedsPage` 边），表示页面组合关系，不是用户跳转。
+- `summary.navigation_count`：导航相关边总数，含页面嵌入、组件控制与传参边；不要与 `page_jump_count` 混用。
 - `details.entrypoints`：用户可触发入口，不含普通 input。
 - `details.action_flows`：动作链，含 `action_id`、`action_type`、`action_category`、`semantic_summary`、`component_id`、`trigger_type`、`blocks_on`、`condition`、`reads`、`writes`、`navigation`、`sets_params`、`passes_params`。
 - `details.data_sources`：页面读取的模型和字段。

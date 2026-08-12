@@ -905,17 +905,28 @@
         export M58_CNB_MODEL="${KIMI_JUDGE_MODEL:-deepseek-v4-flash}"
         export KIMI_SMOKE_TRANSCRIPT_DIR="$OUT_DIR"
         export KIMI_JUDGE_OUTPUT_DIR="$OUT_DIR"
-        cargo test --features cli-local --test kimi_harness_judge_tests -- --ignored --nocapture
-        test -s "$OUT_DIR/judge.json"
+        JUDGE_LOG="$OUT_DIR/judge-test.log"
+        JUDGE_EXIT=0
+        # judge 的 stdout/stderr 可能含模型转述内容，先落盘，等全目录扫描脱敏后才能输出。
+        cargo test --features cli-local --test kimi_harness_judge_tests -- --ignored --nocapture \
+          > "$JUDGE_LOG" 2>&1 || JUDGE_EXIT=$?
 
         # 兜底扫描必须在任何 dump 之前：逐 case 扫描之后这里本应扫不到，扫到说明有
         # 未覆盖的产物（比如 judge 转述了含 token 的答案）。先全量脱敏再判红——带着
         # 原文退出，endStages 的原始 dump 就会把 token 打进 CI 日志。
+        TOKEN_LEAKED=0
         if [ -n "${CNB_TOKEN:-}" ] && grep -rqF "$CNB_TOKEN" "$OUT_DIR" 2>/dev/null; then
           echo "CNB_TOKEN leaked into smoke artifacts; redacting everything before exit"
           find "$OUT_DIR" -type f | while read -r f; do redact_token "$f"; done
-          exit 1
+          TOKEN_LEAKED=1
         fi
+        cat "$JUDGE_LOG"
+        if [ "$TOKEN_LEAKED" -ne 0 ]; then exit 1; fi
+        if [ "$JUDGE_EXIT" -ne 0 ]; then
+          echo "judge infra failure; captured test exit=$JUDGE_EXIT"
+          exit "$JUDGE_EXIT"
+        fi
+        test -s "$OUT_DIR/judge.json"
         cat "$OUT_DIR/judge.md"
 
         if [ "$INFRA_FAILED" -ne 0 ]; then
@@ -945,6 +956,12 @@
             }
           ' "$1" "${CNB_TOKEN:-}"
         }
+        # main stage 可能在 judge 扫描之前被信号终止；endStage 在任何 ls/cat 之前独立
+        # 扫描整个目录，保证失败路径也不会把原 token 打进日志。
+        if [ -n "${CNB_TOKEN:-}" ] && grep -rqF "$CNB_TOKEN" "$OUT_DIR" 2>/dev/null; then
+          echo "CNB_TOKEN found in smoke artifacts during endStage; redacting before report"
+          find "$OUT_DIR" -type f | while read -r f; do redact_token "$f"; done
+        fi
         ls -lh "$OUT_DIR" || true
         # records.jsonl 是给下游读的；这里额外投影一份人读的表，
         # 免得复盘时先得自己解析 JSONL。

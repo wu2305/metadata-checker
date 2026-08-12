@@ -21,9 +21,10 @@ scripts/cnb-smoke-dry-run.sh
 scripts/cnb-smoke-dry-run.sh --fault empty   # 没有 smoke.enabled 的 case
 scripts/cnb-smoke-dry-run.sh --fault dup     # smoke.order 撞号
 scripts/cnb-smoke-dry-run.sh --fault noeat   # 循环中途丢一条 record
+scripts/cnb-smoke-dry-run.sh --fault judgeleak # judge 产物与 stdout 含 token
 ```
 
-脚本自身对结果做断言：正常路径非 0 判失败，注入故障后退出 0 同样判失败。**「故障路径必须红」和「正常路径必须绿」同等重要**——静默假绿正是这套东西要防的失效模式。
+脚本自身对结果做断言：正常路径非 0 判失败，注入故障后退出 0 同样判失败。`judgeleak` 还会断言 token 既未进入 stage 日志，也未残留在产物中。**「故障路径必须红」和「正常路径必须绿」同等重要**——静默假绿或失败路径泄密正是这套东西要防的失效模式。
 
 前置：`dash`（`brew install dash`）、`python3` + `pyyaml`、`node`。
 
@@ -45,11 +46,11 @@ scripts/cnb-smoke-dry-run.sh --fault noeat   # 循环中途丢一条 record
 
 stub 补的是**镜像里本来就有、开发机上没有**的 GNU 行为。任何为了「让脚本跑起来」而改写 stage 语法的做法都会让这次验证失去意义。
 
-故障注入改的是**输入数据**（case fixture）或外部命令行为，同样不动 stage 脚本本身。
+故障注入改的是**输入数据**（case fixture）或外部命令行为，同样不动 stage 脚本本身。`judgeleak` 让 cargo stub 把 token 同时写进 `judge.md` 与 stdout，用于验证 stage 必须先捕获 judge 日志、扫描并脱敏完整目录，之后才能输出日志并判红。
 
 ## 覆盖边界
 
-干跑验证的是 shell 语义、控制流、故障路径判红、records 字段与取值。它**不**验证：真实模型行为、真实项目图构建、判分质量、墙钟量级（stub 是毫秒级，真跑是分钟级）。
+干跑验证的是 shell 语义、控制流、故障路径判红、judge 日志的脱敏顺序、records 字段与取值。它**不**验证：真实模型行为、真实项目图构建、判分质量、墙钟量级（stub 是毫秒级，真跑是分钟级）。
 
 因此干跑通过**不等于**验收通过。stage 的真实验收是在 CNB 上跑一次 `api_trigger_kimi_harness_smoke`。
 

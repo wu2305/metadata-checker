@@ -352,6 +352,7 @@ fn test_m39_query_page_logic_equivalence_between_memory_graph_and_graphdb() {
         "write_target_count",
         "navigation_count",
         "page_jump_count",
+        "page_embed_count",
         "risk_count",
     ] {
         assert_eq!(

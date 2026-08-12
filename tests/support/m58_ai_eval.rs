@@ -433,6 +433,25 @@ fn strip_dataflow_prefix(target: &str) -> &str {
     target.strip_prefix("model:").unwrap_or(target)
 }
 
+/// 构造命令 target 的稳定身份：先用真实图归一，再折叠 DataFlow 可选前缀。
+fn canonical_target_identity(
+    command_kind: &str,
+    target: &str,
+    resolver: &TargetResolver,
+) -> String {
+    let canonical = resolver
+        .canonical(target)
+        .unwrap_or_else(|| target.to_string());
+    if matches!(
+        command_kind,
+        "--relations" | "--query-dataflow" | "--query-model"
+    ) {
+        strip_dataflow_prefix(&canonical).to_string()
+    } else {
+        canonical
+    }
+}
+
 /// 命令命中 plan 的方式。
 ///
 /// 放宽接受面之后仍然要能区分路由质量，否则「模型选对动词」和「模型选了另一条也能拿到
@@ -502,31 +521,41 @@ pub(crate) struct CommandPolicy {
 pub(crate) struct ExecutedCommand {
     step_index: usize,
     command_kind: String,
-    target: String,
+    target_identity: String,
+    effective_args: EffectiveRequestArgs,
     budget: String,
 }
 
 impl ExecutedCommand {
     /// 供测试构造一条已执行记录。
-    pub(crate) fn for_test(step_index: usize, request: &CommandRequest) -> Self {
-        Self::from_request(step_index, request)
-    }
-
-    fn from_request(step_index: usize, request: &CommandRequest) -> Self {
-        Self {
+    pub(crate) fn for_test(step_index: usize, request: &CommandRequest) -> Result<Self> {
+        Ok(Self {
             step_index,
             command_kind: request.command_kind.clone(),
-            target: request.target.clone(),
+            target_identity: request.target.clone(),
+            effective_args: parse_request_args(&request.args)?,
             budget: request
                 .budget
                 .clone()
                 .unwrap_or_else(|| "compact".to_string()),
-        }
+        })
     }
 
     /// 这次请求相对本条已执行命令，能不能拿到不一样的输出。
-    fn yields_something_new(&self, request: &CommandRequest) -> bool {
-        if self.command_kind != request.command_kind || self.target != request.target {
+    fn yields_something_new(
+        &self,
+        command_kind: &str,
+        target_identity: &str,
+        effective_args: &EffectiveRequestArgs,
+        budget: &str,
+    ) -> bool {
+        if self.command_kind != command_kind || self.target_identity != target_identity {
+            return true;
+        }
+        // intent/depth/detail 会改变真正交给模型的证据；同 target、同 budget 下改变它们
+        // 不是原样重放。反过来，参数顺序或 value-source/value_source 别名不同但有效值
+        // 相同，仍然是同一份输出，不能借此绕过重放限制。
+        if &self.effective_args != effective_args {
             return true;
         }
         let rank = |budget: &str| match budget {
@@ -535,7 +564,7 @@ impl ExecutedCommand {
             "full" => Some(2),
             _ => None,
         };
-        match (rank(&self.budget), request.budget.as_deref().and_then(rank)) {
+        match (rank(&self.budget), rank(budget)) {
             (Some(previous), Some(requested)) => requested > previous,
             _ => false,
         }
@@ -558,6 +587,12 @@ pub(crate) struct ValidatedCommand {
     /// 实际命中的写法；必须执行模型选的那一条，而不是 plan 的规范命令，
     /// 否则报告里的 trace 与真正跑过的 CLI 不是同一个命令。
     variant: PlanVariant,
+    /// 实际执行 target 的稳定身份，用于阻止换一种拼写重放同一查询。
+    target_identity: String,
+    /// 实际执行参数的语义身份，不受参数顺序与等价别名影响。
+    effective_args: EffectiveRequestArgs,
+    /// 实际执行预算；模型省略时来自 plan，plan 也省略时为 compact。
+    effective_budget: String,
     route: RouteKind,
     project_dir: PathBuf,
     graph_db_path: PathBuf,
@@ -609,30 +644,36 @@ impl CommandPolicy {
     }
 
     /// 构造一条不占 plan 步数的定位命令。
-    fn locating_command(&self, request: &CommandRequest) -> Result<ValidatedCommand> {
-        validate_request_args(&request.args)?;
-        if let Some(budget) = request.budget.as_deref() {
-            validate_request_budget(budget)?;
-        }
-        Ok(ValidatedCommand {
+    fn locating_command(
+        &self,
+        request: &CommandRequest,
+        effective_args: EffectiveRequestArgs,
+    ) -> ValidatedCommand {
+        let effective_budget = request
+            .budget
+            .clone()
+            .unwrap_or_else(|| "compact".to_string());
+        ValidatedCommand {
             step_index: None,
             variant: PlanVariant {
                 command_kind: request.command_kind.clone(),
                 target: request.target.clone(),
                 args: request.args.clone(),
-                budget: Some(
-                    request
-                        .budget
-                        .clone()
-                        .unwrap_or_else(|| "compact".to_string()),
-                ),
+                budget: Some(effective_budget.clone()),
                 requires_project_dir: true,
             },
+            target_identity: canonical_target_identity(
+                &request.command_kind,
+                &request.target,
+                &self.resolver,
+            ),
+            effective_args,
+            effective_budget,
             route: RouteKind::Primary,
             project_dir: self.project_dir.clone(),
             graph_db_path: self.graph_db_path.clone(),
             binary_path: self.binary_path.clone(),
-        })
+        }
     }
 
     /// 校验模型命令只能使用尚未消费的 plan step；`--find` 例外，见 [`MAX_DISCOVERY_COMMANDS`]。
@@ -645,12 +686,16 @@ impl CommandPolicy {
         if contains_shell_metacharacters(&request.target) {
             bail!("target 包含禁止的 shell 元字符");
         }
+        let effective_args = parse_request_args(&request.args)?;
+        if let Some(budget) = request.budget.as_deref() {
+            validate_request_budget(budget)?;
+        }
 
         if request.command_kind == "--find" {
             if discovery_used >= MAX_DISCOVERY_COMMANDS {
                 bail!("定位命令数超过 {MAX_DISCOVERY_COMMANDS}");
             }
-            return self.locating_command(request);
+            return Ok(self.locating_command(request, effective_args));
         }
 
         if used_steps.len() >= self.max_command_count {
@@ -682,21 +727,35 @@ impl CommandPolicy {
             // 仍逐条记录，多花的命令看得见。原样重发同一条命令仍然拒绝——那拿到的是同一
             // 份输出，模型在原地打转。
             None => {
-                let retried = self
-                    .steps
-                    .iter()
-                    .enumerate()
-                    .filter(|(index, _)| {
-                        used_steps
-                            .iter()
-                            .filter(|used| used.step_index == *index)
-                            .all(|used| used.yields_something_new(request))
-                            && used_steps.iter().any(|used| used.step_index == *index)
-                    })
-                    .find_map(|(index, step)| {
-                        step.match_variant(request, &self.resolver)
-                            .map(|(variant, route)| (index, variant.clone(), route))
-                    });
+                let retried = self.steps.iter().enumerate().find_map(|(index, step)| {
+                    let (variant, route) = step.match_variant(request, &self.resolver)?;
+                    let seen_step = used_steps.iter().any(|used| used.step_index == index);
+                    if !seen_step {
+                        return None;
+                    }
+                    let target_identity = canonical_target_identity(
+                        &request.command_kind,
+                        &request.target,
+                        &self.resolver,
+                    );
+                    let effective_budget = request
+                        .budget
+                        .as_deref()
+                        .or(variant.budget.as_deref())
+                        .unwrap_or("compact");
+                    used_steps
+                        .iter()
+                        .filter(|used| used.step_index == index)
+                        .all(|used| {
+                            used.yields_something_new(
+                                &request.command_kind,
+                                &target_identity,
+                                &effective_args,
+                                effective_budget,
+                            )
+                        })
+                        .then(|| (index, variant.clone(), route))
+                });
                 match retried {
                     Some(retried) => retried,
                     // 工具寻址不到的 target 交给工具去说，别替它判负。
@@ -713,7 +772,7 @@ impl CommandPolicy {
                         && self.resolver.canonical(&request.target).is_none()
                         && discovery_used < MAX_DISCOVERY_COMMANDS =>
                     {
-                        return self.locating_command(request);
+                        return Ok(self.locating_command(request, effective_args));
                     }
                     None => {
                         bail!("模型命令不匹配任何未使用的 minimal_command_plan step");
@@ -732,17 +791,24 @@ impl CommandPolicy {
         // compact 截断后升级 normal 的重试必须真的用 normal 跑。此前两者被静默丢掉——
         // trace 记的是模型请求的值、执行的是 plan 的值，评测报告描述的就不是真正量过的
         // CLI 调用。取值先过合法性校验，白名单外的旗标一律拒绝。
-        validate_request_args(&request.args)?;
-        if let Some(budget) = request.budget.as_deref() {
-            validate_request_budget(budget)?;
-        }
         variant.args = request.args.clone();
         if request.budget.is_some() {
             variant.budget = request.budget.clone();
         }
+        let effective_budget = variant
+            .budget
+            .clone()
+            .unwrap_or_else(|| "compact".to_string());
 
         Ok(ValidatedCommand {
             step_index: Some(step_index),
+            target_identity: canonical_target_identity(
+                &request.command_kind,
+                &request.target,
+                &self.resolver,
+            ),
+            effective_args,
+            effective_budget,
             variant,
             route,
             project_dir: self.project_dir.clone(),
@@ -753,6 +819,17 @@ impl CommandPolicy {
 }
 
 impl ValidatedCommand {
+    /// 生成本次真实执行的重放身份。
+    fn executed_command(&self, step_index: usize) -> ExecutedCommand {
+        ExecutedCommand {
+            step_index,
+            command_kind: self.variant.command_kind.clone(),
+            target_identity: self.target_identity.clone(),
+            effective_args: self.effective_args.clone(),
+            budget: self.effective_budget.clone(),
+        }
+    }
+
     /// 返回不经过 shell 的 CLI 参数。
     pub(crate) fn argv(&self) -> Vec<OsString> {
         let mut argv = vec![OsString::from("--non-human")];
@@ -803,29 +880,53 @@ fn contains_shell_metacharacters(value: &str) -> bool {
 /// args 会原样进入 argv：放进白名单外的旗标，CLI 要么报错、要么悄悄改变行为，而
 /// trace 记的都是同一条命令——不许出现「记的和跑的不一致」的灰色地带。budget 只能
 /// 走 JSON 顶层字段（SKILL.md 也是这么要求的），混进 args 直接拒绝并说明写法。
-fn validate_request_args(args: &[String]) -> Result<()> {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct EffectiveRequestArgs {
+    intent: Option<String>,
+    depth: Option<usize>,
+    detail: bool,
+}
+
+/// 把 CLI 参数解析成真正影响输出的稳定身份，并同时完成白名单校验。
+fn parse_request_args(args: &[String]) -> Result<EffectiveRequestArgs> {
+    let mut effective = EffectiveRequestArgs::default();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--intent" => {
                 let value = iter.next().ok_or_else(|| anyhow!("--intent 缺少取值"))?;
-                metadata_checker::explain::TraversalIntent::parse(value)
+                let intent = metadata_checker::explain::TraversalIntent::parse(value)
                     .with_context(|| format!("--intent 取值无效: {value}"))?;
+                if effective
+                    .intent
+                    .replace(intent.as_str().to_string())
+                    .is_some()
+                {
+                    bail!("--intent 不允许重复");
+                }
             }
             "--depth" => {
                 let value = iter.next().ok_or_else(|| anyhow!("--depth 缺少取值"))?;
-                if value.parse::<usize>().is_err() {
-                    bail!("--depth 取值无效: {value}");
+                let depth = value
+                    .parse::<usize>()
+                    .with_context(|| format!("--depth 取值无效: {value}"))?;
+                if effective.depth.replace(depth).is_some() {
+                    bail!("--depth 不允许重复");
                 }
             }
-            "--detail" => {}
+            "--detail" => {
+                if effective.detail {
+                    bail!("--detail 不允许重复");
+                }
+                effective.detail = true;
+            }
             "--budget" => {
                 bail!("budget 只能放在 JSON 顶层 budget 字段，不能放进 args");
             }
             other => bail!("args 含不允许的参数: {other}"),
         }
     }
-    Ok(())
+    Ok(effective)
 }
 
 /// budget 只接受三档；其余取值让模型重写，不能带进 argv。
@@ -2237,9 +2338,7 @@ fn run_case_for_trial(
                     execution.output_sections,
                 ));
                 match step_index {
-                    Some(index) => {
-                        used_steps.push(ExecutedCommand::from_request(index, &command_request))
-                    }
+                    Some(index) => used_steps.push(validated.executed_command(index)),
                     // 定位命令不占 plan 步数，只吃自己的定位额度。
                     None => discovery_used += 1,
                 }
