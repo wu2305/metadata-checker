@@ -917,8 +917,9 @@
           # 不再 grep 行数——grep 把 assistant 复述与工具返回里的 'metadata-checker'
           # 字样都算成调用，实跑出现过 13 次 tool_calls 对 15 次「调用」的假数据。
           # raw fallback：绕过 metadata-checker 直接读写项目原始 .spg/.tbl（启发式下限：
-          # 与 metadata-checker 调用混在同一行命令里的直接读文件抓不到）。
-          # raw_fallback=true 的 trial 不计入工具分，只在 task_score 里算任务完成。
+          # 与 metadata-checker 调用混在同一行命令里的直接读文件抓不到；反过来 ls/test
+          # 一个 .spg 路径也会误标）。它只是诊断信号，judge.md 按固定分母分层报告，
+          # 不作为任何计分准入条件。
           TOOL_STATS="$(node -e '
             const fs = require("fs");
             let toolCalls = 0, mcInvocations = 0, rawFallbackCalls = 0;
