@@ -1,7 +1,7 @@
 //! M58 CI tester 的评测 runner 支持代码。
 
 use anyhow::{Context, Result, anyhow, bail};
-use reqwest::header::{ACCEPT, CONTENT_TYPE};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -1052,6 +1052,8 @@ pub(crate) struct CnbChatAdapter {
     repo: String,
     token: String,
     model: String,
+    /// CNB 内部 AI 路由及其认证契约。
+    route: CnbAiRoute,
     /// 透传给上游的 reasoning_effort；None 表示完全不发该字段。
     reasoning_effort: Option<String>,
     /// 本 adapter 累计收到的 reasoning_content 字符数。
@@ -1060,6 +1062,15 @@ pub(crate) struct CnbChatAdapter {
     /// `reasoning_effort` 真的生效了——该字段未被 swagger 声明，如果哪天上游默默忽略它，
     /// 报告会像模型名被静默替换那样，标着「开了推理」其实一次都没推理。
     reasoning_chars: usize,
+}
+
+/// CNB 的两套 AI HTTP 路由。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CnbAiRoute {
+    /// OpenAPI 已声明的 `/-/ai/chat/completions`，使用 Bearer token。
+    AiChat,
+    /// AI IDE 内部的 `/-/ai-ide/v2/chat/completions`，Authorization 直接传 token。
+    AiIdeV2,
 }
 
 /// 构造带指定超时的 HTTP client。
@@ -1079,6 +1090,7 @@ impl fmt::Debug for CnbChatAdapter {
             .field("repo", &self.repo)
             .field("token", &"[REDACTED]")
             .field("model", &self.model)
+            .field("route", &self.route)
             .finish()
     }
 }
@@ -1123,6 +1135,27 @@ impl CnbChatAdapter {
         token: String,
         model: String,
     ) -> Result<Self> {
+        Self::new_with_route(endpoint, repo, token, model, CnbAiRoute::AiChat)
+    }
+
+    /// 创建 AI IDE v2 adapter；该内部接口可提供比被测模型更强的独立 judge。
+    pub(crate) fn new_ai_ide_v2(
+        endpoint: String,
+        repo: String,
+        token: String,
+        model: String,
+    ) -> Result<Self> {
+        Self::new_with_route(endpoint, repo, token, model, CnbAiRoute::AiIdeV2)
+    }
+
+    /// 按指定 CNB 路由创建 adapter，并统一校验非敏感配置。
+    fn new_with_route(
+        endpoint: String,
+        repo: String,
+        token: String,
+        model: String,
+        route: CnbAiRoute,
+    ) -> Result<Self> {
         if endpoint.trim().is_empty() {
             bail!("CNB API endpoint 不能为空");
         }
@@ -1135,13 +1168,18 @@ impl CnbChatAdapter {
         if model.trim().is_empty() {
             bail!("CNB model 不能为空");
         }
-        let client = build_http_client(Duration::from_secs(60))?;
+        let timeout = match route {
+            CnbAiRoute::AiChat => Duration::from_secs(60),
+            CnbAiRoute::AiIdeV2 => Duration::from_secs(300),
+        };
+        let client = build_http_client(timeout)?;
         Ok(Self {
             client,
             endpoint: endpoint.trim_end_matches('/').to_string(),
             repo: repo.trim_matches('/').to_string(),
             token,
             model,
+            route,
             reasoning_effort: None,
             reasoning_chars: 0,
         })
@@ -1149,7 +1187,11 @@ impl CnbChatAdapter {
 
     /// 返回完整的 CNB 仓库 AI Chat endpoint。
     fn chat_url(&self) -> String {
-        format!("{}/{}/-/ai/chat/completions", self.endpoint, self.repo)
+        let route = match self.route {
+            CnbAiRoute::AiChat => "ai",
+            CnbAiRoute::AiIdeV2 => "ai-ide/v2",
+        };
+        format!("{}/{}/-/{route}/chat/completions", self.endpoint, self.repo)
     }
 }
 
@@ -1160,14 +1202,16 @@ impl ModelAdapter for CnbChatAdapter {
         payload.model = self.model.clone();
         payload.stream = true;
         payload.reasoning_effort = self.reasoning_effort.clone();
-        let response = self
+        let request = self
             .client
             .post(self.chat_url())
-            .bearer_auth(&self.token)
             .header(ACCEPT, "text/event-stream")
-            .json(&payload)
-            .send()
-            .context("请求 CNB AI Chat 失败")?;
+            .json(&payload);
+        let request = match self.route {
+            CnbAiRoute::AiChat => request.bearer_auth(&self.token),
+            CnbAiRoute::AiIdeV2 => request.header(AUTHORIZATION, &self.token),
+        };
+        let response = request.send().context("请求 CNB AI Chat 失败")?;
         let status = response.status();
         let content_type = response
             .headers()

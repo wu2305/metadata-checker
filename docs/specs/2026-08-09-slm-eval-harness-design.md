@@ -18,12 +18,17 @@
 
 推论：**被测 agent 必须在 CNB pipeline 内运行**。任何"本地跑一遍评测"的方案不成立。这条约束单独决定了评测只能是两阶段形态（pipeline 内产出 → 之后判分），不是实现选择。
 
-### 2. 可用模型只有 deepseek-v4-flash
+### 2. 被测 agent 模型固定，judge 可走 AI IDE v2 强模型
 
-CNB AI Chat 当前只提供 `deepseek-v4-flash`（外部实测，2026-08-08；本仓库内无自动化举证，若 CNB 后续放开模型列表需重新核对本节）。推论：
+CNB AI Chat 的被测 agent 路径当前固定为 `deepseek-v4-flash`。2026-08-13 另行实测内部
+`/{repo}/-/ai-ide/v2/chat/completions`：使用直传 `Authorization: <CNB_TOKEN>`、
+`stream=true` 时，精确模型 ID `glm-5.2` 返回 200，SSE `model` 也回报 `glm-5.2`；
+`Kimi-K3` 及当时可查到的 provider 前缀别名返回 `11102 service info not found`。
+用户据此选择 GLM-5.2 作为 judge，agent 仍保持 deepseek-v4-flash。推论：
 
 - **被扫的变量是 prompt（SKILL.md），不是 model。** 模型是钉死的常量。
-- 无法用"换个强模型看是否也失败"来区分「提示词不清楚」与「模型能力不足」。唯一的归因通道是**同一模型下的 prompt 配对 A/B**。
+- 强模型只提高语义判分可靠性，不能代替同一被测模型下的 prompt 配对 A/B，也不能单凭
+  judge 结论区分「提示词不清楚」与「模型能力不足」。
 - 因此评测输出的第一公民是**逐 case 配对网格**，不是单一聚合通过率。
 
 ### 3. CNB AI Chat 支持原生 tool calling
@@ -128,22 +133,24 @@ stage 脚本默认由 `sh` 解释，`browser-wasm-ci` 基于 `node:22-bookworm`�
 - **variant 拆分到不同的 pipeline 触发**，使单次运行是 `cases × trials` 而非 `variants × cases × trials`。
 - trial 数不靠估算：先在六问冒烟中记录逐问墙钟，再据实测与 CNB job 超时确定。
 
-## 未决策：判分数据边界
+## 判分数据边界决策
 
 判分模型若在 CNB 之外，xiaoshouyi（真实客户项目）的答案文本要出 CNB 闭环送第三方 API。
 
 必须明确的是：**限制为只送 final answer 减少的是暴露量，不是暴露种类。** `must_mention` 条目本身就是 `model11.totalRowCount__ > 0`、`继承 panel35.visibleCondition` 这类内容——最终答案按设计必须包含字段名与表达式，否则无从判分。字段名级的项目信息出境是本方案的**固有成本**，不是可选成本。
 
-两个选项，二选一，无第三条路径：
+曾评估两个选项：
 
 | 选项 | 得到 | 代价 |
 |------|------|------|
 | A：判分模型在 CNB 外 | 摆脱 judge 与被测模型同源的偏差 | 字段名级项目信息送第三方 API |
-| B：判分留在 CNB（deepseek） | 数据不出闭环 | judge 与被测模型同源 |
+| B：判分留在 CNB | 数据不出闭环 | 可用模型若与被测模型相同，会产生同源偏差 |
 
 选项 B 的代价需要展开：judge 的失败模式（对措辞流畅的回答判得更松）是**输入相关**的，而 prompt variant 恰好改变措辞流畅度。因此偏差不会在 A/B 两侧对消，它会伪装成正信号。选项 B 下的配对 A/B 结论上限因此明显受限。
 
-**本决策留待人工拍板，不由实施方默认。** 阶段 A（含语料轨道）不依赖此决策。
+**2026-08-13 用户拍板选择 B，并指定 AI IDE v2 的 `glm-5.2` 作为 judge。** 这避免了
+judge 与被测 `deepseek-v4-flash` 使用同一个模型，但数据仍留在 CNB 闭环。接口未进入
+公开 OpenAPI，必须以真实探针、实际返回模型校验和失败即 INFRA 约束防止协议漂移。
 
 ## 非目标
 

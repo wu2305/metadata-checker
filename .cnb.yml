@@ -814,7 +814,7 @@
         node -e '
           const fs = require("fs");
           const [outPath, recordedAt, repoSha, corpusSha, kimiVersion, binSha, skillSha,
-                 agentModel, judgeModel] = process.argv.slice(1);
+                 agentModel, judgeModel, judgeApiRoute] = process.argv.slice(1);
           const manifest = {
             recorded_at: recordedAt,
             repo_sha: repoSha,
@@ -824,11 +824,12 @@
             skill_sha256: skillSha,
             agent_model: agentModel,
             judge_model: judgeModel,
+            judge_api_route: judgeApiRoute,
           };
           fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2) + "\n");
         ' "$OUT_DIR/run.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REPO_SHA" "$CORPUS_SHA" \
           "$KIMI_VERSION" "$BIN_SHA" "$SKILL_SHA" \
-          "${KIMI_MODEL_NAME:-unknown}" "${KIMI_JUDGE_MODEL:-deepseek-v4-flash}"
+          "${KIMI_MODEL_NAME:-unknown}" "${KIMI_JUDGE_MODEL:-glm-5.2}" "ai-ide/v2"
         cat "$OUT_DIR/run.json"
 
         # 问题文本不在本文件里。唯一事实源是 xiaoshouyi_large_real_cases.json 的
@@ -995,13 +996,13 @@
           process.stdout.write(String(lines.reduce((a, l) => a + JSON.parse(l).wall_clock_ms, 0)));
         ' "$RECORDS")"
 
-        # 语义 judge（软报告，不判红）：LLM 逐条判 must_mention / should_mention /
-        # must_not_mention，替代原关键词命中统计——关键词对措辞变体太脆，判读必须基于
-        # 语义。judge 复用 M58 的 CNB SSE adapter；infra 故障让测试失败，语义 pass/fail
-        # 校准期只报告。judge.md 是判读答案质量的主入口，endStages 的原始 dump 只用于深查。
+        # 语义 judge（软报告，不判红）：GLM-5.2 通过 AI IDE v2 内部接口逐条判
+        # must_mention / should_mention / must_not_mention，与被测 deepseek-v4-flash 解耦。
+        # infra 故障让测试失败，语义 pass/fail 校准期只报告。judge.md 是判读答案质量的
+        # 主入口，endStages 的原始 dump 只用于深查。
         # 判分外移（M58.2 阶段 B）落地前，这里保持原样并行跑，避免过渡期没有信号。
-        export M58_CNB_REPO="${CNB_REPO_SLUG:?}"
-        export M58_CNB_MODEL="${KIMI_JUDGE_MODEL:-deepseek-v4-flash}"
+        export KIMI_JUDGE_MODEL="${KIMI_JUDGE_MODEL:-glm-5.2}"
+        export KIMI_JUDGE_API_BASE="${KIMI_JUDGE_API_BASE:-${CNB_API_ENDPOINT:-https://api.cnb.cool}}"
         export KIMI_SMOKE_TRANSCRIPT_DIR="$OUT_DIR"
         export KIMI_JUDGE_OUTPUT_DIR="$OUT_DIR"
         JUDGE_LOG="$OUT_DIR/judge-test.log"

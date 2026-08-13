@@ -642,6 +642,42 @@ fn test_m58_cnb_adapter_sends_redacted_safe_request() {
     assert!(raw_request_lower.contains("accept: text/event-stream"));
 }
 
+/// 验证 AI IDE v2 judge 使用内部路由与直传 Authorization，不复用 OpenAPI Bearer 契约。
+#[test]
+fn test_ai_ide_v2_adapter_sends_expected_request() {
+    let token = "ai-ide-v2-test-secret";
+    let response_body = concat!(
+        "data: {\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{\"content\":\"{\\\"verdict\\\":\\\"contradicted\\\"}\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let (endpoint, server) = spawn_fake_cnb_server("200 OK", "text/event-stream", response_body);
+    let mut adapter = CnbChatAdapter::new_ai_ide_v2(
+        endpoint,
+        "org/repo".to_string(),
+        token.to_string(),
+        "glm-5.2".to_string(),
+    )
+    .unwrap();
+
+    let content = adapter.complete(&empty_chat_request()).unwrap();
+    assert_eq!(content, r#"{"verdict":"contradicted"}"#);
+
+    let raw_request = server.join().unwrap();
+    let raw_request_lower = raw_request.to_ascii_lowercase();
+    assert!(raw_request.starts_with("POST /org/repo/-/ai-ide/v2/chat/completions HTTP/1.1"));
+    assert!(raw_request_lower.contains("authorization: ai-ide-v2-test-secret"));
+    assert!(!raw_request_lower.contains("authorization: bearer"));
+    assert!(raw_request_lower.contains("accept: text/event-stream"));
+    let request_body = raw_request
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap();
+    assert!(!request_body.contains(token));
+    let request_json: serde_json::Value = serde_json::from_str(request_body).unwrap();
+    assert_eq!(request_json["model"], "glm-5.2");
+    assert_eq!(request_json["stream"], true);
+}
+
 /// 验证 CNB SSE 流里的非法 JSON 不会泄漏 token。
 #[test]
 fn test_m58_cnb_sse_rejects_invalid_json_without_leaking_token() {

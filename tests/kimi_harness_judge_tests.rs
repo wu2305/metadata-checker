@@ -897,12 +897,12 @@ fn test_render_judge_markdown_keeps_multiple_trials_per_case() {
 
 /// CNB pipeline 中对 kimi harness 六问冒烟 transcript 做语义判分；普通测试不运行。
 ///
-/// env 契约：`CNB_TOKEN`（必需，缺则跳过）、`M58_CNB_REPO`（或 `CNB_REPO_SLUG` 兜底）、
-/// `M58_CNB_MODEL`（judge 模型）、`M58_CNB_API_BASE`（可选）、
+/// env 契约：`CNB_TOKEN`（必需，缺则跳过）、`CNB_REPO_SLUG`（仓库）、
+/// `KIMI_JUDGE_MODEL`（AI IDE v2 judge 模型）、`KIMI_JUDGE_API_BASE`（可选）、
 /// `KIMI_SMOKE_TRANSCRIPT_DIR`（默认 target/kimi-harness-smoke，目录不存在则跳过）、
 /// `KIMI_JUDGE_OUTPUT_DIR`（默认与 transcript 目录相同）。
 #[test]
-#[ignore = "requires CNB_TOKEN, M58_CNB_REPO/CNB_REPO_SLUG, M58_CNB_MODEL and smoke transcripts"]
+#[ignore = "requires CNB_TOKEN, CNB_REPO_SLUG, KIMI_JUDGE_MODEL and smoke transcripts"]
 fn kimi_harness_smoke_judge_live() -> Result<()> {
     if std::env::var("CNB_TOKEN").is_err() {
         println!("跳过 kimi_harness_smoke_judge_live：缺少 CNB_TOKEN");
@@ -919,17 +919,17 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
         return Ok(());
     }
 
-    // judge adapter 与 M58 runner 同一契约（CNB_TOKEN / M58_CNB_REPO / M58_CNB_MODEL /
-    // M58_CNB_API_BASE），repo 额外允许 CNB_REPO_SLUG 兜底。不调 from_env：Rust 2024
-    // 下补环境变量必须 unsafe，而显式读 env 调 new 行为完全一致。
+    // judge 使用 AI IDE v2 内部路由，与被测 agent 的 CNB AI Chat 路由和模型分离。
+    // 不调 from_env：该构造器固定指向 OpenAPI `/-/ai`，而 judge 必须使用
+    // `/-/ai-ide/v2` 的直传 Authorization 契约。
     let token = std::env::var("CNB_TOKEN")?;
-    let repo = std::env::var("M58_CNB_REPO")
-        .or_else(|_| std::env::var("CNB_REPO_SLUG"))
-        .context("缺少 M58_CNB_REPO（或 CNB_REPO_SLUG）")?;
-    let model = std::env::var("M58_CNB_MODEL").context("缺少 M58_CNB_MODEL（judge 模型）")?;
-    let endpoint =
-        std::env::var("M58_CNB_API_BASE").unwrap_or_else(|_| "https://api.cnb.cool".to_string());
-    let mut adapter = CnbChatAdapter::new(endpoint, repo, token, model)?;
+    let repo = std::env::var("CNB_REPO_SLUG").context("缺少 CNB_REPO_SLUG")?;
+    let model = std::env::var("KIMI_JUDGE_MODEL")
+        .context("缺少 KIMI_JUDGE_MODEL（AI IDE v2 judge 模型）")?;
+    let endpoint = std::env::var("KIMI_JUDGE_API_BASE")
+        .or_else(|_| std::env::var("CNB_API_ENDPOINT"))
+        .unwrap_or_else(|_| "https://api.cnb.cool".to_string());
+    let mut adapter = CnbChatAdapter::new_ai_ide_v2(endpoint, repo, token, model)?;
 
     let cases_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json");
