@@ -342,6 +342,14 @@ fn test_build_judge_request_contains_all_assertions() {
     let schema_pos = user.content.find("\"assertions\"").unwrap();
     let tail_pos = user.content.find("不要输出 JSON 以外的任何文字").unwrap();
     assert!(schema_pos < tail_pos);
+    assert!(
+        user.content
+            .contains("遗漏、未提及、没有解释某项关系，绝不构成禁令违反")
+    );
+    assert!(
+        user.content
+            .contains("不能用参考答案中有而被评审答案中没有的内容作依据")
+    );
 }
 
 /// 验证超长答案被截断到 MAX_ANSWER_CHARS，防止 prompt 膨胀。

@@ -306,7 +306,9 @@ pub(crate) fn build_judge_request(case: &SmokeCase, answer: &str) -> ChatRequest
          \"overall_note\":\"一句话总评\"}\n\
          - assertions 逐条对应「必须满足的断言」，bonus 逐条对应「加分断言」，id 与上方编号一致。\n\
          - verdict 取值：supported=答案表达了该断言；not_mentioned=答案未提及；contradicted=答案与该断言矛盾。\n\
-         - forbidden 逐条对应「禁止出现的内容」，violated=true 表示答案违反了该禁令。\n\
+         - forbidden 逐条对应「禁止出现的内容」；只有答案明确声称该内容或表达同义结论时，violated 才能为 true。\n\
+         - 遗漏、未提及、没有解释某项关系，绝不构成禁令违反；这类缺失只能在 assertions/bonus 中判 not_mentioned。\n\
+         - forbidden 的 note 必须指出被评审答案中的明确违规表述，不能用参考答案中有而被评审答案中没有的内容作依据。\n\
          - 不要输出 JSON 以外的任何文字。\n",
     );
 
