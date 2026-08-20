@@ -8,9 +8,9 @@ mod m58_ai_eval;
 use anyhow::{Context, Result, bail};
 use kimi_smoke_judge::{
     AssertionVerdict, CaseJudgement, ForbiddenCheck, MAX_ANSWER_CHARS, SmokeCase, StandardAnswer,
-    TRIAL_RECORD_FIELDS, Verdict, build_judge_request, extract_final_answer, judge_case,
-    load_smoke_cases, parse_judge_response, parse_trial_records, render_judge_markdown,
-    smoke_subset,
+    TRIAL_RECORD_FIELDS, TrialJudgement, Verdict, build_judge_request, extract_final_answer,
+    judge_case, load_smoke_cases, parse_judge_response, parse_trial_records, render_judge_markdown,
+    resolve_transcript_path, smoke_subset,
 };
 use m58_ai_eval::{CnbChatAdapter, FakeModelAdapter};
 use std::path::{Path, PathBuf};
@@ -214,6 +214,35 @@ fn test_cnb_record_emitter_matches_trial_record_schema() {
     assert_eq!(
         emitted, TRIAL_RECORD_FIELDS,
         ".cnb.yml 发射的 record 字段与 TrialRecord 不一致（左：.cnb.yml，右：Rust）"
+    );
+}
+
+/// `.cnb.yml` 产出的 transcript / stderr 文件名必须带 variant 与 trial。
+///
+/// 与上一条测试同一动机，换一个失效模式：文件名只按 case_id 命名时，同一 stage 内
+/// 的第二个 trial 会覆盖第一个的答案——records 有 N 行、磁盘上只剩 1 份，judge 评的
+/// 是幸存者，报告读起来完全正常。这是**跑完一整轮才可能被察觉**的静默丢数据，
+/// 因此把它钉在 `cargo test` 上，而不是等 Phase 2 打开多 trial 时靠肉眼发现。
+#[test]
+fn test_cnb_transcript_names_carry_variant_and_trial() {
+    let cnb = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".cnb.yml"))
+        .expect("读取 .cnb.yml 失败");
+    assert!(
+        cnb.contains(r#"RUN_TAG="${CASE_ID}__${VARIANT}__t${TRIAL}""#),
+        ".cnb.yml 的 RUN_TAG 不再由 case_id + variant + trial 组成"
+    );
+    assert!(
+        cnb.contains(r#"TRANSCRIPT="$OUT_DIR/smoke-transcript-${RUN_TAG}.jsonl""#),
+        "transcript 文件名未使用 RUN_TAG：多 trial 会互相覆盖"
+    );
+    assert!(
+        cnb.contains(r#"STDERR_LOG="$OUT_DIR/smoke-stderr-${RUN_TAG}.log""#),
+        "stderr 文件名未使用 RUN_TAG：多 trial 会互相覆盖"
+    );
+    // 清理 glob 必须仍覆盖新命名，否则上一轮产物会混进本轮报告。
+    assert!(
+        cnb.contains(r#"rm -f "$OUT_DIR"/smoke-transcript-*.jsonl"#),
+        "开跑清理的 glob 与 transcript 命名不再匹配"
     );
 }
 
@@ -751,7 +780,13 @@ fn test_render_judge_markdown_contains_key_sections() {
         overall_note: "失败原因".to_string(),
     };
     let failing_for_escape = failing.clone();
-    let markdown = render_judge_markdown(&[passing, failing], &[]);
+    let markdown = render_judge_markdown(
+        &[
+            TrialJudgement::new("baseline", 1, passing),
+            TrialJudgement::new("baseline", 1, failing),
+        ],
+        &[],
+    );
     assert!(markdown.contains("case_pass"));
     assert!(markdown.contains("case_fail"));
     assert!(markdown.contains("PASS"));
@@ -762,10 +797,14 @@ fn test_render_judge_markdown_contains_key_sections() {
     assert!(markdown.contains("违反的禁令"));
     assert!(markdown.contains("禁令丙"));
     assert!(markdown.contains("失败原因"));
-    // 没有 records 时两个 case 都算「缺少 record」，行为分层全部为空。
-    assert!(markdown.contains("task_score：1/2"), "{markdown}");
+    // 没有 records 时两个 trial 都算「缺少匹配 record」，行为分层全部为空。
+    assert!(markdown.contains("task_score：1/2 trial"), "{markdown}");
     assert!(markdown.contains("不设 tool_score"), "{markdown}");
-    assert!(markdown.contains("缺少 record 的 case"), "{markdown}");
+    assert!(markdown.contains("缺少匹配 record 的 trial"), "{markdown}");
+    assert!(
+        markdown.contains("case_pass/baseline/t1、case_fail/baseline/t1"),
+        "{markdown}"
+    );
     // Markdown 表格分隔符被转义，断言文本不会破坏报告结构。
     let escaped = CaseJudgement {
         overall_note: "无".to_string(),
@@ -777,7 +816,8 @@ fn test_render_judge_markdown_contains_key_sections() {
         }],
         ..failing_for_escape
     };
-    let escaped_markdown = render_judge_markdown(&[escaped], &[]);
+    let escaped_markdown =
+        render_judge_markdown(&[TrialJudgement::new("baseline", 1, escaped)], &[]);
     assert!(escaped_markdown.contains("含\\|管道"));
 }
 
@@ -806,9 +846,9 @@ fn test_render_judge_markdown_reports_fixed_denominator_strata() {
         overall_note: "完成".to_string(),
     };
     let judgements = vec![
-        judged("case_tool_pass", true),
-        judged("case_raw_pass", true),
-        judged("case_mixed_fail", false),
+        TrialJudgement::new("baseline", 1, judged("case_tool_pass", true)),
+        TrialJudgement::new("baseline", 1, judged("case_raw_pass", true)),
+        TrialJudgement::new("baseline", 1, judged("case_mixed_fail", false)),
     ];
     let record = |case_id: &str, mc: u32, raw_calls: u32, raw: bool| {
         format!(
@@ -823,23 +863,33 @@ fn test_render_judge_markdown_reports_fixed_denominator_strata() {
     ))
     .unwrap();
     let markdown = render_judge_markdown(&judgements, &records);
-    // task_score 分母固定为全部非 INFRA case，含绕过工具完成的。
-    assert!(markdown.contains("task_score：2/3"), "{markdown}");
+    // task_score 分母固定为全部非 INFRA trial，含绕过工具完成的。
+    assert!(markdown.contains("task_score：2/3 trial"), "{markdown}");
+    // 单 trial 时 case_stable_pass 与 task_score 同源，分母是 case 数。
+    assert!(
+        markdown.contains("case_stable_pass：2/3 case"),
+        "{markdown}"
+    );
     // 不设 tool_score，并说明为什么（选择偏差 + 配对实验归因）。
     assert!(markdown.contains("不设 tool_score"), "{markdown}");
     assert!(markdown.contains("配对实验"), "{markdown}");
     // 行为分层分母固定：三个 trial 各自进入唯一分层，fallback 的 PASS 不再被移出分母。
     assert!(
-        markdown.contains("tool-only（mc>0，无 raw fallback）：1 trial，PASS 1 —— case_tool_pass"),
+        markdown.contains(
+            "tool-only（mc>0，无 raw fallback）：1 trial，PASS 1 —— case_tool_pass/baseline/t1"
+        ),
         "{markdown}"
     );
     assert!(
-        markdown
-            .contains("raw-only（mc=0，绕过工具直读原始文件）：1 trial，PASS 1 —— case_raw_pass"),
+        markdown.contains(
+            "raw-only（mc=0，绕过工具直读原始文件）：1 trial，PASS 1 —— case_raw_pass/baseline/t1"
+        ),
         "{markdown}"
     );
     assert!(
-        markdown.contains("mixed（mc>0 且有 raw fallback）：1 trial，PASS 0 —— case_mixed_fail"),
+        markdown.contains(
+            "mixed（mc>0 且有 raw fallback）：1 trial，PASS 0 —— case_mixed_fail/baseline/t1"
+        ),
         "{markdown}"
     );
     assert!(
@@ -850,14 +900,18 @@ fn test_render_judge_markdown_reports_fixed_denominator_strata() {
     assert!(markdown.contains("启发式诊断信号"), "{markdown}");
 }
 
-/// 验证同一 case 的多条 (variant, trial) 记录不被覆盖：汇总表逐 trial 列出，
-/// 分层按 trial 计数并带 trial 号。Phase 2 加重复 trial 后统计不得依赖输入顺序。
+/// 验证同一 case 的多个 trial 各自判分、各自配对：一份判分只配一条 record，
+/// 不同 trial 的结论不互相顶替。
+///
+/// 这条测试此前编码的正是缺陷本身：只给一份 case 级判分、两条 record，然后断言
+/// 「两个分层各 PASS 1」——同一个结论被算了两票。真实语义是每个 trial 是一次
+/// 独立运行，可以一次通过一次失败。
 #[test]
-fn test_render_judge_markdown_keeps_multiple_trials_per_case() {
-    let judgement = CaseJudgement {
+fn test_render_judge_markdown_scores_each_trial_independently() {
+    let judged = |passed: bool| CaseJudgement {
         case_id: "case_multi".to_string(),
-        passed: true,
-        must_supported: 1,
+        passed,
+        must_supported: if passed { 1 } else { 0 },
         must_total: 1,
         contradicted_count: 0,
         bonus_supported: 0,
@@ -865,42 +919,146 @@ fn test_render_judge_markdown_keeps_multiple_trials_per_case() {
         violations: 0,
         verdicts: vec![AssertionVerdict {
             id: 1,
-            verdict: Verdict::Supported,
-            note: "覆盖".to_string(),
+            verdict: if passed {
+                Verdict::Supported
+            } else {
+                Verdict::NotMentioned
+            },
+            note: "依据".to_string(),
             assertion: "断言".to_string(),
         }],
         bonus_verdicts: Vec::new(),
         forbidden_checks: Vec::new(),
         overall_note: "完成".to_string(),
     };
-    let record = |trial: u32, mc: u32, raw: bool| {
+    let record = |trial: u32, mc: u32| {
         format!(
-            r#"{{"case_id":"case_multi","order":1,"difficulty":"easy","variant":"baseline","trial":{trial},"exit_code":0,"wall_clock_ms":100,"tool_calls":3,"metadata_checker_invocations":{mc},"raw_fallback_calls":0,"raw_fallback":{raw},"transcript_bytes":100,"transcript_path":"t.jsonl","stderr_path":"t.log"}}"#
+            r#"{{"case_id":"case_multi","order":1,"difficulty":"easy","variant":"baseline","trial":{trial},"exit_code":0,"wall_clock_ms":100,"tool_calls":3,"metadata_checker_invocations":{mc},"raw_fallback_calls":0,"raw_fallback":false,"transcript_bytes":100,"transcript_path":"t{trial}.jsonl","stderr_path":"t{trial}.log"}}"#
         )
     };
-    // 故意按 trial 2 在前的顺序输入：输出不得依赖顺序。
+    // 故意按 trial 2 在前的顺序输入：配对按三元组，不得依赖顺序。
+    let records = parse_trial_records(&format!("{}\n{}\n", record(2, 0), record(1, 3))).unwrap();
+    let markdown = render_judge_markdown(
+        &[
+            TrialJudgement::new("baseline", 1, judged(true)),
+            TrialJudgement::new("baseline", 2, judged(false)),
+        ],
+        &records,
+    );
+    // trial 1 通过、trial 2 失败：分层各自记自己那条 record 的结论。
+    assert!(
+        markdown.contains(
+            "tool-only（mc>0，无 raw fallback）：1 trial，PASS 1 —— case_multi/baseline/t1"
+        ),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains(
+            "no-tool（mc=0 且无 raw fallback）：1 trial，PASS 0 —— case_multi/baseline/t2"
+        ),
+        "{markdown}"
+    );
+    // 一个 case 只要有 trial 失败就不算稳定通过。
+    assert!(markdown.contains("task_score：1/2 trial"), "{markdown}");
+    assert!(
+        markdown.contains("case_stable_pass：0/1 case"),
+        "{markdown}"
+    );
+    // 每个 trial 一节，工具调用只列自己那条 record。
+    assert!(
+        markdown.contains("## case_multi/baseline/t1 — PASS"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("## case_multi/baseline/t2 — FAIL"),
+        "{markdown}"
+    );
+}
+
+/// 验证两侧配不上的情况都被点名：判分找不到 record（工具统计未知），
+/// record 找不到判分（算力已花却在报告里消失）。两种都曾是静默的。
+#[test]
+fn test_render_judge_markdown_names_unpaired_sides() {
+    let judgement = CaseJudgement {
+        case_id: "case_judged".to_string(),
+        passed: true,
+        must_supported: 1,
+        must_total: 1,
+        contradicted_count: 0,
+        bonus_supported: 0,
+        bonus_total: 0,
+        violations: 0,
+        verdicts: Vec::new(),
+        bonus_verdicts: Vec::new(),
+        forbidden_checks: Vec::new(),
+        overall_note: "完成".to_string(),
+    };
+    let record = |case_id: &str, trial: u32| {
+        format!(
+            r#"{{"case_id":"{case_id}","order":1,"difficulty":"easy","variant":"baseline","trial":{trial},"exit_code":0,"wall_clock_ms":100,"tool_calls":1,"metadata_checker_invocations":1,"raw_fallback_calls":0,"raw_fallback":false,"transcript_bytes":100,"transcript_path":"t.jsonl","stderr_path":"t.log"}}"#
+        )
+    };
+    // record 是 case_judged/t2 与 case_unjudged/t1，判分是 case_judged/t1：三者两两配不上。
     let records = parse_trial_records(&format!(
         "{}\n{}\n",
-        record(2, 0, false),
-        record(1, 3, false)
+        record("case_judged", 2),
+        record("case_unjudged", 1)
     ))
     .unwrap();
-    let markdown = render_judge_markdown(&[judgement], &records);
-    // 汇总表 mc 列逐 trial 列出，而不是后者覆盖前者。
-    assert!(markdown.contains("t1:3"), "{markdown}");
-    assert!(markdown.contains("t2:0"), "{markdown}");
-    // 分层按 trial 计数：tool-only 与 no-tool 各 1 条，case 标签带 trial 号。
+    let markdown =
+        render_judge_markdown(&[TrialJudgement::new("baseline", 1, judgement)], &records);
     assert!(
-        markdown.contains("tool-only（mc>0，无 raw fallback）：1 trial，PASS 1 —— case_multi(t1)"),
+        markdown.contains("缺少匹配 record 的 trial（工具统计未知）：case_judged/baseline/t1"),
         "{markdown}"
     );
     assert!(
-        markdown.contains("no-tool（mc=0 且无 raw fallback）：1 trial，PASS 1 —— case_multi(t2)"),
+        markdown.contains("有 record 但没有判分的 trial"),
         "{markdown}"
     );
-    // 每 case 节逐 trial 列出工具调用。
-    assert!(markdown.contains("工具调用（trial 1）"), "{markdown}");
-    assert!(markdown.contains("工具调用（trial 2）"), "{markdown}");
+    assert!(
+        markdown.contains("case_judged/baseline/t2、case_unjudged/baseline/t1"),
+        "{markdown}"
+    );
+}
+
+/// 验证 transcript 定位以 record 的 `transcript_path` 为准：按 case_id 重拼路径是
+/// 独立猜测，两侧一旦分叉（文件名加了 variant/trial）就会安静地评错一份答案。
+#[test]
+fn test_resolve_transcript_path_prefers_recorded_path() {
+    // 仓库内既有惯例：不引 tempfile，直接在系统临时目录下开一个唯一子目录。
+    let dir = std::env::temp_dir().join(format!(
+        "metadata-checker-judge-transcript-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let recorded = dir.join("smoke-transcript-case_a__baseline__t2.jsonl");
+    std::fs::write(&recorded, "{}\n").unwrap();
+    let record_line = format!(
+        r#"{{"case_id":"case_a","order":1,"difficulty":"easy","variant":"baseline","trial":2,"exit_code":0,"wall_clock_ms":100,"tool_calls":1,"metadata_checker_invocations":1,"raw_fallback_calls":0,"raw_fallback":false,"transcript_bytes":3,"transcript_path":"{}","stderr_path":"x.log"}}"#,
+        recorded.display()
+    );
+    let records = parse_trial_records(&record_line).unwrap();
+    // 记录里的绝对路径存在，直接采用。
+    assert_eq!(
+        resolve_transcript_path(&records[0], Path::new("/nonexistent")),
+        Some(recorded.clone())
+    );
+
+    // 记录路径不存在时按 basename 落到 transcript 目录：artifact 下载到别处也能重判。
+    let moved = dir.join("elsewhere");
+    std::fs::create_dir(&moved).unwrap();
+    let moved_file = moved.join("smoke-transcript-case_a__baseline__t2.jsonl");
+    std::fs::rename(&recorded, &moved_file).unwrap();
+    assert_eq!(
+        resolve_transcript_path(&records[0], &moved),
+        Some(moved_file)
+    );
+
+    // 两处都没有就返回 None，由调用方记 infra 占位，不猜第三种路径。
+    std::fs::remove_dir_all(&moved).unwrap();
+    assert_eq!(resolve_transcript_path(&records[0], &dir), None);
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// CNB pipeline 中对 kimi harness 六问冒烟 transcript 做语义判分；普通测试不运行。
@@ -949,10 +1107,11 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
     std::fs::create_dir_all(&output_dir)
         .with_context(|| format!("创建 judge 输出目录失败: {}", output_dir.display()))?;
 
-    // records.jsonl 是阶段 A 交给所有下游的契约文件，在这里就地校验一次。
+    // records.jsonl 是阶段 A 交给所有下游的契约文件，在这里就地校验一次，
+    // 并作为**判分的驱动列表**：一条 record = 一次真实运行 = 一份要判的答案。
     // 判分 stage 是 pipeline 里最后一个读它的 Rust 环节；放到 Phase 2 才发现字段
     // 对不上，意味着一整轮 pipeline 的算力已经花掉了。文件不存在不算错——
-    // 单独重跑判分时本来就没有它。
+    // 单独重跑判分时本来就没有它，那时退回按 case 发现 transcript。
     let records_path = transcript_dir.join("records.jsonl");
     let mut trial_records = Vec::new();
     if records_path.is_file() {
@@ -969,75 +1128,153 @@ fn kimi_harness_smoke_judge_live() -> Result<()> {
         println!("未找到 {}，跳过 records 校验", records_path.display());
     }
 
-    let mut judgements = Vec::new();
+    let subset = smoke_subset(&cases)?;
+    let mut judgements: Vec<TrialJudgement> = Vec::new();
     let mut infra_errors: Vec<String> = Vec::new();
-    for case in smoke_subset(&cases)? {
-        let question_no = format!("q{}", case.smoke.order);
-        // 冒烟 stage 现按 case_id 命名 transcript，q{n} 两种是历史/手工导出的兼容名。
-        let transcript_path = [
-            transcript_dir.join(format!("smoke-transcript-{}.jsonl", case.case_id)),
-            transcript_dir.join(format!("smoke-transcript-{question_no}.jsonl")),
-            transcript_dir.join(format!("t-{question_no}.jsonl")),
-        ]
-        .into_iter()
-        .find(|path| path.is_file());
-        let answer = match transcript_path {
-            Some(path) => {
-                // 命中兼容名必须出声：手工导出的旧 transcript 会被静默当成本次结果判分，
-                // 那是一份看起来正常、其实评的是上一次运行的报告。
-                if !path.ends_with(format!("smoke-transcript-{}.jsonl", case.case_id)) {
-                    println!(
-                        "警告：{} 使用兼容名 transcript {}，不是本次 stage 产出的 case_id 命名文件",
-                        case.case_id,
-                        path.display()
-                    );
-                }
-                let content = std::fs::read_to_string(&path)
-                    .with_context(|| format!("读取 transcript 失败: {}", path.display()))?;
-                extract_final_answer(&content)
-            }
-            None => {
-                // transcript 缺失记 infra 占位并计入 infra_errors：评测基础设施
-                // 已经失效时测试必须失败，不能拿占位报告当成功（Codex 评审 P2）。
-                let reason = format!("{question_no} transcript 缺失");
-                println!("{reason}，记 infra 占位");
-                judgements.push(infra_judgement(case, &reason));
-                infra_errors.push(reason);
-                continue;
-            }
-        };
-        if answer.trim().is_empty() {
-            let reason = format!("{question_no} 最终答案为空");
+
+    // 判一份答案：读 transcript、抽最终答案、调 judge。三种失败都记 infra 占位
+    // 并计入 infra_errors——评测基础设施失效时测试必须失败，不能拿占位报告当成功。
+    let mut judge_one = |case: &SmokeCase,
+                         label: &str,
+                         path: Option<PathBuf>,
+                         judgements: &mut Vec<TrialJudgement>,
+                         infra_errors: &mut Vec<String>,
+                         variant: &str,
+                         trial: u32|
+     -> Result<()> {
+        let Some(path) = path else {
+            let reason = format!("{label} transcript 缺失");
             println!("{reason}，记 infra 占位");
-            judgements.push(infra_judgement(case, &reason));
+            judgements.push(TrialJudgement::new(
+                variant,
+                trial,
+                infra_judgement(case, &reason),
+            ));
             infra_errors.push(reason);
-            continue;
+            return Ok(());
+        };
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("读取 transcript 失败: {}", path.display()))?;
+        let answer = extract_final_answer(&content);
+        if answer.trim().is_empty() {
+            let reason = format!("{label} 最终答案为空");
+            println!("{reason}，记 infra 占位");
+            judgements.push(TrialJudgement::new(
+                variant,
+                trial,
+                infra_judgement(case, &reason),
+            ));
+            infra_errors.push(reason);
+            return Ok(());
         }
         match judge_case(case, &answer, &mut adapter) {
-            Ok(judgement) => judgements.push(judgement),
+            Ok(judgement) => judgements.push(TrialJudgement::new(variant, trial, judgement)),
             Err(error) => {
-                // adapter/endpoint/judge 输出解析失败都是 infra 故障：记占位，
-                // 报告落盘后让测试失败，infra 问题必须可见。
-                let reason = format!("{question_no} judge 调用失败: {error:#}");
+                let reason = format!("{label} judge 调用失败: {error:#}");
                 println!("{reason}");
-                judgements.push(infra_judgement(case, &reason));
+                judgements.push(TrialJudgement::new(
+                    variant,
+                    trial,
+                    infra_judgement(case, &reason),
+                ));
+                infra_errors.push(reason);
+            }
+        }
+        Ok(())
+    };
+
+    if trial_records.is_empty() {
+        // 手工重判路径：没有 records 就没有 (variant, trial) 身份，按 case 发现
+        // transcript 并明确记为 unrecorded/t0，报告里一眼看得出这不是流水线产物。
+        for case in &subset {
+            let question_no = format!("q{}", case.smoke.order);
+            // 兼容名只在这条路径上保留：流水线产出的文件名带 variant/trial，
+            // 由 records 驱动，不走这里。
+            let path = [
+                transcript_dir.join(format!("smoke-transcript-{}.jsonl", case.case_id)),
+                transcript_dir.join(format!("smoke-transcript-{question_no}.jsonl")),
+                transcript_dir.join(format!("t-{question_no}.jsonl")),
+            ]
+            .into_iter()
+            .find(|path| path.is_file());
+            if let Some(path) = &path {
+                println!(
+                    "警告：{} 无 records.jsonl，按 case 发现 transcript {}，身份记为 unrecorded/t0",
+                    case.case_id,
+                    path.display()
+                );
+            }
+            judge_one(
+                case,
+                &question_no,
+                path,
+                &mut judgements,
+                &mut infra_errors,
+                "unrecorded",
+                0,
+            )?;
+        }
+    } else {
+        // 流水线路径：逐 record 判分。transcript 路径取自 record 而不是按 case_id
+        // 重拼——重拼是一次独立猜测，两侧一旦分叉（文件名带上了 variant/trial 而
+        // 判分侧没跟上）就会安静地评到另一份答案上。
+        for record in &trial_records {
+            let label = format!("{}/{}/t{}", record.case_id, record.variant, record.trial);
+            let Some(case) = subset
+                .iter()
+                .find(|case| case.case_id == record.case_id)
+                .copied()
+            else {
+                // record 指向 case 文件里没有的 case_id：两侧已经不是同一份 fixture，
+                // 继续判分只会产出无法归因的报告。
+                let reason = format!("{label} 在 case 文件的 smoke 子集里没有对应 case");
+                println!("{reason}");
+                infra_errors.push(reason);
+                continue;
+            };
+            let path = resolve_transcript_path(record, &transcript_dir);
+            judge_one(
+                case,
+                &label,
+                path,
+                &mut judgements,
+                &mut infra_errors,
+                &record.variant,
+                record.trial,
+            )?;
+        }
+        // 子集里一条 record 都没有的 case：阶段 A 根本没跑到它。
+        for case in &subset {
+            if !trial_records
+                .iter()
+                .any(|record| record.case_id == case.case_id)
+            {
+                let reason = format!("{} 没有任何 record：阶段 A 未产出该 case", case.case_id);
+                println!("{reason}，记 infra 占位");
+                judgements.push(TrialJudgement::new(
+                    "unrecorded",
+                    0,
+                    infra_judgement(case, &reason),
+                ));
                 infra_errors.push(reason);
             }
         }
     }
 
-    // 每 case 一行摘要，CI 靠 --nocapture 直接读日志；语义 pass/fail 只报告不断言。
-    // case_id 自身就是标识，不再和一份外部顺序表按位置 zip——那种耦合在任一侧
-    // 跳过元素时会静默错位，把 A 的分数印成 B 的。
-    for judgement in &judgements {
+    // 每 trial 一行摘要，CI 靠 --nocapture 直接读日志；语义 pass/fail 只报告不断言。
+    // 标识是 (case_id, variant, trial)，不再和一份外部顺序表按位置 zip——那种耦合
+    // 在任一侧跳过元素时会静默错位，把 A 的分数印成 B 的。
+    for trial_judgement in &judgements {
         println!(
-            "{} {} must={}/{} contradicted={} violations={}",
-            judgement.case_id,
-            status_label(judgement),
-            judgement.must_supported,
-            judgement.must_total,
-            judgement.contradicted_count,
-            judgement.violations,
+            "{}/{}/t{} {} must={}/{} contradicted={} violations={}",
+            trial_judgement.judgement.case_id,
+            trial_judgement.variant,
+            trial_judgement.trial,
+            status_label(&trial_judgement.judgement),
+            trial_judgement.judgement.must_supported,
+            trial_judgement.judgement.must_total,
+            trial_judgement.judgement.contradicted_count,
+            trial_judgement.judgement.violations,
         );
     }
     let markdown = render_judge_markdown(&judgements, &trial_records);

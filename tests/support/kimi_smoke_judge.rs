@@ -211,6 +211,27 @@ pub(crate) fn parse_trial_records(jsonl: &str) -> Result<Vec<TrialRecord>> {
     Ok(records)
 }
 
+/// 定位一条 record 对应的 transcript 文件。
+///
+/// record 里的 `transcript_path` 是**权威**来源：它由产出方在写文件的同一次循环里
+/// 记下，而按 `case_id` 重新拼路径是一次独立的猜测——两者一旦分叉（例如文件名加了
+/// variant/trial 而判分侧没跟上），判分会安静地评到另一份答案上。
+///
+/// 两级解析：路径原样存在就用它（pipeline 内的正常情况，相对仓库根）；否则按
+/// basename 落到 `transcript_dir`（把 artifact 下载到别处重判时的情况）。两者都不
+/// 存在返回 `None`，由调用方记 infra 占位——不猜第三种路径。
+pub(crate) fn resolve_transcript_path(
+    record: &TrialRecord,
+    transcript_dir: &Path,
+) -> Option<std::path::PathBuf> {
+    let recorded = Path::new(&record.transcript_path);
+    if recorded.is_file() {
+        return Some(recorded.to_path_buf());
+    }
+    let candidate = transcript_dir.join(recorded.file_name()?);
+    candidate.is_file().then_some(candidate)
+}
+
 /// 从 kimi-code `--output-format stream-json` 的 JSONL transcript 提取最终答案。
 ///
 /// 逐行读，行内含 "assistant" 才解析 JSON，
@@ -417,6 +438,46 @@ pub(crate) struct CaseJudgement {
     pub(crate) forbidden_checks: Vec<ForbiddenCheck>,
     /// 模型的一句话总评（含 Rust 侧追加的忽略记录）。
     pub(crate) overall_note: String,
+}
+
+/// 带 trial 身份的判分结果：一条 `records.jsonl` 记录对应一份判分。
+///
+/// `CaseJudgement` 本身是 case 级的（`parse_judge_response` 只看断言与答案，不知道
+/// 自己在评哪一个 trial）。身份在调用侧补上，而不是塞进解析函数——解析的输入里
+/// 本来就没有这个信息。
+///
+/// 这个结构存在的理由是一次真实的错误归因风险：报告此前按 `case_id` 分组关联
+/// records，一个 case 只判一次却按 trial 数计入行为分层，3 个 trial 会把同一个
+/// 结论算三票。带上 `(case_id, variant, trial)` 之后，一份判分只能配一条 record。
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct TrialJudgement {
+    /// prompt 变体名；无 `records.jsonl` 的手工重判记为 `unrecorded`。
+    pub(crate) variant: String,
+    /// trial 序号；无 `records.jsonl` 时记 0，报告里一眼可辨。
+    pub(crate) trial: u32,
+    /// 该 trial 的判分结果。
+    #[serde(flatten)]
+    pub(crate) judgement: CaseJudgement,
+}
+
+impl TrialJudgement {
+    /// 用 record 的身份包装一份判分。
+    pub(crate) fn new(variant: impl Into<String>, trial: u32, judgement: CaseJudgement) -> Self {
+        Self {
+            variant: variant.into(),
+            trial,
+            judgement,
+        }
+    }
+
+    /// 与 `TrialRecord` 配对用的三元组。
+    fn key(&self) -> (&str, &str, u32) {
+        (
+            self.judgement.case_id.as_str(),
+            self.variant.as_str(),
+            self.trial,
+        )
+    }
 }
 
 /// judge 响应的原始反序列化结构。
@@ -691,39 +752,41 @@ pub(crate) fn judge_case(
     parse_judge_response(case, &raw)
 }
 
-/// 把判分结果渲染成 Markdown 报告：先汇总表与行为分层，再每 case 一节含逐条 verdict 表。
+/// 把判分结果渲染成 Markdown 报告：先汇总表与行为分层，再每 trial 一节含逐条 verdict 表。
 ///
-/// records（records.jsonl 的 trial 记录）按 case_id 分组关联——同一 case 可有多条
-/// (variant, trial) 记录，全部保留，不允许后写入的覆盖先写入的。报告只设一个分数：
-/// task_score（非 INFRA case 的任务完成率，分母固定为全部非 INFRA case）。
+/// 判分与 record 按 `(case_id, variant, trial)` **一一配对**：一份判分只配一条 record，
+/// 配不上的两侧都点名（缺 record 的 trial、有 record 却没判分的 trial）。此前按 case_id
+/// 分组会把一份 case 级判分扇出到该 case 的每条 record 上，3 个 trial 算三票。
+/// 分数两个：task_score（非 INFRA trial 的任务完成率）与 case_stable_pass
+/// （该 case 全部非 INFRA trial 都通过）。
 /// **不设 tool_score**：按运行后行为（是否调用工具、是否 raw fallback）筛选分母
 /// 有选择偏差——困难 case 更易 fallback 并被移出分母，剩下 2/2 也不能解释为工具
 /// 成功率。工具贡献只能由 forced/tool-disabled 配对实验（Phase 2）归因。报告改为
 /// 按固定分母输出行为分层（tool-only / mixed / raw-only / no-tool），分层是行为
 /// 描述而不是分数；raw_fallback 只是启发式诊断信号，不作为任何计分准入条件。
 pub(crate) fn render_judge_markdown(
-    judgements: &[CaseJudgement],
+    judgements: &[TrialJudgement],
     records: &[TrialRecord],
 ) -> String {
-    let mut records_by_case: std::collections::BTreeMap<&str, Vec<&TrialRecord>> =
+    // 按 (case_id, variant, trial) 精确配对。此前按 case_id 分组，一份 case 级判分
+    // 会被扇出到该 case 的每条 record 上——3 个 trial 的 case 把同一个结论算三票。
+    let mut record_by_key: std::collections::BTreeMap<(&str, &str, u32), &TrialRecord> =
         std::collections::BTreeMap::new();
     for record in records {
-        records_by_case
-            .entry(record.case_id.as_str())
-            .or_default()
-            .push(record);
+        record_by_key.insert(
+            (
+                record.case_id.as_str(),
+                record.variant.as_str(),
+                record.trial,
+            ),
+            record,
+        );
     }
-    // 同一 case 多条记录时逐 trial 列出，不允许覆盖；单条保持单列直读。
-    let fmt_records = |records: &[&TrialRecord], pick: &dyn Fn(&TrialRecord) -> String| -> String {
-        match records {
-            [] => "—".to_string(),
-            [single] => pick(single),
-            many => many
-                .iter()
-                .map(|record| format!("t{}:{}", record.trial, pick(record)))
-                .collect::<Vec<_>>()
-                .join("；"),
-        }
+    let matched = |judgement: &TrialJudgement| -> Option<&TrialRecord> {
+        record_by_key.get(&judgement.key()).copied()
+    };
+    let cell = |record: Option<&TrialRecord>, pick: &dyn Fn(&TrialRecord) -> String| -> String {
+        record.map(pick).unwrap_or_else(|| "—".to_string())
     };
     let raw_label = |record: &TrialRecord| {
         if record.raw_fallback {
@@ -735,16 +798,17 @@ pub(crate) fn render_judge_markdown(
 
     let mut markdown = String::new();
     markdown.push_str("# Kimi Harness Smoke 语义 Judge\n\n");
-    markdown.push_str("| case_id | 结果 | must 命中 | contradicted | bonus 命中 | violations | tool_calls | mc | raw fallback |\n");
-    markdown.push_str("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
-    for judgement in judgements {
-        let records = records_by_case
-            .get(judgement.case_id.as_str())
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
+    markdown.push_str("| case_id | variant | trial | 结果 | must 命中 | contradicted | bonus 命中 | violations | tool_calls | mc | raw fallback |\n");
+    markdown
+        .push_str("| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
+    for trial_judgement in judgements {
+        let judgement = &trial_judgement.judgement;
+        let record = matched(trial_judgement);
         markdown.push_str(&format!(
-            "| {} | {} | {}/{} | {} | {}/{} | {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {}/{} | {} | {}/{} | {} | {} | {} | {} |\n",
             escape_markdown_cell(&judgement.case_id),
+            escape_markdown_cell(&trial_judgement.variant),
+            trial_judgement.trial,
             status_label(judgement),
             judgement.must_supported,
             judgement.must_total,
@@ -752,21 +816,41 @@ pub(crate) fn render_judge_markdown(
             judgement.bonus_supported,
             judgement.bonus_total,
             judgement.violations,
-            fmt_records(records, &|record| record.tool_calls.to_string()),
-            fmt_records(records, &|record| record
+            cell(record, &|record| record.tool_calls.to_string()),
+            cell(record, &|record| record
                 .metadata_checker_invocations
                 .to_string()),
-            fmt_records(records, &raw_label),
+            cell(record, &raw_label),
         ));
     }
 
-    // task_score 是唯一分数，分母固定为全部非 INFRA case。行为分层按 trial 统计，
-    // 分母固定为全部有 record 的非 INFRA trial，不做任何行为筛选。
-    let measured: Vec<&CaseJudgement> = judgements
+    // task_score 现在是 **trial 级**通过率，分母固定为全部非 INFRA trial。
+    // 另给 case_stable_pass：一个 case 的全部非 INFRA trial 都通过才算稳定通过。
+    // 冻结 runner 的 baseline 已经证明这个区分有信息量——trial 率相同的两次运行，
+    // 一次可能是「每个 case 都是 3/3 或 0/3」，另一次是「全都在抖」。
+    let measured: Vec<&TrialJudgement> = judgements
         .iter()
-        .filter(|judgement| !is_infra_placeholder(judgement))
+        .filter(|judgement| !is_infra_placeholder(&judgement.judgement))
         .collect();
-    let task_pass = measured.iter().filter(|judgement| judgement.passed).count();
+    let task_pass = measured
+        .iter()
+        .filter(|judgement| judgement.judgement.passed)
+        .count();
+    let mut case_trials: std::collections::BTreeMap<&str, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for judgement in &measured {
+        let entry = case_trials
+            .entry(judgement.judgement.case_id.as_str())
+            .or_insert((0, 0));
+        entry.0 += 1;
+        if judgement.judgement.passed {
+            entry.1 += 1;
+        }
+    }
+    let stable_pass = case_trials
+        .values()
+        .filter(|(total, passed)| total == passed)
+        .count();
 
     // 四个互斥行为分层，下标与输出顺序一致。
     const STRATA: [&str; 4] = [
@@ -778,47 +862,56 @@ pub(crate) fn render_judge_markdown(
     let mut stratum_trials = [0usize; 4];
     let mut stratum_pass = [0usize; 4];
     let mut stratum_cases: [Vec<String>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-    let mut no_record_cases: Vec<&str> = Vec::new();
-    for judgement in &measured {
-        let records = records_by_case
-            .get(judgement.case_id.as_str())
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        if records.is_empty() {
-            no_record_cases.push(judgement.case_id.as_str());
+    let mut no_record_trials: Vec<String> = Vec::new();
+    for trial_judgement in &measured {
+        // 一份判分只计入自己那条 record 的分层，一条 record 一票。
+        let Some(record) = matched(trial_judgement) else {
+            no_record_trials.push(trial_label(trial_judgement));
             continue;
+        };
+        let index = match (record.metadata_checker_invocations > 0, record.raw_fallback) {
+            (true, false) => 0,
+            (true, true) => 1,
+            (false, true) => 2,
+            (false, false) => 3,
+        };
+        stratum_trials[index] += 1;
+        if trial_judgement.judgement.passed {
+            stratum_pass[index] += 1;
         }
-        for record in records {
-            let index = match (record.metadata_checker_invocations > 0, record.raw_fallback) {
-                (true, false) => 0,
-                (true, true) => 1,
-                (false, true) => 2,
-                (false, false) => 3,
-            };
-            stratum_trials[index] += 1;
-            if judgement.passed {
-                stratum_pass[index] += 1;
-            }
-            // 多 trial 时带 trial 号，避免两条记录在同一分层里看起来像一个 case。
-            let label = if records.len() > 1 {
-                format!("{}(t{})", judgement.case_id, record.trial)
-            } else {
-                judgement.case_id.clone()
-            };
-            stratum_cases[index].push(label);
-        }
+        stratum_cases[index].push(trial_label(trial_judgement));
     }
     let infra_cases = judgements
         .iter()
-        .filter(|judgement| is_infra_placeholder(judgement))
-        .map(|judgement| judgement.case_id.as_str())
+        .filter(|judgement| is_infra_placeholder(&judgement.judgement))
+        .map(trial_label)
         .collect::<Vec<_>>();
+    // 有 record 却没有对应判分：transcript 丢了、case 被判分侧跳过，或身份三元组
+    // 对不上。任何一种都意味着这一 trial 的算力白花且报告里看不见，必须点名。
+    let judged_keys: BTreeSet<(&str, &str, u32)> =
+        judgements.iter().map(TrialJudgement::key).collect();
+    let unjudged_records: Vec<String> = records
+        .iter()
+        .filter(|record| {
+            !judged_keys.contains(&(
+                record.case_id.as_str(),
+                record.variant.as_str(),
+                record.trial,
+            ))
+        })
+        .map(|record| format!("{}/{}/t{}", record.case_id, record.variant, record.trial))
+        .collect();
 
     markdown.push_str("\n## 得分口径\n\n");
     markdown.push_str(&format!(
-        "- task_score：{}/{}（全部非 INFRA case，含绕过工具完成的；即任务完成率）\n",
+        "- task_score：{}/{} trial（全部非 INFRA trial，含绕过工具完成的；即任务完成率）\n",
         task_pass,
         measured.len()
+    ));
+    markdown.push_str(&format!(
+        "- case_stable_pass：{}/{} case（该 case 的全部非 INFRA trial 都通过才算；单 trial 时与上一行同源，多 trial 时才有信息量）\n",
+        stable_pass,
+        case_trials.len()
     ));
     markdown.push_str(
         "- 不设 tool_score：按运行后行为筛选分母有选择偏差（困难 case 更易 fallback 并被移出\n  分母），工具贡献须由 forced/tool-disabled 配对实验（Phase 2）归因。以下按固定\n  分母报告行为分层（行为描述，不是分数）：\n",
@@ -840,18 +933,23 @@ pub(crate) fn render_judge_markdown(
         "- raw_fallback 是启发式诊断信号（同一命令混用工具与直读会漏标；ls/test .spg 路径\n  会误标），不作为计分准入条件。\n",
     );
     markdown.push_str(&format!(
-        "- 缺少 record 的 case（工具统计未知）：{}\n",
-        join_or_none(&no_record_cases)
+        "- 缺少匹配 record 的 trial（工具统计未知）：{}\n",
+        join_or_none_owned(&no_record_trials)
     ));
     markdown.push_str(&format!(
-        "- INFRA 占位 case（不进任何分数）：{}\n",
-        join_or_none(&infra_cases)
+        "- 有 record 但没有判分的 trial（算力已花、报告里看不见）：{}\n",
+        join_or_none_owned(&unjudged_records)
+    ));
+    markdown.push_str(&format!(
+        "- INFRA 占位 trial（不进任何分数）：{}\n",
+        join_or_none_owned(&infra_cases)
     ));
 
-    for judgement in judgements {
+    for trial_judgement in judgements {
+        let judgement = &trial_judgement.judgement;
         markdown.push_str(&format!(
             "\n## {} — {}\n\n",
-            judgement.case_id,
+            trial_label(trial_judgement),
             status_label(judgement),
         ));
         markdown.push_str(&format!(
@@ -863,23 +961,12 @@ pub(crate) fn render_judge_markdown(
             judgement.bonus_total,
             judgement.violations,
         ));
-        let case_records = records_by_case
-            .get(judgement.case_id.as_str())
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        for record in case_records {
-            // 多 trial 时逐条列出并带 trial 号；单条保持原样直读。
-            let trial_prefix = if case_records.len() > 1 {
-                format!("（trial {}）", record.trial)
-            } else {
-                String::new()
-            };
+        // 只列自己那条 record：跨 trial 的工具统计混在一个 case 小节里，读起来像
+        // 同一次运行的多次调用。
+        if let Some(record) = matched(trial_judgement) {
             markdown.push_str(&format!(
-                "- 工具调用{}：{} 次（metadata-checker {} 次；raw fallback {} 次）\n",
-                trial_prefix,
-                record.tool_calls,
-                record.metadata_checker_invocations,
-                record.raw_fallback_calls,
+                "- 工具调用：{} 次（metadata-checker {} 次；raw fallback {} 次）\n",
+                record.tool_calls, record.metadata_checker_invocations, record.raw_fallback_calls,
             ));
         }
 
@@ -967,12 +1054,20 @@ fn status_label(judgement: &CaseJudgement) -> &'static str {
 }
 
 /// 列表渲染：空列表显示「无」，避免空行被读成「没有这个问题」。
-fn join_or_none(cases: &[&str]) -> String {
-    if cases.is_empty() {
+fn join_or_none_owned(items: &[String]) -> String {
+    if items.is_empty() {
         "无".to_string()
     } else {
-        cases.join("、")
+        items.join("、")
     }
+}
+
+/// 报告里的 trial 标识：`<case_id>/<variant>/t<trial>`，与 records 三元组同形。
+fn trial_label(judgement: &TrialJudgement) -> String {
+    format!(
+        "{}/{}/t{}",
+        judgement.judgement.case_id, judgement.variant, judgement.trial
+    )
 }
 
 /// 转义 Markdown 表格单元格中的分隔符与换行，避免报告结构被断言文本破坏。

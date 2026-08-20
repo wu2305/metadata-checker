@@ -46,6 +46,9 @@
 
 ## 实现进度
 
+> 下表是**冻结的 JSON-command runner（M58/M58.1）**的进度。当前主路径 M58.2 的进度见
+> [M58.2 阶段 A 实现状态](#m582-阶段-a-实现状态2026-08-17)。
+
 | 项 | 状态 |
 |----|------|
 | Spec（CNB AI Chat 版本）登记 | done |
@@ -123,3 +126,50 @@ RunReport 升到 `1.3.0`，新增 `command_route_usage`（按 `<task_family> -> 
 同时记录一个结构性观察：组件的三条属性轴中，display 与 value 由 `--intent` 在组件 target 上寻址，**actions 没有对应的 intent**，必须同时换动词（`--explain`）和换 target 文法（`action:`）；`--advise-query --question-kind` 同样缺 action 一类。这是路由不自解释的根因之一，是否补齐待决策。
 
 上述两项阻塞与 action 轴缺失已在 2026-08-02 全部修复（见上一节），路由预言机实验不再被挡住。下一次 CNB live run 可以直接观察 `command_route_usage` 与 `command_routing_confusion` 的变化。
+
+## M58.2 阶段 A 实现状态（2026-08-17）
+
+> 本节补的是文档债，不是运行结果。M58.2 spec 的第一目的就是「让从 `docs/` 进入这条线的人读到的不是过时结论」，而 2026-08-09 之后的全部工作只存在于代码与 commit message 里——journal 上一条记录停在 2026-08-02。**用 spec 描述的路径工作、却让 journal 继续落后，是同一个缺陷的复发。**
+
+### 已落地的东西（可在仓库内复核）
+
+| 项 | 状态 | 落点 |
+|----|------|------|
+| 冻结 JSON-command runner，主路径转 agent harness | done | 本文档顶部冻结公告 + [M58.2 spec](../../specs/2026-08-09-slm-eval-harness-design.md) |
+| 阶段 A pipeline（kimi-code + SKILL.md + 真实项目语料） | done | `.cnb.yml` `api_trigger_kimi_harness_smoke` |
+| 问题文本数据化（`.cnb.yml` 内不再有问题原文） | done | fixture 的 `cases[].smoke.{enabled,order,question_template}` |
+| 语料 SHA 钉死与漂移判红 | done | fixture `corpus_pin_sha: 6920ac51` + `fetch real project corpus` stage |
+| `records.jsonl` 跨语言契约 + 双重守卫 | done | `TrialRecord` / `test_cnb_record_emitter_matches_trial_record_schema` / 判分 stage 就地校验 |
+| 语义 judge（逐条断言、Rust 侧确定性 pass、不信 overall） | done | `tests/support/kimi_smoke_judge.rs` |
+| judge 模型与被测模型解耦 | done | judge = `glm-5.2`（AI IDE v2 路由），agent = `deepseek-v4-flash`（CNB AI Chat） |
+| dash 实跑干跑 + 故障注入 | done | `scripts/cnb-smoke-dry-run.sh`（`--fault empty\|dup\|noeat\|judgeleak`）+ [runbook](../../runbooks/m58-cnb-shell-dry-run.md) |
+| trial 身份链（transcript 命名 / 判分驱动 / 报告配对） | done（2026-08-17，见下节） | `.cnb.yml`、`kimi_smoke_judge.rs`、`kimi_harness_judge_tests.rs` |
+| commit 附件归档（records / judge / run / transcripts） | done（2026-08-20） | `.cnb.yml` endStage `upload_asset` + 干跑 `curl` stub；流水线校验禁止自定义 `CNB_` 变量，API 基址用 `ARCHIVE_API` |
+| **阶段 B 独立 pipeline（判分外移）** | **未做** | 判分目前仍内联在阶段 A 的同一个 stage 里（代码注释已声明是过渡态） |
+| **配对网格（variant × case × trial）** | **未做** | `variant`/`trial` 只是占位，恒为 `baseline`/`1` |
+| **逐 case `provenance`** | **未做** | 8 个 case 均无 per-case `provenance`；顶层只有 `claimed_validation` + `evidence_status: recalled_unverifiable` |
+| **语料扩充** | **未做** | 仍是 8 个 case（6 个入冒烟），每个难度层 2–3 个 |
+
+### 没有可归档的阶段 A 实跑结果
+
+仓库里**不存在**任何 kimi harness 冒烟的运行产物：`docs/ai-eval-runs/` 只有三份 2026-05-08 的旧快照，与本路径无关；`target/kimi-harness-smoke/` 是运行期目录，不进 Git。因此本节**不给任何通过率**。
+
+归档机制已落地（endStage 把 records / judge.md / run.json / transcripts.tar.gz 挂到 commit 附件页），但**还没有一次真实 CNB 跑把附件写上去**。在那次实跑之前，阶段 A 的结果仍然只可能活在被截断的 stage 日志里。**这正是必须先跑 `api_trigger_kimi_harness_smoke`、再把阶段 B 做成独立 pipeline 的理由**——机制在、产物不在，与 spec 点名批评的「本地手动跑一下」仍是同一类失效。
+
+引用规则同冻结公告：在阶段 B 落地、语料扩充到位之前，任何来自 6 问冒烟的数字都只是调试仪表，不能回答「廉价模型 + SKILL.md 到底够不够用」。
+
+### trial 身份链修复（2026-08-17）
+
+一次代码评审发现三处**同源**缺陷，都属于「跑完一整轮才可能被察觉的静默丢数据」，已一并修复：
+
+1. **transcript 文件名不带 variant/trial**（`.cnb.yml`）。record 按 `(case_id, variant, trial)` 唯一，而 transcript 只按 `case_id` 命名——同一 stage 内跑第二个 trial 会覆盖第一个的答案，records 有 N 行、磁盘上只剩 1 份。现改为 `RUN_TAG="${CASE_ID}__${VARIANT}__t${TRIAL}"`。
+2. **判分侧按 case_id 重拼路径**，不读 record 里的 `transcript_path`。重拼是一次独立猜测，两侧一旦分叉就会安静地评到另一份答案上。现改为**由 records 驱动判分**：一条 record = 一次真实运行 = 一份要判的答案，路径取自 `transcript_path`（不存在时按 basename 落到 transcript 目录，供 artifact 下载后重判）。无 `records.jsonl` 的手工重判路径保留，但身份显式记为 `unrecorded/t0`。
+3. **一份 case 级判分被扇出到该 case 的每条 record**（`render_judge_markdown`）。3 个 trial 会把同一个结论算三票。现改为按三元组一一配对，配不上的两侧都点名：缺 record 的 trial、有 record 却没判分的 trial（后者意味着算力已花却在报告里消失）。
+
+伴随的口径变化：`task_score` 从 case 级变为 **trial 级**通过率，另加 `case_stable_pass`（该 case 全部非 INFRA trial 都通过）。单 trial 时两者同源，多 trial 时才有信息量——冻结 runner 的 baseline 已经证明这个区分能分辨「每个 case 都是 3/3 或 0/3」与「全都在抖」。
+
+三条守卫同时加上，防止改回去：`test_cnb_transcript_names_carry_variant_and_trial` 直接解析 `.cnb.yml` 断言命名规则；`test_render_judge_markdown_scores_each_trial_independently` 替换了此前**编码了该缺陷**的测试（原测试用一份判分 + 两条 record 断言「两个分层各 PASS 1」）；干跑脚本断言产出 6 份带 `__baseline__t1` 的 transcript 且 endStage 标签带身份。
+
+验证（2026-08-17）：`cargo fmt --check` 干净；`kimi_harness_judge_tests` 40 passed / 1 ignored（live 按 token 门控）；`m58_cnb_ai_runner_tests` 40 passed / 1 ignored；`ai_eval_tests` 25 passed；`m58_3_command_surface_tests` 27 passed；`scripts/cnb-smoke-dry-run.sh` 正常路径绿、四条故障注入全部判红。
+
+复验（2026-08-20，含附件归档）：`.cnb.yml` 流水线 YAML/语义/Schema 校验通过；`kimi_harness_judge_tests` 40 passed / 1 ignored；干跑正常路径绿（含 6 份 `__baseline__t1` transcript、四件附件上传与 ttl/size 断言），四条故障注入全部判红。**未在 CNB 上实跑**——干跑通过不等于验收通过，真实验收仍是跑一次 `api_trigger_kimi_harness_smoke`。

@@ -878,6 +878,8 @@
 
         # variant / trial 现在恒为 baseline / 1，但字段先占位：Phase 2 加 prompt 变体
         # 与重复次数时，record schema 不需要再变，下游 grid 也不用改读法。
+        # 二者同时进 transcript/stderr 文件名（见下方 RUN_TAG）：占位字段只有落到
+        # 产物命名上才真的挡住覆盖，否则 Phase 2 第一次跑就会静默丢答案。
         VARIANT="${KIMI_SMOKE_VARIANT:-baseline}"
         TRIAL="${KIMI_SMOKE_TRIAL:-1}"
 
@@ -889,8 +891,13 @@
         TAB="$(printf '\t')"
         INFRA_FAILED=0
         while IFS="$TAB" read -r CASE_ID ORDER DIFFICULTY QUESTION; do
-          TRANSCRIPT="$OUT_DIR/smoke-transcript-${CASE_ID}.jsonl"
-          STDERR_LOG="$OUT_DIR/smoke-stderr-${CASE_ID}.log"
+          # 文件名必须带 variant/trial：record 已经按 (case_id, variant, trial) 唯一，
+          # 而 transcript 曾只按 case_id 命名——同一 stage 内跑第二个 trial 会把第一个
+          # 的答案覆盖掉，records 有 N 行、磁盘上只剩 1 份，judge 评的是幸存者且无从
+          # 察觉。分隔符用 `__`：case_id 只含单下划线，肉眼仍能一眼切开。
+          RUN_TAG="${CASE_ID}__${VARIANT}__t${TRIAL}"
+          TRANSCRIPT="$OUT_DIR/smoke-transcript-${RUN_TAG}.jsonl"
+          STDERR_LOG="$OUT_DIR/smoke-stderr-${RUN_TAG}.log"
           CASE_EXIT=0
           # 墙钟是 Phase 2 的预算输入：variant × case × trial 的总时长要从实测推，
           # 不是拍脑袋。含模型自己建图的时间，这正是要量的那部分。
@@ -1100,21 +1107,129 @@
         # 逐 case dump 含 tool_calls 的原始 JSONL 行（截断）与答案尾部，
         # 不假设 stream-json 的字段嵌套形态。CNB stage 日志有 ~115KB 上限、
         # 从头截断，全量 dump 会丢前面的问题，因此每段都压小。
+        # RUN_TAG 是 `<case_id>__<variant>__t<trial>`，与 records 的三元组一一对应。
+        # 这里只把它当标签用、不反解 case_id：反解要猜 case_id 里的下划线归属，
+        # 而 dump 只需要一个能对上 records 的稳定标识。
         for TRANSCRIPT in "$OUT_DIR"/smoke-transcript-*.jsonl; do
           [ -e "$TRANSCRIPT" ] || continue
-          CASE_ID="$(basename "$TRANSCRIPT" .jsonl)"
-          CASE_ID="${CASE_ID#smoke-transcript-}"
+          RUN_TAG="$(basename "$TRANSCRIPT" .jsonl)"
+          RUN_TAG="${RUN_TAG#smoke-transcript-}"
           # dump 前就地脱敏：无论前面的 stage 在哪一步断掉，这里都不能成为
           # token 进 CI 日志的通道。
           redact_token "$TRANSCRIPT"
-          redact_token "$OUT_DIR/smoke-stderr-${CASE_ID}.log"
-          echo "===== ${CASE_ID} tool calls (raw, truncated) ====="
+          redact_token "$OUT_DIR/smoke-stderr-${RUN_TAG}.log"
+          echo "===== ${RUN_TAG} tool calls (raw, truncated) ====="
           grep '"tool_calls"' "$TRANSCRIPT" 2>/dev/null | cut -c1-600 || true
-          echo "===== ${CASE_ID} transcript tail ====="
+          echo "===== ${RUN_TAG} transcript tail ====="
           tail -c 2000 "$TRANSCRIPT" 2>/dev/null || true
-          echo "===== ${CASE_ID} stderr tail ====="
-          tail -n 10 "$OUT_DIR/smoke-stderr-${CASE_ID}.log" 2>/dev/null || true
+          echo "===== ${RUN_TAG} stderr tail ====="
+          tail -n 10 "$OUT_DIR/smoke-stderr-${RUN_TAG}.log" 2>/dev/null || true
         done
+
+        # ---- 归档：把本轮产物上传为 commit 附件 -----------------------------
+        # 为什么必须归档：stage 日志 ~115KB 且从头截断，而 judge.md 恰好排在逐 case
+        # dump 之前——真正跑满的那次运行，最先被截掉的就是判分报告。M58.2 阶段 A 的
+        # 历史结果因此只活在聊天记录里：无法复核、无法配对、无法重判。
+        # 附件按 commit SHA 归档，与 run.json 的 repo_sha 同源；下游（阶段 B 判分、
+        # 配对网格）用同一个 SHA 就能 DOWNLOAD 回原字节，不必从 Markdown 里反解。
+        #
+        # 协议取自 cnbcool/attachments 插件实现：POST asset-upload-url 换一次性链接
+        # → PUT 原字节 → POST verify_url 确认。这里用 curl 直写而不是引插件 image：
+        # 干跑脚本逐字提取 `script:` 用 dash 跑，image 形态的 step 它看不见，而这条
+        # 工作线的失效模式一贯是静默假绿——看不见的步骤等于没验过的步骤。
+        #
+        # 放在 endStage 最后：确认行与附件页地址要活到日志尾部，头部会被截掉。
+        # 也保证 tar 打包的是上面逐 case 脱敏之后的 transcript。
+        #
+        # 安全：upload_url / verify_url 是预签名链接，query 里可能带凭证，全程不回显；
+        # token 只进 Authorization 头；上传发生在全目录脱敏之后。
+        ARCHIVE_META="/tmp/m58-archive-upload.json"
+        # 不能叫 CNB_API_BASE：CNB_ 前缀是内置只读变量保留字，自定义会让流水线校验失败。
+        ARCHIVE_API="${CNB_API_ENDPOINT:-https://api.cnb.cool}"
+        ARCHIVE_TS="$(node -pe 'try{(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).recorded_at||"").replace(/[:-]/g,"")}catch(e){""}' "$OUT_DIR/run.json" 2>/dev/null || echo "")"
+        if [ -z "$ARCHIVE_TS" ]; then ARCHIVE_TS="$(date -u +%Y%m%dT%H%M%SZ)"; fi
+        COMMIT_SHA="$(node -pe 'try{JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).repo_sha||""}catch(e){""}' "$OUT_DIR/run.json" 2>/dev/null || echo "")"
+        if [ -z "$COMMIT_SHA" ] || [ "$COMMIT_SHA" = "unknown" ]; then
+          COMMIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo "")"
+        fi
+
+        # 上传单个文件。失败只打印并返回 1，绝不掩盖 main stage 的真实退出码。
+        upload_asset() {
+          ASSET_PATH="$1"
+          ASSET_NAME="$2"
+          ASSET_TTL="$3"
+          if [ ! -s "$ASSET_PATH" ]; then
+            echo "archive skip（缺失或为空）：$ASSET_PATH"
+            return 0
+          fi
+          ASSET_SIZE="$(wc -c < "$ASSET_PATH" | tr -d ' ')"
+          META_CODE="$(curl -sS -o "$ARCHIVE_META" -w '%{http_code}' -X POST \
+            "${ARCHIVE_API}/${CNB_REPO_SLUG}/-/git/commit-assets/${COMMIT_SHA}/asset-upload-url" \
+            -H "Authorization: Bearer ${CNB_TOKEN}" \
+            -H 'Accept: application/vnd.cnb.api+json' \
+            -H 'Content-Type: application/json' \
+            -d "{\"asset_name\":\"${ASSET_NAME}\",\"size\":${ASSET_SIZE},\"ttl\":${ASSET_TTL}}" \
+            2>/dev/null || echo "curl-error")"
+          if [ "$META_CODE" != "200" ]; then
+            echo "archive FAIL（换取上传链接 http=${META_CODE}）：${ASSET_NAME}"
+            rm -f "$ARCHIVE_META"
+            return 1
+          fi
+          # 两个链接都不回显：预签名 query 可能含凭证。
+          UPLOAD_URL="$(node -pe 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));(d.upload_url||(d.data&&d.data.upload_url)||"")' "$ARCHIVE_META" 2>/dev/null || echo "")"
+          VERIFY_URL="$(node -pe 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));(d.verify_url||(d.data&&d.data.verify_url)||"")' "$ARCHIVE_META" 2>/dev/null || echo "")"
+          rm -f "$ARCHIVE_META"
+          if [ -z "$UPLOAD_URL" ] || [ -z "$VERIFY_URL" ]; then
+            echo "archive FAIL（响应缺 upload_url/verify_url）：${ASSET_NAME}"
+            return 1
+          fi
+          PUT_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$UPLOAD_URL" \
+            -H 'Content-Type: application/octet-stream' \
+            --data-binary "@${ASSET_PATH}" 2>/dev/null || echo "curl-error")"
+          if [ "$PUT_CODE" != "200" ]; then
+            echo "archive FAIL（上传 http=${PUT_CODE}）：${ASSET_NAME}"
+            return 1
+          fi
+          VERIFY_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$VERIFY_URL" \
+            -H "Authorization: Bearer ${CNB_TOKEN}" \
+            -H 'Accept: application/vnd.cnb.api+json' 2>/dev/null || echo "curl-error")"
+          if [ "$VERIFY_CODE" != "200" ]; then
+            echo "archive FAIL（确认 http=${VERIFY_CODE}）：${ASSET_NAME}"
+            return 1
+          fi
+          echo "archive uploaded: ${ASSET_NAME} (${ASSET_SIZE} bytes, ttl=${ASSET_TTL})"
+          return 0
+        }
+
+        if [ -z "${CNB_TOKEN:-}" ] || [ -z "${CNB_REPO_SLUG:-}" ] || [ -z "$COMMIT_SHA" ]; then
+          echo "archive skip：缺少 CNB_TOKEN / CNB_REPO_SLUG / commit sha，不做附件归档"
+        else
+          ARCHIVE_FAILED=0
+          # transcript 与 stderr 打成一个包：单文件几十 KB × N，逐个传既慢又把附件页
+          # 刷满。records/judge/run 保持独立可直接下载，这三个是复核的第一入口。
+          TRANSCRIPT_TAR="$OUT_DIR/m58-smoke-${ARCHIVE_TS}-transcripts.tar.gz"
+          TAR_LIST="/tmp/m58-archive-tar-list"
+          ( cd "$OUT_DIR" && ls smoke-transcript-*.jsonl smoke-stderr-*.log 2>/dev/null ) > "$TAR_LIST" || true
+          if [ -s "$TAR_LIST" ]; then
+            tar -czf "$TRANSCRIPT_TAR" -C "$OUT_DIR" -T "$TAR_LIST" 2>/dev/null || true
+          fi
+          rm -f "$TAR_LIST"
+
+          # ttl=0 永久：records/judge/run 是结论与归因依据，必须一直在。
+          # transcript 体积大、只在深查时才读，给 90 天。
+          upload_asset "$OUT_DIR/records.jsonl" "m58-smoke-${ARCHIVE_TS}-records.jsonl" 0 || ARCHIVE_FAILED=1
+          upload_asset "$OUT_DIR/run.json" "m58-smoke-${ARCHIVE_TS}-run.json" 0 || ARCHIVE_FAILED=1
+          upload_asset "$OUT_DIR/judge.md" "m58-smoke-${ARCHIVE_TS}-judge.md" 0 || ARCHIVE_FAILED=1
+          upload_asset "$TRANSCRIPT_TAR" "m58-smoke-${ARCHIVE_TS}-transcripts.tar.gz" 90 || ARCHIVE_FAILED=1
+
+          echo "archive commit=${COMMIT_SHA} run_tag=${ARCHIVE_TS}"
+          echo "archive page: https://cnb.cool/${CNB_REPO_SLUG}/-/commit/${COMMIT_SHA}?tab=attachments"
+          if [ "$ARCHIVE_FAILED" -ne 0 ]; then
+            # 不改 endStage 的退出码：归档失败不该盖掉 main stage 的真实失败原因，
+            # 但必须在日志尾部留下明确一行，否则「这轮没归档」会被当成「这轮没跑」。
+            echo "archive INCOMPLETE：部分产物未归档，见上方 archive FAIL 行"
+          fi
+        fi
 
 # M58.2 issue 归档方案的前置探针：验证构建凭证 CNB_TOKEN 是否有 repo-issue:rw，
 # 以及 pipeline 内 curl 建 issue、挂预建标签的行为。一次性非致命实验：任何失败只打印

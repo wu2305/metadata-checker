@@ -113,6 +113,55 @@ cat > "$STUB_BIN/ln" <<'STUB'
 echo "[stub ln] $*"
 STUB
 
+# git stub：干跑工作区不是 git 仓库，而 run.json 的 repo_sha 与 endStage 的附件
+# 归档都以 `git rev-parse HEAD` 为准。给一个确定的假 SHA，让归档路径真的跑起来。
+cat > "$STUB_BIN/git" <<'STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = "rev-parse" ] && [ "${2:-}" = "HEAD" ]; then
+  echo "0000000000000000000000000000000000000abc"
+  exit 0
+fi
+exit 1
+STUB
+
+# curl stub：模拟 CNB commit 附件三步协议（换一次性链接 → PUT 原字节 → 确认）。
+# 预签名链接里塞入 STUBPRESIGNSECRET，用来验证 stage 全程不回显它——真实
+# upload_url 的 query 可能带凭证，回显一次就是一次泄漏。
+# 每次换链接把请求体追加到 $DRY_RUN_ARCHIVE_LOG，供外层断言上传了哪些附件。
+cat > "$STUB_BIN/curl" <<'STUB'
+#!/usr/bin/env bash
+OUT_FILE=""; URL=""; DATA=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) OUT_FILE="$2"; shift 2 ;;
+    -w|-X|-H) shift 2 ;;
+    -d) DATA="$2"; shift 2 ;;
+    --data-binary) shift 2 ;;
+    -sS|-s|-S|-N) shift ;;
+    http*) URL="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+case "$URL" in
+  *asset-upload-url)
+    printf '%s\n' "$DATA" >> "${DRY_RUN_ARCHIVE_LOG:-/dev/null}"
+    [ -n "$OUT_FILE" ] && cat > "$OUT_FILE" <<JSON
+{"upload_url":"https://upload.stub.invalid/put?sig=STUBPRESIGNSECRET","verify_url":"https://api.stub.invalid/verify?sig=STUBPRESIGNSECRET"}
+JSON
+    printf '200'
+    ;;
+  *upload.stub.invalid*|*verify*)
+    [ -n "$OUT_FILE" ] && : > "$OUT_FILE"
+    printf '200'
+    ;;
+  *)
+    [ -n "$OUT_FILE" ] && : > "$OUT_FILE"
+    printf '404'
+    ;;
+esac
+exit 0
+STUB
+
 chmod +x "$STUB_BIN"/*
 
 # --- 工作区 ------------------------------------------------------------
@@ -226,15 +275,24 @@ echo "=== stage exit=$STAGE_EXIT ==="
 # 发布（judge.md、records 投影、run manifest）正是它的职责。同样 dash + 逐字脚本。
 echo "=== running endStage under dash ==="
 ENDSTAGE_LOG="$SANDBOX/endstage.log"
+ARCHIVE_LOG="$SANDBOX/archive-uploads.log"
+: > "$ARCHIVE_LOG"
 set +e
 (
   cd "$WORK"
   PATH="$STUB_BIN:$PATH" \
   CNB_TOKEN="stub-token-not-a-real-secret" \
+  CNB_REPO_SLUG="wu2305/metadata-checker" \
+  DRY_RUN_ARCHIVE_LOG="$ARCHIVE_LOG" \
   dash "$ENDSTAGE_SH"
 ) > "$ENDSTAGE_LOG" 2>&1
 ENDSTAGE_EXIT=$?
 set -e
+# 预签名链接绝不能进日志：真实 upload_url 的 query 可能带凭证。
+if grep -qF "STUBPRESIGNSECRET" "$ENDSTAGE_LOG"; then
+  echo "FAIL: 预签名上传链接出现在 endStage 日志中" >&2
+  exit 1
+fi
 if grep -qF "stub-token-not-a-real-secret" "$ENDSTAGE_LOG"; then
   echo "FAIL: CNB_TOKEN 出现在 endStage 日志中" >&2
   exit 1
@@ -255,6 +313,15 @@ if [ "$FAULT" = "none" ]; then
   [ "$(grep -c '"raw_fallback":false' "$RECORDS")" = "5" ] || { echo "FAIL: 期望 5 条 raw_fallback=false" >&2; exit 1; }
   # 卫生清理：预置的过期 transcript 必须被 stage 清掉。
   [ ! -e "$WORK/target/kimi-harness-smoke/smoke-transcript-q1.jsonl" ] || { echo "FAIL: 过期 transcript 未被清理" >&2; exit 1; }
+  # 文件名带 variant/trial：只按 case_id 命名时，Phase 2 的第二个 trial 会覆盖第一个的
+  # 答案，而 records 照常写满、报告照常好看。这条断言守的是那次静默丢数据。
+  TRIAL1_COUNT="$(find "$WORK/target/kimi-harness-smoke" -name 'smoke-transcript-*__baseline__t1.jsonl' | wc -l | tr -d ' ')"
+  [ "$TRIAL1_COUNT" = "6" ] || { echo "FAIL: 期望 6 份带 __baseline__t1 的 transcript，实际 $TRIAL1_COUNT" >&2; exit 1; }
+  find "$WORK/target/kimi-harness-smoke" -name 'smoke-stderr-*__baseline__t1.log' | grep -q . \
+    || { echo "FAIL: stderr 文件名未带 variant/trial" >&2; exit 1; }
+  # endStage 的 dump 用 RUN_TAG 作标签，标签里必须能看到身份。
+  grep -q '__baseline__t1 transcript tail' "$ENDSTAGE_LOG" \
+    || { echo "FAIL: endStage dump 标签未带 variant/trial" >&2; exit 1; }
   # run.json 身份清单已产出且含版本字段。
   grep -q '"corpus_sha"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 corpus_sha" >&2; exit 1; }
   grep -q '"kimi_version": "kimi-stub 0.0.0"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json kimi_version 异常" >&2; exit 1; }
@@ -262,6 +329,26 @@ if [ "$FAULT" = "none" ]; then
   grep -q "===== judge.md =====" "$ENDSTAGE_LOG" || { echo "FAIL: endStage 未发布 judge.md" >&2; exit 1; }
   grep -q "# stub judge" "$ENDSTAGE_LOG" || { echo "FAIL: endStage judge.md 内容缺失" >&2; exit 1; }
   grep -q "===== run manifest =====" "$ENDSTAGE_LOG" || { echo "FAIL: endStage 未发布 run.json" >&2; exit 1; }
+  # 附件归档：四件产物都要上传。stage 日志会被从头截断，判分结果只有落成附件
+  # 才真正留得住——这条断言守的是「结果只活在聊天记录里」那个失效模式。
+  for ASSET in records.jsonl run.json judge.md transcripts.tar.gz; do
+    grep -q "archive uploaded: m58-smoke-.*-${ASSET} " "$ENDSTAGE_LOG" \
+      || { echo "FAIL: 未归档附件 ${ASSET}" >&2; exit 1; }
+  done
+  [ "$(wc -l < "$ARCHIVE_LOG" | tr -d ' ')" = "4" ] \
+    || { echo "FAIL: 期望 4 次换取上传链接，实际 $(wc -l < "$ARCHIVE_LOG" | tr -d ' ')" >&2; exit 1; }
+  # 请求体必须带真实字节数：size=0 会让服务端签出一个永远传不满的链接。
+  if grep -q '"size":0' "$ARCHIVE_LOG"; then echo "FAIL: 归档请求体 size=0" >&2; exit 1; fi
+  # transcript 包按 90 天过期，结论类产物永久保留。
+  grep -q '"ttl":90' "$ARCHIVE_LOG" || { echo "FAIL: transcript 包未设 ttl=90" >&2; exit 1; }
+  [ "$(grep -c '"ttl":0' "$ARCHIVE_LOG")" = "3" ] || { echo "FAIL: 期望 3 件 ttl=0 永久产物" >&2; exit 1; }
+  # 附件挂在 run.json 记录的同一个 commit 上，下游用同一个 SHA 就能取回。
+  grep -q "archive commit=0000000000000000000000000000000000000abc" "$ENDSTAGE_LOG" \
+    || { echo "FAIL: 归档 commit 与 run.json repo_sha 不同源" >&2; exit 1; }
+  # tar 里必须是逐 case 脱敏之后的 transcript，且带 variant/trial 身份。
+  tar -tzf "$WORK"/target/kimi-harness-smoke/m58-smoke-*-transcripts.tar.gz 2>/dev/null \
+    | grep -q 'smoke-transcript-.*__baseline__t1\.jsonl' \
+    || { echo "FAIL: transcript 包内容缺失或未带 variant/trial" >&2; exit 1; }
 fi
 
 # 期望：正常路径绿，注入的故障必须红。红不了才是这个脚本要抓的东西。
