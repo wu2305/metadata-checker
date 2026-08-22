@@ -1133,10 +1133,13 @@
         # 附件按 commit SHA 归档，与 run.json 的 repo_sha 同源；下游（阶段 B 判分、
         # 配对网格）用同一个 SHA 就能 DOWNLOAD 回原字节，不必从 Markdown 里反解。
         #
-        # 协议取自 cnbcool/attachments 插件实现：POST asset-upload-url 换一次性链接
-        # → PUT 原字节 → POST verify_url 确认。这里用 curl 直写而不是引插件 image：
-        # 干跑脚本逐字提取 `script:` 用 dash 跑，image 形态的 step 它看不见，而这条
-        # 工作线的失效模式一贯是静默假绿——看不见的步骤等于没验过的步骤。
+        # 协议取自 OpenAPI（swagger.json）与 cnbcool/attachments 实现：
+        # POST asset-upload-url 换一次性链接（成功是 201 Created，不是 200；
+        # 2026-08-20 实跑 cnb-7h8-1k0fhjt1m 四件全 201 却被当成失败）
+        # → PUT 原字节 → POST verify_url 确认（OpenAPI 成功是 200）。
+        # 这里用 curl 直写而不是引插件 image：干跑脚本逐字提取 `script:` 用 dash
+        # 跑，image 形态的 step 它看不见，而这条工作线的失效模式一贯是静默假绿
+        # ——看不见的步骤等于没验过的步骤。
         #
         # 放在 endStage 最后：确认行与附件页地址要活到日志尾部，头部会被截掉。
         # 也保证 tar 打包的是上面逐 case 脱敏之后的 transcript。
@@ -1170,7 +1173,8 @@
             -H 'Content-Type: application/json' \
             -d "{\"asset_name\":\"${ASSET_NAME}\",\"size\":${ASSET_SIZE},\"ttl\":${ASSET_TTL}}" \
             2>/dev/null || echo "curl-error")"
-          if [ "$META_CODE" != "200" ]; then
+          # OpenAPI PostCommitAssetUploadURL 只声明 201 Created；200 不是成功码。
+          if [ "$META_CODE" != "201" ]; then
             echo "archive FAIL（换取上传链接 http=${META_CODE}）：${ASSET_NAME}"
             rm -f "$ARCHIVE_META"
             return 1

@@ -246,6 +246,25 @@ fn test_cnb_transcript_names_carry_variant_and_trial() {
     );
 }
 
+/// 换取 commit 附件上传链接的成功码必须是 201。
+///
+/// OpenAPI `PostCommitAssetUploadURL` 只声明 201 Created。写成 200 时干跑 stub
+/// 若也回 200 会假绿，而 CNB 实跑返回 201 会被当成失败——2026-08-20 四件附件
+/// 因此全部没归档。这条守卫把契约钉在 `.cnb.yml` 原文上。
+#[test]
+fn test_cnb_archive_upload_url_accepts_201() {
+    let cnb = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".cnb.yml"))
+        .expect("读取 .cnb.yml 失败");
+    assert!(
+        cnb.contains(r#"if [ "$META_CODE" != "201" ]; then"#),
+        ".cnb.yml 换取上传链接不再把 201 当成功（OpenAPI PostCommitAssetUploadURL）"
+    );
+    assert!(
+        !cnb.contains(r#"if [ "$META_CODE" != "200" ]; then"#),
+        ".cnb.yml 又把换取上传链接的成功码写成了 200"
+    );
+}
+
 /// 合法 records.jsonl 正常解析，空行被跳过。
 #[test]
 fn test_parse_trial_records_accepts_valid_lines() {

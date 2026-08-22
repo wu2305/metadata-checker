@@ -127,7 +127,8 @@ STUB
 # curl stub：模拟 CNB commit 附件三步协议（换一次性链接 → PUT 原字节 → 确认）。
 # 预签名链接里塞入 STUBPRESIGNSECRET，用来验证 stage 全程不回显它——真实
 # upload_url 的 query 可能带凭证，回显一次就是一次泄漏。
-# 每次换链接把请求体追加到 $DRY_RUN_ARCHIVE_LOG，供外层断言上传了哪些附件。
+# 换链接这一步 OpenAPI 成功码是 201 Created（不是 200）。stub 必须回 201，
+# 否则 stage 若误写成只认 200，干跑会假绿、CNB 实跑会把真成功当失败。
 cat > "$STUB_BIN/curl" <<'STUB'
 #!/usr/bin/env bash
 OUT_FILE=""; URL=""; DATA=""
@@ -148,7 +149,7 @@ case "$URL" in
     [ -n "$OUT_FILE" ] && cat > "$OUT_FILE" <<JSON
 {"upload_url":"https://upload.stub.invalid/put?sig=STUBPRESIGNSECRET","verify_url":"https://api.stub.invalid/verify?sig=STUBPRESIGNSECRET"}
 JSON
-    printf '200'
+    printf '201'
     ;;
   *upload.stub.invalid*|*verify*)
     [ -n "$OUT_FILE" ] && : > "$OUT_FILE"
