@@ -799,8 +799,11 @@
         }
 
         # run.json：本轮评测的身份清单。records.jsonl 逐 trial 记墙钟与调用，run.json
-        # 记版本面——语料 SHA、工具二进制、SKILL、kimi 与模型别名。缺了这些，任何失败
-        # 都无法归因到工具、模型还是 oracle。无下游消费者，字段演进自由。
+        # 记版本面——语料 SHA、工具二进制、SKILL、fixture/gold、kimi 与模型别名。
+        # 缺了这些，任何失败都无法归因到工具、模型还是 oracle。kimi-code 故意不钉死
+        # （kimi_pin_policy=float），只记录版本；SKILL/CLI A/B 必须共享同一次安装。
+        CASES_JSON="tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json"
+        test -s "$CASES_JSON"
         REPO_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
         CORPUS_SHA="$(cat target/real-project/corpus.sha 2>/dev/null || echo unknown)"
         KIMI_VERSION="$(kimi --version 2>/dev/null | head -n 1 || echo unknown)"
@@ -811,10 +814,11 @@
           BIN_SHA="unknown"
         fi
         SKILL_SHA="$(sha256sum "$OUT_DIR/skills/metadata-checker/SKILL.md" | cut -d' ' -f1)"
+        FIXTURE_SHA="$(sha256sum "$CASES_JSON" | cut -d' ' -f1)"
         node -e '
           const fs = require("fs");
           const [outPath, recordedAt, repoSha, corpusSha, kimiVersion, binSha, skillSha,
-                 agentModel, judgeModel, judgeApiRoute] = process.argv.slice(1);
+                 fixturePath, fixtureSha, agentModel, judgeModel, judgeApiRoute] = process.argv.slice(1);
           const manifest = {
             recorded_at: recordedAt,
             repo_sha: repoSha,
@@ -822,13 +826,19 @@
             kimi_version: kimiVersion,
             metadata_checker_sha256: binSha,
             skill_sha256: skillSha,
+            fixture_path: fixturePath,
+            fixture_sha256: fixtureSha,
             agent_model: agentModel,
             judge_model: judgeModel,
             judge_api_route: judgeApiRoute,
+            agent_temperature: null,
+            judge_temperature: null,
+            kimi_pin_policy: "float",
           };
           fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2) + "\n");
         ' "$OUT_DIR/run.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REPO_SHA" "$CORPUS_SHA" \
           "$KIMI_VERSION" "$BIN_SHA" "$SKILL_SHA" \
+          "$CASES_JSON" "$FIXTURE_SHA" \
           "${KIMI_MODEL_NAME:-unknown}" "${KIMI_JUDGE_MODEL:-glm-5.2}" "ai-ide/v2"
         cat "$OUT_DIR/run.json"
 
@@ -843,7 +853,6 @@
         REAL_PROJECT_DIR="target/real-project/succbi_project_container/projects/xiaoshouyi"
         test -d "$REAL_PROJECT_DIR"
 
-        CASES_JSON="tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json"
         RECORDS="$OUT_DIR/records.jsonl"
         QUESTIONS_TSV="$OUT_DIR/smoke-questions.tsv"
         : > "$RECORDS"
@@ -1092,7 +1101,7 @@
             }
           ' "$OUT_DIR/records.jsonl" || true
         fi
-        # run.json 是本轮身份清单（语料/二进制/SKILL/kimi/模型别名），复盘归因先看它。
+        # run.json 是本轮身份清单（语料/二进制/SKILL/fixture/kimi/模型别名），复盘归因先看它。
         if [ -s "$OUT_DIR/run.json" ]; then
           echo "===== run manifest ====="
           cat "$OUT_DIR/run.json" || true

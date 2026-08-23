@@ -217,6 +217,35 @@ fn test_cnb_record_emitter_matches_trial_record_schema() {
     );
 }
 
+/// `.cnb.yml` 的 run.json 必须记下 fixture/gold 身份、未设置的温度、以及
+/// kimi-code 浮动策略。少记一项，跨次实验就无法判断是改了 gold 还是改了 SKILL。
+#[test]
+fn test_cnb_run_json_records_eval_identity() {
+    let cnb = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".cnb.yml"))
+        .expect("读取 .cnb.yml 失败");
+    let start = cnb
+        .find("const manifest = {")
+        .expect(".cnb.yml 里找不到 run.json 的 manifest 对象；若已改写请同步本测试");
+    let body = &cnb[start..];
+    for needle in [
+        "fixture_path:",
+        "fixture_sha256:",
+        "agent_temperature: null",
+        "judge_temperature: null",
+        "kimi_pin_policy: \"float\"",
+    ] {
+        assert!(
+            body.contains(needle),
+            "run.json manifest 缺少 {needle}：\n{}",
+            &body[..body.len().min(800)]
+        );
+    }
+    assert!(
+        cnb.contains("FIXTURE_SHA=\"$(sha256sum \"$CASES_JSON\""),
+        "fixture_sha256 必须由 sha256sum 对 CASES_JSON 算出，不能手填"
+    );
+}
+
 /// `.cnb.yml` 产出的 transcript / stderr 文件名必须带 variant 与 trial。
 ///
 /// 与上一条测试同一动机，换一个失效模式：文件名只按 case_id 命名时，同一 stage 内
@@ -817,8 +846,16 @@ fn test_render_judge_markdown_contains_key_sections() {
     assert!(markdown.contains("禁令丙"));
     assert!(markdown.contains("失败原因"));
     // 没有 records 时两个 trial 都算「缺少匹配 record」，行为分层全部为空。
-    assert!(markdown.contains("task_score：1/2 trial"), "{markdown}");
-    assert!(markdown.contains("不设 tool_score"), "{markdown}");
+    assert!(
+        markdown.contains("answer_quality（task_score）：1/2 trial"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("tool_adherence：0/0 trial"), "{markdown}");
+    assert!(
+        markdown.contains("tool_assisted_quality：0/0 trial"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("三个率分母固定"), "{markdown}");
     assert!(markdown.contains("缺少匹配 record 的 trial"), "{markdown}");
     assert!(
         markdown.contains("case_pass/baseline/t1、case_fail/baseline/t1"),
@@ -840,9 +877,10 @@ fn test_render_judge_markdown_contains_key_sections() {
     assert!(escaped_markdown.contains("含\\|管道"));
 }
 
-/// 验证得分口径：只有固定分母的 task_score 与四个互斥行为分层；不设 tool_score——
-/// 按运行后行为筛选分母有选择偏差（困难 case 更易 fallback 并被移出分母），
-/// raw_fallback 只是启发式诊断信号，不作为计分准入。
+/// 验证得分口径：三个固定分母率 + 四个互斥行为分层。
+///
+/// `answer_quality` 含 raw-only PASS；`tool_assisted_quality` 不含。
+/// 禁止再按行为筛分母（已废弃的 tool_score）。
 #[test]
 fn test_render_judge_markdown_reports_fixed_denominator_strata() {
     let judged = |case_id: &str, passed: bool| CaseJudgement {
@@ -882,16 +920,24 @@ fn test_render_judge_markdown_reports_fixed_denominator_strata() {
     ))
     .unwrap();
     let markdown = render_judge_markdown(&judgements, &records);
-    // task_score 分母固定为全部非 INFRA trial，含绕过工具完成的。
-    assert!(markdown.contains("task_score：2/3 trial"), "{markdown}");
-    // 单 trial 时 case_stable_pass 与 task_score 同源，分母是 case 数。
+    // answer_quality 分母固定为全部非 INFRA trial，含绕过工具完成的。
+    assert!(
+        markdown.contains("answer_quality（task_score）：2/3 trial"),
+        "{markdown}"
+    );
+    // 单 trial 时 case_stable_pass 与 answer_quality 同源，分母是 case 数。
     assert!(
         markdown.contains("case_stable_pass：2/3 case"),
         "{markdown}"
     );
-    // 不设 tool_score，并说明为什么（选择偏差 + 配对实验归因）。
-    assert!(markdown.contains("不设 tool_score"), "{markdown}");
-    assert!(markdown.contains("配对实验"), "{markdown}");
+    // 三个率：tool 2/3（tool_pass + mixed_fail），assisted 1/3（只有 tool_pass）。
+    assert!(markdown.contains("tool_adherence：2/3 trial"), "{markdown}");
+    assert!(
+        markdown.contains("tool_assisted_quality：1/3 trial"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("三个率分母固定"), "{markdown}");
+    assert!(markdown.contains("LLMOps 主指标"), "{markdown}");
     // 行为分层分母固定：三个 trial 各自进入唯一分层，fallback 的 PASS 不再被移出分母。
     assert!(
         markdown.contains(
@@ -978,7 +1024,10 @@ fn test_render_judge_markdown_scores_each_trial_independently() {
         "{markdown}"
     );
     // 一个 case 只要有 trial 失败就不算稳定通过。
-    assert!(markdown.contains("task_score：1/2 trial"), "{markdown}");
+    assert!(
+        markdown.contains("answer_quality（task_score）：1/2 trial"),
+        "{markdown}"
+    );
     assert!(
         markdown.contains("case_stable_pass：0/1 case"),
         "{markdown}"

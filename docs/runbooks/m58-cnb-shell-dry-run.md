@@ -54,7 +54,7 @@ stub 补的是**镜像里本来就有、开发机上没有**的 GNU 行为。任
 
 ## 覆盖边界
 
-干跑验证的是 shell 语义、控制流、故障路径判红、judge 日志的脱敏顺序、records 字段与取值、endStage 的报告发布（正常与失败路径都发布 `judge.md` 与 run manifest）、commit 附件归档（四件产物、ttl、size≠0、日志不回显预签名链接），以及三组行为：mc/raw fallback 的结构化计数（kimi stub 对「入口」一问额外模拟直接读 `.spg`）、开跑时清理上一轮残留产物、`run.json` 身份清单产出。它**不**验证：真实模型行为、真实项目图构建、判分质量、墙钟量级（stub 是毫秒级，真跑是分钟级），也不覆盖 `fetch real project corpus` stage 的 corpus pin/检出逻辑——那是独立 stage，干跑没有 git stub。也不验证真实 CNB 附件 API。
+干跑验证的是 shell 语义、控制流、故障路径判红、judge 日志的脱敏顺序、records 字段与取值、endStage 的报告发布（正常与失败路径都发布 `judge.md` 与 run manifest）、commit 附件归档（四件产物、ttl、size≠0、日志不回显预签名链接），以及三组行为：mc/raw fallback 的结构化计数（kimi stub 对「入口」一问额外模拟直接读 `.spg`）、开跑时清理上一轮残留产物、`run.json` 身份清单（含 `fixture_sha256`、`kimi_pin_policy=float`、temperature `null`）。它**不**验证：真实模型行为、真实项目图构建、判分质量、墙钟量级（stub 是毫秒级，真跑是分钟级），也不覆盖 `fetch real project corpus` stage 的 corpus pin/检出逻辑——那是独立 stage，干跑没有 git stub。也不验证真实 CNB 附件 API。
 
 因此干跑通过**不等于**验收通过。stage 的真实验收是在 CNB 上跑一次 `api_trigger_kimi_harness_smoke`。
 

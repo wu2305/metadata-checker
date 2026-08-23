@@ -326,6 +326,10 @@ if [ "$FAULT" = "none" ]; then
   # run.json 身份清单已产出且含版本字段。
   grep -q '"corpus_sha"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 corpus_sha" >&2; exit 1; }
   grep -q '"kimi_version": "kimi-stub 0.0.0"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json kimi_version 异常" >&2; exit 1; }
+  grep -q '"fixture_sha256"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 fixture_sha256" >&2; exit 1; }
+  grep -q '"kimi_pin_policy": "float"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 未声明 kimi_pin_policy=float" >&2; exit 1; }
+  grep -q '"agent_temperature": null' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 agent_temperature" >&2; exit 1; }
+  grep -q '"judge_temperature": null' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 judge_temperature" >&2; exit 1; }
   # endStage 无条件发布 judge.md（stub 内容）与 run manifest。
   grep -q "===== judge.md =====" "$ENDSTAGE_LOG" || { echo "FAIL: endStage 未发布 judge.md" >&2; exit 1; }
   grep -q "# stub judge" "$ENDSTAGE_LOG" || { echo "FAIL: endStage judge.md 内容缺失" >&2; exit 1; }

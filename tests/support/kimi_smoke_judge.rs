@@ -757,13 +757,17 @@ pub(crate) fn judge_case(
 /// 判分与 record 按 `(case_id, variant, trial)` **一一配对**：一份判分只配一条 record，
 /// 配不上的两侧都点名（缺 record 的 trial、有 record 却没判分的 trial）。此前按 case_id
 /// 分组会把一份 case 级判分扇出到该 case 的每条 record 上，3 个 trial 算三票。
-/// 分数两个：task_score（非 INFRA trial 的任务完成率）与 case_stable_pass
-/// （该 case 全部非 INFRA trial 都通过）。
-/// **不设 tool_score**：按运行后行为（是否调用工具、是否 raw fallback）筛选分母
-/// 有选择偏差——困难 case 更易 fallback 并被移出分母，剩下 2/2 也不能解释为工具
-/// 成功率。工具贡献只能由 forced/tool-disabled 配对实验（Phase 2）归因。报告改为
-/// 按固定分母输出行为分层（tool-only / mixed / raw-only / no-tool），分层是行为
-/// 描述而不是分数；raw_fallback 只是启发式诊断信号，不作为任何计分准入条件。
+/// 三个率都用固定分母，禁止按「是否调用工具」筛掉 trial（那是已废弃的
+/// `tool_score`，困难 case 更易 fallback 并被移出分母）。
+///
+/// - `answer_quality`（报告里同时标 `task_score`）：非 INFRA trial 的语义通过率，
+///   含 raw-only PASS。
+/// - `tool_adherence`：`mc>0` 的比例；分母是有匹配 record 的非 INFRA trial。
+/// - `tool_assisted_quality`：`mc>0` 且语义 PASS。这是 LLMOps 主指标。
+///
+/// 另给 `case_stable_pass`（该 case 全部非 INFRA trial 都通过）。行为分层
+/// （tool-only / mixed / raw-only / no-tool）只作诊断，不是分数。
+/// `raw_fallback` 是启发式信号，不作为任何计分准入条件。
 pub(crate) fn render_judge_markdown(
     judgements: &[TrialJudgement],
     records: &[TrialRecord],
@@ -824,7 +828,7 @@ pub(crate) fn render_judge_markdown(
         ));
     }
 
-    // task_score 现在是 **trial 级**通过率，分母固定为全部非 INFRA trial。
+    // answer_quality 是 trial 级语义通过率，分母固定为全部非 INFRA trial。
     // 另给 case_stable_pass：一个 case 的全部非 INFRA trial 都通过才算稳定通过。
     // 冻结 runner 的 baseline 已经证明这个区分有信息量——trial 率相同的两次运行，
     // 一次可能是「每个 case 都是 3/3 或 0/3」，另一次是「全都在抖」。
@@ -902,19 +906,44 @@ pub(crate) fn render_judge_markdown(
         .map(|record| format!("{}/{}/t{}", record.case_id, record.variant, record.trial))
         .collect();
 
+    let with_record: Vec<(&TrialJudgement, &TrialRecord)> = measured
+        .iter()
+        .filter_map(|judgement| matched(judgement).map(|record| (*judgement, record)))
+        .collect();
+    let tool_adherence = with_record
+        .iter()
+        .filter(|(_, record)| record.metadata_checker_invocations > 0)
+        .count();
+    let tool_assisted = with_record
+        .iter()
+        .filter(|(judgement, record)| {
+            judgement.judgement.passed && record.metadata_checker_invocations > 0
+        })
+        .count();
+
     markdown.push_str("\n## 得分口径\n\n");
     markdown.push_str(&format!(
-        "- task_score：{}/{} trial（全部非 INFRA trial，含绕过工具完成的；即任务完成率）\n",
+        "- answer_quality（task_score）：{}/{} trial（全部非 INFRA trial 的语义通过率，含绕过工具完成的）\n",
         task_pass,
         measured.len()
     ));
     markdown.push_str(&format!(
-        "- case_stable_pass：{}/{} case（该 case 的全部非 INFRA trial 都通过才算；单 trial 时与上一行同源，多 trial 时才有信息量）\n",
+        "- tool_adherence：{}/{} trial（mc>0；分母=有匹配 record 的非 INFRA trial；无 record 不计）\n",
+        tool_adherence,
+        with_record.len()
+    ));
+    markdown.push_str(&format!(
+        "- tool_assisted_quality：{}/{} trial（mc>0 且语义 PASS；分母同上。LLMOps 主指标：带着工具答对）\n",
+        tool_assisted,
+        with_record.len()
+    ));
+    markdown.push_str(&format!(
+        "- case_stable_pass：{}/{} case（该 case 的全部非 INFRA trial 都通过才算；单 trial 时与 answer_quality 同源，多 trial 时才有信息量）\n",
         stable_pass,
         case_trials.len()
     ));
     markdown.push_str(
-        "- 不设 tool_score：按运行后行为筛选分母有选择偏差（困难 case 更易 fallback 并被移出\n  分母），工具贡献须由 forced/tool-disabled 配对实验（Phase 2）归因。以下按固定\n  分母报告行为分层（行为描述，不是分数）：\n",
+        "- 三个率分母固定，不按行为筛 trial（已废弃的 tool_score 那样做会把困难 case\n  移出分母）。以下分层只描述行为，不是分数；tool-disabled 配对仍是归因实验：\n",
     );
     for index in 0..STRATA.len() {
         if stratum_trials[index] == 0 {

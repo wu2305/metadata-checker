@@ -4,6 +4,7 @@
 > Spec：[2026-07-17-cheap-model-comprehension-eval-design.md](../../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved，描述已冻结的 runner）
 > Spec（当前）：[2026-08-09-slm-eval-harness-design.md](../../specs/2026-08-09-slm-eval-harness-design.md)（approved）
 > Plan：[2026-07-27-m58-cnb-ai-chat-runner-plan.md](../../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done，对应冻结 runner）
+> Plan（当前）：[2026-08-23-m58-2-llmops-eval-loop-plan.md](../../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)（approved；LLMOps 闭环，kimi-code 浮动）
 
 ## 冻结公告（2026-08-09）
 
@@ -144,19 +145,21 @@ RunReport 升到 `1.3.0`，新增 `command_route_usage`（按 `<task_family> -> 
 | judge 模型与被测模型解耦 | done | judge = `glm-5.2`（AI IDE v2 路由），agent = `deepseek-v4-flash`（CNB AI Chat） |
 | dash 实跑干跑 + 故障注入 | done | `scripts/cnb-smoke-dry-run.sh`（`--fault empty\|dup\|noeat\|judgeleak`）+ [runbook](../../runbooks/m58-cnb-shell-dry-run.md) |
 | trial 身份链（transcript 命名 / 判分驱动 / 报告配对） | done（2026-08-17，见下节） | `.cnb.yml`、`kimi_smoke_judge.rs`、`kimi_harness_judge_tests.rs` |
-| commit 附件归档（records / judge / run / transcripts） | done（2026-08-20） | `.cnb.yml` endStage `upload_asset` + 干跑 `curl` stub；流水线校验禁止自定义 `CNB_` 变量，API 基址用 `ARCHIVE_API` |
-| **阶段 B 独立 pipeline（判分外移）** | **未做** | 判分目前仍内联在阶段 A 的同一个 stage 里（代码注释已声明是过渡态） |
+| commit 附件归档（records / judge / run / transcripts） | done（2026-08-22 实跑 cnb-gt7 四件附件落地） | `.cnb.yml` endStage `upload_asset`；upload-url 接受 201 |
+| `run.json` fixture/gold 身份 + kimi 浮动策略 | done（2026-08-23） | `fixture_sha256` / `kimi_pin_policy=float` / temperature `null` |
+| 三个固定分母率（answer / adherence / assisted） | done（2026-08-23） | `render_judge_markdown`；主指标 `tool_assisted_quality` |
+| **阶段 B 独立 pipeline（判分外移）** | **未做** | 计划 PR2；判分目前仍内联在阶段 A |
 | **配对网格（variant × case × trial）** | **未做** | `variant`/`trial` 只是占位，恒为 `baseline`/`1` |
 | **逐 case `provenance`** | **未做** | 8 个 case 均无 per-case `provenance`；顶层只有 `claimed_validation` + `evidence_status: recalled_unverifiable` |
 | **语料扩充** | **未做** | 仍是 8 个 case（6 个入冒烟），每个难度层 2–3 个 |
 
-### 没有可归档的阶段 A 实跑结果
+### 阶段 A 实跑归档（2026-08-22）
 
-仓库里**不存在**任何 kimi harness 冒烟的运行产物：`docs/ai-eval-runs/` 只有三份 2026-05-08 的旧快照，与本路径无关；`target/kimi-harness-smoke/` 是运行期目录，不进 Git。因此本节**不给任何通过率**。
+Live smoke `cnb-gt7-1k0l098a4` 把四件附件写到 commit `d6b33f0`（`run_tag=20260822T151103Z`）。阶段 A 的结果不再只活在被截断的 stage 日志里。阶段 B 仍未拆成独立 pipeline，见 [LLMOps 计划 PR2](../../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)。
 
-归档机制已落地（endStage 把 records / judge.md / run.json / transcripts.tar.gz 挂到 commit 附件页），但**还没有一次真实 CNB 跑把附件写上去**。在那次实跑之前，阶段 A 的结果仍然只可能活在被截断的 stage 日志里。**这正是必须先跑 `api_trigger_kimi_harness_smoke`、再把阶段 B 做成独立 pipeline 的理由**——机制在、产物不在，与 spec 点名批评的「本地手动跑一下」仍是同一类失效。
+kimi-code **不钉死**：`curl install.sh` 取当前 harness，只把 `kimi_version` 记进 `run.json`。跨版本分数差（cnb-7h8 的 3/6 vs cnb-gt7 的 2/6，kimi 0.37.2 → 0.38.0）是 harness 增量，不是 SKILL 信号。SKILL/CLI A/B 必须共享同一次 kimi 安装。
 
-引用规则同冻结公告：在阶段 B 落地、语料扩充到位之前，任何来自 6 问冒烟的数字都只是调试仪表，不能回答「廉价模型 + SKILL.md 到底够不够用」。
+引用规则：在语料扩充到位之前，任何来自 6 问冒烟的数字都只是调试仪表，不能回答「廉价模型 + SKILL.md 到底够不够用」。LLMOps 主指标是 `tool_assisted_quality`（带着工具答对），不是含 raw-only 的 `answer_quality`。
 
 ### trial 身份链修复（2026-08-17）
 
@@ -166,7 +169,7 @@ RunReport 升到 `1.3.0`，新增 `command_route_usage`（按 `<task_family> -> 
 2. **判分侧按 case_id 重拼路径**，不读 record 里的 `transcript_path`。重拼是一次独立猜测，两侧一旦分叉就会安静地评到另一份答案上。现改为**由 records 驱动判分**：一条 record = 一次真实运行 = 一份要判的答案，路径取自 `transcript_path`（不存在时按 basename 落到 transcript 目录，供 artifact 下载后重判）。无 `records.jsonl` 的手工重判路径保留，但身份显式记为 `unrecorded/t0`。
 3. **一份 case 级判分被扇出到该 case 的每条 record**（`render_judge_markdown`）。3 个 trial 会把同一个结论算三票。现改为按三元组一一配对，配不上的两侧都点名：缺 record 的 trial、有 record 却没判分的 trial（后者意味着算力已花却在报告里消失）。
 
-伴随的口径变化：`task_score` 从 case 级变为 **trial 级**通过率，另加 `case_stable_pass`（该 case 全部非 INFRA trial 都通过）。单 trial 时两者同源，多 trial 时才有信息量——冻结 runner 的 baseline 已经证明这个区分能分辨「每个 case 都是 3/3 或 0/3」与「全都在抖」。
+伴随的口径变化：`answer_quality`（报告里同时标 `task_score`）是 trial 级语义通过率；另加 `tool_adherence`（mc>0）与 `tool_assisted_quality`（mc>0 且 PASS，LLMOps 主指标），分母固定、不按行为筛 trial。`case_stable_pass` 仍是「该 case 全部非 INFRA trial 都通过」。单 trial 时 `answer_quality` 与 `case_stable_pass` 同源，多 trial 时才有信息量。
 
 三条守卫同时加上，防止改回去：`test_cnb_transcript_names_carry_variant_and_trial` 直接解析 `.cnb.yml` 断言命名规则；`test_render_judge_markdown_scores_each_trial_independently` 替换了此前**编码了该缺陷**的测试（原测试用一份判分 + 两条 record 断言「两个分层各 PASS 1」）；干跑脚本断言产出 6 份带 `__baseline__t1` 的 transcript 且 endStage 标签带身份。
 
