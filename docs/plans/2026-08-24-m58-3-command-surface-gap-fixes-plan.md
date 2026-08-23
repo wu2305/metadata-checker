@@ -2,7 +2,7 @@
 
 > 状态：**draft**（随 spec 评审修订同步起草；spec approved 后本计划一并转 approved）
 > 上游：[M58.3 spec](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（draft，
-> 四轮独立评审修订；id 文法、诊断信封、迁移机制、事实输出契约的权威定义都在 spec，本文不重复）。
+> 五轮独立评审修订；id 文法、诊断信封、迁移机制、事实输出契约的权威定义都在 spec，本文不重复）。
 > journal：[m58-cheap-model-comprehension-eval.md](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)。
 > 修订包：[2026-08-24-m58-3-appendix-a-amendment.md](2026-08-24-m58-3-appendix-a-amendment.md)
 > （附录 A 回填 + 三处更正 + PR2 三条修订建议，已并入本文与 spec）。
