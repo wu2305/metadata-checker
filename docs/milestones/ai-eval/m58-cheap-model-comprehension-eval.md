@@ -10,7 +10,8 @@
 > Plan（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md](../../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（approved）
 > Spec（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-design.md](../../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)（approved）
 > Plan（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-plan.md](../../plans/2026-08-23-m58-4-llm-paired-benefit-plan.md)（done）
-> Spec（M58.3）：[2026-08-24-m58-3-command-surface-gap-fixes-design.md](../../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（draft；可观测性打底 + F1–F6 缺口修复 + Phase 3 页面内模型节点身份）
+> Spec（M58.3）：[2026-08-24-m58-3-command-surface-gap-fixes-design.md](../../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（approved；可观测性打底 + F1–F6 缺口修复 + Phase 3 页面内模型节点身份）
+> Plan（M58.3）：[2026-08-24-m58-3-command-surface-gap-fixes-plan.md](../../plans/2026-08-24-m58-3-command-surface-gap-fixes-plan.md)（approved）
 
 ## 冻结公告（2026-08-09）
 
