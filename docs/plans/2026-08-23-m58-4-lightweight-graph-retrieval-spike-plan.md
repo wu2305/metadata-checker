@@ -137,7 +137,7 @@ git diff --check
 - 分支：`auto/graph-rag-spike-a7c3`；
 - 基线：`aeefc45`；实现 commit：`567d904`；
 - 正常 case：3（writer、availability/DataFlow、action/condition）；
-- 边界测试：3（dangling mass、无有效 seed、迭代上限）；
+- 模块单测：4（dangling mass、无有效 seed、迭代上限、Context/Auto 显式权重）；
 - 另有稳定序列化和 score tie-break 集成断言。
 
 聚合结果：
@@ -157,7 +157,7 @@ git diff --check
 
 - `cargo fmt --check`：通过；
 - `cargo test --features cli-local --test graph_retrieval_spike_tests`：3 passed；
-- `cargo test --lib graph_retrieval`：3 passed；
+- `cargo test --lib graph_retrieval`：4 passed；
 - `cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown`：通过；
 - `git diff --check`：通过。
 

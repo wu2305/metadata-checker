@@ -93,7 +93,7 @@ relevant recall / precision / gold terminal recall 为 `0.3056 / 1.0000 / 0.0000
 首跑只暴露上限不足，最终保留阈值并把默认上限调整为 200。
 
 typed PPR 和无权 hop 的截断前候选池同为 6/7/7，因此结果只支持“相同 top-k 下有效密度
-更高”，不支持“候选池更小”。远端 `cargo fmt --check`、3 个集成测试、3 个边界单测、
+更高”，不支持“候选池更小”。远端 `cargo fmt --check`、3 个集成测试、4 个模块单测、
 browser-wasm check 与 `git diff --check` 均通过。
 
 结论为 **deterministic go**，不是产品 go。代码未接公共查询、未接 semantic seed、

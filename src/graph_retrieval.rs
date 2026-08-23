@@ -304,10 +304,31 @@ fn intent_edge_weights(intent: TraversalIntent, edge_type: &EdgeType) -> (f64, f
             EdgeType::Contains => (0.02, 0.02),
             _ => (0.0, 0.0),
         },
+        // 这里刻意不用通配符：新增 EdgeType 必须先明确分类，不能自动获得高权。
+        // 这把“未知关系不隐式传播”变成编译期约束。
         TraversalIntent::Context | TraversalIntent::Auto => match edge_type {
             EdgeType::Contains => (0.05, 0.05),
             EdgeType::EmbedsPage => (0.1, 0.1),
-            _ => (0.5, 0.5),
+            EdgeType::Reads
+            | EdgeType::Writes
+            | EdgeType::Triggers
+            | EdgeType::DataflowInput
+            | EdgeType::ActionWrites
+            | EdgeType::OpensPage
+            | EdgeType::PassesParam
+            | EdgeType::SetsParam
+            | EdgeType::OutputsTo
+            | EdgeType::DataflowInternal
+            | EdgeType::DataflowOutput
+            | EdgeType::FieldAlias
+            | EdgeType::FieldWrite
+            | EdgeType::ActionReads
+            | EdgeType::ActionNavigates
+            | EdgeType::ActionSetsParam
+            | EdgeType::ActionControlsComponent
+            | EdgeType::ActionValidates
+            | EdgeType::ActionLoadsData
+            | EdgeType::DependsOn => (0.5, 0.5),
         },
     }
 }
@@ -392,5 +413,22 @@ mod tests {
 
         assert_eq!(result.iterations, 1);
         assert_eq!(result.converged, false);
+    }
+
+    /// Context/Auto 的已知语义边和结构边必须保持显式、不同档位。
+    #[test]
+    fn graph_retrieval_context_weights_are_explicit() {
+        assert_eq!(
+            intent_edge_weights(TraversalIntent::Context, &EdgeType::Reads),
+            (0.5, 0.5)
+        );
+        assert_eq!(
+            intent_edge_weights(TraversalIntent::Context, &EdgeType::Contains),
+            (0.05, 0.05)
+        );
+        assert_eq!(
+            intent_edge_weights(TraversalIntent::Auto, &EdgeType::EmbedsPage),
+            (0.1, 0.1)
+        );
     }
 }
