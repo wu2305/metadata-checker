@@ -246,6 +246,54 @@ fn test_cnb_run_json_records_eval_identity() {
     );
 }
 
+/// 阶段 B 必须是同一 `api_trigger_kimi_harness_smoke` 的下一 stage，复用
+/// workspace / cargo target / smoke 目录。另起 pipeline 会重装 kimi、重编 CLI。
+#[test]
+fn test_cnb_stage_b_judge_follows_smoke_in_same_pipeline() {
+    let cnb = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".cnb.yml"))
+        .expect("读取 .cnb.yml 失败");
+    let smoke = cnb
+        .find("name: kimi-code harness smoke run")
+        .expect("找不到阶段 A smoke run");
+    let judge = cnb
+        .find("name: kimi-code harness judge")
+        .expect("找不到阶段 B judge");
+    assert!(
+        smoke < judge,
+        "judge 必须紧跟在同一 pipeline 的 smoke run 之后，不能另起 api_trigger"
+    );
+    assert!(
+        !cnb.contains("api_trigger_kimi_harness_judge"),
+        "不要为判分再开一条 api_trigger：runner env 必须由本 pipeline 复用"
+    );
+    let smoke_script = &cnb[smoke..judge];
+    assert!(
+        !smoke_script.contains("kimi_harness_judge_tests -- --ignored"),
+        "阶段 A 不应再跑 live judge；判分属于下一 stage"
+    );
+    let judge_script = &cnb[judge..];
+    let judge_end = judge_script
+        .find("endStages:")
+        .expect("judge stage 之后应是 endStages");
+    let judge_script = &judge_script[..judge_end];
+    assert!(
+        judge_script.contains("kimi_harness_judge_tests -- --ignored"),
+        "阶段 B 必须跑 live judge"
+    );
+    assert!(
+        !judge_script.contains("install.sh"),
+        "阶段 B 不得重装 kimi-code"
+    );
+    assert!(
+        !judge_script.contains("cargo build --release"),
+        "阶段 B 不得重编 release 二进制"
+    );
+    assert!(
+        judge_script.contains("fixture_sha mismatch"),
+        "阶段 B 必须核对 run.json 的 fixture_sha256"
+    );
+}
+
 /// `.cnb.yml` 产出的 transcript / stderr 文件名必须带 variant 与 trial。
 ///
 /// 与上一条测试同一动机，换一个失效模式：文件名只按 case_id 命名时，同一 stage 内

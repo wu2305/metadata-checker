@@ -1,7 +1,7 @@
 # CNB 冒烟 stage 的本地 dash 干跑（M58.2）
 
-> 适用：`.cnb.yml` 的 `api_trigger_kimi_harness_smoke` → `kimi-code harness smoke run` stage
-> 与 `report smoke summary` endStage（两者都逐字提取、dash 执行）。
+> 适用：`.cnb.yml` 的 `api_trigger_kimi_harness_smoke` → `kimi-code harness smoke run`（阶段 A）再 `kimi-code harness judge`（阶段 B，同一 pipeline、同一 workspace）
+> 与 `report smoke summary` endStage（均逐字提取、dash 执行）。
 > 工具：[`scripts/cnb-smoke-dry-run.sh`](../../scripts/cnb-smoke-dry-run.sh)
 
 ## 为什么有这份 runbook

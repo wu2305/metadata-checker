@@ -31,12 +31,12 @@ raw-only PASS 计入 `answer_quality`，不计入 `tool_assisted_quality`。禁�
 - 干跑断言新字段；Rust 单测锁三率口径。
 - journal / INDEX 链到本计划。
 
-### PR2 — 阶段 B 独立判分 pipeline
+### PR2 — 阶段 B 同 pipeline 下一 stage（复用 runner env）
 
-- 新 `api_trigger_kimi_harness_judge`：入参 commit SHA + `run_tag`，下载 Stage A 四件附件，再跑 judge。
-- 语义 FAIL 不判红；缺附件 / schema / 身份撞号 / fixture_sha 与当前 fixture 不一致 / judge API 失败才 INFRA。
-- Stage A 内联 judge 保留到阶段 B 至少一次实跑成功。
-- 同一 job 内跑两个 `KIMI_SMOKE_VARIANT` 是后续 SKILL A/B 的触发方式，不在 PR2 做 SKILL 改写。
+- **不**新增 `api_trigger_kimi_harness_judge`。A（generate）与 B（judge）都在 `api_trigger_kimi_harness_smoke` 里顺序执行。
+- CNB 同一 pipeline 的 stage 共用 workspace；`docker.volumes` 里的 `target/cnb/kimi-harness-build` 与 `target/kimi-harness-smoke` 跨 stage 保留。B 不安装 kimi、不编 release、不拉语料。
+- 语义 FAIL 不判红；缺产物 / `fixture_sha256` 对不上 / judge API 失败才 INFRA。
+- 同一 job 内跑两个 `KIMI_SMOKE_VARIANT` 是后续 SKILL A/B 的触发方式，不在本 PR 改 SKILL。
 
 ## 非目标
 
@@ -49,4 +49,4 @@ raw-only PASS 计入 `answer_quality`，不计入 `tool_assisted_quality`。禁�
 
 1. 干跑绿；`kimi_harness_judge_tests` 覆盖三率与 `run.json` 字段守卫。
 2. 下一轮 live smoke 的 `run.json` 含 `fixture_sha256` 与 `kimi_pin_policy=float`。
-3. PR2 能对 `d6b33f0` / `20260822T151103Z` 重判并产出新 `judge.md`（fixture_sha 对不上则 INFRA，不静默用新 gold 评旧答案）。
+3. 同一次 `api_trigger_kimi_harness_smoke` 里 smoke run 之后有 `kimi-code harness judge`；干跑先 A 后 B、A 失败则跳过 B。

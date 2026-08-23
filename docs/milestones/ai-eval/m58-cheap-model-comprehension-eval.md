@@ -148,14 +148,14 @@ RunReport 升到 `1.3.0`，新增 `command_route_usage`（按 `<task_family> -> 
 | commit 附件归档（records / judge / run / transcripts） | done（2026-08-22 实跑 cnb-gt7 四件附件落地） | `.cnb.yml` endStage `upload_asset`；upload-url 接受 201 |
 | `run.json` fixture/gold 身份 + kimi 浮动策略 | done（2026-08-23） | `fixture_sha256` / `kimi_pin_policy=float` / temperature `null` |
 | 三个固定分母率（answer / adherence / assisted） | done（2026-08-23） | `render_judge_markdown`；主指标 `tool_assisted_quality` |
-| **阶段 B 独立 pipeline（判分外移）** | **未做** | 计划 PR2；判分目前仍内联在阶段 A |
+| 阶段 B 同 pipeline 判分（复用 runner env） | done（2026-08-23） | `kimi-code harness judge` 紧跟 smoke run；不另起 api_trigger |
 | **配对网格（variant × case × trial）** | **未做** | `variant`/`trial` 只是占位，恒为 `baseline`/`1` |
 | **逐 case `provenance`** | **未做** | 8 个 case 均无 per-case `provenance`；顶层只有 `claimed_validation` + `evidence_status: recalled_unverifiable` |
 | **语料扩充** | **未做** | 仍是 8 个 case（6 个入冒烟），每个难度层 2–3 个 |
 
 ### 阶段 A 实跑归档（2026-08-22）
 
-Live smoke `cnb-gt7-1k0l098a4` 把四件附件写到 commit `d6b33f0`（`run_tag=20260822T151103Z`）。阶段 A 的结果不再只活在被截断的 stage 日志里。阶段 B 仍未拆成独立 pipeline，见 [LLMOps 计划 PR2](../../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)。
+Live smoke `cnb-gt7-1k0l098a4` 把四件附件写到 commit `d6b33f0`（`run_tag=20260822T151103Z`）。阶段 B 是同一 `api_trigger_kimi_harness_smoke` 的下一 stage，复用 workspace / cargo target / smoke 目录，不另起流水线。
 
 kimi-code **不钉死**：`curl install.sh` 取当前 harness，只把 `kimi_version` 记进 `run.json`。跨版本分数差（cnb-7h8 的 3/6 vs cnb-gt7 的 2/6，kimi 0.37.2 → 0.38.0）是 harness 增量，不是 SKILL 信号。SKILL/CLI A/B 必须共享同一次 kimi 安装。
 

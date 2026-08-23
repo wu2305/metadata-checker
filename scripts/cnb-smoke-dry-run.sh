@@ -227,17 +227,28 @@ esac
 
 # --- 逐字提取 stage 脚本 -----------------------------------------------
 STAGE_SH="$SANDBOX/stage.sh"
+JUDGE_SH="$SANDBOX/judge.sh"
 ENDSTAGE_SH="$SANDBOX/endstage.sh"
-python3 - "$REPO_ROOT/.cnb.yml" "$STAGE_SH" "$ENDSTAGE_SH" <<'PY'
+python3 - "$REPO_ROOT/.cnb.yml" "$STAGE_SH" "$JUDGE_SH" "$ENDSTAGE_SH" <<'PY'
 import sys, yaml
-cnb_path, out_path, endstage_path = sys.argv[1], sys.argv[2], sys.argv[3]
+cnb_path, out_path, judge_path, endstage_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 doc = yaml.safe_load(open(cnb_path, encoding="utf-8"))
 pipeline = doc["$"]["api_trigger_kimi_harness_smoke"][0]
-stages = [s for s in pipeline["stages"] if s.get("name") == "kimi-code harness smoke run"]
-if len(stages) != 1:
-    raise SystemExit(f"expected exactly 1 smoke stage, found {len(stages)}")
-open(out_path, "w", encoding="utf-8").write(stages[0]["script"])
-print(f"extracted stage script: {len(stages[0]['script'].splitlines())} lines")
+stages = pipeline["stages"]
+smoke = [s for s in stages if s.get("name") == "kimi-code harness smoke run"]
+judge = [s for s in stages if s.get("name") == "kimi-code harness judge"]
+if len(smoke) != 1:
+    raise SystemExit(f"expected exactly 1 smoke stage, found {len(smoke)}")
+if len(judge) != 1:
+    raise SystemExit(f"expected exactly 1 judge stage, found {len(judge)}")
+smoke_i = stages.index(smoke[0])
+judge_i = stages.index(judge[0])
+if smoke_i >= judge_i:
+    raise SystemExit("judge stage must follow smoke run in the same pipeline")
+open(out_path, "w", encoding="utf-8").write(smoke[0]["script"])
+open(judge_path, "w", encoding="utf-8").write(judge[0]["script"])
+print(f"extracted smoke script: {len(smoke[0]['script'].splitlines())} lines")
+print(f"extracted judge script: {len(judge[0]['script'].splitlines())} lines")
 endstages = [s for s in pipeline.get("endStages", []) if s.get("name") == "report smoke summary"]
 if len(endstages) != 1:
     raise SystemExit(f"expected exactly 1 report smoke summary endStage, found {len(endstages)}")
@@ -246,7 +257,7 @@ print(f"extracted endStage script: {len(endstages[0]['script'].splitlines())} li
 PY
 
 # --- 执行 ---------------------------------------------------------------
-echo "=== running stage under dash (fault=$FAULT) ==="
+echo "=== running smoke stage under dash (fault=$FAULT) ==="
 STAGE_LOG="$SANDBOX/stage.log"
 set +e
 (
@@ -255,22 +266,49 @@ set +e
   KIMI_CODE_HOME="$SANDBOX/kimi-home" \
   CNB_TOKEN="stub-token-not-a-real-secret" \
   CNB_REPO_SLUG="wu2305/metadata-checker" \
-  DRY_RUN_JUDGE_LEAK="$DRY_RUN_JUDGE_LEAK" \
   dash "$STAGE_SH"
 ) > "$STAGE_LOG" 2>&1
 STAGE_EXIT=$?
 set -e
 if grep -qF "stub-token-not-a-real-secret" "$STAGE_LOG"; then
-  echo "FAIL: CNB_TOKEN 出现在 stage 日志中" >&2
+  echo "FAIL: CNB_TOKEN 出现在 smoke stage 日志中" >&2
   exit 1
 fi
+cat "$STAGE_LOG"
+echo "=== smoke stage exit=$STAGE_EXIT ==="
+
+# CNB：同一 pipeline 里后一 stage 复用 workspace；前一 stage 失败则跳过后续。
+JUDGE_EXIT=""
+JUDGE_LOG="$SANDBOX/judge.log"
+if [ "$STAGE_EXIT" = "0" ]; then
+  echo "=== running judge stage under dash (same workdir) ==="
+  set +e
+  (
+    cd "$WORK"
+    PATH="$STUB_BIN:$PATH" \
+    CNB_TOKEN="stub-token-not-a-real-secret" \
+    CNB_REPO_SLUG="wu2305/metadata-checker" \
+    DRY_RUN_JUDGE_LEAK="$DRY_RUN_JUDGE_LEAK" \
+    dash "$JUDGE_SH"
+  ) > "$JUDGE_LOG" 2>&1
+  JUDGE_EXIT=$?
+  set -e
+  if grep -qF "stub-token-not-a-real-secret" "$JUDGE_LOG"; then
+    echo "FAIL: CNB_TOKEN 出现在 judge stage 日志中" >&2
+    exit 1
+  fi
+  cat "$JUDGE_LOG"
+  echo "=== judge stage exit=$JUDGE_EXIT ==="
+else
+  echo "=== skipping judge stage (smoke failed, CNB would skip) ==="
+fi
+PIPE_EXIT="${JUDGE_EXIT:-$STAGE_EXIT}"
+
 if [ -d "$WORK/target/kimi-harness-smoke" ] \
   && grep -rqF "stub-token-not-a-real-secret" "$WORK/target/kimi-harness-smoke"; then
   echo "FAIL: CNB_TOKEN 在 stage 结束后仍留在产物中" >&2
   exit 1
 fi
-cat "$STAGE_LOG"
-echo "=== stage exit=$STAGE_EXIT ==="
 
 # endStage 与 CNB 行为一致：无论 main stage 退出码如何都执行——失败路径的报告
 # 发布（judge.md、records 投影、run manifest）正是它的职责。同样 dash + 逐字脚本。
@@ -361,10 +399,10 @@ case "$FAULT" in
   none)   EXPECT_OK=1 ;;
   *)      EXPECT_OK=0 ;;
 esac
-if [ "$EXPECT_OK" = "1" ] && [ "$STAGE_EXIT" != "0" ]; then
-  echo "FAIL: 正常路径本应退出 0，实际 $STAGE_EXIT" >&2; exit 1
+if [ "$EXPECT_OK" = "1" ] && [ "$PIPE_EXIT" != "0" ]; then
+  echo "FAIL: 正常路径本应退出 0，实际 smoke=$STAGE_EXIT judge=${JUDGE_EXIT:-skip}" >&2; exit 1
 fi
-if [ "$EXPECT_OK" = "0" ] && [ "$STAGE_EXIT" = "0" ]; then
+if [ "$EXPECT_OK" = "0" ] && [ "$PIPE_EXIT" = "0" ]; then
   echo "FAIL: fault=$FAULT 本应判红，实际退出 0（静默假绿）" >&2; exit 1
 fi
 if [ "$FAULT" = "judgeleak" ]; then
@@ -374,4 +412,4 @@ if [ "$FAULT" = "judgeleak" ]; then
   grep -q "stub judge" "$ENDSTAGE_LOG" || { echo "FAIL: 失败路径 judge.md 内容缺失" >&2; exit 1; }
 fi
 # 花括号是必需的：紧跟其后的全角括号会被 bash 当成变量名的一部分。
-echo "OK: fault=$FAULT 行为符合预期（exit=${STAGE_EXIT}）"
+echo "OK: fault=$FAULT 行为符合预期（exit=${PIPE_EXIT} smoke=$STAGE_EXIT judge=${JUDGE_EXIT:-skip})"
