@@ -10,6 +10,9 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// cli-local runtime 读取的实验图召回开关。
+pub const EXPERIMENTAL_GRAPH_RETRIEVAL_ENV: &str = "METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL";
+
 /// 单个图召回种子。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphSeed {
@@ -67,6 +70,30 @@ pub struct GraphRetrievalResult {
     pub effective_seed_count: usize,
     /// 截断到 top-k 前的正分候选数。
     pub candidate_pool_count: usize,
+}
+
+/// ExplainCondition 的图召回策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphRetrievalStrategy {
+    /// 保持既有查询与输出契约。
+    Baseline,
+    /// 追加按查询意图赋权的 PPR 候选。
+    TypedPpr,
+}
+
+impl GraphRetrievalStrategy {
+    /// 解析 runtime 实验开关；未设置时保持 baseline。
+    pub fn parse(value: Option<&str>) -> Result<Self> {
+        match value {
+            None | Some("baseline") => Ok(Self::Baseline),
+            Some("typed-ppr") => Ok(Self::TypedPpr),
+            Some(other) => anyhow::bail!(
+                "{} 只接受 baseline 或 typed-ppr，实际为 '{}'",
+                EXPERIMENTAL_GRAPH_RETRIEVAL_ENV,
+                other
+            ),
+        }
+    }
 }
 
 /// 在现有类型图上执行按查询意图赋权的 Personalized PageRank。
@@ -429,6 +456,29 @@ mod tests {
         assert_eq!(
             intent_edge_weights(TraversalIntent::Auto, &EdgeType::EmbedsPage),
             (0.1, 0.1)
+        );
+    }
+
+    /// runtime 策略解析必须保持未设置时 baseline，并只接受批准值。
+    #[test]
+    fn graph_retrieval_strategy_rejects_unknown_value() {
+        assert_eq!(
+            GraphRetrievalStrategy::parse(None).expect("未设置时应使用 baseline"),
+            GraphRetrievalStrategy::Baseline
+        );
+        assert_eq!(
+            GraphRetrievalStrategy::parse(Some("baseline")).expect("显式 baseline 应被接受"),
+            GraphRetrievalStrategy::Baseline
+        );
+        assert_eq!(
+            GraphRetrievalStrategy::parse(Some("typed-ppr")).expect("typed-ppr 应被接受"),
+            GraphRetrievalStrategy::TypedPpr
+        );
+        let error =
+            GraphRetrievalStrategy::parse(Some("typed_ppr")).expect_err("未知策略不得静默回退");
+        assert_eq!(
+            error.to_string().contains("只接受 baseline 或 typed-ppr"),
+            true
         );
     }
 }

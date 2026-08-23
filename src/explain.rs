@@ -19,6 +19,9 @@ use crate::explain::handlers::{
     explain_action_graph, explain_component_graph, explain_condition_graph, explain_dataflow_graph,
     explain_field_graph, explain_model_graph, explain_page_graph,
 };
+use crate::graph_retrieval::{
+    GraphRetrievalConfig, GraphRetrievalStrategy, GraphSeed, typed_personalized_page_rank,
+};
 use crate::graph_store::GraphReadStore;
 use crate::model_scope::{
     is_dataflow_model, parse_scoped_model_target, resolve_model_target_in_page,
@@ -28,7 +31,7 @@ use crate::path::PathFinder;
 use crate::path::PathSelector;
 use crate::query::find_candidates;
 use crate::superpage::{RefType, SuperPageMetadata};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::io::{self, Write};
 
@@ -429,12 +432,86 @@ pub fn build_explain_condition_output(
     build_explain_condition_output_with_intent(graph, target_id, _budget, TraversalIntent::Auto)
 }
 
+/// 为 typed-PPR treatment 构造候选上下文和路径 bridge。
+fn build_experimental_graph_retrieval(
+    graph: &dyn GraphReadStore,
+    target_node: &crate::graph::Node,
+    intent: TraversalIntent,
+    strategy: GraphRetrievalStrategy,
+) -> Result<(Vec<String>, Option<Value>)> {
+    if strategy == GraphRetrievalStrategy::Baseline {
+        return Ok((Vec::new(), None));
+    }
+
+    let result = typed_personalized_page_rank(
+        graph,
+        intent,
+        &[GraphSeed {
+            node_id: target_node.id.clone(),
+            score: 1.0,
+        }],
+        GraphRetrievalConfig::default(),
+    )
+    .with_context(|| format!("为目标 '{}' 执行 typed PPR 失败", target_node.id))?;
+
+    let mut bridge_anchors = Vec::new();
+    let mut ranked_candidates = Vec::new();
+    for (rank, ranked_node) in result
+        .ranked_nodes
+        .iter()
+        .filter(|ranked_node| ranked_node.node_id != target_node.id)
+        .enumerate()
+    {
+        let node = graph
+            .get_node(&ranked_node.node_id)
+            .with_context(|| format!("读取 PPR 候选 '{}' 失败", ranked_node.node_id))?
+            .with_context(|| format!("PPR 候选 '{}' 不存在", ranked_node.node_id))?;
+        bridge_anchors.push(ranked_node.node_id.clone());
+        ranked_candidates.push(json!({
+            "rank": rank + 1,
+            "node_id": ranked_node.node_id,
+            "node_type": format!("{:?}", node.node_type),
+            "name": node.name,
+            "path": node.path,
+        }));
+    }
+
+    let context = json!({
+        "strategy": "typed_ppr",
+        "evidence_role": "candidate_only",
+        "seed_node_id": target_node.id,
+        "effective_seed_count": result.effective_seed_count,
+        "candidate_pool_count": result.candidate_pool_count,
+        "iterations": result.iterations,
+        "converged": result.converged,
+        "ranked_candidates": ranked_candidates,
+    });
+    Ok((bridge_anchors, Some(context)))
+}
+
 /// 构建带 M33 intent 的 explain-condition 结构化 JSON 输出，不直接打印
 pub fn build_explain_condition_output_with_intent(
     graph: &dyn GraphReadStore,
     target_id: &str,
     _budget: &str,
     intent: TraversalIntent,
+) -> Result<serde_json::Value> {
+    build_explain_condition_output_with_intent_and_retrieval(
+        graph,
+        target_id,
+        _budget,
+        intent,
+        GraphRetrievalStrategy::Baseline,
+    )
+}
+
+/// 构建带 intent 与显式图召回策略的 explain-condition 结构化输出。
+pub fn build_explain_condition_output_with_intent_and_retrieval(
+    graph: &dyn GraphReadStore,
+    target_id: &str,
+    _budget: &str,
+    intent: TraversalIntent,
+    retrieval_strategy: GraphRetrievalStrategy,
 ) -> Result<serde_json::Value> {
     let (target_node, scoped_page_node, dataflow_model_id) =
         if let Some((page_ref, local_model_id)) = parse_scoped_model_target(target_id) {
@@ -475,6 +552,13 @@ pub fn build_explain_condition_output_with_intent(
         }
     };
     let page_path = page_node.path.clone();
+    let (retrieval_bridge_anchors, experimental_graph_retrieval) =
+        build_experimental_graph_retrieval(
+            graph,
+            &target_node,
+            effective_intent,
+            retrieval_strategy,
+        )?;
 
     let mut blocking_conditions: Vec<serde_json::Value> = Vec::new();
     let mut data_empty_gates: Vec<serde_json::Value> = Vec::new();
@@ -725,7 +809,7 @@ pub fn build_explain_condition_output_with_intent(
             target_anchors: vec![target_node.id.clone()],
             source_anchors: Vec::new(),
             sink_anchors: Vec::new(),
-            bridge_anchors: Vec::new(),
+            bridge_anchors: retrieval_bridge_anchors.clone(),
             excluded_anchors: Vec::new(),
             budget: _budget.to_string(),
         };
@@ -995,7 +1079,7 @@ pub fn build_explain_condition_output_with_intent(
         "related_context_count": related_context.len(),
     });
 
-    let details = serde_json::json!({
+    let mut details = serde_json::json!({
         "target": {
             "node_id": target_node.id,
             "node_type": format!("{:?}", target_node.node_type),
@@ -1023,6 +1107,16 @@ pub fn build_explain_condition_output_with_intent(
         "truncation_guard": truncation_guard,
         "required_followups": required_followups,
     });
+
+    if let Some(experimental_context) = experimental_graph_retrieval {
+        details
+            .as_object_mut()
+            .context("ExplainCondition details 必须是 JSON object")?
+            .insert(
+                "experimental_graph_retrieval".to_string(),
+                experimental_context,
+            );
+    }
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(target_id.to_string());

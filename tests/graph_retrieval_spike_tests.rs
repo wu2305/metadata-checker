@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use metadata_checker::answer_contract::TraversalIntent;
 use metadata_checker::graph::{EdgeType, NodeType};
 use metadata_checker::graph_retrieval::{
-    GraphRetrievalConfig, GraphSeed, typed_personalized_page_rank,
+    GraphRetrievalConfig, GraphRetrievalStrategy, GraphSeed, typed_personalized_page_rank,
 };
 use metadata_checker::graph_store::GraphReadStore;
 use metadata_checker::memory_graph_store::MemoryGraphStore;
@@ -393,5 +393,86 @@ fn graph_retrieval_spike_breaks_score_ties_by_node_id() -> Result<()> {
             .collect::<Vec<_>>(),
         vec!["field:a", "field:b"]
     );
+    Ok(())
+}
+
+/// 显式 baseline 必须与既有 ExplainCondition 输出完全一致。
+#[test]
+fn graph_retrieval_baseline_preserves_explain_contract() -> Result<()> {
+    let suite = load_suite()?;
+    let case = &suite.cases[2];
+    let graph = build_graph(case);
+    let target_id = &case.seed_scores[0].node_id;
+
+    let legacy = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        target_id,
+        "normal",
+        TraversalIntent::Action,
+    )?;
+    let explicit =
+        metadata_checker::explain::build_explain_condition_output_with_intent_and_retrieval(
+            &graph,
+            target_id,
+            "normal",
+            TraversalIntent::Action,
+            GraphRetrievalStrategy::Baseline,
+        )?;
+
+    assert_eq!(legacy, explicit);
+    assert_eq!(
+        explicit
+            .get("details")
+            .and_then(|details| details.get("experimental_graph_retrieval"))
+            .is_none(),
+        true
+    );
+    Ok(())
+}
+
+/// typed-PPR treatment 必须暴露候选上下文，但明确声明候选不是事实。
+#[test]
+fn graph_retrieval_typed_treatment_exposes_candidate_only_context() -> Result<()> {
+    let suite = load_suite()?;
+    let case = &suite.cases[2];
+    let graph = build_graph(case);
+    let target_id = &case.seed_scores[0].node_id;
+
+    let output =
+        metadata_checker::explain::build_explain_condition_output_with_intent_and_retrieval(
+            &graph,
+            target_id,
+            "normal",
+            TraversalIntent::Action,
+            GraphRetrievalStrategy::TypedPpr,
+        )?;
+    let context = output
+        .get("details")
+        .and_then(|details| details.get("experimental_graph_retrieval"))
+        .context("typed treatment 必须输出 experimental_graph_retrieval")?;
+
+    assert_eq!(
+        context.get("strategy").and_then(|value| value.as_str()),
+        Some("typed_ppr")
+    );
+    assert_eq!(
+        context
+            .get("evidence_role")
+            .and_then(|value| value.as_str()),
+        Some("candidate_only")
+    );
+    assert_eq!(
+        context.get("converged").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    let candidate_ids = context
+        .get("ranked_candidates")
+        .and_then(|value| value.as_array())
+        .context("typed treatment 必须输出候选数组")?
+        .iter()
+        .filter_map(|candidate| candidate.get("node_id").and_then(|value| value.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(candidate_ids.contains(&"action:submit.validate"), true);
+    assert_eq!(candidate_ids.contains(&target_id.as_str()), false);
     Ok(())
 }

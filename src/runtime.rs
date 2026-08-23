@@ -1,3 +1,5 @@
+#[cfg(feature = "cli-local")]
+use anyhow::Context;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -15,6 +17,30 @@ use crate::dense_graph::DenseGraphSnapshot;
 use crate::graph::GraphDB;
 use crate::response_processor::ResponseProcessor;
 pub use crate::response_processor::{RuntimeQueryResponse, RuntimeTiming};
+
+/// 读取 cli-local runtime 的图召回实验策略。
+#[cfg(feature = "cli-local")]
+fn runtime_graph_retrieval_strategy() -> Result<crate::graph_retrieval::GraphRetrievalStrategy> {
+    let raw_value = std::env::var_os(crate::graph_retrieval::EXPERIMENTAL_GRAPH_RETRIEVAL_ENV);
+    let value = raw_value
+        .as_deref()
+        .map(|value| {
+            value.to_str().with_context(|| {
+                format!(
+                    "{} 必须是 UTF-8",
+                    crate::graph_retrieval::EXPERIMENTAL_GRAPH_RETRIEVAL_ENV
+                )
+            })
+        })
+        .transpose()?;
+    crate::graph_retrieval::GraphRetrievalStrategy::parse(value)
+}
+
+/// browser-wasm 不读取进程环境变量，始终保持 baseline。
+#[cfg(not(feature = "cli-local"))]
+fn runtime_graph_retrieval_strategy() -> Result<crate::graph_retrieval::GraphRetrievalStrategy> {
+    Ok(crate::graph_retrieval::GraphRetrievalStrategy::Baseline)
+}
 
 /// Runtime 使用模式，用于区分一次性 CLI 查询和长生命周期服务。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -928,11 +954,13 @@ impl GraphRuntime {
                 let intent = crate::explain::TraversalIntent::parse(
                     request.intent.as_deref().unwrap_or("auto"),
                 )?;
-                crate::explain::build_explain_condition_output_with_intent(
+                let retrieval_strategy = runtime_graph_retrieval_strategy()?;
+                crate::explain::build_explain_condition_output_with_intent_and_retrieval(
                     &self.graph,
                     &request.target,
                     &request.budget,
                     intent,
+                    retrieval_strategy,
                 )?
             }
             ToolCommand::QueryModel => crate::query::build_query_model_output(
