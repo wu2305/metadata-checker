@@ -116,7 +116,7 @@ pub(crate) struct TrialRecord {
     pub(crate) order: u32,
     /// 难度层，用于分层统计。
     pub(crate) difficulty: String,
-    /// prompt 变体名；Phase 2 之前恒为 `baseline`。
+    /// 变体名，由 `.cnb.yml` 的 `KIMI_SMOKE_VARIANTS` 网格驱动（当前为 `baseline` / `typed_ppr`）。
     pub(crate) variant: String,
     /// 同一 (variant, case) 下的重复次数序号，从 1 开始。
     pub(crate) trial: u32,

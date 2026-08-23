@@ -5,6 +5,7 @@
 > Spec（当前）：[2026-08-09-slm-eval-harness-design.md](../../specs/2026-08-09-slm-eval-harness-design.md)（approved）
 > Plan：[2026-07-27-m58-cnb-ai-chat-runner-plan.md](../../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done，对应冻结 runner）
 > Plan（当前）：[2026-08-23-m58-2-llmops-eval-loop-plan.md](../../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)（approved；LLMOps 闭环，kimi-code 浮动）
+> Plan（M58.2 续作）：[2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md](../../plans/2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md)（approved；逐 case provenance + 语料扩充）
 > Spec（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md](../../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)（approved；确定性图召回对比）
 > Plan（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md](../../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（approved）
 > Spec（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-design.md](../../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)（approved）
@@ -232,9 +233,9 @@ RunReport 升到 `1.3.0`，新增 `command_route_usage`（按 `<task_family> -> 
 | `run.json` fixture/gold 身份 + kimi 浮动策略 | done（2026-08-23） | `fixture_sha256` / `kimi_pin_policy=float` / temperature `null` |
 | 三个固定分母率（answer / adherence / assisted） | done（2026-08-23） | `render_judge_markdown`；主指标 `tool_assisted_quality` |
 | 阶段 B 同 pipeline 判分（复用 runner env） | done（2026-08-23） | `kimi-code harness judge` 紧跟 smoke run；不另起 api_trigger |
-| **配对网格（variant × case × trial）** | **未做** | `variant`/`trial` 只是占位，恒为 `baseline`/`1` |
+| 配对网格（variant × case × trial） | done（2026-08-23 随 M58.4 Phase B 落地；本表写于 08-17，当时「占位」属实，Phase B 后未回填） | `.cnb.yml` env 网格 `KIMI_SMOKE_VARIANTS`/`KIMI_SMOKE_TRIALS`（2×6×3=36）+ records/judge 按 `(case_id, variant, trial)` 配对 |
 | **逐 case `provenance`** | **未做** | 8 个 case 均无 per-case `provenance`；顶层只有 `claimed_validation` + `evidence_status: recalled_unverifiable` |
-| **语料扩充** | **未做** | 仍是 8 个 case（6 个入冒烟），每个难度层 2–3 个 |
+| **语料扩充** | **未做** | 仍是 8 个 case（6 个入冒烟），每个难度层 2–3 个；hard 层冒烟内只有 1 个 |
 
 ### 阶段 A 实跑归档（2026-08-22）
 
