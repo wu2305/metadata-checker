@@ -489,7 +489,10 @@ pub fn build_context_output(
                 truncated_cats.join(", ")
             ),
             location: crate::output::Location::new(),
-            suggestion: Some(
+            suggestion: Some(,
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
                 "Use --budget full or increase --depth to see more relations".to_string(),
             ),
         });

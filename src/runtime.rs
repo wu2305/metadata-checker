@@ -194,6 +194,8 @@ pub struct GraphRuntime {
     pub read_model: Option<Arc<RuntimeReadModel>>,
     /// 派生只读模型构建耗时（毫秒）。
     pub read_model_build_ms: u128,
+    /// 加载阶段的 hydrate 结构化诊断（PR1 存入 runtime，供 status/查询统一透出）
+    pub load_diagnostics: Vec<crate::output::Diagnostic>,
 }
 
 /// Runtime 查询命令枚举
@@ -280,6 +282,9 @@ pub struct RuntimeStatus {
     pub runtime_mode: RuntimeMode,
     /// 是否已构建 LongLived 派生读模型。
     pub read_model_ready: bool,
+    /// 加载阶段的结构化诊断（hydrate 损失等）
+    #[serde(default)]
+    pub load_diagnostics: Vec<crate::output::Diagnostic>,
 }
 
 impl GraphRuntime {
@@ -337,6 +342,7 @@ impl GraphRuntime {
 
         let mut diagnostics = Vec::new();
         diagnostics.push(format!("Graph loaded in {} ms", graph_load_ms));
+        let load_diagnostics = graph.hydrate_diagnostics().to_diagnostics();
 
         let prefix_hash = compute_prefix_hash(&path, 4096);
         let fingerprint = GraphFingerprint {
@@ -441,6 +447,7 @@ impl GraphRuntime {
             runtime_mode,
             read_model,
             read_model_build_ms,
+            load_diagnostics,
         })
     }
 
@@ -1072,6 +1079,112 @@ impl GraphRuntime {
             query_compute_ms
         ));
 
+        // PR1：所有查询响应置顶 hydrate 诊断（GRAPH_DB_PARTIAL_HYDRATE 闸门）
+        // 悬挂边无法归因到具体查询，统一在结果中合并 load_diagnostics
+        if !self.load_diagnostics.is_empty() {
+            // 将结构化 load_diagnostics 合并进 result 的 diagnostics 数组
+            if let Some(obj) = result.as_object_mut() {
+                let slot = obj
+                    .entry("diagnostics")
+                    .or_insert_with(|| serde_json::json!([]));
+                if let Some(arr) = slot.as_array_mut() {
+                    for diag in &self.load_diagnostics {
+                        if let Ok(value) = serde_json::to_value(diag) {
+                            arr.push(value);
+                        }
+                    }
+                }
+                // 同步更新 confidence（若存在）
+                if let Some(summary) = obj.get_mut("summary").and_then(|s| s.as_object_mut()) {
+                    let mut codes: Vec<String> = self
+                        .load_diagnostics
+                        .iter()
+                        .map(|d| d.code.clone())
+                        .collect();
+                    // 追加已有 diagnostics 的 codes
+                    if let Some(existing) = obj
+                        .get("diagnostics")
+                        .and_then(|v| v.as_array())
+                    {
+                        for entry in existing {
+                            if let Some(code) = entry.get("code").and_then(|v| v.as_str()) {
+                                if !codes.contains(&code.to_string()) {
+                                    codes.push(code.to_string());
+                                }
+                            }
+                        }
+                    }
+                    summary.insert(
+                        "confidence".to_string(),
+                        crate::output::answer_effect::confidence_value(
+                            codes.iter().map(|s| s.as_str()),
+                        ),
+                    );
+                }
+            }
+            // 外层 RuntimeQueryResponse diagnostics 也追加可读字符串版本
+            for diag in &self.load_diagnostics {
+                diagnostics.push(format!("{}: {}", diag.code, diag.message));
+            }
+        }
+        // PAGE_SCOPED_TARGET_FALLBACK：从 result.json 中提取页内回退信号并转为统一信封
+        // 检测 result 是否包含 page_scoped 回退标记（若存在则注入信封诊断）
+        {
+            let has_fallback = result
+                .get("details")
+                .and_then(|d| d.get("key_model_availability"))
+                .and_then(|v| v.as_array())
+                .is_some_and(|items| {
+                    items.iter().any(|item| {
+                        item.get("scope_warning").and_then(|v| v.as_str())
+                            == Some("page_scoped_target_not_resolved_fallback_to_global_model")
+                    })
+                })
+                || result
+                    .get("summary")
+                    .and_then(|s| s.get("key_model_availability"))
+                    .is_some_and(|_| false);
+            // 更通用的：扫描 result 全量 JSON 字符串中的回退标记
+            let fallback_via_string = serde_json::to_string(&result)
+                .map(|s| s.contains("page_scoped_target_not_resolved_fallback_to_global_model"))
+                .unwrap_or(false);
+            if has_fallback || fallback_via_string {
+                let fallback_diag = crate::diagnostics::envelope_diagnostic(
+                    crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK,
+                    1,
+                    crate::output::Location::default(),
+                    "Page-scoped model target not resolved, fell back to global model",
+                );
+                if let Some(obj) = result.as_object_mut() {
+                    let slot = obj
+                        .entry("diagnostics")
+                        .or_insert_with(|| serde_json::json!([]));
+                    if let Some(arr) = slot.as_array_mut() {
+                        if let Ok(value) = serde_json::to_value(&fallback_diag) {
+                            // 去重
+                            let already = arr.iter().any(|e| {
+                                e.get("code").and_then(|v| v.as_str())
+                                    == Some(crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK)
+                            });
+                            if !already {
+                                arr.push(value);
+                            }
+                        }
+                    }
+                }
+                let already_outer = diagnostics.iter().any(|s| {
+                    s.contains(crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK)
+                });
+                if !already_outer {
+                    diagnostics.push(format!(
+                        "{}: {}",
+                        crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK,
+                        "Page-scoped model target not resolved, fell back to global model"
+                    ));
+                }
+            }
+        }
+
         let mut response = ResponseProcessor::runtime_response(
             result,
             diagnostics,
@@ -1206,6 +1319,7 @@ impl GraphRuntime {
                 self.runtime_mode = new_runtime.runtime_mode;
                 self.read_model = new_runtime.read_model;
                 self.read_model_build_ms = new_runtime.read_model_build_ms;
+                self.load_diagnostics = new_runtime.load_diagnostics;
                 self.reload_count += 1;
                 self.last_reload_error = None;
                 Ok(())
@@ -1237,6 +1351,7 @@ impl GraphRuntime {
             last_reload_error: self.last_reload_error.clone(),
             runtime_mode: self.runtime_mode,
             read_model_ready: self.read_model.is_some(),
+            load_diagnostics: self.load_diagnostics.clone(),
         }
     }
 }

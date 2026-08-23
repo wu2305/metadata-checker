@@ -1,0 +1,442 @@
+#!/usr/bin/env python3
+"""M58.3 附录 A 语料形态体检。
+
+按 spec 的 F1 形态规则测量 `.spg` 语料，产出三类可复核数字：
+
+1. **容器形态**：当前白名单递归漏掉哪些候选容器键，逐键给出行为证据
+   （带表达式 / 带 actions / 带子容器），供 spec F1 的排除列表定值。
+2. **表达式引用**：沿真实调用链
+   `classify_identifier → resolve_expression_refs_with_context → scanner match`
+   统计各终态，定位 `ComponentProperty` 被 `spg.rs` 通配臂丢弃的量与垃圾 model 名。
+3. **DataFlow 深度**：`.spg` 内联 dataFlow 与 `.tbl` 解析深度差的原始结构计数。
+
+**测量边界（必须与判读一起引用）**：本脚本读原始 JSON、复刻解析器的遍历与分类规则，
+不构建 graphdb。它给出的是**候选量**，不是图中实际节点/边数——凡需断言图内事实
+（如「垃圾 model 节点数」），须在 pin 语料重建后从图里复测。
+
+用法：
+    python3 tools/corpus-shape-audit.py --corpus <dir> [--json out.json]
+"""
+
+import argparse
+import collections
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+
+# 与 superpage/mod.rs:344-387 的两张分类表同源；改那里须同步改这里。
+ALWAYS_EXPR_FIELDS = {
+    "exp", "itemFilter", "visibleCondition", "validExp", "calcCondition",
+    "calcExp", "maskCondition", "submitCondition", "submitPageCondition",
+    "defaultPanelCondition", "disableCondition", "defaultValueExp",
+}
+CONDITIONAL_EXPR_FIELDS = {
+    "value", "defaultValue", "visible", "enable", "text", "formula", "html",
+    "desc", "placeholder", "url", "documentTitle", "inputTitle", "labelValue",
+    "panelName", "rootPath", "selectedCaption", "confirmCaption", "tip",
+    "badge", "count", "attrCaption", "caption", "defaultSelect", "defaultCheck",
+    "maxLevel",
+}
+# superpage/mod.rs:313-324,543-554 与 scanner/spg.rs:107 的现役白名单。
+CURRENT_WHITELIST = ("components", "panels", "steps", "comps")
+# expr_ast.rs:820 的 ${} 分支只做 split('.')，纯点分路径才是它的良性输入。
+DOTTED_PATH = re.compile(r"^[A-Za-z_$@][\w$@]*(\.[\w$@]+)*$")
+
+
+def is_component_object(node):
+    """spec F1 形态规则的元素判据：带非空字符串 id 与非空字符串 type 的对象。"""
+    return (
+        isinstance(node, dict)
+        and isinstance(node.get("id"), str) and node["id"]
+        and isinstance(node.get("type"), str) and node["type"]
+    )
+
+
+def is_component_array(value):
+    """spec F1 形态规则：数组、非空、且**每个**元素都满足元素判据。
+
+    混合形态（部分元素缺 id/type）整体判非组件，对应 spec 的
+    `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数分支。
+    """
+    return (
+        isinstance(value, list)
+        and len(value) > 0
+        and all(is_component_object(item) for item in value)
+    )
+
+
+def extract_current(raw, out):
+    """复刻 superpage::extract_components 的现役遍历，含空 id 透传规则。"""
+    if not isinstance(raw, dict):
+        return
+    if not raw.get("id") or not raw.get("type"):
+        for key in CURRENT_WHITELIST:
+            for child in raw.get(key) or []:
+                extract_current(child, out)
+        return
+    out.append(raw)
+    for key in CURRENT_WHITELIST:
+        for child in raw.get(key) or []:
+            extract_current(child, out)
+
+
+def is_expression_value(field, value):
+    """复刻 superpage/mod.rs:429-441 的 is_expr 判定（仅字符串值参与）。"""
+    if not isinstance(value, str) or not value:
+        return False
+    if field in ALWAYS_EXPR_FIELDS:
+        return True
+    if field in CONDITIONAL_EXPR_FIELDS:
+        return value.startswith("=") or "${" in value
+    return False
+
+
+def audit_containers(canvas, reached_ids):
+    """逐容器键统计现役遍历漏掉的候选对象及其行为证据。"""
+    stats = collections.defaultdict(
+        lambda: {"missed": 0, "with_expr": 0, "with_actions": 0, "with_children": 0}
+    )
+    mixed_shape_keys = collections.Counter()
+
+    def walk(node, container_key):
+        if isinstance(node, dict):
+            if is_component_object(node) and id(node) not in reached_ids:
+                entry = stats[container_key]
+                entry["missed"] += 1
+                if any(is_expression_value(k, v) for k, v in node.items()):
+                    entry["with_expr"] += 1
+                if node.get("actions"):
+                    entry["with_actions"] += 1
+                if any(is_component_array(v) for v in node.values()):
+                    entry["with_children"] += 1
+            for key, value in node.items():
+                # 混合形态数组：含组件样元素但不是每个都满足——spec 要求进诊断计数。
+                if (
+                    isinstance(value, list) and value
+                    and not is_component_array(value)
+                    and any(is_component_object(i) for i in value)
+                ):
+                    mixed_shape_keys[key] += 1
+                walk(value, key)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value, container_key)
+
+    walk(canvas, "canvas")
+    return stats, mixed_shape_keys
+
+
+def audit_expressions(components, source_ids, all_object_ids):
+    """沿真实调用链统计 ${a.b} 引用的终态。
+
+    链路：classify_identifier（`${}` 分支无条件 ModelField）
+        → resolve_expression_refs_with_context（head 命中已抽取组件 id 则改写为
+          ComponentProperty，superpage/mod.rs:122）
+        → scanner/spg.rs:559-705 的 match（ComponentProperty 落 `_ => {}` 被丢弃）
+    """
+    extracted_ids = {c["id"] for c in components}
+    buckets = collections.Counter()
+    dropped_suffixes = collections.Counter()
+    junk_model_names = set()
+    junk_occurrences = 0
+
+    for comp in components:
+        for field, value in comp.items():
+            if not is_expression_value(field, value):
+                continue
+            for match in re.finditer(r"\$\{([^}]*)\}", value):
+                inner = match.group(1)
+                if not DOTTED_PATH.match(inner):
+                    head = inner.split(".")[0]
+                    if head in extracted_ids:
+                        # 上下文解析会纠正，不产生垃圾节点。
+                        buckets["malformed_but_resolved"] += 1
+                    else:
+                        buckets["malformed_stays_modelfield"] += 1
+                        junk_occurrences += 1
+                        junk_model_names.add(head)
+                    continue
+                parts = inner.split(".")
+                if len(parts) < 2:
+                    continue
+                head = parts[0]
+                if head in source_ids or head.startswith("model"):
+                    buckets["modelfield_correct"] += 1
+                elif head in extracted_ids:
+                    buckets["componentproperty_dropped_by_scanner"] += 1
+                    dropped_suffixes["." + ".".join(parts[1:])] += 1
+                elif head in all_object_ids:
+                    # head 是当前不可达的候选对象：上下文解析看不到它，仍是 ModelField。
+                    buckets["head_unreachable_stays_modelfield"] += 1
+                    junk_occurrences += 1
+                    junk_model_names.add(head)
+                else:
+                    buckets["head_unknown_stays_modelfield"] += 1
+
+    return {
+        "buckets": dict(buckets),
+        "dropped_componentproperty_suffixes": dict(dropped_suffixes.most_common(20)),
+        "junk_model_name_occurrences": junk_occurrences,
+        "junk_model_names": junk_model_names,
+    }
+
+
+def audit_properties(components, known_props):
+    """统计已抽取组件上的属性键：未被 RawComponent 覆盖、且带表达式的有多少。
+
+    **适用范围**：只覆盖当前遍历可达的组件。F1 放开容器后须重跑——新进入的类型
+    可能带不同的属性键。
+    """
+    unknown_with_expr = collections.Counter()
+    unknown_any = collections.Counter()
+    skipped_nonstring_with_expr = collections.Counter()
+    container_like = {"actions", "components", "panels", "steps", "comps"}
+
+    for comp in components:
+        for key, value in comp.items():
+            if key in known_props:
+                if isinstance(value, (dict, list)) and key not in container_like:
+                    if "${" in json.dumps(value, ensure_ascii=False):
+                        skipped_nonstring_with_expr[key] += 1
+                continue
+            if is_component_array(value):
+                # 子组件容器，不是属性——归容器审计，避免污染属性层结论。
+                continue
+            unknown_any[key] += 1
+            text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            if isinstance(text, str) and (text.startswith("=") or "${" in text):
+                unknown_with_expr[key] += 1
+
+    return unknown_with_expr, unknown_any, skipped_nonstring_with_expr
+
+
+def load_known_component_props(repo_root):
+    """从 raw_types.rs 的 RawComponent 定义提取已覆盖的属性键（serde rename 优先）。"""
+    path = os.path.join(repo_root, "src", "superpage", "raw_types.rs")
+    try:
+        text = open(path, encoding="utf-8").read()
+        block = text.split("pub struct RawComponent {")[1].split("\n}")[0]
+    except (OSError, IndexError):
+        return None
+    names = set()
+    for match in re.finditer(
+        r'(?:#\[serde\((?:rename = "([^"]+)", )?default\)\]\s*)?pub (\w+):', block
+    ):
+        names.add(match.group(1) or match.group(2))
+    return names
+
+
+def audit_dataflow(document):
+    """统计 .spg 内联 dataFlow 中 tbl.rs 会解析、spg.rs 不解析的结构。"""
+    result = collections.Counter()
+    for source in document.get("sources") or []:
+        content = source.get("content") or {}
+        nodes = (content.get("dataFlow") or {}).get("nodes") or {}
+        if not nodes:
+            if source.get("path"):
+                result["dwtable_sources"] += 1
+            continue
+        result["inline_dataflow_sources"] += 1
+        result["inline_dataflow_nodes"] += len(nodes)
+        for node in nodes.values():
+            for key in ("fields", "alias", "inputNodes", "joinConditions", "steps"):
+                if node.get(key):
+                    result["node_attr_" + key] += 1
+    return result
+
+
+def corpus_revision(corpus_dir):
+    try:
+        out = subprocess.run(
+            ["git", "-C", corpus_dir, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=True,
+        )
+        return out.stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--corpus", required=True, help="语料根目录（含 .spg 的项目目录）")
+    parser.add_argument("--json", help="结构化结果输出路径")
+    args = parser.parse_args()
+
+    if not os.path.isdir(args.corpus):
+        print("corpus not found: %s" % args.corpus, file=sys.stderr)
+        return 2
+
+    spg_files = sorted(
+        os.path.join(root, name)
+        for root, _, names in os.walk(args.corpus)
+        for name in names if name.endswith(".spg")
+    )
+
+    totals = collections.Counter()
+    container_stats = collections.defaultdict(
+        lambda: {"missed": 0, "with_expr": 0, "with_actions": 0, "with_children": 0}
+    )
+    mixed_shape = collections.Counter()
+    expr_buckets = collections.Counter()
+    dropped_suffixes = collections.Counter()
+    junk_names = set()
+    junk_occ = 0
+    dataflow = collections.Counter()
+    unknown_expr_props = collections.Counter()
+    unknown_props = collections.Counter()
+    skipped_nonstring = collections.Counter()
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    known_props = load_known_component_props(repo_root)
+
+    for path in spg_files:
+        with open(path, encoding="utf-8") as handle:
+            document = json.load(handle)
+        canvas = document.get("canvas") or {}
+
+        reached = []
+        extract_current(canvas, reached)
+        reached_ids = {id(c) for c in reached}
+        totals["reached_by_current_traversal"] += len(reached)
+
+        all_object_ids = set()
+
+        def collect_ids(node):
+            if isinstance(node, dict):
+                if is_component_object(node):
+                    all_object_ids.add(node["id"])
+                for value in node.values():
+                    collect_ids(value)
+            elif isinstance(node, list):
+                for value in node:
+                    collect_ids(value)
+
+        collect_ids(document)
+
+        stats, mixed = audit_containers(canvas, reached_ids)
+        for key, entry in stats.items():
+            for field, value in entry.items():
+                container_stats[key][field] += value
+        mixed_shape.update(mixed)
+
+        source_ids = {s.get("id") for s in (document.get("sources") or []) if s.get("id")}
+        expr = audit_expressions(reached, source_ids, all_object_ids)
+        expr_buckets.update(expr["buckets"])
+        dropped_suffixes.update(expr["dropped_componentproperty_suffixes"])
+        junk_occ += expr["junk_model_name_occurrences"]
+        junk_names |= expr["junk_model_names"]
+        dataflow.update(audit_dataflow(document))
+        if known_props is not None:
+            a, b, c = audit_properties(reached, known_props)
+            unknown_expr_props.update(a)
+            unknown_props.update(b)
+            skipped_nonstring.update(c)
+
+    missed_total = sum(e["missed"] for e in container_stats.values())
+    behavioral = {
+        k: e for k, e in container_stats.items()
+        if e["with_expr"] or e["with_actions"] or e["with_children"]
+    }
+    inert = {k: e for k, e in container_stats.items() if k not in behavioral}
+
+    report = {
+        "measurement_boundary": (
+            "读原始 JSON 并复刻解析器遍历/分类规则，不构建 graphdb；"
+            "所有数字是候选量，图内事实须重建后复测"
+        ),
+        "corpus_dir": args.corpus,
+        "corpus_revision": corpus_revision(args.corpus),
+        "script_sha256": hashlib.sha256(
+            open(__file__, "rb").read()
+        ).hexdigest()[:16],
+        "spg_files": len(spg_files),
+        "containers": {
+            "reached_by_current_traversal": totals["reached_by_current_traversal"],
+            "missed_candidates_total": missed_total,
+            "missed_with_behavior_evidence": sum(e["missed"] for e in behavioral.values()),
+            "missed_without_behavior_evidence": sum(e["missed"] for e in inert.values()),
+            "by_key": dict(sorted(
+                container_stats.items(), key=lambda kv: -kv[1]["missed"]
+            )),
+            "mixed_shape_arrays_by_key": dict(mixed_shape.most_common(20)),
+        },
+        "expressions": {
+            "terminal_states": dict(expr_buckets),
+            "dropped_componentproperty_suffixes": dict(dropped_suffixes.most_common(20)),
+            "junk_model_name_occurrences": junk_occ,
+            "junk_model_names_distinct": len(junk_names),
+        },
+        "dataflow": dict(dataflow),
+        "properties": {
+            "scope_limit": (
+                "只覆盖当前遍历可达的组件；F1 放开容器后须重跑"
+            ),
+            "raw_component_known_keys": len(known_props) if known_props else None,
+            "unknown_keys_with_expression": dict(unknown_expr_props.most_common(20)),
+            "unknown_keys_top": dict(unknown_props.most_common(10)),
+            "known_keys_nonstring_value_containing_expr": dict(
+                skipped_nonstring.most_common(10)
+            ),
+        },
+    }
+
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, ensure_ascii=False, indent=2, sort_keys=True)
+
+    c = report["containers"]
+    print("语料 %s @ %s，%d 个 .spg" % (
+        args.corpus, report["corpus_revision"], report["spg_files"]))
+    print("\n== 容器形态（附录 A）==")
+    print("现役遍历到达 %d ; 漏掉候选 %d（有行为证据 %d / 无行为证据 %d）" % (
+        c["reached_by_current_traversal"], c["missed_candidates_total"],
+        c["missed_with_behavior_evidence"], c["missed_without_behavior_evidence"]))
+    print("%-16s %8s %8s %10s %10s" % ("容器键", "漏掉", "带表达式", "带actions", "带子容器"))
+    for key, entry in c["by_key"].items():
+        print("%-16s %8d %8d %10d %10d" % (
+            key, entry["missed"], entry["with_expr"],
+            entry["with_actions"], entry["with_children"]))
+    if c["mixed_shape_arrays_by_key"]:
+        print("\n混合形态数组（spec F1 判非组件、进诊断计数）:")
+        for key, count in c["mixed_shape_arrays_by_key"].items():
+            print("  %6d  %s" % (count, key))
+
+    print("\n== 表达式引用终态（沿真实调用链）==")
+    print("  畸形 ${} 产生的垃圾 model 名：%d 次 / %d 个不同名（候选量，非图内实测）" % (
+        report["expressions"]["junk_model_name_occurrences"],
+        report["expressions"]["junk_model_names_distinct"]))
+    for state, count in sorted(report["expressions"]["terminal_states"].items(),
+                               key=lambda kv: -kv[1]):
+        print("  %6d  %s" % (count, state))
+    if report["expressions"]["dropped_componentproperty_suffixes"]:
+        print("被 scanner 通配臂丢弃的 ComponentProperty 后缀:")
+        for suffix, count in report["expressions"]["dropped_componentproperty_suffixes"].items():
+            print("  %6d  %s" % (count, suffix))
+
+    props = report["properties"]
+    if props["raw_component_known_keys"]:
+        print("\n== 属性层（仅当前可达组件；F1 后须重跑）==")
+        print("RawComponent 已覆盖 %d 个键" % props["raw_component_known_keys"])
+        print("未覆盖且带表达式的键:")
+        for key, count in props["unknown_keys_with_expression"].items():
+            print("  %6d  %s" % (count, key))
+        print("量最大的未覆盖键（多为样式，正确忽略）:")
+        for key, count in list(props["unknown_keys_top"].items())[:6]:
+            print("  %6d  %s" % (count, key))
+        print("已知键但值为对象/数组且内含 ${}（被 `_ => continue` 跳过）: %d 处" % sum(
+            props["known_keys_nonstring_value_containing_expr"].values()))
+
+    print("\n== DataFlow 解析深度差 ==")
+    for key, count in sorted(report["dataflow"].items(), key=lambda kv: -kv[1]):
+        print("  %6d  %s" % (count, key))
+
+    if args.json:
+        print("\nJSON: %s" % args.json)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

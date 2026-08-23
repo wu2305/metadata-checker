@@ -70,6 +70,9 @@ pub(super) fn push_relation_evidence(
                 ),
                 location: crate::output::Location::new(),
                 suggestion: Some("Verify graph edge metadata completeness".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }

@@ -149,6 +149,17 @@ pub fn answer_effect(code: &str) -> Option<(AnswerImpact, &'static str)> {
             Partial,
             "target 匹配到多个节点，工具已对每个节点分别作答；结论按 answers[*].target 分组，回答时要说明说的是哪一个节点，不要把它们混成一个答案。",
         ),
+        "GRAPH_DB_PARTIAL_HYDRATE"
+        | "GRAPH_DB_NODE_DECODE_FAILED"
+        | "GRAPH_DB_EDGE_DECODE_FAILED"
+        | "GRAPH_DB_EDGE_DANGLING_ENDPOINT" => (
+            Uncertain,
+            "图数据库部分加载失败，部分节点或边丢失；涉及该图的结论应保守回答，建议重建图数据库。",
+        ),
+        "PAGE_SCOPED_TARGET_FALLBACK" => (
+            Uncertain,
+            "页面限定的模型目标未命中，已回退到全局模型；该结论可能不准确于当前页面。",
+        ),
         // ---- 路由说明：与答案内容无关 ----
         "RESOLVED_TARGET" => (
             Routing,

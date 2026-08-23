@@ -57,7 +57,10 @@ pub(super) fn build_page_logic_diagnostics(
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some(
+            suggestion: Some(,
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
                 "Use --budget full to see more relations, or focus on key_primary_paths in summary"
                     .to_string(),
             ),
@@ -88,6 +91,9 @@ pub(super) fn build_page_logic_diagnostics(
                 json_path: None,
             },
             suggestion: Some("Verify if page is read-only or actions are not parsed".to_string()),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 
@@ -102,6 +108,9 @@ pub(super) fn build_page_logic_diagnostics(
                 json_path: Some("canvas.components[*].actions[*]".to_string()),
             },
             suggestion: Some("Check component action definitions".to_string()),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 
@@ -116,7 +125,10 @@ pub(super) fn build_page_logic_diagnostics(
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some(
+            suggestion: Some(,
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
                 "Ensure --project-dir points to the project root containing this page file"
                     .to_string(),
             ),
@@ -146,6 +158,9 @@ pub(super) fn build_page_logic_diagnostics(
                         .map(ToString::to_string),
                 },
                 suggestion: Some("Check if target page exists in project".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -173,6 +188,9 @@ pub(super) fn build_page_logic_diagnostics(
                         .map(ToString::to_string),
                 },
                 suggestion: Some("Check if target model exists in project sources".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -221,7 +239,10 @@ pub(super) fn build_page_logic_diagnostics(
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string),
                 },
-                suggestion: Some(
+                suggestion: Some(,
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
                     "Review the expression and verify each referenced component/model exists"
                         .to_string(),
                 ),
@@ -298,6 +319,9 @@ pub(super) fn build_page_logic_diagnostics(
                         .map(ToString::to_string),
                 },
                 suggestion: Some("Verify if this action should produce a write target".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -359,7 +383,10 @@ pub(super) fn build_page_logic_diagnostics(
                     node_id,
                     json_path,
                 },
-                suggestion: Some(
+                suggestion: Some(,
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
                     "Check if this action type is supported by metadata-checker".to_string(),
                 ),
             });
@@ -394,7 +421,10 @@ pub(super) fn build_page_logic_diagnostics(
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some(
+            suggestion: Some(,
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
                 "Use details arrays for full coverage; evidence is intentionally low-noise sampled"
                     .to_string(),
             ),

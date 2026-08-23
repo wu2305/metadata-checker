@@ -674,7 +674,10 @@ pub fn build_advise_query_output(
                 question_kind
             ),
             location: crate::output::schema::Location::default(),
-            suggestion: Some(format!(
+            suggestion: Some(format!(,
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
                 "使用其中之一：{}",
                 ADVISE_QUERY_QUESTION_KINDS.join(" | ")
             )),
