@@ -1,6 +1,6 @@
 # M58.2 续作：逐 case provenance 与语料扩充计划
 
-> 状态：**approved**（用户 2026-08-23 指示完成 M58.2 剩余缺口）
+> 状态：**done**（2026-08-23 落地：13 case / 11 冒烟 / 逐 case replay_verified；验收四项全过）
 > 范围：M58.2 阶段 A 状态表遗留的两个「未做」——(b) 逐 case `provenance`、(c) 语料扩充。
 > 「配对网格 variant × case × trial」已随 M58.4 Phase B 落地（`.cnb.yml` env 网格 2×6×3=36），
 > 本计划不含网格实现，只做 journal 勘误回填。
