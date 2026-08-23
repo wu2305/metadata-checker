@@ -174,6 +174,11 @@ cp "$REPO_ROOT/SKILL.md" "$WORK/SKILL.md"
 mkdir -p "$WORK/tests/fixtures/corpus/ai_eval"
 CASES="$WORK/tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json"
 cp "$REPO_ROOT/tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json" "$CASES"
+# redact_token() 在每个 stage/endStage 脚本块里都 shell 到这个文件（相对 cwd），
+# 真实 CNB 的 cwd 是仓库根，这里的合成工作区也要有它，否则 endStage 逐 transcript
+# 无条件调用 redact_token 时会报 MODULE_NOT_FOUND。
+mkdir -p "$WORK/scripts"
+cp "$REPO_ROOT/scripts/cnb-redact-token.mjs" "$WORK/scripts/cnb-redact-token.mjs"
 
 # 预置上一轮的过期 transcript：stage 开跑时必须清掉它，否则旧文件会混进本轮报告。
 mkdir -p "$WORK/target/kimi-harness-smoke"
@@ -257,52 +262,51 @@ print(f"extracted endStage script: {len(endstages[0]['script'].splitlines())} li
 PY
 
 # --- 执行 ---------------------------------------------------------------
-echo "=== running smoke stage under dash (fault=$FAULT) ==="
-STAGE_LOG="$SANDBOX/stage.log"
-set +e
-(
-  cd "$WORK"
-  PATH="$STUB_BIN:$PATH" \
-  KIMI_CODE_HOME="$SANDBOX/kimi-home" \
-  CNB_TOKEN="stub-token-not-a-real-secret" \
-  CNB_REPO_SLUG="wu2305/metadata-checker" \
-  dash "$STAGE_SH"
-) > "$STAGE_LOG" 2>&1
-STAGE_EXIT=$?
-set -e
-if grep -qF "stub-token-not-a-real-secret" "$STAGE_LOG"; then
-  echo "FAIL: CNB_TOKEN 出现在 smoke stage 日志中" >&2
-  exit 1
-fi
-cat "$STAGE_LOG"
-echo "=== smoke stage exit=$STAGE_EXIT ==="
-
-# CNB：同一 pipeline 里后一 stage 复用 workspace；前一 stage 失败则跳过后续。
-JUDGE_EXIT=""
-JUDGE_LOG="$SANDBOX/judge.log"
-if [ "$STAGE_EXIT" = "0" ]; then
-  echo "=== running judge stage under dash (same workdir) ==="
+# 跑一个 stage 脚本：cd 到工作区、注入公共 stub 环境（外加调用方传入的额外
+# env）、在 dash 下执行并落日志，随后检查 stub token 是否泄漏到日志本身。
+# smoke/judge 两个 main stage 共用这段骨架；endStage 另有预签名链接检查与
+# 无条件执行语义，不套这个壳。
+run_stage_under_dash() {
+  local label="$1" script="$2" log="$3"
+  shift 3
+  echo "=== running $label stage under dash ==="
   set +e
   (
     cd "$WORK"
-    PATH="$STUB_BIN:$PATH" \
-    CNB_TOKEN="stub-token-not-a-real-secret" \
-    CNB_REPO_SLUG="wu2305/metadata-checker" \
-    DRY_RUN_JUDGE_LEAK="$DRY_RUN_JUDGE_LEAK" \
-    dash "$JUDGE_SH"
-  ) > "$JUDGE_LOG" 2>&1
-  JUDGE_EXIT=$?
+    env PATH="$STUB_BIN:$PATH" \
+      CNB_TOKEN="stub-token-not-a-real-secret" \
+      CNB_REPO_SLUG="wu2305/metadata-checker" \
+      "$@" \
+      dash "$script"
+  ) > "$log" 2>&1
+  local exit_code=$?
   set -e
-  if grep -qF "stub-token-not-a-real-secret" "$JUDGE_LOG"; then
-    echo "FAIL: CNB_TOKEN 出现在 judge stage 日志中" >&2
+  if grep -qF "stub-token-not-a-real-secret" "$log"; then
+    echo "FAIL: CNB_TOKEN 出现在 $label stage 日志中" >&2
     exit 1
   fi
-  cat "$JUDGE_LOG"
-  echo "=== judge stage exit=$JUDGE_EXIT ==="
+  cat "$log"
+  echo "=== $label stage exit=$exit_code ==="
+  return "$exit_code"
+}
+
+STAGE_LOG="$SANDBOX/stage.log"
+run_stage_under_dash "smoke" "$STAGE_SH" "$STAGE_LOG" \
+  KIMI_CODE_HOME="$SANDBOX/kimi-home"
+STAGE_EXIT=$?
+
+# CNB：同一 pipeline 里后一 stage 复用 workspace；前一 stage 失败则跳过后续。
+JUDGE_EXIT="skip"
+JUDGE_LOG="$SANDBOX/judge.log"
+if [ "$STAGE_EXIT" = "0" ]; then
+  run_stage_under_dash "judge" "$JUDGE_SH" "$JUDGE_LOG" \
+    DRY_RUN_JUDGE_LEAK="$DRY_RUN_JUDGE_LEAK"
+  JUDGE_EXIT=$?
+  PIPE_EXIT="$JUDGE_EXIT"
 else
   echo "=== skipping judge stage (smoke failed, CNB would skip) ==="
+  PIPE_EXIT="$STAGE_EXIT"
 fi
-PIPE_EXIT="${JUDGE_EXIT:-$STAGE_EXIT}"
 
 if [ -d "$WORK/target/kimi-harness-smoke" ] \
   && grep -rqF "stub-token-not-a-real-secret" "$WORK/target/kimi-harness-smoke"; then
@@ -400,7 +404,7 @@ case "$FAULT" in
   *)      EXPECT_OK=0 ;;
 esac
 if [ "$EXPECT_OK" = "1" ] && [ "$PIPE_EXIT" != "0" ]; then
-  echo "FAIL: 正常路径本应退出 0，实际 smoke=$STAGE_EXIT judge=${JUDGE_EXIT:-skip}" >&2; exit 1
+  echo "FAIL: 正常路径本应退出 0，实际 smoke=$STAGE_EXIT judge=$JUDGE_EXIT" >&2; exit 1
 fi
 if [ "$EXPECT_OK" = "0" ] && [ "$PIPE_EXIT" = "0" ]; then
   echo "FAIL: fault=$FAULT 本应判红，实际退出 0（静默假绿）" >&2; exit 1
@@ -412,4 +416,4 @@ if [ "$FAULT" = "judgeleak" ]; then
   grep -q "stub judge" "$ENDSTAGE_LOG" || { echo "FAIL: 失败路径 judge.md 内容缺失" >&2; exit 1; }
 fi
 # 花括号是必需的：紧跟其后的全角括号会被 bash 当成变量名的一部分。
-echo "OK: fault=$FAULT 行为符合预期（exit=${PIPE_EXIT} smoke=$STAGE_EXIT judge=${JUDGE_EXIT:-skip})"
+echo "OK: fault=$FAULT 行为符合预期（exit=${PIPE_EXIT} smoke=$STAGE_EXIT judge=$JUDGE_EXIT)"

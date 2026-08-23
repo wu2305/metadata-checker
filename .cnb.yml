@@ -784,20 +784,13 @@
         rm -f "$OUT_DIR"/smoke-transcript-*.jsonl "$OUT_DIR"/smoke-stderr-*.log \
           "$OUT_DIR"/records.jsonl "$OUT_DIR"/judge.json "$OUT_DIR"/judge.md "$OUT_DIR"/judge-test.log
 
-        # token 脱敏：node 做字面量替换（token 可能含正则元字符，不能走 sed 正则），
-        # 空 token 时不动文件。endStages 是独立脚本块、函数不共享，那边另有一份定义。
+        # token 脱敏：委托 scripts/cnb-redact-token.mjs（字面量替换，token 可能含正则
+        # 元字符，不能走 sed 正则）。每个 stage/endStage 是独立脚本块、函数不共享，
+        # 因此各自保留这个薄壳，但脱敏算法本身只有一份，不会跨脚本块漂移。
         redact_token() {
           [ -n "${CNB_TOKEN:-}" ] || return 0
           [ -f "$1" ] || return 0
-          node -e '
-            const fs = require("fs");
-            const [file, token] = process.argv.slice(1);
-            if (!token) process.exit(0);
-            const text = fs.readFileSync(file, "utf8");
-            if (text.includes(token)) {
-              fs.writeFileSync(file, text.split(token).join("[REDACTED_CNB_TOKEN]"));
-            }
-          ' "$1" "${CNB_TOKEN:-}"
+          node scripts/cnb-redact-token.mjs "$1" "${CNB_TOKEN:-}"
         }
 
         # run.json：本轮评测的身份清单。records.jsonl 逐 trial 记墙钟与调用，run.json
@@ -1053,15 +1046,7 @@
         redact_token() {
           [ -n "${CNB_TOKEN:-}" ] || return 0
           [ -f "$1" ] || return 0
-          node -e '
-            const fs = require("fs");
-            const [file, token] = process.argv.slice(1);
-            if (!token) process.exit(0);
-            const text = fs.readFileSync(file, "utf8");
-            if (text.includes(token)) {
-              fs.writeFileSync(file, text.split(token).join("[REDACTED_CNB_TOKEN]"));
-            }
-          ' "$1" "${CNB_TOKEN:-}"
+          node scripts/cnb-redact-token.mjs "$1" "${CNB_TOKEN:-}"
         }
 
         export KIMI_JUDGE_MODEL="${KIMI_JUDGE_MODEL:-glm-5.2}"
@@ -1073,10 +1058,15 @@
         cargo test --features cli-local --test kimi_harness_judge_tests -- --ignored --nocapture \
           > "$JUDGE_LOG" 2>&1 || JUDGE_EXIT=$?
 
+        # 只扫本 stage 自己写出的三个文件：records/run.json/transcript 等阶段 A 产物
+        # 在阶段 A 退出前已扫过一遍且本 stage 从不改写它们，重扫整棵目录是纯浪费。
+        # 万一本 stage 在扫描前被信号打断，endStage 的全目录兜底扫描仍会兜底。
         TOKEN_LEAKED=0
-        if [ -n "${CNB_TOKEN:-}" ] && grep -rqF "$CNB_TOKEN" "$OUT_DIR" 2>/dev/null; then
-          echo "CNB_TOKEN leaked into smoke artifacts; redacting everything before exit"
-          find "$OUT_DIR" -type f | while read -r f; do redact_token "$f"; done
+        if [ -n "${CNB_TOKEN:-}" ] && grep -qF "$CNB_TOKEN" "$OUT_DIR/judge.json" "$OUT_DIR/judge.md" "$JUDGE_LOG" 2>/dev/null; then
+          echo "CNB_TOKEN leaked into judge artifacts; redacting before exit"
+          redact_token "$OUT_DIR/judge.json"
+          redact_token "$OUT_DIR/judge.md"
+          redact_token "$JUDGE_LOG"
           TOKEN_LEAKED=1
         fi
         cat "$JUDGE_LOG"
@@ -1096,19 +1086,12 @@
         OUT_DIR="target/kimi-harness-smoke"
         # 独立脱敏：前面的 stage 可能在任意一步失败、跳过逐 case 扫描（endStages 本来就
         # 为这种场景存在），dump 原始产物前必须自己再过一遍，不能把含 token 的原文
-        # 打进日志。定义与 main stage 相同，文件改动不会随 stage 带过来。
+        # 打进日志。脱敏算法委托 scripts/cnb-redact-token.mjs，文件改动不会随 stage 带
+        # 过来，所以这份薄壳仍需独立声明。
         redact_token() {
           [ -n "${CNB_TOKEN:-}" ] || return 0
           [ -f "$1" ] || return 0
-          node -e '
-            const fs = require("fs");
-            const [file, token] = process.argv.slice(1);
-            if (!token) process.exit(0);
-            const text = fs.readFileSync(file, "utf8");
-            if (text.includes(token)) {
-              fs.writeFileSync(file, text.split(token).join("[REDACTED_CNB_TOKEN]"));
-            }
-          ' "$1" "${CNB_TOKEN:-}"
+          node scripts/cnb-redact-token.mjs "$1" "${CNB_TOKEN:-}"
         }
         # main stage 可能在 judge 扫描之前被信号终止；endStage 在任何 ls/cat 之前独立
         # 扫描整个目录，保证失败路径也不会把原 token 打进日志。
