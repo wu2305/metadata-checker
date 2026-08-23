@@ -4,6 +4,7 @@ use metadata_checker::graph::{EdgeType, NodeType};
 use metadata_checker::graph_redb::GraphDB;
 use metadata_checker::scanner::scan_project;
 use redb::{Database, TableDefinition};
+use metadata_checker::graph_store::V2ShadowState;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const NODES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("nodes");
@@ -55,6 +56,12 @@ fn pr1_hydrate_counts_and_partial_gate() -> anyhow::Result<()> {
             };
             let key = metadata_checker::graph_redb::edge_storage_key(&dangling);
             edges.insert(key.as_str(), serde_json::to_vec(&dangling)?)?;
+        }
+        // Force v2 to Stale so hydrate falls back to v1 tables (where bad rows live)
+        {
+            let mut meta = write_txn.open_table::<&str, Vec<u8>>(redb::TableDefinition::new("v2_meta"))?;
+            let bytes = serde_json::to_vec(&V2ShadowState::Stale).unwrap();
+            meta.insert("shadow_state", bytes)?;
         }
         write_txn.commit()?;
     }
