@@ -181,7 +181,9 @@ fn test_fixture_cases_carry_per_case_provenance() {
                 );
             }
             for artifact in artifacts {
-                let rel = artifact.as_str().expect("evidence_artifacts 元素必须是字符串");
+                let rel = artifact
+                    .as_str()
+                    .expect("evidence_artifacts 元素必须是字符串");
                 assert!(
                     manifest.join(rel).exists(),
                     "{case_id} 的证据产物 {rel} 在仓库内不存在"
