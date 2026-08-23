@@ -40,7 +40,7 @@ fn candidate_score(node: &Node, target_id: &str) -> Option<(f64, &'static str)> 
     let node_bare = bare_id(&node.id);
     let node_bare_lower = node_bare.to_lowercase();
 
-    let mut score = 0.0;
+    let mut score: f64 = 0.0;
     let mut reason = "substring match";
 
     if let Some(prefix) = target_prefix {
