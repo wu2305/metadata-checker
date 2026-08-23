@@ -1,0 +1,113 @@
+{
+  "case_id": "xiaoshouyi_testdrive_name_cross_page_writer",
+  "candidate_status": "viable_with_changes",
+  "candidate_notes": "关键验证点结论：CLI 的 writer 输出（writer intent paths 与 --relations writers entry meta）均不暴露写入动作的 conditionExp 门控（cmd1/cmd2），按预案降级为 relations 型问题。原推断多处被推翻：上传信息.spg button2 action6（updateData）不写 name（写 userid/licenceLevel 等）；公里数.spg button3 action2 写 kilometer/departureTime/returnTime；英力士/捷豹路虎登记表 button1 action5 写 is_questionnaire；不存在 试乘试驾登记表.spg 这个页面。字段级 name 的真实 action 写入者 5 个：试乘试驾协议.spg button5 action2（submitData）、上传信息.spg button2 action3（insertData）、不用/销售旧/上传信息_copy1.spg button2 action3、不用/销售旧/上传信息_copy.spg button2 action3/action5。",
+  "difficulty": "expert",
+  "risk_tags": [
+    "cross_page_writer",
+    "field_level_writer",
+    "high_fanout_model",
+    "condition_exp_not_exposed",
+    "legacy_copy_pages"
+  ],
+  "question": "低代码项目 /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi 中，fact_testDrive 表的 name 字段（试驾合同编号）会被哪些页面、哪些动作写入？",
+  "smoke": {
+    "enabled": true,
+    "order": 9,
+    "question_template": "在低代码项目 {project_dir} 中，fact_testDrive 表的 name 字段会被哪些页面、哪些动作写入？"
+  },
+  "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "source_path": "data/tables/销售/fact_testDrive.tbl",
+  "real_project_target": "model:fact_testDrive",
+  "required_commands": [
+    "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --relations 'model:fact_testDrive' --budget normal"
+  ],
+  "minimal_command_plan": [
+    {
+      "command_kind": "--relations",
+      "target": "model:fact_testDrive",
+      "args": [
+        "--budget",
+        "normal"
+      ],
+      "requires_project_dir": true,
+      "budget": "normal"
+    }
+  ],
+  "standard_answer": {
+    "summary": "fact_testDrive 是高扇出模型：read_by_count=84、written_by_count=248、consumed_by_dataflow_count=19（DataFlowParticipant），必须用 normal budget 否则 writers 截断。字段级看 name 的写入动作有 5 个：试乘试驾协议.spg button5 action2（submitData）、上传信息.spg button2 action3（insertData），以及历史副本页 不用/销售旧/上传信息_copy1.spg button2 action3、不用/销售旧/上传信息_copy.spg button2 action3/action5。上传信息.spg button2 action6（updateData）写 userid/licenceLevel 等字段但不写 name。CLI 不暴露写入动作的 conditionExp 门控，回答「什么条件下写入」时必须声明该限制，不能编造。",
+    "must_mention": [
+      "written_by_count=248（normal budget 全量）",
+      "上传信息.spg button2 action3（insertData）写 name",
+      "试乘试驾协议.spg button5 action2（submitData）写 name",
+      "CLI 不暴露写入动作的 conditionExp"
+    ],
+    "should_mention": [
+      "不用/销售旧 两个副本页也写 name",
+      "上传信息.spg button2 action6 不写 name",
+      "公里数.spg / 英力士/捷豹路虎登记表写的是 kilometer/is_questionnaire 等其他字段"
+    ],
+    "must_not_mention": [
+      "上传信息.spg button2 action6 写 name",
+      "只有上传信息.spg 会写 name",
+      "编造 insertData 的写入门控（如 model9.totalRowCount__=0）并声称 CLI 已证实",
+      "compact 截断后声称已看完全部 writer"
+    ]
+  },
+  "expected_facts": [
+    "summary.read_by_count=84",
+    "summary.written_by_count=248",
+    "summary.consumed_by_dataflow_count=19",
+    "writers 包含 action:app/销售.app/完善合同信息/上传信息.spg|button2|action3（field fact_testDrive.name）",
+    "writers 包含 action:app/销售.app/完善合同信息/试乘试驾协议.spg|button5|action2（field fact_testDrive.name）",
+    "writers entry meta 不含 conditionExp 字段（已知限制）"
+  ],
+  "forbidden_claims": [
+    "把 action6 列为 name 的 writer",
+    "把 Reads 当写入动作",
+    "在 CLI 未暴露 conditionExp 的情况下编造写入条件",
+    "compact 预算下断言 writer 全集"
+  ],
+  "expected_output_assertions": [
+    {
+      "command_index": 1,
+      "path": "summary.written_by_count",
+      "op": "eq",
+      "value": 248,
+      "description": "fact_testDrive 应有 248 个写入节点"
+    },
+    {
+      "command_index": 1,
+      "path": "summary.read_by_count",
+      "op": "eq",
+      "value": 84,
+      "description": "fact_testDrive 应有 84 个读取节点"
+    },
+    {
+      "command_index": 1,
+      "path": "details.writers",
+      "op": "array_any_contains_substring",
+      "field": "node_id",
+      "value": "action:app/销售.app/完善合同信息/上传信息.spg|button2|action3",
+      "description": "必须查到上传信息 insertData 写入"
+    },
+    {
+      "command_index": 1,
+      "path": "details.writers",
+      "op": "array_any_contains_substring",
+      "field": "node_id",
+      "value": "action:app/销售.app/完善合同信息/试乘试驾协议.spg|button5|action2",
+      "description": "必须查到试乘试驾协议 submitData 写入"
+    }
+  ],
+  "answer_style_policy": {
+    "principles": [
+      "先给模型级计数，再列字段级写入动作",
+      "明确声明 CLI 对写入门控的可见性边界"
+    ],
+    "forbidden_practices": [
+      "在截断输出上做全量结论",
+      "把源文件里看到但 CLI 未输出的条件当已证实事实"
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+$ target/cnb/workspace/release/metadata-checker --project-dir target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain-condition 'comp:app/销售.app/销售/合同协议.spg|button13' --intent display --budget compact
+exit_code=0
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain-condition comp:app/销售.app/销售/合同协议.spg|button13 --intent display --budget compact
+exit_code=0
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain-condition comp:app/销售.app/销售/合同协议.spg|panel13 --intent display --budget compact
+exit_code=0
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain comp:app/销售.app/销售/合同协议.spg|button13 --budget normal
+exit_code=0
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain-condition model:app/销售.app/销售/合同协议.spg|model10 --intent availability --budget compact
+exit_code=0

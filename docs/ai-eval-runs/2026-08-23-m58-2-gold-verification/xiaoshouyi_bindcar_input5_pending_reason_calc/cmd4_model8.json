@@ -1,0 +1,809 @@
+{
+  "details": {
+    "answer_contract": {
+      "budget_used": "compact",
+      "candidate_path_count": 0,
+      "completion": {
+        "missing": [
+          "graph_relationship_path"
+        ],
+        "next_commands": [
+          {
+            "budget": "normal",
+            "command": "--context",
+            "reason": "未找到路径时先查看目标相邻关系，确认目标 ID 和边方向",
+            "target": "model:app/售后.app/绑定车辆/绑定车辆.spg|model8"
+          }
+        ],
+        "status": "partial_due_to_missing_proven_path"
+      },
+      "dataflow_model_id": "model:协议",
+      "forbidden_fact_paths": [
+        "display_facts",
+        "value_source_facts",
+        "writer_facts",
+        "model_io_facts"
+      ],
+      "intent": "availability",
+      "is_page_scoped_target": true,
+      "must_read_summary_first": true,
+      "primary_fact_path": "availability_facts",
+      "proven_path_count": 0,
+      "rejected_path_count": 0,
+      "resolved_model_target": "model:model8",
+      "target_scope": {
+        "dataflow_model_id": "model:协议",
+        "is_page_scoped_target": true,
+        "node_id": "model:model8",
+        "node_type": "Model",
+        "query_target": "model:app/售后.app/绑定车辆/绑定车辆.spg|model8",
+        "resolved_model_target": "model:model8",
+        "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+      }
+    },
+    "answer_facts": {
+      "availability_facts": {
+        "confidence": "high",
+        "dataflow_availability": "dataflow_filters_present",
+        "dataflow_table": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl",
+        "evidence_refs": [
+          {
+            "json_path": "sources[7].filter.clauses[0].exp",
+            "node_id": "cond:app/售后.app/绑定车辆/绑定车辆.spg|model8#filter#0#exp",
+            "source_file": "app/售后.app/绑定车辆/绑定车辆.spg"
+          },
+          {
+            "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+            "node_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|0",
+            "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+          },
+          {
+            "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+            "node_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|1",
+            "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+          },
+          {
+            "json_path": "dataFlow.nodes.会员协议.filters",
+            "node_id": "model:model8|会员协议|node_filter|2",
+            "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+          },
+          {
+            "json_path": "dataFlow.nodes.隐私协议.filters",
+            "node_id": "model:model8|隐私协议|node_filter|3",
+            "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+          }
+        ],
+        "gates": [
+          {
+            "condition_id": "cond:app/售后.app/绑定车辆/绑定车辆.spg|model8#filter#0#exp",
+            "condition_scope": "direct",
+            "condition_type": "SourceFilterExp",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "sources[7].filter.clauses[0].exp",
+            "owner_node_id": "model:model8",
+            "raw_expr": "model8.name=IF(param1 IS NULL,input1.value,param1)",
+            "source_file": "app/售后.app/绑定车辆/绑定车辆.spg"
+          },
+          {
+            "condition_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|0",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+            "owner_node_id": "model:model8",
+            "raw_expr": "[素材类型] = 3",
+            "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+          },
+          {
+            "condition_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|1",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+            "owner_node_id": "model:model8",
+            "raw_expr": "[文件分类] = [\"2\",\"3\"]",
+            "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+          },
+          {
+            "condition_id": "model:model8|会员协议|node_filter|2",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.会员协议.filters",
+            "owner_node_id": "model:model8",
+            "raw_expr": "[文件分类] = 3",
+            "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+          },
+          {
+            "condition_id": "model:model8|隐私协议|node_filter|3",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.隐私协议.filters",
+            "owner_node_id": "model:model8",
+            "raw_expr": "[文件分类] = 2",
+            "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+          }
+        ],
+        "join_rules": [],
+        "missing_evidence": [],
+        "output_filters": [],
+        "paths": [
+          {
+            "confidence": "high",
+            "evidence_refs": [
+              {
+                "json_path": "sources[7].filter.clauses[0].exp",
+                "node_id": "cond:app/售后.app/绑定车辆/绑定车辆.spg|model8#filter#0#exp",
+                "source_file": "app/售后.app/绑定车辆/绑定车辆.spg"
+              }
+            ],
+            "intent": "availability",
+            "result": "model8.name=IF(param1 IS NULL,input1.value,param1)",
+            "steps": [
+              {
+                "direction": "incoming",
+                "edge_type": "DependsOn",
+                "field_path": null,
+                "json_path": "sources[7].filter.clauses[0].exp",
+                "node_id": "cond:app/售后.app/绑定车辆/绑定车辆.spg|model8#filter#0#exp",
+                "node_type": "Condition",
+                "source_file": "app/售后.app/绑定车辆/绑定车辆.spg",
+                "step": 1,
+                "why_included": "filter or totalRowCount condition controls data availability"
+              }
+            ],
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "why_complete": "data availability gate found"
+          },
+          {
+            "confidence": "high",
+            "evidence_refs": [
+              {
+                "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+                "node_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|0",
+                "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+              }
+            ],
+            "intent": "availability",
+            "result": "[素材类型] = 3",
+            "steps": [
+              {
+                "direction": "incoming",
+                "edge_type": "DependsOn",
+                "field_path": null,
+                "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+                "node_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|0",
+                "node_type": "Condition",
+                "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl",
+                "step": 1,
+                "why_included": "filter or totalRowCount condition controls data availability"
+              }
+            ],
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "why_complete": "data availability gate found"
+          },
+          {
+            "confidence": "high",
+            "evidence_refs": [
+              {
+                "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+                "node_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|1",
+                "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+              }
+            ],
+            "intent": "availability",
+            "result": "[文件分类] = [\"2\",\"3\"]",
+            "steps": [
+              {
+                "direction": "incoming",
+                "edge_type": "DependsOn",
+                "field_path": null,
+                "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+                "node_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|1",
+                "node_type": "Condition",
+                "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl",
+                "step": 1,
+                "why_included": "filter or totalRowCount condition controls data availability"
+              }
+            ],
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "why_complete": "data availability gate found"
+          }
+        ],
+        "physical_inputs": [
+          "$DATA:/活动/fact_autoBasicMaterial.tbl"
+        ],
+        "referenced_vars": [],
+        "result": "data_gates_found",
+        "source_filters": [
+          {
+            "left": "[素材类型]",
+            "node_alias": "FACT_AUTOBASICMATERIAL",
+            "operator": "=",
+            "raw_expr": "[素材类型] = 3",
+            "referenced_fields": [
+              "素材类型"
+            ],
+            "referenced_vars": [],
+            "right": "3"
+          },
+          {
+            "left": "[文件分类]",
+            "node_alias": "FACT_AUTOBASICMATERIAL",
+            "operator": "=",
+            "raw_expr": "[文件分类] = [\"2\",\"3\"]",
+            "referenced_fields": [
+              "文件分类"
+            ],
+            "referenced_vars": [],
+            "right": "[\"2\",\"3\"]"
+          }
+        ],
+        "union_rules": [
+          {
+            "field_mappings": [
+              {
+                "fields": [
+                  "文件分类",
+                  "文件分类"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "附件ID",
+                  "附件ID"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "创建人",
+                  "创建人"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "店总",
+                  "店总"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "图文附件ID",
+                  "图文附件ID"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "创建日期",
+                  "创建日期"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "所有人",
+                  "所有人"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "所属机构",
+                  "所属机构"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "素材类型",
+                  "素材类型"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "素材来源",
+                  "素材来源"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "素材名称",
+                  "素材名称"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "适用品牌",
+                  "适用品牌"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "适用车系",
+                  "适用车系"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "备注",
+                  "备注"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "有效期至",
+                  "有效期至"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "图片分类",
+                  "图片分类"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "图片",
+                  "图片"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "视频分类",
+                  "视频分类"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "视频",
+                  "视频"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "文件",
+                  "文件"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "文件描述",
+                  "文件描述"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "图文分类",
+                  "图文分类"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "图文",
+                  "图文"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "图文富文本图片",
+                  "图文富文本图片"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "图文标题",
+                  "图文标题"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "图文小标题",
+                  "图文小标题"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "状态",
+                  "状态"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "审批状态",
+                  "审批状态"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "驳回原因",
+                  "驳回原因"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "附件大小",
+                  "附件大小"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "封面ID",
+                  "封面ID"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "草稿箱ID1",
+                  "草稿箱ID1"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "封面的URL",
+                  "封面的URL"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "返回图文富文本图片",
+                  "返回图文富文本图片"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "素材URL",
+                  "素材URL"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "适用车型",
+                  "适用车型"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "素材文件夹",
+                  "素材文件夹"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "修改时间",
+                  "修改时间"
+                ],
+                "visible": true
+              }
+            ],
+            "node_alias": "联合",
+            "row_semantic": "any_branch_can_output"
+          }
+        ]
+      },
+      "intent": "availability",
+      "traversal_policy": {
+        "allowed_edge_types": [
+          "DependsOn",
+          "DataflowInput"
+        ],
+        "directions": [
+          "incoming",
+          "filter_refs"
+        ],
+        "intent": "availability",
+        "max_paths": 3,
+        "max_steps_per_path": 6,
+        "rank_rules": [
+          "field-level paths before model-level paths",
+          "proven paths before candidates",
+          "paths with evidence before inferred paths"
+        ],
+        "stop_conditions": [
+          "filter_or_total_row_count_gate_found"
+        ]
+      }
+    },
+    "blocking_conditions": [],
+    "candidate_paths": [],
+    "candidate_paths_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 candidate_paths 明细；需要核查时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "data_empty_gates": [
+      {
+        "condition_id": "cond:app/售后.app/绑定车辆/绑定车辆.spg|model8#filter#0#exp",
+        "condition_key": "app/售后.app/绑定车辆/绑定车辆.spg|SourceFilterExp|Filter|model8.name=IF(param1 IS NULL,input1.value,param1)|component:input1,model:model8.name,param:param1",
+        "condition_scope": "direct",
+        "condition_type": "SourceFilterExp",
+        "effect_type": "Filter",
+        "json_path": "sources[7].filter.clauses[0].exp",
+        "normalized_expr": "model8.name=IF(param1 IS NULL,input1.value,param1)",
+        "owner_node_id": "model:model8",
+        "owner_type": "ModelSource",
+        "raw_expr": "model8.name=IF(param1 IS NULL,input1.value,param1)",
+        "referenced_symbols": [
+          "model:model8.name",
+          "param:param1",
+          "component:input1",
+          "param:param1"
+        ],
+        "source_file": "app/售后.app/绑定车辆/绑定车辆.spg",
+        "subject_type": "ModelSource"
+      },
+      {
+        "condition_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|0",
+        "condition_key": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl|DataFlowFilter||[素材类型] = 3|",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+        "left": "[素材类型]",
+        "node_alias": "FACT_AUTOBASICMATERIAL",
+        "node_type": "ModelTable",
+        "operator": "=",
+        "owner_node_id": "model:model8",
+        "raw_expr": "[素材类型] = 3",
+        "referenced_fields": [
+          "素材类型"
+        ],
+        "referenced_vars": [],
+        "right": "3",
+        "role": "source_filter",
+        "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+      },
+      {
+        "condition_id": "model:model8|FACT_AUTOBASICMATERIAL|source_filter|1",
+        "condition_key": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl|DataFlowFilter||[文件分类] = [\"2\",\"3\"]|",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.FACT_AUTOBASICMATERIAL.filters",
+        "left": "[文件分类]",
+        "node_alias": "FACT_AUTOBASICMATERIAL",
+        "node_type": "ModelTable",
+        "operator": "=",
+        "owner_node_id": "model:model8",
+        "raw_expr": "[文件分类] = [\"2\",\"3\"]",
+        "referenced_fields": [
+          "文件分类"
+        ],
+        "referenced_vars": [],
+        "right": "[\"2\",\"3\"]",
+        "role": "source_filter",
+        "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+      },
+      {
+        "condition_id": "model:model8|会员协议|node_filter|2",
+        "condition_key": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl|DataFlowFilter||[文件分类] = 3|",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.会员协议.filters",
+        "left": "[文件分类]",
+        "node_alias": "会员协议",
+        "node_type": "Select",
+        "operator": "=",
+        "owner_node_id": "model:model8",
+        "raw_expr": "[文件分类] = 3",
+        "referenced_fields": [
+          "文件分类"
+        ],
+        "referenced_vars": [],
+        "right": "3",
+        "role": "node_filter",
+        "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+      },
+      {
+        "condition_id": "model:model8|隐私协议|node_filter|3",
+        "condition_key": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl|DataFlowFilter||[文件分类] = 2|",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.隐私协议.filters",
+        "left": "[文件分类]",
+        "node_alias": "隐私协议",
+        "node_type": "Select",
+        "operator": "=",
+        "owner_node_id": "model:model8",
+        "raw_expr": "[文件分类] = 2",
+        "referenced_fields": [
+          "文件分类"
+        ],
+        "referenced_vars": [],
+        "right": "2",
+        "role": "node_filter",
+        "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+      }
+    ],
+    "primary_path": [],
+    "primary_path_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 primary_path 明细；answer_facts.paths 已保留短证据",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "proven_paths": [],
+    "rejected_paths": [],
+    "rejected_paths_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 rejected_paths 明细；需要排查路径拒绝原因时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "related_context": [],
+    "related_context_summary": {
+      "by_scope": {
+        "direct": 194
+      },
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": true,
+      "note": "compact 模式隐藏 related_context 明细；它们是相关但非必要上下文",
+      "source_file_distinct_count": 82,
+      "total_count": 194
+    },
+    "required_followups": [
+      {
+        "budget": "normal",
+        "command": "--explain-condition",
+        "expected_fact_path": "availability_facts",
+        "intent": "availability",
+        "must_run_for_complete_answer": true,
+        "reason": "truncation_guard 标记 compact 输出不完整，需要升级到 normal 展开完整路径",
+        "target": "model:app/售后.app/绑定车辆/绑定车辆.spg|model8"
+      }
+    ],
+    "supporting_context": [],
+    "supporting_context_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 supporting_context 明细；需要核查时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "target": {
+      "name": "model8",
+      "node_id": "model:model8",
+      "node_type": "Model",
+      "path": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+    },
+    "thinking_frame": {
+      "answer_with": "availability_facts",
+      "completion_status": "partial_due_to_missing_proven_path",
+      "do_not_use_as_primary_evidence": [
+        "display_facts",
+        "value_source_facts",
+        "writer_facts",
+        "model_io_facts"
+      ],
+      "next_best_action": "使用 --budget normal 或 full 重新查询以展开更多路径",
+      "primary_question_type": "这个模型在什么条件下有数据",
+      "question_kind": "availability",
+      "required_followups": [
+        {
+          "expected_fact_path": "availability_facts",
+          "reason": "未找到任何 proven 或 candidate 路径；可能需要扩展 budget 或检查目标 ID 是否正确"
+        }
+      ],
+      "target_scope": {
+        "node_id": "model:model8",
+        "node_type": "Model",
+        "source_file": "$DATA:/销售/用品销售/精品附件质保明细表/商品质保期限表/fact_warrantyperiod.tbl"
+      },
+      "what_is_missing": "未找到任何 proven 或 candidate 路径；可能需要扩展 budget 或检查目标 ID 是否正确",
+      "what_to_avoid": "不要把 source_filters 标成组件 direct visibleCondition",
+      "why_this_intent": "用户追问数据可用性，应聚焦 filter、totalRowCount__ 和 DataFlow 输入"
+    },
+    "traversal_policy": {
+      "allowed_edge_types": [
+        "DependsOn",
+        "DataflowInput"
+      ],
+      "directions": [
+        "incoming",
+        "filter_refs"
+      ],
+      "intent": "availability",
+      "max_paths": 3,
+      "max_steps_per_path": 6,
+      "rank_rules": [
+        "field-level paths before model-level paths",
+        "proven paths before candidates",
+        "paths with evidence before inferred paths"
+      ],
+      "stop_conditions": [
+        "filter_or_total_row_count_gate_found"
+      ]
+    },
+    "truncation_guard": {
+      "compact_limits": {
+        "max_blocking_conditions": 10,
+        "max_data_empty_gates": 10,
+        "max_paths": 3,
+        "max_related_context": 5,
+        "max_steps_per_path": 6,
+        "max_supporting_context": 5
+      },
+      "is_complete": false,
+      "recommended_rerun": "--explain-condition {} --budget normal --intent auto",
+      "required_budget_for_complete_answer": "normal",
+      "safe_to_answer_full_relationships": false,
+      "truncated_sections": [
+        "related_context"
+      ]
+    },
+    "value_source_context": null
+  },
+  "diagnostics": [],
+  "evidence": [],
+  "kind": "Explain",
+  "next_queries": [],
+  "query_target": "model:app/售后.app/绑定车辆/绑定车辆.spg|model8",
+  "schema_version": "1.0",
+  "summary": {
+    "answer_facts_count": 1,
+    "blocking_conditions_count": 0,
+    "candidate_paths_count": 0,
+    "data_empty_gates_count": 5,
+    "intent": "availability",
+    "primary_paths_count": 0,
+    "primary_reason": "目标 model:model8 受 5 个数据门控影响（filter/totalRowCount__）",
+    "rejected_paths_count": 0,
+    "related_context_count": 194,
+    "supporting_context_count": 0,
+    "target_id": "model:model8",
+    "target_name": "model8",
+    "target_type": "Model",
+    "value_source_context_count": 0,
+    "what_is_it": "Why 解释: model:model8"
+  }
+}

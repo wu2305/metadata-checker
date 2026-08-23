@@ -1,0 +1,12 @@
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain-condition comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input6 --intent value-source --budget compact
+exit_code=0
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain-condition comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input6 --intent auto --budget compact
+exit_code=0
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input6 --budget normal
+exit_code=0
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain-condition model:app/销售.app/完善合同信息/试乘试驾协议.spg|model7 --intent availability --budget compact
+exit_code=0
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain-condition model:app/销售.app/完善合同信息/试乘试驾协议.spg|model6 --intent availability --budget compact
+exit_code=0
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input6 --budget compact
+exit_code=0

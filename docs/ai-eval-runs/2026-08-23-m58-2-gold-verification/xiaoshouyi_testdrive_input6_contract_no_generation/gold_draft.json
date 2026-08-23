@@ -1,0 +1,125 @@
+{
+  "case_id": "xiaoshouyi_testdrive_input6_contract_no_generation",
+  "candidate_status": "viable_with_changes",
+  "candidate_notes": "取值表达式与 model7 六条本页 filter 均被 CLI 证实（cmd6/cmd4）。两处修正：(1) CLI 对 model7/model6 的 dataflow_table 解析降级到其他页面同名模型（fact_saleContract/szsys_4_users，cmd4/cmd5），物理表 fact_testDrive.tbl 无法从 CLI 证明，gold 不含物理表断言；(2) --explain-condition --intent value-source/auto 对 input6 均返回 value_source_context not available（cmd1/cmd2），取值表达式只能用 --explain 的 details.reads 取得（与存量 case xiaoshouyi_contract_input3_value_expr 同风格）。",
+  "difficulty": "expert",
+  "risk_tags": [
+    "value_expr",
+    "calc_expression",
+    "conditional_reuse",
+    "model_filter_context",
+    "known_table_resolution_gap"
+  ],
+  "question": "低代码项目 /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi 中，app/销售.app/完善合同信息/试乘试驾协议.spg 里 input6 的合同编号是怎么算出来的？什么情况下会直接复用已有的编号？",
+  "smoke": {
+    "enabled": true,
+    "order": 8,
+    "question_template": "低代码项目 {project_dir} 中，app/销售.app/完善合同信息/试乘试驾协议.spg 里 input6 的合同编号是怎么算出来的？什么情况下会复用已有编号？"
+  },
+  "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "source_path": "app/销售.app/完善合同信息/试乘试驾协议.spg",
+  "real_project_target": "comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input6",
+  "required_commands": [
+    "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --explain 'comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input6' --budget compact",
+    "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --explain-condition 'model:app/销售.app/完善合同信息/试乘试驾协议.spg|model7' --intent availability --budget compact"
+  ],
+  "minimal_command_plan": [
+    {
+      "command_kind": "--explain",
+      "target": "comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input6",
+      "args": [
+        "--budget",
+        "compact"
+      ],
+      "requires_project_dir": true,
+      "budget": "compact"
+    },
+    {
+      "command_kind": "--explain-condition",
+      "target": "model:app/销售.app/完善合同信息/试乘试驾协议.spg|model7",
+      "args": [
+        "--intent",
+        "availability",
+        "--budget",
+        "compact"
+      ],
+      "requires_project_dir": true,
+      "budget": "compact"
+    }
+  ],
+  "standard_answer": {
+    "summary": "input6 的取值表达式是 IF(model7.totalRowCount__=1,model7.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))：当 model7（试乘编辑）恰好有 1 条记录时直接复用其 name 作为合同编号；否则现算新编号 = 'SJ' + input15 + 当天日期 yyyymmdd 的后 6 位 + (model6 当天记录数+1) 的三位补零。model7 的本页 filter 把记录限定为当天、未签署、当前外部用户/企微联系人的试乘记录：create_time.date=TODAY()、signed IS NULL、externalUserId=input11、qwContactId=input14、TestDrivingMethod='1'、lgDelete IS NULL OR lgDelete = 0。注意：当前 CLI 把 model7 的 dataflow_table 降级解析到其他页面同名模型（fact_saleContract），物理表结论不能引用 CLI 输出。",
+    "must_mention": [
+      "完整 IF 表达式",
+      "复用条件是 model7.totalRowCount__=1（恰好 1 条，不是只要有数据）",
+      "新编号规则：'SJ'+input15+当天日期后6位+(model6.totalRowCount__+1) 补零",
+      "model7 限定当天未签署记录（create_time.date=TODAY()、signed IS NULL）"
+    ],
+    "should_mention": [
+      "model6.totalRowCount__ 提供当天序号",
+      "externalUserId=input11 / qwContactId=input14 限定当前用户",
+      "CLI 对 model7 dataflow_table 的解析是已知错位，不要引用"
+    ],
+    "must_not_mention": [
+      "合同编号由后端生成后回显到 input6",
+      "只要 model7 有数据就复用（必须是恰好 1 条）",
+      "model7 指向 fact_saleContract（错位解析结果）",
+      "断言物理表是 fact_testDrive.tbl 并声称 CLI 已证明"
+    ]
+  },
+  "expected_facts": [
+    "details.reads 包含完整 IF 表达式（raw_expr 子串）",
+    "summary.what_is_it 包含「读取 model7」",
+    "availability gates 包含 model7 六条本页 filter（lgDelete/TestDrivingMethod/signed/create_time/qwContactId/externalUserId）",
+    "不断言 model7/model6 的 dataflow_table（CLI 解析错位，见 candidate_notes）"
+  ],
+  "forbidden_claims": [
+    "把 =1 的精确条件说成「有数据就复用」",
+    "引用 CLI 给出的 model7 dataflow_table 当物理来源",
+    "忽略编号表达式中 model6 的序号部分"
+  ],
+  "expected_output_assertions": [
+    {
+      "command_index": 1,
+      "path": "details.reads",
+      "op": "array_any_contains_substring",
+      "field": "raw_expr",
+      "value": "IF(model7.totalRowCount__=1,model7.name",
+      "description": "input6 取值表达式含条件复用分支"
+    },
+    {
+      "command_index": 1,
+      "path": "details.reads",
+      "op": "array_any_contains_substring",
+      "field": "raw_expr",
+      "value": "TOSTR(model6.totalRowCount__+1,'000')",
+      "description": "新编号含 model6 序号补零"
+    },
+    {
+      "command_index": 2,
+      "path": "details.answer_facts.availability_facts.gates",
+      "op": "array_any_contains_substring",
+      "field": "raw_expr",
+      "value": "model7.signed IS NULL",
+      "description": "model7 限定未签署记录"
+    },
+    {
+      "command_index": 2,
+      "path": "details.answer_facts.availability_facts.gates",
+      "op": "array_any_contains_substring",
+      "field": "raw_expr",
+      "value": "model7.create_time.date=TODAY()",
+      "description": "model7 限定当天记录"
+    }
+  ],
+  "answer_style_policy": {
+    "principles": [
+      "先给完整表达式，再解释两个分支的触发条件",
+      "model filter 作为「已有编号」的界定依据"
+    ],
+    "forbidden_practices": [
+      "把已知错位的 dataflow_table 当事实引用",
+      "只摘录表达式片段而不给完整分支"
+    ]
+  }
+}

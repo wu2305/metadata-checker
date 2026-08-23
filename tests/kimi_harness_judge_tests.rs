@@ -57,13 +57,13 @@ fn all_supported_response() -> String {
     .to_string()
 }
 
-/// 验证 case 文件加载：真实冒烟 fixture 读出 8 个 case 及其 standard_answer 断言。
+/// 验证 case 文件加载：真实冒烟 fixture 读出 13 个 case 及其 standard_answer 断言。
 #[test]
 fn test_load_smoke_cases_reads_real_fixture() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json");
     let cases = load_smoke_cases(&path).unwrap();
-    assert_eq!(cases.len(), 8);
+    assert_eq!(cases.len(), 13);
     let first = &cases[0];
     assert_eq!(first.case_id, "xiaoshouyi_text41_display_conditions");
     assert!(!first.question.is_empty());
@@ -99,7 +99,7 @@ fn test_smoke_subset_derives_from_fixture() {
         .join("tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json");
     let cases = load_smoke_cases(&path).unwrap();
     let subset = smoke_subset(&cases).unwrap();
-    assert_eq!(subset.len(), 6);
+    assert_eq!(subset.len(), 11);
     for (index, case) in subset.iter().enumerate() {
         assert_eq!(
             case.smoke.order,

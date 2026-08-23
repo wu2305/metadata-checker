@@ -13,7 +13,7 @@
 # 本脚本自身是 bash（它是开发机工具，不进 CNB），被测的 stage 才是 dash。
 #
 # 用法：
-#   scripts/cnb-smoke-dry-run.sh                 # 正常路径，期望退出 0、产出 36 条 record
+#   scripts/cnb-smoke-dry-run.sh                 # 正常路径，期望退出 0、产出 66 条 record
 #   scripts/cnb-smoke-dry-run.sh --fault empty   # 无 smoke.enabled，期望判红
 #   scripts/cnb-smoke-dry-run.sh --fault dup     # smoke.order 撞号，期望判红
 #   scripts/cnb-smoke-dry-run.sh --fault noeat   # 循环中途少产一条 record，期望判红
@@ -93,6 +93,13 @@ STUB
 cat > "$STUB_BIN/sha256sum" <<'STUB'
 #!/usr/bin/env bash
 exec shasum -a 256 "$@"
+STUB
+
+# wc stub：macOS 的 wc 计数带前导空格（GNU 没有），stage 里 `test "$(wc -l < f)" = N`
+# 这类等值断言在干跑下会假红。剥掉空白，其余行为不变。
+cat > "$STUB_BIN/wc" <<'STUB'
+#!/usr/bin/env bash
+/usr/bin/wc "$@" | tr -d ' '
 STUB
 
 # cargo stub：judge 要 CNB_TOKEN 和真模型，干跑不碰。伪造它的产出契约即可。
@@ -237,9 +244,10 @@ esac
 STAGE_SH="$SANDBOX/stage.sh"
 JUDGE_SH="$SANDBOX/judge.sh"
 ENDSTAGE_SH="$SANDBOX/endstage.sh"
-python3 - "$REPO_ROOT/.cnb.yml" "$STAGE_SH" "$JUDGE_SH" "$ENDSTAGE_SH" <<'PY'
+PIPELINE_ENV="$SANDBOX/pipeline.env"
+python3 - "$REPO_ROOT/.cnb.yml" "$STAGE_SH" "$JUDGE_SH" "$ENDSTAGE_SH" "$PIPELINE_ENV" <<'PY'
 import sys, yaml
-cnb_path, out_path, judge_path, endstage_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+cnb_path, out_path, judge_path, endstage_path, env_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 doc = yaml.safe_load(open(cnb_path, encoding="utf-8"))
 pipeline = doc["$"]["api_trigger_kimi_harness_smoke"][0]
 stages = pipeline["stages"]
@@ -262,6 +270,14 @@ if len(endstages) != 1:
     raise SystemExit(f"expected exactly 1 report smoke summary endStage, found {len(endstages)}")
 open(endstage_path, "w", encoding="utf-8").write(endstages[0]["script"])
 print(f"extracted endStage script: {len(endstages[0]['script'].splitlines())} lines")
+# pipeline 级 env（KIMI_SMOKE_VARIANTS/KIMI_SMOKE_TRIALS 等）同样逐字导出——stage 脚本
+# 里的 ${VAR:?} 守卫在真实 runner 上由 pipeline env 满足，干跑缺了它就是假红。
+import shlex
+env_map = pipeline.get("env", {})
+with open(env_path, "w", encoding="utf-8") as f:
+    for key, value in env_map.items():
+        f.write(f"{key}={shlex.quote(str(value))}\n")
+print(f"extracted pipeline env: {len(env_map)} keys")
 PY
 
 # --- 执行 ---------------------------------------------------------------
@@ -276,6 +292,8 @@ run_stage_under_dash() {
   set +e
   (
     cd "$WORK"
+    # 先注入 pipeline 级 env（逐字提取自 .cnb.yml），再用 stub/调用方变量覆盖。
+    set -a; . "$PIPELINE_ENV"; set +a
     env PATH="$STUB_BIN:$PATH" \
       CNB_TOKEN="stub-token-not-a-real-secret" \
       CNB_REPO_SLUG="wu2305/metadata-checker" \
@@ -326,6 +344,7 @@ ARCHIVE_LOG="$SANDBOX/archive-uploads.log"
 set +e
 (
   cd "$WORK"
+  set -a; . "$PIPELINE_ENV"; set +a
   PATH="$STUB_BIN:$PATH" \
   CNB_TOKEN="stub-token-not-a-real-secret" \
   CNB_REPO_SLUG="wu2305/metadata-checker" \
@@ -353,24 +372,25 @@ if [ -s "$RECORDS" ]; then
 fi
 
 if [ "$FAULT" = "none" ]; then
-  # 结构化解析覆盖完整 6×2×3 网格；入口 case 在每个 variant/trial 各出现一次。
-  [ "$(wc -l < "$RECORDS" | tr -d ' ')" = "36" ] || { echo "FAIL: 期望 36 条 record" >&2; exit 1; }
-  [ "$(grep -c '"metadata_checker_invocations":1' "$RECORDS")" = "36" ] || { echo "FAIL: mc 结构化计数异常" >&2; exit 1; }
-  [ "$(grep -c '"raw_fallback":true' "$RECORDS")" = "6" ] || { echo "FAIL: 期望 6 条 raw_fallback=true" >&2; exit 1; }
-  [ "$(grep -c '"raw_fallback":false' "$RECORDS")" = "30" ] || { echo "FAIL: 期望 30 条 raw_fallback=false" >&2; exit 1; }
-  [ "$(grep -c '"variant":"typed_ppr".*"retrieval_context_observed":true' "$RECORDS")" = "18" ] || { echo "FAIL: typed exposure 应为 18/18" >&2; exit 1; }
-  [ "$(grep -c '"variant":"baseline".*"retrieval_context_observed":false' "$RECORDS")" = "18" ] || { echo "FAIL: baseline 应为 18 条未曝光" >&2; exit 1; }
+  # 结构化解析覆盖完整 11×2×3 网格；入口 case 在每个 variant/trial 各出现一次。
+  [ "$(wc -l < "$RECORDS" | tr -d ' ')" = "66" ] || { echo "FAIL: 期望 66 条 record" >&2; exit 1; }
+  [ "$(grep -c '"metadata_checker_invocations":1' "$RECORDS")" = "66" ] || { echo "FAIL: mc 结构化计数异常" >&2; exit 1; }
+  # 两个 page overview case 的问题模板都含「入口」，各自在 2×3 网格里触发一次 raw fallback。
+  [ "$(grep -c '"raw_fallback":true' "$RECORDS")" = "12" ] || { echo "FAIL: 期望 12 条 raw_fallback=true" >&2; exit 1; }
+  [ "$(grep -c '"raw_fallback":false' "$RECORDS")" = "54" ] || { echo "FAIL: 期望 54 条 raw_fallback=false" >&2; exit 1; }
+  [ "$(grep -c '"variant":"typed_ppr".*"retrieval_context_observed":true' "$RECORDS")" = "33" ] || { echo "FAIL: typed exposure 应为 33/33" >&2; exit 1; }
+  [ "$(grep -c '"variant":"baseline".*"retrieval_context_observed":false' "$RECORDS")" = "33" ] || { echo "FAIL: baseline 应为 33 条未曝光" >&2; exit 1; }
   [ "$(grep -c '"variant":"baseline".*"retrieval_context_observed":true' "$RECORDS" || true)" = "0" ] || { echo "FAIL: baseline 出现 treatment 污染" >&2; exit 1; }
   # 卫生清理：预置的过期 transcript 必须被 stage 清掉。
   [ ! -e "$WORK/target/kimi-harness-smoke/smoke-transcript-q1.jsonl" ] || { echo "FAIL: 过期 transcript 未被清理" >&2; exit 1; }
-  # 每个 variant/trial 必须各有 6 份 transcript；只按 case_id 命名会静默覆盖。
+  # 每个 variant/trial 必须各有 11 份 transcript；只按 case_id 命名会静默覆盖。
   for EXPECTED_VARIANT in baseline typed_ppr; do
     for EXPECTED_TRIAL in 1 2 3; do
       ACTUAL_COUNT="$(find "$WORK/target/kimi-harness-smoke" -name "smoke-transcript-*__"$EXPECTED_VARIANT"__t"$EXPECTED_TRIAL".jsonl" | wc -l | tr -d ' ')"
-      [ "$ACTUAL_COUNT" = "6" ] || { echo "FAIL: $EXPECTED_VARIANT/t$EXPECTED_TRIAL transcript 实际 $ACTUAL_COUNT" >&2; exit 1; }
+      [ "$ACTUAL_COUNT" = "11" ] || { echo "FAIL: $EXPECTED_VARIANT/t$EXPECTED_TRIAL transcript 实际 $ACTUAL_COUNT" >&2; exit 1; }
     done
   done
-  [ "$(find "$WORK/target/kimi-harness-smoke" -name 'smoke-stderr-*__*__t*.log' | wc -l | tr -d ' ')" = "36" ] || { echo "FAIL: stderr 文件数量不是 36" >&2; exit 1; }
+  [ "$(find "$WORK/target/kimi-harness-smoke" -name 'smoke-stderr-*__*__t*.log' | wc -l | tr -d ' ')" = "66" ] || { echo "FAIL: stderr 文件数量不是 66" >&2; exit 1; }
   # endStage 的 dump 用 RUN_TAG 作标签，标签里必须能看到身份。
   grep -q '__baseline__t1 transcript tail' "$ENDSTAGE_LOG" \
     || { echo "FAIL: endStage dump 标签未带 variant/trial" >&2; exit 1; }

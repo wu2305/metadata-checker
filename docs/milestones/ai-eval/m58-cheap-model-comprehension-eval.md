@@ -234,8 +234,8 @@ RunReport 升到 `1.3.0`，新增 `command_route_usage`（按 `<task_family> -> 
 | 三个固定分母率（answer / adherence / assisted） | done（2026-08-23） | `render_judge_markdown`；主指标 `tool_assisted_quality` |
 | 阶段 B 同 pipeline 判分（复用 runner env） | done（2026-08-23） | `kimi-code harness judge` 紧跟 smoke run；不另起 api_trigger |
 | 配对网格（variant × case × trial） | done（2026-08-23 随 M58.4 Phase B 落地；本表写于 08-17，当时「占位」属实，Phase B 后未回填） | `.cnb.yml` env 网格 `KIMI_SMOKE_VARIANTS`/`KIMI_SMOKE_TRIALS`（2×6×3=36）+ records/judge 按 `(case_id, variant, trial)` 配对 |
-| **逐 case `provenance`** | **未做** | 8 个 case 均无 per-case `provenance`；顶层只有 `claimed_validation` + `evidence_status: recalled_unverifiable` |
-| **语料扩充** | **未做** | 仍是 8 个 case（6 个入冒烟），每个难度层 2–3 个；hard 层冒烟内只有 1 个 |
+| 逐 case `provenance` | done（2026-08-23） | 13 个 case 全部带 per-case `provenance`；存量 8 个重放复核 22/22 断言 PASS，证据在 `docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/`；守卫测试 `test_fixture_cases_carry_per_case_provenance` |
+| 语料扩充 | done（2026-08-23） | 8 → 13 个 case（6 → 11 个入冒烟）；hard 层冒烟 1 → 2；新 case 的 gold 全部经 CLI 实跑验证，见下节 |
 
 ### 阶段 A 实跑归档（2026-08-22）
 
@@ -260,3 +260,21 @@ kimi-code **不钉死**：`curl install.sh` 取当前 harness，只把 `kimi_ver
 验证（2026-08-17）：`cargo fmt --check` 干净；`kimi_harness_judge_tests` 40 passed / 1 ignored（live 按 token 门控）；`m58_cnb_ai_runner_tests` 40 passed / 1 ignored；`ai_eval_tests` 25 passed；`m58_3_command_surface_tests` 27 passed；`scripts/cnb-smoke-dry-run.sh` 正常路径绿、四条故障注入全部判红。
 
 复验（2026-08-20，含附件归档）：`.cnb.yml` 流水线 YAML/语义/Schema 校验通过；`kimi_harness_judge_tests` 40 passed / 1 ignored；干跑正常路径绿（含 6 份 `__baseline__t1` transcript、四件附件上传与 ttl/size 断言），四条故障注入全部判红。**未在 CNB 上实跑**——干跑通过不等于验收通过，真实验收仍是跑一次 `api_trigger_kimi_harness_smoke`。
+
+### 逐 case provenance 复核与语料扩充（2026-08-23）
+
+执行 [M58.2 续作 plan](../../plans/2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md)。全部实跑在 CNB workspace 完成：当前源码 release 二进制（`66f75bc`，sha256 `c64d9a23…`）+ pin 语料（`xiaoshouyi-corpus @ 6920ac51`）+ 全量 graphdb（78127 节点 / 150165 边）。
+
+**存量 8 个 case 重放复核**：22/22 `expected_output_assertions` PASS，`expected_facts`/`forbidden_claims` 与实跑输出一致。每个 case 补了 per-case `provenance`，`evidence_status` 从顶层共用的 `recalled_unverifiable` 升为逐 case `replay_verified`，证据产物（命令+退出码、原始输出、断言核对表、facts 复核记录）落 `docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/<case_id>/`。新增守卫测试 `test_fixture_cases_carry_per_case_provenance`：每个 case 必须有 provenance，`replay_verified` 必须有真实存在的证据产物与 `verified_with` 坐标。两处非阻塞观察如实写进 case note（writer_chain 的 compact 截断、page_overview 的 confidence=reduced）。
+
+**语料扩充 8 → 13（冒烟 6 → 11）**：6 个候选从 pin 语料源文件命题，全部经 CLI 实跑验证，5 个入库（hard：`contract_button13_display_condition`；expert：`testdrive_input6_contract_no_generation`、`testdrive_name_cross_page_writer`；easy：`bindcar_text14_status_value_expr`、`testdrive_protocol_page_overview`），hard 层冒烟 1 → 2。候选 `bindcar_input5_pending_reason_calc` 判 **not_viable** 弃置（calc CASE WHEN 完全不被 CLI 暴露，且 availability 页面限定降级），证据保留在同一目录备查。多个候选的原推断被实跑推翻后如实修正（如 button13 祖先链断裂改打 panel13、writer 的 conditionExp 不暴露降级为 relations 型），修正史写进各 case 的 `provenance.note`。
+
+**反哺工具侧的 5 项缺口**（本轮只记录不修复，属 M58.3/scanner 面）：
+
+1. 组件祖先 Contains 链选择性缺口：合同协议.spg button13 嵌在 panel13 内，但图中 Contains 入边仅来自 page，display intent 找不到继承条件（text41→panel35 正常，说明是选择性的，疑似深层嵌套容器处理问题）。
+2. `--explain-condition --intent availability` 在部分页面把页面限定降级到全局同名模型（绑定车辆.spg model6/7/8、试乘试驾协议.spg model6/7 实跑中招），execution_notes 第 15 条原只记载 `--explain` 的退化，已补记。
+3. `calcEnabled` 的 CASE WHEN 取值表达式不进 value-source/auto intent，只能经 `--explain` 的 `details.reads` 取得。
+4. 写动作的 `conditionExp` 不在 writer/relations 输出中暴露，「什么条件下写入」类问题目前无法由 CLI 证明。
+5. 表达式内模型引用解析粗糙：`IF(model6.totalRowCount__ …)` 的模型 id 被截成 `IF(model6`。
+
+**同步面**：fixture `eval_count` 13、`smoke.order` 1–11 连续；干跑脚本计数 36→66（record/stderr）、18→33（variant 曝光）、6→11（每 variant×trial transcript）、raw_fallback 6→12（两个 page overview case 的模板都含「入口」）；`test_load_smoke_cases_reads_real_fixture` / `test_smoke_subset_derives_from_fixture` 计数同步。引用规则不变：历史 6 问冒烟的数字仍是调试仪表；扩充后首轮 11 问 run 之前的绝对分数不可跨语料比较。
