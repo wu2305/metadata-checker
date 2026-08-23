@@ -259,13 +259,6 @@ impl Serialize for Diagnostic {
 pub enum DiagnosticSeverity {
     Error,
     Warning,
-
-/// 诊断严重级别
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum DiagnosticSeverity {
-    Error,
-    Warning,
     Info,
 }
 
