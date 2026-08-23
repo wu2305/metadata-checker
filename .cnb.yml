@@ -642,6 +642,8 @@
     KIMI_CODE_HOME: target/kimi-harness-smoke/kimi-home
     KIMI_DISABLE_TELEMETRY: "1"
     KIMI_CODE_NO_AUTO_UPDATE: "1"
+    KIMI_SMOKE_VARIANTS: "baseline typed_ppr"
+    KIMI_SMOKE_TRIALS: "3"
   stages:
     - name: install kimi-code
       script: |
@@ -820,7 +822,8 @@
         node -e '
           const fs = require("fs");
           const [outPath, recordedAt, repoSha, corpusSha, kimiVersion, binSha, skillSha,
-                 fixturePath, fixtureSha, agentModel, judgeModel, judgeApiRoute] = process.argv.slice(1);
+                 fixturePath, fixtureSha, agentModel, judgeModel, judgeApiRoute,
+                 variants, trials, treatmentEnvName] = process.argv.slice(1);
           const manifest = {
             recorded_at: recordedAt,
             repo_sha: repoSha,
@@ -833,6 +836,9 @@
             agent_model: agentModel,
             judge_model: judgeModel,
             judge_api_route: judgeApiRoute,
+            variants: variants.split(/\s+/).filter(Boolean),
+            trials: Number(trials),
+            treatment_env_name: treatmentEnvName,
             agent_temperature: null,
             judge_temperature: null,
             kimi_pin_policy: "float",
@@ -841,7 +847,8 @@
         ' "$OUT_DIR/run.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REPO_SHA" "$CORPUS_SHA" \
           "$KIMI_VERSION" "$BIN_SHA" "$SKILL_SHA" \
           "$CASES_JSON" "$FIXTURE_SHA" \
-          "${KIMI_MODEL_NAME:-unknown}" "${KIMI_JUDGE_MODEL:-glm-5.2}" "ai-ide/v2"
+          "${KIMI_MODEL_NAME:-unknown}" "${KIMI_JUDGE_MODEL:-glm-5.2}" "ai-ide/v2" \
+          "$KIMI_SMOKE_VARIANTS" "$KIMI_SMOKE_TRIALS" "METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL"
         cat "$OUT_DIR/run.json"
 
         # 问题文本不在本文件里。唯一事实源是 xiaoshouyi_large_real_cases.json 的
@@ -887,12 +894,18 @@
         ' "$CASES_JSON" "$REAL_PROJECT_DIR" > "$QUESTIONS_TSV"
         echo "SMOKE_CASE_COUNT=$(wc -l < "$QUESTIONS_TSV")"
 
-        # variant / trial 现在恒为 baseline / 1，但字段先占位：Phase 2 加 prompt 变体
-        # 与重复次数时，record schema 不需要再变，下游 grid 也不用改读法。
-        # 二者同时进 transcript/stderr 文件名（见下方 RUN_TAG）：占位字段只有落到
-        # 产物命名上才真的挡住覆盖，否则 Phase 2 第一次跑就会静默丢答案。
-        VARIANT="${KIMI_SMOKE_VARIANT:-baseline}"
-        TRIAL="${KIMI_SMOKE_TRIAL:-1}"
+        # 配对网格由 anchor env 固定；只允许批准的两组与正整数 trial，防止手动触发时
+        # 用一个拼错的 variant 跑出看似完整、实则不可配对的高成本结果。
+        VARIANTS="${KIMI_SMOKE_VARIANTS:?}"
+        TRIAL_COUNT="${KIMI_SMOKE_TRIALS:?}"
+        case "$VARIANTS" in
+          "baseline typed_ppr") ;;
+          *) echo "unexpected KIMI_SMOKE_VARIANTS=$VARIANTS" >&2; exit 1 ;;
+        esac
+        case "$TRIAL_COUNT" in
+          ""|*[!0-9]*) echo "KIMI_SMOKE_TRIALS must be a positive integer" >&2; exit 1 ;;
+        esac
+        test "$TRIAL_COUNT" -gt 0
 
         # 硬断言只留 infra 级（kimi 退出码、transcript 非空、token 泄漏）；
         # 是否调用 metadata-checker 只软报告不判红——真实文件读不动时
@@ -901,113 +914,140 @@
         # POSIX 下拿一个真制表符只能这样：`IFS=$'\t'` 是 bash 专属。
         TAB="$(printf '\t')"
         INFRA_FAILED=0
-        while IFS="$TAB" read -r CASE_ID ORDER DIFFICULTY QUESTION; do
-          # 文件名必须带 variant/trial：record 已经按 (case_id, variant, trial) 唯一，
-          # 而 transcript 曾只按 case_id 命名——同一 stage 内跑第二个 trial 会把第一个
-          # 的答案覆盖掉，records 有 N 行、磁盘上只剩 1 份，judge 评的是幸存者且无从
-          # 察觉。分隔符用 `__`：case_id 只含单下划线，肉眼仍能一眼切开。
-          RUN_TAG="${CASE_ID}__${VARIANT}__t${TRIAL}"
-          TRANSCRIPT="$OUT_DIR/smoke-transcript-${RUN_TAG}.jsonl"
-          STDERR_LOG="$OUT_DIR/smoke-stderr-${RUN_TAG}.log"
-          CASE_EXIT=0
-          # 墙钟是 Phase 2 的预算输入：variant × case × trial 的总时长要从实测推，
-          # 不是拍脑袋。含模型自己建图的时间，这正是要量的那部分。
-          START_MS="$(date +%s%3N)"
-          timeout 1800 kimi -p "$QUESTION" \
-            --skills-dir "$PWD/$OUT_DIR/skills" \
-            --output-format stream-json \
-            > "$TRANSCRIPT" \
-            2> "$STDERR_LOG" || CASE_EXIT=$?
-          END_MS="$(date +%s%3N)"
-
-          # 每次调用后立刻扫 token：kimi -p 自动批准工具调用，模型跑个 env 或 CLI 打印
-          # 请求头都可能把 KIMI_MODEL_API_KEY（即 CNB_TOKEN）写进 transcript/stderr。
-          # 一旦发现立刻就地脱敏并判 infra 失败——留着原文，后面的记录投影与
-          # endStages dump 会把它带进 CI 日志。
-          if [ -n "${CNB_TOKEN:-}" ] && grep -qF "$CNB_TOKEN" "$TRANSCRIPT" "$STDERR_LOG" 2>/dev/null; then
-            echo "CNB_TOKEN leaked into kimi output for $CASE_ID; redacted in place"
-            redact_token "$TRANSCRIPT"
-            redact_token "$STDERR_LOG"
-            INFRA_FAILED=1
+        TRIAL=1
+        while [ "$TRIAL" -le "$TRIAL_COUNT" ]; do
+          if [ $((TRIAL % 2)) -eq 0 ]; then
+            VARIANT_ORDER="typed_ppr baseline"
+          else
+            VARIANT_ORDER="$VARIANTS"
           fi
+          for VARIANT in $VARIANT_ORDER; do
+            case "$VARIANT" in
+              baseline) unset METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL ;;
+              typed_ppr) export METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL="typed-ppr" ;;
+            esac
+            while IFS="$TAB" read -r CASE_ID ORDER DIFFICULTY QUESTION; do
+              # 文件名必须带 variant/trial：record 已经按 (case_id, variant, trial) 唯一，
+              # 而 transcript 曾只按 case_id 命名——同一 stage 内跑第二个 trial 会把第一个
+              # 的答案覆盖掉，records 有 N 行、磁盘上只剩 1 份，judge 评的是幸存者且无从
+              # 察觉。分隔符用 `__`：case_id 只含单下划线，肉眼仍能一眼切开。
+              RUN_TAG="${CASE_ID}__${VARIANT}__t${TRIAL}"
+              TRANSCRIPT="$OUT_DIR/smoke-transcript-${RUN_TAG}.jsonl"
+              STDERR_LOG="$OUT_DIR/smoke-stderr-${RUN_TAG}.log"
+              CASE_EXIT=0
+              # 墙钟是 Phase 2 的预算输入：variant × case × trial 的总时长要从实测推，
+              # 不是拍脑袋。含模型自己建图的时间，这正是要量的那部分。
+              START_MS="$(date +%s%3N)"
+              timeout 1800 kimi -p "$QUESTION" \
+                --skills-dir "$PWD/$OUT_DIR/skills" \
+                --output-format stream-json \
+                > "$TRANSCRIPT" \
+                2> "$STDERR_LOG" || CASE_EXIT=$?
+              END_MS="$(date +%s%3N)"
 
-          # 工具调用统计改为结构化解析 stream-json 的 tool_calls 事件（真实形状：
-          # {"role":"assistant","tool_calls":[{"function":{"name":"Bash","arguments":"{...}"}}]}），
-          # 不再 grep 行数——grep 把 assistant 复述与工具返回里的 'metadata-checker'
-          # 字样都算成调用，实跑出现过 13 次 tool_calls 对 15 次「调用」的假数据。
-          # raw fallback：绕过 metadata-checker 直接读写项目原始 .spg/.tbl（启发式下限：
-          # 与 metadata-checker 调用混在同一行命令里的直接读文件抓不到；反过来 ls/test
-          # 一个 .spg 路径也会误标）。它只是诊断信号，judge.md 按固定分母分层报告，
-          # 不作为任何计分准入条件。
-          TOOL_STATS="$(node -e '
-            const fs = require("fs");
-            let toolCalls = 0, mcInvocations = 0, rawFallbackCalls = 0;
-            for (const line of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
-              if (!line.includes("tool_calls")) continue;
-              let msg;
-              try { msg = JSON.parse(line); } catch { continue; }
-              const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
-              for (const call of calls) {
-                toolCalls += 1;
-                let args = {};
-                try { args = JSON.parse((call.function && call.function.arguments) || "{}"); } catch {}
-                const command = typeof args.command === "string" ? args.command : "";
-                const path = typeof args.path === "string" ? args.path : "";
-                const invokesMc = /(^|[\/\s])metadata-checker(\s|$)/.test(command);
-                if (invokesMc) mcInvocations += 1;
-                if (!invokesMc && /\.(spg|tbl)(["\x27\s),;]|$)/.test(command + " " + path)) {
-                  rawFallbackCalls += 1;
+              # 每次调用后立刻扫 token：kimi -p 自动批准工具调用，模型跑个 env 或 CLI 打印
+              # 请求头都可能把 KIMI_MODEL_API_KEY（即 CNB_TOKEN）写进 transcript/stderr。
+              # 一旦发现立刻就地脱敏并判 infra 失败——留着原文，后面的记录投影与
+              # endStages dump 会把它带进 CI 日志。
+              if [ -n "${CNB_TOKEN:-}" ] && grep -qF "$CNB_TOKEN" "$TRANSCRIPT" "$STDERR_LOG" 2>/dev/null; then
+                echo "CNB_TOKEN leaked into kimi output for $CASE_ID; redacted in place"
+                redact_token "$TRANSCRIPT"
+                redact_token "$STDERR_LOG"
+                INFRA_FAILED=1
+              fi
+
+              # 工具调用统计改为结构化解析 stream-json 的 tool_calls 事件（真实形状：
+              # {"role":"assistant","tool_calls":[{"function":{"name":"Bash","arguments":"{...}"}}]}），
+              # 不再 grep 行数——grep 把 assistant 复述与工具返回里的 'metadata-checker'
+              # 字样都算成调用，实跑出现过 13 次 tool_calls 对 15 次「调用」的假数据。
+              # raw fallback：绕过 metadata-checker 直接读写项目原始 .spg/.tbl（启发式下限：
+              # 与 metadata-checker 调用混在同一行命令里的直接读文件抓不到；反过来 ls/test
+              # 一个 .spg 路径也会误标）。它只是诊断信号，judge.md 按固定分母分层报告，
+              # 不作为任何计分准入条件。
+              TOOL_STATS="$(node -e '
+                const fs = require("fs");
+                let toolCalls = 0, mcInvocations = 0, rawFallbackCalls = 0, retrievalContextObserved = 0;
+                for (const line of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
+                  let msg;
+                  try { msg = JSON.parse(line); } catch { continue; }
+                  const serialized = JSON.stringify(msg);
+                  const isToolResult = serialized.includes("\"role\":\"tool\"") || serialized.includes("\"type\":\"tool_result\"") || serialized.includes("\"tool_result\"");
+                  if (isToolResult && serialized.includes("experimental_graph_retrieval")) retrievalContextObserved = 1;
+                  const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+                  for (const call of calls) {
+                    toolCalls += 1;
+                    let args = {};
+                    try { args = JSON.parse((call.function && call.function.arguments) || "{}"); } catch {}
+                    const command = typeof args.command === "string" ? args.command : "";
+                    const path = typeof args.path === "string" ? args.path : "";
+                    const invokesMc = /(^|[\/\s])metadata-checker(\s|$)/.test(command);
+                    if (invokesMc) mcInvocations += 1;
+                    if (!invokesMc && /\.(spg|tbl)(["\x27\s),;]|$)/.test(command + " " + path)) {
+                      rawFallbackCalls += 1;
+                    }
+                  }
                 }
-              }
-            }
-            process.stdout.write([toolCalls, mcInvocations, rawFallbackCalls].join("\t"));
-          ' "$TRANSCRIPT")"
-          TOOL_CALLS="$(printf '%s' "$TOOL_STATS" | cut -f1)"
-          MC_INVOCATIONS="$(printf '%s' "$TOOL_STATS" | cut -f2)"
-          RAW_FALLBACK_CALLS="$(printf '%s' "$TOOL_STATS" | cut -f3)"
-          RAW_FALLBACK=0
-          if [ "$RAW_FALLBACK_CALLS" -gt 0 ]; then RAW_FALLBACK=1; fi
-          TRANSCRIPT_BYTES="$(wc -c < "$TRANSCRIPT" 2>/dev/null || echo 0)"
+                process.stdout.write([toolCalls, mcInvocations, rawFallbackCalls, retrievalContextObserved].join("\t"));
+              ' "$TRANSCRIPT")"
+              TOOL_CALLS="$(printf '%s' "$TOOL_STATS" | cut -f1)"
+              MC_INVOCATIONS="$(printf '%s' "$TOOL_STATS" | cut -f2)"
+              RAW_FALLBACK_CALLS="$(printf '%s' "$TOOL_STATS" | cut -f3)"
+              RETRIEVAL_CONTEXT_OBSERVED="$(printf '%s' "$TOOL_STATS" | cut -f4)"
+              RAW_FALLBACK=0
+              if [ "$RAW_FALLBACK_CALLS" -gt 0 ]; then RAW_FALLBACK=1; fi
+              if [ "$VARIANT" = "baseline" ] && [ "$RETRIEVAL_CONTEXT_OBSERVED" = "1" ]; then
+                echo "baseline treatment contamination for $CASE_ID/t$TRIAL" >&2
+                INFRA_FAILED=1
+              fi
+              TRANSCRIPT_BYTES="$(wc -c < "$TRANSCRIPT" 2>/dev/null || echo 0)"
 
-          node -e '
-            const [caseId, order, difficulty, variant, trial, exitCode, startMs, endMs,
-                   toolCalls, mcInvocations, rawFallbackCalls, rawFallback,
-                   transcript, stderrLog, bytes] = process.argv.slice(1);
-            process.stdout.write(JSON.stringify({
-              case_id: caseId,
-              order: Number(order),
-              difficulty,
-              variant,
-              trial: Number(trial),
-              exit_code: Number(exitCode),
-              wall_clock_ms: Number(endMs) - Number(startMs),
-              tool_calls: Number(toolCalls),
-              metadata_checker_invocations: Number(mcInvocations),
-              raw_fallback_calls: Number(rawFallbackCalls),
-              raw_fallback: rawFallback === "1",
-              transcript_bytes: Number(bytes || 0),
-              transcript_path: transcript,
-              stderr_path: stderrLog,
-            }) + "\n");
-          ' "$CASE_ID" "$ORDER" "$DIFFICULTY" "$VARIANT" "$TRIAL" "$CASE_EXIT" \
-            "$START_MS" "$END_MS" "$TOOL_CALLS" "$MC_INVOCATIONS" \
-            "$RAW_FALLBACK_CALLS" "$RAW_FALLBACK" \
-            "$TRANSCRIPT" "$STDERR_LOG" "$TRANSCRIPT_BYTES" >> "$RECORDS"
+              node -e '
+                const [caseId, order, difficulty, variant, trial, exitCode, startMs, endMs,
+                       toolCalls, mcInvocations, rawFallbackCalls, rawFallback, retrievalContextObserved,
+                       transcript, stderrLog, bytes] = process.argv.slice(1);
+                process.stdout.write(JSON.stringify({
+                  case_id: caseId,
+                  order: Number(order),
+                  difficulty,
+                  variant,
+                  trial: Number(trial),
+                  exit_code: Number(exitCode),
+                  wall_clock_ms: Number(endMs) - Number(startMs),
+                  tool_calls: Number(toolCalls),
+                  metadata_checker_invocations: Number(mcInvocations),
+                  raw_fallback_calls: Number(rawFallbackCalls),
+                  raw_fallback: rawFallback === "1",
+                  retrieval_context_observed: retrievalContextObserved === "1",
+                  transcript_bytes: Number(bytes || 0),
+                  transcript_path: transcript,
+                  stderr_path: stderrLog,
+                }) + "\n");
+              ' "$CASE_ID" "$ORDER" "$DIFFICULTY" "$VARIANT" "$TRIAL" "$CASE_EXIT" \
+                "$START_MS" "$END_MS" "$TOOL_CALLS" "$MC_INVOCATIONS" \
+                "$RAW_FALLBACK_CALLS" "$RAW_FALLBACK" "$RETRIEVAL_CONTEXT_OBSERVED" \
+                "$TRANSCRIPT" "$STDERR_LOG" "$TRANSCRIPT_BYTES" >> "$RECORDS"
 
-          echo "[$ORDER/$DIFFICULTY] $CASE_ID exit=$CASE_EXIT $(( (END_MS - START_MS) / 1000 ))s tool_calls=$TOOL_CALLS mc=$MC_INVOCATIONS raw_fallback=$RAW_FALLBACK"
+              echo "[$ORDER/$DIFFICULTY] $CASE_ID variant=$VARIANT trial=$TRIAL exit=$CASE_EXIT $(( (END_MS - START_MS) / 1000 ))s tool_calls=$TOOL_CALLS mc=$MC_INVOCATIONS raw_fallback=$RAW_FALLBACK retrieval_exposure=$RETRIEVAL_CONTEXT_OBSERVED"
 
-          if [ "$CASE_EXIT" -ne 0 ]; then INFRA_FAILED=1; fi
-          if [ ! -s "$TRANSCRIPT" ]; then
-            echo "empty transcript for $CASE_ID"
-            INFRA_FAILED=1
-          fi
-        done < "$QUESTIONS_TSV"
+              if [ "$CASE_EXIT" -ne 0 ]; then INFRA_FAILED=1; fi
+              if [ ! -s "$TRANSCRIPT" ]; then
+                echo "empty transcript for $CASE_ID"
+                INFRA_FAILED=1
+              fi
+            done < "$QUESTIONS_TSV"
+          done
+          TRIAL=$((TRIAL + 1))
+        done
+        unset METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL
 
         # records.jsonl 是下游唯一输入（判分、grid、墙钟预算都读它），
         # 行数对不上说明循环中途被吞了，必须判红而不是让下游拿半份数据算比率。
         RECORD_COUNT="$(wc -l < "$RECORDS")"
         echo "SMOKE_RECORD_COUNT=${RECORD_COUNT}"
-        test "$RECORD_COUNT" = "$(wc -l < "$QUESTIONS_TSV")"
+        CASE_COUNT="$(wc -l < "$QUESTIONS_TSV")"
+        VARIANT_COUNT="$(printf '%s\n' "$VARIANTS" | wc -w)"
+        EXPECTED_RECORD_COUNT=$((CASE_COUNT * VARIANT_COUNT * TRIAL_COUNT))
+        test "$RECORD_COUNT" = "$EXPECTED_RECORD_COUNT"
         echo "SMOKE_TOTAL_WALL_CLOCK_MS=$(node -e '
           const fs = require("fs");
           const lines = fs.readFileSync(process.argv[1], "utf8").trim().split("\n");

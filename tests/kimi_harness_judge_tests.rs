@@ -131,7 +131,7 @@ fn test_smoke_subset_rejects_empty_selection() {
 
 /// 一行合法 record，字段顺序与 `.cnb.yml` 的 node 发射器一致。
 fn sample_record_line() -> String {
-    r#"{"case_id":"c1","order":1,"difficulty":"easy","variant":"baseline","trial":1,"exit_code":0,"wall_clock_ms":1234,"tool_calls":3,"metadata_checker_invocations":2,"raw_fallback_calls":1,"raw_fallback":true,"transcript_bytes":4096,"transcript_path":"out/t.jsonl","stderr_path":"out/t.log"}"#
+    r#"{"case_id":"c1","order":1,"difficulty":"easy","variant":"baseline","trial":1,"exit_code":0,"wall_clock_ms":1234,"tool_calls":3,"metadata_checker_invocations":2,"raw_fallback_calls":1,"raw_fallback":true,"retrieval_context_observed":false,"transcript_bytes":4096,"transcript_path":"out/t.jsonl","stderr_path":"out/t.log"}"#
         .to_string()
 }
 
@@ -230,6 +230,9 @@ fn test_cnb_run_json_records_eval_identity() {
     for needle in [
         "fixture_path:",
         "fixture_sha256:",
+        "variants:",
+        "trials:",
+        "treatment_env_name:",
         "agent_temperature: null",
         "judge_temperature: null",
         "kimi_pin_policy: \"float\"",
@@ -957,7 +960,7 @@ fn test_render_judge_markdown_reports_fixed_denominator_strata() {
     ];
     let record = |case_id: &str, mc: u32, raw_calls: u32, raw: bool| {
         format!(
-            r#"{{"case_id":"{case_id}","order":1,"difficulty":"easy","variant":"baseline","trial":1,"exit_code":0,"wall_clock_ms":100,"tool_calls":3,"metadata_checker_invocations":{mc},"raw_fallback_calls":{raw_calls},"raw_fallback":{raw},"transcript_bytes":100,"transcript_path":"t.jsonl","stderr_path":"t.log"}}"#
+            r#"{{"case_id":"{case_id}","order":1,"difficulty":"easy","variant":"baseline","trial":1,"exit_code":0,"wall_clock_ms":100,"tool_calls":3,"metadata_checker_invocations":{mc},"raw_fallback_calls":{raw_calls},"raw_fallback":{raw},"retrieval_context_observed":false,"transcript_bytes":100,"transcript_path":"t.jsonl","stderr_path":"t.log"}}"#
         )
     };
     let records = parse_trial_records(&format!(
@@ -1046,7 +1049,7 @@ fn test_render_judge_markdown_scores_each_trial_independently() {
     };
     let record = |trial: u32, mc: u32| {
         format!(
-            r#"{{"case_id":"case_multi","order":1,"difficulty":"easy","variant":"baseline","trial":{trial},"exit_code":0,"wall_clock_ms":100,"tool_calls":3,"metadata_checker_invocations":{mc},"raw_fallback_calls":0,"raw_fallback":false,"transcript_bytes":100,"transcript_path":"t{trial}.jsonl","stderr_path":"t{trial}.log"}}"#
+            r#"{{"case_id":"case_multi","order":1,"difficulty":"easy","variant":"baseline","trial":{trial},"exit_code":0,"wall_clock_ms":100,"tool_calls":3,"metadata_checker_invocations":{mc},"raw_fallback_calls":0,"raw_fallback":false,"retrieval_context_observed":false,"transcript_bytes":100,"transcript_path":"t{trial}.jsonl","stderr_path":"t{trial}.log"}}"#
         )
     };
     // 故意按 trial 2 在前的顺序输入：配对按三元组，不得依赖顺序。
@@ -1111,7 +1114,7 @@ fn test_render_judge_markdown_names_unpaired_sides() {
     };
     let record = |case_id: &str, trial: u32| {
         format!(
-            r#"{{"case_id":"{case_id}","order":1,"difficulty":"easy","variant":"baseline","trial":{trial},"exit_code":0,"wall_clock_ms":100,"tool_calls":1,"metadata_checker_invocations":1,"raw_fallback_calls":0,"raw_fallback":false,"transcript_bytes":100,"transcript_path":"t.jsonl","stderr_path":"t.log"}}"#
+            r#"{{"case_id":"{case_id}","order":1,"difficulty":"easy","variant":"baseline","trial":{trial},"exit_code":0,"wall_clock_ms":100,"tool_calls":1,"metadata_checker_invocations":1,"raw_fallback_calls":0,"raw_fallback":false,"retrieval_context_observed":false,"transcript_bytes":100,"transcript_path":"t.jsonl","stderr_path":"t.log"}}"#
         )
     };
     // record 是 case_judged/t2 与 case_unjudged/t1，判分是 case_judged/t1：三者两两配不上。
@@ -1151,7 +1154,7 @@ fn test_resolve_transcript_path_prefers_recorded_path() {
     let recorded = dir.join("smoke-transcript-case_a__baseline__t2.jsonl");
     std::fs::write(&recorded, "{}\n").unwrap();
     let record_line = format!(
-        r#"{{"case_id":"case_a","order":1,"difficulty":"easy","variant":"baseline","trial":2,"exit_code":0,"wall_clock_ms":100,"tool_calls":1,"metadata_checker_invocations":1,"raw_fallback_calls":0,"raw_fallback":false,"transcript_bytes":3,"transcript_path":"{}","stderr_path":"x.log"}}"#,
+        r#"{{"case_id":"case_a","order":1,"difficulty":"easy","variant":"baseline","trial":2,"exit_code":0,"wall_clock_ms":100,"tool_calls":1,"metadata_checker_invocations":1,"raw_fallback_calls":0,"raw_fallback":false,"retrieval_context_observed":false,"transcript_bytes":3,"transcript_path":"{}","stderr_path":"x.log"}}"#,
         recorded.display()
     );
     let records = parse_trial_records(&record_line).unwrap();
@@ -1437,4 +1440,94 @@ fn infra_judgement(case: &SmokeCase, reason: &str) -> CaseJudgement {
         forbidden_checks: Vec::new(),
         overall_note: format!("infra: {reason}"),
     }
+}
+
+/// 构造 Phase B 配对测试的最小判分。
+fn paired_judgement(case_id: &str, variant: &str, trial: u32, passed: bool) -> TrialJudgement {
+    TrialJudgement::new(
+        variant,
+        trial,
+        CaseJudgement {
+            case_id: case_id.to_string(),
+            passed,
+            must_supported: usize::from(passed),
+            must_total: 1,
+            contradicted_count: 0,
+            bonus_supported: 0,
+            bonus_total: 0,
+            violations: 0,
+            verdicts: Vec::new(),
+            bonus_verdicts: Vec::new(),
+            forbidden_checks: Vec::new(),
+            overall_note: "paired fixture".to_string(),
+        },
+    )
+}
+
+/// 构造 Phase B 配对测试的最小 record。
+fn paired_record(
+    case_id: &str,
+    variant: &str,
+    trial: u32,
+    metadata_checker_invocations: u32,
+    retrieval_context_observed: bool,
+) -> String {
+    format!(
+        r#"{{"case_id":"{case_id}","order":1,"difficulty":"easy","variant":"{variant}","trial":{trial},"exit_code":0,"wall_clock_ms":100,"tool_calls":1,"metadata_checker_invocations":{metadata_checker_invocations},"raw_fallback_calls":0,"raw_fallback":false,"retrieval_context_observed":{retrieval_context_observed},"transcript_bytes":100,"transcript_path":"{case_id}-{variant}-{trial}.jsonl","stderr_path":"{case_id}-{variant}-{trial}.log"}}"#
+    )
+}
+
+/// Phase B 必须按 variant 固定分母并输出可归因的正向配对转换。
+#[test]
+fn test_render_judge_markdown_reports_positive_paired_signal() {
+    let judgements = vec![
+        paired_judgement("case_gain", "baseline", 1, false),
+        paired_judgement("case_gain", "typed_ppr", 1, true),
+        paired_judgement("case_stable", "baseline", 1, true),
+        paired_judgement("case_stable", "typed_ppr", 1, true),
+    ];
+    let records = parse_trial_records(&format!(
+        "{}\n{}\n{}\n{}\n",
+        paired_record("case_gain", "baseline", 1, 1, false),
+        paired_record("case_gain", "typed_ppr", 1, 1, true),
+        paired_record("case_stable", "baseline", 1, 1, false),
+        paired_record("case_stable", "typed_ppr", 1, 1, false),
+    ))
+    .expect("配对 records 应合法");
+
+    let markdown = render_judge_markdown(&judgements, &records);
+    assert_eq!(
+        markdown.contains("| baseline | 2 | 1/2 | 2/2 | 1/2 | 0/2 |"),
+        true
+    );
+    assert_eq!(
+        markdown.contains("| typed_ppr | 2 | 2/2 | 2/2 | 2/2 | 1/2 |"),
+        true
+    );
+    assert_eq!(markdown.contains("| answer | 1 | 0 | 1 | 0 | +1/2 |"), true);
+    assert_eq!(
+        markdown.contains("| tool-assisted | 1 | 0 | 1 | 0 | +1/2 |"),
+        true
+    );
+    assert_eq!(markdown.contains("实验结论：**positive signal**"), true);
+}
+
+/// baseline 曝光 treatment 时，即使指标更高也必须判为 inconclusive。
+#[test]
+fn test_render_judge_markdown_rejects_baseline_treatment_contamination() {
+    let judgements = vec![
+        paired_judgement("case_polluted", "baseline", 1, false),
+        paired_judgement("case_polluted", "typed_ppr", 1, true),
+    ];
+    let records = parse_trial_records(&format!(
+        "{}\n{}\n",
+        paired_record("case_polluted", "baseline", 1, 1, true),
+        paired_record("case_polluted", "typed_ppr", 1, 1, true),
+    ))
+    .expect("污染 record 仍应能进入报告诊断");
+
+    let markdown = render_judge_markdown(&judgements, &records);
+    assert_eq!(markdown.contains("baseline treatment 污染：1 条"), true);
+    assert_eq!(markdown.contains("实验结论：**inconclusive**"), true);
+    assert_eq!(markdown.contains("baseline 污染 1 条"), true);
 }

@@ -135,6 +135,8 @@ pub(crate) struct TrialRecord {
     /// 是否发生 raw fallback。仅作诊断信号：同一命令混用工具与直读会漏标，ls/test
     /// 一个 .spg 路径会误标，因此不作为任何计分的准入条件。
     pub(crate) raw_fallback: bool,
+    /// transcript 的真实工具结果是否包含 typed-PPR treatment 上下文。
+    pub(crate) retrieval_context_observed: bool,
     /// transcript 字节数；0 表示空产出。
     pub(crate) transcript_bytes: u64,
     /// transcript 路径，判分阶段据此定位答案。
@@ -148,7 +150,7 @@ pub(crate) struct TrialRecord {
 /// 手写而非派生：`deny_unknown_fields` 的错误信息里虽然含字段名，但依赖
 /// serde 错误文本做断言太脆。这份清单与结构体不同步时，
 /// `test_trial_record_field_list_matches_struct` 会判红。
-pub(crate) const TRIAL_RECORD_FIELDS: [&str; 14] = [
+pub(crate) const TRIAL_RECORD_FIELDS: [&str; 15] = [
     "case_id",
     "order",
     "difficulty",
@@ -160,6 +162,7 @@ pub(crate) const TRIAL_RECORD_FIELDS: [&str; 14] = [
     "metadata_checker_invocations",
     "raw_fallback_calls",
     "raw_fallback",
+    "retrieval_context_observed",
     "transcript_bytes",
     "transcript_path",
     "stderr_path",
@@ -802,14 +805,15 @@ pub(crate) fn render_judge_markdown(
 
     let mut markdown = String::new();
     markdown.push_str("# Kimi Harness Smoke 语义 Judge\n\n");
-    markdown.push_str("| case_id | variant | trial | 结果 | must 命中 | contradicted | bonus 命中 | violations | tool_calls | mc | raw fallback |\n");
-    markdown
-        .push_str("| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
+    markdown.push_str("| case_id | variant | trial | 结果 | must 命中 | contradicted | bonus 命中 | violations | tool_calls | mc | raw fallback | retrieval exposure |\n");
+    markdown.push_str(
+        "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |\n",
+    );
     for trial_judgement in judgements {
         let judgement = &trial_judgement.judgement;
         let record = matched(trial_judgement);
         markdown.push_str(&format!(
-            "| {} | {} | {} | {} | {}/{} | {} | {}/{} | {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {}/{} | {} | {}/{} | {} | {} | {} | {} | {} |\n",
             escape_markdown_cell(&judgement.case_id),
             escape_markdown_cell(&trial_judgement.variant),
             trial_judgement.trial,
@@ -825,6 +829,9 @@ pub(crate) fn render_judge_markdown(
                 .metadata_checker_invocations
                 .to_string()),
             cell(record, &raw_label),
+            cell(record, &|record| record
+                .retrieval_context_observed
+                .to_string()),
         ));
     }
 
@@ -921,6 +928,149 @@ pub(crate) fn render_judge_markdown(
         })
         .count();
 
+    // Phase B：同一固定分母下分别统计两组，未调用工具或未曝光都不能移出分母。
+    let variant_metrics = |variant: &str| -> (usize, usize, usize, usize, usize) {
+        let trials = measured
+            .iter()
+            .copied()
+            .filter(|judgement| judgement.variant == variant)
+            .collect::<Vec<_>>();
+        let answer_pass = trials
+            .iter()
+            .filter(|judgement| judgement.judgement.passed)
+            .count();
+        let tool_used = trials
+            .iter()
+            .filter(|judgement| {
+                matched(judgement)
+                    .map(|record| record.metadata_checker_invocations > 0)
+                    .unwrap_or(false)
+            })
+            .count();
+        let tool_assisted_pass = trials
+            .iter()
+            .filter(|judgement| {
+                judgement.judgement.passed
+                    && matched(judgement)
+                        .map(|record| record.metadata_checker_invocations > 0)
+                        .unwrap_or(false)
+            })
+            .count();
+        let retrieval_exposure = trials
+            .iter()
+            .filter(|judgement| {
+                matched(judgement)
+                    .map(|record| record.retrieval_context_observed)
+                    .unwrap_or(false)
+            })
+            .count();
+        (
+            trials.len(),
+            answer_pass,
+            tool_used,
+            tool_assisted_pass,
+            retrieval_exposure,
+        )
+    };
+    let baseline_metrics = variant_metrics("baseline");
+    let typed_metrics = variant_metrics("typed_ppr");
+
+    // 以 (case_id, trial) 为配对键，分别统计语义与 tool-assisted 的四种转换。
+    let mut baseline_by_pair = std::collections::BTreeMap::new();
+    let mut typed_by_pair = std::collections::BTreeMap::new();
+    for judgement in &measured {
+        let key = (judgement.judgement.case_id.as_str(), judgement.trial);
+        match judgement.variant.as_str() {
+            "baseline" => {
+                baseline_by_pair.insert(key, *judgement);
+            }
+            "typed_ppr" => {
+                typed_by_pair.insert(key, *judgement);
+            }
+            _ => {}
+        }
+    }
+    let mut pair_keys = BTreeSet::new();
+    pair_keys.extend(baseline_by_pair.keys().copied());
+    pair_keys.extend(typed_by_pair.keys().copied());
+    let mut answer_transitions = [0usize; 4];
+    let mut tool_transitions = [0usize; 4];
+    let mut missing_pairs = Vec::new();
+    let transition_index = |before: bool, after: bool| match (before, after) {
+        (false, true) => 0,
+        (true, false) => 1,
+        (true, true) => 2,
+        (false, false) => 3,
+    };
+    for (case_id, trial) in pair_keys {
+        let (Some(baseline), Some(typed)) = (
+            baseline_by_pair.get(&(case_id, trial)),
+            typed_by_pair.get(&(case_id, trial)),
+        ) else {
+            missing_pairs.push(format!("{case_id}/t{trial}"));
+            continue;
+        };
+        answer_transitions[transition_index(baseline.judgement.passed, typed.judgement.passed)] +=
+            1;
+        let baseline_tool_pass = baseline.judgement.passed
+            && matched(baseline)
+                .map(|record| record.metadata_checker_invocations > 0)
+                .unwrap_or(false);
+        let typed_tool_pass = typed.judgement.passed
+            && matched(typed)
+                .map(|record| record.metadata_checker_invocations > 0)
+                .unwrap_or(false);
+        tool_transitions[transition_index(baseline_tool_pass, typed_tool_pass)] += 1;
+    }
+    let paired_count = answer_transitions.iter().sum::<usize>();
+    let baseline_contamination = records
+        .iter()
+        .filter(|record| record.variant == "baseline" && record.retrieval_context_observed)
+        .count();
+    let unknown_variants = records
+        .iter()
+        .map(|record| record.variant.as_str())
+        .chain(
+            judgements
+                .iter()
+                .map(|judgement| judgement.variant.as_str()),
+        )
+        .filter(|variant| *variant != "baseline" && *variant != "typed_ppr")
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+
+    let mut inconclusive_reasons = Vec::new();
+    if !infra_cases.is_empty() {
+        inconclusive_reasons.push(format!("{} 个 INFRA trial", infra_cases.len()));
+    }
+    if !no_record_trials.is_empty() || !unjudged_records.is_empty() {
+        inconclusive_reasons.push("record/judge 未完整配对".to_string());
+    }
+    if !missing_pairs.is_empty() {
+        inconclusive_reasons.push("baseline/typed_ppr 缺对".to_string());
+    }
+    if baseline_contamination > 0 {
+        inconclusive_reasons.push(format!("baseline 污染 {baseline_contamination} 条"));
+    }
+    if !unknown_variants.is_empty() {
+        inconclusive_reasons.push(format!(
+            "未知 variant：{}",
+            unknown_variants.into_iter().collect::<Vec<_>>().join("、")
+        ));
+    }
+    if baseline_metrics.0 == 0 || typed_metrics.0 == 0 || paired_count == 0 {
+        inconclusive_reasons.push("缺少可比较的 baseline/typed_ppr trial".to_string());
+    }
+    let typed_tool_assisted_higher =
+        typed_metrics.3 * baseline_metrics.0 > baseline_metrics.3 * typed_metrics.0;
+    let experiment_conclusion = if !inconclusive_reasons.is_empty() {
+        "inconclusive"
+    } else if typed_tool_assisted_higher && answer_transitions[0] > answer_transitions[1] {
+        "positive signal"
+    } else {
+        "no observed gain"
+    };
+
     markdown.push_str("\n## 得分口径\n\n");
     markdown.push_str(&format!(
         "- answer_quality（task_score）：{}/{} trial（全部非 INFRA trial 的语义通过率，含绕过工具完成的）\n",
@@ -942,6 +1092,71 @@ pub(crate) fn render_judge_markdown(
         stable_pass,
         case_trials.len()
     ));
+    markdown.push_str("\n## Phase B variant 固定分母\n\n");
+    markdown.push_str("| variant | total | answer_quality | tool_adherence | tool_assisted_quality | retrieval_exposure |\n");
+    markdown.push_str("| --- | ---: | ---: | ---: | ---: | ---: |\n");
+    markdown.push_str(&format!(
+        "| baseline | {} | {}/{} | {}/{} | {}/{} | {}/{} |\n",
+        baseline_metrics.0,
+        baseline_metrics.1,
+        baseline_metrics.0,
+        baseline_metrics.2,
+        baseline_metrics.0,
+        baseline_metrics.3,
+        baseline_metrics.0,
+        baseline_metrics.4,
+        baseline_metrics.0,
+    ));
+    markdown.push_str(&format!(
+        "| typed_ppr | {} | {}/{} | {}/{} | {}/{} | {}/{} |\n",
+        typed_metrics.0,
+        typed_metrics.1,
+        typed_metrics.0,
+        typed_metrics.2,
+        typed_metrics.0,
+        typed_metrics.3,
+        typed_metrics.0,
+        typed_metrics.4,
+        typed_metrics.0,
+    ));
+    markdown.push_str("\n分母不按工具调用或 treatment 曝光筛选；未曝光只作归因诊断。\n");
+
+    markdown.push_str("\n## Phase B paired transitions\n\n");
+    markdown
+        .push_str("| outcome | fail→pass | pass→fail | pass→pass | fail→fail | paired delta |\n");
+    markdown.push_str("| --- | ---: | ---: | ---: | ---: | ---: |\n");
+    markdown.push_str(&format!(
+        "| answer | {} | {} | {} | {} | {:+}/{} |\n",
+        answer_transitions[0],
+        answer_transitions[1],
+        answer_transitions[2],
+        answer_transitions[3],
+        answer_transitions[0] as isize - answer_transitions[1] as isize,
+        paired_count,
+    ));
+    markdown.push_str(&format!(
+        "| tool-assisted | {} | {} | {} | {} | {:+}/{} |\n",
+        tool_transitions[0],
+        tool_transitions[1],
+        tool_transitions[2],
+        tool_transitions[3],
+        tool_transitions[0] as isize - tool_transitions[1] as isize,
+        paired_count,
+    ));
+    markdown.push_str(&format!(
+        "- 缺失配对：{}\n",
+        join_or_none_owned(&missing_pairs)
+    ));
+    markdown.push_str(&format!(
+        "- baseline treatment 污染：{} 条\n",
+        baseline_contamination
+    ));
+    markdown.push_str(&format!("- 实验结论：**{}**\n", experiment_conclusion));
+    markdown.push_str(&format!(
+        "- inconclusive 原因：{}\n",
+        join_or_none_owned(&inconclusive_reasons)
+    ));
+
     markdown.push_str(
         "- 三个率分母固定，不按行为筛 trial（已废弃的 tool_score 那样做会把困难 case\n  移出分母）。以下分层只描述行为，不是分数；tool-disabled 配对仍是归因实验：\n",
     );

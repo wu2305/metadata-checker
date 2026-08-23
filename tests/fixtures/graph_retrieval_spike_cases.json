@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "case_id": "writer_alias_with_structural_noise",
+      "intent": "writer",
+      "description": "字段经别名追溯写入动作，页面 Contains 边制造高扇出噪声",
+      "top_k": 3,
+      "hop_depth": 2,
+      "nodes": [
+        { "id": "field:order.total", "node_type": "Field" },
+        { "id": "field:db.orders.total", "node_type": "Field" },
+        { "id": "action:update_total", "node_type": "Action" },
+        { "id": "page:order", "node_type": "Page" },
+        { "id": "comp:noise_alpha", "node_type": "Component" },
+        { "id": "comp:noise_beta", "node_type": "Component" },
+        { "id": "comp:noise_gamma", "node_type": "Component" }
+      ],
+      "edges": [
+        { "from": "page:order", "to": "field:order.total", "edge_type": "Contains" },
+        { "from": "page:order", "to": "comp:noise_alpha", "edge_type": "Contains" },
+        { "from": "page:order", "to": "comp:noise_beta", "edge_type": "Contains" },
+        { "from": "page:order", "to": "comp:noise_gamma", "edge_type": "Contains" },
+        { "from": "field:order.total", "to": "field:db.orders.total", "edge_type": "FieldAlias" },
+        { "from": "action:update_total", "to": "field:db.orders.total", "edge_type": "FieldWrite" }
+      ],
+      "seed_scores": [
+        { "node_id": "field:order.total", "score": 1.0 }
+      ],
+      "relevant_node_ids": [
+        "field:order.total",
+        "field:db.orders.total",
+        "action:update_total"
+      ],
+      "gold_terminal_ids": [
+        "action:update_total"
+      ]
+    },
+    {
+      "case_id": "availability_dataflow_lineage",
+      "intent": "availability",
+      "description": "组件经模型字段与物理别名反向找到 DataFlow 生产者",
+      "top_k": 4,
+      "hop_depth": 3,
+      "nodes": [
+        { "id": "comp:grid", "node_type": "Component" },
+        { "id": "model:order_rows", "node_type": "Model" },
+        { "id": "model:db.orders", "node_type": "Model" },
+        { "id": "model:dataflow.load_orders", "node_type": "Model" },
+        { "id": "page:list", "node_type": "Page" },
+        { "id": "comp:noise_filter", "node_type": "Component" },
+        { "id": "comp:noise_toolbar", "node_type": "Component" }
+      ],
+      "edges": [
+        { "from": "page:list", "to": "comp:grid", "edge_type": "Contains" },
+        { "from": "page:list", "to": "comp:noise_filter", "edge_type": "Contains" },
+        { "from": "page:list", "to": "comp:noise_toolbar", "edge_type": "Contains" },
+        { "from": "comp:grid", "to": "model:order_rows", "edge_type": "Reads" },
+        { "from": "model:order_rows", "to": "model:db.orders", "edge_type": "FieldAlias" },
+        { "from": "model:dataflow.load_orders", "to": "model:db.orders", "edge_type": "OutputsTo" }
+      ],
+      "seed_scores": [
+        { "node_id": "comp:grid", "score": 1.0 }
+      ],
+      "relevant_node_ids": [
+        "comp:grid",
+        "model:order_rows",
+        "model:db.orders",
+        "model:dataflow.load_orders"
+      ],
+      "gold_terminal_ids": [
+        "model:dataflow.load_orders"
+      ]
+    },
+    {
+      "case_id": "action_validation_path",
+      "intent": "action",
+      "description": "组件触发动作并追溯校验条件，页面结构边是竞争候选",
+      "top_k": 3,
+      "hop_depth": 2,
+      "nodes": [
+        { "id": "comp:submit", "node_type": "Component" },
+        { "id": "action:submit.validate", "node_type": "Action" },
+        { "id": "cond:submit.enabled", "node_type": "Condition" },
+        { "id": "page:form", "node_type": "Page" },
+        { "id": "comp:noise_cancel", "node_type": "Component" },
+        { "id": "comp:noise_help", "node_type": "Component" }
+      ],
+      "edges": [
+        { "from": "page:form", "to": "comp:submit", "edge_type": "Contains" },
+        { "from": "page:form", "to": "comp:noise_cancel", "edge_type": "Contains" },
+        { "from": "page:form", "to": "comp:noise_help", "edge_type": "Contains" },
+        { "from": "comp:submit", "to": "action:submit.validate", "edge_type": "Triggers" },
+        { "from": "action:submit.validate", "to": "cond:submit.enabled", "edge_type": "ActionValidates" }
+      ],
+      "seed_scores": [
+        { "node_id": "comp:submit", "score": 1.0 }
+      ],
+      "relevant_node_ids": [
+        "comp:submit",
+        "action:submit.validate",
+        "cond:submit.enabled"
+      ],
+      "gold_terminal_ids": [
+        "cond:submit.enabled"
+      ]
+    }
+  ]
+}
