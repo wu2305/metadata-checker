@@ -99,7 +99,7 @@
 - 不要让验收者直接修代码。
 - 不要把阻塞项一次性塞给一个上下文较小或职责不匹配的 worker；拆成互不重叠的小包。
 - 不要全量 `cargo test` 当默认动作；优先按影响面运行目标测试。只有跨模块核心行为或用户明确要求时才跑全量。
-- **真实编译与 `cargo test` 必须在 CNB 云原生开发环境里跑**，不得在本地执行（见下方「编译与测试环境」）。
+- **需要编译或排错测试时**再拉起 CNB 云原生环境跑 `cargo`；不要为了改代码去 start-workspace。禁止在本地 `cargo check` / `cargo test` / `cargo build`（见下方「编译与排错测试环境」）。
 - 每轮可验收修复必须提交。
 
 ## M40 Browser 接入边界
@@ -135,7 +135,7 @@ M40.9 / M40.10 相关实现必须遵守以下边界：
 3. 更新 `README.md` 和 `--help` 输出
 
 ### 优化性能（减少 clone）
-1. 先 `cargo check` 确认编译通过
+1. 需要验证编译时，在远端 `cargo check` 确认通过
 2. 识别 `.clone()` 热点（`grep -n '\.clone()' src/*.rs`）
 3. 优先尝试：返回引用（`&T`）、使用 `Cow<str>`、预分配局部变量复用
 4. 修改后 `cargo test` 确保全部通过
@@ -153,13 +153,15 @@ M40.9 / M40.10 相关实现必须遵守以下边界：
   - `docs:` 文档/注释
   - `refactor:` 重构
 
-## 编译与测试环境
+## 编译与排错测试环境
 
-**真实代码测试之前，必须先拉起 CNB 云原生开发环境，再 SSH 连上去跑。所有代码编译发生在远端，禁止在本地 `cargo check` / `cargo test` / `cargo build`。**
+不要为日常开发去拉远程环境。读代码、改文件、提交、推送都在本地完成，此时不必 `start-workspace`。
 
-编辑、提交、推送留在本地；编译和测试放到远端。流程见 [docs/runbooks/cnb-remote-dev-env.md](docs/runbooks/cnb-remote-dev-env.md)。
+**触发条件：需要编译，或需要排错/跑测试。** 这时再拉起 CNB 云原生环境（`StartWorkspace`），SSH 上去执行 `cargo check` / `cargo test` / `cargo build`。所有这类命令发生在远端，禁止在本地跑。
 
-1. 拉起（或复用）当前分支的开发环境：
+流程见 [docs/runbooks/cnb-remote-dev-env.md](docs/runbooks/cnb-remote-dev-env.md)。
+
+1. 拉起（或复用）当前分支的环境（只为编译或排错测试）：
    ```bash
    cnb workspace start-workspace --repo wu2305/metadata-checker --branch "$(git branch --show-current)"
    ```
@@ -167,17 +169,17 @@ M40.9 / M40.10 相关实现必须遵守以下边界：
    ```bash
    cnb workspace get-workspace-detail --repo wu2305/metadata-checker --sn <sn>
    ```
-3. `git push cnb HEAD` 后，用 **login shell** SSH 到 `remoteSsh`，在 `/workspace` 编译和跑测试：
+3. `git push cnb HEAD` 后，用 **login shell** SSH 到 `remoteSsh`，在 `/workspace` 编译或排错测试：
    ```bash
    ssh $HOST 'bash -lc "cd /workspace && git pull --ff-only && cargo test --features cli-local --test <name>"'
    ```
    非 login shell 不会 source `/etc/profile`，rustup 找不到工具链。不要 `cat /etc/profile` / `env` / `export -p`（里面有密钥）。
 
-例外（这些不是代码编译，仍可在本地做）：读文件、改文档、`git`、`.cnb.yml` schema 校验、`scripts/cnb-smoke-dry-run.sh`（dash 干跑，不调 cargo）。M58 评测 / kimi harness 冒烟仍走 `api_trigger_*` 流水线，不把开发环境手跑当评测基线。
+例外（不是编译、也不是跑测试，仍可在本地做）：读文件、改文档、`git`、`.cnb.yml` schema 校验、`scripts/cnb-smoke-dry-run.sh`（dash 干跑，不调 cargo）。M58 评测 / kimi harness 冒烟仍走 `api_trigger_*` 流水线，不把环境手跑当评测基线。
 
 ## 测试命令
 
-在远端 `/workspace` 执行（先完成上一节的 start-workspace + SSH）：
+在远端 `/workspace` 执行（仅在需要编译或排错测试时，先完成上一节的 start-workspace + SSH）：
 
 ```bash
 # 快速检查

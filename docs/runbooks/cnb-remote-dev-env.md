@@ -1,22 +1,22 @@
-# CNB 云原生开发环境：开启、连接与快速迭代
+# CNB 远程环境：编译与排错测试
 
-本文记录如何拉起 CNB 云原生开发环境（cloud-native dev env）、连上去跑测试，以及在上面
-快速迭代的操作流程。目的是把本地笔记本从「跑 CI」这件事里解放出来：编辑、提交、推送留在
-本地，编译和测试放到远端。
+本文记录何时、如何拉起 CNB 云原生环境（`StartWorkspace`）去做 **编译** 或 **排错测试**。
+读代码、改文件、提交、推送留在本地，不必为日常开发拉环境。只有要跑 `cargo check` /
+`cargo test` / `cargo build`，或要在远端复现、调试失败测试时，才 start-workspace。
 
 环境定义在 `.cnb.yml` 的 `.cloud_native_dev_env` 锚点（`vscode` 事件），与跑 M58 评测的
 `.m58_cnb_llm_ci`（`api_trigger_m58_llm` 事件）是两条独立流水线，用途不同，见第 6 节。
 
 ## 1. 开启环境
 
-云原生开发环境**不能**用 `POST /-/build/start` 拉起。该接口只接受 `api_trigger` 或
+这套远程环境**不能**用 `POST /-/build/start` 拉起。该接口只接受 `api_trigger` 或
 `api_trigger_` 前缀的事件，传 `vscode` 会被拒：
 
 ```
 {"errcode":400,"errmsg":"[API_BUILD_START_FAIL]Event must be 'api_trigger' or start with 'api_trigger_'."}
 ```
 
-开发环境走的是另一个接口 `StartWorkspace`，`cnb` CLI 已经封装：
+这套环境走的是另一个接口 `StartWorkspace`，`cnb` CLI 已经封装：
 
 ```bash
 cnb workspace start-workspace \
@@ -26,7 +26,7 @@ cnb workspace start-workspace \
 
 返回里的 `sn`（形如 `cnb-ni8-1jv4a7j9k`）是后续所有操作的句柄。
 
-**接口只有 `repo` / `branch` / `ref` 三个入参，没有 `env` 字段。** 也就是说开发环境无法在
+**接口只有 `repo` / `branch` / `ref` 三个入参，没有 `env` 字段。** 也就是说这套环境无法在
 启动时注入环境变量——像 `M58_CNB_REASONING_EFFORT` 这种参数只能连上去之后在 shell 里
 `export`。需要用环境变量参数化的跑法，用第 6 节的 API 触发流水线。
 
@@ -68,7 +68,7 @@ Remote-SSH 直连时可以直接点 `vscode` 那一条。
   `cargo-llvm-cov`、`wasm-bindgen`、`bencher`、node。
 - `.cnb.yml` 里声明为 volume 的目录跨环境重启保留，因此依赖缓存是热的：
   `/usr/local/cargo/registry`、`/usr/local/cargo/git`、`./target/cnb/workspace`。
-- 开发环境的 `CARGO_TARGET_DIR` 是 `target/cnb/workspace`；分支 CI 用的是
+- 这套环境的 `CARGO_TARGET_DIR` 是 `target/cnb/workspace`；分支 CI 用的是
   `target/cnb/coverage`。要完全复刻 CI 的产物布局就显式覆盖（见第 5 节）。
 
 ## 4. 必须用 login shell（最容易踩的坑）
@@ -179,7 +179,7 @@ ssh $HOST 'bash -lc "cd /workspace && git pull --ff-only && \
 `get-workspace-detail` 同时开始返回 `404 WORKSPACE_NOT_FOUND`。具体是总时长上限还是别的
 策略没有查证，但结论对使用者是一样的：
 
-- **把开发环境当随时会消失的东西**。远端只放可重建的产物（编译缓存、日志）。
+- **把远程环境当随时会消失的东西**。远端只放可重建的产物（编译缓存、日志）。
 - **在远端改的代码要尽快 commit + push**，否则回收即丢失。
 - **结果要及时取回本地**（或直接在轮询里判定成功/失败）。长任务跑完先把结论捞出来，
   不要指望环境还在那儿等你回来看。
@@ -194,9 +194,9 @@ cnb workspace workspace-stop    --repo <repo> --sn <sn>   # 停止
 cnb workspace delete-workspace  --repo <repo> --sn <sn>   # 删除
 ```
 
-## 8. 什么时候不该用开发环境
+## 8. 什么时候不该用这套环境
 
-开发环境适合**交互式排查**和**快速重跑目标测试**。以下情况仍然走 API 触发的流水线：
+这套环境只用于**编译**和**排错测试**（交互式复现、重跑目标 `cargo test`）。不要为写代码去开它。以下情况仍然走 API 触发的流水线：
 
 ```bash
 curl -s -X POST "https://api.cnb.cool/<repo>/-/build/start" \
@@ -210,6 +210,6 @@ curl -s -X POST "https://api.cnb.cool/<repo>/-/build/start" \
 1. **`StartWorkspace` 没有 `env` 字段**（第 1 节），而 M58 评测的关键维度就是靠构建环境
    变量注入的；流水线的 `env` 是一个普通 string map，能传。
 2. **手敲 shell 的结果不可复现**。流水线固定了工具链、`M58_AI_EVAL_TRIALS=3`、输出目录，
-   报告可以完全从 CI 日志重建；开发环境里的一次手跑做不到这一点，不能当作评测基线。
+   报告可以完全从 CI 日志重建；远程环境里的一次手跑做不到这一点，不能当作评测基线。
 
-一句话：开发环境用来**让测试变绿**，流水线用来**产出可信的结论**。
+一句话：远程环境用来**编译和把失败测试跑绿**，流水线用来**产出可信的结论**。

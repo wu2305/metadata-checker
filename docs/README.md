@@ -35,7 +35,7 @@
 | [milestones/](milestones/) | 里程碑 journal 与 [performance-baseline](milestones/performance/performance-baseline.md) |
 | [specs/](specs/) | 实现前设计（须 `approved` 再编码） |
 | [plans/](plans/) | 实现计划 |
-| [runbooks/](runbooks/) | 真实 BI / 环境操作手册，含 [CNB 云原生开发环境](runbooks/cnb-remote-dev-env.md) |
+| [runbooks/](runbooks/) | 真实 BI / 环境操作手册，含 [CNB 远程编译与排错测试](runbooks/cnb-remote-dev-env.md) |
 | [archive/](archive/) | 已完成 roadmap 章节（[roadmap 索引](archive/roadmap/README.md)） |
 
 ## 设计与计划（Phase C）
