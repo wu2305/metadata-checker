@@ -49,6 +49,8 @@
    `page_logic.rs:155-170/:300-311`（已有 `page_scoped_target_not_resolved_fallback_to_global_model`
    信号，explain 主路径接上同类信号）；`model_scope.rs:120-130/:365-375` 是候选路径
    收集里的路径兜底（`unwrap_or(fallback_model_path)`），同样计数但不混为一谈。
+   注意 explain 完整/fast 路径对 scoped 解析失败返回 target-not-found（`explain.rs:516-529`），
+   **不是**回退分支——信号只能挂在上述 page_logic 的两处真实回退上。
 
 Phase 1 的计数器不是过渡措施：F1 改为结构识别后（见 Phase 2），它们转为**永久安全网**，
 任何新语料形状进来都会先在计数上显形。
@@ -109,8 +111,9 @@ FieldAlias/DataFlow 出边指向的物理路径作为偏好；无页面上下文
   （`scanner/indexer.rs` `apply_incremental_changes` → `merge_removed_node_ids`，
   `:296-301` 区域）。今天 `model:model6` 是**跨页共享**的全局节点——**编辑任意一页会
   删掉别的页也在用的那个节点**，直到那些页被重扫。id 分段后删除粒度才与文件粒度对齐。
-  反方向同样存在：普通 read/write 路径 `ensure_model_field`（`spg.rs:260/:283`）建的
-  model/field 节点**不进** `node_ids`，增量下是泄漏而非误删——两个方向都源于「节点
+  反方向同样存在：普通 read/write 路径经 `ensure_model_field` 建的
+  model/field 节点（read 路径调用点 `spg.rs:196/:219`，write 路径 `:260/:283`）
+  **不进** `node_ids`，增量下是泄漏而非误删——两个方向都源于「节点
   归属粒度 ≠ 文件粒度」，分段后一并消解。验收加一条：增量刷新改一页后，另一页的
   model 事实不掉。
 
@@ -217,8 +220,7 @@ physical 聚合语义不变所以多数应保持一致，变了的按「重新�
   版本 bump 触发
 - PR4b：Phase 3 节点 id 分段 + 解析 + 写入双写，**F4 协议统一归属本 PR**
   （`route.rs:432` 禁用 model 前缀剥离、说明 B 的平局替代）；`format!("model:` 30 处 /
-  `strip_prefix("model:")` 12 处散布 15+ 文件，与 PR4a 切开后各自可验收（`format!("model:` 30 处 /
-  `strip_prefix("model:")` 12 处散布 15+ 文件，与 PR4a 切开后各自可验收）
+  `strip_prefix("model:")` 12 处散布 15+ 文件，与 PR4a 切开后各自可验收
 - PR5：F5 + F6（facts 暴露，其中 F6 的写边双写在 PR4b 的 schema 上落地）
 - PR6：graphdb 重建 + 13 case 重放 + 11-case live run 验收
 
