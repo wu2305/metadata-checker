@@ -124,6 +124,7 @@ pub fn sanitize_diagnostic(diagnostic: &Diagnostic) -> Diagnostic {
         answer_impact: diagnostic.answer_impact.clone(),
         first_seen_phase: diagnostic.first_seen_phase.clone(),
     }
+}
 
 /// 清洗诊断位置信息。
 pub fn sanitize_location(location: &Location) -> Location {
