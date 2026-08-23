@@ -1,6 +1,6 @@
 # M58.3 缺口修复与可观测性打底设计
 
-> 状态：**draft**（2026-08-23 独立评审一轮后修订，修订点见文末「评审修订记录」）
+> 状态：**draft**（2026-08-23 独立评审两轮后修订，修订点见文末「评审修订记录」）
 > 里程碑：M58.3（三动词命令表面收敛，active）
 > 上游证据：[M58 journal 2026-08-23 节](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)（5 项缺口实跑记录）+
 > `docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/`（逐 case 证据产物）
@@ -45,9 +45,10 @@
    - `:178` 的 `read_v2_layout` Err/None 折叠路径新增计数；
    - hydrate 失败分支**接上**已有的 `v2_hydrate_warning` 访问器（`:267`）——这不是新建
      管道，是把一个只有测试在断言的死访问器接进 `--status` 输出。
-3. 页面限定解析回退全局模型时（`model_scope.rs:126/370`）输出显式 diagnostic
-   （参照 `page_logic.rs:165` 已有的 `page_scoped_target_not_resolved_fallback_to_global_model`，
-   explain 主路径接上同类信号）。
+3. 页面限定解析回退全局模型时输出显式 diagnostic。真正的回退点在
+   `page_logic.rs:155-170/:300-311`（已有 `page_scoped_target_not_resolved_fallback_to_global_model`
+   信号，explain 主路径接上同类信号）；`model_scope.rs:120-130/:365-375` 是候选路径
+   收集里的路径兜底（`unwrap_or(fallback_model_path)`），同样计数但不混为一谈。
 
 Phase 1 的计数器不是过渡措施：F1 改为结构识别后（见 Phase 2），它们转为**永久安全网**，
 任何新语料形状进来都会先在计数上显形。
@@ -56,11 +57,11 @@ Phase 1 的计数器不是过渡措施：F1 改为结构识别后（见 Phase 2�
 
 | # | 缺口 | 根因位置 | 修法 |
 |---|------|---------|------|
-| F1 | 容器子键白名单丢组件（1049 处） | `superpage/mod.rs:313-324,543-554`、`scanner/spg.rs:107` | **不再扩展枚举**——那是换一份语料再丢一次。改为结构识别：`RawComponent` 用 `#[serde(flatten)]` 收 extra map，递归规则为「任何是对象数组且元素带 `id`+`componentType` 的 value 都当子组件」；既有四键白名单降级为**排除列表**（已知非组件键不进递归）。Phase 1 计数器兜底未知形状。同页重复组件 id 加诊断（`spg.rs:82-103`） |
+| F1 | 容器子键白名单丢组件（1049 处） | `superpage/mod.rs:313-324,543-554`、`scanner/spg.rs:107` | **不再扩展枚举**——那是换一份语料再丢一次。改为结构识别：`RawComponent` 用 `#[serde(flatten)]` 收 extra map，递归规则为「任何是对象数组且元素带 `id`+`componentType` 的 value 都当子组件」；既有四键白名单降级为**排除列表**（已知非组件键不进递归；排除列表初值以实测非组件键为准，在 PR2 描述中登记）。注意 scanner 侧 `spg.rs:107` 走裸 `Value` 递归、不经 `RawComponent`，需平行修改。Phase 1 计数器兜底未知形状。同页重复组件 id 加诊断（`spg.rs:82-103`） |
 | F2 | 无表达式组件的祖先条件继承断（button13） | `conditions.rs:379-416` 不读节点 meta json_path（`spg.rs:468` 白写）、`:429` 硬编码 `.components[` | `component_json_paths` 补读节点 meta；`is_ancestor_json_path` 放宽到全部容器子键；scanner 补建 comp→comp Contains 边。**配套硬决定**（见表格下方说明 A）：`component_ancestor_chain` 改为「优先 Component 父、Page 仅兜底」 |
-| F3 | `${IF(...)}` 表达式模型引用截断 | `expr_ast.rs:204-219` tokenizer 吞整个 `${}` + `:823-831` 盲 `split('.')` → `model:IF(model6` 垃圾节点 | `classify_identifier` 的 `${}` 分支校验内部是否纯点分路径，否则对 inner 递归走表达式 AST。**已知边界**：tokenizer（`:206-217`）贪婪吃到第一个 `}`，嵌套 `${...${...}...}` 在词法层就已截断，本修复只覆盖单层 `${IF(...)}`；嵌套形态若在语料实测中出现（Phase 1 计数器会暴露），另立项处理，不算回归 |
-| F4 | 页面限定降级 / 协议矛盾 | `route.rs:429-434`（剥页面段）vs `page_logic.rs:115-122`（构造页面段）；`model_scope.rs:126/370` 静默回退 | **方向已定，无决策空间**：保留页面段，`route.rs:432` 的 `by_overqualified` 档对 model 前缀禁用；回退路径接 Phase 1 的 diagnostic；协议统一随 Phase 3 的节点 id 分段一并落地（并入 PR4b）。`model_scope.rs:5` 硬编码表名移除的平局替代规则见下方说明 B |
-| F5 | calc 表达式不进 value-source | `value_source.rs:235-247` 只认单裸 `${FIELD}` | value-source 事实提取放宽到一般表达式：图里已有带 `source_expr` 的 Reads 边（`spg.rs:559-585`），直接透出 raw_expr + 引用清单，不再仅限裸字段 |
+| F3 | `${IF(...)}` 表达式模型引用截断 | `superpage/expr_ast.rs:204-219` tokenizer 吞整个 `${}` + `:823-831` 盲 `split('.')` → `model:IF(model6` 垃圾节点 | `classify_identifier` 的 `${}` 分支校验内部是否纯点分路径，否则对 inner 递归走表达式 AST。**已知边界**：tokenizer（`:206-217`）贪婪吃到第一个 `}`，嵌套 `${...${...}...}` 在词法层就已截断，本修复只覆盖单层 `${IF(...)}`；嵌套形态若在语料实测中出现（Phase 1 计数器会暴露），另立项处理，不算回归 |
+| F4 | 页面限定降级 / 协议矛盾 | `route.rs:429-434`（剥页面段）vs `page_logic.rs:115-122`（构造页面段）；页面限定回退全局模型发生在 `page_logic.rs:155-170/:300-311`（`model_scope.rs:120-130/:365-375` 只是候选路径收集的路径兜底） | **方向已定，无决策空间**：保留页面段，`route.rs:432` 的 `by_overqualified` 档对 model 前缀禁用；回退路径接 Phase 1 的 diagnostic；协议统一随 Phase 3 的节点 id 分段一并落地（并入 PR4b）。`model_scope.rs:5` 硬编码表名移除的平局替代规则见下方说明 B |
+| F5 | calc 表达式不进 value-source | `explain/condition_facts/value_source.rs:235-247` 只认单裸 `${FIELD}` | value-source 事实提取放宽到一般表达式：图里已有带 `source_expr` 的 Reads 边（`spg.rs:559-585`），直接透出 raw_expr + 引用清单，不再仅限裸字段 |
 | F6 | 写动作 conditionExp 不暴露 | 写边 meta 不带（`spg.rs:842-851,872-881`），输出层不回查 action 节点 | scanner 把 `condition`/`conditionExp` 抄进写边 meta（与 action 节点 meta 同源），`--relations` writers 与 writer intent 透出；Phase 3 双写落地后抄到页面局部写边 |
 
 **说明 A（F2 的边冲突与迭代序陷阱）**：`spg.rs:512` 给**每个**组件（含深层嵌套）都建
@@ -73,7 +74,9 @@ page→comp 边**（按 page Contains 计组件数的消费者不动），`compo
 改为按「Component 父优先、Page 兜底」排序选父。另注：comp 节点 meta 已存 `parent_id`
 （`spg.rs:469-470`），祖先链不建边也能走 meta——取舍为：建边让图查询/可视化/血缘
 统一走边（与 Phase 3 双写同哲学，图为唯一事实源），读 meta 零 schema 变更但又多一条
-平行事实通道；本设计选建边。
+平行事实通道；本设计选建边。PR2 验收加一条「嵌套 comp 的 Component 父唯一」断言——
+若某形状出现多条 comp→comp incoming Contains（多父），顺序依赖会从后门回来，必须在
+测试层挡住。
 
 **说明 B（F4 硬编码表名的平局替代）**：`FACT_AUTO_CUSTOMER_AUTO_REL_TABLE`
 （`model_scope.rs:5`）在 `pick_best_dataflow_candidate` 的三处调用点作为
@@ -100,18 +103,25 @@ FieldAlias/DataFlow 出边指向的物理路径作为偏好；无页面上下文
   （cmd4_* availability 把 model6/7/8 分别降级解析到 `szsys_4_users.tbl` /
   `fact_saleContract.tbl` / `fact_warrantyperiod.tbl`，源文件证实三者同表）。
 - **增量刷新误删（比答案不准更硬：是数据丢失）**：`process_spg_file_from_value` 把
-  `model:modelN` 和 `field:modelN.x` 放进该页文件的 `node_ids` 返回值
-  （`spg.rs:370-371/387-388`），indexer 增量更新按 `previous_node_ids` 批删
+  `model:modelN` 和 `field:modelN.x` 放进该页文件的 `node_ids` 返回值（内嵌 DataFlow
+  路径 `spg.rs:370-371/387-388`；dwtable source 路径 `spg.rs:1485-1486`——model6/7/8
+  场景的主流触发路径），indexer 增量更新按 `previous_node_ids` 批删
   （`scanner/indexer.rs` `apply_incremental_changes` → `merge_removed_node_ids`，
   `:296-301` 区域）。今天 `model:model6` 是**跨页共享**的全局节点——**编辑任意一页会
   删掉别的页也在用的那个节点**，直到那些页被重扫。id 分段后删除粒度才与文件粒度对齐。
-  验收加一条：增量刷新改一页后，另一页的 model 事实不掉。
+  反方向同样存在：普通 read/write 路径 `ensure_model_field`（`spg.rs:260/:283`）建的
+  model/field 节点**不进** `node_ids`，增量下是泄漏而非误删——两个方向都源于「节点
+  归属粒度 ≠ 文件粒度」，分段后一并消解。验收加一条：增量刷新改一页后，另一页的
+  model 事实不掉。
 
 #### 现状 schema 的精确病灶
 
 - `model:` 命名空间混装两类节点：物理表（`scanner/tbl.rs:29`，按表名）与页面局部逻辑模型（`scanner/spg.rs:149`，按局部 id）。
 - 局部模型全局按名合并（`spg.rs:149` + `upsert_node` 后写覆盖 `utils.rs:15`），两页同 id 时 path/meta 由扫描顺序决定。
-- 局部→物理的映射靠 `FieldAlias` 边（`spg.rs:1472-1473`），页面绑定只在扫描期 `source_path_map`（`spg.rs:325`），扫完即丢。
+- 局部→物理的映射分两层：模型级靠 `DataflowInput`/`DataflowOutput` 边
+  （dwtable source 块，`spg.rs:1497-1504` 起），字段级靠 `FieldAlias` 边
+  （read/write 路径，`spg.rs:238-245/:302-309`）；页面绑定只在扫描期
+  `source_path_map`（`spg.rs:325`），扫完即丢。
 
 #### 设计：id 分段 + 双写聚合
 
@@ -124,7 +134,8 @@ FieldAlias/DataFlow 出边指向的物理路径作为偏好；无页面上下文
 
 - 局部模型节点携带**本页自己的** filter/meta（不再 upsert 覆盖）→ F4 的 availability
   gates 直接读节点自身，启发式重建（路径兜底/主页投票/硬编码表名）整体拆除；
-- 局部→物理的 `FieldAlias` / DataFlow 边改从 `model:PAGE|modelN` 发出，血缘不断；
+- 局部→物理的模型级 `DataflowInput`/`DataflowOutput` 与字段级 `FieldAlias` 边改从
+  `model:PAGE|modelN` 发出，血缘不断；
 - **写入双写**：动作写物理字段时同时落两条边——`ActionWrites → model:PAGE|modelN`
   （带本页 conditionExp，承接 F6）与既有物理表聚合边。`--relations 'model:fact_testDrive'`
   的跨页扇出计数（84/248 类）语义不变；新增「这个页面怎么写这张表」的精确视图。
@@ -141,11 +152,17 @@ FieldAlias/DataFlow 出边指向的物理路径作为偏好；无页面上下文
 **schema 版本与旧库拒绝**（PR4a 先行落地）：
 
 - `graph_redb` 的 `META_TABLE` 目前只存 diff-refresh checkpoint（`:36-37/:959-963/:1040+`），
-  没有可「+1」的图 schema 版本键——PR4a **先引入** `graph_schema_version` 键。
-- **键不存在必须判为旧库**，给明确「请重建」诊断。仓里既有先例正好相反：
-  `read_v2_shadow_state` 对旧库无记录「视为 Current，向后兼容」
-  （`graph_redb.rs:172-174` 注释）——**不得照抄**，照抄会让旧库静默通过，精确复现
-  模式 1。
+  没有可「+1」的图 schema 版本键——PR4a **先引入** `graph_schema_version` 键（写入侧
+  每次 persist 盖当前版本；读取侧显式解析）。
+- **键不存在必须显式归类为「schema version 1（旧库）」**——这是代码里显式枚举的已知
+  版本，不是兼容性默认。仓里既有先例正好相反：`read_v2_shadow_state` 对旧库无记录
+  「视为 Current，向后兼容」（`graph_redb.rs:172-174` 注释）——**不得照抄**，照抄会让
+  旧库静默通过，精确复现模式 1。
+- 版本兼容矩阵写死在代码里：PR4a 期间期望版本 = 1，故缺键/版本 1 的库**正常加载、
+  行为不变**（纯机制落地）；PR4b 把期望版本 bump 到 2，此后加载版本 1/缺键的库给明确
+  「graph schema 过旧，请重建」诊断并拒绝静默继续。「键不存在 = 旧库」的判定从 PR4a
+  起就生效，只是 PR4a 阶段旧库恰好兼容——拒绝动作由版本 bump 触发，不靠实现期临时
+  决定。
 - checkpoint 随版本失效：版本不匹配时忽略 diff-refresh checkpoint，强制全量重建，
   否则重建后的图会被旧 checkpoint 增量打补丁。
 
@@ -176,8 +193,9 @@ physical 聚合语义不变所以多数应保持一致，变了的按「重新�
 2. F1–F6 各自的复现命令（取自证据目录）修复后输出正确事实，回归测试绿。
 3. Phase 3 落地后：裸 `model:modelN` 多页同名时如实交回候选、单页直达；
    `model:PAGE|modelN` 精确命中且 gates 来自本页 filter；`--relations 'model:表名'`
-   的跨页聚合计数语义不变；旧 graphdb（含无 `graph_schema_version` 键的库）得到明确
-   「请重建」诊断而非静默回退；**增量刷新修改一页后，另一页的 model 事实不掉**。
+   的跨页聚合计数语义不变；PR4b 版本 bump 后，旧 graphdb（含无 `graph_schema_version`
+   键的库）得到明确「请重建」诊断而非静默回退；**增量刷新修改一页后，另一页的 model
+   事实不掉**。
 4. 远端 `cargo fmt --check`、`m58_3_command_surface_tests`、`kimi_harness_judge_tests`、
    `ai_eval_tests` 绿；本地干跑五条路径符合预期。
 5. 修复后对 pin 语料重建 graphdb，重放 13 个 case 的 `expected_output_assertions`：
@@ -194,8 +212,12 @@ physical 聚合语义不变所以多数应保持一致，变了的按「重新�
 - PR1：Phase 1 可观测性（独立可验收，为后续所有修复提供「修复前后丢了多少数据」的对照）
 - PR2：F1 + F2（scanner/继承链，同层；含说明 A 的祖先链选父改造）
 - PR3：F3（表达式解析，小切口先行）
-- PR4a：图 schema 版本键 + 旧库拒绝诊断 + checkpoint 随版本失效（**行为不变**，纯机制）
-- PR4b：Phase 3 节点 id 分段 + 解析 + 写入双写 + F4 协议统一（`format!("model:` 30 处 /
+- PR4a：图 schema 版本键机制（引入 `graph_schema_version`、缺键显式归类 version 1、
+  checkpoint 随版本失效）；期望版本仍为 1，**加载行为不变**，拒绝诊断由 PR4b 的
+  版本 bump 触发
+- PR4b：Phase 3 节点 id 分段 + 解析 + 写入双写，**F4 协议统一归属本 PR**
+  （`route.rs:432` 禁用 model 前缀剥离、说明 B 的平局替代）；`format!("model:` 30 处 /
+  `strip_prefix("model:")` 12 处散布 15+ 文件，与 PR4a 切开后各自可验收（`format!("model:` 30 处 /
   `strip_prefix("model:")` 12 处散布 15+ 文件，与 PR4a 切开后各自可验收）
 - PR5：F5 + F6（facts 暴露，其中 F6 的写边双写在 PR4b 的 schema 上落地）
 - PR6：graphdb 重建 + 13 case 重放 + 11-case live run 验收
@@ -213,3 +235,20 @@ physical 聚合语义不变所以多数应保持一致，变了的按「重新�
 - F4 消除表述矛盾：方向已定（保留页面段），补硬编码表名移除后的平局替代规则（说明 B）。
 - Phase 1 计数器拆因（`node_decode_failed` / `edge_decode_failed` / `edge_dangling_endpoint`）；
   F3 补嵌套 `${}` 词法边界；PR4 拆 PR4a/PR4b；验收 1/5 改机械判据；model6/7/8 补证据路径。
+
+第二轮（复验 P1/P2）：
+
+- P1-1：消除「PR4a 行为不变」与「缺键判旧库」的矛盾——缺键从 PR4a 起显式归类
+  version 1，PR4a 期望版本 = 1 故加载行为不变；拒绝诊断由 PR4b 版本 bump 触发，
+  版本兼容矩阵写死在代码里，不留实现期临时决定。
+- P2-1：「局部→物理映射」改述为模型级 `DataflowInput`/`DataflowOutput`
+  （`spg.rs:1497-1504`）+ 字段级 `FieldAlias`（`spg.rs:238-245/:302-309`），
+  原引 `spg.rs:1472-1473` 实为 id 构造行。
+- P2-2：增量刷新论据补 dwtable source 路径（`spg.rs:1485-1486`，model6/7/8 主流触发）
+  与反向泄漏（`ensure_model_field` `spg.rs:260/:283` 的节点不进 `node_ids`）。
+- P2-3：回退点引用改正——真正的页面限定→全局回退在 `page_logic.rs:155-170/:300-311`；
+  `model_scope.rs:120-130/:365-375` 是候选路径收集的路径兜底，两处分别表述。
+  （复验引的 `explain.rs:523` 实为 target-not-found 分支，亦不采用。）
+- P2-4：路径前缀补全（`superpage/expr_ast.rs`、`explain/condition_facts/value_source.rs`）。
+- 残留建议采纳：PR2 验收加「嵌套 comp 的 Component 父唯一」断言；F1 排除列表初值
+  在 PR2 描述登记；PR 切分节给 F4 单独归属指针（PR4b）。
