@@ -40,7 +40,6 @@ pub mod route;
 pub mod runtime;
 pub mod scanner;
 #[cfg(feature = "cli-local")]
-#[cfg(feature = "cli-local")]
 pub mod session;
 pub mod source_id;
 #[cfg(feature = "cli-local")]

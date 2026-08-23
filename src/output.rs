@@ -2,7 +2,7 @@ pub mod answer_effect;
 pub mod brief;
 pub mod tbl;
 
-use crate::conditions::scan_conditions;
+use crate::conditions::{collect_json_paths, scan_conditions};
 use crate::dependency::DependencyGraph;
 use crate::parser::PageMetadata;
 use crate::superpage::{RefType, SuperPageMetadata};
@@ -203,25 +203,6 @@ fn print_superpage_human(spg: &SuperPageMetadata, out: &mut dyn Write) -> Result
     writeln!(out, "\n=== End of Report ===")?;
     out.flush()?;
     Ok(())
-}
-
-/// 递归收集组件 ID 对应的稳定 json_path
-fn collect_component_json_paths(
-    arr: &[serde_json::Value],
-    path_prefix: &str,
-    paths: &mut HashMap<String, String>,
-) {
-    for (index, comp) in arr.iter().enumerate() {
-        let current = format!("{}[{}]", path_prefix, index);
-        if let Some(comp_id) = comp.get("id").and_then(|v| v.as_str()) {
-            paths.insert(comp_id.to_string(), current.clone());
-        }
-        for nested in ["components", "panels", "steps", "comps"] {
-            if let Some(children) = comp.get(nested).and_then(|v| v.as_array()) {
-                collect_component_json_paths(children, &format!("{}.{}", current, nested), paths);
-            }
-        }
-    }
 }
 
 pub fn print_non_human(meta: &PageMetadata) -> Result<()> {
@@ -559,11 +540,7 @@ pub fn print_non_human_to(
             .and_then(|c| c.get("components"))
             .and_then(|v| v.as_array())
         {
-            collect_component_json_paths(
-                components,
-                "canvas.components",
-                &mut component_json_paths,
-            );
+            collect_json_paths(components, "canvas.components", &mut component_json_paths);
         }
 
         let details = json!({

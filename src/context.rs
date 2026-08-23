@@ -74,6 +74,77 @@ fn generate_next_queries(
     queries
 }
 
+struct LineageReferenceDetails {
+    source_fields: Vec<String>,
+    resolved_refs: Vec<Value>,
+    has_unresolved: bool,
+}
+
+/// 将写入表达式解析为统一的 lineage 引用明细。
+fn build_lineage_reference_details(source_expr: Option<&str>) -> LineageReferenceDetails {
+    let mut details = LineageReferenceDetails {
+        source_fields: Vec::new(),
+        resolved_refs: Vec::new(),
+        has_unresolved: false,
+    };
+    let Some(expr) = source_expr else {
+        return details;
+    };
+
+    let refs = crate::superpage::parse_expression_refs(expr);
+    if refs.is_empty() {
+        details.has_unresolved = true;
+    }
+    for reference in refs {
+        let (ref_type, ref_id, confidence) = match reference {
+            crate::superpage::RefType::ModelField(model, field) => {
+                let field_id = format!("field:{}.{}", model, field);
+                details.source_fields.push(field_id.clone());
+                ("ModelField", field_id, "high")
+            }
+            crate::superpage::RefType::ComponentValue(component) => {
+                ("ComponentValue", format!("comp:{}", component), "high")
+            }
+            crate::superpage::RefType::ComponentProperty(component, property) => (
+                "ComponentProperty",
+                format!("comp:{}.{}", component, property),
+                "high",
+            ),
+            crate::superpage::RefType::Param(param) => {
+                ("Param", format!("param:{}", param), "high")
+            }
+            crate::superpage::RefType::UserProperty(property) => {
+                ("UserProperty", format!("user:{}", property), "medium")
+            }
+            crate::superpage::RefType::SystemVar(variable) => ("SystemVar", variable, "high"),
+            crate::superpage::RefType::Other(other) => {
+                details.has_unresolved = true;
+                ("Other", other, "low")
+            }
+        };
+        details.resolved_refs.push(json!({
+            "ref_type": ref_type,
+            "ref_id": ref_id,
+            "confidence": confidence,
+        }));
+    }
+    details
+}
+
+/// 根据表达式是否存在以及解析结果计算 lineage 置信度。
+fn lineage_confidence(
+    source_expr: Option<&str>,
+    details: &LineageReferenceDetails,
+) -> &'static str {
+    if source_expr.is_some() && details.has_unresolved {
+        "medium"
+    } else if source_expr.is_some() && details.resolved_refs.is_empty() {
+        "low"
+    } else {
+        "high"
+    }
+}
+
 /// 构建上下文查询 JSON 输出
 ///
 /// 返回 Value，由外层调用者决定输出格式。
@@ -510,60 +581,13 @@ pub fn build_context_output(
                         .as_ref()
                         .and_then(|m| m.get("source_expr"))
                         .and_then(|v| v.as_str());
-                    let mut source_fields: Vec<String> = Vec::new();
-                    let mut resolved_refs: Vec<serde_json::Value> = Vec::new();
-                    let mut has_unresolved = false;
-                    if let Some(expr) = source_expr {
-                        let refs = crate::superpage::parse_expression_refs(expr);
-                        if refs.is_empty() {
-                            has_unresolved = true;
-                        }
-                        for r in refs {
-                            let (ref_type_str, ref_id, confidence) = match &r {
-                                crate::superpage::RefType::ModelField(m, f) => {
-                                    let fid = format!("field:{}.{}", m, f);
-                                    source_fields.push(fid.clone());
-                                    ("ModelField", fid, "high")
-                                }
-                                crate::superpage::RefType::ComponentValue(c) => {
-                                    ("ComponentValue", format!("comp:{}", c), "high")
-                                }
-                                crate::superpage::RefType::ComponentProperty(c, p) => {
-                                    ("ComponentProperty", format!("comp:{}.{}", c, p), "high")
-                                }
-                                crate::superpage::RefType::Param(p) => {
-                                    ("Param", format!("param:{}", p), "high")
-                                }
-                                crate::superpage::RefType::UserProperty(p) => {
-                                    ("UserProperty", format!("user:{}", p), "medium")
-                                }
-                                crate::superpage::RefType::SystemVar(v) => {
-                                    ("SystemVar", v.clone(), "high")
-                                }
-                                crate::superpage::RefType::Other(o) => {
-                                    has_unresolved = true;
-                                    ("Other", o.clone(), "low")
-                                }
-                            };
-                            resolved_refs.push(json!({
-                                "ref_type": ref_type_str,
-                                "ref_id": ref_id,
-                                "confidence": confidence,
-                            }));
-                        }
-                    }
-                    let confidence = if source_expr.is_some() && has_unresolved {
-                        "medium"
-                    } else if source_expr.is_some() && resolved_refs.is_empty() {
-                        "low"
-                    } else {
-                        "high"
-                    };
+                    let lineage_refs = build_lineage_reference_details(source_expr);
+                    let confidence = lineage_confidence(source_expr, &lineage_refs);
                     lineage.push(json!({
                         "target_field": node.id,
-                        "source_fields": source_fields,
+                        "source_fields": lineage_refs.source_fields,
                         "source_expr": source_expr,
-                        "resolved_refs": resolved_refs,
+                        "resolved_refs": lineage_refs.resolved_refs,
                         "transform": "page action write",
                         "via_node": source.id.clone(),
                         "confidence": confidence,
@@ -613,60 +637,13 @@ pub fn build_context_output(
                         .as_ref()
                         .and_then(|m| m.get("source_expr"))
                         .and_then(|v| v.as_str());
-                    let mut source_fields: Vec<String> = Vec::new();
-                    let mut resolved_refs: Vec<serde_json::Value> = Vec::new();
-                    let mut has_unresolved = false;
-                    if let Some(expr) = source_expr {
-                        let refs = crate::superpage::parse_expression_refs(expr);
-                        if refs.is_empty() {
-                            has_unresolved = true;
-                        }
-                        for r in refs {
-                            let (ref_type_str, ref_id, confidence) = match &r {
-                                crate::superpage::RefType::ModelField(m, f) => {
-                                    let fid = format!("field:{}.{}", m, f);
-                                    source_fields.push(fid.clone());
-                                    ("ModelField", fid, "high")
-                                }
-                                crate::superpage::RefType::ComponentValue(c) => {
-                                    ("ComponentValue", format!("comp:{}", c), "high")
-                                }
-                                crate::superpage::RefType::ComponentProperty(c, p) => {
-                                    ("ComponentProperty", format!("comp:{}.{}", c, p), "high")
-                                }
-                                crate::superpage::RefType::Param(p) => {
-                                    ("Param", format!("param:{}", p), "high")
-                                }
-                                crate::superpage::RefType::UserProperty(p) => {
-                                    ("UserProperty", format!("user:{}", p), "medium")
-                                }
-                                crate::superpage::RefType::SystemVar(v) => {
-                                    ("SystemVar", v.clone(), "high")
-                                }
-                                crate::superpage::RefType::Other(o) => {
-                                    has_unresolved = true;
-                                    ("Other", o.clone(), "low")
-                                }
-                            };
-                            resolved_refs.push(json!({
-                                "ref_type": ref_type_str,
-                                "ref_id": ref_id,
-                                "confidence": confidence,
-                            }));
-                        }
-                    }
-                    let confidence = if source_expr.is_some() && has_unresolved {
-                        "medium"
-                    } else if source_expr.is_some() && resolved_refs.is_empty() {
-                        "low"
-                    } else {
-                        "high"
-                    };
+                    let lineage_refs = build_lineage_reference_details(source_expr);
+                    let confidence = lineage_confidence(source_expr, &lineage_refs);
                     lineage.push(json!({
                         "target_field": node.id,
-                        "source_fields": source_fields,
+                        "source_fields": lineage_refs.source_fields,
                         "source_expr": source_expr,
-                        "resolved_refs": resolved_refs,
+                        "resolved_refs": lineage_refs.resolved_refs,
                         "transform": "page action write",
                         "via_node": source.id.clone(),
                         "confidence": confidence,

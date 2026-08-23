@@ -168,8 +168,8 @@ fn ref_type_to_string(r: &RefType) -> String {
     }
 }
 
-/// 递归收集组件 ID 到 JSON path 的映射
-fn collect_json_paths(
+/// 递归收集组件 ID 到 JSON path 的映射，供条件扫描和输出复用。
+pub(crate) fn collect_json_paths(
     arr: &[serde_json::Value],
     path_prefix: &str,
     paths: &mut HashMap<String, String>,
