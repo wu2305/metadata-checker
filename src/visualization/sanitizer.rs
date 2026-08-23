@@ -120,7 +120,6 @@ pub fn sanitize_diagnostic(diagnostic: &Diagnostic) -> Diagnostic {
             .suggestion
             .as_ref()
             .map(|text| sanitize_text(text)),
-    },
         count: None,
         answer_impact: None,
         first_seen_phase: None,

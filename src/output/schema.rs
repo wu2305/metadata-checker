@@ -164,8 +164,6 @@ pub enum Confidence {
 /// 维护者的（"Check if this action type is supported by metadata-checker"），消费输出
 /// 的模型从中读不出这条诊断对结论意味着什么。影响只由 code 决定，所以由序列化统一
 /// 补齐，而不是让上百处构造点各写一遍。
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Debug, Clone, Deserialize)]
 /// 统一诊断信封字段（M58.3 Phase 1）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticEnvelopeMeta {
@@ -176,6 +174,7 @@ pub struct DiagnosticEnvelopeMeta {
     pub first_seen_phase: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
     pub code: String,
