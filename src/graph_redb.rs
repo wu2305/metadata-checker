@@ -1257,113 +1257,13 @@ impl GraphDB {
 
     /// 搜索与目标 ID 相似的候选节点
     pub fn find_candidates(&self, target_id: &str, limit: usize) -> Vec<(Node, String)> {
-        let mut candidates: Vec<(Node, f64, String)> = Vec::new();
-        let target_lower = target_id.to_lowercase();
-
-        let target_bare = target_id
-            .strip_prefix("model:")
-            .or_else(|| target_id.strip_prefix("page:"))
-            .or_else(|| target_id.strip_prefix("comp:"))
-            .or_else(|| target_id.strip_prefix("action:"))
-            .or_else(|| target_id.strip_prefix("field:"))
-            .unwrap_or(target_id);
-
-        for (_, idx) in &self.node_indices {
-            if let Some(node) = self.graph.node_weight(*idx) {
-                if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty()
-                {
-                    continue;
-                }
-
-                let node_lower = node.id.to_lowercase();
-                let node_bare = node
-                    .id
-                    .strip_prefix("model:")
-                    .or_else(|| node.id.strip_prefix("page:"))
-                    .or_else(|| node.id.strip_prefix("comp:"))
-                    .or_else(|| node.id.strip_prefix("action:"))
-                    .or_else(|| node.id.strip_prefix("field:"))
-                    .unwrap_or(&node.id);
-
-                let mut score = 0.0;
-                let mut reason = "substring match";
-
-                if !target_bare.is_empty()
-                    && !node_bare.is_empty()
-                    && node_bare.eq_ignore_ascii_case(target_bare)
-                {
-                    score = 100.0;
-                    reason = "bare name exact match";
-                } else {
-                    let id_dist = crate::graph::levenshtein(&node.id.to_lowercase(), &target_lower);
-                    let bare_dist = crate::graph::levenshtein(
-                        &node_bare.to_lowercase(),
-                        &target_bare.to_lowercase(),
-                    );
-                    if id_dist == 0 || bare_dist == 0 {
-                        score = 100.0;
-                        reason = "exact match";
-                    } else if id_dist <= 1 || bare_dist <= 1 {
-                        score = 90.0;
-                        reason = "typo edit distance 1";
-                    } else if id_dist <= 2 || bare_dist <= 2 {
-                        score = 70.0;
-                        reason = "typo edit distance 2";
-                    } else if id_dist <= 3 || bare_dist <= 3 {
-                        score = 50.0;
-                        reason = "typo edit distance 3";
-                    } else if id_dist <= 5 || bare_dist <= 5 {
-                        score = 25.0;
-                        reason = "weak edit distance";
-                    }
-                }
-
-                if score == 0.0 {
-                    if node_lower.contains(&target_lower) {
-                        score = 60.0;
-                        reason = "substring match";
-                    } else if target_lower.contains(&node_lower) {
-                        score = 10.0;
-                        reason = "partial substring match";
-                    }
-                }
-
-                if score == 0.0 {
-                    if !node_bare.is_empty()
-                        && target_id.starts_with("model:")
-                        && node.id.starts_with("model:")
-                    {
-                        score = 5.0;
-                        reason = "same prefix (model)";
-                    } else if !node_bare.is_empty()
-                        && target_id.starts_with("page:")
-                        && node.id.starts_with("page:")
-                    {
-                        score = 5.0;
-                        reason = "same prefix (page)";
-                    } else if !node_bare.is_empty()
-                        && target_id.starts_with("comp:")
-                        && node.id.starts_with("comp:")
-                    {
-                        score = 5.0;
-                        reason = "same prefix (component)";
-                    }
-                }
-
-                if score >= 10.0 {
-                    candidates.push((node.clone(), score, reason.to_string()));
-                }
-            }
-        }
-
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        let mut seen = std::collections::HashSet::new();
-        candidates
-            .into_iter()
-            .filter(|(n, _, _)| seen.insert(n.id.clone()))
-            .take(limit)
-            .map(|(n, _, r)| (n, r))
-            .collect()
+        crate::candidate::rank_candidates(
+            self.node_indices
+                .values()
+                .filter_map(|index| self.graph.node_weight(*index).cloned()),
+            target_id,
+            limit,
+        )
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::superpage::{ComponentExpr, RefType, SuperPageMetadata};
-use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 /// 组件依赖关系分析模块
 ///
@@ -121,27 +122,29 @@ impl DependencyGraph {
             }
         }
 
-        // 使用 Vec 作为队列，每次按 component_order 排序后取第一个
-        let mut queue: Vec<String> = Vec::new();
+        let component_order: HashMap<&str, usize> = self
+            .component_order
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (id.as_str(), index))
+            .collect();
+        let mut queue: BinaryHeap<Reverse<(usize, String)>> = BinaryHeap::new();
         let mut result = Vec::new();
 
         // 找到所有入度为0的节点
         for (id, degree) in &in_degree {
             if *degree == 0 {
-                queue.push(id.clone());
+                queue.push(Reverse((
+                    component_order
+                        .get(id.as_str())
+                        .copied()
+                        .unwrap_or(usize::MAX),
+                    id.clone(),
+                )));
             }
         }
 
-        // 按元数据出现顺序稳定排序入度为0的节点
-        queue.sort_by_key(|id| {
-            self.component_order
-                .iter()
-                .position(|o| o == id)
-                .unwrap_or(usize::MAX)
-        });
-
-        while !queue.is_empty() {
-            let current = queue.remove(0);
+        while let Some(Reverse((_, current))) = queue.pop() {
             result.push(current.clone());
 
             if let Some(neighbors) = adj.get(&current) {
@@ -149,19 +152,17 @@ impl DependencyGraph {
                     if let Some(degree) = in_degree.get_mut(neighbor) {
                         *degree -= 1;
                         if *degree == 0 {
-                            queue.push(neighbor.clone());
+                            queue.push(Reverse((
+                                component_order
+                                    .get(neighbor.as_str())
+                                    .copied()
+                                    .unwrap_or(usize::MAX),
+                                neighbor.clone(),
+                            )));
                         }
                     }
                 }
             }
-
-            // 重新排序，保证稳定性
-            queue.sort_by_key(|id| {
-                self.component_order
-                    .iter()
-                    .position(|o| o == id)
-                    .unwrap_or(usize::MAX)
-            });
         }
 
         result

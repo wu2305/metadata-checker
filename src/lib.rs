@@ -4,6 +4,7 @@ pub mod browser;
 pub mod browser_orchestrator;
 #[cfg(feature = "browser-wasm")]
 pub mod browser_wasm_bindgen;
+pub(crate) mod candidate;
 #[cfg(feature = "cli-local")]
 pub mod cli;
 pub mod conditions;

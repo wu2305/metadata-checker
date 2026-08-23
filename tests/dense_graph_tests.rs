@@ -2,8 +2,9 @@
 
 use metadata_checker::dense_graph::DenseGraphSnapshot;
 use metadata_checker::graph::GraphDB;
-use metadata_checker::graph_store::{GraphReadStore, GraphStoreResult};
+use metadata_checker::graph_store::{GraphNeighbors, GraphReadStore, GraphStoreResult};
 use metadata_checker::scanner::scan_project;
+use std::cell::Cell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
@@ -80,5 +81,49 @@ fn dense_graph_snapshot_preserves_graph_counts_and_neighbors() -> anyhow::Result
         );
     }
 
+    Ok(())
+}
+
+struct CountingGraphStore<'a> {
+    graph: &'a GraphDB,
+    edge_reads: Cell<usize>,
+}
+
+impl GraphReadStore for CountingGraphStore<'_> {
+    fn get_node(&self, node_id: &str) -> GraphStoreResult<Option<metadata_checker::graph::Node>> {
+        self.graph.get_node(node_id)
+    }
+
+    fn get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>> {
+        self.edge_reads.set(self.edge_reads.get() + 1);
+        self.graph.get_node_edges(node_id)
+    }
+
+    fn node_count(&self) -> GraphStoreResult<usize> {
+        self.graph.node_count()
+    }
+
+    fn edge_count(&self) -> GraphStoreResult<usize> {
+        self.graph.edge_count()
+    }
+
+    fn iter_nodes(
+        &self,
+    ) -> GraphStoreResult<Box<dyn Iterator<Item = metadata_checker::graph::Node> + '_>> {
+        self.graph.iter_nodes()
+    }
+}
+
+#[test]
+fn dense_graph_snapshot_reads_each_node_edge_set_once() -> anyhow::Result<()> {
+    let graph = fixture_graph("single-edge-read")?;
+    let counted = CountingGraphStore {
+        edge_reads: Cell::new(0),
+        graph: &graph,
+    };
+
+    let _snapshot = DenseGraphSnapshot::from_graph(&counted)?;
+
+    assert_eq!(counted.edge_reads.get(), graph.node_count()?);
     Ok(())
 }

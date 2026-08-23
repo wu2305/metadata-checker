@@ -520,7 +520,7 @@ pub fn build_explain_condition_output_with_intent_and_retrieval(
             {
                 (scoped_model, Some(page_node), scoped_df_model_id)
             } else {
-                let candidates = find_local_candidates(graph, target_id);
+                let candidates = find_candidates(graph, target_id, 5)?;
                 let out = crate::output::schema::build_target_not_found_output(
                     crate::output::schema::OutputKind::Explain,
                     target_id,
@@ -531,7 +531,7 @@ pub fn build_explain_condition_output_with_intent_and_retrieval(
         } else if let Some(node) = graph.get_node(target_id).ok().flatten() {
             (node, None, None)
         } else {
-            let candidates = find_local_candidates(graph, target_id);
+            let candidates = find_candidates(graph, target_id, 5)?;
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::Explain,
                 target_id,
@@ -1142,7 +1142,7 @@ pub(crate) fn build_explain_availability_fast_output(
             {
                 (scoped_model, Some(page_node), scoped_df_model_id)
             } else {
-                let candidates = find_local_candidates(graph, target_id);
+                let candidates = find_candidates(graph, target_id, 5)?;
                 let out = crate::output::schema::build_target_not_found_output(
                     crate::output::schema::OutputKind::Explain,
                     target_id,
@@ -1153,7 +1153,7 @@ pub(crate) fn build_explain_availability_fast_output(
         } else if let Some(node) = graph.get_node(target_id).ok().flatten() {
             (node, None, None)
         } else {
-            let candidates = find_local_candidates(graph, target_id);
+            let candidates = find_candidates(graph, target_id, 5)?;
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::Explain,
                 target_id,
@@ -1358,138 +1358,6 @@ pub(crate) fn build_explain_availability_fast_output(
             "truncation_guard": truncation_guard,
         }
     }))
-}
-
-/// 辅助：在页面范围内查找近似候选目标
-/// 计算两个字符串的最长公共前缀长度
-fn common_prefix_len(a: &str, b: &str) -> usize {
-    a.chars()
-        .zip(b.chars())
-        .take_while(|(ca, cb)| ca == cb)
-        .count()
-}
-
-/// 判断字符串是否全为数字
-fn is_all_digits(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
-}
-
-fn find_local_candidates(
-    graph: &dyn GraphReadStore,
-    target_id: &str,
-) -> Vec<(crate::graph::Node, String)> {
-    let mut candidates: Vec<(crate::graph::Node, f64, String)> = Vec::new();
-    let target_lower = target_id.to_lowercase();
-
-    let target_prefix = if target_id.starts_with("model:") {
-        Some("model")
-    } else if target_id.starts_with("page:") {
-        Some("page")
-    } else if target_id.starts_with("comp:") {
-        Some("comp")
-    } else if target_id.starts_with("action:") {
-        Some("action")
-    } else if target_id.starts_with("field:") {
-        Some("field")
-    } else {
-        None
-    };
-
-    let target_bare = target_id
-        .strip_prefix("model:")
-        .or_else(|| target_id.strip_prefix("page:"))
-        .or_else(|| target_id.strip_prefix("comp:"))
-        .or_else(|| target_id.strip_prefix("action:"))
-        .or_else(|| target_id.strip_prefix("field:"))
-        .unwrap_or(target_id);
-
-    let target_page = if target_prefix == Some("comp") || target_prefix == Some("action") {
-        target_bare.split('|').next().map(|s| s.to_string())
-    } else {
-        None
-    };
-    let target_id_part = if target_prefix == Some("comp") || target_prefix == Some("action") {
-        target_bare.split('|').next_back().map(|s| s.to_string())
-    } else {
-        Some(target_bare.to_string())
-    };
-
-    let nodes = match graph.iter_nodes() {
-        Ok(nodes) => nodes,
-        Err(_) => return Vec::new(),
-    };
-    for node in nodes {
-        if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty() {
-            continue;
-        }
-        let node_bare = node
-            .id
-            .strip_prefix("model:")
-            .or_else(|| node.id.strip_prefix("page:"))
-            .or_else(|| node.id.strip_prefix("comp:"))
-            .or_else(|| node.id.strip_prefix("action:"))
-            .or_else(|| node.id.strip_prefix("field:"))
-            .unwrap_or(&node.id);
-
-        let mut score = 0.0;
-        let mut reason = "substring match";
-
-        // 同页面组件优先
-        if let Some(ref page) = target_page
-            && node_bare.starts_with(page)
-        {
-            if let Some(ref id_part) = target_id_part {
-                let node_name_lower = node.name.to_lowercase();
-                let target_id_lower = id_part.to_lowercase();
-
-                // 双向子串匹配：input3 匹配 input33（前缀），input3 匹配 input13（包含子串）
-                if node_name_lower.contains(&target_id_lower)
-                    || target_id_lower.contains(&node_name_lower)
-                {
-                    score = 3.0;
-                    reason = "same page component name match";
-                }
-
-                // 公共前缀 + 数字后缀近似：input33 ~ input3 / input13 / input23
-                if score == 0.0 {
-                    let prefix_len = common_prefix_len(&node_name_lower, &target_id_lower);
-                    if prefix_len >= 3 {
-                        let node_suffix = &node_name_lower[prefix_len..];
-                        let target_suffix = &target_id_lower[prefix_len..];
-                        if is_all_digits(node_suffix) && is_all_digits(target_suffix) {
-                            score = 2.5;
-                            reason = "same prefix numeric suffix match";
-                        }
-                    }
-                }
-            }
-        }
-
-        // 裸名精确匹配（不同前缀）
-        if score == 0.0 && !target_bare.is_empty() && node_bare == target_bare {
-            score = 5.0;
-            reason = "bare name match with different prefix";
-        }
-
-        // 子串匹配
-        if score == 0.0
-            && (node.id.to_lowercase().contains(&target_lower)
-                || node.name.to_lowercase().contains(&target_lower))
-        {
-            score = 1.0;
-        }
-
-        if score > 0.0 {
-            candidates.push((node, score, reason.to_string()));
-        }
-    }
-
-    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    candidates
-        .into_iter()
-        .take(5)
-        .map(|(n, _, r)| (n, r))
-        .collect()
 }
 
 /// 构建 explain JSON 输出
