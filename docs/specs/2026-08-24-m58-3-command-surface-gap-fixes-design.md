@@ -55,10 +55,52 @@
 落在 `tests/m58_3_command_surface_tests.rs` 或新文件），覆盖「之前有表达式才碰巧正确」
 之外的形状（无表达式组件、`${IF(...)}`、页面限定 model、calc 组件、带 conditionExp 的写动作）。
 
+### Phase 3：页面内模型节点身份（核心设计，不推迟）
+
+#### 为什么必须现在做
+
+页面内模型是三重身份的交汇点，缺一维全部失真：
+
+- **查询逻辑**：`model:modelN` 的 availability gates 应该来自**本页这份** filter，不是别页合并进全局节点的表路径；
+- **写入场景**：同一个动作写哪张表、带什么 conditionExp 门控，是页面级事实；
+- **同表异 filter**：绑定车辆.spg 的 model6/7/8 同指 `fact_customAutoMyAutoList.tbl` 但 filter 完全不同——全局按名合并后，三个逻辑视图塌成一个节点，谁的 filter 都答不对。
+
+#### 现状 schema 的精确病灶
+
+- `model:` 命名空间混装两类节点：物理表（`scanner/tbl.rs:29`，按表名）与页面局部逻辑模型（`scanner/spg.rs:149`，按局部 id）。
+- 局部模型全局按名合并（`spg.rs:149` + `upsert_node` 后写覆盖 `utils.rs:15`），两页同 id 时 path/meta 由扫描顺序决定。
+- 局部→物理的映射靠 `FieldAlias` 边（`spg.rs:1472-1473`），页面绑定只在扫描期 `source_path_map`（`spg.rs:325`），扫完即丢。
+
+#### 设计：id 分段 + 双写聚合
+
+**节点 id 方案**：页面局部模型节点 id 改为 `model:<PAGE_PATH>|<modelN>`（竖线分段）。
+这个格式不是新发明——`page_logic.rs:115` 的 `page_scoped_model_target` 已经在生产它、
+`model_scope.rs:12` 已经在解析它，本次是让图 schema 与既有 target 文法对齐。物理表节点
+保持 `model:<tableName>`（无竖线），**竖线即两类节点的判据**。
+
+**边与 meta**：
+
+- 局部模型节点携带**本页自己的** filter/meta（不再 upsert 覆盖）→ F4 的 availability
+  gates 直接读节点自身，启发式重建（路径兜底/主页投票/硬编码表名）整体拆除；
+- 局部→物理的 `FieldAlias` / DataFlow 边改从 `model:PAGE|modelN` 发出，血缘不断；
+- **写入双写**：动作写物理字段时同时落两条边——`ActionWrites → model:PAGE|modelN`
+  （带本页 conditionExp，承接 F6）与既有物理表聚合边。`--relations 'model:fact_testDrive'`
+  的跨页扇出计数（84/248 类）语义不变；新增「这个页面怎么写这张表」的精确视图。
+
+**解析与兼容**：
+
+- `model:PAGE|modelN` 精确命中页面局部节点（O(1)，不再归一剥离——`route.rs:432` 的
+  `by_overqualified` 档对 model 前缀禁用，F4 并入本 Phase）；
+- 裸 `model:modelN` 若只命中一个页面局部节点则直达；多页面同名 → 走既有歧义模式
+  **如实交回全部候选**（与 `test_ambiguous_bare_target_answers_every_candidate` 同契约），
+  绝不替调用方猜；
+- 旧 graphdb 不兼容：graph schema 版本号 +1，加载旧库给明确「请重建」诊断（不静默回退）。
+
+**与评测语料的相互校验**：13 个 case 的计数类断言（read_by_count 等）在重建后重放；
+physical 聚合语义不变所以多数应保持一致，变了的按「重新校验并记录」流程处理。
+
 ### 明确推迟（记录但不修）
 
-- **页面内模型节点身份**（图 schema 变更：`model:PAGE|modelN` 成为一等节点）。影响面涉及
-  scanner/graph store/query/序列化全链路，等 Phase 1+2 落地后看同类缺口是否还复发再立项。
 - facts 块信封统一、巨型函数拆分（`page_logic.rs` 831 行等）、`.clone()` 治理——可演进性
   改进，不与正确性修复混在一个里程碑。
 - 旧动词（`--explain-condition`/`--query-*` 等 10 个）的删除决策：维持「隐藏但可用」，
@@ -76,11 +118,14 @@
 
 1. Phase 1 的三类计数/diagnostic 在真实语料构建与查询输出中可见，且正常路径不产生噪音。
 2. F1–F6 各自的复现命令（取自证据目录）修复后输出正确事实，回归测试绿。
-3. 远端 `cargo fmt --check`、`m58_3_command_surface_tests`、`kimi_harness_judge_tests`、
+3. Phase 3 落地后：裸 `model:modelN` 多页同名时如实交回候选、单页直达；
+   `model:PAGE|modelN` 精确命中且 gates 来自本页 filter；`--relations 'model:表名'`
+   的跨页聚合计数语义不变；旧 graphdb 得到明确「请重建」诊断而非静默回退。
+4. 远端 `cargo fmt --check`、`m58_3_command_surface_tests`、`kimi_harness_judge_tests`、
    `ai_eval_tests` 绿；本地干跑五条路径符合预期。
-4. 修复后对 pin 语料重建 graphdb，重放 13 个 case 的 `expected_output_assertions`：
+5. 修复后对 pin 语料重建 graphdb，重放 13 个 case 的 `expected_output_assertions`：
    允许断言值随修复**变好**而更新（按流程重新校验），不允许静默变坏。
-5. 完成后跑一次 11-case `api_trigger_kimi_harness_smoke` 拿扩充后首轮基线，与
+6. 完成后跑一次 11-case `api_trigger_kimi_harness_smoke` 拿扩充后首轮基线，与
    `command_route_usage` / `command_routing_confusion` 的历史基线对比——这是 M58.3
    标 done 的验收门。
 
@@ -88,6 +133,7 @@
 
 - PR1：Phase 1 可观测性（独立可验收，为后续所有修复提供「修复前后丢了多少数据」的对照）
 - PR2：F1 + F2（scanner/继承链，同层）
-- PR3：F3 + F4（表达式解析 + target 协议，同层）
-- PR4：F5 + F6（facts 暴露，同层）
-- PR5：graphdb 重建 + 13 case 重放 + 11-case live run 验收
+- PR3：F3（表达式解析，小切口先行）
+- PR4：**Phase 3 页面内模型节点身份**（含 F4 协议统一；schema 版本 +1，需全量重建验证）
+- PR5：F5 + F6（facts 暴露，其中 F6 的写边双写在 PR4 的 schema 上落地）
+- PR6：graphdb 重建 + 13 case 重放 + 11-case live run 验收
