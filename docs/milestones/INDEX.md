@@ -54,7 +54,7 @@
 | M54 | Diff refresh 通路（fixture META_FILES → rewarm） | done | performance | [m54](performance/m54-diff-refresh-pipeline.md) | [design](../specs/2026-07-12-diff-refresh-pipeline-design.md) | [plan](../plans/2026-07-12-diff-refresh-pipeline-plan.md) | M53 |
 | M55 | Diff refresh 正确性（真 META_FILES + 依赖索引） | done | performance | [m54](performance/m54-diff-refresh-pipeline.md) | [design](../specs/2026-07-12-diff-refresh-pipeline-design.md) | [plan](../plans/2026-07-12-diff-refresh-pipeline-plan.md) | M54 |
 | M56 | Diff refresh persist（redb_commit / commit batch） | done | performance | [m54](performance/m54-diff-refresh-pipeline.md) | [design](../specs/2026-07-12-diff-refresh-pipeline-design.md) | [plan](../plans/2026-07-12-diff-refresh-pipeline-plan.md) | M54 |
-| M57 | Diff refresh 产品化 + tick 成本 + 范围/凭证/SKILL | active | performance | [m57](performance/m57-diff-refresh-closeout.md) | [design](../specs/2026-07-23-m57-diff-refresh-closeout-design.md)（approved） | [plan](../plans/2026-07-26-m57-ai-contract-foundation-plan.md)（approved） | M56 |
+| M57 | Diff refresh 产品化 + tick 成本 + 范围/凭证/SKILL | done | performance | [m57](performance/m57-diff-refresh-closeout.md) | [design](../specs/2026-07-23-m57-diff-refresh-closeout-design.md)（approved） | [plan](../plans/2026-07-26-m57-ai-contract-foundation-plan.md)（approved） | M56 |
 
 CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`release-fast` + `cnb-078`）。
 
