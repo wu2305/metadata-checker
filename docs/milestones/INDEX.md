@@ -65,7 +65,7 @@ CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`re
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
 | M58 | 廉价模型理解力评测 | active | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved；JSON-command runner 已冻结）<br>[design M58.2](../specs/2026-08-09-slm-eval-harness-design.md)（approved；agent harness，当前路径） | [plan](../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done，冻结 runner）<br>[plan M58.2 LLMOps](../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)（approved）<br>[plan M58.2 续作](../plans/2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md)（done）<br>[runbook](../runbooks/m58-cnb-shell-dry-run.md) | M22 |
-| M58.3 | 三动词命令表面收敛（--find/--explain/--relations） | active | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | — | — | M58.2 |
+| M58.3 | 三动词命令表面收敛（--find/--explain/--relations） | active | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（draft） | — | M58.2 |
 | M58.4 | 轻量图召回与 LLM 配对验证 | done | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design Phase A](../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)（approved）<br>[design Phase B](../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)（approved） | [plan Phase A](../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（done）<br>[plan Phase B](../plans/2026-08-23-m58-4-llm-paired-benefit-plan.md)（done） | M58.2, M58.3 |
 | M59 | Dashboard / Report 格式支持 | planned | formats | — | （待建） | | |
 
