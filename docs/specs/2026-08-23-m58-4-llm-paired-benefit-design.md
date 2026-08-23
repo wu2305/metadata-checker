@@ -1,6 +1,6 @@
 # M58.4 Phase B：LLM 回答收益配对验证设计
 
-> 状态：**approved（用户确认 2026-08-23）**
+> 状态：**approved（用户确认 2026-08-23；live 验证完成 2026-08-23）**
 > 类型：live paired evaluation
 > 依赖：[M58.4 deterministic spike](2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)
 > 执行环境：CNB Pipeline；token 只从远端环境变量读取
@@ -107,3 +107,42 @@ variant 标签不等于模型真的看到了增强证据。每条 `records.jsonl
 - **inconclusive**：record/judge 不完整、variant 污染、有效配对不足或出现 infra。
 
 即使 positive signal，也只允许得出“这 6 个真实项目问题、当前模型版本、3-trial 网格中
+存在 variant assignment 层的弱正向信号”。它不自动等价于 typed-PPR 的因果收益；若
+改善 pair 没有实际看到 treatment，上升只能记为随机波动或未归因信号。
+
+## 7. 实测结果
+
+CNB build [`cnb-r2g-1k0mi4oqu`](https://cnb.cool/wu2305/metadata-checker/-/build/logs/cnb-r2g-1k0mi4oqu)
+在 commit `4e288994a29db6c5e52531f2028187bca71343f8` 完成 36/36 agent trials、
+36/36 judge calls 和 18/18 配对；无 INFRA、缺对或 baseline 污染。固定身份为：
+
+- agent `deepseek-v4-flash`，judge `glm-5.2`，kimi-code `0.38.0`；
+- corpus `6920ac514df2d79a3df73a6447cf851abdfc954b`；
+- fixture SHA-256 `df86f2f35c170f699c325de556e36de0ed2dae7ce8cd94f98567f9fe49131d10`；
+- run tag `20260823T054257Z`；records / run / judge 永久归档，脱敏 transcript 保留 90 天。
+
+| variant | answer quality | tool adherence | tool-assisted quality | retrieval exposure |
+|---|---:|---:|---:|---:|
+| baseline | 10/18 | 15/18 | 10/18 | 0/18 |
+| typed_ppr | 12/18 | 15/18 | 11/18 | 1/18 |
+
+| outcome | fail→pass | pass→fail | pass→pass | fail→fail | paired delta |
+|---|---:|---:|---:|---:|---:|
+| answer | 2 | 0 | 10 | 6 | +2/18 |
+| tool-assisted | 2 | 1 | 9 | 6 | +1/18 |
+
+按第 6 节冻结规则，自动报告的 variant assignment 结论是 **positive signal**。但这不是
+typed-PPR 收益成立：typed 组只有 `1/18` transcript 实际包含
+`experimental_graph_retrieval`，唯一曝光 pair
+`xiaoshouyi_text41_display_conditions/t3` 是 PASS→PASS；两个 answer fail→pass
+都发生在未曝光 trial。两组 tool adherence 同为 `15/18`、raw fallback 同为 `12/18`，
+也没有显示 treatment 改变了整体工具行为。
+
+因此 M58.4 Phase B 的产品结论是：
+
+- **variant assignment 有弱正向信号**，仅作小样本仪表；
+- **typed-PPR 对 LLM 最终回答的因果收益仍未证明**，当前证据为 inconclusive；
+- 当前瓶颈先是命令路由 / treatment 曝光，不是继续更换或堆叠图召回算法。
+
+若继续，下一轮应先让需要条件多跳证据的 case 稳定走到受处理的 ExplainCondition 输出，
+并在运行前冻结最低曝光门槛；在此之前不把 typed-PPR 接入默认查询路径。

@@ -8,7 +8,7 @@
 > Spec（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md](../../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)（approved；确定性图召回对比）
 > Plan（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md](../../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（approved）
 > Spec（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-design.md](../../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)（approved）
-> Plan（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-plan.md](../../plans/2026-08-23-m58-4-llm-paired-benefit-plan.md)（approved）
+> Plan（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-plan.md](../../plans/2026-08-23-m58-4-llm-paired-benefit-plan.md)（done）
 
 ## 冻结公告（2026-08-09）
 
@@ -101,7 +101,7 @@ browser-wasm check 与 `git diff --check` 均通过。
 结论为 **deterministic go**，不是产品 go。代码未接公共查询、未接 semantic seed、
 未跑 LLM paired variants；真实项目与 `tool_assisted_quality` 增益仍未验证。
 
-#### Phase B：LLM 回答收益配对验证（active，2026-08-23）
+#### Phase B：LLM 回答收益配对验证（done，2026-08-23）
 
 用户进一步要求在 CNB 环境复用 Pipeline 与已有 token，直接验证 LLM 最终回答收益。设计
 固定为同一次 build 的 6 个 smoke case、baseline / typed_ppr 两组、每组 3 次独立 trial，
@@ -120,6 +120,33 @@ pass→fail / pass→pass / fail→fail。完整设计见 [Phase B spec](../../s
 
 本轮所有源码、Pipeline、测试和 live 请求继续只在 CNB 远端执行。token 仅由 Pipeline
 环境消费，不读取、不打印、不归档。
+
+Live build [`cnb-r2g-1k0mi4oqu`](https://cnb.cool/wu2305/metadata-checker/-/build/logs/cnb-r2g-1k0mi4oqu)
+在 commit `4e288994a29db6c5e52531f2028187bca71343f8` 成功完成。smoke 产出 36/36
+record，judge 完成 36/36 判分，18 对身份完整；无 INFRA、缺对、baseline 污染或 token
+泄漏。run tag 为 `20260823T054257Z`，records / run / judge 永久归档，脱敏 transcript
+保留 90 天，入口见 [commit attachments](https://cnb.cool/wu2305/metadata-checker/-/commit/4e288994a29db6c5e52531f2028187bca71343f8?tab=attachments)。
+
+固定分母结果：
+
+| variant | answer quality | tool adherence | tool-assisted quality | retrieval exposure |
+|---|---:|---:|---:|---:|
+| baseline | 10/18 | 15/18 | 10/18 | 0/18 |
+| typed_ppr | 12/18 | 15/18 | 11/18 | 1/18 |
+
+answer 配对为 fail→pass `2`、pass→fail `0`、pass→pass `10`、fail→fail `6`，
+净增 `+2/18`；tool-assisted 配对为 `2 / 1 / 9 / 6`，净增 `+1/18`。按预先冻结
+规则，自动报告给出 **positive signal**。
+
+但这只能解释为 variant assignment 层的弱信号，不能归因 typed-PPR：typed 组实际曝光
+只有 `1/18`，唯一曝光的 `xiaoshouyi_text41_display_conditions/t3` 是 PASS→PASS；两个
+answer fail→pass 都没有看到 treatment。两组 tool adherence 都是 `15/18`，raw fallback
+也都是 `12/18`。也就是说，这轮真正暴露的是路由瓶颈：模型大多数时候没有进入新增图召回
+输出，组间 +1/+2 更可能是小样本随机波动，不能当作 Graph RAG 收益。
+
+M58.4 到此完成，结论是 **typed-PPR 的 LLM 因果收益未证明**。不接默认查询路径；若继续，
+先让目标 case 稳定走到受处理的 ExplainCondition 输出，并预先冻结最低 treatment exposure
+门槛，再重复配对实验。确定性层的 typed-PPR 密度优势保留，但不能越级当作答案收益。
 
 本地 fake runner 已覆盖 13 个 active `fixture_llm` case，覆盖 page/action/lineage/dataflow/navigation/diagnostic/context/condition 等任务族；每个 case 都有 `evaluation_dimensions`，并通过独立 trial、命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport、SSE 和 token 脱敏测试。历史真实 CNB smoke 曾由 `api_trigger_m58_llm` 执行：provider=`cnb-ai-chat`、model=`deepseek-v4-flash`、build=`cnb-54f-1juijih5i`、单 trial pass rate=`1.0`、failure classes 为空；它只证明当时三个 case 的一次端到端路径可用，不证明 Skill 的稳定理解或任务泛化。新的 live runner 默认每个 case 执行 3 个独立 trial，报告同时输出 `trial_pass_rate`、`case_stable_pass_rate` 和 `cases_with_flaky_trials`；只保留结构化摘要和脱敏 command trace，不归档 prompt、模型原文或 token。runtime contract preflight 的缺省回退与显式 override 已通过同一 live stage 验证。
 

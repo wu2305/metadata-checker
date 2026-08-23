@@ -1,6 +1,6 @@
 # M58.4 Phase B：LLM 回答收益配对验证实施计划
 
-> 状态：**approved（用户确认 2026-08-23）**
+> 状态：**done（2026-08-23）**
 > 对应设计：[Phase B 设计](../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)
 > 前置结果：[deterministic spike](2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)
 > 分支：`auto/graph-rag-spike-a7c3`
@@ -135,3 +135,34 @@ git diff --check
 | 顺序 | commit | 内容 |
 |---|---|---|
 | 1 | `docs: approve llm graph retrieval paired eval` | Phase B spec / plan / INDEX / journal |
+| 2 | `feat: expose typed graph retrieval experiment` | cli-local treatment、baseline 兼容与聚焦测试 |
+| 3 | `test: add paired graph retrieval evaluation` | 36-run Pipeline、曝光记录、配对 judge 与 dry-run |
+| 4 | `docs: record llm graph retrieval paired result` | live 身份、指标、归因限制与结论 |
+
+## 5. 执行记录
+
+实现与验证全部在 CNB `/workspace` 完成：
+
+- `graph_retrieval_spike_tests`：5 passed；
+- `kimi_harness_judge_tests`：45 passed、1 个 token 门控 live test ignored；
+- browser-wasm check、`cargo fmt --check`、`git diff --check`：通过；
+- Pipeline dry-run：正常 36-record 网格通过，`empty` / `dup` / `noeat` /
+  `judgeleak` 四类注入均按预期判红；
+- `.cnb.yml`：YAML 语法、CNB 语义和 Schema 校验通过。
+
+Live build [`cnb-r2g-1k0mi4oqu`](https://cnb.cool/wu2305/metadata-checker/-/build/logs/cnb-r2g-1k0mi4oqu)
+在 `4e28899` 上成功完成，smoke stage `2,340,751 ms`，judge stage `371,174 ms`，
+总 pipeline `2,869,206 ms`。四件产物均归档到
+[commit attachments](https://cnb.cool/wu2305/metadata-checker/-/commit/4e288994a29db6c5e52531f2028187bca71343f8?tab=attachments)。
+
+结果：
+
+- baseline：answer `10/18`，adherence `15/18`，assisted `10/18`，exposure `0/18`；
+- typed_ppr：answer `12/18`，adherence `15/18`，assisted `11/18`，exposure `1/18`；
+- answer 配对 `2/0/10/6`，净增 `+2/18`；tool-assisted 配对 `2/1/9/6`，
+  净增 `+1/18`；
+- 36 条 record、18 对配对完整，baseline 污染为 0，token 扫描通过。
+
+冻结规则给出 variant assignment **positive signal**。但唯一真实曝光 pair 是 PASS→PASS，
+两个 fail→pass 都未曝光 typed-PPR，因此不能把 +1/+2 归因给图召回。Spike 到此完成，结论
+是“图召回因果收益未证明；先解决命令路由与 treatment 曝光”，不接默认查询路径。
