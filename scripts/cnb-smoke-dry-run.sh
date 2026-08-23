@@ -13,7 +13,7 @@
 # 本脚本自身是 bash（它是开发机工具，不进 CNB），被测的 stage 才是 dash。
 #
 # 用法：
-#   scripts/cnb-smoke-dry-run.sh                 # 正常路径，期望退出 0、产出 6 条 record
+#   scripts/cnb-smoke-dry-run.sh                 # 正常路径，期望退出 0、产出 36 条 record
 #   scripts/cnb-smoke-dry-run.sh --fault empty   # 无 smoke.enabled，期望判红
 #   scripts/cnb-smoke-dry-run.sh --fault dup     # smoke.order 撞号，期望判红
 #   scripts/cnb-smoke-dry-run.sh --fault noeat   # 循环中途少产一条 record，期望判红
@@ -72,6 +72,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 printf '%s\n' '{"role":"assistant","content":"先查图状态","tool_calls":[{"type":"function","id":"call_1","function":{"name":"Bash","arguments":"{\"command\":\"metadata-checker --check-graph\"}"}}]}'
+if [ "${METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL:-}" = "typed-ppr" ]; then
+  printf '%s\n' '{"role":"tool","content":"{\"details\":{\"experimental_graph_retrieval\":{\"evidence_role\":\"candidate_only\"}}}"}'
+fi
 case "$QUESTION" in
   *入口*)
     printf '%s\n' '{"role":"assistant","content":"绕开工具直接读文件","tool_calls":[{"type":"function","id":"call_2","function":{"name":"Bash","arguments":"{\"command\":\"grep -n input3 合同协议.spg | head\"}"}}]}'
@@ -346,18 +349,24 @@ if [ -s "$RECORDS" ]; then
 fi
 
 if [ "$FAULT" = "none" ]; then
-  # 结构化解析真实生效：每个问题恰好 1 次 mc 调用；只有「入口」一问 raw_fallback=true。
-  grep -q '"metadata_checker_invocations":1' "$RECORDS" || { echo "FAIL: mc 结构化计数异常" >&2; exit 1; }
-  [ "$(grep -c '"raw_fallback":true' "$RECORDS")" = "1" ] || { echo "FAIL: 期望恰好 1 条 raw_fallback=true" >&2; exit 1; }
-  [ "$(grep -c '"raw_fallback":false' "$RECORDS")" = "5" ] || { echo "FAIL: 期望 5 条 raw_fallback=false" >&2; exit 1; }
+  # 结构化解析覆盖完整 6×2×3 网格；入口 case 在每个 variant/trial 各出现一次。
+  [ "$(wc -l < "$RECORDS" | tr -d ' ')" = "36" ] || { echo "FAIL: 期望 36 条 record" >&2; exit 1; }
+  [ "$(grep -c '"metadata_checker_invocations":1' "$RECORDS")" = "36" ] || { echo "FAIL: mc 结构化计数异常" >&2; exit 1; }
+  [ "$(grep -c '"raw_fallback":true' "$RECORDS")" = "6" ] || { echo "FAIL: 期望 6 条 raw_fallback=true" >&2; exit 1; }
+  [ "$(grep -c '"raw_fallback":false' "$RECORDS")" = "30" ] || { echo "FAIL: 期望 30 条 raw_fallback=false" >&2; exit 1; }
+  [ "$(grep -c '"variant":"typed_ppr".*"retrieval_context_observed":true' "$RECORDS")" = "18" ] || { echo "FAIL: typed exposure 应为 18/18" >&2; exit 1; }
+  [ "$(grep -c '"variant":"baseline".*"retrieval_context_observed":false' "$RECORDS")" = "18" ] || { echo "FAIL: baseline 应为 18 条未曝光" >&2; exit 1; }
+  [ "$(grep -c '"variant":"baseline".*"retrieval_context_observed":true' "$RECORDS" || true)" = "0" ] || { echo "FAIL: baseline 出现 treatment 污染" >&2; exit 1; }
   # 卫生清理：预置的过期 transcript 必须被 stage 清掉。
   [ ! -e "$WORK/target/kimi-harness-smoke/smoke-transcript-q1.jsonl" ] || { echo "FAIL: 过期 transcript 未被清理" >&2; exit 1; }
-  # 文件名带 variant/trial：只按 case_id 命名时，Phase 2 的第二个 trial 会覆盖第一个的
-  # 答案，而 records 照常写满、报告照常好看。这条断言守的是那次静默丢数据。
-  TRIAL1_COUNT="$(find "$WORK/target/kimi-harness-smoke" -name 'smoke-transcript-*__baseline__t1.jsonl' | wc -l | tr -d ' ')"
-  [ "$TRIAL1_COUNT" = "6" ] || { echo "FAIL: 期望 6 份带 __baseline__t1 的 transcript，实际 $TRIAL1_COUNT" >&2; exit 1; }
-  find "$WORK/target/kimi-harness-smoke" -name 'smoke-stderr-*__baseline__t1.log' | grep -q . \
-    || { echo "FAIL: stderr 文件名未带 variant/trial" >&2; exit 1; }
+  # 每个 variant/trial 必须各有 6 份 transcript；只按 case_id 命名会静默覆盖。
+  for EXPECTED_VARIANT in baseline typed_ppr; do
+    for EXPECTED_TRIAL in 1 2 3; do
+      ACTUAL_COUNT="$(find "$WORK/target/kimi-harness-smoke" -name "smoke-transcript-*__"$EXPECTED_VARIANT"__t"$EXPECTED_TRIAL".jsonl" | wc -l | tr -d ' ')"
+      [ "$ACTUAL_COUNT" = "6" ] || { echo "FAIL: $EXPECTED_VARIANT/t$EXPECTED_TRIAL transcript 实际 $ACTUAL_COUNT" >&2; exit 1; }
+    done
+  done
+  [ "$(find "$WORK/target/kimi-harness-smoke" -name 'smoke-stderr-*__*__t*.log' | wc -l | tr -d ' ')" = "36" ] || { echo "FAIL: stderr 文件数量不是 36" >&2; exit 1; }
   # endStage 的 dump 用 RUN_TAG 作标签，标签里必须能看到身份。
   grep -q '__baseline__t1 transcript tail' "$ENDSTAGE_LOG" \
     || { echo "FAIL: endStage dump 标签未带 variant/trial" >&2; exit 1; }
@@ -368,6 +377,9 @@ if [ "$FAULT" = "none" ]; then
   grep -q '"kimi_pin_policy": "float"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 未声明 kimi_pin_policy=float" >&2; exit 1; }
   grep -q '"agent_temperature": null' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 agent_temperature" >&2; exit 1; }
   grep -q '"judge_temperature": null' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 judge_temperature" >&2; exit 1; }
+  grep -q '"typed_ppr"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 typed_ppr variant" >&2; exit 1; }
+  grep -q '"trials": 3' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json trials 不是 3" >&2; exit 1; }
+  grep -q '"treatment_env_name": "METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL"' "$WORK/target/kimi-harness-smoke/run.json" || { echo "FAIL: run.json 缺少 treatment 环境变量名" >&2; exit 1; }
   # endStage 无条件发布 judge.md（stub 内容）与 run manifest。
   grep -q "===== judge.md =====" "$ENDSTAGE_LOG" || { echo "FAIL: endStage 未发布 judge.md" >&2; exit 1; }
   grep -q "# stub judge" "$ENDSTAGE_LOG" || { echo "FAIL: endStage judge.md 内容缺失" >&2; exit 1; }
