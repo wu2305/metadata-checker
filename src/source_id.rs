@@ -97,8 +97,8 @@ impl SourceId {
     ///
     /// `source_path` 必须是项目内逻辑路径：
     /// - 提供 `project_dir` 时，从绝对路径裁剪出相对路径；`origin_path` 保留原始绝对路径。
-    /// - 未提供 `project_dir` 时，相对路径直接使用；绝对路径只接受能转换为 cwd-relative
-    ///   的路径，无法安全归一化时返回错误。`origin_path` 始终保留原始路径。
+    /// - 未提供 `project_dir` 时，相对路径直接使用；绝对路径优先转换为 cwd-relative，
+    ///   否则编码为不碰撞的 standalone 逻辑路径。`origin_path` 始终保留原始路径。
     pub fn from_local_path(
         project_ref: ProjectRef,
         path: &Path,
@@ -122,12 +122,7 @@ impl SourceId {
                 .with_context(|| "无法确定当前工作目录，不能安全归一化来源路径")?;
             path.strip_prefix(&cwd)
                 .map(|p| p.to_string_lossy().to_string())
-                .with_context(|| {
-                    format!(
-                        "绝对来源路径 {} 不在当前工作目录内；请提供 project_dir 以生成稳定逻辑路径",
-                        path.display()
-                    )
-                })?
+                .unwrap_or_else(|_| Self::standalone_source_path(path))
         } else {
             path.to_string_lossy().to_string()
         };
@@ -139,7 +134,13 @@ impl SourceId {
             );
         }
 
-        let display_path = Some(source_path.clone());
+        let display_path = if project_dir.is_none() && path.is_absolute() {
+            path.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .or_else(|| Some(source_path.clone()))
+        } else {
+            Some(source_path.clone())
+        };
 
         let source_kind = if path.extension().map(|e| e == "spg").unwrap_or(false) {
             SourceKind::Spg
@@ -158,6 +159,12 @@ impl SourceId {
             origin: SourceOrigin::Local,
             revision: None,
         })
+    }
+
+    /// 为缺少项目根目录的绝对路径生成不碰撞的逻辑路径。
+    fn standalone_source_path(path: &Path) -> String {
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        format!("__absolute__/{}", normalized.trim_start_matches('/'))
     }
 
     /// 从内存字节构造 SourceId，用于 WASM 或测试 fixture。
@@ -283,17 +290,20 @@ mod tests {
     }
 
     #[test]
-    fn test_source_id_from_local_path_rejects_absolute_path_outside_cwd_without_project_dir() {
+    fn test_source_id_from_local_path_encodes_absolute_path_outside_cwd_without_project_dir() {
         let pr = ProjectRef::new("p1");
-        let result = SourceId::from_local_path(pr, Path::new("/tmp/page.spg"), None);
-        assert!(result.is_err());
+        let sid = SourceId::from_local_path(pr, Path::new("/tmp/page.spg"), None).unwrap();
+        assert_eq!(sid.source_path, "__absolute__/tmp/page.spg");
+        assert_eq!(sid.display_path, Some("page.spg".to_string()));
     }
 
     #[test]
-    fn test_source_id_from_local_path_absolute_outside_cwd_is_rejected() {
+    fn test_source_id_from_local_path_absolute_outside_cwd_is_non_colliding() {
         let pr = ProjectRef::new("p1");
-        let result = SourceId::from_local_path(pr, Path::new("/very/unlikely/path/page.spg"), None);
-        assert!(result.is_err());
+        let sid =
+            SourceId::from_local_path(pr, Path::new("/very/unlikely/path/page.spg"), None).unwrap();
+        assert_eq!(sid.source_path, "__absolute__/very/unlikely/path/page.spg");
+        assert_eq!(sid.display_path, Some("page.spg".to_string()));
     }
 
     #[test]
@@ -332,13 +342,16 @@ mod tests {
     }
 
     #[test]
-    fn test_source_id_rejects_distinct_absolute_paths_without_project_dir() {
+    fn test_source_id_keeps_distinct_absolute_paths_without_project_dir() {
         let project = ProjectRef::new("test-project");
         let first =
-            SourceId::from_local_path(project.clone(), Path::new("/tmp/project-a/page.spg"), None);
-        let second = SourceId::from_local_path(project, Path::new("/tmp/project-b/page.spg"), None);
+            SourceId::from_local_path(project.clone(), Path::new("/tmp/project-a/page.spg"), None)
+                .unwrap();
+        let second =
+            SourceId::from_local_path(project, Path::new("/tmp/project-b/page.spg"), None).unwrap();
 
-        assert!(first.is_err());
-        assert!(second.is_err());
+        assert_ne!(first.source_path, second.source_path);
+        assert_ne!(first, second);
+        assert_eq!(first.display_path, second.display_path);
     }
 }

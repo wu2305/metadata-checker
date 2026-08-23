@@ -76,6 +76,10 @@ fn candidate_score(node: &Node, target_id: &str) -> Option<(f64, &'static str)> 
                 score = 5.0;
                 reason = "same prefix (component)";
             }
+            if numeric_suffix_variant(target_bare, node_bare) {
+                score = score.max(40.0);
+                reason = "numbered suffix variant";
+            }
         } else if !target_bare.is_empty() && node_bare.eq_ignore_ascii_case(target_bare) {
             score = 70.0;
             reason = "bare name match with different prefix";

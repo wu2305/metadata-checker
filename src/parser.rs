@@ -97,7 +97,11 @@ pub fn parse_content(parsed: &ParsedContent) -> Result<PageMetadata> {
     })?;
 
     let mut meta = PageMetadata {
-        input_path: Some(parsed.source.source_path.clone()),
+        input_path: parsed
+            .source
+            .display_path
+            .clone()
+            .or_else(|| Some(parsed.source.source_path.clone())),
         ..PageMetadata::default()
     };
 
