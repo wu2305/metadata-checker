@@ -5,6 +5,8 @@
 > Spec（当前）：[2026-08-09-slm-eval-harness-design.md](../../specs/2026-08-09-slm-eval-harness-design.md)（approved）
 > Plan：[2026-07-27-m58-cnb-ai-chat-runner-plan.md](../../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done，对应冻结 runner）
 > Plan（当前）：[2026-08-23-m58-2-llmops-eval-loop-plan.md](../../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)（approved；LLMOps 闭环，kimi-code 浮动）
+> Spec（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md](../../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)（approved；确定性图召回对比）
+> Plan（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md](../../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（approved）
 
 ## 冻结公告（2026-08-09）
 
@@ -64,6 +66,24 @@
 | M58.1 CNB 3-trial live baseline | done（最新 SN `cnb-ubg-1juus86tj`；结果为观察基线，不设模型通过门槛） |
 
 ## 验收记录
+
+### M58.4 轻量图召回对比 spike（2026-08-23）
+
+状态：**active**。用户已确认在独立远端分支开展对比 spike；所有编辑、编译和测试均在
+CNB 工作环境的隔离 worktree 中完成，本地工作区不参与实现。
+
+本轮不重实现 Microsoft GraphRAG，也不引入外部图 RAG 框架。实验只验证一个更小的假设：
+在同一批确定性种子、同一张现有类型图和同一 top-k 预算下，按查询意图赋权的
+Personalized PageRank（typed PPR）能否比无权 N-hop 扩展更少地引入结构噪声，同时保持
+关键终点召回。PPR 只负责候选排序；答案仍必须由现有类型路径和证据契约证明。
+
+对照固定为 `seed_only`、`unweighted_hop`、`typed_ppr` 三组。首轮只跑确定性 fixture，
+记录 `recall@k`、`precision@k`、gold terminal recall、候选规模、收敛轮数和稳定排序；
+不调用 LLM、不修改冻结 runner、不把少量 fixture 结果包装成产品结论。只有确定性层达到
+go 条件，才进入 M58.2 的同模型、同 case、同 trial 配对验证。
+
+设计与执行边界见 [M58.4 spec](../../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)
+和 [M58.4 plan](../../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)。
 
 本地 fake runner 已覆盖 13 个 active `fixture_llm` case，覆盖 page/action/lineage/dataflow/navigation/diagnostic/context/condition 等任务族；每个 case 都有 `evaluation_dimensions`，并通过独立 trial、命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport、SSE 和 token 脱敏测试。历史真实 CNB smoke 曾由 `api_trigger_m58_llm` 执行：provider=`cnb-ai-chat`、model=`deepseek-v4-flash`、build=`cnb-54f-1juijih5i`、单 trial pass rate=`1.0`、failure classes 为空；它只证明当时三个 case 的一次端到端路径可用，不证明 Skill 的稳定理解或任务泛化。新的 live runner 默认每个 case 执行 3 个独立 trial，报告同时输出 `trial_pass_rate`、`case_stable_pass_rate` 和 `cases_with_flaky_trials`；只保留结构化摘要和脱敏 command trace，不归档 prompt、模型原文或 token。runtime contract preflight 的缺省回退与显式 override 已通过同一 live stage 验证。
 
