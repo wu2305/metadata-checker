@@ -17,6 +17,7 @@ pub mod graph;
 pub mod graph_redb;
 #[cfg(feature = "cli-local")]
 pub mod graph_redb_v2;
+pub mod graph_retrieval;
 pub mod graph_store;
 pub mod memory_graph_store;
 pub mod model_scope;
