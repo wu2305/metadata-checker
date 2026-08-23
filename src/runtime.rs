@@ -1094,26 +1094,24 @@ impl GraphRuntime {
                         }
                     }
                 }
-                // 同步更新 confidence（若存在）
-                if let Some(summary) = obj.get_mut("summary").and_then(|s| s.as_object_mut()) {
-                    let mut codes: Vec<String> = self
-                        .load_diagnostics
-                        .iter()
-                        .map(|d| d.code.clone())
-                        .collect();
-                    // 追加已有 diagnostics 的 codes
-                    if let Some(existing) = obj
-                        .get("diagnostics")
-                        .and_then(|v| v.as_array())
-                    {
-                        for entry in existing {
-                            if let Some(code) = entry.get("code").and_then(|v| v.as_str()) {
-                                if !codes.contains(&code.to_string()) {
-                                    codes.push(code.to_string());
-                                }
+                let mut codes: Vec<String> = self
+                    .load_diagnostics
+                    .iter()
+                    .map(|d| d.code.clone())
+                    .collect();
+                if let Some(existing) = obj
+                    .get("diagnostics")
+                    .and_then(|v| v.as_array())
+                {
+                    for entry in existing {
+                        if let Some(code) = entry.get("code").and_then(|v| v.as_str()) {
+                            if !codes.contains(&code.to_string()) {
+                                codes.push(code.to_string());
                             }
                         }
                     }
+                }
+                if let Some(summary) = obj.get_mut("summary").and_then(|s| s.as_object_mut()) {
                     summary.insert(
                         "confidence".to_string(),
                         crate::output::answer_effect::confidence_value(

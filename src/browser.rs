@@ -1528,6 +1528,9 @@ fn build_selection_visual_graph(
                 message: "Some edges are missing evidence details.".to_string(),
                 location: crate::output::schema::Location::default(),
                 suggestion: None,
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
     }
 
