@@ -499,6 +499,9 @@ pub fn find_nodes(
             message: format!("No nodes found matching keyword '{}'", keyword),
             location: crate::output::schema::Location::default(),
             suggestion: Some("Try a broader keyword or verify spelling".to_string()),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 
@@ -531,6 +534,9 @@ pub fn resolve_model_in_page(
                 message: format!("Page '{}' not found in graph", page_id),
                 location: crate::output::schema::Location::default(),
                 suggestion: Some("Verify page ID or use --find-page to search".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
             out.next_queries
                 .push(crate::output::schema::format_next_query(
@@ -655,6 +661,9 @@ pub fn resolve_model_in_page(
                 json_path: None,
             },
             suggestion: Some("Use --find-model to search globally".to_string()),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
         output
             .next_queries

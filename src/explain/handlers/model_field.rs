@@ -596,6 +596,9 @@ pub(in crate::explain) fn explain_field_graph(
                 ),
                 location: crate::output::Location::new(),
                 suggestion: Some("Check if expression parser supports this syntax".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
         lineage.push(serde_json::json!({
@@ -852,6 +855,9 @@ pub(in crate::explain) fn explain_field_graph(
             suggestion: Some(
                 "Check dimensions[].inputField or dimensions[].exp metadata".to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 

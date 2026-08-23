@@ -2493,6 +2493,9 @@ fn build_query_page_logic_output_inner(
                 suggestion: Some(
                     "Use --budget normal or --budget full to see complete arrays".to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
 

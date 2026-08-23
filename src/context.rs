@@ -492,6 +492,9 @@ pub fn build_context_output(
             suggestion: Some(
                 "Use --budget full or increase --depth to see more relations".to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 

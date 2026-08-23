@@ -61,6 +61,9 @@ pub(super) fn build_page_logic_diagnostics(
                 "Use --budget full to see more relations, or focus on key_primary_paths in summary"
                     .to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
     // ---- 5.7 注意力漂移治理：旁路关系统计（必须在 truncation 之后）
@@ -88,6 +91,9 @@ pub(super) fn build_page_logic_diagnostics(
                 json_path: None,
             },
             suggestion: Some("Verify if page is read-only or actions are not parsed".to_string()),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 
@@ -102,6 +108,9 @@ pub(super) fn build_page_logic_diagnostics(
                 json_path: Some("canvas.components[*].actions[*]".to_string()),
             },
             suggestion: Some("Check component action definitions".to_string()),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 
@@ -120,6 +129,9 @@ pub(super) fn build_page_logic_diagnostics(
                 "Ensure --project-dir points to the project root containing this page file"
                     .to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 
@@ -146,6 +158,9 @@ pub(super) fn build_page_logic_diagnostics(
                         .map(ToString::to_string),
                 },
                 suggestion: Some("Check if target page exists in project".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -173,6 +188,9 @@ pub(super) fn build_page_logic_diagnostics(
                         .map(ToString::to_string),
                 },
                 suggestion: Some("Check if target model exists in project sources".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -225,6 +243,9 @@ pub(super) fn build_page_logic_diagnostics(
                     "Review the expression and verify each referenced component/model exists"
                         .to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -298,6 +319,9 @@ pub(super) fn build_page_logic_diagnostics(
                         .map(ToString::to_string),
                 },
                 suggestion: Some("Verify if this action should produce a write target".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -362,6 +386,9 @@ pub(super) fn build_page_logic_diagnostics(
                 suggestion: Some(
                     "Check if this action type is supported by metadata-checker".to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -398,6 +425,9 @@ pub(super) fn build_page_logic_diagnostics(
                 "Use details arrays for full coverage; evidence is intentionally low-noise sampled"
                     .to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 

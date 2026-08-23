@@ -336,6 +336,9 @@ pub fn build_query_model_output(
                 suggestion: Some(
                     "Use --budget normal or --budget full to see complete arrays".to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
 

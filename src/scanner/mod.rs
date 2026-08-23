@@ -14,6 +14,17 @@ use std::path::Path;
 #[cfg(feature = "cli-local")]
 pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
     let report = indexer::ProjectIndexer::scan(project_dir, db_path)?;
+    // PR1：构建输出同样暴露 hydrate 诊断信封（与 --status / 查询响应三处可见）
+    let graph = GraphDB::open(db_path)?;
+    let diags = graph.hydrate_diagnostics().to_diagnostics();
+    if !diags.is_empty() {
+        let envelope = serde_json::json!({
+            "diagnostics": diags,
+            "node_count": graph.graph.node_count(),
+            "edge_count": graph.graph.edge_count(),
+        });
+        eprintln!("Build diagnostics: {}", serde_json::to_string(&envelope).unwrap_or_default());
+    }
     eprintln!(
         "Indexed {} files | Unchanged: {} | Dirty: {} | Deleted: {}",
         report.indexed, report.unchanged, report.dirty, report.deleted

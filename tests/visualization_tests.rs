@@ -99,6 +99,9 @@ fn create_test_output_with_nested_visual_secrets() -> AiOutput {
             json_path: Some("$.password=diagnostic_password_001".to_string()),
         },
         suggestion: Some("rotate secret=diagnostic_secret_001".to_string()),
+        count: None,
+        answer_impact: None,
+        first_seen_phase: None,
     });
     output
 }
@@ -165,6 +168,9 @@ fn test_error_envelope_generates_diagnostic_only_graph() {
         message: "Target 'page:missing' not found".to_string(),
         location: Location::default(),
         suggestion: Some("Check the target ID".to_string()),
+        count: None,
+        answer_impact: None,
+        first_seen_phase: None,
     });
 
     let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());
@@ -626,6 +632,9 @@ fn test_diagnostic_values_are_redacted_in_graph_mermaid_and_echarts() {
             json_path: Some("$.api_key=diagnostic_api_key_002".to_string()),
         },
         suggestion: Some("replace api_key=diagnostic_suggestion_api_key_002".to_string()),
+        count: None,
+        answer_impact: None,
+        first_seen_phase: None,
     });
 
     let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());

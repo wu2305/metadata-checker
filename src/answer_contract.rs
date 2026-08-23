@@ -678,6 +678,9 @@ pub fn build_advise_query_output(
                 "使用其中之一：{}",
                 ADVISE_QUERY_QUESTION_KINDS.join(" | ")
             )),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
     out.next_queries

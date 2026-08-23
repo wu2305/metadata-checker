@@ -229,6 +229,9 @@ pub(in crate::explain) fn explain_component_graph(
             suggestion: Some(
                 "Check --context or --query-dataflow for upstream relationships".to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 

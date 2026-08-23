@@ -296,6 +296,9 @@ impl GraphDB {
                     "Run metadata-checker --project-dir <DIR> --build-graph to create it"
                         .to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
@@ -330,6 +333,9 @@ impl GraphDB {
                         "Wait for other process to finish, or use a different --graph-db-path"
                             .to_string(),
                     ),
+                    count: None,
+                    answer_impact: None,
+                    first_seen_phase: None,
                 });
                 out.next_queries.push(format_next_query(
                     "metadata-checker --graph-db-path {} --graph-lock-timeout-ms <MS>",
@@ -373,6 +379,9 @@ impl GraphDB {
                             "Wait for other process to finish, or use a different --graph-db-path"
                                 .to_string(),
                         ),
+                        count: None,
+                        answer_impact: None,
+                        first_seen_phase: None,
                     });
                 } else if msg.contains("permission")
                     || msg.contains("denied")
@@ -392,6 +401,9 @@ impl GraphDB {
                                 "redb requires write access even for read. Copy to a writable path with --graph-db-path"
                                     .to_string(),
                             ),
+                            count: None,
+                            answer_impact: None,
+                            first_seen_phase: None,
                         });
                     } else {
                         out.diagnostics.push(Diagnostic {
@@ -406,6 +418,9 @@ impl GraphDB {
                             suggestion: Some(
                                 "Use --graph-db-path pointing to a writable directory".to_string(),
                             ),
+                            count: None,
+                            answer_impact: None,
+                            first_seen_phase: None,
                         });
                     }
                 } else {
@@ -419,6 +434,9 @@ impl GraphDB {
                             json_path: None,
                         },
                         suggestion: Some("Try --build-graph to rebuild".to_string()),
+                        count: None,
+                        answer_impact: None,
+                        first_seen_phase: None,
                     });
                 }
                 out.summary["needs_rebuild"] = serde_json::json!(true);
@@ -452,6 +470,9 @@ impl GraphDB {
                     "Run metadata-checker --project-dir <DIR> --build-graph to create it"
                         .to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
@@ -489,6 +510,9 @@ impl GraphDB {
                             "Use --graph-db-path to a separate path, wait for other process, or increase --graph-lock-timeout-ms"
                                 .to_string(),
                         ),
+                        count: None,
+                        answer_impact: None,
+                        first_seen_phase: None,
                     });
                     out.next_queries.push(format_next_query(
                         "metadata-checker --project-dir <DIR> --query-model <MODEL> --graph-db-path {} --graph-lock-timeout-ms 30000",
@@ -510,6 +534,9 @@ impl GraphDB {
                         suggestion: Some(
                             "Use --graph-db-path pointing to a writable directory".to_string(),
                         ),
+                        count: None,
+                        answer_impact: None,
+                        first_seen_phase: None,
                     });
                 } else {
                     out.diagnostics.push(Diagnostic {
@@ -522,6 +549,9 @@ impl GraphDB {
                             json_path: None,
                         },
                         suggestion: Some("Try --build-graph to rebuild".to_string()),
+                        count: None,
+                        answer_impact: None,
+                        first_seen_phase: None,
                     });
                 }
                 Err(Box::new(out))

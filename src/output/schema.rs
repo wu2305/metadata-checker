@@ -61,6 +61,9 @@ impl AiOutput {
                     "Use --detail for manual verification, and treat conclusions as low confidence"
                         .to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
         out
@@ -162,31 +165,100 @@ pub enum Confidence {
 /// 的模型从中读不出这条诊断对结论意味着什么。影响只由 code 决定，所以由序列化统一
 /// 补齐，而不是让上百处构造点各写一遍。
 #[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+/// 统一诊断信封字段（M58.3 Phase 1）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticEnvelopeMeta {
+    pub count: Option<usize>,
+    pub sample_location: Option<Location>,
+    #[serde(rename = "answer_impact")]
+    pub answer_impact: Option<String>,
+    pub first_seen_phase: Option<String>,
+}
+
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
     pub code: String,
     pub message: String,
     pub location: Location,
     pub suggestion: Option<String>,
+    #[serde(default)]
+    pub count: Option<usize>,
+    #[serde(default, rename = "answer_impact")]
+    pub answer_impact: Option<String>,
+    #[serde(default)]
+    pub first_seen_phase: Option<String>,
+}
+
+impl Diagnostic {
+    pub fn with_count(mut self, count: usize) -> Self {
+        self.count = Some(count);
+        self
+    }
+    pub fn with_answer_impact(mut self, impact: impl Into<String>) -> Self {
+        self.answer_impact = Some(impact.into());
+        self
+    }
+    pub fn with_first_seen_phase(mut self, phase: impl Into<String>) -> Self {
+        self.first_seen_phase = Some(phase.into());
+        self
+    }
 }
 
 impl Serialize for Diagnostic {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
         let effect = crate::output::answer_effect::answer_effect(&self.code);
-        let mut state =
-            serializer.serialize_struct("Diagnostic", 5 + usize::from(effect.is_some()))?;
+        let mut extra = 5;
+        if self.count.is_some() {
+            extra += 1;
+        }
+        if self.answer_impact.is_some() {
+            extra += 1;
+        } else if effect.is_some() {
+            // 兼容旧 answer_effect 映射，回退为 answer_impact 的一种
+        }
+        if self.first_seen_phase.is_some() {
+            extra += 1;
+        }
+        if effect.is_some() {
+            extra += 1;
+        }
+        let mut state = serializer.serialize_struct("Diagnostic", extra)?;
         state.serialize_field("severity", &self.severity)?;
         state.serialize_field("code", &self.code)?;
         state.serialize_field("message", &self.message)?;
         state.serialize_field("location", &self.location)?;
         state.serialize_field("suggestion", &self.suggestion)?;
+        if let Some(count) = self.count {
+            state.serialize_field("count", &count)?;
+        }
+        if let Some(ref impact) = self.answer_impact {
+            state.serialize_field("answer_impact", impact)?;
+        }
+        if let Some(ref phase) = self.first_seen_phase {
+            state.serialize_field("first_seen_phase", phase)?;
+        }
         if let Some((_, effect)) = effect {
             state.serialize_field("answer_effect", effect)?;
+        }
+        // 兼容 spec 信封的 sample_location 别名
+        if self.location.source_file.is_some()
+            || self.location.node_id.is_some()
+            || self.location.json_path.is_some()
+        {
+            state.serialize_field("sample_location", &self.location)?;
         }
         state.end()
     }
 }
+
+/// 诊断严重级别
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DiagnosticSeverity {
+    Error,
+    Warning,
 
 /// 诊断严重级别
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -350,6 +422,9 @@ pub fn build_target_not_found_output(
         } else {
             Some("Did you mean one of the candidate targets below?".to_string())
         },
+        count: None,
+        answer_impact: None,
+        first_seen_phase: None,
     });
 
     for (node, _) in candidates {

@@ -293,6 +293,9 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
             suggestion: Some(
                 "Check if DataFlow is intended to produce a physical table".to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 
@@ -307,6 +310,9 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
                 json_path: Some("dataFlow.nodes".to_string()),
             },
             suggestion: Some("Verify dataFlow.nodes contains ModelTable sources".to_string()),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 
@@ -331,6 +337,9 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
                     json_path: Some(format!("dataFlow.nodes.{}.moduleTablePath", inp.node_id)),
                 },
                 suggestion: Some("Verify moduleTablePath points to a valid .tbl file".to_string()),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -364,6 +373,9 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
                         suggestion: Some(
                             "Use --project-dir --explain for full lineage".to_string(),
                         ),
+                        count: None,
+                        answer_impact: None,
+                        first_seen_phase: None,
                     });
                 }
             }
@@ -422,6 +434,9 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
                 suggestion: Some(
                     "Use --budget normal or --budget full to see complete arrays".to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
 
