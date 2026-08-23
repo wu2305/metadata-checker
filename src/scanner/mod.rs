@@ -1,7 +1,8 @@
-#[cfg(feature = "cli-local")]
 use anyhow::Result;
 #[cfg(feature = "cli-local")]
 use std::path::Path;
+#[cfg(feature = "cli-local")]
+use crate::graph_redb::GraphDB;
 
 /// 项目目录扫描模块
 ///
