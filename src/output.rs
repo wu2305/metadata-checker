@@ -6,7 +6,7 @@ use crate::conditions::scan_conditions;
 use crate::dependency::DependencyGraph;
 use crate::parser::PageMetadata;
 use crate::superpage::{RefType, SuperPageMetadata};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, Write};
