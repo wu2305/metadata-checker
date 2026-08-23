@@ -26,8 +26,9 @@
   构造同格式直接矛盾；`model_scope.rs:5` 把真实客户表名硬编码进通用打分。comp→comp
   Contains 边从未建，`component_ancestor_chain` 是恒返回空的结构性死代码。
 - **模式 3：白名单驱动 + 各自手写。** 容器子键只枚举 `components/panels/steps/comps`
-  （实测 pin 语料 1049 处 `panel`/`columns`/`tabs` 等组件对象被静默丢弃，逐键逐形态
-  测量见附录 A）；value-source 只认单裸 `${FIELD}`；写边 meta 缺 conditionExp；六个
+  （实测 pin 语料 8,653 个候选组件对象被静默丢弃、其中 8,310 带行为证据，逐键逐形态
+  测量见附录 A；数字由 `tools/corpus-shape-audit.py` 复刻真实遍历口径产出，
+  根因解剖期的旧口径 1049 作废）；value-source 只认单裸 `${FIELD}`；写边 meta 缺 conditionExp；六个
   facts 块各自手写信封。
 
 **测试覆盖缺口的精确表述**（第三轮评审更正）：`m58_3_command_surface_tests.rs:18-38`
@@ -84,7 +85,7 @@ redb 真实路径。真正缺的是两类：**(a) 坏行 hydrate**（redb 里塞
 
 | # | 缺口 | 根因位置 | 修法 |
 |---|------|---------|------|
-| F1 | 容器子键白名单丢组件（1049 处，逐键逐形态测量见附录 A） | `superpage/mod.rs:313-324,543-554`、`scanner/spg.rs:107` | **形态感知递归**，不扩展枚举：递归规则为「value 是数组、非空、且**每个**元素都是带字符串 `id` 和字符串 `type` 的对象 → 子组件数组」。多态键安全：字符串形态（如 action 的 `panel: "nextPage"`，`raw_types.rs:87`）天然不匹配；混合形态数组（部分元素缺 `id`/`type`）整体判非组件、进 `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数；已知非组件键进排除列表（初值以实测为准，PR2 描述登记）。`RawComponent` 加 `#[serde(flatten)]` extra map（`raw_types.rs:210-217` 无 `deny_unknown_fields`，兼容），scanner 侧 `spg.rs:107` 裸 `Value` 递归平行修改；json_path 逐层保留。同页重复组件 id 诊断（`spg.rs:82-103`）。**证据性质更正**：F1 不是 journal 五个实跑缺口之一，其证据是语料测量（附录 A），验收按「测量数 → 0 丢失」而非「重放命令」 |
+| F1 | 容器子键白名单丢组件（8,653 候选 / 8,310 带行为证据，逐键逐形态测量见附录 A） | `superpage/mod.rs:313-324,543-554`、`scanner/spg.rs:107` | **形态感知递归**，不扩展枚举：递归规则为「value 是数组、非空、且**每个**元素都是带字符串 `id` 和字符串 `type` 的对象 → 子组件数组」。多态键安全：字符串形态（如 action 的 `panel: "nextPage"`，`raw_types.rs:87`）天然不匹配；混合形态数组（部分元素缺 `id`/`type`）整体判非组件、进 `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数（`conditionStyles` 有 15 处真实样本，PR2 测试直接取用）；已知非组件键进排除列表（**初值取附录 A 实测四键** `effectStyles`/`conditionStyles`/`labelFields`/`stateFields`，`buttons` 样本不足待人工确认）。`RawComponent` 加 `#[serde(flatten)]` extra map（`raw_types.rs:210-217` 无 `deny_unknown_fields`，兼容），scanner 侧 `spg.rs:107` 裸 `Value` 递归平行修改；json_path 逐层保留。同页重复组件 id 诊断（`spg.rs:82-103`）。**证据性质更正**：F1 不是 journal 五个实跑缺口之一，其证据是语料测量（附录 A），验收基线为 `漏掉候选 − 排除列表命中数 == 0`，不是「重放命令」，也不是「所有 id+type 对象都进图」（那会把 343 个样式记录吃进图里，与排除列表冲突） |
 | F2 | 无表达式组件的祖先条件继承断（button13） | `conditions.rs:379-416` 不读节点 meta json_path、`:429` 硬编码 `.components[` | `component_json_paths` 补读节点 meta；`is_ancestor_json_path` 放宽到全部容器子键；scanner 补建 comp→comp Contains 边。**不变式与选父规则见说明 A** |
 | F3 | `${IF(...)}` 表达式模型引用截断 | `superpage/expr_ast.rs:204-219` tokenizer 吞整个 `${}` + `:823-831` `classify_identifier` 盲 `split('.')` | **修复点改到能合并递归结果的层**：`classify_identifier` 只返回单个 `RefType`（`:818-819`），无法扩展 refs/resolved_refs/diagnostics——内嵌表达式的处理移到 tokenizer 的 `${}` 分支或 `extract_refs_from_ast`（`:644-649`，已有 refs/resolved_refs/diagnostics 三个可变累积参数），在其中对 inner 递归走 AST 并**合并**结果。纯点分路径保持现状直出。**已知边界**：tokenizer 贪婪吃到第一个 `}`，嵌套 `${...${...}...}` 词法层已截断，本修复只覆盖单层；嵌套形态若实测出现（Phase 1 计数器暴露）另立项。测试矩阵：普通 `${model.field}` 兼容、`${IF(...)}` 多引用、缺右花括号、嵌套调用、纯字面量 |
 | F4 | 页面限定降级 / 协议矛盾 | `route.rs:429-434`（剥页面段）vs `page_logic.rs:115-122`（构造页面段）；真实回退点 `page_logic.rs:155-170/:300-311` | **方向已定**：保留页面段，`route.rs:432` 的 `by_overqualified` 档对 model/field 前缀禁用；回退接 `PAGE_SCOPED_TARGET_FALLBACK`；协议统一随 Phase 3 落地（归属 PR4b）。硬编码表名移除的平局替代见说明 B |
@@ -125,6 +126,17 @@ NodeType 确定性排序**——Component 父优先、Page 仅兜底，与迭代
   id）与 `confidence`；Phase 3 双写后**页面局部写边 + 物理聚合写边计为一个逻辑 writer**
   （计数去重按 (action, 物理字段) 键），缺失 conditionExp 的 writer 给
   `WRITER_CONDITION_MISSING` 诊断。
+
+**说明 D（`ComponentProperty` 的图契约）**：`superpage/mod.rs:59` 的上下文解析会把
+head 命中已抽取组件 id 的 `ModelField` 改写为 `ComponentProperty`（`mod.rs:122`）——
+`classify_identifier` 不是终态。但 scanner 的 match（`spg.rs:559-704`）只处理
+`ModelField`/`ComponentValue`/`Param`/`UserProperty`/`SystemVar`，`ComponentProperty`
+落进 `:705` 的 `_ => {}` 被静默丢弃；而 `dependency.rs:48` 同时处理 `ComponentValue`
+与 `ComponentProperty`——**同一个 RefType，两个消费者契约不一致**。决定：scanner 为
+`ComponentProperty` 建 comp→comp `DependsOn` 边并带属性名（与 `dependency.rs` 语义
+对齐），不记诊断；补 `parse → 上下文解析 → scanner 建边` 贯通测试。当前语料仅 4 处
+（后缀 `.txt`×3、`.seconds`×1，附录 A 口径），但 F1 放开容器后新组件 id 会进入
+`component_ids` 集合、改写比例会变——**PR2 合入后须重测**。归属 PR2。
 
 ### Phase 3：页面内模型节点身份——完整局部子图（核心设计，不推迟）
 
@@ -222,6 +234,11 @@ bump `REDB_V2_SCHEMA_VERSION`（`graph_redb_v2.rs:17`）**不会**重建旧 v1 �
 
 ### 明确推迟（记录但不修）
 
+- 内联 dataFlow source 的深度解析：`spg.rs:402-434` 只取 `moduleTablePath`，而同一 schema
+  在 `tbl.rs:214+` 有深度解析；未被 .spg 侧解析的字段实测 fields 1994 / alias 1994 /
+  inputNodes 1259 / joinConditions 329 / steps 218（附录 A 同源测量）。属新模块
+  （`dataflow::parse_nodes`）范畴，记入 **M58.5 候选**；除非出现具体的 resolver 失败
+  trace，不进 M58.3。
 - facts 块信封统一、巨型文件/函数拆分（`page_logic.rs` 共 2820 行等）、`.clone()` 治理——
   可演进性改进，不与正确性修复混在一个里程碑。
 - 旧动词（`--explain-condition`/`--query-*` 等 10 个）的删除决策：维持「隐藏但可用」，
@@ -240,7 +257,8 @@ bump `REDB_V2_SCHEMA_VERSION`（`graph_redb_v2.rs:17`）**不会**重建旧 v1 �
    硬指标：pin 语料（`xiaoshouyi-corpus @ 6920ac51`）全量构建的**正常路径诊断 = 0**；
    实现期确认不可避免的良性计数，给出白名单基线数并在本文件登记。
 2. F1–F6 各自的证据（实跑重放命令或附录 A 测量）修复后通过，回归测试绿；F1 的判据是
-   「测量数 → 0 丢失」，F2 的判据含说明 A 的测试电池。
+   `漏掉候选 − 排除列表命中数 == 0`（附录 A 口径，PR2 合入后重跑测量脚本确认），
+   F2 的判据含说明 A 的测试电池。
 3. Phase 3 落地后：裸 id 多页同名如实交回候选、单页直达；页面段 id 精确命中且 gates
    来自本页 filter；`--relations 'model:表名'` 跨页聚合语义不变；next_queries 生成的 id
    粒度正确且可直接执行；PR4b 后旧库触发 `GRAPH_SCHEMA_STALE`（含 `--non-human` 形态）
@@ -272,11 +290,53 @@ bump `REDB_V2_SCHEMA_VERSION`（`graph_redb_v2.rs:17`）**不会**重建旧 v1 �
 - PR5：F5 + F6（事实输出契约，说明 C）
 - PR6：graphdb 重建 + 13 case 重放 + 变迁台账 + 11-case 首轮基线
 
-## 附录 A：F1 容器子键测量（pin 语料 @ 6920ac51）
+## 附录 A：F1 容器子键测量（pin 语料 @ 6920ac51，已回填）
 
-> 待 PR2 开工时用测量脚本回填逐键逐形态计数（键 × 字符串/对象数组/混合形态 × 命中
-> `id`+`type` 谓词比例），当前总数 1049 来自 2026-08-23 根因解剖。回填后本节即为
-> 「测量数 → 0 丢失」验收的对照基线。
+> 来源：`tools/corpus-shape-audit.py`（sha256 前缀 `9d2f2d3f`）→
+> `docs/ai-eval-runs/2026-08-24-m58-3-corpus-shape-audit.json`（501 个 `.spg`）。
+> 修订包：`docs/plans/2026-08-24-m58-3-appendix-a-amendment.md`。
+>
+> **测量边界**（引用数字时必须一并引用）：脚本读原始 JSON、复刻
+> `superpage::extract_components` 的现役遍历与 `is_expr` 分类，**不构建 graphdb**；
+> 产出是**候选量**，不是图中实际节点/边数。
+
+复现：
+
+```bash
+python3 tools/corpus-shape-audit.py \
+  --corpus <succ-definitions>/projects/xiaoshouyi \
+  --json docs/ai-eval-runs/2026-08-24-m58-3-corpus-shape-audit.json
+```
+
+现役遍历到达 **26,007**；漏掉候选 **8,653**，其中带行为证据 **8,310** / 无行为证据 **343**。
+
+| 容器键 | 漏掉 | 带表达式 | 带 actions | 带子容器 | 判读 |
+|---|---:|---:|---:|---:|---|
+| `columns` | 5226 | 26 | 136 | 143 | 组件 |
+| `components` | 2144 | 1054 | 459 | 642 | 组件（祖先在非白名单键下而整棵子树不可达） |
+| `panel` | 245 | 0 | 48 | 245 | 组件 |
+| `grid` | 245 | 9 | 165 | 0 | 组件 |
+| `attrFields` | 240 | 10 | 0 | 0 | 组件（有表达式） |
+| `tabs` | 179 | 12 | 0 | 0 | 组件（有表达式） |
+| `operateButtons` | 31 | 19 | 31 | 0 | 组件 |
+| `effectStyles` | 226 | 0 | 0 | 0 | **排除列表** |
+| `conditionStyles` | 61 | 0 | 0 | 0 | **排除列表** |
+| `labelFields` | 35 | 0 | 0 | 0 | **排除列表** |
+| `stateFields` | 20 | 0 | 0 | 0 | **排除列表** |
+| `buttons` | 1 | 0 | 0 | 0 | 样本过少，人工确认 |
+
+**排除列表初值**：`effectStyles` / `conditionStyles` / `labelFields` / `stateFields`
+（合计 342），判据是三项行为证据全为 0；样本形态 `{"id":"effectStyle1","type":"hover"}`，
+`type` 取值是状态名而非组件类型。`buttons`（1 个）不自动定性。
+**混合形态样本**：`conditionStyles` 有 15 处「含组件样元素但非每个元素都带 `id`+`type`」，
+正好落进整体判非组件 + `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数分支，PR2 测试直接取用。
+
+**组件数量级推论**（非独立事实，随排除列表定值而变）：排除列表取上述初值时，组件数
+26,007 → 34,317（**+32%**）——PR2 的性能基线义务（见 plan）由此而来。
+
+**F1 验收基线**：`漏掉候选 − 排除列表命中数 == 0`（本节目径）。PR2 合入后重跑测量
+脚本确认；届时新进入的组件类型可能带不同的属性键，修订包 §4 的属性层负面结论
+（45 处未覆盖表达式键、8 处被跳过的对象/数组值）也须在那时重测后再定论。
 
 ## 评审修订记录
 
@@ -306,3 +366,12 @@ v1/v2 双路校验、fail-closed `GRAPH_SCHEMA_STALE`、强制全量重建、迁
 `:1447-1454`）；`GRAPH_DB_PARTIAL_HYDRATE` 明确「所有后续响应」不按查询目标归因；
 next_queries 审计口径改为 `format_next_query(` 57 处/16 文件（删不可复现的「31 处」）；
 `RuntimeStatus` 与 `diagnostics.rs` 引用补全行号/路径前缀。
+
+第五轮（2026-08-24 修订包 `docs/plans/2026-08-24-m58-3-appendix-a-amendment.md`）：
+附录 A 测量回填（8,653 候选 / 8,310 带行为证据，旧口径 1049 作废；排除列表初值四键；
+混合形态真实样本 15 处）；F1 验收基线定为 `漏掉候选 − 排除列表命中数 == 0`（废弃
+「所有 id+type 对象进图」表述）；新增说明 D——`ComponentProperty` 图契约
+（scanner 补建 comp→comp `DependsOn`，与 `dependency.rs:48` 对齐，归属 PR2，PR2 后重测）；
+内联 dataFlow 深度解析记入 M58.5 候选（无 resolver 失败 trace 不进 M58.3）；
+评审者撤回三处旧判断（293 处误记、250 垃圾节点、说明 B 50% 覆盖率缺口）——
+本文从未引用前两条，说明 B 的平局替代规则不依赖该覆盖率论断，维持不变。

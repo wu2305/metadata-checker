@@ -4,6 +4,8 @@
 > 上游：[M58.3 spec](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（draft，
 > 四轮独立评审修订；id 文法、诊断信封、迁移机制、事实输出契约的权威定义都在 spec，本文不重复）。
 > journal：[m58-cheap-model-comprehension-eval.md](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)。
+> 修订包：[2026-08-24-m58-3-appendix-a-amendment.md](2026-08-24-m58-3-appendix-a-amendment.md)
+> （附录 A 回填 + 三处更正 + PR2 三条修订建议，已并入本文与 spec）。
 > 治理：多 PR 工作须 approved plan（`docs/governance/planning.md:34`）。
 
 ## 背景
@@ -25,13 +27,23 @@ M58.3 修五个实跑缺口 + 一个测量缺口（F1），spec 三轮评审后�
   坏行 hydrate 测试（坏节点行/坏边行/悬挂边 → 计数 + `GRAPH_DB_PARTIAL_HYDRATE`）。
 - 测试：`m58_3_command_surface_tests`、`graph_store_tests`、新增坏行 hydrate 测试文件。
 
-### PR2 — F1 形态感知递归 + F2 祖先链
+### PR2 — F1 形态感知递归 + F2 祖先链 + ComponentProperty 图契约
 
 - 写入范围：`src/superpage/raw_types.rs`（flatten extra map）、`src/superpage/mod.rs`、
-  `src/scanner/spg.rs`（裸 Value 递归平行修改、comp→comp Contains、重复 id 诊断）、
+  `src/scanner/spg.rs`（裸 Value 递归平行修改、comp→comp Contains、重复 id 诊断、
+  `ComponentProperty` 建 comp→comp `DependsOn` 边——spec 说明 D）、
   `src/explain/condition_facts/conditions.rs`（补读节点 meta、放宽前缀、确定性选父）。
-- 前置：附录 A 逐键逐形态测量回填（测量脚本入 `tools/` 或证据目录）。
-- 验收：spec 验收 2；说明 A 测试电池（唯一父/无环/序稳定/page_logic 遍历/增量重建）。
+- 前置：**已完成**——附录 A 测量回填（`tools/corpus-shape-audit.py` +
+  `docs/ai-eval-runs/2026-08-24-m58-3-corpus-shape-audit.json`，修订包
+  `2026-08-24-m58-3-appendix-a-amendment.md`）；排除列表初值取四键
+  （`effectStyles`/`conditionStyles`/`labelFields`/`stateFields`），`buttons` 人工确认。
+- 验收：spec 验收 2；说明 A 测试电池（唯一父/无环/序稳定/page_logic 遍历/增量重建）；
+  `parse → 上下文解析 → scanner 建边` 贯通测试（说明 D）；**性能基线义务**：组件数
+  预计 +32%（附录 A 推论），按 `docs/milestones/performance/performance-baseline.md`
+  的 M50 标准真实项目 runner 采集，记录节点/边数、graphdb 体积、全量构建与加载耗时、
+  查询 P50/P95——**实测采集为准，不用推论反推预期值**。
+- 后续义务：PR2 合入后重跑 `corpus-shape-audit.py`（新组件类型的属性键分布 +
+  `ComponentProperty` 计数都会变，附录 A 与说明 D 据此更新）。
 
 ### PR3 — F3 表达式递归合并
 
@@ -84,4 +96,9 @@ M58.3 修五个实跑缺口 + 一个测量缺口（F1），spec 三轮评审后�
 
 - PR4b 爆炸半径最大（15+ 文件）：PR4a 先落机制就是把「重建是否可行」与「schema 是否
   正确」解耦；PR4b 内部可按「scanner 建点 → 查询解析 → next_queries」再切 commit。
-- 附录 A 测量若与 1049 总数出入大，F1 验收基线以回填后的逐键计数为准并在 spec 登记。
+- ~~附录 A 测量若与 1049 总数出入大~~（已闭环：回填完成，8,653 候选 / 8,310 带行为
+  证据，旧口径 1049 作废，F1 验收基线以附录 A 逐键计数为准）。
+- PR2/PR3 关系（修订包 §2.3）：代码层面可并行开发，但 PR3 的语料断言必须在 PR2 合入后
+  重测才能关闭——PR2 放开的容器会带 1,054 处新表达式进解析路径。任何断言值变化在
+  **改变它的那个 PR 里**就更新并附变迁台账，不允许跨 PR 挂「已知待更新」状态；
+  两个 PR 各自独立可验收，各自的语料重建都省不掉。
