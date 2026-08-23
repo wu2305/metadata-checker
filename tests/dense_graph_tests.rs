@@ -91,26 +91,26 @@ struct CountingGraphStore<'a> {
 
 impl GraphReadStore for CountingGraphStore<'_> {
     fn get_node(&self, node_id: &str) -> GraphStoreResult<Option<metadata_checker::graph::Node>> {
-        self.graph.get_node(node_id)
+        GraphReadStore::get_node(self.graph, node_id)
     }
 
     fn get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>> {
         self.edge_reads.set(self.edge_reads.get() + 1);
-        self.graph.get_node_edges(node_id)
+        GraphReadStore::get_node_edges(self.graph, node_id)
     }
 
     fn node_count(&self) -> GraphStoreResult<usize> {
-        self.graph.node_count()
+        GraphReadStore::node_count(self.graph)
     }
 
     fn edge_count(&self) -> GraphStoreResult<usize> {
-        self.graph.edge_count()
+        GraphReadStore::edge_count(self.graph)
     }
 
     fn iter_nodes(
         &self,
     ) -> GraphStoreResult<Box<dyn Iterator<Item = metadata_checker::graph::Node> + '_>> {
-        self.graph.iter_nodes()
+        GraphReadStore::iter_nodes(self.graph)
     }
 }
 
