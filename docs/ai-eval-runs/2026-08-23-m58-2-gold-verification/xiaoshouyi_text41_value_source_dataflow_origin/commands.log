@@ -1,0 +1,2 @@
+$ /workspace/target/cnb/workspace/release/metadata-checker --project-dir /workspace/target/real-project/succbi_project_container/projects/xiaoshouyi --graph-db-path /tmp/xiaoshouyi-m58-2-verify.graphdb --graph-lock-timeout-ms 30000 --explain-condition 'comp:app/售后.app/绑定车辆/会员已注册.spg|text41' --intent value-source --budget compact
+exit_code=0

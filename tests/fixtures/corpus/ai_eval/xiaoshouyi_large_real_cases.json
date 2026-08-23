@@ -38,6 +38,25 @@
   "cases": [
     {
       "case_id": "xiaoshouyi_text41_display_conditions",
+      "provenance": {
+        "extracted_by": "Kimi-K3",
+        "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
+        "evidence_status": "replay_verified",
+        "claimed_validation": [
+          "python 脚本核对",
+          "metadata-checker CLI 实跑核对",
+          "人工确认"
+        ],
+        "evidence_artifacts": [
+          "docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/xiaoshouyi_text41_display_conditions/"
+        ],
+        "verified_with": {
+          "date": "2026-08-23",
+          "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
+          "binary": "metadata-checker @ 66f75bc release（cli-local），sha256=c64d9a233481d4be9285fff173da5de5b0c7601187bd7fad03ba790ebd536b5d"
+        },
+        "note": "2026-08-23 重放复核：required_commands 全部 exit 0，expected_output_assertions 全部 PASS，expected_facts/forbidden_claims 与实跑输出一致；证据见 evidence_artifacts。初稿来源见顶层 provenance（Kimi-K3 提取，原 claimed_validation 无产物留存）。"
+      },
       "difficulty": "hard",
       "risk_tags": [
         "display_condition",
@@ -140,6 +159,25 @@
     },
     {
       "case_id": "xiaoshouyi_text41_value_source_dataflow_origin",
+      "provenance": {
+        "extracted_by": "Kimi-K3",
+        "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
+        "evidence_status": "replay_verified",
+        "claimed_validation": [
+          "python 脚本核对",
+          "metadata-checker CLI 实跑核对",
+          "人工确认"
+        ],
+        "evidence_artifacts": [
+          "docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/xiaoshouyi_text41_value_source_dataflow_origin/"
+        ],
+        "verified_with": {
+          "date": "2026-08-23",
+          "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
+          "binary": "metadata-checker @ 66f75bc release（cli-local），sha256=c64d9a233481d4be9285fff173da5de5b0c7601187bd7fad03ba790ebd536b5d"
+        },
+        "note": "2026-08-23 重放复核：required_commands 全部 exit 0，expected_output_assertions 全部 PASS，expected_facts/forbidden_claims 与实跑输出一致；证据见 evidence_artifacts。初稿来源见顶层 provenance（Kimi-K3 提取，原 claimed_validation 无产物留存）。"
+      },
       "difficulty": "hard",
       "risk_tags": [
         "value_source",
@@ -245,6 +283,25 @@
     },
     {
       "case_id": "xiaoshouyi_model11_availability_dataflow_filters",
+      "provenance": {
+        "extracted_by": "Kimi-K3",
+        "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
+        "evidence_status": "replay_verified",
+        "claimed_validation": [
+          "python 脚本核对",
+          "metadata-checker CLI 实跑核对",
+          "人工确认"
+        ],
+        "evidence_artifacts": [
+          "docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/xiaoshouyi_model11_availability_dataflow_filters/"
+        ],
+        "verified_with": {
+          "date": "2026-08-23",
+          "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
+          "binary": "metadata-checker @ 66f75bc release（cli-local），sha256=c64d9a233481d4be9285fff173da5de5b0c7601187bd7fad03ba790ebd536b5d"
+        },
+        "note": "2026-08-23 重放复核：required_commands 全部 exit 0，expected_output_assertions 全部 PASS，expected_facts/forbidden_claims 与实跑输出一致；证据见 evidence_artifacts。初稿来源见顶层 provenance（Kimi-K3 提取，原 claimed_validation 无产物留存）。"
+      },
       "difficulty": "expert",
       "risk_tags": [
         "data_availability",
@@ -355,6 +412,25 @@
     },
     {
       "case_id": "xiaoshouyi_contract_input3_writer_chain",
+      "provenance": {
+        "extracted_by": "Kimi-K3",
+        "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
+        "evidence_status": "replay_verified",
+        "claimed_validation": [
+          "python 脚本核对",
+          "metadata-checker CLI 实跑核对",
+          "人工确认"
+        ],
+        "evidence_artifacts": [
+          "docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/xiaoshouyi_contract_input3_writer_chain/"
+        ],
+        "verified_with": {
+          "date": "2026-08-23",
+          "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
+          "binary": "metadata-checker @ 66f75bc release（cli-local），sha256=c64d9a233481d4be9285fff173da5de5b0c7601187bd7fad03ba790ebd536b5d"
+        },
+        "note": "2026-08-23 重放复核：required_commands 全部 exit 0，expected_output_assertions 全部 PASS，expected_facts/forbidden_claims 与实跑输出一致；证据见 evidence_artifacts。初稿来源见顶层 provenance（Kimi-K3 提取，原 claimed_validation 无产物留存）；观察（非阻塞）：compact 预算下 paths 未含保客 button3 action1，仅影响 should_mention，全量输出确认其存在。"
+      },
       "difficulty": "expert",
       "risk_tags": [
         "cross_page_writer",
@@ -456,6 +532,25 @@
     },
     {
       "case_id": "xiaoshouyi_fact_qwsidebar_model_relationships",
+      "provenance": {
+        "extracted_by": "Kimi-K3",
+        "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
+        "evidence_status": "replay_verified",
+        "claimed_validation": [
+          "python 脚本核对",
+          "metadata-checker CLI 实跑核对",
+          "人工确认"
+        ],
+        "evidence_artifacts": [
+          "docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/xiaoshouyi_fact_qwsidebar_model_relationships/"
+        ],
+        "verified_with": {
+          "date": "2026-08-23",
+          "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
+          "binary": "metadata-checker @ 66f75bc release（cli-local），sha256=c64d9a233481d4be9285fff173da5de5b0c7601187bd7fad03ba790ebd536b5d"
+        },
+        "note": "2026-08-23 重放复核：required_commands 全部 exit 0，expected_output_assertions 全部 PASS，expected_facts/forbidden_claims 与实跑输出一致；证据见 evidence_artifacts。初稿来源见顶层 provenance（Kimi-K3 提取，原 claimed_validation 无产物留存）。"
+      },
       "difficulty": "expert",
       "risk_tags": [
         "model_query",
@@ -566,6 +661,25 @@
     },
     {
       "case_id": "xiaoshouyi_member_registered_page_overview",
+      "provenance": {
+        "extracted_by": "Kimi-K3",
+        "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
+        "evidence_status": "replay_verified",
+        "claimed_validation": [
+          "python 脚本核对",
+          "metadata-checker CLI 实跑核对",
+          "人工确认"
+        ],
+        "evidence_artifacts": [
+          "docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/xiaoshouyi_member_registered_page_overview/"
+        ],
+        "verified_with": {
+          "date": "2026-08-23",
+          "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
+          "binary": "metadata-checker @ 66f75bc release（cli-local），sha256=c64d9a233481d4be9285fff173da5de5b0c7601187bd7fad03ba790ebd536b5d"
+        },
+        "note": "2026-08-23 重放复核：required_commands 全部 exit 0，expected_output_assertions 全部 PASS，expected_facts/forbidden_claims 与实跑输出一致；证据见 evidence_artifacts。初稿来源见顶层 provenance（Kimi-K3 提取，原 claimed_validation 无产物留存）；观察：confidence.level=reduced（PRIMARY_PATHS_TRUNCATED 等 compact 截断诊断），不影响 summary 计数断言。"
+      },
       "difficulty": "easy",
       "risk_tags": [
         "page_overview",
@@ -660,6 +774,25 @@
     },
     {
       "case_id": "xiaoshouyi_contract_input3_value_expr",
+      "provenance": {
+        "extracted_by": "Kimi-K3",
+        "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
+        "evidence_status": "replay_verified",
+        "claimed_validation": [
+          "python 脚本核对",
+          "metadata-checker CLI 实跑核对",
+          "人工确认"
+        ],
+        "evidence_artifacts": [
+          "docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/xiaoshouyi_contract_input3_value_expr/"
+        ],
+        "verified_with": {
+          "date": "2026-08-23",
+          "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
+          "binary": "metadata-checker @ 66f75bc release（cli-local），sha256=c64d9a233481d4be9285fff173da5de5b0c7601187bd7fad03ba790ebd536b5d"
+        },
+        "note": "2026-08-23 重放复核：required_commands 全部 exit 0，expected_output_assertions 全部 PASS，expected_facts/forbidden_claims 与实跑输出一致；证据见 evidence_artifacts。初稿来源见顶层 provenance（Kimi-K3 提取，原 claimed_validation 无产物留存）。"
+      },
       "difficulty": "easy",
       "risk_tags": [
         "value_expr",
@@ -733,6 +866,25 @@
     },
     {
       "case_id": "xiaoshouyi_fact_salecontract_read_write_counts",
+      "provenance": {
+        "extracted_by": "Kimi-K3",
+        "extraction_method": "模型自行从语料中提取问题并自答，产出 standard_answer 初稿",
+        "evidence_status": "replay_verified",
+        "claimed_validation": [
+          "python 脚本核对",
+          "metadata-checker CLI 实跑核对",
+          "人工确认"
+        ],
+        "evidence_artifacts": [
+          "docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/xiaoshouyi_fact_salecontract_read_write_counts/"
+        ],
+        "verified_with": {
+          "date": "2026-08-23",
+          "corpus": "https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac51",
+          "binary": "metadata-checker @ 66f75bc release（cli-local），sha256=c64d9a233481d4be9285fff173da5de5b0c7601187bd7fad03ba790ebd536b5d"
+        },
+        "note": "2026-08-23 重放复核：required_commands 全部 exit 0，expected_output_assertions 全部 PASS，expected_facts/forbidden_claims 与实跑输出一致；证据见 evidence_artifacts。初稿来源见顶层 provenance（Kimi-K3 提取，原 claimed_validation 无产物留存）。"
+      },
       "difficulty": "easy",
       "risk_tags": [
         "model_fanout",

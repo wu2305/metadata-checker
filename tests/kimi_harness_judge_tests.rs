@@ -129,6 +129,68 @@ fn test_smoke_subset_rejects_empty_selection() {
     assert!(smoke_subset(&cases).is_err());
 }
 
+/// 验证每个 case 都带逐 case provenance，且 `replay_verified` 的证据产物真实存在。
+///
+/// 顶层 provenance 的 note 要求后续 case 必须逐 case 写本字段并把产物落到
+/// `evidence_artifacts` 指向的路径；本测试把这条约定变成硬约束，防止新增 case
+/// 又回到「共用一份不可复核的事后追记」。
+#[test]
+fn test_fixture_cases_carry_per_case_provenance() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest.join("tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json");
+    let raw: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let cases = raw["cases"].as_array().expect("cases 必须是数组");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let case_id = case["case_id"].as_str().expect("case 缺 case_id");
+        let provenance = case
+            .get("provenance")
+            .unwrap_or_else(|| panic!("{case_id} 缺少逐 case provenance"));
+        for field in [
+            "extracted_by",
+            "evidence_status",
+            "claimed_validation",
+            "evidence_artifacts",
+        ] {
+            assert!(
+                provenance.get(field).is_some(),
+                "{case_id} 的 provenance 缺字段 {field}"
+            );
+        }
+        let status = provenance["evidence_status"].as_str().unwrap_or("");
+        assert!(
+            matches!(status, "replay_verified" | "recalled_unverifiable"),
+            "{case_id} 的 evidence_status={status} 不在枚举内"
+        );
+        if status == "replay_verified" {
+            let artifacts = provenance["evidence_artifacts"]
+                .as_array()
+                .expect("evidence_artifacts 必须是数组");
+            assert!(
+                !artifacts.is_empty(),
+                "{case_id} 标称 replay_verified 但没有证据产物"
+            );
+            let verified_with = provenance.get("verified_with").unwrap_or_else(|| {
+                panic!("{case_id} 标称 replay_verified 但缺 verified_with 坐标")
+            });
+            for field in ["date", "corpus", "binary"] {
+                assert!(
+                    verified_with.get(field).is_some(),
+                    "{case_id} 的 verified_with 缺字段 {field}"
+                );
+            }
+            for artifact in artifacts {
+                let rel = artifact.as_str().expect("evidence_artifacts 元素必须是字符串");
+                assert!(
+                    manifest.join(rel).exists(),
+                    "{case_id} 的证据产物 {rel} 在仓库内不存在"
+                );
+            }
+        }
+    }
+}
+
 /// 一行合法 record，字段顺序与 `.cnb.yml` 的 node 发射器一致。
 fn sample_record_line() -> String {
     r#"{"case_id":"c1","order":1,"difficulty":"easy","variant":"baseline","trial":1,"exit_code":0,"wall_clock_ms":1234,"tool_calls":3,"metadata_checker_invocations":2,"raw_fallback_calls":1,"raw_fallback":true,"retrieval_context_observed":false,"transcript_bytes":4096,"transcript_path":"out/t.jsonl","stderr_path":"out/t.log"}"#

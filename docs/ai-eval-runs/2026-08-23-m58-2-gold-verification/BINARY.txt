@@ -1,0 +1,6 @@
+repo_commit=66f75bc537dda39b8638c0a03e6b9ef74c768928
+binary_path=target/cnb/workspace/release/metadata-checker
+binary_sha256=c64d9a233481d4be9285fff173da5de5b0c7601187bd7fad03ba790ebd536b5d
+binary_size=5.6M (release, --features cli-local)
+corpus=https://cnb.cool/wu2305/succbi_project_container.git branch xiaoshouyi-corpus @ 6920ac514df2d79a3df73a6447cf851abdfc954b
+graphdb=/tmp/xiaoshouyi-m58-2-verify.graphdb  node_count=78127  edge_count=150165  size=538972160 bytes
