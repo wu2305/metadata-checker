@@ -478,19 +478,6 @@ pub fn print_non_human_to(
                 });
             }
         }
-        if let Some(analyses) = priority_analyses {
-            if analyses.is_empty() {
-                diagnostics.push(crate::output::Diagnostic {
-                    severity: crate::output::DiagnosticSeverity::Info,
-                    code: "NO_PRIORITY_RULES".to_string(),
-                    message: "No priority rules found in this page".to_string(),
-                    location: crate::output::Location::new(),
-                    suggestion: Some(
-                        "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
-                    ),
-                });
-            }
-        }
 
         // 保守推断单页角色
         let mut has_button = false;
@@ -537,6 +524,11 @@ pub fn print_non_human_to(
             "unknown"
         };
         let conditions = scan_conditions(spg, meta.input_path.as_deref());
+        let condition_values = conditions
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<serde_json::Result<Vec<Value>>>()
+            .with_context(|| "序列化 SuperPage 条件记录失败")?;
         let what_is_it = format!(
             "SuperPage {}，{} 个组件，{} 个表达式，{} 个数据源，{} 个条件表达式，角色 {}",
             meta.input_path.as_deref().unwrap_or("unknown"),
@@ -624,7 +616,7 @@ pub fn print_non_human_to(
             "dependency_order": topo,
             "cycles": cycles,
             "priority_summary": priority_summary,
-            "conditions": conditions.iter().map(|c| serde_json::to_value(c).unwrap()).collect::<Vec<Value>>(),
+            "conditions": condition_values,
         });
 
         let mut output =

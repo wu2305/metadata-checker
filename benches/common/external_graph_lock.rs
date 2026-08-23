@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
@@ -10,14 +11,14 @@ pub fn graph_lock_path(db_path: &Path) -> PathBuf {
 /// benchmark 外部锁守卫，释放时同步删除锁文件。
 #[must_use]
 pub struct ExternalGraphLock {
-    lock_path: PathBuf,
     lock_file: Option<File>,
 }
 
 impl Drop for ExternalGraphLock {
     fn drop(&mut self) {
-        drop(self.lock_file.take());
-        let _ = std::fs::remove_file(&self.lock_path);
+        if let Some(lock_file) = self.lock_file.take() {
+            let _ = lock_file.unlock();
+        }
     }
 }
 
@@ -25,13 +26,16 @@ impl Drop for ExternalGraphLock {
 pub fn acquire_external_graph_lock(db_path: &Path) -> Result<ExternalGraphLock> {
     let lock_path = graph_lock_path(db_path);
     let lock_file = OpenOptions::new()
+        .read(true)
         .write(true)
-        .create_new(true)
+        .create(true)
         .open(&lock_path)
         .with_context(|| format!("acquire external graph lock {}", lock_path.display()))?;
+    lock_file
+        .try_lock_exclusive()
+        .with_context(|| format!("lock external graph lock {}", lock_path.display()))?;
 
     Ok(ExternalGraphLock {
-        lock_path,
         lock_file: Some(lock_file),
     })
 }

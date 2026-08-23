@@ -97,8 +97,8 @@ impl SourceId {
     ///
     /// `source_path` 必须是项目内逻辑路径：
     /// - 提供 `project_dir` 时，从绝对路径裁剪出相对路径；`origin_path` 保留原始绝对路径。
-    /// - 未提供 `project_dir` 时，相对路径直接使用；绝对路径尝试 cwd-relative 转换，
-    ///   失败则退化为 basename。`origin_path` 始终保留原始路径。
+    /// - 未提供 `project_dir` 时，相对路径直接使用；绝对路径只接受能转换为 cwd-relative
+    ///   的路径，无法安全归一化时返回错误。`origin_path` 始终保留原始路径。
     pub fn from_local_path(
         project_ref: ProjectRef,
         path: &Path,
@@ -118,15 +118,16 @@ impl SourceId {
                 })?
         } else if path.is_absolute() {
             // 尝试相对于当前工作目录转换为相对路径
-            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let cwd = std::env::current_dir()
+                .with_context(|| "无法确定当前工作目录，不能安全归一化来源路径")?;
             path.strip_prefix(&cwd)
                 .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| {
-                    // 退化为文件名，确保 source_path 不是绝对路径
-                    path.file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| path.to_string_lossy().to_string())
-                })
+                .with_context(|| {
+                    format!(
+                        "绝对来源路径 {} 不在当前工作目录内；请提供 project_dir 以生成稳定逻辑路径",
+                        path.display()
+                    )
+                })?
         } else {
             path.to_string_lossy().to_string()
         };
@@ -282,28 +283,17 @@ mod tests {
     }
 
     #[test]
-    fn test_source_id_from_local_path_converts_absolute_without_project_dir() {
+    fn test_source_id_from_local_path_rejects_absolute_path_outside_cwd_without_project_dir() {
         let pr = ProjectRef::new("p1");
-        let sid = SourceId::from_local_path(pr, Path::new("/tmp/page.spg"), None).unwrap();
-        // 绝对路径无 project_dir 时，应退化为文件名，确保 source_path 不是绝对路径
-        assert_eq!(sid.source_path, "page.spg");
-        assert_eq!(sid.display_path, Some("page.spg".to_string()));
-        assert_eq!(sid.origin_path, Some("/tmp/page.spg".to_string()));
-        assert!(is_project_internal_path(&sid.source_path));
+        let result = SourceId::from_local_path(pr, Path::new("/tmp/page.spg"), None);
+        assert!(result.is_err());
     }
 
     #[test]
-    fn test_source_id_from_local_path_absolute_outside_cwd_becomes_basename() {
+    fn test_source_id_from_local_path_absolute_outside_cwd_is_rejected() {
         let pr = ProjectRef::new("p1");
-        let sid =
-            SourceId::from_local_path(pr, Path::new("/very/unlikely/path/page.spg"), None).unwrap();
-        assert_eq!(sid.source_path, "page.spg");
-        assert_eq!(sid.display_path, Some("page.spg".to_string()));
-        assert_eq!(
-            sid.origin_path,
-            Some("/very/unlikely/path/page.spg".to_string())
-        );
-        assert!(is_project_internal_path(&sid.source_path));
+        let result = SourceId::from_local_path(pr, Path::new("/very/unlikely/path/page.spg"), None);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -339,5 +329,16 @@ mod tests {
             sid1, sid2,
             "display_path should not affect SourceId identity"
         );
+    }
+
+    #[test]
+    fn test_source_id_rejects_distinct_absolute_paths_without_project_dir() {
+        let project = ProjectRef::new("test-project");
+        let first =
+            SourceId::from_local_path(project.clone(), Path::new("/tmp/project-a/page.spg"), None);
+        let second = SourceId::from_local_path(project, Path::new("/tmp/project-b/page.spg"), None);
+
+        assert!(first.is_err());
+        assert!(second.is_err());
     }
 }

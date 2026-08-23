@@ -13,6 +13,7 @@ use crate::output::schema::{
     format_next_query,
 };
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
@@ -64,17 +65,24 @@ fn acquire_graph_lock(db_path: &Path) -> Result<std::fs::File> {
     let timeout_ms = GRAPH_LOCK_TIMEOUT_MS.load(Ordering::Relaxed);
     let interval_ms = 100u64;
     let max_attempts = timeout_ms.div_ceil(interval_ms).max(1);
+    let lock_file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&lock_path)
+        .with_context(|| format!("无法打开 graphdb 锁文件 {}", lock_path.display()))?;
+
     for attempt in 0..max_attempts {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(f) => return Ok(f),
-            Err(_) => {
+        match lock_file.try_lock_exclusive() {
+            Ok(()) => return Ok(lock_file),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if attempt + 1 < max_attempts {
                     std::thread::sleep(std::time::Duration::from_millis(interval_ms));
                 }
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("无法锁定 graphdb 锁文件 {}", lock_path.display()));
             }
         }
     }
@@ -85,21 +93,16 @@ fn acquire_graph_lock(db_path: &Path) -> Result<std::fs::File> {
     )
 }
 
-fn release_graph_lock(db_path: &Path) {
-    let lock_path = db_path.with_extension("graphdb.lock");
-    let _ = std::fs::remove_file(&lock_path);
-}
-
 /// GraphDB 锁守卫，Drop 时释放与 GraphDB 相同的锁文件
 pub(crate) struct GraphDbLockGuard {
-    db_path: PathBuf,
     lock_file: Option<std::fs::File>,
 }
 
 impl Drop for GraphDbLockGuard {
     fn drop(&mut self) {
-        drop(self.lock_file.take());
-        release_graph_lock(&self.db_path);
+        if let Some(lock_file) = self.lock_file.take() {
+            let _ = lock_file.unlock();
+        }
     }
 }
 
@@ -107,7 +110,6 @@ impl Drop for GraphDbLockGuard {
 pub(crate) fn acquire_graph_db_lock(db_path: &Path) -> Result<GraphDbLockGuard> {
     let lock_file = acquire_graph_lock(db_path)?;
     Ok(GraphDbLockGuard {
-        db_path: db_path.to_path_buf(),
         lock_file: Some(lock_file),
     })
 }
@@ -337,7 +339,6 @@ impl GraphDB {
             }
         };
         let db_result = Database::open(db_path);
-        release_graph_lock(db_path);
         match db_result {
             Ok(db) => {
                 let read_txn = db.begin_read();
