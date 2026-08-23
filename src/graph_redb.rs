@@ -373,7 +373,6 @@ impl GraphDB {
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
-                ),
             });
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
@@ -408,7 +407,6 @@ impl GraphDB {
                     count: None,
                     answer_impact: None,
                     first_seen_phase: None,
-                    ),
                 });
                 out.next_queries.push(format_next_query(
                     "metadata-checker --graph-db-path {} --graph-lock-timeout-ms <MS>",
@@ -452,7 +450,6 @@ impl GraphDB {
                         count: None,
                         answer_impact: None,
                         first_seen_phase: None,
-                        ),
                     });
                 } else if msg.contains("permission")
                     || msg.contains("denied")
@@ -472,7 +469,6 @@ impl GraphDB {
                             count: None,
                             answer_impact: None,
                             first_seen_phase: None,
-                            ),
                         });
                     } else {
                         out.diagnostics.push(Diagnostic {
@@ -488,7 +484,6 @@ impl GraphDB {
                             count: None,
                             answer_impact: None,
                             first_seen_phase: None,
-                            ),
                         });
                     }
                 } else {
@@ -538,7 +533,6 @@ impl GraphDB {
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
-                ),
             });
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
@@ -576,7 +570,6 @@ impl GraphDB {
                         count: None,
                         answer_impact: None,
                         first_seen_phase: None,
-                        ),
                     });
                     out.next_queries.push(format_next_query(
                         "metadata-checker --project-dir <DIR> --query-model <MODEL> --graph-db-path {} --graph-lock-timeout-ms 30000",
@@ -599,7 +592,6 @@ impl GraphDB {
                         count: None,
                         answer_impact: None,
                         first_seen_phase: None,
-                        ),
                     });
                 } else {
                     out.diagnostics.push(Diagnostic {
