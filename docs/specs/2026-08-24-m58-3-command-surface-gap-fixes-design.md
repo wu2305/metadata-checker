@@ -64,15 +64,15 @@ redb 真实路径。真正缺的是两类：**(a) 坏行 hydrate**（redb 里塞
 | `GRAPH_DB_EDGE_DECODE_FAILED` | `:237` | partial |
 | `GRAPH_DB_EDGE_DANGLING_ENDPOINT` | `:238-239` 悬挂边（实际更常见，与反序列化失败拆开） | partial |
 | `GRAPH_DB_V2_LAYOUT_UNREADABLE` | `:178` 的 `read_v2_layout` Err/None 折叠路径 | none |
-| `GRAPH_DB_PARTIAL_HYDRATE` | 上面三类 hydrate 损失的**汇总闸门**：任一计数 > 0 即在每个受影响响应置顶，confidence 降为 partial——缺失的边会把「未知」变成假的「无关系」，只计数不够 | partial |
+| `GRAPH_DB_PARTIAL_HYDRATE` | 上面三类 hydrate 损失的**汇总闸门**：任一计数 > 0 即在该实例**所有**后续响应置顶（悬挂边无法归因到具体查询，不做按目标归因），confidence 降为 partial——缺失的边会把「未知」变成假的「无关系」，只计数不够 | partial |
 | `PAGE_SCOPED_TARGET_FALLBACK` | 页面限定回退全局模型（真实回退点 `page_logic.rs:155-170/:300-311`；既有信号 `page_scoped_target_not_resolved_fallback_to_global_model` 归入此 code） | partial |
 
 **传播与归属**（评审 P1-4 要求的硬设计）：
 
 - runtime 加载诊断目前只在局部构造、不存进 `GraphRuntime`（`runtime.rs:338`），
-  `RuntimeStatus` 无诊断字段（`:1222`）——Phase 1 把加载诊断**存入 GraphRuntime**，
+  `RuntimeStatus` 无诊断字段（结构体 `runtime.rs:260`，`status()` `:1222`）——Phase 1 把加载诊断**存入 GraphRuntime**，
   `status()` 透出；查询响应从 runtime 取同一份，**不在查询层另造第二套信号**。
-- 查询时聚合已有先例（`diagnostics.rs:305` 的 `UNKNOWN_ACTION_TYPE`）：同类诊断的
+- 查询时聚合已有先例（`query/page_logic/diagnostics.rs:305` 的 `UNKNOWN_ACTION_TYPE`）：同类诊断的
   归属规则 = **加载期归 GraphRuntime，查询期归 page_logic diagnostics**，同一 code
   只在一处产生，跨来源不去重（code 本身即来源标识）。
 - `graph_redb.rs:267` 的 `v2_hydrate_warning` 死访问器接进上述信封，不新建平行管道。
@@ -160,15 +160,23 @@ NodeType 确定性排序**——Component 父优先、Page 仅兜底，与迭代
 
 **竖线即判据**：带 `|` 的是页面局部节点，不带的是全局/物理节点。
 
-**边端点迁移**：
+**边端点迁移**（以全仓 `EdgeType::Contains`/`DependsOn` 实际构造点为准，逐类列全）：
 
-- `Contains`（page→model/cond/comp）：model 端点改指向局部 id；comp 端不变；
+- `Contains`：实际只有两类——model→field（`spg.rs:167/:394/:1432`）与 page→comp
+  （`:512`）。**不存在** page→model / page→cond 的 Contains 边（更正本文早先的虚构
+  表述）。迁移：model→field 的两端随局部 model/field 分段重指；page→comp 不变；
 - `Reads`/`FieldWrite`/写边（comp/action → field/model）：指向**局部** field/model id；
 - `FieldAlias`（字段级 field→field，`spg.rs:238-245/:302-309`）：**从局部 field 节点发出**，
   指向物理 field——更正本文早先「FieldAlias 从局部 model 节点发出」的错误表述，
   FieldAlias 从来不是 model→model；
 - `DataflowInput`/`DataflowOutput`（模型级，`spg.rs:1497-1513`）：局部 model ↔ 物理 model；
-- `DependsOn`（cond → `field:...totalRowCount__`，:1447-1454）：指向分段后的行数字段；
+- `DependsOn`（cond → owner）：`OwnerType::ModelSource` 分支构造全局
+  `format!("model:{}", cond.owner_id)`（`spg.rs:1345-1347`，建边 `:1361-1368`）——
+  这是「条件归属于哪个 model」的**承重边**，F4「gates 来自本页 filter」就压在它上面；
+  分段后必须改指局部 model id，漏改则悬挂到不存在的 `model:modelN`；
+- `DependsOn`（cond → upstream 符号）：`"model"` 符号分支构造全局 id
+  （`spg.rs:1379-1382`，建边 `:1396-1403`），同样改指局部 model id；
+- `DependsOn`（cond → `field:...totalRowCount__`，`spg.rs:1447-1454`）：指向分段后的行数字段；
 - **写入双写**：动作写物理字段时落两条边——`ActionWrites → model:<PAGE>|modelN`
   （带本页 conditionExp，承接 F6）与既有物理表聚合边；`--relations 'model:fact_testDrive'`
   跨页扇出计数语义不变（说明 C 的去重键保证）。
@@ -179,7 +187,8 @@ NodeType 确定性排序**——Component 父优先、Page 仅兜底，与迭代
 - 裸 `model:modelN` / `field:modelN.x`：单页命中直达；多页同名 → 如实交回全部候选
   （同 `test_ambiguous_bare_target_answers_every_candidate` 契约）；
 - `next_queries` 生成的 id 必须与事实来源同粒度：页面局部事实生成页面段 id，物理聚合
-  事实生成全局 id。全仓 31 处生成点逐一审计（已知合成全局 field id 的：
+  事实生成全局 id。全仓生成点逐一审计（口径：`format_next_query(` 调用 57 处/16 文件，
+  含定义与循环内调用；已知合成全局 field id 的：
   `query/model.rs:294`、`main.rs:407`），PR4b 验收含「next_queries 指向的 id 可直接
   执行且命中正确粒度节点」。
 
@@ -286,5 +295,13 @@ v1/v2 双路校验、fail-closed `GRAPH_SCHEMA_STALE`、强制全量重建、迁
 统一诊断信封 + `GRAPH_DB_PARTIAL_HYDRATE` 闸门 + 传播归属（P1-4）；F1 改形态感知递归
 （panel 多态安全）+ 附录 A 测量归档（P1-5）；F3 修复点上移到 `extract_refs_from_ast`
 合并层（P1-6）；F5/F6 事实输出契约（说明 C）+ F5 硬依赖 F3（P1-7）；断言变迁台账 +
-基线可比性策略 + 配套 plan 文档（P1-8）；测试覆盖缺口表述更正（P2-2）；验证矩阵补齐
-+ 干跑五条路径逐字列出（P2-1）。
+基线可比性策略 + 配套 plan 文档（P1-8）；测试覆盖缺口表述更正（P2-2）；验证矩阵补齐、
+干跑五条路径逐字列出（P2-1）。
+
+第四轮（复验第三轮重写）：边端点迁移清单纠错——`Contains` 实际只有 model→field
+（`spg.rs:167/:394/:1432`）与 page→comp（`:512`）两类，不存在 page→model/cond 边；
+补三类遗漏的 `DependsOn` 边迁移（cond→owner ModelSource 承重边 `spg.rs:1345-1347/
+:1361-1368`、cond→upstream `"model"` 符号 `:1379-1382/:1396-1403`、cond→totalRowCount__
+`:1447-1454`）；`GRAPH_DB_PARTIAL_HYDRATE` 明确「所有后续响应」不按查询目标归因；
+next_queries 审计口径改为 `format_next_query(` 57 处/16 文件（删不可复现的「31 处」）；
+`RuntimeStatus` 与 `diagnostics.rs` 引用补全行号/路径前缀。
