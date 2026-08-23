@@ -69,7 +69,8 @@
 
 ### M58.4 轻量图召回对比 spike（2026-08-23）
 
-状态：**active**。用户已确认在独立远端分支开展对比 spike；所有编辑、编译和测试均在
+状态：**done（deterministic spike）**。
+用户已确认在独立远端分支开展对比 spike；所有编辑、编译和测试均在
 CNB 工作环境的隔离 worktree 中完成，本地工作区不参与实现。
 
 本轮不重实现 Microsoft GraphRAG，也不引入外部图 RAG 框架。实验只验证一个更小的假设：
@@ -84,6 +85,19 @@ go 条件，才进入 M58.2 的同模型、同 case、同 trial 配对验证。
 
 设计与执行边界见 [M58.4 spec](../../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)
 和 [M58.4 plan](../../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)。
+
+实测（实现 commit `567d904`）：3 个正常 case 中，`seed_only` 的 mean
+relevant recall / precision / gold terminal recall 为 `0.3056 / 1.0000 / 0.0000`，
+`unweighted_hop` 为 `0.6111 / 0.6111 / 0.0000`，`typed_ppr` 为
+`1.0000 / 1.0000 / 1.0000`。三例 PPR 都在 107 轮达到 `1e-10` 收敛阈值；100 轮
+首跑只暴露上限不足，最终保留阈值并把默认上限调整为 200。
+
+typed PPR 和无权 hop 的截断前候选池同为 6/7/7，因此结果只支持“相同 top-k 下有效密度
+更高”，不支持“候选池更小”。远端 `cargo fmt --check`、3 个集成测试、3 个边界单测、
+browser-wasm check 与 `git diff --check` 均通过。
+
+结论为 **deterministic go**，不是产品 go。代码未接公共查询、未接 semantic seed、
+未跑 LLM paired variants；真实项目与 `tool_assisted_quality` 增益仍未验证。
 
 本地 fake runner 已覆盖 13 个 active `fixture_llm` case，覆盖 page/action/lineage/dataflow/navigation/diagnostic/context/condition 等任务族；每个 case 都有 `evaluation_dimensions`，并通过独立 trial、命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport、SSE 和 token 脱敏测试。历史真实 CNB smoke 曾由 `api_trigger_m58_llm` 执行：provider=`cnb-ai-chat`、model=`deepseek-v4-flash`、build=`cnb-54f-1juijih5i`、单 trial pass rate=`1.0`、failure classes 为空；它只证明当时三个 case 的一次端到端路径可用，不证明 Skill 的稳定理解或任务泛化。新的 live runner 默认每个 case 执行 3 个独立 trial，报告同时输出 `trial_pass_rate`、`case_stable_pass_rate` 和 `cases_with_flaky_trials`；只保留结构化摘要和脱敏 command trace，不归档 prompt、模型原文或 token。runtime contract preflight 的缺省回退与显式 override 已通过同一 live stage 验证。
 

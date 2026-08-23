@@ -1,6 +1,6 @@
 # M58.4 轻量图召回对比 Spike 实施计划
 
-> 状态：**approved（用户确认 2026-08-23）**
+> 状态：**done（2026-08-23；deterministic spike）**
 > 对应设计：[M58.4 设计](../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)
 > 分支：`auto/graph-rag-spike-a7c3`
 > 工作位置：CNB 远端 `/tmp/metadata-checker-graph-rag-spike-a7c3`
@@ -131,8 +131,40 @@ git diff --check
 
 ## 7. 实测结果
 
-待 WP3 在 CNB 远端完成后回填。必须包含 commit、测试命令、case 数、三组聚合指标、
-逐 case 异常和 go/no-go，不写“预期通过”。
+环境与身份：
+
+- CNB workspace：`cnb-vf8-1k0m6rgn7`；
+- 分支：`auto/graph-rag-spike-a7c3`；
+- 基线：`aeefc45`；实现 commit：`567d904`；
+- 正常 case：3（writer、availability/DataFlow、action/condition）；
+- 边界测试：3（dangling mass、无有效 seed、迭代上限）；
+- 另有稳定序列化和 score tie-break 集成断言。
+
+聚合结果：
+
+| variant | mean relevant recall@k | mean precision@k | mean gold terminal recall@k |
+|---|---:|---:|---:|
+| `seed_only` | 0.3056 | 1.0000 | 0.0000 |
+| `unweighted_hop` | 0.6111 | 0.6111 | 0.0000 |
+| `typed_ppr` | 1.0000 | 1.0000 | 1.0000 |
+
+三例 typed PPR 都在 107 轮达到 `1e-10` 阈值；首跑的 100 轮上限不足，因此只把默认上限
+调至 200，阈值、fixture、gold、top-k 和权重均未因结果改动。typed PPR 与无权 hop 的
+截断前候选池同为 6/7/7；本轮证明的是相同 top-k 下有效密度提高，**没有证明候选池规模
+下降**。
+
+远端验证：
+
+- `cargo fmt --check`：通过；
+- `cargo test --features cli-local --test graph_retrieval_spike_tests`：3 passed；
+- `cargo test --lib graph_retrieval`：3 passed；
+- `cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown`：通过；
+- `git diff --check`：通过。
+
+结论：**deterministic go**。typed PPR 达到设计中的确定性充分条件，但尚未接入产品查询，
+也不能据此声称真实项目或 LLM 回答质量改善。后续只有在独立 spec 批准后，才能增加
+semantic seed provider，并在 M58.2 使用同模型、同 case、同 trial 的 paired variants
+验证 `tool_assisted_quality`。
 
 ## 8. 完成定义
 
