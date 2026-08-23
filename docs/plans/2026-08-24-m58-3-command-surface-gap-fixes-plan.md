@@ -1,8 +1,8 @@
 # M58.3 缺口修复与可观测性打底计划
 
-> 状态：**draft**（随 spec 第三轮修订同步起草；spec approved 后本计划一并转 approved）
+> 状态：**draft**（随 spec 评审修订同步起草；spec approved 后本计划一并转 approved）
 > 上游：[M58.3 spec](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（draft，
-> 三轮独立评审修订；id 文法、诊断信封、迁移机制、事实输出契约的权威定义都在 spec，本文不重复）。
+> 四轮独立评审修订；id 文法、诊断信封、迁移机制、事实输出契约的权威定义都在 spec，本文不重复）。
 > journal：[m58-cheap-model-comprehension-eval.md](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)。
 > 治理：多 PR 工作须 approved plan（`docs/governance/planning.md:34`）。
 
@@ -53,7 +53,8 @@ M58.3 修五个实跑缺口 + 一个测量缺口（F1），spec 三轮评审后�
 
 - 写入范围：`src/scanner/spg.rs`（五类局部节点 id 分段 + 边端点迁移 + 写入双写）、
   `src/route.rs`（model/field 前缀禁用 `by_overqualified` 剥离）、`src/model_scope.rs`
-  （说明 B 平局替代）、`src/query/` + `src/main.rs`（next_queries 31 处生成点审计）、
+  （说明 B 平局替代）、`src/query/` + `src/main.rs`（next_queries 生成点审计，
+  `format_next_query(` 57 处/16 文件口径）、
   `src/output/`。期望版本 bump 到 v2。
 - 验收：spec 验收 3（歧义契约、精确命中、聚合语义不变、next_queries 粒度、
   `GRAPH_SCHEMA_STALE`、增量隔离）。

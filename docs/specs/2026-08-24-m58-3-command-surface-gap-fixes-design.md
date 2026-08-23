@@ -169,7 +169,8 @@ NodeType 确定性排序**——Component 父优先、Page 仅兜底，与迭代
 - `FieldAlias`（字段级 field→field，`spg.rs:238-245/:302-309`）：**从局部 field 节点发出**，
   指向物理 field——更正本文早先「FieldAlias 从局部 model 节点发出」的错误表述，
   FieldAlias 从来不是 model→model；
-- `DataflowInput`/`DataflowOutput`（模型级，`spg.rs:1497-1513`）：局部 model ↔ 物理 model；
+- `DataflowInput`/`DataflowOutput`（模型级；dwtable 块 `spg.rs:1497-1513`，内嵌 DataFlow
+  的 moduleTablePath 引用 `:416/:425-432`）：局部 model ↔ 物理/外部 model；
 - `DependsOn`（cond → owner）：`OwnerType::ModelSource` 分支构造全局
   `format!("model:{}", cond.owner_id)`（`spg.rs:1345-1347`，建边 `:1361-1368`）——
   这是「条件归属于哪个 model」的**承重边**，F4「gates 来自本页 filter」就压在它上面；
