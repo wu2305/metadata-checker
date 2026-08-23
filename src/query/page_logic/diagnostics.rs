@@ -57,13 +57,13 @@ pub(super) fn build_page_logic_diagnostics(
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some(,
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
+            suggestion: Some(
                 "Use --budget full to see more relations, or focus on key_primary_paths in summary"
                     .to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
     // ---- 5.7 注意力漂移治理：旁路关系统计（必须在 truncation 之后）
@@ -125,13 +125,13 @@ pub(super) fn build_page_logic_diagnostics(
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some(,
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
+            suggestion: Some(
                 "Ensure --project-dir points to the project root containing this page file"
                     .to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 
@@ -239,13 +239,13 @@ pub(super) fn build_page_logic_diagnostics(
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string),
                 },
-                suggestion: Some(,
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
+                suggestion: Some(
                     "Review the expression and verify each referenced component/model exists"
                         .to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
     }
@@ -383,12 +383,12 @@ pub(super) fn build_page_logic_diagnostics(
                     node_id,
                     json_path,
                 },
-                suggestion: Some(,
+                suggestion: Some(
+                    "Check if this action type is supported by metadata-checker".to_string(),
+                ),
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
-                    "Check if this action type is supported by metadata-checker".to_string(),
-                ),
             });
         }
     }
@@ -421,13 +421,13 @@ pub(super) fn build_page_logic_diagnostics(
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some(,
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
+            suggestion: Some(
                 "Use details arrays for full coverage; evidence is intentionally low-noise sampled"
                     .to_string(),
             ),
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
         });
     }
 

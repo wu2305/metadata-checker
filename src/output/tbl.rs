@@ -290,12 +290,12 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
                 node_id: meta.table_id.clone(),
                 json_path: Some("properties.dbTableName".to_string()),
             },
-            suggestion: Some(,
+            suggestion: Some(
+                "Check if DataFlow is intended to produce a physical table".to_string(),
+            ),
             count: None,
             answer_impact: None,
             first_seen_phase: None,
-                "Check if DataFlow is intended to produce a physical table".to_string(),
-            ),
         });
     }
 
@@ -370,12 +370,12 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
                             )),
                             json_path: Some(format!("dimensions[{}].exp", idx)),
                         },
-                        suggestion: Some(,
+                        suggestion: Some(
+                            "Use --project-dir --explain for full lineage".to_string(),
+                        ),
                         count: None,
                         answer_impact: None,
                         first_seen_phase: None,
-                            "Use --project-dir --explain for full lineage".to_string(),
-                        ),
                     });
                 }
             }
@@ -431,12 +431,12 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
                     node_id: meta.table_id.clone(),
                     json_path: None,
                 },
-                suggestion: Some(,
+                suggestion: Some(
+                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                ),
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
-                    "Use --budget normal or --budget full to see complete arrays".to_string(),
-                ),
             });
         }
 

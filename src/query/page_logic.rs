@@ -2490,12 +2490,12 @@ fn build_query_page_logic_output_inner(
                     node_id: Some(page_id.to_string()),
                     json_path: None,
                 },
-                suggestion: Some(,
+                suggestion: Some(
+                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                ),
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
-                    "Use --budget normal or --budget full to see complete arrays".to_string(),
-                ),
             });
         }
 

@@ -229,11 +229,10 @@ pub(in crate::explain) fn explain_component_graph(
             suggestion: Some(
                 "Check --context or --query-dataflow for upstream relationships".to_string(),
             ),
-        
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
+        });
     }
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);

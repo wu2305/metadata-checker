@@ -852,12 +852,12 @@ pub(in crate::explain) fn explain_field_graph(
             code: "LINEAGE_SOURCE_MISSING".to_string(),
             message: format!("Field {} has no traceable source lineage", node.id),
             location: crate::output::Location::new(),
-            suggestion: Some(,
+            suggestion: Some(
+                "Check dimensions[].inputField or dimensions[].exp metadata".to_string(),
+            ),
             count: None,
             answer_impact: None,
             first_seen_phase: None,
-                "Check dimensions[].inputField or dimensions[].exp metadata".to_string(),
-            ),
         });
     }
 

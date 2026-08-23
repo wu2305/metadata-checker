@@ -333,12 +333,12 @@ pub fn build_query_model_output(
                     node_id: Some(model_id.to_string()),
                     json_path: None,
                 },
-                suggestion: Some(,
+                suggestion: Some(
+                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                ),
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
-                    "Use --budget normal or --budget full to see complete arrays".to_string(),
-                ),
             });
         }
 

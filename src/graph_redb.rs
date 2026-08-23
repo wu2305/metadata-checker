@@ -127,8 +127,6 @@ pub struct GraphDB {
     /// v2 hydrate 失败时的诊断信息（fallback 到 v1 后仍可正常使用，
     /// 调用方可读取此字段决定是否上报 diagnostic）。
     v2_hydrate_warning: Option<String>,
-    /// hydrate 阶段的结构化诊断统计（PR1 引入，供 runtime 统一信封透出）
-    hydrate_diagnostics: crate::diagnostics::HydrateDiagnostics,
 }
 
 type NodeEdgePair<'a> = (&'a Node, &'a Edge);
@@ -166,68 +164,36 @@ impl GraphDB {
             removed_nodes: HashSet::new(),
             topology_dirty: false,
             v2_hydrate_warning: None,
-            hydrate_diagnostics: crate::diagnostics::HydrateDiagnostics::default(),
         }
     }
 
     fn open_inner(db_path: &Path) -> Result<Self> {
         Self::ensure_redb_tables(db_path)?;
 
-        let mut pending_hydrate_diagnostics = crate::diagnostics::HydrateDiagnostics::default();
-
-        // 检测 v2 layout 可读性：read_v2_layout 报错/返回 None 均视为一次 V2_LAYOUT_UNREADABLE，
-        // 与后续 v1 hydrate 的细粒度计数并行记录（不折叠）。
-        let v2_layout_probe = crate::graph_redb_v2::read_v2_layout(db_path);
-        let v2_layout_had_error = matches!(&v2_layout_probe, Err(_));
-        if v2_layout_had_error {
-            pending_hydrate_diagnostics.v2_layout_unreadable = 1;
-        }
-
         // M56：v2 shadow 为 Stale 时跳过 v2，从增量更新后的 v1 hydrate；
         // Current 或旧库无记录（视为 Current，向后兼容）时维持 v2 优先。
         if crate::graph_redb_v2::read_v2_shadow_state(db_path)?
             != crate::graph_redb_v2::V2ShadowState::Stale
         {
-            if let Ok(Some(layout)) = v2_layout_probe {
+            if let Ok(Some(layout)) = crate::graph_redb_v2::read_v2_layout(db_path) {
                 match crate::graph_redb_v2::hydrate_graph_from_v2(
                     &layout,
                     &db_path.to_string_lossy(),
                 ) {
-                    Ok(mut graph) => {
-                        graph.hydrate_diagnostics = pending_hydrate_diagnostics;
-                        return Ok(graph);
-                    }
+                    Ok(graph) => return Ok(graph),
                     Err(error) => {
                         // v2 hydrate 失败时 fallback v1（始终正确），但记录诊断供调用方上报
                         let mut graph = Self::open_inner_v1(db_path)?;
                         graph.v2_hydrate_warning = Some(format!(
                             "v2 shadow hydrate failed, fell back to v1: {error:#}"
                         ));
-                        if graph.hydrate_diagnostics.v2_hydrate_warning.is_none() {
-                            graph.hydrate_diagnostics.v2_hydrate_warning =
-                                graph.v2_hydrate_warning.clone();
-                        }
-                        if graph.hydrate_diagnostics.v2_layout_unreadable == 0
-                            && pending_hydrate_diagnostics.v2_layout_unreadable > 0
-                        {
-                            graph.hydrate_diagnostics.v2_layout_unreadable =
-                                pending_hydrate_diagnostics.v2_layout_unreadable;
-                        }
                         return Ok(graph);
                     }
                 }
             }
         }
 
-        let mut graph = Self::open_inner_v1(db_path)?;
-        // 合并未通过 v2 路径的 v2_layout 探针诊断
-        if graph.hydrate_diagnostics.v2_layout_unreadable == 0
-            && pending_hydrate_diagnostics.v2_layout_unreadable > 0
-        {
-            graph.hydrate_diagnostics.v2_layout_unreadable =
-                pending_hydrate_diagnostics.v2_layout_unreadable;
-        }
-        Ok(graph)
+        Self::open_inner_v1(db_path)
     }
 
     /// 确保 redb 基础表存在。
@@ -252,70 +218,33 @@ impl GraphDB {
 
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
-        let mut hydrate_diagnostics = crate::diagnostics::HydrateDiagnostics::default();
 
         let read_txn = db.begin_read()?;
         let nodes_table = read_txn.open_table(NODES_TABLE)?;
         for item in nodes_table.iter()? {
             let (key, value) = item?;
             let id = key.value();
-            match serde_json::from_slice::<Node>(value.value().as_slice()) {
-                Ok(node) => {
-                    let idx = graph.add_node(node);
-                    node_indices.insert(id.to_string(), idx);
-                }
-                Err(_) => {
-                    hydrate_diagnostics.node_decode_failed += 1;
-                    if hydrate_diagnostics.sample_node_location.is_none() {
-                        hydrate_diagnostics.sample_node_location = Some(crate::output::Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: Some(id.to_string()),
-                            json_path: None,
-                        });
-                    }
-                }
+            if let Ok(node) = serde_json::from_slice::<Node>(value.value().as_slice()) {
+                let idx = graph.add_node(node);
+                node_indices.insert(id.to_string(), idx);
             }
         }
 
         let mut seen_edges: HashSet<(String, String, EdgeType, Option<String>)> = HashSet::new();
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
-            let (key, value) = item?;
-            let raw_key = key.value().to_string();
-            match serde_json::from_slice::<Edge>(value.value().as_slice()) {
-                Ok(edge) => {
-                    if let (Some(&from_idx), Some(&to_idx)) =
-                        (node_indices.get(&edge.from), node_indices.get(&edge.to))
-                    {
-                        graph.add_edge(from_idx, to_idx, edge.clone());
-                        seen_edges.insert((
-                            edge.from.clone(),
-                            edge.to.clone(),
-                            edge.edge_type.clone(),
-                            edge.field_path.clone(),
-                        ));
-                    } else {
-                        hydrate_diagnostics.dangling_edge += 1;
-                        if hydrate_diagnostics.sample_dangling_location.is_none() {
-                            hydrate_diagnostics.sample_dangling_location =
-                                Some(crate::output::Location {
-                                    source_file: Some(db_path.to_string_lossy().to_string()),
-                                    node_id: Some(edge.from.clone()),
-                                    json_path: Some(raw_key.clone()),
-                                });
-                        }
-                    }
-                }
-                Err(_) => {
-                    hydrate_diagnostics.edge_decode_failed += 1;
-                    if hydrate_diagnostics.sample_edge_location.is_none() {
-                        hydrate_diagnostics.sample_edge_location = Some(crate::output::Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: Some(raw_key.clone()),
-                        });
-                    }
-                }
+            let (_, value) = item?;
+            if let Ok(edge) = serde_json::from_slice::<Edge>(value.value().as_slice())
+                && let (Some(&from_idx), Some(&to_idx)) =
+                    (node_indices.get(&edge.from), node_indices.get(&edge.to))
+            {
+                graph.add_edge(from_idx, to_idx, edge.clone());
+                seen_edges.insert((
+                    edge.from.clone(),
+                    edge.to.clone(),
+                    edge.edge_type.clone(),
+                    edge.field_path.clone(),
+                ));
             }
         }
 
@@ -329,7 +258,6 @@ impl GraphDB {
             removed_nodes: HashSet::new(),
             topology_dirty: false,
             v2_hydrate_warning: None,
-            hydrate_diagnostics,
         })
     }
 
@@ -338,11 +266,6 @@ impl GraphDB {
     /// 调用方可据此决定是否上报 diagnostic；`None` 表示 v2 hydrate 正常或未尝试。
     pub fn v2_hydrate_warning(&self) -> Option<&str> {
         self.v2_hydrate_warning.as_deref()
-    }
-
-    /// 读取 hydrate 结构化诊断统计
-    pub fn hydrate_diagnostics(&self) -> &crate::diagnostics::HydrateDiagnostics {
-        &self.hydrate_diagnostics
     }
 
     /// 检查图数据库状态，返回结构化 AiOutput（不 panic）
@@ -369,13 +292,13 @@ impl GraphDB {
                     node_id: None,
                     json_path: None,
                 },
-                suggestion: Some(,
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
+                suggestion: Some(
                     "Run metadata-checker --project-dir <DIR> --build-graph to create it"
                         .to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
@@ -406,13 +329,13 @@ impl GraphDB {
                         node_id: None,
                         json_path: None,
                     },
-                    suggestion: Some(,
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
+                    suggestion: Some(
                         "Wait for other process to finish, or use a different --graph-db-path"
                             .to_string(),
                     ),
+                    count: None,
+                    answer_impact: None,
+                    first_seen_phase: None,
                 });
                 out.next_queries.push(format_next_query(
                     "metadata-checker --graph-db-path {} --graph-lock-timeout-ms <MS>",
@@ -452,13 +375,13 @@ impl GraphDB {
                             node_id: None,
                             json_path: None,
                         },
-                        suggestion: Some(,
-                        count: None,
-                        answer_impact: None,
-                        first_seen_phase: None,
+                        suggestion: Some(
                             "Wait for other process to finish, or use a different --graph-db-path"
                                 .to_string(),
                         ),
+                        count: None,
+                        answer_impact: None,
+                        first_seen_phase: None,
                     });
                 } else if msg.contains("permission")
                     || msg.contains("denied")
@@ -474,13 +397,13 @@ impl GraphDB {
                                 node_id: None,
                                 json_path: None,
                             },
-                            suggestion: Some(,
-                            count: None,
-                            answer_impact: None,
-                            first_seen_phase: None,
+                            suggestion: Some(
                                 "redb requires write access even for read. Copy to a writable path with --graph-db-path"
                                     .to_string(),
                             ),
+                            count: None,
+                            answer_impact: None,
+                            first_seen_phase: None,
                         });
                     } else {
                         out.diagnostics.push(Diagnostic {
@@ -492,12 +415,12 @@ impl GraphDB {
                                 node_id: None,
                                 json_path: None,
                             },
-                            suggestion: Some(,
+                            suggestion: Some(
+                                "Use --graph-db-path pointing to a writable directory".to_string(),
+                            ),
                             count: None,
                             answer_impact: None,
                             first_seen_phase: None,
-                                "Use --graph-db-path pointing to a writable directory".to_string(),
-                            ),
                         });
                     }
                 } else {
@@ -543,13 +466,13 @@ impl GraphDB {
                     node_id: None,
                     json_path: None,
                 },
-                suggestion: Some(,
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
+                suggestion: Some(
                     "Run metadata-checker --project-dir <DIR> --build-graph to create it"
                         .to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
@@ -583,13 +506,13 @@ impl GraphDB {
                             node_id: None,
                             json_path: None,
                         },
-                        suggestion: Some(,
-                        count: None,
-                        answer_impact: None,
-                        first_seen_phase: None,
+                        suggestion: Some(
                             "Use --graph-db-path to a separate path, wait for other process, or increase --graph-lock-timeout-ms"
                                 .to_string(),
                         ),
+                        count: None,
+                        answer_impact: None,
+                        first_seen_phase: None,
                     });
                     out.next_queries.push(format_next_query(
                         "metadata-checker --project-dir <DIR> --query-model <MODEL> --graph-db-path {} --graph-lock-timeout-ms 30000",
@@ -608,12 +531,12 @@ impl GraphDB {
                             node_id: None,
                             json_path: None,
                         },
-                        suggestion: Some(,
+                        suggestion: Some(
+                            "Use --graph-db-path pointing to a writable directory".to_string(),
+                        ),
                         count: None,
                         answer_impact: None,
                         first_seen_phase: None,
-                            "Use --graph-db-path pointing to a writable directory".to_string(),
-                        ),
                     });
                 } else {
                     out.diagnostics.push(Diagnostic {
@@ -680,70 +603,33 @@ impl GraphDB {
     fn load_from_db(db: Database, db_path: &Path) -> Result<Self> {
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
-        let mut hydrate_diagnostics = crate::diagnostics::HydrateDiagnostics::default();
 
         let read_txn = db.begin_read()?;
         let nodes_table = read_txn.open_table(NODES_TABLE)?;
         for item in nodes_table.iter()? {
             let (key, value) = item?;
             let id = key.value();
-            match serde_json::from_slice::<Node>(value.value().as_slice()) {
-                Ok(node) => {
-                    let idx = graph.add_node(node);
-                    node_indices.insert(id.to_string(), idx);
-                }
-                Err(_) => {
-                    hydrate_diagnostics.node_decode_failed += 1;
-                    if hydrate_diagnostics.sample_node_location.is_none() {
-                        hydrate_diagnostics.sample_node_location = Some(crate::output::Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: Some(id.to_string()),
-                            json_path: None,
-                        });
-                    }
-                }
+            if let Ok(node) = serde_json::from_slice::<Node>(value.value().as_slice()) {
+                let idx = graph.add_node(node);
+                node_indices.insert(id.to_string(), idx);
             }
         }
 
         let mut seen_edges: HashSet<(String, String, EdgeType, Option<String>)> = HashSet::new();
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
-            let (key, value) = item?;
-            let raw_key = key.value().to_string();
-            match serde_json::from_slice::<Edge>(value.value().as_slice()) {
-                Ok(edge) => {
-                    if let (Some(&from_idx), Some(&to_idx)) =
-                        (node_indices.get(&edge.from), node_indices.get(&edge.to))
-                    {
-                        graph.add_edge(from_idx, to_idx, edge.clone());
-                        seen_edges.insert((
-                            edge.from.clone(),
-                            edge.to.clone(),
-                            edge.edge_type.clone(),
-                            edge.field_path.clone(),
-                        ));
-                    } else {
-                        hydrate_diagnostics.dangling_edge += 1;
-                        if hydrate_diagnostics.sample_dangling_location.is_none() {
-                            hydrate_diagnostics.sample_dangling_location =
-                                Some(crate::output::Location {
-                                    source_file: Some(db_path.to_string_lossy().to_string()),
-                                    node_id: Some(edge.from.clone()),
-                                    json_path: Some(raw_key.clone()),
-                                });
-                        }
-                    }
-                }
-                Err(_) => {
-                    hydrate_diagnostics.edge_decode_failed += 1;
-                    if hydrate_diagnostics.sample_edge_location.is_none() {
-                        hydrate_diagnostics.sample_edge_location = Some(crate::output::Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: Some(raw_key.clone()),
-                        });
-                    }
-                }
+            let (_, value) = item?;
+            if let Ok(edge) = serde_json::from_slice::<Edge>(value.value().as_slice())
+                && let (Some(&from_idx), Some(&to_idx)) =
+                    (node_indices.get(&edge.from), node_indices.get(&edge.to))
+            {
+                graph.add_edge(from_idx, to_idx, edge.clone());
+                seen_edges.insert((
+                    edge.from.clone(),
+                    edge.to.clone(),
+                    edge.edge_type.clone(),
+                    edge.field_path.clone(),
+                ));
             }
         }
 
@@ -757,7 +643,6 @@ impl GraphDB {
             removed_nodes: HashSet::new(),
             topology_dirty: false,
             v2_hydrate_warning: None,
-            hydrate_diagnostics,
         })
     }
 

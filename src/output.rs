@@ -264,7 +264,6 @@ pub fn print_summary_to(
                 message: "Cycle dependencies detected".to_string(),
                 location: crate::output::Location::new(),
                 suggestion: Some("Check component expressions for circular references".to_string()),
-            
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
@@ -276,7 +275,6 @@ pub fn print_summary_to(
                 message: "No cycles detected".to_string(),
                 location: crate::output::Location::new(),
                 suggestion: None,
-            
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
@@ -292,11 +290,10 @@ pub fn print_summary_to(
                     suggestion: Some(
                         "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
                     ),
-                
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+                    count: None,
+                    answer_impact: None,
+                    first_seen_phase: None,
+                });
             }
         }
 
@@ -448,7 +445,6 @@ pub fn print_non_human_to(
                 message: "Cycle dependencies detected".to_string(),
                 location: crate::output::Location::new(),
                 suggestion: Some("Check component expressions for circular references".to_string()),
-            
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
@@ -460,7 +456,6 @@ pub fn print_non_human_to(
                 message: "No cycles detected".to_string(),
                 location: crate::output::Location::new(),
                 suggestion: None,
-            
                 count: None,
                 answer_impact: None,
                 first_seen_phase: None,
@@ -476,11 +471,10 @@ pub fn print_non_human_to(
                     suggestion: Some(
                         "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
                     ),
-                
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+                    count: None,
+                    answer_impact: None,
+                    first_seen_phase: None,
+                });
             }
         }
 

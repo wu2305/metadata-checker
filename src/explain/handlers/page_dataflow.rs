@@ -200,11 +200,10 @@ pub(in crate::explain) fn explain_page_graph(
             message: "Page has no detected user entrypoints".to_string(),
             location: crate::output::Location::new(),
             suggestion: Some("Page may be read-only or actions not yet parsed".to_string()),
-        
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
+        });
     }
     diagnostics.push(crate::output::Diagnostic {
         severity: crate::output::DiagnosticSeverity::Info,
@@ -214,11 +213,10 @@ pub(in crate::explain) fn explain_page_graph(
         suggestion: Some(
             "Check --context or --query-dataflow for upstream relationships".to_string(),
         ),
-    
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+        count: None,
+        answer_impact: None,
+        first_seen_phase: None,
+    });
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(node.id.clone());
@@ -521,11 +519,10 @@ pub(in crate::explain) fn explain_dataflow_graph(
             message: "DataFlow internal topology not available".to_string(),
             location: crate::output::Location::new(),
             suggestion: Some("Check if dataFlow.nodes exists in .tbl metadata".to_string()),
-        
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
+        });
     }
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);

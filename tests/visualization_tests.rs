@@ -168,11 +168,10 @@ fn test_error_envelope_generates_diagnostic_only_graph() {
         message: "Target 'page:missing' not found".to_string(),
         location: Location::default(),
         suggestion: Some("Check the target ID".to_string()),
-    
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+        count: None,
+        answer_impact: None,
+        first_seen_phase: None,
+    });
 
     let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());
     assert!(

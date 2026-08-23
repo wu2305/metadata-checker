@@ -57,13 +57,13 @@ impl AiOutput {
                 message: "Summary contains claims but no structured evidence was generated"
                     .to_string(),
                 location: Location::default(),
-                suggestion: Some(,
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
+                suggestion: Some(
                     "Use --detail for manual verification, and treat conclusions as low confidence"
                         .to_string(),
                 ),
+                count: None,
+                answer_impact: None,
+                first_seen_phase: None,
             });
         }
         out
@@ -164,6 +164,8 @@ pub enum Confidence {
 /// 维护者的（"Check if this action type is supported by metadata-checker"），消费输出
 /// 的模型从中读不出这条诊断对结论意味着什么。影响只由 code 决定，所以由序列化统一
 /// 补齐，而不是让上百处构造点各写一遍。
+#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 /// 统一诊断信封字段（M58.3 Phase 1）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticEnvelopeMeta {
@@ -174,7 +176,6 @@ pub struct DiagnosticEnvelopeMeta {
     pub first_seen_phase: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
     pub code: String,
@@ -251,6 +252,13 @@ impl Serialize for Diagnostic {
         state.end()
     }
 }
+
+/// 诊断严重级别
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DiagnosticSeverity {
+    Error,
+    Warning,
 
 /// 诊断严重级别
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -406,10 +414,7 @@ pub fn build_target_not_found_output(
         code: "TARGET_NOT_FOUND".to_string(),
         message: format!("Target '{}' not found in graph", target_id),
         location: Location::default(),
-        suggestion: if candidates.is_empty() {,
-        count: None,
-        answer_impact: None,
-        first_seen_phase: None,
+        suggestion: if candidates.is_empty() {
             Some(format!(
                 "Verify the target ID or use {} to search globally",
                 find_cmd.replace("{}", "<keyword>")
@@ -417,6 +422,9 @@ pub fn build_target_not_found_output(
         } else {
             Some("Did you mean one of the candidate targets below?".to_string())
         },
+        count: None,
+        answer_impact: None,
+        first_seen_phase: None,
     });
 
     for (node, _) in candidates {

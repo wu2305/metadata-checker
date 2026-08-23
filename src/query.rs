@@ -685,9 +685,6 @@ pub fn resolve_model_in_page(
                 json_path: None,
             },
             suggestion: Some("Use --explain <MODEL_ID> to verify specific model".to_string()),
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
         });
         for (n, _, _) in &candidates {
             output
