@@ -7,6 +7,8 @@
 > Plan（当前）：[2026-08-23-m58-2-llmops-eval-loop-plan.md](../../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)（approved；LLMOps 闭环，kimi-code 浮动）
 > Spec（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md](../../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)（approved；确定性图召回对比）
 > Plan（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md](../../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（approved）
+> Spec（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-design.md](../../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)（approved）
+> Plan（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-plan.md](../../plans/2026-08-23-m58-4-llm-paired-benefit-plan.md)（approved）
 
 ## 冻结公告（2026-08-09）
 
@@ -98,6 +100,26 @@ browser-wasm check 与 `git diff --check` 均通过。
 
 结论为 **deterministic go**，不是产品 go。代码未接公共查询、未接 semantic seed、
 未跑 LLM paired variants；真实项目与 `tool_assisted_quality` 增益仍未验证。
+
+#### Phase B：LLM 回答收益配对验证（active，2026-08-23）
+
+用户进一步要求在 CNB 环境复用 Pipeline 与已有 token，直接验证 LLM 最终回答收益。设计
+固定为同一次 build 的 6 个 smoke case、baseline / typed_ppr 两组、每组 3 次独立 trial，
+共 36 条 agent transcript 和 36 次独立 judge。
+
+这不是给现有结果换 variant 标签。typed_ppr 必须通过 cli-local runtime 开关实际调用
+typed PPR，并把非 seed 排名节点作为既有 path finder 的 bridge anchors；最终事实仍由
+path/evidence 证明。每条 record 另外记录 transcript 是否真实出现
+experimental_graph_retrieval，baseline 出现该字段直接视为污染，typed 未出现则保留在
+固定分母中作为未曝光诊断。
+
+主指标为按 variant 固定分母的 tool_assisted_quality，同时报告 answer quality、tool
+adherence、retrieval exposure，以及同一 (case_id, trial) 的 fail→pass /
+pass→fail / pass→pass / fail→fail。完整设计见 [Phase B spec](../../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)，执行步骤见
+[Phase B plan](../../plans/2026-08-23-m58-4-llm-paired-benefit-plan.md)。
+
+本轮所有源码、Pipeline、测试和 live 请求继续只在 CNB 远端执行。token 仅由 Pipeline
+环境消费，不读取、不打印、不归档。
 
 本地 fake runner 已覆盖 13 个 active `fixture_llm` case，覆盖 page/action/lineage/dataflow/navigation/diagnostic/context/condition 等任务族；每个 case 都有 `evaluation_dimensions`，并通过独立 trial、命令 loop、白名单拒绝、history 回传、AnswerJudge、RunReport、SSE 和 token 脱敏测试。历史真实 CNB smoke 曾由 `api_trigger_m58_llm` 执行：provider=`cnb-ai-chat`、model=`deepseek-v4-flash`、build=`cnb-54f-1juijih5i`、单 trial pass rate=`1.0`、failure classes 为空；它只证明当时三个 case 的一次端到端路径可用，不证明 Skill 的稳定理解或任务泛化。新的 live runner 默认每个 case 执行 3 个独立 trial，报告同时输出 `trial_pass_rate`、`case_stable_pass_rate` 和 `cases_with_flaky_trials`；只保留结构化摘要和脱敏 command trace，不归档 prompt、模型原文或 token。runtime contract preflight 的缺省回退与显式 override 已通过同一 live stage 验证。
 
