@@ -1,6 +1,5 @@
-use anyhow::Result;
 #[cfg(feature = "cli-local")]
-use crate::graph_redb::GraphDB;
+use anyhow::Result;
 #[cfg(feature = "cli-local")]
 use std::path::Path;
 
