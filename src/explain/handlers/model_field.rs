@@ -587,19 +587,18 @@ pub(in crate::explain) fn explain_field_graph(
             source_fields.push(format!("model:{}", model_ref));
         }
         if source_fields.is_empty() {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "LINEAGE_EXPR_UNPARSED".to_string(),
-                message: format!(
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "LINEAGE_EXPR_UNPARSED",
+                1,
+                crate::output::Location::new(),
+                format!(
                     "Expression '{}' could not be resolved to specific source fields",
                     expr
                 ),
-                location: crate::output::Location::new(),
-                suggestion: Some("Check if expression parser supports this syntax".to_string()),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+            );
+            diag.severity = crate::output::DiagnosticSeverity::Info;
+            diag.suggestion = Some("Check if expression parser supports this syntax".to_string());
+            diagnostics.push(diag);
         }
         lineage.push(serde_json::json!({
             "target_field": node.id,
@@ -847,18 +846,17 @@ pub(in crate::explain) fn explain_field_graph(
     }
 
     if lineage.is_empty() {
-        diagnostics.push(crate::output::Diagnostic {
-            severity: crate::output::DiagnosticSeverity::Info,
-            code: "LINEAGE_SOURCE_MISSING".to_string(),
-            message: format!("Field {} has no traceable source lineage", node.id),
-            location: crate::output::Location::new(),
-            suggestion: Some(
-                "Check dimensions[].inputField or dimensions[].exp metadata".to_string(),
-            ),
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
-        });
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "LINEAGE_SOURCE_MISSING",
+            1,
+            crate::output::Location::new(),
+            format!("Field {} has no traceable source lineage", node.id),
+        );
+        diag.severity = crate::output::DiagnosticSeverity::Info;
+        diag.suggestion = Some(
+            "Check dimensions[].inputField or dimensions[].exp metadata".to_string(),
+        );
+        diagnostics.push(diag);
     }
 
     let what = if det_count > 0 {

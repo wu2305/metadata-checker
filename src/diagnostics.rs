@@ -75,127 +75,72 @@ impl HydrateDiagnostics {
     /// 转为结构化 Diagnostic 列表（按 code 去重，每类一条，带 count 与 sample_location）
     pub fn to_diagnostics(&self) -> Vec<Diagnostic> {
         let mut out = Vec::new();
+        if self.has_partial_loss() {
+            let total = self.node_decode_failed + self.edge_decode_failed + self.dangling_edge;
+            out.push(envelope_diagnostic(
+                CODE_GRAPH_DB_PARTIAL_HYDRATE,
+                total,
+                self.sample_node_location
+                    .clone()
+                    .or_else(|| self.sample_edge_location.clone())
+                    .or_else(|| self.sample_dangling_location.clone())
+                    .unwrap_or_default(),
+                format!(
+                    "GraphDB partial hydrate: {} rows lost (node {} / edge {} / dangling {})",
+                    total, self.node_decode_failed, self.edge_decode_failed, self.dangling_edge
+                ),
+            ));
+        }
         if self.node_decode_failed > 0 {
-            out.push(
-                Diagnostic {
-                    severity: severity_for(CODE_GRAPH_DB_NODE_DECODE_FAILED),
-                    code: CODE_GRAPH_DB_NODE_DECODE_FAILED.to_string(),
-                    message: format!(
-                        "GraphDB hydrate: {} node rows failed to decode",
-                        self.node_decode_failed
-                    ),
-                    location: self.sample_node_location.clone().unwrap_or_default(),
-                    suggestion: Some("Rebuild graphdb with --build-graph".to_string()),
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
-                }
-                .with_count(self.node_decode_failed)
-                .with_answer_impact(answer_impact_for(CODE_GRAPH_DB_NODE_DECODE_FAILED))
-                .with_first_seen_phase(PHASE_PR1),
-            );
+            out.push(envelope_diagnostic(
+                CODE_GRAPH_DB_NODE_DECODE_FAILED,
+                self.node_decode_failed,
+                self.sample_node_location.clone().unwrap_or_default(),
+                format!(
+                    "GraphDB hydrate: {} node rows failed to decode",
+                    self.node_decode_failed
+                ),
+            ));
         }
         if self.edge_decode_failed > 0 {
-            out.push(
-                Diagnostic {
-                    severity: severity_for(CODE_GRAPH_DB_EDGE_DECODE_FAILED),
-                    code: CODE_GRAPH_DB_EDGE_DECODE_FAILED.to_string(),
-                    message: format!(
-                        "GraphDB hydrate: {} edge rows failed to decode",
-                        self.edge_decode_failed
-                    ),
-                    location: self.sample_edge_location.clone().unwrap_or_default(),
-                    suggestion: Some("Rebuild graphdb with --build-graph".to_string()),
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
-                }
-                .with_count(self.edge_decode_failed)
-                .with_answer_impact(answer_impact_for(CODE_GRAPH_DB_EDGE_DECODE_FAILED))
-                .with_first_seen_phase(PHASE_PR1),
-            );
+            out.push(envelope_diagnostic(
+                CODE_GRAPH_DB_EDGE_DECODE_FAILED,
+                self.edge_decode_failed,
+                self.sample_edge_location.clone().unwrap_or_default(),
+                format!(
+                    "GraphDB hydrate: {} edge rows failed to decode",
+                    self.edge_decode_failed
+                ),
+            ));
         }
         if self.dangling_edge > 0 {
-            out.push(
-                Diagnostic {
-                    severity: severity_for(CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT),
-                    code: CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT.to_string(),
-                    message: format!(
-                        "GraphDB hydrate: {} edges have dangling endpoints and were dropped",
-                        self.dangling_edge
-                    ),
-                    location: self.sample_dangling_location.clone().unwrap_or_default(),
-                    suggestion: Some("Rebuild graphdb with --build-graph".to_string()),
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
-                }
-                .with_count(self.dangling_edge)
-                .with_answer_impact(answer_impact_for(CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT))
-                .with_first_seen_phase(PHASE_PR1),
-            );
+            out.push(envelope_diagnostic(
+                CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT,
+                self.dangling_edge,
+                self.sample_dangling_location.clone().unwrap_or_default(),
+                format!(
+                    "GraphDB hydrate: {} edges have dangling endpoints and were dropped",
+                    self.dangling_edge
+                ),
+            ));
         }
         if self.v2_layout_unreadable > 0 {
-            out.push(
-                Diagnostic {
-                    severity: severity_for(CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE),
-                    code: CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE.to_string(),
-                    message: "GraphDB v2 layout unreadable, fell back to v1".to_string(),
-                    location: Location::default(),
-                    suggestion: Some("Rebuild graphdb to refresh v2 shadow".to_string()),
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
-                }
-                .with_count(self.v2_layout_unreadable)
-                .with_answer_impact(answer_impact_for(CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE))
-                .with_first_seen_phase(PHASE_PR1),
-            );
+            out.push(envelope_diagnostic(
+                CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE,
+                self.v2_layout_unreadable,
+                Location::default(),
+                "GraphDB v2 layout unreadable, fell back to v1",
+            ));
         }
         if let Some(warning) = &self.v2_hydrate_warning {
             if self.v2_layout_unreadable == 0 {
-                out.push(
-                    Diagnostic {
-                        severity: severity_for(CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE),
-                        code: CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE.to_string(),
-                        message: warning.clone(),
-                        location: Location::default(),
-                        suggestion: Some("Rebuild graphdb to refresh v2 shadow".to_string()),
-                        count: None,
-                        answer_impact: None,
-                        first_seen_phase: None,
-                    }
-                    .with_count(1)
-                    .with_answer_impact(answer_impact_for(CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE))
-                    .with_first_seen_phase(PHASE_PR1),
-                );
+                out.push(envelope_diagnostic(
+                    CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE,
+                    1,
+                    Location::default(),
+                    warning.clone(),
+                ));
             }
-        }
-        if self.has_partial_loss() {
-            let total = self.node_decode_failed + self.edge_decode_failed + self.dangling_edge;
-            out.push(
-                Diagnostic {
-                    severity: severity_for(CODE_GRAPH_DB_PARTIAL_HYDRATE),
-                    code: CODE_GRAPH_DB_PARTIAL_HYDRATE.to_string(),
-                    message: format!(
-                        "GraphDB partial hydrate: {} rows lost (node {} / edge {} / dangling {})",
-                        total, self.node_decode_failed, self.edge_decode_failed, self.dangling_edge
-                    ),
-                    location: self
-                        .sample_node_location
-                        .clone()
-                        .or_else(|| self.sample_edge_location.clone())
-                        .or_else(|| self.sample_dangling_location.clone())
-                        .unwrap_or_default(),
-                    suggestion: Some("Answers may be incomplete; rebuild graphdb".to_string()),
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
-                }
-                .with_count(total)
-                .with_answer_impact(answer_impact_for(CODE_GRAPH_DB_PARTIAL_HYDRATE))
-                .with_first_seen_phase(PHASE_PR1),
-            );
         }
         out
     }
@@ -214,11 +159,8 @@ pub fn envelope_diagnostic(
         message: message.into(),
         location: sample_location,
         suggestion: None,
-        count: None,
-        answer_impact: None,
-        first_seen_phase: None,
+        count: Some(count),
+        answer_impact: Some(answer_impact_for(code).to_string()),
+        first_seen_phase: Some(PHASE_PR1.to_string()),
     }
-    .with_count(count)
-    .with_answer_impact(answer_impact_for(code))
-    .with_first_seen_phase(PHASE_PR1)
 }

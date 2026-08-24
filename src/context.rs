@@ -480,21 +480,21 @@ pub fn build_context_output(
                 related_components.len()
             ));
         }
-        diagnostics.push(crate::output::Diagnostic {
-            severity: crate::output::DiagnosticSeverity::Info,
-            code: "OUTPUT_TRUNCATED".to_string(),
-            message: format!(
-                "Output truncated due to budget '{}': {}",
-                budget,
-                truncated_cats.join(", ")
-            ),
-            location: crate::output::Location::new(),
-            suggestion: Some(
-                "Use --budget full or increase --depth to see more relations".to_string(),
-            ),
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
+        diagnostics.push({
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "OUTPUT_TRUNCATED",
+                1,
+                crate::output::Location::new(),
+                format!(
+                    "Output truncated due to budget '{}': {}",
+                    budget,
+                    truncated_cats.join(", ")
+                ),
+            );
+            diag.severity = crate::output::DiagnosticSeverity::Info;
+            diag.suggestion =
+                Some("Use --budget full or increase --depth to see more relations".to_string());
+            diag
         });
     }
 

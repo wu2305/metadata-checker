@@ -33,15 +33,25 @@ fn collect_component_contexts(
     value: &serde_json::Value,
 ) -> std::collections::HashMap<String, ComponentContext> {
     let mut contexts = std::collections::HashMap::new();
+    // 解析路径只消费组件上下文；扫描诊断由 scan_raw_diagnostics 对同一份原始 JSON
+    // 单独遍历采集（PR2 形态感知递归落地后统一为单次遍历）。
+    let mut diags = ScanDiagnostics::default();
     if let Some(canvas) = value.get("canvas") {
-        collect_component_contexts_inner(canvas, "canvas", None, &mut contexts);
+        collect_component_contexts_inner_with_context_and_diagnostics(
+            canvas,
+            "canvas",
+            None,
+            None,
+            &mut contexts,
+            &mut diags,
+        );
     }
     contexts
 }
 
-/// 测试用：对原始 canvas 额外产出扫描诊断
+/// 对原始 SPG JSON 采集扫描诊断计数（未识别容器键 / 重复组件 id）。
 #[cfg(any(test, feature = "cli-local"))]
-pub fn scan_diagnostics_for_test(value: &serde_json::Value) -> Vec<crate::output::Diagnostic> {
+pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
     let mut diags = ScanDiagnostics::default();
     if let Some(canvas) = value.get("canvas") {
         collect_component_contexts_inner_with_context_and_diagnostics(
@@ -53,17 +63,29 @@ pub fn scan_diagnostics_for_test(value: &serde_json::Value) -> Vec<crate::output
             &mut diags,
         );
     }
-    diags.to_diagnostics()
+    diags
 }
 
-fn collect_component_contexts_inner(
-    node: &serde_json::Value,
-    json_path: &str,
-    parent_id: Option<String>,
-    contexts: &mut std::collections::HashMap<String, ComponentContext>,
-) {
-    collect_component_contexts_inner_with_context(node, json_path, parent_id, None, contexts);
+/// 对原始 SPG JSON 采集扫描诊断（未识别容器键 / 重复组件 id）。
+///
+/// 生产路径由 indexer 的 `collect_scanner_diagnostics` 调用，集成测试亦直接使用。
+#[cfg(any(test, feature = "cli-local"))]
+pub fn scan_raw_diagnostics(value: &serde_json::Value) -> Vec<crate::output::Diagnostic> {
+    scan_raw_counts(value).to_diagnostics()
 }
+
+/// 已知非组件容器键的排除列表（不计入未识别容器键诊断）。
+///
+/// 包含真实语料中不带行为证据的样式/字段容器（附录 A 登记的四键）与动作容器
+/// `actions`（`tests/fixtures/test_project` 实测会误报 21 次），仅保留形态感知递归前的
+/// 最小安全网，待 PR2 形态感知递归落地后由更精确的判定替代。
+const SCANNER_EXCLUDED_CONTAINER_KEYS: &[&str] = &[
+    "actions",
+    "effectStyles",
+    "conditionStyles",
+    "labelFields",
+    "stateFields",
+];
 
 /// 扫描阶段的轻量诊断计数（PR1 落地，未识别容器键/重复组件 id）。
 #[derive(Debug, Default, Clone)]
@@ -75,6 +97,19 @@ pub(crate) struct ScanDiagnostics {
 }
 
 impl ScanDiagnostics {
+    /// 合并另一份计数（跨文件聚合；样本位置保留首个非空）。
+    #[cfg(any(test, feature = "cli-local"))]
+    pub(crate) fn merge(&mut self, other: &ScanDiagnostics) {
+        self.unrecognized_container_key += other.unrecognized_container_key;
+        self.duplicate_component_id += other.duplicate_component_id;
+        if self.sample_unrecognized_location.is_none() {
+            self.sample_unrecognized_location = other.sample_unrecognized_location.clone();
+        }
+        if self.sample_duplicate_location.is_none() {
+            self.sample_duplicate_location = other.sample_duplicate_location.clone();
+        }
+    }
+
     pub(crate) fn to_diagnostics(&self) -> Vec<crate::output::Diagnostic> {
         let mut out = Vec::new();
         if self.unrecognized_container_key > 0 {
@@ -106,25 +141,6 @@ impl ScanDiagnostics {
         }
         out
     }
-}
-
-fn collect_component_contexts_inner_with_context(
-    node: &serde_json::Value,
-    json_path: &str,
-    parent_id: Option<String>,
-    inherited_context: Option<ComponentContext>,
-    contexts: &mut std::collections::HashMap<String, ComponentContext>,
-) {
-    // 兼容历史调用方：诊断在更高层聚合，这里用一次性计数
-    let mut diags = ScanDiagnostics::default();
-    collect_component_contexts_inner_with_context_and_diagnostics(
-        node,
-        json_path,
-        parent_id,
-        inherited_context,
-        contexts,
-        &mut diags,
-    );
 }
 
 fn collect_component_contexts_inner_with_context_and_diagnostics(
@@ -210,10 +226,13 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
         }
     }
     // 现有白名单路径之外的未知子键：遇到非空数组且元素为对象时计入 SCANNER_UNRECOGNIZED_CONTAINER_KEY
-    //（PR2 形态感知递归前的安全网）
+    //（PR2 形态感知递归前的安全网，排除列表已过滤已知非组件键）
     if let Some(obj) = node.as_object() {
         for (key, value) in obj {
-            if ["components", "panels", "steps", "comps", "id", "type"].contains(&key.as_str()) {
+            if SCANNER_EXCLUDED_CONTAINER_KEYS.contains(&key.as_str())
+                || ["components", "panels", "steps", "comps", "id", "type"]
+                    .contains(&key.as_str())
+            {
                 continue;
             }
             if let Some(arr) = value.as_array() {

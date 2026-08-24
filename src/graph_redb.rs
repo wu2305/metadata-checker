@@ -9,7 +9,7 @@ use crate::graph_store::{
     GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
 };
 use crate::output::schema::{
-    AiOutput, Confidence, Diagnostic, DiagnosticSeverity, Evidence, Location, OutputKind,
+    AiOutput, Confidence, DiagnosticSeverity, Evidence, Location, OutputKind,
     format_next_query,
 };
 use anyhow::{Context, Result};
@@ -360,20 +360,19 @@ impl GraphDB {
         out.query_target = Some(db_path.to_string_lossy().to_string());
 
         if !db_path.exists() {
-            out.diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Error,
-                code: "GRAPH_DB_NOT_FOUND".to_string(),
-                message: format!("Graph database not found at {:?}", db_path),
-                location: Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "GRAPH_DB_NOT_FOUND",
+                1,
+                Location {
                     source_file: Some(db_path.to_string_lossy().to_string()),
                     node_id: None,
                     json_path: None,
                 },
-                suggestion: Some("Run metadata-checker --project-dir <DIR> --build-graph to create it".to_string()),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+                format!("Graph database not found at {:?}", db_path),
+            );
+            diag.severity = DiagnosticSeverity::Error;
+            diag.suggestion = Some("Run metadata-checker --project-dir <DIR> --build-graph to create it".to_string());
+            out.diagnostics.push(diag);
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
                 &db_path.to_string_lossy(),
@@ -394,20 +393,19 @@ impl GraphDB {
         let _lock = match acquire_graph_lock(db_path) {
             Ok(l) => l,
             Err(e) => {
-                out.diagnostics.push(Diagnostic {
-                    severity: DiagnosticSeverity::Error,
-                    code: "GRAPH_DB_LOCKED".to_string(),
-                    message: format!("Cannot acquire graphdb lock: {}", e),
-                    location: Location {
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "GRAPH_DB_LOCKED",
+                    1,
+                    Location {
                         source_file: Some(db_path.to_string_lossy().to_string()),
                         node_id: None,
                         json_path: None,
                     },
-                    suggestion: Some("Wait for other process to finish, or use a different --graph-db-path".to_string()),
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
-                });
+                    format!("Cannot acquire graphdb lock: {}", e),
+                );
+                diag.severity = DiagnosticSeverity::Error;
+                diag.suggestion = Some("Wait for other process to finish, or use a different --graph-db-path".to_string());
+                out.diagnostics.push(diag);
                 out.next_queries.push(format_next_query(
                     "metadata-checker --graph-db-path {} --graph-lock-timeout-ms <MS>",
                     &db_path.to_string_lossy(),
@@ -437,69 +435,73 @@ impl GraphDB {
                     || msg.contains("already open")
                     || msg.contains("Cannot acquire")
                 {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_LOCKED".to_string(),
-                        message: format!("Graph database is locked by another process: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some("Wait for other process to finish, or use a different --graph-db-path".to_string()),
-                        count: None,
-                        answer_impact: None,
-                        first_seen_phase: None,
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_LOCKED",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Graph database is locked by another process: {}", msg),
+                        );
+                        diag.severity = DiagnosticSeverity::Error;
+                        diag.suggestion = Some("Wait for other process to finish, or use a different --graph-db-path".to_string());
+                        diag
                     });
                 } else if msg.contains("permission")
                     || msg.contains("denied")
                     || msg.contains("read-only")
                 {
                     if file_readable && !writable {
-                        out.diagnostics.push(Diagnostic {
-                            severity: DiagnosticSeverity::Info,
-                            code: "GRAPH_DB_READ_ONLY".to_string(),
-                            message: format!("Graph database file is read-only: {}", msg),
-                            location: Location {
-                                source_file: Some(db_path.to_string_lossy().to_string()),
-                                node_id: None,
-                                json_path: None,
-                            },
-                            suggestion: Some("redb requires write access even for read. Copy to a writable path with --graph-db-path".to_string()),
-                            count: None,
-                            answer_impact: None,
-                            first_seen_phase: None,
+                        out.diagnostics.push({
+                            let mut diag = crate::diagnostics::envelope_diagnostic(
+                                "GRAPH_DB_READ_ONLY",
+                                1,
+                                Location {
+                                    source_file: Some(db_path.to_string_lossy().to_string()),
+                                    node_id: None,
+                                    json_path: None,
+                                },
+                                format!("Graph database file is read-only: {}", msg),
+                            );
+                            diag.severity = DiagnosticSeverity::Info;
+                            diag.suggestion = Some("redb requires write access even for read. Copy to a writable path with --graph-db-path".to_string());
+                            diag
                         });
                     } else {
-                        out.diagnostics.push(Diagnostic {
-                            severity: DiagnosticSeverity::Error,
-                            code: "GRAPH_DB_PERMISSION_DENIED".to_string(),
-                            message: format!("Graph database permission denied: {}", msg),
-                            location: Location {
-                                source_file: Some(db_path.to_string_lossy().to_string()),
-                                node_id: None,
-                                json_path: None,
-                            },
-                            suggestion: Some("Use --graph-db-path pointing to a writable directory".to_string()),
-                            count: None,
-                            answer_impact: None,
-                            first_seen_phase: None,
+                        out.diagnostics.push({
+                            let mut diag = crate::diagnostics::envelope_diagnostic(
+                                "GRAPH_DB_PERMISSION_DENIED",
+                                1,
+                                Location {
+                                    source_file: Some(db_path.to_string_lossy().to_string()),
+                                    node_id: None,
+                                    json_path: None,
+                                },
+                                format!("Graph database permission denied: {}", msg),
+                            );
+                            diag.severity = DiagnosticSeverity::Error;
+                            diag.suggestion = Some("Use --graph-db-path pointing to a writable directory".to_string());
+                            diag
                         });
                     }
                 } else {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_OPEN_ERROR".to_string(),
-                        message: format!("Failed to open graph database: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some("Try --build-graph to rebuild".to_string()),
-                        count: None,
-                        answer_impact: None,
-                        first_seen_phase: None,
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_OPEN_ERROR",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Failed to open graph database: {}", msg),
+                        );
+                        diag.severity = DiagnosticSeverity::Error;
+                        diag.suggestion = Some("Try --build-graph to rebuild".to_string());
+                        diag
                     });
                 }
                 out.summary["needs_rebuild"] = serde_json::json!(true);
@@ -520,19 +522,20 @@ impl GraphDB {
                 }),
             );
             out.query_target = Some(db_path.to_string_lossy().to_string());
-            out.diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Error,
-                code: "GRAPH_DB_NOT_FOUND".to_string(),
-                message: format!("Graph database not found at {:?}", db_path),
-                location: Location {
-                    source_file: Some(db_path.to_string_lossy().to_string()),
-                    node_id: None,
-                    json_path: None,
-                },
-                suggestion: Some("Run metadata-checker --project-dir <DIR> --build-graph to create it".to_string()),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
+            out.diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "GRAPH_DB_NOT_FOUND",
+                    1,
+                    Location {
+                        source_file: Some(db_path.to_string_lossy().to_string()),
+                        node_id: None,
+                        json_path: None,
+                    },
+                    format!("Graph database not found at {:?}", db_path),
+                );
+                diag.severity = DiagnosticSeverity::Error;
+                diag.suggestion = Some("Run metadata-checker --project-dir <DIR> --build-graph to create it".to_string());
+                diag
             });
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
@@ -557,19 +560,20 @@ impl GraphDB {
                     || msg.contains("already open")
                     || msg.contains("Cannot acquire")
                 {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_LOCKED".to_string(),
-                        message: format!("Graph database locked: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some("Use --graph-db-path to a separate path, wait for other process, or increase --graph-lock-timeout-ms".to_string()),
-                        count: None,
-                        answer_impact: None,
-                        first_seen_phase: None,
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_LOCKED",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Graph database locked: {}", msg),
+                        );
+                        diag.severity = DiagnosticSeverity::Error;
+                        diag.suggestion = Some("Use --graph-db-path to a separate path, wait for other process, or increase --graph-lock-timeout-ms".to_string());
+                        diag
                     });
                     out.next_queries.push(format_next_query(
                         "metadata-checker --project-dir <DIR> --query-model <MODEL> --graph-db-path {} --graph-lock-timeout-ms 30000",
@@ -579,34 +583,36 @@ impl GraphDB {
                     || msg.contains("denied")
                     || msg.contains("read-only")
                 {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_PERMISSION_DENIED".to_string(),
-                        message: format!("Graph database permission denied: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some("Use --graph-db-path pointing to a writable directory".to_string()),
-                        count: None,
-                        answer_impact: None,
-                        first_seen_phase: None,
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_PERMISSION_DENIED",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Graph database permission denied: {}", msg),
+                        );
+                        diag.severity = DiagnosticSeverity::Error;
+                        diag.suggestion = Some("Use --graph-db-path pointing to a writable directory".to_string());
+                        diag
                     });
                 } else {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_OPEN_ERROR".to_string(),
-                        message: format!("Failed to open graph database: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some("Try --build-graph to rebuild".to_string()),
-                        count: None,
-                        answer_impact: None,
-                        first_seen_phase: None,
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_OPEN_ERROR",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Failed to open graph database: {}", msg),
+                        );
+                        diag.severity = DiagnosticSeverity::Error;
+                        diag.suggestion = Some("Try --build-graph to rebuild".to_string());
+                        diag
                     });
                 }
                 Err(Box::new(out))

@@ -258,41 +258,43 @@ pub fn print_summary_to(
 
         let mut diagnostics = Vec::new();
         if !cycles.is_empty() {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Warning,
-                code: "CYCLE_DEPENDENCY".to_string(),
-                message: "Cycle dependencies detected".to_string(),
-                location: crate::output::Location::new(),
-                suggestion: Some("Check component expressions for circular references".to_string()),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
+            diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "CYCLE_DEPENDENCY",
+                    cycles.len(),
+                    crate::output::Location::new(),
+                    "Cycle dependencies detected",
+                );
+                diag.suggestion =
+                    Some("Check component expressions for circular references".to_string());
+                diag
             });
         } else {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "OK".to_string(),
-                message: "No cycles detected".to_string(),
-                location: crate::output::Location::new(),
-                suggestion: None,
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
+            diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "OK",
+                    1,
+                    crate::output::Location::new(),
+                    "No cycles detected",
+                );
+                diag.severity = crate::output::DiagnosticSeverity::Info;
+                diag
             });
         }
         if let Some(analyses) = priority_analyses {
             if analyses.is_empty() {
-                diagnostics.push(crate::output::Diagnostic {
-                    severity: crate::output::DiagnosticSeverity::Info,
-                    code: "NO_PRIORITY_RULES".to_string(),
-                    message: "No priority rules found in this page".to_string(),
-                    location: crate::output::Location::new(),
-                    suggestion: Some(
+                diagnostics.push({
+                    let mut diag = crate::diagnostics::envelope_diagnostic(
+                        "NO_PRIORITY_RULES",
+                        1,
+                        crate::output::Location::new(),
+                        "No priority rules found in this page",
+                    );
+                    diag.severity = crate::output::DiagnosticSeverity::Info;
+                    diag.suggestion = Some(
                         "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
-                    ),
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
+                    );
+                    diag
                 });
             }
         }
@@ -439,41 +441,43 @@ pub fn print_non_human_to(
 
         let mut diagnostics = Vec::new();
         if !cycles.is_empty() {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Warning,
-                code: "CYCLE_DEPENDENCY".to_string(),
-                message: "Cycle dependencies detected".to_string(),
-                location: crate::output::Location::new(),
-                suggestion: Some("Check component expressions for circular references".to_string()),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
+            diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "CYCLE_DEPENDENCY",
+                    cycles.len(),
+                    crate::output::Location::new(),
+                    "Cycle dependencies detected",
+                );
+                diag.suggestion =
+                    Some("Check component expressions for circular references".to_string());
+                diag
             });
         } else {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "OK".to_string(),
-                message: "No cycles detected".to_string(),
-                location: crate::output::Location::new(),
-                suggestion: None,
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
+            diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "OK",
+                    1,
+                    crate::output::Location::new(),
+                    "No cycles detected",
+                );
+                diag.severity = crate::output::DiagnosticSeverity::Info;
+                diag
             });
         }
         if let Some(analyses) = priority_analyses {
             if analyses.is_empty() {
-                diagnostics.push(crate::output::Diagnostic {
-                    severity: crate::output::DiagnosticSeverity::Info,
-                    code: "NO_PRIORITY_RULES".to_string(),
-                    message: "No priority rules found in this page".to_string(),
-                    location: crate::output::Location::new(),
-                    suggestion: Some(
+                diagnostics.push({
+                    let mut diag = crate::diagnostics::envelope_diagnostic(
+                        "NO_PRIORITY_RULES",
+                        1,
+                        crate::output::Location::new(),
+                        "No priority rules found in this page",
+                    );
+                    diag.severity = crate::output::DiagnosticSeverity::Info;
+                    diag.suggestion = Some(
                         "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
-                    ),
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
+                    );
+                    diag
                 });
             }
         }

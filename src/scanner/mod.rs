@@ -26,19 +26,17 @@ pub struct ScanReport {
 }
 
 #[cfg(feature = "cli-local")]
-pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
-    let report = scan_project_with_report(project_dir, db_path)?;
-    if !report.diagnostics.is_empty() {
-        println!("{}", serde_json::to_string(&report).unwrap_or_default());
-    }
-    Ok(())
+pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<ScanReport> {
+    scan_project_with_report(project_dir, db_path)
 }
 
 #[cfg(feature = "cli-local")]
 pub fn scan_project_with_report(project_dir: &Path, db_path: &Path) -> Result<ScanReport> {
-    let index_report = indexer::ProjectIndexer::scan(project_dir, db_path)?;
+    let index_with_diags = indexer::ProjectIndexer::scan_with_diagnostics(project_dir, db_path)?;
+    let index_report = index_with_diags.report;
+    let mut diagnostics = index_with_diags.diagnostics;
     let graph = GraphDB::open(db_path)?;
-    let diagnostics = graph.hydrate_diagnostics().to_diagnostics();
+    diagnostics.extend(graph.hydrate_diagnostics().to_diagnostics());
     Ok(ScanReport {
         indexed: index_report.indexed,
         unchanged: index_report.unchanged,
@@ -51,6 +49,13 @@ pub fn scan_project_with_report(project_dir: &Path, db_path: &Path) -> Result<Sc
 }
 
 #[cfg(feature = "cli-local")]
+#[derive(Debug, Clone)]
+pub struct IndexReportWithDiagnostics {
+    pub report: indexer::IndexReport,
+    pub diagnostics: Vec<crate::output::Diagnostic>,
+}
+
+#[cfg(feature = "cli-local")]
 pub mod indexer;
 mod spg;
 mod tbl;
@@ -59,6 +64,6 @@ mod utils;
 
 pub use spg::process_spg_file_from_value;
 #[cfg(any(test, feature = "cli-local"))]
-pub use spg::scan_diagnostics_for_test;
+pub use spg::scan_raw_diagnostics;
 pub use tbl::process_tbl_file_from_string;
 pub use utils::{add_edge_with_meta, add_node, resolve_reference_path};

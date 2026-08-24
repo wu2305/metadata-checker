@@ -194,29 +194,29 @@ pub(in crate::explain) fn explain_page_graph(
 
     let mut diagnostics = Vec::new();
     if entry_count == 0 {
-        diagnostics.push(crate::output::Diagnostic {
-            severity: crate::output::DiagnosticSeverity::Info,
-            code: "NO_ENTRYPOINTS".to_string(),
-            message: "Page has no detected user entrypoints".to_string(),
-            location: crate::output::Location::new(),
-            suggestion: Some("Page may be read-only or actions not yet parsed".to_string()),
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
-        });
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "NO_ENTRYPOINTS",
+            1,
+            crate::output::Location::new(),
+            "Page has no detected user entrypoints",
+        );
+        diag.severity = crate::output::DiagnosticSeverity::Info;
+        diag.suggestion = Some("Page may be read-only or actions not yet parsed".to_string());
+        diagnostics.push(diag);
     }
-    diagnostics.push(crate::output::Diagnostic {
-        severity: crate::output::DiagnosticSeverity::Info,
-        code: "LINEAGE_SOURCE_MISSING".to_string(),
-        message: "Field-level lineage source could not be determined".to_string(),
-        location: crate::output::Location::new(),
-        suggestion: Some(
+    {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "LINEAGE_SOURCE_MISSING",
+            1,
+            crate::output::Location::new(),
+            "Field-level lineage source could not be determined",
+        );
+        diag.severity = crate::output::DiagnosticSeverity::Info;
+        diag.suggestion = Some(
             "Check --context or --query-dataflow for upstream relationships".to_string(),
-        ),
-        count: None,
-        answer_impact: None,
-        first_seen_phase: None,
-    });
+        );
+        diagnostics.push(diag);
+    }
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(node.id.clone());
@@ -440,19 +440,19 @@ pub(in crate::explain) fn explain_dataflow_graph(
                 })
                 .collect();
             if source_fields.is_empty() {
-                diagnostics.push(crate::output::Diagnostic {
-                    severity: crate::output::DiagnosticSeverity::Info,
-                    code: "LINEAGE_EXPR_UNPARSED".to_string(),
-                    message: format!(
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "LINEAGE_EXPR_UNPARSED",
+                    1,
+                    crate::output::Location::new(),
+                    format!(
                         "Dimension '{}' expression could not be resolved: {}",
                         dim_name, expr
                     ),
-                    location: crate::output::Location::new(),
-                    suggestion: Some("Expression parser may not support this syntax".to_string()),
-                    count: None,
-                    answer_impact: None,
-                    first_seen_phase: None,
-                });
+                );
+                diag.severity = crate::output::DiagnosticSeverity::Info;
+                diag.suggestion =
+                    Some("Expression parser may not support this syntax".to_string());
+                diagnostics.push(diag);
             }
             lineage.push(serde_json::json!({
                 "target_field": format!("field:{}.{}", node.name, dim_name),
@@ -470,16 +470,15 @@ pub(in crate::explain) fn explain_dataflow_graph(
                 }
             }));
         } else {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "LINEAGE_SOURCE_MISSING".to_string(),
-                message: format!("Dimension '{}' has no inputField or exp", dim_name),
-                location: crate::output::Location::new(),
-                suggestion: Some("Add inputField or exp to dimension metadata".to_string()),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "LINEAGE_SOURCE_MISSING",
+                1,
+                crate::output::Location::new(),
+                format!("Dimension '{}' has no inputField or exp", dim_name),
+            );
+            diag.severity = crate::output::DiagnosticSeverity::Info;
+            diag.suggestion = Some("Add inputField or exp to dimension metadata".to_string());
+            diagnostics.push(diag);
         }
     }
 
@@ -513,16 +512,15 @@ pub(in crate::explain) fn explain_dataflow_graph(
     });
 
     if internal_node_count == 0 {
-        diagnostics.push(crate::output::Diagnostic {
-            severity: crate::output::DiagnosticSeverity::Info,
-            code: "LINEAGE_SOURCE_MISSING".to_string(),
-            message: "DataFlow internal topology not available".to_string(),
-            location: crate::output::Location::new(),
-            suggestion: Some("Check if dataFlow.nodes exists in .tbl metadata".to_string()),
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
-        });
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "LINEAGE_SOURCE_MISSING",
+            1,
+            crate::output::Location::new(),
+            "DataFlow internal topology not available",
+        );
+        diag.severity = crate::output::DiagnosticSeverity::Info;
+        diag.suggestion = Some("Check if dataFlow.nodes exists in .tbl metadata".to_string());
+        diagnostics.push(diag);
     }
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);

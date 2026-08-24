@@ -1957,10 +1957,18 @@ fn main() -> Result<()> {
 
         if args.build_graph {
             let report = scanner::scan_project_with_report(project_dir, &db_path)?;
-            if !report.diagnostics.is_empty() {
-                println!("{}", serde_json::to_string(&report).unwrap_or_default());
-            } else {
+            // 统计行始终输出；有诊断时额外输出结构化 JSON 信封
+            println!(
+                "Indexed {} files | Unchanged: {} | Dirty: {} | Deleted: {} | Nodes: {} | Edges: {}",
+                report.indexed, report.unchanged, report.dirty, report.deleted,
+                report.node_count, report.edge_count
+            );
+            if report.diagnostics.is_empty() {
                 println!("Graph database built at {:?}", db_path);
+            } else {
+                let payload = serde_json::to_string(&report)
+                    .map_err(|err| anyhow::anyhow!("failed to serialize ScanReport: {err}"))?;
+                println!("{}", payload);
             }
             return Ok(());
         }

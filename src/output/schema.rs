@@ -51,20 +51,18 @@ impl AiOutput {
                 "Output generated from parsed metadata",
                 "Fallback evidence injected because this query path did not emit structured evidence",
             ).with_confidence(Confidence::Low));
-            out.diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
-                code: "EVIDENCE_INCOMPLETE".to_string(),
-                message: "Summary contains claims but no structured evidence was generated"
-                    .to_string(),
-                location: Location::default(),
-                suggestion: Some(
+            out.diagnostics.push(crate::diagnostics::envelope_diagnostic(
+                "EVIDENCE_INCOMPLETE",
+                1,
+                Location::default(),
+                "Summary contains claims but no structured evidence was generated",
+            ));
+            if let Some(last) = out.diagnostics.last_mut() {
+                last.suggestion = Some(
                     "Use --detail for manual verification, and treat conclusions as low confidence"
                         .to_string(),
-                ),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+                );
+            }
         }
         out
     }
@@ -195,11 +193,19 @@ impl Diagnostic {
 
 impl Serialize for Diagnostic {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
+        use serde::ser::{Error as _, SerializeStruct};
         let effect = crate::output::answer_effect::answer_effect(&self.code);
-        let mut extra = 5;
-        // spec 信封六字段必填：count / sample_location / answer_impact / first_seen_phase 始终输出
-        extra += 4;
+        // 信封字段缺失是构造方 bug：显式报序列化错误，不静默编值、不 panic。
+        let count = self
+            .count
+            .ok_or_else(|| S::Error::custom("Diagnostic.count must be set via envelope_diagnostic"))?;
+        let answer_impact = self.answer_impact.as_deref().ok_or_else(|| {
+            S::Error::custom("Diagnostic.answer_impact must be set via envelope_diagnostic")
+        })?;
+        let first_seen_phase = self.first_seen_phase.as_deref().ok_or_else(|| {
+            S::Error::custom("Diagnostic.first_seen_phase must be set via envelope_diagnostic")
+        })?;
+        let mut extra = 9;
         if effect.is_some() {
             extra += 1;
         }
@@ -207,21 +213,12 @@ impl Serialize for Diagnostic {
         state.serialize_field("severity", &self.severity)?;
         state.serialize_field("code", &self.code)?;
         state.serialize_field("message", &self.message)?;
+        state.serialize_field("count", &count)?;
         state.serialize_field("sample_location", &self.location)?;
+        state.serialize_field("answer_impact", answer_impact)?;
+        state.serialize_field("first_seen_phase", first_seen_phase)?;
+        state.serialize_field("location", &self.location)?;
         state.serialize_field("suggestion", &self.suggestion)?;
-        state.serialize_field("count", &self.count.unwrap_or(1))?;
-        state.serialize_field(
-            "answer_impact",
-            self.answer_impact
-                .as_deref()
-                .unwrap_or(crate::diagnostics::answer_impact_for(&self.code)),
-        )?;
-        state.serialize_field(
-            "first_seen_phase",
-            self.first_seen_phase
-                .as_deref()
-                .unwrap_or(crate::diagnostics::PHASE_PR1),
-        )?;
         if let Some((_, effect)) = effect {
             state.serialize_field("answer_effect", effect)?;
         }
@@ -378,23 +375,22 @@ pub fn build_target_not_found_output(
     out.details = Some(serde_json::json!({
         "candidate_targets": candidate_targets,
     }));
-    out.diagnostics.push(Diagnostic {
-        severity: DiagnosticSeverity::Error,
-        code: "TARGET_NOT_FOUND".to_string(),
-        message: format!("Target '{}' not found in graph", target_id),
-        location: Location::default(),
-        suggestion: if candidates.is_empty() {
-            Some(format!(
-                "Verify the target ID or use {} to search globally",
-                find_cmd.replace("{}", "<keyword>")
-            ))
-        } else {
-            Some("Did you mean one of the candidate targets below?".to_string())
-        },
-        count: None,
-        answer_impact: None,
-        first_seen_phase: None,
+    let mut target_diag = crate::diagnostics::envelope_diagnostic(
+        "TARGET_NOT_FOUND",
+        1,
+        Location::default(),
+        format!("Target '{}' not found in graph", target_id),
+    );
+    target_diag.severity = DiagnosticSeverity::Error;
+    target_diag.suggestion = Some(if candidates.is_empty() {
+        format!(
+            "Verify the target ID or use {} to search globally",
+            find_cmd.replace("{}", "<keyword>")
+        )
+    } else {
+        "Did you mean one of the candidate targets below?".to_string()
     });
+    out.diagnostics.push(target_diag);
 
     for (node, _) in candidates {
         out.next_queries.push(format_next_query(

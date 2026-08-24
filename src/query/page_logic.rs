@@ -186,32 +186,38 @@ fn build_key_model_availability_entry(
 }
 
 /// 诊断：页面限定回退全局模型（PAGE_SCOPED_TARGET_FALLBACK 的查询期归属）。
-/// 同一 code 只在 page_logic diagnostics 产生，runtime 不另做字符串扫描。
-#[cfg(any(test, feature = "cli-local"))]
-pub fn page_scoped_fallback_diagnostic_for_test(
-    model_id: &str,
-    page_path: &str,
-) -> crate::output::Diagnostic {
-    page_scoped_fallback_diagnostic(model_id, page_path)
-}
-
+///
+/// 同一 code 只在 page_logic 产生，runtime 不另做字符串扫描；生产路径在
+/// `build_query_page_logic_output_inner` 的 availability 批次聚合点调用本函数，
+/// 单次页面查询最多产生一条，计数为该批次的回退次数。
 pub(crate) fn page_scoped_fallback_diagnostic(
-    model_id: &str,
+    page_id: &str,
     page_path: &str,
+    fallback_count: usize,
 ) -> crate::output::Diagnostic {
     crate::diagnostics::envelope_diagnostic(
         crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK,
-        1,
+        fallback_count,
         crate::output::Location {
             source_file: Some(page_path.to_string()),
-            node_id: Some(model_id.to_string()),
+            node_id: Some(page_id.to_string()),
             json_path: None,
         },
         format!(
-            "Page-scoped model target '{}' not resolved in '{}', fell back to global model",
-            model_id, page_path
+            "Page-scoped model target fallback to global model ({} occurrence(s))",
+            fallback_count
         ),
     )
+}
+
+#[cfg(any(test, feature = "cli-local"))]
+#[doc(hidden)]
+pub fn page_scoped_fallback_diagnostic_for_test(
+    page_id: &str,
+    page_path: &str,
+    fallback_count: usize,
+) -> crate::output::Diagnostic {
+    page_scoped_fallback_diagnostic(page_id, page_path, fallback_count)
 }
 
 fn key_model_availability_value_from_result(
@@ -2289,7 +2295,7 @@ fn build_query_page_logic_output_inner(
             (batch, build_ms, projection_ms)
         };
     let availability_context_build_ms = availability_index_build_ms;
-    let mut key_model_availability = availability_batch.entries;
+    let key_model_availability = availability_batch.entries;
     // 落点修正：PAGE_SCOPED_TARGET_FALLBACK 由 page_logic 唯一产生
     // 若本批次有回退，对应的诊断在此追加（与 diagnostics 合并后统一落 response）
     let fallback_count = availability_batch.fallback_count;
@@ -2297,18 +2303,10 @@ fn build_query_page_logic_output_inner(
     if fallback_count > 0 {
         // 逐个回退项无法一一映射到 model_id（batch 已聚合），按 batch 级别产生一条聚合诊断
         // 单次页面查询中同一 code 只产生一次，计数为回退次数
-        page_scoped_fallback_diagnostics.push(crate::diagnostics::envelope_diagnostic(
-            crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK,
+        page_scoped_fallback_diagnostics.push(page_scoped_fallback_diagnostic(
+            page_id,
+            &page_node.path,
             fallback_count,
-            crate::output::Location {
-                source_file: Some(page_node.path.clone()),
-                node_id: Some(page_id.to_string()),
-                json_path: None,
-            },
-            format!(
-                "Page-scoped model target fallback to global model ({} occurrence(s))",
-                fallback_count
-            ),
         ));
     }
     record_profile_stage(
@@ -2530,25 +2528,19 @@ fn build_query_page_logic_output_inner(
             .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
             .collect();
         if !truncated_parts.is_empty() {
-            output.diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "OUTPUT_TRUNCATED".to_string(),
-                message: format!(
-                    "Compact budget: arrays truncated for: {}",
-                    truncated_parts.join(", ")
-                ),
-                location: crate::output::Location {
+            output.diagnostics.push(crate::diagnostics::envelope_diagnostic(
+                "OUTPUT_TRUNCATED",
+                1,
+                crate::output::Location {
                     source_file: Some(page_node.path.clone()),
                     node_id: Some(page_id.to_string()),
                     json_path: None,
                 },
-                suggestion: Some(
-                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                format!(
+                    "Compact budget: arrays truncated for: {}",
+                    truncated_parts.join(", ")
                 ),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+            ));
         }
 
         // Add evidence_summary and key_findings to summary

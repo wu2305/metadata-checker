@@ -495,16 +495,15 @@ pub fn find_nodes(
                 &top.id,
             ));
     } else {
-        output.diagnostics.push(crate::output::schema::Diagnostic {
-            severity: crate::output::schema::DiagnosticSeverity::Info,
-            code: "NO_MATCHES_FOUND".to_string(),
-            message: format!("No nodes found matching keyword '{}'", keyword),
-            location: crate::output::schema::Location::default(),
-            suggestion: Some("Try a broader keyword or verify spelling".to_string()),
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
-        });
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "NO_MATCHES_FOUND",
+            1,
+            crate::output::schema::Location::default(),
+            format!("No nodes found matching keyword '{}'", keyword),
+        );
+        diag.severity = crate::output::schema::DiagnosticSeverity::Info;
+        diag.suggestion = Some("Try a broader keyword or verify spelling".to_string());
+        output.diagnostics.push(diag);
     }
 
     Ok(output.validate())
@@ -530,16 +529,15 @@ pub fn resolve_model_in_page(
                     "what_is_it": format!("Page {} not found", page_id),
                 }),
             );
-            out.diagnostics.push(crate::output::schema::Diagnostic {
-                severity: crate::output::schema::DiagnosticSeverity::Error,
-                code: "TARGET_NOT_FOUND".to_string(),
-                message: format!("Page '{}' not found in graph", page_id),
-                location: crate::output::schema::Location::default(),
-                suggestion: Some("Verify page ID or use --find-page to search".to_string()),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "TARGET_NOT_FOUND",
+                1,
+                crate::output::schema::Location::default(),
+                format!("Page '{}' not found in graph", page_id),
+            );
+            diag.severity = crate::output::schema::DiagnosticSeverity::Error;
+            diag.suggestion = Some("Verify page ID or use --find-page to search".to_string());
+            out.diagnostics.push(diag);
             out.next_queries
                 .push(crate::output::schema::format_next_query(
                     "--find-page {} to search for similar pages",
@@ -650,23 +648,21 @@ pub fn resolve_model_in_page(
     }
 
     if resolved_count == 0 {
-        output.diagnostics.push(crate::output::schema::Diagnostic {
-            severity: crate::output::schema::DiagnosticSeverity::Warning,
-            code: "MODEL_UNRESOLVED".to_string(),
-            message: format!(
-                "No model matching '{}' found in page {}",
-                local_model_id, page_id
-            ),
-            location: crate::output::schema::Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "MODEL_UNRESOLVED",
+            1,
+            crate::output::schema::Location {
                 source_file: Some(page_node.path),
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some("Use --find-model to search globally".to_string()),
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
-        });
+            format!(
+                "No model matching '{}' found in page {}",
+                local_model_id, page_id
+            ),
+        );
+        diag.suggestion = Some("Use --find-model to search globally".to_string());
+        output.diagnostics.push(diag);
         output
             .next_queries
             .push(crate::output::schema::format_next_query(
@@ -674,23 +670,22 @@ pub fn resolve_model_in_page(
                 local_model_id,
             ));
     } else if ambiguous {
-        output.diagnostics.push(crate::output::schema::Diagnostic {
-            severity: crate::output::schema::DiagnosticSeverity::Info,
-            code: "AMBIGUOUS_RESOLUTION".to_string(),
-            message: format!(
-                "Multiple models match '{}'; candidate count: {}",
-                local_model_id, resolved_count
-            ),
-            location: crate::output::schema::Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "AMBIGUOUS_RESOLUTION",
+            resolved_count,
+            crate::output::schema::Location {
                 source_file: Some(page_node.path),
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some("Use --explain <MODEL_ID> to verify specific model".to_string()),
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
-        });
+            format!(
+                "Multiple models match '{}'; candidate count: {}",
+                local_model_id, resolved_count
+            ),
+        );
+        diag.severity = crate::output::schema::DiagnosticSeverity::Info;
+        diag.suggestion = Some("Use --explain <MODEL_ID> to verify specific model".to_string());
+        output.diagnostics.push(diag);
         for (n, _, _) in &candidates {
             output
                 .next_queries

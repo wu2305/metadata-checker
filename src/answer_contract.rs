@@ -666,22 +666,20 @@ pub fn build_advise_query_output(
         .with_confidence(crate::output::schema::Confidence::High),
     );
     if !recognized {
-        out.diagnostics.push(crate::output::schema::Diagnostic {
-            severity: crate::output::schema::DiagnosticSeverity::Warning,
-            code: "UNKNOWN_QUESTION_KIND".to_string(),
-            message: format!(
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "UNKNOWN_QUESTION_KIND",
+            1,
+            crate::output::schema::Location::default(),
+            format!(
                 "未识别的 question-kind '{}'，已回退到 auto 建议",
                 question_kind
             ),
-            location: crate::output::schema::Location::default(),
-            suggestion: Some(format!(
-                "使用其中之一：{}",
-                ADVISE_QUERY_QUESTION_KINDS.join(" | ")
-            )),
-            count: None,
-            answer_impact: None,
-            first_seen_phase: None,
-        });
+        );
+        diag.suggestion = Some(format!(
+            "使用其中之一：{}",
+            ADVISE_QUERY_QUESTION_KINDS.join(" | ")
+        ));
+        out.diagnostics.push(diag);
     }
     out.next_queries
         .push(crate::output::schema::format_next_query(

@@ -54,6 +54,17 @@ pub enum ParsedGraphContent {
     Tbl(String),
 }
 
+/// 跨文件聚合扫描诊断（PR1 落地）：对每份 SPG 原始 JSON 采集计数后合并。
+fn collect_scanner_diagnostics(updates: &[ParsedGraphUpdate]) -> Vec<crate::output::Diagnostic> {
+    let mut acc = crate::scanner::spg::ScanDiagnostics::default();
+    for update in updates {
+        if let ParsedGraphContent::Spg(value) = &update.content {
+            acc.merge(&crate::scanner::spg::scan_raw_counts(value));
+        }
+    }
+    acc.to_diagnostics()
+}
+
 /// 合并多文件待删节点 ID 并去重（保持首次出现顺序）
 fn merge_removed_node_ids<'a>(sources: impl Iterator<Item = &'a [String]>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
@@ -331,6 +342,14 @@ impl ProjectIndexer {
 
     /// 全量索引入口（替代 scan_project）
     pub fn scan(project_dir: &Path, db_path: &Path) -> Result<IndexReport> {
+        Self::scan_with_diagnostics(project_dir, db_path).map(|with| with.report)
+    }
+
+    /// 全量索引并返回扫描诊断（未识别容器键 / 重复组件 id 的跨文件聚合）。
+    pub fn scan_with_diagnostics(
+        project_dir: &Path,
+        db_path: &Path,
+    ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
         let mut graph = GraphDB::open(db_path)?;
         let prev_states = graph.load_file_states().unwrap_or_default();
 
@@ -343,6 +362,7 @@ impl ProjectIndexer {
         if !plan.dirty.is_empty() || !plan.deleted.is_empty() {
             let updates =
                 Self::parse_dirty_files(&prev_states, &plan.dirty, project_dir, &provider)?;
+            let scanner_diagnostics = collect_scanner_diagnostics(&updates);
             // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
             let merged_removed = merge_removed_node_ids(
                 updates
@@ -409,14 +429,20 @@ impl ProjectIndexer {
                 },
             };
             let report = Self::persist_index(&mut graph, commit)?;
-            return Ok(report);
+            return Ok(crate::scanner::IndexReportWithDiagnostics {
+                report,
+                diagnostics: scanner_diagnostics,
+            });
         }
 
-        Ok(IndexReport {
-            indexed: plan.discovered_count,
-            unchanged: plan.discovered_count - plan.dirty.len(),
-            dirty: plan.dirty.len(),
-            deleted: plan.deleted.len(),
+        Ok(crate::scanner::IndexReportWithDiagnostics {
+            report: IndexReport {
+                indexed: plan.discovered_count,
+                unchanged: plan.discovered_count - plan.dirty.len(),
+                dirty: plan.dirty.len(),
+                deleted: plan.deleted.len(),
+            },
+            diagnostics: Vec::new(),
         })
     }
 

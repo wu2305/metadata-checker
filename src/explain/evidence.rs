@@ -61,19 +61,18 @@ pub(super) fn push_relation_evidence(
         output.evidence.push(ev);
 
         if node_id.is_none() || source_file.is_none() {
-            output.diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "EVIDENCE_LOCATION_MISSING".to_string(),
-                message: format!(
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "EVIDENCE_LOCATION_MISSING",
+                1,
+                crate::output::Location::new(),
+                format!(
                     "Evidence for {} relation lacks node_id or source_file; confidence reduced",
                     relation
                 ),
-                location: crate::output::Location::new(),
-                suggestion: Some("Verify graph edge metadata completeness".to_string()),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+            );
+            diag.severity = crate::output::DiagnosticSeverity::Info;
+            diag.suggestion = Some("Verify graph edge metadata completeness".to_string());
+            output.diagnostics.push(diag);
         }
     }
 }

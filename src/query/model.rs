@@ -321,25 +321,23 @@ pub fn build_query_model_output(
             .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
             .collect();
         if !truncated_parts.is_empty() {
-            output.diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "OUTPUT_TRUNCATED".to_string(),
-                message: format!(
-                    "Compact budget: arrays truncated for: {}",
-                    truncated_parts.join(", ")
-                ),
-                location: crate::output::Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "OUTPUT_TRUNCATED",
+                1,
+                crate::output::Location {
                     source_file: None,
                     node_id: Some(model_id.to_string()),
                     json_path: None,
                 },
-                suggestion: Some(
-                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                format!(
+                    "Compact budget: arrays truncated for: {}",
+                    truncated_parts.join(", ")
                 ),
-                count: None,
-                answer_impact: None,
-                first_seen_phase: None,
-            });
+            );
+            diag.severity = crate::output::DiagnosticSeverity::Info;
+            diag.suggestion =
+                Some("Use --budget normal or --budget full to see complete arrays".to_string());
+            output.diagnostics.push(diag);
         }
 
         let evidence_summary = crate::output::brief::evidence_summary(&output.evidence, 5);

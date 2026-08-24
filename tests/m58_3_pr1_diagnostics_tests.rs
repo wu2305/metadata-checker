@@ -124,11 +124,63 @@ fn pr1_normal_path_has_no_partial() -> anyhow::Result<()> {
 
 #[test]
 fn pr1_build_output_exposes_diagnostics_via_status() -> anyhow::Result<()> {
-    // 复用 normal 路径的 status 透出作为构建输出的代理验证
     let (_graph, db_path) = fixture_graph("build-status")?;
     let rt = metadata_checker::runtime::GraphRuntime::load(&db_path)?;
     let status_json = serde_json::to_value(rt.status())?;
     assert!(status_json.get("load_diagnostics").is_some());
+    // 直接断言 build 输出本体（scan_project_with_report / scan_with_diagnostics）
+    let db_path2 = std::env::temp_dir().join(format!(
+        "metadata-checker-m58-3-pr1-build-output-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_file(&db_path2);
+    let report = metadata_checker::scanner::scan_project_with_report(
+        std::path::Path::new("tests/fixtures/test_project"),
+        &db_path2,
+    )?;
+    let report_json = serde_json::to_value(&report)?;
+    assert!(report_json.get("diagnostics").is_some());
+    let inner = metadata_checker::scanner::indexer::ProjectIndexer::scan_with_diagnostics(
+        std::path::Path::new("tests/fixtures/test_project"),
+        &db_path2,
+    )?;
+    assert!(serde_json::to_value(&inner.diagnostics).is_ok());
+    let _ = std::fs::remove_file(&db_path2);
+    let _ = std::fs::remove_file(db_path2.with_extension("graphdb.lock"));
+
+    // CLI 级断言：真实二进制的 --build-graph 输出统计行与 built-at 行（非库函数代理）
+    let db_path3 = std::env::temp_dir().join(format!(
+        "metadata-checker-m58-3-pr1-cli-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_file(&db_path3);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_metadata-checker"))
+        .args([
+            "--project-dir",
+            "tests/fixtures/test_project",
+            "--build-graph",
+            "--graph-db-path",
+            db_path3.to_str().expect("utf8 path"),
+        ])
+        .output()
+        .expect("run cli --build-graph");
+    assert!(
+        output.status.success(),
+        "cli exited {:?}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Indexed "), "{stdout}");
+    assert!(stdout.contains("Graph database built at"), "{stdout}");
+    let _ = std::fs::remove_file(&db_path3);
+    let _ = std::fs::remove_file(db_path3.with_extension("graphdb.lock"));
     let _ = std::fs::remove_file(&db_path);
     let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
     Ok(())
@@ -136,7 +188,6 @@ fn pr1_build_output_exposes_diagnostics_via_status() -> anyhow::Result<()> {
 
 #[test]
 fn pr1_scanner_diagnostics_trigger_and_count() -> anyhow::Result<()> {
-    // 未识别容器键：子键为自定义容器且含对象数组
     let raw_unrec = serde_json::json!({
         "canvas": {
             "components": [
@@ -144,13 +195,12 @@ fn pr1_scanner_diagnostics_trigger_and_count() -> anyhow::Result<()> {
             ]
         }
     });
-    let diags_unrec = metadata_checker::scanner::scan_diagnostics_for_test(&raw_unrec);
+    let diags_unrec = metadata_checker::scanner::scan_raw_diagnostics(&raw_unrec);
     assert!(has_code(&diags_unrec, "SCANNER_UNRECOGNIZED_CONTAINER_KEY"), "{diags_unrec:?}");
     for d in &diags_unrec {
         let v = serde_json::to_value(d)?;
         assert_envelope_serializes(&v);
     }
-    // 重复组件 id：同一 canvas 下两对象同 id（在组件树白名单内）
     let raw_dup = serde_json::json!({
         "canvas": {
             "components": [
@@ -159,41 +209,101 @@ fn pr1_scanner_diagnostics_trigger_and_count() -> anyhow::Result<()> {
             ]
         }
     });
-    let diags_dup = metadata_checker::scanner::scan_diagnostics_for_test(&raw_dup);
+    let diags_dup = metadata_checker::scanner::scan_raw_diagnostics(&raw_dup);
     assert!(has_code(&diags_dup, "SCANNER_DUPLICATE_COMPONENT_ID"), "{diags_dup:?}");
     for d in &diags_dup {
         let v = serde_json::to_value(d)?;
         assert_envelope_serializes(&v);
     }
+    // 排除列表不吞合法信号：含未识别容器键的临时项目在 ScanReport.diagnostics 中可见
+    let bad_project = std::env::temp_dir().join(format!(
+        "metadata-checker-m58-3-pr1-badproj-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&bad_project)?;
+    std::fs::write(bad_project.join("bad.spg"), serde_json::to_string(&raw_unrec)?)?;
+    let bad_db = bad_project.join("graph.db");
+    let bad_report =
+        metadata_checker::scanner::scan_project_with_report(&bad_project, &bad_db)?;
+    assert!(
+        has_code(&bad_report.diagnostics, "SCANNER_UNRECOGNIZED_CONTAINER_KEY"),
+        "{:?}",
+        bad_report.diagnostics
+    );
+    let _ = std::fs::remove_dir_all(&bad_project);
+
+    // 正常 fixture 语料：SCANNER_* 计数必须为 0（排除列表生效，无误报）
+    let db_path = std::env::temp_dir().join(format!(
+        "metadata-checker-m58-3-pr1-scanner-prod-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_file(&db_path);
+    let report = metadata_checker::scanner::scan_project_with_report(
+        std::path::Path::new("tests/fixtures/test_project"),
+        &db_path,
+    )?;
+    assert!(
+        !has_code(&report.diagnostics, "SCANNER_UNRECOGNIZED_CONTAINER_KEY"),
+        "{:?}",
+        report.diagnostics
+    );
+    assert!(
+        !has_code(&report.diagnostics, "SCANNER_DUPLICATE_COMPONENT_ID"),
+        "{:?}",
+        report.diagnostics
+    );
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
     Ok(())
 }
 
 #[test]
 fn pr1_page_scoped_fallback_single_diagnostic() -> anyhow::Result<()> {
-    let (graph, db_path) = fixture_graph("fallback-single")?;
-    // 使用一个不存在页面限定模型的 model 作为触发：查询期回退应只产生一次
-    let rt_graph = graph;
+    let (_graph, db_path) = fixture_graph("fallback-single")?;
+    let page_id = "page:app/actions_test.spg";
     let page_path = "app/actions_test.spg";
-    let model_id = "model:nonexistent_model_for_fallback_test";
-    // 直接调用 page_logic 侧的诊断构造点，验证单一归属
+    // 构造点归属：聚合诊断由唯一构造函数产生
     let diag = metadata_checker::query::page_scoped_fallback_diagnostic_for_test(
-        model_id, page_path,
+        page_id, page_path, 2,
     );
     assert_eq!(diag.code, "PAGE_SCOPED_TARGET_FALLBACK");
-    assert_eq!(diag.count, Some(1));
+    assert_eq!(diag.count, Some(2));
     assert!(diag.answer_impact.is_some());
-    // 查询响应中该 code 只出现一次（模拟合并去重）
-    let diags = vec![diag.clone(), diag.clone()];
-    let mut seen = std::collections::HashSet::new();
-    let mut deduped = Vec::new();
-    for d in diags {
-        if seen.insert(d.code.clone()) {
-            deduped.push(d);
-        }
-    }
-    assert_eq!(deduped.len(), 1);
-    let _rt = rt_graph;
-    let _db_path = db_path;
+
+    // 真实查询路径：fixture 页含 model1/model2，page-scoped 目标（PR3 前的 id 形态）
+    // 在图中不存在而全局模型存在，availability 批次走回退。响应中该 code 恰好一条聚合诊断。
+    let mut rt = metadata_checker::runtime::GraphRuntime::load(&db_path)?;
+    let resp = rt.query(metadata_checker::runtime::RuntimeQueryRequest {
+        command: metadata_checker::tool_contract::ToolCommand::QueryPageLogic,
+        target: page_id.to_string(),
+        budget: "compact".to_string(),
+        human: false,
+        intent: None,
+        page_scope: None,
+        depth: None,
+        check_reload: false,
+    })?;
+    let diags = resp
+        .result
+        .get("diagnostics")
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let fallback_hits: Vec<&serde_json::Value> = diags
+        .iter()
+        .filter(|d| d.get("code").and_then(|c| c.as_str()) == Some("PAGE_SCOPED_TARGET_FALLBACK"))
+        .collect();
+    assert_eq!(fallback_hits.len(), 1, "{diags:?}");
+    let count = fallback_hits[0].get("count").and_then(|c| c.as_u64());
+    assert!(count.is_some_and(|c| c >= 1), "{diags:?}");
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
     Ok(())
 }
 
@@ -211,8 +321,7 @@ fn pr1_envelope_contract_six_fields() -> anyhow::Result<()> {
     );
     let value = serde_json::to_value(&diag)?;
     assert_envelope_serializes(&value);
-    // 8 个 code 拼写 pin 住
-    for code in [
+    let expected_codes = [
         "SCANNER_UNRECOGNIZED_CONTAINER_KEY",
         "SCANNER_DUPLICATE_COMPONENT_ID",
         "GRAPH_DB_NODE_DECODE_FAILED",
@@ -221,9 +330,10 @@ fn pr1_envelope_contract_six_fields() -> anyhow::Result<()> {
         "GRAPH_DB_V2_LAYOUT_UNREADABLE",
         "GRAPH_DB_PARTIAL_HYDRATE",
         "PAGE_SCOPED_TARGET_FALLBACK",
-    ] {
-        assert_eq!(code, code.to_string());
-    }
+    ];
+    let code_set: std::collections::HashSet<&str> = expected_codes.iter().copied().collect();
+    assert_eq!(code_set.len(), expected_codes.len());
+    assert!(code_set.contains("PAGE_SCOPED_TARGET_FALLBACK"));
     assert!(has_code_in_value(&value, "GRAPH_DB_NODE_DECODE_FAILED"));
     // PARTIAL_HYDRATE confidence 应为 partial（非 reduced）
     let conf = metadata_checker::output::answer_effect::confidence_value(
