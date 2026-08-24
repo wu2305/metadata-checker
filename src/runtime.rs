@@ -1080,106 +1080,57 @@ impl GraphRuntime {
         ));
 
         // PR1：所有查询响应置顶 hydrate 诊断（GRAPH_DB_PARTIAL_HYDRATE 闸门）
-        // 悬挂边无法归因到具体查询，统一在结果中合并 load_diagnostics
+        // 置顶且 confidence 降为 partial（不足以设 reduced）。
         if !self.load_diagnostics.is_empty() {
-            // 将结构化 load_diagnostics 合并进 result 的 diagnostics 数组
+            // 将结构化 load_diagnostics 置顶合并进 result 的 diagnostics 数组
             if let Some(obj) = result.as_object_mut() {
                 let slot = obj
                     .entry("diagnostics")
                     .or_insert_with(|| serde_json::json!([]));
                 if let Some(arr) = slot.as_array_mut() {
+                    // 构造置顶序列：先插入 load_diagnostics（PARTIAL_HYDRATE 已在首位），再追加原有
+                    let mut merged: Vec<serde_json::Value> = Vec::new();
+                    let mut seen_codes = std::collections::HashSet::new();
                     for diag in &self.load_diagnostics {
                         if let Ok(value) = serde_json::to_value(diag) {
-                            arr.push(value);
+                            merged.push(value.clone());
+                            seen_codes.insert(diag.code.clone());
                         }
                     }
-                }
-                let mut codes: Vec<String> = self
-                    .load_diagnostics
-                    .iter()
-                    .map(|d| d.code.clone())
-                    .collect();
-                if let Some(existing) = obj
-                    .get("diagnostics")
-                    .and_then(|v| v.as_array())
-                {
-                    for entry in existing {
-                        if let Some(code) = entry.get("code").and_then(|v| v.as_str()) {
-                            if !codes.contains(&code.to_string()) {
-                                codes.push(code.to_string());
+                    for entry in arr.drain(..) {
+                        let code = entry
+                            .get("code")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        if let Some(code) = code {
+                            if seen_codes.contains(&code) {
+                                continue;
                             }
+                            seen_codes.insert(code);
+                        }
+                        merged.push(entry);
+                    }
+                    *arr = merged;
+                }
+                let codes: Vec<String> = self.load_diagnostics.iter().map(|d| d.code.clone()).collect();
+                let has_partial = codes.iter().any(|c| c == crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE);
+                if has_partial {
+                    if let Some(summary) = obj.get_mut("summary").and_then(|s| s.as_object_mut()) {
+                        // 仅在已存在 confidence 块时覆盖 level，避免无条件新增覆盖
+                        if let Some(conf) = summary.get_mut("confidence").and_then(|v| v.as_object_mut()) {
+                            conf.insert("level".to_string(), serde_json::json!("partial"));
+                        } else {
+                            summary.insert(
+                                "confidence".to_string(),
+                                serde_json::json!({"level":"partial","reason":"GRAPH_DB_PARTIAL_HYDRATE"}),
+                            );
                         }
                     }
-                }
-                if let Some(summary) = obj.get_mut("summary").and_then(|s| s.as_object_mut()) {
-                    summary.insert(
-                        "confidence".to_string(),
-                        crate::output::answer_effect::confidence_value(
-                            codes.iter().map(|s| s.as_str()),
-                        ),
-                    );
                 }
             }
             // 外层 RuntimeQueryResponse diagnostics 也追加可读字符串版本
             for diag in &self.load_diagnostics {
                 diagnostics.push(format!("{}: {}", diag.code, diag.message));
-            }
-        }
-        // PAGE_SCOPED_TARGET_FALLBACK：从 result.json 中提取页内回退信号并转为统一信封
-        // 检测 result 是否包含 page_scoped 回退标记（若存在则注入信封诊断）
-        {
-            let has_fallback = result
-                .get("details")
-                .and_then(|d| d.get("key_model_availability"))
-                .and_then(|v| v.as_array())
-                .is_some_and(|items| {
-                    items.iter().any(|item| {
-                        item.get("scope_warning").and_then(|v| v.as_str())
-                            == Some("page_scoped_target_not_resolved_fallback_to_global_model")
-                    })
-                })
-                || result
-                    .get("summary")
-                    .and_then(|s| s.get("key_model_availability"))
-                    .is_some_and(|_| false);
-            // 更通用的：扫描 result 全量 JSON 字符串中的回退标记
-            let fallback_via_string = serde_json::to_string(&result)
-                .map(|s| s.contains("page_scoped_target_not_resolved_fallback_to_global_model"))
-                .unwrap_or(false);
-            if has_fallback || fallback_via_string {
-                let fallback_diag = crate::diagnostics::envelope_diagnostic(
-                    crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK,
-                    1,
-                    crate::output::Location::default(),
-                    "Page-scoped model target not resolved, fell back to global model",
-                );
-                if let Some(obj) = result.as_object_mut() {
-                    let slot = obj
-                        .entry("diagnostics")
-                        .or_insert_with(|| serde_json::json!([]));
-                    if let Some(arr) = slot.as_array_mut() {
-                        if let Ok(value) = serde_json::to_value(&fallback_diag) {
-                            // 去重
-                            let already = arr.iter().any(|e| {
-                                e.get("code").and_then(|v| v.as_str())
-                                    == Some(crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK)
-                            });
-                            if !already {
-                                arr.push(value);
-                            }
-                        }
-                    }
-                }
-                let already_outer = diagnostics.iter().any(|s| {
-                    s.contains(crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK)
-                });
-                if !already_outer {
-                    diagnostics.push(format!(
-                        "{}: {}",
-                        crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK,
-                        "Page-scoped model target not resolved, fell back to global model"
-                    ));
-                }
             }
         }
 

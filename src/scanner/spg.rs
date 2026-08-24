@@ -39,6 +39,23 @@ fn collect_component_contexts(
     contexts
 }
 
+/// 测试用：对原始 canvas 额外产出扫描诊断
+#[cfg(any(test, feature = "cli-local"))]
+pub fn scan_diagnostics_for_test(value: &serde_json::Value) -> Vec<crate::output::Diagnostic> {
+    let mut diags = ScanDiagnostics::default();
+    if let Some(canvas) = value.get("canvas") {
+        collect_component_contexts_inner_with_context_and_diagnostics(
+            canvas,
+            "canvas",
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut diags,
+        );
+    }
+    diags.to_diagnostics()
+}
+
 fn collect_component_contexts_inner(
     node: &serde_json::Value,
     json_path: &str,
@@ -48,12 +65,69 @@ fn collect_component_contexts_inner(
     collect_component_contexts_inner_with_context(node, json_path, parent_id, None, contexts);
 }
 
+/// 扫描阶段的轻量诊断计数（PR1 落地，未识别容器键/重复组件 id）。
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ScanDiagnostics {
+    pub(crate) unrecognized_container_key: usize,
+    pub(crate) duplicate_component_id: usize,
+    pub(crate) sample_unrecognized_location: Option<crate::output::Location>,
+    pub(crate) sample_duplicate_location: Option<crate::output::Location>,
+}
+
+impl ScanDiagnostics {
+    pub(crate) fn to_diagnostics(&self) -> Vec<crate::output::Diagnostic> {
+        let mut out = Vec::new();
+        if self.unrecognized_container_key > 0 {
+            let loc = self
+                .sample_unrecognized_location
+                .clone()
+                .unwrap_or_default();
+            out.push(crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY,
+                self.unrecognized_container_key,
+                loc,
+                format!(
+                    "Scanner encountered {} unrecognized container keys",
+                    self.unrecognized_container_key
+                ),
+            ));
+        }
+        if self.duplicate_component_id > 0 {
+            let loc = self.sample_duplicate_location.clone().unwrap_or_default();
+            out.push(crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID,
+                self.duplicate_component_id,
+                loc,
+                format!(
+                    "Scanner encountered {} duplicate component ids",
+                    self.duplicate_component_id
+                ),
+            ));
+        }
+        out
+    }
+}
+
 fn collect_component_contexts_inner_with_context(
+    node: &serde_json::Value,
+    json_path: &str,
+    parent_id: Option<String>,
+    contexts: &mut std::collections::HashMap<String, ComponentContext>,
+) {
+    // 兼容历史调用方：诊断在更高层聚合，这里用一次性计数
+    let mut diags = ScanDiagnostics::default();
+    collect_component_contexts_inner_with_context_and_diagnostics(
+        node, json_path, parent_id, None, contexts, &mut diags,
+    );
+}
+
+fn collect_component_contexts_inner_with_context_and_diagnostics(
     node: &serde_json::Value,
     json_path: &str,
     parent_id: Option<String>,
     inherited_context: Option<ComponentContext>,
     contexts: &mut std::collections::HashMap<String, ComponentContext>,
+    diagnostics: &mut ScanDiagnostics,
 ) {
     let current_id = node
         .get("id")
@@ -80,6 +154,16 @@ fn collect_component_contexts_inner_with_context(
     let active_context = own_context.or(inherited_context);
 
     if let Some(id) = &current_id {
+        if contexts.contains_key(id) {
+            diagnostics.duplicate_component_id += 1;
+            if diagnostics.sample_duplicate_location.is_none() {
+                diagnostics.sample_duplicate_location = Some(crate::output::Location {
+                    source_file: None,
+                    node_id: Some(id.clone()),
+                    json_path: Some(json_path.to_string()),
+                });
+            }
+        }
         contexts.insert(
             id.clone(),
             ComponentContext {
@@ -108,13 +192,39 @@ fn collect_component_contexts_inner_with_context(
         if let Some(children) = node.get(child_key).and_then(|v| v.as_array()) {
             for (idx, child) in children.iter().enumerate() {
                 let child_path = format!("{}.{}[{}]", json_path, child_key, idx);
-                collect_component_contexts_inner_with_context(
+                collect_component_contexts_inner_with_context_and_diagnostics(
                     child,
                     &child_path,
                     child_parent.clone(),
                     active_context.clone(),
                     contexts,
+                    diagnostics,
                 );
+            }
+        }
+    }
+    // 现有白名单路径之外的未知子键：遇到非空数组且元素为对象时计入 SCANNER_UNRECOGNIZED_CONTAINER_KEY
+    //（PR2 形态感知递归前的安全网）
+    if let Some(obj) = node.as_object() {
+        for (key, value) in obj {
+            if ["components", "panels", "steps", "comps", "id", "type"].contains(&key.as_str()) {
+                continue;
+            }
+            if let Some(arr) = value.as_array() {
+                if arr.is_empty() {
+                    continue;
+                }
+                let has_object = arr.iter().any(|item| item.is_object());
+                if has_object {
+                    diagnostics.unrecognized_container_key += 1;
+                    if diagnostics.sample_unrecognized_location.is_none() {
+                        diagnostics.sample_unrecognized_location = Some(crate::output::Location {
+                            source_file: None,
+                            node_id: current_id.clone(),
+                            json_path: Some(format!("{}.{}", json_path, key)),
+                        });
+                    }
+                }
             }
         }
     }

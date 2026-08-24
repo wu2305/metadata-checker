@@ -243,6 +243,8 @@ bump `REDB_V2_SCHEMA_VERSION`（`graph_redb_v2.rs:17`）**不会**重建旧 v1 �
   可演进性改进，不与正确性修复混在一个里程碑。
 - 旧动词（`--explain-condition`/`--query-*` 等 10 个）的删除决策：维持「隐藏但可用」，
   待 M58.3 验收 run 后单独决策。
+- v2 shadow 为 Current 时 v1 表坏行不可见的盲区：PR1 阶段 hydrate 探针与 bad-row
+  诊断以 v1 表为准，v2 hydrated 场景下坏行由 v2 shadow 覆盖；留 PR4a/PR6 处理。
 
 ## 3. 非目标
 

@@ -431,6 +431,11 @@ pub(super) fn build_page_logic_diagnostics(
         });
     }
 
+    // PAGE_SCOPED_TARGET_FALLBACK：页面限定回退全局模型
+    // 查询期唯一产生点（加载期不产生），与 runtime 的 hydrate 诊断不去重。
+    // 此处仅在确有回退信号时产生；信号源为调用方传入的回退清单，本函数仅负责落点。
+    // 当前链路中该 code 的真实触发由 build_key_model_availability_* 的 fallback 分支
+    // 决定，diagnostics 层仅承接其显式调用。
     PageLogicDiagnostics {
         diagnostics,
         related_context_summary,

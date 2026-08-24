@@ -153,12 +153,12 @@ pub fn answer_effect(code: &str) -> Option<(AnswerImpact, &'static str)> {
         | "GRAPH_DB_NODE_DECODE_FAILED"
         | "GRAPH_DB_EDGE_DECODE_FAILED"
         | "GRAPH_DB_EDGE_DANGLING_ENDPOINT" => (
-            Uncertain,
-            "图数据库部分加载失败，部分节点或边丢失；涉及该图的结论应保守回答，建议重建图数据库。",
+            Partial,
+            "图数据库部分加载失败，部分节点或边丢失；涉及该图的结论只覆盖剩余部分，建议重建图数据库。",
         ),
         "PAGE_SCOPED_TARGET_FALLBACK" => (
-            Uncertain,
-            "页面限定的模型目标未命中，已回退到全局模型；该结论可能不准确于当前页面。",
+            Partial,
+            "页面限定的模型目标未命中，已回退到全局模型；该结论只覆盖回退后可见的部分。",
         ),
         // ---- 路由说明：与答案内容无关 ----
         "RESOLVED_TARGET" => (

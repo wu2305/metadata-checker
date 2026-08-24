@@ -1956,8 +1956,12 @@ fn main() -> Result<()> {
         }
 
         if args.build_graph {
-            scanner::scan_project(project_dir, &db_path)?;
-            println!("Graph database built at {:?}", db_path);
+            let report = scanner::scan_project_with_report(project_dir, &db_path)?;
+            if !report.diagnostics.is_empty() {
+                println!("{}", serde_json::to_string(&report).unwrap_or_default());
+            } else {
+                println!("Graph database built at {:?}", db_path);
+            }
             return Ok(());
         }
 

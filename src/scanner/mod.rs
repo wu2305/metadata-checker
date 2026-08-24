@@ -12,28 +12,42 @@ use crate::graph_redb::GraphDB;
 ///
 /// 支持增量更新：对比文件 mtime/size/hash，只重新处理变更文件。
 /// Scan a project directory and build/update the graph database.
+/// 构建报告（含结构化诊断 envelope）
+#[cfg(feature = "cli-local")]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ScanReport {
+    pub indexed: usize,
+    pub unchanged: usize,
+    pub dirty: usize,
+    pub deleted: usize,
+    pub node_count: usize,
+    pub edge_count: usize,
+    pub diagnostics: Vec<crate::output::Diagnostic>,
+}
+
 #[cfg(feature = "cli-local")]
 pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<()> {
-    let report = indexer::ProjectIndexer::scan(project_dir, db_path)?;
-    // PR1：构建输出同样暴露 hydrate 诊断信封（与 --status / 查询响应三处可见）
-    let graph = GraphDB::open(db_path)?;
-    let diags = graph.hydrate_diagnostics().to_diagnostics();
-    if !diags.is_empty() {
-        let envelope = serde_json::json!({
-            "diagnostics": diags,
-            "node_count": graph.graph.node_count(),
-            "edge_count": graph.graph.edge_count(),
-        });
-        eprintln!("Build diagnostics: {}", serde_json::to_string(&envelope).unwrap_or_default());
-    }
-    eprintln!(
-        "Indexed {} files | Unchanged: {} | Dirty: {} | Deleted: {}",
-        report.indexed, report.unchanged, report.dirty, report.deleted
-    );
-    if report.dirty == 0 && report.deleted == 0 {
-        eprintln!("No graph changes detected; skip persistence");
+    let report = scan_project_with_report(project_dir, db_path)?;
+    if !report.diagnostics.is_empty() {
+        println!("{}", serde_json::to_string(&report).unwrap_or_default());
     }
     Ok(())
+}
+
+#[cfg(feature = "cli-local")]
+pub fn scan_project_with_report(project_dir: &Path, db_path: &Path) -> Result<ScanReport> {
+    let index_report = indexer::ProjectIndexer::scan(project_dir, db_path)?;
+    let graph = GraphDB::open(db_path)?;
+    let diagnostics = graph.hydrate_diagnostics().to_diagnostics();
+    Ok(ScanReport {
+        indexed: index_report.indexed,
+        unchanged: index_report.unchanged,
+        dirty: index_report.dirty,
+        deleted: index_report.deleted,
+        node_count: graph.graph.node_count(),
+        edge_count: graph.graph.edge_count(),
+        diagnostics,
+    })
 }
 
 #[cfg(feature = "cli-local")]

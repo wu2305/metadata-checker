@@ -160,25 +160,14 @@ pub enum Confidence {
 
 /// 诊断结构
 ///
-/// 序列化时会按 `code` 补一条 `answer_effect`：`message` 与 `suggestion` 是写给工具
-/// 维护者的（"Check if this action type is supported by metadata-checker"），消费输出
-/// 的模型从中读不出这条诊断对结论意味着什么。影响只由 code 决定，所以由序列化统一
-/// 补齐，而不是让上百处构造点各写一遍。
-/// 统一诊断信封字段（M58.3 Phase 1）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiagnosticEnvelopeMeta {
-    pub count: Option<usize>,
-    pub sample_location: Option<Location>,
-    #[serde(rename = "answer_impact")]
-    pub answer_impact: Option<String>,
-    pub first_seen_phase: Option<String>,
-}
-
+/// 统一诊断信封字段（M58.3 Phase 1）：`{ code, severity, count, sample_location, answer_impact, first_seen_phase }`
+/// 内部字段名为 `location`，序列化/反序列化均使用 `sample_location`；`location` 仅作反序列化别名以兼容旧数据。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
     pub code: String,
     pub message: String,
+    #[serde(rename = "sample_location", alias = "location")]
     pub location: Location,
     pub suggestion: Option<String>,
     #[serde(default)]
@@ -209,17 +198,8 @@ impl Serialize for Diagnostic {
         use serde::ser::SerializeStruct;
         let effect = crate::output::answer_effect::answer_effect(&self.code);
         let mut extra = 5;
-        if self.count.is_some() {
-            extra += 1;
-        }
-        if self.answer_impact.is_some() {
-            extra += 1;
-        } else if effect.is_some() {
-            // 兼容旧 answer_effect 映射，回退为 answer_impact 的一种
-        }
-        if self.first_seen_phase.is_some() {
-            extra += 1;
-        }
+        // spec 信封六字段必填：count / sample_location / answer_impact / first_seen_phase 始终输出
+        extra += 4;
         if effect.is_some() {
             extra += 1;
         }
@@ -227,26 +207,23 @@ impl Serialize for Diagnostic {
         state.serialize_field("severity", &self.severity)?;
         state.serialize_field("code", &self.code)?;
         state.serialize_field("message", &self.message)?;
-        state.serialize_field("location", &self.location)?;
+        state.serialize_field("sample_location", &self.location)?;
         state.serialize_field("suggestion", &self.suggestion)?;
-        if let Some(count) = self.count {
-            state.serialize_field("count", &count)?;
-        }
-        if let Some(ref impact) = self.answer_impact {
-            state.serialize_field("answer_impact", impact)?;
-        }
-        if let Some(ref phase) = self.first_seen_phase {
-            state.serialize_field("first_seen_phase", phase)?;
-        }
+        state.serialize_field("count", &self.count.unwrap_or(1))?;
+        state.serialize_field(
+            "answer_impact",
+            self.answer_impact
+                .as_deref()
+                .unwrap_or(crate::diagnostics::answer_impact_for(&self.code)),
+        )?;
+        state.serialize_field(
+            "first_seen_phase",
+            self.first_seen_phase
+                .as_deref()
+                .unwrap_or(crate::diagnostics::PHASE_PR1),
+        )?;
         if let Some((_, effect)) = effect {
             state.serialize_field("answer_effect", effect)?;
-        }
-        // 兼容 spec 信封的 sample_location 别名
-        if self.location.source_file.is_some()
-            || self.location.node_id.is_some()
-            || self.location.json_path.is_some()
-        {
-            state.serialize_field("sample_location", &self.location)?;
         }
         state.end()
     }

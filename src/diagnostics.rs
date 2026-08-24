@@ -24,7 +24,7 @@ pub const CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT: &str = "GRAPH_DB_EDGE_DANGLING_E
 pub const CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE: &str = "GRAPH_DB_V2_LAYOUT_UNREADABLE";
 pub const CODE_GRAPH_DB_PARTIAL_HYDRATE: &str = "GRAPH_DB_PARTIAL_HYDRATE";
 pub const CODE_PAGE_SCOPED_TARGET_FALLBACK: &str = "PAGE_SCOPED_TARGET_FALLBACK";
-pub const CODE_GRAPH_SCHEMA_STALE: &str = "GRAPH_SCHEMA_STALE";
+/// 仅保留 PR1 阶段的 code；PR4a 的 GRAPH_SCHEMA_STALE 待该 PR 再引入。
 
 /// answer_impact 映射
 pub fn answer_impact_for(code: &str) -> &'static str {
@@ -37,17 +37,13 @@ pub fn answer_impact_for(code: &str) -> &'static str {
         CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE => IMPACT_NONE,
         CODE_GRAPH_DB_PARTIAL_HYDRATE => IMPACT_PARTIAL,
         CODE_PAGE_SCOPED_TARGET_FALLBACK => IMPACT_PARTIAL,
-        CODE_GRAPH_SCHEMA_STALE => IMPACT_BLOCKING,
         _ => IMPACT_NONE,
     }
 }
 
 /// severity 映射
-pub fn severity_for(code: &str) -> DiagnosticSeverity {
-    match code {
-        // 均为 warning，除非明确为 error
-        _ => DiagnosticSeverity::Warning,
-    }
+pub fn severity_for(_code: &str) -> DiagnosticSeverity {
+    DiagnosticSeverity::Warning
 }
 
 /// hydrate 阶段统计

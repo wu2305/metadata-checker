@@ -185,6 +185,35 @@ fn build_key_model_availability_entry(
     })
 }
 
+/// 诊断：页面限定回退全局模型（PAGE_SCOPED_TARGET_FALLBACK 的查询期归属）。
+/// 同一 code 只在 page_logic diagnostics 产生，runtime 不另做字符串扫描。
+#[cfg(any(test, feature = "cli-local"))]
+pub fn page_scoped_fallback_diagnostic_for_test(
+    model_id: &str,
+    page_path: &str,
+) -> crate::output::Diagnostic {
+    page_scoped_fallback_diagnostic(model_id, page_path)
+}
+
+pub(crate) fn page_scoped_fallback_diagnostic(
+    model_id: &str,
+    page_path: &str,
+) -> crate::output::Diagnostic {
+    crate::diagnostics::envelope_diagnostic(
+        crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK,
+        1,
+        crate::output::Location {
+            source_file: Some(page_path.to_string()),
+            node_id: Some(model_id.to_string()),
+            json_path: None,
+        },
+        format!(
+            "Page-scoped model target '{}' not resolved in '{}', fell back to global model",
+            model_id, page_path
+        ),
+    )
+}
+
 fn key_model_availability_value_from_result(
     model_id: &str,
     page_scoped_target: &str,
@@ -2086,7 +2115,7 @@ fn build_query_page_logic_output_inner(
     let stage_started = Instant::now();
     let evidence_sample_limit = diagnostics::EVIDENCE_SAMPLE_LIMIT;
     let diagnostics::PageLogicDiagnostics {
-        diagnostics,
+        mut diagnostics,
         related_context_summary,
     } = {
         let graph_store: &dyn GraphReadStore = graph;
@@ -2260,7 +2289,28 @@ fn build_query_page_logic_output_inner(
             (batch, build_ms, projection_ms)
         };
     let availability_context_build_ms = availability_index_build_ms;
-    let key_model_availability = availability_batch.entries;
+    let mut key_model_availability = availability_batch.entries;
+    // 落点修正：PAGE_SCOPED_TARGET_FALLBACK 由 page_logic 唯一产生
+    // 若本批次有回退，对应的诊断在此追加（与 diagnostics 合并后统一落 response）
+    let fallback_count = availability_batch.fallback_count;
+    let mut page_scoped_fallback_diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
+    if fallback_count > 0 {
+        // 逐个回退项无法一一映射到 model_id（batch 已聚合），按 batch 级别产生一条聚合诊断
+        // 单次页面查询中同一 code 只产生一次，计数为回退次数
+        page_scoped_fallback_diagnostics.push(crate::diagnostics::envelope_diagnostic(
+            crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK,
+            fallback_count,
+            crate::output::Location {
+                source_file: Some(page_node.path.clone()),
+                node_id: Some(page_id.to_string()),
+                json_path: None,
+            },
+            format!(
+                "Page-scoped model target fallback to global model ({} occurrence(s))",
+                fallback_count
+            ),
+        ));
+    }
     record_profile_stage(
         &mut profile,
         "key_model_availability",
@@ -2445,7 +2495,9 @@ fn build_query_page_logic_output_inner(
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::PageLogic, summary);
     output.query_target = Some(page_id.to_string());
     output.details = Some(details);
-    output.diagnostics = diagnostics.clone();
+    let mut merged_diagnostics = diagnostics.clone();
+    merged_diagnostics.extend(page_scoped_fallback_diagnostics);
+    output.diagnostics = merged_diagnostics;
     record_profile_stage(&mut profile, "output_build", output_stage_started);
 
     let stage_started = Instant::now();
