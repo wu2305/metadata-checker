@@ -336,16 +336,14 @@ impl GraphRuntime {
         })?;
         let graph_load_ms = start.elapsed().as_millis();
 
-        let (graph_file_mtime, graph_file_size) = std::fs::metadata(&path)
-            .map(|m| (m.modified().ok(), m.len()))
-            .unwrap_or((None, 0));
-
         let mut diagnostics = Vec::new();
         diagnostics.push(format!("Graph loaded in {} ms", graph_load_ms));
         let mut load_diagnostics = graph.hydrate_diagnostics().to_diagnostics();
         // M58.3 PR1 refix（F2）：scanner 诊断（SCANNER_*）持久化在 redb，
         // 加载期并入 load_diagnostics——status() 与查询响应经既有管道自然透出，
         // 不在查询层另造第二套信号。读取/合并失败不阻塞加载，降级为文本诊断。
+        // 注意：redb 连接 drop 时也会触碰 db 文件（clean-close 标记），因此所有
+        // db I/O 必须发生在下方指纹采集之前，否则 check-reload 会误判文件已变更。
         match graph.load_scanner_diagnostic_entries() {
             Ok(entries) => {
                 match crate::scanner::indexer::ProjectIndexer::merge_scanner_diagnostic_entries(
@@ -359,6 +357,10 @@ impl GraphRuntime {
             }
             Err(error) => diagnostics.push(format!("Scanner diagnostics load failed: {error:#}")),
         }
+
+        let (graph_file_mtime, graph_file_size) = std::fs::metadata(&path)
+            .map(|m| (m.modified().ok(), m.len()))
+            .unwrap_or((None, 0));
 
         let prefix_hash = compute_prefix_hash(&path, 4096);
         let fingerprint = GraphFingerprint {
