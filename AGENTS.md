@@ -66,7 +66,7 @@
 
 | 模块 | 职责 | 修改前必读 |
 |---|---|---|
-| `superpage.rs` | JSON 反序列化、组件树递归提取、表达式引用正则解析 | 理解 `RawComponent` 和 `SpgComponent` 的映射关系 |
+| `superpage.rs` | JSON 反序列化、组件树递归提取（白名单键 + 形态感知递归）、表达式引用正则解析 | 理解 `RawComponent`（含 flatten `extra`）和 `SpgComponent` 的映射关系 |
 | `dependency.rs` | 依赖图构建、拓扑排序、循环检测、值来源递归追溯 | 了解 `RefType` 分类和 `ValueTrace` 结构 |
 | `priority.rs` | `defaultValue`/`exp`/`calcCondition` 优先级判定 | 优先级规则：`calcCondition` > `exp` > `defaultValue` |
 | `output.rs` | human/JSON 双模式输出、交互式查询循环 | 修改输出格式需同步更新两种模式 |
@@ -74,7 +74,7 @@
 | `graph.rs` | 图节点/边等共享数据结构与通用 helper | 节点/边类型变更需同步 graph store、scanner、query 和序列化逻辑 |
 | `graph_redb.rs` | redb 图数据库实现（`cli-local`）与 graphdb lock | 修改 redb 表、锁、持久化行为需覆盖 native 回归 |
 | `graph_store.rs` | GraphReadStore / GraphWriteStore / IndexStateStore 抽象 | query 层不得重新绑定具体 redb 实现 |
-| `scanner.rs` | 目录扫描、增量更新（mtime+size+hash）、SPG/TBL 处理 | 增量逻辑涉及文件状态比较，改动需谨慎 |
+| `scanner.rs` | 目录扫描、增量更新（mtime+size+hash）、SPG/TBL 处理、扫描诊断（SCANNER_*）持久化 | 增量逻辑涉及文件状态比较，改动需谨慎 |
 | `query.rs` | 图查询接口：`query_model`/`query_page`/`query_cross`/`query_dataflow` | DataFlow 子图展开涉及字段级追溯，较复杂 |
 | `remote_metadata.rs` | 远程元数据 provider contract、WASM fetch 骨架、测试 provider | provider 只返回 raw text，不解析、不建图 |
 | `persistence/` | Memory / redb / IndexedDB stub 持久化 provider | redb 不得另建第二套 graph snapshot；browser-wasm 不得引入 redb |

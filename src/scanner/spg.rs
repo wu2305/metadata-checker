@@ -68,7 +68,8 @@ pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
 
 /// 对原始 SPG JSON 采集扫描诊断（未识别容器键 / 重复组件 id）。
 ///
-/// 生产路径由 indexer 的 `collect_scanner_diagnostics` 调用，集成测试亦直接使用。
+/// 生产路径由 indexer 按文件采集计数并持久化到 redb（`per_file_scan_diagnostic_entry` /
+/// `merge_scanner_diagnostic_entries`），集成测试亦直接使用本函数。
 #[cfg(any(test, feature = "cli-local"))]
 pub fn scan_raw_diagnostics(value: &serde_json::Value) -> Vec<crate::output::Diagnostic> {
     scan_raw_counts(value).to_diagnostics()
