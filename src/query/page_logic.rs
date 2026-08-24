@@ -2121,7 +2121,7 @@ fn build_query_page_logic_output_inner(
     let stage_started = Instant::now();
     let evidence_sample_limit = diagnostics::EVIDENCE_SAMPLE_LIMIT;
     let diagnostics::PageLogicDiagnostics {
-        mut diagnostics,
+        diagnostics,
         related_context_summary,
     } = {
         let graph_store: &dyn GraphReadStore = graph;

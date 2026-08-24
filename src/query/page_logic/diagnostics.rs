@@ -1,6 +1,6 @@
 use crate::graph::Node;
 use crate::graph_store::GraphReadStore;
-use crate::output::{Diagnostic, DiagnosticSeverity, Location};
+use crate::output::{Diagnostic, Location};
 
 use super::pick_str_field;
 

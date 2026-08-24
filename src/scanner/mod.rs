@@ -51,7 +51,7 @@ pub fn scan_project_with_report(project_dir: &Path, db_path: &Path) -> Result<Sc
 #[cfg(feature = "cli-local")]
 #[derive(Debug, Clone)]
 pub struct IndexReportWithDiagnostics {
-    pub report: indexer::IndexReport,
+    pub report: crate::graph_store::IndexReport,
     pub diagnostics: Vec<crate::output::Diagnostic>,
 }
 
