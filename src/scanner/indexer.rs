@@ -55,11 +55,32 @@ pub enum ParsedGraphContent {
 }
 
 /// 跨文件聚合扫描诊断（PR1 落地）：对每份 SPG 原始 JSON 采集计数后合并。
+///
+/// M58.3 PR1 refix（F8）：spg 侧构造的 sample_location 不携带来源文件
+/// （`source_file` 为 None），在聚合点按「首个非空样例胜出」语义把胜出样例的
+/// `source_file` 回填为贡献该样例的 update 的 `logical_path`。
 fn collect_scanner_diagnostics(updates: &[ParsedGraphUpdate]) -> Vec<crate::output::Diagnostic> {
     let mut acc = crate::scanner::spg::ScanDiagnostics::default();
     for update in updates {
         if let ParsedGraphContent::Spg(value) = &update.content {
-            acc.merge(&crate::scanner::spg::scan_raw_counts(value));
+            let counts = crate::scanner::spg::scan_raw_counts(value);
+            // 本 update 的样例只有在 acc 尚无样例时才会被 merge 采纳，
+            // 此时需要回填 source_file。
+            let backfill_unrecognized = acc.sample_unrecognized_location.is_none()
+                && counts.sample_unrecognized_location.is_some();
+            let backfill_duplicate = acc.sample_duplicate_location.is_none()
+                && counts.sample_duplicate_location.is_some();
+            acc.merge(&counts);
+            if backfill_unrecognized {
+                if let Some(loc) = acc.sample_unrecognized_location.as_mut() {
+                    loc.source_file = Some(update.logical_path.clone());
+                }
+            }
+            if backfill_duplicate {
+                if let Some(loc) = acc.sample_duplicate_location.as_mut() {
+                    loc.source_file = Some(update.logical_path.clone());
+                }
+            }
         }
     }
     acc.to_diagnostics()
@@ -428,7 +449,15 @@ impl ProjectIndexer {
                     })
                 },
             };
-            let report = Self::persist_index(&mut graph, commit)?;
+            let mut report = Self::persist_index(&mut graph, commit)?;
+            // M58.3 PR1 refix（F6）：IndexReport 统一为文件口径。
+            // store 层 persist_index 只能从 commit 拿到节点数（dirty_nodes/
+            // deleted_nodes），文件数只有 diff 阶段的 plan 知道，因此在报告
+            // 出口层覆盖，与下方 no-op 路径口径一致。
+            report.indexed = plan.discovered_count;
+            report.dirty = plan.dirty.len();
+            report.deleted = plan.deleted.len();
+            report.unchanged = plan.discovered_count.saturating_sub(plan.dirty.len());
             return Ok(crate::scanner::IndexReportWithDiagnostics {
                 report,
                 diagnostics: scanner_diagnostics,

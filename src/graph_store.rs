@@ -222,12 +222,24 @@ pub struct PersistReport {
 
 /// 索引报告
 ///
-/// 一次索引提交后的结果摘要。
+/// 一次索引提交后的结果摘要。**四个字段均为文件口径**（不是节点数）：
+/// `indexed` = 发现的文件总数，`dirty` = 本轮重新解析的脏文件数，
+/// `deleted` = 本轮删除的文件数，`unchanged` = `indexed - dirty`。
+///
+/// 注意：`IndexStateStore::persist_index` 的 store 实现（redb/memory）
+/// 只能从 `IndexCommit` 拿到节点数，返回的是节点口径的近似值；
+/// 文件口径由 `ProjectIndexer::scan_with_diagnostics` 在报告出口层
+/// 用 diff 计划覆盖（M58.3 PR1 refix，F6）。直接消费 store 层
+/// `persist_index` 返回值的调用方（如 perf profile）读到的仍是节点口径。
 #[derive(Debug, Clone)]
 pub struct IndexReport {
+    /// 发现的文件总数
     pub indexed: usize,
+    /// 未变更文件数（`indexed - dirty`）
     pub unchanged: usize,
+    /// 本轮重新解析的脏文件数
     pub dirty: usize,
+    /// 本轮删除的文件数
     pub deleted: usize,
 }
 

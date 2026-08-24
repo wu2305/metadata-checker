@@ -172,54 +172,54 @@ impl GraphDB {
     fn open_inner(db_path: &Path) -> Result<Self> {
         Self::ensure_redb_tables(db_path)?;
 
+        // M56：先查 v2 shadow 状态。Stale 时跳过 v2，从增量更新后的 v1 hydrate，
+        // 且不跑 read_v2_layout 全量探针（Stale 路径用不到探针结果，大读白费，
+        // 也不应新发 v2_layout 诊断）。
+        if crate::graph_redb_v2::read_v2_shadow_state(db_path)?
+            == crate::graph_redb_v2::V2ShadowState::Stale
+        {
+            return Self::open_inner_v1(db_path);
+        }
+
         let mut pending_hydrate_diagnostics = crate::diagnostics::HydrateDiagnostics::default();
 
-        // 检测 v2 layout 可读性：read_v2_layout 报错/返回 None 均视为一次 V2_LAYOUT_UNREADABLE，
-        // 与后续 v1 hydrate 的细粒度计数并行记录（不折叠）。
+        // 检测 v2 layout 可读性（Current 或旧库无记录时）：read_v2_layout 返回 Err
+        // 或 Ok(None)（meta 表/键缺失、schema 版本不匹配、fingerprint 不匹配）
+        // 均计为一次 V2_LAYOUT_UNREADABLE，与后续 v1 hydrate 的细粒度计数并行记录（不折叠）。
         let v2_layout_probe = crate::graph_redb_v2::read_v2_layout(db_path);
-        let v2_layout_had_error = matches!(&v2_layout_probe, Err(_));
-        if v2_layout_had_error {
+        if !matches!(&v2_layout_probe, Ok(Some(_))) {
             pending_hydrate_diagnostics.v2_layout_unreadable = 1;
         }
 
-        // M56：v2 shadow 为 Stale 时跳过 v2，从增量更新后的 v1 hydrate；
-        // Current 或旧库无记录（视为 Current，向后兼容）时维持 v2 优先。
-        if crate::graph_redb_v2::read_v2_shadow_state(db_path)?
-            != crate::graph_redb_v2::V2ShadowState::Stale
-        {
-            if let Ok(Some(layout)) = v2_layout_probe {
-                match crate::graph_redb_v2::hydrate_graph_from_v2(
-                    &layout,
-                    &db_path.to_string_lossy(),
-                ) {
-                    Ok(mut graph) => {
-                        graph.hydrate_diagnostics = pending_hydrate_diagnostics;
-                        return Ok(graph);
+        if let Ok(Some(layout)) = v2_layout_probe {
+            match crate::graph_redb_v2::hydrate_graph_from_v2(&layout, &db_path.to_string_lossy())
+            {
+                Ok(mut graph) => {
+                    graph.hydrate_diagnostics = pending_hydrate_diagnostics;
+                    return Ok(graph);
+                }
+                Err(error) => {
+                    // v2 hydrate 失败时 fallback v1（始终正确），但记录诊断供调用方上报
+                    let mut graph = Self::open_inner_v1(db_path)?;
+                    graph.v2_hydrate_warning =
+                        Some(format!("v2 shadow hydrate failed, fell back to v1: {error:#}"));
+                    if graph.hydrate_diagnostics.v2_hydrate_warning.is_none() {
+                        graph.hydrate_diagnostics.v2_hydrate_warning =
+                            graph.v2_hydrate_warning.clone();
                     }
-                    Err(error) => {
-                        // v2 hydrate 失败时 fallback v1（始终正确），但记录诊断供调用方上报
-                        let mut graph = Self::open_inner_v1(db_path)?;
-                        graph.v2_hydrate_warning = Some(format!(
-                            "v2 shadow hydrate failed, fell back to v1: {error:#}"
-                        ));
-                        if graph.hydrate_diagnostics.v2_hydrate_warning.is_none() {
-                            graph.hydrate_diagnostics.v2_hydrate_warning =
-                                graph.v2_hydrate_warning.clone();
-                        }
-                        if graph.hydrate_diagnostics.v2_layout_unreadable == 0
-                            && pending_hydrate_diagnostics.v2_layout_unreadable > 0
-                        {
-                            graph.hydrate_diagnostics.v2_layout_unreadable =
-                                pending_hydrate_diagnostics.v2_layout_unreadable;
-                        }
-                        return Ok(graph);
+                    if graph.hydrate_diagnostics.v2_layout_unreadable == 0
+                        && pending_hydrate_diagnostics.v2_layout_unreadable > 0
+                    {
+                        graph.hydrate_diagnostics.v2_layout_unreadable =
+                            pending_hydrate_diagnostics.v2_layout_unreadable;
                     }
+                    return Ok(graph);
                 }
             }
         }
 
         let mut graph = Self::open_inner_v1(db_path)?;
-        // 合并未通过 v2 路径的 v2_layout 探针诊断
+        // 合并 v2 探针诊断（仅非 Stale 路径存在探针结果）
         if graph.hydrate_diagnostics.v2_layout_unreadable == 0
             && pending_hydrate_diagnostics.v2_layout_unreadable > 0
         {
