@@ -1,0 +1,46 @@
+{
+    "version": "4.19.7",
+    "theme": "default",
+    "sources": [
+        {
+            "id": "model1",
+            "modelType": "dwtable",
+            "path": "data/chain_table.tbl"
+        }
+    ],
+    "canvas": {
+        "id": "canvas",
+        "type": "canvas",
+        "components": [
+            {
+                "id": "panel_gate",
+                "type": "panel",
+                "visibleCondition": "model1.totalRowCount__ > 0",
+                "components": [
+                    {
+                        "id": "child_text",
+                        "type": "text",
+                        "visible": "model1.flag",
+                        "value": "${model1.name}"
+                    },
+                    {
+                        "id": "grand_panel",
+                        "type": "panel",
+                        "visibleCondition": "model1.flag == 1",
+                        "components": [
+                            {
+                                "id": "leaf_btn",
+                                "type": "button"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "id": "sibling_text",
+                "type": "text",
+                "visibleCondition": "model1.other > 1"
+            }
+        ]
+    }
+}
