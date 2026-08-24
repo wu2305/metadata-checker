@@ -27,6 +27,13 @@ pub const CODE_PAGE_SCOPED_TARGET_FALLBACK: &str = "PAGE_SCOPED_TARGET_FALLBACK"
 /// 仅保留 PR1 阶段的 code；PR4a 的 GRAPH_SCHEMA_STALE 待该 PR 再引入。
 
 /// answer_impact 映射
+///
+/// 显式列出的 code 以本表为准（权威）。未显式列出的 code 从
+/// [`crate::output::answer_effect::answer_effect`] 派生，保证序列化 JSON 中
+/// `answer_impact` 与 `answer_effect` 的置信度语义一致：
+/// - `Uncertain` / `Partial` → [`IMPACT_PARTIAL`]（语义不确定或只覆盖部分数据）
+/// - `Determinate` / `Addressing` / `Routing` → [`IMPACT_NONE`]（确定判定、寻址与路由说明不降低答案置信度）
+/// - 未登记的 code（`answer_effect` 返回 `None`）→ [`IMPACT_NONE`]
 pub fn answer_impact_for(code: &str) -> &'static str {
     match code {
         CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY => IMPACT_PARTIAL,
@@ -37,7 +44,15 @@ pub fn answer_impact_for(code: &str) -> &'static str {
         CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE => IMPACT_NONE,
         CODE_GRAPH_DB_PARTIAL_HYDRATE => IMPACT_PARTIAL,
         CODE_PAGE_SCOPED_TARGET_FALLBACK => IMPACT_PARTIAL,
-        _ => IMPACT_NONE,
+        _ => match crate::output::answer_effect::answer_effect(code) {
+            Some((
+                crate::output::answer_effect::AnswerImpact::Uncertain
+                | crate::output::answer_effect::AnswerImpact::Partial,
+                _,
+            )) => IMPACT_PARTIAL,
+            // Determinate / Addressing / Routing 与未登记 code 一样，不降低答案置信度
+            _ => IMPACT_NONE,
+        },
     }
 }
 
