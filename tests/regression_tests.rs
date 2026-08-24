@@ -1536,8 +1536,9 @@ fn test_cli_query_model_contract() {
         "--project-dir",
         "tests/fixtures/test_project",
         "--build-graph",
+        "--human",
     ]);
-    // build-graph 输出 human text, 但先确保 graph 建立
+    // build-graph 默认输出单 JSON；--human 下才有人类统计行，先确保 graph 建立
     assert!(output.contains("Graph database built"));
 
     let output = run_cli(&[

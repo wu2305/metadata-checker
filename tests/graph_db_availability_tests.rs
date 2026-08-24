@@ -51,6 +51,7 @@ fn test_custom_graph_db_path_build_and_query() {
         "--project-dir",
         "tests/fixtures/test_project",
         "--build-graph",
+        "--human",
         "--graph-db-path",
         tmp.to_str().unwrap(),
     ]);
@@ -186,6 +187,7 @@ fn test_build_graph_to_tmp_real_project() {
         "--project-dir",
         project,
         "--build-graph",
+        "--human",
         "--graph-db-path",
         tmp.to_str().unwrap(),
         "--graph-lock-timeout-ms",
@@ -260,6 +262,7 @@ fn test_real_project_parallel_queries() {
         "--project-dir",
         project,
         "--build-graph",
+        "--human",
         "--graph-db-path",
         tmp.to_str().unwrap(),
         "--graph-lock-timeout-ms",
@@ -346,11 +349,12 @@ fn test_graph_db_locked_returns_structured_diagnostic() {
     let _ = std::fs::remove_file(&db_path);
     let _ = std::fs::remove_file(&lock_path);
 
-    // 先 build graph
+    // 先 build graph（--human：默认模式输出单 JSON，人类统计行只在 human 模式打印）
     let build_out = run_cli(&[
         "--project-dir",
         "tests/fixtures/test_project",
         "--build-graph",
+        "--human",
         "--graph-db-path",
         db_path.to_str().unwrap(),
     ]);
