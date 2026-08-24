@@ -206,7 +206,7 @@ impl Serialize for Diagnostic {
         let first_seen_phase = self.first_seen_phase.as_deref().ok_or_else(|| {
             S::Error::custom("Diagnostic.first_seen_phase must be set via envelope_diagnostic")
         })?;
-        let mut extra = 9;
+        let mut extra = 8;
         if effect.is_some() {
             extra += 1;
         }
@@ -218,7 +218,6 @@ impl Serialize for Diagnostic {
         state.serialize_field("sample_location", &self.location)?;
         state.serialize_field("answer_impact", answer_impact)?;
         state.serialize_field("first_seen_phase", first_seen_phase)?;
-        state.serialize_field("location", &self.location)?;
         state.serialize_field("suggestion", &self.suggestion)?;
         if let Some((_, effect)) = effect {
             state.serialize_field("answer_effect", effect)?;
