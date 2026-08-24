@@ -112,12 +112,18 @@ fn collect_component_contexts_inner_with_context(
     node: &serde_json::Value,
     json_path: &str,
     parent_id: Option<String>,
+    inherited_context: Option<ComponentContext>,
     contexts: &mut std::collections::HashMap<String, ComponentContext>,
 ) {
     // 兼容历史调用方：诊断在更高层聚合，这里用一次性计数
     let mut diags = ScanDiagnostics::default();
     collect_component_contexts_inner_with_context_and_diagnostics(
-        node, json_path, parent_id, None, contexts, &mut diags,
+        node,
+        json_path,
+        parent_id,
+        inherited_context,
+        contexts,
+        &mut diags,
     );
 }
 
@@ -187,7 +193,7 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
         );
     }
 
-    let child_parent = current_id.or(parent_id);
+    let child_parent = current_id.clone().or(parent_id);
     for child_key in ["components", "panels", "steps", "comps"] {
         if let Some(children) = node.get(child_key).and_then(|v| v.as_array()) {
             for (idx, child) in children.iter().enumerate() {
