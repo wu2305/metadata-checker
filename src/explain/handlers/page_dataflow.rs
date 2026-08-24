@@ -212,9 +212,8 @@ pub(in crate::explain) fn explain_page_graph(
             "Field-level lineage source could not be determined",
         );
         diag.severity = crate::output::DiagnosticSeverity::Info;
-        diag.suggestion = Some(
-            "Check --context or --query-dataflow for upstream relationships".to_string(),
-        );
+        diag.suggestion =
+            Some("Check --context or --query-dataflow for upstream relationships".to_string());
         diagnostics.push(diag);
     }
 
@@ -450,8 +449,7 @@ pub(in crate::explain) fn explain_dataflow_graph(
                     ),
                 );
                 diag.severity = crate::output::DiagnosticSeverity::Info;
-                diag.suggestion =
-                    Some("Expression parser may not support this syntax".to_string());
+                diag.suggestion = Some("Expression parser may not support this syntax".to_string());
                 diagnostics.push(diag);
             }
             lineage.push(serde_json::json!({

@@ -291,9 +291,8 @@ pub fn print_summary_to(
                         "No priority rules found in this page",
                     );
                     diag.severity = crate::output::DiagnosticSeverity::Info;
-                    diag.suggestion = Some(
-                        "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
-                    );
+                    diag.suggestion =
+                        Some("Page has no defaultValue/exp/calcCondition conflicts".to_string());
                     diag
                 });
             }
@@ -474,9 +473,8 @@ pub fn print_non_human_to(
                         "No priority rules found in this page",
                     );
                     diag.severity = crate::output::DiagnosticSeverity::Info;
-                    diag.suggestion = Some(
-                        "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
-                    );
+                    diag.suggestion =
+                        Some("Page has no defaultValue/exp/calcCondition conflicts".to_string());
                     diag
                 });
             }

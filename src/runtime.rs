@@ -1112,12 +1112,21 @@ impl GraphRuntime {
                     }
                     *arr = merged;
                 }
-                let codes: Vec<String> = self.load_diagnostics.iter().map(|d| d.code.clone()).collect();
-                let has_partial = codes.iter().any(|c| c == crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE);
+                let codes: Vec<String> = self
+                    .load_diagnostics
+                    .iter()
+                    .map(|d| d.code.clone())
+                    .collect();
+                let has_partial = codes
+                    .iter()
+                    .any(|c| c == crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE);
                 if has_partial {
                     if let Some(summary) = obj.get_mut("summary").and_then(|s| s.as_object_mut()) {
                         // 仅在已存在 confidence 块时覆盖 level，避免无条件新增覆盖
-                        if let Some(conf) = summary.get_mut("confidence").and_then(|v| v.as_object_mut()) {
+                        if let Some(conf) = summary
+                            .get_mut("confidence")
+                            .and_then(|v| v.as_object_mut())
+                        {
                             conf.insert("level".to_string(), serde_json::json!("partial"));
                         } else {
                             summary.insert(

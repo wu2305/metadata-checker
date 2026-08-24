@@ -230,8 +230,7 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
     if let Some(obj) = node.as_object() {
         for (key, value) in obj {
             if SCANNER_EXCLUDED_CONTAINER_KEYS.contains(&key.as_str())
-                || ["components", "panels", "steps", "comps", "id", "type"]
-                    .contains(&key.as_str())
+                || ["components", "panels", "steps", "comps", "id", "type"].contains(&key.as_str())
             {
                 continue;
             }

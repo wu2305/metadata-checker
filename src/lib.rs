@@ -1,6 +1,5 @@
 pub mod action_semantics;
 pub mod answer_contract;
-pub mod diagnostics;
 pub mod browser;
 pub mod browser_orchestrator;
 #[cfg(feature = "browser-wasm")]
@@ -12,6 +11,7 @@ pub mod conditions;
 pub mod context;
 pub mod dense_graph;
 pub mod dependency;
+pub mod diagnostics;
 pub mod diff_refresh;
 pub mod explain;
 pub mod graph;

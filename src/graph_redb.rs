@@ -9,8 +9,7 @@ use crate::graph_store::{
     GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
 };
 use crate::output::schema::{
-    AiOutput, Confidence, DiagnosticSeverity, Evidence, Location, OutputKind,
-    format_next_query,
+    AiOutput, Confidence, DiagnosticSeverity, Evidence, Location, OutputKind, format_next_query,
 };
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -371,7 +370,9 @@ impl GraphDB {
                 format!("Graph database not found at {:?}", db_path),
             );
             diag.severity = DiagnosticSeverity::Error;
-            diag.suggestion = Some("Run metadata-checker --project-dir <DIR> --build-graph to create it".to_string());
+            diag.suggestion = Some(
+                "Run metadata-checker --project-dir <DIR> --build-graph to create it".to_string(),
+            );
             out.diagnostics.push(diag);
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
@@ -404,7 +405,10 @@ impl GraphDB {
                     format!("Cannot acquire graphdb lock: {}", e),
                 );
                 diag.severity = DiagnosticSeverity::Error;
-                diag.suggestion = Some("Wait for other process to finish, or use a different --graph-db-path".to_string());
+                diag.suggestion = Some(
+                    "Wait for other process to finish, or use a different --graph-db-path"
+                        .to_string(),
+                );
                 out.diagnostics.push(diag);
                 out.next_queries.push(format_next_query(
                     "metadata-checker --graph-db-path {} --graph-lock-timeout-ms <MS>",
@@ -447,7 +451,10 @@ impl GraphDB {
                             format!("Graph database is locked by another process: {}", msg),
                         );
                         diag.severity = DiagnosticSeverity::Error;
-                        diag.suggestion = Some("Wait for other process to finish, or use a different --graph-db-path".to_string());
+                        diag.suggestion = Some(
+                            "Wait for other process to finish, or use a different --graph-db-path"
+                                .to_string(),
+                        );
                         diag
                     });
                 } else if msg.contains("permission")
@@ -483,7 +490,9 @@ impl GraphDB {
                                 format!("Graph database permission denied: {}", msg),
                             );
                             diag.severity = DiagnosticSeverity::Error;
-                            diag.suggestion = Some("Use --graph-db-path pointing to a writable directory".to_string());
+                            diag.suggestion = Some(
+                                "Use --graph-db-path pointing to a writable directory".to_string(),
+                            );
                             diag
                         });
                     }
@@ -534,7 +543,10 @@ impl GraphDB {
                     format!("Graph database not found at {:?}", db_path),
                 );
                 diag.severity = DiagnosticSeverity::Error;
-                diag.suggestion = Some("Run metadata-checker --project-dir <DIR> --build-graph to create it".to_string());
+                diag.suggestion = Some(
+                    "Run metadata-checker --project-dir <DIR> --build-graph to create it"
+                        .to_string(),
+                );
                 diag
             });
             out.next_queries.push(format_next_query(
@@ -595,7 +607,9 @@ impl GraphDB {
                             format!("Graph database permission denied: {}", msg),
                         );
                         diag.severity = DiagnosticSeverity::Error;
-                        diag.suggestion = Some("Use --graph-db-path pointing to a writable directory".to_string());
+                        diag.suggestion = Some(
+                            "Use --graph-db-path pointing to a writable directory".to_string(),
+                        );
                         diag
                     });
                 } else {

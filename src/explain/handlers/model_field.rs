@@ -853,9 +853,8 @@ pub(in crate::explain) fn explain_field_graph(
             format!("Field {} has no traceable source lineage", node.id),
         );
         diag.severity = crate::output::DiagnosticSeverity::Info;
-        diag.suggestion = Some(
-            "Check dimensions[].inputField or dimensions[].exp metadata".to_string(),
-        );
+        diag.suggestion =
+            Some("Check dimensions[].inputField or dimensions[].exp metadata".to_string());
         diagnostics.push(diag);
     }
 

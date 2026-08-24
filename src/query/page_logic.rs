@@ -2528,19 +2528,21 @@ fn build_query_page_logic_output_inner(
             .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
             .collect();
         if !truncated_parts.is_empty() {
-            output.diagnostics.push(crate::diagnostics::envelope_diagnostic(
-                "OUTPUT_TRUNCATED",
-                1,
-                crate::output::Location {
-                    source_file: Some(page_node.path.clone()),
-                    node_id: Some(page_id.to_string()),
-                    json_path: None,
-                },
-                format!(
-                    "Compact budget: arrays truncated for: {}",
-                    truncated_parts.join(", ")
-                ),
-            ));
+            output
+                .diagnostics
+                .push(crate::diagnostics::envelope_diagnostic(
+                    "OUTPUT_TRUNCATED",
+                    1,
+                    crate::output::Location {
+                        source_file: Some(page_node.path.clone()),
+                        node_id: Some(page_id.to_string()),
+                        json_path: None,
+                    },
+                    format!(
+                        "Compact budget: arrays truncated for: {}",
+                        truncated_parts.join(", ")
+                    ),
+                ));
         }
 
         // Add evidence_summary and key_findings to summary

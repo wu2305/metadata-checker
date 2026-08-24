@@ -224,7 +224,8 @@ pub(super) fn build_page_logic_diagnostics(
                 ),
             );
             diag.suggestion = Some(
-                "Review the expression and verify each referenced component/model exists".to_string(),
+                "Review the expression and verify each referenced component/model exists"
+                    .to_string(),
             );
             diagnostics.push(diag);
         }
@@ -298,7 +299,8 @@ pub(super) fn build_page_logic_diagnostics(
                         .unwrap_or("?")
                 ),
             );
-            diag.suggestion = Some("Verify if this action should produce a write target".to_string());
+            diag.suggestion =
+                Some("Verify if this action should produce a write target".to_string());
             diagnostics.push(diag);
         }
     }

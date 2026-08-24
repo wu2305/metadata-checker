@@ -1960,8 +1960,12 @@ fn main() -> Result<()> {
             // 统计行始终输出；有诊断时额外输出结构化 JSON 信封
             println!(
                 "Indexed {} files | Unchanged: {} | Dirty: {} | Deleted: {} | Nodes: {} | Edges: {}",
-                report.indexed, report.unchanged, report.dirty, report.deleted,
-                report.node_count, report.edge_count
+                report.indexed,
+                report.unchanged,
+                report.dirty,
+                report.deleted,
+                report.node_count,
+                report.edge_count
             );
             if report.diagnostics.is_empty() {
                 println!("Graph database built at {:?}", db_path);

@@ -228,9 +228,8 @@ pub(in crate::explain) fn explain_component_graph(
             "Field-level lineage source could not be determined",
         );
         diag.severity = crate::output::DiagnosticSeverity::Info;
-        diag.suggestion = Some(
-            "Check --context or --query-dataflow for upstream relationships".to_string(),
-        );
+        diag.suggestion =
+            Some("Check --context or --query-dataflow for upstream relationships".to_string());
         diagnostics.push(diag);
     }
 

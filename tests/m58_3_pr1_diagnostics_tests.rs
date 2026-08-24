@@ -31,11 +31,20 @@ fn has_code(diags: &[metadata_checker::output::Diagnostic], code: &str) -> bool 
 }
 
 fn has_code_in_value(value: &serde_json::Value, code: &str) -> bool {
-    serde_json::to_string(value).unwrap_or_default().contains(code)
+    serde_json::to_string(value)
+        .unwrap_or_default()
+        .contains(code)
 }
 
 fn assert_envelope_serializes(value: &serde_json::Value) {
-    for field in ["code", "severity", "count", "sample_location", "answer_impact", "first_seen_phase"] {
+    for field in [
+        "code",
+        "severity",
+        "count",
+        "sample_location",
+        "answer_impact",
+        "first_seen_phase",
+    ] {
         assert!(value.get(field).is_some(), "missing field {field}: {value}");
     }
 }
@@ -69,7 +78,8 @@ fn pr1_hydrate_counts_and_partial_gate() -> anyhow::Result<()> {
         }
         // Force v2 to Stale so hydrate falls back to v1 tables (where bad rows live)
         {
-            let mut meta = write_txn.open_table::<&str, Vec<u8>>(redb::TableDefinition::new("v2_meta"))?;
+            let mut meta =
+                write_txn.open_table::<&str, Vec<u8>>(redb::TableDefinition::new("v2_meta"))?;
             let bytes = serde_json::to_vec(&V2ShadowState::Stale).unwrap();
             meta.insert("shadow_state", bytes)?;
         }
@@ -80,13 +90,19 @@ fn pr1_hydrate_counts_and_partial_gate() -> anyhow::Result<()> {
     let diags = reopened.hydrate_diagnostics().to_diagnostics();
     assert!(has_code(&diags, "GRAPH_DB_NODE_DECODE_FAILED"), "{diags:?}");
     assert!(has_code(&diags, "GRAPH_DB_EDGE_DECODE_FAILED"), "{diags:?}");
-    assert!(has_code(&diags, "GRAPH_DB_EDGE_DANGLING_ENDPOINT"), "{diags:?}");
+    assert!(
+        has_code(&diags, "GRAPH_DB_EDGE_DANGLING_ENDPOINT"),
+        "{diags:?}"
+    );
     assert!(has_code(&diags, "GRAPH_DB_PARTIAL_HYDRATE"), "{diags:?}");
 
     // status 透出
     let rt = metadata_checker::runtime::GraphRuntime::load(&db_path)?;
     assert!(has_code(&rt.load_diagnostics, "GRAPH_DB_PARTIAL_HYDRATE"));
-    assert!(has_code(&rt.status().load_diagnostics, "GRAPH_DB_PARTIAL_HYDRATE"));
+    assert!(has_code(
+        &rt.status().load_diagnostics,
+        "GRAPH_DB_PARTIAL_HYDRATE"
+    ));
 
     // 查询响应同样带闸门
     let mut rt2 = metadata_checker::runtime::GraphRuntime::load(&db_path)?;
@@ -101,7 +117,10 @@ fn pr1_hydrate_counts_and_partial_gate() -> anyhow::Result<()> {
         check_reload: false,
     })?;
     let result_str = serde_json::to_string(&resp.result)?;
-    assert!(result_str.contains("GRAPH_DB_PARTIAL_HYDRATE"), "{result_str}");
+    assert!(
+        result_str.contains("GRAPH_DB_PARTIAL_HYDRATE"),
+        "{result_str}"
+    );
 
     let _ = std::fs::remove_file(&db_path);
     let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
@@ -115,9 +134,18 @@ fn pr1_normal_path_has_no_partial() -> anyhow::Result<()> {
     // 正常路径：pin 语料（xiaoshouyi-corpus @ 6920ac51）全量构建实测 GRAPH_DB_* 均为 0
     //（已登记在 spec 验收 1，2026-08-24）；fixture 同样为 0
     assert!(!has_code(&diags, "GRAPH_DB_PARTIAL_HYDRATE"), "{diags:?}");
-    assert!(!has_code(&diags, "GRAPH_DB_NODE_DECODE_FAILED"), "{diags:?}");
-    assert!(!has_code(&diags, "GRAPH_DB_EDGE_DECODE_FAILED"), "{diags:?}");
-    assert!(!has_code(&diags, "GRAPH_DB_EDGE_DANGLING_ENDPOINT"), "{diags:?}");
+    assert!(
+        !has_code(&diags, "GRAPH_DB_NODE_DECODE_FAILED"),
+        "{diags:?}"
+    );
+    assert!(
+        !has_code(&diags, "GRAPH_DB_EDGE_DECODE_FAILED"),
+        "{diags:?}"
+    );
+    assert!(
+        !has_code(&diags, "GRAPH_DB_EDGE_DANGLING_ENDPOINT"),
+        "{diags:?}"
+    );
     let _ = std::fs::remove_file(&db_path);
     let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
     Ok(())
@@ -197,7 +225,10 @@ fn pr1_scanner_diagnostics_trigger_and_count() -> anyhow::Result<()> {
         }
     });
     let diags_unrec = metadata_checker::scanner::scan_raw_diagnostics(&raw_unrec);
-    assert!(has_code(&diags_unrec, "SCANNER_UNRECOGNIZED_CONTAINER_KEY"), "{diags_unrec:?}");
+    assert!(
+        has_code(&diags_unrec, "SCANNER_UNRECOGNIZED_CONTAINER_KEY"),
+        "{diags_unrec:?}"
+    );
     for d in &diags_unrec {
         let v = serde_json::to_value(d)?;
         assert_envelope_serializes(&v);
@@ -211,7 +242,10 @@ fn pr1_scanner_diagnostics_trigger_and_count() -> anyhow::Result<()> {
         }
     });
     let diags_dup = metadata_checker::scanner::scan_raw_diagnostics(&raw_dup);
-    assert!(has_code(&diags_dup, "SCANNER_DUPLICATE_COMPONENT_ID"), "{diags_dup:?}");
+    assert!(
+        has_code(&diags_dup, "SCANNER_DUPLICATE_COMPONENT_ID"),
+        "{diags_dup:?}"
+    );
     for d in &diags_dup {
         let v = serde_json::to_value(d)?;
         assert_envelope_serializes(&v);
@@ -225,12 +259,17 @@ fn pr1_scanner_diagnostics_trigger_and_count() -> anyhow::Result<()> {
             .as_nanos()
     ));
     std::fs::create_dir_all(&bad_project)?;
-    std::fs::write(bad_project.join("bad.spg"), serde_json::to_string(&raw_unrec)?)?;
+    std::fs::write(
+        bad_project.join("bad.spg"),
+        serde_json::to_string(&raw_unrec)?,
+    )?;
     let bad_db = bad_project.join("graph.db");
-    let bad_report =
-        metadata_checker::scanner::scan_project_with_report(&bad_project, &bad_db)?;
+    let bad_report = metadata_checker::scanner::scan_project_with_report(&bad_project, &bad_db)?;
     assert!(
-        has_code(&bad_report.diagnostics, "SCANNER_UNRECOGNIZED_CONTAINER_KEY"),
+        has_code(
+            &bad_report.diagnostics,
+            "SCANNER_UNRECOGNIZED_CONTAINER_KEY"
+        ),
         "{:?}",
         bad_report.diagnostics
     );
@@ -270,9 +309,8 @@ fn pr1_page_scoped_fallback_single_diagnostic() -> anyhow::Result<()> {
     let page_id = "page:app/actions_test.spg";
     let page_path = "app/actions_test.spg";
     // 构造点归属：聚合诊断由唯一构造函数产生
-    let diag = metadata_checker::query::page_scoped_fallback_diagnostic_for_test(
-        page_id, page_path, 2,
-    );
+    let diag =
+        metadata_checker::query::page_scoped_fallback_diagnostic_for_test(page_id, page_path, 2);
     assert_eq!(diag.code, "PAGE_SCOPED_TARGET_FALLBACK");
     assert_eq!(diag.count, Some(2));
     assert!(diag.answer_impact.is_some());
@@ -305,7 +343,10 @@ fn pr1_page_scoped_fallback_single_diagnostic() -> anyhow::Result<()> {
         .iter()
         .filter(|d| d.get("code").and_then(|c| c.as_str()) == Some("PAGE_SCOPED_TARGET_FALLBACK"))
         .collect();
-    assert!(fallback_hits.len() <= 1, "同一 code 至多一条聚合诊断: {diags:?}");
+    assert!(
+        fallback_hits.len() <= 1,
+        "同一 code 至多一条聚合诊断: {diags:?}"
+    );
     let warned_items = resp
         .result
         .get("details")
@@ -320,7 +361,11 @@ fn pr1_page_scoped_fallback_single_diagnostic() -> anyhow::Result<()> {
         })
         .unwrap_or(0);
     if warned_items > 0 {
-        assert_eq!(fallback_hits.len(), 1, "有回退必须恰好一条聚合诊断: {diags:?}");
+        assert_eq!(
+            fallback_hits.len(),
+            1,
+            "有回退必须恰好一条聚合诊断: {diags:?}"
+        );
         let count = fallback_hits[0].get("count").and_then(|c| c.as_u64());
         assert!(count.is_some_and(|c| c >= 1), "{diags:?}");
     } else {
@@ -363,6 +408,10 @@ fn pr1_envelope_contract_six_fields() -> anyhow::Result<()> {
     let conf = metadata_checker::output::answer_effect::confidence_value(
         ["GRAPH_DB_PARTIAL_HYDRATE"].iter().copied(),
     );
-    assert_eq!(conf.get("level").and_then(|v| v.as_str()), Some("partial"), "{conf}");
+    assert_eq!(
+        conf.get("level").and_then(|v| v.as_str()),
+        Some("partial"),
+        "{conf}"
+    );
     Ok(())
 }

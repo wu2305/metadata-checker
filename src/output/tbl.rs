@@ -4,8 +4,7 @@
 //! 解析模块（tbl_single）只返回结构化对象，不负责输出。
 
 use crate::output::schema::{
-    AiOutput, Confidence, DiagnosticSeverity, Evidence, Location, OutputKind,
-    format_next_query,
+    AiOutput, Confidence, DiagnosticSeverity, Evidence, Location, OutputKind, format_next_query,
 };
 use crate::superpage;
 use crate::tbl_single::TblMetadata;

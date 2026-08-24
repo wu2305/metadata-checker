@@ -51,12 +51,13 @@ impl AiOutput {
                 "Output generated from parsed metadata",
                 "Fallback evidence injected because this query path did not emit structured evidence",
             ).with_confidence(Confidence::Low));
-            out.diagnostics.push(crate::diagnostics::envelope_diagnostic(
-                "EVIDENCE_INCOMPLETE",
-                1,
-                Location::default(),
-                "Summary contains claims but no structured evidence was generated",
-            ));
+            out.diagnostics
+                .push(crate::diagnostics::envelope_diagnostic(
+                    "EVIDENCE_INCOMPLETE",
+                    1,
+                    Location::default(),
+                    "Summary contains claims but no structured evidence was generated",
+                ));
             if let Some(last) = out.diagnostics.last_mut() {
                 last.suggestion = Some(
                     "Use --detail for manual verification, and treat conclusions as low confidence"
@@ -196,9 +197,9 @@ impl Serialize for Diagnostic {
         use serde::ser::{Error as _, SerializeStruct};
         let effect = crate::output::answer_effect::answer_effect(&self.code);
         // 信封字段缺失是构造方 bug：显式报序列化错误，不静默编值、不 panic。
-        let count = self
-            .count
-            .ok_or_else(|| S::Error::custom("Diagnostic.count must be set via envelope_diagnostic"))?;
+        let count = self.count.ok_or_else(|| {
+            S::Error::custom("Diagnostic.count must be set via envelope_diagnostic")
+        })?;
         let answer_impact = self.answer_impact.as_deref().ok_or_else(|| {
             S::Error::custom("Diagnostic.answer_impact must be set via envelope_diagnostic")
         })?;
