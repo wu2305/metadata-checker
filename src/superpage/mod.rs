@@ -373,6 +373,10 @@ fn extract_child_components(
             continue;
         };
         for item in items {
+            // 单个元素反序列化失败只跳过该元素，不阻塞其余子树。
+            // 已知取舍：scanner 侧按原始 Value 判定（不反序列化），此处静默跳过
+            // 会造成 scanner 计入组件而 superpage 丢元素且两侧都无信号；
+            // 形态判定已过滤绝大多数不匹配样本，暂不为此新增诊断。
             if let Ok(child) = serde_json::from_value::<RawComponent>(item.clone()) {
                 extract_components(&child, parent_id.clone(), components, expressions);
             }

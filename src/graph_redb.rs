@@ -1214,7 +1214,7 @@ impl GraphDB {
                 table.remove(path.as_str())?;
             }
             for (path, bytes) in entries {
-                table.insert(path.as_str(), bytes.clone())?;
+                table.insert(path.as_str(), bytes)?;
             }
         }
         write_txn.commit()?;
