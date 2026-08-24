@@ -54,36 +54,68 @@ pub enum ParsedGraphContent {
     Tbl(String),
 }
 
-/// 跨文件聚合扫描诊断（PR1 落地）：对每份 SPG 原始 JSON 采集计数后合并。
+/// 单文件扫描诊断计数的持久化镜像（M58.3 PR1 refix，F2）。
 ///
-/// M58.3 PR1 refix（F8）：spg 侧构造的 sample_location 不携带来源文件
-/// （`source_file` 为 None），在聚合点按「首个非空样例胜出」语义把胜出样例的
-/// `source_file` 回填为贡献该样例的 update 的 `logical_path`。
-fn collect_scanner_diagnostics(updates: &[ParsedGraphUpdate]) -> Vec<crate::output::Diagnostic> {
-    let mut acc = crate::scanner::spg::ScanDiagnostics::default();
-    for update in updates {
-        if let ParsedGraphContent::Spg(value) = &update.content {
-            let counts = crate::scanner::spg::scan_raw_counts(value);
-            // 本 update 的样例只有在 acc 尚无样例时才会被 merge 采纳，
-            // 此时需要回填 source_file。
-            let backfill_unrecognized = acc.sample_unrecognized_location.is_none()
-                && counts.sample_unrecognized_location.is_some();
-            let backfill_duplicate = acc.sample_duplicate_location.is_none()
-                && counts.sample_duplicate_location.is_some();
-            acc.merge(&counts);
-            if backfill_unrecognized {
-                if let Some(loc) = acc.sample_unrecognized_location.as_mut() {
-                    loc.source_file = Some(update.logical_path.clone());
-                }
-            }
-            if backfill_duplicate {
-                if let Some(loc) = acc.sample_duplicate_location.as_mut() {
-                    loc.source_file = Some(update.logical_path.clone());
-                }
-            }
+/// `ScanDiagnostics` 定义在 `scanner::spg`（只读模块边界，不加 serde derive），
+/// 序列化格式由 indexer 侧拥有；graph_redb 只存取原始 bytes，不参与序列化/合并。
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+struct FileScanDiagnostics {
+    unrecognized_container_key: usize,
+    duplicate_component_id: usize,
+    sample_unrecognized_location: Option<crate::output::Location>,
+    sample_duplicate_location: Option<crate::output::Location>,
+}
+
+impl FileScanDiagnostics {
+    /// 从 spg 侧计数结构拷贝为可序列化镜像。
+    fn from_scan(counts: &crate::scanner::spg::ScanDiagnostics) -> Self {
+        Self {
+            unrecognized_container_key: counts.unrecognized_container_key,
+            duplicate_component_id: counts.duplicate_component_id,
+            sample_unrecognized_location: counts.sample_unrecognized_location.clone(),
+            sample_duplicate_location: counts.sample_duplicate_location.clone(),
         }
     }
-    acc.to_diagnostics()
+
+    /// 还原为 spg 侧计数结构，供 `ScanDiagnostics::merge` 聚合。
+    fn into_scan(self) -> crate::scanner::spg::ScanDiagnostics {
+        crate::scanner::spg::ScanDiagnostics {
+            unrecognized_container_key: self.unrecognized_container_key,
+            duplicate_component_id: self.duplicate_component_id,
+            sample_unrecognized_location: self.sample_unrecognized_location,
+            sample_duplicate_location: self.sample_duplicate_location,
+        }
+    }
+}
+
+/// M58.3 PR1 refix（F2）：计算单个 update 的 per-file 扫描诊断并序列化为
+/// `(logical_path, bytes)` entry，供落库。
+///
+/// 样例的 `source_file` 在 per-file 层面回填为本文件的 logical_path
+/// （样例本就来自该文件，与旧聚合点「首个非空样例胜出」回填语义等价）。
+/// 计数为零的脏 SPG 文件也写 entry：覆盖旧值，正确淘汰已修复文件的计数。
+fn per_file_scan_diagnostic_entry(
+    update: &ParsedGraphUpdate,
+) -> Result<Option<(String, Vec<u8>)>> {
+    if let ParsedGraphContent::Spg(value) = &update.content {
+        let mut counts = crate::scanner::spg::scan_raw_counts(value);
+        if let Some(loc) = counts.sample_unrecognized_location.as_mut() {
+            loc.source_file = Some(update.logical_path.clone());
+        }
+        if let Some(loc) = counts.sample_duplicate_location.as_mut() {
+            loc.source_file = Some(update.logical_path.clone());
+        }
+        let bytes = serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts))
+            .with_context(|| {
+                format!(
+                    "Failed to serialize scanner diagnostics for {}",
+                    update.logical_path
+                )
+            })?;
+        Ok(Some((update.logical_path.clone(), bytes)))
+    } else {
+        Ok(None)
+    }
 }
 
 /// 合并多文件待删节点 ID 并去重（保持首次出现顺序）
@@ -366,6 +398,27 @@ impl ProjectIndexer {
         Self::scan_with_diagnostics(project_dir, db_path).map(|with| with.report)
     }
 
+    /// M58.3 PR1 refix（F2）：合并 redb 中的 per-file scanner 诊断计数 entry，
+    /// 产出全库口径的信封诊断。
+    ///
+    /// 按 key（文件 logical_path）字典序合并（确定性），样例取「首个非空胜出」；
+    /// 供构建报告出口与 runtime 加载诊断共用，同一 code 只经此一处进入 runtime。
+    pub fn merge_scanner_diagnostic_entries(
+        entries: &[(String, Vec<u8>)],
+    ) -> Result<Vec<crate::output::Diagnostic>> {
+        let mut sorted: Vec<&(String, Vec<u8>)> = entries.iter().collect();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut acc = crate::scanner::spg::ScanDiagnostics::default();
+        for (path, bytes) in sorted {
+            let file_counts: FileScanDiagnostics = serde_json::from_slice(bytes)
+                .with_context(|| {
+                    format!("Failed to decode scanner diagnostics entry for {path}")
+                })?;
+            acc.merge(&file_counts.into_scan());
+        }
+        Ok(acc.to_diagnostics())
+    }
+
     /// 全量索引并返回扫描诊断（未识别容器键 / 重复组件 id 的跨文件聚合）。
     pub fn scan_with_diagnostics(
         project_dir: &Path,
@@ -383,7 +436,13 @@ impl ProjectIndexer {
         if !plan.dirty.is_empty() || !plan.deleted.is_empty() {
             let updates =
                 Self::parse_dirty_files(&prev_states, &plan.dirty, project_dir, &provider)?;
-            let scanner_diagnostics = collect_scanner_diagnostics(&updates);
+            // M58.3 PR1 refix（F2）：per-file 诊断计数序列化，persist 后落库
+            let mut scanner_entries = Vec::new();
+            for update in &updates {
+                if let Some(entry) = per_file_scan_diagnostic_entry(update)? {
+                    scanner_entries.push(entry);
+                }
+            }
             // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
             let merged_removed = merge_removed_node_ids(
                 updates
@@ -450,6 +509,14 @@ impl ProjectIndexer {
                 },
             };
             let mut report = Self::persist_index(&mut graph, commit)?;
+            // M58.3 PR1 refix（F2）：persist 成功后落库 per-file 诊断计数
+            //（脏文件覆盖 entry，删除文件移除 entry），随后重新 load 合并全量——
+            // 报告 envelope 反映全库口径，而非仅本轮脏文件。
+            let deleted_paths: Vec<String> =
+                plan.deleted.iter().map(|(rel, _)| rel.clone()).collect();
+            graph.save_scanner_diagnostic_entries(&scanner_entries, &deleted_paths)?;
+            let scanner_diagnostics =
+                Self::merge_scanner_diagnostic_entries(&graph.load_scanner_diagnostic_entries()?)?;
             // M58.3 PR1 refix（F6）：IndexReport 统一为文件口径。
             // store 层 persist_index 只能从 commit 拿到节点数（dirty_nodes/
             // deleted_nodes），文件数只有 diff 阶段的 plan 知道，因此在报告
@@ -471,7 +538,11 @@ impl ProjectIndexer {
                 dirty: plan.dirty.len(),
                 deleted: plan.deleted.len(),
             },
-            diagnostics: Vec::new(),
+            // M58.3 PR1 refix（F2）：no-op 路径从库里 load 合并，
+            // 持久化的 scanner 诊断不再随无变更构建消失。
+            diagnostics: Self::merge_scanner_diagnostic_entries(
+                &graph.load_scanner_diagnostic_entries()?,
+            )?,
         })
     }
 

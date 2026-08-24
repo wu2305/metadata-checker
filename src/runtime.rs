@@ -342,7 +342,23 @@ impl GraphRuntime {
 
         let mut diagnostics = Vec::new();
         diagnostics.push(format!("Graph loaded in {} ms", graph_load_ms));
-        let load_diagnostics = graph.hydrate_diagnostics().to_diagnostics();
+        let mut load_diagnostics = graph.hydrate_diagnostics().to_diagnostics();
+        // M58.3 PR1 refix（F2）：scanner 诊断（SCANNER_*）持久化在 redb，
+        // 加载期并入 load_diagnostics——status() 与查询响应经既有管道自然透出，
+        // 不在查询层另造第二套信号。读取/合并失败不阻塞加载，降级为文本诊断。
+        match graph.load_scanner_diagnostic_entries() {
+            Ok(entries) => {
+                match crate::scanner::indexer::ProjectIndexer::merge_scanner_diagnostic_entries(
+                    &entries,
+                ) {
+                    Ok(scanner_diagnostics) => load_diagnostics.extend(scanner_diagnostics),
+                    Err(error) => {
+                        diagnostics.push(format!("Scanner diagnostics merge failed: {error:#}"))
+                    }
+                }
+            }
+            Err(error) => diagnostics.push(format!("Scanner diagnostics load failed: {error:#}")),
+        }
 
         let prefix_hash = compute_prefix_hash(&path, 4096);
         let fingerprint = GraphFingerprint {

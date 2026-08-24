@@ -34,6 +34,14 @@ const FILE_STATES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("
 const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
 /// M54：diff-refresh checkpoint 在 META_TABLE 中的键
 const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
+/// M58.3 PR1 refix（F2）：per-file scanner 诊断计数表。
+///
+/// key = 文件 logical_path，value = 该文件诊断计数的序列化 bytes。
+/// 按文件存储而非单行聚合：增量扫描只重算脏文件，单行聚合无法正确
+/// 淘汰已修复/已删除文件的计数。store 层只存取原始 bytes，
+/// 序列化/合并归 `scanner::indexer`。
+const SCANNER_DIAGNOSTICS_TABLE: TableDefinition<&str, Vec<u8>> =
+    TableDefinition::new("scanner_diagnostics");
 
 /// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约）。
 ///
@@ -239,6 +247,8 @@ impl GraphDB {
             let _ = write_txn.open_table(EDGES_TABLE)?;
             let _ = write_txn.open_table(FILE_STATES_TABLE)?;
             let _ = write_txn.open_table(META_TABLE)?;
+            // M58.3 PR1 refix（F2）：旧库兼容——打开即补建 scanner 诊断表
+            let _ = write_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
         }
         write_txn.commit()?;
         Ok(())
@@ -1178,6 +1188,53 @@ impl GraphDB {
             }
         }
         Ok(states)
+    }
+
+    /// M58.3 PR1 refix（F2）：按文件覆盖/删除 scanner 诊断计数 entry。
+    ///
+    /// `entries` 为脏文件的 `(logical_path, 序列化计数 bytes)`，覆盖同 key 旧值；
+    /// `deleted` 为已删除文件的 logical_path，移除其 entry。两者皆空时是 no-op
+    /// （不开写事务）。全量重建等价于全部文件 dirty，所有 entry 被覆盖，无残留。
+    /// 计数结构的序列化由调用方（`scanner::indexer`）负责，本层不感知格式。
+    pub fn save_scanner_diagnostic_entries(
+        &mut self,
+        entries: &[(String, Vec<u8>)],
+        deleted: &[String],
+    ) -> Result<()> {
+        if entries.is_empty() && deleted.is_empty() {
+            return Ok(());
+        }
+        // 与 persist 共用同一 graphdb 文件锁，串行化并发 CLI 写入
+        let _lock = acquire_graph_db_lock(std::path::Path::new(&self.db_path))?;
+        let db = Database::create(&self.db_path)?;
+        let write_txn = db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
+            for path in deleted {
+                table.remove(path.as_str())?;
+            }
+            for (path, bytes) in entries {
+                table.insert(path.as_str(), bytes.clone())?;
+            }
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    /// M58.3 PR1 refix（F2）：读取全部 per-file scanner 诊断计数 entry。
+    ///
+    /// redb 按 key（logical_path）字典序迭代，返回顺序确定；
+    /// 反序列化与「首个非空样例胜出」合并由调用方（`scanner::indexer`）负责。
+    pub fn load_scanner_diagnostic_entries(&self) -> Result<Vec<(String, Vec<u8>)>> {
+        let db = Database::create(&self.db_path)?;
+        let read_txn = db.begin_read()?;
+        let table = read_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
+        let mut entries = Vec::new();
+        for item in table.iter()? {
+            let (key, value) = item?;
+            entries.push((key.value().to_string(), value.value()));
+        }
+        Ok(entries)
     }
 
     /// M54：加载 diff-refresh checkpoint。
