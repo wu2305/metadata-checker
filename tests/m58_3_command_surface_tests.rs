@@ -157,9 +157,14 @@ fn test_surface_diagnostics_are_structured_objects() {
         let object = entry
             .as_object()
             .unwrap_or_else(|| panic!("diagnostics 元素必须是对象：{entry}"));
-        for field in ["code", "severity", "message", "location"] {
+        for field in ["code", "severity", "message"] {
             assert!(object.contains_key(field), "缺少 {field}：{entry}");
         }
+        // 信封诊断为 sample_location；路由层 surface_diagnostic 仍是旧形态 location
+        assert!(
+            object.contains_key("sample_location") || object.contains_key("location"),
+            "缺少 sample_location/location：{entry}"
+        );
     }
 }
 

@@ -180,7 +180,7 @@ fn pr1_build_output_exposes_diagnostics_via_status() -> anyhow::Result<()> {
     let _ = std::fs::remove_file(&db_path2);
     let _ = std::fs::remove_file(db_path2.with_extension("graphdb.lock"));
 
-    // CLI 级断言：真实二进制的 --build-graph 输出统计行与 built-at 行（非库函数代理）
+    // CLI 级断言：默认模式 --build-graph 输出恰好一个 JSON 文档（非库函数代理）
     let db_path3 = std::env::temp_dir().join(format!(
         "metadata-checker-m58-3-pr1-cli-{}-{}.db",
         std::process::id(),
@@ -206,8 +206,9 @@ fn pr1_build_output_exposes_diagnostics_via_status() -> anyhow::Result<()> {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Indexed "), "{stdout}");
-    assert!(stdout.contains("Graph database built at"), "{stdout}");
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+        .expect("default build-graph output must be a single JSON document");
+    assert!(parsed.get("indexed").is_some(), "{stdout}");
     let _ = std::fs::remove_file(&db_path3);
     let _ = std::fs::remove_file(db_path3.with_extension("graphdb.lock"));
     let _ = std::fs::remove_file(&db_path);
@@ -220,7 +221,8 @@ fn pr1_scanner_diagnostics_trigger_and_count() -> anyhow::Result<()> {
     let raw_unrec = serde_json::json!({
         "canvas": {
             "components": [
-                {"id": "a", "type": "panel", "myContainer": [{"id": "b", "type": "button"}]}
+                // 混合形态数组（部分元素缺 id/type）：PR2 形态感知递归下判非组件，计入未识别容器键
+                {"id": "a", "type": "panel", "myContainer": [{"id": "b", "type": "button"}, {"label": "no-id"}]}
             ]
         }
     });
