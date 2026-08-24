@@ -94,9 +94,7 @@ impl FileScanDiagnostics {
 /// 样例的 `source_file` 在 per-file 层面回填为本文件的 logical_path
 /// （样例本就来自该文件，与旧聚合点「首个非空样例胜出」回填语义等价）。
 /// 计数为零的脏 SPG 文件也写 entry：覆盖旧值，正确淘汰已修复文件的计数。
-fn per_file_scan_diagnostic_entry(
-    update: &ParsedGraphUpdate,
-) -> Result<Option<(String, Vec<u8>)>> {
+fn per_file_scan_diagnostic_entry(update: &ParsedGraphUpdate) -> Result<Option<(String, Vec<u8>)>> {
     if let ParsedGraphContent::Spg(value) = &update.content {
         let mut counts = crate::scanner::spg::scan_raw_counts(value);
         if let Some(loc) = counts.sample_unrecognized_location.as_mut() {
@@ -105,8 +103,8 @@ fn per_file_scan_diagnostic_entry(
         if let Some(loc) = counts.sample_duplicate_location.as_mut() {
             loc.source_file = Some(update.logical_path.clone());
         }
-        let bytes = serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts))
-            .with_context(|| {
+        let bytes =
+            serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts)).with_context(|| {
                 format!(
                     "Failed to serialize scanner diagnostics for {}",
                     update.logical_path
@@ -410,8 +408,8 @@ impl ProjectIndexer {
         sorted.sort_by(|a, b| a.0.cmp(&b.0));
         let mut acc = crate::scanner::spg::ScanDiagnostics::default();
         for (path, bytes) in sorted {
-            let file_counts: FileScanDiagnostics = serde_json::from_slice(bytes)
-                .with_context(|| {
+            let file_counts: FileScanDiagnostics =
+                serde_json::from_slice(bytes).with_context(|| {
                     format!("Failed to decode scanner diagnostics entry for {path}")
                 })?;
             acc.merge(&file_counts.into_scan());

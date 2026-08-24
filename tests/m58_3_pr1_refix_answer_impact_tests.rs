@@ -12,7 +12,12 @@ use metadata_checker::output::answer_effect::confidence_value;
 /// 兜底派生后 `answer_impact` 应为 `partial`。
 #[test]
 fn output_truncated_fallback_derives_partial() {
-    let diag = envelope_diagnostic("OUTPUT_TRUNCATED", 1, Location::default(), "output truncated");
+    let diag = envelope_diagnostic(
+        "OUTPUT_TRUNCATED",
+        1,
+        Location::default(),
+        "output truncated",
+    );
     assert_eq!(diag.answer_impact.as_deref(), Some("partial"));
 }
 
@@ -20,7 +25,12 @@ fn output_truncated_fallback_derives_partial() {
 /// 同一 code 不应出现 `answer_impact: "none"` 而 level 为 `partial` 的矛盾。
 #[test]
 fn serialized_json_answer_impact_matches_confidence_level() {
-    let diag = envelope_diagnostic("OUTPUT_TRUNCATED", 1, Location::default(), "output truncated");
+    let diag = envelope_diagnostic(
+        "OUTPUT_TRUNCATED",
+        1,
+        Location::default(),
+        "output truncated",
+    );
     let value = serde_json::to_value(&diag).expect("信封诊断序列化不应失败");
     assert_eq!(value["answer_impact"], serde_json::json!("partial"));
     // answer_effect 字段为影响说明文本，存在即代表该 code 已登记
@@ -39,7 +49,10 @@ fn serialized_json_answer_impact_matches_confidence_level() {
 /// 但此处验证显式映射本身不被改动）。
 #[test]
 fn explicit_none_code_stays_none() {
-    assert_eq!(answer_impact_for(CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE), "none");
+    assert_eq!(
+        answer_impact_for(CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE),
+        "none"
+    );
     let diag = envelope_diagnostic(
         CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE,
         1,

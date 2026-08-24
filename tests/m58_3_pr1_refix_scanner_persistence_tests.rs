@@ -102,7 +102,11 @@ fn scanner_diagnostics_survive_noop_rebuild() -> anyhow::Result<()> {
 
     // 立即二次 no-op 构建（不改任何文件）
     let second = ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
-    assert_eq!(second.report.dirty, 0, "无变更应为 no-op: {:?}", second.report);
+    assert_eq!(
+        second.report.dirty, 0,
+        "无变更应为 no-op: {:?}",
+        second.report
+    );
     let second_unrec = code_hits(&second.diagnostics, CODE_UNRECOGNIZED);
     assert_eq!(
         second_unrec.len(),

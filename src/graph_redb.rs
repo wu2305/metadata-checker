@@ -200,8 +200,7 @@ impl GraphDB {
         }
 
         if let Ok(Some(layout)) = v2_layout_probe {
-            match crate::graph_redb_v2::hydrate_graph_from_v2(&layout, &db_path.to_string_lossy())
-            {
+            match crate::graph_redb_v2::hydrate_graph_from_v2(&layout, &db_path.to_string_lossy()) {
                 Ok(mut graph) => {
                     graph.hydrate_diagnostics = pending_hydrate_diagnostics;
                     return Ok(graph);
@@ -209,8 +208,9 @@ impl GraphDB {
                 Err(error) => {
                     // v2 hydrate 失败时 fallback v1（始终正确），但记录诊断供调用方上报
                     let mut graph = Self::open_inner_v1(db_path)?;
-                    graph.v2_hydrate_warning =
-                        Some(format!("v2 shadow hydrate failed, fell back to v1: {error:#}"));
+                    graph.v2_hydrate_warning = Some(format!(
+                        "v2 shadow hydrate failed, fell back to v1: {error:#}"
+                    ));
                     if graph.hydrate_diagnostics.v2_hydrate_warning.is_none() {
                         graph.hydrate_diagnostics.v2_hydrate_warning =
                             graph.v2_hydrate_warning.clone();

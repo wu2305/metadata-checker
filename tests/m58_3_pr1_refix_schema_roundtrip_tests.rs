@@ -92,5 +92,8 @@ fn refix_both_names_rejected_as_duplicate_field() {
         }
     });
     let result: Result<Diagnostic, _> = serde_json::from_value(both);
-    assert!(result.is_err(), "双名必须报 duplicate field，实际：{result:?}");
+    assert!(
+        result.is_err(),
+        "双名必须报 duplicate field，实际：{result:?}"
+    );
 }

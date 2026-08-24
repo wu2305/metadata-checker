@@ -184,7 +184,10 @@ fn refix_index_report_counts_are_file_scoped() -> anyhow::Result<()> {
         report.dirty, 1,
         "单个脏文件含多个节点时 dirty 仍应为文件数 1"
     );
-    assert_eq!(report.unchanged, 1, "unchanged = indexed - dirty（文件口径）");
+    assert_eq!(
+        report.unchanged, 1,
+        "unchanged = indexed - dirty（文件口径）"
+    );
     assert_eq!(report.deleted, 0);
 
     // no-op 路径口径一致：不再改动任何文件，三轮扫描全为 0/不变

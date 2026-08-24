@@ -172,7 +172,12 @@ fn excluded_keys_are_neither_extracted_nor_counted() {
             "排除列表/动作容器元素不得提取为组件: {excluded_id}"
         );
     }
-    assert_eq!(meta.components.len(), 1, "只剩 form1: {:?}", meta.components);
+    assert_eq!(
+        meta.components.len(),
+        1,
+        "只剩 form1: {:?}",
+        meta.components
+    );
 
     let diags = metadata_checker::scanner::scan_raw_diagnostics(&raw);
     assert_eq!(
@@ -233,7 +238,12 @@ fn string_shaped_polymorphic_keys_have_no_side_effects() {
         }
     });
     let meta = parse_superpage_from_value(raw.clone()).expect("parse should succeed");
-    assert_eq!(meta.components.len(), 1, "不应提取新组件: {:?}", meta.components);
+    assert_eq!(
+        meta.components.len(),
+        1,
+        "不应提取新组件: {:?}",
+        meta.components
+    );
 
     let diags = metadata_checker::scanner::scan_raw_diagnostics(&raw);
     assert!(
@@ -313,9 +323,9 @@ fn component_property_builds_depends_on_edge_end_to_end() {
             .collect()
     };
     assert!(
-        resolved_of("exprA")
-            .iter()
-            .any(|r| matches!(r, RefType::ComponentProperty(id, prop) if id == "txtB" && prop == "txt")),
+        resolved_of("exprA").iter().any(
+            |r| matches!(r, RefType::ComponentProperty(id, prop) if id == "txtB" && prop == "txt")
+        ),
         "exprA 应解析出 ComponentProperty(txtB, txt): {:?}",
         resolved_of("exprA")
     );

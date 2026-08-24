@@ -655,7 +655,14 @@ pub fn process_spg_file_from_value(
             && let Some(parent_id) = &ctx.parent_id
         {
             let parent_comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), parent_id);
-            add_edge_with_meta(graph, &parent_comp_id, &comp_id, EdgeType::Contains, None, None)?;
+            add_edge_with_meta(
+                graph,
+                &parent_comp_id,
+                &comp_id,
+                EdgeType::Contains,
+                None,
+                None,
+            )?;
         }
 
         // Process expressions (reads)
