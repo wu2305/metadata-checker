@@ -176,7 +176,7 @@ fn pr1_page_scoped_fallback_single_diagnostic() -> anyhow::Result<()> {
     let page_path = "app/actions_test.spg";
     let model_id = "model:nonexistent_model_for_fallback_test";
     // 直接调用 page_logic 侧的诊断构造点，验证单一归属
-    let diag = metadata_checker::query::page_logic::page_scoped_fallback_diagnostic_for_test(
+    let diag = metadata_checker::query::page_scoped_fallback_diagnostic_for_test(
         model_id, page_path,
     );
     assert_eq!(diag.code, "PAGE_SCOPED_TARGET_FALLBACK");
