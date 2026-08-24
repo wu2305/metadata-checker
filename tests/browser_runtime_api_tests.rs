@@ -95,17 +95,6 @@ fn visual_graph_item(
         .expect("should include visual_graph item")
 }
 
-fn visual_graph_contains_diagnostic(status: &serde_json::Value, code: &str) -> bool {
-    status
-        .get("diagnostics")
-        .and_then(|value| value.as_array())
-        .is_some_and(|diagnostics| {
-            diagnostics
-                .iter()
-                .any(|diag| diag.get("code").and_then(|c| c.as_str()) == Some(code))
-        })
-}
-
 fn assert_task_descriptor_has_source(detail: &serde_json::Value, expected_source: &str) {
     let source_path = detail
         .get("source_path")
