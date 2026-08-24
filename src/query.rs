@@ -366,6 +366,8 @@ pub use model::query_model;
 mod page_logic;
 #[cfg(feature = "cli-local")]
 pub use page_logic::collect_page_logic_nodes_for_test;
+#[cfg(any(test, feature = "cli-local"))]
+pub use page_logic::page_scoped_fallback_diagnostic_for_test;
 pub use page_logic::query_page_logic;
 pub use page_logic::{
     MaterializedAvailabilityFactsIndex, PageDependencyIndex, PageDependencyIndexCoverage,

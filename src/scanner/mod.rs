@@ -58,5 +58,7 @@ mod tbl;
 mod utils;
 
 pub use spg::process_spg_file_from_value;
+#[cfg(any(test, feature = "cli-local"))]
+pub use spg::scan_diagnostics_for_test;
 pub use tbl::process_tbl_file_from_string;
 pub use utils::{add_edge_with_meta, add_node, resolve_reference_path};
