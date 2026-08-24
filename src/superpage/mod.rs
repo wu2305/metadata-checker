@@ -5,7 +5,8 @@ use std::path::Path;
 /// SuperPage 元数据解析模块
 ///
 /// 负责解析 .spg 文件的 JSON 结构，提取：
-/// - 组件树（支持递归嵌套：components/panels/steps/comps）
+/// - 组件树（白名单键 components/panels/steps/comps + M58.3 F1 形态感知递归：
+///   未知子键中非空且每个元素都带字符串 id+type 的数组也视为子组件数组）
 /// - 表达式字段（exp、value、defaultValue、visible、enable 等）
 /// - 动作列表（actions）及其参数
 /// - 页面参数（params）和数据源（sources）
@@ -303,6 +304,82 @@ fn resolve_ref_token(
 
     RefType::Other(token.to_string())
 }
+// ============================================================
+
+/// 已知非组件容器键排除列表（M58.3 F1，附录 A 实测初值）。
+///
+/// - `effectStyles`/`conditionStyles`/`labelFields`/`stateFields`：附录 A 登记的
+///   无行为证据样式/字段容器（`type` 取值是状态名而非组件类型），排除优先于形态判定；
+/// - `actions`：动作容器（元素带 `id`/`actionType`、无 `type`，天然不满足组件形态），
+///   排除以避免误入未识别计数（`tests/fixtures/test_project` 实测会误报）。
+///
+/// `buttons` 样本不足，按附录 A 决议不进排除列表。superpage 解析侧与 scanner 侧
+/// 共用本列表，避免两份规则漂移。
+pub(crate) const NON_COMPONENT_CONTAINER_KEYS: &[&str] = &[
+    "actions",
+    "effectStyles",
+    "conditionStyles",
+    "labelFields",
+    "stateFields",
+];
+
+/// 组件数组形态判定（M58.3 F1）：value 是「子组件数组」当且仅当它是非空数组，
+/// 且**每个**元素都是带字符串 `id` 和字符串 `type` 的对象。
+///
+/// - 字符串形态的多态键（如 action 的 `panel: "nextPage"`）天然不匹配；
+/// - 混合形态数组（部分元素缺 `id`/`type`）整体判非组件，由 scanner 侧计入
+///   `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 安全网。
+///
+/// superpage 解析侧与 scanner 裸 `Value` 递归共用本判定，避免两份规则漂移。
+pub(crate) fn is_component_array(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Array(items) => {
+            !items.is_empty()
+                && items.iter().all(|item| {
+                    item.as_object().is_some_and(|obj| {
+                        obj.get("id").is_some_and(|v| v.is_string())
+                            && obj.get("type").is_some_and(|v| v.is_string())
+                    })
+                })
+        }
+        _ => false,
+    }
+}
+
+/// 递归提取组件的全部子容器：白名单键（components/panels/steps/comps）+
+/// extra 中形态吻合的未知键（M58.3 F1 形态感知递归，json_path 由 scanner 侧逐层保留）。
+fn extract_child_components(
+    raw: &RawComponent,
+    parent_id: Option<String>,
+    components: &mut Vec<SpgComponent>,
+    expressions: &mut Vec<ComponentExpr>,
+) {
+    for child in raw
+        .components
+        .iter()
+        .chain(&raw.panels)
+        .chain(&raw.steps)
+        .chain(&raw.comps)
+    {
+        extract_components(child, parent_id.clone(), components, expressions);
+    }
+    // 形态感知递归：排除列表键与混合形态数组不递归（后者由 scanner 安全网计数）；
+    // 单个元素反序列化失败只跳过该元素，不阻塞其余子树
+    for (key, value) in raw.extra.iter() {
+        if NON_COMPONENT_CONTAINER_KEYS.contains(&key.as_str()) || !is_component_array(value) {
+            continue;
+        }
+        let Some(items) = value.as_array() else {
+            continue;
+        };
+        for item in items {
+            if let Ok(child) = serde_json::from_value::<RawComponent>(item.clone()) {
+                extract_components(&child, parent_id.clone(), components, expressions);
+            }
+        }
+    }
+}
+
 fn extract_components(
     raw: &RawComponent,
     parent_id: Option<String>,
@@ -310,18 +387,7 @@ fn extract_components(
     expressions: &mut Vec<ComponentExpr>,
 ) {
     if raw.id.is_empty() || raw.component_type.is_empty() {
-        for child in &raw.components {
-            extract_components(child, parent_id.clone(), components, expressions);
-        }
-        for child in &raw.panels {
-            extract_components(child, parent_id.clone(), components, expressions);
-        }
-        for child in &raw.steps {
-            extract_components(child, parent_id.clone(), components, expressions);
-        }
-        for child in &raw.comps {
-            extract_components(child, parent_id.clone(), components, expressions);
-        }
+        extract_child_components(raw, parent_id, components, expressions);
         return;
     }
 
@@ -539,19 +605,7 @@ fn extract_components(
 
     components.push(comp);
 
-    let parent = Some(raw.id.clone());
-    for child in &raw.components {
-        extract_components(child, parent.clone(), components, expressions);
-    }
-    for child in &raw.panels {
-        extract_components(child, parent.clone(), components, expressions);
-    }
-    for child in &raw.steps {
-        extract_components(child, parent.clone(), components, expressions);
-    }
-    for child in &raw.comps {
-        extract_components(child, parent.clone(), components, expressions);
-    }
+    extract_child_components(raw, Some(raw.id.clone()), components, expressions);
 }
 
 /// 将组件属性中的标量 JSON 值转换为字符串，数组取第一个字符串项

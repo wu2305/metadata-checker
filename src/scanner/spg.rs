@@ -33,8 +33,8 @@ fn collect_component_contexts(
     value: &serde_json::Value,
 ) -> std::collections::HashMap<String, ComponentContext> {
     let mut contexts = std::collections::HashMap::new();
-    // 解析路径只消费组件上下文；扫描诊断由 scan_raw_diagnostics 对同一份原始 JSON
-    // 单独遍历采集（PR2 形态感知递归落地后统一为单次遍历）。
+    // 解析路径只消费组件上下文；扫描诊断由 scan_raw_counts 对同一份原始 JSON
+    // 单独遍历采集。两条路径共用同一个带形态感知递归的内层遍历函数，规则不漂移。
     let mut diags = ScanDiagnostics::default();
     if let Some(canvas) = value.get("canvas") {
         collect_component_contexts_inner_with_context_and_diagnostics(
@@ -73,19 +73,6 @@ pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
 pub fn scan_raw_diagnostics(value: &serde_json::Value) -> Vec<crate::output::Diagnostic> {
     scan_raw_counts(value).to_diagnostics()
 }
-
-/// 已知非组件容器键的排除列表（不计入未识别容器键诊断）。
-///
-/// 包含真实语料中不带行为证据的样式/字段容器（附录 A 登记的四键）与动作容器
-/// `actions`（`tests/fixtures/test_project` 实测会误报 21 次），仅保留形态感知递归前的
-/// 最小安全网，待 PR2 形态感知递归落地后由更精确的判定替代。
-const SCANNER_EXCLUDED_CONTAINER_KEYS: &[&str] = &[
-    "actions",
-    "effectStyles",
-    "conditionStyles",
-    "labelFields",
-    "stateFields",
-];
 
 /// 扫描阶段的轻量诊断计数（PR1 落地，未识别容器键/重复组件 id）。
 #[derive(Debug, Default, Clone)]
@@ -225,29 +212,46 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
             }
         }
     }
-    // 现有白名单路径之外的未知子键：遇到非空数组且元素为对象时计入 SCANNER_UNRECOGNIZED_CONTAINER_KEY
-    //（PR2 形态感知递归前的安全网，排除列表已过滤已知非组件键）
+    // 白名单路径之外的未知子键（M58.3 F1 形态感知递归）：
+    // - 排除列表键：已知非组件，不递归也不计数（排除优先于形态判定）；
+    // - 形态吻合（非空数组且每个元素都带字符串 id+type）：子组件数组，递归遍历，不计数；
+    // - 混合形态（含对象但不满足组件形态）：整体判非组件，计入 SCANNER_UNRECOGNIZED_CONTAINER_KEY。
     if let Some(obj) = node.as_object() {
         for (key, value) in obj {
-            if SCANNER_EXCLUDED_CONTAINER_KEYS.contains(&key.as_str())
+            if crate::superpage::NON_COMPONENT_CONTAINER_KEYS.contains(&key.as_str())
                 || ["components", "panels", "steps", "comps", "id", "type"].contains(&key.as_str())
             {
                 continue;
             }
-            if let Some(arr) = value.as_array() {
-                if arr.is_empty() {
-                    continue;
+            let Some(arr) = value.as_array() else {
+                continue;
+            };
+            if arr.is_empty() {
+                continue;
+            }
+            if crate::superpage::is_component_array(value) {
+                for (idx, child) in arr.iter().enumerate() {
+                    let child_path = format!("{}.{}[{}]", json_path, key, idx);
+                    collect_component_contexts_inner_with_context_and_diagnostics(
+                        child,
+                        &child_path,
+                        child_parent.clone(),
+                        active_context.clone(),
+                        contexts,
+                        diagnostics,
+                    );
                 }
-                let has_object = arr.iter().any(|item| item.is_object());
-                if has_object {
-                    diagnostics.unrecognized_container_key += 1;
-                    if diagnostics.sample_unrecognized_location.is_none() {
-                        diagnostics.sample_unrecognized_location = Some(crate::output::Location {
-                            source_file: None,
-                            node_id: current_id.clone(),
-                            json_path: Some(format!("{}.{}", json_path, key)),
-                        });
-                    }
+                continue;
+            }
+            let has_object = arr.iter().any(|item| item.is_object());
+            if has_object {
+                diagnostics.unrecognized_container_key += 1;
+                if diagnostics.sample_unrecognized_location.is_none() {
+                    diagnostics.sample_unrecognized_location = Some(crate::output::Location {
+                        source_file: None,
+                        node_id: current_id.clone(),
+                        json_path: Some(format!("{}.{}", json_path, key)),
+                    });
                 }
             }
         }
@@ -644,6 +648,15 @@ pub fn process_spg_file_from_value(
         )?;
         node_ids.insert(comp_id.clone());
         add_edge_with_meta(graph, &page_id, &comp_id, EdgeType::Contains, None, None)?;
+        // comp→comp Contains：父组件取自组件上下文（说明 A：每个嵌套组件恰好一个
+        // Component 父；page→comp 边保留）。白名单嵌套与形态感知递归新发现的组件
+        // 走同一条建边路径。
+        if let Some(ctx) = ctx
+            && let Some(parent_id) = &ctx.parent_id
+        {
+            let parent_comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), parent_id);
+            add_edge_with_meta(graph, &parent_comp_id, &comp_id, EdgeType::Contains, None, None)?;
+        }
 
         // Process expressions (reads)
         if let Some(exprs) = expr_map.get(comp.id.as_str()) {
@@ -739,6 +752,33 @@ pub fn process_spg_file_from_value(
                                 &target_comp_id,
                                 EdgeType::DependsOn,
                                 Some(format!("comp:{}.value", target_id)),
+                                Some(edge_meta),
+                            )?;
+                        }
+                        crate::superpage::RefType::ComponentProperty(target_id, property) => {
+                            // 说明 D：与 dependency.rs 的语义对齐——ComponentProperty 与
+                            // ComponentValue 一样建 comp→comp DependsOn 边，并带属性名。
+                            let target_comp_id =
+                                format!("comp:{}|{}", rel_path.replace(r"\", "/"), target_id);
+                            let edge_meta = serde_json::json!({
+                                "reason": format!(
+                                    "Component '{}' depends on component '{}' property '{}' via field '{}'",
+                                    comp.id, target_id, property, expr.field
+                                ),
+                                "actor_kind": "component",
+                                "actor_id": comp.id,
+                                "operation": "DependsOn",
+                                "target_component": target_id,
+                                "target_property": property,
+                                "source_expr": expr.raw_expr,
+                                "source_field": expr.field,
+                            });
+                            add_edge_with_meta(
+                                graph,
+                                &comp_id,
+                                &target_comp_id,
+                                EdgeType::DependsOn,
+                                Some(format!("comp:{}.{}", target_id, property)),
                                 Some(edge_meta),
                             )?;
                         }
