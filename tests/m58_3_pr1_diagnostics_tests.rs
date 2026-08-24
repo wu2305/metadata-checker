@@ -314,6 +314,16 @@ fn pr1_page_scoped_fallback_single_diagnostic() -> anyhow::Result<()> {
         .map(|items| items.iter().filter(|i| i.get("scope_warning").is_some()).count())
         .unwrap_or(0);
     if warned_items > 0 {
+        eprintln!(
+            "DEBUG kma items: {}",
+            serde_json::to_string_pretty(
+                resp.result
+                    .get("details")
+                    .and_then(|d| d.get("key_model_availability"))
+                    .unwrap_or(&serde_json::Value::Null)
+            )
+            .unwrap_or_default()
+        );
         assert_eq!(fallback_hits.len(), 1, "有回退必须恰好一条聚合诊断: {diags:?}");
         let count = fallback_hits[0].get("count").and_then(|c| c.as_u64());
         assert!(count.is_some_and(|c| c >= 1), "{diags:?}");
