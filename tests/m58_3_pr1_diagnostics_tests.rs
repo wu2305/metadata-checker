@@ -112,7 +112,8 @@ fn pr1_hydrate_counts_and_partial_gate() -> anyhow::Result<()> {
 fn pr1_normal_path_has_no_partial() -> anyhow::Result<()> {
     let (graph, db_path) = fixture_graph("normal-zero")?;
     let diags = graph.hydrate_diagnostics().to_diagnostics();
-    // 正常路径：pin 语料实测 = 0（见 spec 验收 1 处登记），fixture 同样为 0
+    // 正常路径：pin 语料（xiaoshouyi-corpus @ 6920ac51）全量构建实测 GRAPH_DB_* 均为 0
+    //（已登记在 spec 验收 1，2026-08-24）；fixture 同样为 0
     assert!(!has_code(&diags, "GRAPH_DB_PARTIAL_HYDRATE"), "{diags:?}");
     assert!(!has_code(&diags, "GRAPH_DB_NODE_DECODE_FAILED"), "{diags:?}");
     assert!(!has_code(&diags, "GRAPH_DB_EDGE_DECODE_FAILED"), "{diags:?}");

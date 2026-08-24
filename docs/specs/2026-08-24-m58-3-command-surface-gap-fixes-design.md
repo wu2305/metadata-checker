@@ -258,6 +258,19 @@ bump `REDB_V2_SCHEMA_VERSION`（`graph_redb_v2.rs:17`）**不会**重建旧 v1 �
 1. Phase 1 的诊断信封在构建输出、`--status`、查询响应三处可见；每个 code 有契约测试。
    硬指标：pin 语料（`xiaoshouyi-corpus @ 6920ac51`）全量构建的**正常路径诊断 = 0**；
    实现期确认不可避免的良性计数，给出白名单基线数并在本文件登记。
+
+   **PR1 实测登记**（2026-08-24，CNB 远端，`--project-dir projects/xiaoshouyi` 全量
+   `--build-graph`：1329 文件 / 78127 节点 / 150165 边，与 M58.2 graphdb 规模一致）：
+   - `GRAPH_DB_NODE_DECODE_FAILED` / `GRAPH_DB_EDGE_DECODE_FAILED` /
+     `GRAPH_DB_EDGE_DANGLING_ENDPOINT` / `GRAPH_DB_V2_LAYOUT_UNREADABLE` /
+     `GRAPH_DB_PARTIAL_HYDRATE`：均 **0**（hydrate 正常路径无丢行，硬指标达成）。
+   - `SCANNER_UNRECOGNIZED_CONTAINER_KEY` = **943**（基线登记，非噪音）：逐键分布
+     `moreFields` 279、`columns` 250、`panel` 241、`tabs` 60、`attrFields` 38、
+     `params` 33、`grid` 22、`operateButtons` 20。其中 `columns`/`tabs`/`panel`（数组形态）
+     是 F1 已诊断的真实组件容器——此计数正是 PR1 安全网按设计捕获「白名单丢组件」缺口，
+     待 PR2 形态感知递归落地后应显著下降（PR2 合入后重测并更新本登记）。
+   - `SCANNER_DUPLICATE_COMPONENT_ID` = **218**（基线登记）：真实语料中跨容器复制产生的
+     重复组件 id，属数据实情信号，非实现缺陷。
 2. F1–F6 各自的证据（实跑重放命令或附录 A 测量）修复后通过，回归测试绿；F1 的判据是
    `漏掉候选 − 排除列表命中数 == 0`（附录 A 口径，PR2 合入后重跑测量脚本确认），
    F2 的判据含说明 A 的测试电池。
