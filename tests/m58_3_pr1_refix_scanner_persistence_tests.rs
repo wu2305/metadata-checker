@@ -235,26 +235,17 @@ fn scanner_diagnostics_entry_removed_after_delete() -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(&project_dir);
     Ok(())
 }
-
-/// 守卫测试（验收缺口补录）：`GraphRuntime::load` 不得触碰 db 文件指纹。
+/// 守卫测试（验收缺口补录）：load 后立即 check-reload 必须判定未变更。
 ///
-/// redb 连接 drop 时会写 clean-close 标记；加载期若有 db I/O 排在指纹采集
-/// 之后，`reload_if_changed` 会误判文件已变更（regression_tests 的
-/// check-reload 契约曾因此变红）。此处钉住行为：load 后立即检查必须为
-/// Unchanged，且 load 前后 mtime/size 不变。
+/// redb 连接 drop 时会写 clean-close 标记，加载本身会触碰 db 文件
+/// （mtime 变化属预期，不断言）；不变式是：所有 db I/O 必须在指纹采集
+/// 之前完成，使运行时指纹覆盖加载期写入。F2 曾把 scanner 诊断读取排在
+/// mtime 采集之后，导致 reload 契约误判（regression_tests 变红），此处钉住。
 #[test]
-fn runtime_load_does_not_touch_db_fingerprint() -> anyhow::Result<()> {
+fn runtime_load_then_check_reload_reports_unchanged() -> anyhow::Result<()> {
     let (project_dir, db_path, _) = build_two_file_project("fingerprint")?;
 
-    let before = std::fs::metadata(&db_path)?;
     let mut runtime = GraphRuntime::load(&db_path)?;
-    let after = std::fs::metadata(&db_path)?;
-    assert_eq!(
-        before.modified().ok(),
-        after.modified().ok(),
-        "load 不得改变 db 文件 mtime"
-    );
-    assert_eq!(before.len(), after.len(), "load 不得改变 db 文件大小");
     assert!(
         matches!(
             runtime.reload_if_changed()?,
