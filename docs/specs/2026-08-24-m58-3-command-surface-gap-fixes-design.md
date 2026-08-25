@@ -357,7 +357,7 @@ python3 tools/corpus-shape-audit.py \
 
 ### 附录 A 重跑确认（PR2 落地后，2026-08-25）
 
-> 来源：`tools/corpus-shape-audit.py`（PR2 口径同步后，sha256 前缀 `b0f3997f`）→
+> 来源：`tools/corpus-shape-audit.py`（PR2 口径同步 + 复核返修后，sha256 前缀 `78cceb5f`）→
 > `docs/ai-eval-runs/2026-08-25-m58-3-corpus-shape-audit-post-pr2.json`
 > （同一 pin 语料 @ 6920ac51，501 个 `.spg`）。脚本复刻对象从旧白名单遍历换成
 > PR2 的形态感知递归（白名单四键 + extra 形态吻合键，排除列表优先），混合形态计数
