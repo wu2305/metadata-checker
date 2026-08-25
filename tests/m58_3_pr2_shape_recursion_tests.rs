@@ -450,8 +450,10 @@ fn component_property_forward_reference_builds_depends_on_edge() {
     );
 }
 
-/// 前向引用回归（ComponentValue）：裸组件 id 引用同样受单遍顺序处理丢边
-/// bug 影响，修复后引用方在前也必须建出 DependsOn 边。
+/// 前向引用回归（裸 `${id}` 全组件引用）：解析层把裸 `${txtB}` 先判为
+/// ModelField("txtB", "")、再按已知组件 id 改写为 ComponentProperty("txtB", "")，
+/// scanner 侧空属性归一为 comp:txtB.value（见 spg.rs ComponentProperty 臂注释）。
+/// 引用方排在被引用组件之前时，DependsOn 边不得丢失。
 #[test]
 fn component_value_forward_reference_builds_depends_on_edge() {
     let raw = serde_json::json!({

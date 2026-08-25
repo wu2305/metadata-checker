@@ -780,8 +780,17 @@ pub fn process_spg_file_from_value(
                         crate::superpage::RefType::ComponentProperty(target_id, property) => {
                             // 说明 D：与 dependency.rs 的语义对齐——ComponentProperty 与
                             // ComponentValue 一样建 comp→comp DependsOn 边，并带属性名。
+                            // property 为空时是裸 `${id}` 全组件引用（解析层经
+                            // ModelField(id, "") 改写为 ComponentProperty(id, "")），
+                            // field_path 归一为 comp:id.value，与 ComponentValue 分支
+                            // 对齐，避免 "comp:id." 尾点和语义重复边。
                             let target_comp_id =
                                 format!("comp:{}|{}", rel_path.replace(r"\", "/"), target_id);
+                            let field_path = if property.is_empty() {
+                                format!("comp:{}.value", target_id)
+                            } else {
+                                format!("comp:{}.{}", target_id, property)
+                            };
                             let edge_meta = serde_json::json!({
                                 "reason": format!(
                                     "Component '{}' depends on component '{}' property '{}' via field '{}'",
@@ -800,7 +809,7 @@ pub fn process_spg_file_from_value(
                                 &comp_id,
                                 &target_comp_id,
                                 EdgeType::DependsOn,
-                                Some(format!("comp:{}.{}", target_id, property)),
+                                Some(field_path),
                                 Some(edge_meta),
                             )?;
                         }
