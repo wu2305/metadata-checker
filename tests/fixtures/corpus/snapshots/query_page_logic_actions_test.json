@@ -340,10 +340,11 @@
         "confidence": "medium",
         "diagnostics": [],
         "evidence": [
-          "comp:app/actions_test.spg|input1 -> field:model1.name via FieldWrite",
+          "comp:app/actions_test.spg|buttonValidate -> action:app/actions_test.spg|buttonValidate|actionValidate via Triggers",
+          "action:app/actions_test.spg|buttonValidate|actionValidate -> field:model1.name via FieldWrite",
           "field:model1.name -> field:table1.name via FieldAlias"
         ],
-        "path_id": "comp:app/actions_test.spg|input1>field:model1.name>field:table1.name",
+        "path_id": "comp:app/actions_test.spg|buttonValidate>action:app/actions_test.spg|buttonValidate|actionValidate>field:model1.name>field:table1.name",
         "purpose": "自动发现路径",
         "rank_features": {
           "contains_cross_page_writer": true,
@@ -356,17 +357,40 @@
           "contains_physical_field": false,
           "contains_target_component": true,
           "edge_type_sequence": [
+            "Triggers",
             "FieldWrite",
             "FieldAlias"
           ],
           "field_name_match": false,
           "has_condition_node": false,
           "has_json_path": false,
-          "path_length": 2,
-          "same_page": false,
+          "path_length": 3,
+          "same_page": true,
           "source_file_count": 2
         },
         "segments": [
+          {
+            "confidence": "medium",
+            "edge": {
+              "edge_type": "Triggers",
+              "field_path": null,
+              "json_path": null,
+              "source_expr": null
+            },
+            "evidence": "comp:app/actions_test.spg|buttonValidate -> action:app/actions_test.spg|buttonValidate|actionValidate via Triggers",
+            "from": {
+              "name": "buttonValidate",
+              "node_id": "comp:app/actions_test.spg|buttonValidate",
+              "node_type": "Component",
+              "path": "app/actions_test.spg"
+            },
+            "to": {
+              "name": "validateData:actionValidate",
+              "node_id": "action:app/actions_test.spg|buttonValidate|actionValidate",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            }
+          },
           {
             "confidence": "high",
             "edge": {
@@ -375,11 +399,11 @@
               "json_path": null,
               "source_expr": "model1.name"
             },
-            "evidence": "comp:app/actions_test.spg|input1 -> field:model1.name via FieldWrite",
+            "evidence": "action:app/actions_test.spg|buttonValidate|actionValidate -> field:model1.name via FieldWrite",
             "from": {
-              "name": "input1",
-              "node_id": "comp:app/actions_test.spg|input1",
-              "node_type": "Component",
+              "name": "validateData:actionValidate",
+              "node_id": "action:app/actions_test.spg|buttonValidate|actionValidate",
+              "node_type": "Action",
               "path": "app/actions_test.spg"
             },
             "to": {
@@ -424,10 +448,11 @@
         "confidence": "medium",
         "diagnostics": [],
         "evidence": [
-          "comp:app/actions_test.spg|input1 -> field:model1.name via FieldWrite",
+          "comp:app/actions_test.spg|buttonValidate -> action:app/actions_test.spg|buttonValidate|actionValidate via Triggers",
+          "action:app/actions_test.spg|buttonValidate|actionValidate -> field:model1.name via FieldWrite",
           "field:model1.name -> field:app_table.name via FieldAlias"
         ],
-        "path_id": "comp:app/actions_test.spg|input1>field:model1.name>field:app_table.name",
+        "path_id": "comp:app/actions_test.spg|buttonValidate>action:app/actions_test.spg|buttonValidate|actionValidate>field:model1.name>field:app_table.name",
         "purpose": "自动发现路径",
         "rank_features": {
           "contains_cross_page_writer": true,
@@ -440,17 +465,40 @@
           "contains_physical_field": false,
           "contains_target_component": true,
           "edge_type_sequence": [
+            "Triggers",
             "FieldWrite",
             "FieldAlias"
           ],
           "field_name_match": false,
           "has_condition_node": false,
           "has_json_path": false,
-          "path_length": 2,
-          "same_page": false,
+          "path_length": 3,
+          "same_page": true,
           "source_file_count": 3
         },
         "segments": [
+          {
+            "confidence": "medium",
+            "edge": {
+              "edge_type": "Triggers",
+              "field_path": null,
+              "json_path": null,
+              "source_expr": null
+            },
+            "evidence": "comp:app/actions_test.spg|buttonValidate -> action:app/actions_test.spg|buttonValidate|actionValidate via Triggers",
+            "from": {
+              "name": "buttonValidate",
+              "node_id": "comp:app/actions_test.spg|buttonValidate",
+              "node_type": "Component",
+              "path": "app/actions_test.spg"
+            },
+            "to": {
+              "name": "validateData:actionValidate",
+              "node_id": "action:app/actions_test.spg|buttonValidate|actionValidate",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            }
+          },
           {
             "confidence": "high",
             "edge": {
@@ -459,11 +507,11 @@
               "json_path": null,
               "source_expr": "model1.name"
             },
-            "evidence": "comp:app/actions_test.spg|input1 -> field:model1.name via FieldWrite",
+            "evidence": "action:app/actions_test.spg|buttonValidate|actionValidate -> field:model1.name via FieldWrite",
             "from": {
-              "name": "input1",
-              "node_id": "comp:app/actions_test.spg|input1",
-              "node_type": "Component",
+              "name": "validateData:actionValidate",
+              "node_id": "action:app/actions_test.spg|buttonValidate|actionValidate",
+              "node_type": "Action",
               "path": "app/actions_test.spg"
             },
             "to": {
@@ -510,7 +558,7 @@
     "page_name": "actions_test",
     "page_role": "data_maintenance_page",
     "primary_paths_count": 36,
-    "related_context_count": 81,
+    "related_context_count": 88,
     "risk_count": 2,
     "top_action_prerequisites": [
       {
