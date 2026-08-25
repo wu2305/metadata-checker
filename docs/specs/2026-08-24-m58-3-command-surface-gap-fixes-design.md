@@ -85,7 +85,7 @@ redb 真实路径。真正缺的是两类：**(a) 坏行 hydrate**（redb 里塞
 
 | # | 缺口 | 根因位置 | 修法 |
 |---|------|---------|------|
-| F1 | 容器子键白名单丢组件（8,653 候选 / 8,310 带行为证据，逐键逐形态测量见附录 A） | `superpage/mod.rs:313-324,543-554`、`scanner/spg.rs:107` | **形态感知递归**，不扩展枚举：递归规则为「value 是数组、非空、且**每个**元素都是带字符串 `id` 和字符串 `type` 的对象 → 子组件数组」。多态键安全：字符串形态（如 action 的 `panel: "nextPage"`，`raw_types.rs:87`）天然不匹配；混合形态数组（部分元素缺 `id`/`type`）整体判非组件、进 `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数（`conditionStyles` 有 15 处真实样本，PR2 测试直接取用）；已知非组件键进排除列表（**初值取附录 A 实测四键** `effectStyles`/`conditionStyles`/`labelFields`/`stateFields`，`buttons` 样本不足待人工确认）。`RawComponent` 加 `#[serde(flatten)]` extra map（`raw_types.rs:210-217` 无 `deny_unknown_fields`，兼容），scanner 侧 `spg.rs:107` 裸 `Value` 递归平行修改；json_path 逐层保留。同页重复组件 id 诊断（`spg.rs:82-103`）。**证据性质更正**：F1 不是 journal 五个实跑缺口之一，其证据是语料测量（附录 A），验收基线为 `漏掉候选 − 排除列表命中数 == 0`，不是「重放命令」，也不是「所有 id+type 对象都进图」（那会把 343 个样式记录吃进图里，与排除列表冲突） |
+| F1 | 容器子键白名单丢组件（8,653 候选 / 8,310 带行为证据，逐键逐形态测量见附录 A） | `superpage/mod.rs` 的 `extract_components`/`extract_child_components`（修复前只走白名单四键）、`scanner/spg.rs` 的裸 `Value` 递归 | **形态感知递归**，不扩展枚举：递归规则为「value 是数组、非空、且**每个**元素都是带字符串 `id` 和字符串 `type` 的对象 → 子组件数组」。多态键安全：字符串形态（如 action 的 `panel: "nextPage"`，`raw_types.rs:88`）天然不匹配；混合形态数组（部分元素缺 `id`/`type`）整体判非组件、进 `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数（`conditionStyles` 有 15 处真实样本，PR2 测试直接取用）；已知非组件键进排除列表（**初值取附录 A 实测四键** `effectStyles`/`conditionStyles`/`labelFields`/`stateFields`，`buttons` 样本不足待人工确认）。`RawComponent` 加 `#[serde(flatten)]` extra map（`raw_types.rs:218-223` 无 `deny_unknown_fields`，兼容），scanner 侧 `spg.rs:219-233` 裸 `Value` 递归平行修改；json_path 逐层保留。同页重复组件 id 诊断（`spg.rs:118-129` 透出）。**证据性质更正**：F1 不是 journal 五个实跑缺口之一，其证据是语料测量（附录 A），验收基线为 `漏掉候选 − 排除列表命中数 == 0`，不是「重放命令」，也不是「所有 id+type 对象都进图」（那会把 343 个样式记录吃进图里，与排除列表冲突） |
 | F2 | 无表达式组件的祖先条件继承断（button13） | `conditions.rs:379-416` 不读节点 meta json_path、`:429` 硬编码 `.components[` | `component_json_paths` 补读节点 meta；`is_ancestor_json_path` 放宽到全部容器子键；scanner 补建 comp→comp Contains 边。**不变式与选父规则见说明 A** |
 | F3 | `${IF(...)}` 表达式模型引用截断 | `superpage/expr_ast.rs:204-219` tokenizer 吞整个 `${}` + `:823-831` `classify_identifier` 盲 `split('.')` | **修复点改到能合并递归结果的层**：`classify_identifier` 只返回单个 `RefType`（`:818-819`），无法扩展 refs/resolved_refs/diagnostics——内嵌表达式的处理移到 tokenizer 的 `${}` 分支或 `extract_refs_from_ast`（`:644-649`，已有 refs/resolved_refs/diagnostics 三个可变累积参数），在其中对 inner 递归走 AST 并**合并**结果。纯点分路径保持现状直出。**已知边界**：tokenizer 贪婪吃到第一个 `}`，嵌套 `${...${...}...}` 词法层已截断，本修复只覆盖单层；嵌套形态若实测出现（Phase 1 计数器暴露）另立项。测试矩阵：普通 `${model.field}` 兼容、`${IF(...)}` 多引用、缺右花括号、嵌套调用、纯字面量 |
 | F4 | 页面限定降级 / 协议矛盾 | `route.rs:429-434`（剥页面段）vs `page_logic.rs:115-122`（构造页面段）；真实回退点 `page_logic.rs:155-170/:300-311` | **方向已定**：保留页面段，`route.rs:432` 的 `by_overqualified` 档对 model/field 前缀禁用；回退接 `PAGE_SCOPED_TARGET_FALLBACK`；协议统一随 Phase 3 落地（归属 PR4b）。硬编码表名移除的平局替代见说明 B |
@@ -127,11 +127,13 @@ NodeType 确定性排序**——Component 父优先、Page 仅兜底，与迭代
   （计数去重按 (action, 物理字段) 键），缺失 conditionExp 的 writer 给
   `WRITER_CONDITION_MISSING` 诊断。
 
-**说明 D（`ComponentProperty` 的图契约）**：`superpage/mod.rs:59` 的上下文解析会把
-head 命中已抽取组件 id 的 `ModelField` 改写为 `ComponentProperty`（`mod.rs:122`）——
-`classify_identifier` 不是终态。但 scanner 的 match（`spg.rs:559-704`）只处理
+**说明 D（`ComponentProperty` 的图契约）**：`superpage/mod.rs` 的上下文解析
+（`resolve_expression_refs_with_context`，:82）会把
+head 命中已抽取组件 id 的 `ModelField` 改写为 `ComponentProperty`（:136）——
+`classify_identifier` 不是终态。但 scanner 的 match（修复前 `spg.rs:559-704`）只处理
 `ModelField`/`ComponentValue`/`Param`/`UserProperty`/`SystemVar`，`ComponentProperty`
-落进 `:705` 的 `_ => {}` 被静默丢弃；而 `dependency.rs:48` 同时处理 `ComponentValue`
+落进 `_ => {}` 被静默丢弃（修复后 `spg.rs:766` 起新增 `ComponentProperty` 臂，
+`_ => {}` 移至 :887）；而 `dependency.rs:48` 同时处理 `ComponentValue`
 与 `ComponentProperty`——**同一个 RefType，两个消费者契约不一致**。决定：scanner 为
 `ComponentProperty` 建 comp→comp `DependsOn` 边并带属性名（与 `dependency.rs` 语义
 对齐），不记诊断；补 `parse → 上下文解析 → scanner 建边` 贯通测试。当前语料仅 4 处

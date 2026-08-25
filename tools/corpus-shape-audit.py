@@ -95,17 +95,32 @@ def is_component_array(value):
 
 
 def would_fail_raw_component_deserialize(node):
-    """廉价复刻 serde 反序列化 RawComponent 会失败的形态：声明为 Vec 的字段不是数组。
+    """廉价复刻 serde 反序列化 RawComponent 会失败的形态。
+
+    覆盖三类失败：声明为 Vec 的字段不是数组；标量字段类型不符
+    （`submitField` 须为字符串、`submitData` 须为布尔）；`actions` 元素非对象
+    （RawAction 是 struct）。仍是近似：`Option<serde_json::Value>` 字段来者不拒，
+    RawAction 内部的 Vec<String>/Vec<RawFieldValue> 等嵌套类型不再下钻。
+    pin 语料未命中任何一类，现有结论不受影响。
 
     superpage 侧对 extra 数组元素逐个 `serde_json::from_value::<RawComponent>`，
-    失败即静默跳过整棵子树（mod.rs:375-384 的已知取舍）；scanner 侧走裸 Value
-    不受此限。命中的元素不计入「现役遍历可达」，walk 仍会把它们算进漏掉候选。
+    失败即静默跳过整棵子树（extract_child_components 的已知取舍，mod.rs:375-384）；
+    scanner 侧走裸 Value 不受此限。命中的元素不计入「现役遍历可达」，walk 仍会把
+    它们算进漏掉候选。
     """
     if not isinstance(node, dict):
         return True
     for key in WHITELIST_CONTAINER_KEYS + ("actions",):
         if key in node and not isinstance(node[key], list):
             return True
+    if "submitField" in node and not isinstance(node["submitField"], str):
+        return True
+    # 注意 Python bool 是 int 子类：JSON true/false 之外（数字、字符串）都判失败，
+    # 与 serde 的 Option<bool> 行为一致。
+    if "submitData" in node and not isinstance(node["submitData"], bool):
+        return True
+    if any(not isinstance(item, dict) for item in node.get("actions") or []):
+        return True
     return False
 
 
@@ -132,7 +147,11 @@ def iter_current_children(raw, known_props):
 
 
 def extract_current(raw, out, known_props):
-    """复刻 PR2 后的形态感知递归（mod.rs:387-411），含空 id 透传规则。"""
+    """复刻 PR2 后的形态感知递归（mod.rs 的 extract_components），含空 id 透传规则。
+
+    实际递归入口分散在多处：空 id 透传分支 mod.rs:394、正常分支末尾 :612，
+    子容器遍历在 extract_child_components（:351-385，对应 iter_current_children）。
+    """
     if not isinstance(raw, dict):
         return
     if not raw.get("id") or not raw.get("type"):
@@ -316,6 +335,9 @@ def load_known_component_props(repo_root):
         r'(?:#\[serde\((?:rename = "([^"]+)", )?default\)\]\s*)?pub (\w+):', block
     ):
         names.add(match.group(1) or match.group(2))
+    # #[serde(flatten)] 的 extra 不是真实 JSON 键：计入已声明字段会让语料里的字面量
+    # "extra" 键被误判跳过形态感知递归，必须从返回集合剔除。
+    names.discard("extra")
     return names
 
 

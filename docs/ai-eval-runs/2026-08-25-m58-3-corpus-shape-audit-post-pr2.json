@@ -87,7 +87,7 @@
     "known_keys_nonstring_value_containing_expr": {
       "value": 9
     },
-    "raw_component_known_keys": 50,
+    "raw_component_known_keys": 49,
     "scope_limit": "覆盖形态感知递归可达的组件（PR2 后含 columns/grid/tabs 等新进入类型）",
     "unknown_keys_top": {
       "display": 6626,
@@ -111,6 +111,6 @@
       "validMessage": 4
     }
   },
-  "script_sha256": "b0f3997f61ad4fe0",
+  "script_sha256": "78cceb5f00b7fcfe",
   "spg_files": 501
 }
