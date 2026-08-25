@@ -353,6 +353,30 @@ python3 tools/corpus-shape-audit.py \
 脚本确认；届时新进入的组件类型可能带不同的属性键，修订包 §4 的属性层负面结论
 （45 处未覆盖表达式键、8 处被跳过的对象/数组值）也须在那时重测后再定论。
 
+### 附录 A 重跑确认（PR2 落地后，2026-08-25）
+
+> 来源：`tools/corpus-shape-audit.py`（PR2 口径同步后，sha256 前缀 `b0f3997f`）→
+> `docs/ai-eval-runs/2026-08-25-m58-3-corpus-shape-audit-post-pr2.json`
+> （同一 pin 语料 @ 6920ac51，501 个 `.spg`）。脚本复刻对象从旧白名单遍历换成
+> PR2 的形态感知递归（白名单四键 + extra 形态吻合键，排除列表优先），混合形态计数
+> 换成 scanner 安全网口径（只走 scanner 实际到达的节点）。
+
+- **F1 验收判据通过**：形态感知递归到达 **34,317**（与 +32% 推论精确吻合）；漏掉候选
+  **343**，全部位于排除列表子树内（`effectStyles` 226 / `conditionStyles` 61 /
+  `labelFields` 35 / `stateFields` 20，外加 `actions` 排除子树内埋着的 1 个
+  `buttons` 样本 `showConfirmDialog.button` 配置——排除按子树继承口径计入），
+  `漏掉候选 343 − 排除列表子树命中 343 == 0`。漏掉者三项行为证据全为 0。
+- **混合形态（scanner 安全网口径）**：`moreFields` 279、`params` 33，进
+  `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数，属白名单基线登记范畴。
+- **表达式引用终态重测**：`ComponentProperty` 建 comp→comp `DependsOn` 边 4 处
+  （后缀 `.txt`×3、`.seconds`×1，与修订包 §2.1 一致）；畸形 `${}` 垃圾 model 名
+  候选 601 次 / 161 个不同名（PR3 的断言须在 PR2 合入后以此口径重测）；
+  `head_unknown_stays_modelfield` 162。
+- **属性层重测**（修订包 §4 负面结论更新）：新进入组件类型带来变化——未覆盖且带
+  表达式的键合计 59 处（`params` 19 / `resPathExp` 13 / `title` 11 / `operator` 10 /
+  `validMessage` 4 / `dynamicColumns` 1 / `endLocationExp` 1）；已知键但值为
+  对象/数组且内含 `${}` 被跳过 9 处。是否补这些键留待后续里程碑评估。
+
 ## 评审修订记录
 
 第一轮（2026-08-23）：v2 管道事实修正；page_logic.rs 行数 2820；P0-A 选父决定；

@@ -43,7 +43,9 @@ M58.3 修五个实跑缺口 + 一个测量缺口（F1），spec 三轮评审后�
   的 M50 标准真实项目 runner 采集，记录节点/边数、graphdb 体积、全量构建与加载耗时、
   查询 P50/P95——**实测采集为准，不用推论反推预期值**。
 - 后续义务：PR2 合入后重跑 `corpus-shape-audit.py`（新组件类型的属性键分布 +
-  `ComponentProperty` 计数都会变，附录 A 与说明 D 据此更新）。
+  `ComponentProperty` 计数都会变，附录 A 与说明 D 据此更新）。**已完成**
+  （2026-08-25，口径同步后重跑：到达 34,317、验收判据归 0，见 spec 附录 A
+  「重跑确认」与 `docs/ai-eval-runs/2026-08-25-m58-3-corpus-shape-audit-post-pr2.json`）。
 
 ### PR3 — F3 表达式递归合并
 

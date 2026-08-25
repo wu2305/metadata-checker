@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""M58.3 附录 A 语料形态体检。
+"""M58.3 附录 A 语料形态体检（PR2 后重跑口径）。
 
 按 spec 的 F1 形态规则测量 `.spg` 语料，产出三类可复核数字：
 
-1. **容器形态**：当前白名单递归漏掉哪些候选容器键，逐键给出行为证据
-   （带表达式 / 带 actions / 带子容器），供 spec F1 的排除列表定值。
+1. **容器形态**：PR2 形态感知递归（白名单四键 + extra 形态吻合键，排除列表
+   优先）漏掉哪些候选容器键，逐键给出行为证据（带表达式 / 带 actions /
+   带子容器），并输出 spec 验收 2 的判据「漏掉候选 − 排除列表命中数」。
 2. **表达式引用**：沿真实调用链
    `classify_identifier → resolve_expression_refs_with_context → scanner match`
-   统计各终态，定位 `ComponentProperty` 被 `spg.rs` 通配臂丢弃的量与垃圾 model 名。
+   统计各终态，含 `ComponentProperty` 建 comp→comp DependsOn 边的量与垃圾
+   model 名。
 3. **DataFlow 深度**：`.spg` 内联 dataFlow 与 `.tbl` 解析深度差的原始结构计数。
 
 **测量边界（必须与判读一起引用）**：本脚本读原始 JSON、复刻解析器的遍历与分类规则，
@@ -27,7 +29,7 @@ import re
 import subprocess
 import sys
 
-# 与 superpage/mod.rs:344-387 的两张分类表同源；改那里须同步改这里。
+# 与 superpage/mod.rs:415-457 的两张分类表同源；改那里须同步改这里。
 ALWAYS_EXPR_FIELDS = {
     "exp", "itemFilter", "visibleCondition", "validExp", "calcCondition",
     "calcExp", "maskCondition", "submitCondition", "submitPageCondition",
@@ -40,8 +42,13 @@ CONDITIONAL_EXPR_FIELDS = {
     "badge", "count", "attrCaption", "caption", "defaultSelect", "defaultCheck",
     "maxLevel",
 }
-# superpage/mod.rs:313-324,543-554 与 scanner/spg.rs:107 的现役白名单。
-CURRENT_WHITELIST = ("components", "panels", "steps", "comps")
+# superpage/mod.rs:349-364 的白名单子容器键（RawComponent 声明字段，Vec<RawComponent> 链）。
+WHITELIST_CONTAINER_KEYS = ("components", "panels", "steps", "comps")
+# superpage/mod.rs:318-324 的已知非组件容器键排除列表（M58.3 F1，附录 A 实测初值）；
+# 排除优先于形态判定。改那里须同步改这里。
+NON_COMPONENT_CONTAINER_KEYS = {
+    "actions", "effectStyles", "conditionStyles", "labelFields", "stateFields",
+}
 # expr_ast.rs:820 的 ${} 分支只做 split('.')，纯点分路径才是它的良性输入。
 DOTTED_PATH = re.compile(r"^[A-Za-z_$@][\w$@]*(\.[\w$@]+)*$")
 
@@ -55,8 +62,27 @@ def is_component_object(node):
     )
 
 
+def is_component_array_lenient(value):
+    """复刻 superpage/mod.rs:334-347 的 is_component_array（递归遍历口径）。
+
+    非空数组且每个元素都是带字符串 id 与字符串 type 的对象——**允许空串**，
+    与 serde 的 `String` 反序列化对齐（空串 id/type 的元素在 extract_components
+    里走透传分支，不append但继续递归子树）。候选审计仍用上面的严格判据。
+    """
+    return (
+        isinstance(value, list)
+        and len(value) > 0
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("id"), str)
+            and isinstance(item.get("type"), str)
+            for item in value
+        )
+    )
+
+
 def is_component_array(value):
-    """spec F1 形态规则：数组、非空、且**每个**元素都满足元素判据。
+    """spec F1 形态规则（严格口径）：数组、非空、且**每个**元素都满足元素判据。
 
     混合形态（部分元素缺 id/type）整体判非组件，对应 spec 的
     `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数分支。
@@ -68,23 +94,58 @@ def is_component_array(value):
     )
 
 
-def extract_current(raw, out):
-    """复刻 superpage::extract_components 的现役遍历，含空 id 透传规则。"""
+def would_fail_raw_component_deserialize(node):
+    """廉价复刻 serde 反序列化 RawComponent 会失败的形态：声明为 Vec 的字段不是数组。
+
+    superpage 侧对 extra 数组元素逐个 `serde_json::from_value::<RawComponent>`，
+    失败即静默跳过整棵子树（mod.rs:375-384 的已知取舍）；scanner 侧走裸 Value
+    不受此限。命中的元素不计入「现役遍历可达」，walk 仍会把它们算进漏掉候选。
+    """
+    if not isinstance(node, dict):
+        return True
+    for key in WHITELIST_CONTAINER_KEYS + ("actions",):
+        if key in node and not isinstance(node[key], list):
+            return True
+    return False
+
+
+def iter_current_children(raw, known_props):
+    """复刻 extract_child_components（mod.rs:351-385）的子节点序列。
+
+    白名单四键先行；extra 键（未声明、不在排除列表）形态吻合才递归。
+    """
+    for key in WHITELIST_CONTAINER_KEYS:
+        for child in raw.get(key) or []:
+            yield child
+    for key, value in raw.items():
+        if key in WHITELIST_CONTAINER_KEYS or key in NON_COMPONENT_CONTAINER_KEYS:
+            continue
+        if known_props is not None and key in known_props:
+            # 已声明字段不进 flatten extra，不参与形态感知递归。
+            continue
+        if not is_component_array_lenient(value):
+            continue
+        for item in value:
+            if would_fail_raw_component_deserialize(item):
+                continue
+            yield item
+
+
+def extract_current(raw, out, known_props):
+    """复刻 PR2 后的形态感知递归（mod.rs:387-411），含空 id 透传规则。"""
     if not isinstance(raw, dict):
         return
     if not raw.get("id") or not raw.get("type"):
-        for key in CURRENT_WHITELIST:
-            for child in raw.get(key) or []:
-                extract_current(child, out)
+        for child in iter_current_children(raw, known_props):
+            extract_current(child, out, known_props)
         return
     out.append(raw)
-    for key in CURRENT_WHITELIST:
-        for child in raw.get(key) or []:
-            extract_current(child, out)
+    for child in iter_current_children(raw, known_props):
+        extract_current(child, out, known_props)
 
 
 def is_expression_value(field, value):
-    """复刻 superpage/mod.rs:429-441 的 is_expr 判定（仅字符串值参与）。"""
+    """复刻 superpage/mod.rs:499-512 的 is_expr 判定（仅字符串值参与）。"""
     if not isinstance(value, str) or not value:
         return False
     if field in ALWAYS_EXPR_FIELDS:
@@ -95,17 +156,32 @@ def is_expression_value(field, value):
 
 
 def audit_containers(canvas, reached_ids):
-    """逐容器键统计现役遍历漏掉的候选对象及其行为证据。"""
+    """容器形态审计，两条遍历分开记：
+
+    - **漏掉候选猎手**（`walk_all`）：走遍全树（含排除列表子树），凡是严格
+      组件形态且未被形态感知递归到达的对象都计数；`under_excluded` 标记是否
+      位于排除列表子树内（如 actions 内部的 buttons 配置），供 spec 验收 2 的
+      「漏掉候选 − 排除列表命中数 == 0」判据使用。
+    - **混合形态计数**（`walk_scanner`）：复刻 scanner/spg.rs:200-258 的安全网
+      口径，只走 scanner 实际到达的节点——白名单四键递归 + 形态吻合 extra 键
+      递归；其余非空数组含对象元素则计 `SCANNER_UNRECOGNIZED_CONTAINER_KEY`，
+      不递归进去。
+    """
     stats = collections.defaultdict(
-        lambda: {"missed": 0, "with_expr": 0, "with_actions": 0, "with_children": 0}
+        lambda: {
+            "missed": 0, "under_excluded": 0,
+            "with_expr": 0, "with_actions": 0, "with_children": 0,
+        }
     )
     mixed_shape_keys = collections.Counter()
 
-    def walk(node, container_key):
+    def walk_all(node, container_key, under_excluded):
         if isinstance(node, dict):
             if is_component_object(node) and id(node) not in reached_ids:
                 entry = stats[container_key]
                 entry["missed"] += 1
+                if under_excluded:
+                    entry["under_excluded"] += 1
                 if any(is_expression_value(k, v) for k, v in node.items()):
                     entry["with_expr"] += 1
                 if node.get("actions"):
@@ -113,19 +189,32 @@ def audit_containers(canvas, reached_ids):
                 if any(is_component_array(v) for v in node.values()):
                     entry["with_children"] += 1
             for key, value in node.items():
-                # 混合形态数组：含组件样元素但不是每个都满足——spec 要求进诊断计数。
-                if (
-                    isinstance(value, list) and value
-                    and not is_component_array(value)
-                    and any(is_component_object(i) for i in value)
-                ):
-                    mixed_shape_keys[key] += 1
-                walk(value, key)
+                walk_all(value, key, under_excluded or key in NON_COMPONENT_CONTAINER_KEYS)
         elif isinstance(node, list):
             for value in node:
-                walk(value, container_key)
+                walk_all(value, container_key, under_excluded)
 
-    walk(canvas, "canvas")
+    def walk_scanner(node):
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if key in NON_COMPONENT_CONTAINER_KEYS or key in ("id", "type"):
+                continue
+            if key in WHITELIST_CONTAINER_KEYS:
+                if isinstance(value, list):
+                    for child in value:
+                        walk_scanner(child)
+                continue
+            if not isinstance(value, list) or not value:
+                continue
+            if is_component_array_lenient(value):
+                for child in value:
+                    walk_scanner(child)
+            elif any(isinstance(i, dict) for i in value):
+                mixed_shape_keys[key] += 1
+
+    walk_all(canvas, "canvas", False)
+    walk_scanner(canvas)
     return stats, mixed_shape_keys
 
 
@@ -134,8 +223,9 @@ def audit_expressions(components, source_ids, all_object_ids):
 
     链路：classify_identifier（`${}` 分支无条件 ModelField）
         → resolve_expression_refs_with_context（head 命中已抽取组件 id 则改写为
-          ComponentProperty，superpage/mod.rs:122）
-        → scanner/spg.rs:559-705 的 match（ComponentProperty 落 `_ => {}` 被丢弃）
+          ComponentProperty）
+        → scanner/spg.rs:766-783 的 match（PR2 说明 D：ComponentProperty 与
+          ComponentValue 一样建 comp→comp DependsOn 边，属性名进 edge meta）
     """
     extracted_ids = {c["id"] for c in components}
     buckets = collections.Counter()
@@ -166,7 +256,7 @@ def audit_expressions(components, source_ids, all_object_ids):
                 if head in source_ids or head.startswith("model"):
                     buckets["modelfield_correct"] += 1
                 elif head in extracted_ids:
-                    buckets["componentproperty_dropped_by_scanner"] += 1
+                    buckets["componentproperty_builds_comp_depends_on"] += 1
                     dropped_suffixes["." + ".".join(parts[1:])] += 1
                 elif head in all_object_ids:
                     # head 是当前不可达的候选对象：上下文解析看不到它，仍是 ModelField。
@@ -178,7 +268,7 @@ def audit_expressions(components, source_ids, all_object_ids):
 
     return {
         "buckets": dict(buckets),
-        "dropped_componentproperty_suffixes": dict(dropped_suffixes.most_common(20)),
+        "componentproperty_edge_suffixes": dict(dropped_suffixes.most_common(20)),
         "junk_model_name_occurrences": junk_occurrences,
         "junk_model_names": junk_model_names,
     }
@@ -187,8 +277,8 @@ def audit_expressions(components, source_ids, all_object_ids):
 def audit_properties(components, known_props):
     """统计已抽取组件上的属性键：未被 RawComponent 覆盖、且带表达式的有多少。
 
-    **适用范围**：只覆盖当前遍历可达的组件。F1 放开容器后须重跑——新进入的类型
-    可能带不同的属性键。
+    **适用范围**：覆盖形态感知递归可达的组件（PR2 后含 columns/grid/tabs 等
+    新进入类型）。排除列表键下的对象不可达，不在本审计范围内。
     """
     unknown_with_expr = collections.Counter()
     unknown_any = collections.Counter()
@@ -202,7 +292,7 @@ def audit_properties(components, known_props):
                     if "${" in json.dumps(value, ensure_ascii=False):
                         skipped_nonstring_with_expr[key] += 1
                 continue
-            if is_component_array(value):
+            if is_component_array_lenient(value):
                 # 子组件容器，不是属性——归容器审计，避免污染属性层结论。
                 continue
             unknown_any[key] += 1
@@ -277,7 +367,10 @@ def main():
 
     totals = collections.Counter()
     container_stats = collections.defaultdict(
-        lambda: {"missed": 0, "with_expr": 0, "with_actions": 0, "with_children": 0}
+        lambda: {
+            "missed": 0, "under_excluded": 0,
+            "with_expr": 0, "with_actions": 0, "with_children": 0,
+        }
     )
     mixed_shape = collections.Counter()
     expr_buckets = collections.Counter()
@@ -298,7 +391,7 @@ def main():
         canvas = document.get("canvas") or {}
 
         reached = []
-        extract_current(canvas, reached)
+        extract_current(canvas, reached, known_props)
         reached_ids = {id(c) for c in reached}
         totals["reached_by_current_traversal"] += len(reached)
 
@@ -325,7 +418,7 @@ def main():
         source_ids = {s.get("id") for s in (document.get("sources") or []) if s.get("id")}
         expr = audit_expressions(reached, source_ids, all_object_ids)
         expr_buckets.update(expr["buckets"])
-        dropped_suffixes.update(expr["dropped_componentproperty_suffixes"])
+        dropped_suffixes.update(expr["componentproperty_edge_suffixes"])
         junk_occ += expr["junk_model_name_occurrences"]
         junk_names |= expr["junk_model_names"]
         dataflow.update(audit_dataflow(document))
@@ -336,6 +429,10 @@ def main():
             skipped_nonstring.update(c)
 
     missed_total = sum(e["missed"] for e in container_stats.values())
+    # 排除命中按子树继承口径：位于排除列表键子树内（任意深度）的漏掉候选都算，
+    # 例如 actions 排除后其内部的 buttons 配置随之不可达。
+    exclusion_hits = sum(e["under_excluded"] for e in container_stats.values())
+    acceptance_gap = missed_total - exclusion_hits
     behavioral = {
         k: e for k, e in container_stats.items()
         if e["with_expr"] or e["with_actions"] or e["with_children"]
@@ -354,10 +451,14 @@ def main():
         ).hexdigest()[:16],
         "spg_files": len(spg_files),
         "containers": {
+            "traversal_rule": "PR2 形态感知递归（白名单四键 + extra 形态吻合键，排除列表优先）",
             "reached_by_current_traversal": totals["reached_by_current_traversal"],
             "missed_candidates_total": missed_total,
             "missed_with_behavior_evidence": sum(e["missed"] for e in behavioral.values()),
             "missed_without_behavior_evidence": sum(e["missed"] for e in inert.values()),
+            "exclusion_list_keys": sorted(NON_COMPONENT_CONTAINER_KEYS),
+            "missed_under_exclusion_subtrees": exclusion_hits,
+            "acceptance_gap_missed_minus_exclusion": acceptance_gap,
             "by_key": dict(sorted(
                 container_stats.items(), key=lambda kv: -kv[1]["missed"]
             )),
@@ -365,14 +466,14 @@ def main():
         },
         "expressions": {
             "terminal_states": dict(expr_buckets),
-            "dropped_componentproperty_suffixes": dict(dropped_suffixes.most_common(20)),
+            "componentproperty_edge_suffixes": dict(dropped_suffixes.most_common(20)),
             "junk_model_name_occurrences": junk_occ,
             "junk_model_names_distinct": len(junk_names),
         },
         "dataflow": dict(dataflow),
         "properties": {
             "scope_limit": (
-                "只覆盖当前遍历可达的组件；F1 放开容器后须重跑"
+                "覆盖形态感知递归可达的组件（PR2 后含 columns/grid/tabs 等新进入类型）"
             ),
             "raw_component_known_keys": len(known_props) if known_props else None,
             "unknown_keys_with_expression": dict(unknown_expr_props.most_common(20)),
@@ -390,17 +491,20 @@ def main():
     c = report["containers"]
     print("语料 %s @ %s，%d 个 .spg" % (
         args.corpus, report["corpus_revision"], report["spg_files"]))
-    print("\n== 容器形态（附录 A）==")
+    print("\n== 容器形态（附录 A，PR2 形态感知递归口径）==")
     print("现役遍历到达 %d ; 漏掉候选 %d（有行为证据 %d / 无行为证据 %d）" % (
         c["reached_by_current_traversal"], c["missed_candidates_total"],
         c["missed_with_behavior_evidence"], c["missed_without_behavior_evidence"]))
+    print("验收口径：漏掉候选 %d − 排除列表子树命中 %d = %d（spec 验收 2 要求 == 0）" % (
+        c["missed_candidates_total"], c["missed_under_exclusion_subtrees"],
+        c["acceptance_gap_missed_minus_exclusion"]))
     print("%-16s %8s %8s %10s %10s" % ("容器键", "漏掉", "带表达式", "带actions", "带子容器"))
     for key, entry in c["by_key"].items():
         print("%-16s %8d %8d %10d %10d" % (
             key, entry["missed"], entry["with_expr"],
             entry["with_actions"], entry["with_children"]))
     if c["mixed_shape_arrays_by_key"]:
-        print("\n混合形态数组（spec F1 判非组件、进诊断计数）:")
+        print("\n混合形态数组（scanner 安全网口径，进 SCANNER_UNRECOGNIZED_CONTAINER_KEY）:")
         for key, count in c["mixed_shape_arrays_by_key"].items():
             print("  %6d  %s" % (count, key))
 
@@ -411,14 +515,14 @@ def main():
     for state, count in sorted(report["expressions"]["terminal_states"].items(),
                                key=lambda kv: -kv[1]):
         print("  %6d  %s" % (count, state))
-    if report["expressions"]["dropped_componentproperty_suffixes"]:
-        print("被 scanner 通配臂丢弃的 ComponentProperty 后缀:")
-        for suffix, count in report["expressions"]["dropped_componentproperty_suffixes"].items():
+    if report["expressions"]["componentproperty_edge_suffixes"]:
+        print("ComponentProperty 建 comp→comp DependsOn 边的属性后缀:")
+        for suffix, count in report["expressions"]["componentproperty_edge_suffixes"].items():
             print("  %6d  %s" % (count, suffix))
 
     props = report["properties"]
     if props["raw_component_known_keys"]:
-        print("\n== 属性层（仅当前可达组件；F1 后须重跑）==")
+        print("\n== 属性层（形态感知递归可达组件，PR2 后重跑）==")
         print("RawComponent 已覆盖 %d 个键" % props["raw_component_known_keys"])
         print("未覆盖且带表达式的键:")
         for key, count in props["unknown_keys_with_expression"].items():
