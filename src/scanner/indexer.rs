@@ -549,6 +549,8 @@ impl ProjectIndexer {
     ///
     /// 与 `scan` 复用同一套阶段函数；graphdb 文件在 prepare 前后保持不变，
     /// 由调用方决定何时把 `commit`（可附加 diff-refresh checkpoint）落盘。
+    /// M58.3 PR2：per-file scanner 诊断 entries 与删除路径随返回值透传，
+    /// 调用方须在 commit 落库成功后写 SCANNER_* 诊断（见 `PreparedIndexUpdate`）。
     pub fn prepare(project_dir: &Path, db_path: &Path) -> Result<PreparedIndexUpdate> {
         let mut graph = GraphDB::open(db_path)?;
         let prev_states = graph.load_file_states().unwrap_or_default();
@@ -559,6 +561,15 @@ impl ProjectIndexer {
 
         let mut new_states = prev_states.clone();
         let updates = Self::parse_dirty_files(&prev_states, &plan.dirty, project_dir, &provider)?;
+        // M58.3 PR2：与 scan 相同逻辑收集本轮 per-file scanner 诊断 entries，
+        // 随 PreparedIndexUpdate 透传给调用方（diff-refresh 编排器）落库，
+        // 候选图不落盘不代表诊断可以丢——持久化责任移交调用方。
+        let mut scanner_entries = Vec::new();
+        for update in &updates {
+            if let Some(entry) = per_file_scan_diagnostic_entry(update)? {
+                scanner_entries.push(entry);
+            }
+        }
         // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
         let merged_removed = merge_removed_node_ids(
             updates
@@ -601,6 +612,8 @@ impl ProjectIndexer {
             .collect();
         let removed_file_paths: Vec<String> =
             plan.deleted.iter().map(|(rel, _)| rel.clone()).collect();
+        // M58.3 PR2：本轮删除文件的 logical_path，落库时需移除其诊断 entry
+        let scanner_deleted_paths = removed_file_paths.clone();
 
         for update in &updates {
             let logical_path = update.logical_path.clone();
@@ -643,6 +656,8 @@ impl ProjectIndexer {
             commit,
             dirty_node_ids,
             deleted_node_ids,
+            scanner_entries,
+            scanner_deleted_paths,
         })
     }
 }
@@ -659,4 +674,12 @@ pub struct PreparedIndexUpdate {
     pub dirty_node_ids: Vec<String>,
     /// 完整 deleted 节点 ID：已删除文件节点的并集（去重）
     pub deleted_node_ids: Vec<String>,
+    /// M58.3 PR2：本轮脏 SPG 文件的 per-file scanner 诊断 entries
+    /// （序列化 bytes；计数为零的修复文件也携带 entry 以覆盖旧值）。
+    /// 生命周期：调用方在 commit 持久化成功后交给
+    /// `GraphDB::save_scanner_diagnostic_entries` 落库；deferred 模式
+    /// 由编排器跨轮合并（脏覆盖、删除移除），随 pending commit 一起落库。
+    pub scanner_entries: Vec<(String, Vec<u8>)>,
+    /// M58.3 PR2：本轮删除文件的 logical_path，落库时移除其诊断 entry
+    pub scanner_deleted_paths: Vec<String>,
 }

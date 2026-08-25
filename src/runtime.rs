@@ -733,6 +733,9 @@ impl GraphRuntime {
     ///
     /// 调用方必须先完成 graph+checkpoint 原子提交再调用本方法；
     /// 本方法不做任何可能失败的图构建，只更新运行时持有对象与文件指纹。
+    /// M58.3 PR2：本方法不刷新 scanner 诊断缓存——deferred 模式下 install 时
+    /// durable 库尚未写入本轮诊断 entries，缓存口径由编排器在 install/persist
+    /// 之后经 `replace_scanner_diagnostics` 统一刷新（durable + pending overlay）。
     pub fn install_replacement(&mut self, candidate: GraphDB, prepared: PreparedRuntimeReadModel) {
         self.graph = candidate;
         self.loaded_at = SystemTime::now();
@@ -753,6 +756,22 @@ impl GraphRuntime {
         self.read_model_build_ms = prepared.read_model_build_ms;
         self.reload_count += 1;
         self.last_reload_error = None;
+    }
+
+    /// M58.3 PR2：整体替换 `load_diagnostics` 中的 scanner 诊断段（SCANNER_* code）。
+    ///
+    /// diff-refresh 在 install/persist 之后由编排器以「durable + pending overlay」
+    /// 的全库口径调用，使 live status/query 立即反映修复或新变坏的文件；
+    /// hydrate 等其他 code 的诊断保持不动。
+    pub fn replace_scanner_diagnostics(
+        &mut self,
+        scanner_diagnostics: Vec<crate::output::Diagnostic>,
+    ) {
+        self.load_diagnostics.retain(|diag| {
+            diag.code != crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY
+                && diag.code != crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID
+        });
+        self.load_diagnostics.extend(scanner_diagnostics);
     }
 
     /// 构建单条 page logic warm cache 条目（不写回 read model）。
