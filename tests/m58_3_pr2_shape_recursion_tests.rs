@@ -406,3 +406,80 @@ fn duplicate_component_id_diagnostic_unchanged() {
         "形态吻合键不得误计 unrecognized: {diags:?}"
     );
 }
+
+/// 前向引用回归（ComponentProperty）：引用方组件排在被引用组件之前时，
+/// comp→comp DependsOn 边不得丢失。修复前 scanner 单遍顺序处理组件，
+/// 目标节点尚未注册时 add_edge 会静默丢边（见 spg.rs 两遍拆分注释）。
+#[test]
+fn component_property_forward_reference_builds_depends_on_edge() {
+    let raw = serde_json::json!({
+        "canvas": {
+            "components": [
+                {"id": "exprA", "type": "text", "value": "${txtB.txt}"},
+                {"id": "txtB", "type": "text"}
+            ]
+        }
+    });
+    let store = build_store(raw);
+
+    // 目标组件节点本身应正常注册
+    assert!(
+        store
+            .get_node(&comp_node_id("txtB"))
+            .expect("get_node")
+            .is_some(),
+        "txtB 组件节点应存在"
+    );
+    let neighbors = store
+        .get_node_edges(&comp_node_id("exprA"))
+        .expect("get_node_edges")
+        .unwrap_or_else(|| panic!("exprA 应有邻居"));
+    let hit = neighbors.outgoing.iter().any(|v| {
+        v.edge.edge_type == EdgeType::DependsOn
+            && v.edge.to == comp_node_id("txtB")
+            && v.edge.field_path.as_deref() == Some("comp:txtB.txt")
+    });
+    assert!(
+        hit,
+        "前向引用不得丢边: 缺 DependsOn exprA -> txtB (comp:txtB.txt): {:?}",
+        neighbors
+            .outgoing
+            .iter()
+            .map(|v| (&v.edge.to, &v.edge.field_path))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// 前向引用回归（ComponentValue）：裸组件 id 引用同样受单遍顺序处理丢边
+/// bug 影响，修复后引用方在前也必须建出 DependsOn 边。
+#[test]
+fn component_value_forward_reference_builds_depends_on_edge() {
+    let raw = serde_json::json!({
+        "canvas": {
+            "components": [
+                {"id": "exprA", "type": "text", "value": "${txtB}"},
+                {"id": "txtB", "type": "text"}
+            ]
+        }
+    });
+    let store = build_store(raw);
+
+    let neighbors = store
+        .get_node_edges(&comp_node_id("exprA"))
+        .expect("get_node_edges")
+        .unwrap_or_else(|| panic!("exprA 应有邻居"));
+    let hit = neighbors.outgoing.iter().any(|v| {
+        v.edge.edge_type == EdgeType::DependsOn
+            && v.edge.to == comp_node_id("txtB")
+            && v.edge.field_path.as_deref() == Some("comp:txtB.value")
+    });
+    assert!(
+        hit,
+        "前向引用不得丢边: 缺 DependsOn exprA -> txtB (comp:txtB.value): {:?}",
+        neighbors
+            .outgoing
+            .iter()
+            .map(|v| (&v.edge.to, &v.edge.field_path))
+            .collect::<Vec<_>>()
+    );
+}

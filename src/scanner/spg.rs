@@ -593,7 +593,14 @@ pub fn process_spg_file_from_value(
     }
     let component_id_set: std::collections::HashSet<&str> =
         meta.components.iter().map(|c| c.id.as_str()).collect();
-    // Process components and their expressions
+    // 组件处理拆成两遍：第一遍先为 meta.components 中所有组件注册节点，
+    // 第二遍再建边。原因：GraphWriteStore 在边任一端点节点尚不存在时会静默
+    // 丢弃该边（见 graph_redb.rs / memory_graph_store.rs 的 add_edge 实现）；
+    // 若表达式引用的目标组件在数组中排在引用方之后（前向引用），单遍顺序
+    // 处理会让 comp→comp DependsOn / Contains 边被无声丢失。先全量注册节点
+    // 可消除这一顺序依赖。
+    //
+    // 第一遍：注册全部组件节点（节点 meta 内容与拆分前完全一致）。
     for comp in &meta.components {
         let comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), comp.id);
         let ctx = component_contexts.get(&comp.id);
@@ -648,6 +655,13 @@ pub fn process_spg_file_from_value(
             Some(comp_meta),
         )?;
         node_ids.insert(comp_id.clone());
+    }
+
+    // 第二遍：建 page→comp / comp→comp Contains 边，并处理表达式引用建边。
+    // 此时所有组件节点均已注册，前向引用的目标节点必定存在，不会再丢边。
+    for comp in &meta.components {
+        let comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), comp.id);
+        let ctx = component_contexts.get(&comp.id);
         add_edge_with_meta(graph, &page_id, &comp_id, EdgeType::Contains, None, None)?;
         // comp→comp Contains：父组件取自组件上下文（说明 A：每个嵌套组件恰好一个
         // Component 父；page→comp 边保留）。白名单嵌套与形态感知递归新发现的组件
