@@ -367,7 +367,9 @@ python3 tools/corpus-shape-audit.py \
   `buttons` 样本 `showConfirmDialog.button` 配置——排除按子树继承口径计入），
   `漏掉候选 343 − 排除列表子树命中 343 == 0`。漏掉者三项行为证据全为 0。
 - **混合形态（scanner 安全网口径）**：`moreFields` 279、`params` 33，进
-  `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数，属白名单基线登记范畴。
+  `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 计数，属白名单基线登记范畴。图侧复测吻合：
+  PR2 基线 graphdb 的 `status.load_diagnostics` 中该诊断 count=312 = 279 + 33，
+  与脚本预测精确一致（见 performance-baseline.md「M58.3 PR2 真实项目性能基线」）。
 - **表达式引用终态重测**：`ComponentProperty` 建 comp→comp `DependsOn` 边 4 处
   （后缀 `.txt`×3、`.seconds`×1，与修订包 §2.1 一致）；畸形 `${}` 垃圾 model 名
   候选 601 次 / 161 个不同名（PR3 的断言须在 PR2 合入后以此口径重测）；
