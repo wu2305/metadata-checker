@@ -83,7 +83,7 @@ fn spg_fixed(marker: &str) -> serde_json::Value {
         "canvas": {
             "components": [
                 {"id": "panel_a", "type": "panel", "children": [{"id": "child1", "type": "button"}]}
-            }
+            ]
         }
     })
 }
