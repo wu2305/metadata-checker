@@ -776,6 +776,7 @@ cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_
 | 边数 | 199,575 | 150,029 |
 | graphdb 体积 | 538,972,160 B（约 514 MiB） | 约 257 MiB |
 | 全量建图 wall | 45.9 s | — |
+| stdio 启动加载（spawn→`Graph loaded`） | 1,008.1 s / 1,011.8 s（2 轮实测） | — |
 | stdio 进程总 wall（图加载 + 60 请求） | 1,151.9 s | — |
 
 口径注意：
@@ -784,7 +785,13 @@ cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_
   附录 A「重跑确认」，两者不可直接相减比较。
 - M26 旧基线为 macOS M3 debug 构建且语料非同一 pin，只作数量级参考，不作回归判据。
 - stdio 总 wall 中查询合计约 97 s（各场景 P95 × 5 轮上界），其余约 1,050 s 主要为
-  515M graphdb 的加载与启动（推算值，`status` 在加载完成后返回 `graph_load_ms=0`）。
+  515M graphdb 的加载与启动。加载耗时已独立实测闭环（2026-08-25，CNB workspace
+  `cnb-7jg-1k0sh4l6r` 同口径重建 graphdb 后）：从进程 spawn 到 stderr
+  `[stdio-server] Graph loaded` 标记的 wall time，2 轮分别 1,008.1 s / 1,011.8 s
+  （page-cache 暖度差异 < 1%），与推算值吻合；两轮后 `status` 均正常返回、节点/边数
+  与建图口径一致。stdio 模式下 60 条响应的 `graph_load_ms` 全为 0 是口径所致——
+  启动期加载不归入任何请求，故加载耗时只能由 spawn→标记的 wall time 独立测量
+  （测量脚本 `tools/graph-load-measure.py`，M50 runner 本身不拆加载耗时）。
 
 查询 P50/P95（warm runtime，5 轮，全部 5/5 ok）：
 
