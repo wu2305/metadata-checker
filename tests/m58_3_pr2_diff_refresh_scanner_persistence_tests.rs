@@ -383,7 +383,11 @@ fn sync_mode_scanner_diagnostics_follow_fix_and_break() -> Result<()> {
         "同步持久化后修复文件的 unrec 必须消失: {durable:?}"
     );
     let durable_dup = code_hits(&durable, CODE_DUPLICATE);
-    assert_eq!(durable_dup.len(), 1, "新变坏文件的 dup 必须出现: {durable:?}");
+    assert_eq!(
+        durable_dup.len(),
+        1,
+        "新变坏文件的 dup 必须出现: {durable:?}"
+    );
     assert_eq!(durable_dup[0].count, Some(1), "{durable:?}");
 
     // live runtime：load_diagnostics 与 status 口径一致
@@ -567,11 +571,7 @@ fn deferred_mode_cross_round_merge_override_and_delete() -> Result<()> {
     let fourth = orchestrator.refresh_once().expect("round 4");
     assert_eq!(fourth.persisted, false, "{fourth:?}");
     let live = &orchestrator.runtime().load_diagnostics;
-    assert_eq!(
-        code_hits(live, CODE_UNRECOGNIZED).len(),
-        0,
-        "{live:?}"
-    );
+    assert_eq!(code_hits(live, CODE_UNRECOGNIZED).len(), 0, "{live:?}");
     assert_eq!(
         code_hits(live, CODE_DUPLICATE).len(),
         0,
