@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use metadata_checker::persistence::GraphPersistenceProvider;
+
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// 构建 fixture graphdb 到唯一临时目录
@@ -23,12 +25,16 @@ pub fn build_fixture_graphdb() -> (PathBuf, PathBuf) {
     let db_path = temp_dir.join(".metadata-checker.graphdb");
     metadata_checker::scanner::scan_project(&temp_dir, &db_path)
         .expect("scan_project must succeed");
-    // redb 的 pending freed pages 在下一次 open+close 时才落盘，会改变文件
-    // 大小。扫描后先做一次 open+close 让文件进入稳定态，下游测试量到的
-    // before_len 才是 settle 后的基线（M58.3 复核返修：scanner 诊断并入
-    // persist 事务后，构建末尾少了独立 save 事务，pending 状态留给了
-    // 下一个打开者）。
-    drop(metadata_checker::graph::GraphDB::open(&db_path).expect("settle open must succeed"));
+    // redb 的 pending freed pages 在 Database::open + drop 时才落盘，会改变
+    // 文件大小。扫描后用 RedbPersistenceProvider 的读路径（与下游测试探针
+    // 同源）settle 一次，让量到的 before_len 是稳定基线（M58.3 复核返修：
+    // scanner 诊断并入 persist 事务后，构建末尾少了独立 save 事务，pending
+    // 状态留给了下一个打开者；GraphDB::open 的写事务路径不会触发该落盘）。
+    {
+        let provider = metadata_checker::persistence::redb::RedbPersistenceProvider::new(&db_path)
+            .expect("settle provider must init");
+        let _ = provider.load_graph_meta("project:settle", "graph:settle");
+    }
     (temp_dir, db_path)
 }
 
