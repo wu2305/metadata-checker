@@ -462,10 +462,7 @@ fn pr1_refix_partial_hydrate_confidence_block_is_canonical() -> anyhow::Result<(
     // 无既有 confidence 块时，PARTIAL_HYDRATE 闸门生成的块必须是规范形态：
     // level/statement/reasons 数组，不得出现手写的 reason 标量
     let (mut rt, db_path) = runtime_with_partial_hydrate("conf-canonical")?;
-    assert!(has_code(
-        &rt.load_diagnostics,
-        "GRAPH_DB_PARTIAL_HYDRATE"
-    ));
+    assert!(has_code(&rt.load_diagnostics, "GRAPH_DB_PARTIAL_HYDRATE"));
     let resp = rt.query(query_page_logic_request())?;
     let conf = resp
         .result
@@ -489,8 +486,7 @@ fn pr1_refix_partial_hydrate_confidence_block_is_canonical() -> anyhow::Result<(
     assert!(
         reasons
             .iter()
-            .any(|r| r.get("code").and_then(|c| c.as_str())
-                == Some("GRAPH_DB_PARTIAL_HYDRATE")),
+            .any(|r| r.get("code").and_then(|c| c.as_str()) == Some("GRAPH_DB_PARTIAL_HYDRATE")),
         "{reasons:?}"
     );
     assert!(conf.get("reason").is_none(), "{conf}");
@@ -506,16 +502,17 @@ fn pr1_refix_unserializable_load_diagnostic_fails_visible() -> anyhow::Result<()
     let (_graph, db_path) = fixture_graph("serialize-fallback")?;
     let mut rt = metadata_checker::runtime::GraphRuntime::load(&db_path)?;
     // 即使闸门诊断本身序列化失败，也要 fail-visible
-    rt.load_diagnostics.push(metadata_checker::output::Diagnostic {
-        severity: metadata_checker::output::DiagnosticSeverity::Warning,
-        code: metadata_checker::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE.to_string(),
-        message: "hand-built diagnostic missing envelope fields".to_string(),
-        location: metadata_checker::output::Location::default(),
-        suggestion: None,
-        count: None,
-        answer_impact: None,
-        first_seen_phase: None,
-    });
+    rt.load_diagnostics
+        .push(metadata_checker::output::Diagnostic {
+            severity: metadata_checker::output::DiagnosticSeverity::Warning,
+            code: metadata_checker::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE.to_string(),
+            message: "hand-built diagnostic missing envelope fields".to_string(),
+            location: metadata_checker::output::Location::default(),
+            suggestion: None,
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
+        });
     let resp = rt.query(query_page_logic_request())?;
     let diags = resp
         .result
@@ -525,9 +522,7 @@ fn pr1_refix_unserializable_load_diagnostic_fails_visible() -> anyhow::Result<()
         .unwrap_or_default();
     let fallback_hits: Vec<&serde_json::Value> = diags
         .iter()
-        .filter(|d| {
-            d.get("code").and_then(|c| c.as_str()) == Some("DIAGNOSTIC_SERIALIZE_FAILED")
-        })
+        .filter(|d| d.get("code").and_then(|c| c.as_str()) == Some("DIAGNOSTIC_SERIALIZE_FAILED"))
         .collect();
     assert_eq!(fallback_hits.len(), 1, "{diags:?}");
     let message = fallback_hits[0]
@@ -542,8 +537,9 @@ fn pr1_refix_unserializable_load_diagnostic_fails_visible() -> anyhow::Result<()
     assert_envelope_serializes(fallback_hits[0]);
     // 原诊断没有序列化成功，不得有 code 为 GRAPH_DB_PARTIAL_HYDRATE 的完整条目混入
     assert!(
-        !diags.iter().any(|d| d.get("code").and_then(|c| c.as_str())
-            == Some("GRAPH_DB_PARTIAL_HYDRATE")),
+        !diags
+            .iter()
+            .any(|d| d.get("code").and_then(|c| c.as_str()) == Some("GRAPH_DB_PARTIAL_HYDRATE")),
         "{diags:?}"
     );
     // has_partial 判定不依赖序列化结果：confidence 仍应落为 partial

@@ -303,10 +303,7 @@ mod tests {
     fn merge_extra_full_becomes_partial() {
         // 既有 full 块并入 GRAPH_DB_PARTIAL_HYDRATE：降为 partial，reasons 登记新 code
         let existing = confidence_value(["NO_WRITE_TARGETS"]);
-        assert_eq!(
-            existing.get("level").and_then(|v| v.as_str()),
-            Some("full")
-        );
+        assert_eq!(existing.get("level").and_then(|v| v.as_str()), Some("full"));
         let merged = confidence_value_with_extra(Some(&existing), &["GRAPH_DB_PARTIAL_HYDRATE"]);
         assert_eq!(
             merged.get("level").and_then(|v| v.as_str()),

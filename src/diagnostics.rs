@@ -75,8 +75,11 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
     match code {
         // ---- Error：查询目标/图库不可用 ----
         // 原 graph_redb.rs / output/schema.rs / query.rs 构造点事后覆盖为 Error
-        "GRAPH_DB_NOT_FOUND" | "GRAPH_DB_LOCKED" | "GRAPH_DB_PERMISSION_DENIED"
-        | "GRAPH_DB_OPEN_ERROR" | "TARGET_NOT_FOUND" => DiagnosticSeverity::Error,
+        "GRAPH_DB_NOT_FOUND"
+        | "GRAPH_DB_LOCKED"
+        | "GRAPH_DB_PERMISSION_DENIED"
+        | "GRAPH_DB_OPEN_ERROR"
+        | "TARGET_NOT_FOUND" => DiagnosticSeverity::Error,
 
         // ---- Info：按设计发生或纯提示 ----
         // redb 只读回退是可操作状态，不阻断查询
@@ -112,10 +115,18 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         | CODE_GRAPH_DB_PARTIAL_HYDRATE
         | CODE_PAGE_SCOPED_TARGET_FALLBACK => DiagnosticSeverity::Warning,
         // 循环依赖、DataFlow 结构残缺、模型/导航/可见性规则解析失败等
-        "CYCLE_DEPENDENCY" | "DATAFLOW_NO_OUTPUT" | "DATAFLOW_NO_INPUTS"
-        | "MODEL_UNRESOLVED" | "PAGE_INPUTS_DEFERRED" | "UNRESOLVED_PAGE_NAVIGATION"
-        | "UNRESOLVED_MODEL_WRITE" | "VISIBILITY_RULE_UNRESOLVED" | "ACTION_FLOW_INCOMPLETE"
-        | "UNKNOWN_ACTION_TYPE" | "UNKNOWN_QUESTION_KIND" | "EDGE_EVIDENCE_UNAVAILABLE"
+        "CYCLE_DEPENDENCY"
+        | "DATAFLOW_NO_OUTPUT"
+        | "DATAFLOW_NO_INPUTS"
+        | "MODEL_UNRESOLVED"
+        | "PAGE_INPUTS_DEFERRED"
+        | "UNRESOLVED_PAGE_NAVIGATION"
+        | "UNRESOLVED_MODEL_WRITE"
+        | "VISIBILITY_RULE_UNRESOLVED"
+        | "ACTION_FLOW_INCOMPLETE"
+        | "UNKNOWN_ACTION_TYPE"
+        | "UNKNOWN_QUESTION_KIND"
+        | "EDGE_EVIDENCE_UNAVAILABLE"
         | "EVIDENCE_INCOMPLETE" => DiagnosticSeverity::Warning,
 
         // 未登记 code 维持 Warning 默认档
