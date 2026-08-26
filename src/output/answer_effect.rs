@@ -160,6 +160,11 @@ pub fn answer_effect(code: &str) -> Option<(AnswerImpact, &'static str)> {
             Partial,
             "页面限定的模型目标未命中，已回退到全局模型；该结论只覆盖回退后可见的部分。",
         ),
+        // 加载诊断序列化失败被兜底替换：原诊断内容没有透出，诊断覆盖面本身不完整
+        "DIAGNOSTIC_SERIALIZE_FAILED" => (
+            Partial,
+            "有一条加载诊断序列化失败，已被兜底诊断替换；原诊断内容未透出，结论应保守回答。",
+        ),
         // ---- 路由说明：与答案内容无关 ----
         "RESOLVED_TARGET" => (
             Routing,
@@ -238,6 +243,29 @@ pub fn confidence_value<'a>(codes: impl IntoIterator<Item = &'a str>) -> serde_j
     })
 }
 
+/// 在既有 confidence 块（可能不存在）上并入额外诊断 code，按规范形态重建整块。
+///
+/// level 取「既有 level 与并入 code 的更严重者」（reduced > partial > full）：规范块的
+/// 不变式是 level 由 reasons 的 code 决定（reduced 块必含 Uncertain code），因此保留
+/// 既有 reasons 的 code 再并入新 code 重建，reduced 不会被 partial 反向升级，level 与
+/// statement/reasons 也不会脱节。既有块缺失或形态不规范（无 reasons 数组）时按 full 处理。
+pub fn confidence_value_with_extra<'a>(
+    existing: Option<&'a serde_json::Value>,
+    extra_codes: &[&'a str],
+) -> serde_json::Value {
+    let mut codes: Vec<&'a str> = existing
+        .and_then(|c| c.get("reasons"))
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| e.get("code").and_then(serde_json::Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+    codes.extend(extra_codes.iter().copied());
+    confidence_value(codes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +297,70 @@ mod tests {
     fn repeated_codes_are_reported_once() {
         let confidence = summarize_confidence(["UNKNOWN_ACTION_TYPE", "UNKNOWN_ACTION_TYPE"]);
         assert_eq!(confidence.reasons.len(), 1);
+    }
+
+    #[test]
+    fn merge_extra_full_becomes_partial() {
+        // 既有 full 块并入 GRAPH_DB_PARTIAL_HYDRATE：降为 partial，reasons 登记新 code
+        let existing = confidence_value(["NO_WRITE_TARGETS"]);
+        assert_eq!(
+            existing.get("level").and_then(|v| v.as_str()),
+            Some("full")
+        );
+        let merged = confidence_value_with_extra(Some(&existing), &["GRAPH_DB_PARTIAL_HYDRATE"]);
+        assert_eq!(
+            merged.get("level").and_then(|v| v.as_str()),
+            Some("partial")
+        );
+        let reasons = merged
+            .get("reasons")
+            .and_then(|v| v.as_array())
+            .expect("reasons must be an array");
+        let codes: Vec<&str> = reasons
+            .iter()
+            .filter_map(|r| r.get("code").and_then(|c| c.as_str()))
+            .collect();
+        assert!(codes.contains(&"NO_WRITE_TARGETS"), "{codes:?}");
+        assert!(codes.contains(&"GRAPH_DB_PARTIAL_HYDRATE"), "{codes:?}");
+    }
+
+    #[test]
+    fn merge_extra_reduced_stays_reduced() {
+        // 既有 reduced 块并入 partial 级 code：不得被反向升级为 partial
+        let existing = confidence_value(["UNKNOWN_ACTION_TYPE"]);
+        assert_eq!(
+            existing.get("level").and_then(|v| v.as_str()),
+            Some("reduced")
+        );
+        let merged = confidence_value_with_extra(Some(&existing), &["GRAPH_DB_PARTIAL_HYDRATE"]);
+        assert_eq!(
+            merged.get("level").and_then(|v| v.as_str()),
+            Some("reduced"),
+            "{merged}"
+        );
+        // 整块一致：statement 是 reduced 档文案，reasons 两 code 俱在
+        let statement = merged
+            .get("statement")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(statement.contains("语义不确定"), "{statement}");
+        let reasons = merged
+            .get("reasons")
+            .and_then(|v| v.as_array())
+            .expect("reasons must be an array");
+        assert_eq!(reasons.len(), 2, "{reasons:?}");
+    }
+
+    #[test]
+    fn merge_extra_without_existing_block_is_canonical_partial() {
+        // 无既有块：生成规范形态（level/statement/reasons 数组），不是手写 reason 标量
+        let merged = confidence_value_with_extra(None, &["GRAPH_DB_PARTIAL_HYDRATE"]);
+        assert_eq!(
+            merged.get("level").and_then(|v| v.as_str()),
+            Some("partial")
+        );
+        assert!(merged.get("statement").and_then(|v| v.as_str()).is_some());
+        assert!(merged.get("reasons").and_then(|v| v.as_array()).is_some());
+        assert!(merged.get("reason").is_none(), "{merged}");
     }
 }

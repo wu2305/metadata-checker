@@ -1138,7 +1138,7 @@ impl GraphRuntime {
         ));
 
         // PR1：所有查询响应置顶 hydrate 诊断（GRAPH_DB_PARTIAL_HYDRATE 闸门）
-        // 置顶且 confidence 降为 partial（不足以设 reduced）。
+        // 置顶且 confidence 取「现有 level 与 partial 的更严重者」（reduced > partial > full）。
         if !self.load_diagnostics.is_empty() {
             // 将结构化 load_diagnostics 置顶合并进 result 的 diagnostics 数组
             if let Some(obj) = result.as_object_mut() {
@@ -1150,9 +1150,39 @@ impl GraphRuntime {
                     let mut merged: Vec<serde_json::Value> = Vec::new();
                     let mut seen_codes = std::collections::HashSet::new();
                     for diag in &self.load_diagnostics {
-                        if let Ok(value) = serde_json::to_value(diag) {
-                            merged.push(value.clone());
-                            seen_codes.insert(diag.code.clone());
+                        match serde_json::to_value(diag) {
+                            Ok(value) => {
+                                merged.push(value);
+                                seen_codes.insert(diag.code.clone());
+                            }
+                            Err(err) => {
+                                // fail-visible：序列化失败（信封必填字段缺失属构造方 bug）
+                                // 不得静默丢弃，用稳定兜底诊断替换，message 带原 code 与错误概要。
+                                // 原 code 不登记 seen_codes：result 自带同 code 条目（若有）
+                                // 是该 code 仅剩的可见副本，必须保留。
+                                let fallback = crate::diagnostics::envelope_diagnostic(
+                                    crate::diagnostics::CODE_DIAGNOSTIC_SERIALIZE_FAILED,
+                                    1,
+                                    crate::output::Location::default(),
+                                    format!(
+                                        "load diagnostic {} failed to serialize and was replaced: {}",
+                                        diag.code, err
+                                    ),
+                                );
+                                match serde_json::to_value(&fallback) {
+                                    Ok(value) => merged.push(value),
+                                    // 兜底诊断由 envelope_diagnostic 构造、必填字段齐全，
+                                    // 正常不会失败；真失败时也要 fail-visible，留最小 JSON 占位
+                                    Err(fallback_err) => merged.push(serde_json::json!({
+                                        "severity": "warning",
+                                        "code": crate::diagnostics::CODE_DIAGNOSTIC_SERIALIZE_FAILED,
+                                        "message": format!(
+                                            "load diagnostic {} failed to serialize: {}; fallback diagnostic also failed: {}",
+                                            diag.code, err, fallback_err
+                                        ),
+                                    })),
+                                }
+                            }
                         }
                     }
                     for entry in arr.drain(..) {
@@ -1180,18 +1210,18 @@ impl GraphRuntime {
                     .any(|c| c == crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE);
                 if has_partial {
                     if let Some(summary) = obj.get_mut("summary").and_then(|s| s.as_object_mut()) {
-                        // 仅在已存在 confidence 块时覆盖 level，避免无条件新增覆盖
-                        if let Some(conf) = summary
-                            .get_mut("confidence")
-                            .and_then(|v| v.as_object_mut())
-                        {
-                            conf.insert("level".to_string(), serde_json::json!("partial"));
-                        } else {
-                            summary.insert(
-                                "confidence".to_string(),
-                                serde_json::json!({"level":"partial","reason":"GRAPH_DB_PARTIAL_HYDRATE"}),
-                            );
-                        }
+                        // M58.3 复核返修：level 取「现有与 partial 的更严重者」并用规范
+                        // 构造函数重建整块（level/statement/reasons 一致），
+                        // reasons 登记 GRAPH_DB_PARTIAL_HYDRATE；reduced 不被反向升级，
+                        // 无既有块时同样生成规范形态（reasons 数组而非 reason 标量）。
+                        let existing = summary.get("confidence").cloned();
+                        summary.insert(
+                            "confidence".to_string(),
+                            crate::output::answer_effect::confidence_value_with_extra(
+                                existing.as_ref(),
+                                &[crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE],
+                            ),
+                        );
                     }
                 }
             }

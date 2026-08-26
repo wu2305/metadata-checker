@@ -417,3 +417,148 @@ fn pr1_envelope_contract_six_fields() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// 构造带坏行的图库并加载 runtime，返回（runtime, db_path）
+fn runtime_with_partial_hydrate(
+    tag: &str,
+) -> anyhow::Result<(metadata_checker::runtime::GraphRuntime, std::path::PathBuf)> {
+    let (graph, db_path) = fixture_graph(tag)?;
+    drop(graph);
+    {
+        let db = Database::create(&db_path)?;
+        let write_txn = db.begin_write()?;
+        {
+            let mut nodes = write_txn.open_table(NODES_TABLE)?;
+            nodes.insert("bad_node:1", b"not-json".to_vec())?;
+        }
+        // Force v2 to Stale so hydrate falls back to v1 tables (where bad rows live)
+        {
+            let mut meta =
+                write_txn.open_table::<&str, Vec<u8>>(redb::TableDefinition::new("v2_meta"))?;
+            let bytes = serde_json::to_vec(&V2ShadowState::Stale)?;
+            meta.insert("shadow_state", bytes)?;
+        }
+        write_txn.commit()?;
+    }
+    let rt = metadata_checker::runtime::GraphRuntime::load(&db_path)?;
+    Ok((rt, db_path))
+}
+
+fn query_page_logic_request() -> metadata_checker::runtime::RuntimeQueryRequest {
+    metadata_checker::runtime::RuntimeQueryRequest {
+        command: metadata_checker::tool_contract::ToolCommand::QueryPageLogic,
+        target: "page:app/actions_test.spg".to_string(),
+        budget: "compact".to_string(),
+        human: false,
+        intent: None,
+        page_scope: None,
+        depth: None,
+        check_reload: false,
+    }
+}
+
+#[test]
+fn pr1_refix_partial_hydrate_confidence_block_is_canonical() -> anyhow::Result<()> {
+    // 无既有 confidence 块时，PARTIAL_HYDRATE 闸门生成的块必须是规范形态：
+    // level/statement/reasons 数组，不得出现手写的 reason 标量
+    let (mut rt, db_path) = runtime_with_partial_hydrate("conf-canonical")?;
+    assert!(has_code(
+        &rt.load_diagnostics,
+        "GRAPH_DB_PARTIAL_HYDRATE"
+    ));
+    let resp = rt.query(query_page_logic_request())?;
+    let conf = resp
+        .result
+        .get("summary")
+        .and_then(|s| s.get("confidence"))
+        .cloned()
+        .expect("summary.confidence must exist when PARTIAL_HYDRATE fires");
+    assert_eq!(
+        conf.get("level").and_then(|v| v.as_str()),
+        Some("partial"),
+        "{conf}"
+    );
+    assert!(
+        conf.get("statement").and_then(|v| v.as_str()).is_some(),
+        "{conf}"
+    );
+    let reasons = conf
+        .get("reasons")
+        .and_then(|v| v.as_array())
+        .expect("confidence.reasons must be an array");
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r.get("code").and_then(|c| c.as_str())
+                == Some("GRAPH_DB_PARTIAL_HYDRATE")),
+        "{reasons:?}"
+    );
+    assert!(conf.get("reason").is_none(), "{conf}");
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
+    Ok(())
+}
+
+#[test]
+fn pr1_refix_unserializable_load_diagnostic_fails_visible() -> anyhow::Result<()> {
+    // 缺信封必填字段的 Diagnostic（不走 envelope_diagnostic）序列化失败时，
+    // 不得静默消失：响应里必须出现 DIAGNOSTIC_SERIALIZE_FAILED 兜底诊断
+    let (_graph, db_path) = fixture_graph("serialize-fallback")?;
+    let mut rt = metadata_checker::runtime::GraphRuntime::load(&db_path)?;
+    // 即使闸门诊断本身序列化失败，也要 fail-visible
+    rt.load_diagnostics.push(metadata_checker::output::Diagnostic {
+        severity: metadata_checker::output::DiagnosticSeverity::Warning,
+        code: metadata_checker::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE.to_string(),
+        message: "hand-built diagnostic missing envelope fields".to_string(),
+        location: metadata_checker::output::Location::default(),
+        suggestion: None,
+        count: None,
+        answer_impact: None,
+        first_seen_phase: None,
+    });
+    let resp = rt.query(query_page_logic_request())?;
+    let diags = resp
+        .result
+        .get("diagnostics")
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let fallback_hits: Vec<&serde_json::Value> = diags
+        .iter()
+        .filter(|d| {
+            d.get("code").and_then(|c| c.as_str()) == Some("DIAGNOSTIC_SERIALIZE_FAILED")
+        })
+        .collect();
+    assert_eq!(fallback_hits.len(), 1, "{diags:?}");
+    let message = fallback_hits[0]
+        .get("message")
+        .and_then(|m| m.as_str())
+        .unwrap_or_default();
+    assert!(
+        message.contains("GRAPH_DB_PARTIAL_HYDRATE"),
+        "兜底 message 必须带原 code: {message}"
+    );
+    // 兜底诊断自身是规范信封
+    assert_envelope_serializes(fallback_hits[0]);
+    // 原诊断没有序列化成功，不得有 code 为 GRAPH_DB_PARTIAL_HYDRATE 的完整条目混入
+    assert!(
+        !diags.iter().any(|d| d.get("code").and_then(|c| c.as_str())
+            == Some("GRAPH_DB_PARTIAL_HYDRATE")),
+        "{diags:?}"
+    );
+    // has_partial 判定不依赖序列化结果：confidence 仍应落为 partial
+    let conf = resp
+        .result
+        .get("summary")
+        .and_then(|s| s.get("confidence"))
+        .cloned()
+        .expect("summary.confidence must exist");
+    assert_eq!(
+        conf.get("level").and_then(|v| v.as_str()),
+        Some("partial"),
+        "{conf}"
+    );
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("graphdb.lock"));
+    Ok(())
+}
