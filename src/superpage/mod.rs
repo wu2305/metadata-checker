@@ -104,6 +104,11 @@ fn resolve_expression_refs_with_context(
                         "Corrected: '{}' was initially guessed as model but is actually a known component ID",
                         id
                     ),
+                    // 裸 `${id}` 全组件引用归一为 ComponentValue 后的改写说明
+                    RefType::ComponentValue(id) => format!(
+                        "Corrected: '{}' was initially guessed as model but is actually a known component ID (bare reference, treated as component value)",
+                        id
+                    ),
                     _ => reason,
                 }
             } else {
@@ -120,7 +125,9 @@ fn resolve_expression_refs_with_context(
     }
 }
 
-/// 将已解析的引用统一归一化；目前唯一需要改写的是误判为模型的组件引用。
+/// 将已解析的引用统一归一化：把误判为模型的组件引用改写为组件引用。
+/// 归一后不变式：`ComponentProperty` 的 property 永不为空——裸 `${id}` 全组件
+/// 引用（field 为空）改写为 `ComponentValue`，语义即依赖组件值本身。
 fn resolve_ref_type(
     ref_type: &RefType,
     component_ids: &std::collections::HashSet<&str>,
@@ -132,10 +139,18 @@ fn resolve_ref_type(
             resolve_ref_token(token, component_ids, source_ids, param_ids),
             false,
         ),
-        RefType::ModelField(model, field) if component_ids.contains(model.as_str()) => (
-            RefType::ComponentProperty(model.clone(), field.clone()),
-            true,
-        ),
+        RefType::ModelField(model, field) if component_ids.contains(model.as_str()) => {
+            if field.is_empty() {
+                // 裸 `${id}` 全组件引用（expr_ast 先判为 ModelField(id, "")），
+                // 归一为 ComponentValue，避免下游出现 "comp:id." 尾点形态
+                (RefType::ComponentValue(model.clone()), true)
+            } else {
+                (
+                    RefType::ComponentProperty(model.clone(), field.clone()),
+                    true,
+                )
+            }
+        }
         _ => (ref_type.clone(), false),
     }
 }
@@ -264,6 +279,11 @@ fn resolve_ref_token(
 
         // Exact match: first part is a known component ID
         if component_ids.contains(first) {
+            // 尾点 token（如 "txtB."，split 后 rest 为空）语义等同裸 `${id}` 全组件
+            // 引用，归一为 ComponentValue，维持 ComponentProperty property 非空不变式
+            if rest.is_empty() {
+                return RefType::ComponentValue(first.to_string());
+            }
             return RefType::ComponentProperty(first.to_string(), rest);
         }
 

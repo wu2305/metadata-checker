@@ -451,8 +451,9 @@ fn component_property_forward_reference_builds_depends_on_edge() {
 }
 
 /// 前向引用回归（裸 `${id}` 全组件引用）：解析层把裸 `${txtB}` 先判为
-/// ModelField("txtB", "")、再按已知组件 id 改写为 ComponentProperty("txtB", "")，
-/// scanner 侧空属性归一为 comp:txtB.value（见 spg.rs ComponentProperty 臂注释）。
+/// ModelField("txtB", "")，因 txtB 是已知组件 id 且 field 为空，在 parse 层
+/// 已归一为 ComponentValue("txtB")（superpage/mod.rs resolve_ref_type），
+/// scanner 侧走 ComponentValue 臂建 field_path comp:txtB.value。
 /// 引用方排在被引用组件之前时，DependsOn 边不得丢失。
 #[test]
 fn component_value_forward_reference_builds_depends_on_edge() {

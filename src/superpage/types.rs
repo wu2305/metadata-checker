@@ -16,6 +16,8 @@ pub struct SpgComponent {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RefType {
     ComponentValue(String),
+    /// 组件属性引用。不变式：property 永不为空——裸 `${id}` 全组件引用在 parse 层
+    /// （`resolve_ref_type` / `resolve_ref_token`）已归一为 `ComponentValue`
     ComponentProperty(String, String),
     ModelField(String, String),
     Param(String),
