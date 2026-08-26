@@ -37,3 +37,13 @@
   重建后全量 `cargo test --features cli-local` 88 目标 1109 通过
 - **复核人决定**：主线程逐字段 diff 复核，新增边均为真实引用，排名变化为修复预期后果；
   待独立验收者复验
+
+## 312c938 — severity 映射表修复（dbfe4b8）后的快照重建
+
+- **case_id**：`query_page_logic_actions_test`
+- **断言**：`diagnostics[EVIDENCE_SAMPLED].severity`
+  - 旧值：`Warning`；新值：`Info`
+  - 原因：`severity_for` 原实现忽略入参恒返回 Warning，`EVIDENCE_SAMPLED`（按设计采样）
+    被静默升档；显式映射表恢复其意图 severity。`UNKNOWN_ACTION_TYPE` 保持 Warning 不变
+- **源证据命令**：`UPDATE_CORPUS_SNAPSHOTS=1 cargo test --features cli-local --test corpus_snapshot_tests`
+- **复核人决定**：severity 回归设计意图，非内容变化；待独立验收者复验
