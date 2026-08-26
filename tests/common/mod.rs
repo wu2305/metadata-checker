@@ -23,6 +23,12 @@ pub fn build_fixture_graphdb() -> (PathBuf, PathBuf) {
     let db_path = temp_dir.join(".metadata-checker.graphdb");
     metadata_checker::scanner::scan_project(&temp_dir, &db_path)
         .expect("scan_project must succeed");
+    // redb 的 pending freed pages 在下一次 open+close 时才落盘，会改变文件
+    // 大小。扫描后先做一次 open+close 让文件进入稳定态，下游测试量到的
+    // before_len 才是 settle 后的基线（M58.3 复核返修：scanner 诊断并入
+    // persist 事务后，构建末尾少了独立 save 事务，pending 状态留给了
+    // 下一个打开者）。
+    drop(metadata_checker::graph::GraphDB::open(&db_path).expect("settle open must succeed"));
     (temp_dir, db_path)
 }
 
