@@ -51,19 +51,18 @@ impl AiOutput {
                 "Output generated from parsed metadata",
                 "Fallback evidence injected because this query path did not emit structured evidence",
             ).with_confidence(Confidence::Low));
-            out.diagnostics
-                .push(crate::diagnostics::envelope_diagnostic(
-                    "EVIDENCE_INCOMPLETE",
-                    1,
-                    Location::default(),
-                    "Summary contains claims but no structured evidence was generated",
-                ));
-            if let Some(last) = out.diagnostics.last_mut() {
-                last.suggestion = Some(
-                    "Use --detail for manual verification, and treat conclusions as low confidence"
-                        .to_string(),
-                );
-            }
+            // 局部构造好再一次 push，避免「先 push 再 last_mut() 改」的两段式写法
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "EVIDENCE_INCOMPLETE",
+                1,
+                Location::default(),
+                "Summary contains claims but no structured evidence was generated",
+            );
+            diag.suggestion = Some(
+                "Use --detail for manual verification, and treat conclusions as low confidence"
+                    .to_string(),
+            );
+            out.diagnostics.push(diag);
         }
         out
     }
@@ -381,7 +380,6 @@ pub fn build_target_not_found_output(
         Location::default(),
         format!("Target '{}' not found in graph", target_id),
     );
-    target_diag.severity = DiagnosticSeverity::Error;
     target_diag.suggestion = Some(if candidates.is_empty() {
         format!(
             "Verify the target ID or use {} to search globally",

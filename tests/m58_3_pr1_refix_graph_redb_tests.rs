@@ -6,7 +6,7 @@
 //! - F8：scanner 聚合诊断的 sample_location 回填 source_file。
 
 use metadata_checker::graph_redb::GraphDB;
-use metadata_checker::graph_redb_v2::RedbV2Meta;
+use metadata_checker::graph_redb_v2::{RedbV2Meta, has_v2_shadow_meta};
 use metadata_checker::graph_store::V2ShadowState;
 use metadata_checker::output::Diagnostic;
 use metadata_checker::scanner::{scan_project, scan_project_with_report};
@@ -250,5 +250,106 @@ fn refix_scanner_sample_location_backfills_source_file() -> anyhow::Result<()> {
     );
 
     let _ = std::fs::remove_dir_all(&project_dir);
+    Ok(())
+}
+
+/// 把 v2 meta bundle 的 schema_version 改成未知版本：read_v2_layout 走
+/// Ok(None)，但 shadow 元数据存在，属「有 shadow 但版本不匹配」。
+fn force_v2_schema_version_mismatch(db_path: &Path) -> anyhow::Result<()> {
+    let db = Database::create(db_path)?;
+    let write_txn = db.begin_write()?;
+    {
+        let mut meta_table = write_txn.open_table(V2_META_TABLE)?;
+        let raw = meta_table
+            .get(V2_BUNDLE_KEY)?
+            .expect("v2 meta bundle must exist after full build")
+            .value();
+        let mut meta: RedbV2Meta = serde_json::from_slice(&raw)?;
+        meta.schema_version = "unknown-future-version".to_string();
+        meta_table.insert(V2_BUNDLE_KEY, serde_json::to_vec(&meta)?)?;
+    }
+    write_txn.commit()?;
+    Ok(())
+}
+
+/// 把 v2 meta bundle 写成不可解析的字节：read_v2_layout 走 Err 路径。
+fn corrupt_v2_meta_blob(db_path: &Path) -> anyhow::Result<()> {
+    let db = Database::create(db_path)?;
+    let write_txn = db.begin_write()?;
+    {
+        let mut meta_table = write_txn.open_table(V2_META_TABLE)?;
+        meta_table.insert(V2_BUNDLE_KEY, b"not-json".to_vec())?;
+    }
+    write_txn.commit()?;
+    Ok(())
+}
+
+/// P1-d 回归：v1-only 库（从未写过 v2 shadow，v2_meta 表不存在）打开时
+/// 不得产生 GRAPH_DB_V2_LAYOUT_UNREADABLE——这是遗留库/新建库的常态。
+#[test]
+fn refix_v1_only_db_has_no_layout_diagnostic() -> anyhow::Result<()> {
+    let db_path = unique_temp_path("v1-only", "db");
+    let _ = std::fs::remove_file(&db_path);
+
+    // GraphDB::open 只补建 v1 表，不写 v2 shadow => 等价于 v1-only 遗留库
+    let opened = GraphDB::open(&db_path)?;
+    let diags = opened.hydrate_diagnostics().to_diagnostics();
+    assert_eq!(
+        v2_layout_diagnostics(&diags).len(),
+        0,
+        "v1-only 库不得产生 v2_layout 诊断: {diags:?}"
+    );
+    assert_eq!(
+        has_v2_shadow_meta(&db_path)?,
+        false,
+        "v1-only 库不应存在 v2 shadow 元数据"
+    );
+
+    drop(opened);
+    cleanup_db(&db_path);
+    Ok(())
+}
+
+/// P1-d 回归：有 v2 shadow 但 schema 版本不匹配时，必须恰好产生一条
+/// GRAPH_DB_V2_LAYOUT_UNREADABLE 且 count=1，v1 fallback 仍成功加载。
+#[test]
+fn refix_v2_schema_version_mismatch_counts_layout_diagnostic() -> anyhow::Result<()> {
+    let db_path = build_fixture_db("v2-version-mismatch")?;
+    force_v2_schema_version_mismatch(&db_path)?;
+
+    let reopened = GraphDB::open(&db_path)?;
+    let diags = reopened.hydrate_diagnostics().to_diagnostics();
+    let hits = v2_layout_diagnostics(&diags);
+    assert_eq!(
+        hits.len(),
+        1,
+        "schema 版本不匹配应恰好一条 v2_layout 诊断: {diags:?}"
+    );
+    assert_eq!(hits[0].count, Some(1), "{diags:?}");
+
+    drop(reopened);
+    cleanup_db(&db_path);
+    Ok(())
+}
+
+/// P1-d 回归：v2 meta blob 损坏（不可解析，read_v2_layout 走 Err）时
+/// 仍计为 unreadable，恰好一条 GRAPH_DB_V2_LAYOUT_UNREADABLE。
+#[test]
+fn refix_v2_meta_blob_corrupt_counts_layout_diagnostic() -> anyhow::Result<()> {
+    let db_path = build_fixture_db("v2-meta-corrupt")?;
+    corrupt_v2_meta_blob(&db_path)?;
+
+    let reopened = GraphDB::open(&db_path)?;
+    let diags = reopened.hydrate_diagnostics().to_diagnostics();
+    let hits = v2_layout_diagnostics(&diags);
+    assert_eq!(
+        hits.len(),
+        1,
+        "meta blob 损坏应恰好一条 v2_layout 诊断: {diags:?}"
+    );
+    assert_eq!(hits[0].count, Some(1), "{diags:?}");
+
+    drop(reopened);
+    cleanup_db(&db_path);
     Ok(())
 }

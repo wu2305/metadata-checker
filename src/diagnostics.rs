@@ -27,6 +27,9 @@ pub const CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT: &str = "GRAPH_DB_EDGE_DANGLING_E
 pub const CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE: &str = "GRAPH_DB_V2_LAYOUT_UNREADABLE";
 pub const CODE_GRAPH_DB_PARTIAL_HYDRATE: &str = "GRAPH_DB_PARTIAL_HYDRATE";
 pub const CODE_PAGE_SCOPED_TARGET_FALLBACK: &str = "PAGE_SCOPED_TARGET_FALLBACK";
+/// M58.3 复核返修：load_diagnostics 合并进查询响应时序列化失败的 fail-visible
+/// 兜底 code（answer_impact 经 `answer_effect` 派生为 partial）
+pub const CODE_DIAGNOSTIC_SERIALIZE_FAILED: &str = "DIAGNOSTIC_SERIALIZE_FAILED";
 /// 仅保留 PR1 阶段的 code；PR4a 的 GRAPH_SCHEMA_STALE 待该 PR 再引入。
 
 /// answer_impact 映射
@@ -61,9 +64,63 @@ pub fn answer_impact_for(code: &str) -> &'static str {
     }
 }
 
-/// severity 映射
-pub fn severity_for(_code: &str) -> DiagnosticSeverity {
-    DiagnosticSeverity::Warning
+/// severity 映射（权威来源）
+///
+/// M58.3 复核返修 P1-c：severity 只从本表派生，构造点不再事后补丁式覆盖
+/// （覆盖值已收敛进本表）。分档口径：
+/// - `Error`：目标/资源不可用，查询无法完成（库缺失、锁占用、权限、打开失败、目标不存在）
+/// - `Info`：按设计发生或纯提示性信息（采样、截断、空结果、只读回退、lineage 缺失等）
+/// - `Warning`：数据或配置疑似有问题、结论可能不可靠（默认档，未登记 code 也落这里）
+pub fn severity_for(code: &str) -> DiagnosticSeverity {
+    match code {
+        // ---- Error：查询目标/图库不可用 ----
+        // 原 graph_redb.rs / output/schema.rs / query.rs 构造点事后覆盖为 Error
+        "GRAPH_DB_NOT_FOUND" | "GRAPH_DB_LOCKED" | "GRAPH_DB_PERMISSION_DENIED"
+        | "GRAPH_DB_OPEN_ERROR" | "TARGET_NOT_FOUND" => DiagnosticSeverity::Error,
+
+        // ---- Info：按设计发生或纯提示 ----
+        // redb 只读回退是可操作状态，不阻断查询
+        "GRAPH_DB_READ_ONLY" => DiagnosticSeverity::Info,
+        // 健康检查通过 / 无优先级冲突的肯定性结论
+        "OK" | "NO_PRIORITY_RULES" => DiagnosticSeverity::Info,
+        // 预算截断是按设计行为（page_logic.rs 构造点原无覆盖，随同 code 统一为 Info）
+        "OUTPUT_TRUNCATED" => DiagnosticSeverity::Info,
+        // 页面逻辑：按设计采样 / 主路径按设计截断 / 只读页面无写目标，均为低噪音提示
+        // （原构造点未打补丁被默认档静默升档，本表恢复意图 severity）
+        "EVIDENCE_SAMPLED" | "PRIMARY_PATHS_TRUNCATED" | "NO_WRITE_TARGETS" => {
+            DiagnosticSeverity::Info
+        }
+        // 无用户入口在只读页面属常态（page_logic 构造点原无覆盖，随 page_dataflow 统一 Info）
+        "NO_ENTRYPOINTS" => DiagnosticSeverity::Info,
+        // 检索/解析的良性空结果与多候选
+        "NO_MATCHES_FOUND" | "AMBIGUOUS_RESOLUTION" => DiagnosticSeverity::Info,
+        // lineage 推断缺失 / 表达式超出解析能力：降低置信度提示，非数据错误
+        "LINEAGE_SOURCE_MISSING" | "LINEAGE_EXPR_UNPARSED" | "EVIDENCE_LOCATION_MISSING" => {
+            DiagnosticSeverity::Info
+        }
+        // DataFlow 输入路径未解析、表达式过复杂未完整解析：启发式提示
+        "DATAFLOW_INPUT_PATH_UNRESOLVED" | "EXPR_UNPARSED" => DiagnosticSeverity::Info,
+
+        // ---- Warning：数据/配置疑似有问题（默认档，显式列出以固定意图） ----
+        CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY
+        | CODE_SCANNER_DUPLICATE_COMPONENT_ID
+        | CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED
+        | CODE_GRAPH_DB_NODE_DECODE_FAILED
+        | CODE_GRAPH_DB_EDGE_DECODE_FAILED
+        | CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT
+        | CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE
+        | CODE_GRAPH_DB_PARTIAL_HYDRATE
+        | CODE_PAGE_SCOPED_TARGET_FALLBACK => DiagnosticSeverity::Warning,
+        // 循环依赖、DataFlow 结构残缺、模型/导航/可见性规则解析失败等
+        "CYCLE_DEPENDENCY" | "DATAFLOW_NO_OUTPUT" | "DATAFLOW_NO_INPUTS"
+        | "MODEL_UNRESOLVED" | "PAGE_INPUTS_DEFERRED" | "UNRESOLVED_PAGE_NAVIGATION"
+        | "UNRESOLVED_MODEL_WRITE" | "VISIBILITY_RULE_UNRESOLVED" | "ACTION_FLOW_INCOMPLETE"
+        | "UNKNOWN_ACTION_TYPE" | "UNKNOWN_QUESTION_KIND" | "EDGE_EVIDENCE_UNAVAILABLE"
+        | "EVIDENCE_INCOMPLETE" => DiagnosticSeverity::Warning,
+
+        // 未登记 code 维持 Warning 默认档
+        _ => DiagnosticSeverity::Warning,
+    }
 }
 
 /// hydrate 阶段统计

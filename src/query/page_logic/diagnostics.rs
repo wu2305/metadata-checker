@@ -47,7 +47,7 @@ pub(super) fn build_page_logic_diagnostics(
         }
         let mut diag = crate::diagnostics::envelope_diagnostic(
             "PRIMARY_PATHS_TRUNCATED",
-            1,
+            overflow_count,
             Location {
                 source_file: Some(page_node.path.clone()),
                 node_id: Some(page_id.to_string()),

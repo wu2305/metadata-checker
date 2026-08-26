@@ -9,7 +9,7 @@ use crate::graph_store::{
     GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
 };
 use crate::output::schema::{
-    AiOutput, Confidence, DiagnosticSeverity, Evidence, Location, OutputKind, format_next_query,
+    AiOutput, Confidence, Evidence, Location, OutputKind, format_next_query,
 };
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -213,11 +213,19 @@ impl GraphDB {
 
         let mut pending_hydrate_diagnostics = crate::diagnostics::HydrateDiagnostics::default();
 
-        // 检测 v2 layout 可读性（Current 或旧库无记录时）：read_v2_layout 返回 Err
-        // 或 Ok(None)（meta 表/键缺失、schema 版本不匹配、fingerprint 不匹配）
-        // 均计为一次 V2_LAYOUT_UNREADABLE，与后续 v1 hydrate 的细粒度计数并行记录（不折叠）。
+        // 检测 v2 layout 可读性（Current 或旧库无记录时）：
+        // - Err（打开/解析/校验失败）：计为一次 V2_LAYOUT_UNREADABLE；
+        // - Ok(None)：仅当 v2 shadow 元数据确实存在（schema 版本不匹配或
+        //   fingerprint 不匹配）才计 unreadable；从未写过 v2 shadow 的
+        //   v1-only 遗留库/新建库属正常态，不计诊断。
+        // 与后续 v1 hydrate 的细粒度计数并行记录（不折叠）。
         let v2_layout_probe = crate::graph_redb_v2::read_v2_layout(db_path);
-        if !matches!(&v2_layout_probe, Ok(Some(_))) {
+        let v2_layout_unreadable = match &v2_layout_probe {
+            Ok(Some(_)) => false,
+            Ok(None) => crate::graph_redb_v2::has_v2_shadow_meta(db_path)?,
+            Err(_) => true,
+        };
+        if v2_layout_unreadable {
             pending_hydrate_diagnostics.v2_layout_unreadable = 1;
         }
 
@@ -401,7 +409,6 @@ impl GraphDB {
                 },
                 format!("Graph database not found at {:?}", db_path),
             );
-            diag.severity = DiagnosticSeverity::Error;
             diag.suggestion = Some(
                 "Run metadata-checker --project-dir <DIR> --build-graph to create it".to_string(),
             );
@@ -436,7 +443,6 @@ impl GraphDB {
                     },
                     format!("Cannot acquire graphdb lock: {}", e),
                 );
-                diag.severity = DiagnosticSeverity::Error;
                 diag.suggestion = Some(
                     "Wait for other process to finish, or use a different --graph-db-path"
                         .to_string(),
@@ -482,7 +488,6 @@ impl GraphDB {
                             },
                             format!("Graph database is locked by another process: {}", msg),
                         );
-                        diag.severity = DiagnosticSeverity::Error;
                         diag.suggestion = Some(
                             "Wait for other process to finish, or use a different --graph-db-path"
                                 .to_string(),
@@ -505,7 +510,6 @@ impl GraphDB {
                                 },
                                 format!("Graph database file is read-only: {}", msg),
                             );
-                            diag.severity = DiagnosticSeverity::Info;
                             diag.suggestion = Some("redb requires write access even for read. Copy to a writable path with --graph-db-path".to_string());
                             diag
                         });
@@ -521,7 +525,6 @@ impl GraphDB {
                                 },
                                 format!("Graph database permission denied: {}", msg),
                             );
-                            diag.severity = DiagnosticSeverity::Error;
                             diag.suggestion = Some(
                                 "Use --graph-db-path pointing to a writable directory".to_string(),
                             );
@@ -540,7 +543,6 @@ impl GraphDB {
                             },
                             format!("Failed to open graph database: {}", msg),
                         );
-                        diag.severity = DiagnosticSeverity::Error;
                         diag.suggestion = Some("Try --build-graph to rebuild".to_string());
                         diag
                     });
@@ -574,7 +576,6 @@ impl GraphDB {
                     },
                     format!("Graph database not found at {:?}", db_path),
                 );
-                diag.severity = DiagnosticSeverity::Error;
                 diag.suggestion = Some(
                     "Run metadata-checker --project-dir <DIR> --build-graph to create it"
                         .to_string(),
@@ -615,7 +616,6 @@ impl GraphDB {
                             },
                             format!("Graph database locked: {}", msg),
                         );
-                        diag.severity = DiagnosticSeverity::Error;
                         diag.suggestion = Some("Use --graph-db-path to a separate path, wait for other process, or increase --graph-lock-timeout-ms".to_string());
                         diag
                     });
@@ -638,7 +638,6 @@ impl GraphDB {
                             },
                             format!("Graph database permission denied: {}", msg),
                         );
-                        diag.severity = DiagnosticSeverity::Error;
                         diag.suggestion = Some(
                             "Use --graph-db-path pointing to a writable directory".to_string(),
                         );
@@ -656,7 +655,6 @@ impl GraphDB {
                             },
                             format!("Failed to open graph database: {}", msg),
                         );
-                        diag.severity = DiagnosticSeverity::Error;
                         diag.suggestion = Some("Try --build-graph to rebuild".to_string());
                         diag
                     });
