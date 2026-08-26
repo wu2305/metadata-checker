@@ -446,6 +446,8 @@ fn followup_v2_threshold_exact_1024_triggers_rebuild() {
             changed_file_states: Vec::new(),
             removed_file_paths: Vec::new(),
         }),
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
     let report = graph.persist_commit(&commit).expect("delta persist");
 
@@ -536,6 +538,8 @@ fn followup_v2_threshold_below_1024_stays_stale() {
             changed_file_states: Vec::new(),
             removed_file_paths: Vec::new(),
         }),
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
     let report = graph.persist_commit(&commit).expect("delta persist");
 

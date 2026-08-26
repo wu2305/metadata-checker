@@ -170,6 +170,16 @@ pub struct IndexCommit {
     pub checkpoint: Option<crate::diff_refresh::DiffRefreshCheckpoint>,
     /// M56 增量持久化 delta；`None` 表示走全量重写路径
     pub delta: Option<IndexDelta>,
+    /// M58.3 复核返修：scanner 诊断载荷，与 nodes/edges/file_states/checkpoint
+    /// 在同一 write transaction 落库（同生共死，避免 checkpoint 已推进但诊断
+    /// 陈旧的持久不一致）。
+    /// `scanner_entries`：本轮脏文件的 `(logical_path, 序列化计数 bytes)`，
+    /// 覆盖同 key 旧值；计数为零的修复文件也携带 entry 以覆盖旧值。
+    /// `scanner_deleted_paths`：已删除文件的 logical_path，移除其 entry。
+    /// 两者皆空表示本次提交不涉及 scanner 诊断变更。
+    pub scanner_entries: Vec<(String, Vec<u8>)>,
+    /// 已删除文件的 logical_path 列表，落库时移除其 scanner 诊断 entry
+    pub scanner_deleted_paths: Vec<String>,
 }
 
 /// M56：增量持久化 delta（由 scanner 在 remove/re-add 时收集，persist 只消费）。

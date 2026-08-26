@@ -434,7 +434,8 @@ impl ProjectIndexer {
         if !plan.dirty.is_empty() || !plan.deleted.is_empty() {
             let updates =
                 Self::parse_dirty_files(&prev_states, &plan.dirty, project_dir, &provider)?;
-            // M58.3 PR1 refix（F2）：per-file 诊断计数序列化，persist 后落库
+            // M58.3 PR1 refix（F2）：per-file 诊断计数序列化，随 commit 载荷
+            // 与图/file states 在同一事务落库（M58.3 复核返修：原子化）
             let mut scanner_entries = Vec::new();
             for update in &updates {
                 if let Some(entry) = per_file_scan_diagnostic_entry(update)? {
@@ -488,6 +489,10 @@ impl ProjectIndexer {
                 );
             }
 
+            // M58.3 复核返修：本轮删除文件的 logical_path 随 commit 载荷落库，
+            // 同事务移除其 scanner 诊断 entry
+            let scanner_deleted_paths: Vec<String> =
+                plan.deleted.iter().map(|(rel, _)| rel.clone()).collect();
             let commit = IndexCommit {
                 file_states: new_states.clone(),
                 dirty_nodes: graph.dirty_nodes_set().iter().cloned().collect(),
@@ -505,14 +510,13 @@ impl ProjectIndexer {
                         removed_file_paths,
                     })
                 },
+                scanner_entries,
+                scanner_deleted_paths,
             };
             let mut report = Self::persist_index(&mut graph, commit)?;
-            // M58.3 PR1 refix（F2）：persist 成功后落库 per-file 诊断计数
-            //（脏文件覆盖 entry，删除文件移除 entry），随后重新 load 合并全量——
-            // 报告 envelope 反映全库口径，而非仅本轮脏文件。
-            let deleted_paths: Vec<String> =
-                plan.deleted.iter().map(|(rel, _)| rel.clone()).collect();
-            graph.save_scanner_diagnostic_entries(&scanner_entries, &deleted_paths)?;
+            // M58.3 复核返修：per-file 诊断计数已随 commit 同事务落库
+            //（脏文件覆盖 entry，删除文件移除 entry），persist 成功后重新
+            // load 合并全量——报告 envelope 反映全库口径，而非仅本轮脏文件。
             let scanner_diagnostics =
                 Self::merge_scanner_diagnostic_entries(&graph.load_scanner_diagnostic_entries()?)?;
             // M58.3 PR1 refix（F6）：IndexReport 统一为文件口径。
@@ -549,8 +553,9 @@ impl ProjectIndexer {
     ///
     /// 与 `scan` 复用同一套阶段函数；graphdb 文件在 prepare 前后保持不变，
     /// 由调用方决定何时把 `commit`（可附加 diff-refresh checkpoint）落盘。
-    /// M58.3 PR2：per-file scanner 诊断 entries 与删除路径随返回值透传，
-    /// 调用方须在 commit 落库成功后写 SCANNER_* 诊断（见 `PreparedIndexUpdate`）。
+    /// M58.3 PR2：per-file scanner 诊断 entries 与删除路径随返回值透传；
+    /// M58.3 复核返修：调用方须先把它们挂到 commit 的 scanner 载荷上
+    /// （可与 pending 累积合并），再 persist，保证与图同事务落库。
     pub fn prepare(project_dir: &Path, db_path: &Path) -> Result<PreparedIndexUpdate> {
         let mut graph = GraphDB::open(db_path)?;
         let prev_states = graph.load_file_states().unwrap_or_default();
@@ -650,6 +655,10 @@ impl ProjectIndexer {
                     removed_file_paths,
                 })
             },
+            // M58.3 复核返修：prepare 不落盘，scanner 载荷由调用方
+            // （diff-refresh 编排器）合并 pending 累积后挂到 commit 再 persist
+            scanner_entries: Vec::new(),
+            scanner_deleted_paths: Vec::new(),
         };
         Ok(PreparedIndexUpdate {
             graph,
@@ -676,9 +685,9 @@ pub struct PreparedIndexUpdate {
     pub deleted_node_ids: Vec<String>,
     /// M58.3 PR2：本轮脏 SPG 文件的 per-file scanner 诊断 entries
     /// （序列化 bytes；计数为零的修复文件也携带 entry 以覆盖旧值）。
-    /// 生命周期：调用方在 commit 持久化成功后交给
-    /// `GraphDB::save_scanner_diagnostic_entries` 落库；deferred 模式
-    /// 由编排器跨轮合并（脏覆盖、删除移除），随 pending commit 一起落库。
+    /// 生命周期（M58.3 复核返修）：调用方把本字段挂到 commit 的 scanner
+    /// 载荷上随 commit 同事务落库；deferred 模式由编排器跨轮合并
+    /// （脏覆盖、删除移除），随 pending commit 一起原子落库。
     pub scanner_entries: Vec<(String, Vec<u8>)>,
     /// M58.3 PR2：本轮删除文件的 logical_path，落库时移除其诊断 entry
     pub scanner_deleted_paths: Vec<String>,

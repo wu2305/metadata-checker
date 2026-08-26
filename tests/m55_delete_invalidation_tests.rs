@@ -166,6 +166,8 @@ fn setup_session(name: &str) -> (SessionManager, PathBuf, SessionManifest, PathB
             deleted: SourceCursor::new(0, Vec::new()),
         }),
         delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
     IndexStateStore::persist_index(&mut graph, commit).expect("seed checkpoint");
     (manager, session_dir, manifest, db_path)

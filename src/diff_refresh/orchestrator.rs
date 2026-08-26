@@ -413,23 +413,19 @@ impl DiffRefreshOrchestrator {
 
         if self.persist_mode == DiffRefreshPersistMode::Synchronous {
             let mut stage = Instant::now();
-            let report = candidate
-                .persist_commit(&commit)
-                .context("persist graph and checkpoint commit")?;
-            // M58.3 PR2：图提交成功后落库本轮 scanner 诊断 entries
-            // （脏文件覆盖 entry，删除文件移除 entry；与 scan 路径语义一致）。
-            // 先合并 pending overlay 再落库：模式中途切换时此前 deferred 轮次
-            // 累积的诊断不丢失（正常同步模式下 pending 为空，等价于只写本轮）。
+            // M58.3 复核返修：先合并 pending overlay 再挂到 commit 的 scanner
+            // 载荷，与图/checkpoint 一次原子写（模式中途切换时此前 deferred
+            // 轮次累积的诊断不丢失；正常同步模式下 pending 为空，等价于只写
+            // 本轮）。不再在 persist 成功后另开事务写 SCANNER_* 表。
             self.merge_pending_scanner_diagnostics(
                 prepared.scanner_entries,
                 prepared.scanner_deleted_paths,
             );
-            candidate
-                .save_scanner_diagnostic_entries(
-                    &self.pending_scanner_entries,
-                    &self.pending_scanner_deleted_paths,
-                )
-                .context("persist scanner diagnostic entries")?;
+            commit.scanner_entries = self.pending_scanner_entries.clone();
+            commit.scanner_deleted_paths = self.pending_scanner_deleted_paths.clone();
+            let report = candidate
+                .persist_commit(&commit)
+                .context("persist graph and checkpoint commit")?;
             timing.commit_ms = stage.elapsed().as_millis();
             persisted = true;
             persist_report = Some(report);
@@ -571,19 +567,15 @@ impl DiffRefreshOrchestrator {
     fn persist_pending(&mut self) -> Result<PersistReport> {
         let commit = self
             .pending_commit
-            .as_ref()
+            .as_mut()
             .context("missing pending commit for persistence")?;
+        // M58.3 复核返修：跨轮累积的 scanner 诊断 entries 挂到 pending commit
+        // 载荷上，与图/checkpoint 同一事务原子落库；失败则 pending 状态
+        // （含诊断 overlay）整体保留，下一轮随 commit 一起重试。
+        commit.scanner_entries = self.pending_scanner_entries.clone();
+        commit.scanner_deleted_paths = self.pending_scanner_deleted_paths.clone();
         let report = (self.persist_fn)(&mut self.runtime.graph, commit)
             .context("persist pending graph and checkpoint")?;
-        // M58.3 PR2：图提交成功后落库跨轮累积的 scanner 诊断 entries；
-        // 失败则保留 pending 状态（含诊断 overlay），下一轮随 commit 一起重试。
-        self.runtime
-            .graph
-            .save_scanner_diagnostic_entries(
-                &self.pending_scanner_entries,
-                &self.pending_scanner_deleted_paths,
-            )
-            .context("persist pending scanner diagnostic entries")?;
         self.clear_pending_state();
         // durable 已更新且 overlay 清空，live 缓存直接反映最新持久化口径
         self.refresh_live_scanner_diagnostics();
@@ -595,7 +587,10 @@ impl DiffRefreshOrchestrator {
     ///
     /// overlay：pending 覆盖（脏文件）/删除的路径从 durable entries 中剔除，
     /// 再附加 pending entries，按全库合并（与 `scan` 报告口径同源）。
-    /// 读取/合并失败时保留旧缓存，不阻塞刷新主流程（下一轮 install/persist 再试）。
+    /// 读取/合并失败时不阻塞刷新主流程（下一轮 install/persist 再试），但必须
+    /// 在诊断缓存留一条稳定的 `SCANNER_DIAGNOSTICS_REFRESH_FAILED` warning，
+    /// 让 status/query 能透出「scanner 诊断缓存可能陈旧」（M58.3 复核返修）；
+    /// 成功刷新时由 `replace_scanner_diagnostics` 一并清除该 warning。
     fn refresh_live_scanner_diagnostics(&mut self) {
         let result = (|| -> Result<Vec<crate::output::Diagnostic>> {
             let mut entries = self
@@ -622,8 +617,10 @@ impl DiffRefreshOrchestrator {
             ProjectIndexer::merge_scanner_diagnostic_entries(&entries)
                 .context("merge live scanner diagnostic entries")
         })();
-        if let Ok(diagnostics) = result {
-            self.runtime.replace_scanner_diagnostics(diagnostics);
+        match result {
+            Ok(diagnostics) => self.runtime.replace_scanner_diagnostics(diagnostics),
+            // 失败不静默：保留旧缓存的同时追加稳定 warning（同 code 不堆叠）
+            Err(error) => self.runtime.mark_scanner_diagnostics_refresh_failed(&error),
         }
     }
 

@@ -57,6 +57,28 @@ pub fn edge_storage_key(edge: &Edge) -> String {
     )
 }
 
+/// M58.3 复核返修：在给定 write transaction 内按文件覆盖/删除 scanner 诊断
+/// 计数 entry（`persist_internal` 专用，保证诊断与图/checkpoint 同生共死）。
+///
+/// `entries` 为脏文件的 `(logical_path, 序列化计数 bytes)`，覆盖同 key 旧值
+/// （计数为零的修复文件也携带 entry 以覆盖旧值）；`deleted` 为已删除文件的
+/// logical_path，移除其 entry。计数结构的序列化由调用方
+/// （`scanner::indexer`）负责，本层不感知格式。
+fn write_scanner_diagnostic_entries(
+    write_txn: &redb::WriteTransaction,
+    entries: &[(String, Vec<u8>)],
+    deleted: &[String],
+) -> Result<()> {
+    let mut table = write_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
+    for path in deleted {
+        table.remove(path.as_str())?;
+    }
+    for (path, bytes) in entries {
+        table.insert(path.as_str(), bytes)?;
+    }
+    Ok(())
+}
+
 /// M56 P1：Stale 累计重建阈值（受影响节点 keys 数）。
 ///
 /// 真图测量（release、77,077 节点）：v1 hydrate 1604ms / v2 hydrate 1408ms
@@ -944,7 +966,7 @@ impl GraphDB {
         file_states: &HashMap<String, FileState>,
         checkpoint: Option<&crate::diff_refresh::DiffRefreshCheckpoint>,
     ) -> Result<crate::graph_store::PersistReport> {
-        self.persist_internal(file_states, checkpoint, None)
+        self.persist_internal(file_states, checkpoint, None, &[], &[])
     }
 
     /// M56：按 IndexCommit 持久化并返回本次提交的成本报告。
@@ -952,6 +974,8 @@ impl GraphDB {
     /// `commit.delta` 为 `Some` 时走增量路径：edges/file_states 只写受影响
     /// keys，topology dirty 时只把 v2 shadow 标记 `Stale`（不写全量 v2 blobs）；
     /// 为 `None` 时维持全量重写（显式 full rebuild/compaction 路径，v2 置 Current）。
+    /// M58.3 复核返修：`commit` 的 scanner 诊断载荷（entries/删除路径）在同一
+    /// write transaction 写入 SCANNER_* 表，与图和 checkpoint 同生共死。
     pub fn persist_commit(
         &mut self,
         commit: &crate::graph_store::IndexCommit,
@@ -960,6 +984,8 @@ impl GraphDB {
             &commit.file_states,
             commit.checkpoint.as_ref(),
             commit.delta.as_ref(),
+            &commit.scanner_entries,
+            &commit.scanner_deleted_paths,
         )
     }
 
@@ -968,13 +994,21 @@ impl GraphDB {
         file_states: &HashMap<String, FileState>,
         checkpoint: Option<&crate::diff_refresh::DiffRefreshCheckpoint>,
         delta: Option<&crate::graph_store::IndexDelta>,
+        scanner_entries: &[(String, Vec<u8>)],
+        scanner_deleted_paths: &[String],
     ) -> Result<crate::graph_store::PersistReport> {
         let commit_started = std::time::Instant::now();
         // P1 修复：persist 全程持有 graph lock，覆盖预读→写入→提交，
         // 防止并发 CLI/--build-graph 在 mutate→persist 间隙写入不一致边集
         let _lock = acquire_graph_db_lock(std::path::Path::new(&self.db_path))?;
 
-        if !self.is_dirty && checkpoint.is_none() {
+        // 空提交判断须计入 scanner 诊断载荷：仅携带 scanner 诊断变更的提交
+        // （图与 checkpoint 均无变化）也必须落库
+        if !self.is_dirty
+            && checkpoint.is_none()
+            && scanner_entries.is_empty()
+            && scanner_deleted_paths.is_empty()
+        {
             // 空提交：无写入，report 全零（v2 状态读当前值）
             return Ok(crate::graph_store::PersistReport {
                 dirty_nodes: 0,
@@ -1117,6 +1151,15 @@ impl GraphDB {
             meta_table.insert(META_DIFF_REFRESH_CHECKPOINT_KEY, bytes)?;
         }
 
+        // M58.3 复核返修：scanner 诊断载荷与图/checkpoint 同一事务落库，
+        // 崩溃或写失败不会留下「checkpoint 已推进但诊断陈旧」的不一致
+        if !scanner_entries.is_empty() || !scanner_deleted_paths.is_empty() {
+            for (path, bytes) in scanner_entries {
+                bytes_written += (path.len() + bytes.len()) as u64;
+            }
+            write_scanner_diagnostic_entries(&write_txn, scanner_entries, scanner_deleted_paths)?;
+        }
+
         let v2_shadow_state = match delta {
             Some(_) => {
                 // graph 未变化（checkpoint-only）时不动 v2 状态
@@ -1188,37 +1231,6 @@ impl GraphDB {
             }
         }
         Ok(states)
-    }
-
-    /// M58.3 PR1 refix（F2）：按文件覆盖/删除 scanner 诊断计数 entry。
-    ///
-    /// `entries` 为脏文件的 `(logical_path, 序列化计数 bytes)`，覆盖同 key 旧值；
-    /// `deleted` 为已删除文件的 logical_path，移除其 entry。两者皆空时是 no-op
-    /// （不开写事务）。全量重建等价于全部文件 dirty，所有 entry 被覆盖，无残留。
-    /// 计数结构的序列化由调用方（`scanner::indexer`）负责，本层不感知格式。
-    pub fn save_scanner_diagnostic_entries(
-        &mut self,
-        entries: &[(String, Vec<u8>)],
-        deleted: &[String],
-    ) -> Result<()> {
-        if entries.is_empty() && deleted.is_empty() {
-            return Ok(());
-        }
-        // 与 persist 共用同一 graphdb 文件锁，串行化并发 CLI 写入
-        let _lock = acquire_graph_db_lock(std::path::Path::new(&self.db_path))?;
-        let db = Database::create(&self.db_path)?;
-        let write_txn = db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
-            for path in deleted {
-                table.remove(path.as_str())?;
-            }
-            for (path, bytes) in entries {
-                table.insert(path.as_str(), bytes)?;
-            }
-        }
-        write_txn.commit()?;
-        Ok(())
     }
 
     /// M58.3 PR1 refix（F2）：读取全部 per-file scanner 诊断计数 entry。

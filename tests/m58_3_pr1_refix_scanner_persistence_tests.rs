@@ -235,6 +235,57 @@ fn scanner_diagnostics_entry_removed_after_delete() -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(&project_dir);
     Ok(())
 }
+
+/// M58.3 复核返修（critical）：scanner 诊断载荷随 IndexCommit 在同一事务落库。
+///
+/// 断言两点：
+/// 1. persist_commit 返回后 load_scanner_diagnostic_entries 立即可读
+///    （无需 persist 后再单独 save）；
+/// 2. 图无 dirty、checkpoint 为 None 的「仅 scanner 载荷」提交不会被
+///    空提交早退跳过——脏文件覆盖 entry、删除路径移除 entry 都生效。
+#[test]
+fn scanner_payload_persists_atomically_with_commit() -> anyhow::Result<()> {
+    let (project_dir, db_path, _) = build_two_file_project("atomic")?;
+
+    let mut graph = metadata_checker::graph::GraphDB::open(&db_path)?;
+    // 仅 scanner 载荷的提交：图与 checkpoint 均无变化
+    let payload_bytes = serde_json::to_vec(&serde_json::json!({
+        "unrecognized_container_key": 2,
+        "duplicate_component_id": 0,
+        "sample_unrecognized_location": null,
+        "sample_duplicate_location": null,
+    }))?;
+    let commit = metadata_checker::graph_store::IndexCommit {
+        file_states: graph.load_file_states()?,
+        dirty_nodes: Vec::new(),
+        deleted_nodes: Vec::new(),
+        checkpoint: None,
+        delta: None,
+        scanner_entries: vec![("virtual/c.spg".to_string(), payload_bytes)],
+        scanner_deleted_paths: vec!["a.spg".to_string()],
+    };
+    graph.persist_commit(&commit)?;
+
+    let entries = graph.load_scanner_diagnostic_entries()?;
+    let keys: Vec<&str> = entries.iter().map(|(path, _)| path.as_str()).collect();
+    assert_eq!(
+        keys,
+        vec!["b.spg", "virtual/c.spg"],
+        "同事事务落库后 entry 集合必须立即反映覆盖/删除: {keys:?}"
+    );
+    // 合并口径：a.spg 的 unrec 被移除，c.spg 的 2 次计入，b.spg 的 dup 保留
+    let merged = ProjectIndexer::merge_scanner_diagnostic_entries(&entries)?;
+    let unrec = code_hits(&merged, CODE_UNRECOGNIZED);
+    assert_eq!(unrec.len(), 1, "{merged:?}");
+    assert_eq!(unrec[0].count, Some(2), "{merged:?}");
+    let dup = code_hits(&merged, CODE_DUPLICATE);
+    assert_eq!(dup.len(), 1, "{merged:?}");
+    assert_eq!(dup[0].count, Some(1), "{merged:?}");
+
+    let _ = std::fs::remove_dir_all(&project_dir);
+    Ok(())
+}
+
 /// 守卫测试（验收缺口补录）：load 后立即 check-reload 必须判定未变更。
 ///
 /// redb 连接 drop 时会写 clean-close 标记，加载本身会触碰 db 文件

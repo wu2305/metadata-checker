@@ -403,6 +403,8 @@ fn test_persist_index_commits_graph_and_file_states_together() {
         deleted_nodes: vec![],
         checkpoint: None,
         delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
 
     let report =

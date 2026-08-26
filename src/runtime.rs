@@ -763,6 +763,8 @@ impl GraphRuntime {
     /// diff-refresh 在 install/persist 之后由编排器以「durable + pending overlay」
     /// 的全库口径调用，使 live status/query 立即反映修复或新变坏的文件；
     /// hydrate 等其他 code 的诊断保持不动。
+    /// M58.3 复核返修：替换同时清除 `SCANNER_DIAGNOSTICS_REFRESH_FAILED`
+    /// warning（成功刷新即证明缓存口径已最新）。
     pub fn replace_scanner_diagnostics(
         &mut self,
         scanner_diagnostics: Vec<crate::output::Diagnostic>,
@@ -770,8 +772,27 @@ impl GraphRuntime {
         self.load_diagnostics.retain(|diag| {
             diag.code != crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY
                 && diag.code != crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID
+                && diag.code != crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED
         });
         self.load_diagnostics.extend(scanner_diagnostics);
+    }
+
+    /// M58.3 复核返修：live scanner 诊断缓存刷新失败时记录稳定 warning。
+    ///
+    /// 同 code 先移除再追加，重复失败不堆叠；message 携带错误概要。
+    /// 成功刷新由 `replace_scanner_diagnostics` 清除该 warning。
+    pub fn mark_scanner_diagnostics_refresh_failed(&mut self, error: &anyhow::Error) {
+        self.load_diagnostics.retain(|diag| {
+            diag.code != crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED
+        });
+        self.load_diagnostics.push(crate::diagnostics::envelope_diagnostic(
+            crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED,
+            1,
+            crate::output::schema::Location::default(),
+            format!(
+                "Scanner diagnostics cache refresh failed, cached SCANNER_* diagnostics may be stale: {error:#}"
+            ),
+        ));
     }
 
     /// 构建单条 page logic warm cache 条目（不写回 read model）。

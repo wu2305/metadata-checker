@@ -13,9 +13,11 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Result, anyhow};
+use redb::{Database, TableDefinition};
 
 use metadata_checker::diff_refresh::{
     ChangeSet, ChangedRemoteFile, DiffRefreshCheckpoint, DiffRefreshOrchestrator,
@@ -40,6 +42,10 @@ use metadata_checker::session::{RemoteSessionProvider, SessionManager};
 
 const CODE_UNRECOGNIZED: &str = "SCANNER_UNRECOGNIZED_CONTAINER_KEY";
 const CODE_DUPLICATE: &str = "SCANNER_DUPLICATE_COMPONENT_ID";
+const CODE_REFRESH_FAILED: &str = "SCANNER_DIAGNOSTICS_REFRESH_FAILED";
+
+/// 与 graph_redb 内部表定义同名，用于测试注入/清除无法解码的损坏 entry
+const SCANNER_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("scanner_diagnostics");
 
 static TEST_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -279,6 +285,8 @@ fn setup_session(
             deleted: SourceCursor::new(0, Vec::new()),
         }),
         delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
     IndexStateStore::persist_index(&mut graph, commit).expect("seed checkpoint");
 
@@ -611,6 +619,228 @@ fn deferred_mode_cross_round_merge_override_and_delete() -> Result<()> {
     let live = &orchestrator.runtime().load_diagnostics;
     assert_eq!(code_hits(live, CODE_UNRECOGNIZED).len(), 0, "{live:?}");
     assert_eq!(code_hits(live, CODE_DUPLICATE).len(), 0, "{live:?}");
+
+    cleanup(&session_dir);
+    Ok(())
+}
+
+/// M58.3 复核返修（critical）：同步模式下 scanner 诊断载荷挂在 commit 上，
+/// 随图/checkpoint 一次原子 persist——注入 persist_fn 断言 commit 携带载荷，
+/// 且 persist 返回后 durable 立即可读（无需二次 save）。
+#[test]
+fn sync_mode_commit_carries_scanner_payload() -> Result<()> {
+    let (manager, session_dir, manifest, db_path) = setup_session(
+        "payload",
+        &[("app/page_a.spg", "file-a", "1", spg_fixed("a-v1"))],
+    );
+
+    let provider = QueuedProvider::new();
+    provider.push(
+        "app/page_a.spg",
+        "file-a",
+        "2",
+        &serde_json::to_string_pretty(&spg_with_unrecognized_key())?,
+    );
+    let source = QueuedChangeSource::new(vec![(
+        vec![active_event("file-a", "app/page_a.spg", "2", 1000)],
+        watermark(1000, vec!["active:file-a:2".into()], 0),
+    )]);
+
+    let mut orchestrator = build_orchestrator(manager, &session_dir, manifest, source, provider);
+    orchestrator.set_one_shot_mode(true);
+    // 捕获 commit 的 scanner 载荷，随后委托真实 persist
+    let captured_entries: Rc<RefCell<Vec<Vec<String>>>> = Rc::new(RefCell::new(Vec::new()));
+    let captured_deleted: Rc<RefCell<Vec<Vec<String>>>> = Rc::new(RefCell::new(Vec::new()));
+    {
+        let captured_entries = Rc::clone(&captured_entries);
+        let captured_deleted = Rc::clone(&captured_deleted);
+        orchestrator.set_persist_fn(Box::new(move |graph, commit| {
+            captured_entries.borrow_mut().push(
+                commit
+                    .scanner_entries
+                    .iter()
+                    .map(|(path, _)| path.clone())
+                    .collect(),
+            );
+            captured_deleted
+                .borrow_mut()
+                .push(commit.scanner_deleted_paths.clone());
+            graph.persist_commit(commit)
+        }));
+    }
+
+    let report = orchestrator.refresh_once().expect("sync refresh");
+    assert_eq!(report.persisted, true, "{report:?}");
+
+    assert_eq!(
+        captured_entries.borrow().as_slice(),
+        &[vec!["app/page_a.spg".to_string()]],
+        "commit 必须携带本轮脏文件的 scanner entry 载荷"
+    );
+    assert_eq!(
+        captured_deleted.borrow().as_slice(),
+        &[Vec::<String>::new()],
+        "本轮无删除文件"
+    );
+    // 原子性：persist 成功后 durable 立即反映，不存在「另开事务 save」的窗口
+    let durable = durable_scanner_diagnostics(&db_path)?;
+    assert_eq!(
+        code_hits(&durable, CODE_UNRECOGNIZED).len(),
+        1,
+        "persist 返回后 durable 必须立即含新诊断: {durable:?}"
+    );
+
+    cleanup(&session_dir);
+    Ok(())
+}
+
+/// M58.3 复核返修（warning）：live 诊断刷新失败不得静默——
+/// durable 中混入无法解码的损坏 entry 使 load/merge 失败时，
+/// runtime.load_diagnostics 必须透出稳定的 SCANNER_DIAGNOSTICS_REFRESH_FAILED
+/// warning 且不随重复失败堆叠；损坏清除、刷新成功后 warning 消失。
+#[test]
+fn refresh_failure_surfaces_stale_cache_warning() -> Result<()> {
+    let (manager, session_dir, manifest, db_path) = setup_session(
+        "refresh-fail",
+        &[
+            ("app/page_a.spg", "file-a", "1", spg_fixed("a-v1")),
+            ("app/page_b.spg", "file-b", "1", spg_fixed("b-v1")),
+        ],
+    );
+
+    let provider = QueuedProvider::new();
+    provider.push(
+        "app/page_a.spg",
+        "file-a",
+        "2",
+        &serde_json::to_string_pretty(&spg_with_unrecognized_key())?,
+    );
+    provider.push(
+        "app/page_b.spg",
+        "file-b",
+        "2",
+        &serde_json::to_string_pretty(&spg_with_duplicate_id())?,
+    );
+    provider.push(
+        "app/page_a.spg",
+        "file-a",
+        "3",
+        &serde_json::to_string_pretty(&spg_fixed("a-v3"))?,
+    );
+    provider.push(
+        "app/page_b.spg",
+        "file-b",
+        "3",
+        &serde_json::to_string_pretty(&spg_fixed("b-v3"))?,
+    );
+    let source = QueuedChangeSource::new(vec![
+        (
+            vec![active_event("file-a", "app/page_a.spg", "2", 1000)],
+            watermark(1000, vec!["active:file-a:2".into()], 0),
+        ),
+        (
+            vec![active_event("file-b", "app/page_b.spg", "2", 2000)],
+            watermark(
+                2000,
+                vec!["active:file-a:2".into(), "active:file-b:2".into()],
+                0,
+            ),
+        ),
+        (
+            vec![active_event("file-a", "app/page_a.spg", "3", 3000)],
+            watermark(
+                3000,
+                vec!["active:file-a:3".into(), "active:file-b:2".into()],
+                0,
+            ),
+        ),
+        (
+            vec![active_event("file-b", "app/page_b.spg", "3", 4000)],
+            watermark(
+                4000,
+                vec!["active:file-a:3".into(), "active:file-b:3".into()],
+                0,
+            ),
+        ),
+    ]);
+
+    let mut orchestrator = build_orchestrator(manager, &session_dir, manifest, source, provider);
+    orchestrator.set_one_shot_mode(true);
+
+    // 第 1 轮：a 变坏，正常刷新——live 有 unrec、无 warning
+    orchestrator.refresh_once().expect("round 1");
+    let live = &orchestrator.runtime().load_diagnostics;
+    assert_eq!(code_hits(live, CODE_UNRECOGNIZED).len(), 1, "{live:?}");
+    assert_eq!(code_hits(live, CODE_REFRESH_FAILED).len(), 0, "{live:?}");
+
+    // 注入损坏 entry：merge 必然 decode 失败
+    {
+        let db = Database::create(&db_path).expect("open redb for corruption");
+        let write_txn = db.begin_write().expect("corruption write txn");
+        {
+            let mut table = write_txn
+                .open_table(SCANNER_TABLE)
+                .expect("open scanner table");
+            table
+                .insert("corrupt/bad.spg", b"not-valid-json".to_vec())
+                .expect("insert garbage entry");
+        }
+        write_txn.commit().expect("commit corruption");
+    }
+
+    // 第 2 轮：persist 成功但 live 刷新失败——旧缓存保留 + 稳定 warning；
+    // 旧缓存口径（unrec 1、dup 0）不被丢弃，只是标记可能陈旧
+    orchestrator.refresh_once().expect("round 2");
+    let live = &orchestrator.runtime().load_diagnostics;
+    assert_eq!(
+        code_hits(live, CODE_REFRESH_FAILED).len(),
+        1,
+        "刷新失败必须透出 warning: {live:?}"
+    );
+    assert_eq!(code_hits(live, CODE_UNRECOGNIZED).len(), 1, "{live:?}");
+    assert_eq!(code_hits(live, CODE_DUPLICATE).len(), 0, "{live:?}");
+
+    // 第 3 轮：再次失败——warning 不堆叠
+    orchestrator.refresh_once().expect("round 3");
+    let live = &orchestrator.runtime().load_diagnostics;
+    assert_eq!(
+        code_hits(live, CODE_REFRESH_FAILED).len(),
+        1,
+        "重复失败不得堆叠 warning: {live:?}"
+    );
+
+    // 清除损坏 entry
+    {
+        let db = Database::create(&db_path).expect("open redb for cleanup");
+        let write_txn = db.begin_write().expect("cleanup write txn");
+        {
+            let mut table = write_txn
+                .open_table(SCANNER_TABLE)
+                .expect("open scanner table");
+            table
+                .remove("corrupt/bad.spg")
+                .expect("remove garbage entry");
+        }
+        write_txn.commit().expect("commit cleanup");
+    }
+
+    // 第 4 轮：刷新成功——warning 消失，live 反映最终 durable 口径（均已修复）
+    orchestrator.refresh_once().expect("round 4");
+    let live = &orchestrator.runtime().load_diagnostics;
+    assert_eq!(
+        code_hits(live, CODE_REFRESH_FAILED).len(),
+        0,
+        "刷新成功后 warning 必须消失: {live:?}"
+    );
+    assert_eq!(code_hits(live, CODE_UNRECOGNIZED).len(), 0, "{live:?}");
+    assert_eq!(code_hits(live, CODE_DUPLICATE).len(), 0, "{live:?}");
+    let status = orchestrator.runtime().status();
+    assert_eq!(
+        code_hits(&status.load_diagnostics, CODE_REFRESH_FAILED).len(),
+        0,
+        "status 口径同步清除: {:?}",
+        status.load_diagnostics
+    );
 
     cleanup(&session_dir);
     Ok(())

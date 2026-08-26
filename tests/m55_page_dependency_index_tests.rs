@@ -326,6 +326,8 @@ fn m55_page_dependency_orchestrator_shared_model_invalidates_multiple_pages() {
                 deleted: SourceCursor::new(0, Vec::new()),
             }),
             delta: None,
+            scanner_entries: Vec::new(),
+            scanner_deleted_paths: Vec::new(),
         };
         IndexStateStore::persist_index(&mut graph, commit).expect("seed checkpoint");
     }

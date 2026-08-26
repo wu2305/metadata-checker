@@ -220,6 +220,8 @@ fn seed_checkpoint(db_path: &Path, checkpoint: DiffRefreshCheckpoint) {
         deleted_nodes: Vec::new(),
         checkpoint: Some(checkpoint),
         delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
     IndexStateStore::persist_index(&mut graph, commit).expect("seed checkpoint");
 }
