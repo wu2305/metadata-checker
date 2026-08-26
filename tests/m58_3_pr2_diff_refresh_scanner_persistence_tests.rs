@@ -624,11 +624,13 @@ fn deferred_mode_cross_round_merge_override_and_delete() -> Result<()> {
     Ok(())
 }
 
-/// M58.3 复核返修（critical）：同步模式下 scanner 诊断载荷挂在 commit 上，
-/// 随图/checkpoint 一次原子 persist——注入 persist_fn 断言 commit 携带载荷，
-/// 且 persist 返回后 durable 立即可读（无需二次 save）。
+/// M58.3 复核返修（critical）：scanner 诊断载荷挂在 commit 上，随图/checkpoint
+/// 一次原子 persist——deferred 模式阈值置 0 使本轮即走 persist_pending，
+/// 注入 persist_fn 断言 commit 携带载荷，且 persist 返回后 durable 立即可读
+/// （无需二次 save）。同步模式的载荷等价性由 sync 用例的 durable 断言覆盖
+/// （sync 路径直连 candidate.persist_commit，不经 persist_fn 注入点）。
 #[test]
-fn sync_mode_commit_carries_scanner_payload() -> Result<()> {
+fn commit_carries_scanner_payload() -> Result<()> {
     let (manager, session_dir, manifest, db_path) = setup_session(
         "payload",
         &[("app/page_a.spg", "file-a", "1", spg_fixed("a-v1"))],
@@ -647,7 +649,11 @@ fn sync_mode_commit_carries_scanner_payload() -> Result<()> {
     )]);
 
     let mut orchestrator = build_orchestrator(manager, &session_dir, manifest, source, provider);
-    orchestrator.set_one_shot_mode(true);
+    // 阈值 0：本轮有脏节点即触发 persist_pending（同一轮内经 persist_fn 落库）
+    orchestrator.set_persist_policy(LongLivedPersistPolicy {
+        dirty_node_threshold: 0,
+        max_pending_rounds: 10,
+    });
     // 捕获 commit 的 scanner 载荷，随后委托真实 persist
     let captured_entries: Rc<RefCell<Vec<Vec<String>>>> = Rc::new(RefCell::new(Vec::new()));
     let captured_deleted: Rc<RefCell<Vec<Vec<String>>>> = Rc::new(RefCell::new(Vec::new()));
