@@ -423,8 +423,9 @@ impl DiffRefreshOrchestrator {
             );
             commit.scanner_entries = self.pending_scanner_entries.clone();
             commit.scanner_deleted_paths = self.pending_scanner_deleted_paths.clone();
-            let report = candidate
-                .persist_commit(&commit)
+            // 与 deferred 路径一样经 persist_fn 落库（缺省即 GraphDB::persist_commit），
+            // 保证注入点（测试/包装）对两种模式都生效，不再绕过
+            let report = (self.persist_fn)(&mut candidate, &commit)
                 .context("persist graph and checkpoint commit")?;
             timing.commit_ms = stage.elapsed().as_millis();
             persisted = true;

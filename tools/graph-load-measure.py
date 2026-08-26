@@ -27,8 +27,13 @@ import time
 MARKER = b"[stdio-server] Graph loaded"
 
 
-def readline_with_timeout(stream, timeout_secs, deadline):
-    """在剩余超时预算内逐行读；超时或 EOF 返回 None。"""
+def readline_with_timeout(stream, deadline):
+    """在剩余超时预算内逐行读；超时或 EOF 返回 None。
+
+    注意：等待期间不排空另一侧管道——本脚本驱动的 stdio server 在收到
+    status 请求前不会向 stdout 写数据，因此不存在交叉死锁；若未来被复用到
+    会主动写 stdout 的进程，需要先补排空逻辑。
+    """
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         return None
@@ -58,7 +63,7 @@ def measure_run(run, args):
     try:
         # 逐行读 stderr 直到加载完成标记（带超时，EOF 视为失败）
         while True:
-            line = readline_with_timeout(proc.stderr, args.timeout_secs, deadline)
+            line = readline_with_timeout(proc.stderr, deadline)
             if line is None:
                 break
             if MARKER in line:
@@ -69,7 +74,7 @@ def measure_run(run, args):
         if load_ms is not None:
             proc.stdin.write(b'{"request_id":"s1","command":"status"}\n')
             proc.stdin.flush()
-            resp = readline_with_timeout(proc.stdout, args.timeout_secs, deadline)
+            resp = readline_with_timeout(proc.stdout, deadline)
             if resp is not None:
                 try:
                     payload = json.loads(resp)

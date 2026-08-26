@@ -271,6 +271,12 @@ bump `REDB_V2_SCHEMA_VERSION`（`graph_redb_v2.rs:17`）**不会**重建旧 v1 �
      `params` 33、`grid` 22、`operateButtons` 20。其中 `columns`/`tabs`/`panel`（数组形态）
      是 F1 已诊断的真实组件容器——此计数正是 PR1 安全网按设计捕获「白名单丢组件」缺口，
      待 PR2 形态感知递归落地后应显著下降（PR2 合入后重测并更新本登记）。
+
+     **PR2 合入后重测更新**（2026-08-25，见附录 A 重跑确认）：943 → **312**
+     （`moreFields` 279 + `params` 33）；`columns`/`tabs`/`panel` 等真实组件容器
+     已被形态感知递归覆盖。图侧交叉验证：`status.load_diagnostics` 中该诊断
+     count=312，与脚本预测一致。`params`（33）是否属误报并进排除列表，
+     留作后续决策项（改动会影响诊断计数口径与快照）。
    - `SCANNER_DUPLICATE_COMPONENT_ID` = **218**（基线登记）：真实语料中跨容器复制产生的
      重复组件 id，属数据实情信号，非实现缺陷。
 2. F1–F6 各自的证据（实跑重放命令或附录 A 测量）修复后通过，回归测试绿；F1 的判据是
