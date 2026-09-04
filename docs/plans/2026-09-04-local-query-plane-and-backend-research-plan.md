@@ -104,7 +104,7 @@
 - 只读、单语句、参数绑定；
 - 最大行数、字节数、跳数和执行时间；
 - 结构化错误、截断标记和诊断；
-- 每条事实的节点/边 ID、`source_file`、`source_hash`、`json_path`（raw JSON 事实可为空）、可选 `source_span`（action source 等非 JSON 来源）、`evidence_layer`、`source_kind`、`snapshot_id`、`coverage_status`；
+- 每条事实的节点/边 ID、`source_file`、`source_hash`、`json_path`（raw JSON 事实必须提供；非 JSON 来源可为空）、可选 `source_span`（action source 等非 JSON 来源）、`evidence_layer`、`source_kind`、`snapshot_id`、`coverage_status`；
 - 明确图查询只返回文件定位，不读取任意路径；原始文件读取沿既有 provider/CLI 权限与项目根目录边界执行；
 - `--non-human` 单 JSON 输出；
 - 禁止写操作、任意文件读取、外部网络和无界遍历；
