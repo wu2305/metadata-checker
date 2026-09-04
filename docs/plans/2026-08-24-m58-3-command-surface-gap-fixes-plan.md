@@ -1,8 +1,8 @@
 # M58.3 缺口修复与可观测性打底计划
 
 > 状态：**closed（范围收口，2026-09-05）**
-> 上游：[M58.3 spec](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（approved，
-> 五轮独立评审修订；id 文法、诊断信封、迁移机制、事实输出契约的权威定义都在 spec，本文不重复）。
+> 上游：[M58.3 spec](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（closed；PR1/PR2 范围收口，原批准设计经五轮独立评审修订；
+> id 文法、诊断信封、迁移机制、事实输出契约的权威定义都在 spec，本文不重复）。
 > journal：[m58-cheap-model-comprehension-eval.md](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)。
 > 修订包：[2026-08-24-m58-3-appendix-a-amendment.md](2026-08-24-m58-3-appendix-a-amendment.md)
 > （附录 A 回填 + 三处更正 + PR2 三条修订建议，已并入本文与 spec）。
@@ -59,7 +59,7 @@
   `docs/ai-eval-runs/2026-08-24-m58-3-corpus-shape-audit.json`，修订包
   `2026-08-24-m58-3-appendix-a-amendment.md`）；排除列表初值取四键
   （`effectStyles`/`conditionStyles`/`labelFields`/`stateFields`），`buttons` 人工确认。
-- 验收：spec 验收 2；说明 A 测试电池（唯一父/无环/序稳定/page_logic 遍历/增量重建）；
+- 验收：spec 验收 2 中的 PR2 子集；说明 A 测试电池（唯一父/无环/序稳定/page_logic 遍历/增量重建）；
   `parse → 上下文解析 → scanner 建边` 贯通测试（说明 D）；**性能基线义务**：组件数
   预计 +32%（附录 A 推论），按 `docs/milestones/performance/performance-baseline.md`
   的 M50 标准真实项目 runner 采集，记录节点/边数、graphdb 体积、全量构建与加载耗时、
@@ -100,7 +100,7 @@
 - 写入范围：`src/explain/condition_facts/value_source.rs`、`src/scanner/spg.rs`
   （写边 meta 抄 conditionExp）、`src/explain/`（说明 C 的分组去重/source_field 过滤/
   证据与诊断字段）。
-- 依赖：PR3（F3）已合入。
+- 依赖：PR3（F3）；当前 PR3 与 PR5 均 deferred。
 - 验收：说明 C 契约测试；calc case 重放产出非空 reads/lineage。
 
 ### PR6 — 重建 + 重放 + 首轮基线（deferred）

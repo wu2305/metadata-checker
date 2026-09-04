@@ -33,7 +33,7 @@
 
 这些证据对查询平面的直接影响是：
 
-1. 图查询结果必须能返回 `source_file`、`json_path`、action source 引用和 snapshot/hash；原始文件正文由调用方直接读取，不要求图数据库保存 `documents` 表；
+1. 图查询结果必须能返回 `source_file`、`source_hash`、`json_path`、action source 引用和 `snapshot_id`；原始文件正文由调用方直接读取，不要求图数据库保存 `documents` 表；
 2. 结果必须保留“业务规范 / 静态实现 / 交付快照 / 运行事实 / 外部回执”的证据层级，不能把页面存在或接口调用成功写成业务完成；
 3. 查询接口需要显式处理多命中、抽样、截断和未覆盖范围，不能把空结果当成“不存在”；
 4. 真实 session 中的 jq 命令应成为阶段 0 的固定回归集，尤其是那些当前 `find`/`explain`/`relations` 无法表达的联合查询；但必须先按查询意图分类，区分原始元数据查询、工具响应裁剪和展示格式化，并脱敏、规范化结果。
@@ -60,7 +60,7 @@
 
 - 哪些节点、边、表达式和 `meta` 已入图；
 - 哪些细节只能从原始 SPG/TBL 取得；
-- `source_file`、`json_path`、文件 hash 与图事实如何关联，以及调用方如何据此直接打开完整原始文件；
+- `source_file`、`json_path`、`source_hash` 与图事实如何关联，以及调用方如何据此直接打开完整原始文件；
 - M58.3 页面局部模型迁移后需要保留的节点、边和目标语法。
 
 交付物：事实覆盖矩阵和最终候选查询 schema，至少包含：
@@ -104,7 +104,7 @@
 - 只读、单语句、参数绑定；
 - 最大行数、字节数、跳数和执行时间；
 - 结构化错误、截断标记和诊断；
-- 每条事实的节点/边 ID、`source_file`、`json_path`、`evidence_layer`、`source_kind`、`snapshot_id`、`coverage_status`；
+- 每条事实的节点/边 ID、`source_file`、`source_hash`、`json_path`（raw JSON 事实可为空）、可选 `source_span`（action source 等非 JSON 来源）、`evidence_layer`、`source_kind`、`snapshot_id`、`coverage_status`；
 - 明确图查询只返回文件定位，不读取任意路径；原始文件读取沿既有 provider/CLI 权限与项目根目录边界执行；
 - `--non-human` 单 JSON 输出；
 - 禁止写操作、任意文件读取、外部网络和无界遍历；

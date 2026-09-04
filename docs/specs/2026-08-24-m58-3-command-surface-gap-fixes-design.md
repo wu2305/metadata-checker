@@ -162,7 +162,7 @@ head 命中已抽取组件 id 的 `ModelField` 改写为 `ComponentProperty`（:
 （后缀 `.txt`×3、`.seconds`×1，附录 A 口径），但 F1 放开容器后新组件 id 会进入
 `component_ids` 集合、改写比例会变——**PR2 合入后须重测**。归属 PR2。
 
-### Phase 3：页面内模型节点身份——完整局部子图（核心设计，不推迟）
+### Phase 3：页面内模型节点身份——完整局部子图（原设计方向；当前 deferred）
 
 #### 为什么必须现在做
 
@@ -304,10 +304,10 @@ bump `REDB_V2_SCHEMA_VERSION`（`graph_redb_v2.rs:17`）**不会**重建旧 v1 �
      留作后续决策项（改动会影响诊断计数口径与快照）。
    - `SCANNER_DUPLICATE_COMPONENT_ID` = **218**（基线登记）：真实语料中跨容器复制产生的
      重复组件 id，属数据实情信号，非实现缺陷。
-2. F1–F6 各自的证据（实跑重放命令或附录 A 测量）修复后通过，回归测试绿；F1 的判据是
+2. 当前已验证的 PR2 子集为 F1/F2/ComponentProperty：F1 的判据是
    `漏掉候选 − 排除列表命中数 == 0`（附录 A 口径，PR2 合入后重跑测量脚本确认），
-   F2 的判据含说明 A 的测试电池。
-3. Phase 3 落地后：裸 id 多页同名如实交回候选、单页直达；页面段 id 精确命中且 gates
+   F2 的判据含说明 A 的测试电池；F3–F6 的证据和回归仍 deferred。
+3. Phase 3（当前 deferred）落地后：裸 id 多页同名如实交回候选、单页直达；页面段 id 精确命中且 gates
    来自本页 filter；`--relations 'model:表名'` 跨页聚合语义不变；next_queries 生成的 id
    粒度正确且可直接执行；PR4b 后旧库触发 `GRAPH_SCHEMA_STALE`（含 `--non-human` 形态）
    而非静默回退；**增量刷新修改一页后，另一页的 model 事实不掉**。
