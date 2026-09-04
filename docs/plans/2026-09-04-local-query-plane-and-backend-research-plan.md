@@ -67,7 +67,7 @@
 
 `nodes`、`edges`、`file_states`、`scanner_diagnostics`、`graph_meta`；原始文件正文不属于 Grafeo/DuckDB 投影的必选表。
 
-每条可查询事实还必须有 `evidence_layer`（业务规范/静态实现/交付快照/运行事实/外部回执）、`source_kind`（graph/raw/action/runtime/external）、`snapshot_id`、`coverage_status`（complete/partial/sampled/truncated/unavailable）和稳定的 `source_file`/`json_path`；空结果必须能区分“不存在”和“未覆盖/外部不可用”。这些字段是原始文件复核的定位契约，不代表 raw 内容已复制进图。
+每条可查询事实还必须有 `evidence_layer`（业务规范/静态实现/交付快照/运行事实/外部回执）、`source_kind`（graph/raw/action/runtime/external）、`snapshot_id`、`source_hash`、`coverage_status`（complete/partial/sampled/truncated/unavailable）和稳定的 `source_file`；`json_path` 对 raw JSON 事实提供、对 action source 等非 JSON 来源可为空，并可用 `source_span` 补充范围。空结果必须能区分“不存在”和“未覆盖/外部不可用”。这些字段是原始文件复核的定位契约，不代表 raw 内容已复制进图。
 
 ### 阶段 2：候选后端深度研究
 

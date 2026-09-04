@@ -302,4 +302,5 @@ M58.3 已经完成并保留在当前分支的范围是：
 选型不能默认替代页面身份迁移，也不能把未完成的事实契约包装成已通过。
 
 新的查询平面边界已同步明确：Grafeo/DuckDB 只负责结构化图查询；原始 SPG/TBL 和 action
-source 正文继续由调用方沿 `source_file`/`json_path` 直接读取，不强制复制进图数据库。
+source 正文继续由调用方沿 `source_file`/`source_hash` 直接读取，raw JSON 可用 `json_path`
+定位，非 JSON action source 可用可选 `source_span` 补充，不强制复制进图数据库。
