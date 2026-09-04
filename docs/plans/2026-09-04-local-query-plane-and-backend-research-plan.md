@@ -40,7 +40,7 @@
 
 ### 阶段 0：真实查询缺口冻结
 
-从惠通陆华分析仓库和上述 session 产物中收集实际使用过的 jq 命令，不用抽象猜测替代。记录命令对应的工具版本、源目录、git commit 或内容 hash；只保存脱敏后的命令和证据引用。
+从惠通陆华分析仓库和上述 session 产物中收集实际使用过的 jq 命令，不用抽象猜测替代。记录命令对应的工具版本、源目录、git commit 或内容 hash；只保存脱敏后的命令和证据引用。对参与联合查询的服务动作和 TypeScript action 源文件建立固定快照 manifest，记录路径、内容 hash 和脱敏状态。
 
 交付物：查询缺口清单，至少 20–30 条样例，覆盖：
 
@@ -111,7 +111,7 @@
 
 ### 阶段 4：非侵入式原型
 
-暂不删除 redb。由 `SPG/TBL -> projection` 的独立生成器从固定源快照生成查询投影或临时 DuckDB 数据库，同时保留当前运行时路径；查询-only 进程必须验证不打开、不 hydrate redb，不能从已 hydrate 的 redb 再生成投影。
+暂不删除 redb。由 `SPG/TBL + action-source manifest -> projection` 的独立生成器从固定源快照生成查询投影或临时 DuckDB 数据库，同时保留当前运行时路径；查询-only 进程必须验证不打开、不 hydrate redb，不能从已 hydrate 的 redb 再生成投影。action 源文件以 `source_kind=action` 进入 `documents`/引用索引，并保留路径、hash 和脱敏状态；若某类 action 仅能保留引用而不能查询正文，必须显式标为 `coverage_status=unavailable`，不得伪装成完整覆盖。
 
 原型需要验证：
 
