@@ -1,23 +1,25 @@
 # 本地图查询平面与后端深化研究计划
 
-> 状态：**approved**（2026-09-04 用户确认方向：解决分析时的查询缺口，不把问题简化为 jq 读取 redb）
-> 范围：为模型提供可控的本地图查询入口，同时覆盖图关系和未进入图的原始 SPG/TBL 元数据；先研究与原型，后决定是否替换 redb。
+> 状态：**approved，已按 2026-09-05 决策修订**（解决分析时的查询缺口，不把问题简化为 jq 读取 redb）
+> 范围：为模型提供可控的本地图查询入口；Grafeo/DuckDB 等候选只承担结构化图查询，原始 SPG/TBL 继续由现有文件读取链路直接提供，先研究与原型，后决定是否替换 redb。
 > 关联：[M58.3 spec](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)、[M58.3 plan](2026-08-24-m58-3-command-surface-gap-fixes-plan.md)、[性能基线](../milestones/performance/performance-baseline.md)。
 
 ## 1. 决策边界
 
-本计划解决的是“工具现有命令面无法表达某些元数据查询，分析者被迫回到原始文件使用 jq”的问题。
+本计划解决的是“工具现有命令面无法表达某些结构化图查询，分析者被迫回到原始文件使用 jq”的问题。
 
 目标不是单纯把 redb 改成 JSONL，也不是先选定 DuckDB 或某个 Cypher 引擎。持久化后端必须服从查询平面、原始文档覆盖、增量一致性和跨平台约束。
+
+原始文件访问与图查询是两个并列平面：图查询返回结构化关系及可复核的文件定位，调用方可以继续直接读取完整的 `.spg`/`.tbl` 或 action source。Grafeo 不需要承载完整 raw JSON，也不要求用 Cypher 重现 jq 的任意 JSON 子树能力。
 
 现有高层命令（`find`、`explain`、`relations`、`query-*`）继续保留；新增低层只读查询能力，用于取证、探索和补充高层语义输出。
 
 ## 2. 现状与约束
 
 - 当前 `GraphReadStore` 只提供按 ID 取节点、邻边、遍历节点和计数，不能表达任意过滤、投影、聚合或路径查询。
-- 当前节点/边只保存被 scanner 选择的 `meta`；原始 SPG/TBL 中未抽取的字段不一定存在于图中。
+- 当前节点/边只保存被 scanner 选择的 `meta`；原始 SPG/TBL 中未抽取的字段不一定存在于图中，这不是图后端必须填平的缺口，而是由原始文件读取平面补足。
 - redb/petgraph 当前没有 Cypher 执行层；“Cypher 透传”只有在底层引擎支持 Cypher 时才是真透传，否则属于受限 Cypher 编译器。
-- M58.3 页面局部模型 ID、schema version、表达式和事实输出仍在收尾，新的查询平面不能固化旧的全局 `model:<name>` / `field:<model>.<field>` 身份。
+- M58.3 已按 PR1/PR2 范围收口；页面局部模型 ID、schema version、表达式和事实输出仍是未完成输入，新的查询平面不能固化旧的全局 `model:<name>` / `field:<model>.<field>` 身份。
 - xiaoshouyi 当前性能基线记录约为 89,094 节点、199,575 条边、514 MiB graphdb，stdio 启动加载约 1,008 秒；release binary 约 3.6 MiB。这是性能基线快照，不等同于下述 2026-08-30 session 工作态；阶段 0 必须重新钉住可复现的源目录、提交/内容 hash 和清单。新方案必须测量是否能避免全量 hydrate，而不只比较文件大小。
 - Rust 2024、四平台构建、release binary 10MB 上限、只读安全和现有 `AiOutput`/`--non-human` 契约继续有效。
 
@@ -31,7 +33,7 @@
 
 这些证据对查询平面的直接影响是：
 
-1. 查询对象不能只有 nodes/edges，还必须能返回原始文档、action 源码引用和 JSON 路径；
+1. 图查询结果必须能返回 `source_file`、`json_path`、action source 引用和 snapshot/hash；原始文件正文由调用方直接读取，不要求图数据库保存 `documents` 表；
 2. 结果必须保留“业务规范 / 静态实现 / 交付快照 / 运行事实 / 外部回执”的证据层级，不能把页面存在或接口调用成功写成业务完成；
 3. 查询接口需要显式处理多命中、抽样、截断和未覆盖范围，不能把空结果当成“不存在”；
 4. 真实 session 中的 jq 命令应成为阶段 0 的固定回归集，尤其是那些当前 `find`/`explain`/`relations` 无法表达的联合查询；但必须先按查询意图分类，区分原始元数据查询、工具响应裁剪和展示格式化，并脱敏、规范化结果。
@@ -45,10 +47,10 @@
 交付物：查询缺口清单，至少 20–30 条样例，覆盖：
 
 - 图关系、邻接和有限路径；
-- 原始 JSON 任意子树或字段；
-- 图关系与原始文档联合查询。
+- 图查询结果定位到原始 JSON 任意子树或字段；
+- 图定位后直接读取原始文件的两阶段流程。
 
-每条样例记录原始命令（脱敏）、查询意图分类、规范化期望结果、当前工具缺口、证据路径、快照 hash 和可接受的输出大小；把响应裁剪/格式化样例单列，不把包装差异当作查询能力缺口。
+每条样例记录原始命令（脱敏）、查询意图分类、规范化期望结果、当前工具缺口、证据路径、快照 hash 和可接受的输出大小；把响应裁剪/格式化样例单列，不把包装差异当作查询能力缺口。原始 JSON/jq 样例作为“文件读取回归”记录，不要求全部翻译成 Cypher。
 
 **门槛**：没有真实样例，不进入后端选型结论。
 
@@ -58,25 +60,25 @@
 
 - 哪些节点、边、表达式和 `meta` 已入图；
 - 哪些细节只能从原始 SPG/TBL 取得；
-- `source_file`、`json_path`、文件 hash 与图事实如何关联；
+- `source_file`、`json_path`、文件 hash 与图事实如何关联，以及调用方如何据此直接打开完整原始文件；
 - M58.3 页面局部模型迁移后需要保留的节点、边和目标语法。
 
 交付物：事实覆盖矩阵和最终候选查询 schema，至少包含：
 
-`nodes`、`edges`、`documents`、`file_states`、`scanner_diagnostics`、`graph_meta`。
+`nodes`、`edges`、`file_states`、`scanner_diagnostics`、`graph_meta`；原始文件正文不属于 Grafeo/DuckDB 投影的必选表。
 
-每条可查询事实还必须有 `evidence_layer`（业务规范/静态实现/交付快照/运行事实/外部回执）、`source_kind`（graph/raw/action/runtime/external）、`snapshot_id`、`coverage_status`（complete/partial/sampled/truncated/unavailable）和稳定的 `source_file`/`json_path`；空结果必须能区分“不存在”和“未覆盖/外部不可用”。
+每条可查询事实还必须有 `evidence_layer`（业务规范/静态实现/交付快照/运行事实/外部回执）、`source_kind`（graph/raw/action/runtime/external）、`snapshot_id`、`coverage_status`（complete/partial/sampled/truncated/unavailable）和稳定的 `source_file`/`json_path`；空结果必须能区分“不存在”和“未覆盖/外部不可用”。这些字段是原始文件复核的定位契约，不代表 raw 内容已复制进图。
 
 ### 阶段 2：候选后端深度研究
 
 候选至少包括：
 
 1. DuckDB + SQL/JSON；
-2. 可嵌入且支持 Cypher 的图数据库；
+2. Grafeo（嵌入式 Rust、原生 Cypher、`with_read_store`）；
 3. 基于现有 `GraphReadStore` 的受限 Cypher；
 4. SQLite 或其他轻量 SQL 控制组。
 
-研究维度固定为：维护状态、许可证、Rust API、四平台、二进制体积、JSON 能力、只读隔离、参数绑定、超时/取消、事务、增量更新、冷启动、内存、查询延迟、原始文档证据定位。
+研究维度固定为：维护状态、许可证、Rust API、四平台、二进制体积、结构化属性/JSON 能力、只读隔离、参数绑定、超时/取消、事务、增量更新、冷启动、内存、查询延迟、原始文件证据定位。候选后端的 JSON 能力只评估图内选定属性，不把它当作 jq 或文件读取替代品。
 
 **证据规则**：优先官方文档和官方仓库；记录版本日期；区分事实、推断和未验证项；不得把 DuckDB 当作原生 Cypher 引擎描述。
 
@@ -103,25 +105,26 @@
 - 最大行数、字节数、跳数和执行时间；
 - 结构化错误、截断标记和诊断；
 - 每条事实的节点/边 ID、`source_file`、`json_path`、`evidence_layer`、`source_kind`、`snapshot_id`、`coverage_status`；
+- 明确图查询只返回文件定位，不读取任意路径；原始文件读取沿既有 provider/CLI 权限与项目根目录边界执行；
 - `--non-human` 单 JSON 输出；
 - 禁止写操作、任意文件读取、外部网络和无界遍历；
-- 原始文档中的凭据、token、cookie 等敏感字段的脱敏或拒绝策略。
+- 若图投影携带来自原始文件的值，凭据、token、cookie 等敏感字段的脱敏或拒绝策略；原始文件正文仍沿既有 provider/CLI 合同读取。
 
 如果最终使用受限 Cypher，第一版只支持 `MATCH`、有限跳数关系、`WHERE`、`RETURN`、`ORDER BY`、`LIMIT`，不宣称完整 openCypher 兼容。
 
 ### 阶段 4：非侵入式原型
 
-暂不删除 redb。由 `SPG/TBL + action-source manifest -> projection` 的独立生成器从固定源快照生成查询投影或临时 DuckDB 数据库，同时保留当前运行时路径；查询-only 进程必须验证不打开、不 hydrate redb，不能从已 hydrate 的 redb 再生成投影。action 源文件以 `source_kind=action` 进入 `documents`/引用索引，并保留路径、hash 和脱敏状态；若某类 action 仅能保留引用而不能查询正文，必须显式标为 `coverage_status=unavailable`，不得伪装成完整覆盖。
+暂不删除 redb。由 `SPG/TBL + action-source manifest -> graph projection` 的独立生成器从固定源快照生成查询投影或临时 DuckDB/Grafeo 数据库，同时保留当前运行时路径；查询-only 进程必须验证不打开、不 hydrate redb，不能从已 hydrate 的 redb 再生成投影。action source 只需以 `source_kind=action`、路径、hash 和脱敏状态作为图事实或引用元数据；正文继续由原始文件读取链路提供，不建立完整 `documents` 表作为基线要求。
 
 原型需要验证：
 
-- 真实 jq 样例是否可以逐条重现；
-- 原始 JSON 和图关系能否联合查询；
-- 查询是否能返回足够的证据定位；
+- 图查询是否能为真实 jq 样例逐条返回足够的定位信息；
+- 调用方能否依据定位读取完整原始 SPG/TBL 或 action source；
+- 两阶段“图定位 → 原始文件复核”是否保持证据一致；
 - 是否可以绕过启动时完整 hydrate redb；
 - 高层命令输出不发生变化。
 
-补充负向验收：拒绝写语句、任意文件读取、路径穿越、外部网络访问和无界遍历；验证嵌套敏感字段脱敏/拒绝、源库 hash 不变、超时取消和结构化错误。
+补充负向验收：图查询拒绝写语句、任意路径读取、路径穿越、外部网络访问和无界遍历；原始文件读取仍走既有权限/根目录校验；验证源库 hash 不变、超时取消和结构化错误。
 
 受限 Cypher方案应与 DuckDB SQL方案分别做最小 spike，不直接开始完整 parser 或全量迁移。
 
@@ -151,18 +154,19 @@
 - 增量更新、崩溃恢复和旧库迁移；
 - redb 保留、双写、投影或完全替换的边界。
 
-正式迁移须在 M58.3 页面局部 schema 和最终重建验收后进行，避免把旧身份问题复制到新后端。
+正式迁移须先重新处理 M58.3 尚未完成的页面局部身份/schema 与重建验收，或明确记录兼容适配器；
+不能因为选择了 Grafeo/DuckDB 就把这些遗留项视为已解决，避免把旧身份问题复制到新后端。
 
 ## 4. 推荐的初始技术路线
 
-完成阶段 0–3 并进入阶段 4 后，优先做“DuckDB 查询投影 + 原始 documents 表”的 spike，同时保留现有 redb 运行时；并行评估“受限 Cypher 编译到 GraphReadStore/SQL”的模型体验。
+完成阶段 0–3 并进入阶段 4 后，优先做“Grafeo 原生 Cypher / `with_read_store` + 图投影”的 spike，同时保留现有 redb 运行时；以 DuckDB SQL 和受限 Cypher 作为对照。原始文件不进入候选后端，使用真实 jq 样例验证“图定位 → 文件复核”链路。
 
 理由：
 
-- 原始 JSON 细节是 jq 回退的主要来源，SQL/JSON 对这类查询更直接；
-- 图关系可以用 `nodes`/`edges` 表和视图表达；
+- 现有痛点的核心是结构化图查询缺口，Grafeo 原生 Cypher 更贴近目标交互；
+- 原始 JSON 仍由用户/LLM 直接读取，不需要再造一套 jq 替代层；
 - 可以先验证按需查询是否解决冷启动和低层取证问题；
-- 不需要在第一轮就承担完整 Cypher 引擎或大规模持久化迁移风险。
+- 不需要在第一轮就承担 raw 文档复制、完整 JSON 查询语义或大规模持久化迁移风险。
 
 这只是原型顺序，不是最终后端结论。
 
@@ -170,8 +174,8 @@
 
 计划完成必须同时满足：
 
-1. 真实 jq 缺口有明确替代查询；
-2. 图事实和原始文档事实均可查询；
+1. 真实 jq 缺口有明确的图定位查询或两阶段替代流程；
+2. 图事实可查询，原始文件可沿定位直接复核；
 3. 结果带可复核的文件/JSON 路径；
 4. 现有高层命令和 M58.3 验收不退化；
 5. 查询接口只读、限额、可取消、错误可见；

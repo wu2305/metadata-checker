@@ -1,12 +1,34 @@
 # M58.3 缺口修复与可观测性打底设计
 
-> 状态：**approved**（2026-08-24 用户批准；五轮独立评审修订，修订点见文末「评审修订记录」）
-> 里程碑：M58.3（三动词命令表面收敛，active）
+> 状态：**closed（范围收口，2026-09-05）**（2026-08-24 用户批准；五轮独立评审修订，修订点见文末「评审修订记录」）
+> 里程碑：M58.3（三动词命令表面收敛，closed at PR1/PR2 scope）
 > 配套计划：`docs/plans/2026-08-24-m58-3-command-surface-gap-fixes-plan.md`（多 PR 硬规则要求，
 > 见 `docs/governance/planning.md:34`）
 > 上游证据：[M58 journal 2026-08-23 节](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)（5 项缺口实跑记录）+
 > `docs/ai-eval-runs/2026-08-23-m58-2-gold-verification/`（逐 case 证据产物）
 > 根因分析：2026-08-23 三路并行代码解剖（scanner/图构建、查询/解释、横切指标），结论见本文第 1 节。
+
+## 收口边界（2026-09-05）
+
+本 spec 的实现状态收口为：**PR1 与 PR2 已落地并完成复核；PR3、PR4a、PR4b、PR5、PR6
+不在本轮声称完成**。因此，本文保留这些后续设计作为历史决策记录，但不能把下方完整验收
+条款解读为已经全部通过。
+
+已落地范围：
+
+- 统一诊断信封、hydrate/scanner 计数、runtime/query 传播和坏行诊断测试；
+- F1 形态感知递归、F2 祖先链确定性选父、ComponentProperty comp→comp `DependsOn`；
+- 附录 A 同 pin 重跑与 PR2 真实项目性能基线。
+
+未落地范围：
+
+- F3 表达式递归合并；
+- F4 页面局部模型身份、schema 版本与强制重建；
+- F5/F6 value-source/writer 事实输出契约；
+- PR6 全量 graphdb 重建、13 case 重放、断言变迁台账和 11-case 首轮基线。
+
+这些未落地项转为后续查询平面/证据链设计的输入；尤其页面局部身份仍需单独决策，不能因
+引入 Grafeo 或其他后端而默认视为已解决。
 
 ## 1. 根因分析结论（修复的事实基础）
 
@@ -255,7 +277,10 @@ bump `REDB_V2_SCHEMA_VERSION`（`graph_redb_v2.rs:17`）**不会**重建旧 v1 �
 - 不动已冻结的 JSON-command runner。
 - 不重排既有 case 的 gold；断言值变化走验收第 5 条的变迁台账。
 
-## 4. 验收
+## 4. 验收（原设计契约；当前仅 PR1/PR2 范围关闭）
+
+下列条款是 M58.3 原批准设计的完整验收契约。收口时只对上方明确列出的 PR1/PR2 范围
+作已落地声明；涉及 PR3–PR6 的条款仍保持未完成状态，等待后续计划重新排序和验收。
 
 1. Phase 1 的诊断信封在构建输出、`--status`、查询响应三处可见；每个 code 有契约测试。
    硬指标：pin 语料（`xiaoshouyi-corpus @ 6920ac51`）全量构建的**正常路径诊断 = 0**；

@@ -10,8 +10,8 @@
 > Plan（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md](../../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（approved）
 > Spec（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-design.md](../../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)（approved）
 > Plan（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-plan.md](../../plans/2026-08-23-m58-4-llm-paired-benefit-plan.md)（done）
-> Spec（M58.3）：[2026-08-24-m58-3-command-surface-gap-fixes-design.md](../../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（approved；可观测性打底 + F1–F6 缺口修复 + Phase 3 页面内模型节点身份）
-> Plan（M58.3）：[2026-08-24-m58-3-command-surface-gap-fixes-plan.md](../../plans/2026-08-24-m58-3-command-surface-gap-fixes-plan.md)（approved）
+> Spec（M58.3）：[2026-08-24-m58-3-command-surface-gap-fixes-design.md](../../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（closed；PR1/PR2 已落地，PR3–PR6 deferred）
+> Plan（M58.3）：[2026-08-24-m58-3-command-surface-gap-fixes-plan.md](../../plans/2026-08-24-m58-3-command-surface-gap-fixes-plan.md)（closed；范围收口）
 
 ## 冻结公告（2026-08-09）
 
@@ -280,3 +280,26 @@ kimi-code **不钉死**：`curl install.sh` 取当前 harness，只把 `kimi_ver
 5. 表达式内模型引用解析粗糙：`IF(model6.totalRowCount__ …)` 的模型 id 被截成 `IF(model6`。
 
 **同步面**：fixture `eval_count` 13、`smoke.order` 1–11 连续；干跑脚本计数 36→66（record/stderr）、18→33（variant 曝光）、6→11（每 variant×trial transcript）、raw_fallback 6→12（两个 page overview case 的模板都含「入口」）；`test_load_smoke_cases_reads_real_fixture` / `test_smoke_subset_derives_from_fixture` 计数同步。引用规则不变：历史 6 问冒烟的数字仍是调试仪表；扩充后首轮 11 问 run 之前的绝对分数不可跨语料比较。
+
+### M58.3 收口（2026-09-05）
+
+状态：**closed（范围收口，不宣称完整六 PR 验收）**。
+
+M58.3 已经完成并保留在当前分支的范围是：
+
+- **PR1**：统一诊断信封、hydrate/scanner 计数、runtime/query 传播、坏行 hydrate 测试；
+  后续复核修复已收敛到 `1943105`、`fecaef2`、`f711611`、`d81ca07`、`dbfe4b8`、`312c938`；
+- **PR2**：F1 形态感知递归、F2 祖先链确定性选父、ComponentProperty comp→comp
+  `DependsOn` 图契约；实现起点为 `893c95b`、`e826ce1`，后续修复见 `feb5ad8`、
+  `4d85e94`、`7118bf2`、`41c011a`；
+- 附录 A 已按 pin 语料 `6920ac51` 重跑：到达 34,317，漏掉候选 343 全部属于排除列表，
+  `343 - 343 == 0`；PR2 真实项目节点/边、graphdb、构建/加载和查询基线已回填到
+  [performance-baseline.md](../performance/performance-baseline.md)。
+
+以下内容**未在 M58.3 收口前完成**，不把它们从缺口清单中抹掉：F3 表达式递归合并、F4
+页面局部模型身份与 schema 迁移、F5/F6 事实输出契约，以及 PR6 的全量重建、13 case
+重放、断言变迁台账和 11-case 首轮基线。它们转为后续本地图查询平面计划的输入；Grafeo
+选型不能默认替代页面身份迁移，也不能把未完成的事实契约包装成已通过。
+
+新的查询平面边界已同步明确：Grafeo/DuckDB 只负责结构化图查询；原始 SPG/TBL 和 action
+source 正文继续由调用方沿 `source_file`/`json_path` 直接读取，不强制复制进图数据库。
