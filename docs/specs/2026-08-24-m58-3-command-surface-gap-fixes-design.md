@@ -159,8 +159,8 @@ head 命中已抽取组件 id 的 `ModelField` 改写为 `ComponentProperty`（:
 与 `ComponentProperty`——**同一个 RefType，两个消费者契约不一致**。决定：scanner 为
 `ComponentProperty` 建 comp→comp `DependsOn` 边并带属性名（与 `dependency.rs` 语义
 对齐），不记诊断；补 `parse → 上下文解析 → scanner 建边` 贯通测试。当前语料仅 4 处
-（后缀 `.txt`×3、`.seconds`×1，附录 A 口径），但 F1 放开容器后新组件 id 会进入
-`component_ids` 集合、改写比例会变——**PR2 合入后须重测**。归属 PR2。
+（后缀 `.txt`×3、`.seconds`×1，附录 A 口径）。F1 放开容器后已按 PR2 口径重测，
+结果仍为 4 处，见附录 A「重跑确认」。归属 PR2。
 
 ### Phase 3：页面内模型节点身份——完整局部子图（原设计方向；当前 deferred）
 

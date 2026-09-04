@@ -44,7 +44,7 @@
 
 从惠通陆华分析仓库和上述 session 产物中收集实际使用过的 jq 命令，不用抽象猜测替代。记录命令对应的工具版本、源目录、git commit 或内容 hash；只保存脱敏后的命令和证据引用。对参与联合查询的服务动作和 TypeScript action 源文件建立固定快照 manifest，记录路径、内容 hash 和脱敏状态。
 
-交付物：查询缺口清单，至少 20–30 条样例，覆盖：
+交付物：查询缺口清单，20–30 条样例，覆盖：
 
 - 图关系、邻接和有限路径；
 - 图查询结果定位到原始 JSON 任意子树或字段；
@@ -114,7 +114,7 @@
 
 ### 阶段 4：非侵入式原型
 
-暂不删除 redb。由 `SPG/TBL + action-source manifest -> graph projection` 的独立生成器从固定源快照生成查询投影或临时 DuckDB/Grafeo 数据库，同时保留当前运行时路径；查询-only 进程必须验证不打开、不 hydrate redb，不能从已 hydrate 的 redb 再生成投影。action source 只需以 `source_kind=action`、路径、hash 和脱敏状态作为图事实或引用元数据；正文继续由原始文件读取链路提供，不建立完整 `documents` 表作为基线要求。
+暂不删除 redb。由 `SPG/TBL + action-source manifest -> graph projection` 的独立生成器从固定源快照生成查询投影或临时 DuckDB/Grafeo 数据库，同时保留当前运行时路径；查询-only 进程必须验证不打开、不 hydrate redb，不能从已 hydrate 的 redb 再生成投影。action source 只需以 `source_kind=action`、`source_file`、`source_hash`、`snapshot_id`、可选 `source_span` 和脱敏状态作为图事实或引用元数据；正文继续由原始文件读取链路提供，不建立完整 `documents` 表作为基线要求。
 
 原型需要验证：
 
@@ -147,7 +147,7 @@
 研究和 spike 通过后，另行提交后端无关的 approved spec/plan，明确：
 
 - query backend interface；
-- canonical 数据与 raw document schema；
+- canonical 图数据与 source-locator schema；raw body 是否保留由既有文件读取合同决定，不作为候选后端必选表；
 - schema/generation/checkpoint；
 - `IndexCommit` 原子语义；
 - LongLived deferred persistence；
