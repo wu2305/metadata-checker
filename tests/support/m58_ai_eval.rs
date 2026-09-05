@@ -2481,7 +2481,7 @@ M58 runner answer-shape override (apply after SKILL.md; 只约束最终回答的
 - 页面整体最终回答必须写出用户入口与写入目标的实际情况（有就说有多少、是什么；没有就说没有），并引用 literal section name。\\n\\
 - summary.conclusion 存在时，final answer 必须逐字照抄它给出的结论表述，不要换成同义词。\\n\\
 - summary.absent 非空时，把其中每条 statement 的说法逐条写进 final answer。\\n\\
-- summary.confidence.level 不是 full 时，必须按 summary.confidence.statement 与各 reason 的 effect 保守表达。\\n\\
+- 无论 summary.confidence.level 是否 full，final answer 都必须遵守 summary.confidence.statement 的表述约束；level 不是 full 时还必须逐条结合各 reason 的 effect 保守表达。\\n\\
 field final 必须 literal 包含 页面 action、写入、字段。\\n\\
 \\n\\
 Case Question: {}",

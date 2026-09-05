@@ -72,7 +72,8 @@ redb 真实路径。真正缺的是两类：**(a) 坏行 hydrate**（redb 里塞
 ```
 
 - `code`：稳定枚举字符串（初值见下表），进契约测试，不允许实现期自由发挥；
-- `severity`：`warning` / `error`；`answer_impact`：`none` / `partial` / `blocking`；
+- `severity`：`warning` / `error`（实现另有既有 `info` 意图档——如 `EVIDENCE_SAMPLED`、
+  `RESOLVED_TARGET`；权威映射以 `diagnostics.rs` 的 `severity_for` 显式表为准，dbfe4b8 起）；`answer_impact`：`none` / `partial` / `blocking`；
 - `sample_location`：首个样例的文件/节点定位（计数即可，不逐条刷屏）；
 - 落点三处都必须出现：构建输出 envelope、`--status` 的 `RuntimeStatus`、查询响应的
   `diagnostics` 数组。
@@ -89,6 +90,9 @@ redb 真实路径。真正缺的是两类：**(a) 坏行 hydrate**（redb 里塞
 | `GRAPH_DB_V2_LAYOUT_UNREADABLE` | `:178` 的 `read_v2_layout` Err/None 折叠路径 | none |
 | `GRAPH_DB_PARTIAL_HYDRATE` | 上面三类 hydrate 损失的**汇总闸门**：任一计数 > 0 即在该实例**所有**后续响应置顶（悬挂边无法归因到具体查询，不做按目标归因），confidence 降为 partial——缺失的边会把「未知」变成假的「无关系」，只计数不够 | partial |
 | `PAGE_SCOPED_TARGET_FALLBACK` | 页面限定回退全局模型（真实回退点 `page_logic.rs:155-170/:300-311`；既有信号 `page_scoped_target_not_resolved_fallback_to_global_model` 归入此 code） | partial |
+| `SCANNER_DIAGNOSTICS_REFRESH_FAILED` | diff-refresh 刷新 live scanner 诊断缓存失败，已透出的 SCANNER_* 可能陈旧（复核返修 1943105 新增，本表补登） | partial |
+| `SCANNER_DIAGNOSTICS_LOAD_FAILED` | 加载期 scanner 诊断缓存读取/合并失败，SCANNER_* 整体缺失（2026-09-05 复核返修新增；区别于 REFRESH_FAILED 的「可能陈旧」） | partial |
+| `RUNTIME_READ_MODEL_DEGRADED` | read model（派生只读索引）构建失败或整体跳过（2026-09-05 复核返修新增；只影响延迟，不影响答案正确性） | none |
 
 **传播与归属**（评审 P1-4 要求的硬设计）：
 
@@ -304,6 +308,12 @@ bump `REDB_V2_SCHEMA_VERSION`（`graph_redb_v2.rs:17`）**不会**重建旧 v1 �
      留作后续决策项（改动会影响诊断计数口径与快照）。
    - `SCANNER_DUPLICATE_COMPONENT_ID` = **218**（基线登记）：真实语料中跨容器复制产生的
      重复组件 id，属数据实情信号，非实现缺陷。
+
+     **PR2 合入后重测更新**（PR2 真实项目性能基线实测，见
+     [performance-baseline.md](../milestones/performance/performance-baseline.md) 诊断
+     计数表）：218 → **1,105**。口径：重复 id 按出现次数计；形态感知递归覆盖复制子树
+     所在的深层容器后，同一复制子树的每个子孙组件各计 1 次。与 UNRECOGNIZED 的
+     943→312 同属 F1 遍历面扩大的设计内后果。
 2. 当前已验证的 PR2 子集为 F1/F2/ComponentProperty：F1 的判据是
    `漏掉候选 − 排除列表命中数 == 0`（附录 A 口径，PR2 合入后重跑测量脚本确认），
    F2 的判据含说明 A 的测试电池；F3–F6 的证据和回归仍 deferred。

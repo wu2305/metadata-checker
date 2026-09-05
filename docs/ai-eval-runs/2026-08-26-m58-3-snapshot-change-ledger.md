@@ -7,16 +7,36 @@
 
 ## b3d67d3 — PR2 落地后 corpus 快照重建
 
+> 2026-09-05 hostile review 补登：原条目把「旧值/新值」登记为审计脚本候选数
+> （26,007→34,317），不是任何快照断言字段，且漏登记断言 5 的 severity 翻转。
+> 以下按 spec 验收第 5 条格式逐断言重登。
+
 - **case_id**：`tests/corpus_snapshot_tests.rs` 全量快照（fixture corpus）
-- **断言**：组件/边计数类字段（各快照的 counts、related 集合规模）
-- **旧值**：白名单递归口径（组件数 26,007，见 spec 附录 A）
-- **新值**：形态感知递归口径（组件数 34,317，+32%），新增 comp→comp Contains 与
-  继承链数据上下文边
+- **断言 1**：`context_button1_depth1.json` 的 `related_components_count`
+  - 旧值：0；新值：1
+  - 原因：PR2 comp→comp Contains 边落地，button1 的父容器进入 related_components
+- **断言 2**：`context_button1_depth1.json` 的 `related_nodes_count`
+  - 旧值：2；新值：3
+  - 原因：同上，Contains 边带入一个新增关联节点
+- **断言 3**：`query_page_logic_actions_test.json` 的 `primary_paths_count`
+  - 旧值：35；新值：36
+  - 原因：新 Contains 路径进入路径发现
+- **断言 4**：`query_page_logic_actions_test.json` 的 `related_context_count`
+  - 旧值：86；新值：81
+  - 原因：F2 祖先链继承口径变化
+- **断言 5（补登，原条目漏登记）**：`query_page_logic_actions_test.json` 的
+  `diagnostics[EVIDENCE_SAMPLED].severity`
+  - 旧值：`Info`；新值：`Warning`
+  - 原因：**把 bug 输出锁成了期望值**——PR1 初版 `severity_for` 忽略入参恒返回
+    Warning，`EVIDENCE_SAMPLED`（按设计采样，意图 Info）被静默升档，本提交重建
+    快照时把错误的 Warning 固化为期望值。后由 `dbfe4b8`（severity_for 显式映射表）
+    修复、`312c938` 重建快照回归 Info（见下方条目）。溯源链在此补齐
 - **源证据命令**：`UPDATE_CORPUS_SNAPSHOTS=1 cargo test --features cli-local --test corpus_snapshot_tests`；
   交叉证据 `python3 tools/corpus-shape-audit.py --corpus <xiaoshouyi>`（
   `docs/ai-eval-runs/2026-08-25-m58-3-corpus-shape-audit-post-pr2.json`，
-  `acceptance_gap_missed_minus_exclusion == 0`）
-- **复核人决定**：PR2（spec F1/F2）设计内的口径扩展，非回归
+  `acceptance_gap_missed_minus_exclusion == 0`；34,317 为审计脚本候选数，非快照断言）
+- **复核人决定**：断言 1–4 为 PR2（spec F1/F2）设计内的口径扩展，非回归；断言 5 为
+  缺陷显影，已按上述链路修复回归（2026-09-05 独立验收复核确认补登）
 
 ## 41c011a — 前向引用修复（feb5ad8）后的快照重建
 
@@ -44,6 +64,8 @@
 - **断言**：`diagnostics[EVIDENCE_SAMPLED].severity`
   - 旧值：`Warning`；新值：`Info`
   - 原因：`severity_for` 原实现忽略入参恒返回 Warning，`EVIDENCE_SAMPLED`（按设计采样）
-    被静默升档；显式映射表恢复其意图 severity。`UNKNOWN_ACTION_TYPE` 保持 Warning 不变
+    被静默升档；显式映射表恢复其意图 severity。`UNKNOWN_ACTION_TYPE` 保持 Warning 不变。
+    注：旧值 Warning 是 `b3d67d3` 在 bug 存续期重建快照时锁入的（该条目已于
+    2026-09-05 补登此翻转，见上方断言 5）
 - **源证据命令**：`UPDATE_CORPUS_SNAPSHOTS=1 cargo test --features cli-local --test corpus_snapshot_tests`
 - **复核人决定**：severity 回归设计意图，非内容变化；待独立验收者复验
