@@ -65,19 +65,17 @@ fn cond_to_component_symbol_edge_lands_with_target_property() {
     // meta.target_property 记录属性名
     let cond_a = cond_node_id("exprA#value#0");
     assert!(
-        store
-            .get_node(&cond_a)
-            .expect("get_node")
-            .is_some(),
+        store.get_node(&cond_a).expect("get_node").is_some(),
         "cond 节点应存在: {cond_a}"
     );
     let neighbors = store
         .get_node_edges(&cond_a)
         .expect("get_node_edges")
         .unwrap_or_else(|| panic!("{cond_a} 应有邻居"));
-    let prop_edge = neighbors.outgoing.iter().find(|v| {
-        v.edge.edge_type == EdgeType::DependsOn && v.edge.to == comp_node_id("txtB")
-    });
+    let prop_edge = neighbors
+        .outgoing
+        .iter()
+        .find(|v| v.edge.edge_type == EdgeType::DependsOn && v.edge.to == comp_node_id("txtB"));
     let prop_edge = prop_edge.unwrap_or_else(|| {
         panic!(
             "缺 cond→comp DependsOn 边（P1-4 修复前目标节点 id 带 .txt 后缀不存在，边被静默丢弃）: {:?}",
@@ -110,9 +108,10 @@ fn cond_to_component_symbol_edge_lands_with_target_property() {
         .get_node_edges(&cond_c)
         .expect("get_node_edges")
         .unwrap_or_else(|| panic!("{cond_c} 应有邻居"));
-    let bare_edge = neighbors_c.outgoing.iter().find(|v| {
-        v.edge.edge_type == EdgeType::DependsOn && v.edge.to == comp_node_id("txtB")
-    });
+    let bare_edge = neighbors_c
+        .outgoing
+        .iter()
+        .find(|v| v.edge.edge_type == EdgeType::DependsOn && v.edge.to == comp_node_id("txtB"));
     let bare_edge = bare_edge.unwrap_or_else(|| {
         panic!(
             "裸 component 符号边应落图: {:?}",
@@ -123,10 +122,7 @@ fn cond_to_component_symbol_edge_lands_with_target_property() {
                 .collect::<Vec<_>>()
         )
     });
-    assert_eq!(
-        bare_edge.edge.field_path.as_deref(),
-        Some("component:txtB")
-    );
+    assert_eq!(bare_edge.edge.field_path.as_deref(), Some("component:txtB"));
     assert!(
         bare_edge
             .edge
@@ -210,9 +206,10 @@ fn extra_key_component_action_condition_recorded_with_real_json_path() {
         .expect("get_node_edges")
         .unwrap_or_else(|| panic!("{cond_id} 应有邻居"));
     assert!(
-        neighbors.outgoing.iter().any(|v| {
-            v.edge.edge_type == EdgeType::DependsOn && v.edge.to == action_node
-        }),
+        neighbors
+            .outgoing
+            .iter()
+            .any(|v| { v.edge.edge_type == EdgeType::DependsOn && v.edge.to == action_node }),
         "缺 cond→action owner 边: {:?}",
         neighbors
             .outgoing
