@@ -71,4 +71,6 @@ M57：
 M58：
 
 - [2026-07-17-cheap-model-comprehension-eval-design.md](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（draft）
+- [2026-08-24-m58-3-command-surface-gap-fixes-design.md](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（closed，范围收口至 PR1/PR2）
+- [2026-09-05-m58-3-condition-symbol-normalization-design.md](../specs/2026-09-05-m58-3-condition-symbol-normalization-design.md)（approved）
 - journal：[m58-cheap-model-comprehension-eval.md](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)
