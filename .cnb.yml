@@ -437,9 +437,16 @@
   # /wu2305/succbi_project_container 返回 403、GET /wu2305/metadata-checker 返回 200，
   # 因此 dev 环境里直接 clone 语料会失败。流水线侧的 CNB_TOKEN 有跨仓授权，
   # dev 环境没有，差别不在 imports 而在 token 本身。
-  # 这里复用 full-criterion 已在用的 REAL_PROJECT_FIXTURE_DEPLOY_TOKEN。
-  imports:
-    - https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
+  #
+  # 下面这行 imports 现在**不能**打开：real-fixture.yml 自身声明了 allow_events，
+  # vscode 不在其中，加上会让 Prepare 阶段直接失败、整个开发环境起不来：
+  #   Pipeline init error: event: vscode does not conform to allow_events of
+  #   https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
+  # 要启用：先在 metadata-checker-keys 仓的 real-fixture.yml 里把 vscode 加进
+  # allow_events，再取消下面两行注释。放开前请确认：这等于允许该部署 token 注入到
+  # 可交互 SSH 的开发环境里，而不只是短生命周期的流水线。
+  # imports:
+  #   - https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
   env:
     CARGO_TARGET_DIR: target/cnb/workspace
   stages:
