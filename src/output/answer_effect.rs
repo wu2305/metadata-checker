@@ -183,6 +183,13 @@ pub fn answer_effect(code: &str) -> Option<(AnswerImpact, &'static str)> {
 ///
 /// `level` 只由「不确定」和「部分数据」两类决定：确定性的「没有」和寻址问题都不该
 /// 让模型给一个本来能确定的答案降级。
+///
+/// M58.3 复核返修（P1-3）：`answer_impact` 的权威来源是
+/// [`crate::diagnostics::answer_impact_for`] 显式表，其中 SCANNER_* 等 code 登记为
+/// partial 但不进 [`answer_effect`] 注册表（不产 effect 文案、不降 confidence
+/// level——spec 只让 GRAPH_DB_PARTIAL_HYDRATE 降 level）。因此 full 档 statement 的
+/// 判空必须基于最终 `answer_impact`，而不是 answer_effect 注册表：否则响应同时携带
+/// `answer_impact: "partial"` 的诊断和一句「没有降低置信度的诊断」，自相矛盾。
 pub struct AnswerConfidence {
     pub level: &'static str,
     pub statement: String,
@@ -194,33 +201,56 @@ pub fn summarize_confidence<'a>(codes: impl IntoIterator<Item = &'a str>) -> Ans
     let mut reasons: Vec<(String, &'static str, &'static str)> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let (mut uncertain, mut partial) = (false, false);
+    // answer_effect 未登记但最终 answer_impact 非 none 的 code（如 SCANNER_*）：
+    // 不降 level、不进 reasons（无 effect 文案可引，「宁可不说，也不要瞎说」），
+    // 但 full 档 statement 不得再声称不存在这类诊断。
+    let mut unregistered_impact_codes: Vec<&str> = Vec::new();
     for code in codes {
-        let Some((impact, effect)) = answer_effect(code) else {
-            continue;
-        };
-        match impact {
-            AnswerImpact::Uncertain => uncertain = true,
-            AnswerImpact::Partial => partial = true,
-            _ => {}
-        }
-        if seen.insert(code.to_string()) {
-            reasons.push((code.to_string(), impact.as_str(), effect));
+        match answer_effect(code) {
+            Some((impact, effect)) => {
+                match impact {
+                    AnswerImpact::Uncertain => uncertain = true,
+                    AnswerImpact::Partial => partial = true,
+                    _ => {}
+                }
+                if seen.insert(code.to_string()) {
+                    reasons.push((code.to_string(), impact.as_str(), effect));
+                }
+            }
+            None => {
+                if crate::diagnostics::answer_impact_for(code) != crate::diagnostics::IMPACT_NONE
+                    && !unregistered_impact_codes.contains(&code)
+                {
+                    unregistered_impact_codes.push(code);
+                }
+            }
         }
     }
     let (level, statement) = match (uncertain, partial) {
         (true, _) => (
             "reduced",
-            "本次输出存在语义不确定的诊断，涉及它们的结论应保守回答，不要给出确定性判断。",
+            "本次输出存在语义不确定的诊断，涉及它们的结论应保守回答，不要给出确定性判断。"
+                .to_string(),
         ),
         (false, true) => (
             "partial",
-            "本次输出是部分数据，结论只覆盖已展示的部分，不要断言「只有这些」。",
+            "本次输出是部分数据，结论只覆盖已展示的部分，不要断言「只有这些」。".to_string(),
         ),
-        (false, false) => ("full", "本次输出没有降低置信度的诊断，可以按事实直接作答。"),
+        (false, false) if !unregistered_impact_codes.is_empty() => (
+            "full",
+            format!(
+                "本次输出没有登记置信度影响的诊断；但 diagnostics 中存在 answer_impact 为 partial/blocking 的条目（{}），涉及它们覆盖范围的结论请保留余地，不要当作已确认无问题。",
+                unregistered_impact_codes.join("、"),
+            ),
+        ),
+        (false, false) => (
+            "full",
+            "本次输出没有降低置信度的诊断，可以按事实直接作答。".to_string(),
+        ),
     };
     AnswerConfidence {
         level,
-        statement: statement.to_string(),
+        statement,
         reasons,
     }
 }
@@ -276,6 +306,65 @@ mod tests {
         let confidence = summarize_confidence(["SOME_FUTURE_CODE"]);
         assert_eq!(confidence.level, "full");
         assert!(confidence.reasons.is_empty());
+        // answer_impact 兜底为 none 的未登记 code：full 档 statement 维持原文
+        assert!(confidence.statement.contains("没有降低置信度的诊断"));
+    }
+
+    /// M58.3 复核返修（P1-3）：SCANNER_* 显式登记 answer_impact=partial 但不进
+    /// answer_effect 注册表——不降 level（spec 只让 PARTIAL_HYDRATE 降级），
+    /// 但 full 档 statement 不得再声称「没有降低置信度的诊断」。
+    #[test]
+    fn unregistered_partial_codes_keep_level_full_but_statement_stays_honest() {
+        let confidence = summarize_confidence([
+            "SCANNER_UNRECOGNIZED_CONTAINER_KEY",
+            "SCANNER_DUPLICATE_COMPONENT_ID",
+        ]);
+        assert_eq!(confidence.level, "full");
+        assert!(
+            confidence.reasons.is_empty(),
+            "未登记 code 不产 effect 文案，不进 reasons: {:?}",
+            confidence.reasons
+        );
+        assert!(
+            !confidence.statement.contains("没有降低置信度的诊断"),
+            "携带 answer_impact=partial 诊断时 statement 不得说谎: {}",
+            confidence.statement
+        );
+        // statement 点名相关 code，便于消费方回查 diagnostics 数组；同 code 去重
+        assert!(
+            confidence
+                .statement
+                .contains("SCANNER_UNRECOGNIZED_CONTAINER_KEY")
+        );
+        let once = summarize_confidence([
+            "SCANNER_UNRECOGNIZED_CONTAINER_KEY",
+            "SCANNER_UNRECOGNIZED_CONTAINER_KEY",
+        ]);
+        assert_eq!(
+            once.statement
+                .matches("SCANNER_UNRECOGNIZED_CONTAINER_KEY")
+                .count(),
+            1,
+            "{}",
+            once.statement
+        );
+    }
+
+    /// 已登记 code 的 level 语义不受未登记 partial code 影响：
+    /// reduced/partial 档位与 statement 文案均照旧。
+    #[test]
+    fn registered_impact_still_drives_level_when_mixed_with_unregistered() {
+        let reduced =
+            summarize_confidence(["SCANNER_UNRECOGNIZED_CONTAINER_KEY", "UNKNOWN_ACTION_TYPE"]);
+        assert_eq!(reduced.level, "reduced");
+        assert!(reduced.statement.contains("语义不确定"));
+        assert_eq!(reduced.reasons.len(), 1, "{:?}", reduced.reasons);
+
+        let partial =
+            summarize_confidence(["SCANNER_DIAGNOSTICS_REFRESH_FAILED", "OUTPUT_TRUNCATED"]);
+        assert_eq!(partial.level, "partial");
+        assert!(partial.statement.contains("部分数据"));
+        assert_eq!(partial.reasons.len(), 1, "{:?}", partial.reasons);
     }
 
     #[test]

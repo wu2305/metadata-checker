@@ -21,6 +21,12 @@ pub const CODE_SCANNER_DUPLICATE_COMPONENT_ID: &str = "SCANNER_DUPLICATE_COMPONE
 /// M58.3 复核返修：diff-refresh 刷新 live scanner 诊断缓存失败，
 /// 已透出的 SCANNER_* 诊断可能陈旧
 pub const CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED: &str = "SCANNER_DIAGNOSTICS_REFRESH_FAILED";
+/// M58.3 复核返修（P1-1）：加载期 scanner 诊断缓存读取/合并失败，
+/// SCANNER_* 诊断整体缺失（区别于 REFRESH_FAILED 的「可能陈旧」）
+pub const CODE_SCANNER_DIAGNOSTICS_LOAD_FAILED: &str = "SCANNER_DIAGNOSTICS_LOAD_FAILED";
+/// M58.3 复核返修（P1-1）：read model（性能层派生索引）构建失败或整体跳过，
+/// 只影响延迟不影响答案正确性
+pub const CODE_RUNTIME_READ_MODEL_DEGRADED: &str = "RUNTIME_READ_MODEL_DEGRADED";
 pub const CODE_GRAPH_DB_NODE_DECODE_FAILED: &str = "GRAPH_DB_NODE_DECODE_FAILED";
 pub const CODE_GRAPH_DB_EDGE_DECODE_FAILED: &str = "GRAPH_DB_EDGE_DECODE_FAILED";
 pub const CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT: &str = "GRAPH_DB_EDGE_DANGLING_ENDPOINT";
@@ -46,6 +52,10 @@ pub fn answer_impact_for(code: &str) -> &'static str {
         CODE_SCANNER_DUPLICATE_COMPONENT_ID => IMPACT_PARTIAL,
         // 诊断缓存可能陈旧：涉及 SCANNER_* 诊断的结论只能视为部分可靠
         CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED => IMPACT_PARTIAL,
+        // 诊断整体缺失（加载失败）：同上，涉及 SCANNER_* 覆盖面的结论只能视为部分可靠
+        CODE_SCANNER_DIAGNOSTICS_LOAD_FAILED => IMPACT_PARTIAL,
+        // read model 是性能层派生索引，降级不影响答案正确性
+        CODE_RUNTIME_READ_MODEL_DEGRADED => IMPACT_NONE,
         CODE_GRAPH_DB_NODE_DECODE_FAILED => IMPACT_PARTIAL,
         CODE_GRAPH_DB_EDGE_DECODE_FAILED => IMPACT_PARTIAL,
         CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT => IMPACT_PARTIAL,
@@ -97,6 +107,12 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         "NO_ENTRYPOINTS" => DiagnosticSeverity::Info,
         // 检索/解析的良性空结果与多候选
         "NO_MATCHES_FOUND" | "AMBIGUOUS_RESOLUTION" => DiagnosticSeverity::Info,
+        // M58.3 复核返修（D1）：路由层表面诊断统一信封后，severity 由本表权威派生，
+        // 保持原 surface 层的 info 意图——目标补全留痕 / 多候选逐个作答 /
+        // 补充块取不到但主结果完整，均为按设计发生或纯提示
+        "RESOLVED_TARGET" | "AMBIGUOUS_TARGET_ANSWERED" | "SUPPLEMENT_UNAVAILABLE" => {
+            DiagnosticSeverity::Info
+        }
         // lineage 推断缺失 / 表达式超出解析能力：降低置信度提示，非数据错误
         "LINEAGE_SOURCE_MISSING" | "LINEAGE_EXPR_UNPARSED" | "EVIDENCE_LOCATION_MISSING" => {
             DiagnosticSeverity::Info
@@ -108,12 +124,16 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY
         | CODE_SCANNER_DUPLICATE_COMPONENT_ID
         | CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED
+        | CODE_SCANNER_DIAGNOSTICS_LOAD_FAILED
         | CODE_GRAPH_DB_NODE_DECODE_FAILED
         | CODE_GRAPH_DB_EDGE_DECODE_FAILED
         | CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT
         | CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE
         | CODE_GRAPH_DB_PARTIAL_HYDRATE
         | CODE_PAGE_SCOPED_TARGET_FALLBACK => DiagnosticSeverity::Warning,
+        // read model 构建失败属异常信号（非按设计），但只是性能层降级，
+        // 答案正确性不受影响由 answer_impact=none 表达
+        CODE_RUNTIME_READ_MODEL_DEGRADED => DiagnosticSeverity::Warning,
         // 循环依赖、DataFlow 结构残缺、模型/导航/可见性规则解析失败等
         "CYCLE_DEPENDENCY"
         | "DATAFLOW_NO_OUTPUT"

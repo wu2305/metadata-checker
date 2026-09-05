@@ -194,7 +194,9 @@ pub struct GraphRuntime {
     pub read_model: Option<Arc<RuntimeReadModel>>,
     /// 派生只读模型构建耗时（毫秒）。
     pub read_model_build_ms: u128,
-    /// 加载阶段的 hydrate 结构化诊断（PR1 存入 runtime，供 status/查询统一透出）
+    /// 加载阶段的结构化诊断（PR1 存入 runtime，供 status/查询统一透出）：
+    /// hydrate 损失、SCANNER_* 合并结果、scanner 诊断加载/合并失败（LOAD_FAILED）、
+    /// read model 降级（READ_MODEL_DEGRADED）
     pub load_diagnostics: Vec<crate::output::Diagnostic>,
 }
 
@@ -244,6 +246,88 @@ fn compute_prefix_hash(path: &std::path::Path, prefix_len: usize) -> u64 {
             .for_each(|b| b.hash(&mut hasher));
     }
     hasher.finish()
+}
+
+/// M58.3 复核返修（P1-1）：加载期 scanner 诊断缓存读取/合并失败的结构化诊断。
+///
+/// 与 diff-refresh 侧的 `SCANNER_DIAGNOSTICS_REFRESH_FAILED` 区分：加载失败意味着
+/// SCANNER_* 诊断整体缺失（而非可能陈旧），两者 answer_impact 同为 partial。
+fn scanner_diagnostics_load_failed(message: String) -> crate::output::Diagnostic {
+    crate::diagnostics::envelope_diagnostic(
+        crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_LOAD_FAILED,
+        1,
+        crate::output::Location::default(),
+        message,
+    )
+}
+
+/// M58.3 复核返修（P1-1）：read model（dense snapshot / 物化索引 / 页面依赖索引）
+/// 构建失败或整体跳过的结构化诊断。
+///
+/// read model 是性能层派生索引，降级只影响延迟不影响答案正确性，
+/// 故 answer_impact 为 none（见 `answer_impact_for` 显式表）。
+fn read_model_degraded_diagnostic(message: impl Into<String>) -> crate::output::Diagnostic {
+    crate::diagnostics::envelope_diagnostic(
+        crate::diagnostics::CODE_RUNTIME_READ_MODEL_DEGRADED,
+        1,
+        crate::output::Location::default(),
+        message,
+    )
+}
+
+/// M58.3 复核返修（P1-2）：把结构化 load_diagnostics 置顶合并进查询结果的
+/// diagnostics 数组（load 侧在前，PARTIAL_HYDRATE 保持首位；result 自带条目原序保留在后）。
+///
+/// 跨来源不按 code 去重——spec「传播与归属」：同一 code 只在一处产生（加载期归
+/// GraphRuntime，查询期归 page_logic diagnostics），code 本身即来源标识。旧实现按
+/// code 去重会把查询期同 code 的多条明细（如每条未解析导航各一条的
+/// UNRESOLVED_PAGE_NAVIGATION、按类型多条聚合的 UNKNOWN_ACTION_TYPE）静默丢到只剩
+/// 第一条。
+///
+/// PARTIAL_HYDRATE 的取舍：契约上它只有 hydrate 一个产生点（`HydrateDiagnostics::
+/// to_diagnostics` 置顶生成），load 侧与查询侧不会同时出现，因此不做特判去重；
+/// 若未来契约被破坏出现双份，保留两份是 fail-visible（优于静默丢一条），且
+/// confidence 重建路径（`confidence_value_with_extra` → `summarize_confidence`）本身
+/// 按 code 去重 reasons，不会重复降级。
+fn merge_load_diagnostics_ahead(
+    load_diagnostics: &[crate::output::Diagnostic],
+    result_diagnostics: &mut Vec<serde_json::Value>,
+) {
+    let mut merged: Vec<serde_json::Value> = Vec::new();
+    for diag in load_diagnostics {
+        match serde_json::to_value(diag) {
+            Ok(value) => merged.push(value),
+            Err(err) => {
+                // fail-visible：序列化失败（信封必填字段缺失属构造方 bug）
+                // 不得静默丢弃，用稳定兜底诊断替换，message 带原 code 与错误概要。
+                // 跨来源不再按 code 去重，result 自带同 code 条目（若有）无条件保留。
+                let fallback = crate::diagnostics::envelope_diagnostic(
+                    crate::diagnostics::CODE_DIAGNOSTIC_SERIALIZE_FAILED,
+                    1,
+                    crate::output::Location::default(),
+                    format!(
+                        "load diagnostic {} failed to serialize and was replaced: {}",
+                        diag.code, err
+                    ),
+                );
+                match serde_json::to_value(&fallback) {
+                    Ok(value) => merged.push(value),
+                    // 兜底诊断由 envelope_diagnostic 构造、必填字段齐全，
+                    // 正常不会失败；真失败时也要 fail-visible，留最小 JSON 占位
+                    Err(fallback_err) => merged.push(serde_json::json!({
+                        "severity": "warning",
+                        "code": crate::diagnostics::CODE_DIAGNOSTIC_SERIALIZE_FAILED,
+                        "message": format!(
+                            "load diagnostic {} failed to serialize: {}; fallback diagnostic also failed: {}",
+                            diag.code, err, fallback_err
+                        ),
+                    })),
+                }
+            }
+        }
+    }
+    merged.append(result_diagnostics);
+    *result_diagnostics = merged;
 }
 
 /// reload_if_changed 结果枚举
@@ -336,12 +420,15 @@ impl GraphRuntime {
         })?;
         let graph_load_ms = start.elapsed().as_millis();
 
-        let mut diagnostics = Vec::new();
-        diagnostics.push(format!("Graph loaded in {} ms", graph_load_ms));
         let mut load_diagnostics = graph.hydrate_diagnostics().to_diagnostics();
         // M58.3 PR1 refix（F2）：scanner 诊断（SCANNER_*）持久化在 redb，
         // 加载期并入 load_diagnostics——status() 与查询响应经既有管道自然透出，
-        // 不在查询层另造第二套信号。读取/合并失败不阻塞加载，降级为文本诊断。
+        // 不在查询层另造第二套信号。
+        // M58.3 复核返修（P1-1）：读取/合并失败不再吞进函数级死 vec，映射为结构化
+        // SCANNER_DIAGNOSTICS_LOAD_FAILED 进入 load_diagnostics——否则 --status 与查询
+        // 响应对「无 scanner 问题」与「scanner 诊断加载失败」不可区分（老库缺
+        // SCANNER_DIAGNOSTICS_TABLE 时 open_readonly 从不建表，必走 Err 分支）。
+        // 失败不阻塞加载：scanner 诊断缺失不影响图查询本身。
         // 注意：redb 连接 drop 时也会触碰 db 文件（clean-close 标记），因此所有
         // db I/O 必须发生在下方指纹采集之前，否则 check-reload 会误判文件已变更。
         match graph.load_scanner_diagnostic_entries() {
@@ -350,12 +437,14 @@ impl GraphRuntime {
                     &entries,
                 ) {
                     Ok(scanner_diagnostics) => load_diagnostics.extend(scanner_diagnostics),
-                    Err(error) => {
-                        diagnostics.push(format!("Scanner diagnostics merge failed: {error:#}"))
-                    }
+                    Err(error) => load_diagnostics.push(scanner_diagnostics_load_failed(format!(
+                        "Scanner diagnostics merge failed: {error:#}"
+                    ))),
                 }
             }
-            Err(error) => diagnostics.push(format!("Scanner diagnostics load failed: {error:#}")),
+            Err(error) => load_diagnostics.push(scanner_diagnostics_load_failed(format!(
+                "Scanner diagnostics load failed: {error:#}"
+            ))),
         }
 
         let (graph_file_mtime, graph_file_size) = std::fs::metadata(&path)
@@ -378,9 +467,12 @@ impl GraphRuntime {
             let dense_graph = DenseGraphSnapshot::from_graph(&graph).ok().map(Arc::new);
             dense_snapshot_build_ms = dense_started.elapsed().as_millis();
             if dense_graph.is_none() {
-                diagnostics.push(
-                    "DenseGraphSnapshot build failed; long-lived dense path disabled".to_string(),
-                );
+                // M58.3 复核返修（P1-1）：read model 构建失败与 scanner 诊断加载失败
+                // 同路——原死 vec 文本映射为结构化诊断进 load_diagnostics。
+                // read model 是性能层派生索引，降级不影响答案正确性（answer_impact=none）。
+                load_diagnostics.push(read_model_degraded_diagnostic(
+                    "DenseGraphSnapshot build failed; long-lived dense path disabled",
+                ));
             }
             let facts_started = Instant::now();
             let availability_facts = match crate::query::MaterializedAvailabilityFactsIndex::build(
@@ -388,9 +480,9 @@ impl GraphRuntime {
             ) {
                 Ok(index) => Arc::new(index),
                 Err(error) => {
-                    diagnostics.push(format!(
+                    load_diagnostics.push(read_model_degraded_diagnostic(format!(
                         "MaterializedAvailabilityFactsIndex build failed: {error}; using empty index"
-                    ));
+                    )));
                     Arc::new(crate::query::MaterializedAvailabilityFactsIndex::empty())
                 }
             };
@@ -400,9 +492,9 @@ impl GraphRuntime {
                 let page_dependency_index = match crate::query::PageDependencyIndex::build(&graph) {
                     Ok(index) => Arc::new(index),
                     Err(error) => {
-                        diagnostics.push(format!(
+                        load_diagnostics.push(read_model_degraded_diagnostic(format!(
                             "PageDependencyIndex build failed: {error}; using empty index"
-                        ));
+                        )));
                         Arc::new(crate::query::PageDependencyIndex::empty())
                     }
                 };
@@ -414,10 +506,9 @@ impl GraphRuntime {
                     page_dependency_index,
                 }))
             } else {
-                diagnostics.push(
-                    "Long-lived read model skipped: dense snapshot and materialized index both unavailable"
-                        .to_string(),
-                );
+                load_diagnostics.push(read_model_degraded_diagnostic(
+                    "Long-lived read model skipped: dense snapshot and materialized index both unavailable",
+                ));
                 None
             }
         } else {
@@ -765,6 +856,8 @@ impl GraphRuntime {
     /// hydrate 等其他 code 的诊断保持不动。
     /// M58.3 复核返修：替换同时清除 `SCANNER_DIAGNOSTICS_REFRESH_FAILED`
     /// warning（成功刷新即证明缓存口径已最新）。
+    /// M58.3 复核返修（P1-1）：同时清除 `SCANNER_DIAGNOSTICS_LOAD_FAILED`——
+    /// 刷新成功说明 durable entries 此刻可读可合并，加载期失败的成因已消失。
     pub fn replace_scanner_diagnostics(
         &mut self,
         scanner_diagnostics: Vec<crate::output::Diagnostic>,
@@ -773,6 +866,7 @@ impl GraphRuntime {
             diag.code != crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY
                 && diag.code != crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID
                 && diag.code != crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED
+                && diag.code != crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_LOAD_FAILED
         });
         self.load_diagnostics.extend(scanner_diagnostics);
     }
@@ -1146,59 +1240,7 @@ impl GraphRuntime {
                     .entry("diagnostics")
                     .or_insert_with(|| serde_json::json!([]));
                 if let Some(arr) = slot.as_array_mut() {
-                    // 构造置顶序列：先插入 load_diagnostics（PARTIAL_HYDRATE 已在首位），再追加原有
-                    let mut merged: Vec<serde_json::Value> = Vec::new();
-                    let mut seen_codes = std::collections::HashSet::new();
-                    for diag in &self.load_diagnostics {
-                        match serde_json::to_value(diag) {
-                            Ok(value) => {
-                                merged.push(value);
-                                seen_codes.insert(diag.code.clone());
-                            }
-                            Err(err) => {
-                                // fail-visible：序列化失败（信封必填字段缺失属构造方 bug）
-                                // 不得静默丢弃，用稳定兜底诊断替换，message 带原 code 与错误概要。
-                                // 原 code 不登记 seen_codes：result 自带同 code 条目（若有）
-                                // 是该 code 仅剩的可见副本，必须保留。
-                                let fallback = crate::diagnostics::envelope_diagnostic(
-                                    crate::diagnostics::CODE_DIAGNOSTIC_SERIALIZE_FAILED,
-                                    1,
-                                    crate::output::Location::default(),
-                                    format!(
-                                        "load diagnostic {} failed to serialize and was replaced: {}",
-                                        diag.code, err
-                                    ),
-                                );
-                                match serde_json::to_value(&fallback) {
-                                    Ok(value) => merged.push(value),
-                                    // 兜底诊断由 envelope_diagnostic 构造、必填字段齐全，
-                                    // 正常不会失败；真失败时也要 fail-visible，留最小 JSON 占位
-                                    Err(fallback_err) => merged.push(serde_json::json!({
-                                        "severity": "warning",
-                                        "code": crate::diagnostics::CODE_DIAGNOSTIC_SERIALIZE_FAILED,
-                                        "message": format!(
-                                            "load diagnostic {} failed to serialize: {}; fallback diagnostic also failed: {}",
-                                            diag.code, err, fallback_err
-                                        ),
-                                    })),
-                                }
-                            }
-                        }
-                    }
-                    for entry in arr.drain(..) {
-                        let code = entry
-                            .get("code")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        if let Some(code) = code {
-                            if seen_codes.contains(&code) {
-                                continue;
-                            }
-                            seen_codes.insert(code);
-                        }
-                        merged.push(entry);
-                    }
-                    *arr = merged;
+                    merge_load_diagnostics_ahead(&self.load_diagnostics, arr);
                 }
                 let codes: Vec<String> = self
                     .load_diagnostics
@@ -1427,4 +1469,137 @@ pub fn page_logic_cache_warm_structural_writes() -> usize {
 #[cfg(feature = "cli-local")]
 pub fn page_logic_cache_map_clone_elements() -> usize {
     PAGE_LOGIC_CACHE_MAP_CLONE_ELEMENTS.with(|counter| counter.get())
+}
+
+#[cfg(test)]
+mod tests {
+    //! M58.3 复核返修（P1-2）：`merge_load_diagnostics_ahead` 合并语义回归。
+    use super::*;
+
+    fn envelope_json(code: &str, message: &str) -> serde_json::Value {
+        serde_json::to_value(crate::diagnostics::envelope_diagnostic(
+            code,
+            1,
+            crate::output::Location::default(),
+            message,
+        ))
+        .expect("信封诊断序列化不应失败")
+    }
+
+    fn codes_of(entries: &[serde_json::Value]) -> Vec<&str> {
+        entries
+            .iter()
+            .filter_map(|entry| entry.get("code").and_then(|v| v.as_str()))
+            .collect()
+    }
+
+    /// load 侧置顶在前，result 自带条目原序保留在后，一条不丢。
+    #[test]
+    fn merge_prepends_load_diagnostics_and_keeps_every_result_entry() {
+        let load = vec![
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE,
+                3,
+                crate::output::Location::default(),
+                "partial hydrate",
+            ),
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_GRAPH_DB_NODE_DECODE_FAILED,
+                1,
+                crate::output::Location::default(),
+                "bad node row",
+            ),
+        ];
+        // 查询结果自带同 code 多条（每条未解析导航一条）+ 一个其他 code
+        let mut result_side = vec![
+            envelope_json("UNRESOLVED_PAGE_NAVIGATION", "nav to page A missing"),
+            envelope_json("UNRESOLVED_PAGE_NAVIGATION", "nav to page B missing"),
+            envelope_json("UNKNOWN_ACTION_TYPE", "unknown action type 'x'"),
+        ];
+
+        merge_load_diagnostics_ahead(&load, &mut result_side);
+
+        assert_eq!(
+            codes_of(&result_side),
+            vec![
+                "GRAPH_DB_PARTIAL_HYDRATE",
+                "GRAPH_DB_NODE_DECODE_FAILED",
+                "UNRESOLVED_PAGE_NAVIGATION",
+                "UNRESOLVED_PAGE_NAVIGATION",
+                "UNKNOWN_ACTION_TYPE",
+            ],
+            "load 置顶 + 查询侧同 code 多条全保留: {result_side:?}"
+        );
+    }
+
+    /// 跨来源同 code 不去重：code 本身即来源标识，同一 code 契约上只在一处产生；
+    /// 若契约被破坏，保留双份是 fail-visible，优于静默丢一条。
+    #[test]
+    fn merge_does_not_dedup_same_code_across_sources() {
+        let load = vec![crate::diagnostics::envelope_diagnostic(
+            "UNKNOWN_ACTION_TYPE",
+            1,
+            crate::output::Location::default(),
+            "load-side entry",
+        )];
+        let mut result_side = vec![
+            envelope_json("UNKNOWN_ACTION_TYPE", "query-side entry one"),
+            envelope_json("UNKNOWN_ACTION_TYPE", "query-side entry two"),
+        ];
+
+        merge_load_diagnostics_ahead(&load, &mut result_side);
+
+        assert_eq!(result_side.len(), 3, "{result_side:?}");
+        let messages: Vec<&str> = result_side
+            .iter()
+            .filter_map(|entry| entry.get("message").and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(
+            messages,
+            vec![
+                "load-side entry",
+                "query-side entry one",
+                "query-side entry two"
+            ],
+            "跨来源同 code 条目必须全部保留且 load 置顶: {messages:?}"
+        );
+    }
+
+    /// load 诊断序列化失败仍 fail-visible：兜底诊断替换进场，result 侧条目全保留。
+    #[test]
+    fn merge_unserializable_load_diagnostic_fails_visible() {
+        let load = vec![crate::output::Diagnostic {
+            severity: crate::output::DiagnosticSeverity::Warning,
+            code: crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE.to_string(),
+            message: "hand-built diagnostic missing envelope fields".to_string(),
+            location: crate::output::Location::default(),
+            suggestion: None,
+            count: None,
+            answer_impact: None,
+            first_seen_phase: None,
+        }];
+        let mut result_side = vec![envelope_json(
+            crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE,
+            "query-side copy of the same code",
+        )];
+
+        merge_load_diagnostics_ahead(&load, &mut result_side);
+
+        assert_eq!(
+            codes_of(&result_side),
+            vec![
+                crate::diagnostics::CODE_DIAGNOSTIC_SERIALIZE_FAILED,
+                crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE,
+            ],
+            "序列化失败替换为兜底诊断，result 侧同 code 条目不得被牵连丢弃: {result_side:?}"
+        );
+        let message = result_side[0]
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(
+            message.contains(crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE),
+            "兜底 message 必须带原 code: {message}"
+        );
+    }
 }

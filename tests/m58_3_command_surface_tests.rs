@@ -138,10 +138,11 @@ fn test_bare_target_is_resolved_by_the_tool() {
     );
 }
 
-/// diagnostics 必须是结构化对象，不能混入裸字符串。
+/// diagnostics 必须是六字段信封对象，不能混入裸字符串或旧形态。
 ///
 /// `AiOutput.diagnostics` 是 `Vec<Diagnostic>`；表面层曾往里塞 `format!` 出来的字符串，
-/// 按结构解析这个数组的调用方会直接崩在这里。
+/// 按结构解析这个数组的调用方会直接崩在这里。M58.3 复核返修（D1）后路由层
+/// surface_diagnostic 也走 `envelope_diagnostic` 构造，与查询层/runtime 合并层同一形态。
 #[test]
 fn test_surface_diagnostics_are_structured_objects() {
     let db = workspace("diagnostic-shape");
@@ -157,13 +158,21 @@ fn test_surface_diagnostics_are_structured_objects() {
         let object = entry
             .as_object()
             .unwrap_or_else(|| panic!("diagnostics 元素必须是对象：{entry}"));
-        for field in ["code", "severity", "message"] {
+        // 统一信封（M58.3 Phase 1）：六个字段写死，所有来源同一形态
+        for field in [
+            "code",
+            "severity",
+            "message",
+            "count",
+            "sample_location",
+            "answer_impact",
+            "first_seen_phase",
+        ] {
             assert!(object.contains_key(field), "缺少 {field}：{entry}");
         }
-        // 信封诊断为 sample_location；路由层 surface_diagnostic 仍是旧形态 location
         assert!(
-            object.contains_key("sample_location") || object.contains_key("location"),
-            "缺少 sample_location/location：{entry}"
+            !object.contains_key("location"),
+            "旧形态 location 键不得再出现：{entry}"
         );
     }
 }

@@ -1015,18 +1015,28 @@ fn merge_supplement(base: &mut serde_json::Value, key: &str, supplement: serde_j
 }
 
 /// 把路由层自己产生的诊断追加到输出的 `diagnostics` 数组。
-/// 构造一条符合 `AiOutput.diagnostics` 结构的诊断。
 ///
-/// 这个数组里其余元素全是 `{code, severity, message, location, suggestion}` 对象，
-/// 表面层此前往里塞裸字符串，任何按结构解析 diagnostics 的调用方都会在这里炸掉。
+/// M58.3 复核返修（D1）：统一走六字段信封构造路径（`envelope_diagnostic` →
+/// `Diagnostic` 序列化：`code/severity/count/sample_location/answer_impact/
+/// first_seen_phase` + message/suggestion），不再手写旧形态 JSON（location 键、
+/// 无 count/answer_impact/first_seen_phase）。severity 由 `severity_for(code)`
+/// 权威派生，保持本层原有 info 意图（RESOLVED_TARGET 等已在表中登记为 Info）。
 fn surface_diagnostic(code: &str, message: String) -> serde_json::Value {
-    serde_json::json!({
-        "severity": "info",
-        "code": code,
-        "message": message,
-        "location": { "source_file": null, "node_id": null, "json_path": null },
-        "suggestion": null,
-    })
+    match serde_json::to_value(metadata_checker::diagnostics::envelope_diagnostic(
+        code,
+        1,
+        metadata_checker::output::Location::default(),
+        message,
+    )) {
+        Ok(value) => value,
+        // 信封必填字段由 envelope_diagnostic 全量构造，正常不会失败；
+        // 真失败也要 fail-visible，留最小 JSON 占位（与 runtime 合并路径同策略）。
+        Err(error) => serde_json::json!({
+            "severity": "warning",
+            "code": metadata_checker::diagnostics::CODE_DIAGNOSTIC_SERIALIZE_FAILED,
+            "message": format!("surface diagnostic {code} failed to serialize: {error}"),
+        }),
+    }
 }
 
 fn append_diagnostics(result: &mut serde_json::Value, diagnostics: &[serde_json::Value]) {
