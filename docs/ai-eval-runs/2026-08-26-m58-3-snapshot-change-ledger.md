@@ -90,7 +90,9 @@
   - 新值：`... reads from 27 data sources`
   - 原因：断言 2 的计数在证据文案中的投影，非独立变化
 - **源证据命令**：`UPDATE_CORPUS_SNAPSHOTS=1 cargo test --test corpus_snapshot_tests`
-  （CNB 远端 workspace `cnb-abg-1k1ofgjjt`）
+  （CNB 远端 workspace `cnb-abg-1k1ofgjjt`）。重建后全量回归
+  `cargo test --features cli-local --no-fail-fast`：**93 目标 1,148 通过 / 0 失败 /
+  24 忽略，退出码 0**；`cargo fmt --all -- --check` 干净
 - **复核人决定**：四条断言同源于一个缺陷修复，方向均为**消除垃圾节点**，
   新值为正确值，非回归。
 - **流程缺陷（自查登记）**：本次不一致是 `3f5960f` 落地时**当场就该暴露**的，
