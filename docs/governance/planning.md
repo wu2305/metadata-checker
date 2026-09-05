@@ -75,4 +75,9 @@ M58：
 - [2026-09-05-m58-3-condition-symbol-normalization-design.md](../specs/2026-09-05-m58-3-condition-symbol-normalization-design.md)（approved）
 - [2026-09-04-local-query-plane-and-backend-research-plan.md](../plans/2026-09-04-local-query-plane-and-backend-research-plan.md)（approved）
 - [2026-09-05-graph-backend-migration-plan-review.md](../plans/2026-09-05-graph-backend-migration-plan-review.md)（复核意见）
+
+M59（redb → Grafeo 迁移）：
+
+- [2026-09-05-grafeo-backend-migration-design.md](../specs/2026-09-05-grafeo-backend-migration-design.md)（approved）
+- 实测：[2026-09-05-grafeo-spike-measurements.md](../ai-eval-runs/2026-09-05-grafeo-spike-measurements.md)
 - journal：[m58-cheap-model-comprehension-eval.md](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)
