@@ -1979,7 +1979,10 @@ fn test_m58_bootstrap_prompt_contract_for_small_model() {
     // 回答形状跟着工具输出走，不替某一个页面的样子立模板。
     assert!(bootstrap.contains("summary.conclusion 存在时，final answer 必须逐字照抄"));
     assert!(bootstrap.contains("summary.absent 非空时"));
-    assert!(bootstrap.contains("summary.confidence.level 不是 full 时"));
+    // 置信度引导以 statement 为准（level==full 时 statement 也可能携带
+    // answer_impact=partial 诊断的保留口径，M58.3 复核返修 P1-3 起）
+    assert!(bootstrap.contains("无论 summary.confidence.level 是否 full"));
+    assert!(bootstrap.contains("summary.confidence.statement 的表述约束"));
     assert!(bootstrap.contains("field final 必须 literal 包含 页面 action、写入、字段"));
     assert!(bootstrap.contains("diagnostics"));
     assert!(bootstrap.contains("truncation"));
