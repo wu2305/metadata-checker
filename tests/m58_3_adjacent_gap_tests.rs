@@ -8,6 +8,9 @@
 //! - B：裸 `${modelN}` 的空字段名产出 `model:modelN.` 尾点符号与 `field:modelN.`
 //!   垃圾节点；
 //! - C：cond→param / user / system 三类目标节点从未创建，边被存储层整类丢弃；
+//! - C2（本轮新发现）：`${$user.x}` / `${$now}` 这类花括号包裹的 `$` 前缀 token
+//!   被判成 ModelField("$user", "x")，造出 `model:$user` / `field:$user.x` 垃圾
+//!   节点，用户属性血缘整条丢失（真实语料里有 `${$user.WXWORK_USER_ID}` 等多处）；
 //! - D：`canvas.panels` 等非 `canvas.components` 分支的组件 json_path 退回
 //!   `canvas.components[id='...']` 合成串，违反 raw JSON locator 契约。
 
@@ -204,5 +207,44 @@ fn condition_only_param_user_system_targets_get_nodes_and_edges() {
     assert!(
         targets.iter().any(|t| t.starts_with("user:")),
         "cond→user 边必须落库: {targets:?}"
+    );
+}
+
+/// 缺口 C2：`${$user.x}` / `${$now}` 与裸 `$user.x` / `$now` 同口径分类，
+/// 不再落成 `model:$user` / `field:$user.x` 垃圾节点。
+#[test]
+fn dollar_prefixed_tokens_inside_braces_classify_like_bare_form() {
+    use metadata_checker::superpage::{RefType, parse_expression_refs};
+
+    let braced = parse_expression_refs("${$user.dept_id}");
+    let bare = parse_expression_refs("$user.dept_id");
+    assert_eq!(
+        braced, bare,
+        "花括号包裹与裸形态必须分类一致: {braced:?} vs {bare:?}"
+    );
+    assert!(
+        braced
+            .iter()
+            .any(|r| matches!(r, RefType::UserProperty(p) if p == "user.dept_id")),
+        "必须是 UserProperty: {braced:?}"
+    );
+
+    let store = build_store(serde_json::json!({
+        "version": "1.0",
+        "canvas": {
+            "id": "canvas1",
+            "type": "Canvas",
+            "components": [{ "id": "txt1", "type": "text", "exp": "${$user.dept_id}" }]
+        }
+    }));
+    let garbage: Vec<String> = store
+        .iter_nodes()
+        .expect("iter_nodes")
+        .map(|n| n.id)
+        .filter(|id| id.starts_with("model:$") || id.starts_with("field:$"))
+        .collect();
+    assert!(
+        garbage.is_empty(),
+        "不得出现 $ 前缀的 model/field 垃圾节点: {garbage:?}"
     );
 }

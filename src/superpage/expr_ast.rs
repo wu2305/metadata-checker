@@ -822,6 +822,14 @@ fn classify_identifier(token: &str) -> RefType {
     // 处理 SuperPage ${model.field} 语法
     if token.starts_with("${") && token.ends_with("}") {
         let inner = &token[2..token.len() - 1];
+        // M58.3 相邻缺口修复：`${$user.deptId}` / `${$now}` 这类花括号包裹的
+        // `$` 前缀 token 此前直接走下方 `.` 拆分，被判成 ModelField("$user",
+        // "deptId")——在图里造出 `model:$user` 与 `field:$user.deptId` 垃圾节点，
+        // 用户属性/系统变量的血缘整条丢失（真实语料里有 `${$user.WXWORK_USER_ID}`
+        // 等多处）。这里改为委派给下方 `$` 前缀分支，与裸 `$user.deptId` 同口径。
+        if inner.starts_with('$') {
+            return classify_identifier(inner);
+        }
         let parts: Vec<&str> = inner.split('.').collect();
         if parts.len() >= 2 {
             let field = parts[1..].join(".");
