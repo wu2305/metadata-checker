@@ -69,3 +69,31 @@
     2026-09-05 补登此翻转，见上方断言 5）
 - **源证据命令**：`UPDATE_CORPUS_SNAPSHOTS=1 cargo test --features cli-local --test corpus_snapshot_tests`
 - **复核人决定**：severity 回归设计意图，非内容变化；待独立验收者复验
+
+## 3f5960f 后的快照重建（条件符号经页面上下文归一 / 空字段名不再造尾点节点）
+
+- **case_id**：`query_page_logic_actions_test`（fixture `app/actions_test.spg`）
+- **断言 1**：`summary.top_data_prerequisites[2].depends_on[0]`
+  - 旧值：`model:name.`；新值：`model:name`
+  - 原因：`3f5960f` 的 `ensure_model_field` 在字段名为空时不再建字段节点，
+    `model_field_path()` 也不再拼出尾点。旧值 `model:name.` 是尾点垃圾节点被
+    锁进期望值的结果
+- **断言 2**：`details_counts.data_sources_count` 与 `summary.data_source_count`
+  - 旧值：28；新值：27
+  - 原因：尾点节点 `model:name.` 与真实节点 `model:name` 原本各占一个数据源，
+    消除尾点后二者合一
+- **断言 3**：`summary.related_context_count`
+  - 旧值：88；新值：87
+  - 原因：同上，少一个垃圾节点进入关联上下文
+- **断言 4**：`evidence[16].claim` 文案
+  - 旧值：`Page page:app/actions_test.spg reads from 28 data sources`
+  - 新值：`... reads from 27 data sources`
+  - 原因：断言 2 的计数在证据文案中的投影，非独立变化
+- **源证据命令**：`UPDATE_CORPUS_SNAPSHOTS=1 cargo test --test corpus_snapshot_tests`
+  （CNB 远端 workspace `cnb-abg-1k1ofgjjt`）
+- **复核人决定**：四条断言同源于一个缺陷修复，方向均为**消除垃圾节点**，
+  新值为正确值，非回归。
+- **流程缺陷（自查登记）**：本次不一致是 `3f5960f` 落地时**当场就该暴露**的，
+  但当时的影响面测试集（30 个 suite）**未包含 `corpus_snapshot_tests`**，
+  直到 M59-B4 跑 `cargo test --tests` 全量才发现。教训：涉及节点身份/符号文法的
+  改动，影响面集合必须显式包含快照套件，不能靠挑选相关 suite。
