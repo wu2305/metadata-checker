@@ -162,11 +162,24 @@ C 才有意义。
 
 ## 4. 已知阻塞项
 
-1. **真实语料在 dev workspace 不可达。** workspace 的 `CNB_TOKEN` 是仓库级的，
-   实测 `git ls-remote succbi_project_container` 返回 Repository Not Found，
-   同凭据访问 `origin` 正常。语料只有流水线拿得到（`.cnb.yml:707`，跨仓 token 来自
-   `imports` 的 `metadata-checker-keys/real-fixture.yml`）。阶段 D1 需新增
-   `api_trigger_*` 事件并由人触发。
+1. ~~**真实语料在 dev workspace 不可达。**~~ **已解决（2026-09-05）。**
+
+   诊断更正：dev 环境注入的 `CNB_TOKEN` **是用户态身份**——`GET /user` 返回
+   `wu2305`——但**授权范围只到本仓**：实测 `GET /wu2305/succbi_project_container`
+   返回 **403**（不是 404，仓库存在且归属正确），`GET /wu2305/metadata-checker`
+   返回 200。此前记为「仓库级 token」方向对但机制说错了。
+
+   与 imports 也无关：`.kimi_harness_smoke_ci` 同样没有 imports，它用的就是
+   `$CNB_TOKEN`——差别在于**流水线的 CNB_TOKEN 有跨仓授权，dev 环境的没有**。
+
+   修复：给 `.cloud_native_dev_env` 挂上
+   `metadata-checker-keys/real-fixture.yml`（`.full_criterion_bench_shell` 已在用），
+   并新增 `fetch real project corpus` stage，用其中的
+   `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 做 sparse clone。失败不阻塞开环境。
+   凭证只走 `http.extraHeader`，不落盘，末尾断言未持久化进 `.git/config`。
+
+   未采用 submodule：语料 156 MB，submodule 会进每一次 clone 与 CI checkout，
+   而现有流水线是刻意用 `--depth 1 --filter=blob:none --sparse` 规避这个开销的。
 2. **内存驻留在真实语料上未知。** 合成图 16.5 MB 落盘 → 262 MB RSS（16 倍）。
    真实语料 514 MiB 若同比例约 **8 GB**。这是 D1 必测项，也可能反过来影响 schema
    （是否要瘦身 meta）。

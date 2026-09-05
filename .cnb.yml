@@ -432,6 +432,14 @@
       options:
         keepAliveTimeout: 1h
     - docker
+  # 真实项目语料的部署 token。dev 环境自身注入的 CNB_TOKEN 虽然是用户态身份
+  # （API /user 返回 wu2305），但授权范围只到本仓：实测 GET
+  # /wu2305/succbi_project_container 返回 403、GET /wu2305/metadata-checker 返回 200，
+  # 因此 dev 环境里直接 clone 语料会失败。流水线侧的 CNB_TOKEN 有跨仓授权，
+  # dev 环境没有，差别不在 imports 而在 token 本身。
+  # 这里复用 full-criterion 已在用的 REAL_PROJECT_FIXTURE_DEPLOY_TOKEN。
+  imports:
+    - https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
   env:
     CARGO_TARGET_DIR: target/cnb/workspace
   stages:
@@ -499,6 +507,53 @@
         else
           kimi doctor config
           echo "[kimi-code] provider=cnb-ai-chat default_model=cnb-ai-chat/deepseek-v4-flash 配置完成"
+        fi
+    - name: fetch real project corpus
+      script: |
+        # 把真实项目语料（succbi_project_container 的 xiaoshouyi-corpus 分支，
+        # sparse projects/xiaoshouyi，约 156MB）拉进 dev 环境，供 M59 后端迁移的
+        # 真实语料实测使用。此前这一步只有流水线做得到，dev 环境因 token 授权范围
+        # 拿不到语料，实测只能退回合成图。
+        #
+        # 失败不阻塞开环境：没有 token、网络不通或语料仓不可达时打印指引后跳过，
+        # 与上面 kimi-code 占位符同策略——开发环境的主职责是编译排错，不是跑语料。
+        #
+        # 凭证只走 http.extraHeader 请求头，不落盘、不进 remote URL，末尾断言
+        # 它没有被 git 持久化进 .git/config。不要 echo 展开值。
+        REAL_DIR="target/real-project/succbi_project_container"
+        CORPUS_DIR="$REAL_DIR/projects/xiaoshouyi"
+        if [ -d "$CORPUS_DIR" ]; then
+          echo "[corpus] 已存在，跳过：$CORPUS_DIR"
+        elif [ -z "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ]; then
+          echo "[corpus] 未注入 REAL_PROJECT_FIXTURE_DEPLOY_TOKEN，跳过语料拉取。"
+          echo "[corpus] dev 环境自身的 CNB_TOKEN 只有本仓授权（实测语料仓 403），"
+          echo "[corpus] 需要 imports 里的 real-fixture.yml 生效才能拉取。"
+        else
+          CORPUS_SLUG="${REAL_PROJECT_FIXTURE_REPO_SLUG:-wu2305/succbi_project_container}"
+          CORPUS_REF="${REAL_PROJECT_FIXTURE_REF:-xiaoshouyi-corpus}"
+          CORPUS_PATH="projects/${REAL_PROJECT_FIXTURE_PROJECT_PATH:-xiaoshouyi}"
+          AUTH_HEADER="Authorization: Basic $(printf '%s:%s' cnb "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" | base64 -w0)"
+          rm -rf "$REAL_DIR"
+          # git 报错走 stderr，显式合流，否则日志只剩 Cloning into 一行无法归因
+          if ! git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --filter=blob:none --sparse \
+              --branch "$CORPUS_REF" "https://cnb.cool/${CORPUS_SLUG}.git" "$REAL_DIR" 2>&1; then
+            echo "[corpus] partial clone 失败，去掉 blob filter 重试"
+            git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --sparse \
+              --branch "$CORPUS_REF" "https://cnb.cool/${CORPUS_SLUG}.git" "$REAL_DIR" 2>&1 || true
+          fi
+          if [ -d "$REAL_DIR/.git" ]; then
+            git -C "$REAL_DIR" sparse-checkout set "$CORPUS_PATH"
+            SPG_COUNT="$(find "$REAL_DIR/$CORPUS_PATH" -name '*.spg' 2>/dev/null | wc -l)"
+            TBL_COUNT="$(find "$REAL_DIR/$CORPUS_PATH" -name '*.tbl' 2>/dev/null | wc -l)"
+            echo "[corpus] READY spg=${SPG_COUNT} tbl=${TBL_COUNT} sha=$(git -C "$REAL_DIR" rev-parse HEAD)"
+            du -sh "$REAL_DIR/$CORPUS_PATH" 2>/dev/null || true
+            if grep -qF "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" "$REAL_DIR/.git/config" 2>/dev/null; then
+              echo "[corpus] deploy token persisted in git config" >&2
+              exit 1
+            fi
+          else
+            echo "[corpus] clone 未成功，跳过（不阻塞开环境）"
+          fi
         fi
 
 # ponytail: stage 级 if 跳过 main，避免与 main.push 重复跑 rust-ci
