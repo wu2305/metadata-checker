@@ -5,7 +5,7 @@
 //! - `s_bytes[i] as char` 逐字节转换，把多字节 UTF-8 拆成乱码。
 
 use metadata_checker::dependency::{DependencyGraph, trace_value_source};
-use metadata_checker::parser::parse_superpage;
+use metadata_checker::superpage::parse_superpage;
 use std::path::PathBuf;
 
 fn fixture() -> (
