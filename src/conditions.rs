@@ -169,6 +169,11 @@ fn ref_type_to_string(r: &RefType) -> String {
 }
 
 /// 递归收集组件 ID 到 JSON path 的映射，供条件扫描和输出复用。
+///
+/// M58.3 复核返修 P1-5：白名单四键之外，extra 键按与 superpage 提取侧**同一
+/// 形态判定**（`is_component_array` + `NON_COMPONENT_CONTAINER_KEYS`）递归——
+/// extra 键组件（columns/operateButtons/grid 等）的 json_path 因此真实可查，
+/// 不再退回 `canvas.components[id='...']` 合成兜底
 pub(crate) fn collect_json_paths(
     arr: &[serde_json::Value],
     path_prefix: &str,
@@ -184,105 +189,116 @@ pub(crate) fn collect_json_paths(
                 collect_json_paths(children, &format!("{}.{}", current, nested), paths);
             }
         }
-    }
-}
-
-/// 递归扫描组件数组中的 action 条件（遍历 components/panels/steps/comps）
-fn scan_actions_recursive(
-    components: &[serde_json::Value],
-    base_path: &str,
-    source_file: Option<&str>,
-) -> Vec<ConditionRecord> {
-    let mut records = Vec::new();
-    for (comp_idx, comp) in components.iter().enumerate() {
-        let current_path = format!("{}[{}]", base_path, comp_idx);
-        let comp_id = comp.get("id").and_then(|v| v.as_str()).unwrap_or("");
-
-        // 扫描当前组件的 actions
-        if let Some(actions) = comp.get("actions").and_then(|v| v.as_array()) {
-            for (action_idx, action) in actions.iter().enumerate() {
-                let action_id = action.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                let action_base_path = format!("{}.actions[{}]", current_path, action_idx);
-
-                if let Some(cond_exp) = action.get("conditionExp").and_then(|v| v.as_str()) {
-                    let owner_type = OwnerType::Action;
-                    let subject_type = owner_type_to_subject_type(&owner_type);
-                    if cond_exp.is_empty() {
-                        records.push(ConditionRecord {
-                            condition_id: format!("{}#{}#conditionExp", comp_id, action_id),
-                            condition_type: ConditionType::ActionConditionExp,
-                            effect_type: EffectType::Execute,
-                            subject_type: subject_type.clone(),
-                            raw_expr: "".to_string(),
-                            normalized_expr: "".to_string(),
-                            source_file: source_file.map(|s| s.to_string()),
-                            json_path: format!("{}.conditionExp", action_base_path),
-                            owner_type: owner_type.clone(),
-                            owner_id: format!("{}:{}", comp_id, action_id),
-                            referenced_symbols: Vec::new(),
-                            diagnostics: vec![ConditionDiagnostic {
-                                code: "EMPTY_CONDITION".to_string(),
-                                message: "Action conditionExp 为空".to_string(),
-                            }],
-                        });
-                    } else {
-                        let parse_result = parse_expression_ast(cond_exp);
-                        let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
-                        records.push(ConditionRecord {
-                            condition_id: format!("{}#{}#conditionExp", comp_id, action_id),
-                            condition_type: ConditionType::ActionConditionExp,
-                            effect_type: EffectType::Execute,
-                            subject_type: subject_type.clone(),
-                            raw_expr: cond_exp.to_string(),
-                            normalized_expr: cond_exp.trim().to_string(),
-                            source_file: source_file.map(|s| s.to_string()),
-                            json_path: format!("{}.conditionExp", action_base_path),
-                            owner_type: owner_type.clone(),
-                            owner_id: format!("{}:{}", comp_id, action_id),
-                            referenced_symbols: refs,
-                            diagnostics: parse_result
-                                .diagnostics
-                                .iter()
-                                .map(ConditionDiagnostic::from)
-                                .collect(),
-                        });
-                    }
+        // 形态感知递归（与 superpage 提取侧/scanner 裸 Value 递归同一份判定函数）
+        if let Some(obj) = comp.as_object() {
+            for (key, value) in obj {
+                if crate::superpage::NON_COMPONENT_CONTAINER_KEYS.contains(&key.as_str())
+                    || ["components", "panels", "steps", "comps"].contains(&key.as_str())
+                {
+                    continue;
                 }
-
-                if let Some(cond) = action.get("condition").and_then(|v| v.as_str()) {
-                    if !cond.is_empty() {
-                        let owner_type = OwnerType::Action;
-                        let subject_type = owner_type_to_subject_type(&owner_type);
-                        let parse_result = parse_expression_ast(cond);
-                        let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
-                        records.push(ConditionRecord {
-                            condition_id: format!("{}#{}#condition", comp_id, action_id),
-                            condition_type: ConditionType::ActionCondition,
-                            effect_type: EffectType::Execute,
-                            subject_type: subject_type.clone(),
-                            raw_expr: cond.to_string(),
-                            normalized_expr: cond.trim().to_string(),
-                            source_file: source_file.map(|s| s.to_string()),
-                            json_path: format!("{}.condition", action_base_path),
-                            owner_type: owner_type.clone(),
-                            owner_id: format!("{}:{}", comp_id, action_id),
-                            referenced_symbols: refs,
-                            diagnostics: parse_result
-                                .diagnostics
-                                .iter()
-                                .map(ConditionDiagnostic::from)
-                                .collect(),
-                        });
-                    }
+                if crate::superpage::is_component_array(value)
+                    && let Some(children) = value.as_array()
+                {
+                    collect_json_paths(children, &format!("{}.{}", current, key), paths);
                 }
             }
         }
+    }
+}
 
-        // 递归进入嵌套子组件
-        for nested in ["components", "panels", "steps", "comps"] {
-            if let Some(children) = comp.get(nested).and_then(|v| v.as_array()) {
-                let nested_path = format!("{}.{}", current_path, nested);
-                records.extend(scan_actions_recursive(children, &nested_path, source_file));
+/// 从 superpage 提取结果（`spg.components`）收集动作条件记录。
+///
+/// M58.3 复核返修 P1-5：驱动源从第三份裸 JSON 递归（只走白名单四键）改为
+/// 提取结果——白名单 + F1 形态感知递归发现的组件（含 extra 键组件）全覆盖，
+/// 组件到达口径与图构建严格一致；json_path 取自同一形态判定的
+/// `collect_json_paths`，extra 键组件的动作条件得到真实路径
+fn collect_action_conditions(
+    spg: &SuperPageMetadata,
+    component_paths: &HashMap<String, String>,
+    source_file: Option<&str>,
+) -> Vec<ConditionRecord> {
+    let mut records = Vec::new();
+    for comp in &spg.components {
+        let comp_id = comp.id.as_str();
+        let comp_base_path = component_paths
+            .get(comp_id)
+            .cloned()
+            .unwrap_or_else(|| format!("canvas.components[id='{}']", comp_id));
+        for (action_idx, action) in comp.actions.iter().enumerate() {
+            let action_id = action.id.as_str();
+            let action_base_path = format!("{}.actions[{}]", comp_base_path, action_idx);
+
+            if let Some(cond_exp) = &action.condition_exp {
+                let owner_type = OwnerType::Action;
+                let subject_type = owner_type_to_subject_type(&owner_type);
+                if cond_exp.is_empty() {
+                    records.push(ConditionRecord {
+                        condition_id: format!("{}#{}#conditionExp", comp_id, action_id),
+                        condition_type: ConditionType::ActionConditionExp,
+                        effect_type: EffectType::Execute,
+                        subject_type: subject_type.clone(),
+                        raw_expr: "".to_string(),
+                        normalized_expr: "".to_string(),
+                        source_file: source_file.map(|s| s.to_string()),
+                        json_path: format!("{}.conditionExp", action_base_path),
+                        owner_type: owner_type.clone(),
+                        owner_id: format!("{}:{}", comp_id, action_id),
+                        referenced_symbols: Vec::new(),
+                        diagnostics: vec![ConditionDiagnostic {
+                            code: "EMPTY_CONDITION".to_string(),
+                            message: "Action conditionExp 为空".to_string(),
+                        }],
+                    });
+                } else {
+                    let parse_result = parse_expression_ast(cond_exp);
+                    let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
+                    records.push(ConditionRecord {
+                        condition_id: format!("{}#{}#conditionExp", comp_id, action_id),
+                        condition_type: ConditionType::ActionConditionExp,
+                        effect_type: EffectType::Execute,
+                        subject_type: subject_type.clone(),
+                        raw_expr: cond_exp.clone(),
+                        normalized_expr: cond_exp.trim().to_string(),
+                        source_file: source_file.map(|s| s.to_string()),
+                        json_path: format!("{}.conditionExp", action_base_path),
+                        owner_type: owner_type.clone(),
+                        owner_id: format!("{}:{}", comp_id, action_id),
+                        referenced_symbols: refs,
+                        diagnostics: parse_result
+                            .diagnostics
+                            .iter()
+                            .map(ConditionDiagnostic::from)
+                            .collect(),
+                    });
+                }
+            }
+
+            if let Some(cond) = &action.condition
+                && !cond.is_empty()
+            {
+                let owner_type = OwnerType::Action;
+                let subject_type = owner_type_to_subject_type(&owner_type);
+                let parse_result = parse_expression_ast(cond);
+                let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
+                records.push(ConditionRecord {
+                    condition_id: format!("{}#{}#condition", comp_id, action_id),
+                    condition_type: ConditionType::ActionCondition,
+                    effect_type: EffectType::Execute,
+                    subject_type: subject_type.clone(),
+                    raw_expr: cond.clone(),
+                    normalized_expr: cond.trim().to_string(),
+                    source_file: source_file.map(|s| s.to_string()),
+                    json_path: format!("{}.condition", action_base_path),
+                    owner_type: owner_type.clone(),
+                    owner_id: format!("{}:{}", comp_id, action_id),
+                    referenced_symbols: refs,
+                    diagnostics: parse_result
+                        .diagnostics
+                        .iter()
+                        .map(ConditionDiagnostic::from)
+                        .collect(),
+                });
             }
         }
     }
@@ -346,19 +362,13 @@ pub fn scan_conditions(spg: &SuperPageMetadata, source_file: Option<&str>) -> Ve
         });
     }
 
-    // 2. 从 actions 提取动作条件（递归遍历嵌套组件）
-    if let Some(components) = spg
-        .raw
-        .get("canvas")
-        .and_then(|c| c.get("components"))
-        .and_then(|v| v.as_array())
-    {
-        records.extend(scan_actions_recursive(
-            components,
-            "canvas.components",
-            source_file,
-        ));
-    }
+    // 2. 从 actions 提取动作条件（驱动源为 superpage 提取结果：白名单 +
+    //    形态感知递归发现的组件全覆盖，组件到达口径与图构建一致）
+    records.extend(collect_action_conditions(
+        spg,
+        &component_paths,
+        source_file,
+    ));
 
     // 3. 从 sources 提取 filter
     if let Some(sources) = spg.raw.get("sources").and_then(|v| v.as_array()) {

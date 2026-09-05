@@ -109,6 +109,11 @@ fn resolve_expression_refs_with_context(
                         "Corrected: '{}' was initially guessed as model but is actually a known component ID (bare reference, treated as component value)",
                         id
                     ),
+                    // 裸 `${paramN}` 归一为 Param 后的改写说明（P1-6）
+                    RefType::Param(id) => format!(
+                        "Corrected: '{}' was initially guessed as model but is actually a known param ID (bare reference, treated as param)",
+                        id
+                    ),
                     _ => reason,
                 }
             } else {
@@ -125,9 +130,11 @@ fn resolve_expression_refs_with_context(
     }
 }
 
-/// 将已解析的引用统一归一化：把误判为模型的组件引用改写为组件引用。
+/// 将已解析的引用统一归一化：把误判为模型的组件/参数引用改写为正确语义。
 /// 归一后不变式：`ComponentProperty` 的 property 永不为空——裸 `${id}` 全组件
-/// 引用（field 为空）改写为 `ComponentValue`，语义即依赖组件值本身。
+/// 引用（field 为空）改写为 `ComponentValue`，语义即依赖组件值本身；
+/// 裸 `${paramN}` 命中页面 param id 时改写为 `Param`（M58.3 复核返修 P1-6），
+/// 避免下游产出 `model:paramN` 垃圾节点与 `field:paramN.` 尾点节点
 fn resolve_ref_type(
     ref_type: &RefType,
     component_ids: &std::collections::HashSet<&str>,
@@ -150,6 +157,14 @@ fn resolve_ref_type(
                     true,
                 )
             }
+        }
+        // 裸 `${id}` 命中页面 param id（expr_ast 判为 ModelField(id, "")）时归一为
+        // Param，与上方裸组件 id 归一 ComponentValue 同族；命名启发式（param 前缀）
+        // 之外的 param id 只有这里能凭上下文捕获
+        RefType::ModelField(model, field)
+            if field.is_empty() && param_ids.contains(model.as_str()) =>
+        {
+            (RefType::Param(model.clone()), true)
         }
         _ => (ref_type.clone(), false),
     }

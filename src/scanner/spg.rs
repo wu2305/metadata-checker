@@ -144,6 +144,28 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    // M58.3 复核返修 P1-7：组件身份判定对齐 superpage 提取侧口径——id 与 type
+    // 同时为非空字符串才是组件。id 有、type 无/空的对象不是组件：不注册组件
+    // 上下文（否则 pass2 会向不存在的 comp 节点建 comp→comp Contains，被存储层
+    // 静默丢弃，且 SpgComponent.parent_id 与 ctx.parent_id 两个事实源互相矛盾），
+    // 其子组件的 parent_id 透传祖父（与 extract_components 的透传一致）；同时按
+    // 「对象形态未识别」计入 SCANNER_UNRECOGNIZED_CONTAINER_KEY 安全网（spec 中
+    // 该 code 的定义覆盖容器子键/对象形态未识别），不允许继续静默
+    let has_type = node
+        .get("type")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty());
+    let is_component = current_id.is_some() && has_type;
+    if current_id.is_some() && !has_type {
+        diagnostics.unrecognized_container_key += 1;
+        if diagnostics.sample_unrecognized_location.is_none() {
+            diagnostics.sample_unrecognized_location = Some(crate::output::Location {
+                source_file: None,
+                node_id: current_id.clone(),
+                json_path: Some(json_path.to_string()),
+            });
+        }
+    }
 
     let source = node.get("source").and_then(json_scalar_to_string);
     let data_set = node.get("dataSet").and_then(json_scalar_to_string);
@@ -163,7 +185,7 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
     };
     let active_context = own_context.or(inherited_context);
 
-    if let Some(id) = &current_id {
+    if is_component && let Some(id) = &current_id {
         if contexts.contains_key(id) {
             diagnostics.duplicate_component_id += 1;
             if diagnostics.sample_duplicate_location.is_none() {
@@ -197,7 +219,14 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
         );
     }
 
-    let child_parent = current_id.clone().or(parent_id);
+    // 组件身份成立时子组件的父为当前节点；非组件节点（无 id，或 id 有 type 无）
+    // 透传祖父 parent_id——与 superpage 提取侧 extract_components 对 id/type
+    // 缺失节点的 parent_id 透传保持同口径，消除两个 parent 事实源的矛盾
+    let child_parent = if is_component {
+        current_id.clone()
+    } else {
+        parent_id.clone()
+    };
     for child_key in ["components", "panels", "steps", "comps"] {
         if let Some(children) = node.get(child_key).and_then(|v| v.as_array()) {
             for (idx, child) in children.iter().enumerate() {
@@ -593,6 +622,10 @@ pub fn process_spg_file_from_value(
     }
     let component_id_set: std::collections::HashSet<&str> =
         meta.components.iter().map(|c| c.id.as_str()).collect();
+    // 页面 param 集合（M58.3 复核返修 P1-6）：裸 `${paramN}` 是参数引用而非数据
+    // 上下文字段，不得落入下方「裸字段 + 继承 dataSet」的 Reads 建边分支
+    let param_id_set: std::collections::HashSet<&str> =
+        meta.params.iter().map(|p| p.id.as_str()).collect();
     // 组件处理拆成两遍：第一遍先为 meta.components 中所有组件注册节点，
     // 第二遍再建边。原因：GraphWriteStore 在边任一端点节点尚不存在时会静默
     // 丢弃该边（见 graph_redb.rs / memory_graph_store.rs 的 add_edge 实现）；
@@ -687,6 +720,7 @@ pub fn process_spg_file_from_value(
                     && let Some(bare_symbol) = extract_single_bare_symbol(&expr.raw_expr)
                     && !source_path_map.contains_key(bare_symbol.as_str())
                     && !component_id_set.contains(bare_symbol.as_str())
+                    && !param_id_set.contains(bare_symbol.as_str())
                     && let Some(ctx) = ctx
                     && let Some(data_set) = &ctx.inherited_data_context_data_set
                 {
@@ -1575,18 +1609,33 @@ pub fn process_spg_file_from_value(
                 continue;
             }
             let (kind, target_id) = (sym_parts[0], sym_parts[1]);
-            let target_node_id = match kind {
-                "param" => format!("param:{}|{}", rel_path.replace(r"\", "/"), target_id),
+            // M58.3 复核返修 P1-4：component 臂与 model 臂对齐剥掉 `.后缀`——
+            // 符号 `component:{id}.{prop}` 的节点 id 只到组件 id（真实节点是
+            // `comp:<page>|{id}`，带后缀的 id 不存在，边会被两端存储静默丢弃）；
+            // 属性名不丢弃，保留在边 meta 的 target_property（field_path 仍携带
+            // 完整符号串），与上方 ComponentProperty 建边路径同口径
+            let (target_node_id, target_property) = match kind {
+                "param" => (
+                    format!("param:{}|{}", rel_path.replace(r"\", "/"), target_id),
+                    None,
+                ),
                 "model" => {
                     let model_name = target_id.split('.').next().unwrap_or(target_id);
-                    format!("model:{}", model_name)
+                    (format!("model:{}", model_name), None)
                 }
-                "component" => format!("comp:{}|{}", rel_path.replace(r"\", "/"), target_id),
-                "user" => format!("user:{}", target_id),
-                "system" => format!("system:{}", target_id),
+                "component" => {
+                    let mut segments = target_id.splitn(2, '.');
+                    let comp_name = segments.next().unwrap_or(target_id);
+                    (
+                        format!("comp:{}|{}", rel_path.replace(r"\", "/"), comp_name),
+                        segments.next().filter(|prop| !prop.is_empty()),
+                    )
+                }
+                "user" => (format!("user:{}", target_id), None),
+                "system" => (format!("system:{}", target_id), None),
                 _ => continue,
             };
-            let dep_edge_meta = serde_json::json!({
+            let mut dep_edge_meta = serde_json::json!({
                 "reason": format!("Condition '{}' depends on symbol '{}'", cond.condition_id, sym),
                 "actor_kind": "condition",
                 "actor_id": cond.condition_id,
@@ -1594,6 +1643,11 @@ pub fn process_spg_file_from_value(
                 "source_expr": cond.raw_expr,
                 "json_path": cond.json_path,
             });
+            if let Some(prop) = target_property
+                && let Some(obj) = dep_edge_meta.as_object_mut()
+            {
+                obj.insert("target_property".to_string(), serde_json::json!(prop));
+            }
             add_edge_with_meta(
                 graph,
                 &cond_node_id,

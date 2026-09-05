@@ -827,6 +827,13 @@ fn classify_identifier(token: &str) -> RefType {
             let field = parts[1..].join(".");
             return RefType::ModelField(parts[0].to_string(), field);
         }
+        // M58.3 复核返修 P1-6：裸 `${paramN}` 与裸 `paramN` 共用同一命名启发式
+        // （见下方 param 前缀分支），归一为 Param，避免下游产出 `model:paramN`
+        // 垃圾节点与 `field:paramN.` 尾点节点；带点形态 `${paramN.x}` 维持
+        // ModelField 现状不动
+        if inner.starts_with("param") {
+            return RefType::Param(inner.to_string());
+        }
         return RefType::ModelField(inner.to_string(), String::new());
     }
 
