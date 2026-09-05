@@ -1,0 +1,29 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "params": [
+    {"id": "param1", "name": "来源参数"}
+  ],
+  "sources": [],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {
+        "id": "b",
+        "type": "input",
+        "value": "=param1"
+      },
+      {
+        "id": "a",
+        "type": "input",
+        "value": "=${b}"
+      },
+      {
+        "id": "zh",
+        "type": "text",
+        "value": "=CONCAT(\"合同金额：\", b.value, \"元\")"
+      }
+    ]
+  }
+}

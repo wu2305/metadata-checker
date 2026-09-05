@@ -388,31 +388,34 @@ pub fn expand_expression(
 
     format!("={}", expanded)
 }
-/// Replace pattern only at word boundaries (word chars = [A-Za-z0-9_]).
+/// 只在词边界（词字符 = `[A-Za-z0-9_]`）处替换 pattern。
+///
+/// 按 `str` 的字符边界切片拼接，不做逐字节 `u8 as char` 转换——后者会把中文等
+/// 多字节 UTF-8 拆成乱码。`match_indices` 只在合法字符边界上给出匹配，且
+/// pattern 长于 s 时直接不产生匹配，因此不存在越界切片。
 fn replace_with_boundary(s: &str, pattern: &str, replacement: &str) -> String {
-    let mut result = String::with_capacity(s.len() + replacement.len());
-    let pat_bytes = pattern.as_bytes();
-    let s_bytes = s.as_bytes();
-    let mut i = 0;
+    if pattern.is_empty() {
+        return s.to_string();
+    }
 
-    while i <= s_bytes.len().saturating_sub(pat_bytes.len()) {
-        if &s_bytes[i..i + pat_bytes.len()] == pat_bytes {
-            let prev_ok = i == 0 || !is_word_char(s_bytes[i - 1]);
-            let next_ok =
-                i + pat_bytes.len() == s_bytes.len() || !is_word_char(s_bytes[i + pat_bytes.len()]);
-            if prev_ok && next_ok {
-                result.push_str(replacement);
-                i += pat_bytes.len();
-                continue;
-            }
+    let mut result = String::with_capacity(s.len() + replacement.len());
+    let s_bytes = s.as_bytes();
+    let mut last = 0usize;
+
+    for (start, matched) in s.match_indices(pattern) {
+        let end = start + matched.len();
+        // 边界字节若是多字节字符的一部分（>= 0x80），is_word_char 返回 false，
+        // 即中文与 ASCII 词字符相邻时视为边界成立，与原实现一致。
+        let prev_ok = start == 0 || !is_word_char(s_bytes[start - 1]);
+        let next_ok = end == s_bytes.len() || !is_word_char(s_bytes[end]);
+        if prev_ok && next_ok {
+            result.push_str(&s[last..start]);
+            result.push_str(replacement);
+            last = end;
         }
-        result.push(s_bytes[i] as char);
-        i += 1;
     }
-    while i < s_bytes.len() {
-        result.push(s_bytes[i] as char);
-        i += 1;
-    }
+
+    result.push_str(&s[last..]);
     result
 }
 
