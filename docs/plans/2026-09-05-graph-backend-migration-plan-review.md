@@ -7,7 +7,8 @@
 
 ## 0. 一句话结论
 
-**要换的不是数据库，是「查询在哪儿执行」。**
+**换库的方向没问题，但成败只取决于一件事：Grafeo 能不能不把整张图读进内存就执行
+查询。** 这件事官方文档没写（§2.5），必须第一个验（§4 第 0 步）。
 
 两个 codex session 的完整命令记录（§0.1 / §0.2）量出四件事，按证据强度排：
 
@@ -21,9 +22,14 @@
    一个不存在的事实（§0.1.1）。
 4. **32% 的 jq 压根不是查询**，是在裁剪工具自己的输出（§0.1）。属输出契约。
 
-链路层要有界多跳、节点层要扁平表——**两层都要，而两层今天都被同一个架构约束卡住：
+链路层要跨 22 个 `EdgeType` 里的 21 个做有界多跳（数据从显示→交互→控制的完整生命
+周期，§0.2.1b），节点层要扁平表——**两层都要，而两层今天都被同一个架构约束卡住：
 查询在客户端内存里执行，所以必须先全量 hydrate，所以冷启动 1,008 秒，所以没人敢做
-跨 77 页的链路查询。** 换 redb 为别的库不解决这个；把查询下推到存储里执行才解决。
+跨 77 页的链路查询。**
+
+「一次落库 + 成熟本地查询」的方向因此是对的。**但换库本身不构成解法**：若新库同样
+是 in-memory 优先，hydrate 只是换个地方做，1,008 秒原样保留。所以第一个要验的不是
+「Grafeo 好不好」，是「Grafeo 查得动磁盘上的图吗」。
 
 > **本文第 1 / 2 版的错误更正**：第 2 版据「315 条 jq 里只有 4 条图形状」推出
 > 「图需求只有 1.3%」。该推断作废——jq 按文件工作，跨文件链路结构上装不进 jq 语料；
@@ -168,6 +174,33 @@ B 类（215 条，直接 jq 原始文件）的形态统计：
 **两层都没被服务，而且失败形态完全不同：链路层的失败表现为重复，节点层的失败表现
 为出走。** 我上一版只看见了后者。
 
+### 0.2.1b 链路的形状：一条数据在系统里的生命周期
+
+> 2026-09-05 三修，据用户澄清补入：要看的链路是**「数据」在「系统」中走过的路**——
+> **从显示，到各类交互，到控制**。不是某个窄边集，「其实都用上了」。
+
+把 `EdgeType` 的 22 个变体（`src/graph.rs:23-49`）按这三层摊开：
+
+| 层 | 边类型 | 回答的问题 |
+|---|---|---|
+| **显示** | `Reads` `ActionLoadsData` `DataflowInput` `DataflowInternal` `DataflowOutput` `FieldAlias` `Contains`(model→field) `OutputsTo` | 这个字段的值从哪张表来、经过哪些 dataflow 加工、最后显示在哪个组件 |
+| **交互** | `Triggers` `ActionReads` `ActionWrites` `Writes` `FieldWrite` `ActionNavigates` `OpensPage` `EmbedsPage` `PassesParam` `SetsParam` `ActionSetsParam` | 谁触发、读了什么、写回哪张表哪个字段、跳到哪一页、带走哪些参数 |
+| **控制** | `DependsOn`(cond→owner / cond→符号) `ActionValidates` `ActionControlsComponent` | 哪个条件决定它显不显示 / 能不能点 / 能不能提交，那个条件又依赖谁 |
+
+**22 个里有 21 个在链路语义上都有用**，只有 `Contains`(page→comp) 偏纯结构。
+
+这条澄清改变了两件事：
+
+1. **§2.6 里「先做一个 `--via <边类型白名单>` 的粗形态」不够用。** 白名单如果几乎等于
+   全集，那参数化的意义就不在「选哪几类边」，而在**每类边的语义不同**——
+   `PassesParam` 要带参数名、`DependsOn` 要带条件表达式、`FieldAlias` 是同一事实的
+   两个名字（走过去不该算一跳距离）、`ActionControlsComponent` 是控制而非数据流。
+   一个只认「跳数」的遍历器表达不了这些。
+2. **这反过来是支持 Cypher 的证据，不是反对。** 手写一个跨 21 种异构边、每种边有
+   自己投影和权重规则、还要能按业务问题临时组合的遍历器——正是查询语言存在的理由。
+   本文第 2 版据 jq 语料说「需求形状是表不是图、反对 Cypher」，那半条结论到这里
+   同样要收窄：**节点层要表，链路层要图查询语言，两层都要。**
+
 ### 0.2.2 对 §0.1 结论的修正
 
 `§0.1` 的三条修正里，第 2、3 条要改：
@@ -309,21 +342,46 @@ B 类（215 条，直接 jq 原始文件）的形态统计：
 - 若不可 → 候选只能定位为「native 侧的可选加速层」，`GraphReadStore` 抽象必须保留，
   且必须回答「wasm 侧的等价查询能力谁提供」。
 
-这条不解决，阶段 6 会撞墙。
+> **2026-09-05 三修，本节大部分作废。** Grafeo 有 wasm 支持（`@grafeo-db/wasm`，
+> 以及浏览器包 `@grafeo-db/web`，**用 IndexedDB 做持久化**）。后者与本仓库现有的
+> `src/persistence/indexeddb.rs` 是同一条路子，对齐度比我预期的好。
+>
+> 本节**仅剩一条仍成立**：npm 侧有 wasm 包，不等于 **Rust crate 本身**能编到
+> `wasm32-unknown-unknown` 并在 `browser-wasm` feature 下与现有栈共存。这个项目走的
+> 是 Rust 路径，不是 npm 路径。阶段 2 需要实测的是 `cargo build --target
+> wasm32-unknown-unknown --features browser-wasm`，而不是看 npm 包存在与否。
 
-### 2.5 Grafeo 被指定为首选路线，但它的存在性/维护状态尚未验证
+### 2.5 Grafeo 尽调（原「存在性未验证」一节，已核实，结论改写）
 
-计划第 4 节把「Grafeo 原生 Cypher + `with_read_store`」定为阶段 4 的优先 spike，
-而 Grafeo 的维护状态、许可证、Rust API 恰恰是**阶段 2 才要去核实**的内容。这是个
-顺序倒置：先钦定了首选，再去做尽调。
+> **2026-09-05 三修。** 上一版写「无法确认 Grafeo 是真实、在维护的 crate」，
+> 并建议把它从首选降级。**该判断撤销**——那是我查不到，不是它不存在。已核实如下。
 
-我无法从本仓库或既有文档中确认 Grafeo 是一个真实、在维护的嵌入式 Rust Cypher crate；
-计划里也没有版本号、仓库链接或日期。按计划自己的「证据规则」（优先官方文档和官方
-仓库、记录版本日期、区分事实与未验证项），**Grafeo 目前属于未验证项，不该占据
-「推荐初始技术路线」的位置**。
+| 项 | 结论 | 来源 |
+|---|---|---|
+| 存在性 / 维护 | 真实且活跃：`GrafeoDB/grafeo`，main 分支 1,529 commits、770 stars、有 CI 与 codecov | GitHub |
+| 许可证 | **Apache-2.0** | GitHub |
+| 查询语言 | **openCypher 9.0**，另支持 GQL(ISO) / Gremlin / GraphQL / SPARQL / SQL-PGQ | 官方 |
+| Rust | 纯 Rust 核心，宣称「zero external dependencies：no JVM、no Docker、no external processes」 | 官方 |
+| wasm | `@grafeo-db/wasm`；浏览器包 `@grafeo-db/web` 走 **WebAssembly + IndexedDB**；另有 "Edge profile（WASM, resource-constrained）" | 官方 |
+| 版本 | **v0.5.42**，sub-1.0 | grafeo.dev |
+| 存储 | 列式存储 + 字典/delta/RLE 压缩、zone maps 数据跳过；向量索引用 mmap | 官方 |
 
-**建议**：阶段 2 完成前，第 4 节的推荐降级为「候选之一」；核实通过（有仓库、有
-license、有近期 release、能编到目标平台）后再恢复首选地位。
+**计划第 4 节把它定为首选，这个选择本身站得住。** 但尽调暴露了两个**必须在 spike
+里回答**的问题，两个都不是「它好不好」，而是「它解不解本项目的那个问题」：
+
+1. **⚠️ 最关键：Grafeo 是否能在不把整张图读进内存的前提下执行查询？**
+   官方页面**没有**任何 streaming / lazy loading / larger-than-memory 的说法；措辞是
+   「lower memory footprint than other **in-memory** databases」——读起来是
+   **in-memory 优先**。若果真如此，**换成 Grafeo 不解决 §0.3 的 1,008 秒**，只是把
+   「hydrate 到自己的内存图」换成「hydrate 到 Grafeo 的内存表」，是一次平移。
+   这是整个迁移成败的那一个问题，**必须是 spike 的第一条验收**，而不是选型完再发现。
+2. **嵌入式 Rust 库的二进制体积未知。** 官方只给了 grafeo-server 的 ~40MB Docker
+   镜像和 ONNX embeddings 的 ~17MB（opt-in），没有给 crate 静态链接后的增量。
+   本项目 release 上限 10 MB、当前约 3.6 MiB，§2.3 的淘汰规则照常适用——先量再谈。
+
+次要记录项：sub-1.0（v0.5.42）；社区讨论里有「除非用例简单且愿意做早期采用者，
+否则尚未 production-ready」的说法。这不构成否决——本项目是本地只读分析工具，
+不是在线交易系统，早期采用的风险面小得多——但应当写进决策记录，别当它不存在。
 
 ### 2.6 基线臂：链路 + 表投影两层都要，且都必须可下推
 
@@ -347,12 +405,20 @@ license、有近期 release、能编到目标平台）后再恢复首选地位�
 `sources`、`conditions`、`writes`、`fields`、`pages`）：
 
 1. **表投影**：`WHERE` 等值/前缀/正则 + 字段投影 + `LIMIT` + TSV/JSON 双输出；
-2. **有界多跳**：给定起点、边类型白名单、最大跳数、最大结果数，返回路径 + 每跳的
-   `source_file` / `json_path` / 理由。语法可以先不是 Cypher——`--trace <起点>
-   --via ActionWrites,Reads --max-hops 4` 这种形态就能验证需求，语法糖以后再说。
+2. **有界多跳链路**：给定起点、边类型集合、最大跳数、最大结果数，返回路径 + 每跳的
+   `source_file` / `json_path` / 理由。
+
+> **三修**：本节曾写「语法可以先不是 Cypher，`--via ActionWrites,Reads --max-hops 4`
+> 就够验证需求」。据 §0.2.1b **收回**：要走的是「数据在系统里的生命周期」，22 个
+> `EdgeType` 里 21 个都在链路语义内，且**每类边的投影规则不同**（`PassesParam` 带
+> 参数名、`DependsOn` 带条件表达式、`FieldAlias` 是同一事实的别名不该计一跳、
+> `ActionControlsComponent` 是控制而非数据流）。一个只认跳数的遍历器表达不了这些。
+> 这正是查询语言的用武之地——**Cypher 在这里是合理选择，不是过度设计。**
 
 关键约束（§0.3.1）：这两件事都必须能**下推到存储里执行**。做成客户端遍历就等于
-默认全量 hydrate，那链路查询在 89k 节点上不可用，等于没做。
+默认全量 hydrate，那链路查询在 89k 节点上不可用，等于没做。**这条约束对 Grafeo
+同样适用**——见 §2.5 的第 1 个待验证问题：若 Grafeo 也是 in-memory 优先，
+换过去只是把 hydrate 换个地方做，1,008 秒原样保留。
 
 ## 3. 该补的
 
@@ -379,49 +445,57 @@ license、有近期 release、能编到目标平台）后再恢复首选地位�
 
 **下推能力是主线，其余都挂在它下面。** 顺序按「先解锁公共约束，再填两层需求」排：
 
-```
-第 1 步     GraphReadStore 加下推接口（过滤/投影/有界多跳/聚合）
-            ├── 这是 §0.3.1 的承重改造：换库不换抽象等于换个地方复现瓶颈
-            ├── 先在 redb 上做实现 spike——做完才知道到底要不要换库
-            └── 验收：89k 节点上跑一条 4 跳链路查询，不 hydrate 全图
+> **三修**：Grafeo 已核实（§2.5），且方向已定为「一次落库 + 成熟本地查询」。
+> 顺序因此从「先自己做下推 spike，做完再决定换不换」改为「**先用一个实验同时回答
+> 换不换和怎么换**」——因为那个实验对两条路是同一个。
 
-第 2 步     链路动词（先于节点深挖，对齐"先看链路再深挖节点"）
-            ├── --trace <起点> --via <边类型> --max-hops N --limit M
-            ├── 返回路径 + 每跳 source_file / json_path / 理由
+```
+第 0 步 ★  一次性判决实验：Grafeo 能不能不全量进内存地执行查询
+           ├── 这是 §2.5 的问题 1，也是 §0.3 的全部要害
+           ├── 做法：拿 xiaoshouyi 语料（89k 节点 / 200k 边）落一次 Grafeo 库，
+           │        量「进程启动 → 首条 4 跳链路查询返回」的 wall time 与内存峰值
+           ├── 判据：显著优于 1,008 s / 不需要把全图读进 RAM  → 换，走 A 线
+           │        与 hydrate 同量级                        → 不换库，走 B 线
+           └── 顺带量 crate 静态链接后的 release binary 增量（10 MB 硬闸，§2.3）
+
+A 线（Grafeo 撑得住）           B 线（in-memory 优先，换了也白换）
+──────────────────────────      ──────────────────────────────────
+A1 GraphReadStore 抽象加下推     B1 同 A1——抽象改造两条路都要做
+   （过滤/投影/有界多跳/聚合）      （§0.3.1：换库不换抽象等于换地方复现瓶颈）
+A2 Grafeo 实现 + Cypher 链路     B2 在 redb 上自己做下推 + 有界多跳
+A3 wasm32 实测：cargo build       B3 wasm 侧沿用现有 IndexedDB 栈
+   --target wasm32-unknown-unknown
+   --features browser-wasm（§2.4）
+
+第 1 步     链路动词（先于节点深挖，对齐"先看链路再深挖节点"）
+            ├── 覆盖 22 个 EdgeType 里的 21 个，每类边有自己的投影规则（§0.2.1b）
             └── 验收：77 页普查里至少 3 条真实业务链路，一条命令走完
 
-第 3 步     表投影层（节点层）                                → 接住 B1/B3/B4/B5 207 条
+第 2 步     表投影层（节点层）                              → 接住 B1/B3/B4/B5 207 条
             └── 只读视图 + WHERE + 投影 + LIMIT + TSV/JSON
 
-并行 A      输出契约：--budget 之外补字段选择 / profile      → 接住 A 桶 100 条
-            └── 唯一不受内存架构约束的一条，只动 output.rs，可随时插队做
+并行 A      输出契约：--budget 之外补字段选择 / profile     → 接住 A 桶 100 条
+            └── 唯一不受内存架构约束的一条，只动 output.rs，随时可插队
 
 并行 B      PR4a（schema 版本键 + fail-closed + 强制全量重建）
             ├── 不依赖任何选型结论，换不换后端都必须有
             └── 是 F4 与任何迁移的共同前置
 
-第 4 步     scanner 覆盖：businessDesc / notNull / validMessage
+第 3 步     scanner 覆盖：businessDesc / notNull / validMessage
             / resourceRoot(菜单树) / modelDataType
             └── 排在下推之后：下推没做之前扩覆盖会直接恶化冷启动（§0.1.3）
 
-然后        阶段 0（缺口冻结，按 §0.1+§0.2 两条轴分类，不只按查询意图）
+然后        缺口冻结（按 §0.1+§0.2 两条轴分类，不只按查询意图）
             + 诊断计数基线重测，同一个 snapshot_id 一次跑完
 
-之后        只有在第 1 步的 redb 下推 spike 证明"redb 撑不住"时，才进阶段 2 尽调。
-            先执行两条淘汰规则：
-            ① release binary > 10 MB → 出局
-            ② 不能编 wasm32 → 降级为 native 可选加速层，不得替换抽象
-            并核实 Grafeo 的存在性与维护状态
-
 再之后      F4 / PR4b（页面局部身份），schema 一次到位
-            └── 阶段 4 原型的投影直接按 F4 后的身份文法生成
-
-最后        阶段 4/5 原型与决策门，头条指标 = 冷启动到首条链路查询返回
+            └── 投影直接按 F4 后的身份文法生成，避免迁移做两遍
 ```
 
-核心主张不变但更锋利：**后端选型不是这条路的起点。第 1 步的 redb 下推 spike 才是，
-而它同时也是判定"要不要换库"的那个实验。** 计划把这个实验放在阶段 4，前面压了三个
-阶段的尽调——顺序应当反过来。
+核心主张收敛为一句：**「换不换库」和「怎么改架构」不是两个决策，是同一个实验的两个
+分支。** 那个实验就是第 0 步——Grafeo 能否不全量进内存地跑完一条链路查询。计划把它
+放在阶段 4，前面压了三个阶段的尽调；它应该是第一件事，因为无论结果如何，后面的路都
+由它决定，而它本身只要一次落库加一条查询。
 
 ## 5. 复核范围声明
 
@@ -431,5 +505,17 @@ jsonl，机器解析全量命令，非抽样阅读）。以下为**已在本仓�
 （`graph_schema_version` / `GRAPH_SCHEMA_STALE` 全仓无实现）、redb 仅挂 `cli-local`
 feature、`persistence/` 下 redb 与 indexeddb 并列、v2 仍为 shadow-only。
 
-以下为**未核实项**，不作为结论依据：Grafeo 的存在性与维护状态、DuckDB 静态链接的
-实际体积、任何候选在 wasm32 上的可编译性。这些是阶段 2 的输入。
+Grafeo 相关事实已于三修时**联网核实**（GitHub `GrafeoDB/grafeo`、grafeo.dev、
+crates.io、lib.rs）：Apache-2.0、openCypher 9.0、纯 Rust 核心、v0.5.42、
+`@grafeo-db/wasm` 与浏览器包 `@grafeo-db/web`（WebAssembly + IndexedDB）。见 §2.5。
+
+以下**仍未核实**，不作为结论依据，且其中第 1 条是决策的要害：
+
+1. **Grafeo 是否支持不全量载入内存的查询执行**——官方页面无 streaming /
+   lazy loading / larger-than-memory 说法，措辞为「lower memory footprint than other
+   **in-memory** databases」。必须实测（§4 第 0 步）。
+2. Grafeo crate 静态链接后对 release binary 的体积增量（官方只给了 server 的 ~40MB
+   Docker 镜像与 ONNX embeddings 的 ~17MB opt-in）。
+3. Grafeo **Rust crate** 在 `wasm32-unknown-unknown` + 本仓库 `browser-wasm` feature
+   下的可编译性（npm 有 wasm 包 ≠ Rust 路径可用）。
+4. DuckDB 静态链接的实际体积。
