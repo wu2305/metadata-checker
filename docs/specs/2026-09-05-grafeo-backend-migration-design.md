@@ -162,7 +162,7 @@ C 才有意义。
 
 ## 4. 已知阻塞项
 
-1. ~~**真实语料在 dev workspace 不可达。**~~ **已解决（2026-09-05）。**
+1. **真实语料在 dev workspace 不可达——机制已就位，等一个授权决定。**
 
    诊断更正：dev 环境注入的 `CNB_TOKEN` **是用户态身份**——`GET /user` 返回
    `wu2305`——但**授权范围只到本仓**：实测 `GET /wu2305/succbi_project_container`
@@ -172,11 +172,30 @@ C 才有意义。
    与 imports 也无关：`.kimi_harness_smoke_ci` 同样没有 imports，它用的就是
    `$CNB_TOKEN`——差别在于**流水线的 CNB_TOKEN 有跨仓授权，dev 环境的没有**。
 
-   修复：给 `.cloud_native_dev_env` 挂上
-   `metadata-checker-keys/real-fixture.yml`（`.full_criterion_bench_shell` 已在用），
-   并新增 `fetch real project corpus` stage，用其中的
-   `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 做 sparse clone。失败不阻塞开环境。
-   凭证只走 `http.extraHeader`，不落盘，末尾断言未持久化进 `.git/config`。
+   已做：`.cloud_native_dev_env` 新增 `fetch real project corpus` stage，用
+   `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 做 sparse clone；fail-soft、已存在则跳过、
+   凭证只走 `http.extraHeader` 不落盘、末尾断言未持久化进 `.git/config`。
+   实测 stage 跑通（sn=`cnb-vo8-1k1nsqnju`，`success,474,fetch real project corpus`，
+   走 fail-soft 分支，环境正常启动）。
+
+   **仍缺一步（需人决策）**：`imports: real-fixture.yml` 现在**打不开**——该密钥
+   文件自身声明了 `allow_events`，`vscode` 不在其中，加上会让 Prepare 阶段直接失败、
+   整个开发环境起不来（实测 sn=`cnb-ao8-1k1ns62sh`）：
+
+   ```
+   Pipeline init error: event: vscode does not conform to allow_events of
+   https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
+   ```
+
+   两条出路，**都要人拍板**：
+
+   - **A**：在 `metadata-checker-keys` 的 `real-fixture.yml` 里把 `vscode` 加进
+     `allow_events`，再取消 `.cnb.yml` 里那两行注释。代价是该部署 token 会被注入到
+     **可交互 SSH 的开发环境**，而不只是短生命周期流水线。收益是 M59 可以在真实语料
+     上交互式迭代。
+   - **B**：不动 `allow_events`，把真实语料实测做成 `api_trigger_m59_grafeo` 流水线
+     事件（该类事件已在 `allow_events` 内）。安全面不变，但只能批处理跑，无法交互
+     调试。
 
    未采用 submodule：语料 156 MB，submodule 会进每一次 clone 与 CI checkout，
    而现有流水线是刻意用 `--depth 1 --filter=blob:none --sparse` 规避这个开销的。
