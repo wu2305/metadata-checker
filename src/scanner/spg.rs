@@ -307,15 +307,21 @@ fn extract_single_bare_symbol(raw_expr: &str) -> Option<String> {
 
 /// 确保 model 和 field 节点存在，并建立 Contains 关系。
 /// 返回 (model_id, field_id)。
+/// 确保 `model:{model}` 节点存在；字段名非空时一并确保 `field:{model}.{field}`
+/// 节点与 model→field `Contains` 边。
+///
+/// M58.3 相邻缺口修复：字段名为空时（裸 `${modelN}` 被 `expr_ast` 判为
+/// `ModelField(modelN, "")`）**不再**造 `field:modelN.` 尾点节点——那是个没有字段
+/// 语义的垃圾节点，只会在 dataflow/lineage 里冒充一个字段。返回值第二项因此
+/// 改为 `Option`：`None` 表示本次只有模型级语义，调用方不应建字段级边。
 fn ensure_model_field(
     graph: &mut dyn GraphWriteStore,
     model: &str,
     field: &str,
     model_path: &str,
     field_meta: Option<serde_json::Value>,
-) -> Result<(String, String)> {
+) -> Result<(String, Option<String>)> {
     let model_id = format!("model:{}", model);
-    let field_id = format!("field:{}.{}", model, field);
     add_node(
         graph,
         model_id.clone(),
@@ -324,6 +330,10 @@ fn ensure_model_field(
         model.to_string(),
         None,
     )?;
+    if field.is_empty() {
+        return Ok((model_id, None));
+    }
+    let field_id = format!("field:{}.{}", model, field);
     add_node(
         graph,
         field_id.clone(),
@@ -333,7 +343,16 @@ fn ensure_model_field(
         field_meta,
     )?;
     add_edge_with_meta(graph, &model_id, &field_id, EdgeType::Contains, None, None)?;
-    Ok((model_id, field_id))
+    Ok((model_id, Some(field_id)))
+}
+
+/// 模型字段引用的 field_path 文案：字段名为空时只写模型名，避免 `modelN.` 尾点。
+fn model_field_path(model: &str, field: &str) -> String {
+    if field.is_empty() {
+        model.to_string()
+    } else {
+        format!("{}.{}", model, field)
+    }
 }
 
 /// 从模型路径中提取物理表名（去除路径前缀和 .tbl 后缀）。
@@ -367,18 +386,20 @@ fn add_model_read(
         from_id,
         &model_id,
         edge_type.clone(),
-        Some(format!("{}.{}", model, field)),
+        Some(model_field_path(model, field)),
         Some(edge_meta.clone()),
     )?;
-    // 字段级读取边：组件直接指向字段节点
-    add_edge_with_meta(
-        graph,
-        from_id,
-        &field_id,
-        edge_type.clone(),
-        Some(format!("{}.{}", model, field)),
-        Some(edge_meta.clone()),
-    )?;
+    // 字段级读取边：组件直接指向字段节点（字段名为空时无字段节点，只保留模型级边）
+    if let Some(field_id) = &field_id {
+        add_edge_with_meta(
+            graph,
+            from_id,
+            field_id,
+            edge_type.clone(),
+            Some(model_field_path(model, field)),
+            Some(edge_meta.clone()),
+        )?;
+    }
 
     // 同时创建到物理表的读取边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
@@ -390,31 +411,36 @@ fn add_model_read(
                 from_id,
                 &phy_model_id,
                 edge_type.clone(),
-                Some(format!("{}.{}", physical_name, field)),
+                Some(model_field_path(&physical_name, field)),
                 Some(edge_meta.clone()),
             )?;
-            // 字段级读取边：组件直接指向物理字段节点
-            add_edge_with_meta(
-                graph,
-                from_id,
-                &phy_field_id,
-                edge_type.clone(),
-                Some(format!("{}.{}", physical_name, field)),
-                Some(edge_meta.clone()),
-            )?;
-            // 局部模型字段到物理表字段的别名映射
-            add_edge_with_meta(
-                graph,
-                &field_id,
-                &phy_field_id,
-                EdgeType::FieldAlias,
-                Some(format!("{}.{}", model, field)),
-                None,
-            )?;
+            // 字段级读取边：组件直接指向物理字段节点（字段名为空时无字段节点）
+            if let Some(phy_field_id) = &phy_field_id {
+                add_edge_with_meta(
+                    graph,
+                    from_id,
+                    phy_field_id,
+                    edge_type.clone(),
+                    Some(model_field_path(&physical_name, field)),
+                    Some(edge_meta.clone()),
+                )?;
+                // 局部模型字段到物理表字段的别名映射
+                if let Some(field_id) = &field_id {
+                    add_edge_with_meta(
+                        graph,
+                        field_id,
+                        phy_field_id,
+                        EdgeType::FieldAlias,
+                        Some(model_field_path(model, field)),
+                        None,
+                    )?;
+                }
+            }
         }
     }
     Ok(())
 }
+
 /// 添加从 from_id 写入 model.field 的关系边。
 fn add_model_write(
     graph: &mut dyn GraphWriteStore,
@@ -431,18 +457,20 @@ fn add_model_write(
         from_id,
         &model_id,
         edge_type.clone(),
-        Some(format!("{}.{}", model, field)),
+        Some(model_field_path(model, field)),
         Some(edge_meta.clone()),
     )?;
-    // 字段级写入边：action 直接指向字段节点
-    add_edge_with_meta(
-        graph,
-        from_id,
-        &field_id,
-        EdgeType::FieldWrite,
-        Some(format!("{}.{}", model, field)),
-        Some(edge_meta.clone()),
-    )?;
+    // 字段级写入边：action 直接指向字段节点（字段名为空时无字段节点，只保留模型级边）
+    if let Some(field_id) = &field_id {
+        add_edge_with_meta(
+            graph,
+            from_id,
+            field_id,
+            EdgeType::FieldWrite,
+            Some(model_field_path(model, field)),
+            Some(edge_meta.clone()),
+        )?;
+    }
 
     // 同时创建到物理表的写入边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
@@ -454,27 +482,31 @@ fn add_model_write(
                 from_id,
                 &phy_model_id,
                 edge_type.clone(),
-                Some(format!("{}.{}", physical_name, field)),
+                Some(model_field_path(&physical_name, field)),
                 Some(edge_meta.clone()),
             )?;
-            // 字段级写入边：action 直接指向物理字段节点
-            add_edge_with_meta(
-                graph,
-                from_id,
-                &phy_field_id,
-                EdgeType::FieldWrite,
-                Some(format!("{}.{}", physical_name, field)),
-                Some(edge_meta.clone()),
-            )?;
-            // 局部模型字段到物理表字段的别名映射
-            add_edge_with_meta(
-                graph,
-                &field_id,
-                &phy_field_id,
-                EdgeType::FieldAlias,
-                Some(format!("{}.{}", model, field)),
-                None,
-            )?;
+            // 字段级写入边：action 直接指向物理字段节点（字段名为空时无字段节点）
+            if let Some(phy_field_id) = &phy_field_id {
+                add_edge_with_meta(
+                    graph,
+                    from_id,
+                    phy_field_id,
+                    EdgeType::FieldWrite,
+                    Some(model_field_path(&physical_name, field)),
+                    Some(edge_meta.clone()),
+                )?;
+                // 局部模型字段到物理表字段的别名映射
+                if let Some(field_id) = &field_id {
+                    add_edge_with_meta(
+                        graph,
+                        field_id,
+                        phy_field_id,
+                        EdgeType::FieldAlias,
+                        Some(model_field_path(model, field)),
+                        None,
+                    )?;
+                }
+            }
         }
     }
     Ok(())
@@ -1614,11 +1646,25 @@ pub fn process_spg_file_from_value(
             // `comp:<page>|{id}`，带后缀的 id 不存在，边会被两端存储静默丢弃）；
             // 属性名不丢弃，保留在边 meta 的 target_property（field_path 仍携带
             // 完整符号串），与上方 ComponentProperty 建边路径同口径
+            // M58.3 相邻缺口修复：param / user / system 三类目标节点此前只在
+            // **组件表达式**那条路径上创建（见上方 RefType::Param/UserProperty/
+            // SystemVar 分支）。只出现在条件里的符号没有对应节点，边被两端存储
+            // 静默丢弃——整整三个类别的 cond→依赖边悬挂。这里按与组件表达式路径
+            // 完全一致的 id / NodeType / meta 补建节点（add_node 幂等），符号本身
+            // 就是事实，不存在凭空造节点的问题。
             let (target_node_id, target_property) = match kind {
-                "param" => (
-                    format!("param:{}|{}", rel_path.replace(r"\", "/"), target_id),
-                    None,
-                ),
+                "param" => {
+                    let param_id = format!("param:{}|{}", rel_path.replace(r"\", "/"), target_id);
+                    add_node(
+                        graph,
+                        param_id.clone(),
+                        NodeType::Field,
+                        rel_path.to_string(),
+                        target_id.to_string(),
+                        Some(serde_json::json!({"kind": "param"})),
+                    )?;
+                    (param_id, None)
+                }
                 "model" => {
                     let model_name = target_id.split('.').next().unwrap_or(target_id);
                     (format!("model:{}", model_name), None)
@@ -1631,8 +1677,30 @@ pub fn process_spg_file_from_value(
                         segments.next().filter(|prop| !prop.is_empty()),
                     )
                 }
-                "user" => (format!("user:{}", target_id), None),
-                "system" => (format!("system:{}", target_id), None),
+                "user" => {
+                    let user_id = format!("user:{}", target_id);
+                    add_node(
+                        graph,
+                        user_id.clone(),
+                        NodeType::Field,
+                        "system".to_string(),
+                        format!("$user.{}", target_id),
+                        Some(serde_json::json!({"kind": "user_property"})),
+                    )?;
+                    (user_id, None)
+                }
+                "system" => {
+                    let sys_id = format!("system:{}", target_id);
+                    add_node(
+                        graph,
+                        sys_id.clone(),
+                        NodeType::Field,
+                        "system".to_string(),
+                        format!("${}", target_id),
+                        Some(serde_json::json!({"kind": "system_var"})),
+                    )?;
+                    (sys_id, None)
+                }
                 _ => continue,
             };
             let mut dep_edge_meta = serde_json::json!({

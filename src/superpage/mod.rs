@@ -135,7 +135,7 @@ fn resolve_expression_refs_with_context(
 /// 引用（field 为空）改写为 `ComponentValue`，语义即依赖组件值本身；
 /// 裸 `${paramN}` 命中页面 param id 时改写为 `Param`（M58.3 复核返修 P1-6），
 /// 避免下游产出 `model:paramN` 垃圾节点与 `field:paramN.` 尾点节点
-fn resolve_ref_type(
+pub(crate) fn resolve_ref_type(
     ref_type: &RefType,
     component_ids: &std::collections::HashSet<&str>,
     source_ids: &std::collections::HashSet<&str>,

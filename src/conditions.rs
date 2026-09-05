@@ -1,7 +1,7 @@
 use crate::superpage::{ExprDiagnostic, parse_expression_ast};
 use crate::superpage::{RefType, SuperPageMetadata};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// 条件类型枚举（技术来源）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -160,11 +160,53 @@ fn ref_type_to_string(r: &RefType) -> String {
     match r {
         RefType::ComponentValue(id) => format!("component:{}", id),
         RefType::ComponentProperty(id, prop) => format!("component:{}.{}", id, prop),
+        // 字段名为空（裸 `${modelN}`）时只写模型名——`model:modelN.` 尾点串会一路
+        // 传到图构建，被切成 `field:modelN.` 垃圾节点，也让消费方误以为有个空名字段
+        RefType::ModelField(model, field) if field.is_empty() => format!("model:{}", model),
         RefType::ModelField(model, field) => format!("model:{}.{}", model, field),
         RefType::Param(name) => format!("param:{}", name),
         RefType::UserProperty(prop) => format!("user:{}", prop),
         RefType::SystemVar(name) => format!("system:{}", name),
         RefType::Other(s) => format!("other:{}", s),
+    }
+}
+
+/// 页面级引用上下文：组件 id / 数据源 id / 参数 id 三个集合。
+///
+/// M58.3 相邻缺口修复：`scan_conditions` 的动作条件与 source filter 走的是裸
+/// `parse_expression_ast`，只有正则启发式，没有页面上下文——`${txtB.txt}`（txtB 是
+/// 组件）会被判成 `ModelField("txtB", "txt")`，最终在图里建一条指向不存在的
+/// `model:txtB.txt` 的悬挂边。组件表达式（`spg.expressions`）在
+/// `resolve_expression_refs_with_context` 里已经归一过，这里给另外两类条件补上
+/// **同一份**归一函数，三条路径的符号口径因此一致。
+struct PageRefContext<'a> {
+    component_ids: HashSet<&'a str>,
+    source_ids: HashSet<&'a str>,
+    param_ids: HashSet<&'a str>,
+}
+
+impl<'a> PageRefContext<'a> {
+    fn from_spg(spg: &'a SuperPageMetadata) -> Self {
+        Self {
+            component_ids: spg.components.iter().map(|c| c.id.as_str()).collect(),
+            source_ids: spg.sources.iter().map(|s| s.id.as_str()).collect(),
+            param_ids: spg.params.iter().map(|p| p.id.as_str()).collect(),
+        }
+    }
+
+    /// 把裸解析出的引用按页面上下文归一后转成符号串。
+    fn symbols(&self, refs: &[RefType]) -> Vec<String> {
+        refs.iter()
+            .map(|r| {
+                let (resolved, _corrected) = crate::superpage::resolve_ref_type(
+                    r,
+                    &self.component_ids,
+                    &self.source_ids,
+                    &self.param_ids,
+                );
+                ref_type_to_string(&resolved)
+            })
+            .collect()
     }
 }
 
@@ -180,29 +222,45 @@ pub(crate) fn collect_json_paths(
     paths: &mut HashMap<String, String>,
 ) {
     for (index, comp) in arr.iter().enumerate() {
-        let current = format!("{}[{}]", path_prefix, index);
-        if let Some(comp_id) = comp.get("id").and_then(|v| v.as_str()) {
-            paths.insert(comp_id.to_string(), current.clone());
+        collect_json_paths_from_node(comp, &format!("{}[{}]", path_prefix, index), paths);
+    }
+}
+
+/// 单个组件节点的 json_path 登记与子树递归。
+///
+/// M58.3 相邻缺口修复：入口从「`canvas.components` 数组」上移到「任意组件节点」——
+/// `extract_components` 的遍历起点是 `canvas` 对象本身，四个白名单键（含
+/// `canvas.panels` / `canvas.steps` / `canvas.comps`）和 canvas 级 extra 组件数组
+/// 都在它的覆盖面内。旧入口只喂 `canvas.components`，这些分支下的组件在
+/// `component_paths` 里查不到，只能退回 `canvas.components[id='...']` 合成串——
+/// 那不是能在原始 JSON 里定位到的路径，违反 raw JSON locator 契约。
+pub(crate) fn collect_json_paths_from_node(
+    node: &serde_json::Value,
+    json_path: &str,
+    paths: &mut HashMap<String, String>,
+) {
+    if let Some(comp_id) = node.get("id").and_then(|v| v.as_str()) {
+        paths.insert(comp_id.to_string(), json_path.to_string());
+    }
+    for nested in ["components", "panels", "steps", "comps"] {
+        if let Some(children) = node.get(nested).and_then(|v| v.as_array()) {
+            collect_json_paths(children, &format!("{}.{}", json_path, nested), paths);
         }
-        for nested in ["components", "panels", "steps", "comps"] {
-            if let Some(children) = comp.get(nested).and_then(|v| v.as_array()) {
-                collect_json_paths(children, &format!("{}.{}", current, nested), paths);
-            }
+    }
+    // 形态感知递归（与 superpage 提取侧/scanner 裸 Value 递归同一份判定函数）
+    let Some(obj) = node.as_object() else {
+        return;
+    };
+    for (key, value) in obj {
+        if crate::superpage::NON_COMPONENT_CONTAINER_KEYS.contains(&key.as_str())
+            || ["components", "panels", "steps", "comps"].contains(&key.as_str())
+        {
+            continue;
         }
-        // 形态感知递归（与 superpage 提取侧/scanner 裸 Value 递归同一份判定函数）
-        if let Some(obj) = comp.as_object() {
-            for (key, value) in obj {
-                if crate::superpage::NON_COMPONENT_CONTAINER_KEYS.contains(&key.as_str())
-                    || ["components", "panels", "steps", "comps"].contains(&key.as_str())
-                {
-                    continue;
-                }
-                if crate::superpage::is_component_array(value)
-                    && let Some(children) = value.as_array()
-                {
-                    collect_json_paths(children, &format!("{}.{}", current, key), paths);
-                }
-            }
+        if crate::superpage::is_component_array(value)
+            && let Some(children) = value.as_array()
+        {
+            collect_json_paths(children, &format!("{}.{}", json_path, key), paths);
         }
     }
 }
@@ -216,6 +274,7 @@ pub(crate) fn collect_json_paths(
 fn collect_action_conditions(
     spg: &SuperPageMetadata,
     component_paths: &HashMap<String, String>,
+    ref_context: &PageRefContext<'_>,
     source_file: Option<&str>,
 ) -> Vec<ConditionRecord> {
     let mut records = Vec::new();
@@ -252,7 +311,7 @@ fn collect_action_conditions(
                     });
                 } else {
                     let parse_result = parse_expression_ast(cond_exp);
-                    let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
+                    let refs = ref_context.symbols(&parse_result.refs);
                     records.push(ConditionRecord {
                         condition_id: format!("{}#{}#conditionExp", comp_id, action_id),
                         condition_type: ConditionType::ActionConditionExp,
@@ -280,7 +339,7 @@ fn collect_action_conditions(
                 let owner_type = OwnerType::Action;
                 let subject_type = owner_type_to_subject_type(&owner_type);
                 let parse_result = parse_expression_ast(cond);
-                let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
+                let refs = ref_context.symbols(&parse_result.refs);
                 records.push(ConditionRecord {
                     condition_id: format!("{}#{}#condition", comp_id, action_id),
                     condition_type: ConditionType::ActionCondition,
@@ -309,14 +368,14 @@ fn collect_action_conditions(
 pub fn scan_conditions(spg: &SuperPageMetadata, source_file: Option<&str>) -> Vec<ConditionRecord> {
     let mut records = Vec::new();
     let mut component_paths: HashMap<String, String> = HashMap::new();
+    // 动作条件与 source filter 的裸解析结果都要经这里归一（组件表达式已在
+    // superpage 解析末尾归一过，其 refs 再走一次是幂等的）
+    let ref_context = PageRefContext::from_spg(spg);
 
-    if let Some(components) = spg
-        .raw
-        .get("canvas")
-        .and_then(|c| c.get("components"))
-        .and_then(|v| v.as_array())
-    {
-        collect_json_paths(components, "canvas.components", &mut component_paths);
+    // 与 extract_components 同起点：canvas 对象本身（其四个白名单键与 extra
+    // 组件数组一并覆盖），而不是只喂 canvas.components 一个分支
+    if let Some(canvas) = spg.raw.get("canvas") {
+        collect_json_paths_from_node(canvas, "canvas", &mut component_paths);
     }
 
     // 1. 从已解析的 expressions 提取组件级条件
@@ -367,6 +426,7 @@ pub fn scan_conditions(spg: &SuperPageMetadata, source_file: Option<&str>) -> Ve
     records.extend(collect_action_conditions(
         spg,
         &component_paths,
+        &ref_context,
         source_file,
     ));
 
@@ -385,7 +445,7 @@ pub fn scan_conditions(spg: &SuperPageMetadata, source_file: Option<&str>) -> Ve
 
                         if let Some(exp) = clause.get("exp").and_then(|v| v.as_str()) {
                             let parse_result = parse_expression_ast(exp);
-                            let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
+                            let refs = ref_context.symbols(&parse_result.refs);
                             records.push(ConditionRecord {
                                 condition_id: format!("{}#filter#{}#exp", src_id, clause_idx),
                                 condition_type: ConditionType::SourceFilterExp,
@@ -417,7 +477,7 @@ pub fn scan_conditions(spg: &SuperPageMetadata, source_file: Option<&str>) -> Ve
                                 .unwrap_or("");
                             let combined = format!("{} {} {}", left_exp, operator, right_value);
                             let parse_result = parse_expression_ast(left_exp);
-                            let refs = parse_result.refs.iter().map(ref_type_to_string).collect();
+                            let refs = ref_context.symbols(&parse_result.refs);
                             records.push(ConditionRecord {
                                 condition_id: format!("{}#filter#{}#clause", src_id, clause_idx),
                                 condition_type: ConditionType::SourceFilterClause,

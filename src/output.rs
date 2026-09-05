@@ -2,7 +2,7 @@ pub mod answer_effect;
 pub mod brief;
 pub mod tbl;
 
-use crate::conditions::{collect_json_paths, scan_conditions};
+use crate::conditions::{collect_json_paths_from_node, scan_conditions};
 use crate::dependency::DependencyGraph;
 use crate::parser::PageMetadata;
 use crate::superpage::{RefType, SuperPageMetadata};
@@ -554,13 +554,9 @@ pub fn print_non_human_to(
         });
 
         let mut component_json_paths: HashMap<String, String> = HashMap::new();
-        if let Some(components) = spg
-            .raw
-            .get("canvas")
-            .and_then(|c| c.get("components"))
-            .and_then(|v| v.as_array())
-        {
-            collect_json_paths(components, "canvas.components", &mut component_json_paths);
+        // 与 extract_components / scan_conditions 同起点：canvas 对象本身
+        if let Some(canvas) = spg.raw.get("canvas") {
+            collect_json_paths_from_node(canvas, "canvas", &mut component_json_paths);
         }
 
         let details = json!({
