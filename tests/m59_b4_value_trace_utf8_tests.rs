@@ -23,8 +23,8 @@ fn fixture() -> (
 #[test]
 fn bare_component_ref_shorter_than_pattern_does_not_panic() {
     let (meta, graph) = fixture();
-    let trace = trace_value_source(&meta, &graph, "a", "value", 5)
-        .expect("a.value should be traceable");
+    let trace =
+        trace_value_source(&meta, &graph, "a", "value", 5).expect("a.value should be traceable");
     assert_eq!(trace.raw_expr, "=${b}");
     // pattern 未出现在被替换串中，展开结果保持原样，不得崩溃、不得吞掉内容。
     assert_eq!(trace.expanded_expr, "=b");
@@ -34,8 +34,8 @@ fn bare_component_ref_shorter_than_pattern_does_not_panic() {
 #[test]
 fn utf8_expression_survives_boundary_replacement() {
     let (meta, graph) = fixture();
-    let trace = trace_value_source(&meta, &graph, "zh", "value", 5)
-        .expect("zh.value should be traceable");
+    let trace =
+        trace_value_source(&meta, &graph, "zh", "value", 5).expect("zh.value should be traceable");
     assert!(
         trace.expanded_expr.contains("合同金额："),
         "中文前缀应原样保留，实际得到 {}",

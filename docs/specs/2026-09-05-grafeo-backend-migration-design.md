@@ -79,6 +79,29 @@ while i <= s_bytes.len().saturating_sub(pat_bytes.len()) {
 
 违反 AGENTS.md「禁止使用 `panic!` 处理可恢复错误」。**与后端无关**，任何时候都该修。
 
+> **已落地（B4，commit `3f84a96` + `c99a14d`）**：改用 `str::match_indices` +
+> 字符边界切片拼接。匹配只落在合法字符边界上，pattern 长于 s 时不产生匹配，
+> 越界不再可能；未匹配区间按 `&s[last..start]` 原样搬运。词边界判定行为不变
+> （多字节字符的字节 `>= 0x80`，`is_word_char` 返回 false）。
+> 回归测试 `tests/m59_b4_value_trace_utf8_tests.rs` 已在**修复前的 `src/dependency.rs`**
+> 上验证会失败，两条缺陷均精确复现：
+> `range end index 7 out of range for slice of length 1`（dependency.rs:399）、
+> `合同金额：` → `ååéé¢ï¼`。
+>
+> **修复过程中暴露的新缺陷（本文新增，codex 未报）**：panic 一直掩盖着
+> `RefType::ComponentValue` 的**替换 pattern 与来源文法不匹配**。
+> `expr_ast.rs:862-868` 把 `b.value`、`b.step` 和裸 `b` **一律**归一为
+> `ComponentValue("b")`，丢掉了后缀；而 `dependency.rs:365-369` 只按
+> `format!("{}.value", dep_id)` 一种形态去替换。后果：
+> - 裸 `${b}`：pattern 不匹配（旧代码在此 panic），值追溯**静默不展开**，
+>   实测 `a.value` 追溯结果是 `=b` 而非展开到 `param1`；
+> - `b.step`：同样不匹配，同样静默不展开。
+>
+> 这不是替换函数的 bug，是**引用文法在归一时丢了信息**——修在替换侧只能靠猜
+> 后缀（先试 `.value` 再试裸 id，会把 `b.step` 错误改写成 `(展开).step`）。
+> 正确的修法是让 `RefType::ComponentValue` 保留被引用的原始 token，属**阶段 A1
+> 身份文法**的范围，故不在 B4 内顺手改。已在 A1 增列一条。
+
 ### 2.4 P1｜模型身份跨页/跨目录碰撞 —— 确认（本文认定为迁移的头号前置）
 
 - `spg.rs:559`：内嵌模型命名为全局 `model:<source.id>`；
@@ -131,6 +154,8 @@ redb 侧则去重边、对占位模型保留既有 metadata。同一组写入，
 ```
 阶段 A  身份与事实定稿（schema 输入，必须先于落库）
         A1 F4/PR4b 身份文法：项目 + 源文件 + 局部 id，旧 target 经显式解析 + 歧义诊断兼容
+        A1b ComponentValue 保留原始引用 token（.value / .step / 裸 id），
+            使值追溯的替换 pattern 与来源文法一致——见 §2.3 的新增缺陷
         A2 路径归一化统一函数（. / .. / 分隔符 / 越界），扫描与引用解析共用
         A3 边带 origin_file；删除按 origin 而非按端点牵连
         A4 PR4a：schema 版本键 + fail-closed + 强制全量重建（迁移的开关本身）
@@ -141,6 +166,7 @@ redb 侧则去重边、对占位模型保留既有 metadata。同一组写入，
         B2 收紧 core_feature_tests 的宽松断言（迁移期的退化探针）
         B3 TBL 解析失败不再返回 Ok(空)：验证通过才动候选图，否则保留旧图 + 陈旧标记
         B4 值追溯 panic 与中文乱码：改 token/span 定位替换，保留原始字符串片段
+           —— **已完成**（`3f84a96` / `c99a14d`），见 §2.3
         B5 全量 vs 增量差分测试：同一最终文件集，逐节点/逐边/逐属性比对（非计数比对）
 
 阶段 C  Grafeo 落地
