@@ -244,7 +244,10 @@ fn deleting_a_never_valid_tbl_removes_its_orphaned_warning() -> anyhow::Result<(
     std::fs::create_dir_all(project_dir.join("data"))?;
     // 另有一个合法文件，保证图与 file states 非空——否则「诊断消失」可能只是
     // 因为整个库是空的，验不到对账逻辑。
-    std::fs::write(project_dir.join("data").join("orders.tbl"), valid_tbl(false))?;
+    std::fs::write(
+        project_dir.join("data").join("orders.tbl"),
+        valid_tbl(false),
+    )?;
     let broken = project_dir.join("data").join("broken.tbl");
     std::fs::write(&broken, "{\"dimensions\": [")?;
     let db_path = project_dir.join("graph.db");

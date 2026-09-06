@@ -213,15 +213,23 @@ fn logical_path_of(path: &Path, project_dir: &Path) -> String {
 /// 反过来若强制重新解析，会把一个内容未变的文件推进 apply 路径、连带删除并重建
 /// 它的节点——在 §2.1 的跨文件边缺陷尚未修复前，那等于为了清一条警告去触发
 /// 一次真实的丢边。
+///
+/// **解码不出来的 entry 一律不碰**，哪怕它的路径已经不存在。损坏有它自己的响亮
+/// 信号（`runtime` 的 `SCANNER_DIAGNOSTICS_REFRESH_FAILED`）；本函数只做生命周期
+/// 记账，删掉损坏 entry 等于毁掉证据、把损坏悄悄抹平——正是 B3 要根除的那种
+/// 「失败被转成非事件」。同理也不向上抛错：一条坏 entry 不该让整轮索引失败。
 fn stale_scanner_diagnostic_paths(
     entries: &[(String, Vec<u8>)],
     discovered: &HashSet<String>,
     prev_states: &HashMap<String, FileState>,
     dirty: &[DirtyFile],
-) -> Result<Vec<String>> {
+) -> Vec<String> {
     let dirty_paths: HashSet<&str> = dirty.iter().map(|(rel, _, _)| rel.as_str()).collect();
     let mut stale = Vec::new();
     for (path, bytes) in entries {
+        let Ok(counts) = serde_json::from_slice::<FileScanDiagnostics>(bytes) else {
+            continue;
+        };
         if !discovered.contains(path.as_str()) {
             // 孤儿：文件没了。已在 `plan.deleted` 里的路径由调用方去重。
             stale.push(path.clone());
@@ -231,13 +239,11 @@ fn stale_scanner_diagnostic_paths(
             // 这轮会重新解析，覆盖机制自会处理；不要抢在解析结果之前删。
             continue;
         }
-        let counts: FileScanDiagnostics = serde_json::from_slice(bytes)
-            .with_context(|| format!("Failed to decode scanner diagnostics entry for {path}"))?;
         if counts.parse_failed > 0 {
             stale.push(path.clone());
         }
     }
-    Ok(stale)
+    stale
 }
 
 /// 把本轮删除文件的路径与对账出的陈旧诊断路径合并去重。
@@ -620,7 +626,7 @@ impl ProjectIndexer {
             &discovered,
             &prev_states,
             &plan.dirty,
-        )?;
+        );
 
         let mut new_states = prev_states.clone();
 
@@ -780,7 +786,7 @@ impl ProjectIndexer {
             &discovered,
             &prev_states,
             &plan.dirty,
-        )?;
+        );
 
         let mut new_states = prev_states.clone();
         let (updates, parse_failures) = Self::parse_dirty_files_with_failures(

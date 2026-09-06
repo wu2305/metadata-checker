@@ -90,8 +90,8 @@ fn bare_ref_does_not_match_longer_identifier_with_same_prefix() {
 #[test]
 fn component_id_inside_string_literal_is_not_replaced() {
     let (meta, graph) = fixture();
-    let trace =
-        trace_value_source(&meta, &graph, "lit", "value", 5).expect("lit.value should be traceable");
+    let trace = trace_value_source(&meta, &graph, "lit", "value", 5)
+        .expect("lit.value should be traceable");
     assert_eq!(
         trace.expanded_expr, "=CONCAT(\"b\", (param1))",
         "字面量 \"b\" 必须原样保留，只有真正的引用 b.value 被展开，实际得到 {}",
