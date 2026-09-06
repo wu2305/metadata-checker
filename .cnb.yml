@@ -741,6 +741,43 @@
   - *rust_ci
   - *browser_offscreen_bench_ci
 
+# 知识库（CNB knowledge:update）。
+#
+# 白名单而非全量：docs/ 下 253 个跟踪文件中 archive 46 个、ai-eval-runs 115 个
+# （含评测答案键）。默认 `include: "**/**.md"` 加默认开启的 Issue 同步，会把已归档
+# 结论与当前事实混在一起召回，向量检索分不出新旧。因此只索引人工撰写、带源码依据
+# 的 docs/knowledge/** 与两个 Agent 入口文件。
+#
+# 不索引源码：knowledge:update 当前支持 .md/.mdx/.docx/.txt/.pdf，不支持 .rs；
+# 源码知识以「附 src/xxx.rs:NNN + 分析 SHA 的主题文档」形式入库。
+# 处理失败报错（ignoreProcessFailures: false），不让「入库成功」掩盖部分文档失败。
+# 不无条件 forceRebuild：仅在白名单结构变更时手动触发一次。
+# ifModify 让无关提交不额外占一条并发（知识库任务不需要编译环境，不挂 docker/volumes）。
+.knowledge_base_ci: &knowledge_base_ci
+  name: knowledge-base
+  ifModify:
+    - docs/knowledge/**
+    - AGENTS.md
+    - SKILL.md
+    - .cnb.yml
+  stages:
+    - name: update knowledge base
+      type: knowledge:update
+      options:
+        include:
+          - "docs/knowledge/**/*.md"
+          - "AGENTS.md"
+          - "SKILL.md"
+        # include 已是显式白名单，与这两条无交集；保留它们作为放宽 include 时的兜底。
+        exclude:
+          - "docs/ai-eval-runs/**"   # 评测答案键，任何口径都不得入库
+          - "docs/archive/**"        # 已归档历史结论，与当前事实词面几乎一样
+        chunkSize: 1200
+        chunkOverlap: 150
+        issueSyncEnabled: false
+        ignoreProcessFailures: false
+        forceRebuild: false
+
 .main_authoritative_ci: &main_authoritative_ci
   - *rust_ci
   - *browser_offscreen_bench_ci_with_bencher
@@ -750,6 +787,7 @@
   - *full_criterion_rebuild_crud_ci
   - *full_criterion_redb_ci
   - *full_criterion_boundary_ci
+  - *knowledge_base_ci
 
 .m58_cnb_llm_ci: &m58_cnb_llm_ci
   name: m58-cnb-llm-eval

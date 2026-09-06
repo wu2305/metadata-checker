@@ -77,6 +77,11 @@ M58：
 - [2026-09-04-local-query-plane-and-backend-research-plan.md](../plans/2026-09-04-local-query-plane-and-backend-research-plan.md)（approved）
 - [2026-09-05-graph-backend-migration-plan-review.md](../plans/2026-09-05-graph-backend-migration-plan-review.md)（复核意见）
 
+知识库（Issue #30）：
+
+- [2026-09-06-knowledge-base-corpus-design.md](../specs/2026-09-06-knowledge-base-corpus-design.md)（draft）
+- 语料目录：[knowledge/README.md](../knowledge/README.md)；验收：[knowledge-acceptance-questions.md](../knowledge/knowledge-acceptance-questions.md)
+
 M59（redb → Grafeo 迁移）：
 
 - [2026-09-05-grafeo-backend-migration-design.md](../specs/2026-09-05-grafeo-backend-migration-design.md)（approved）

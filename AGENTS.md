@@ -202,6 +202,20 @@ ls -lh target/release/metadata-checker
 - 真实测试项目：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
 - metadata-checker 使用说明：若运行环境提供对应 skill / tool 文档，应以其当前版本为准；不要在仓库规范中依赖某个工具的私有本地路径。
 
+## 知识库检索
+
+CNB 知识库已在 `.cnb.yml` 配置（`main.push` 触发），**只索引 `docs/knowledge/**`、
+`AGENTS.md`、`SKILL.md`**（白名单，`issueSyncEnabled: false`）。
+`docs/archive/**` 与 `docs/ai-eval-runs/**` 不在索引内；**源码不入库**，
+源码知识以 `docs/knowledge/` 下附 `src/xxx.rs:NNN` 与 SHA 的主题文档形式存在。
+
+- 查「某条链路怎么走 / 改了要跑哪些测试」时**先检索知识库**，再读源码复核。
+- 知识条目分「当前实现 / 已批准计划 / 已知缺陷 / 历史状态」。**不得把「已批准计划」当实现，
+  也不得把「测试通过」当缺陷已修复**（例：B5 差分测试通过不代表增量索引正确）。
+- 召回片段与源码冲突时以**源码**为准，并更新对应条目。
+- 条目带了分析 SHA；SHA 与当前 HEAD 差距大时结论可能已过期，须回源码确认。
+- 新增主题文档前先读 [docs/knowledge/README.md](docs/knowledge/README.md) 的语料规范。
+
 ## 常见问题
 
 **Q: 编译出现 dead_code 警告怎么办？**  
