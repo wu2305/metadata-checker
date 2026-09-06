@@ -101,6 +101,19 @@ while i <= s_bytes.len().saturating_sub(pat_bytes.len()) {
 > 后缀（先试 `.value` 再试裸 id，会把 `b.step` 错误改写成 `(展开).step`）。
 > 正确的修法是让 `RefType::ComponentValue` 保留被引用的原始 token，属**阶段 A1
 > 身份文法**的范围，故不在 B4 内顺手改。已在 A1 增列一条。
+>
+> **A1b 的值追溯半边已落地**（`f5d35b9` / `20921ad`）。拆成两半的理由：
+> 改 `RefType::ComponentValue` 的元数（让它带原始 token）要动 `src/`、`tests/`、
+> `benches/` 共 **103 处**，且与 A1 的身份文法重写重叠——那半边仍留在 A1 内。
+> 但「裸引用静默不展开」和「`.step` 可能被错误替换成值」是**当下就在产出错误
+> 结果**的缺陷，不该等 A1。故新增 `dependency::replace_component_value_ref`，
+> 在替换点按后缀显式判定：`id.value` 与裸 `id` 替换，`id.<其它后缀>` 跳过，
+> 词边界挡住 `bx` / `id.values` 这类同前缀更长标识符；替换文本不被二次扫描，
+> 且剥掉前导 `=`，避免拼出 `CONCAT(a, =(param1))` 这种嵌套等号。
+> 断言写在**行为层**（`tests/m59_a1b_component_value_ref_tests.rs`，4 条），
+> 因此 A1 落地后重构替换实现时这些断言应当继续成立，是 A1 的回归网。
+> 同时把 `m59_b4_value_trace_utf8_tests.rs` 里那条**把缺陷当期望**的断言
+> （`assert_eq!(trace.expanded_expr, "=b")`）改掉——它原本会把 A1b 的修复判成回归。
 
 ### 2.4 P1｜模型身份跨页/跨目录碰撞 —— 确认（本文认定为迁移的头号前置）
 
@@ -156,6 +169,8 @@ redb 侧则去重边、对占位模型保留既有 metadata。同一组写入，
         A1 F4/PR4b 身份文法：项目 + 源文件 + 局部 id，旧 target 经显式解析 + 歧义诊断兼容
         A1b ComponentValue 保留原始引用 token（.value / .step / 裸 id），
             使值追溯的替换 pattern 与来源文法一致——见 §2.3 的新增缺陷
+            —— 值追溯半边**已完成**（f5d35b9 / 20921ad）；枚举元数半边（103 处
+            调用点）并入 A1 一起改
         A2 路径归一化统一函数（. / .. / 分隔符 / 越界），扫描与引用解析共用
         A3 边带 origin_file；删除按 origin 而非按端点牵连
         A4 PR4a：schema 版本键 + fail-closed + 强制全量重建（迁移的开关本身）
@@ -230,12 +245,23 @@ C 才有意义。
 
    未采用 submodule：语料 156 MB，submodule 会进每一次 clone 与 CI checkout，
    而现有流水线是刻意用 `--depth 1 --filter=blob:none --sparse` 规避这个开销的。
-2. **内存驻留在真实语料上未知。** 合成图 16.5 MB 落盘 → 262 MB RSS（16 倍）。
-   真实语料的 redb `.graphdb` 为 514 MiB（`performance-baseline.md:777`；语料源目录
-   本身只有 157 MB，两者不是一回事，勿混用），若同比例膨胀约 **8 GB**。
+2. **内存驻留在真实语料上未知。** —— **测量中**（2026-09-06），记录见
+   [M59 真实语料实测](../ai-eval-runs/2026-09-06-m59-real-corpus-measurements.md)。
+
+   合成图 16.5 MB 落盘 → 262 MB RSS（16 倍）。真实语料的 redb `.graphdb` 为
+   514 MiB（`performance-baseline.md:777`；语料源目录本身只有 157 MB，两者不是
+   一回事，勿混用），若同比例膨胀约 **8 GB**。
 
    **本条虽列在 D1，但必须在 A4 之前测。** 理由在 §1：schema 一次性冻结，而这条
    读数直接决定「要不要瘦身 meta」——等到 D 阶段才测，答案已经刻进库里了。
    §4.1 解除后它已可测，不再需要外推。
+
+   已到手的两个数**都不是**这一条要的答案，勿代用：建图路径峰值 1,693 MiB 是
+   写入侧；`--check-graph` 的 6 MiB 只读文件头、根本没加载图。驻留必须走 stdio
+   加载路径实测（`tools/graph-load-measure.py --rss-sample`，取 `VmRSS`）。
+   中途观察已达 3.72 GiB 且仍在上升。
+
+   顺带确认：`SCANNER_UNRECOGNIZED_CONTAINER_KEY` 312 与
+   `SCANNER_DUPLICATE_COMPONENT_ID` 1,105 两条陈旧诊断基线**实测仍准确**。
 3. **`with_read_store` 未评估。** `GrafeoDB::with_read_store(Arc<dyn GraphStoreSearch>, Config)`
    允许只借 Cypher 引擎、不迁数据。既然已决定换库，此路仅作为 C1 受阻时的退路记录。
