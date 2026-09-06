@@ -8,13 +8,19 @@ JSONL 拆出加载耗时。本脚本从进程 spawn 计时到 stderr 出现
 （release-fast 二进制启动本身为毫秒级，可忽略）。连续测 N 轮观察 page-cache
 暖度差异；每轮独立进程，加载完成后发一次 `status` 验证服务可用并取节点/边数。
 
+`--rss-sample`（Linux）在 status 返回后、kill 之前读被测进程的
+`/proc/<pid>/status`，取 `VmRSS`（此刻的**驻留**）与 `VmHWM`（进程生命周期内的
+峰值）。这两个数不可互相替代：加载过程中的临时缓冲会把 HWM 抬到驻留之上，而
+M59 §4.2 问的是「图加载完成后常驻多少」，即 VmRSS。非 Linux 或读取失败时该轮
+两个字段为 null，不影响耗时测量、也不改变退出码。
+
 fail-closed：`--runs` 必须 >= 1；等待标记/响应均有超时（`--timeout-secs`）；
 任何一轮未等到加载标记、进程提前退出或 status 响应异常，脚本最终以非零码退出。
 
 用法：
     python3 tools/graph-load-measure.py --bin <release-fast 二进制> \
         --graph-db <graphdb 路径> --project-dir <语料目录> [--runs 2] \
-        [--timeout-secs 1800]
+        [--timeout-secs 1800] [--rss-sample]
 """
 
 import argparse
@@ -25,6 +31,27 @@ import sys
 import time
 
 MARKER = b"[stdio-server] Graph loaded"
+
+
+def sample_proc_rss(pid):
+    """读 /proc/<pid>/status 的 VmRSS / VmHWM，单位 KiB。
+
+    仅 Linux 有 /proc；读不到（平台不支持、进程已退出、权限不足）返回
+    (None, None)——驻留采样是附加信息，不参与 fail-closed 判定。
+    """
+    rss = hwm = None
+    try:
+        with open("/proc/%d/status" % pid, "r") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    rss = int(line.split()[1])
+                elif line.startswith("VmHWM:"):
+                    hwm = int(line.split()[1])
+                if rss is not None and hwm is not None:
+                    break
+    except (OSError, ValueError, IndexError):
+        return None, None
+    return rss, hwm
 
 
 def readline_with_timeout(stream, deadline):
@@ -58,6 +85,8 @@ def measure_run(run, args):
     load_ms = None
     marker_line = b""
     status_ok = None
+    rss_kib = None
+    hwm_kib = None
     result = {}
     ok = False
     try:
@@ -83,6 +112,9 @@ def measure_run(run, args):
                 except json.JSONDecodeError:
                     status_ok = False
             ok = status_ok is True
+            # 采样必须在 kill 之前，且在 status 之后——此时图已完整驻留。
+            if args.rss_sample:
+                rss_kib, hwm_kib = sample_proc_rss(proc.pid)
     finally:
         proc.kill()
         proc.wait()
@@ -94,6 +126,8 @@ def measure_run(run, args):
         "node_count": result.get("node_count"),
         "edge_count": result.get("edge_count"),
         "total_wall_ms_incl_query": total_ms,
+        "resident_rss_kib_after_load": rss_kib,
+        "peak_rss_kib_vmhwm": hwm_kib,
     }, marker_line, ok
 
 
@@ -105,6 +139,8 @@ def main():
     parser.add_argument("--runs", type=int, default=2, help="测量轮数（默认 2，必须 >= 1）")
     parser.add_argument("--timeout-secs", type=int, default=1800,
                         help="单轮等待加载标记/status 响应的超时秒数（默认 1800）")
+    parser.add_argument("--rss-sample", action="store_true",
+                        help="加载完成后读 /proc/<pid>/status 采样 VmRSS/VmHWM（仅 Linux）")
     args = parser.parse_args()
 
     if args.runs < 1:
