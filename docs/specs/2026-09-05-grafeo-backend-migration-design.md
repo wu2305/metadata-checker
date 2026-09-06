@@ -176,6 +176,39 @@ redb 侧则去重边、对占位模型保留既有 metadata。同一组写入，
 > Grafeo 实现是对的还是错的**，因为没有基准。因此共享存储契约测试套件是
 > **迁移的硬前置，必须先于 Grafeo 实现存在**，不能等迁移完再补。
 
+**已落地（B1，commit `4962412` + `e4b1106`）**：
+`tests/m59_b1_graph_store_contract_tests.rs`，12 个用例 × 2 个实现 = 24 条测试，
+由 `contract_suite!` 宏展开。用例只用 trait 方法、不碰实现细节，
+**C1 落地时加一个 `impl` 分支即可接入，用例一行不动——用例通过即为 C1 的验收判据。**
+
+覆盖 §3 B1 点名的五项（重复边 / 节点更新 / 占位节点升级 / 删除 / 邻接一致性），
+另加三项：计数自洽（`iter_nodes` ↔ `node_count`、逐节点出边之和 ↔ `edge_count`）、
+入出边互为镜像、以及「端点删后重建同一条边必须能重新写入」——
+去重键若不随删除一起清，图里会**静默永久缺一条边**，无任何报错。
+
+分歧一律以 **redb 为准**（生产查询路径实际跑的实现）。规则本身提到
+`graph_store.rs` 由两实现共用**同一份实现**，避免规则分头演化——
+这正是本条缺陷的成因：
+
+- `merge_upsert_meta` 由 `graph_redb.rs` 的私有函数提升为
+  `graph_store::merge_upsert_meta`（`graph_redb` 是 `cli-local` gated 而
+  `memory_graph_store` 不是，只有 `graph_store` 两边都可见）；
+- 新增 `graph_store::edge_dedup_key`，把「`field_path` 参与去重键」写成明文——
+  同一对端点上不同字段产生的引用是**不同的事实**，不能合并。
+
+`MemoryGraphStore` 三处偏离逐条纠正：`add_edge` 不去重 → 按四元组去重且删节点时
+连带清去重键；邻接表存节点副本导致 upsert 后邻边读到旧值 → 只存 `Edge`、读时按 id
+现查（**结构上**消除不一致的可能，而不是靠记得同步两份）；`upsert_node` 无条件覆盖
+meta → 走共享规则。
+
+> 顺带修掉一个**无效基准**：`add_test_edge` 原先用两个 `if let` 各判一端，
+> 只有一端存在时会留下**半悬挂的单向边**。这种状态 redb 侧根本构造不出来，
+> 拿它搭出来的测试期望验证不了任何生产行为。现改为直接走 `add_edge`。
+
+远程验证（`4962412` + `e4b1106`）：契约套件 24/24 通过，
+**`cargo test --features cli-local` 全量套件 `FULL_EXIT=0`**（`MemoryGraphStore`
+是 57 处调用点的共用替身，改它必须全量回归），`FMT_EXIT=0`。
+
 ### 2.7 两条附注 —— 确认
 
 - `graph_redb.rs:888`：每删一个节点对整个 `seen_edges` 做一次 `retain`，
@@ -224,6 +257,7 @@ redb 侧则去重边、对占位模型保留既有 metadata。同一组写入，
 阶段 B  契约与正确性（先于 Grafeo 实现）
         B1 共享 GraphStore 契约测试套件：同一组用例跑 memory / redb 两实现
            覆盖重复边、节点更新、占位节点升级、删除、邻接一致性
+           —— **已完成**（`4962412` / `e4b1106`），见 §2.6；C1 加一个 impl 分支即接入
         B2 收紧 core_feature_tests 的宽松断言（迁移期的退化探针）
            —— **已完成**（`276d61f`），见 §2.7；顺带钉住两条既有分类缺陷
         B3 TBL 解析失败不再返回 Ok(空)：验证通过才动候选图，否则保留旧图 + 陈旧标记
