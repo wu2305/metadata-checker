@@ -188,6 +188,29 @@ fn snapshot(db_path: &Path) -> GraphSnapshot {
     GraphSnapshot { nodes, edges }
 }
 
+/// 增量相对全量的**完整**差异：`(全量有而增量没有, 增量有而全量没有)`。
+///
+/// codex 复审（`2db8af9` 之后）：下面两条「钉住已知缺陷」的用例原先只断言
+/// **过滤出来的那一类**行——`embeds(&inc).is_empty()`、`ghost(&inc).len() == 1`。
+/// 这类断言对「差异恰好是那一处」毫无约束：把增量侧的边**全部**清空、或者把
+/// B 的节点连同所有边一起删掉，过滤结果照样满足，测试照样绿。
+/// 于是它钉住的其实是「至少包含这处缺陷」，而不是「**只有**这处缺陷」——
+/// 而后者才是 A3 落地前的退化探针该给的保证。
+/// 现在改成：两侧的完整差异逐行列出，缺的、多的都必须与预期**完全**吻合。
+fn complete_diff(full: &[String], inc: &[String]) -> (Vec<String>, Vec<String>) {
+    let missing: Vec<String> = full
+        .iter()
+        .filter(|x| !inc.contains(x))
+        .cloned()
+        .collect();
+    let extra: Vec<String> = inc
+        .iter()
+        .filter(|x| !full.contains(x))
+        .cloned()
+        .collect();
+    (missing, extra)
+}
+
 /// 人类可读的逐行差分。只在断言失败时构造。
 fn describe_diff(label_a: &str, a: &[String], label_b: &str, b: &[String]) -> String {
     let only_a: Vec<&String> = a.iter().filter(|x| !b.contains(x)).collect();
@@ -310,6 +333,15 @@ fn the_changed_file_itself_is_rebuilt_identically() {
         "应当读到改动后的内容，实际 {:?}",
         b_nodes(&full)
     );
+    // 过滤后的子集相等还不够：若增量侧整体塌了（比如 A 的节点也没了），
+    // 上面的断言依旧成立。节点集在这个场景里两侧本就应当完全一致——
+    // §2.1 丢的是边，不是节点。
+    assert_eq!(
+        full.nodes,
+        inc.nodes,
+        "本场景两侧节点集应完全一致：{}",
+        describe_diff("全量", &full.nodes, "增量", &inc.nodes)
+    );
 }
 
 /// **钉住 spec §2.1 的 P1 缺陷**：增量路径丢失未变更文件（A）贡献的跨文件边。
@@ -356,12 +388,28 @@ fn cross_file_edge_is_lost_by_incremental_update() {
         embeds(&full)[0]
     );
 
+    // 关键：钉住的是「差异**恰好**是这一条边」，不是「这一类边没了」。
+    // 后者对退化毫无约束——把增量侧的边全部清空，`embeds(&inc).is_empty()`
+    // 照样成立，测试照样绿，而那已经是彻底的图崩塌。
+    let (missing, extra) = complete_diff(&full.edges, &inc.edges);
+    assert_eq!(
+        missing.len(),
+        1,
+        "增量相对全量应当**只**少这一条跨文件边；多少了别的就是新的退化：{}",
+        describe_diff("全量", &full.edges, "增量", &inc.edges)
+    );
+    assert_eq!(
+        missing[0], embeds(&full)[0],
+        "少掉的必须正是 A→B 的那条 EmbedsPage 边（逐属性一致），实际 {}",
+        missing[0]
+    );
     assert!(
-        embeds(&inc).is_empty(),
-        "钉住 spec §2.1 的 P1 缺陷：增量路径此处会丢掉跨文件边。\
-         若这条断言失败（增量把边保住了），说明 A3 已落地——\
-         请把本测试改为 full.edges == inc.edges，不要放宽断言。实际 {:?}",
-        embeds(&inc)
+        extra.is_empty(),
+        "增量不得凭空多出边，实际多出 {extra:?}"
+    );
+    assert!(
+        !inc.edges.is_empty(),
+        "前置健全性：增量侧不该只剩空图，否则上面的「只少一条」是拿空集在比"
     );
 
     // 节点集不受影响：丢的是边，不是节点。这一条把缺陷的范围钉死，
@@ -439,13 +487,39 @@ fn placeholder_page_node_leaks_after_its_only_referrer_is_deleted() {
         "全量路径下 a.spg 从不存在，不该有 ghost 占位节点，实际 {:?}",
         ghost(&full)
     );
+
+    // 同上：断言的是「差异**恰好**是这一个泄漏节点」。只数 ghost 的条数，
+    // 对增量侧其余内容一无约束——把 B 的节点连同所有边一起删光，
+    // `ghost(&inc).len() == 1` 依旧成立。
+    let (missing_nodes, extra_nodes) = complete_diff(&full.nodes, &inc.nodes);
     assert_eq!(
-        ghost(&inc).len(),
+        extra_nodes.len(),
         1,
-        "钉住新发现的缺陷：占位节点不归 a.spg 所有，删掉 a.spg 后它留在图里。\
-         若这条断言失败（占位节点被清掉了），说明 A3 的节点归属半边已落地——\
-         请把本测试改为 full.nodes == inc.nodes，不要放宽断言。实际 {:?}",
-        ghost(&inc)
+        "钉住新发现的缺陷：删掉 a.spg 后**恰好**泄漏一个占位节点。\
+         若这条断言失败且 extra 为空，说明 A3 的节点归属半边已落地——\
+         请把本测试改为 full.nodes == inc.nodes，不要放宽断言。差异：{}",
+        describe_diff("全量", &full.nodes, "增量", &inc.nodes)
+    );
+    assert_eq!(
+        extra_nodes, ghost(&inc),
+        "多出来的那个节点必须正是 ghost 占位页节点，实际 {extra_nodes:?}"
+    );
+    assert!(
+        missing_nodes.is_empty(),
+        "增量不得少节点——a.spg 之外的东西都该原样还在，实际少了 {missing_nodes:?}"
+    );
+
+    // 边：a.spg 自身的节点被删时，它指向 ghost 的那条 EmbedsPage 边也随之消失，
+    // 因此两侧的边集应当**完全一致**。泄漏的是一个悬空节点，不是一条悬空边。
+    assert_eq!(
+        full.edges,
+        inc.edges,
+        "边集应完全一致；这条缺陷泄漏的只有节点：{}",
+        describe_diff("全量", &full.edges, "增量", &inc.edges)
+    );
+    assert!(
+        !inc.nodes.is_empty(),
+        "前置健全性：增量侧不该只剩空图"
     );
 
     // 同时确认这不是「增量删除整体失灵」：a.spg 自己的节点确实被删干净了。
