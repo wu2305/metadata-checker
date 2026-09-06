@@ -84,16 +84,6 @@ struct SnapshotDiff {
     removed_edges: Vec<String>,
 }
 
-impl SnapshotDiff {
-    fn is_empty(&self) -> bool {
-        self.added_nodes.is_empty()
-            && self.removed_nodes.is_empty()
-            && self.changed_nodes.is_empty()
-            && self.added_edges.is_empty()
-            && self.removed_edges.is_empty()
-    }
-}
-
 impl Snapshot {
     fn node_repr(&self, id: &str) -> Option<&str> {
         self.nodes

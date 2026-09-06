@@ -198,16 +198,8 @@ fn snapshot(db_path: &Path) -> GraphSnapshot {
 /// 而后者才是 A3 落地前的退化探针该给的保证。
 /// 现在改成：两侧的完整差异逐行列出，缺的、多的都必须与预期**完全**吻合。
 fn complete_diff(full: &[String], inc: &[String]) -> (Vec<String>, Vec<String>) {
-    let missing: Vec<String> = full
-        .iter()
-        .filter(|x| !inc.contains(x))
-        .cloned()
-        .collect();
-    let extra: Vec<String> = inc
-        .iter()
-        .filter(|x| !full.contains(x))
-        .cloned()
-        .collect();
+    let missing: Vec<String> = full.iter().filter(|x| !inc.contains(x)).cloned().collect();
+    let extra: Vec<String> = inc.iter().filter(|x| !full.contains(x)).cloned().collect();
     (missing, extra)
 }
 
@@ -399,14 +391,12 @@ fn cross_file_edge_is_lost_by_incremental_update() {
         describe_diff("全量", &full.edges, "增量", &inc.edges)
     );
     assert_eq!(
-        missing[0], embeds(&full)[0],
+        missing[0],
+        embeds(&full)[0],
         "少掉的必须正是 A→B 的那条 EmbedsPage 边（逐属性一致），实际 {}",
         missing[0]
     );
-    assert!(
-        extra.is_empty(),
-        "增量不得凭空多出边，实际多出 {extra:?}"
-    );
+    assert!(extra.is_empty(), "增量不得凭空多出边，实际多出 {extra:?}");
     assert!(
         !inc.edges.is_empty(),
         "前置健全性：增量侧不该只剩空图，否则上面的「只少一条」是拿空集在比"
@@ -501,7 +491,8 @@ fn placeholder_page_node_leaks_after_its_only_referrer_is_deleted() {
         describe_diff("全量", &full.nodes, "增量", &inc.nodes)
     );
     assert_eq!(
-        extra_nodes, ghost(&inc),
+        extra_nodes,
+        ghost(&inc),
         "多出来的那个节点必须正是 ghost 占位页节点，实际 {extra_nodes:?}"
     );
     assert!(
@@ -517,10 +508,7 @@ fn placeholder_page_node_leaks_after_its_only_referrer_is_deleted() {
         "边集应完全一致；这条缺陷泄漏的只有节点：{}",
         describe_diff("全量", &full.edges, "增量", &inc.edges)
     );
-    assert!(
-        !inc.nodes.is_empty(),
-        "前置健全性：增量侧不该只剩空图"
-    );
+    assert!(!inc.nodes.is_empty(), "前置健全性：增量侧不该只剩空图");
 
     // 同时确认这不是「增量删除整体失灵」：a.spg 自己的节点确实被删干净了。
     assert!(

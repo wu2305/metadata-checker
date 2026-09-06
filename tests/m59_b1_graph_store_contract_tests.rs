@@ -38,7 +38,7 @@
 
 use metadata_checker::graph::{Edge, EdgeType, Node, NodeType};
 use metadata_checker::graph_redb::GraphDB;
-use metadata_checker::graph_store::{GraphEdgeView, GraphReadStore, GraphStore, GraphWriteStore};
+use metadata_checker::graph_store::{GraphEdgeView, GraphStore};
 use metadata_checker::memory_graph_store::MemoryGraphStore;
 use serde_json::json;
 use std::path::PathBuf;
