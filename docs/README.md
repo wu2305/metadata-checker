@@ -38,11 +38,21 @@
 | [plans/](plans/) | 实现计划 |
 | [runbooks/](runbooks/) | 真实 BI / 环境操作手册，含 [CNB 远程编译与排错测试](runbooks/cnb-remote-dev-env.md) |
 | [archive/](archive/) | 已完成 roadmap 章节（[roadmap 索引](archive/roadmap/README.md)） |
+| [knowledge/](knowledge/) | 知识库语料（唯一被索引的白名单目录，[说明](knowledge/README.md)） |
 
 ## 设计与计划（Phase C）
 
 - Spec：[specs/2026-07-05-docs-governance-reorg-design.md](specs/2026-07-05-docs-governance-reorg-design.md)
 - Plan：[plans/2026-07-05-docs-governance-reorg-plan.md](plans/2026-07-05-docs-governance-reorg-plan.md)
+
+## 知识库
+
+CNB 知识库只索引 `docs/knowledge/**`、`AGENTS.md`、`SKILL.md`（白名单，关闭 Issue 同步）。
+写入 `docs/knowledge/` 前先读 [knowledge/README.md](knowledge/README.md) 的语料规范
+（状态分层、源码依据、自包含、否定结论、脱敏）。
+
+- 设计规范：[specs/2026-09-06-knowledge-base-corpus-design.md](specs/2026-09-06-knowledge-base-corpus-design.md)
+- 验收问题集：[knowledge/knowledge-acceptance-questions.md](knowledge/knowledge-acceptance-questions.md)
 
 ## 根目录其它文档
 
