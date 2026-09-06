@@ -1,0 +1,232 @@
+{
+  "details": {
+    "answer_contract": {
+      "budget_used": "compact",
+      "candidate_path_count": 0,
+      "completion": {
+        "missing": [
+          "graph_relationship_path"
+        ],
+        "next_commands": [
+          {
+            "budget": "normal",
+            "command": "--context",
+            "reason": "未找到路径时先查看目标相邻关系，确认目标 ID 和边方向",
+            "target": "comp:app/销售.app/销售/合同协议.spg|button13"
+          }
+        ],
+        "status": "partial_due_to_missing_proven_path"
+      },
+      "dataflow_model_id": null,
+      "forbidden_fact_paths": [
+        "value_source_facts",
+        "writer_facts",
+        "availability_facts",
+        "model_io_facts"
+      ],
+      "intent": "display",
+      "is_page_scoped_target": false,
+      "must_read_summary_first": true,
+      "primary_fact_path": "display_facts",
+      "proven_path_count": 0,
+      "rejected_path_count": 0,
+      "resolved_model_target": "comp:app/销售.app/销售/合同协议.spg|button13",
+      "target_scope": {
+        "dataflow_model_id": null,
+        "is_page_scoped_target": false,
+        "node_id": "comp:app/销售.app/销售/合同协议.spg|button13",
+        "node_type": "Component",
+        "query_target": "comp:app/销售.app/销售/合同协议.spg|button13",
+        "resolved_model_target": "comp:app/销售.app/销售/合同协议.spg|button13",
+        "source_file": "app/销售.app/销售/合同协议.spg"
+      }
+    },
+    "answer_facts": {
+      "display_facts": {
+        "confidence": "medium",
+        "direct_conditions": [],
+        "evidence_refs": [],
+        "expanded_data_gates": [],
+        "has_direct_condition": false,
+        "inherited_conditions": [],
+        "missing_evidence": [
+          "no direct or inherited display gate found"
+        ],
+        "paths": [],
+        "result": "no_display_condition_found",
+        "target": "comp:app/销售.app/销售/合同协议.spg|button13"
+      },
+      "intent": "display",
+      "traversal_policy": {
+        "allowed_edge_types": [
+          "DependsOn",
+          "Contains"
+        ],
+        "directions": [
+          "incoming",
+          "ancestor"
+        ],
+        "intent": "display",
+        "max_paths": 3,
+        "max_steps_per_path": 6,
+        "rank_rules": [
+          "field-level paths before model-level paths",
+          "proven paths before candidates",
+          "paths with evidence before inferred paths"
+        ],
+        "stop_conditions": [
+          "display_condition_found",
+          "expanded_model_filter_found"
+        ]
+      }
+    },
+    "blocking_conditions": [],
+    "candidate_paths": [],
+    "candidate_paths_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 candidate_paths 明细；需要核查时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "data_empty_gates": [],
+    "primary_path": [],
+    "primary_path_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 primary_path 明细；answer_facts.paths 已保留短证据",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "proven_paths": [],
+    "rejected_paths": [],
+    "rejected_paths_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 rejected_paths 明细；需要排查路径拒绝原因时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "related_context": [],
+    "related_context_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 related_context 明细；它们是相关但非必要上下文",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "required_followups": [],
+    "supporting_context": [],
+    "supporting_context_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 supporting_context 明细；需要核查时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "target": {
+      "name": "button13",
+      "node_id": "comp:app/销售.app/销售/合同协议.spg|button13",
+      "node_type": "Component",
+      "path": "app/销售.app/销售/合同协议.spg"
+    },
+    "thinking_frame": {
+      "answer_with": "display_facts",
+      "completion_status": "partial_due_to_missing_proven_path",
+      "do_not_use_as_primary_evidence": [
+        "value_source_facts",
+        "writer_facts",
+        "availability_facts",
+        "model_io_facts"
+      ],
+      "next_best_action": "使用 --budget normal 或 full 重新查询以展开更多路径",
+      "primary_question_type": "为什么这个组件显示/隐藏",
+      "question_kind": "display",
+      "required_followups": [
+        {
+          "expected_fact_path": "display_facts",
+          "reason": "未找到任何 proven 或 candidate 路径；可能需要扩展 budget 或检查目标 ID 是否正确"
+        }
+      ],
+      "target_scope": {
+        "node_id": "comp:app/销售.app/销售/合同协议.spg|button13",
+        "node_type": "Component",
+        "source_file": "app/销售.app/销售/合同协议.spg"
+      },
+      "what_is_missing": "未找到任何 proven 或 candidate 路径；可能需要扩展 budget 或检查目标 ID 是否正确",
+      "what_to_avoid": "不要把 value_source_facts 或 writer_facts 的结论当作显示条件的证据",
+      "why_this_intent": "目标是一个组件，优先解释它的显示/启用条件"
+    },
+    "traversal_policy": {
+      "allowed_edge_types": [
+        "DependsOn",
+        "Contains"
+      ],
+      "directions": [
+        "incoming",
+        "ancestor"
+      ],
+      "intent": "display",
+      "max_paths": 3,
+      "max_steps_per_path": 6,
+      "rank_rules": [
+        "field-level paths before model-level paths",
+        "proven paths before candidates",
+        "paths with evidence before inferred paths"
+      ],
+      "stop_conditions": [
+        "display_condition_found",
+        "expanded_model_filter_found"
+      ]
+    },
+    "truncation_guard": {
+      "compact_limits": {
+        "max_blocking_conditions": 10,
+        "max_data_empty_gates": 10,
+        "max_paths": 3,
+        "max_related_context": 5,
+        "max_steps_per_path": 6,
+        "max_supporting_context": 5
+      },
+      "is_complete": true,
+      "recommended_rerun": "",
+      "required_budget_for_complete_answer": "compact",
+      "safe_to_answer_full_relationships": true,
+      "truncated_sections": []
+    },
+    "value_source_context": null
+  },
+  "diagnostics": [],
+  "evidence": [],
+  "kind": "Explain",
+  "next_queries": [],
+  "query_target": "comp:app/销售.app/销售/合同协议.spg|button13",
+  "schema_version": "1.0",
+  "summary": {
+    "answer_facts_count": 1,
+    "blocking_conditions_count": 0,
+    "candidate_paths_count": 0,
+    "data_empty_gates_count": 0,
+    "intent": "display",
+    "primary_paths_count": 0,
+    "primary_reason": "目标 comp:app/销售.app/销售/合同协议.spg|button13 未发现明确显示条件",
+    "rejected_paths_count": 0,
+    "related_context_count": 0,
+    "supporting_context_count": 0,
+    "target_id": "comp:app/销售.app/销售/合同协议.spg|button13",
+    "target_name": "button13",
+    "target_type": "Component",
+    "value_source_context_count": 0,
+    "what_is_it": "Why 解释: comp:app/销售.app/销售/合同协议.spg|button13"
+  }
+}

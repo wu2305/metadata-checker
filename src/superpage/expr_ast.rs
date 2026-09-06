@@ -822,10 +822,25 @@ fn classify_identifier(token: &str) -> RefType {
     // 处理 SuperPage ${model.field} 语法
     if token.starts_with("${") && token.ends_with("}") {
         let inner = &token[2..token.len() - 1];
+        // M58.3 相邻缺口修复：`${$user.deptId}` / `${$now}` 这类花括号包裹的
+        // `$` 前缀 token 此前直接走下方 `.` 拆分，被判成 ModelField("$user",
+        // "deptId")——在图里造出 `model:$user` 与 `field:$user.deptId` 垃圾节点，
+        // 用户属性/系统变量的血缘整条丢失（真实语料里有 `${$user.WXWORK_USER_ID}`
+        // 等多处）。这里改为委派给下方 `$` 前缀分支，与裸 `$user.deptId` 同口径。
+        if inner.starts_with('$') {
+            return classify_identifier(inner);
+        }
         let parts: Vec<&str> = inner.split('.').collect();
         if parts.len() >= 2 {
             let field = parts[1..].join(".");
             return RefType::ModelField(parts[0].to_string(), field);
+        }
+        // M58.3 复核返修 P1-6：裸 `${paramN}` 与裸 `paramN` 共用同一命名启发式
+        // （见下方 param 前缀分支），归一为 Param，避免下游产出 `model:paramN`
+        // 垃圾节点与 `field:paramN.` 尾点节点；带点形态 `${paramN.x}` 维持
+        // ModelField 现状不动
+        if inner.starts_with("param") {
+            return RefType::Param(inner.to_string());
         }
         return RefType::ModelField(inner.to_string(), String::new());
     }

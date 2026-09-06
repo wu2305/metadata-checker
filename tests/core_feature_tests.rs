@@ -828,6 +828,18 @@ fn test_value_trace_cross_component_types() {
 // P2: 输出层来源分类定义测试
 // ============================================================
 
+// M59-B2（spec §2.7）：以下四条来源分类断言原先接受 2~3 个候选值
+//（`Param|UserInput|Constant`、`Computed|Unknown`、`Constant|Computed|Unknown`，
+// 以及一条 `has_model_node || raw_expr.contains("model1")` 的或门）。
+// 这类宽松断言挡不住迁移引入的分类退化——Grafeo 落地期正是最需要它们的时候。
+// 现全部收紧到**唯一期望值**，并把展开式与 source_chain 一并钉住：
+// 分类只是最终标签，展开式和链条才是它由之而来的事实。
+//
+// 收紧过程中暴露的两条既有缺陷，见每条测试内的说明。它们**不在 B2 范围内修**
+// （B2 只做探针），但断言必须明确写成「钉住当前行为，且当前行为是错的」，
+// 而不能读起来像是在背书。
+
+/// `=param1` → `Param`，且属外部输入。
 #[test]
 fn test_source_type_param() {
     use metadata_checker::dependency::{SourceType, trace_value_source};
@@ -836,16 +848,26 @@ fn test_source_type_param() {
     let graph = DependencyGraph::new(&meta);
     let trace =
         trace_value_source(&meta, &graph, "input1", "value", 5).expect("Should trace input1.value");
+    assert_eq!(trace.raw_expr, "=param1");
     assert!(
-        matches!(
-            trace.source_type,
-            SourceType::Param | SourceType::UserInput | SourceType::Constant
-        ),
-        "input1.value = param1 should be classified as Param, UserInput or Constant, got {:?}",
+        matches!(trace.source_type, SourceType::Param),
+        "input1.value = param1 必须唯一判为 Param，实际 {:?}",
         trace.source_type
+    );
+    assert!(
+        trace.is_external_input,
+        "Param 属外部输入，is_external_input 必须为 true"
+    );
+    assert_eq!(trace.expanded_expr, "=(param1)");
+    assert!(
+        trace.source_chain.is_empty(),
+        "无组件依赖时链条应为空，实际 {:?}",
+        trace.source_chain
     );
 }
 
+/// `=input1.value + input2.value` → `Computed`；链条按依赖出现顺序展开，
+/// 且逐节点分类到位（input1=Param、input2=ModelAuto）。
 #[test]
 fn test_source_type_computed() {
     use metadata_checker::dependency::{SourceType, trace_value_source};
@@ -855,15 +877,34 @@ fn test_source_type_computed() {
     let trace =
         trace_value_source(&meta, &graph, "input3", "value", 5).expect("Should trace input3.value");
     assert!(
-        matches!(
-            trace.source_type,
-            SourceType::Computed | SourceType::Unknown
-        ),
-        "input3.value = input1.value + input2.value should be Computed or Unknown, got {:?}",
+        matches!(trace.source_type, SourceType::Computed),
+        "input1.value + input2.value 必须唯一判为 Computed，实际 {:?}",
         trace.source_type
+    );
+    assert!(!trace.is_external_input, "计算值不是外部输入");
+    assert_eq!(
+        trace.expanded_expr, "=(param1) + (model1.A)",
+        "两个分支必须各自展开到根来源"
+    );
+    let chain: Vec<String> = trace
+        .source_chain
+        .iter()
+        .map(|n| format!("{}:{:?}", n.component_id, n.source_type))
+        .collect();
+    assert_eq!(
+        chain,
+        vec!["input1:Param".to_string(), "input2:ModelAuto".to_string()],
+        "链条须按依赖顺序逐节点分类，实际 {chain:?}"
     );
 }
 
+/// `=input2.value + model1.A` → `ModelAuto`（`contains("model")` 优先于 `.value`）。
+///
+/// **钉住的既有缺陷**：`RefType::ModelField` 在 `expand_expression` 里只做替换、
+/// **不 push `SourceNode`**，所以 `model1` 本身从不出现在 source_chain 里——
+/// 链条只有 input1/input2。原断言那道 `|| raw_expr.contains("model1")` 或门正是
+/// 靠这半边才通过的，等于把缺陷藏起来了。这里改成显式断言链条**不含**
+/// ModelAuto 节点：行为一旦被修好，这条会立刻红，届时连同期望一起更新。
 #[test]
 fn test_source_type_model_auto() {
     use metadata_checker::dependency::{SourceType, trace_value_source};
@@ -872,18 +913,45 @@ fn test_source_type_model_auto() {
     let graph = DependencyGraph::new(&meta);
     let trace =
         trace_value_source(&meta, &graph, "input3", "value", 5).expect("Should trace input3.value");
-    // input3 包含 model1.A，但表达式整体可能被判为 Computed
-    // 这里只验证 source_chain 中包含 ModelAuto 节点
-    let has_model_node = trace
+    assert!(
+        matches!(trace.source_type, SourceType::ModelAuto),
+        "表达式含 model 引用必须唯一判为 ModelAuto，实际 {:?}",
+        trace.source_type
+    );
+    assert_eq!(
+        trace.expanded_expr, "=(param1) + (model1.A)",
+        "多级组件链与模型字段引用都要展开"
+    );
+    let chain: Vec<String> = trace
         .source_chain
         .iter()
-        .any(|n| matches!(n.source_type, SourceType::ModelAuto));
+        .map(|n| format!("{}:{:?}", n.component_id, n.source_type))
+        .collect();
+    assert_eq!(
+        chain,
+        vec!["input1:Param".to_string(), "input2:Computed".to_string()],
+        "链条须按依赖顺序逐节点分类，实际 {chain:?}"
+    );
     assert!(
-        has_model_node || trace.raw_expr.contains("model1"),
-        "Trace should contain ModelAuto node or reference model1"
+        !trace
+            .source_chain
+            .iter()
+            .any(|n| matches!(n.source_type, SourceType::ModelAuto)),
+        "钉住既有缺陷：ModelField 引用不进 source_chain。这条一旦变红说明缺陷被修了，\
+         把期望改成「链条里应当有 model1」即可，不要放宽断言"
     );
 }
 
+/// `=123` → **`Unknown`**。
+///
+/// **钉住的既有缺陷**：`determine_source_type` 判 `Constant` 的条件是
+/// 「不以 `=` 开头且不以 `${` 开头」，于是公式形态的字面量 `=123` 落不进
+/// `Constant`，一路掉到兜底的 `Unknown`。按名字这条测试想验的是常量分类，
+/// 而它从来没验到过——旧断言把 `Constant|Computed|Unknown` 三个都收下了，
+/// 正好盖住这件事。
+///
+/// 这里**如实钉住 `Unknown`**，不是认可它。修法属分类器本身（`=` 开头但不含任何
+/// 引用的纯字面量应判 Constant），不在 B2 探针范围内。
 #[test]
 fn test_source_type_constant() {
     use metadata_checker::dependency::{SourceType, trace_value_source};
@@ -892,14 +960,15 @@ fn test_source_type_constant() {
     let graph = DependencyGraph::new(&meta);
     let trace =
         trace_value_source(&meta, &graph, "text3", "value", 5).expect("Should trace text3.value");
+    assert_eq!(trace.raw_expr, "=123");
     assert!(
-        matches!(
-            trace.source_type,
-            SourceType::Constant | SourceType::Computed | SourceType::Unknown
-        ),
-        "text3.value = 123 should be Constant, Computed or Unknown, got {:?}",
+        matches!(trace.source_type, SourceType::Unknown),
+        "钉住当前行为：`=123` 现在判为 Unknown（应当是 Constant，见 doc 注释），实际 {:?}",
         trace.source_type
     );
+    assert!(!trace.is_external_input);
+    assert_eq!(trace.expanded_expr, "=123", "字面量不该被改写");
+    assert!(trace.source_chain.is_empty());
 }
 
 // ============================================================

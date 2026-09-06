@@ -33,33 +33,174 @@ fn collect_component_contexts(
     value: &serde_json::Value,
 ) -> std::collections::HashMap<String, ComponentContext> {
     let mut contexts = std::collections::HashMap::new();
+    // 解析路径只消费组件上下文；扫描诊断由 scan_raw_counts 对同一份原始 JSON
+    // 单独遍历采集。两条路径共用同一个带形态感知递归的内层遍历函数，规则不漂移。
+    let mut diags = ScanDiagnostics::default();
     if let Some(canvas) = value.get("canvas") {
-        collect_component_contexts_inner(canvas, "canvas", None, &mut contexts);
+        collect_component_contexts_inner_with_context_and_diagnostics(
+            canvas,
+            "canvas",
+            None,
+            None,
+            &mut contexts,
+            &mut diags,
+        );
     }
     contexts
 }
 
-fn collect_component_contexts_inner(
-    node: &serde_json::Value,
-    json_path: &str,
-    parent_id: Option<String>,
-    contexts: &mut std::collections::HashMap<String, ComponentContext>,
-) {
-    collect_component_contexts_inner_with_context(node, json_path, parent_id, None, contexts);
+/// 对原始 SPG JSON 采集扫描诊断计数（未识别容器键 / 重复组件 id）。
+#[cfg(any(test, feature = "cli-local"))]
+pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
+    let mut diags = ScanDiagnostics::default();
+    if let Some(canvas) = value.get("canvas") {
+        collect_component_contexts_inner_with_context_and_diagnostics(
+            canvas,
+            "canvas",
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut diags,
+        );
+    }
+    diags
 }
 
-fn collect_component_contexts_inner_with_context(
+/// 对原始 SPG JSON 采集扫描诊断（未识别容器键 / 重复组件 id）。
+///
+/// 生产路径由 indexer 按文件采集计数并持久化到 redb（`per_file_scan_diagnostic_entry` /
+/// `merge_scanner_diagnostic_entries`），集成测试亦直接使用本函数。
+#[cfg(any(test, feature = "cli-local"))]
+pub fn scan_raw_diagnostics(value: &serde_json::Value) -> Vec<crate::output::Diagnostic> {
+    scan_raw_counts(value).to_diagnostics()
+}
+
+/// 扫描阶段的轻量诊断计数（PR1 落地，未识别容器键/重复组件 id）。
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ScanDiagnostics {
+    pub(crate) unrecognized_container_key: usize,
+    pub(crate) duplicate_component_id: usize,
+    /// M59-B3：本文件解析失败、未进候选图（图内容陈旧）。
+    /// 不由 `scan_raw_counts` 产出——扫描能跑到这里说明已经解析成功了；
+    /// 由 indexer 在解析阶段失败时直接构造。
+    pub(crate) parse_failed: usize,
+    pub(crate) sample_unrecognized_location: Option<crate::output::Location>,
+    pub(crate) sample_duplicate_location: Option<crate::output::Location>,
+    pub(crate) sample_parse_failed_location: Option<crate::output::Location>,
+    /// 解析失败的原因（serde/UTF-8 报错原文），随诊断 message 透出
+    pub(crate) parse_failed_reason: Option<String>,
+}
+
+impl ScanDiagnostics {
+    /// 合并另一份计数（跨文件聚合；样本位置保留首个非空）。
+    #[cfg(any(test, feature = "cli-local"))]
+    pub(crate) fn merge(&mut self, other: &ScanDiagnostics) {
+        self.unrecognized_container_key += other.unrecognized_container_key;
+        self.duplicate_component_id += other.duplicate_component_id;
+        self.parse_failed += other.parse_failed;
+        if self.sample_unrecognized_location.is_none() {
+            self.sample_unrecognized_location = other.sample_unrecognized_location.clone();
+        }
+        if self.sample_duplicate_location.is_none() {
+            self.sample_duplicate_location = other.sample_duplicate_location.clone();
+        }
+        if self.sample_parse_failed_location.is_none() {
+            self.sample_parse_failed_location = other.sample_parse_failed_location.clone();
+            self.parse_failed_reason = other.parse_failed_reason.clone();
+        }
+    }
+
+    pub(crate) fn to_diagnostics(&self) -> Vec<crate::output::Diagnostic> {
+        let mut out = Vec::new();
+        if self.unrecognized_container_key > 0 {
+            let loc = self
+                .sample_unrecognized_location
+                .clone()
+                .unwrap_or_default();
+            out.push(crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY,
+                self.unrecognized_container_key,
+                loc,
+                format!(
+                    "Scanner encountered {} unrecognized container keys",
+                    self.unrecognized_container_key
+                ),
+            ));
+        }
+        if self.duplicate_component_id > 0 {
+            let loc = self.sample_duplicate_location.clone().unwrap_or_default();
+            out.push(crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID,
+                self.duplicate_component_id,
+                loc,
+                format!(
+                    "Scanner encountered {} duplicate component ids",
+                    self.duplicate_component_id
+                ),
+            ));
+        }
+        if self.parse_failed > 0 {
+            let loc = self
+                .sample_parse_failed_location
+                .clone()
+                .unwrap_or_default();
+            // 消息里点名「图内容为上一次成功解析的结果」——读到这条的人需要知道
+            // 这不是「没有数据」，而是「数据是旧的」。
+            let reason = self
+                .parse_failed_reason
+                .clone()
+                .unwrap_or_else(|| "unknown parse error".to_string());
+            out.push(crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_FILE_PARSE_FAILED,
+                self.parse_failed,
+                loc,
+                format!(
+                    "{} source file(s) failed to parse and were skipped; \
+                     their graph content is the last successfully parsed version (stale). \
+                     First failure: {}",
+                    self.parse_failed, reason
+                ),
+            ));
+        }
+        out
+    }
+}
+
+fn collect_component_contexts_inner_with_context_and_diagnostics(
     node: &serde_json::Value,
     json_path: &str,
     parent_id: Option<String>,
     inherited_context: Option<ComponentContext>,
     contexts: &mut std::collections::HashMap<String, ComponentContext>,
+    diagnostics: &mut ScanDiagnostics,
 ) {
     let current_id = node
         .get("id")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    // M58.3 复核返修 P1-7：组件身份判定对齐 superpage 提取侧口径——id 与 type
+    // 同时为非空字符串才是组件。id 有、type 无/空的对象不是组件：不注册组件
+    // 上下文（否则 pass2 会向不存在的 comp 节点建 comp→comp Contains，被存储层
+    // 静默丢弃，且 SpgComponent.parent_id 与 ctx.parent_id 两个事实源互相矛盾），
+    // 其子组件的 parent_id 透传祖父（与 extract_components 的透传一致）；同时按
+    // 「对象形态未识别」计入 SCANNER_UNRECOGNIZED_CONTAINER_KEY 安全网（spec 中
+    // 该 code 的定义覆盖容器子键/对象形态未识别），不允许继续静默
+    let has_type = node
+        .get("type")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty());
+    let is_component = current_id.is_some() && has_type;
+    if current_id.is_some() && !has_type {
+        diagnostics.unrecognized_container_key += 1;
+        if diagnostics.sample_unrecognized_location.is_none() {
+            diagnostics.sample_unrecognized_location = Some(crate::output::Location {
+                source_file: None,
+                node_id: current_id.clone(),
+                json_path: Some(json_path.to_string()),
+            });
+        }
+    }
 
     let source = node.get("source").and_then(json_scalar_to_string);
     let data_set = node.get("dataSet").and_then(json_scalar_to_string);
@@ -79,7 +220,17 @@ fn collect_component_contexts_inner_with_context(
     };
     let active_context = own_context.or(inherited_context);
 
-    if let Some(id) = &current_id {
+    if is_component && let Some(id) = &current_id {
+        if contexts.contains_key(id) {
+            diagnostics.duplicate_component_id += 1;
+            if diagnostics.sample_duplicate_location.is_none() {
+                diagnostics.sample_duplicate_location = Some(crate::output::Location {
+                    source_file: None,
+                    node_id: Some(id.clone()),
+                    json_path: Some(json_path.to_string()),
+                });
+            }
+        }
         contexts.insert(
             id.clone(),
             ComponentContext {
@@ -103,18 +254,70 @@ fn collect_component_contexts_inner_with_context(
         );
     }
 
-    let child_parent = current_id.or(parent_id);
+    // 组件身份成立时子组件的父为当前节点；非组件节点（无 id，或 id 有 type 无）
+    // 透传祖父 parent_id——与 superpage 提取侧 extract_components 对 id/type
+    // 缺失节点的 parent_id 透传保持同口径，消除两个 parent 事实源的矛盾
+    let child_parent = if is_component {
+        current_id.clone()
+    } else {
+        parent_id.clone()
+    };
     for child_key in ["components", "panels", "steps", "comps"] {
         if let Some(children) = node.get(child_key).and_then(|v| v.as_array()) {
             for (idx, child) in children.iter().enumerate() {
                 let child_path = format!("{}.{}[{}]", json_path, child_key, idx);
-                collect_component_contexts_inner_with_context(
+                collect_component_contexts_inner_with_context_and_diagnostics(
                     child,
                     &child_path,
                     child_parent.clone(),
                     active_context.clone(),
                     contexts,
+                    diagnostics,
                 );
+            }
+        }
+    }
+    // 白名单路径之外的未知子键（M58.3 F1 形态感知递归）：
+    // - 排除列表键：已知非组件，不递归也不计数（排除优先于形态判定）；
+    // - 形态吻合（非空数组且每个元素都带字符串 id+type）：子组件数组，递归遍历，不计数；
+    // - 混合形态（含对象但不满足组件形态）：整体判非组件，计入 SCANNER_UNRECOGNIZED_CONTAINER_KEY。
+    if let Some(obj) = node.as_object() {
+        for (key, value) in obj {
+            if crate::superpage::NON_COMPONENT_CONTAINER_KEYS.contains(&key.as_str())
+                || ["components", "panels", "steps", "comps", "id", "type"].contains(&key.as_str())
+            {
+                continue;
+            }
+            let Some(arr) = value.as_array() else {
+                continue;
+            };
+            if arr.is_empty() {
+                continue;
+            }
+            if crate::superpage::is_component_array(value) {
+                for (idx, child) in arr.iter().enumerate() {
+                    let child_path = format!("{}.{}[{}]", json_path, key, idx);
+                    collect_component_contexts_inner_with_context_and_diagnostics(
+                        child,
+                        &child_path,
+                        child_parent.clone(),
+                        active_context.clone(),
+                        contexts,
+                        diagnostics,
+                    );
+                }
+                continue;
+            }
+            let has_object = arr.iter().any(|item| item.is_object());
+            if has_object {
+                diagnostics.unrecognized_container_key += 1;
+                if diagnostics.sample_unrecognized_location.is_none() {
+                    diagnostics.sample_unrecognized_location = Some(crate::output::Location {
+                        source_file: None,
+                        node_id: current_id.clone(),
+                        json_path: Some(format!("{}.{}", json_path, key)),
+                    });
+                }
             }
         }
     }
@@ -139,15 +342,21 @@ fn extract_single_bare_symbol(raw_expr: &str) -> Option<String> {
 
 /// 确保 model 和 field 节点存在，并建立 Contains 关系。
 /// 返回 (model_id, field_id)。
+/// 确保 `model:{model}` 节点存在；字段名非空时一并确保 `field:{model}.{field}`
+/// 节点与 model→field `Contains` 边。
+///
+/// M58.3 相邻缺口修复：字段名为空时（裸 `${modelN}` 被 `expr_ast` 判为
+/// `ModelField(modelN, "")`）**不再**造 `field:modelN.` 尾点节点——那是个没有字段
+/// 语义的垃圾节点，只会在 dataflow/lineage 里冒充一个字段。返回值第二项因此
+/// 改为 `Option`：`None` 表示本次只有模型级语义，调用方不应建字段级边。
 fn ensure_model_field(
     graph: &mut dyn GraphWriteStore,
     model: &str,
     field: &str,
     model_path: &str,
     field_meta: Option<serde_json::Value>,
-) -> Result<(String, String)> {
+) -> Result<(String, Option<String>)> {
     let model_id = format!("model:{}", model);
-    let field_id = format!("field:{}.{}", model, field);
     add_node(
         graph,
         model_id.clone(),
@@ -156,6 +365,10 @@ fn ensure_model_field(
         model.to_string(),
         None,
     )?;
+    if field.is_empty() {
+        return Ok((model_id, None));
+    }
+    let field_id = format!("field:{}.{}", model, field);
     add_node(
         graph,
         field_id.clone(),
@@ -165,7 +378,16 @@ fn ensure_model_field(
         field_meta,
     )?;
     add_edge_with_meta(graph, &model_id, &field_id, EdgeType::Contains, None, None)?;
-    Ok((model_id, field_id))
+    Ok((model_id, Some(field_id)))
+}
+
+/// 模型字段引用的 field_path 文案：字段名为空时只写模型名，避免 `modelN.` 尾点。
+fn model_field_path(model: &str, field: &str) -> String {
+    if field.is_empty() {
+        model.to_string()
+    } else {
+        format!("{}.{}", model, field)
+    }
 }
 
 /// 从模型路径中提取物理表名（去除路径前缀和 .tbl 后缀）。
@@ -199,18 +421,20 @@ fn add_model_read(
         from_id,
         &model_id,
         edge_type.clone(),
-        Some(format!("{}.{}", model, field)),
+        Some(model_field_path(model, field)),
         Some(edge_meta.clone()),
     )?;
-    // 字段级读取边：组件直接指向字段节点
-    add_edge_with_meta(
-        graph,
-        from_id,
-        &field_id,
-        edge_type.clone(),
-        Some(format!("{}.{}", model, field)),
-        Some(edge_meta.clone()),
-    )?;
+    // 字段级读取边：组件直接指向字段节点（字段名为空时无字段节点，只保留模型级边）
+    if let Some(field_id) = &field_id {
+        add_edge_with_meta(
+            graph,
+            from_id,
+            field_id,
+            edge_type.clone(),
+            Some(model_field_path(model, field)),
+            Some(edge_meta.clone()),
+        )?;
+    }
 
     // 同时创建到物理表的读取边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
@@ -222,31 +446,36 @@ fn add_model_read(
                 from_id,
                 &phy_model_id,
                 edge_type.clone(),
-                Some(format!("{}.{}", physical_name, field)),
+                Some(model_field_path(&physical_name, field)),
                 Some(edge_meta.clone()),
             )?;
-            // 字段级读取边：组件直接指向物理字段节点
-            add_edge_with_meta(
-                graph,
-                from_id,
-                &phy_field_id,
-                edge_type.clone(),
-                Some(format!("{}.{}", physical_name, field)),
-                Some(edge_meta.clone()),
-            )?;
-            // 局部模型字段到物理表字段的别名映射
-            add_edge_with_meta(
-                graph,
-                &field_id,
-                &phy_field_id,
-                EdgeType::FieldAlias,
-                Some(format!("{}.{}", model, field)),
-                None,
-            )?;
+            // 字段级读取边：组件直接指向物理字段节点（字段名为空时无字段节点）
+            if let Some(phy_field_id) = &phy_field_id {
+                add_edge_with_meta(
+                    graph,
+                    from_id,
+                    phy_field_id,
+                    edge_type.clone(),
+                    Some(model_field_path(&physical_name, field)),
+                    Some(edge_meta.clone()),
+                )?;
+                // 局部模型字段到物理表字段的别名映射
+                if let Some(field_id) = &field_id {
+                    add_edge_with_meta(
+                        graph,
+                        field_id,
+                        phy_field_id,
+                        EdgeType::FieldAlias,
+                        Some(model_field_path(model, field)),
+                        None,
+                    )?;
+                }
+            }
         }
     }
     Ok(())
 }
+
 /// 添加从 from_id 写入 model.field 的关系边。
 fn add_model_write(
     graph: &mut dyn GraphWriteStore,
@@ -263,18 +492,20 @@ fn add_model_write(
         from_id,
         &model_id,
         edge_type.clone(),
-        Some(format!("{}.{}", model, field)),
+        Some(model_field_path(model, field)),
         Some(edge_meta.clone()),
     )?;
-    // 字段级写入边：action 直接指向字段节点
-    add_edge_with_meta(
-        graph,
-        from_id,
-        &field_id,
-        EdgeType::FieldWrite,
-        Some(format!("{}.{}", model, field)),
-        Some(edge_meta.clone()),
-    )?;
+    // 字段级写入边：action 直接指向字段节点（字段名为空时无字段节点，只保留模型级边）
+    if let Some(field_id) = &field_id {
+        add_edge_with_meta(
+            graph,
+            from_id,
+            field_id,
+            EdgeType::FieldWrite,
+            Some(model_field_path(model, field)),
+            Some(edge_meta.clone()),
+        )?;
+    }
 
     // 同时创建到物理表的写入边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
@@ -286,27 +517,31 @@ fn add_model_write(
                 from_id,
                 &phy_model_id,
                 edge_type.clone(),
-                Some(format!("{}.{}", physical_name, field)),
+                Some(model_field_path(&physical_name, field)),
                 Some(edge_meta.clone()),
             )?;
-            // 字段级写入边：action 直接指向物理字段节点
-            add_edge_with_meta(
-                graph,
-                from_id,
-                &phy_field_id,
-                EdgeType::FieldWrite,
-                Some(format!("{}.{}", physical_name, field)),
-                Some(edge_meta.clone()),
-            )?;
-            // 局部模型字段到物理表字段的别名映射
-            add_edge_with_meta(
-                graph,
-                &field_id,
-                &phy_field_id,
-                EdgeType::FieldAlias,
-                Some(format!("{}.{}", model, field)),
-                None,
-            )?;
+            // 字段级写入边：action 直接指向物理字段节点（字段名为空时无字段节点）
+            if let Some(phy_field_id) = &phy_field_id {
+                add_edge_with_meta(
+                    graph,
+                    from_id,
+                    phy_field_id,
+                    EdgeType::FieldWrite,
+                    Some(model_field_path(&physical_name, field)),
+                    Some(edge_meta.clone()),
+                )?;
+                // 局部模型字段到物理表字段的别名映射
+                if let Some(field_id) = &field_id {
+                    add_edge_with_meta(
+                        graph,
+                        field_id,
+                        phy_field_id,
+                        EdgeType::FieldAlias,
+                        Some(model_field_path(model, field)),
+                        None,
+                    )?;
+                }
+            }
         }
     }
     Ok(())
@@ -454,7 +689,18 @@ pub fn process_spg_file_from_value(
     }
     let component_id_set: std::collections::HashSet<&str> =
         meta.components.iter().map(|c| c.id.as_str()).collect();
-    // Process components and their expressions
+    // 页面 param 集合（M58.3 复核返修 P1-6）：裸 `${paramN}` 是参数引用而非数据
+    // 上下文字段，不得落入下方「裸字段 + 继承 dataSet」的 Reads 建边分支
+    let param_id_set: std::collections::HashSet<&str> =
+        meta.params.iter().map(|p| p.id.as_str()).collect();
+    // 组件处理拆成两遍：第一遍先为 meta.components 中所有组件注册节点，
+    // 第二遍再建边。原因：GraphWriteStore 在边任一端点节点尚不存在时会静默
+    // 丢弃该边（见 graph_redb.rs / memory_graph_store.rs 的 add_edge 实现）；
+    // 若表达式引用的目标组件在数组中排在引用方之后（前向引用），单遍顺序
+    // 处理会让 comp→comp DependsOn / Contains 边被无声丢失。先全量注册节点
+    // 可消除这一顺序依赖。
+    //
+    // 第一遍：注册全部组件节点（节点 meta 内容与拆分前完全一致）。
     for comp in &meta.components {
         let comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), comp.id);
         let ctx = component_contexts.get(&comp.id);
@@ -509,7 +755,30 @@ pub fn process_spg_file_from_value(
             Some(comp_meta),
         )?;
         node_ids.insert(comp_id.clone());
+    }
+
+    // 第二遍：建 page→comp / comp→comp Contains 边，并处理表达式引用建边。
+    // 此时所有组件节点均已注册，前向引用的目标节点必定存在，不会再丢边。
+    for comp in &meta.components {
+        let comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), comp.id);
+        let ctx = component_contexts.get(&comp.id);
         add_edge_with_meta(graph, &page_id, &comp_id, EdgeType::Contains, None, None)?;
+        // comp→comp Contains：父组件取自组件上下文（说明 A：每个嵌套组件恰好一个
+        // Component 父；page→comp 边保留）。白名单嵌套与形态感知递归新发现的组件
+        // 走同一条建边路径。
+        if let Some(ctx) = ctx
+            && let Some(parent_id) = &ctx.parent_id
+        {
+            let parent_comp_id = format!("comp:{}|{}", rel_path.replace("\\", "/"), parent_id);
+            add_edge_with_meta(
+                graph,
+                &parent_comp_id,
+                &comp_id,
+                EdgeType::Contains,
+                None,
+                None,
+            )?;
+        }
 
         // Process expressions (reads)
         if let Some(exprs) = expr_map.get(comp.id.as_str()) {
@@ -518,6 +787,7 @@ pub fn process_spg_file_from_value(
                     && let Some(bare_symbol) = extract_single_bare_symbol(&expr.raw_expr)
                     && !source_path_map.contains_key(bare_symbol.as_str())
                     && !component_id_set.contains(bare_symbol.as_str())
+                    && !param_id_set.contains(bare_symbol.as_str())
                     && let Some(ctx) = ctx
                     && let Some(data_set) = &ctx.inherited_data_context_data_set
                 {
@@ -605,6 +875,38 @@ pub fn process_spg_file_from_value(
                                 &target_comp_id,
                                 EdgeType::DependsOn,
                                 Some(format!("comp:{}.value", target_id)),
+                                Some(edge_meta),
+                            )?;
+                        }
+                        crate::superpage::RefType::ComponentProperty(target_id, property) => {
+                            // 说明 D：与 dependency.rs 的语义对齐——ComponentProperty 与
+                            // ComponentValue 一样建 comp→comp DependsOn 边，并带属性名。
+                            // 不变式：parse 层（superpage/mod.rs resolve_ref_type /
+                            // resolve_ref_token）保证 ComponentProperty 的 property 永不为空；
+                            // 裸 `${id}` 全组件引用已归一为 ComponentValue（见上方分支），
+                            // 此处直接按 comp:id.prop 生成 field_path。
+                            let target_comp_id =
+                                format!("comp:{}|{}", rel_path.replace(r"\", "/"), target_id);
+                            let field_path = format!("comp:{}.{}", target_id, property);
+                            let edge_meta = serde_json::json!({
+                                "reason": format!(
+                                    "Component '{}' depends on component '{}' property '{}' via field '{}'",
+                                    comp.id, target_id, property, expr.field
+                                ),
+                                "actor_kind": "component",
+                                "actor_id": comp.id,
+                                "operation": "DependsOn",
+                                "target_component": target_id,
+                                "target_property": property,
+                                "source_expr": expr.raw_expr,
+                                "source_field": expr.field,
+                            });
+                            add_edge_with_meta(
+                                graph,
+                                &comp_id,
+                                &target_comp_id,
+                                EdgeType::DependsOn,
+                                Some(field_path),
                                 Some(edge_meta),
                             )?;
                         }
@@ -1374,18 +1676,69 @@ pub fn process_spg_file_from_value(
                 continue;
             }
             let (kind, target_id) = (sym_parts[0], sym_parts[1]);
-            let target_node_id = match kind {
-                "param" => format!("param:{}|{}", rel_path.replace(r"\", "/"), target_id),
+            // M58.3 复核返修 P1-4：component 臂与 model 臂对齐剥掉 `.后缀`——
+            // 符号 `component:{id}.{prop}` 的节点 id 只到组件 id（真实节点是
+            // `comp:<page>|{id}`，带后缀的 id 不存在，边会被两端存储静默丢弃）；
+            // 属性名不丢弃，保留在边 meta 的 target_property（field_path 仍携带
+            // 完整符号串），与上方 ComponentProperty 建边路径同口径
+            // M58.3 相邻缺口修复：param / user / system 三类目标节点此前只在
+            // **组件表达式**那条路径上创建（见上方 RefType::Param/UserProperty/
+            // SystemVar 分支）。只出现在条件里的符号没有对应节点，边被两端存储
+            // 静默丢弃——整整三个类别的 cond→依赖边悬挂。这里按与组件表达式路径
+            // 完全一致的 id / NodeType / meta 补建节点（add_node 幂等），符号本身
+            // 就是事实，不存在凭空造节点的问题。
+            let (target_node_id, target_property) = match kind {
+                "param" => {
+                    let param_id = format!("param:{}|{}", rel_path.replace(r"\", "/"), target_id);
+                    add_node(
+                        graph,
+                        param_id.clone(),
+                        NodeType::Field,
+                        rel_path.to_string(),
+                        target_id.to_string(),
+                        Some(serde_json::json!({"kind": "param"})),
+                    )?;
+                    (param_id, None)
+                }
                 "model" => {
                     let model_name = target_id.split('.').next().unwrap_or(target_id);
-                    format!("model:{}", model_name)
+                    (format!("model:{}", model_name), None)
                 }
-                "component" => format!("comp:{}|{}", rel_path.replace(r"\", "/"), target_id),
-                "user" => format!("user:{}", target_id),
-                "system" => format!("system:{}", target_id),
+                "component" => {
+                    let mut segments = target_id.splitn(2, '.');
+                    let comp_name = segments.next().unwrap_or(target_id);
+                    (
+                        format!("comp:{}|{}", rel_path.replace(r"\", "/"), comp_name),
+                        segments.next().filter(|prop| !prop.is_empty()),
+                    )
+                }
+                "user" => {
+                    let user_id = format!("user:{}", target_id);
+                    add_node(
+                        graph,
+                        user_id.clone(),
+                        NodeType::Field,
+                        "system".to_string(),
+                        format!("$user.{}", target_id),
+                        Some(serde_json::json!({"kind": "user_property"})),
+                    )?;
+                    (user_id, None)
+                }
+                "system" => {
+                    let sys_id = format!("system:{}", target_id);
+                    add_node(
+                        graph,
+                        sys_id.clone(),
+                        NodeType::Field,
+                        "system".to_string(),
+                        format!("${}", target_id),
+                        Some(serde_json::json!({"kind": "system_var"})),
+                    )?;
+                    (sys_id, None)
+                }
                 _ => continue,
             };
-            let dep_edge_meta = serde_json::json!({
+            let mut dep_edge_meta = serde_json::json!({
                 "reason": format!("Condition '{}' depends on symbol '{}'", cond.condition_id, sym),
                 "actor_kind": "condition",
                 "actor_id": cond.condition_id,
@@ -1393,6 +1746,11 @@ pub fn process_spg_file_from_value(
                 "source_expr": cond.raw_expr,
                 "json_path": cond.json_path,
             });
+            if let Some(prop) = target_property
+                && let Some(obj) = dep_edge_meta.as_object_mut()
+            {
+                obj.insert("target_property".to_string(), serde_json::json!(prop));
+            }
             add_edge_with_meta(
                 graph,
                 &cond_node_id,

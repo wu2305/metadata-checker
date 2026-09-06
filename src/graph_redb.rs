@@ -9,15 +9,15 @@ use crate::graph_store::{
     GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
 };
 use crate::output::schema::{
-    AiOutput, Confidence, Diagnostic, DiagnosticSeverity, Evidence, Location, OutputKind,
-    format_next_query,
+    AiOutput, Confidence, Evidence, Location, OutputKind, format_next_query,
 };
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// 图数据库锁等待超时（毫秒），进程级可配置
@@ -34,6 +34,14 @@ const FILE_STATES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("
 const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
 /// M54：diff-refresh checkpoint 在 META_TABLE 中的键
 const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
+/// M58.3 PR1 refix（F2）：per-file scanner 诊断计数表。
+///
+/// key = 文件 logical_path，value = 该文件诊断计数的序列化 bytes。
+/// 按文件存储而非单行聚合：增量扫描只重算脏文件，单行聚合无法正确
+/// 淘汰已修复/已删除文件的计数。store 层只存取原始 bytes，
+/// 序列化/合并归 `scanner::indexer`。
+const SCANNER_DIAGNOSTICS_TABLE: TableDefinition<&str, Vec<u8>> =
+    TableDefinition::new("scanner_diagnostics");
 
 /// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约）。
 ///
@@ -47,6 +55,28 @@ pub fn edge_storage_key(edge: &Edge) -> String {
         type_str,
         edge.field_path.as_deref().unwrap_or("")
     )
+}
+
+/// M58.3 复核返修：在给定 write transaction 内按文件覆盖/删除 scanner 诊断
+/// 计数 entry（`persist_internal` 专用，保证诊断与图/checkpoint 同生共死）。
+///
+/// `entries` 为脏文件的 `(logical_path, 序列化计数 bytes)`，覆盖同 key 旧值
+/// （计数为零的修复文件也携带 entry 以覆盖旧值）；`deleted` 为已删除文件的
+/// logical_path，移除其 entry。计数结构的序列化由调用方
+/// （`scanner::indexer`）负责，本层不感知格式。
+fn write_scanner_diagnostic_entries(
+    write_txn: &redb::WriteTransaction,
+    entries: &[(String, Vec<u8>)],
+    deleted: &[String],
+) -> Result<()> {
+    let mut table = write_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
+    for path in deleted {
+        table.remove(path.as_str())?;
+    }
+    for (path, bytes) in entries {
+        table.insert(path.as_str(), bytes)?;
+    }
+    Ok(())
 }
 
 /// M56 P1：Stale 累计重建阈值（受影响节点 keys 数）。
@@ -64,17 +94,24 @@ fn acquire_graph_lock(db_path: &Path) -> Result<std::fs::File> {
     let timeout_ms = GRAPH_LOCK_TIMEOUT_MS.load(Ordering::Relaxed);
     let interval_ms = 100u64;
     let max_attempts = timeout_ms.div_ceil(interval_ms).max(1);
+    let lock_file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&lock_path)
+        .with_context(|| format!("无法打开 graphdb 锁文件 {}", lock_path.display()))?;
+
     for attempt in 0..max_attempts {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(f) => return Ok(f),
-            Err(_) => {
+        match lock_file.try_lock_exclusive() {
+            Ok(()) => return Ok(lock_file),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if attempt + 1 < max_attempts {
                     std::thread::sleep(std::time::Duration::from_millis(interval_ms));
                 }
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("无法锁定 graphdb 锁文件 {}", lock_path.display()));
             }
         }
     }
@@ -85,21 +122,16 @@ fn acquire_graph_lock(db_path: &Path) -> Result<std::fs::File> {
     )
 }
 
-fn release_graph_lock(db_path: &Path) {
-    let lock_path = db_path.with_extension("graphdb.lock");
-    let _ = std::fs::remove_file(&lock_path);
-}
-
 /// GraphDB 锁守卫，Drop 时释放与 GraphDB 相同的锁文件
 pub(crate) struct GraphDbLockGuard {
-    db_path: PathBuf,
     lock_file: Option<std::fs::File>,
 }
 
 impl Drop for GraphDbLockGuard {
     fn drop(&mut self) {
-        drop(self.lock_file.take());
-        release_graph_lock(&self.db_path);
+        if let Some(lock_file) = self.lock_file.take() {
+            let _ = lock_file.unlock();
+        }
     }
 }
 
@@ -107,7 +139,6 @@ impl Drop for GraphDbLockGuard {
 pub(crate) fn acquire_graph_db_lock(db_path: &Path) -> Result<GraphDbLockGuard> {
     let lock_file = acquire_graph_lock(db_path)?;
     Ok(GraphDbLockGuard {
-        db_path: db_path.to_path_buf(),
         lock_file: Some(lock_file),
     })
 }
@@ -125,6 +156,8 @@ pub struct GraphDB {
     /// v2 hydrate 失败时的诊断信息（fallback 到 v1 后仍可正常使用，
     /// 调用方可读取此字段决定是否上报 diagnostic）。
     v2_hydrate_warning: Option<String>,
+    /// hydrate 阶段的结构化诊断统计（PR1 引入，供 runtime 统一信封透出）
+    hydrate_diagnostics: crate::diagnostics::HydrateDiagnostics,
 }
 
 type NodeEdgePair<'a> = (&'a Node, &'a Edge);
@@ -162,36 +195,76 @@ impl GraphDB {
             removed_nodes: HashSet::new(),
             topology_dirty: false,
             v2_hydrate_warning: None,
+            hydrate_diagnostics: crate::diagnostics::HydrateDiagnostics::default(),
         }
     }
 
     fn open_inner(db_path: &Path) -> Result<Self> {
         Self::ensure_redb_tables(db_path)?;
 
-        // M56：v2 shadow 为 Stale 时跳过 v2，从增量更新后的 v1 hydrate；
-        // Current 或旧库无记录（视为 Current，向后兼容）时维持 v2 优先。
+        // M56：先查 v2 shadow 状态。Stale 时跳过 v2，从增量更新后的 v1 hydrate，
+        // 且不跑 read_v2_layout 全量探针（Stale 路径用不到探针结果，大读白费，
+        // 也不应新发 v2_layout 诊断）。
         if crate::graph_redb_v2::read_v2_shadow_state(db_path)?
-            != crate::graph_redb_v2::V2ShadowState::Stale
+            == crate::graph_redb_v2::V2ShadowState::Stale
         {
-            if let Ok(Some(layout)) = crate::graph_redb_v2::read_v2_layout(db_path) {
-                match crate::graph_redb_v2::hydrate_graph_from_v2(
-                    &layout,
-                    &db_path.to_string_lossy(),
-                ) {
-                    Ok(graph) => return Ok(graph),
-                    Err(error) => {
-                        // v2 hydrate 失败时 fallback v1（始终正确），但记录诊断供调用方上报
-                        let mut graph = Self::open_inner_v1(db_path)?;
-                        graph.v2_hydrate_warning = Some(format!(
-                            "v2 shadow hydrate failed, fell back to v1: {error:#}"
-                        ));
-                        return Ok(graph);
+            return Self::open_inner_v1(db_path);
+        }
+
+        let mut pending_hydrate_diagnostics = crate::diagnostics::HydrateDiagnostics::default();
+
+        // 检测 v2 layout 可读性（Current 或旧库无记录时）：
+        // - Err（打开/解析/校验失败）：计为一次 V2_LAYOUT_UNREADABLE；
+        // - Ok(None)：仅当 v2 shadow 元数据确实存在（schema 版本不匹配或
+        //   fingerprint 不匹配）才计 unreadable；从未写过 v2 shadow 的
+        //   v1-only 遗留库/新建库属正常态，不计诊断。
+        // 与后续 v1 hydrate 的细粒度计数并行记录（不折叠）。
+        let v2_layout_probe = crate::graph_redb_v2::read_v2_layout(db_path);
+        let v2_layout_unreadable = match &v2_layout_probe {
+            Ok(Some(_)) => false,
+            Ok(None) => crate::graph_redb_v2::has_v2_shadow_meta(db_path)?,
+            Err(_) => true,
+        };
+        if v2_layout_unreadable {
+            pending_hydrate_diagnostics.v2_layout_unreadable = 1;
+        }
+
+        if let Ok(Some(layout)) = v2_layout_probe {
+            match crate::graph_redb_v2::hydrate_graph_from_v2(&layout, &db_path.to_string_lossy()) {
+                Ok(mut graph) => {
+                    graph.hydrate_diagnostics = pending_hydrate_diagnostics;
+                    return Ok(graph);
+                }
+                Err(error) => {
+                    // v2 hydrate 失败时 fallback v1（始终正确），但记录诊断供调用方上报
+                    let mut graph = Self::open_inner_v1(db_path)?;
+                    graph.v2_hydrate_warning = Some(format!(
+                        "v2 shadow hydrate failed, fell back to v1: {error:#}"
+                    ));
+                    if graph.hydrate_diagnostics.v2_hydrate_warning.is_none() {
+                        graph.hydrate_diagnostics.v2_hydrate_warning =
+                            graph.v2_hydrate_warning.clone();
                     }
+                    if graph.hydrate_diagnostics.v2_layout_unreadable == 0
+                        && pending_hydrate_diagnostics.v2_layout_unreadable > 0
+                    {
+                        graph.hydrate_diagnostics.v2_layout_unreadable =
+                            pending_hydrate_diagnostics.v2_layout_unreadable;
+                    }
+                    return Ok(graph);
                 }
             }
         }
 
-        Self::open_inner_v1(db_path)
+        let mut graph = Self::open_inner_v1(db_path)?;
+        // 合并 v2 探针诊断（仅非 Stale 路径存在探针结果）
+        if graph.hydrate_diagnostics.v2_layout_unreadable == 0
+            && pending_hydrate_diagnostics.v2_layout_unreadable > 0
+        {
+            graph.hydrate_diagnostics.v2_layout_unreadable =
+                pending_hydrate_diagnostics.v2_layout_unreadable;
+        }
+        Ok(graph)
     }
 
     /// 确保 redb 基础表存在。
@@ -204,6 +277,8 @@ impl GraphDB {
             let _ = write_txn.open_table(EDGES_TABLE)?;
             let _ = write_txn.open_table(FILE_STATES_TABLE)?;
             let _ = write_txn.open_table(META_TABLE)?;
+            // M58.3 PR1 refix（F2）：旧库兼容——打开即补建 scanner 诊断表
+            let _ = write_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
         }
         write_txn.commit()?;
         Ok(())
@@ -216,33 +291,70 @@ impl GraphDB {
 
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
+        let mut hydrate_diagnostics = crate::diagnostics::HydrateDiagnostics::default();
 
         let read_txn = db.begin_read()?;
         let nodes_table = read_txn.open_table(NODES_TABLE)?;
         for item in nodes_table.iter()? {
             let (key, value) = item?;
             let id = key.value();
-            if let Ok(node) = serde_json::from_slice::<Node>(value.value().as_slice()) {
-                let idx = graph.add_node(node);
-                node_indices.insert(id.to_string(), idx);
+            match serde_json::from_slice::<Node>(value.value().as_slice()) {
+                Ok(node) => {
+                    let idx = graph.add_node(node);
+                    node_indices.insert(id.to_string(), idx);
+                }
+                Err(_) => {
+                    hydrate_diagnostics.node_decode_failed += 1;
+                    if hydrate_diagnostics.sample_node_location.is_none() {
+                        hydrate_diagnostics.sample_node_location = Some(crate::output::Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: Some(id.to_string()),
+                            json_path: None,
+                        });
+                    }
+                }
             }
         }
 
         let mut seen_edges: HashSet<(String, String, EdgeType, Option<String>)> = HashSet::new();
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
-            let (_, value) = item?;
-            if let Ok(edge) = serde_json::from_slice::<Edge>(value.value().as_slice())
-                && let (Some(&from_idx), Some(&to_idx)) =
-                    (node_indices.get(&edge.from), node_indices.get(&edge.to))
-            {
-                graph.add_edge(from_idx, to_idx, edge.clone());
-                seen_edges.insert((
-                    edge.from.clone(),
-                    edge.to.clone(),
-                    edge.edge_type.clone(),
-                    edge.field_path.clone(),
-                ));
+            let (key, value) = item?;
+            let raw_key = key.value().to_string();
+            match serde_json::from_slice::<Edge>(value.value().as_slice()) {
+                Ok(edge) => {
+                    if let (Some(&from_idx), Some(&to_idx)) =
+                        (node_indices.get(&edge.from), node_indices.get(&edge.to))
+                    {
+                        graph.add_edge(from_idx, to_idx, edge.clone());
+                        seen_edges.insert((
+                            edge.from.clone(),
+                            edge.to.clone(),
+                            edge.edge_type.clone(),
+                            edge.field_path.clone(),
+                        ));
+                    } else {
+                        hydrate_diagnostics.dangling_edge += 1;
+                        if hydrate_diagnostics.sample_dangling_location.is_none() {
+                            hydrate_diagnostics.sample_dangling_location =
+                                Some(crate::output::Location {
+                                    source_file: Some(db_path.to_string_lossy().to_string()),
+                                    node_id: Some(edge.from.clone()),
+                                    json_path: Some(raw_key.clone()),
+                                });
+                        }
+                    }
+                }
+                Err(_) => {
+                    hydrate_diagnostics.edge_decode_failed += 1;
+                    if hydrate_diagnostics.sample_edge_location.is_none() {
+                        hydrate_diagnostics.sample_edge_location = Some(crate::output::Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: Some(raw_key.clone()),
+                        });
+                    }
+                }
             }
         }
 
@@ -256,6 +368,7 @@ impl GraphDB {
             removed_nodes: HashSet::new(),
             topology_dirty: false,
             v2_hydrate_warning: None,
+            hydrate_diagnostics,
         })
     }
 
@@ -264,6 +377,11 @@ impl GraphDB {
     /// 调用方可据此决定是否上报 diagnostic；`None` 表示 v2 hydrate 正常或未尝试。
     pub fn v2_hydrate_warning(&self) -> Option<&str> {
         self.v2_hydrate_warning.as_deref()
+    }
+
+    /// 读取 hydrate 结构化诊断统计
+    pub fn hydrate_diagnostics(&self) -> &crate::diagnostics::HydrateDiagnostics {
+        &self.hydrate_diagnostics
     }
 
     /// 检查图数据库状态，返回结构化 AiOutput（不 panic）
@@ -281,20 +399,20 @@ impl GraphDB {
         out.query_target = Some(db_path.to_string_lossy().to_string());
 
         if !db_path.exists() {
-            out.diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Error,
-                code: "GRAPH_DB_NOT_FOUND".to_string(),
-                message: format!("Graph database not found at {:?}", db_path),
-                location: Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "GRAPH_DB_NOT_FOUND",
+                1,
+                Location {
                     source_file: Some(db_path.to_string_lossy().to_string()),
                     node_id: None,
                     json_path: None,
                 },
-                suggestion: Some(
-                    "Run metadata-checker --project-dir <DIR> --build-graph to create it"
-                        .to_string(),
-                ),
-            });
+                format!("Graph database not found at {:?}", db_path),
+            );
+            diag.suggestion = Some(
+                "Run metadata-checker --project-dir <DIR> --build-graph to create it".to_string(),
+            );
+            out.diagnostics.push(diag);
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
                 &db_path.to_string_lossy(),
@@ -315,20 +433,21 @@ impl GraphDB {
         let _lock = match acquire_graph_lock(db_path) {
             Ok(l) => l,
             Err(e) => {
-                out.diagnostics.push(Diagnostic {
-                    severity: DiagnosticSeverity::Error,
-                    code: "GRAPH_DB_LOCKED".to_string(),
-                    message: format!("Cannot acquire graphdb lock: {}", e),
-                    location: Location {
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "GRAPH_DB_LOCKED",
+                    1,
+                    Location {
                         source_file: Some(db_path.to_string_lossy().to_string()),
                         node_id: None,
                         json_path: None,
                     },
-                    suggestion: Some(
-                        "Wait for other process to finish, or use a different --graph-db-path"
-                            .to_string(),
-                    ),
-                });
+                    format!("Cannot acquire graphdb lock: {}", e),
+                );
+                diag.suggestion = Some(
+                    "Wait for other process to finish, or use a different --graph-db-path"
+                        .to_string(),
+                );
+                out.diagnostics.push(diag);
                 out.next_queries.push(format_next_query(
                     "metadata-checker --graph-db-path {} --graph-lock-timeout-ms <MS>",
                     &db_path.to_string_lossy(),
@@ -337,7 +456,6 @@ impl GraphDB {
             }
         };
         let db_result = Database::open(db_path);
-        release_graph_lock(db_path);
         match db_result {
             Ok(db) => {
                 let read_txn = db.begin_read();
@@ -359,65 +477,74 @@ impl GraphDB {
                     || msg.contains("already open")
                     || msg.contains("Cannot acquire")
                 {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_LOCKED".to_string(),
-                        message: format!("Graph database is locked by another process: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some(
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_LOCKED",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Graph database is locked by another process: {}", msg),
+                        );
+                        diag.suggestion = Some(
                             "Wait for other process to finish, or use a different --graph-db-path"
                                 .to_string(),
-                        ),
+                        );
+                        diag
                     });
                 } else if msg.contains("permission")
                     || msg.contains("denied")
                     || msg.contains("read-only")
                 {
                     if file_readable && !writable {
-                        out.diagnostics.push(Diagnostic {
-                            severity: DiagnosticSeverity::Info,
-                            code: "GRAPH_DB_READ_ONLY".to_string(),
-                            message: format!("Graph database file is read-only: {}", msg),
-                            location: Location {
-                                source_file: Some(db_path.to_string_lossy().to_string()),
-                                node_id: None,
-                                json_path: None,
-                            },
-                            suggestion: Some(
-                                "redb requires write access even for read. Copy to a writable path with --graph-db-path"
-                                    .to_string(),
-                            ),
+                        out.diagnostics.push({
+                            let mut diag = crate::diagnostics::envelope_diagnostic(
+                                "GRAPH_DB_READ_ONLY",
+                                1,
+                                Location {
+                                    source_file: Some(db_path.to_string_lossy().to_string()),
+                                    node_id: None,
+                                    json_path: None,
+                                },
+                                format!("Graph database file is read-only: {}", msg),
+                            );
+                            diag.suggestion = Some("redb requires write access even for read. Copy to a writable path with --graph-db-path".to_string());
+                            diag
                         });
                     } else {
-                        out.diagnostics.push(Diagnostic {
-                            severity: DiagnosticSeverity::Error,
-                            code: "GRAPH_DB_PERMISSION_DENIED".to_string(),
-                            message: format!("Graph database permission denied: {}", msg),
-                            location: Location {
-                                source_file: Some(db_path.to_string_lossy().to_string()),
-                                node_id: None,
-                                json_path: None,
-                            },
-                            suggestion: Some(
+                        out.diagnostics.push({
+                            let mut diag = crate::diagnostics::envelope_diagnostic(
+                                "GRAPH_DB_PERMISSION_DENIED",
+                                1,
+                                Location {
+                                    source_file: Some(db_path.to_string_lossy().to_string()),
+                                    node_id: None,
+                                    json_path: None,
+                                },
+                                format!("Graph database permission denied: {}", msg),
+                            );
+                            diag.suggestion = Some(
                                 "Use --graph-db-path pointing to a writable directory".to_string(),
-                            ),
+                            );
+                            diag
                         });
                     }
                 } else {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_OPEN_ERROR".to_string(),
-                        message: format!("Failed to open graph database: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some("Try --build-graph to rebuild".to_string()),
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_OPEN_ERROR",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Failed to open graph database: {}", msg),
+                        );
+                        diag.suggestion = Some("Try --build-graph to rebuild".to_string());
+                        diag
                     });
                 }
                 out.summary["needs_rebuild"] = serde_json::json!(true);
@@ -438,19 +565,22 @@ impl GraphDB {
                 }),
             );
             out.query_target = Some(db_path.to_string_lossy().to_string());
-            out.diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Error,
-                code: "GRAPH_DB_NOT_FOUND".to_string(),
-                message: format!("Graph database not found at {:?}", db_path),
-                location: Location {
-                    source_file: Some(db_path.to_string_lossy().to_string()),
-                    node_id: None,
-                    json_path: None,
-                },
-                suggestion: Some(
+            out.diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "GRAPH_DB_NOT_FOUND",
+                    1,
+                    Location {
+                        source_file: Some(db_path.to_string_lossy().to_string()),
+                        node_id: None,
+                        json_path: None,
+                    },
+                    format!("Graph database not found at {:?}", db_path),
+                );
+                diag.suggestion = Some(
                     "Run metadata-checker --project-dir <DIR> --build-graph to create it"
                         .to_string(),
-                ),
+                );
+                diag
             });
             out.next_queries.push(format_next_query(
                 "metadata-checker --project-dir <DIR> --build-graph --graph-db-path {}",
@@ -475,19 +605,19 @@ impl GraphDB {
                     || msg.contains("already open")
                     || msg.contains("Cannot acquire")
                 {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_LOCKED".to_string(),
-                        message: format!("Graph database locked: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some(
-                            "Use --graph-db-path to a separate path, wait for other process, or increase --graph-lock-timeout-ms"
-                                .to_string(),
-                        ),
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_LOCKED",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Graph database locked: {}", msg),
+                        );
+                        diag.suggestion = Some("Use --graph-db-path to a separate path, wait for other process, or increase --graph-lock-timeout-ms".to_string());
+                        diag
                     });
                     out.next_queries.push(format_next_query(
                         "metadata-checker --project-dir <DIR> --query-model <MODEL> --graph-db-path {} --graph-lock-timeout-ms 30000",
@@ -497,30 +627,36 @@ impl GraphDB {
                     || msg.contains("denied")
                     || msg.contains("read-only")
                 {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_PERMISSION_DENIED".to_string(),
-                        message: format!("Graph database permission denied: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some(
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_PERMISSION_DENIED",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Graph database permission denied: {}", msg),
+                        );
+                        diag.suggestion = Some(
                             "Use --graph-db-path pointing to a writable directory".to_string(),
-                        ),
+                        );
+                        diag
                     });
                 } else {
-                    out.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "GRAPH_DB_OPEN_ERROR".to_string(),
-                        message: format!("Failed to open graph database: {}", msg),
-                        location: Location {
-                            source_file: Some(db_path.to_string_lossy().to_string()),
-                            node_id: None,
-                            json_path: None,
-                        },
-                        suggestion: Some("Try --build-graph to rebuild".to_string()),
+                    out.diagnostics.push({
+                        let mut diag = crate::diagnostics::envelope_diagnostic(
+                            "GRAPH_DB_OPEN_ERROR",
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            format!("Failed to open graph database: {}", msg),
+                        );
+                        diag.suggestion = Some("Try --build-graph to rebuild".to_string());
+                        diag
                     });
                 }
                 Err(Box::new(out))
@@ -572,33 +708,70 @@ impl GraphDB {
     fn load_from_db(db: Database, db_path: &Path) -> Result<Self> {
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
+        let mut hydrate_diagnostics = crate::diagnostics::HydrateDiagnostics::default();
 
         let read_txn = db.begin_read()?;
         let nodes_table = read_txn.open_table(NODES_TABLE)?;
         for item in nodes_table.iter()? {
             let (key, value) = item?;
             let id = key.value();
-            if let Ok(node) = serde_json::from_slice::<Node>(value.value().as_slice()) {
-                let idx = graph.add_node(node);
-                node_indices.insert(id.to_string(), idx);
+            match serde_json::from_slice::<Node>(value.value().as_slice()) {
+                Ok(node) => {
+                    let idx = graph.add_node(node);
+                    node_indices.insert(id.to_string(), idx);
+                }
+                Err(_) => {
+                    hydrate_diagnostics.node_decode_failed += 1;
+                    if hydrate_diagnostics.sample_node_location.is_none() {
+                        hydrate_diagnostics.sample_node_location = Some(crate::output::Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: Some(id.to_string()),
+                            json_path: None,
+                        });
+                    }
+                }
             }
         }
 
         let mut seen_edges: HashSet<(String, String, EdgeType, Option<String>)> = HashSet::new();
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
-            let (_, value) = item?;
-            if let Ok(edge) = serde_json::from_slice::<Edge>(value.value().as_slice())
-                && let (Some(&from_idx), Some(&to_idx)) =
-                    (node_indices.get(&edge.from), node_indices.get(&edge.to))
-            {
-                graph.add_edge(from_idx, to_idx, edge.clone());
-                seen_edges.insert((
-                    edge.from.clone(),
-                    edge.to.clone(),
-                    edge.edge_type.clone(),
-                    edge.field_path.clone(),
-                ));
+            let (key, value) = item?;
+            let raw_key = key.value().to_string();
+            match serde_json::from_slice::<Edge>(value.value().as_slice()) {
+                Ok(edge) => {
+                    if let (Some(&from_idx), Some(&to_idx)) =
+                        (node_indices.get(&edge.from), node_indices.get(&edge.to))
+                    {
+                        graph.add_edge(from_idx, to_idx, edge.clone());
+                        seen_edges.insert((
+                            edge.from.clone(),
+                            edge.to.clone(),
+                            edge.edge_type.clone(),
+                            edge.field_path.clone(),
+                        ));
+                    } else {
+                        hydrate_diagnostics.dangling_edge += 1;
+                        if hydrate_diagnostics.sample_dangling_location.is_none() {
+                            hydrate_diagnostics.sample_dangling_location =
+                                Some(crate::output::Location {
+                                    source_file: Some(db_path.to_string_lossy().to_string()),
+                                    node_id: Some(edge.from.clone()),
+                                    json_path: Some(raw_key.clone()),
+                                });
+                        }
+                    }
+                }
+                Err(_) => {
+                    hydrate_diagnostics.edge_decode_failed += 1;
+                    if hydrate_diagnostics.sample_edge_location.is_none() {
+                        hydrate_diagnostics.sample_edge_location = Some(crate::output::Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: Some(raw_key.clone()),
+                        });
+                    }
+                }
             }
         }
 
@@ -612,6 +785,7 @@ impl GraphDB {
             removed_nodes: HashSet::new(),
             topology_dirty: false,
             v2_hydrate_warning: None,
+            hydrate_diagnostics,
         })
     }
 
@@ -790,7 +964,7 @@ impl GraphDB {
         file_states: &HashMap<String, FileState>,
         checkpoint: Option<&crate::diff_refresh::DiffRefreshCheckpoint>,
     ) -> Result<crate::graph_store::PersistReport> {
-        self.persist_internal(file_states, checkpoint, None)
+        self.persist_internal(file_states, checkpoint, None, &[], &[])
     }
 
     /// M56：按 IndexCommit 持久化并返回本次提交的成本报告。
@@ -798,6 +972,8 @@ impl GraphDB {
     /// `commit.delta` 为 `Some` 时走增量路径：edges/file_states 只写受影响
     /// keys，topology dirty 时只把 v2 shadow 标记 `Stale`（不写全量 v2 blobs）；
     /// 为 `None` 时维持全量重写（显式 full rebuild/compaction 路径，v2 置 Current）。
+    /// M58.3 复核返修：`commit` 的 scanner 诊断载荷（entries/删除路径）在同一
+    /// write transaction 写入 SCANNER_* 表，与图和 checkpoint 同生共死。
     pub fn persist_commit(
         &mut self,
         commit: &crate::graph_store::IndexCommit,
@@ -806,6 +982,8 @@ impl GraphDB {
             &commit.file_states,
             commit.checkpoint.as_ref(),
             commit.delta.as_ref(),
+            &commit.scanner_entries,
+            &commit.scanner_deleted_paths,
         )
     }
 
@@ -814,13 +992,21 @@ impl GraphDB {
         file_states: &HashMap<String, FileState>,
         checkpoint: Option<&crate::diff_refresh::DiffRefreshCheckpoint>,
         delta: Option<&crate::graph_store::IndexDelta>,
+        scanner_entries: &[(String, Vec<u8>)],
+        scanner_deleted_paths: &[String],
     ) -> Result<crate::graph_store::PersistReport> {
         let commit_started = std::time::Instant::now();
         // P1 修复：persist 全程持有 graph lock，覆盖预读→写入→提交，
         // 防止并发 CLI/--build-graph 在 mutate→persist 间隙写入不一致边集
         let _lock = acquire_graph_db_lock(std::path::Path::new(&self.db_path))?;
 
-        if !self.is_dirty && checkpoint.is_none() {
+        // 空提交判断须计入 scanner 诊断载荷：仅携带 scanner 诊断变更的提交
+        // （图与 checkpoint 均无变化）也必须落库
+        if !self.is_dirty
+            && checkpoint.is_none()
+            && scanner_entries.is_empty()
+            && scanner_deleted_paths.is_empty()
+        {
             // 空提交：无写入，report 全零（v2 状态读当前值）
             return Ok(crate::graph_store::PersistReport {
                 dirty_nodes: 0,
@@ -963,6 +1149,15 @@ impl GraphDB {
             meta_table.insert(META_DIFF_REFRESH_CHECKPOINT_KEY, bytes)?;
         }
 
+        // M58.3 复核返修：scanner 诊断载荷与图/checkpoint 同一事务落库，
+        // 崩溃或写失败不会留下「checkpoint 已推进但诊断陈旧」的不一致
+        if !scanner_entries.is_empty() || !scanner_deleted_paths.is_empty() {
+            for (path, bytes) in scanner_entries {
+                bytes_written += (path.len() + bytes.len()) as u64;
+            }
+            write_scanner_diagnostic_entries(&write_txn, scanner_entries, scanner_deleted_paths)?;
+        }
+
         let v2_shadow_state = match delta {
             Some(_) => {
                 // graph 未变化（checkpoint-only）时不动 v2 状态
@@ -1034,6 +1229,22 @@ impl GraphDB {
             }
         }
         Ok(states)
+    }
+
+    /// M58.3 PR1 refix（F2）：读取全部 per-file scanner 诊断计数 entry。
+    ///
+    /// redb 按 key（logical_path）字典序迭代，返回顺序确定；
+    /// 反序列化与「首个非空样例胜出」合并由调用方（`scanner::indexer`）负责。
+    pub fn load_scanner_diagnostic_entries(&self) -> Result<Vec<(String, Vec<u8>)>> {
+        let db = Database::create(&self.db_path)?;
+        let read_txn = db.begin_read()?;
+        let table = read_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
+        let mut entries = Vec::new();
+        for item in table.iter()? {
+            let (key, value) = item?;
+            entries.push((key.value().to_string(), value.value()));
+        }
+        Ok(entries)
     }
 
     /// M54：加载 diff-refresh checkpoint。
@@ -1256,113 +1467,13 @@ impl GraphDB {
 
     /// 搜索与目标 ID 相似的候选节点
     pub fn find_candidates(&self, target_id: &str, limit: usize) -> Vec<(Node, String)> {
-        let mut candidates: Vec<(Node, f64, String)> = Vec::new();
-        let target_lower = target_id.to_lowercase();
-
-        let target_bare = target_id
-            .strip_prefix("model:")
-            .or_else(|| target_id.strip_prefix("page:"))
-            .or_else(|| target_id.strip_prefix("comp:"))
-            .or_else(|| target_id.strip_prefix("action:"))
-            .or_else(|| target_id.strip_prefix("field:"))
-            .unwrap_or(target_id);
-
-        for (_, idx) in &self.node_indices {
-            if let Some(node) = self.graph.node_weight(*idx) {
-                if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty()
-                {
-                    continue;
-                }
-
-                let node_lower = node.id.to_lowercase();
-                let node_bare = node
-                    .id
-                    .strip_prefix("model:")
-                    .or_else(|| node.id.strip_prefix("page:"))
-                    .or_else(|| node.id.strip_prefix("comp:"))
-                    .or_else(|| node.id.strip_prefix("action:"))
-                    .or_else(|| node.id.strip_prefix("field:"))
-                    .unwrap_or(&node.id);
-
-                let mut score = 0.0;
-                let mut reason = "substring match";
-
-                if !target_bare.is_empty()
-                    && !node_bare.is_empty()
-                    && node_bare.eq_ignore_ascii_case(target_bare)
-                {
-                    score = 100.0;
-                    reason = "bare name exact match";
-                } else {
-                    let id_dist = crate::graph::levenshtein(&node.id.to_lowercase(), &target_lower);
-                    let bare_dist = crate::graph::levenshtein(
-                        &node_bare.to_lowercase(),
-                        &target_bare.to_lowercase(),
-                    );
-                    if id_dist == 0 || bare_dist == 0 {
-                        score = 100.0;
-                        reason = "exact match";
-                    } else if id_dist <= 1 || bare_dist <= 1 {
-                        score = 90.0;
-                        reason = "typo edit distance 1";
-                    } else if id_dist <= 2 || bare_dist <= 2 {
-                        score = 70.0;
-                        reason = "typo edit distance 2";
-                    } else if id_dist <= 3 || bare_dist <= 3 {
-                        score = 50.0;
-                        reason = "typo edit distance 3";
-                    } else if id_dist <= 5 || bare_dist <= 5 {
-                        score = 25.0;
-                        reason = "weak edit distance";
-                    }
-                }
-
-                if score == 0.0 {
-                    if node_lower.contains(&target_lower) {
-                        score = 60.0;
-                        reason = "substring match";
-                    } else if target_lower.contains(&node_lower) {
-                        score = 10.0;
-                        reason = "partial substring match";
-                    }
-                }
-
-                if score == 0.0 {
-                    if !node_bare.is_empty()
-                        && target_id.starts_with("model:")
-                        && node.id.starts_with("model:")
-                    {
-                        score = 5.0;
-                        reason = "same prefix (model)";
-                    } else if !node_bare.is_empty()
-                        && target_id.starts_with("page:")
-                        && node.id.starts_with("page:")
-                    {
-                        score = 5.0;
-                        reason = "same prefix (page)";
-                    } else if !node_bare.is_empty()
-                        && target_id.starts_with("comp:")
-                        && node.id.starts_with("comp:")
-                    {
-                        score = 5.0;
-                        reason = "same prefix (component)";
-                    }
-                }
-
-                if score >= 10.0 {
-                    candidates.push((node.clone(), score, reason.to_string()));
-                }
-            }
-        }
-
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        let mut seen = std::collections::HashSet::new();
-        candidates
-            .into_iter()
-            .filter(|(n, _, _)| seen.insert(n.id.clone()))
-            .take(limit)
-            .map(|(n, _, r)| (n, r))
-            .collect()
+        crate::candidate::rank_candidates(
+            self.node_indices
+                .values()
+                .filter_map(|index| self.graph.node_weight(*index).cloned()),
+            target_id,
+            limit,
+        )
     }
 }
 
@@ -1423,7 +1534,8 @@ impl GraphWriteStore for GraphDB {
     fn upsert_node(&mut self, node: Node) -> GraphStoreResult<()> {
         let node_id = node.id.clone();
         if let Some(idx) = self.node_indices.get(&node_id).copied() {
-            let preserve_meta = merge_upsert_meta(self.graph[idx].meta.clone(), node.meta);
+            let preserve_meta =
+                crate::graph_store::merge_upsert_meta(self.graph[idx].meta.clone(), node.meta);
             self.graph[idx] = Node {
                 meta: preserve_meta,
                 ..node
@@ -1455,29 +1567,6 @@ impl GraphWriteStore for GraphDB {
         GraphDB::remove_nodes_by_ids(self, &node_ids.to_vec());
         Ok(())
     }
-}
-
-/// 合并写入节点 meta
-fn merge_upsert_meta(
-    existing_meta: Option<serde_json::Value>,
-    incoming_meta: Option<serde_json::Value>,
-) -> Option<serde_json::Value> {
-    let Some(incoming_meta) = incoming_meta else {
-        return existing_meta;
-    };
-    let Some(existing_meta) = existing_meta else {
-        return Some(incoming_meta);
-    };
-
-    let existing_model_type = existing_meta.get("modelType").and_then(|v| v.as_str());
-    let incoming_model_type = incoming_meta.get("modelType").and_then(|v| v.as_str());
-    if incoming_model_type == Some("PhysicalTable")
-        && matches!(existing_model_type, Some("DataFlow" | "App"))
-    {
-        return Some(existing_meta);
-    }
-
-    Some(incoming_meta)
 }
 
 impl IndexStateStore for GraphDB {

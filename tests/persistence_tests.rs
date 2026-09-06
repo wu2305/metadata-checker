@@ -223,19 +223,37 @@ fn test_redb_provider_new_is_lazy_for_missing_db() {
     );
 }
 
+/// 图内容指纹：节点数 + 边数 + file_states 数。
+///
+/// 为什么不用文件字节大小：探针实测（M58.3 复核返修）redb 在 Database
+/// open+close 时会非确定性地落盘内部 pending/trim 状态（文件缩小约 265KB，
+/// 时序相关、可复现但不可控），与图内容无关；「不修改 db」的真实语义是
+/// 图内容不变。load 合法触碰文件的先例见 ef03a6d 的守卫测试。
+#[cfg(feature = "cli-local")]
+fn graph_content_fingerprint(db_path: &std::path::Path) -> (usize, usize, usize) {
+    let graph_db = GraphDB::open_readonly(db_path).expect("readonly GraphDB open should work");
+    let file_states = graph_db
+        .load_file_states()
+        .expect("should load file states");
+    (
+        graph_db.graph.node_count(),
+        graph_db.graph.edge_count(),
+        file_states.len(),
+    )
+}
+
 #[cfg(feature = "cli-local")]
 #[test]
 fn test_redb_provider_new_and_missing_cache_load_do_not_modify_existing_db() {
     let (_temp_dir, db_path) = common::build_fixture_graphdb();
-    let before_len = std::fs::metadata(&db_path)
-        .expect("fixture graphdb should exist")
-        .len();
+    let before = graph_content_fingerprint(&db_path);
 
     let provider = RedbPersistenceProvider::new(&db_path).expect("provider init should be lazy");
-    let after_new_len = std::fs::metadata(&db_path)
-        .expect("fixture graphdb should still exist")
-        .len();
-    assert_eq!(after_new_len, before_len);
+    assert_eq!(
+        graph_content_fingerprint(&db_path),
+        before,
+        "provider new 不得改动图内容"
+    );
 
     assert_not_found(
         provider
@@ -248,23 +266,19 @@ fn test_redb_provider_new_and_missing_cache_load_do_not_modify_existing_db() {
             .expect_err("missing graph meta table should be NotFound"),
     );
 
-    let after_load_len = std::fs::metadata(&db_path)
-        .expect("fixture graphdb should still exist")
-        .len();
-    assert_eq!(after_load_len, before_len);
+    assert_eq!(
+        graph_content_fingerprint(&db_path),
+        before,
+        "缺失缓存的读操作不得改动图内容"
+    );
 }
 
 #[cfg(feature = "cli-local")]
 #[test]
 fn test_redb_load_graph_snapshot_reads_existing_graphdb_readonly() {
     let (_temp_dir, db_path) = common::build_fixture_graphdb();
-    let before_len = std::fs::metadata(&db_path)
-        .expect("fixture graphdb should exist")
-        .len();
-    let (baseline_node_count, baseline_edge_count) = {
-        let graph_db = GraphDB::open_readonly(&db_path).expect("readonly GraphDB open should work");
-        (graph_db.graph.node_count(), graph_db.graph.edge_count())
-    };
+    let before = graph_content_fingerprint(&db_path);
+    let (baseline_node_count, baseline_edge_count) = (before.0, before.1);
     assert!(baseline_node_count > 0, "fixture graphdb should have nodes");
 
     let provider = RedbPersistenceProvider::new(&db_path).expect("provider init should be lazy");
@@ -275,10 +289,13 @@ fn test_redb_load_graph_snapshot_reads_existing_graphdb_readonly() {
     assert_eq!(snapshot.schema_version, PERSISTENCE_SCHEMA_VERSION);
     assert_eq!(snapshot.nodes.len(), baseline_node_count);
     assert_eq!(snapshot.edges.len(), baseline_edge_count);
-    let after_len = std::fs::metadata(&db_path)
-        .expect("fixture graphdb should still exist")
-        .len();
-    assert_eq!(after_len, before_len);
+    // 内容级「未修改」断言（字节大小受 redb 内部 housekeeping 影响，见
+    // graph_content_fingerprint 注释）
+    assert_eq!(
+        graph_content_fingerprint(&db_path),
+        before,
+        "快照读取不得改动图内容"
+    );
 }
 
 #[cfg(feature = "cli-local")]

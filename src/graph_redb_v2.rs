@@ -364,6 +364,10 @@ pub fn write_v2_shadow(db_path: &Path, layout: &RedbV2Layout) -> Result<()> {
 }
 
 /// 读取 v2 shadow layout；表缺失或 schema 不匹配时返回 `None`。
+///
+/// 注意：`Ok(None)` 同时覆盖「从未写过 v2 shadow」（v1-only 遗留库/新建库，
+/// 正常态）与「有 shadow 但版本/fingerprint 不匹配」两类情形；需要区分时应
+/// 先调 [`has_v2_shadow_meta`] 判断 shadow 元数据是否存在。
 pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
     if !db_path.exists() {
         return Ok(None);
@@ -419,6 +423,27 @@ pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
         return Ok(None);
     }
     Ok(Some(layout))
+}
+
+/// 判断库中是否存在 v2 shadow 元数据（`v2_meta` 表且含 bundle 键）。
+///
+/// M58.3 复核返修 P1-d：用于把 [`read_v2_layout`] 的 `Ok(None)` 细分为
+/// 「从未写过 v2 shadow」（v1-only 遗留库/新建库，正常态，不计诊断）与
+/// 「有 shadow 但不可读/版本不匹配/fingerprint 不匹配」（才应计
+/// `GRAPH_DB_V2_LAYOUT_UNREADABLE`）。meta blob 本身损坏（不可解析）时
+/// 本函数仍返回 `true`，由调用方计为 unreadable。
+pub fn has_v2_shadow_meta(db_path: &Path) -> Result<bool> {
+    if !db_path.exists() {
+        return Ok(false);
+    }
+    let db = Database::open(db_path)
+        .with_context(|| format!("open redb for v2 shadow meta probe at {:?}", db_path))?;
+    let read_txn = db.begin_read()?;
+    let meta_table = match read_txn.open_table(V2_META_TABLE) {
+        Ok(table) => table,
+        Err(_) => return Ok(false),
+    };
+    Ok(meta_table.get(V2_SINGLE_KEY)?.is_some())
 }
 
 /// 从 v2 layout hydrate 内存图，供 shadow compare 和 M53 预研。

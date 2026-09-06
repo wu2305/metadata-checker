@@ -66,12 +66,25 @@
   "query_target": "model:dataflow_output",
   "schema_version": "1.0",
   "summary": {
+    "answer_facts_count": 2,
+    "blocking_conditions_count": 0,
+    "candidate_paths_count": 0,
+    "data_empty_gates_count": 0,
     "importance": "data_source",
     "input_count": 1,
+    "intent": "auto",
     "internal_node_count": 3,
     "output_count": 1,
+    "primary_paths_count": 0,
+    "rejected_paths_count": 0,
+    "related_context_count": 0,
+    "supporting_context_count": 0,
+    "target_id": "model:dataflow_output",
+    "target_name": "dataflow_output",
+    "target_type": "Model",
     "type": "dataflow",
     "type_detail": "dataflow_output",
+    "value_source_context_count": 0,
     "what_is_it": "DataFlow dataflow_output，输入 1 个源，输出 1 个目标，内部 3 个节点"
   }
 }

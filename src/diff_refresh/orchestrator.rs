@@ -124,6 +124,11 @@ pub struct DiffRefreshOrchestrator {
     pending_checkpoint: Option<DiffRefreshCheckpoint>,
     pending_dirty_node_ids: Vec<String>,
     pending_commit: Option<IndexCommit>,
+    /// M58.3 PR2：deferred 模式跨轮累积的 per-file scanner 诊断 entries
+    /// （脏文件后者覆盖前者；删除文件移除 entry），随 pending commit 一起落库
+    pending_scanner_entries: Vec<(String, Vec<u8>)>,
+    /// M58.3 PR2：deferred 模式跨轮累积的删除文件路径（落库时移除其诊断 entry）
+    pending_scanner_deleted_paths: Vec<String>,
     pending_rounds: usize,
     warm_fn: WarmFn,
     persist_fn: PersistFn,
@@ -188,6 +193,8 @@ impl DiffRefreshOrchestrator {
             pending_checkpoint: None,
             pending_dirty_node_ids: Vec::new(),
             pending_commit: None,
+            pending_scanner_entries: Vec::new(),
+            pending_scanner_deleted_paths: Vec::new(),
             pending_rounds: 0,
             warm_fn: Box::new(|runtime, targets| runtime.warm_page_logic_batch(targets)),
             persist_fn: Box::new(|graph, commit| graph.persist_commit(commit)),
@@ -406,8 +413,19 @@ impl DiffRefreshOrchestrator {
 
         if self.persist_mode == DiffRefreshPersistMode::Synchronous {
             let mut stage = Instant::now();
-            let report = candidate
-                .persist_commit(&commit)
+            // M58.3 复核返修：先合并 pending overlay 再挂到 commit 的 scanner
+            // 载荷，与图/checkpoint 一次原子写（模式中途切换时此前 deferred
+            // 轮次累积的诊断不丢失；正常同步模式下 pending 为空，等价于只写
+            // 本轮）。不再在 persist 成功后另开事务写 SCANNER_* 表。
+            self.merge_pending_scanner_diagnostics(
+                prepared.scanner_entries,
+                prepared.scanner_deleted_paths,
+            );
+            commit.scanner_entries = self.pending_scanner_entries.clone();
+            commit.scanner_deleted_paths = self.pending_scanner_deleted_paths.clone();
+            // 与 deferred 路径一样经 persist_fn 落库（缺省即 GraphDB::persist_commit），
+            // 保证注入点（测试/包装）对两种模式都生效，不再绕过
+            let report = (self.persist_fn)(&mut candidate, &commit)
                 .context("persist graph and checkpoint commit")?;
             timing.commit_ms = stage.elapsed().as_millis();
             persisted = true;
@@ -416,6 +434,8 @@ impl DiffRefreshOrchestrator {
             self.runtime.install_replacement(candidate, replacement);
             timing.swap_ms = stage.elapsed().as_millis();
             self.clear_pending_state();
+            // M58.3 PR2：durable 已含本轮诊断，刷新 live 缓存使 status/query 立即反映
+            self.refresh_live_scanner_diagnostics();
         } else {
             let mut stage = Instant::now();
             self.runtime.install_replacement(candidate, replacement);
@@ -425,7 +445,12 @@ impl DiffRefreshOrchestrator {
                 prepared.dirty_node_ids,
                 prepared.deleted_node_ids,
                 commit,
+                prepared.scanner_entries,
+                prepared.scanner_deleted_paths,
             );
+            // M58.3 PR2：durable 尚未写入本轮诊断，但 live 缓存必须立即反映——
+            // 以「durable entries + pending overlay」口径刷新
+            self.refresh_live_scanner_diagnostics();
             if self.should_persist_pending() {
                 stage = Instant::now();
                 let report = self
@@ -476,6 +501,8 @@ impl DiffRefreshOrchestrator {
         self.pending_checkpoint = None;
         self.pending_dirty_node_ids.clear();
         self.pending_commit = None;
+        self.pending_scanner_entries.clear();
+        self.pending_scanner_deleted_paths.clear();
         self.pending_rounds = 0;
     }
 
@@ -486,6 +513,8 @@ impl DiffRefreshOrchestrator {
         dirty_node_ids: Vec<String>,
         deleted_node_ids: Vec<String>,
         commit: IndexCommit,
+        scanner_entries: Vec<(String, Vec<u8>)>,
+        scanner_deleted_paths: Vec<String>,
     ) {
         let mut merged_dirty = HashSet::new();
         for id in self.pending_dirty_node_ids.iter() {
@@ -502,6 +531,31 @@ impl DiffRefreshOrchestrator {
         self.pending_rounds = self.pending_rounds.saturating_add(1);
         self.pending_checkpoint = Some(checkpoint);
         self.pending_commit = Some(commit);
+        self.merge_pending_scanner_diagnostics(scanner_entries, scanner_deleted_paths);
+    }
+
+    /// M58.3 PR2：跨轮合并 pending scanner 诊断 entries。
+    ///
+    /// 与 scan 落库语义一致：本轮删除的文件丢弃其 pending entry 并登记删除路径；
+    /// 本轮脏文件的 entry 覆盖同名旧 entry（后者覆盖前者），并清除其陈旧
+    /// 删除记录（文件被重新创建）。不变式：pending entries 与 deleted paths 不交。
+    fn merge_pending_scanner_diagnostics(
+        &mut self,
+        entries: Vec<(String, Vec<u8>)>,
+        deleted_paths: Vec<String>,
+    ) {
+        self.pending_scanner_entries
+            .retain(|(path, _)| !deleted_paths.contains(path));
+        for path in deleted_paths {
+            if !self.pending_scanner_deleted_paths.contains(&path) {
+                self.pending_scanner_deleted_paths.push(path);
+            }
+        }
+        for (path, bytes) in entries {
+            self.pending_scanner_entries.retain(|(p, _)| p != &path);
+            self.pending_scanner_deleted_paths.retain(|p| p != &path);
+            self.pending_scanner_entries.push((path, bytes));
+        }
     }
 
     /// 当前 pending 状态是否达到持久化阈值或轮次回退条件。
@@ -514,12 +568,61 @@ impl DiffRefreshOrchestrator {
     fn persist_pending(&mut self) -> Result<PersistReport> {
         let commit = self
             .pending_commit
-            .as_ref()
+            .as_mut()
             .context("missing pending commit for persistence")?;
+        // M58.3 复核返修：跨轮累积的 scanner 诊断 entries 挂到 pending commit
+        // 载荷上，与图/checkpoint 同一事务原子落库；失败则 pending 状态
+        // （含诊断 overlay）整体保留，下一轮随 commit 一起重试。
+        commit.scanner_entries = self.pending_scanner_entries.clone();
+        commit.scanner_deleted_paths = self.pending_scanner_deleted_paths.clone();
         let report = (self.persist_fn)(&mut self.runtime.graph, commit)
             .context("persist pending graph and checkpoint")?;
         self.clear_pending_state();
+        // durable 已更新且 overlay 清空，live 缓存直接反映最新持久化口径
+        self.refresh_live_scanner_diagnostics();
         Ok(report)
+    }
+
+    /// M58.3 PR2：以「durable entries 应用 pending overlay」口径计算并刷新
+    /// runtime 的 scanner 诊断缓存。
+    ///
+    /// overlay：pending 覆盖（脏文件）/删除的路径从 durable entries 中剔除，
+    /// 再附加 pending entries，按全库合并（与 `scan` 报告口径同源）。
+    /// 读取/合并失败时不阻塞刷新主流程（下一轮 install/persist 再试），但必须
+    /// 在诊断缓存留一条稳定的 `SCANNER_DIAGNOSTICS_REFRESH_FAILED` warning，
+    /// 让 status/query 能透出「scanner 诊断缓存可能陈旧」（M58.3 复核返修）；
+    /// 成功刷新时由 `replace_scanner_diagnostics` 一并清除该 warning。
+    fn refresh_live_scanner_diagnostics(&mut self) {
+        let result = (|| -> Result<Vec<crate::output::Diagnostic>> {
+            let mut entries = self
+                .runtime
+                .graph
+                .load_scanner_diagnostic_entries()
+                .context("load durable scanner diagnostic entries")?;
+            if !self.pending_scanner_entries.is_empty()
+                || !self.pending_scanner_deleted_paths.is_empty()
+            {
+                let overlay_paths: HashSet<&str> = self
+                    .pending_scanner_entries
+                    .iter()
+                    .map(|(path, _)| path.as_str())
+                    .chain(
+                        self.pending_scanner_deleted_paths
+                            .iter()
+                            .map(|path| path.as_str()),
+                    )
+                    .collect();
+                entries.retain(|(path, _)| !overlay_paths.contains(path.as_str()));
+                entries.extend(self.pending_scanner_entries.iter().cloned());
+            }
+            ProjectIndexer::merge_scanner_diagnostic_entries(&entries)
+                .context("merge live scanner diagnostic entries")
+        })();
+        match result {
+            Ok(diagnostics) => self.runtime.replace_scanner_diagnostics(diagnostics),
+            // 失败不静默：保留旧缓存的同时追加稳定 warning（同 code 不堆叠）
+            Err(error) => self.runtime.mark_scanner_diagnostics_refresh_failed(&error),
+        }
     }
 
     /// 使用标准线程 sleep 执行一次限流 Tick 循环。

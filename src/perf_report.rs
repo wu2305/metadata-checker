@@ -672,6 +672,8 @@ fn profile_rebuild(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         deleted_nodes: graph.removed_nodes_set().iter().cloned().collect(),
         checkpoint: None,
         delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
     let started_at = Instant::now();
     let cold_report = ProjectIndexer::persist_index(&mut graph, commit)
@@ -787,6 +789,8 @@ fn profile_redb(project_dir: &Path, sample_index: usize) -> Result<PerfProfile> 
             deleted_nodes: graph.removed_nodes_set().iter().cloned().collect(),
             checkpoint: None,
             delta: None,
+            scanner_entries: Vec::new(),
+            scanner_deleted_paths: Vec::new(),
         })
         .context("profile redb commit")?;
     profile.record_stage("redb_commit", started_at.elapsed());

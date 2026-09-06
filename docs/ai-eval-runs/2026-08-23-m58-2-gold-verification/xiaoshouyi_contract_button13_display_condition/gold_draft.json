@@ -1,0 +1,116 @@
+{
+  "case_id": "xiaoshouyi_contract_button13_display_condition",
+  "candidate_status": "viable_with_changes",
+  "candidate_notes": "原推断以 button13 为目标并断言其继承 panel13 visibleCondition；实测 CLI 对 button13 返回 no_display_condition_found（图中 button13 的 Contains 仅来自 page，祖先链断裂，证据见 cmd1/cmd3）。源文件证实 button13 确实嵌在 panel13 内，属于工具缺口。gold 改以 panel13 为目标。原推断称 model10 是内嵌 DataFlow（originalNode=FACT_TESTDRIVE → fact_testDrive.tbl），实测 model10 解析到 $DATA:/销售/fact_gap.tbl，物理输入为 fact_customAutoMyAutoListStore/fact_repairWorkOrders（cmd4），该推断被推翻，gold 不含物理表断言。另发现推断遗漏：panel13 还继承 panel2 的 model4.totalRowCount__>0。",
+  "difficulty": "hard",
+  "risk_tags": [
+    "display_condition",
+    "ancestor_condition",
+    "total_row_count_expansion",
+    "same_name_component_noise"
+  ],
+  "question": "低代码项目 /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi 中，app/销售.app/销售/合同协议.spg 这个页面里，「查看」试驾协议按钮所在的 panel13 区域在哪些情况下会显示？",
+  "smoke": {
+    "enabled": true,
+    "order": 7,
+    "question_template": "低代码项目 {project_dir} 中，app/销售.app/销售/合同协议.spg 里「查看」按钮所在的 panel13 区域在哪些情况下会显示？"
+  },
+  "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "source_path": "app/销售.app/销售/合同协议.spg",
+  "real_project_target": "comp:app/销售.app/销售/合同协议.spg|panel13",
+  "required_commands": [
+    "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --explain-condition 'comp:app/销售.app/销售/合同协议.spg|panel13' --intent display --budget compact"
+  ],
+  "minimal_command_plan": [
+    {
+      "command_kind": "--explain-condition",
+      "target": "comp:app/销售.app/销售/合同协议.spg|panel13",
+      "args": [
+        "--intent",
+        "display",
+        "--budget",
+        "compact"
+      ],
+      "requires_project_dir": true,
+      "budget": "compact"
+    }
+  ],
+  "standard_answer": {
+    "summary": "panel13 自身配置了 visibleCondition：model10.totalRowCount__>0；同时它还继承祖先 panel2 的 visibleCondition：model4.totalRowCount__>0。model10.totalRowCount__ 门控展开为本页 model10 的三条 filter：model10.SIGNED IS NOT NULL AND model10.SIGNED!='相关合同已经撤销'、model10.EXTERNALUSERID=param5、model10.QWCONTACTID=text41（其中 text41 是本页组件引用，与会员已注册.spg 的 text41 同名不同物）。所以 panel13 显示需要：panel2 可显示（model4 有数据）且 model10 在本页过滤后有数据。",
+    "must_mention": [
+      "panel13 自身有 direct visibleCondition",
+      "model10.totalRowCount__>0",
+      "继承 panel2 的 model4.totalRowCount__>0",
+      "model10.SIGNED IS NOT NULL AND model10.SIGNED!='相关合同已经撤销'",
+      "model10.EXTERNALUSERID=param5",
+      "model10.QWCONTACTID=text41 中的 text41 是本页组件"
+    ],
+    "should_mention": [
+      "totalRowCount__ 门控展开为模型当前页 filter",
+      "display 与 value-source 是两个不同 intent"
+    ],
+    "must_not_mention": [
+      "panel13 没有显示条件",
+      "model10.totalRowCount__>0 是唯一显示条件（漏掉 panel2 继承）",
+      "把 model10 的页面 filter 当成 panel13 自己配置的 visibleCondition",
+      "把 QWCONTACTID=text41 的 text41 说成会员已注册.spg 的 text41",
+      "断言 model10 的物理表是 fact_testDrive.tbl（CLI 解析为 fact_gap.tbl，原推断未证实）"
+    ]
+  },
+  "expected_facts": [
+    "display_facts.has_direct_condition=true",
+    "direct_conditions 包含 raw_expr=model10.totalRowCount__>0",
+    "inherited_conditions 包含 panel2 的 raw_expr=model4.totalRowCount__>0",
+    "expanded_data_gates 包含 model10.SIGNED/EXTERNALUSERID=param5/QWCONTACTID=text41 三条",
+    "不断言 model10 物理表（CLI 解析与源文件推断不一致，见 candidate_notes）"
+  ],
+  "forbidden_claims": [
+    "只答 model10.totalRowCount__>0 而忽略 panel2 继承",
+    "把 expanded filter 说成 direct visibleCondition",
+    "跨页引用会员已注册.spg 的 text41",
+    "编造 model10 的物理表来源"
+  ],
+  "expected_output_assertions": [
+    {
+      "command_index": 1,
+      "path": "details.answer_facts.display_facts.has_direct_condition",
+      "op": "eq",
+      "value": true,
+      "description": "panel13 自身有 direct visibleCondition"
+    },
+    {
+      "command_index": 1,
+      "path": "details.answer_facts.display_facts.direct_conditions",
+      "op": "array_any_contains_substring",
+      "field": "raw_expr",
+      "value": "model10.totalRowCount__>0",
+      "description": "direct 条件为 model10 行数门控"
+    },
+    {
+      "command_index": 1,
+      "path": "details.answer_facts.display_facts.inherited_conditions",
+      "op": "array_any_contains_substring",
+      "field": "raw_expr",
+      "value": "model4.totalRowCount__>0",
+      "description": "继承祖先 panel2 的 model4 行数门控"
+    },
+    {
+      "command_index": 1,
+      "path": "details.answer_facts.display_facts.expanded_data_gates",
+      "op": "array_any_contains_substring",
+      "field": "raw_expr",
+      "value": "model10.QWCONTACTID=text41",
+      "description": "model10 行数门控展开为本页 filter，引用本页 text41"
+    }
+  ],
+  "answer_style_policy": {
+    "principles": [
+      "先给显示结论，再区分 direct / inherited / expanded data gate",
+      "对同名组件保持当前页面边界"
+    ],
+    "forbidden_practices": [
+      "把 related_context 说成必要门控",
+      "在 CLI 未证明的情况下断言物理表"
+    ]
+  }
+}

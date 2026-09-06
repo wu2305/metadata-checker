@@ -362,6 +362,8 @@ fn test_memory_graph_store_persist_index_returns_commit_stats() {
         deleted_nodes: vec!["old:removed".to_string()],
         checkpoint: None,
         delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
 
     let report =

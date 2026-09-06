@@ -484,6 +484,8 @@ fn test_project_indexer_persist_index_uses_index_state_store_boundary() {
         deleted_nodes: vec![],
         checkpoint: None,
         delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
 
     let report = ProjectIndexer::persist_index(&mut store, commit.clone())

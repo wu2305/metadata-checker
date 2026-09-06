@@ -99,7 +99,9 @@ fn test_cli_context_option_parses() {
         "compact",
     ]);
     assert_eq!(cli.context, Some("button1".to_string()));
-    assert_eq!(cli.depth, 2);
+    // depth 从「默认 1」改成 Option：`--explain` 只有在显式给了深度时才补邻居块，
+    // 否则每次调用都要多付一次上下文的钱。
+    assert_eq!(cli.depth, Some(2));
     assert_eq!(cli.budget, "compact");
 }
 
@@ -949,6 +951,93 @@ fn test_m33_writer_intent_fixture_outputs_writer_paths() {
     );
 }
 
+/// M58：action intent 必须交出可直接执行的 `action:` target 与动作门禁。
+///
+/// 用户问句里不可能出现内部 action id，因此组件级查询能否暴露它，
+/// 决定了模型能不能走到动作级命令。
+#[test]
+fn test_m58_action_intent_exposes_executable_action_target() {
+    let (_db_path, graph) = setup_graph_db("m58_action_intent");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/actions_test.spg|button2",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Action,
+    )
+    .expect("explain-condition must succeed");
+    let action_facts = result
+        .get("details")
+        .and_then(|v| v.get("answer_facts"))
+        .and_then(|v| v.get("action_facts"))
+        .expect("action intent 必须输出 action_facts");
+
+    assert_eq!(
+        action_facts.get("action_count").and_then(|v| v.as_u64()),
+        Some(1)
+    );
+    let action = &action_facts
+        .get("actions")
+        .and_then(|v| v.as_array())
+        .unwrap()[0];
+    assert_eq!(
+        action.get("action_target").and_then(|v| v.as_str()),
+        Some("action:app/actions_test.spg|button2|action1"),
+        "action_target 必须是可直接喂给 --explain 的节点 ID"
+    );
+    assert_eq!(action.get("gate_count").and_then(|v| v.as_u64()), Some(1));
+    assert!(
+        action
+            .get("gate_conditions")
+            .map(|v| v.to_string())
+            .unwrap_or_default()
+            .contains("input1.value"),
+        "动作门禁表达式必须原样给出"
+    );
+    assert!(
+        result
+            .get("details")
+            .and_then(|v| v.get("answer_facts"))
+            .and_then(|v| v.get("value_source_facts"))
+            .is_none(),
+        "action intent 不应扩散到 value_source_facts"
+    );
+}
+
+/// M58：被动作条件引用的组件不能被说成拥有那个动作。
+#[test]
+fn test_m58_action_intent_separates_related_actions_from_owned() {
+    let (_db_path, graph) = setup_graph_db("m58_action_intent_related");
+    let result = metadata_checker::explain::build_explain_condition_output_with_intent(
+        &graph,
+        "comp:app/actions_test.spg|input1",
+        "compact",
+        metadata_checker::explain::TraversalIntent::Action,
+    )
+    .expect("explain-condition must succeed");
+    let action_facts = result
+        .get("details")
+        .and_then(|v| v.get("answer_facts"))
+        .and_then(|v| v.get("action_facts"))
+        .expect("action intent 必须输出 action_facts");
+
+    assert_eq!(
+        action_facts.get("action_count").and_then(|v| v.as_u64()),
+        Some(0),
+        "input1 自己不挂动作"
+    );
+    assert_eq!(
+        action_facts
+            .get("related_action_count")
+            .and_then(|v| v.as_u64()),
+        Some(1),
+        "input1 被 button2 的动作门禁引用，必须作为 related 交出"
+    );
+    assert_eq!(
+        action_facts.get("result").and_then(|v| v.as_str()),
+        Some("only_related_action_gate_found")
+    );
+}
+
 #[test]
 fn test_m33_availability_intent_fixture_stops_at_filter_vars() {
     let (_db_path, graph) = setup_graph_db("m33_availability_fixture");
@@ -1286,9 +1375,7 @@ fn test_m31_m32_docs_define_condition_and_value_source_contract() {
 /// 通过编译后的二进制 CLI 捕获 JSON 输出
 fn run_cli(args: &[&str]) -> String {
     let _guard = CLI_LOCK.lock().unwrap();
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"));
     let cmd_output = std::process::Command::new(&bin)
         .args(args)
         .output()
@@ -1298,9 +1385,7 @@ fn run_cli(args: &[&str]) -> String {
 
 fn run_cli_stderr(args: &[&str]) -> String {
     let _guard = CLI_LOCK.lock().unwrap();
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"));
     let cmd_output = std::process::Command::new(&bin)
         .args(args)
         .output()
@@ -1451,8 +1536,9 @@ fn test_cli_query_model_contract() {
         "--project-dir",
         "tests/fixtures/test_project",
         "--build-graph",
+        "--human",
     ]);
-    // build-graph 输出 human text, 但先确保 graph 建立
+    // build-graph 默认输出单 JSON；--human 下才有人类统计行，先确保 graph 建立
     assert!(output.contains("Graph database built"));
 
     let output = run_cli(&[
@@ -6717,9 +6803,7 @@ fn test_cli_runtime_session_diff_refresh_redacts_password_on_failure() {
     create_diff_refresh_cli_session(&root, "s1", &format!("http://{addr}"));
 
     let password = "super-secret-pw-123";
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"));
     let output = std::process::Command::new(&bin)
         .args([
             "--session-dir",

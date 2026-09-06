@@ -185,6 +185,41 @@ fn build_key_model_availability_entry(
     })
 }
 
+/// 诊断：页面限定回退全局模型（PAGE_SCOPED_TARGET_FALLBACK 的查询期归属）。
+///
+/// 同一 code 只在 page_logic 产生，runtime 不另做字符串扫描；生产路径在
+/// `build_query_page_logic_output_inner` 的 availability 批次聚合点调用本函数，
+/// 单次页面查询最多产生一条，计数为该批次的回退次数。
+pub(crate) fn page_scoped_fallback_diagnostic(
+    page_id: &str,
+    page_path: &str,
+    fallback_count: usize,
+) -> crate::output::Diagnostic {
+    crate::diagnostics::envelope_diagnostic(
+        crate::diagnostics::CODE_PAGE_SCOPED_TARGET_FALLBACK,
+        fallback_count,
+        crate::output::Location {
+            source_file: Some(page_path.to_string()),
+            node_id: Some(page_id.to_string()),
+            json_path: None,
+        },
+        format!(
+            "Page-scoped model target fallback to global model ({} occurrence(s))",
+            fallback_count
+        ),
+    )
+}
+
+#[cfg(any(test, feature = "cli-local"))]
+#[doc(hidden)]
+pub fn page_scoped_fallback_diagnostic_for_test(
+    page_id: &str,
+    page_path: &str,
+    fallback_count: usize,
+) -> crate::output::Diagnostic {
+    page_scoped_fallback_diagnostic(page_id, page_path, fallback_count)
+}
+
 fn key_model_availability_value_from_result(
     model_id: &str,
     page_scoped_target: &str,
@@ -905,6 +940,180 @@ fn compact_key_model_availability_details(
         "remaining_count": remaining_count,
         "items": key_model_availability,
     })
+}
+
+/// 由 page_role 与各项计数生成一句确定的页面结论。
+///
+/// 只按 role 分支套模板，不认得任何具体页面：同样的计数必然得到同一句话。
+fn page_conclusion(
+    page_role: &str,
+    page_name: &str,
+    entrypoints: usize,
+    write_targets: usize,
+    navigation: usize,
+    data_sources: usize,
+) -> String {
+    match page_role {
+        "readonly_dashboard" => format!(
+            "页面 {page_name} 是只读仪表板（page_role=readonly_dashboard）：无用户入口（entrypoint_count=0）、\
+             无写入目标（write_target_count=0），只读取 {data_sources} 个数据源，用户无法通过该页面更改数据。"
+        ),
+        "data_maintenance_page" => format!(
+            "页面 {page_name} 是数据维护页（page_role=data_maintenance_page）：有 {entrypoints} 个用户入口，\
+             写入 {write_targets} 个目标，未解析到页面跳转，用户可以通过该页面更改数据。"
+        ),
+        "navigation_page" => format!(
+            "页面 {page_name} 是导航页（page_role=navigation_page）：有 {entrypoints} 个用户入口、\
+             {navigation} 个跳转，无写入目标（write_target_count=0），用户无法通过该页面更改数据。"
+        ),
+        "mixed_interaction_page" => format!(
+            "页面 {page_name} 既写数据又跳转（page_role=mixed_interaction_page）：有 {entrypoints} 个用户入口，\
+             写入 {write_targets} 个目标，{navigation} 个跳转。"
+        ),
+        _ => format!(
+            "页面 {page_name} 有 {entrypoints} 个用户入口，但没有解析到写入目标或跳转\
+             （page_role=unknown）；这可能是页面确实只做展示，也可能是动作没被解析出来，结论应保守回答。"
+        ),
+    }
+}
+
+/// 判断 navigation 明细是否为动作触发的真实页面跳转。
+///
+/// navigation 数组里混着四类边：动作触发的真实页面跳转、页面嵌入、传参，以及组件
+/// 控制。`EmbedsPage` 只表示页面结构中嵌了另一个页面，不代表用户发生跳转；传参的
+/// `to` 又是参数节点而非页面。把它们统称为目标页面会改变页面角色，因此必须同时按
+/// edge type 和 target type 分类。
+fn is_page_jump_entry(entry: &serde_json::Value) -> bool {
+    matches!(
+        entry.get("type").and_then(|value| value.as_str()),
+        Some("OpensPage" | "ActionNavigates")
+    ) && entry
+        .get("to")
+        .and_then(|value| value.as_str())
+        .is_some_and(|to| to.starts_with("page:"))
+}
+
+/// 页面嵌入数量与真实跳转分开统计，供调用方判断页面组合关系。
+fn is_page_embed_entry(entry: &serde_json::Value) -> bool {
+    entry.get("type").and_then(|value| value.as_str()) == Some("EmbedsPage")
+        && entry
+            .get("to")
+            .and_then(|value| value.as_str())
+            .is_some_and(|to| to.starts_with("page:"))
+}
+
+/// 把跳转关系归纳成一句话：跳去哪些目标页面，其中哪些带了参数。
+///
+/// 没有跳转时返回 None——这种情况由 `absent` 负责说明，两处都说会自相矛盾。
+fn navigation_statement(
+    navigation: &[serde_json::Value],
+    action_flows: &[serde_json::Value],
+) -> Option<String> {
+    if navigation.is_empty() {
+        return None;
+    }
+    let mut page_targets: Vec<String> = Vec::new();
+    let mut params: Vec<String> = Vec::new();
+    // 发起跳转的那些 action 的 id，用来回查它们的类型。
+    let mut source_actions: Vec<String> = Vec::new();
+    for entry in navigation {
+        let Some(to) = entry.get("to").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let name = entry.get("to_name").and_then(|v| v.as_str()).unwrap_or(to);
+        if entry.get("type").and_then(|v| v.as_str()) == Some("PassesParam") {
+            // 参数只报名字没用——问「传了哪些参数」的人要的是传了什么值。
+            let label = match entry.get("raw_expr").and_then(|v| v.as_str()) {
+                Some(expr) if !expr.is_empty() => format!("{name}（{to}，取值 {expr}）"),
+                _ => format!("{name}（{to}）"),
+            };
+            if !params.contains(&label) {
+                params.push(label);
+            }
+        } else if is_page_jump_entry(entry) {
+            let label = format!("{name}（{to}）");
+            if !page_targets.contains(&label) {
+                page_targets.push(label);
+            }
+            if let Some(from) = entry.get("from").and_then(|v| v.as_str())
+                && from.starts_with("action:")
+                && !source_actions.iter().any(|known| known == from)
+            {
+                source_actions.push(from.to_string());
+            }
+        }
+    }
+
+    // 跳转是哪种 action 干的（link / showDialog / ...）是这个问句的核心事实之一，
+    // 而它只存在于 action_flows 里，navigation 边上没有。
+    let mut action_types: Vec<String> = Vec::new();
+    for flow in action_flows {
+        let Some(node_id) = flow.get("node_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if !source_actions.iter().any(|known| known == node_id) {
+            continue;
+        }
+        if let Some(action_type) = flow.get("action_type").and_then(|v| v.as_str())
+            && !action_type.is_empty()
+            && !action_types.iter().any(|known| known == action_type)
+        {
+            action_types.push(action_type.to_string());
+        }
+    }
+    if page_targets.is_empty() && params.is_empty() {
+        return None;
+    }
+    let mut statement = if page_targets.is_empty() {
+        // 只解析到传参、没解析到跳去哪一页：这是解析缺口，不能反过来说成「没有跳转」。
+        "该页面的跳转目标页面未解析出来。".to_string()
+    } else {
+        format!("该页面跳转的目标页面为：{}。", page_targets.join("、"))
+    };
+    if !action_types.is_empty() {
+        statement.push_str(&format!(
+            "跳转由 action_type={} 的动作发起。",
+            action_types.join(" / ")
+        ));
+    }
+    if params.is_empty() {
+        statement.push_str("这些跳转没有解析到参数传递。");
+    } else {
+        statement.push_str(&format!(
+            "跳转时通过 PassesParam 边向目标页面传递了参数：{}。逐条依据见 details.navigation。",
+            params.join("、")
+        ));
+    }
+    Some(statement)
+}
+
+/// 把判定出来的「没有」写成事实。
+///
+/// 只登记确实为 0 的项：空数组在 JSON 里和「被截断成空」无法区分，模型只能猜。
+fn absent_facts(
+    entrypoints: usize,
+    write_targets: usize,
+    navigation: usize,
+    data_sources: usize,
+) -> Vec<serde_json::Value> {
+    [
+        (
+            entrypoints,
+            "entrypoints",
+            "该页面没有用户可触发入口（无入口）",
+        ),
+        (
+            write_targets,
+            "write_targets",
+            "该页面没有写入目标（无写入）",
+        ),
+        (navigation, "navigation", "未解析到页面跳转"),
+        (data_sources, "data_sources", "该页面没有读取任何数据源"),
+    ]
+    .into_iter()
+    .filter(|(count, _, _)| *count == 0)
+    .map(|(_, what, statement)| serde_json::json!({ "what": what, "statement": statement }))
+    .collect()
 }
 
 /// 查询页面级逻辑摘要
@@ -1935,13 +2144,23 @@ fn build_query_page_logic_output_inner(
     set_profile_counter(&mut profile, "diagnostics", diagnostics.len());
 
     // ---- 7. Summary & page_role ----
+    // navigation 数组混着动作跳转、页面嵌入、传参和组件控制。page_role 与「几个跳转」
+    // 只能由 OpensPage / ActionNavigates 决定；EmbedsPage 是组合关系，不是用户跳转。
+    let page_jump_count = navigation
+        .iter()
+        .filter(|entry| is_page_jump_entry(entry))
+        .count();
+    let page_embed_count = navigation
+        .iter()
+        .filter(|entry| is_page_embed_entry(entry))
+        .count();
     let page_role = if entrypoints.is_empty() {
         "readonly_dashboard"
-    } else if !write_targets.is_empty() && !navigation.is_empty() {
+    } else if !write_targets.is_empty() && page_jump_count > 0 {
         "mixed_interaction_page"
     } else if !write_targets.is_empty() {
         "data_maintenance_page"
-    } else if !navigation.is_empty() {
+    } else if page_jump_count > 0 {
         "navigation_page"
     } else {
         "unknown"
@@ -1953,7 +2172,40 @@ fn build_query_page_logic_output_inner(
         entrypoints.len(),
         data_sources.len(),
         write_targets.len(),
-        navigation.len()
+        page_jump_count
+    );
+
+    // what_is_it 是四个计数的拼接，「入口 0、写入 0」到「这页是只读的、用户改不了数据」
+    // 之间还有一步推理，此前留给模型自己走。这一步是确定的：同样的计数永远得到同样的
+    // 结论，正是应该留在工具里的部分。
+    // 跳转的目标页面藏在 details.navigation[*].to 里，compact 预算下这个数组还会被截断，
+    // 于是「跳去哪、带没带参数」这个问句里最核心的事实反而是最容易丢的。
+    let navigation_statement = navigation_statement(&navigation, &action_flows);
+
+    let mut conclusion = page_conclusion(
+        page_role,
+        &page_node.name,
+        entrypoints.len(),
+        write_targets.len(),
+        page_jump_count,
+        data_sources.len(),
+    );
+
+    // 跳转和传参必须进 conclusion 本身，不能只留在 navigation_statement 里。
+    // 导航页的 conclusion 以「无写入目标、用户无法通过该页面更改数据」收尾，模型读完
+    // 这一句就去回答「跳转传了哪些参数」，答出来的是「无参数」——而 PassesParam 边就在
+    // 同一次输出的 details 里。conclusion 是最被信任的那句话，页面最主要的行为就该写在里面。
+    if let Some(statement) = navigation_statement.as_deref() {
+        conclusion.push_str(statement);
+    }
+
+    // 空数组和「被截断成空」在 JSON 里长得一样。判定出来的「没有」要作为事实说出来。
+    // 跳转同样只认页面目标边：组件控制/传参边存在不代表有页面跳转。
+    let absent = absent_facts(
+        entrypoints.len(),
+        write_targets.len(),
+        page_jump_count,
+        data_sources.len(),
     );
 
     // Build top-N lists for brief mode
@@ -1969,9 +2221,11 @@ fn build_query_page_logic_output_inner(
         data_prerequisites.iter().take(3).cloned().collect();
     let top_action_prerequisites: Vec<serde_json::Value> =
         action_prerequisites.iter().take(3).cloned().collect();
-    // key_primary_paths 从已排序的 primary_paths 中取前 10 条（已按重要性排序）
-    let key_primary_paths: Vec<serde_json::Value> =
-        primary_paths.iter().take(10).cloned().collect();
+    // key_primary_paths 从已排序的 primary_paths 中取前 3 条（已按重要性排序）。
+    // 与同级 top_* 列表保持同一上限：summary 是 details 的真子集，不能比
+    // details.primary_paths（compact 截断为 5）还长。primary_path 单条体积远大于
+    // 其它 summary 项，取 10 会让 summary 反而比它所摘要的 details 更大。
+    let key_primary_paths: Vec<serde_json::Value> = primary_paths.iter().take(3).cloned().collect();
 
     // M35.7: 从 data_sources 和 write_targets 中自动发现关键模型，
     // 并内嵌每个模型的 availability 摘要。
@@ -2042,6 +2296,19 @@ fn build_query_page_logic_output_inner(
         };
     let availability_context_build_ms = availability_index_build_ms;
     let key_model_availability = availability_batch.entries;
+    // 落点修正：PAGE_SCOPED_TARGET_FALLBACK 由 page_logic 唯一产生
+    // 若本批次有回退，对应的诊断在此追加（与 diagnostics 合并后统一落 response）
+    let fallback_count = availability_batch.fallback_count;
+    let mut page_scoped_fallback_diagnostics: Vec<crate::output::Diagnostic> = Vec::new();
+    if fallback_count > 0 {
+        // 逐个回退项无法一一映射到 model_id（batch 已聚合），按 batch 级别产生一条聚合诊断
+        // 单次页面查询中同一 code 只产生一次，计数为回退次数
+        page_scoped_fallback_diagnostics.push(page_scoped_fallback_diagnostic(
+            page_id,
+            &page_node.path,
+            fallback_count,
+        ));
+    }
     record_profile_stage(
         &mut profile,
         "key_model_availability",
@@ -2114,11 +2381,16 @@ fn build_query_page_logic_output_inner(
         "page_id": page_id,
         "page_name": page_node.name,
         "what_is_it": what_is_it,
+        "conclusion": conclusion,
+        "absent": absent,
+        "navigation_statement": navigation_statement,
         "page_role": page_role,
         "entrypoint_count": entrypoints.len(),
         "data_source_count": data_sources.len(),
         "write_target_count": write_targets.len(),
         "navigation_count": navigation.len(),
+        "page_jump_count": page_jump_count,
+        "page_embed_count": page_embed_count,
         "risk_count": diagnostics.len(),
         "top_entrypoints": top_entrypoints,
         "top_data_sources": top_data_sources,
@@ -2139,13 +2411,18 @@ fn build_query_page_logic_output_inner(
     let risk_diagnostics: Vec<serde_json::Value> = diagnostics
         .iter()
         .map(|d| {
-            serde_json::json!({
+            let mut entry = serde_json::json!({
                 "severity": format!("{:?}", d.severity),
                 "code": d.code,
                 "message": d.message,
                 "location": d.location,
                 "suggestion": d.suggestion,
-            })
+            });
+            // 这里是手写的 json，绕过了 Diagnostic 的序列化，得自己补 answer_effect。
+            if let Some((_, effect)) = crate::output::answer_effect::answer_effect(&d.code) {
+                entry["answer_effect"] = serde_json::json!(effect);
+            }
+            entry
         })
         .collect();
 
@@ -2216,7 +2493,9 @@ fn build_query_page_logic_output_inner(
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::PageLogic, summary);
     output.query_target = Some(page_id.to_string());
     output.details = Some(details);
-    output.diagnostics = diagnostics.clone();
+    let mut merged_diagnostics = diagnostics.clone();
+    merged_diagnostics.extend(page_scoped_fallback_diagnostics);
+    output.diagnostics = merged_diagnostics;
     record_profile_stage(&mut profile, "output_build", output_stage_started);
 
     let stage_started = Instant::now();
@@ -2249,22 +2528,21 @@ fn build_query_page_logic_output_inner(
             .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
             .collect();
         if !truncated_parts.is_empty() {
-            output.diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "OUTPUT_TRUNCATED".to_string(),
-                message: format!(
-                    "Compact budget: arrays truncated for: {}",
-                    truncated_parts.join(", ")
-                ),
-                location: crate::output::Location {
-                    source_file: Some(page_node.path.clone()),
-                    node_id: Some(page_id.to_string()),
-                    json_path: None,
-                },
-                suggestion: Some(
-                    "Use --budget normal or --budget full to see complete arrays".to_string(),
-                ),
-            });
+            output
+                .diagnostics
+                .push(crate::diagnostics::envelope_diagnostic(
+                    "OUTPUT_TRUNCATED",
+                    1,
+                    crate::output::Location {
+                        source_file: Some(page_node.path.clone()),
+                        node_id: Some(page_id.to_string()),
+                        json_path: None,
+                    },
+                    format!(
+                        "Compact budget: arrays truncated for: {}",
+                        truncated_parts.join(", ")
+                    ),
+                ));
         }
 
         // Add evidence_summary and key_findings to summary
@@ -2436,4 +2714,156 @@ pub fn query_page_logic(
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod answer_statement_tests {
+    use super::*;
+
+    #[test]
+    fn a_readonly_page_says_so_in_words() {
+        let conclusion = page_conclusion("readonly_dashboard", "报表页", 0, 0, 0, 3);
+        assert!(conclusion.contains("只读"));
+        assert!(conclusion.contains("无写入"));
+        assert!(conclusion.contains("无用户入口"));
+        // 只读页的结论里出现「按钮」会把答案带向「有按钮但不可点」这种错误方向。
+        assert!(!conclusion.contains("按钮"));
+    }
+
+    #[test]
+    fn a_writable_page_is_not_described_as_readonly() {
+        let conclusion = page_conclusion("data_maintenance_page", "工单维护", 4, 2, 0, 3);
+        assert!(!conclusion.contains("只读"));
+        assert!(conclusion.contains("写入 2 个目标"));
+        assert!(conclusion.contains("可以"));
+    }
+
+    #[test]
+    fn an_unclassifiable_page_asks_for_a_conservative_answer() {
+        // role=unknown 意味着「没解析到动作」和「确实只做展示」区分不开，不能当成只读断言。
+        let conclusion = page_conclusion("unknown", "怪页", 2, 0, 0, 0);
+        assert!(!conclusion.contains("只读"));
+        assert!(conclusion.contains("保守回答"));
+    }
+
+    #[test]
+    fn only_real_zeros_are_reported_as_absent() {
+        let absent = absent_facts(0, 0, 2, 5);
+        let kinds: Vec<&str> = absent
+            .iter()
+            .map(|item| item["what"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, vec!["entrypoints", "write_targets"]);
+        assert!(absent_facts(1, 1, 1, 1).is_empty());
+    }
+
+    #[test]
+    fn param_nodes_are_never_called_target_pages() {
+        // PassesParam 的 to 是参数节点，不是页面；把它念成「目标页面 param1」就是编事实。
+        let navigation = vec![
+            serde_json::json!({
+                "to": "page:app/详情.spg", "to_name": "详情", "type": "OpensPage",
+            }),
+            serde_json::json!({
+                "to": "param:详情/orderId", "to_name": "orderId", "type": "PassesParam",
+            }),
+        ];
+        let statement = navigation_statement(&navigation, &[]).unwrap();
+        assert!(statement.contains("目标页面为：详情（page:app/详情.spg）"));
+        assert!(statement.contains("传递了参数：orderId（param:详情/orderId）"));
+        assert!(!statement.contains("目标页面为：orderId"));
+    }
+
+    #[test]
+    fn a_control_edge_is_not_a_navigation_target() {
+        let navigation = vec![serde_json::json!({
+            "to": "comp:app/a.spg|b", "to_name": "b", "type": "ActionControlsComponent",
+        })];
+        assert!(navigation_statement(&navigation, &[]).is_none());
+    }
+
+    #[test]
+    fn an_embedded_page_is_not_a_user_jump() {
+        let embedded = serde_json::json!({
+            "from": "comp:app/a.spg|subpage1",
+            "to": "page:app/embedded.spg",
+            "to_name": "embedded",
+            "type": "EmbedsPage",
+        });
+        assert!(!is_page_jump_entry(&embedded));
+        assert!(is_page_embed_entry(&embedded));
+        assert!(navigation_statement(&[embedded], &[]).is_none());
+    }
+
+    #[test]
+    fn no_navigation_says_nothing_here_and_leaves_it_to_absent() {
+        assert!(navigation_statement(&[], &[]).is_none());
+    }
+
+    #[test]
+    fn passed_param_reports_the_value_expression_not_just_the_name() {
+        // 问「传了哪些参数」的人要的是传了什么值，只报名字等于没回答。
+        let navigation = vec![serde_json::json!({
+            "to": "param:详情/orderId",
+            "to_name": "orderId",
+            "type": "PassesParam",
+            "raw_expr": "table1.selectedRow.id",
+        })];
+        let statement = navigation_statement(&navigation, &[]).unwrap();
+        assert!(
+            statement.contains("orderId（param:详情/orderId，取值 table1.selectedRow.id）"),
+            "{statement}"
+        );
+        // 只解析到传参、没解析到目标页面时，不能反过来说成「没有跳转」。
+        assert!(statement.contains("目标页面未解析出来"), "{statement}");
+    }
+
+    #[test]
+    fn navigation_names_the_action_type_that_triggered_it() {
+        // action_type 只存在于 action_flows，navigation 边上没有；跳转是 link 还是
+        // showDialog 是这个问句的核心事实之一。
+        let navigation = vec![serde_json::json!({
+            "from": "action:app/a.spg|button1|action1",
+            "to": "page:app/详情.spg",
+            "to_name": "详情",
+            "type": "OpensPage",
+        })];
+        let action_flows = vec![
+            serde_json::json!({
+                "node_id": "action:app/a.spg|button1|action1", "action_type": "link",
+            }),
+            // 不是本次跳转的发起者，不能混进来。
+            serde_json::json!({
+                "node_id": "action:app/a.spg|button9|action1", "action_type": "showDialog",
+            }),
+        ];
+        let statement = navigation_statement(&navigation, &action_flows).unwrap();
+        assert!(statement.contains("action_type=link"), "{statement}");
+        assert!(!statement.contains("showDialog"), "{statement}");
+    }
+
+    #[test]
+    fn repeated_action_type_is_reported_once() {
+        let navigation = vec![
+            serde_json::json!({
+                "from": "action:app/a.spg|button1|action1",
+                "to": "page:app/x.spg", "to_name": "x", "type": "OpensPage",
+            }),
+            serde_json::json!({
+                "from": "action:app/a.spg|button2|action1",
+                "to": "page:app/y.spg", "to_name": "y", "type": "OpensPage",
+            }),
+        ];
+        let action_flows = vec![
+            serde_json::json!({
+                "node_id": "action:app/a.spg|button1|action1", "action_type": "link",
+            }),
+            serde_json::json!({
+                "node_id": "action:app/a.spg|button2|action1", "action_type": "link",
+            }),
+        ];
+        let statement = navigation_statement(&navigation, &action_flows).unwrap();
+        assert!(statement.contains("action_type=link"), "{statement}");
+        assert_eq!(statement.matches("link").count(), 1, "{statement}");
+    }
 }

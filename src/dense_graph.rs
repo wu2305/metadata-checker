@@ -67,7 +67,7 @@ pub struct DenseGraphSnapshot {
 impl DenseGraphSnapshot {
     /// 从只读图构建稠密快照。
     ///
-    /// 单次遍历各节点出边：写入一份 edge payload，同时登记 outgoing / incoming 邻接索引。
+    /// 单次读取各节点邻居：写入一份 edge payload，同时登记 outgoing / incoming 邻接索引。
     pub fn from_graph(graph: &dyn GraphReadStore) -> GraphStoreResult<Self> {
         let nodes: Vec<Node> = graph.iter_nodes()?.collect();
         if nodes.len() > u32::MAX as usize {
@@ -85,6 +85,7 @@ impl DenseGraphSnapshot {
         let mut incoming_by_node: Vec<Vec<DenseAdjacencyEntry>> = vec![Vec::new(); nodes.len()];
         let mut edge_payloads = Vec::new();
         let mut edge_indices = HashMap::new();
+        let mut pending_incoming = Vec::new();
 
         for node in &nodes {
             let from_dense =
@@ -119,42 +120,37 @@ impl DenseGraphSnapshot {
                     edge_idx,
                 });
             }
+            let to_dense = from_dense;
+            pending_incoming.extend(
+                neighbors
+                    .incoming
+                    .into_iter()
+                    .map(|edge_view| (to_dense, edge_view)),
+            );
         }
 
-        for node in &nodes {
-            let to_dense =
-                node_ids
-                    .get(&node.id)
-                    .copied()
-                    .ok_or_else(|| GraphStoreError::Corrupted {
-                        reason: format!("dense id missing for node {}", node.id),
-                    })?;
-            let Some(neighbors) = graph.get_node_edges(&node.id)? else {
-                continue;
-            };
-            for edge_view in neighbors.incoming {
-                let from_dense = node_ids.get(&edge_view.node.id).copied().ok_or_else(|| {
-                    GraphStoreError::Corrupted {
-                        reason: format!(
-                            "edge source {} missing while building dense graph",
-                            edge_view.node.id
-                        ),
-                    }
+        for (to_dense, edge_view) in pending_incoming {
+            let from_dense = node_ids.get(&edge_view.node.id).copied().ok_or_else(|| {
+                GraphStoreError::Corrupted {
+                    reason: format!(
+                        "edge source {} missing while building dense graph",
+                        edge_view.node.id
+                    ),
+                }
+            })?;
+            let edge_idx = edge_indices
+                .get(&dense_edge_key(&edge_view.edge))
+                .copied()
+                .ok_or_else(|| GraphStoreError::Corrupted {
+                    reason: format!(
+                        "incoming edge {} -> {} missing outgoing payload",
+                        edge_view.edge.from, edge_view.edge.to
+                    ),
                 })?;
-                let edge_idx = edge_indices
-                    .get(&dense_edge_key(&edge_view.edge))
-                    .copied()
-                    .ok_or_else(|| GraphStoreError::Corrupted {
-                        reason: format!(
-                            "incoming edge {} -> {} missing outgoing payload",
-                            edge_view.edge.from, edge_view.edge.to
-                        ),
-                    })?;
-                incoming_by_node[to_dense.index()].push(DenseAdjacencyEntry {
-                    adjacent: from_dense,
-                    edge_idx,
-                });
-            }
+            incoming_by_node[to_dense.index()].push(DenseAdjacencyEntry {
+                adjacent: from_dense,
+                edge_idx,
+            });
         }
 
         let (out_offsets, out_edges) = flatten_adjacency(outgoing_by_node);

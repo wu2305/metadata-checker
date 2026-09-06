@@ -85,6 +85,16 @@ fn path_reject_reason_for_intent(
                 Some("edge_type_not_allowed_for_availability_intent")
             }
         }
+        TraversalIntent::Action => {
+            if edges
+                .iter()
+                .all(|edge| matches!(edge.as_str(), "Triggers" | "ActionWrites" | "DependsOn"))
+            {
+                None
+            } else {
+                Some("edge_type_not_allowed_for_action_intent")
+            }
+        }
         TraversalIntent::Context | TraversalIntent::Auto => None,
     }
 }

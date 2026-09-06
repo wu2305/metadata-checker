@@ -107,6 +107,31 @@ fn test_print_non_human_superpage() {
     );
 }
 
+#[test]
+fn test_print_non_human_does_not_duplicate_empty_priority_diagnostic() {
+    let path = PathBuf::from("tests/fixtures/test_superpage.spg");
+    let meta = parser::parse_file(&path).expect("Failed to parse");
+    let empty_analyses: Vec<metadata_checker::priority::PriorityAnalysis> = Vec::new();
+
+    let mut buf: Vec<u8> = Vec::new();
+    output::print_non_human_to(&meta, Some(&empty_analyses), &mut buf)
+        .expect("print_non_human_to should succeed");
+    let json: serde_json::Value =
+        serde_json::from_slice(&buf).expect("non-human output should be valid JSON");
+    let diagnostics = json
+        .get("diagnostics")
+        .and_then(|value| value.as_array())
+        .expect("output should contain diagnostics");
+    let no_priority_count = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.get("code").and_then(|v| v.as_str()) == Some("NO_PRIORITY_RULES")
+        })
+        .count();
+
+    assert_eq!(no_priority_count, 1);
+}
+
 // ============================================================
 // 三、output.rs component query 测试
 // ============================================================
@@ -377,9 +402,7 @@ fn test_repl_interactive_priority() {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    let bin = std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"));
     if !bin.exists() {
         eprintln!("Binary not found, skipping integration test");
         return;

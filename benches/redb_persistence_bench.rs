@@ -264,6 +264,8 @@ fn bench_redb_incremental_persist_commit(c: &mut Criterion, source_project_dir: 
                     deleted_nodes: graph.removed_nodes_set().iter().cloned().collect(),
                     checkpoint: None,
                     delta: None,
+                    scanner_entries: Vec::new(),
+                    scanner_deleted_paths: Vec::new(),
                 };
                 let report = ProjectIndexer::persist_index(&mut graph, commit)
                     .expect("persist index commit");
@@ -689,6 +691,8 @@ fn prepare_dirty_commit(
             changed_file_states: Vec::new(),
             removed_file_paths: Vec::new(),
         }),
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
     (graph, commit)
 }

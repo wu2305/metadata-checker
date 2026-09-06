@@ -39,119 +39,11 @@ pub fn find_candidates(
     target_id: &str,
     limit: usize,
 ) -> Result<Vec<(crate::graph::Node, String)>> {
-    let mut candidates = Vec::new();
-    let target_lower = target_id.to_lowercase();
-
-    let target_prefix = if target_id.starts_with("model:") {
-        Some("model")
-    } else if target_id.starts_with("page:") {
-        Some("page")
-    } else if target_id.starts_with("comp:") {
-        Some("comp")
-    } else if target_id.starts_with("action:") {
-        Some("action")
-    } else if target_id.starts_with("field:") {
-        Some("field")
-    } else {
-        None
-    };
-
-    let target_bare = target_id
-        .strip_prefix("model:")
-        .or_else(|| target_id.strip_prefix("page:"))
-        .or_else(|| target_id.strip_prefix("comp:"))
-        .or_else(|| target_id.strip_prefix("action:"))
-        .or_else(|| target_id.strip_prefix("field:"))
-        .unwrap_or(target_id);
-
-    for node in graph.iter_nodes()? {
-        if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty() {
-            continue;
-        }
-        let node_bare = node
-            .id
-            .strip_prefix("model:")
-            .or_else(|| node.id.strip_prefix("page:"))
-            .or_else(|| node.id.strip_prefix("comp:"))
-            .or_else(|| node.id.strip_prefix("action:"))
-            .or_else(|| node.id.strip_prefix("field:"))
-            .unwrap_or(&node.id);
-
-        let mut score: f64 = 0.0;
-        let mut reason = "substring match";
-
-        if let Some(prefix) = target_prefix {
-            if node.id.starts_with(prefix) {
-                if node_bare.to_lowercase() == target_bare.to_lowercase() {
-                    score = 100.0;
-                    reason = "exact bare name match";
-                } else if node_bare
-                    .to_lowercase()
-                    .contains(&target_bare.to_lowercase())
-                    || target_bare
-                        .to_lowercase()
-                        .contains(&node_bare.to_lowercase())
-                {
-                    score = 80.0;
-                    reason = "bare name substring match";
-                } else if node.id.to_lowercase().contains(&target_lower)
-                    || target_lower.contains(&node.id.to_lowercase())
-                {
-                    score = 60.0;
-                    reason = "full id substring match";
-                }
-            }
-            if node_bare.starts_with(target_bare) && node_bare != target_bare {
-                if node_bare
-                    .trim_start_matches(target_bare)
-                    .parse::<f64>()
-                    .is_ok()
-                {
-                    score = score.max(40.0_f64);
-                    reason = "numbered suffix variant";
-                }
-            }
-            if node_bare.starts_with(target_bare) {
-                if let Some(rest) = node_bare.strip_prefix(target_bare) {
-                    if rest.parse::<f64>().is_ok() {
-                        score = score.max(40.0_f64);
-                        reason = "numbered suffix variant";
-                    }
-                }
-            }
-            if score == 0.0 && target_id.starts_with("comp:") && node.id.starts_with("comp:") {
-                score = 5.0;
-                reason = "same prefix (component)";
-            }
-        } else {
-            if node.name.to_lowercase() == target_lower || node.id.to_lowercase() == target_lower {
-                score = 100.0;
-                reason = "exact match";
-            } else if node.name.to_lowercase().contains(&target_lower)
-                || node.id.to_lowercase().contains(&target_lower)
-            {
-                score = 80.0;
-                reason = "name/id substring match";
-            } else if node.path.to_lowercase().contains(&target_lower) {
-                score = 50.0;
-                reason = "path substring match";
-            }
-        }
-
-        if score > 0.0 {
-            candidates.push((node.clone(), score, reason.to_string()));
-        }
-    }
-
-    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let mut seen = std::collections::HashSet::new();
-    let result: Vec<_> = candidates
-        .into_iter()
-        .filter(|(n, _, _)| seen.insert(n.id.clone()))
-        .take(limit)
-        .map(|(n, _, r)| (n, r))
-        .collect();
-    Ok(result)
+    Ok(crate::candidate::rank_candidates(
+        graph.iter_nodes()?,
+        target_id,
+        limit,
+    ))
 }
 
 /// 追溯节点所属的页面（通过 Contains 边）
@@ -474,6 +366,8 @@ pub use model::query_model;
 mod page_logic;
 #[cfg(feature = "cli-local")]
 pub use page_logic::collect_page_logic_nodes_for_test;
+#[cfg(any(test, feature = "cli-local"))]
+pub use page_logic::page_scoped_fallback_diagnostic_for_test;
 pub use page_logic::query_page_logic;
 pub use page_logic::{
     MaterializedAvailabilityFactsIndex, PageDependencyIndex, PageDependencyIndexCoverage,
@@ -601,13 +495,15 @@ pub fn find_nodes(
                 &top.id,
             ));
     } else {
-        output.diagnostics.push(crate::output::schema::Diagnostic {
-            severity: crate::output::schema::DiagnosticSeverity::Info,
-            code: "NO_MATCHES_FOUND".to_string(),
-            message: format!("No nodes found matching keyword '{}'", keyword),
-            location: crate::output::schema::Location::default(),
-            suggestion: Some("Try a broader keyword or verify spelling".to_string()),
-        });
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "NO_MATCHES_FOUND",
+            1,
+            crate::output::schema::Location::default(),
+            format!("No nodes found matching keyword '{}'", keyword),
+        );
+        diag.severity = crate::output::schema::DiagnosticSeverity::Info;
+        diag.suggestion = Some("Try a broader keyword or verify spelling".to_string());
+        output.diagnostics.push(diag);
     }
 
     Ok(output.validate())
@@ -633,13 +529,15 @@ pub fn resolve_model_in_page(
                     "what_is_it": format!("Page {} not found", page_id),
                 }),
             );
-            out.diagnostics.push(crate::output::schema::Diagnostic {
-                severity: crate::output::schema::DiagnosticSeverity::Error,
-                code: "TARGET_NOT_FOUND".to_string(),
-                message: format!("Page '{}' not found in graph", page_id),
-                location: crate::output::schema::Location::default(),
-                suggestion: Some("Verify page ID or use --find-page to search".to_string()),
-            });
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "TARGET_NOT_FOUND",
+                1,
+                crate::output::schema::Location::default(),
+                format!("Page '{}' not found in graph", page_id),
+            );
+            diag.severity = crate::output::schema::DiagnosticSeverity::Error;
+            diag.suggestion = Some("Verify page ID or use --find-page to search".to_string());
+            out.diagnostics.push(diag);
             out.next_queries
                 .push(crate::output::schema::format_next_query(
                     "--find-page {} to search for similar pages",
@@ -750,20 +648,21 @@ pub fn resolve_model_in_page(
     }
 
     if resolved_count == 0 {
-        output.diagnostics.push(crate::output::schema::Diagnostic {
-            severity: crate::output::schema::DiagnosticSeverity::Warning,
-            code: "MODEL_UNRESOLVED".to_string(),
-            message: format!(
-                "No model matching '{}' found in page {}",
-                local_model_id, page_id
-            ),
-            location: crate::output::schema::Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "MODEL_UNRESOLVED",
+            1,
+            crate::output::schema::Location {
                 source_file: Some(page_node.path),
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some("Use --find-model to search globally".to_string()),
-        });
+            format!(
+                "No model matching '{}' found in page {}",
+                local_model_id, page_id
+            ),
+        );
+        diag.suggestion = Some("Use --find-model to search globally".to_string());
+        output.diagnostics.push(diag);
         output
             .next_queries
             .push(crate::output::schema::format_next_query(
@@ -771,20 +670,22 @@ pub fn resolve_model_in_page(
                 local_model_id,
             ));
     } else if ambiguous {
-        output.diagnostics.push(crate::output::schema::Diagnostic {
-            severity: crate::output::schema::DiagnosticSeverity::Info,
-            code: "AMBIGUOUS_RESOLUTION".to_string(),
-            message: format!(
-                "Multiple models match '{}'; candidate count: {}",
-                local_model_id, resolved_count
-            ),
-            location: crate::output::schema::Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "AMBIGUOUS_RESOLUTION",
+            resolved_count,
+            crate::output::schema::Location {
                 source_file: Some(page_node.path),
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some("Use --explain <MODEL_ID> to verify specific model".to_string()),
-        });
+            format!(
+                "Multiple models match '{}'; candidate count: {}",
+                local_model_id, resolved_count
+            ),
+        );
+        diag.severity = crate::output::schema::DiagnosticSeverity::Info;
+        diag.suggestion = Some("Use --explain <MODEL_ID> to verify specific model".to_string());
+        output.diagnostics.push(diag);
         for (n, _, _) in &candidates {
             output
                 .next_queries

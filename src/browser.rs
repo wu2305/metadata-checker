@@ -1522,13 +1522,12 @@ fn build_selection_visual_graph(
         visual_graph.status = "warning".to_string();
         visual_graph
             .diagnostics
-            .push(crate::output::schema::Diagnostic {
-                severity: crate::output::schema::DiagnosticSeverity::Warning,
-                code: "EDGE_EVIDENCE_UNAVAILABLE".to_string(),
-                message: "Some edges are missing evidence details.".to_string(),
-                location: crate::output::schema::Location::default(),
-                suggestion: None,
-            });
+            .push(crate::diagnostics::envelope_diagnostic(
+                "EDGE_EVIDENCE_UNAVAILABLE",
+                1,
+                crate::output::schema::Location::default(),
+                "Some edges are missing evidence details.",
+            ));
     }
 
     let original_nodes = visual_graph.nodes.len();

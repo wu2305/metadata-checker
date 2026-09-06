@@ -27,35 +27,51 @@ description: |
 调用层边界：
 | 场景 | target 写法 | 示例 |
 |---|---|---|
-| Shell / CLI | 含 `|`、中文、`$`、空格、括号时用单引号 | `--explain-condition 'comp:app/售后.app/首页.spg|button1'` |
-| stdio JSON | 不带 shell 单引号 | `"target":"comp:app/售后.app/首页.spg|button1"` |
-| Function Calling | 不带 shell 单引号，由 wrapper 传 JSON payload | `{ "target": "comp:app/售后.app/首页.spg|button1" }` |
+| Shell / CLI | 含 `|`、中文、`$`、空格、括号时用单引号 | `--explain 'comp:首页.spg|button1'` |
+| stdio JSON | 不带 shell 单引号 | `"target":"comp:首页.spg|button1"` |
+| Function Calling | 不带 shell 单引号，由 wrapper 传 JSON payload | `{ "target": "comp:首页.spg|button1" }` |
 
 `--human` 和 `--interactive` 只用于人工探索，不用于自动化/机器消费。
 
 ## 快速分流
 
-先按用户意图选工具或命令；如果不确定，先用 `--advise-query TARGET --question-kind ...` 获取结构化推荐。
+只有三个查询动词。**动词只决定问什么，target 前缀决定去哪**——不需要在提问阶段判断
+节点是组件还是动作、条件问题还是语义问题。
 
-| 用户问题 | 首选工具或命令 | 首读字段 | 禁止混淆 |
+| 动词 | 回答哪一类问题 | 接受的 target |
+|---|---|---|
+| `--find <KEYWORD>` | 我说的这个名字在项目里的哪儿？ | 任意关键词，不分类型 |
+| `--explain <TARGET>` | 它是什么、做什么、为什么这样表现 | `comp:` `action:` `field:` `model:` `page:` `dataflow:`，或裸名 |
+| `--relations <TARGET>` | 谁读它、谁写它、它连到哪 | `page:` `model:` `dataflow:`，或 `page:A,page:B` |
+
+分流只需两问：
+
+1. **知道确切目标吗？** 不知道就先 `--find`，它会给回可直接使用的规范 target。
+2. **问的是这一个节点，还是它和别人的关系？** 前者 `--explain`，后者 `--relations`。
+
+| 用户问题 | 命令 | 首读字段 | 禁止混淆 |
 |---|---|---|---|
-| 这个组件什么时候显示/为什么不显示？ | `metadata_explain_condition` 或 `--explain-condition 'comp:PAGE|ID' --intent display --budget compact` | `summary.intent`、`details.answer_contract`、`details.answer_facts.display_facts` | `value` / `exp` 不是显示条件 |
-| 这个组件显示什么值/值来自哪张表？ | `metadata_explain_condition` 或 `--explain-condition 'comp:PAGE|ID' --intent value-source --budget compact` | `details.answer_facts.value_source_facts`、必要时读 `details.value_source_context` | 裸字段 `${FIELD}` 不是表名 |
-| 这个字段被谁写入/生成？ | `metadata_explain_condition` 或 `--explain-condition 'field:MODEL.FIELD' --intent writer --budget compact` | `details.answer_facts.writer_facts`、`details.primary_path` | `related_context` 不是必要条件 |
-| 为什么数据源可能为空？ | `metadata_explain_condition` 或 `--explain-condition 'model:ID' --intent availability --budget compact` | `details.answer_facts.availability_facts` | DataFlow filter 不是组件显示门禁 |
-| 这个按钮/动作做什么？ | `metadata_explain` 或 `--explain 'comp:PAGE|button'` / `--explain 'action:PAGE|button|action'` | `summary.what_is_it`、`details.triggers`、`details.writes_models` | Page Contains 是位置，不是触发 |
-| 这个页面做什么/有哪些逻辑？ | `metadata_query_page_logic` 或 `--query-page-logic 'page:PAGE' --budget compact` | `summary.key_findings`、`details.action_flows` | compact 数组可能截断 |
-| 谁读写这个模型/表？ | `metadata_query_model` 或 `--query-model MODEL --budget compact` | `summary`、`details.read_by`、`details.write_by`、`details.consumed_by_dataflows` | `read_by_count=0` 不等于未使用 |
-| 周围还有什么关系？ | `metadata_context` 或 `--context 'ID' --depth 2 --budget normal` | upstream/downstream 摘要 | context 是补充，不是主答案 |
+| 这个组件什么时候显示/为什么不显示？ | `--explain 'comp:PAGE\|ID'` | `summary.primary_reason`、`details.condition_facts.answer_facts.display_facts` | `value` / `exp` 不是显示条件 |
+| 这个组件显示什么值/值来自哪张表？ | `--explain 'comp:PAGE\|ID'` | `details.condition_facts.answer_facts.value_source_facts` | 裸字段 `${FIELD}` 不是表名 |
+| 这个字段被谁写入/生成？ | `--explain 'field:MODEL.FIELD'` | `details.condition_facts.answer_facts.writer_facts`、`details.lineage` | `related_context` 不是必要条件 |
+| 为什么数据源可能为空？ | `--explain 'model:ID'` | `details.condition_facts.answer_facts.availability_facts` | DataFlow filter 不是组件显示门禁 |
+| 这个按钮/动作做什么/为什么点不动/在什么条件下执行？ | `--explain 'comp:PAGE\|ID'` 或 `--explain 'action:PAGE\|button\|action'`，**两种写法返回同一组事实块** | `summary.what_is_it`、`details.triggers`、`details.writes_models`、`details.condition_facts.answer_facts.action_facts` | `action_facts.related_actions` 是别的组件的动作，只是门禁引用了本目标 |
+| 这个页面做什么/有哪些逻辑？ | `--relations 'page:PAGE'` | `summary.key_findings`、`details.action_flows`、`details.entrypoints` | compact 数组可能截断 |
+| 谁读写这个模型/表？ | `--relations 'model:MODEL'` | `summary`、`details.read_by`、`details.write_by`、`details.consumed_by_dataflows` | `read_by_count=0` 不等于未使用 |
+| 这张 DataFlow 表怎么来的？ | `--relations 'model:MODEL'` | `details.dataflow_subgraph.inputs[]`、`.outputs[]` | 取不到该块说明它不是 DataFlow |
+| 周围还有什么关系？ | `--explain 'TARGET' --depth 2` | `details.neighbor_context` | 补充块，不是主答案 |
+
+`--intent` 只收窄 `condition_facts` 的输出，不改变主结论；不确定就不要写。
+`--budget` 只控制输出大小，不影响结论正确性。
 
 ## Single Thinking Flow
 
 所有机器输出都按同一条阅读流消费：
-1. 判断 intent / question kind：从 `summary.intent`、用户问题和命令类型确认 display、value-source、writer、availability、page-logic、model-relationships 等意图。
+1. 判断 intent / question kind：从 `summary.intent`、用户问题和命令类型确认 display、value-source、writer、availability、action、page-logic、model-relationships 等意图。
 2. 先读 `summary`：优先看 `summary.what_is_it`、`summary.primary_reason`、`summary.key_findings`、`summary.evidence_summary` 和计数字段。
-3. 对 explain-condition 和 advise-query，读 `details.answer_contract`：确认 `primary_fact_path`、`forbidden_fact_paths[]`、`must_read_summary_first`。
-4. 只深入主证据块：按 `primary_fact_path` 读取 `details.answer_facts.<fact_block>`，不要把 forbidden fact block 混成同一结论。
-5. 查容量和后续动作：若 `details.truncation_guard.safe_to_answer_full_relationships=false` 或有 `OUTPUT_TRUNCATED`，按 `required_budget_for_complete_answer` 从 `--budget compact` 升级到 `normal` 或 `--budget full`；若 `details.required_followups[]` 中 `must_run_for_complete_answer=true`，先执行 followup。
+3. 读 answer contract：`--explain` 在 `details.condition_facts.answer_contract`（旧命令 `--explain-condition` 在 `details.answer_contract`，`--advise-query` 直接给 `details.primary_fact_path` / `details.forbidden_fact_paths[]`）：确认 `primary_fact_path`、`forbidden_fact_paths[]`、`must_read_summary_first`。
+4. 只深入主证据块：按 `primary_fact_path` 读取 `details.condition_facts.answer_facts.<fact_block>`，不要把 forbidden fact block 混成同一结论。
+5. 查容量和后续动作：若 `details.condition_facts.truncation_guard.safe_to_answer_full_relationships=false` 或有 `OUTPUT_TRUNCATED`，按 `required_budget_for_complete_answer` 从 `--budget compact` 升级到 `normal` 或 `--budget full`；若 `details.condition_facts.required_followups[]` 中 `must_run_for_complete_answer=true`，先执行 followup。
 6. 需要核验时再读 `evidence`：优先使用 `confidence=high` 且有真实 `source_file` / `json_path` 的证据。
 7. 有 `diagnostics` 时降级回答：按 Diagnostics & Fallback Matrix 说明限制、下一步和不确定性。
 8. 最终回答声明使用的 fact block 或证据类型，例如“根据 display_facts...”。
@@ -70,13 +86,19 @@ description: |
 |---|---|---|
 | component | `comp:app/page.spg|button1` | 单文件模式可用裸 ID，如 `button1` |
 | action | `action:app/page.spg|button1|action1` | 指向具体组件动作 |
-| model | `model:model1` 或 `modelName` | CLI 的 `--query-model` 兼容裸模型名和 `model:` 前缀 |
+| model | `model:model1` 或 `modelName` | CLI 兼容裸模型名和 `model:` 前缀 |
 | field | `field:model1.fieldA` | 字段级追溯 |
 | page | `page:app/page.spg` | 页面节点使用规范化相对路径 |
 | dataflow | `model:dataflow_output` | DataFlow 在图中也是 Model 类型 |
 
 定位步骤：
-1. 不知道精确目标：先用 `--find-page <KEYWORD>`、`--find-model <KEYWORD>`、`--find-component <KEYWORD>`。
+1. **target 只写你确实知道的部分，剩下的交给工具补全。** 文件路径可以省成文件名、
+   可以省掉扩展名，也可以整个省掉：`page:首页`、`comp:首页.spg|button1`、
+   `comp:button1` 都会被定位到真实节点，`diagnostics` 里留 `RESOLVED_TARGET` 说明补成
+   了什么。唯一命中就直接返回结果；有歧义则返回 `AMBIGUOUS_TARGET` 和真实的
+   `candidate_targets`，从候选里挑一个重发即可。
+   **永远不要自己拼路径**——写不出来的那一段就别写，补全是确定性的图查询，猜出来的
+   路径只会变成一次无效调用。本文档示例里的大写占位段只是格式说明，不是真实路径。
 2. 页面内局部 model ID：用 `--resolve-model-page 'page:...' --resolve-model model5` 映射到真实全局模型。
 3. 拼写错误或不存在：读取 `TARGET_NOT_FOUND` 和 `candidate_targets`，从候选确认，不要自动替用户选。
 4. 目标含特殊字符时，CLI 用单引号；stdio / function calling JSON payload 不加单引号。
@@ -93,19 +115,21 @@ metadata-checker --check-graph --graph-db-path /tmp/project.graphdb
 metadata-checker --project-dir /path/to/project --build-graph --graph-db-path /tmp/project.graphdb
 
 # 查询时复用 graphdb
-metadata-checker --project-dir /path/to/project --query-page-logic 'page:app/销售.app/销售/合同协议.spg' --graph-db-path /tmp/project.graphdb --budget compact
+metadata-checker --project-dir /path/to/project --relations 'page:app/销售.app/销售/合同协议.spg' --graph-db-path /tmp/project.graphdb --budget compact
 ```
 
 默认 graphdb 路径是 `<project-dir>/.metadata-checker.graphdb`。项目目录只读或沙箱限制写入时，把 `--graph-db-path` 指向 `/tmp/...`。
 
 可用项目级查询：
-- `--query-model <MODEL>`：模型读写关系。
-- `--query-page <PAGE>`：页面依赖。
-- `--query-cross <A> <B>`：跨页关系。
-- `--query-dataflow <MODEL>`：DataFlow 子图。
-- `--query-page-logic <PAGE>`：页面入口、动作、读写、跳转、可见性。
-- `--explain <ID>`：解释任意节点。
-- `--context <ID> --depth 2 --budget normal`：补查上下游。
+- `--find <KEYWORD>`：定位页面/模型/组件，返回规范 target。
+- `--explain <TARGET>`：节点是什么、做什么、为什么这样表现（含条件成因）。加
+  `--depth 2` 时附带上下游邻居。
+- `--relations <TARGET>`：`page:` 给页面入口/动作/读写/跳转/可见性，`model:` 给模型
+  读写关系和 DataFlow 子图，`page:A,page:B` 给跨页关系。
+
+旧动词（`--explain-condition`、`--context`、`--query-model`、`--query-page`、
+`--query-cross`、`--query-dataflow`、`--query-page-logic`、`--find-page`、
+`--find-model`、`--find-component`）仍然可用，但已从 `--help` 隐藏，新集成不要再用。
 
 ## Session 差量刷新路径
 
@@ -137,7 +161,7 @@ metadata-checker --session-dir ~/.metadata-checker/sessions \
 
 ## explain-condition 协议
 
-`--explain-condition` 用于回答显示、可用性、值来源、写入来源问题。
+`--explain` 的 `details.condition_facts` 块用于回答显示、可用性、值来源、写入来源问题。
 
 支持 target：
 - `comp:PAGE|ID`
@@ -145,21 +169,22 @@ metadata-checker --session-dir ~/.metadata-checker/sessions \
 - `field:MODEL.FIELD`
 - `page:PATH`
 
-intent 到 fact block 映射：
+intent 到 fact block 映射（`--explain` 下全部位于 `details.condition_facts.*`；旧命令 `--explain-condition` 输出同一组块，但位于 `details.*` 顶层）：
 | intent | 主证据块 |
 |---|---|
-| `display` | `details.answer_facts.display_facts` |
-| `value-source` | `details.answer_facts.value_source_facts` |
-| `writer` | `details.answer_facts.writer_facts` |
-| `availability` | `details.answer_facts.availability_facts` |
+| `display` | `details.condition_facts.answer_facts.display_facts` |
+| `value-source` | `details.condition_facts.answer_facts.value_source_facts` |
+| `writer` | `details.condition_facts.answer_facts.writer_facts` |
+| `availability` | `details.condition_facts.answer_facts.availability_facts` |
+| `action` | `details.condition_facts.answer_facts.action_facts` |
 
 关键字段：
-- `details.answer_contract.primary_fact_path`：本次唯一主证据路径。
-- `details.answer_contract.forbidden_fact_paths[]`：不能混入主结论的证据块。
-- `details.answer_facts.*.paths[].steps[].why_included`：每一步为什么被纳入链路，用它过滤普通图邻居。
-- `details.thinking_frame`：缺什么、不能用什么、下一步怎么查。
-- `details.truncation_guard`：当前 budget 是否足以回答全量关系。
-- `details.required_followups[]`：完整答案必须执行或建议执行的后续查询。
+- `details.condition_facts.answer_contract.primary_fact_path`：本次唯一主证据路径。
+- `details.condition_facts.answer_contract.forbidden_fact_paths[]`：不能混入主结论的证据块。
+- `details.condition_facts.answer_facts.*.paths[].steps[].why_included`：每一步为什么被纳入链路，用它过滤普通图邻居。
+- `details.condition_facts.thinking_frame`：缺什么、不能用什么、下一步怎么查。
+- `details.condition_facts.truncation_guard`：当前 budget 是否足以回答全量关系。
+- `details.condition_facts.required_followups[]`：完整答案必须执行或建议执行的后续查询。
 
 ### Display Logic Gating Hierarchy
 
@@ -168,7 +193,7 @@ intent 到 fact block 映射：
 按以下 if-else 读取 `condition_scope`：
 1. If `condition_scope = direct`：这是目标组件自身的显示/禁用/只读条件。
 2. Else if `condition_scope = inherited`：这是祖先容器条件，是目标组件能显示的必要门禁。
-3. If direct 或 inherited 条件引用 `modelX.totalRowCount__`：继续读取 `details.data_empty_gates` 中 `condition_scope = expanded_from_total_row_count` 的展开规则。
+3. If direct 或 inherited 条件引用 `modelX.totalRowCount__`：继续读取 `details.condition_facts.data_empty_gates` 中 `condition_scope = expanded_from_total_row_count` 的展开规则。
 4. Else if `condition_scope = referenced_by_model_filter`：这是其他模型 filter 反向引用目标组件，只能作为 supporting context，不是目标显示门禁。
 5. 若存在 `deduped_condition_ids` / `deduped_owner_node_ids`，只在审计重复条件时使用。
 
@@ -283,7 +308,7 @@ AI 引用 CLI 输出时必须区分证据可信度。
 | `GRAPH_DB_LOCKED` | 锁冲突 | 当前查询受阻 | 等待、换 `--graph-db-path`，或加 `--graph-lock-timeout-ms 30000` |
 | `GRAPH_DB_PERMISSION_DENIED` | 只读或无权限 | 当前路径不可写 | 使用 `/tmp/...` graphdb 路径 |
 | `GRAPH_DB_OPEN_ERROR` | redb/IO 错误 | graphdb 状态不可信 | 重建 graphdb |
-| `TARGET_NOT_FOUND` | 目标不存在或拼写错误 | 不要猜测目标 | 读取 `candidate_targets`，或先 `--find-model` / `--find-page` / `--find-component` |
+| `TARGET_NOT_FOUND` | 目标不存在或拼写错误 | 不要猜测目标 | 读取 `candidate_targets`，或先 `--find <KEYWORD>` |
 | `OUTPUT_TRUNCATED` | 输出数组被截断 | 只能回答 Top-N 或摘要结论 | 按需升级 budget |
 | `EVIDENCE_SAMPLED` | evidence 为控噪采样 | 可回答局部结论，不可声称全集 | 需要全集时升级 budget 或读 details 全量数组 |
 | `EVIDENCE_INCOMPLETE` | 证据不完整 | 降级为“初步判断” | 补查 next_queries |
@@ -311,8 +336,8 @@ metadata-checker table.tbl --budget compact
 | 场景 | 命令 | 可回答 | 不可回答 |
 |---|---|---|---|
 | 单文件 `.tbl` | `metadata-checker app_table.tbl --budget compact` | 表类型、字段列表、单文件 `field_lineage` | 全局读写关系、被哪些页面消费 |
-| 项目级 DataFlow | `--query-dataflow model:dataflow_name --budget compact` | `details.inputs[]`、`details.outputs[]`、`details.consumed_by_dataflows[]` | 单个页面组件显示条件 |
-| 项目级模型 | `--query-model model:fact_saleContract --budget compact` | 模型被哪些页面/组件/DataFlow 读写 | 单文件内部完整字段表达式 |
+| 项目级 DataFlow | `--relations 'model:dataflow_name' --budget compact` | `details.dataflow_subgraph.inputs[]`、`.outputs[]`、`details.consumed_by_dataflows[]` | 单个页面组件显示条件 |
+| 项目级模型 | `--relations 'model:fact_saleContract' --budget compact` | 模型被哪些页面/组件/DataFlow 读写 | 单文件内部完整字段表达式 |
 | 页面局部 DataFlow/model | `--resolve-model-page 'page:app/某页.spg' --resolve-model model5` | 局部 ID 到真实模型映射 | 未解析前不可直接解释 model5 |
 
 单文件 `.tbl` 阅读顺序：
@@ -326,16 +351,19 @@ metadata-checker table.tbl --budget compact
 
 ## Page Logic 输出
 
-当用户问“这个页面主要做什么、用户能触发哪些逻辑、会影响哪些数据”时，优先使用 `--query-page-logic`，不是 `--context` 或单点 `--explain`。
+当用户问“这个页面主要做什么、用户能触发哪些逻辑、会影响哪些数据”时，用 `--relations 'page:PAGE'`，不是对页面里的单个组件用 `--explain`。
 
 关键字段：
 - `summary.what_is_it`：页面一句话摘要。
 - `summary.page_role`：`form_submit_page` / `readonly_dashboard` / `navigation_page` / `data_maintenance_page` / `mixed_interaction_page` / `unknown`。
+- `summary.page_jump_count`：真实页面跳转数量（只统计指向页面节点的 `OpensPage` / `ActionNavigates` 边）。`page_role` 与结论中的「跳转」以此为准。
+- `summary.page_embed_count`：嵌入页面数量（只统计 `EmbedsPage` 边），表示页面组合关系，不是用户跳转。
+- `summary.navigation_count`：导航相关边总数，含页面嵌入、组件控制与传参边；不要与 `page_jump_count` 混用。
 - `details.entrypoints`：用户可触发入口，不含普通 input。
 - `details.action_flows`：动作链，含 `action_id`、`action_type`、`action_category`、`semantic_summary`、`component_id`、`trigger_type`、`blocks_on`、`condition`、`reads`、`writes`、`navigation`、`sets_params`、`passes_params`。
 - `details.data_sources`：页面读取的模型和字段。
 - `details.write_targets`：页面写入的模型和字段。
-- `details.navigation`：跳转、嵌入、参数传递关系。
+- `details.navigation`：跳转、嵌入、参数传递、组件控制关系（`to` 以 `page:` 开头的才是页面跳转）。
 - `details.visibility_rules`：visible/hidden/disabled/readonly 规则。
 - `details.risk_diagnostics`：`NO_WRITE_TARGETS`、`NO_ENTRYPOINTS`、`ACTION_FLOW_INCOMPLETE`、`EVIDENCE_SAMPLED`、`UNRESOLVED_PAGE_NAVIGATION`、`UNRESOLVED_MODEL_WRITE`、`VISIBILITY_RULE_UNRESOLVED`。
 
@@ -361,17 +389,24 @@ metadata-checker table.tbl --budget compact
 
 ## DataFlow Projection
 
-当目标字段或页面 model 指向 DataFlow 加工表时，`explain_condition` 会在 `details.answer_facts.<fact_block>` 下输出 DataFlow 内部投影短事实。
+当目标字段或页面 model 指向 DataFlow 加工表时，`--explain` 会在 `details.condition_facts.answer_facts.<fact_block>` 下输出 DataFlow 内部投影短事实。
 
 value-source intent：
-- 读取 `details.answer_facts.value_source_facts.dataflow_table`、`dataflow_output_field`、`physical_source_fields[]`、`via`、`original_node`、`original_field`、`candidate_inputs[]`。
+- 读取 `details.condition_facts.answer_facts.value_source_facts.dataflow_table`、`dataflow_output_field`、`physical_source_fields[]`、`via`、`original_node`、`original_field`、`candidate_inputs[]`。
 - `physical_source_fields[]` 非空时才可把 `proven_physical_input` 当作字段级物理来源证明。
 - 只有 `candidate_inputs[]` 或 `table_source_path` 时，只能说候选来源。
 
 availability intent：
 - 页面局部 model 优先使用 page-scoped target，例如 `model:app/售后.app/绑定车辆/会员已注册.spg|model11`。
-- 读取 `details.answer_facts.availability_facts.dataflow_availability`、`dataflow_table`、`physical_inputs[]`、`source_filters[]`、`output_filters[]`、`join_rules[]`、`union_rules[]`、`referenced_vars[]`。
+- 读取 `details.condition_facts.answer_facts.availability_facts.dataflow_availability`、`dataflow_table`、`physical_inputs[]`、`source_filters[]`、`output_filters[]`、`join_rules[]`、`union_rules[]`、`referenced_vars[]`。
 - DataFlow filter 描述 model 数据可用性，不是组件自身 direct/inherited visibleCondition。
+
+action intent：
+- 用户问句里不会出现内部 action id，所以先在组件上查 `--intent action`，
+  再用 `details.condition_facts.answer_facts.action_facts.actions[].action_target` 作为下一条命令的 target。
+- `actions[]` 是目标自己挂的动作（图上的 Triggers 边）；`related_actions[]` 是别的组件的动作，
+  只是它们的门禁条件引用了本目标——回答「为什么点不动」要用它，但不能说成本目标的动作。
+- `gate_conditions[].raw_expr` 是动作门禁原文；组件自身的 visibleCondition/disableCondition 不是动作门禁。
 
 compact 约束：
 - compact 模式不展开完整 DataFlow 节点树；优先读取 `answer_facts` 中的短事实。
@@ -408,13 +443,13 @@ metadata-checker page.spg --explain input1
 metadata-checker --project-dir /path/to/project --build-graph --graph-db-path /tmp/project.graphdb
 
 # Query model
-metadata-checker --project-dir /path/to/project --query-model model1 --budget compact
+metadata-checker --project-dir /path/to/project --relations 'model:model1' --budget compact
 
 # Get context around a button
-metadata-checker --project-dir /path/to/project --context 'comp:app/page.spg|button1' --depth 2 --budget normal
+metadata-checker --project-dir /path/to/project --explain 'comp:app/page.spg|button1' --depth 2 --budget normal
 
 # Page logic summary
-metadata-checker --project-dir /path/to/project --query-page-logic 'page:app/合同管理/销售合同.spg' --budget compact
+metadata-checker --project-dir /path/to/project --relations 'page:app/合同管理/销售合同.spg' --budget compact
 ```
 
 ## Negative Constraints Checklist

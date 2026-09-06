@@ -1,6 +1,6 @@
 use crate::graph::Node;
 use crate::graph_store::GraphReadStore;
-use crate::output::{Diagnostic, DiagnosticSeverity, Location};
+use crate::output::{Diagnostic, Location};
 
 use super::pick_str_field;
 
@@ -45,23 +45,24 @@ pub(super) fn build_page_logic_diagnostics(
             }
             related_context.push(path);
         }
-        diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Info,
-            code: "PRIMARY_PATHS_TRUNCATED".to_string(),
-            message: format!(
-                "Primary paths limited to {}; {} overflow relations moved to related_context",
-                PRIMARY_PATH_LIMIT, overflow_count
-            ),
-            location: Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "PRIMARY_PATHS_TRUNCATED",
+            overflow_count,
+            Location {
                 source_file: Some(page_node.path.clone()),
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some(
-                "Use --budget full to see more relations, or focus on key_primary_paths in summary"
-                    .to_string(),
+            format!(
+                "Primary paths limited to {}; {} overflow relations moved to related_context",
+                PRIMARY_PATH_LIMIT, overflow_count
             ),
-        });
+        );
+        diag.suggestion = Some(
+            "Use --budget full to see more relations, or focus on key_primary_paths in summary"
+                .to_string(),
+        );
+        diagnostics.push(diag);
     }
     // ---- 5.7 注意力漂移治理：旁路关系统计（必须在 truncation 之后）
     let related_context_summary = serde_json::json!({
@@ -78,60 +79,59 @@ pub(super) fn build_page_logic_diagnostics(
     });
 
     if write_targets.is_empty() {
-        diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Info,
-            code: "NO_WRITE_TARGETS".to_string(),
-            message: "Page has no detected write targets".to_string(),
-            location: Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "NO_WRITE_TARGETS",
+            1,
+            Location {
                 source_file: Some(page_node.path.clone()),
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some("Verify if page is read-only or actions are not parsed".to_string()),
-        });
+            "Page has no detected write targets",
+        );
+        diag.suggestion = Some("Verify if page is read-only or actions are not parsed".to_string());
+        diagnostics.push(diag);
     }
 
     if entrypoints.is_empty() {
-        diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Warning,
-            code: "NO_ENTRYPOINTS".to_string(),
-            message: "Page has no detected user entrypoints (buttons, links, etc.)".to_string(),
-            location: Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "NO_ENTRYPOINTS",
+            1,
+            Location {
                 source_file: Some(page_node.path.clone()),
                 node_id: Some(page_id.to_string()),
                 json_path: Some("canvas.components[*].actions[*]".to_string()),
             },
-            suggestion: Some("Check component action definitions".to_string()),
-        });
+            "Page has no detected user entrypoints (buttons, links, etc.)",
+        );
+        diag.suggestion = Some("Check component action definitions".to_string());
+        diagnostics.push(diag);
     }
 
     if !from_file {
-        diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Warning,
-            code: "PAGE_INPUTS_DEFERRED".to_string(),
-            message: "Raw page file is unavailable; page_inputs/visibility_rules may be incomplete"
-                .to_string(),
-            location: Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "PAGE_INPUTS_DEFERRED",
+            1,
+            Location {
                 source_file: Some(page_node.path.clone()),
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some(
-                "Ensure --project-dir points to the project root containing this page file"
-                    .to_string(),
-            ),
-        });
+            "Raw page file is unavailable; page_inputs/visibility_rules may be incomplete",
+        );
+        diag.suggestion = Some(
+            "Ensure --project-dir points to the project root containing this page file".to_string(),
+        );
+        diagnostics.push(diag);
     }
 
-    // UNRESOLVED_PAGE_NAVIGATION：导航目标页面不存在于图中
     for nav in navigation {
         let to = nav.get("to").and_then(|v| v.as_str()).unwrap_or("");
         if to.starts_with("page:") && graph.get_node(to).is_ok_and(|node| node.is_none()) {
-            diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
-                code: "UNRESOLVED_PAGE_NAVIGATION".to_string(),
-                message: format!("Navigation target page '{}' not found in graph", to),
-                location: Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "UNRESOLVED_PAGE_NAVIGATION",
+                1,
+                Location {
                     source_file: nav
                         .get("source_file")
                         .and_then(|v| v.as_str())
@@ -145,22 +145,22 @@ pub(super) fn build_page_logic_diagnostics(
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string),
                 },
-                suggestion: Some("Check if target page exists in project".to_string()),
-            });
+                format!("Navigation target page '{}' not found in graph", to),
+            );
+            diag.suggestion = Some("Check if target page exists in project".to_string());
+            diagnostics.push(diag);
         }
     }
 
-    // UNRESOLVED_MODEL_WRITE：写入目标模型不存在于图中
     for wt in write_targets {
         let target_id = wt.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
         if target_id.starts_with("model:")
             && graph.get_node(target_id).is_ok_and(|node| node.is_none())
         {
-            diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
-                code: "UNRESOLVED_MODEL_WRITE".to_string(),
-                message: format!("Write target model '{}' not found in graph", target_id),
-                location: Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "UNRESOLVED_MODEL_WRITE",
+                1,
+                Location {
                     source_file: wt
                         .get("source_file")
                         .and_then(|v| v.as_str())
@@ -172,12 +172,13 @@ pub(super) fn build_page_logic_diagnostics(
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string),
                 },
-                suggestion: Some("Check if target model exists in project sources".to_string()),
-            });
+                format!("Write target model '{}' not found in graph", target_id),
+            );
+            diag.suggestion = Some("Check if target model exists in project sources".to_string());
+            diagnostics.push(diag);
         }
     }
 
-    // VISIBILITY_RULE_UNRESOLVED：visibility 规则中的表达式包含未解析或多义引用
     for rule in visibility_rules {
         let has_unresolved = rule
             .get("unresolved_refs")
@@ -200,14 +201,10 @@ pub(super) fn build_page_logic_diagnostics(
                 .and_then(|v| v.as_str())
                 .or_else(|| rule.get("expression").and_then(|v| v.as_str()))
                 .unwrap_or("<non-string expression>");
-            diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
-                code: "VISIBILITY_RULE_UNRESOLVED".to_string(),
-                message: format!(
-                    "Visibility rule '{}' contains unresolved or ambiguous references",
-                    expr
-                ),
-                location: Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "VISIBILITY_RULE_UNRESOLVED",
+                1,
+                Location {
                     source_file: rule
                         .get("source_file")
                         .and_then(|v| v.as_str())
@@ -221,15 +218,19 @@ pub(super) fn build_page_logic_diagnostics(
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string),
                 },
-                suggestion: Some(
-                    "Review the expression and verify each referenced component/model exists"
-                        .to_string(),
+                format!(
+                    "Visibility rule '{}' contains unresolved or ambiguous references",
+                    expr
                 ),
-            });
+            );
+            diag.suggestion = Some(
+                "Review the expression and verify each referenced component/model exists"
+                    .to_string(),
+            );
+            diagnostics.push(diag);
         }
     }
 
-    // ACTION_FLOW_INCOMPLETE：仅对“通常应产生副作用”的动作类型发出提示
     for flow in action_flows {
         let reads = flow
             .get("reads")
@@ -274,16 +275,10 @@ pub(super) fn build_page_logic_diagnostics(
             && expects_side_effect
             && !is_query_refresh_like
         {
-            diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Info,
-                code: "ACTION_FLOW_INCOMPLETE".to_string(),
-                message: format!(
-                    "Action {} reads but does not write; may be a query-only action",
-                    flow.get("action_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?")
-                ),
-                location: Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "ACTION_FLOW_INCOMPLETE",
+                1,
+                Location {
                     source_file: flow
                         .get("source_file")
                         .and_then(|v| v.as_str())
@@ -297,12 +292,19 @@ pub(super) fn build_page_logic_diagnostics(
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string),
                 },
-                suggestion: Some("Verify if this action should produce a write target".to_string()),
-            });
+                format!(
+                    "Action {} reads but does not write; may be a query-only action",
+                    flow.get("action_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                ),
+            );
+            diag.suggestion =
+                Some("Verify if this action should produce a write target".to_string());
+            diagnostics.push(diag);
         }
     }
 
-    // UNKNOWN_ACTION_TYPE：存在未识别的 action 类型（聚合同类，避免刷屏）
     {
         let mut unknown_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
@@ -343,10 +345,15 @@ pub(super) fn build_page_logic_diagnostics(
         for (atype, count) in unknown_counts {
             let (source_file, node_id, json_path, _action_id) =
                 unknown_examples.get(&atype).cloned().unwrap_or_default();
-            diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
-                code: "UNKNOWN_ACTION_TYPE".to_string(),
-                message: if count > 1 {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "UNKNOWN_ACTION_TYPE",
+                count,
+                Location {
+                    source_file: Some(source_file),
+                    node_id,
+                    json_path,
+                },
+                if count > 1 {
                     format!(
                         "Unknown action type '{}' encountered ({} occurrences)",
                         atype, count
@@ -354,19 +361,13 @@ pub(super) fn build_page_logic_diagnostics(
                 } else {
                     format!("Unknown action type '{}' encountered", atype)
                 },
-                location: Location {
-                    source_file: Some(source_file),
-                    node_id,
-                    json_path,
-                },
-                suggestion: Some(
-                    "Check if this action type is supported by metadata-checker".to_string(),
-                ),
-            });
+            );
+            diag.suggestion =
+                Some("Check if this action type is supported by metadata-checker".to_string());
+            diagnostics.push(diag);
         }
     }
 
-    // EVIDENCE_SAMPLED：明细数量大于 evidence 展开上限时提示 evidence 非全集
     let evidence_sample_limit = EVIDENCE_SAMPLE_LIMIT;
     let sampling_categories = [
         ("entrypoints", entrypoints.len()),
@@ -382,23 +383,24 @@ pub(super) fn build_page_logic_diagnostics(
         .map(|(name, size)| format!("{name} {size}>{evidence_sample_limit}"))
         .collect();
     if !sampled_parts.is_empty() {
-        diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Info,
-            code: "EVIDENCE_SAMPLED".to_string(),
-            message: format!(
-                "Evidence includes only a sample for: {}",
-                sampled_parts.join(", ")
-            ),
-            location: Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "EVIDENCE_SAMPLED",
+            1,
+            Location {
                 source_file: Some(page_node.path.clone()),
                 node_id: Some(page_id.to_string()),
                 json_path: None,
             },
-            suggestion: Some(
-                "Use details arrays for full coverage; evidence is intentionally low-noise sampled"
-                    .to_string(),
+            format!(
+                "Evidence includes only a sample for: {}",
+                sampled_parts.join(", ")
             ),
-        });
+        );
+        diag.suggestion = Some(
+            "Use details arrays for full coverage; evidence is intentionally low-noise sampled"
+                .to_string(),
+        );
+        diagnostics.push(diag);
     }
 
     PageLogicDiagnostics {

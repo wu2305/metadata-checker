@@ -1,0 +1,142 @@
+{
+  "containers": {
+    "by_key": {
+      "attrFields": {
+        "missed": 240,
+        "with_actions": 0,
+        "with_children": 0,
+        "with_expr": 10
+      },
+      "buttons": {
+        "missed": 1,
+        "with_actions": 0,
+        "with_children": 0,
+        "with_expr": 0
+      },
+      "columns": {
+        "missed": 5226,
+        "with_actions": 136,
+        "with_children": 143,
+        "with_expr": 26
+      },
+      "components": {
+        "missed": 2144,
+        "with_actions": 459,
+        "with_children": 642,
+        "with_expr": 1054
+      },
+      "conditionStyles": {
+        "missed": 61,
+        "with_actions": 0,
+        "with_children": 0,
+        "with_expr": 0
+      },
+      "effectStyles": {
+        "missed": 226,
+        "with_actions": 0,
+        "with_children": 0,
+        "with_expr": 0
+      },
+      "grid": {
+        "missed": 245,
+        "with_actions": 165,
+        "with_children": 0,
+        "with_expr": 9
+      },
+      "labelFields": {
+        "missed": 35,
+        "with_actions": 0,
+        "with_children": 0,
+        "with_expr": 0
+      },
+      "operateButtons": {
+        "missed": 31,
+        "with_actions": 31,
+        "with_children": 0,
+        "with_expr": 19
+      },
+      "panel": {
+        "missed": 245,
+        "with_actions": 48,
+        "with_children": 245,
+        "with_expr": 0
+      },
+      "stateFields": {
+        "missed": 20,
+        "with_actions": 0,
+        "with_children": 0,
+        "with_expr": 0
+      },
+      "tabs": {
+        "missed": 179,
+        "with_actions": 0,
+        "with_children": 0,
+        "with_expr": 12
+      }
+    },
+    "missed_candidates_total": 8653,
+    "missed_with_behavior_evidence": 8310,
+    "missed_without_behavior_evidence": 343,
+    "mixed_shape_arrays_by_key": {
+      "conditionStyles": 15
+    },
+    "reached_by_current_traversal": 26007
+  },
+  "corpus_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "corpus_revision": "6920ac51",
+  "dataflow": {
+    "dwtable_sources": 2278,
+    "inline_dataflow_nodes": 1994,
+    "inline_dataflow_sources": 399,
+    "node_attr_alias": 1994,
+    "node_attr_fields": 1994,
+    "node_attr_inputNodes": 1259,
+    "node_attr_joinConditions": 329,
+    "node_attr_steps": 218
+  },
+  "expressions": {
+    "dropped_componentproperty_suffixes": {
+      ".seconds": 1,
+      ".txt": 3
+    },
+    "junk_model_name_occurrences": 471,
+    "junk_model_names_distinct": 117,
+    "terminal_states": {
+      "componentproperty_dropped_by_scanner": 4,
+      "head_unknown_stays_modelfield": 44,
+      "malformed_stays_modelfield": 471,
+      "modelfield_correct": 961
+    }
+  },
+  "measurement_boundary": "读原始 JSON 并复刻解析器遍历/分类规则，不构建 graphdb；所有数字是候选量，图内事实须重建后复测",
+  "properties": {
+    "known_keys_nonstring_value_containing_expr": {
+      "value": 8
+    },
+    "raw_component_known_keys": 49,
+    "scope_limit": "只覆盖当前遍历可达的组件；F1 放开容器后须重跑",
+    "unknown_keys_top": {
+      "display": 6046,
+      "flexDirection": 6032,
+      "font": 5954,
+      "height": 18706,
+      "margin": 7364,
+      "minHeight": 14260,
+      "minWidth": 12967,
+      "padding": 6950,
+      "templateName": 19436,
+      "width": 22425
+    },
+    "unknown_keys_with_expression": {
+      "dynamicColumns": 1,
+      "endLocationExp": 1,
+      "operator": 10,
+      "params": 19,
+      "resPathExp": 1,
+      "title": 9,
+      "validMessage": 4
+    }
+  },
+  "script_sha256": "9d2f2d3f6deb85fe",
+  "spg_files": 501
+}

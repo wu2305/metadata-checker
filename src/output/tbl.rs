@@ -4,8 +4,7 @@
 //! 解析模块（tbl_single）只返回结构化对象，不负责输出。
 
 use crate::output::schema::{
-    AiOutput, Confidence, Diagnostic, DiagnosticSeverity, Evidence, Location, OutputKind,
-    format_next_query,
+    AiOutput, Confidence, DiagnosticSeverity, Evidence, Location, OutputKind, format_next_query,
 };
 use crate::superpage;
 use crate::tbl_single::TblMetadata;
@@ -281,33 +280,34 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
 
     // Diagnostics
     if meta.is_dataflow && meta.dataflow_outputs.is_empty() {
-        output.diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Warning,
-            code: "DATAFLOW_NO_OUTPUT".to_string(),
-            message: "DataFlow has no output physical table (dbTableName missing)".to_string(),
-            location: Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "DATAFLOW_NO_OUTPUT",
+            1,
+            Location {
                 source_file: Some(source_file.to_string()),
                 node_id: meta.table_id.clone(),
                 json_path: Some("properties.dbTableName".to_string()),
             },
-            suggestion: Some(
-                "Check if DataFlow is intended to produce a physical table".to_string(),
-            ),
-        });
+            "DataFlow has no output physical table (dbTableName missing)",
+        );
+        diag.suggestion =
+            Some("Check if DataFlow is intended to produce a physical table".to_string());
+        output.diagnostics.push(diag);
     }
 
     if meta.is_dataflow && meta.dataflow_inputs.is_empty() {
-        output.diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Warning,
-            code: "DATAFLOW_NO_INPUTS".to_string(),
-            message: "DataFlow has no input ModelTable nodes".to_string(),
-            location: Location {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "DATAFLOW_NO_INPUTS",
+            1,
+            Location {
                 source_file: Some(source_file.to_string()),
                 node_id: meta.table_id.clone(),
                 json_path: Some("dataFlow.nodes".to_string()),
             },
-            suggestion: Some("Verify dataFlow.nodes contains ModelTable sources".to_string()),
-        });
+            "DataFlow has no input ModelTable nodes",
+        );
+        diag.suggestion = Some("Verify dataFlow.nodes contains ModelTable sources".to_string());
+        output.diagnostics.push(diag);
     }
 
     for inp in &meta.dataflow_inputs {
@@ -317,21 +317,24 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
             false
         };
         if unresolved {
-            output.diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Info,
-                code: "DATAFLOW_INPUT_PATH_UNRESOLVED".to_string(),
-                message: format!(
-                    "DataFlow input node {} moduleTablePath does not end with .tbl: {}",
-                    inp.node_id,
-                    inp.module_table_path.as_deref().unwrap_or("")
-                ),
-                location: Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "DATAFLOW_INPUT_PATH_UNRESOLVED",
+                1,
+                Location {
                     source_file: Some(source_file.to_string()),
                     node_id: Some(inp.node_id.clone()),
                     json_path: Some(format!("dataFlow.nodes.{}.moduleTablePath", inp.node_id)),
                 },
-                suggestion: Some("Verify moduleTablePath points to a valid .tbl file".to_string()),
-            });
+                format!(
+                    "DataFlow input node {} moduleTablePath does not end with .tbl: {}",
+                    inp.node_id,
+                    inp.module_table_path.as_deref().unwrap_or("")
+                ),
+            );
+            diag.severity = DiagnosticSeverity::Info;
+            diag.suggestion =
+                Some("Verify moduleTablePath points to a valid .tbl file".to_string());
+            output.diagnostics.push(diag);
         }
     }
 
@@ -345,14 +348,10 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
             if refs.is_empty() && !exp.trim().is_empty() && !exp.trim().starts_with('"') {
                 // Heuristic: non-empty expression but no refs parsed — may be complex
                 if exp.len() > 200 || exp.contains('\n') {
-                    output.diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Info,
-                        code: "EXPR_UNPARSED".to_string(),
-                        message: format!(
-                            "Field {} expression too complex or multiline to fully parse",
-                            f.name
-                        ),
-                        location: Location {
+                    let mut diag = crate::diagnostics::envelope_diagnostic(
+                        "EXPR_UNPARSED",
+                        1,
+                        Location {
                             source_file: Some(source_file.to_string()),
                             node_id: Some(format!(
                                 "field:{}.{}",
@@ -361,10 +360,15 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
                             )),
                             json_path: Some(format!("dimensions[{}].exp", idx)),
                         },
-                        suggestion: Some(
-                            "Use --project-dir --explain for full lineage".to_string(),
+                        format!(
+                            "Field {} expression too complex or multiline to fully parse",
+                            f.name
                         ),
-                    });
+                    );
+                    diag.severity = DiagnosticSeverity::Info;
+                    diag.suggestion =
+                        Some("Use --project-dir --explain for full lineage".to_string());
+                    output.diagnostics.push(diag);
                 }
             }
         }
@@ -407,22 +411,23 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
             .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
             .collect();
         if !truncated_parts.is_empty() {
-            output.diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Info,
-                code: "OUTPUT_TRUNCATED".to_string(),
-                message: format!(
-                    "Compact budget: arrays truncated for: {}",
-                    truncated_parts.join(", ")
-                ),
-                location: Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "OUTPUT_TRUNCATED",
+                1,
+                Location {
                     source_file: meta.input_path.clone(),
                     node_id: meta.table_id.clone(),
                     json_path: None,
                 },
-                suggestion: Some(
-                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                format!(
+                    "Compact budget: arrays truncated for: {}",
+                    truncated_parts.join(", ")
                 ),
-            });
+            );
+            diag.severity = DiagnosticSeverity::Info;
+            diag.suggestion =
+                Some("Use --budget normal or --budget full to see complete arrays".to_string());
+            output.diagnostics.push(diag);
         }
 
         let evidence_summary = super::brief::evidence_summary(&output.evidence, 5);

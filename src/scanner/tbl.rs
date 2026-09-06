@@ -1,7 +1,7 @@
 use super::{add_edge_with_meta, add_node};
 use crate::graph::{EdgeType, NodeType};
 use crate::graph_store::GraphWriteStore;
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -11,14 +11,18 @@ pub fn process_tbl_file_from_string(
     content: &str,
 ) -> Result<Vec<String>> {
     let mut node_ids = std::collections::HashSet::new();
-    if content.is_empty() {
-        return Ok(node_ids.into_iter().collect());
+    // M59-B3：空内容与非法 JSON 曾各自 `return Ok(空集)`。调用方无从分辨
+    // 「这个表没有任何模型」和「这个文件根本没读出来」，而两者在先删后建的
+    // 增量路径上后果完全不同：后者会把旧模型图删干净、再记录 file hash，
+    // 于是下一轮内容不变直接跳过——损坏被永久固化成「模型不存在」。
+    // 现在两条都是**响亮**的失败；indexer 在解析阶段先行拦截并转成
+    // `SCANNER_FILE_PARSE_FAILED` 诊断（旧图保留、文件保持脏）。
+    if content.trim().is_empty() {
+        bail!("Table metadata file {rel_path} is empty (not a valid table definition)");
     }
 
-    let value: serde_json::Value = match serde_json::from_str(content) {
-        Ok(v) => v,
-        Err(_) => return Ok(node_ids.into_iter().collect()),
-    };
+    let value: serde_json::Value = serde_json::from_str(content)
+        .with_context(|| format!("Failed to parse table metadata JSON for {rel_path}"))?;
 
     // Use file stem as model identifier
     let model_name = Path::new(rel_path)

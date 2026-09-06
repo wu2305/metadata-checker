@@ -19,6 +19,9 @@ use crate::explain::handlers::{
     explain_action_graph, explain_component_graph, explain_condition_graph, explain_dataflow_graph,
     explain_field_graph, explain_model_graph, explain_page_graph,
 };
+use crate::graph_retrieval::{
+    GraphRetrievalConfig, GraphRetrievalStrategy, GraphSeed, typed_personalized_page_rank,
+};
 use crate::graph_store::GraphReadStore;
 use crate::model_scope::{
     is_dataflow_model, parse_scoped_model_target, resolve_model_target_in_page,
@@ -28,7 +31,7 @@ use crate::path::PathFinder;
 use crate::path::PathSelector;
 use crate::query::find_candidates;
 use crate::superpage::{RefType, SuperPageMetadata};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::io::{self, Write};
 
@@ -429,12 +432,86 @@ pub fn build_explain_condition_output(
     build_explain_condition_output_with_intent(graph, target_id, _budget, TraversalIntent::Auto)
 }
 
+/// 为 typed-PPR treatment 构造候选上下文和路径 bridge。
+fn build_experimental_graph_retrieval(
+    graph: &dyn GraphReadStore,
+    target_node: &crate::graph::Node,
+    intent: TraversalIntent,
+    strategy: GraphRetrievalStrategy,
+) -> Result<(Vec<String>, Option<Value>)> {
+    if strategy == GraphRetrievalStrategy::Baseline {
+        return Ok((Vec::new(), None));
+    }
+
+    let result = typed_personalized_page_rank(
+        graph,
+        intent,
+        &[GraphSeed {
+            node_id: target_node.id.clone(),
+            score: 1.0,
+        }],
+        GraphRetrievalConfig::default(),
+    )
+    .with_context(|| format!("为目标 '{}' 执行 typed PPR 失败", target_node.id))?;
+
+    let mut bridge_anchors = Vec::new();
+    let mut ranked_candidates = Vec::new();
+    for (rank, ranked_node) in result
+        .ranked_nodes
+        .iter()
+        .filter(|ranked_node| ranked_node.node_id != target_node.id)
+        .enumerate()
+    {
+        let node = graph
+            .get_node(&ranked_node.node_id)
+            .with_context(|| format!("读取 PPR 候选 '{}' 失败", ranked_node.node_id))?
+            .with_context(|| format!("PPR 候选 '{}' 不存在", ranked_node.node_id))?;
+        bridge_anchors.push(ranked_node.node_id.clone());
+        ranked_candidates.push(json!({
+            "rank": rank + 1,
+            "node_id": ranked_node.node_id,
+            "node_type": format!("{:?}", node.node_type),
+            "name": node.name,
+            "path": node.path,
+        }));
+    }
+
+    let context = json!({
+        "strategy": "typed_ppr",
+        "evidence_role": "candidate_only",
+        "seed_node_id": target_node.id,
+        "effective_seed_count": result.effective_seed_count,
+        "candidate_pool_count": result.candidate_pool_count,
+        "iterations": result.iterations,
+        "converged": result.converged,
+        "ranked_candidates": ranked_candidates,
+    });
+    Ok((bridge_anchors, Some(context)))
+}
+
 /// 构建带 M33 intent 的 explain-condition 结构化 JSON 输出，不直接打印
 pub fn build_explain_condition_output_with_intent(
     graph: &dyn GraphReadStore,
     target_id: &str,
     _budget: &str,
     intent: TraversalIntent,
+) -> Result<serde_json::Value> {
+    build_explain_condition_output_with_intent_and_retrieval(
+        graph,
+        target_id,
+        _budget,
+        intent,
+        GraphRetrievalStrategy::Baseline,
+    )
+}
+
+/// 构建带 intent 与显式图召回策略的 explain-condition 结构化输出。
+pub fn build_explain_condition_output_with_intent_and_retrieval(
+    graph: &dyn GraphReadStore,
+    target_id: &str,
+    _budget: &str,
+    intent: TraversalIntent,
+    retrieval_strategy: GraphRetrievalStrategy,
 ) -> Result<serde_json::Value> {
     let (target_node, scoped_page_node, dataflow_model_id) =
         if let Some((page_ref, local_model_id)) = parse_scoped_model_target(target_id) {
@@ -443,7 +520,7 @@ pub fn build_explain_condition_output_with_intent(
             {
                 (scoped_model, Some(page_node), scoped_df_model_id)
             } else {
-                let candidates = find_local_candidates(graph, target_id);
+                let candidates = find_candidates(graph, target_id, 5)?;
                 let out = crate::output::schema::build_target_not_found_output(
                     crate::output::schema::OutputKind::Explain,
                     target_id,
@@ -454,7 +531,7 @@ pub fn build_explain_condition_output_with_intent(
         } else if let Some(node) = graph.get_node(target_id).ok().flatten() {
             (node, None, None)
         } else {
-            let candidates = find_local_candidates(graph, target_id);
+            let candidates = find_candidates(graph, target_id, 5)?;
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::Explain,
                 target_id,
@@ -475,6 +552,13 @@ pub fn build_explain_condition_output_with_intent(
         }
     };
     let page_path = page_node.path.clone();
+    let (retrieval_bridge_anchors, experimental_graph_retrieval) =
+        build_experimental_graph_retrieval(
+            graph,
+            &target_node,
+            effective_intent,
+            retrieval_strategy,
+        )?;
 
     let mut blocking_conditions: Vec<serde_json::Value> = Vec::new();
     let mut data_empty_gates: Vec<serde_json::Value> = Vec::new();
@@ -725,7 +809,7 @@ pub fn build_explain_condition_output_with_intent(
             target_anchors: vec![target_node.id.clone()],
             source_anchors: Vec::new(),
             sink_anchors: Vec::new(),
-            bridge_anchors: Vec::new(),
+            bridge_anchors: retrieval_bridge_anchors.clone(),
             excluded_anchors: Vec::new(),
             budget: _budget.to_string(),
         };
@@ -995,7 +1079,7 @@ pub fn build_explain_condition_output_with_intent(
         "related_context_count": related_context.len(),
     });
 
-    let details = serde_json::json!({
+    let mut details = serde_json::json!({
         "target": {
             "node_id": target_node.id,
             "node_type": format!("{:?}", target_node.node_type),
@@ -1024,6 +1108,16 @@ pub fn build_explain_condition_output_with_intent(
         "required_followups": required_followups,
     });
 
+    if let Some(experimental_context) = experimental_graph_retrieval {
+        details
+            .as_object_mut()
+            .context("ExplainCondition details 必须是 JSON object")?
+            .insert(
+                "experimental_graph_retrieval".to_string(),
+                experimental_context,
+            );
+    }
+
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);
     output.query_target = Some(target_id.to_string());
     output.details = Some(details);
@@ -1048,7 +1142,7 @@ pub(crate) fn build_explain_availability_fast_output(
             {
                 (scoped_model, Some(page_node), scoped_df_model_id)
             } else {
-                let candidates = find_local_candidates(graph, target_id);
+                let candidates = find_candidates(graph, target_id, 5)?;
                 let out = crate::output::schema::build_target_not_found_output(
                     crate::output::schema::OutputKind::Explain,
                     target_id,
@@ -1059,7 +1153,7 @@ pub(crate) fn build_explain_availability_fast_output(
         } else if let Some(node) = graph.get_node(target_id).ok().flatten() {
             (node, None, None)
         } else {
-            let candidates = find_local_candidates(graph, target_id);
+            let candidates = find_candidates(graph, target_id, 5)?;
             let out = crate::output::schema::build_target_not_found_output(
                 crate::output::schema::OutputKind::Explain,
                 target_id,
@@ -1264,138 +1358,6 @@ pub(crate) fn build_explain_availability_fast_output(
             "truncation_guard": truncation_guard,
         }
     }))
-}
-
-/// 辅助：在页面范围内查找近似候选目标
-/// 计算两个字符串的最长公共前缀长度
-fn common_prefix_len(a: &str, b: &str) -> usize {
-    a.chars()
-        .zip(b.chars())
-        .take_while(|(ca, cb)| ca == cb)
-        .count()
-}
-
-/// 判断字符串是否全为数字
-fn is_all_digits(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
-}
-
-fn find_local_candidates(
-    graph: &dyn GraphReadStore,
-    target_id: &str,
-) -> Vec<(crate::graph::Node, String)> {
-    let mut candidates: Vec<(crate::graph::Node, f64, String)> = Vec::new();
-    let target_lower = target_id.to_lowercase();
-
-    let target_prefix = if target_id.starts_with("model:") {
-        Some("model")
-    } else if target_id.starts_with("page:") {
-        Some("page")
-    } else if target_id.starts_with("comp:") {
-        Some("comp")
-    } else if target_id.starts_with("action:") {
-        Some("action")
-    } else if target_id.starts_with("field:") {
-        Some("field")
-    } else {
-        None
-    };
-
-    let target_bare = target_id
-        .strip_prefix("model:")
-        .or_else(|| target_id.strip_prefix("page:"))
-        .or_else(|| target_id.strip_prefix("comp:"))
-        .or_else(|| target_id.strip_prefix("action:"))
-        .or_else(|| target_id.strip_prefix("field:"))
-        .unwrap_or(target_id);
-
-    let target_page = if target_prefix == Some("comp") || target_prefix == Some("action") {
-        target_bare.split('|').next().map(|s| s.to_string())
-    } else {
-        None
-    };
-    let target_id_part = if target_prefix == Some("comp") || target_prefix == Some("action") {
-        target_bare.split('|').next_back().map(|s| s.to_string())
-    } else {
-        Some(target_bare.to_string())
-    };
-
-    let nodes = match graph.iter_nodes() {
-        Ok(nodes) => nodes,
-        Err(_) => return Vec::new(),
-    };
-    for node in nodes {
-        if node.id == target_id || node.id.trim().is_empty() || node.name.trim().is_empty() {
-            continue;
-        }
-        let node_bare = node
-            .id
-            .strip_prefix("model:")
-            .or_else(|| node.id.strip_prefix("page:"))
-            .or_else(|| node.id.strip_prefix("comp:"))
-            .or_else(|| node.id.strip_prefix("action:"))
-            .or_else(|| node.id.strip_prefix("field:"))
-            .unwrap_or(&node.id);
-
-        let mut score = 0.0;
-        let mut reason = "substring match";
-
-        // 同页面组件优先
-        if let Some(ref page) = target_page
-            && node_bare.starts_with(page)
-        {
-            if let Some(ref id_part) = target_id_part {
-                let node_name_lower = node.name.to_lowercase();
-                let target_id_lower = id_part.to_lowercase();
-
-                // 双向子串匹配：input3 匹配 input33（前缀），input3 匹配 input13（包含子串）
-                if node_name_lower.contains(&target_id_lower)
-                    || target_id_lower.contains(&node_name_lower)
-                {
-                    score = 3.0;
-                    reason = "same page component name match";
-                }
-
-                // 公共前缀 + 数字后缀近似：input33 ~ input3 / input13 / input23
-                if score == 0.0 {
-                    let prefix_len = common_prefix_len(&node_name_lower, &target_id_lower);
-                    if prefix_len >= 3 {
-                        let node_suffix = &node_name_lower[prefix_len..];
-                        let target_suffix = &target_id_lower[prefix_len..];
-                        if is_all_digits(node_suffix) && is_all_digits(target_suffix) {
-                            score = 2.5;
-                            reason = "same prefix numeric suffix match";
-                        }
-                    }
-                }
-            }
-        }
-
-        // 裸名精确匹配（不同前缀）
-        if score == 0.0 && !target_bare.is_empty() && node_bare == target_bare {
-            score = 5.0;
-            reason = "bare name match with different prefix";
-        }
-
-        // 子串匹配
-        if score == 0.0
-            && (node.id.to_lowercase().contains(&target_lower)
-                || node.name.to_lowercase().contains(&target_lower))
-        {
-            score = 1.0;
-        }
-
-        if score > 0.0 {
-            candidates.push((node, score, reason.to_string()));
-        }
-    }
-
-    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    candidates
-        .into_iter()
-        .take(5)
-        .map(|(n, _, r)| (n, r))
-        .collect()
 }
 
 /// 构建 explain JSON 输出

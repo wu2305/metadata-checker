@@ -4,3 +4,9 @@
 /browser/node_modules/
 /.pnpm-store/
 /browser/artifacts/
+
+# 本地工具配置（编辑器/Agent 个人偏好，不入库）
+/.cursor/
+/.agents/
+/.commandcode/
+

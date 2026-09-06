@@ -1,0 +1,502 @@
+{
+  "details": {
+    "answer_contract": {
+      "budget_used": "compact",
+      "candidate_path_count": 0,
+      "completion": {
+        "missing": [
+          "graph_relationship_path"
+        ],
+        "next_commands": [
+          {
+            "budget": "normal",
+            "command": "--context",
+            "reason": "未找到路径时先查看目标相邻关系，确认目标 ID 和边方向",
+            "target": "model:app/销售.app/完善合同信息/试乘试驾协议.spg|model6"
+          }
+        ],
+        "status": "partial_due_to_missing_proven_path"
+      },
+      "dataflow_model_id": "model:fact_prospect",
+      "forbidden_fact_paths": [
+        "display_facts",
+        "value_source_facts",
+        "writer_facts",
+        "model_io_facts"
+      ],
+      "intent": "availability",
+      "is_page_scoped_target": true,
+      "must_read_summary_first": true,
+      "primary_fact_path": "availability_facts",
+      "proven_path_count": 0,
+      "rejected_path_count": 0,
+      "resolved_model_target": "model:model6",
+      "target_scope": {
+        "dataflow_model_id": "model:fact_prospect",
+        "is_page_scoped_target": true,
+        "node_id": "model:model6",
+        "node_type": "Model",
+        "query_target": "model:app/销售.app/完善合同信息/试乘试驾协议.spg|model6",
+        "resolved_model_target": "model:model6",
+        "source_file": "$DATA:/通用/szsys_4_users.tbl"
+      }
+    },
+    "answer_facts": {
+      "availability_facts": {
+        "confidence": "high",
+        "dataflow_availability": "dataflow_filters_present",
+        "dataflow_table": "$DATA:/通用/szsys_4_users.tbl",
+        "evidence_refs": [
+          {
+            "json_path": "sources[5].filter.clauses[0].exp",
+            "node_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|model6#filter#0#exp",
+            "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg"
+          },
+          {
+            "json_path": "canvas.components[1].panels[1].components[0].components[2].components[0].exp",
+            "node_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input6#exp#84",
+            "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg"
+          },
+          {
+            "json_path": "canvas.components[1].panels[0].components[0].components[3].components[0].exp",
+            "node_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input32#exp#39",
+            "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg"
+          },
+          {
+            "json_path": "dataFlow.nodes.FACT_MEMBERSHIPCARD.filters",
+            "node_id": "model:model6|FACT_MEMBERSHIPCARD|source_filter|0",
+            "source_file": "$DATA:/通用/szsys_4_users.tbl"
+          }
+        ],
+        "gates": [
+          {
+            "condition_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|model6#filter#0#exp",
+            "condition_scope": "direct",
+            "condition_type": "SourceFilterExp",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "sources[5].filter.clauses[0].exp",
+            "owner_node_id": "model:model6",
+            "raw_expr": "model6.create_time.date=TODAY()",
+            "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg"
+          },
+          {
+            "condition_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input6#exp#84",
+            "condition_scope": "direct",
+            "condition_type": "FieldExp",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "canvas.components[1].panels[1].components[0].components[2].components[0].exp",
+            "owner_node_id": "comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input6",
+            "raw_expr": " IF(model7.totalRowCount__=1,model7.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))",
+            "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg"
+          },
+          {
+            "condition_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input32#exp#39",
+            "condition_scope": "direct",
+            "condition_type": "FieldExp",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "canvas.components[1].panels[0].components[0].components[3].components[0].exp",
+            "owner_node_id": "comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input32",
+            "raw_expr": " IF(model9.totalRowCount__=1,model9.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))",
+            "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg"
+          },
+          {
+            "condition_id": "model:model6|FACT_MEMBERSHIPCARD|source_filter|0",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.FACT_MEMBERSHIPCARD.filters",
+            "owner_node_id": "model:model6",
+            "raw_expr": "[客户] is not null ",
+            "source_file": "$DATA:/通用/szsys_4_users.tbl"
+          }
+        ],
+        "join_rules": [
+          {
+            "clauses": [
+              {
+                "left": "[FACT_ACCOUNT].[客户编码]",
+                "operator": "=",
+                "right": "[FACT_MEMBERSHIPCARD].[客户]"
+              }
+            ],
+            "join_type": "AntiJoin",
+            "left_table": "FACT_ACCOUNT",
+            "node_alias": "关联",
+            "right_table": "FACT_MEMBERSHIPCARD",
+            "row_semantic": "join_rows_filtered_by_condition"
+          }
+        ],
+        "missing_evidence": [],
+        "output_filters": [],
+        "paths": [
+          {
+            "confidence": "high",
+            "evidence_refs": [
+              {
+                "json_path": "sources[5].filter.clauses[0].exp",
+                "node_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|model6#filter#0#exp",
+                "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg"
+              }
+            ],
+            "intent": "availability",
+            "result": "model6.create_time.date=TODAY()",
+            "steps": [
+              {
+                "direction": "incoming",
+                "edge_type": "DependsOn",
+                "field_path": null,
+                "json_path": "sources[5].filter.clauses[0].exp",
+                "node_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|model6#filter#0#exp",
+                "node_type": "Condition",
+                "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg",
+                "step": 1,
+                "why_included": "filter or totalRowCount condition controls data availability"
+              }
+            ],
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "why_complete": "data availability gate found"
+          },
+          {
+            "confidence": "high",
+            "evidence_refs": [
+              {
+                "json_path": "canvas.components[1].panels[1].components[0].components[2].components[0].exp",
+                "node_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input6#exp#84",
+                "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg"
+              }
+            ],
+            "intent": "availability",
+            "result": " IF(model7.totalRowCount__=1,model7.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))",
+            "steps": [
+              {
+                "direction": "incoming",
+                "edge_type": "DependsOn",
+                "field_path": null,
+                "json_path": "canvas.components[1].panels[1].components[0].components[2].components[0].exp",
+                "node_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input6#exp#84",
+                "node_type": "Condition",
+                "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg",
+                "step": 1,
+                "why_included": "filter or totalRowCount condition controls data availability"
+              }
+            ],
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "why_complete": "data availability gate found"
+          },
+          {
+            "confidence": "high",
+            "evidence_refs": [
+              {
+                "json_path": "canvas.components[1].panels[0].components[0].components[3].components[0].exp",
+                "node_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input32#exp#39",
+                "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg"
+              }
+            ],
+            "intent": "availability",
+            "result": " IF(model9.totalRowCount__=1,model9.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))",
+            "steps": [
+              {
+                "direction": "incoming",
+                "edge_type": "DependsOn",
+                "field_path": null,
+                "json_path": "canvas.components[1].panels[0].components[0].components[3].components[0].exp",
+                "node_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input32#exp#39",
+                "node_type": "Condition",
+                "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg",
+                "step": 1,
+                "why_included": "filter or totalRowCount condition controls data availability"
+              }
+            ],
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "why_complete": "data availability gate found"
+          }
+        ],
+        "physical_inputs": [
+          "$DATA:/主数据/fact_account.tbl",
+          "$DATA:/会员/fact_membershipCard.tbl"
+        ],
+        "referenced_vars": [],
+        "result": "data_gates_found",
+        "source_filters": [
+          {
+            "left": "[客户]",
+            "node_alias": "FACT_MEMBERSHIPCARD",
+            "operator": "is not null",
+            "raw_expr": "[客户] is not null ",
+            "referenced_fields": [
+              "客户"
+            ],
+            "referenced_vars": [],
+            "right": ""
+          }
+        ],
+        "union_rules": []
+      },
+      "intent": "availability",
+      "traversal_policy": {
+        "allowed_edge_types": [
+          "DependsOn",
+          "DataflowInput"
+        ],
+        "directions": [
+          "incoming",
+          "filter_refs"
+        ],
+        "intent": "availability",
+        "max_paths": 3,
+        "max_steps_per_path": 6,
+        "rank_rules": [
+          "field-level paths before model-level paths",
+          "proven paths before candidates",
+          "paths with evidence before inferred paths"
+        ],
+        "stop_conditions": [
+          "filter_or_total_row_count_gate_found"
+        ]
+      }
+    },
+    "blocking_conditions": [],
+    "candidate_paths": [],
+    "candidate_paths_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 candidate_paths 明细；需要核查时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "data_empty_gates": [
+      {
+        "condition_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|model6#filter#0#exp",
+        "condition_key": "app/销售.app/完善合同信息/试乘试驾协议.spg|SourceFilterExp|Filter|model6.create_time.date=TODAY()|model:model6.create_time.date",
+        "condition_scope": "direct",
+        "condition_type": "SourceFilterExp",
+        "effect_type": "Filter",
+        "json_path": "sources[5].filter.clauses[0].exp",
+        "normalized_expr": "model6.create_time.date=TODAY()",
+        "owner_node_id": "model:model6",
+        "owner_type": "ModelSource",
+        "raw_expr": "model6.create_time.date=TODAY()",
+        "referenced_symbols": [
+          "model:model6.create_time.date"
+        ],
+        "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg",
+        "subject_type": "ModelSource"
+      },
+      {
+        "condition_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input6#exp#84",
+        "condition_key": "app/销售.app/完善合同信息/试乘试驾协议.spg|FieldExp|Compute|IF(model7.totalRowCount__=1,model7.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))|component:input15,model:model6.totalRowCount__,model:model7.name,model:model7.totalRowCount__",
+        "condition_scope": "direct",
+        "condition_type": "FieldExp",
+        "effect_type": "Compute",
+        "json_path": "canvas.components[1].panels[1].components[0].components[2].components[0].exp",
+        "normalized_expr": "IF(model7.totalRowCount__=1,model7.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))",
+        "owner_node_id": "comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input6",
+        "owner_type": "Component",
+        "raw_expr": " IF(model7.totalRowCount__=1,model7.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))",
+        "referenced_symbols": [
+          "model:model7.totalRowCount__",
+          "model:model7.name",
+          "component:input15",
+          "model:model6.totalRowCount__"
+        ],
+        "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg",
+        "subject_type": "Component"
+      },
+      {
+        "condition_id": "cond:app/销售.app/完善合同信息/试乘试驾协议.spg|input32#exp#39",
+        "condition_key": "app/销售.app/完善合同信息/试乘试驾协议.spg|FieldExp|Compute|IF(model9.totalRowCount__=1,model9.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))|component:input15,model:model6.totalRowCount__,model:model9.name,model:model9.totalRowCount__",
+        "condition_scope": "direct",
+        "condition_type": "FieldExp",
+        "effect_type": "Compute",
+        "json_path": "canvas.components[1].panels[0].components[0].components[3].components[0].exp",
+        "normalized_expr": "IF(model9.totalRowCount__=1,model9.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))",
+        "owner_node_id": "comp:app/销售.app/完善合同信息/试乘试驾协议.spg|input32",
+        "owner_type": "Component",
+        "raw_expr": " IF(model9.totalRowCount__=1,model9.name, CONCAT('SJ',input15,RIGHT(TOSTR(TODAY(),'yyyymmdd'),6),TOSTR(model6.totalRowCount__+1,'000')))",
+        "referenced_symbols": [
+          "model:model9.totalRowCount__",
+          "model:model9.name",
+          "component:input15",
+          "model:model6.totalRowCount__"
+        ],
+        "source_file": "app/销售.app/完善合同信息/试乘试驾协议.spg",
+        "subject_type": "Component"
+      },
+      {
+        "condition_id": "model:model6|FACT_MEMBERSHIPCARD|source_filter|0",
+        "condition_key": "$DATA:/通用/szsys_4_users.tbl|DataFlowFilter||[客户] is not null |",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.FACT_MEMBERSHIPCARD.filters",
+        "left": "[客户]",
+        "node_alias": "FACT_MEMBERSHIPCARD",
+        "node_type": "ModelTable",
+        "operator": "is not null",
+        "owner_node_id": "model:model6",
+        "raw_expr": "[客户] is not null ",
+        "referenced_fields": [
+          "客户"
+        ],
+        "referenced_vars": [],
+        "right": "",
+        "role": "source_filter",
+        "source_file": "$DATA:/通用/szsys_4_users.tbl"
+      }
+    ],
+    "primary_path": [],
+    "primary_path_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 primary_path 明细；answer_facts.paths 已保留短证据",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "proven_paths": [],
+    "rejected_paths": [],
+    "rejected_paths_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 rejected_paths 明细；需要排查路径拒绝原因时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "related_context": [],
+    "related_context_summary": {
+      "by_scope": {
+        "direct": 284
+      },
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": true,
+      "note": "compact 模式隐藏 related_context 明细；它们是相关但非必要上下文",
+      "source_file_distinct_count": 107,
+      "total_count": 284
+    },
+    "required_followups": [
+      {
+        "budget": "normal",
+        "command": "--explain-condition",
+        "expected_fact_path": "availability_facts",
+        "intent": "availability",
+        "must_run_for_complete_answer": true,
+        "reason": "truncation_guard 标记 compact 输出不完整，需要升级到 normal 展开完整路径",
+        "target": "model:app/销售.app/完善合同信息/试乘试驾协议.spg|model6"
+      }
+    ],
+    "supporting_context": [],
+    "supporting_context_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 supporting_context 明细；需要核查时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "target": {
+      "name": "model6",
+      "node_id": "model:model6",
+      "node_type": "Model",
+      "path": "$DATA:/通用/szsys_4_users.tbl"
+    },
+    "thinking_frame": {
+      "answer_with": "availability_facts",
+      "completion_status": "partial_due_to_missing_proven_path",
+      "do_not_use_as_primary_evidence": [
+        "display_facts",
+        "value_source_facts",
+        "writer_facts",
+        "model_io_facts"
+      ],
+      "next_best_action": "使用 --budget normal 或 full 重新查询以展开更多路径",
+      "primary_question_type": "这个模型在什么条件下有数据",
+      "question_kind": "availability",
+      "required_followups": [
+        {
+          "expected_fact_path": "availability_facts",
+          "reason": "未找到任何 proven 或 candidate 路径；可能需要扩展 budget 或检查目标 ID 是否正确"
+        }
+      ],
+      "target_scope": {
+        "node_id": "model:model6",
+        "node_type": "Model",
+        "source_file": "$DATA:/通用/szsys_4_users.tbl"
+      },
+      "what_is_missing": "未找到任何 proven 或 candidate 路径；可能需要扩展 budget 或检查目标 ID 是否正确",
+      "what_to_avoid": "不要把 source_filters 标成组件 direct visibleCondition",
+      "why_this_intent": "用户追问数据可用性，应聚焦 filter、totalRowCount__ 和 DataFlow 输入"
+    },
+    "traversal_policy": {
+      "allowed_edge_types": [
+        "DependsOn",
+        "DataflowInput"
+      ],
+      "directions": [
+        "incoming",
+        "filter_refs"
+      ],
+      "intent": "availability",
+      "max_paths": 3,
+      "max_steps_per_path": 6,
+      "rank_rules": [
+        "field-level paths before model-level paths",
+        "proven paths before candidates",
+        "paths with evidence before inferred paths"
+      ],
+      "stop_conditions": [
+        "filter_or_total_row_count_gate_found"
+      ]
+    },
+    "truncation_guard": {
+      "compact_limits": {
+        "max_blocking_conditions": 10,
+        "max_data_empty_gates": 10,
+        "max_paths": 3,
+        "max_related_context": 5,
+        "max_steps_per_path": 6,
+        "max_supporting_context": 5
+      },
+      "is_complete": false,
+      "recommended_rerun": "--explain-condition {} --budget normal --intent auto",
+      "required_budget_for_complete_answer": "normal",
+      "safe_to_answer_full_relationships": false,
+      "truncated_sections": [
+        "related_context"
+      ]
+    },
+    "value_source_context": null
+  },
+  "diagnostics": [],
+  "evidence": [],
+  "kind": "Explain",
+  "next_queries": [],
+  "query_target": "model:app/销售.app/完善合同信息/试乘试驾协议.spg|model6",
+  "schema_version": "1.0",
+  "summary": {
+    "answer_facts_count": 1,
+    "blocking_conditions_count": 0,
+    "candidate_paths_count": 0,
+    "data_empty_gates_count": 4,
+    "intent": "availability",
+    "primary_paths_count": 0,
+    "primary_reason": "目标 model:model6 受 4 个数据门控影响（filter/totalRowCount__）",
+    "rejected_paths_count": 0,
+    "related_context_count": 284,
+    "supporting_context_count": 0,
+    "target_id": "model:model6",
+    "target_name": "model6",
+    "target_type": "Model",
+    "value_source_context_count": 0,
+    "what_is_it": "Why 解释: model:model6"
+  }
+}

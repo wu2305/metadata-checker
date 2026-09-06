@@ -18,6 +18,11 @@ pub enum ToolCommand {
     QueryCross,
     QueryDataflow,
     QueryPageLogic,
+    /// 不带类型过滤的统一搜索，对应 `--find`。
+    ///
+    /// `FindPage`/`FindModel`/`FindComponent` 只差一个 node_type 过滤器，而提问者说
+    /// 「button1 在哪」时恰恰不知道它是什么类型——知道了就不必找了。
+    Find,
     FindPage,
     FindModel,
     FindComponent,
@@ -207,6 +212,7 @@ impl ToolRegistry {
                     "writer",
                     "availability",
                     "context",
+                    "action",
                 ],
             },
             ToolSpec {
@@ -286,6 +292,18 @@ impl ToolRegistry {
                 name: "query_page_logic",
                 aliases: &["query-page-logic"],
                 description: "查询页面级逻辑摘要",
+                requires_target: true,
+                requires_graph: true,
+                mutates_runtime: false,
+                supports_human: false,
+                supported_budgets: &["compact", "normal", "full"],
+                supported_intents: &[],
+            },
+            ToolSpec {
+                command: ToolCommand::Find,
+                name: "find",
+                aliases: &[],
+                description: "按关键词定位页面/模型/组件，返回规范 target",
                 requires_target: true,
                 requires_graph: true,
                 mutates_runtime: false,
@@ -429,11 +447,11 @@ pub fn validate_budget(budget: &str) -> Result<(), ToolError> {
 pub fn validate_intent(intent: &str) -> Result<(), ToolError> {
     match intent {
         "auto" | "display" | "value-source" | "value_source" | "writer" | "availability"
-        | "context" => Ok(()),
+        | "context" | "action" => Ok(()),
         other => Err(ToolError::new(
             ToolErrorCode::InvalidIntent,
             format!(
-                "Invalid intent '{}'. Expected: auto | display | value-source | writer | availability | context",
+                "Invalid intent '{}'. Expected: auto | display | value-source | writer | availability | context | action",
                 other
             ),
         )),
@@ -468,7 +486,10 @@ pub fn validate_target_prefix(command: ToolCommand, target: &str) -> Result<(), 
         ToolCommand::AdviseQuery => &[],
         ToolCommand::QueryDataflow => &["model:", "dataflow:"],
         ToolCommand::QueryCross => unreachable!("QueryCross handled above"),
-        ToolCommand::FindPage | ToolCommand::FindModel | ToolCommand::FindComponent => &[],
+        ToolCommand::Find
+        | ToolCommand::FindPage
+        | ToolCommand::FindModel
+        | ToolCommand::FindComponent => &[],
         ToolCommand::Status | ToolCommand::ReloadGraph | ToolCommand::CheckReload => &[],
         ToolCommand::DiffRefresh => &[],
     };

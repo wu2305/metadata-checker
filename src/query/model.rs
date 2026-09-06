@@ -268,10 +268,41 @@ pub fn build_query_model_output(
             .with_node_id(model_id),
         );
     }
-    output.next_queries = vec![
-        format_next_query("--explain {} for full semantic summary", model_id),
+    // 模型级关系答不了「这个字段是从哪一路传过来的」——那是 `--explain field:X.y`。
+    // 此前的 next_queries 里没有任何指向字段的入口，链式血缘的问题（df_a -> physical_x
+    // -> df_b）走到第二步就只能靠模型自己猜出 `field:` 这个前缀存在。已经出现在边上的
+    // 字段名是确定的事实，直接拼成可执行命令交回去。
+    let model_name = model_id.strip_prefix("model:").unwrap_or(model_id);
+    let mut field_names: Vec<String> = Vec::new();
+    for entry in readers.iter().chain(writers.iter()) {
+        let Some(path) = entry.get("field_path").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let leaf = path.rsplit('.').next().unwrap_or(path);
+        if !leaf.is_empty() && !field_names.contains(&leaf.to_string()) {
+            field_names.push(leaf.to_string());
+        }
+    }
+    // 顺序即建议。模型几乎总是照抄第一条，而这次调用刚刚回答完模型级关系——再来一条
+    // `--explain model:X` 基本是重复。评测里 `dataflow_chain_trace` 12 次有 10 次栽在这里：
+    // 第一步走对了，第二步照抄第一条 next_query 回到模型级，再也走不到字段。
+    // 还不知道的是字段级来源，就把它排在最前面。
+    output.next_queries = Vec::new();
+    for field in field_names.iter().take(3) {
+        output.next_queries.push(format_next_query(
+            "--explain {} for field-level lineage (chain across DataFlows)",
+            &format!("field:{model_name}.{field}"),
+        ));
+    }
+    output.next_queries.extend([
         format_next_query("--query-dataflow {} for internal subgraph", model_id),
-    ];
+        format_next_query("--explain {} for full semantic summary", model_id),
+    ]);
+    if field_names.is_empty() {
+        output.next_queries.push(format!(
+            "--explain 'field:{model_name}.<字段名>'（单个字段的上游来源与下游去向，跨 DataFlow 的链式传递要逐字段查）"
+        ));
+    }
 
     if is_compact {
         let truncated_arrays = [
@@ -290,22 +321,23 @@ pub fn build_query_model_output(
             .map(|(name, size, limit)| format!("{} {}>{}", name, size, limit))
             .collect();
         if !truncated_parts.is_empty() {
-            output.diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "OUTPUT_TRUNCATED".to_string(),
-                message: format!(
-                    "Compact budget: arrays truncated for: {}",
-                    truncated_parts.join(", ")
-                ),
-                location: crate::output::Location {
+            let mut diag = crate::diagnostics::envelope_diagnostic(
+                "OUTPUT_TRUNCATED",
+                1,
+                crate::output::Location {
                     source_file: None,
                     node_id: Some(model_id.to_string()),
                     json_path: None,
                 },
-                suggestion: Some(
-                    "Use --budget normal or --budget full to see complete arrays".to_string(),
+                format!(
+                    "Compact budget: arrays truncated for: {}",
+                    truncated_parts.join(", ")
                 ),
-            });
+            );
+            diag.severity = crate::output::DiagnosticSeverity::Info;
+            diag.suggestion =
+                Some("Use --budget normal or --budget full to see complete arrays".to_string());
+            output.diagnostics.push(diag);
         }
 
         let evidence_summary = crate::output::brief::evidence_summary(&output.evidence, 5);

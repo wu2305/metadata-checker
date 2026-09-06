@@ -1,0 +1,14 @@
+{
+    "version": "4.19.7",
+    "theme": "default",
+    "canvas": {
+        "id": "canvas",
+        "type": "canvas",
+        "components": [
+            {
+                "id": "other_btn",
+                "type": "button"
+            }
+        ]
+    }
+}

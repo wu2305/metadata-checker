@@ -13,6 +13,10 @@ pub enum TraversalIntent {
     Writer,
     Availability,
     Context,
+    /// M58：动作轴。组件的三类属性中，display 与 value 都能用 intent 在组件 target 上
+    /// 寻址，唯独「点了之后触发什么、为什么点不动」此前必须同时换动词和换 target 文法
+    /// （`--explain action:page|comp|actionId`），而 action id 不可能由用户问句给出。
+    Action,
 }
 
 impl TraversalIntent {
@@ -25,8 +29,9 @@ impl TraversalIntent {
             "writer" => Ok(Self::Writer),
             "availability" => Ok(Self::Availability),
             "context" => Ok(Self::Context),
+            "action" => Ok(Self::Action),
             other => anyhow::bail!(
-                "Invalid intent '{}'. Expected: auto | display | value-source | writer | availability | context",
+                "Invalid intent '{}'. Expected: auto | display | value-source | writer | availability | context | action",
                 other
             ),
         }
@@ -41,6 +46,7 @@ impl TraversalIntent {
             Self::Writer => "writer",
             Self::Availability => "availability",
             Self::Context => "context",
+            Self::Action => "action",
         }
     }
 }
@@ -56,6 +62,8 @@ pub(crate) enum AnswerFactKind {
     Availability,
     Context,
     ModelIo,
+    /// 组件上挂的动作及其门禁条件（owner_type = Action）。
+    Action,
 }
 
 /// 判断当前 intent 是否需要输出某类事实块。
@@ -73,6 +81,9 @@ pub(crate) fn answer_fact_enabled(
         TraversalIntent::Writer => kind == AnswerFactKind::Writer,
         TraversalIntent::Availability => kind == AnswerFactKind::Availability,
         TraversalIntent::Context => kind == AnswerFactKind::Context,
+        TraversalIntent::Action => kind == AnswerFactKind::Action,
+        // Auto 保持既有行为：action_facts 只在显式 --intent action 下输出，
+        // 避免改动所有既有 auto 查询的输出体积。
         TraversalIntent::Auto => match target_node.node_type {
             NodeType::Component => {
                 matches!(kind, AnswerFactKind::Display | AnswerFactKind::ValueSource)
@@ -98,6 +109,7 @@ fn primary_fact_path(intent: TraversalIntent, target_node: &Node) -> &'static st
         TraversalIntent::Writer => "writer_facts",
         TraversalIntent::Availability => "availability_facts",
         TraversalIntent::Context => "context_facts",
+        TraversalIntent::Action => "action_facts",
         TraversalIntent::Auto => match target_node.node_type {
             NodeType::Component => "display_facts|value_source_facts",
             NodeType::Field => "value_source_facts|writer_facts",
@@ -134,6 +146,7 @@ fn forbidden_fact_paths(intent: TraversalIntent) -> Vec<&'static str> {
             "writer_facts",
             "model_io_facts",
         ],
+        TraversalIntent::Action => vec!["value_source_facts", "writer_facts", "model_io_facts"],
         TraversalIntent::Context | TraversalIntent::Auto => vec![],
     }
 }
@@ -219,6 +232,7 @@ fn intent_primary_fact_path(intent: TraversalIntent) -> &'static str {
         TraversalIntent::Writer => "writer_facts",
         TraversalIntent::Availability => "availability_facts",
         TraversalIntent::Context => "context_facts",
+        TraversalIntent::Action => "action_facts",
         TraversalIntent::Auto => "auto_facts",
     }
 }
@@ -307,6 +321,7 @@ pub fn build_thinking_frame(
         TraversalIntent::Writer => "谁写入或生成了这个目标",
         TraversalIntent::Availability => "这个模型在什么条件下有数据",
         TraversalIntent::Context => "这个目标周围有哪些相关上下文",
+        TraversalIntent::Action => "点击/触发这个组件之后会发生什么，什么条件会挡住它",
         TraversalIntent::Auto => "自动判断目标的核心问题类型",
     };
 
@@ -324,6 +339,7 @@ pub fn build_thinking_frame(
             "用户追问数据可用性，应聚焦 filter、totalRowCount__ 和 DataFlow 输入"
         }
         TraversalIntent::Context => "用户请求周围上下文，应给出相关邻居和旁路信息",
+        TraversalIntent::Action => "用户追问交互行为，应聚焦组件挂了哪些动作以及动作自身的门禁条件",
         TraversalIntent::Auto => "未指定 intent，按目标节点类型自动选择默认事实块",
     };
 
@@ -348,6 +364,9 @@ pub fn build_thinking_frame(
             "不要把 display_facts 或 availability_facts 的结论混为写入链路证据"
         }
         TraversalIntent::Availability => "不要把 source_filters 标成组件 direct visibleCondition",
+        TraversalIntent::Action => {
+            "不要把组件自身的 visibleCondition/disableCondition 当作动作门禁；动作门禁的 owner_type 是 Action"
+        }
         TraversalIntent::Context | TraversalIntent::Auto => "不要把 related_context 当作必要条件",
     };
 
@@ -552,11 +571,145 @@ pub fn build_required_followups(
     followups
 }
 
+/// target 是否已经带节点前缀。
+///
+/// `--advise-query` 的 target 既可能是裸 ID（配合 `--advise-query-page`），
+/// 也可能是已经完整的节点 ID。再拼一层前缀会产出 `model:comp:app/x.spg|button2`
+/// 这种无效 target，模型照着执行必然失败。
+fn has_node_prefix(target: &str) -> bool {
+    const PREFIXES: [&str; 7] = [
+        "comp:",
+        "field:",
+        "model:",
+        "page:",
+        "action:",
+        "dataflow:",
+        "cond:",
+    ];
+    PREFIXES.iter().any(|prefix| target.starts_with(prefix))
+}
+
+/// 按 question-kind 需要的节点类型给裸 target 补前缀；已带前缀的原样返回。
+fn scoped_target(prefix: &str, page_scope: Option<&str>, target: &str) -> String {
+    if has_node_prefix(target) {
+        return target.to_string();
+    }
+    match page_scope {
+        Some(page) => format!("{}{}|{}", prefix, page, target),
+        None => format!("{}{}", prefix, target),
+    }
+}
+
+/// `--advise-query` 支持的 question-kind 全集（含下划线别名）。
+pub const ADVISE_QUERY_QUESTION_KINDS: [&str; 7] = [
+    "display",
+    "value-source",
+    "availability",
+    "writer",
+    "action",
+    "page-logic",
+    "model-relationships",
+];
+
+fn normalize_question_kind(question_kind: &str) -> &str {
+    match question_kind {
+        "value_source" => "value-source",
+        "page_logic" => "page-logic",
+        "model_relationships" => "model-relationships",
+        other => other,
+    }
+}
+
 /// M35.10: 构建 --advise-query 的结构化输出
 ///
 /// 根据 target、page_scope、question_kind 和 budget 生成推荐命令和契约信息。
 /// 不做自然语言问题分类，只消费结构化 question-kind 参数。
+///
+/// M58：输出统一走 `AiOutput` 信封。此前是裸 JSON，任何按标准信封转发输出的
+/// 消费方（例如 M58 runner 的 `filter_cli_output`）都只会拿到空对象。
 pub fn build_advise_query_output(
+    target: &str,
+    page_scope: Option<&str>,
+    question_kind: &str,
+    budget: &str,
+) -> serde_json::Value {
+    let advice = build_advise_query_advice(target, page_scope, question_kind, budget);
+    let kind = normalize_question_kind(question_kind);
+    let recognized = ADVISE_QUERY_QUESTION_KINDS.contains(&kind);
+
+    let primary_command = advice["primary_command"].as_str().unwrap_or("");
+    let primary_target = advice["primary_target"].as_str().unwrap_or("");
+    let recommended_budget = advice["recommended_budget"].as_str().unwrap_or("compact");
+
+    let summary = serde_json::json!({
+        "question_kind": kind,
+        "primary_command": primary_command,
+        "primary_target": primary_target,
+        "recommended_budget": recommended_budget,
+        "what_is_it": format!(
+            "question-kind '{}' 应先执行 {} {}",
+            kind, primary_command, primary_target
+        ),
+    });
+
+    let mut out = crate::output::schema::AiOutput::new(
+        crate::output::schema::OutputKind::QueryAdvice,
+        summary,
+    );
+    out.query_target = Some(target.to_string());
+    out.evidence.push(
+        crate::output::schema::Evidence::new(
+            format!("{} {}", primary_command, primary_target),
+            "路由建议由 question-kind 确定性推导，不依赖自然语言理解",
+        )
+        .with_node_id(primary_target)
+        .with_confidence(crate::output::schema::Confidence::High),
+    );
+    if !recognized {
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "UNKNOWN_QUESTION_KIND",
+            1,
+            crate::output::schema::Location::default(),
+            format!(
+                "未识别的 question-kind '{}'，已回退到 auto 建议",
+                question_kind
+            ),
+        );
+        diag.suggestion = Some(format!(
+            "使用其中之一：{}",
+            ADVISE_QUERY_QUESTION_KINDS.join(" | ")
+        ));
+        out.diagnostics.push(diag);
+    }
+    out.next_queries
+        .push(crate::output::schema::format_next_query(
+            &format!("{} {{}} --budget {}", primary_command, recommended_budget),
+            primary_target,
+        ));
+    for followup in advice["followup_rules"].as_array().into_iter().flatten() {
+        let command = followup["command"].as_str().unwrap_or("");
+        // target 为 null 的规则（例如动作级 target 要等上一步输出）没有可执行命令，
+        // 拼出来只会是 `--explain ''`，宁可不给。
+        let followup_target = match followup["target"].as_str() {
+            Some(target) if !target.is_empty() => target,
+            _ => continue,
+        };
+        let followup_budget = followup["budget"].as_str().unwrap_or("normal");
+        let next = crate::output::schema::format_next_query(
+            &format!("{} {{}} --budget {}", command, followup_budget),
+            followup_target,
+        );
+        if !out.next_queries.contains(&next) {
+            out.next_queries.push(next);
+        }
+    }
+    out.details = Some(advice);
+
+    serde_json::to_value(out.validate()).unwrap_or(serde_json::Value::Null)
+}
+
+/// 路由建议载荷本体；作为 `AiOutput.details` 输出，键名与 M35.10 契约保持一致。
+fn build_advise_query_advice(
     target: &str,
     page_scope: Option<&str>,
     question_kind: &str,
@@ -571,47 +724,40 @@ pub fn build_advise_query_output(
     ) = match question_kind {
         "display" => (
             "--explain-condition",
-            if let Some(page) = page_scope {
-                format!("comp:{}|{}", page, target)
-            } else {
-                target.to_string()
-            },
+            scoped_target("comp:", page_scope, target),
             "compact",
             "display_facts",
             vec!["value_source_facts", "writer_facts", "availability_facts", "model_io_facts"],
         ),
         "value-source" | "value_source" => (
             "--explain-condition",
-            if let Some(page) = page_scope {
-                format!("comp:{}|{}", page, target)
-            } else {
-                target.to_string()
-            },
+            scoped_target("comp:", page_scope, target),
             "compact",
             "value_source_facts",
             vec!["display_facts", "writer_facts", "availability_facts", "model_io_facts"],
         ),
         "availability" => (
             "--explain-condition",
-            if let Some(page) = page_scope {
-                format!("model:{}|{}", page, target)
-            } else {
-                format!("model:{}", target)
-            },
+            scoped_target("model:", page_scope, target),
             "normal",
             "availability_facts",
             vec!["display_facts", "value_source_facts", "writer_facts", "model_io_facts"],
         ),
         "writer" => (
             "--explain-condition",
-            if let Some(page) = page_scope {
-                format!("field:{}|{}", page, target)
-            } else {
-                target.to_string()
-            },
+            scoped_target("field:", page_scope, target),
             "compact",
             "writer_facts",
             vec!["display_facts", "value_source_facts", "availability_facts", "model_io_facts"],
+        ),
+        // M58：动作轴。第一步仍打在组件上——用户问句给不出 action id，
+        // 而组件级 action_facts 会把可执行的 `action:` target 交出来。
+        "action" => (
+            "--explain-condition",
+            scoped_target("comp:", page_scope, target),
+            "compact",
+            "action_facts",
+            vec!["value_source_facts", "writer_facts", "model_io_facts"],
         ),
         "page-logic" | "page_logic" => (
             "--query-page-logic",
@@ -633,18 +779,15 @@ pub fn build_advise_query_output(
         ),
         _ => (
             "--explain-condition",
-            if let Some(page) = page_scope {
-                format!("comp:{}|{}", page, target)
-            } else {
-                target.to_string()
-            },
+            scoped_target("comp:", page_scope, target),
             "compact",
             "auto_facts",
             vec![],
         ),
     };
 
-    let followup = if question_kind == "availability" {
+    let kind = normalize_question_kind(question_kind);
+    let mut followup_rules = vec![if kind == "availability" {
         serde_json::json!({
             "command": primary_command,
             "target": primary_target,
@@ -658,11 +801,25 @@ pub fn build_advise_query_output(
             "command": primary_command,
             "target": primary_target,
             "budget": recommended_budget,
-            "intent": question_kind,
+            "intent": kind,
             "reason": "primary recommendation based on question-kind",
             "must_run_for_complete_answer": false,
         })
-    };
+    }];
+
+    if kind == "action" {
+        // 动作级 target 只能由上一步的输出给出：用户问句里没有 action id，
+        // 因此这条规则给的是取值路径而不是写死的 target。
+        followup_rules.push(serde_json::json!({
+            "command": "--explain",
+            "target": serde_json::Value::Null,
+            "target_from": "details.answer_facts.action_facts.actions[].action_target",
+            "budget": "compact",
+            "reason": "组件级查询先暴露 action target，再用 --explain 查单个动作做什么",
+            "expected_fact_path": "details.triggers",
+            "must_run_for_complete_answer": false,
+        }));
+    }
 
     serde_json::json!({
         "primary_command": primary_command,
@@ -671,7 +828,113 @@ pub fn build_advise_query_output(
         "requires_graphdb": true,
         "primary_fact_path": primary_fact_path,
         "forbidden_fact_paths": forbidden_paths,
-        "followup_rules": [followup],
+        "followup_rules": followup_rules,
         "note": "--advise-query 只消费结构化 question-kind，不做自然语言理解",
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 已带前缀的 target 不得被再拼一层：`model:comp:...` 是无效 target，
+    /// 模型照着建议执行必然失败。
+    #[test]
+    fn test_advise_query_does_not_double_prefix_target() {
+        for kind in [
+            "availability",
+            "display",
+            "value-source",
+            "writer",
+            "action",
+        ] {
+            let out = build_advise_query_output(
+                "comp:app/actions_test.spg|button2",
+                None,
+                kind,
+                "compact",
+            );
+            let target = out["details"]["primary_target"].as_str().unwrap();
+            assert_eq!(
+                target, "comp:app/actions_test.spg|button2",
+                "question-kind {} 不应改写已带前缀的 target",
+                kind
+            );
+        }
+    }
+
+    /// 裸 target 仍按 question-kind 补前缀。
+    #[test]
+    fn test_advise_query_scopes_bare_target() {
+        let out = build_advise_query_output(
+            "button2",
+            Some("app/actions_test.spg"),
+            "availability",
+            "compact",
+        );
+        assert_eq!(
+            out["details"]["primary_target"].as_str(),
+            Some("model:app/actions_test.spg|button2")
+        );
+    }
+
+    /// advise_query 必须走标准 AiOutput 信封，否则按信封转发的消费方只会拿到空对象。
+    #[test]
+    fn test_advise_query_emits_ai_output_envelope() {
+        let out = build_advise_query_output("model:model1", None, "model-relationships", "compact");
+        assert_eq!(out["kind"].as_str(), Some("QueryAdvice"));
+        assert!(out["schema_version"].is_string());
+        assert_eq!(out["query_target"].as_str(), Some("model:model1"));
+        assert_eq!(
+            out["summary"]["primary_command"].as_str(),
+            Some("--query-model")
+        );
+        assert!(out["details"]["followup_rules"].is_array());
+        assert!(!out["evidence"].as_array().unwrap().is_empty());
+        assert!(
+            out["next_queries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|q| q.as_str().unwrap_or("").starts_with("--query-model")),
+            "next_queries 必须给出可执行命令"
+        );
+    }
+
+    /// action 轴要给出两步：先组件级拿 action target，再动作级查动作本身。
+    #[test]
+    fn test_advise_query_action_kind_routes_component_first() {
+        let out =
+            build_advise_query_output("button2", Some("app/actions_test.spg"), "action", "compact");
+        assert_eq!(
+            out["details"]["primary_fact_path"].as_str(),
+            Some("action_facts")
+        );
+        assert_eq!(
+            out["details"]["primary_target"].as_str(),
+            Some("comp:app/actions_test.spg|button2")
+        );
+        let rules = out["details"]["followup_rules"].as_array().unwrap();
+        assert!(
+            rules.iter().any(|rule| {
+                rule["command"] == "--explain"
+                    && rule["target_from"]
+                        == "details.answer_facts.action_facts.actions[].action_target"
+            }),
+            "动作级 target 只能来自上一步输出，必须给取值路径"
+        );
+    }
+
+    /// 未识别的 question-kind 不能静默回退，否则模型拿到的是错的路由。
+    #[test]
+    fn test_advise_query_reports_unknown_question_kind() {
+        let out = build_advise_query_output("comp:app/x.spg|b1", None, "bogus", "compact");
+        let codes: Vec<&str> = out["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|d| d["code"].as_str())
+            .collect();
+        assert!(codes.contains(&"UNKNOWN_QUESTION_KIND"));
+    }
 }

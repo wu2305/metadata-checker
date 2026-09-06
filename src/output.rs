@@ -1,11 +1,12 @@
+pub mod answer_effect;
 pub mod brief;
 pub mod tbl;
 
-use crate::conditions::scan_conditions;
+use crate::conditions::{collect_json_paths_from_node, scan_conditions};
 use crate::dependency::DependencyGraph;
 use crate::parser::PageMetadata;
 use crate::superpage::{RefType, SuperPageMetadata};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -204,25 +205,6 @@ fn print_superpage_human(spg: &SuperPageMetadata, out: &mut dyn Write) -> Result
     Ok(())
 }
 
-/// 递归收集组件 ID 对应的稳定 json_path
-fn collect_component_json_paths(
-    arr: &[serde_json::Value],
-    path_prefix: &str,
-    paths: &mut HashMap<String, String>,
-) {
-    for (index, comp) in arr.iter().enumerate() {
-        let current = format!("{}[{}]", path_prefix, index);
-        if let Some(comp_id) = comp.get("id").and_then(|v| v.as_str()) {
-            paths.insert(comp_id.to_string(), current.clone());
-        }
-        for nested in ["components", "panels", "steps", "comps"] {
-            if let Some(children) = comp.get(nested).and_then(|v| v.as_array()) {
-                collect_component_json_paths(children, &format!("{}.{}", current, nested), paths);
-            }
-        }
-    }
-}
-
 pub fn print_non_human(meta: &PageMetadata) -> Result<()> {
     print_non_human_to(meta, None, &mut io::stdout())
 }
@@ -276,32 +258,42 @@ pub fn print_summary_to(
 
         let mut diagnostics = Vec::new();
         if !cycles.is_empty() {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Warning,
-                code: "CYCLE_DEPENDENCY".to_string(),
-                message: "Cycle dependencies detected".to_string(),
-                location: crate::output::Location::new(),
-                suggestion: Some("Check component expressions for circular references".to_string()),
+            diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "CYCLE_DEPENDENCY",
+                    cycles.len(),
+                    crate::output::Location::new(),
+                    "Cycle dependencies detected",
+                );
+                diag.suggestion =
+                    Some("Check component expressions for circular references".to_string());
+                diag
             });
         } else {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "OK".to_string(),
-                message: "No cycles detected".to_string(),
-                location: crate::output::Location::new(),
-                suggestion: None,
+            diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "OK",
+                    1,
+                    crate::output::Location::new(),
+                    "No cycles detected",
+                );
+                diag.severity = crate::output::DiagnosticSeverity::Info;
+                diag
             });
         }
         if let Some(analyses) = priority_analyses {
             if analyses.is_empty() {
-                diagnostics.push(crate::output::Diagnostic {
-                    severity: crate::output::DiagnosticSeverity::Info,
-                    code: "NO_PRIORITY_RULES".to_string(),
-                    message: "No priority rules found in this page".to_string(),
-                    location: crate::output::Location::new(),
-                    suggestion: Some(
-                        "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
-                    ),
+                diagnostics.push({
+                    let mut diag = crate::diagnostics::envelope_diagnostic(
+                        "NO_PRIORITY_RULES",
+                        1,
+                        crate::output::Location::new(),
+                        "No priority rules found in this page",
+                    );
+                    diag.severity = crate::output::DiagnosticSeverity::Info;
+                    diag.suggestion =
+                        Some("Page has no defaultValue/exp/calcCondition conflicts".to_string());
+                    diag
                 });
             }
         }
@@ -448,45 +440,42 @@ pub fn print_non_human_to(
 
         let mut diagnostics = Vec::new();
         if !cycles.is_empty() {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Warning,
-                code: "CYCLE_DEPENDENCY".to_string(),
-                message: "Cycle dependencies detected".to_string(),
-                location: crate::output::Location::new(),
-                suggestion: Some("Check component expressions for circular references".to_string()),
+            diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "CYCLE_DEPENDENCY",
+                    cycles.len(),
+                    crate::output::Location::new(),
+                    "Cycle dependencies detected",
+                );
+                diag.suggestion =
+                    Some("Check component expressions for circular references".to_string());
+                diag
             });
         } else {
-            diagnostics.push(crate::output::Diagnostic {
-                severity: crate::output::DiagnosticSeverity::Info,
-                code: "OK".to_string(),
-                message: "No cycles detected".to_string(),
-                location: crate::output::Location::new(),
-                suggestion: None,
+            diagnostics.push({
+                let mut diag = crate::diagnostics::envelope_diagnostic(
+                    "OK",
+                    1,
+                    crate::output::Location::new(),
+                    "No cycles detected",
+                );
+                diag.severity = crate::output::DiagnosticSeverity::Info;
+                diag
             });
         }
         if let Some(analyses) = priority_analyses {
             if analyses.is_empty() {
-                diagnostics.push(crate::output::Diagnostic {
-                    severity: crate::output::DiagnosticSeverity::Info,
-                    code: "NO_PRIORITY_RULES".to_string(),
-                    message: "No priority rules found in this page".to_string(),
-                    location: crate::output::Location::new(),
-                    suggestion: Some(
-                        "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
-                    ),
-                });
-            }
-        }
-        if let Some(analyses) = priority_analyses {
-            if analyses.is_empty() {
-                diagnostics.push(crate::output::Diagnostic {
-                    severity: crate::output::DiagnosticSeverity::Info,
-                    code: "NO_PRIORITY_RULES".to_string(),
-                    message: "No priority rules found in this page".to_string(),
-                    location: crate::output::Location::new(),
-                    suggestion: Some(
-                        "Page has no defaultValue/exp/calcCondition conflicts".to_string(),
-                    ),
+                diagnostics.push({
+                    let mut diag = crate::diagnostics::envelope_diagnostic(
+                        "NO_PRIORITY_RULES",
+                        1,
+                        crate::output::Location::new(),
+                        "No priority rules found in this page",
+                    );
+                    diag.severity = crate::output::DiagnosticSeverity::Info;
+                    diag.suggestion =
+                        Some("Page has no defaultValue/exp/calcCondition conflicts".to_string());
+                    diag
                 });
             }
         }
@@ -536,6 +525,11 @@ pub fn print_non_human_to(
             "unknown"
         };
         let conditions = scan_conditions(spg, meta.input_path.as_deref());
+        let condition_values = conditions
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<serde_json::Result<Vec<Value>>>()
+            .with_context(|| "序列化 SuperPage 条件记录失败")?;
         let what_is_it = format!(
             "SuperPage {}，{} 个组件，{} 个表达式，{} 个数据源，{} 个条件表达式，角色 {}",
             meta.input_path.as_deref().unwrap_or("unknown"),
@@ -560,17 +554,9 @@ pub fn print_non_human_to(
         });
 
         let mut component_json_paths: HashMap<String, String> = HashMap::new();
-        if let Some(components) = spg
-            .raw
-            .get("canvas")
-            .and_then(|c| c.get("components"))
-            .and_then(|v| v.as_array())
-        {
-            collect_component_json_paths(
-                components,
-                "canvas.components",
-                &mut component_json_paths,
-            );
+        // 与 extract_components / scan_conditions 同起点：canvas 对象本身
+        if let Some(canvas) = spg.raw.get("canvas") {
+            collect_json_paths_from_node(canvas, "canvas", &mut component_json_paths);
         }
 
         let details = json!({
@@ -623,7 +609,7 @@ pub fn print_non_human_to(
             "dependency_order": topo,
             "cycles": cycles,
             "priority_summary": priority_summary,
-            "conditions": conditions.iter().map(|c| serde_json::to_value(c).unwrap()).collect::<Vec<Value>>(),
+            "conditions": condition_values,
         });
 
         let mut output =

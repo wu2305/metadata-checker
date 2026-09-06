@@ -1,5 +1,5 @@
 use metadata_checker::output::schema::{
-    AiOutput, Diagnostic, DiagnosticSeverity, Evidence, Location, OutputKind,
+    AiOutput, DiagnosticSeverity, Evidence, Location, OutputKind,
 };
 use metadata_checker::visualization::builder::VisualGraphBuilder;
 use metadata_checker::visualization::options::VisualGraphOptions;
@@ -89,16 +89,19 @@ fn create_test_output_with_nested_visual_secrets() -> AiOutput {
             "${model:secret=evidence_target_secret_001}; cookie=evidence_raw_cookie_001",
         ),
     );
-    output.diagnostics.push(Diagnostic {
-        severity: DiagnosticSeverity::Warning,
-        code: "TOKEN_DIAGNOSTIC".to_string(),
-        message: "diagnostic leaked token=diagnostic_token_001".to_string(),
-        location: Location {
-            source_file: Some("pages/api_key=diagnostic_api_key_001.spg".to_string()),
-            node_id: Some("comp:cookie=diagnostic_cookie_001".to_string()),
-            json_path: Some("$.password=diagnostic_password_001".to_string()),
-        },
-        suggestion: Some("rotate secret=diagnostic_secret_001".to_string()),
+    output.diagnostics.push({
+        let mut diag = metadata_checker::diagnostics::envelope_diagnostic(
+            "TOKEN_DIAGNOSTIC",
+            1,
+            Location {
+                source_file: Some("pages/api_key=diagnostic_api_key_001.spg".to_string()),
+                node_id: Some("comp:cookie=diagnostic_cookie_001".to_string()),
+                json_path: Some("$.password=diagnostic_password_001".to_string()),
+            },
+            "diagnostic leaked token=diagnostic_token_001",
+        );
+        diag.suggestion = Some("rotate secret=diagnostic_secret_001".to_string());
+        diag
     });
     output
 }
@@ -159,12 +162,16 @@ fn test_ready_envelope_generates_visual_graph() {
 #[test]
 fn test_error_envelope_generates_diagnostic_only_graph() {
     let mut output = AiOutput::new(OutputKind::PageQuery, json!({}));
-    output.diagnostics.push(Diagnostic {
-        severity: DiagnosticSeverity::Error,
-        code: "TARGET_NOT_FOUND".to_string(),
-        message: "Target 'page:missing' not found".to_string(),
-        location: Location::default(),
-        suggestion: Some("Check the target ID".to_string()),
+    output.diagnostics.push({
+        let mut diag = metadata_checker::diagnostics::envelope_diagnostic(
+            "TARGET_NOT_FOUND",
+            1,
+            Location::default(),
+            "Target 'page:missing' not found",
+        );
+        diag.severity = DiagnosticSeverity::Error;
+        diag.suggestion = Some("Check the target ID".to_string());
+        diag
     });
 
     let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());
@@ -616,16 +623,20 @@ fn test_nested_metadata_sensitive_keys_are_redacted() {
 #[test]
 fn test_diagnostic_values_are_redacted_in_graph_mermaid_and_echarts() {
     let mut output = AiOutput::new(OutputKind::PageQuery, json!({}));
-    output.diagnostics.push(Diagnostic {
-        severity: DiagnosticSeverity::Error,
-        code: "AUTH_FAILED".to_string(),
-        message: "token=diagnostic_token_002 password=diagnostic_password_002".to_string(),
-        location: Location {
-            source_file: Some("pages/cookie=diagnostic_cookie_002.spg".to_string()),
-            node_id: Some("comp:secret=diagnostic_secret_002".to_string()),
-            json_path: Some("$.api_key=diagnostic_api_key_002".to_string()),
-        },
-        suggestion: Some("replace api_key=diagnostic_suggestion_api_key_002".to_string()),
+    output.diagnostics.push({
+        let mut diag = metadata_checker::diagnostics::envelope_diagnostic(
+            "AUTH_FAILED",
+            1,
+            Location {
+                source_file: Some("pages/cookie=diagnostic_cookie_002.spg".to_string()),
+                node_id: Some("comp:secret=diagnostic_secret_002".to_string()),
+                json_path: Some("$.api_key=diagnostic_api_key_002".to_string()),
+            },
+            "token=diagnostic_token_002 password=diagnostic_password_002",
+        );
+        diag.severity = DiagnosticSeverity::Error;
+        diag.suggestion = Some("replace api_key=diagnostic_suggestion_api_key_002".to_string());
+        diag
     });
 
     let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());

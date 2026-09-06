@@ -107,7 +107,22 @@ fn condition_owner_node_id(cond_obj: &serde_json::Value) -> Option<String> {
         "Component" | "FieldDefault" => Some(format!("comp:{}|{}", source_file, owner_token)),
         "ModelSource" => Some(format!("model:{}", owner_token)),
         "Page" => Some(format!("page:{}", source_file)),
-        "Action" => Some(format!("action:{}|{}", source_file, owner_token)),
+        // 动作条件 id 形如 `cond:<文件>|<组件>#<动作>#conditionExp`，
+        // 而动作节点 id 是 `action:<文件>|<组件>|<动作>`。此前只取到组件段，
+        // 拼出的 owner_node_id 指向一个不存在的节点，模型照着查必然落空。
+        "Action" => {
+            let action_token = condition_id
+                .split('|')
+                .nth(1)
+                .and_then(|s| s.split('#').nth(1));
+            match action_token {
+                Some(action_token) if !action_token.is_empty() => Some(format!(
+                    "action:{}|{}|{}",
+                    source_file, owner_token, action_token
+                )),
+                _ => Some(format!("action:{}|{}", source_file, owner_token)),
+            }
+        }
         _ => Some(owner_token.to_string()),
     }
 }
@@ -276,7 +291,23 @@ pub(crate) fn dedupe_conditions(conditions: Vec<serde_json::Value>) -> Vec<serde
     result
 }
 
+/// 祖先选父的类型优先级：Component 父优先，Page 仅兜底（spec 说明 A 不变式）
+fn ancestor_parent_rank(node_type: &crate::graph::NodeType) -> u8 {
+    match node_type {
+        crate::graph::NodeType::Component => 0,
+        crate::graph::NodeType::Page => 1,
+        _ => 2,
+    }
+}
+
 /// 沿 Contains 入边查找组件祖先，返回从近到远的祖先组件
+///
+/// 确定性选父规则（spec 说明 A）：嵌套组件同时有 page→comp 与 comp→comp
+/// 两条 Contains 入边，候选父按 (类型优先级, 节点 id 字典序) 排序取第一——
+/// Component 父优先，Page 仅兜底，同类平局取 id 字典序最小者。选择与图存储
+/// 迭代序无关，redb 与 MemoryGraphStore 结果一致。
+/// 无环守护：选中的父节点若已在链上（成环样本）立即终止，保证起点不会
+/// 被当成自己的祖先、链不重复。
 pub(in crate::explain) fn component_ancestor_chain(
     graph: &dyn GraphReadStore,
     component_id: &str,
@@ -293,7 +324,7 @@ pub(in crate::explain) fn component_ancestor_chain(
         let parent = neighbors
             .incoming
             .iter()
-            .find(|edge_view| {
+            .filter(|edge_view| {
                 let source = &edge_view.node;
                 let edge = &edge_view.edge;
                 matches!(edge.edge_type, crate::graph::EdgeType::Contains)
@@ -302,12 +333,21 @@ pub(in crate::explain) fn component_ancestor_chain(
                         crate::graph::NodeType::Component | crate::graph::NodeType::Page
                     )
             })
+            .min_by(|a, b| {
+                ancestor_parent_rank(&a.node.node_type)
+                    .cmp(&ancestor_parent_rank(&b.node.node_type))
+                    .then_with(|| a.node.id.cmp(&b.node.id))
+            })
             .map(|edge_view| edge_view.node.clone());
 
         let Some(parent) = parent else {
             break;
         };
         if parent.node_type == crate::graph::NodeType::Page {
+            break;
+        }
+        // 成环样本：父节点已在链上（含起点自身），终止避免自继承与重复
+        if seen.contains(&parent.id) {
             break;
         }
 
@@ -360,12 +400,27 @@ fn total_row_count_models(cond_obj: &serde_json::Value) -> Vec<String> {
     models
 }
 
-/// 收集组件自身表达式所在 JSON path，用于通过 JSON 层级推断祖先容器
+/// 收集组件自身表达式所在 JSON path，用于通过 JSON 层级推断祖先容器。
+///
+/// 无表达式的组件（如纯按钮）没有任何条件入边/带 json_path 的出边可借，
+/// 必须补读节点 meta 里的 `json_path`（scanner 建点时已写入，spg.rs 组件
+/// 节点 meta），否则祖先链的 json_path 兜底推断永远落空。
 pub(in crate::explain) fn component_json_paths(
     graph: &dyn GraphReadStore,
     component_id: &str,
 ) -> Vec<String> {
     let mut paths = Vec::new();
+    // 补读节点自身 meta 的 json_path：无表达式组件的唯一路径来源
+    if let Ok(Some(node)) = graph.get_node(component_id) {
+        if let Some(path) = node
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("json_path"))
+            .and_then(|v| v.as_str())
+        {
+            paths.push(path.to_string());
+        }
+    }
     if let Some(neighbors) = graph.get_node_edges(component_id).ok().flatten() {
         for edge_view in &neighbors.incoming {
             let source = &edge_view.node;
@@ -407,14 +462,35 @@ fn condition_component_json_path(cond_obj: &serde_json::Value) -> Option<String>
         .map(|(prefix, _)| prefix.to_string())
 }
 
+/// 判断 `ancestor_component_path` 是否是 `target_json_path` 的祖先容器路径。
+///
+/// 前缀规则（F2 放宽）：不再硬编码 `.components[`，接受全部容器子键——
+/// 命中当且仅当 target 以 `<ancestor>.<子键>[` 开头，`<子键>` 为非空标识符。
+/// 保留 `[` 数组下标锚点，避免把组件自身属性路径（如 `.visibleCondition`、
+/// `.value`）误判为后代；排除列表键（effectStyles 等）不含组件，永远不会
+/// 出现在组件/条件的 json_path 上，无需在此特判。
 pub(in crate::explain::condition_facts) fn is_ancestor_json_path(
     ancestor_component_path: &str,
     target_json_path: &str,
 ) -> bool {
-    target_json_path.starts_with(&format!("{}.components[", ancestor_component_path))
+    let Some(rest) = target_json_path
+        .strip_prefix(ancestor_component_path)
+        .and_then(|rest| rest.strip_prefix('.'))
+    else {
+        return false;
+    };
+    let Some(bracket) = rest.find('[') else {
+        return false;
+    };
+    let container_key = &rest[..bracket];
+    !container_key.is_empty()
+        && container_key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// 低代码组件图当前只保证 page -> component Contains；嵌套父子关系用 json_path 前缀补足
+/// json_path 兜底：comp→comp Contains 边是祖先链的首选依据；对尚缺该边的
+/// 图形态（或无表达式组件），用放宽后的容器子键前缀补足嵌套父子关系
 pub(in crate::explain) fn collect_inherited_conditions_by_json_path(
     graph: &dyn GraphReadStore,
     page_path: &str,
@@ -705,4 +781,300 @@ fn collect_condition_objects_for_node(
         .into_iter()
         .map(|fact| fact.to_json())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{Edge, EdgeType, Node, NodeType};
+    use crate::graph_store::GraphWriteStore;
+    use crate::memory_graph_store::MemoryGraphStore;
+
+    /// 构造测试节点（按需携带 meta）
+    fn test_node(id: &str, node_type: NodeType, meta: Option<serde_json::Value>) -> Node {
+        Node {
+            id: id.to_string(),
+            node_type,
+            path: "app/chain.spg".to_string(),
+            name: id.to_string(),
+            meta,
+        }
+    }
+
+    /// 添加一条 Contains 边
+    fn add_contains(store: &mut MemoryGraphStore, from: &str, to: &str) {
+        store
+            .add_edge(Edge {
+                from: from.to_string(),
+                to: to.to_string(),
+                edge_type: EdgeType::Contains,
+                field_path: None,
+                meta: None,
+            })
+            .expect("添加 Contains 边必须成功");
+    }
+
+    /// 唯一父断言：page→comp 与 comp→comp 两条 Contains 入边并存时，
+    /// 无论插入顺序如何，都必须确定性地选中 Component 父（Page 仅兜底）。
+    #[test]
+    fn test_ancestor_chain_prefers_component_parent_over_page() {
+        for page_edge_first in [true, false] {
+            let mut store = MemoryGraphStore::new();
+            store
+                .upsert_node(test_node("page:app/chain.spg", NodeType::Page, None))
+                .expect("upsert page");
+            store
+                .upsert_node(test_node(
+                    "comp:app/chain.spg|panel",
+                    NodeType::Component,
+                    None,
+                ))
+                .expect("upsert panel");
+            store
+                .upsert_node(test_node(
+                    "comp:app/chain.spg|child",
+                    NodeType::Component,
+                    None,
+                ))
+                .expect("upsert child");
+            if page_edge_first {
+                add_contains(&mut store, "page:app/chain.spg", "comp:app/chain.spg|child");
+                add_contains(
+                    &mut store,
+                    "comp:app/chain.spg|panel",
+                    "comp:app/chain.spg|child",
+                );
+            } else {
+                add_contains(
+                    &mut store,
+                    "comp:app/chain.spg|panel",
+                    "comp:app/chain.spg|child",
+                );
+                add_contains(&mut store, "page:app/chain.spg", "comp:app/chain.spg|child");
+            }
+            add_contains(&mut store, "page:app/chain.spg", "comp:app/chain.spg|panel");
+
+            let chain = component_ancestor_chain(&store, "comp:app/chain.spg|child");
+            assert_eq!(
+                chain,
+                vec![("comp:app/chain.spg|panel".to_string(), 1usize)],
+                "page_edge_first={} 时也必须选中 Component 父",
+                page_edge_first
+            );
+        }
+    }
+
+    /// 确定性选父：多个 Component 父平局（违反 scanner 唯一父不变式的坏样本）时，
+    /// 按节点 id 字典序取最小者，与边插入顺序无关、可复现。
+    #[test]
+    fn test_ancestor_chain_tie_breaks_by_node_id() {
+        let mut chains = Vec::new();
+        for b_edge_first in [true, false] {
+            let mut store = MemoryGraphStore::new();
+            store
+                .upsert_node(test_node(
+                    "comp:app/chain.spg|panel_a",
+                    NodeType::Component,
+                    None,
+                ))
+                .expect("upsert panel_a");
+            store
+                .upsert_node(test_node(
+                    "comp:app/chain.spg|panel_b",
+                    NodeType::Component,
+                    None,
+                ))
+                .expect("upsert panel_b");
+            store
+                .upsert_node(test_node(
+                    "comp:app/chain.spg|child",
+                    NodeType::Component,
+                    None,
+                ))
+                .expect("upsert child");
+            if b_edge_first {
+                add_contains(
+                    &mut store,
+                    "comp:app/chain.spg|panel_b",
+                    "comp:app/chain.spg|child",
+                );
+                add_contains(
+                    &mut store,
+                    "comp:app/chain.spg|panel_a",
+                    "comp:app/chain.spg|child",
+                );
+            } else {
+                add_contains(
+                    &mut store,
+                    "comp:app/chain.spg|panel_a",
+                    "comp:app/chain.spg|child",
+                );
+                add_contains(
+                    &mut store,
+                    "comp:app/chain.spg|panel_b",
+                    "comp:app/chain.spg|child",
+                );
+            }
+            chains.push(component_ancestor_chain(&store, "comp:app/chain.spg|child"));
+        }
+        assert_eq!(chains[0], chains[1], "两种插入顺序的选父结果必须一致");
+        assert_eq!(
+            chains[0],
+            vec![("comp:app/chain.spg|panel_a".to_string(), 1usize)],
+            "平局时必须确定性选择 id 字典序最小的 Component 父"
+        );
+    }
+
+    /// 无环：组件互含成环时链必须终止且不重复（seen 集合守护）。
+    #[test]
+    fn test_ancestor_chain_terminates_on_cycle() {
+        let mut store = MemoryGraphStore::new();
+        store
+            .upsert_node(test_node("comp:app/chain.spg|a", NodeType::Component, None))
+            .expect("upsert a");
+        store
+            .upsert_node(test_node("comp:app/chain.spg|b", NodeType::Component, None))
+            .expect("upsert b");
+        add_contains(&mut store, "comp:app/chain.spg|a", "comp:app/chain.spg|b");
+        add_contains(&mut store, "comp:app/chain.spg|b", "comp:app/chain.spg|a");
+
+        let chain_a = component_ancestor_chain(&store, "comp:app/chain.spg|a");
+        assert_eq!(
+            chain_a,
+            vec![("comp:app/chain.spg|b".to_string(), 1usize)],
+            "成环时必须在回到起点前终止"
+        );
+        let chain_b = component_ancestor_chain(&store, "comp:app/chain.spg|b");
+        assert_eq!(
+            chain_b,
+            vec![("comp:app/chain.spg|a".to_string(), 1usize)],
+            "反向遍历同样必须终止"
+        );
+    }
+
+    /// 近到远序稳定：三级嵌套链多次运行结果一致，距离从 1 递增。
+    #[test]
+    fn test_ancestor_chain_near_to_far_order_stable() {
+        let mut store = MemoryGraphStore::new();
+        store
+            .upsert_node(test_node("page:app/chain.spg", NodeType::Page, None))
+            .expect("upsert page");
+        for id in ["top", "mid", "leaf"] {
+            store
+                .upsert_node(test_node(
+                    &format!("comp:app/chain.spg|{}", id),
+                    NodeType::Component,
+                    None,
+                ))
+                .expect("upsert comp");
+        }
+        add_contains(&mut store, "page:app/chain.spg", "comp:app/chain.spg|top");
+        add_contains(&mut store, "page:app/chain.spg", "comp:app/chain.spg|mid");
+        add_contains(&mut store, "page:app/chain.spg", "comp:app/chain.spg|leaf");
+        add_contains(
+            &mut store,
+            "comp:app/chain.spg|top",
+            "comp:app/chain.spg|mid",
+        );
+        add_contains(
+            &mut store,
+            "comp:app/chain.spg|mid",
+            "comp:app/chain.spg|leaf",
+        );
+
+        let expected = vec![
+            ("comp:app/chain.spg|mid".to_string(), 1usize),
+            ("comp:app/chain.spg|top".to_string(), 2usize),
+        ];
+        for run in 0..3 {
+            let chain = component_ancestor_chain(&store, "comp:app/chain.spg|leaf");
+            assert_eq!(chain, expected, "第 {} 次运行的祖先链必须稳定", run + 1);
+        }
+    }
+
+    /// 放宽前缀：全部容器子键（columns/tabs/panel 等）都参与祖先判定；
+    /// 组件自身属性路径、兄弟路径、id 前缀碰撞不得误判。
+    #[test]
+    fn test_is_ancestor_json_path_accepts_all_container_keys() {
+        let ancestor = "canvas.components[0]";
+        assert!(is_ancestor_json_path(
+            ancestor,
+            "canvas.components[0].components[1]"
+        ));
+        assert!(is_ancestor_json_path(
+            ancestor,
+            "canvas.components[0].columns[2]"
+        ));
+        assert!(is_ancestor_json_path(
+            ancestor,
+            "canvas.components[0].tabs[0].components[0]"
+        ));
+        assert!(is_ancestor_json_path(
+            ancestor,
+            "canvas.components[0].operateButtons[3]"
+        ));
+        // 组件自身属性路径不是后代
+        assert!(!is_ancestor_json_path(
+            ancestor,
+            "canvas.components[0].visibleCondition"
+        ));
+        assert!(!is_ancestor_json_path(
+            ancestor,
+            "canvas.components[0].value"
+        ));
+        // 兄弟节点不是后代
+        assert!(!is_ancestor_json_path(
+            ancestor,
+            "canvas.components[1].components[0]"
+        ));
+        // id 前缀碰撞（[1] 与 [10]）不得误判
+        assert!(!is_ancestor_json_path(
+            "canvas.components[1]",
+            "canvas.components[10].components[0]"
+        ));
+        // 完全无关路径
+        assert!(!is_ancestor_json_path(ancestor, "canvas.other[0]"));
+        assert!(!is_ancestor_json_path(ancestor, ""));
+    }
+
+    /// 补读节点 meta：无表达式组件（无条件入边、无出边）的 json_path
+    /// 必须来自节点自身 meta，且与边 meta 路径去重。
+    #[test]
+    fn test_component_json_paths_reads_node_meta() {
+        let mut store = MemoryGraphStore::new();
+        store
+            .upsert_node(test_node(
+                "comp:app/chain.spg|btn",
+                NodeType::Component,
+                Some(serde_json::json!({"json_path": "canvas.components[0].columns[1]"})),
+            ))
+            .expect("upsert btn");
+
+        let paths = component_json_paths(&store, "comp:app/chain.spg|btn");
+        assert_eq!(
+            paths,
+            vec!["canvas.components[0].columns[1]".to_string()],
+            "无表达式组件必须从节点 meta 补读 json_path"
+        );
+
+        // 节点 meta 与出边 meta 携带相同路径时必须去重
+        store
+            .upsert_node(test_node("field:model1.name", NodeType::Field, None))
+            .expect("upsert field");
+        store
+            .add_edge(Edge {
+                from: "comp:app/chain.spg|btn".to_string(),
+                to: "field:model1.name".to_string(),
+                edge_type: EdgeType::Reads,
+                field_path: None,
+                meta: Some(serde_json::json!({"json_path": "canvas.components[0].columns[1]"})),
+            })
+            .expect("add reads edge");
+        let paths = component_json_paths(&store, "comp:app/chain.spg|btn");
+        assert_eq!(
+            paths,
+            vec!["canvas.components[0].columns[1]".to_string()],
+            "节点 meta 与边 meta 的重复路径必须去重"
+        );
+    }
 }

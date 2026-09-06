@@ -170,6 +170,16 @@ pub struct IndexCommit {
     pub checkpoint: Option<crate::diff_refresh::DiffRefreshCheckpoint>,
     /// M56 增量持久化 delta；`None` 表示走全量重写路径
     pub delta: Option<IndexDelta>,
+    /// M58.3 复核返修：scanner 诊断载荷，与 nodes/edges/file_states/checkpoint
+    /// 在同一 write transaction 落库（同生共死，避免 checkpoint 已推进但诊断
+    /// 陈旧的持久不一致）。
+    /// `scanner_entries`：本轮脏文件的 `(logical_path, 序列化计数 bytes)`，
+    /// 覆盖同 key 旧值；计数为零的修复文件也携带 entry 以覆盖旧值。
+    /// `scanner_deleted_paths`：已删除文件的 logical_path，移除其 entry。
+    /// 两者皆空表示本次提交不涉及 scanner 诊断变更。
+    pub scanner_entries: Vec<(String, Vec<u8>)>,
+    /// 已删除文件的 logical_path 列表，落库时移除其 scanner 诊断 entry
+    pub scanner_deleted_paths: Vec<String>,
 }
 
 /// M56：增量持久化 delta（由 scanner 在 remove/re-add 时收集，persist 只消费）。
@@ -222,12 +232,24 @@ pub struct PersistReport {
 
 /// 索引报告
 ///
-/// 一次索引提交后的结果摘要。
+/// 一次索引提交后的结果摘要。**四个字段均为文件口径**（不是节点数）：
+/// `indexed` = 发现的文件总数，`dirty` = 本轮重新解析的脏文件数，
+/// `deleted` = 本轮删除的文件数，`unchanged` = `indexed - dirty`。
+///
+/// 注意：`IndexStateStore::persist_index` 的 store 实现（redb/memory）
+/// 只能从 `IndexCommit` 拿到节点数，返回的是节点口径的近似值；
+/// 文件口径由 `ProjectIndexer::scan_with_diagnostics` 在报告出口层
+/// 用 diff 计划覆盖（M58.3 PR1 refix，F6）。直接消费 store 层
+/// `persist_index` 返回值的调用方（如 perf profile）读到的仍是节点口径。
 #[derive(Debug, Clone)]
 pub struct IndexReport {
+    /// 发现的文件总数
     pub indexed: usize,
+    /// 未变更文件数（`indexed - dirty`）
     pub unchanged: usize,
+    /// 本轮重新解析的脏文件数
     pub dirty: usize,
+    /// 本轮删除的文件数
     pub deleted: usize,
 }
 
@@ -260,4 +282,54 @@ impl From<GraphStoreError> for crate::tool_contract::ToolError {
         };
         crate::tool_contract::ToolError::new(code, err.to_string())
     }
+}
+
+/// 合并写入节点 meta —— **GraphStore 契约的一部分**，所有实现共用这一个函数。
+///
+/// M59-B1：本函数原先私有于 `graph_redb.rs`，而 `MemoryGraphStore::upsert_node`
+/// 直接 `insert` 覆盖，于是同一组写入在两个实现上产出不同的 meta。规则一旦分头
+/// 实现就必然分叉，所以提到 trait 模块，`graph_redb` 与 `memory_graph_store`
+/// 都调这一份；将来的 Grafeo 实现同样调它，而不是再抄一遍。
+///
+/// 规则：
+/// 1. 写入方没带 meta ⇒ **保留既有 meta**。扫描器会为「尚未见到定义的引用目标」
+///    先建占位节点，之后真正的定义再 upsert 上来；反过来也有先定义后被引用的
+///    顺序。无条件覆盖会让后到的、信息更少的那次写入抹掉已有事实。
+/// 2. 既有为空 ⇒ 采用写入方的 meta。
+/// 3. **占位节点不得被降级**：`PhysicalTable` 是引用侧推断出的保守类型，
+///    不能覆盖已经确认的 `DataFlow` / `App`。其余情况以写入方为准。
+pub fn merge_upsert_meta(
+    existing_meta: Option<serde_json::Value>,
+    incoming_meta: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let Some(incoming_meta) = incoming_meta else {
+        return existing_meta;
+    };
+    let Some(existing_meta) = existing_meta else {
+        return Some(incoming_meta);
+    };
+
+    let existing_model_type = existing_meta.get("modelType").and_then(|v| v.as_str());
+    let incoming_model_type = incoming_meta.get("modelType").and_then(|v| v.as_str());
+    if incoming_model_type == Some("PhysicalTable")
+        && matches!(existing_model_type, Some("DataFlow" | "App"))
+    {
+        return Some(existing_meta);
+    }
+
+    Some(incoming_meta)
+}
+
+/// 边的去重键：`(from, to, edge_type, field_path)`。
+///
+/// M59-B1：`graph_redb` 用这个四元组去重（`seen_edges`），`MemoryGraphStore`
+/// 原先**完全不去重**，同一条边写两次就出现两次。`field_path` 参与键是刻意的：
+/// 同一对端点上不同字段产生的引用是**不同的事实**，不能合并。
+pub fn edge_dedup_key(edge: &Edge) -> (String, String, crate::graph::EdgeType, Option<String>) {
+    (
+        edge.from.clone(),
+        edge.to.clone(),
+        edge.edge_type.clone(),
+        edge.field_path.clone(),
+    )
 }

@@ -2,14 +2,13 @@
 
 //! M11 图数据库路径、只读与并发可用性测试
 
+use fs2::FileExt;
 use metadata_checker::output::schema::{AiOutput, OutputKind};
 use std::path::PathBuf;
 use std::process::Command;
 
 fn bin() -> PathBuf {
-    std::env::current_dir()
-        .unwrap()
-        .join("target/debug/metadata-checker")
+    PathBuf::from(env!("CARGO_BIN_EXE_metadata-checker"))
 }
 
 fn run_cli(args: &[&str]) -> String {
@@ -52,6 +51,7 @@ fn test_custom_graph_db_path_build_and_query() {
         "--project-dir",
         "tests/fixtures/test_project",
         "--build-graph",
+        "--human",
         "--graph-db-path",
         tmp.to_str().unwrap(),
     ]);
@@ -187,6 +187,7 @@ fn test_build_graph_to_tmp_real_project() {
         "--project-dir",
         project,
         "--build-graph",
+        "--human",
         "--graph-db-path",
         tmp.to_str().unwrap(),
         "--graph-lock-timeout-ms",
@@ -261,6 +262,7 @@ fn test_real_project_parallel_queries() {
         "--project-dir",
         project,
         "--build-graph",
+        "--human",
         "--graph-db-path",
         tmp.to_str().unwrap(),
         "--graph-lock-timeout-ms",
@@ -347,11 +349,12 @@ fn test_graph_db_locked_returns_structured_diagnostic() {
     let _ = std::fs::remove_file(&db_path);
     let _ = std::fs::remove_file(&lock_path);
 
-    // 先 build graph
+    // 先 build graph（--human：默认模式输出单 JSON，人类统计行只在 human 模式打印）
     let build_out = run_cli(&[
         "--project-dir",
         "tests/fixtures/test_project",
         "--build-graph",
+        "--human",
         "--graph-db-path",
         db_path.to_str().unwrap(),
     ]);
@@ -359,11 +362,15 @@ fn test_graph_db_locked_returns_structured_diagnostic() {
     assert!(db_path.exists());
 
     // 手动持有辅助锁文件，阻止 CLI 进程获取
-    let _lock_file = std::fs::OpenOptions::new()
+    let lock_file = std::fs::OpenOptions::new()
+        .read(true)
         .write(true)
-        .create_new(true)
+        .create(true)
         .open(&lock_path)
         .expect("should create lock file in test");
+    lock_file
+        .try_lock_exclusive()
+        .expect("should hold graphdb lock in test");
 
     // CLI 进程在 100ms 超时后应返回 GRAPH_DB_LOCKED
     let output = run_cli(&[

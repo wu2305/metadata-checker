@@ -4,12 +4,14 @@ pub mod browser;
 pub mod browser_orchestrator;
 #[cfg(feature = "browser-wasm")]
 pub mod browser_wasm_bindgen;
+pub(crate) mod candidate;
 #[cfg(feature = "cli-local")]
 pub mod cli;
 pub mod conditions;
 pub mod context;
 pub mod dense_graph;
 pub mod dependency;
+pub mod diagnostics;
 pub mod diff_refresh;
 pub mod explain;
 pub mod graph;
@@ -17,6 +19,7 @@ pub mod graph;
 pub mod graph_redb;
 #[cfg(feature = "cli-local")]
 pub mod graph_redb_v2;
+pub mod graph_retrieval;
 pub mod graph_store;
 pub mod memory_graph_store;
 pub mod model_scope;
@@ -33,10 +36,10 @@ pub mod remote_metadata;
 #[cfg(any(feature = "cli-local", feature = "browser-wasm"))]
 pub mod remote_metadata_provider;
 pub mod response_processor;
+pub mod route;
 #[cfg(feature = "cli-local")]
 pub mod runtime;
 pub mod scanner;
-#[cfg(feature = "cli-local")]
 #[cfg(feature = "cli-local")]
 pub mod session;
 pub mod source_id;

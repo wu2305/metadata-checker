@@ -221,15 +221,16 @@ pub(in crate::explain) fn explain_component_graph(
     // field-level lineage tracing: form inputs or components with model writes
     let needs_lineage = !writes_models.is_empty();
     if needs_lineage && lineage.is_empty() {
-        diagnostics.push(crate::output::Diagnostic {
-            severity: crate::output::DiagnosticSeverity::Info,
-            code: "LINEAGE_SOURCE_MISSING".to_string(),
-            message: "Field-level lineage source could not be determined".to_string(),
-            location: crate::output::Location::new(),
-            suggestion: Some(
-                "Check --context or --query-dataflow for upstream relationships".to_string(),
-            ),
-        });
+        let mut diag = crate::diagnostics::envelope_diagnostic(
+            "LINEAGE_SOURCE_MISSING",
+            1,
+            crate::output::Location::new(),
+            "Field-level lineage source could not be determined",
+        );
+        diag.severity = crate::output::DiagnosticSeverity::Info;
+        diag.suggestion =
+            Some("Check --context or --query-dataflow for upstream relationships".to_string());
+        diagnostics.push(diag);
     }
 
     let mut output = crate::output::AiOutput::new(crate::output::OutputKind::Explain, summary);

@@ -748,3 +748,85 @@ cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_
 - 空事件轮次只推进 `pending_rounds`；`persist_report` 可能为 null；
 - 持久化失败不回滚已安装 runtime；下一轮可重试 pending commit；
 - 崩溃恢复仅靠 durable checkpoint，未写盘的 pending 轮次可能丢失，需由下一次 `poll` 重补齐。
+
+---
+
+## M58.3 PR2 真实项目性能基线（形态感知递归后，M50 runner 实测）
+
+采集时间：2026-08-25
+
+背景：PR2（F1 形态感知递归 + F2 祖先链 + ComponentProperty 图契约）的性能基线义务
+（plan `2026-08-24-m58-3-command-surface-gap-fixes-plan.md` PR2 验收项；附录 A 推论组件
+候选数 26,007 → 34,317，+32%）。按 M50 标准 runner 实测采集，不用推论反推预期值。
+
+采集环境：
+
+| 项目 | 值 |
+|---|---|
+| commit | `e27266b`（`codex/m58-slm-eval-foundation`） |
+| 环境 | CNB workspace（`cnb-l6o-1k0s03fst`，Linux 容器），`release-fast` profile |
+| 语料 | xiaoshouyi pin 基准 `6920ac51`（501 个 `.spg` / 828 个 `.tbl`，158MB；与 cnb `wu2305/succbi_project_container` 的 `xiaoshouyi-corpus` 分支 HEAD 一致，由本地 tar 推送进 workspace） |
+| runner | `node tools/m50-real-project-perf.mjs --project-dir <语料> --bin <release-fast> --skip-build-bin --rebuild-graph`，每场景 5 轮 |
+
+图规模与生命周期：
+
+| 指标 | PR2 后实测 | M26 旧基线（仅数量级参考） |
+|---|---:|---:|
+| 节点数 | 89,094 | 78,114 |
+| 边数 | 199,575 | 150,029 |
+| graphdb 体积 | 538,972,160 B（约 514 MiB） | 约 257 MiB |
+| 全量建图 wall | 45.9 s | — |
+| stdio 启动加载（spawn→`Graph loaded`） | 1,008.1 s / 1,011.8 s（2 轮实测） | — |
+| stdio 进程总 wall（图加载 + 60 请求） | 1,151.9 s | — |
+
+口径注意：
+
+- 节点数是全部图节点（组件/字段/模型/页面/action 等）；组件候选口径（34,317）见 spec
+  附录 A「重跑确认」，两者不可直接相减比较。
+- M26 旧基线为 macOS M3 debug 构建且语料非同一 pin，只作数量级参考，不作回归判据。
+- **2026-09-06 复测（M59，workspace `cnb-j1o-1k1qvdkp3`，`release` profile，语料 pin
+  `c3c0528f`）**：节点 89,178（+84）、边 200,028（+453）、graphdb
+  538,972,160 B（与本表**逐字节相同**）、全量建图 wall 64.67 s、峰值 RSS
+  1,693.0 MiB。字节数相同是 redb 页分配粒度的产物，**不构成「图未变」的证据**，
+  不要当回归判据用。建图 wall 的 +41% 未归因（redb 写入路径将随 M59 退役）。
+  完整读数与方法见
+  [M59 真实语料实测](../../ai-eval-runs/2026-09-06-m59-real-corpus-measurements.md)。
+- stdio 总 wall 中查询合计约 97 s（各场景 P95 × 5 轮上界），其余约 1,050 s 主要为
+  515M graphdb 的加载与启动。加载耗时已独立实测闭环（2026-08-25，CNB workspace
+  `cnb-7jg-1k0sh4l6r` 同口径重建 graphdb 后）：从进程 spawn 到 stderr
+  `[stdio-server] Graph loaded` 标记的 wall time，2 轮分别 1,008.1 s / 1,011.8 s
+  （page-cache 暖度差异 < 1%），与推算值吻合；两轮后 `status` 均正常返回、节点/边数
+  与建图口径一致。stdio 模式下 60 条响应的 `graph_load_ms` 全为 0 是口径所致——
+  启动期加载不归入任何请求，故加载耗时只能由 spawn→标记的 wall time 独立测量
+  （测量脚本 `tools/graph-load-measure.py`，M50 runner 本身不拆加载耗时）。
+
+查询 P50/P95（warm runtime，5 轮，全部 5/5 ok）：
+
+| 类别 | 场景 | p50_ms | p95_ms | output_size_max_bytes |
+|---|---|---:|---:|---:|
+| condition | `explain_condition_input3_writer` | 198 | 242 | 15,919 |
+| condition | `explain_condition_text41_display` | 248 | 270 | 9,700 |
+| condition | `explain_condition_text41_value_source` | 248 | 251 | 12,357 |
+| condition | `explain_condition_model11_availability` | 183 | 248 | 23,707 |
+| page_logic | `query_page_logic_contract` | 9,077 | 9,826 | 156,464 |
+| page_logic | `query_page_logic_member_registered` | 7,749 | 7,965 | 114,929 |
+| context | `context_input3_depth2` | 10 | 11 | 31,765 |
+| model | `query_model_fact_qwSidebar` | 10 | 10 | 12,461 |
+| lookup | `find_page_member_registered` | 185 | 209 | 4,797 |
+| lookup | `find_model_auto_customer_rel` | 185 | 194 | 3,125 |
+| lookup | `find_component_text41` | 205 | 209 | 14,618 |
+| lifecycle | `status_warm_runtime` | 0 | 0 | 1,273 |
+
+加载期诊断（`status.load_diagnostics`）：
+
+| code | count | 说明 |
+|---|---:|---|
+| `SCANNER_UNRECOGNIZED_CONTAINER_KEY` | 312 | 与附录 A 重跑脚本的 scanner 口径预测（`moreFields` 279 + `params` 33 = 312）精确吻合，互为交叉验证 |
+| `SCANNER_DUPLICATE_COMPONENT_ID` | 1,105 | 同页重复组件 id，PR1 起持久化透出 |
+
+两条计数曾被标记为「可能已陈旧」。2026-09-06 在 pin `c3c0528f` 上复测，
+**312 / 1,105 一字未变**，该待办关闭。
+
+Baseline impact 判读：本次是 PR2 后首个 runner 真实项目样本，无前序同口径样本可横比；
+page_logic 两场景 P95 约 8–10 s 为当前最重能力，后续 PR（PR4b 页面局部子图迁移）应以本表
+为基线观察漂移。artifact 在 CNB workspace（临时环境），数字已转写本节。

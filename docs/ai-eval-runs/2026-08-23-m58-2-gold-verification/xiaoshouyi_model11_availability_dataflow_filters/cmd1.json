@@ -1,0 +1,925 @@
+{
+  "details": {
+    "answer_contract": {
+      "budget_used": "compact",
+      "candidate_path_count": 0,
+      "completion": {
+        "missing": [
+          "graph_relationship_path"
+        ],
+        "next_commands": [
+          {
+            "budget": "normal",
+            "command": "--context",
+            "reason": "未找到路径时先查看目标相邻关系，确认目标 ID 和边方向",
+            "target": "model:app/售后.app/绑定车辆/会员已注册.spg|model11"
+          }
+        ],
+        "status": "partial_due_to_missing_proven_path"
+      },
+      "dataflow_model_id": "model:绑车",
+      "forbidden_fact_paths": [
+        "display_facts",
+        "value_source_facts",
+        "writer_facts",
+        "model_io_facts"
+      ],
+      "intent": "availability",
+      "is_page_scoped_target": true,
+      "must_read_summary_first": true,
+      "primary_fact_path": "availability_facts",
+      "proven_path_count": 0,
+      "rejected_path_count": 0,
+      "resolved_model_target": "model:model11",
+      "target_scope": {
+        "dataflow_model_id": "model:绑车",
+        "is_page_scoped_target": true,
+        "node_id": "model:model11",
+        "node_type": "Model",
+        "query_target": "model:app/售后.app/绑定车辆/会员已注册.spg|model11",
+        "resolved_model_target": "model:model11",
+        "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+      }
+    },
+    "answer_facts": {
+      "availability_facts": {
+        "confidence": "high",
+        "dataflow_availability": "dataflow_filters_present",
+        "dataflow_table": "$DATA:/加工表/小程序/绑车.tbl",
+        "evidence_refs": [
+          {
+            "json_path": "sources[10].filter.clauses[0].leftExp",
+            "node_id": "cond:app/售后.app/绑定车辆/会员已注册.spg|model11#filter#0#clause",
+            "source_file": "app/售后.app/绑定车辆/会员已注册.spg"
+          },
+          {
+            "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+            "node_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|0",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          },
+          {
+            "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+            "node_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|1",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          },
+          {
+            "json_path": "dataFlow.nodes.FACT_CUSAUTORELEXT.filters",
+            "node_id": "model:model11|FACT_CUSAUTORELEXT|source_filter|2",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          },
+          {
+            "json_path": "dataFlow.nodes.FACT_UNBOUND_VEHICLE.filters",
+            "node_id": "model:model11|FACT_UNBOUND_VEHICLE|source_filter|3",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          },
+          {
+            "json_path": "dataFlow.nodes.关联.filters",
+            "node_id": "model:model11|关联|output_filter|4",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          }
+        ],
+        "gates": [
+          {
+            "condition_id": "cond:app/售后.app/绑定车辆/会员已注册.spg|model11#filter#0#clause",
+            "condition_scope": "direct",
+            "condition_type": "SourceFilterClause",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "sources[10].filter.clauses[0].leftExp",
+            "owner_node_id": "model:model11",
+            "raw_expr": "model11.ISSHOW == 1",
+            "source_file": "app/售后.app/绑定车辆/会员已注册.spg"
+          },
+          {
+            "condition_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|0",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+            "owner_node_id": "model:model11",
+            "raw_expr": "[是否展示] == 1",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          },
+          {
+            "condition_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|1",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+            "owner_node_id": "model:model11",
+            "raw_expr": "[关系类型] == 车主关系",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          },
+          {
+            "condition_id": "model:model11|FACT_CUSAUTORELEXT|source_filter|2",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.FACT_CUSAUTORELEXT.filters",
+            "owner_node_id": "model:model11",
+            "raw_expr": "[使用人粉丝ID] is not null ",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          },
+          {
+            "condition_id": "model:model11|FACT_UNBOUND_VEHICLE|source_filter|3",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.FACT_UNBOUND_VEHICLE.filters",
+            "owner_node_id": "model:model11",
+            "raw_expr": "[粉丝ID]=$user.WECHAT_UNIONID",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          },
+          {
+            "condition_id": "model:model11|关联|output_filter|4",
+            "condition_scope": "dataflow_internal",
+            "condition_type": "DataFlowFilter",
+            "expanded_from_condition": null,
+            "inherited_from": null,
+            "json_path": "dataFlow.nodes.关联.filters",
+            "owner_node_id": "model:model11",
+            "raw_expr": "[粉丝ID]=$user.WECHAT_UNIONID OR ([使用人粉丝ID] = $user.WECHAT_UNIONID and [人员手机号] = [使用人手机])",
+            "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+          }
+        ],
+        "join_rules": [
+          {
+            "clauses": [
+              {
+                "left": "[FACT_AUTOCUSTOMERAUTOREL].[人车关系编码]",
+                "operator": "=",
+                "right": "[去重].[关系ID]"
+              }
+            ],
+            "join_type": "LeftJoin",
+            "left_table": "FACT_AUTOCUSTOMERAUTOREL",
+            "node_alias": "关联1",
+            "right_table": "去重",
+            "row_semantic": "left_rows_preserved_right_fields_nullable"
+          },
+          {
+            "clauses": [
+              {
+                "left": "[联合].[车辆VIN]",
+                "operator": "=",
+                "right": "[去重1].[车架号]"
+              }
+            ],
+            "join_type": "LeftJoin",
+            "left_table": "联合",
+            "node_alias": "关联",
+            "right_table": "去重1",
+            "row_semantic": "left_rows_preserved_right_fields_nullable"
+          }
+        ],
+        "missing_evidence": [],
+        "output_filters": [
+          {
+            "left": null,
+            "node_alias": "关联",
+            "operator": null,
+            "raw_expr": "[粉丝ID]=$user.WECHAT_UNIONID OR ([使用人粉丝ID] = $user.WECHAT_UNIONID and [人员手机号] = [使用人手机])",
+            "referenced_fields": [
+              "粉丝ID",
+              "使用人粉丝ID",
+              "人员手机号",
+              "使用人手机"
+            ],
+            "referenced_vars": [
+              "$user.WECHAT_UNIONID"
+            ],
+            "right": null
+          }
+        ],
+        "paths": [
+          {
+            "confidence": "high",
+            "evidence_refs": [
+              {
+                "json_path": "sources[10].filter.clauses[0].leftExp",
+                "node_id": "cond:app/售后.app/绑定车辆/会员已注册.spg|model11#filter#0#clause",
+                "source_file": "app/售后.app/绑定车辆/会员已注册.spg"
+              }
+            ],
+            "intent": "availability",
+            "result": "model11.ISSHOW == 1",
+            "steps": [
+              {
+                "direction": "incoming",
+                "edge_type": "DependsOn",
+                "field_path": null,
+                "json_path": "sources[10].filter.clauses[0].leftExp",
+                "node_id": "cond:app/售后.app/绑定车辆/会员已注册.spg|model11#filter#0#clause",
+                "node_type": "Condition",
+                "source_file": "app/售后.app/绑定车辆/会员已注册.spg",
+                "step": 1,
+                "why_included": "filter or totalRowCount condition controls data availability"
+              }
+            ],
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "why_complete": "data availability gate found"
+          },
+          {
+            "confidence": "high",
+            "evidence_refs": [
+              {
+                "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+                "node_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|0",
+                "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+              }
+            ],
+            "intent": "availability",
+            "result": "[是否展示] == 1",
+            "steps": [
+              {
+                "direction": "incoming",
+                "edge_type": "DependsOn",
+                "field_path": null,
+                "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+                "node_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|0",
+                "node_type": "Condition",
+                "source_file": "$DATA:/加工表/小程序/绑车.tbl",
+                "step": 1,
+                "why_included": "filter or totalRowCount condition controls data availability"
+              }
+            ],
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "why_complete": "data availability gate found"
+          },
+          {
+            "confidence": "high",
+            "evidence_refs": [
+              {
+                "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+                "node_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|1",
+                "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+              }
+            ],
+            "intent": "availability",
+            "result": "[关系类型] == 车主关系",
+            "steps": [
+              {
+                "direction": "incoming",
+                "edge_type": "DependsOn",
+                "field_path": null,
+                "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+                "node_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|1",
+                "node_type": "Condition",
+                "source_file": "$DATA:/加工表/小程序/绑车.tbl",
+                "step": 1,
+                "why_included": "filter or totalRowCount condition controls data availability"
+              }
+            ],
+            "stop_condition_hit": "filter_or_total_row_count_gate_found",
+            "why_complete": "data availability gate found"
+          }
+        ],
+        "physical_inputs": [
+          "$DATA:/主数据/fact_autoCustomerAutoRel.tbl",
+          "$DATA:/主数据/fact_cusAutoRelExt.tbl",
+          "$DATA:/主数据/fact_customAutoMyAutoListStore.tbl",
+          "$DATA:/会员/粉丝未认证车辆/fact_Unbound_Vehicle.tbl"
+        ],
+        "referenced_vars": [
+          "$user.WECHAT_UNIONID"
+        ],
+        "result": "data_gates_found",
+        "source_filters": [
+          {
+            "left": "[是否展示]",
+            "node_alias": "FACT_AUTOCUSTOMERAUTOREL",
+            "operator": "==",
+            "raw_expr": "[是否展示] == 1",
+            "referenced_fields": [
+              "是否展示"
+            ],
+            "referenced_vars": [],
+            "right": "1"
+          },
+          {
+            "left": "[关系类型]",
+            "node_alias": "FACT_AUTOCUSTOMERAUTOREL",
+            "operator": "==",
+            "raw_expr": "[关系类型] == 车主关系",
+            "referenced_fields": [
+              "关系类型"
+            ],
+            "referenced_vars": [],
+            "right": "车主关系"
+          },
+          {
+            "left": "[使用人粉丝ID]",
+            "node_alias": "FACT_CUSAUTORELEXT",
+            "operator": "is not null",
+            "raw_expr": "[使用人粉丝ID] is not null ",
+            "referenced_fields": [
+              "使用人粉丝ID"
+            ],
+            "referenced_vars": [],
+            "right": ""
+          },
+          {
+            "left": null,
+            "node_alias": "FACT_UNBOUND_VEHICLE",
+            "operator": null,
+            "raw_expr": "[粉丝ID]=$user.WECHAT_UNIONID",
+            "referenced_fields": [
+              "粉丝ID"
+            ],
+            "referenced_vars": [
+              "$user.WECHAT_UNIONID"
+            ],
+            "right": null
+          }
+        ],
+        "union_rules": [
+          {
+            "field_mappings": [
+              {
+                "fields": [
+                  "车辆VIN",
+                  "车辆VIN"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "粉丝ID",
+                  "粉丝ID"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "创建人",
+                  "创建人"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "姓名",
+                  "姓名"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "手机号",
+                  "手机号"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "身份证号",
+                  "身份证号"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "关系类型",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "创建日期",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "所属机构",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "所有人",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "客户编码",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "人车关系编码",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "是否展示",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "号牌号码",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "车辆类型",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "住址",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "使用性质",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "品牌型号",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "发动机号码",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "注册日期",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "发证日期",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "是否删除",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "人员手机号",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  "使用人粉丝ID",
+                  null
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  null,
+                  "创建时间"
+                ],
+                "visible": false
+              },
+              {
+                "fields": [
+                  null,
+                  "ID"
+                ],
+                "visible": true
+              },
+              {
+                "fields": [
+                  null,
+                  "未认证原因"
+                ],
+                "visible": false
+              }
+            ],
+            "node_alias": "联合",
+            "row_semantic": "any_branch_can_output"
+          }
+        ]
+      },
+      "intent": "availability",
+      "traversal_policy": {
+        "allowed_edge_types": [
+          "DependsOn",
+          "DataflowInput"
+        ],
+        "directions": [
+          "incoming",
+          "filter_refs"
+        ],
+        "intent": "availability",
+        "max_paths": 3,
+        "max_steps_per_path": 6,
+        "rank_rules": [
+          "field-level paths before model-level paths",
+          "proven paths before candidates",
+          "paths with evidence before inferred paths"
+        ],
+        "stop_conditions": [
+          "filter_or_total_row_count_gate_found"
+        ]
+      }
+    },
+    "blocking_conditions": [
+      {
+        "condition_id": "cond:app/售后.app/绑定车辆/会员已注册.spg|panel35#visibleCondition#8",
+        "condition_key": "app/售后.app/绑定车辆/会员已注册.spg|VisibleCondition|Show|model11.totalRowCount__ > 0|model:model11.totalRowCount__",
+        "condition_scope": "direct",
+        "condition_type": "VisibleCondition",
+        "effect_type": "Show",
+        "json_path": "canvas.components[0].components[1].components[1].visibleCondition",
+        "normalized_expr": "model11.totalRowCount__ > 0",
+        "owner_node_id": "comp:app/售后.app/绑定车辆/会员已注册.spg|panel35",
+        "owner_type": "Component",
+        "raw_expr": "model11.totalRowCount__ > 0",
+        "referenced_symbols": [
+          "model:model11.totalRowCount__"
+        ],
+        "source_file": "app/售后.app/绑定车辆/会员已注册.spg",
+        "subject_type": "Component"
+      },
+      {
+        "condition_id": "cond:app/售后.app/绑定车辆/会员已注册.spg|panel22#visibleCondition#0",
+        "condition_key": "app/售后.app/绑定车辆/会员已注册.spg|VisibleCondition|Show|model11.totalRowCount__>0|model:model11.totalRowCount__",
+        "condition_scope": "direct",
+        "condition_type": "VisibleCondition",
+        "effect_type": "Show",
+        "json_path": "canvas.components[0].components[0].components[0].visibleCondition",
+        "normalized_expr": "model11.totalRowCount__>0",
+        "owner_node_id": "comp:app/售后.app/绑定车辆/会员已注册.spg|panel22",
+        "owner_type": "Component",
+        "raw_expr": "model11.totalRowCount__>0",
+        "referenced_symbols": [
+          "model:model11.totalRowCount__"
+        ],
+        "source_file": "app/售后.app/绑定车辆/会员已注册.spg",
+        "subject_type": "Component"
+      },
+      {
+        "condition_id": "cond:app/售后.app/绑定车辆/会员已注册.spg|panel12#visibleCondition#23",
+        "condition_key": "app/售后.app/绑定车辆/会员已注册.spg|VisibleCondition|Show|model11.totalRowCount__=0|model:model11.totalRowCount__",
+        "condition_scope": "direct",
+        "condition_type": "VisibleCondition",
+        "effect_type": "Show",
+        "json_path": "canvas.components[0].components[8].visibleCondition",
+        "normalized_expr": "model11.totalRowCount__=0",
+        "owner_node_id": "comp:app/售后.app/绑定车辆/会员已注册.spg|panel12",
+        "owner_type": "Component",
+        "raw_expr": "model11.totalRowCount__=0",
+        "referenced_symbols": [
+          "model:model11.totalRowCount__"
+        ],
+        "source_file": "app/售后.app/绑定车辆/会员已注册.spg",
+        "subject_type": "Component"
+      },
+      {
+        "condition_id": "cond:app/售后.app/绑定车辆/会员已注册.spg|button15#action1#conditionExp",
+        "condition_key": "app/售后.app/绑定车辆/会员已注册.spg|ActionConditionExp|Execute|model11.totalRowCount__ >1|model:model11.totalRowCount__",
+        "condition_scope": "direct",
+        "condition_type": "ActionConditionExp",
+        "deduped_condition_ids": [
+          "cond:app/售后.app/绑定车辆/会员已注册.spg|button14#action1#conditionExp"
+        ],
+        "deduped_owner_node_ids": [
+          "action:app/售后.app/绑定车辆/会员已注册.spg|button14|action1"
+        ],
+        "deduped_scopes": [
+          "direct"
+        ],
+        "effect_type": "Execute",
+        "json_path": "canvas.components[0].components[1].components[1].components[0].components[0].components[1].actions[0].conditionExp",
+        "normalized_expr": "model11.totalRowCount__ >1",
+        "owner_node_id": "action:app/售后.app/绑定车辆/会员已注册.spg|button15|action1",
+        "owner_type": "Action",
+        "raw_expr": "model11.totalRowCount__ >1",
+        "referenced_symbols": [
+          "model:model11.totalRowCount__"
+        ],
+        "source_file": "app/售后.app/绑定车辆/会员已注册.spg",
+        "subject_type": "Action"
+      }
+    ],
+    "candidate_paths": [],
+    "candidate_paths_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 candidate_paths 明细；需要核查时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "data_empty_gates": [
+      {
+        "condition_id": "cond:app/售后.app/绑定车辆/会员已注册.spg|model11#filter#0#clause",
+        "condition_key": "app/售后.app/绑定车辆/会员已注册.spg|SourceFilterClause|Filter|model11.ISSHOW == 1|model:model11.ISSHOW",
+        "condition_scope": "direct",
+        "condition_type": "SourceFilterClause",
+        "effect_type": "Filter",
+        "json_path": "sources[10].filter.clauses[0].leftExp",
+        "normalized_expr": "model11.ISSHOW == 1",
+        "owner_node_id": "model:model11",
+        "owner_type": "ModelSource",
+        "raw_expr": "model11.ISSHOW == 1",
+        "referenced_symbols": [
+          "model:model11.ISSHOW"
+        ],
+        "source_file": "app/售后.app/绑定车辆/会员已注册.spg",
+        "subject_type": "ModelSource"
+      },
+      {
+        "condition_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|0",
+        "condition_key": "$DATA:/加工表/小程序/绑车.tbl|DataFlowFilter||[是否展示] == 1|",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+        "left": "[是否展示]",
+        "node_alias": "FACT_AUTOCUSTOMERAUTOREL",
+        "node_type": "ModelTable",
+        "operator": "==",
+        "owner_node_id": "model:model11",
+        "raw_expr": "[是否展示] == 1",
+        "referenced_fields": [
+          "是否展示"
+        ],
+        "referenced_vars": [],
+        "right": "1",
+        "role": "source_filter",
+        "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+      },
+      {
+        "condition_id": "model:model11|FACT_AUTOCUSTOMERAUTOREL|source_filter|1",
+        "condition_key": "$DATA:/加工表/小程序/绑车.tbl|DataFlowFilter||[关系类型] == 车主关系|",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.FACT_AUTOCUSTOMERAUTOREL.filters",
+        "left": "[关系类型]",
+        "node_alias": "FACT_AUTOCUSTOMERAUTOREL",
+        "node_type": "ModelTable",
+        "operator": "==",
+        "owner_node_id": "model:model11",
+        "raw_expr": "[关系类型] == 车主关系",
+        "referenced_fields": [
+          "关系类型"
+        ],
+        "referenced_vars": [],
+        "right": "车主关系",
+        "role": "source_filter",
+        "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+      },
+      {
+        "condition_id": "model:model11|FACT_CUSAUTORELEXT|source_filter|2",
+        "condition_key": "$DATA:/加工表/小程序/绑车.tbl|DataFlowFilter||[使用人粉丝ID] is not null |",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.FACT_CUSAUTORELEXT.filters",
+        "left": "[使用人粉丝ID]",
+        "node_alias": "FACT_CUSAUTORELEXT",
+        "node_type": "ModelTable",
+        "operator": "is not null",
+        "owner_node_id": "model:model11",
+        "raw_expr": "[使用人粉丝ID] is not null ",
+        "referenced_fields": [
+          "使用人粉丝ID"
+        ],
+        "referenced_vars": [],
+        "right": "",
+        "role": "source_filter",
+        "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+      },
+      {
+        "condition_id": "model:model11|FACT_UNBOUND_VEHICLE|source_filter|3",
+        "condition_key": "$DATA:/加工表/小程序/绑车.tbl|DataFlowFilter||[粉丝ID]=$user.WECHAT_UNIONID|",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.FACT_UNBOUND_VEHICLE.filters",
+        "left": null,
+        "node_alias": "FACT_UNBOUND_VEHICLE",
+        "node_type": "ModelTable",
+        "operator": null,
+        "owner_node_id": "model:model11",
+        "raw_expr": "[粉丝ID]=$user.WECHAT_UNIONID",
+        "referenced_fields": [
+          "粉丝ID"
+        ],
+        "referenced_vars": [
+          "$user.WECHAT_UNIONID"
+        ],
+        "right": null,
+        "role": "source_filter",
+        "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+      },
+      {
+        "condition_id": "model:model11|关联|output_filter|4",
+        "condition_key": "$DATA:/加工表/小程序/绑车.tbl|DataFlowFilter||[粉丝ID]=$user.WECHAT_UNIONID OR ([使用人粉丝ID] = $user.WECHAT_UNIONID and [人员手机号] = [使用人手机])|",
+        "condition_scope": "dataflow_internal",
+        "condition_type": "DataFlowFilter",
+        "json_path": "dataFlow.nodes.关联.filters",
+        "left": null,
+        "node_alias": "关联",
+        "node_type": "Join",
+        "operator": null,
+        "owner_node_id": "model:model11",
+        "raw_expr": "[粉丝ID]=$user.WECHAT_UNIONID OR ([使用人粉丝ID] = $user.WECHAT_UNIONID and [人员手机号] = [使用人手机])",
+        "referenced_fields": [
+          "粉丝ID",
+          "使用人粉丝ID",
+          "人员手机号",
+          "使用人手机"
+        ],
+        "referenced_vars": [
+          "$user.WECHAT_UNIONID"
+        ],
+        "right": null,
+        "role": "output_filter",
+        "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+      }
+    ],
+    "primary_path": [],
+    "primary_path_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 primary_path 明细；answer_facts.paths 已保留短证据",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "proven_paths": [],
+    "rejected_paths": [],
+    "rejected_paths_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 rejected_paths 明细；需要排查路径拒绝原因时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "related_context": [],
+    "related_context_summary": {
+      "by_scope": {
+        "direct": 135
+      },
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": true,
+      "note": "compact 模式隐藏 related_context 明细；它们是相关但非必要上下文",
+      "source_file_distinct_count": 54,
+      "total_count": 135
+    },
+    "required_followups": [
+      {
+        "budget": "normal",
+        "command": "--explain-condition",
+        "expected_fact_path": "availability_facts",
+        "intent": "availability",
+        "must_run_for_complete_answer": true,
+        "reason": "truncation_guard 标记 compact 输出不完整，需要升级到 normal 展开完整路径",
+        "target": "model:app/售后.app/绑定车辆/会员已注册.spg|model11"
+      }
+    ],
+    "supporting_context": [],
+    "supporting_context_summary": {
+      "by_scope": {},
+      "by_source_file": {},
+      "emitted_count": 0,
+      "hidden": false,
+      "note": "compact 模式隐藏 supporting_context 明细；需要核查时使用 --budget normal 或 full",
+      "source_file_distinct_count": 0,
+      "total_count": 0
+    },
+    "target": {
+      "name": "model11",
+      "node_id": "model:model11",
+      "node_type": "Model",
+      "path": "$DATA:/加工表/小程序/绑车.tbl"
+    },
+    "thinking_frame": {
+      "answer_with": "availability_facts",
+      "completion_status": "partial_due_to_missing_proven_path",
+      "do_not_use_as_primary_evidence": [
+        "display_facts",
+        "value_source_facts",
+        "writer_facts",
+        "model_io_facts"
+      ],
+      "next_best_action": "使用 --budget normal 或 full 重新查询以展开更多路径",
+      "primary_question_type": "这个模型在什么条件下有数据",
+      "question_kind": "availability",
+      "required_followups": [
+        {
+          "expected_fact_path": "availability_facts",
+          "reason": "未找到任何 proven 或 candidate 路径；可能需要扩展 budget 或检查目标 ID 是否正确"
+        }
+      ],
+      "target_scope": {
+        "node_id": "model:model11",
+        "node_type": "Model",
+        "source_file": "$DATA:/加工表/小程序/绑车.tbl"
+      },
+      "what_is_missing": "未找到任何 proven 或 candidate 路径；可能需要扩展 budget 或检查目标 ID 是否正确",
+      "what_to_avoid": "不要把 source_filters 标成组件 direct visibleCondition",
+      "why_this_intent": "用户追问数据可用性，应聚焦 filter、totalRowCount__ 和 DataFlow 输入"
+    },
+    "traversal_policy": {
+      "allowed_edge_types": [
+        "DependsOn",
+        "DataflowInput"
+      ],
+      "directions": [
+        "incoming",
+        "filter_refs"
+      ],
+      "intent": "availability",
+      "max_paths": 3,
+      "max_steps_per_path": 6,
+      "rank_rules": [
+        "field-level paths before model-level paths",
+        "proven paths before candidates",
+        "paths with evidence before inferred paths"
+      ],
+      "stop_conditions": [
+        "filter_or_total_row_count_gate_found"
+      ]
+    },
+    "truncation_guard": {
+      "compact_limits": {
+        "max_blocking_conditions": 10,
+        "max_data_empty_gates": 10,
+        "max_paths": 3,
+        "max_related_context": 5,
+        "max_steps_per_path": 6,
+        "max_supporting_context": 5
+      },
+      "is_complete": false,
+      "recommended_rerun": "--explain-condition {} --budget normal --intent auto",
+      "required_budget_for_complete_answer": "normal",
+      "safe_to_answer_full_relationships": false,
+      "truncated_sections": [
+        "related_context"
+      ]
+    },
+    "value_source_context": null
+  },
+  "diagnostics": [],
+  "evidence": [],
+  "kind": "Explain",
+  "next_queries": [],
+  "query_target": "model:app/售后.app/绑定车辆/会员已注册.spg|model11",
+  "schema_version": "1.0",
+  "summary": {
+    "answer_facts_count": 1,
+    "blocking_conditions_count": 4,
+    "candidate_paths_count": 0,
+    "data_empty_gates_count": 6,
+    "intent": "availability",
+    "primary_paths_count": 0,
+    "primary_reason": "目标 model:model11 受 6 个数据门控影响（filter/totalRowCount__）",
+    "rejected_paths_count": 0,
+    "related_context_count": 135,
+    "supporting_context_count": 0,
+    "target_id": "model:model11",
+    "target_name": "model11",
+    "target_type": "Model",
+    "value_source_context_count": 0,
+    "what_is_it": "Why 解释: model:model11"
+  }
+}

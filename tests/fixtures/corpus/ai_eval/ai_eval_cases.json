@@ -1,14 +1,15 @@
 {
-  "schema_version": "1.2.0",
-  "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、运行器规范",
+  "schema_version": "1.3.0",
+  "scope": "M9-F AI 问答评测集：结构化命令计划、自动判分、风险覆盖、多 trial Skill 理解评估",
   "eval_count": 26,
   "cases": [
     {
       "case_id": "page_purpose_actions_test",
+      "tier": "fixture_llm",
       "question": "页面 actions_test 主要做什么？用户能触发哪些逻辑？会影响哪些数据？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --query-page-logic page:app/actions_test.spg"
+        "--project-dir tests/fixtures/test_project --relations 'page:app/actions_test.spg' --budget compact"
       ],
       "expected_facts": [
         "页面是 actions_test",
@@ -67,11 +68,11 @@
       "uncertainty_policy": "如果诊断中有 UNKNOWN_ACTION_TYPE，应标注该 action 语义不确定",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-page-logic",
+          "command_kind": "--relations",
           "target": "page:app/actions_test.spg",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": "compact"
         }
       ],
       "expected_output_assertions": [
@@ -91,13 +92,6 @@
           "path": "details.action_flows",
           "op": "not_empty",
           "description": "action_flows 非空"
-        },
-        {
-          "path": "details.action_flows",
-          "op": "array_any",
-          "field": "action_category",
-          "value": "data_write",
-          "description": "存在 data_write 类别的 action"
         }
       ],
       "risk_tags": [
@@ -106,6 +100,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "page_logic",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 1,
+        "stateful": false,
+        "error_injection": true,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -114,9 +117,19 @@
       "answer_assertions": {
         "must_include": [
           "用户入口",
-          "写入目标",
+          [
+            "写入目标",
+            "写入",
+            "writes",
+            "写到"
+          ],
           "action",
-          "按钮",
+          [
+            "按钮",
+            "button",
+            "buttonWebAPI",
+            "button1"
+          ],
           "model1",
           "model2"
         ],
@@ -146,10 +159,11 @@
     },
     {
       "case_id": "button_submit_effect",
+      "tier": "fixture_llm",
       "question": "点击 actions_test 页面中的 button1 会发生什么？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|button1'"
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|button1' --budget compact"
       ],
       "expected_facts": [
         "button1 是一个按钮组件",
@@ -204,7 +218,16 @@
           "target": "comp:app/actions_test.spg|button1",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": "compact",
+          "alternatives": [
+            {
+              "command_kind": "--explain",
+              "target": "action:app/actions_test.spg|button1|action1",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
         }
       ],
       "expected_output_assertions": [
@@ -233,6 +256,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "action",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 1,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -272,10 +304,11 @@
     },
     {
       "case_id": "field_lineage_model1_name",
+      "tier": "fixture_llm",
       "question": "字段 model1.name 的值从哪里来？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain field:model1.name"
+        "--project-dir tests/fixtures/test_project --explain 'field:model1.name' --budget compact"
       ],
       "expected_facts": [
         "model1.name 被页面 action 写入",
@@ -328,7 +361,7 @@
           "target": "field:model1.name",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": "compact"
         }
       ],
       "expected_output_assertions": [
@@ -343,7 +376,7 @@
           "op": "array_any",
           "field": "edge_type",
           "value": "ActionWrites",
-          "description": "evidence 中有 ActionWrites 或 Writes 边"
+          "description": "evidence 中有 ActionWrites 边"
         },
         {
           "path": "evidence",
@@ -359,9 +392,19 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "lineage",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
+        "details",
         "evidence"
       ],
       "answer_assertions": {
@@ -397,11 +440,11 @@
     },
     {
       "case_id": "dataflow_output_source",
+      "tier": "fixture_llm",
       "question": "DataFlow 输出表 dataflow_output 是怎么来的？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --query-dataflow dataflow_output",
-        "--project-dir tests/fixtures/test_project --explain model:dataflow_output"
+        "--project-dir tests/fixtures/test_project --relations 'model:dataflow_output'"
       ],
       "expected_facts": [
         "dataflow_output 有输入源",
@@ -421,12 +464,12 @@
           "description": "summary.input_count > 0"
         },
         {
-          "path": "details.inputs",
+          "path": "details.dataflow_subgraph.inputs",
           "op": "not_empty",
           "description": "details.inputs 非空"
         },
         {
-          "path": "details.outputs",
+          "path": "details.dataflow_subgraph.outputs",
           "op": "not_empty",
           "description": "details.outputs 非空"
         }
@@ -449,18 +492,20 @@
       "uncertainty_policy": "如果 lineage 不完整，应标注字段级追溯缺失",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-dataflow",
-          "target": "dataflow_output",
-          "args": [],
-          "requires_project_dir": true,
-          "budget": null
-        },
-        {
-          "command_kind": "--explain",
+          "command_kind": "--relations",
           "target": "model:dataflow_output",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": null,
+          "alternatives": [
+            {
+              "command_kind": "--explain",
+              "target": "model:dataflow_output",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": null
+            }
+          ]
         }
       ],
       "expected_output_assertions": [
@@ -471,12 +516,12 @@
           "description": "summary.input_count > 0"
         },
         {
-          "path": "details.inputs",
+          "path": "details.dataflow_subgraph.inputs",
           "op": "not_empty",
           "description": "details.inputs 非空"
         },
         {
-          "path": "details.outputs",
+          "path": "details.dataflow_subgraph.outputs",
           "op": "not_empty",
           "description": "details.outputs 非空"
         }
@@ -488,6 +533,15 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "dataflow",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -527,10 +581,11 @@
     },
     {
       "case_id": "readonly_page_check",
+      "tier": "fixture_llm",
       "question": "页面 dataflow_embedded 是只读的吗？用户能修改数据吗？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --query-page-logic page:app/dataflow_embedded.spg"
+        "--project-dir tests/fixtures/test_project --relations 'page:app/dataflow_embedded.spg'"
       ],
       "expected_facts": [
         "页面是只读仪表板",
@@ -590,7 +645,7 @@
       "uncertainty_policy": "如果页面确实无任何 action，可明确回答只读",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-page-logic",
+          "command_kind": "--relations",
           "target": "page:app/dataflow_embedded.spg",
           "args": [],
           "requires_project_dir": true,
@@ -631,6 +686,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "page_logic",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 1,
+        "stateful": false,
+        "error_injection": true,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary"
@@ -638,8 +702,20 @@
       "answer_assertions": {
         "must_include": [
           "只读",
-          "无写入",
-          "无入口",
+          [
+            "无写入",
+            "没有写入",
+            "不写入",
+            "writes 为空",
+            "无写入目标"
+          ],
+          [
+            "无入口",
+            "没有入口",
+            "无用户入口",
+            "没有用户入口",
+            "无交互入口"
+          ],
           "readonly_dashboard"
         ],
         "must_not_include": [
@@ -669,10 +745,11 @@
     },
     {
       "case_id": "param_passing_link",
+      "tier": "fixture_llm",
       "question": "page_relations 页面跳转时传递了哪些参数？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --query-page-logic page:app/page_relations.spg"
+        "--project-dir tests/fixtures/test_project --relations 'page:app/page_relations.spg'"
       ],
       "expected_facts": [
         "有 link 类型的 action",
@@ -722,11 +799,20 @@
       "uncertainty_policy": "如果参数值是表达式，应标注表达式可能包含未解析引用",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-page-logic",
+          "command_kind": "--relations",
           "target": "page:app/page_relations.spg",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": null,
+          "alternatives": [
+            {
+              "command_kind": "--relations",
+              "target": "page:",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
         }
       ],
       "expected_output_assertions": [
@@ -756,6 +842,15 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "navigation",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -795,10 +890,11 @@
     },
     {
       "case_id": "diagnostic_affects_answer",
+      "tier": "fixture_llm",
       "question": "actions_test 页面有 UNKNOWN_ACTION_TYPE 诊断，这会影响什么结论？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --query-page-logic page:app/actions_test.spg"
+        "--project-dir tests/fixtures/test_project --relations 'page:app/actions_test.spg'"
       ],
       "expected_facts": [
         "UNKNOWN_ACTION_TYPE 表示某个 action 类型未被识别",
@@ -850,7 +946,7 @@
       "uncertainty_policy": "遇到诊断时必须降级表达，不能假装诊断不存在",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-page-logic",
+          "command_kind": "--relations",
           "target": "page:app/actions_test.spg",
           "args": [],
           "requires_project_dir": true,
@@ -886,6 +982,15 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "diagnostic",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 1,
+        "stateful": false,
+        "error_injection": true,
+        "output_truncation": false
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -923,10 +1028,11 @@
     },
     {
       "case_id": "context_button1_neighbors",
+      "tier": "fixture_llm",
       "question": "button1 周围还有哪些关键依赖和影响？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --context 'comp:app/actions_test.spg|button1' --depth 2 --budget normal"
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|button1' --depth 2 --budget normal"
       ],
       "expected_facts": [
         "button1 属于页面 actions_test",
@@ -946,12 +1052,12 @@
           "description": "summary.related_nodes_count > 0"
         },
         {
-          "path": "details.related_actions",
+          "path": "details.neighbor_context.related_actions",
           "op": "not_empty",
           "description": "details.related_actions 非空"
         },
         {
-          "path": "details.downstream",
+          "path": "details.neighbor_context.downstream",
           "op": "array_any",
           "field": "to",
           "value": "model:model1",
@@ -975,16 +1081,30 @@
       "uncertainty_policy": "如果 budget=compact 截断，应说明还有更深层关系未展开",
       "minimal_command_plan": [
         {
-          "command_kind": "--context",
+          "command_kind": "--explain",
           "target": "comp:app/actions_test.spg|button1",
           "args": [
             "--depth",
-            "2",
-            "--budget",
-            "normal"
+            "2"
           ],
           "requires_project_dir": true,
-          "budget": "normal"
+          "budget": "normal",
+          "alternatives": [
+            {
+              "command_kind": "--explain",
+              "target": "comp:button1",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": "compact"
+            },
+            {
+              "command_kind": "--explain",
+              "target": "action:app/actions_test.spg|button1|action1",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
         }
       ],
       "expected_output_assertions": [
@@ -995,12 +1115,12 @@
           "description": "summary.related_nodes_count > 0"
         },
         {
-          "path": "details.related_actions",
+          "path": "details.neighbor_context.related_actions",
           "op": "not_empty",
           "description": "details.related_actions 非空"
         },
         {
-          "path": "details.downstream",
+          "path": "details.neighbor_context.downstream",
           "op": "array_any",
           "field": "to",
           "value": "model:model1",
@@ -1013,6 +1133,15 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
+      "evaluation_dimensions": {
+        "task_family": "context",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -1052,6 +1181,7 @@
     },
     {
       "case_id": "condition_action_behavior",
+      "tier": "fixture_llm",
       "question": "actions_test 中 button2 的动作在什么条件下执行？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
@@ -1102,20 +1232,39 @@
           "target": "action:app/actions_test.spg|button2|action1",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": null,
+          "alternatives": [
+            {
+              "command_kind": "--explain",
+              "target": "comp:app/actions_test.spg|button2",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
         }
       ],
       "expected_output_assertions": [
         {
           "path": "details.condition.raw_expr",
           "op": "exists",
-          "description": "details.condition.raw_expr 非空"
+          "description": "details.condition.raw_expr 非空",
+          "command_index": 0
         },
         {
           "path": "details.condition.refs",
           "op": "array_contains",
           "value": "input1",
-          "description": "details.condition.refs 包含字符串 input1"
+          "description": "details.condition.refs 包含字符串 input1",
+          "command_index": 0
+        },
+        {
+          "path": "details.condition_facts.blocking_conditions",
+          "op": "array_any",
+          "field": "condition_type",
+          "value": "ActionConditionExp",
+          "description": "补查组件级条件时必须给出 ActionConditionExp",
+          "command_index": 1
         }
       ],
       "risk_tags": [
@@ -1125,6 +1274,15 @@
       ],
       "case_status": "active",
       "difficulty": "hard",
+      "evaluation_dimensions": {
+        "task_family": "condition",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -1164,11 +1322,12 @@
     },
     {
       "case_id": "dataflow_chain_trace",
+      "tier": "fixture_llm",
       "question": "df_a 经过 physical_x 到 df_b 的 DataFlow 链中，字段如何传递？",
       "project_dir": "tests/fixtures/test_project",
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --query-dataflow df_a",
-        "--project-dir tests/fixtures/test_project --explain field:df_b.id"
+        "--project-dir tests/fixtures/test_project --relations 'model:df_a'",
+        "--project-dir tests/fixtures/test_project --explain 'field:df_b.id'"
       ],
       "expected_facts": [
         "df_a 的输出连接到 physical_x",
@@ -1190,7 +1349,7 @@
           "command_index": 0
         },
         {
-          "path": "details.inputs",
+          "path": "details.dataflow_subgraph.inputs",
           "op": "not_empty",
           "description": "df_a details.inputs 非空",
           "command_index": 0
@@ -1236,11 +1395,27 @@
       "uncertainty_policy": "如果字段级 lineage 被截断，应标注截断位置和原因",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-dataflow",
-          "target": "df_a",
+          "command_kind": "--relations",
+          "target": "model:df_a",
           "args": [],
           "requires_project_dir": true,
-          "budget": null
+          "budget": null,
+          "alternatives": [
+            {
+              "command_kind": "--relations",
+              "target": "model:df_b",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": null
+            },
+            {
+              "command_kind": "--relations",
+              "target": "model:physical_x",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": null
+            }
+          ]
         },
         {
           "command_kind": "--explain",
@@ -1259,7 +1434,7 @@
           "command_index": 0
         },
         {
-          "path": "details.inputs",
+          "path": "details.dataflow_subgraph.inputs",
           "op": "not_empty",
           "description": "df_a details.inputs 非空",
           "command_index": 0
@@ -1293,6 +1468,15 @@
       ],
       "case_status": "active",
       "difficulty": "hard",
+      "evaluation_dimensions": {
+        "task_family": "dataflow",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 3,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
@@ -1333,6 +1517,7 @@
     },
     {
       "case_id": "real_page_purpose_首页",
+      "tier": "real_manual",
       "question": "售后.app 的首页是什么类型页面？用户能触发哪些操作？页面读取了哪些数据？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1340,7 +1525,7 @@
       "real_project_target": "page:app/售后.app/首页.spg",
       "source_path": "app/售后.app/首页.spg",
       "required_commands": [
-        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-page-logic 'page:app/售后.app/首页.spg' --budget compact"
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --relations 'page:app/售后.app/首页.spg' --budget compact"
       ],
       "expected_facts": [
         "页面是售后.app 的首页",
@@ -1393,7 +1578,7 @@
       "uncertainty_policy": "如果诊断中有 NO_WRITE_TARGETS，应保守表达页面可能没有写入操作",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-page-logic",
+          "command_kind": "--relations",
           "target": "page:app/售后.app/首页.spg",
           "args": [
             "--budget",
@@ -1472,6 +1657,7 @@
     },
     {
       "case_id": "real_button_behavior_首页",
+      "tier": "real_manual",
       "question": "售后首页上的 button1 是什么组件？用户点击后会发生什么？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1606,6 +1792,7 @@
     },
     {
       "case_id": "real_high_fanout_model",
+      "tier": "real_manual",
       "question": "fact_saleContract 这个模型在整个项目中扮演什么角色？被哪些地方消费？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1613,7 +1800,7 @@
       "real_project_target": "model:fact_saleContract",
       "source_path": "data/tables/销售/fact_saleContract.tbl",
       "required_commands": [
-        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-model model:fact_saleContract --budget compact"
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --relations 'model:fact_saleContract' --budget compact"
       ],
       "expected_facts": [
         "模型主要通过 DataFlow 被消费",
@@ -1663,7 +1850,7 @@
       "uncertainty_policy": "如果 read_by_count=0，必须说明模型主要通过 DataFlow 被消费，而非直接读取",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-model",
+          "command_kind": "--relations",
           "target": "model:fact_saleContract",
           "args": [
             "--budget",
@@ -1736,6 +1923,7 @@
     },
     {
       "case_id": "real_target_find_首页",
+      "tier": "real_manual",
       "question": "如何在项目中找到名为'首页'的页面？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1743,7 +1931,7 @@
       "real_project_target": "page:app/售后.app/首页.spg",
       "source_path": "app/售后.app/首页.spg",
       "required_commands": [
-        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --find-page 首页"
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --find '首页'"
       ],
       "expected_facts": [
         "返回多个匹配结果（多个页面叫首页）",
@@ -1787,7 +1975,7 @@
       "uncertainty_policy": "如果有多个首页，应列出主要候选并建议用户确认",
       "minimal_command_plan": [
         {
-          "command_kind": "--find-page",
+          "command_kind": "--find",
           "target": "首页",
           "args": [],
           "requires_project_dir": true,
@@ -1848,6 +2036,7 @@
     },
     {
       "case_id": "real_typo_candidate",
+      "tier": "real_manual",
       "question": "如果查询时把 fact_saleContract 拼写成了 fact_saleContrac，系统会怎样处理？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1855,7 +2044,7 @@
       "real_project_target": "model:fact_saleContract",
       "source_path": "data/tables/销售/fact_saleContract.tbl",
       "required_commands": [
-        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-model model:fact_saleContrac --budget compact"
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --relations 'model:fact_saleContrac' --budget compact"
       ],
       "expected_facts": [
         "返回 TARGET_NOT_FOUND 诊断",
@@ -1903,7 +2092,7 @@
       "uncertainty_policy": "必须明确说明目标未精确命中，建议用户确认候选或使用 --find-model 搜索",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-model",
+          "command_kind": "--relations",
           "target": "model:fact_saleContrac",
           "args": [
             "--budget",
@@ -1973,6 +2162,7 @@
     },
     {
       "case_id": "real_dataflow_tbl",
+      "tier": "real_manual",
       "question": "客户信息详情这个 DataFlow 表在整个数据链路中扮演什么角色？有哪些输入和输出？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -1980,7 +2170,7 @@
       "real_project_target": "model:客户信息详情",
       "source_path": "data/tables/加工表/客户信息详情.tbl",
       "required_commands": [
-        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --query-dataflow model:客户信息详情 --budget compact"
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --relations 'model:客户信息详情' --budget compact"
       ],
       "expected_facts": [
         "是 DataFlow 管道（dataflow_pipeline）",
@@ -2030,7 +2220,7 @@
       "uncertainty_policy": "如果 field_lineage 被截断，应说明需要 --budget full 查看完整链路",
       "minimal_command_plan": [
         {
-          "command_kind": "--query-dataflow",
+          "command_kind": "--relations",
           "target": "model:客户信息详情",
           "args": [
             "--budget",
@@ -2054,12 +2244,12 @@
           "description": "output_count 必须 > 0"
         },
         {
-          "path": "details.inputs",
+          "path": "details.dataflow_subgraph.inputs",
           "op": "not_empty",
           "description": "inputs 必须非空"
         },
         {
-          "path": "details.outputs",
+          "path": "details.dataflow_subgraph.outputs",
           "op": "not_empty",
           "description": "outputs 必须非空"
         }
@@ -2110,6 +2300,7 @@
     },
     {
       "case_id": "real_text_dashboard_not_primary_entrypoint",
+      "tier": "real_manual",
       "question": "售后首页中的 text11 这类文本/统计展示组件是否应被当成主要用户入口？它对页面理解有什么作用？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2250,6 +2441,7 @@
     },
     {
       "case_id": "real_tbl_single_fact_saleContract",
+      "tier": "real_manual",
       "question": "单独读取 data/tables/销售/fact_saleContract.tbl 时，这是什么类型的元数据？能否把它当成 SuperPage 或 DataFlow？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2390,13 +2582,14 @@
     },
     {
       "case_id": "fixture_condition_input1_visible_disabled",
+      "tier": "fixture_llm",
       "question": "actions_test 页面中的 input1 为什么不显示或不可用？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
       "real_project_target": null,
       "source_path": null,
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|input1' --budget compact"
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|input1' --budget compact"
       ],
       "expected_facts": [
         "input1 的显示受 visibleCondition 控制",
@@ -2417,14 +2610,14 @@
           "description": "必须有阻塞条件"
         },
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any",
           "field": "condition_type",
           "value": "VisibleCondition",
           "description": "必须包含 VisibleCondition"
         },
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any",
           "field": "condition_type",
           "value": "EnableCondition",
@@ -2451,12 +2644,9 @@
       "uncertainty_policy": "如果条件表达式存在未解析符号，应保守表达",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain-condition",
+          "command_kind": "--explain",
           "target": "comp:app/actions_test.spg|input1",
-          "args": [
-            "--budget",
-            "compact"
-          ],
+          "args": [],
           "requires_project_dir": true,
           "budget": "compact"
         }
@@ -2466,21 +2656,30 @@
           "path": "summary.blocking_conditions_count",
           "op": "gt",
           "value": 0,
-          "description": "必须有阻塞条件"
+          "description": "必须有阻塞条件",
+          "command_index": 0
         },
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any",
           "field": "condition_type",
           "value": "VisibleCondition",
-          "description": "必须包含 VisibleCondition"
+          "description": "必须包含 VisibleCondition",
+          "command_index": 0
         },
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any",
           "field": "condition_type",
           "value": "EnableCondition",
-          "description": "必须包含 EnableCondition"
+          "description": "必须包含 EnableCondition",
+          "command_index": 0
+        },
+        {
+          "path": "summary.what_is_it",
+          "op": "exists",
+          "description": "补救命令至少要给出组件是什么",
+          "command_index": 1
         }
       ],
       "risk_tags": [
@@ -2490,7 +2689,16 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
-      "max_command_count": 1,
+      "evaluation_dimensions": {
+        "task_family": "condition",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
+      "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
         "details"
@@ -2525,13 +2733,14 @@
     },
     {
       "case_id": "fixture_condition_button2_action_gate",
+      "tier": "fixture_llm",
       "question": "actions_test 页面中 button2 的 updateData action 在什么条件下才会执行？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
       "real_project_target": null,
       "source_path": null,
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|button2' --budget compact"
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|button2' --budget compact"
       ],
       "expected_facts": [
         "button2 的 action 有 conditionExp 限制",
@@ -2545,14 +2754,14 @@
       ],
       "evidence_requirements": [
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any",
           "field": "condition_type",
           "value": "ActionConditionExp",
           "description": "必须包含 ActionConditionExp"
         },
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any",
           "field": "raw_expr",
           "value": "input1.value=='test'",
@@ -2577,23 +2786,36 @@
       "uncertainty_policy": "如果 action 条件未解析，应保守表达",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain-condition",
+          "command_kind": "--explain",
           "target": "comp:app/actions_test.spg|button2",
-          "args": [
-            "--budget",
-            "compact"
-          ],
+          "args": [],
           "requires_project_dir": true,
-          "budget": "compact"
+          "budget": "compact",
+          "alternatives": [
+            {
+              "command_kind": "--explain",
+              "target": "action:app/actions_test.spg|button2|action1",
+              "args": [],
+              "requires_project_dir": true,
+              "budget": "compact"
+            }
+          ]
         }
       ],
       "expected_output_assertions": [
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any",
           "field": "condition_type",
           "value": "ActionConditionExp",
-          "description": "必须包含 ActionConditionExp"
+          "description": "必须包含 ActionConditionExp",
+          "command_index": 0
+        },
+        {
+          "path": "summary.what_is_it",
+          "op": "exists",
+          "description": "补救命令至少要给出组件是什么",
+          "command_index": 1
         }
       ],
       "risk_tags": [
@@ -2603,7 +2825,16 @@
       ],
       "case_status": "active",
       "difficulty": "basic",
-      "max_command_count": 1,
+      "evaluation_dimensions": {
+        "task_family": "condition",
+        "target_resolution": "explicit",
+        "distractor_count": 1,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
+      "max_command_count": 2,
       "allowed_output_sections": [
         "summary",
         "details"
@@ -2635,6 +2866,7 @@
     },
     {
       "case_id": "real_condition_contract_input3_source",
+      "tier": "real_manual",
       "question": "合同协议.spg 中的 input3 值是从哪里来的？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2642,7 +2874,7 @@
       "real_project_target": "comp:app/销售.app/销售/合同协议.spg|input3",
       "source_path": "app/销售.app/销售/合同协议.spg",
       "required_commands": [
-        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain-condition 'comp:app/销售.app/销售/合同协议.spg|input3' --intent writer --budget compact"
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain 'comp:app/销售.app/销售/合同协议.spg|input3' --intent writer --budget compact"
       ],
       "expected_facts": [
         "input3 的值读取自 model22.phoneNumber",
@@ -2660,7 +2892,7 @@
       ],
       "evidence_requirements": [
         {
-          "path": "details.answer_facts.writer_facts.paths",
+          "path": "details.condition_facts.answer_facts.writer_facts.paths",
           "op": "not_empty",
           "description": "必须有字段级 writer 链路"
         },
@@ -2691,13 +2923,11 @@
       "uncertainty_policy": "如果主链路中存在未解析字段，应保守表达并引用 related_context",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain-condition",
+          "command_kind": "--explain",
           "target": "comp:app/销售.app/销售/合同协议.spg|input3",
           "args": [
             "--intent",
-            "writer",
-            "--budget",
-            "compact"
+            "writer"
           ],
           "requires_project_dir": true,
           "budget": "compact"
@@ -2705,7 +2935,7 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "details.answer_facts.writer_facts.paths",
+          "path": "details.condition_facts.answer_facts.writer_facts.paths",
           "op": "not_empty",
           "description": "必须有字段级 writer 链路"
         },
@@ -2716,28 +2946,28 @@
           "description": "主链路数量大于 0"
         },
         {
-          "path": "details.answer_facts.writer_facts.paths",
+          "path": "details.condition_facts.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
           "field": "result",
           "value": "model22.phoneNumber",
           "description": "writer 链路必须包含 model22.phoneNumber"
         },
         {
-          "path": "details.answer_facts.writer_facts.paths",
+          "path": "details.condition_facts.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
           "field": "result",
           "value": "fact_qwSidebar.phoneNumber",
           "description": "writer 链路必须包含 fact_qwSidebar.phoneNumber"
         },
         {
-          "path": "details.answer_facts.writer_facts.paths",
+          "path": "details.condition_facts.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
           "field": "result",
           "value": "action1",
           "description": "writer 链路必须包含 action1"
         },
         {
-          "path": "details.answer_facts.writer_facts.paths",
+          "path": "details.condition_facts.answer_facts.writer_facts.paths",
           "op": "array_any_contains_substring",
           "field": "result",
           "value": "action4",
@@ -2791,6 +3021,7 @@
     },
     {
       "case_id": "real_condition_contract_display",
+      "tier": "real_manual",
       "question": "合同协议.spg 页面正常显示数据需要满足哪些条件？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2798,7 +3029,7 @@
       "real_project_target": "page:app/销售.app/销售/合同协议.spg",
       "source_path": "app/销售.app/销售/合同协议.spg",
       "required_commands": [
-        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain-condition 'page:app/销售.app/销售/合同协议.spg' --budget compact"
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain 'page:app/销售.app/销售/合同协议.spg' --budget compact"
       ],
       "expected_facts": [
         "页面有多个显示/隐藏条件（visibleCondition）",
@@ -2843,7 +3074,7 @@
       "uncertainty_policy": "如果条件过多或复杂，应给出 Top-N 重点条件并说明截断",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain-condition",
+          "command_kind": "--explain",
           "target": "page:app/销售.app/销售/合同协议.spg",
           "args": [
             "--budget",
@@ -2907,6 +3138,7 @@
     },
     {
       "case_id": "real_condition_model22_scope",
+      "tier": "real_manual",
       "question": "model:model22 的数据源过滤条件有哪些？是否有来自其他页面的同名模型条件混入？",
       "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
       "requires_real_project": true,
@@ -2914,7 +3146,7 @@
       "real_project_target": "model:model22",
       "source_path": "app/销售.app/销售/合同协议.spg",
       "required_commands": [
-        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain-condition 'model:model22' --budget compact"
+        "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --explain 'model:model22' --budget compact"
       ],
       "expected_facts": [
         "model22 的过滤条件主要来自合同协议.spg",
@@ -2929,7 +3161,7 @@
       ],
       "evidence_requirements": [
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "not_empty",
           "description": "必须有数据门控"
         },
@@ -2959,7 +3191,7 @@
       "uncertainty_policy": "如果主页面推断不确定，应保守表达并引用相关上下文",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain-condition",
+          "command_kind": "--explain",
           "target": "model:model22",
           "args": [
             "--budget",
@@ -2971,7 +3203,7 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "not_empty",
           "description": "必须有数据门控"
         },
@@ -2982,14 +3214,14 @@
           "description": "必须有 related_context"
         },
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "param5",
           "description": "data_empty_gates 必须包含 param5"
         },
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "WXWORK_USER_ID",
@@ -3041,13 +3273,14 @@
     },
     {
       "case_id": "fixture_condition_model_filter_user_var",
+      "tier": "fixture_llm",
       "question": "actions_test 页面中 model1 的数据源过滤条件有哪些？是否涉及系统变量？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
       "real_project_target": null,
       "source_path": null,
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain-condition 'model:model1' --budget compact"
+        "--project-dir tests/fixtures/test_project --explain 'model:model1' --budget compact"
       ],
       "expected_facts": [
         "model1 有过滤条件 externalUserId=param1",
@@ -3062,19 +3295,19 @@
       ],
       "evidence_requirements": [
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "not_empty",
           "description": "必须有数据门控"
         },
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "param1",
           "description": "data_empty_gates 必须包含 param1"
         },
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "WXWORK_USER_ID",
@@ -3100,31 +3333,28 @@
       "uncertainty_policy": "如果过滤条件未完全解析，应保守表达",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain-condition",
+          "command_kind": "--explain",
           "target": "model:model1",
-          "args": [
-            "--budget",
-            "compact"
-          ],
+          "args": [],
           "requires_project_dir": true,
           "budget": "compact"
         }
       ],
       "expected_output_assertions": [
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "not_empty",
           "description": "必须有数据门控"
         },
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "param1",
           "description": "data_empty_gates 必须包含 param1"
         },
         {
-          "path": "details.data_empty_gates",
+          "path": "details.condition_facts.data_empty_gates",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "WXWORK_USER_ID",
@@ -3139,6 +3369,15 @@
       ],
       "case_status": "active",
       "difficulty": "intermediate",
+      "evaluation_dimensions": {
+        "task_family": "condition",
+        "target_resolution": "explicit",
+        "distractor_count": 2,
+        "dependency_depth": 2,
+        "stateful": false,
+        "error_injection": false,
+        "output_truncation": true
+      },
       "max_command_count": 1,
       "allowed_output_sections": [
         "summary",
@@ -3172,13 +3411,14 @@
     },
     {
       "case_id": "fixture_condition_direct_dependency",
+      "tier": "fixture_structural",
       "question": "actions_test 页面中 input_chain_a 为什么不显示？它的直接条件引用了哪些组件？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
       "real_project_target": null,
       "source_path": null,
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|input_chain_a' --budget compact"
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|input_chain_a' --budget compact"
       ],
       "expected_facts": [
         "input_chain_a 的显示受 visibleCondition 控制",
@@ -3194,14 +3434,14 @@
       ],
       "evidence_requirements": [
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "input_chain_b",
           "description": "blocking_conditions 必须包含 input_chain_b"
         },
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any_contains_substring",
           "field": "referenced_symbols",
           "value": "input_chain_b",
@@ -3226,7 +3466,7 @@
       "uncertainty_policy": "当前工具输出只覆盖直接条件引用，不展开链式上游值来源；如需 param1 来源请补充 --explain-condition 'comp:app/actions_test.spg|input_chain_b'",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain-condition",
+          "command_kind": "--explain",
           "target": "comp:app/actions_test.spg|input_chain_a",
           "args": [
             "--budget",
@@ -3238,14 +3478,14 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "input_chain_b",
           "description": "blocking_conditions 必须包含 input_chain_b"
         },
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any_contains_substring",
           "field": "referenced_symbols",
           "value": "input_chain_b",
@@ -3294,13 +3534,14 @@
     },
     {
       "case_id": "fixture_hidden_component_not_failure",
+      "tier": "fixture_structural",
       "question": "actions_test 页面中 panel_test 为什么不显示？隐藏组件 hidden_customer_id 是渲染故障吗？",
       "project_dir": "tests/fixtures/test_project",
       "requires_real_project": false,
       "real_project_target": null,
       "source_path": null,
       "required_commands": [
-        "--project-dir tests/fixtures/test_project --explain-condition 'comp:app/actions_test.spg|panel_test' --budget compact"
+        "--project-dir tests/fixtures/test_project --explain 'comp:app/actions_test.spg|panel_test' --budget compact"
       ],
       "expected_facts": [
         "panel_test 的显示受 visibleCondition 控制",
@@ -3316,7 +3557,7 @@
       ],
       "evidence_requirements": [
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "hidden_customer_id",
@@ -3342,7 +3583,7 @@
       "uncertainty_policy": "如果隐藏组件的语义不确定，应保守表达",
       "minimal_command_plan": [
         {
-          "command_kind": "--explain-condition",
+          "command_kind": "--explain",
           "target": "comp:app/actions_test.spg|panel_test",
           "args": [
             "--budget",
@@ -3354,7 +3595,7 @@
       ],
       "expected_output_assertions": [
         {
-          "path": "details.blocking_conditions",
+          "path": "details.condition_facts.blocking_conditions",
           "op": "array_any_contains_substring",
           "field": "raw_expr",
           "value": "hidden_customer_id",

@@ -1,124 +1,211 @@
-# AI Eval 评测记录模板
+# M58 AI Eval 运行报告模板
 
-用于记录空上下文小模型（如 5.4-mini）基于 SKILL.md + CLI 输出的真实评测结果。
+用于记录 CI tester 内的空上下文小模型评测。runner 只把 `SKILL.md`、固定项目路径、metadata-checker release binary 和当前问题提供给模型；模型通过 CNB AI Chat API 的 SSE 流返回 JSON `command` / `final` 消息。
 
 ## 记录原则
 
-- 不要提交大段模型原始回答，只提交结构化结果和失败分类。
-- 每次评测应记录：模型版本、case filter、通过/失败数量、关键失败项。
-- 支持记录多个模型结果，包括 5.4-mini、5.3-codex、本地模型。
+- JSON `RunReport` 是唯一事实源，Markdown 只由同一对象生成。
+- 不写入 CNB token、Authorization header、完整 prompt、模型原始回答或大段 CLI 输出。
+- 每次记录 provider、model、CNB build、trial/case 稳定性、失败分类和命令轨迹统计。
+- `fixture_structural` 不调用模型；`fixture_llm` 使用 fixture 项目；`real_manual` 只在明确的人工/手动入口执行。
 
-## 评测记录格式
+## RunReport 格式
 
 ```json
 {
-  "eval_run_id": "run-2026-05-05-5.4-mini",
-  "model": "gpt-5.4-mini",
-  "skill_md_version": "1.2.0",
-  "cases_json": "tests/fixtures/corpus/ai_eval/ai_eval_cases.json",
-  "binary_path": "/Users/wuhaocheng/Documents/repos/metadata-checker/target/release/metadata-checker",
-  "project_dir": "tests/fixtures/test_project",
-  "real_project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
-  "case_filter": "all | fixture-only | real-only",
-  "timestamp": "2026-05-05T12:00:00Z",
-  "summary": {
-    "total_cases": 10,
-    "passed": 8,
-    "failed": 2,
-    "skipped": 0
-  },
-  "results": [
+  "schema_version": "1.4.0",
+  "provider": "cnb-ai-chat",
+  "model_id": "gpt-5.4-mini",
+  "cnb_build_id": "build-20260727",
+  "started_at": "2026-07-27T00:00:00Z",
+  "cases": [
     {
       "case_id": "page_purpose_actions_test",
+      "trial_index": 0,
+      "task_family": "page_logic",
+      "difficulty": "basic",
       "status": "pass",
-      "commands_used": ["--query-page-logic page:app/actions_test.spg"],
-      "assertion_pass_count": 4,
-      "assertion_fail_count": 0,
-      "missed_facts": [],
-      "forbidden_claims_hit": [],
-      "diagnostics_handling": "n/a"
-    },
-    {
-      "case_id": "dataflow_chain_trace",
-      "status": "fail",
-      "commands_used": ["--query-dataflow df_a", "--explain field:df_b.id"],
-      "assertion_pass_count": 3,
-      "assertion_fail_count": 2,
-      "missed_facts": ["physical_x 作为中间节点"],
-      "forbidden_claims_hit": [],
-      "diagnostics_handling": "correctly_conservative",
-      "failure_category": "missed_fact",
-      "notes": "模型未能从 lineage 中识别 physical_x 节点"
+      "passed": true,
+      "max_command_count": 2,
+      "failure_classes": [],
+      "judge_notes": [],
+      "command_trace": [
+        {
+          "command_kind": "--query-page-logic",
+          "target": "page:app/actions_test.spg",
+          "args": [],
+          "budget": "compact",
+          "plan_step_index": 0,
+          "route": "primary",
+          "accepted": true,
+          "detail_request": false,
+          "budget_upgrade": false,
+          "output_sections": ["summary"]
+        }
+      ]
     }
-  ]
+  ],
+  "pass_rate": 1.0,
+  "trial_pass_rate": 1.0,
+  "trial_count": 1,
+  "case_count": 1,
+  "case_stable_pass_rate": 1.0,
+  "cases_with_flaky_trials": 0,
+  "failure_classes": {},
+  "command_trace_stats": {
+    "total_commands": 1,
+    "accepted_commands": 1,
+    "rejected_commands": 0,
+    "cases_with_commands": 1,
+    "average_commands_per_case": 1.0,
+    "average_commands_per_trial": 1.0,
+    "max_command_count_exceeded_cases": 0,
+    "budget_upgrade_count": 0
+  },
+  "command_routing_confusion": {},
+  "command_route_usage": {},
+  "reasoning_effort": null,
+  "reasoning_chars": 0
 }
 ```
+
+`judge_notes` 只能是短的确定性诊断，不得复制模型回答。`command_trace` 只保留参数、plan step 和 section 元数据，不保留 stdout 全文。
+
+多 trial 报告中，`cases_with_commands` 按去重后的 `case_id` 计数；`average_commands_per_case` 的分母是去重后的 `case_count`，`average_commands_per_trial` 的分母是报告中的 trial 行数，避免 trial 数增加后 case 维度被重复放大。
 
 ## 失败分类
 
 | 分类 | 说明 |
 |------|------|
-| missed_fact | 遗漏 expected_fact |
-| hallucination | 出现 forbidden_claim 或无依据推断 |
-| wrong_command | 选用的 CLI 命令与 minimal_command_plan 偏差过大 |
-| ignored_diagnostic | 遇到诊断未降级，仍做确定性结论 |
-| over_read_details | 未先读 summary 而直接读取大量 raw details |
-| plan_mismatch | 未按 minimal_command_plan 执行，导致断言失败 |
+| `missed_fact` | 遗漏 `answer_assertions.must_include` |
+| `hallucination` | 命中 `must_not_include` 或无依据禁用结论 |
+| `no_command` | 模型没有执行任何 CLI 命令 |
+| `command_rejected` | 命令未通过 `minimal_command_plan` 精确匹配而被拒绝；该 trial 在执行 CLI 前立即结束 |
+| `wrong_command` | 命令已执行但没有对应的 plan step |
+| `ungrounded_answer` | 要求证据但没有任何被接受的命令可作为依据 |
+| `ignored_diagnostic` | 存在诊断但回答没有保守表达 |
+| `over_read_details` | 请求 `--detail`、`--budget full` 或未允许的细节路径 |
+| `needs_human_review` | case assertion schema 无法解析 |
+| `runner_error` | adapter、CLI 或 case workspace 的运行时失败，未伪造业务答案；包含 CNB HTTP/transport/SSE 级别异常或 JSON 未返回前就失败的适配层问题 |
 
-## 运行方式
+`missed_fact` 按「同义组」判定：`answer_assertions.must_include` 的每一项可以是单个字符串，也可以是一组等价表述，命中任意一个即视为覆盖该事实。小模型回答简短，不应因为没有复述内部术语而判失败；断言也不得要求 CLI 输出中不存在的词。
 
-### 机器自动运行
+证据要求（`evidence_reference_required`）检查回答是否建立在已被接受的命令之上，不再要求回答文本里出现 `summary` / `details` 等内部 section 英文名——后者只会训练模型复述固定词，与证据强度无关。
+
+`command_rejected` 由 runner 在 `policy.validate` 失败时直接产出，并立即结束该 trial，
+因此它与 `judge_answer` 产出的所有分类（`missed_fact`、`hallucination`、`ungrounded_answer` 等）
+互斥。这把 trial 划成两段互不重叠的归因区间：
+
+- **路由段**：`no_command` + `command_rejected`，衡量 CLI 动词表面是否自解释；
+- **理解段**：其余判分分类，衡量命令输出是否可读。
+
+因此报告应分别看「路由成功率 = 未被拒绝的 trial / 总 trial」和「路由成功后的通过率」，
+不要只看 `trial_pass_rate`——后者会把命令表面缺陷记成模型能力不足。
+
+`command_routing_confusion` 把每条被拒绝的命令按 `<task_family> -> <模型选择的 command_kind>`
+聚合。这是**工具指标而非模型指标**：它直接指出哪类问题会被误路由到哪个动词，是决定合并、
+改名或补充 `SKILL.md` 路由规则的依据。`command_kind` 来自模型，键中截断到 64 字符；该值
+已原样存在 `command_trace` 中，不构成新的信息泄露。
+
+target 比较按 CLI 自身的规范化进行，而不是逐字符相等：`--query-dataflow` 的裸名与 `model:` 前缀
+写法在 CLI 内部解析到同一个节点、输出逐字节相同，因此视为同一条命令。否则「动词选对、实体也选对，
+只是多写了一个类型前缀」会被记成路由失败，`command_rejected` 与本表就会谎报并不存在的接口缺陷。
+放宽只限 `--query-dataflow`（其 CLI 参数就写作 `<MODEL>`，前缀是可选修饰）；其它命令的
+`comp:` / `action:` / `field:` 前缀是消歧义所必需的，剥掉仍判拒绝。
+
+同理，`--intent auto` 是 CLI 默认值，显式写出与整个省略在所有命令/target 上输出逐字节相同，
+比较前一并去掉；因此 plan 里 `--intent auto` 形式的 alternative 会归类成 `primary` 而不是
+`alternate`——它本来就不是另一条路由。其它 `--intent` 取值不放宽：`--intent availability`
+对 model target 会真的丢掉 `model_io_facts`，选错了必须照实记为拒绝。
+
+`command_route_usage` 与之互补，把每条**被接受**的命令按
+`<task_family> -> <command_kind> (primary|alternate)` 聚合。`minimal_command_plan`
+支持语义等价的 `alternatives` 之后，「模型选中规范动词」与「模型选了另一条同样能拿到
+事实的路」都会记为 accepted；只看通过率无法区分两者，工具表面是否自解释的信号就被抹平。
+读法：某个 task_family 里 `alternate` 占比越高，说明规范动词越不是模型的自然选择，
+越应该考虑合并或改名。两张表互斥且互补——同一条命令只会进其中一张。
+
+一次 trial 可以有多个失败分类；`trial_pass_rate` 按 trial 行计数，`case_stable_pass_rate` 只有同一 case 的所有 trial 都通过才计为通过。为兼容旧消费者，`pass_rate` 与 `trial_pass_rate` 保持同值；`cases_with_flaky_trials` 单独标出同一 case 试验结果不稳定的情况。
+
+`task_family` 和 `difficulty` 用于按能力切片；case 原始的 `evaluation_dimensions`（如 `target_resolution`、`distractor_count`、`dependency_depth`、`stateful`、`error_injection`、`output_truncation`）保留在评测集，不进入模型 bootstrap。
+
+## 本地验证
+
+普通开发验证只运行结构和 fake adapter，不访问 CNB：
 
 ```bash
-cargo test --test ai_eval_tests
+cargo test --features cli-local --test m58_cnb_ai_runner_tests
 ```
 
-自动执行所有 active case 的 expected_output_assertions 校验。
+## CNB 手动/定时运行
 
-### 真实项目评测（M15）
+真实 `fixture_llm` baseline 通过 `.cnb.yml` 的 `api_trigger_m58_llm` pipeline 运行，不进入 PR 阻塞 CI。pipeline 必须提供：
 
-1. 确认真实项目路径存在：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
-2. 使用独立 graphdb 路径：`/tmp/metadata-checker-ai-eval-<case_id>.graphdb`
-3. 串行执行，避免 redb 锁冲突
-4. 记录中标注 `requires_real_project` 和 `graph_db_path_strategy`
+- `CNB_TOKEN`：仅用于 `Authorization: Bearer ...`，属于 pipeline-only 密钥；
+- `M58_CNB_REPO`：可选覆盖项；未显式设置时回退到 `CNB_REPO_SLUG`；
+- `M58_CNB_MODEL`：可选覆盖项；未显式设置时默认 `deepseek-v4-flash`。**该端点对未知模型名不报错，
+  而是静默用默认模型服务请求**（实测请求 `definitely-not-a-real-model-xyz` 同样由
+  `deepseek-v4-flash` 应答）。adapter 因此按 SSE chunk 里的 `model` 字段校验实际服务模型，
+  与请求不一致时直接失败——否则换成 `gemma4-31b` 只会得到一份标着 gemma4、实际由默认模型
+  回答的报告，跨模型对比会静默失效。换模型前先用一次 `ai-chat-completions` 确认该模型真的被路由；
+- `M58_AI_EVAL_TRIALS`：live 默认 `3`；本地/fake runner 默认 `1`，每个 trial 使用独立 history、workspace 和 graphdb；
+- `M58_CNB_API_BASE`：可选，仅用于测试 endpoint 覆盖；
+- `M58_CNB_REASONING_EFFORT`：可选，取值 `low` / `medium` / `high`。**不设置时完全不发该字段，
+  模型在零思考状态下作答**——已实测：不带该字段时 SSE 的 `reasoning_content` 恒为 0 字符，
+  对应 build 的 `ai-audit` 也显示 `thinking_tokens: 0`；带上任意取值即产出推理内容。
+  该字段不在 CNB swagger 声明的 body schema 里，属于实测可用的透传参数，因此 runner 会在
+  请求了推理却收到 0 字符时直接失败，避免产出一份「标着开了推理、实际没推理」的基线。
+  报告中的 `reasoning_effort` 与 `reasoning_chars` 记录本次 run 的实际情况；只记长度不记原文。
 
-### 5.4-mini 空上下文验收
-
-- 使用全新空上下文 5.4-mini，只提供 SKILL.md + 二进制路径 + 项目路径 + case question
-- 至少覆盖 5 类问题：页面用途、按钮行为、文本统计、模型被 DataFlow 消费、.tbl 单文件理解
-- 记录结构化结果，不提交大段模型原文
-- M15 当前记录：`docs/ai-eval-runs/run-2026-05-08-5.4-mini-m15.json`
-- 失败项必须归类：missed_fact / hallucination / wrong_command / ignored_diagnostic
-
-### 人工/半自动评测流程
-
-1. 准备空上下文环境（不给源码，不给历史对话）。
-2. 给 SKILL.md 全文 + 二进制路径 + 项目路径。
-3. 按 case_id 顺序提问，记录模型选用的命令和回答。
-4. 对照 answer_assertions.must_include / must_not_include 判分。
-5. 记录结果到本模板 JSON。
-
-### 独立 runner 设计（未来 CLI 子命令）
+服务端每次构建的真实 AI 用量可以从 OpenAPI 取到，它是模型与思考量的权威来源：
 
 ```bash
-metadata-checker --run-ai-eval \
-  --cases tests/fixtures/corpus/ai_eval/ai_eval_cases.json \
-  --project-dir tests/fixtures/test_project \
-  --output eval-results.json \
-  --model 5.4-mini
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.cnb.cool/<repo>/-/build/logs/ai-audit/<sn>/<pipelineId>"
 ```
 
-runner 输入：
-- `cases_json`：评测集路径
-- `project_dir`：项目目录
-- `binary_path`：metadata-checker 二进制路径（默认当前二进制）
-- `case_filter`：可选 case_id 白名单
+返回按模型名拆分的 `prompt_tokens` / `completion_tokens` / `thinking_tokens` /
+`prompt_cached_tokens` / `request_count` / `milli_credit`，可用来交叉验证报告里的 `model_id`
+和推理是否真的发生，以及核算每次 run 的实际成本。
 
-runner 输出：
-- 结构化 eval result JSON，字段见上方模板
-- 失败信息包含 case_id、命令、失败断言路径、实际值、期望值
+`api_trigger_m58_llm` 先跑 runtime contract preflight：在独立 subshell 中执行与 live stage 完全相同的 `export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"` 与 `export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"`，验证仅有 `CNB_TOKEN + CNB_REPO_SLUG` 时空/缺失的 `M58_CNB_REPO` 会回退到 `CNB_REPO_SLUG`、空/缺失的 `M58_CNB_MODEL` 会回退到 `deepseek-v4-flash`，同时确认显式覆盖不会被默认值覆盖。
 
-runner 约束：
-- 串行执行（避免 redb 锁冲突）
-- 隔离 graphdb（临时目录复制）
-- 复用 expected_output_assertions 断言执行逻辑
+`M58_METADATA_CHECKER_BIN` 由 build stage 生成的 release binary 路径提供，不是本地凭据或手工配置要求。运行前先构建 release binary，使用每个 case/trial 独立的 graphdb，并串行执行 case，避免 redb 锁冲突。报告默认写入 `target/m58-ai-eval/`；发布或归档前只上传结构化 JSON/Markdown。
+
+report stage 整份输出 `run.md`，不再用 `grep` 逐字段抽取 `run.json`。`grep` 只能匹配键名所在行，
+`failure_classes`、`command_trace_stats` 这类聚合对象的体永远打不出来，`grep -A N` 又会把命令轨迹
+从中间截断——一次 live 评测跑完，日志里不足以判断模型为什么失败，只能回到本地重跑。`run.md`
+由同一份 `RunReport` 投影而来，除既有汇总外还包含 `## Judge notes (failing cases)`（失败 case 的
+确定性诊断）和 `## Command trace`（逐条命令的 kind/target/args/budget/plan_step_index/route/accepted
+等经 plan 校验过的入参），因此路径编造、动词误选这类失败可以直接从 CI 日志复盘，全程不含模型原文。
+
+## 空上下文边界
+
+bootstrap 只包含仓库 `SKILL.md`、固定 binary/project 路径、JSON 协议和当前问题。不得读取源码、历史运行记录、CNB Knowledge Base 或其他隐藏上下文；也不得注入 `expected_facts`、`must_include`、`minimal_command_plan`、`CNB_TOKEN`、答案键或隐藏 case 数据。CLI stdout 以新的 `user` 消息回传给模型。Bootstrap 不得包含任何实际 case 的 target/answer。
+
+bootstrap 必须显式约束：
+
+- 每轮只返回一个 raw JSON object；禁止 Markdown fence、解释性前缀或后缀；`final` 只能有 `kind` 和 `answer` 两个键，`answer` 使用简短字符串且单行输出。
+- 先按问题意图选命令，再选最小查询范围：单组件/按钮/动作（包括“点击后发生什么”）-> `--explain`，不得误用 `--query-page-logic`；页面整体逻辑 -> `--query-page-logic`；writer/value-source/condition -> `--explain-condition` 且携带 `--intent`（如 `display`、`value-source`、`writer`）。
+- 裸 `field:<model>.<field>` 的值/来源/写入问题优先使用 `--explain field:<model>.<field>`；不要因为“值从哪里来”把直接字段关系误选成 `--explain-condition`。
+- 按钮/点击问题必须使用 `--explain comp:app/<relative-file>.spg|<component-id>`，不得使用 `--query-page-logic`。
+- command JSON 只给固定 schema / shape example，例如 `{"kind":"command","command_kind":"--query-page-logic","target":"page:<relative-page-path>.spg","args":[],"budget":"compact"}`；这不是当前 case 的答案，也不是允许 target。
+- 实际 command turn 必须依据 `SKILL.md` 和 question 自主选择 `command_kind`、`target`、`args`、`budget`；不要从 case metadata 注入最小计划。
+- 页面目标必须保留标准相对路径：`page:app/<relative-file>.spg`。
+- target 构造固定为 `page:app/<relative-file>.spg`、`comp:app/<relative-file>.spg|<component-id>` 或 `field:<model>.<field>`；不得删除 `app/` 或 `.spg`。`budget` 只能放在 command JSON 顶层字段，不得塞入 `args`。
+- final answer 至少引用一个 literal section name（`summary` / `details` / `evidence` / `diagnostics`）；page final 必须 literal 包含“用户入口、按钮、写入目标、action”，field final 必须 literal 包含“页面 action、写入、字段”，并以 CLI 实际事实填充名称和数量。
+- 裸 field 的一次 compact `--explain` 已有 `summary` 和 `evidence` 后立即返回 final，不要再发第二条命令。
+- 第一轮先走最小允许查询：默认使用 `--budget compact`；仅在 `diagnostics`/`OUTPUT_TRUNCATED` 不足时再升级到 `normal` 或 `full`。`budget` 仅表示查询深度，不是路径或目标前缀。
+- 后续 `user` 消息只作为 CLI 证据读取；先看 `summary`，再读声明的主证据块。若主证据块为空或 `result=null`，不要直接作答；仍有查询机会时，用同一 `target` 执行 `--explain`、`args=[]`、`budget=compact` 作为受限 fallback，否则明确说明证据不足。
+- 遇到 `diagnostics`、`OUTPUT_TRUNCATED` 或其他不确定性时，final answer 必须保守说明，禁止猜测。
+
+runner 保持 strict parse：malformed JSON、Markdown fence、解释性前缀等都记为 `protocol_error`，不会自动剥离或重试后继续执行。
+
+页面 final 使用固定标签“用户入口：...；按钮：...；写入目标：...；action：...”，不要用同义词替换这些标签。
+
+边界说明：
+
+- `parse_agent_turn` 只接收 **adapter 已成功返回的 assistant content**，对内容执行 strict JSON 协议解析。
+- 每轮只输出一行 JSON；`final` 对象只能包含 `kind` 和 `answer` 两个键，`answer` 是简短字符串，不得添加 `sources`、`evidence` 等额外键。
+- `protocol_error` 仅表示模型返回内容不符合 `command/final` 协议（如 fenced JSON、非 JSON、解释性前缀）。
+- `runner_error` 表示在模型内容到达 runner 之前失败，典型是 `CnbChatAdapter` 的 HTTP 请求/SSE 解析失败、provider 运行时不可达、超时、CLI 执行失败、以及 workspace 构建失败等；这类不属于模型协议层错误。

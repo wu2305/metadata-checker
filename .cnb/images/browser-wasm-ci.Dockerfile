@@ -11,8 +11,13 @@ RUN apt-get update \
       build-essential \
       ca-certificates \
       curl \
+      openssh-server \
       pkg-config \
     && rm -rf /var/lib/apt/lists/*
+
+# CNB 自定义开发环境要走 VSCode/Cursor Remote-SSH，必须在镜像里预装 openssh-server
+# （见上面的 apt 列表）；sshd 需要这个运行目录，缺了会在连接时才报错。
+RUN mkdir -p /run/sshd
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y \
       --profile minimal \

@@ -1,5 +1,7 @@
 use metadata_checker::dependency::DependencyGraph;
-use metadata_checker::superpage::{RefType, parse_expression_refs, parse_superpage};
+use metadata_checker::superpage::{
+    RefType, parse_expression_refs, parse_superpage, parse_superpage_from_value,
+};
 use std::path::PathBuf;
 
 #[test]
@@ -248,5 +250,72 @@ fn test_parse_expression_refs_model22_phonenumber() {
         has_model22,
         "Expected model22.phoneNumber reference, got: {:?}",
         refs
+    );
+}
+
+/// parse 层归一不变式：裸 `${id}` 全组件引用（id 为已知组件）归一为 ComponentValue，
+/// 带属性的 `${id.prop}` 归一为 ComponentProperty(id, prop)，尾点 `${id.}` 等同裸引用。
+/// 归一后 ComponentProperty 的 property 永不为空，下游不得再出现 "comp:id." 尾点形态。
+#[test]
+fn test_bare_component_ref_normalizes_to_component_value() {
+    let raw = serde_json::json!({
+        "canvas": {
+            "components": [
+                {"id": "txtB", "type": "text"},
+                {"id": "exprA", "type": "text", "value": "${txtB}"},
+                {"id": "exprB", "type": "text", "value": "${txtB.txt}"},
+                {"id": "exprC", "type": "text", "value": "${txtB.}"}
+            ]
+        }
+    });
+    let meta = parse_superpage_from_value(raw).expect("parse should succeed");
+    let resolved_of = |component_id: &str| -> Vec<RefType> {
+        meta.expressions
+            .iter()
+            .filter(|e| e.component_id == component_id)
+            .flat_map(|e| e.resolved_refs.iter().map(|r| r.ref_type.clone()))
+            .collect()
+    };
+
+    // 裸 `${txtB}`：已知组件 id + 空 field → ComponentValue
+    assert!(
+        resolved_of("exprA")
+            .iter()
+            .any(|r| matches!(r, RefType::ComponentValue(id) if id == "txtB")),
+        "exprA 应解析出 ComponentValue(txtB): {:?}",
+        resolved_of("exprA")
+    );
+
+    // `${txtB.txt}`：非空 field → ComponentProperty("txtB", "txt")
+    assert!(
+        resolved_of("exprB").iter().any(
+            |r| matches!(r, RefType::ComponentProperty(id, prop) if id == "txtB" && prop == "txt")
+        ),
+        "exprB 应解析出 ComponentProperty(txtB, txt): {:?}",
+        resolved_of("exprB")
+    );
+
+    // 尾点 `${txtB.}`：split 后 field 为空，等同裸引用 → ComponentValue
+    assert!(
+        resolved_of("exprC")
+            .iter()
+            .any(|r| matches!(r, RefType::ComponentValue(id) if id == "txtB")),
+        "exprC 应解析出 ComponentValue(txtB): {:?}",
+        resolved_of("exprC")
+    );
+
+    // 不变式断言：全部 resolved refs 中不存在 property 为空的 ComponentProperty
+    let has_empty_prop = meta
+        .expressions
+        .iter()
+        .flat_map(|e| e.resolved_refs.iter())
+        .any(|r| matches!(&r.ref_type, RefType::ComponentProperty(_, prop) if prop.is_empty()));
+    assert!(
+        !has_empty_prop,
+        "ComponentProperty 的 property 永不为空: {:?}",
+        meta.expressions
+            .iter()
+            .flat_map(|e| e.resolved_refs.iter().map(|r| &r.ref_type))
+            .collect::<Vec<_>>()
     );
 }

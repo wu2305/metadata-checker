@@ -215,6 +215,12 @@ pub struct RawComponent {
     pub steps: Vec<RawComponent>,
     #[serde(default)]
     pub comps: Vec<RawComponent>,
+    /// 其余未识别子键（M58.3 F1 形态感知递归的候选来源）。
+    ///
+    /// 本结构体无 `deny_unknown_fields`，未知键原本被静默丢弃；flatten 捕获后
+    /// 由 `extract_components` 按形态判定是否为子组件数组。
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 // ============================================================

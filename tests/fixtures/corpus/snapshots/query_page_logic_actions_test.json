@@ -1,7 +1,7 @@
 {
   "details_counts": {
     "action_flows_count": 14,
-    "data_sources_count": 28,
+    "data_sources_count": 27,
     "entrypoints_count": 14,
     "navigation_count": 3,
     "page_inputs_count": 2,
@@ -100,7 +100,7 @@
       "edge_type": "Navigation"
     },
     {
-      "claim": "Page page:app/actions_test.spg reads from 28 data sources",
+      "claim": "Page page:app/actions_test.spg reads from 27 data sources",
       "confidence": "High",
       "edge_type": "Reads/ActionReads"
     },
@@ -164,18 +164,401 @@
   "query_target": "page:app/actions_test.spg",
   "schema_version": "1.0",
   "summary": {
+    "absent": [
+      {
+        "statement": "未解析到页面跳转",
+        "what": "navigation"
+      }
+    ],
     "action_prerequisites_count": 1,
     "data_prerequisites_count": 7,
-    "data_source_count": 28,
+    "data_source_count": 27,
     "display_prerequisites_count": 6,
     "entrypoint_count": 14,
     "key_model_count": 5,
+    "key_primary_paths": [
+      {
+        "classification": "PrimaryPath",
+        "classification_reason": "包含目标组件、数据语义和物理表/跨页写入证据",
+        "confidence": "high",
+        "diagnostics": [],
+        "evidence": [
+          "comp:app/actions_test.spg|button4 -> action:app/actions_test.spg|button4|action4 via Triggers",
+          "action:app/actions_test.spg|button4|action4 -> field:model2.deletedFlag via FieldWrite",
+          "field:model2.deletedFlag <- action:app/actions_test.spg|button4|action4 via FieldWrite",
+          "action:app/actions_test.spg|button4|action4 -> model:model2 via ActionWrites",
+          "model:model2 -> model:fact_orders via DataflowInput"
+        ],
+        "path_id": "comp:app/actions_test.spg|button4>action:app/actions_test.spg|button4|action4>field:model2.deletedFlag>action:app/actions_test.spg|button4|action4>model:model2>model:fact_orders",
+        "purpose": "自动发现路径",
+        "rank_features": {
+          "contains_cross_page_writer": true,
+          "contains_dataflow_side_branch": false,
+          "contains_entrypoint": false,
+          "contains_model_filter": false,
+          "contains_model_read": false,
+          "contains_model_write": true,
+          "contains_only_structural_edges": false,
+          "contains_physical_field": true,
+          "contains_target_component": true,
+          "edge_type_sequence": [
+            "Triggers",
+            "FieldWrite",
+            "FieldWrite",
+            "ActionWrites",
+            "DataflowInput"
+          ],
+          "field_name_match": false,
+          "has_condition_node": false,
+          "has_json_path": false,
+          "path_length": 5,
+          "same_page": true,
+          "source_file_count": 4
+        },
+        "segments": [
+          {
+            "confidence": "medium",
+            "edge": {
+              "edge_type": "Triggers",
+              "field_path": null,
+              "json_path": null,
+              "source_expr": null
+            },
+            "evidence": "comp:app/actions_test.spg|button4 -> action:app/actions_test.spg|button4|action4 via Triggers",
+            "from": {
+              "name": "button4",
+              "node_id": "comp:app/actions_test.spg|button4",
+              "node_type": "Component",
+              "path": "app/actions_test.spg"
+            },
+            "to": {
+              "name": "deleteData:action4",
+              "node_id": "action:app/actions_test.spg|button4|action4",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            }
+          },
+          {
+            "confidence": "high",
+            "edge": {
+              "edge_type": "FieldWrite",
+              "field_path": "model2.deletedFlag",
+              "json_path": null,
+              "source_expr": "1"
+            },
+            "evidence": "action:app/actions_test.spg|button4|action4 -> field:model2.deletedFlag via FieldWrite",
+            "from": {
+              "name": "deleteData:action4",
+              "node_id": "action:app/actions_test.spg|button4|action4",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            },
+            "to": {
+              "name": "deletedFlag",
+              "node_id": "field:model2.deletedFlag",
+              "node_type": "Field",
+              "path": "data/table2.tbl"
+            }
+          },
+          {
+            "confidence": "high",
+            "edge": {
+              "edge_type": "FieldWrite",
+              "field_path": "model2.deletedFlag",
+              "json_path": null,
+              "source_expr": "1"
+            },
+            "evidence": "field:model2.deletedFlag <- action:app/actions_test.spg|button4|action4 via FieldWrite",
+            "from": {
+              "name": "deletedFlag",
+              "node_id": "field:model2.deletedFlag",
+              "node_type": "Field",
+              "path": "data/table2.tbl"
+            },
+            "to": {
+              "name": "deleteData:action4",
+              "node_id": "action:app/actions_test.spg|button4|action4",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            }
+          },
+          {
+            "confidence": "high",
+            "edge": {
+              "edge_type": "ActionWrites",
+              "field_path": "model2.deletedFlag",
+              "json_path": null,
+              "source_expr": "1"
+            },
+            "evidence": "action:app/actions_test.spg|button4|action4 -> model:model2 via ActionWrites",
+            "from": {
+              "name": "deleteData:action4",
+              "node_id": "action:app/actions_test.spg|button4|action4",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            },
+            "to": {
+              "name": "model2",
+              "node_id": "model:model2",
+              "node_type": "Model",
+              "path": "model2.tbl"
+            }
+          },
+          {
+            "confidence": "high",
+            "edge": {
+              "edge_type": "DataflowInput",
+              "field_path": "$DATA:/销售/fact_orders.tbl",
+              "json_path": null,
+              "source_expr": null
+            },
+            "evidence": "model:model2 -> model:fact_orders via DataflowInput",
+            "from": {
+              "name": "model2",
+              "node_id": "model:model2",
+              "node_type": "Model",
+              "path": "model2.tbl"
+            },
+            "to": {
+              "name": "fact_orders",
+              "node_id": "model:fact_orders",
+              "node_type": "Model",
+              "path": "$DATA:/销售/fact_orders.tbl"
+            }
+          }
+        ],
+        "selection_reason": "包含目标组件、数据语义和物理表/跨页写入证据",
+        "terminals": [
+          "TargetComponent",
+          "CrossPageWriter",
+          "SinkPhysicalField"
+        ]
+      },
+      {
+        "classification": "PrimaryPath",
+        "classification_reason": "包含目标组件、数据语义和物理表/跨页写入证据",
+        "confidence": "medium",
+        "diagnostics": [],
+        "evidence": [
+          "comp:app/actions_test.spg|buttonValidate -> action:app/actions_test.spg|buttonValidate|actionValidate via Triggers",
+          "action:app/actions_test.spg|buttonValidate|actionValidate -> field:model1.name via FieldWrite",
+          "field:model1.name -> field:table1.name via FieldAlias"
+        ],
+        "path_id": "comp:app/actions_test.spg|buttonValidate>action:app/actions_test.spg|buttonValidate|actionValidate>field:model1.name>field:table1.name",
+        "purpose": "自动发现路径",
+        "rank_features": {
+          "contains_cross_page_writer": true,
+          "contains_dataflow_side_branch": false,
+          "contains_entrypoint": false,
+          "contains_model_filter": false,
+          "contains_model_read": true,
+          "contains_model_write": false,
+          "contains_only_structural_edges": false,
+          "contains_physical_field": false,
+          "contains_target_component": true,
+          "edge_type_sequence": [
+            "Triggers",
+            "FieldWrite",
+            "FieldAlias"
+          ],
+          "field_name_match": false,
+          "has_condition_node": false,
+          "has_json_path": false,
+          "path_length": 3,
+          "same_page": true,
+          "source_file_count": 2
+        },
+        "segments": [
+          {
+            "confidence": "medium",
+            "edge": {
+              "edge_type": "Triggers",
+              "field_path": null,
+              "json_path": null,
+              "source_expr": null
+            },
+            "evidence": "comp:app/actions_test.spg|buttonValidate -> action:app/actions_test.spg|buttonValidate|actionValidate via Triggers",
+            "from": {
+              "name": "buttonValidate",
+              "node_id": "comp:app/actions_test.spg|buttonValidate",
+              "node_type": "Component",
+              "path": "app/actions_test.spg"
+            },
+            "to": {
+              "name": "validateData:actionValidate",
+              "node_id": "action:app/actions_test.spg|buttonValidate|actionValidate",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            }
+          },
+          {
+            "confidence": "high",
+            "edge": {
+              "edge_type": "FieldWrite",
+              "field_path": "model1.name",
+              "json_path": null,
+              "source_expr": "model1.name"
+            },
+            "evidence": "action:app/actions_test.spg|buttonValidate|actionValidate -> field:model1.name via FieldWrite",
+            "from": {
+              "name": "validateData:actionValidate",
+              "node_id": "action:app/actions_test.spg|buttonValidate|actionValidate",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            },
+            "to": {
+              "name": "name",
+              "node_id": "field:model1.name",
+              "node_type": "Field",
+              "path": "data/table1.tbl"
+            }
+          },
+          {
+            "confidence": "high",
+            "edge": {
+              "edge_type": "FieldAlias",
+              "field_path": "model1.name",
+              "json_path": null,
+              "source_expr": null
+            },
+            "evidence": "field:model1.name -> field:table1.name via FieldAlias",
+            "from": {
+              "name": "name",
+              "node_id": "field:model1.name",
+              "node_type": "Field",
+              "path": "data/table1.tbl"
+            },
+            "to": {
+              "name": "name",
+              "node_id": "field:table1.name",
+              "node_type": "Field",
+              "path": "data/table1.tbl"
+            }
+          }
+        ],
+        "selection_reason": "包含目标组件、数据语义和物理表/跨页写入证据",
+        "terminals": [
+          "TargetComponent",
+          "CrossPageWriter"
+        ]
+      },
+      {
+        "classification": "PrimaryPath",
+        "classification_reason": "包含目标组件、数据语义和物理表/跨页写入证据",
+        "confidence": "medium",
+        "diagnostics": [],
+        "evidence": [
+          "comp:app/actions_test.spg|buttonValidate -> action:app/actions_test.spg|buttonValidate|actionValidate via Triggers",
+          "action:app/actions_test.spg|buttonValidate|actionValidate -> field:model1.name via FieldWrite",
+          "field:model1.name -> field:app_table.name via FieldAlias"
+        ],
+        "path_id": "comp:app/actions_test.spg|buttonValidate>action:app/actions_test.spg|buttonValidate|actionValidate>field:model1.name>field:app_table.name",
+        "purpose": "自动发现路径",
+        "rank_features": {
+          "contains_cross_page_writer": true,
+          "contains_dataflow_side_branch": false,
+          "contains_entrypoint": false,
+          "contains_model_filter": false,
+          "contains_model_read": true,
+          "contains_model_write": false,
+          "contains_only_structural_edges": false,
+          "contains_physical_field": false,
+          "contains_target_component": true,
+          "edge_type_sequence": [
+            "Triggers",
+            "FieldWrite",
+            "FieldAlias"
+          ],
+          "field_name_match": false,
+          "has_condition_node": false,
+          "has_json_path": false,
+          "path_length": 3,
+          "same_page": true,
+          "source_file_count": 3
+        },
+        "segments": [
+          {
+            "confidence": "medium",
+            "edge": {
+              "edge_type": "Triggers",
+              "field_path": null,
+              "json_path": null,
+              "source_expr": null
+            },
+            "evidence": "comp:app/actions_test.spg|buttonValidate -> action:app/actions_test.spg|buttonValidate|actionValidate via Triggers",
+            "from": {
+              "name": "buttonValidate",
+              "node_id": "comp:app/actions_test.spg|buttonValidate",
+              "node_type": "Component",
+              "path": "app/actions_test.spg"
+            },
+            "to": {
+              "name": "validateData:actionValidate",
+              "node_id": "action:app/actions_test.spg|buttonValidate|actionValidate",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            }
+          },
+          {
+            "confidence": "high",
+            "edge": {
+              "edge_type": "FieldWrite",
+              "field_path": "model1.name",
+              "json_path": null,
+              "source_expr": "model1.name"
+            },
+            "evidence": "action:app/actions_test.spg|buttonValidate|actionValidate -> field:model1.name via FieldWrite",
+            "from": {
+              "name": "validateData:actionValidate",
+              "node_id": "action:app/actions_test.spg|buttonValidate|actionValidate",
+              "node_type": "Action",
+              "path": "app/actions_test.spg"
+            },
+            "to": {
+              "name": "name",
+              "node_id": "field:model1.name",
+              "node_type": "Field",
+              "path": "data/table1.tbl"
+            }
+          },
+          {
+            "confidence": "high",
+            "edge": {
+              "edge_type": "FieldAlias",
+              "field_path": "model1.name",
+              "json_path": null,
+              "source_expr": null
+            },
+            "evidence": "field:model1.name -> field:app_table.name via FieldAlias",
+            "from": {
+              "name": "name",
+              "node_id": "field:model1.name",
+              "node_type": "Field",
+              "path": "data/table1.tbl"
+            },
+            "to": {
+              "name": "name",
+              "node_id": "field:app_table.name",
+              "node_type": "Field",
+              "path": "app/app_table.tbl"
+            }
+          }
+        ],
+        "selection_reason": "包含目标组件、数据语义和物理表/跨页写入证据",
+        "terminals": [
+          "TargetComponent",
+          "CrossPageWriter"
+        ]
+      }
+    ],
     "navigation_count": 3,
+    "page_embed_count": 0,
     "page_id": "page:app/actions_test.spg",
+    "page_jump_count": 0,
     "page_name": "actions_test",
-    "page_role": "mixed_interaction_page",
-    "primary_paths_count": 35,
-    "related_context_count": 86,
+    "page_role": "data_maintenance_page",
+    "primary_paths_count": 36,
+    "related_context_count": 87,
     "risk_count": 2,
     "top_action_prerequisites": [
       {
@@ -276,7 +659,7 @@
       {
         "confidence": "high",
         "depends_on": [
-          "model:name."
+          "model:name"
         ],
         "diagnostics": [],
         "effect_type": "Compute",

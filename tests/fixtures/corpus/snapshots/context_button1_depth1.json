@@ -2,7 +2,7 @@
   "details_counts": {
     "downstream_count": 1,
     "related_actions_count": 1,
-    "related_components_count": 0,
+    "related_components_count": 1,
     "related_models_count": 0,
     "related_pages_count": 1,
     "upstream_count": 0
@@ -33,7 +33,7 @@
     "center_node": "comp:app/actions_test.spg|button1",
     "center_type": "component",
     "depth": 1,
-    "related_nodes_count": 2,
+    "related_nodes_count": 3,
     "truncated": false
   }
 }

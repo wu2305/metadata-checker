@@ -1,0 +1,79 @@
+{
+  "case_id": "xiaoshouyi_bindcar_text14_status_value_expr",
+  "candidate_status": "viable_with_changes",
+  "candidate_notes": "取值表达式被 CLI 完整证实（cmd1 details.reads raw_expr）。修正：原推断要求回答「对应哪张表」，但 CLI 对表达式内模型引用解析粗糙（model id 被截成 IF(model6），且本页 model6 的 dataflow_table 降级解析到 szsys_4_users（见候选 2 证据），物理表不可证，gold 只问表达式与两种文案条件。",
+  "difficulty": "easy",
+  "risk_tags": [
+    "value_expr",
+    "single_component",
+    "single_query",
+    "expression_model_ref_mangled"
+  ],
+  "question": "低代码项目 /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi 中，app/售后.app/绑定车辆/绑定车辆.spg 里 text14 的取值表达式是什么？两种文案分别对应什么条件？",
+  "smoke": {
+    "enabled": true,
+    "order": 10,
+    "question_template": "低代码项目 {project_dir} 中，app/售后.app/绑定车辆/绑定车辆.spg 里 text14 的取值表达式是什么？两种文案分别对应什么条件？"
+  },
+  "project_dir": "/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi",
+  "source_path": "app/售后.app/绑定车辆/绑定车辆.spg",
+  "real_project_target": "comp:app/售后.app/绑定车辆/绑定车辆.spg|text14",
+  "required_commands": [
+    "--project-dir /Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi --graph-db-path <GRAPH_DB> --graph-lock-timeout-ms 30000 --explain 'comp:app/售后.app/绑定车辆/绑定车辆.spg|text14' --budget compact"
+  ],
+  "minimal_command_plan": [
+    {
+      "command_kind": "--explain",
+      "target": "comp:app/售后.app/绑定车辆/绑定车辆.spg|text14",
+      "args": [
+        "--budget",
+        "compact"
+      ],
+      "requires_project_dir": true,
+      "budget": "compact"
+    }
+  ],
+  "standard_answer": {
+    "summary": "text14.value = ${IF(model6.totalRowCount__ >0,'绑定成功','已提交审核，车辆待认证中')}：model6（认证车辆）有记录时显示「绑定成功」，否则显示「已提交审核，车辆待认证中」。表达式引用的是 model6 的 totalRowCount__ 行数，而不是某个业务字段。注意 CLI 对表达式内模型引用的解析粗糙（model id 显示为 IF(model6），且 model6 的物理表在当前 CLI 下解析错位，回答不要给表名。",
+    "must_mention": [
+      "完整 IF 表达式",
+      "model6.totalRowCount__>0 ↔ 绑定成功",
+      "否则显示已提交审核，车辆待认证中"
+    ],
+    "should_mention": [
+      "引用的是行数 totalRowCount__ 而非业务字段"
+    ],
+    "must_not_mention": [
+      "text14 是静态写死的文本",
+      "text14 显示 model6.name 等业务字段",
+      "给 model6 安一个 CLI 未证明的物理表名",
+      "把两种文案对应的条件说反"
+    ]
+  },
+  "expected_facts": [
+    "details.reads 包含完整 IF 表达式（raw_expr 子串）"
+  ],
+  "forbidden_claims": [
+    "编造物理表来源",
+    "把文案与条件的对应关系说反",
+    "忽略 totalRowCount__ 行数语义"
+  ],
+  "expected_output_assertions": [
+    {
+      "command_index": 1,
+      "path": "details.reads",
+      "op": "array_any_contains_substring",
+      "field": "raw_expr",
+      "value": "IF(model6.totalRowCount__ >0,'绑定成功','已提交审核，车辆待认证中')",
+      "description": "text14 取值表达式必须是 IF 行数判断双文案"
+    }
+  ],
+  "answer_style_policy": {
+    "principles": [
+      "用 reads.raw_expr 直接回答取值表达式，再解释两个分支"
+    ],
+    "forbidden_practices": [
+      "把已知错位的模型表解析当事实引用"
+    ]
+  }
+}

@@ -24,6 +24,22 @@ fn test_graphdb_implements_graph_read_store() {
 }
 
 #[test]
+fn test_stale_graph_lock_file_does_not_block_open() {
+    let db_path = std::env::temp_dir().join("m39_test_stale_lock.graphdb");
+    let lock_path = db_path.with_extension("graphdb.lock");
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(&lock_path);
+
+    std::fs::File::create(&lock_path).expect("create stale graph lock file");
+    let graph = GraphDB::open(&db_path).expect("stale lock file must not block graphdb open");
+    assert_eq!(graph.node_count().expect("node count"), 0);
+
+    drop(graph);
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(&lock_path);
+}
+
+#[test]
 fn test_graphdb_implements_graph_write_store() {
     let db_path = std::env::temp_dir().join("m39_test_write.graphdb");
     let _ = std::fs::remove_file(&db_path);
@@ -387,6 +403,8 @@ fn test_persist_index_commits_graph_and_file_states_together() {
         deleted_nodes: vec![],
         checkpoint: None,
         delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
 
     let report =

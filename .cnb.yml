@@ -50,6 +50,9 @@
       script: cargo fmt --check
     - name: check benches
       script: cargo check --benches
+    # AI 评测执行测试之前被整条排除，因为语料里的真实项目 case 指向维护者本机路径，
+    # 在 CI 上必然失败。现在缺语料由测试内的存在性门禁显式跳过，
+    # fixture case 可以正常在 CI 跑——继续 skip 只会让 AI 评测集的回归无人发现。
     - name: test and coverage
       script: |
         rm -rf target/debug
@@ -60,8 +63,7 @@
           --lcov \
           --output-path lcov.info \
           -- \
-          --test-threads=1 \
-          --skip test_ai_eval_commands_execute_and_assert
+          --test-threads=1
         test -s lcov.info
     - name: report rust coverage
       type: testing:coverage
@@ -408,6 +410,11 @@
           --bench session_sync_bench \
           --target-dir target/criterion-ci/session
 
+# kimi-code CLI 安装步骤在 cloud-native-dev-env 与 kimi-code-harness-smoke 中各内联一份
+#（CNB schema 要求顶层锚点必须是 array/object，无法给裸脚本字符串做锚点复用）。
+# install.sh 把二进制装到 ~/.kimi-code/bin（PATH 写进 ~/.bashrc，但 CI stage 不 source 它）；
+# 软链进 /usr/local/bin 保证后续 stage 与远程 SSH 会话不依赖 PATH 也能直接命中 kimi。
+
 .cloud_native_dev_env: &cloud_native_dev_env
   name: cloud-native-dev-env
   runner:
@@ -419,8 +426,27 @@
       - /usr/local/cargo/git
       - ./target/cnb/workspace
   services:
-    - vscode
+    # 默认 10 分钟检测不到 http/ssh 心跳就关环境；远程 SSH 里两次操作之间
+    # 很容易超过 10 分钟，放宽到 1 小时避免会话被回收。
+    - name: vscode
+      options:
+        keepAliveTimeout: 1h
     - docker
+  # 真实项目语料的部署 token。dev 环境自身注入的 CNB_TOKEN 虽然是用户态身份
+  # （API /user 返回 wu2305），但授权范围只到本仓：实测 GET
+  # /wu2305/succbi_project_container 返回 403、GET /wu2305/metadata-checker 返回 200，
+  # 因此 dev 环境里直接 clone 语料会失败。流水线侧的 CNB_TOKEN 有跨仓授权，
+  # dev 环境没有，差别不在 imports 而在 token 本身。
+  #
+  # 这行 imports 曾经打不开：real-fixture.yml 自身声明了 allow_events，vscode 不在
+  # 其中，加上会让 Prepare 阶段直接失败、整个开发环境起不来（实测 sn=cnb-ao8-1k1ns62sh）：
+  #   Pipeline init error: event: vscode does not conform to allow_events of
+  #   https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
+  # 2026-09-05 仓库所有者已在 metadata-checker-keys 的 real-fixture.yml 里把 vscode
+  # 加进 allow_events，故此处放开。代价是该部署 token 会注入到可交互 SSH 的开发环境，
+  # 而不只是短生命周期流水线——这是明确的取舍决定，不是疏漏。
+  imports:
+    - https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
   env:
     CARGO_TARGET_DIR: target/cnb/workspace
   stages:
@@ -431,8 +457,249 @@
         cargo --version
         wasm-bindgen --version
         bencher --version
+    # Remote-SSH 的前置条件在镜像里（.cnb/images/browser-wasm-ci.Dockerfile 预装
+    # openssh-server）。这里只做断言：缺了就在开环境时立刻失败，
+    # 而不是等到 VSCode/Cursor 连不上才发现。
+    - name: remote ssh preflight
+      script: |
+        test -x /usr/sbin/sshd || command -v sshd
+        test -d /run/sshd
     - name: fetch dependencies
       script: cargo fetch
+    - name: install kimi-code
+      script: |
+        curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+        export PATH="$HOME/.local/bin:$PATH"
+        KIMI_BIN="$(command -v kimi || true)"
+        for KCAND in "$HOME/.kimi-code/bin/kimi" "$HOME/.local/bin/kimi"; do
+          if [ -z "$KIMI_BIN" ] && [ -x "$KCAND" ]; then KIMI_BIN="$KCAND"; fi
+        done
+        test -n "$KIMI_BIN"
+        ln -sf "$KIMI_BIN" /usr/local/bin/kimi
+        kimi --version
+    - name: configure kimi-code cnb-ai-chat provider
+      script: |
+        # 目标：开发环境创建完成后，用户打开终端即可 `kimi`，默认模型走 CNB AI Chat。
+        # endpoint 契约：POST https://api.cnb.cool/{repo}/-/ai/chat/completions，
+        # 仅支持 stream=true，认证用构建凭证 CNB_TOKEN。
+        # kimi-code 不从 shell 环境读凭证，api_key 必须落在 config.toml；
+        # vscode 事件若未注入 CNB_TOKEN，则写入占位符并打印手工配置指引，不让开环境失败。
+        mkdir -p "$HOME/.kimi-code"
+        KC_BASE_URL="https://api.cnb.cool/${CNB_REPO_SLUG:-OWNER/REPO}/-/ai"
+        KC_API_KEY="${CNB_TOKEN:-__PUT_CNB_TOKEN_HERE__}"
+        {
+          echo '# 由 .cnb.yml cloud-native-dev-env configure 阶段生成，可手工修改'
+          echo 'default_model = "cnb-ai-chat/deepseek-v4-flash"'
+          echo ''
+          echo '[providers.cnb-ai-chat]'
+          echo 'type = "openai"'
+          echo "base_url = \"${KC_BASE_URL}\""
+          echo "api_key = \"${KC_API_KEY}\""
+          echo ''
+          echo '[models."cnb-ai-chat/deepseek-v4-flash"]'
+          echo 'provider = "cnb-ai-chat"'
+          echo 'model = "deepseek-v4-flash"'
+          echo '# max_context_size 是保守估计值，按网关实际窗口调整'
+          echo 'max_context_size = 131072'
+          echo 'capabilities = ["tool_use"]'
+        } > "$HOME/.kimi-code/config.toml"
+        chmod 600 "$HOME/.kimi-code/config.toml"
+        # metadata-checker 使用协议挂到用户级 skill 目录，环境内任意 kimi 会话可发现。
+        mkdir -p "$HOME/.agents/skills/metadata-checker"
+        cp SKILL.md "$HOME/.agents/skills/metadata-checker/SKILL.md"
+        if [ "$KC_API_KEY" = "__PUT_CNB_TOKEN_HERE__" ]; then
+          echo "[kimi-code] 当前事件未注入 CNB_TOKEN，config.toml 已写入占位符。"
+          echo "[kimi-code] 使用前把 ~/.kimi-code/config.toml 的 api_key 换成有效 token，"
+          echo "[kimi-code] 或用 KIMI_MODEL_NAME/KIMI_MODEL_API_KEY/KIMI_MODEL_BASE_URL 临时注入。"
+        else
+          kimi doctor config
+          echo "[kimi-code] provider=cnb-ai-chat default_model=cnb-ai-chat/deepseek-v4-flash 配置完成"
+        fi
+    - name: fetch real project corpus
+      script: |
+        set -eu
+
+        # 把真实项目语料 sparse 拉进 dev 环境，供 M59 后端迁移的真实语料实测使用。
+        # 仓库、提交 pin 与语料路径均由 real-fixture.yml 提供；不要在这里假定旧版
+        # xiaoshouyi-corpus 分支或 projects/xiaoshouyi 目录结构。
+        #
+        # 失败不阻塞开环境：没有 token、网络不通或语料仓不可达时打印指引后跳过，
+        # 与上面 kimi-code 占位符同策略——开发环境的主职责是编译排错，不是跑语料。
+        #
+        # 凭证只走 http.extraHeader 请求头，不落盘、不进 remote URL，末尾断言
+        # 它没有被 git 持久化进 .git/config。不要 echo 展开值。
+        REAL_DIR="target/real-project/succbi_project_container"
+        CORPUS_PATH="${REAL_PROJECT_FIXTURE_PROJECT_PATH:-xiaoshouyi}"
+        CORPUS_DIR="$REAL_DIR/$CORPUS_PATH"
+        CORPUS_SLUG="${REAL_PROJECT_FIXTURE_REPO_SLUG:-wu2305/succbi_project_container}"
+        CORPUS_URL="${REAL_PROJECT_FIXTURE_REPO_URL:-https://cnb.cool/${CORPUS_SLUG}.git}"
+        # Git 输出的 object ID 为小写；先规范化，避免合法的大写十六进制 pin
+        # 在后续精确比较时被误判。
+        CORPUS_REF="$(printf '%s' "${REAL_PROJECT_FIXTURE_REF:-}" | tr 'A-F' 'a-f')"
+        CORPUS_BRANCH="${REAL_PROJECT_FIXTURE_BRANCH:-main}"
+
+        corpus_path_is_safe() {
+          # sparse-checkout 与 Git pathspec 只接受仓库内的普通相对目录；限制字符集
+          # 同时拒绝空段、`.`/`..` 段和 pathspec magic。
+          printf '%s\n' "$CORPUS_PATH" | grep -Eq '^[A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*(/[A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*)*$'
+        }
+
+        corpus_config_has_credentials() {
+          [ -f "$REAL_DIR/.git/config" ] || return 1
+          # 拒绝任何持久化的鉴权 header 或带 userinfo 的 remote URL；即使本次
+          # imports 没有注入 token，也不能继续复用历史 workspace 中的不安全缓存。
+          if corpus_config_scope_has_credentials --local; then
+            return 0
+          fi
+          WORKTREE_CONFIG="$(git -C "$REAL_DIR" config --local --includes --bool \
+            --get extensions.worktreeConfig 2>/dev/null || true)"
+          if [ "$WORKTREE_CONFIG" = true ] \
+              && corpus_config_scope_has_credentials --worktree; then
+            return 0
+          fi
+          return 1
+        }
+
+        corpus_config_scope_has_credentials() {
+          CONFIG_SCOPE="$1"
+          # --includes 同时覆盖 local config 引用的外部文件；启用
+          # extensions.worktreeConfig 时再检查 config.worktree。
+          if git -C "$REAL_DIR" config "$CONFIG_SCOPE" --includes --list --name-only 2>/dev/null \
+              | grep -Eiq '(^|[.])extraheader$'; then
+            return 0
+          fi
+          if git -C "$REAL_DIR" config "$CONFIG_SCOPE" --includes \
+              --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null \
+              | grep -Eq '://[^/@[:space:]]+@'; then
+            return 0
+          fi
+          if [ -n "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ] \
+              && git -C "$REAL_DIR" config "$CONFIG_SCOPE" --includes --list 2>/dev/null \
+                | grep -qF -- "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN"; then
+            return 0
+          fi
+          return 1
+        }
+
+        remove_corpus_dir() {
+          if rm -rf -- "$REAL_DIR"; then
+            return 0
+          fi
+          echo "[corpus] cleanup failed: ${REAL_DIR}" >&2
+          return 1
+        }
+
+        corpus_checkout_ready() {
+          CORPUS_CHECKOUT_REASON=unknown
+          [ -d "$REAL_DIR/.git" ] || { CORPUS_CHECKOUT_REASON=missing_repo; return 1; }
+          [ -d "$CORPUS_DIR" ] || { CORPUS_CHECKOUT_REASON=missing_project_path; return 1; }
+          ! corpus_config_has_credentials || { CORPUS_CHECKOUT_REASON=persisted_credentials; return 1; }
+          CHECKED_OUT_SHA="$(git -C "$REAL_DIR" rev-parse HEAD)" \
+            || { CORPUS_CHECKOUT_REASON=unreadable_head; return 1; }
+          [ "$CHECKED_OUT_SHA" = "$CORPUS_REF" ] \
+            || { CORPUS_CHECKOUT_REASON=ref_mismatch; return 1; }
+          CACHED_ORIGIN="$(git -C "$REAL_DIR" config --local --includes --get-all remote.origin.url)" \
+            || { CORPUS_CHECKOUT_REASON=missing_origin; return 1; }
+          [ "$CACHED_ORIGIN" = "$CORPUS_URL" ] \
+            || { CORPUS_CHECKOUT_REASON=origin_mismatch; return 1; }
+          WORKTREE_CONFIG="$(git -C "$REAL_DIR" config --local --includes --bool \
+            --get extensions.worktreeConfig 2>/dev/null || true)"
+          if [ "$WORKTREE_CONFIG" = true ]; then
+            WORKTREE_ORIGIN="$(git -C "$REAL_DIR" config --worktree --includes \
+              --get-all remote.origin.url 2>/dev/null || true)"
+            [ -z "$WORKTREE_ORIGIN" ] \
+              || { CORPUS_CHECKOUT_REASON=worktree_origin_override; return 1; }
+          fi
+          WORKTREE_STATUS="$(git -C "$REAL_DIR" status --porcelain --untracked-files=all --ignored=matching)" \
+            || { CORPUS_CHECKOUT_REASON=unreadable_worktree; return 1; }
+          [ -z "$WORKTREE_STATUS" ] || { CORPUS_CHECKOUT_REASON=dirty_worktree; return 1; }
+
+          # 工作树文件数必须与 pinned commit 中的普通 blob 数一致；这样 ignored
+          # 文件、symlink、目录伪装或不属于该提交的路径都不能触发 READY。
+          SPG_COUNT="$(find "$CORPUS_DIR" -type f -name '*.spg' | wc -l)" \
+            || { CORPUS_CHECKOUT_REASON=unreadable_spg_files; return 1; }
+          TBL_COUNT="$(find "$CORPUS_DIR" -type f -name '*.tbl' | wc -l)" \
+            || { CORPUS_CHECKOUT_REASON=unreadable_tbl_files; return 1; }
+          # 中文文件名默认会被 Git quote 成带结尾引号的转义文本；关闭 quote 后再
+          # 判断扩展名，避免把真实 tracked metadata 漏计为 0。
+          TRACKED_SPG_COUNT="$(git -C "$REAL_DIR" -c core.quotePath=false \
+            ls-tree -r "$CORPUS_REF" -- "$CORPUS_PATH" \
+            | awk '$1 ~ /^100(644|755)$/ && $2 == "blob" && $0 ~ /[.]spg$/ { count++ } END { print count + 0 }')" \
+            || { CORPUS_CHECKOUT_REASON=unreadable_tracked_spg; return 1; }
+          TRACKED_TBL_COUNT="$(git -C "$REAL_DIR" -c core.quotePath=false \
+            ls-tree -r "$CORPUS_REF" -- "$CORPUS_PATH" \
+            | awk '$1 ~ /^100(644|755)$/ && $2 == "blob" && $0 ~ /[.]tbl$/ { count++ } END { print count + 0 }')" \
+            || { CORPUS_CHECKOUT_REASON=unreadable_tracked_tbl; return 1; }
+          [ "$SPG_COUNT" -gt 0 ] || { CORPUS_CHECKOUT_REASON=empty_spg; return 1; }
+          [ "$TBL_COUNT" -gt 0 ] || { CORPUS_CHECKOUT_REASON=empty_tbl; return 1; }
+          [ "$SPG_COUNT" -eq "$TRACKED_SPG_COUNT" ] \
+            || { CORPUS_CHECKOUT_REASON=spg_tree_mismatch; return 1; }
+          [ "$TBL_COUNT" -eq "$TRACKED_TBL_COUNT" ] \
+            || { CORPUS_CHECKOUT_REASON=tbl_tree_mismatch; return 1; }
+          CORPUS_CHECKOUT_REASON=ready
+        }
+
+        if ! printf '%s\n' "$CORPUS_REF" | grep -Eq '^[0-9a-fA-F]{40}$'; then
+          echo "[corpus] CORPUS_UNAVAILABLE：REAL_PROJECT_FIXTURE_REF 必须是 40 位提交 SHA；开发环境继续启动。"
+        elif ! corpus_path_is_safe; then
+          echo "[corpus] CORPUS_UNAVAILABLE：fixture path 必须是仓库内的安全相对目录；开发环境继续启动。"
+        elif printf '%s\n' "$CORPUS_URL" | grep -Eq '://[^/@[:space:]]+@'; then
+          echo "[corpus] CORPUS_UNAVAILABLE：fixture URL 不得内嵌凭据；开发环境继续启动。"
+        elif [ -d "$REAL_DIR/.git" ] && corpus_config_has_credentials; then
+          echo "[corpus] CORPUS_UNAVAILABLE：缓存仓库持久化了凭据，已删除且本轮不复用；开发环境继续启动。"
+          remove_corpus_dir || true
+        elif corpus_checkout_ready; then
+          echo "[corpus] READY cached=true spg=${SPG_COUNT} tbl=${TBL_COUNT} sha=${CHECKED_OUT_SHA} path=${CORPUS_PATH}"
+        elif [ -z "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ]; then
+          echo "[corpus] CORPUS_UNAVAILABLE：未注入 REAL_PROJECT_FIXTURE_DEPLOY_TOKEN，跳过语料拉取。"
+          echo "[corpus] dev 环境自身的 CNB_TOKEN 只有本仓授权（实测语料仓 403），"
+          echo "[corpus] 需要 imports 里的 real-fixture.yml 生效才能拉取。"
+        else
+          AUTH_HEADER="Authorization: Basic $(printf '%s:%s' cnb "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" | base64 -w0)"
+
+          fetch_real_corpus() {
+            remove_corpus_dir || return 1
+            # 先按分支取得浅克隆，再按 imports 给出的 ref（通常是不可变 SHA）校验或
+            # fetch。`git clone --branch` 不能接受任意提交 SHA。
+            if ! git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 \
+                --filter=blob:none --sparse --branch "$CORPUS_BRANCH" \
+                "$CORPUS_URL" "$REAL_DIR" 2>&1; then
+              echo "[corpus] partial clone 失败，去掉 blob filter 重试"
+              remove_corpus_dir || return 1
+              git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --sparse \
+                --branch "$CORPUS_BRANCH" "$CORPUS_URL" "$REAL_DIR" 2>&1 || return 1
+            fi
+
+            CURRENT_SHA="$(git -C "$REAL_DIR" rev-parse HEAD)" || return 1
+            EXPECTED_SHA="$CORPUS_REF"
+            if [ "$CURRENT_SHA" != "$CORPUS_REF" ]; then
+              git -C "$REAL_DIR" -c http.extraHeader="$AUTH_HEADER" \
+                fetch --depth 1 origin "$CORPUS_REF" || return 1
+              FETCHED_SHA="$(git -C "$REAL_DIR" rev-parse FETCH_HEAD)" || return 1
+              [ "$FETCHED_SHA" = "$EXPECTED_SHA" ] || return 1
+              git -C "$REAL_DIR" -c http.extraHeader="$AUTH_HEADER" \
+                checkout --detach "$EXPECTED_SHA" || return 1
+            fi
+
+            # partial clone 可能在 checkout 时按需拉 blob，仍须显式携带临时鉴权头。
+            git -C "$REAL_DIR" -c http.extraHeader="$AUTH_HEADER" \
+              sparse-checkout set "$CORPUS_PATH" || return 1
+            [ -d "$CORPUS_DIR" ] || return 1
+
+            if ! corpus_checkout_ready; then
+              echo "[corpus] checkout validation failed: ${CORPUS_CHECKOUT_REASON}" >&2
+              return 1
+            fi
+
+            echo "[corpus] READY spg=${SPG_COUNT} tbl=${TBL_COUNT} sha=${CHECKED_OUT_SHA} path=${CORPUS_PATH}"
+            du -sh "$CORPUS_DIR" 2>/dev/null || true
+          }
+
+          if ! fetch_real_corpus; then
+            echo "[corpus] CORPUS_UNAVAILABLE：clone、ref、路径或非空校验失败；开发环境继续启动。"
+            remove_corpus_dir || true
+          fi
+        fi
 
 # ponytail: stage 级 if 跳过 main，避免与 main.push 重复跑 rust-ci
 .rust_ci_branch_push: &rust_ci_branch_push
@@ -448,6 +715,8 @@
   env:
     CARGO_TARGET_DIR: target/cnb/coverage
   stages:
+    # 同 main 分支：AI 评测执行测试不再被排除，
+    # 缺真实项目语料现在是测试内的显式跳过，而不是整条测试消失。
     - name: rust ci
       if: '[ "$CNB_BRANCH" != "main" ]'
       script: |
@@ -464,8 +733,7 @@
           --lcov \
           --output-path lcov.info \
           -- \
-          --test-threads=1 \
-          --skip test_ai_eval_commands_execute_and_assert
+          --test-threads=1
         test -s lcov.info
         cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown
 
@@ -483,12 +751,805 @@
   - *full_criterion_redb_ci
   - *full_criterion_boundary_ci
 
+.m58_cnb_llm_ci: &m58_cnb_llm_ci
+  name: m58-cnb-llm-eval
+  runner:
+    <<: *runner_amd64_4
+  docker:
+    <<: *browser_wasm_ci_image
+    volumes:
+      - /usr/local/cargo/registry
+      - /usr/local/cargo/git
+      - ./target/cnb/m58-ai-eval-build
+      - ./target/m58-ai-eval
+  env:
+    CARGO_TARGET_DIR: target/cnb/m58-ai-eval-build
+    M58_AI_EVAL_OUTPUT_DIR: target/m58-ai-eval
+    M58_AI_EVAL_TRIALS: "3"
+  stages:
+    - name: toolchain
+      script: |
+        rustc --version
+        cargo --version
+    - name: runtime contract preflight
+      script: |
+        test -n "${CNB_TOKEN:-}"
+        test -n "${CNB_REPO_SLUG:-}"
+
+        (
+          unset M58_CNB_REPO M58_CNB_MODEL
+          export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"
+          export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"
+          test "${M58_CNB_REPO}" = "${CNB_REPO_SLUG}"
+          test "${M58_CNB_MODEL}" = "deepseek-v4-flash"
+        )
+
+        (
+          export M58_CNB_REPO="override/repo"
+          export M58_CNB_MODEL="override-model"
+          export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"
+          export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"
+          test "${M58_CNB_REPO}" = "override/repo"
+          test "${M58_CNB_MODEL}" = "override-model"
+        )
+    - name: build release binary
+      script: cargo build --release --features cli-local --bin metadata-checker
+    - name: run CNB fixture baseline
+      script: |
+        export M58_CNB_REPO="${M58_CNB_REPO:-${CNB_REPO_SLUG:?}}"
+        export M58_CNB_MODEL="${M58_CNB_MODEL:-deepseek-v4-flash}"
+        # 不设置时完全不发 reasoning_effort，请求体与历史基线逐字节相同。
+        # 设为 low/medium/high 会打开模型思考（实测：不带该字段时 reasoning_content 恒为空，
+        # 该 build 的 ai-audit 也显示 thinking_tokens=0）。
+        export M58_CNB_REASONING_EFFORT="${M58_CNB_REASONING_EFFORT:-}"
+        test "${M58_AI_EVAL_TRIALS:-0}" -gt 1
+        test -n "${CNB_TOKEN:-}"
+        test -f target/cnb/m58-ai-eval-build/release/metadata-checker
+        export M58_METADATA_CHECKER_BIN="$PWD/target/cnb/m58-ai-eval-build/release/metadata-checker"
+        cargo test --features cli-local --test m58_cnb_ai_runner_tests -- --ignored --nocapture
+  endStages:
+    - name: report structured summary
+      script: |
+        test -s target/m58-ai-eval/run.json
+        test -s target/m58-ai-eval/run.md
+        echo "M58 RunReport: target/m58-ai-eval/run.json"
+        # 这里必须整份 cat run.md，不能再用 grep 逐字段捞。
+        # grep 只匹配键名所在行，failure_classes / command_trace_stats 这类聚合对象的
+        # 体永远打不出来，`grep -A N` 又会把命令轨迹从中间截断——两种都让 CI 日志无法复盘，
+        # 只能回到本地重跑。run.md 由 render_report_markdown 从同一份 RunReport 投影而来，
+        # 是确定性的且不含模型原文，本身就是给人看的那一份。
+        cat target/m58-ai-eval/run.md
+
+# M58 哑协议 runner 的对照实验：同一廉价模型（deepseek-v4-flash，CNB AI Chat endpoint），
+# 但换成真实 agent harness（kimi-code CLI）+ SKILL.md skill。harness 场景没有命令白名单、
+# 没有 trial 截杀，模型自己读 SKILL.md、自己从命令错误里恢复——这才是要验证的部署配置。
+# 只由 api_trigger 手动触发，属于发现性实验，不进任何 CI 阻塞层。
+# 阶段 A（smoke run）与阶段 B（judge）在同一 pipeline 顺序执行，复用 CNB workspace
+# 与 volumes（cargo target / kimi-harness-smoke），不另起判分流水线。
+.kimi_harness_smoke_ci: &kimi_harness_smoke_ci
+  name: kimi-code-harness-smoke
+  runner:
+    <<: *runner_amd64_4
+  docker:
+    <<: *browser_wasm_ci_image
+    volumes:
+      - /usr/local/cargo/registry
+      - /usr/local/cargo/git
+      - ./target/cnb/kimi-harness-build
+      - ./target/kimi-harness-smoke
+  env:
+    CARGO_TARGET_DIR: target/cnb/kimi-harness-build
+    KIMI_CODE_HOME: target/kimi-harness-smoke/kimi-home
+    KIMI_DISABLE_TELEMETRY: "1"
+    KIMI_CODE_NO_AUTO_UPDATE: "1"
+    KIMI_SMOKE_VARIANTS: "baseline typed_ppr"
+    KIMI_SMOKE_TRIALS: "3"
+  stages:
+    - name: install kimi-code
+      script: |
+        curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+        export PATH="$HOME/.local/bin:$PATH"
+        KIMI_BIN="$(command -v kimi || true)"
+        for KCAND in "$HOME/.kimi-code/bin/kimi" "$HOME/.local/bin/kimi"; do
+          if [ -z "$KIMI_BIN" ] && [ -x "$KCAND" ]; then KIMI_BIN="$KCAND"; fi
+        done
+        test -n "$KIMI_BIN"
+        ln -sf "$KIMI_BIN" /usr/local/bin/kimi
+        kimi --version
+    - name: build release binary
+      script: cargo build --release --features cli-local --bin metadata-checker
+    - name: probe CNB AI Chat endpoint
+      script: |
+        # 探测两个能力：
+        # 1) 基础流式补全（契约要求 stream=true；M58 实测 stream=false 返回 400）
+        # 2) 原生 tool calling —— kimi-code 作为 harness 依赖它。当前 Swagger 契约未公开
+        #    tools/tool_calls 字段，这里给实测结论。若不支持就带明确诊断失败，
+        #    避免跑出「kimi 全程没调工具」的假性结论还被当成模型能力问题。
+        # 脱敏约定：token 只出现在 Authorization header，永不打印请求头；
+        # 响应 body 不含凭证，失败时只截前 2000 字节做诊断。
+        test -n "${CNB_TOKEN:-}"
+        test -n "${CNB_REPO_SLUG:-}"
+        CHAT_URL="https://api.cnb.cool/${CNB_REPO_SLUG}/-/ai/chat/completions"
+        OUT_DIR="target/kimi-harness-smoke"
+        mkdir -p "$OUT_DIR"
+
+        BASIC_CODE="$(curl -sS -N -o "$OUT_DIR/probe_basic.sse" -w '%{http_code}' \
+          -X POST "$CHAT_URL" \
+          -H "Authorization: Bearer ${CNB_TOKEN}" \
+          -H 'Content-Type: application/json' \
+          -H 'Accept: text/event-stream' \
+          -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"Reply with the single word: ok"}]}')"
+        echo "basic chat probe http=${BASIC_CODE}"
+        test "$BASIC_CODE" = "200"
+        grep -q '^data:' "$OUT_DIR/probe_basic.sse"
+        grep -q '\[DONE\]' "$OUT_DIR/probe_basic.sse"
+
+        TOOLS_CODE="$(curl -sS -N -o "$OUT_DIR/probe_tools.sse" -w '%{http_code}' \
+          -X POST "$CHAT_URL" \
+          -H "Authorization: Bearer ${CNB_TOKEN}" \
+          -H 'Content-Type: application/json' \
+          -H 'Accept: text/event-stream' \
+          -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"What is the weather in Beijing right now?"}],"tools":[{"type":"function","function":{"name":"get_current_weather","description":"Get the current weather of a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"tool_choice":"required"}')"
+        echo "tool calling probe http=${TOOLS_CODE}"
+        if [ "$TOOLS_CODE" != "200" ]; then
+          echo "KIMI_HARNESS_TOOL_CALLING=unsupported(http ${TOOLS_CODE})"
+          echo "CNB AI Chat 拒绝 tools 字段；kimi-code harness 需要原生 tool calling，实验到此为止。"
+          head -c 2000 "$OUT_DIR/probe_tools.sse"
+          exit 1
+        fi
+        if ! grep -q 'tool_calls' "$OUT_DIR/probe_tools.sse"; then
+          echo "KIMI_HARNESS_TOOL_CALLING=no_tool_calls_in_response"
+          echo "endpoint 接受请求但未返回 tool_calls；kimi-code 无法作为 harness 工作。"
+          head -c 2000 "$OUT_DIR/probe_tools.sse"
+          exit 1
+        fi
+        echo "KIMI_HARNESS_TOOL_CALLING=supported"
+    - name: fetch real project corpus
+      script: |
+        # 验证 CNB_TOKEN 跨仓库 clone：把真实项目语料（succbi_project_container 里的
+        # projects/xiaoshouyi，约 156MB）sparse 拉进工作区，为真实项目冒烟铺路。
+        # 凭证只走 http.extraHeader 请求头，不落盘、不进 remote URL、日志不回显展开值。
+        test -n "${CNB_TOKEN:-}"
+        REAL_DIR="target/real-project/succbi_project_container"
+        AUTH_HEADER="Authorization: Basic $(printf '%s:%s' "${CNB_TOKEN_USER_NAME:-cnb}" "${CNB_TOKEN:?}" | base64 -w0)"
+        rm -rf "$REAL_DIR"
+        # git 的报错走 stderr，显式 2>&1 合流，否则 CNB 日志只剩 Cloning into 一行无法归因。
+        # 语料在 cnb 的 xiaoshouyi-corpus 分支（succbi_project_container 的 main 是
+        # 无关历史，只有 projects/ACT，没有 xiaoshouyi）。
+        if ! git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --filter=blob:none --sparse \
+            --branch xiaoshouyi-corpus \
+            "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR" 2>&1; then
+          echo "partial clone 失败，去掉 blob filter 重试"
+          git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --sparse \
+            --branch xiaoshouyi-corpus \
+            "https://cnb.cool/wu2305/succbi_project_container.git" "$REAL_DIR" 2>&1
+        fi
+        git -C "$REAL_DIR" sparse-checkout set projects/xiaoshouyi
+        test -d "$REAL_DIR/projects/xiaoshouyi"
+        SPG_COUNT="$(find "$REAL_DIR/projects/xiaoshouyi" -name '*.spg' | wc -l)"
+        TBL_COUNT="$(find "$REAL_DIR/projects/xiaoshouyi" -name '*.tbl' | wc -l)"
+        echo "REAL_PROJECT_READY spg=${SPG_COUNT} tbl=${TBL_COUNT}"
+        test "$SPG_COUNT" -gt 0
+        du -sh "$REAL_DIR/projects/xiaoshouyi"
+        # 语料可复现性：case 标准答案固定在 corpus_pin_sha；HEAD 漂移即判红并打出
+        # 实际 SHA。静默漂移会让任何失败都无法归因给工具、模型还是 oracle。
+        # 判红后的出路：把 xiaoshouyi-corpus 分支 reset 回基准，或重新校验 case 后
+        # 更新 fixture 的 corpus_pin_sha。不在 pipeline 里自动 checkout——partial clone
+        # 的惰性 blob 拉取不带授权头，这条修复路径在本地无法验证，不做没有验证的事。
+        CASES_JSON="tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json"
+        CORPUS_PIN="$(node -pe 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).corpus_pin_sha ?? ""' "$CASES_JSON")"
+        CORPUS_SHA="$(git -C "$REAL_DIR" rev-parse HEAD)"
+        if [ -z "$CORPUS_PIN" ]; then
+          echo "case 文件未声明 corpus_pin_sha，只记录实际 HEAD，不做漂移检查"
+        else
+          case "$CORPUS_SHA" in
+            "$CORPUS_PIN"*) echo "corpus HEAD 与 case 基准一致：$CORPUS_SHA" ;;
+            *)
+              echo "corpus 漂移：HEAD=${CORPUS_SHA}，case 基准=${CORPUS_PIN}" >&2
+              echo "case 的计数/链路断言钉在基准版本上，漂移后跑出的任何结果都无法归因。" >&2
+              echo "修复：把 xiaoshouyi-corpus 分支 reset 回基准，或重新校验 case 后更新 corpus_pin_sha。" >&2
+              exit 1
+              ;;
+          esac
+        fi
+        echo "REAL_PROJECT_CORPUS_SHA=$CORPUS_SHA"
+        printf '%s\n' "$CORPUS_SHA" > target/real-project/corpus.sha
+        if grep -qF "$CNB_TOKEN" "$REAL_DIR/.git/config" 2>/dev/null; then
+          echo "CNB_TOKEN persisted in git config"
+          exit 1
+        fi
+    - name: kimi-code harness smoke run
+      script: |
+        # 本 stage 按 POSIX sh 写，不用 bash 专属语法：CNB stage 脚本默认由 sh 执行，
+        # 本镜像是 Debian 系（sh = dash）。这条不是洁癖——`IFS=$'\t'` 在 dash 下会被
+        # 当成字面量 $ ' \ t，按字母 t 切分，产出的是碎掉的 case_id 和垃圾问题文本，
+        # 而退出码、记录数断言、token 检查全部照常通过：一次完美的静默假绿。
+        # set -eu 同样是必需的：下面的记录数硬断言、空子集拒绝和各处 test -s
+        # 全部依赖 errexit 才有意义，没有它们只是打印错误然后继续。
+        set -eu
+
+        # KIMI_MODEL_* 是官方临时模型通道：从环境变量合成 in-memory provider，
+        # 不落盘 config.toml，CNB_TOKEN 不会写进任何文件。
+        export KIMI_MODEL_NAME="deepseek-v4-flash"
+        export KIMI_MODEL_PROVIDER_TYPE="openai"
+        export KIMI_MODEL_API_KEY="${CNB_TOKEN:?}"
+        export KIMI_MODEL_BASE_URL="https://api.cnb.cool/${CNB_REPO_SLUG:?}/-/ai"
+        export KIMI_MODEL_MAX_CONTEXT_SIZE="131072"
+        export KIMI_MODEL_CAPABILITIES="tool_use"
+
+        OUT_DIR="target/kimi-harness-smoke"
+        mkdir -p "$OUT_DIR/skills/metadata-checker" "$KIMI_CODE_HOME"
+        cp SKILL.md "$OUT_DIR/skills/metadata-checker/SKILL.md"
+        ln -sf "$PWD/target/cnb/kimi-harness-build/release/metadata-checker" /usr/local/bin/metadata-checker
+        # 清理上一轮残留：CNB 缓存 workspace，过期 transcript/records 会混进本轮报告与
+        # endStage dump——Aug 7 的 q1-q6 旧文件曾让复盘把上一轮会话当成本轮证据。
+        rm -f "$OUT_DIR"/smoke-transcript-*.jsonl "$OUT_DIR"/smoke-stderr-*.log \
+          "$OUT_DIR"/records.jsonl "$OUT_DIR"/judge.json "$OUT_DIR"/judge.md "$OUT_DIR"/judge-test.log
+
+        # token 脱敏：委托 scripts/cnb-redact-token.mjs（字面量替换，token 可能含正则
+        # 元字符，不能走 sed 正则）。每个 stage/endStage 是独立脚本块、函数不共享，
+        # 因此各自保留这个薄壳，但脱敏算法本身只有一份，不会跨脚本块漂移。
+        redact_token() {
+          [ -n "${CNB_TOKEN:-}" ] || return 0
+          [ -f "$1" ] || return 0
+          node scripts/cnb-redact-token.mjs "$1" "${CNB_TOKEN:-}"
+        }
+
+        # run.json：本轮评测的身份清单。records.jsonl 逐 trial 记墙钟与调用，run.json
+        # 记版本面——语料 SHA、工具二进制、SKILL、fixture/gold、kimi 与模型别名。
+        # 缺了这些，任何失败都无法归因到工具、模型还是 oracle。kimi-code 故意不钉死
+        # （kimi_pin_policy=float），只记录版本；SKILL/CLI A/B 必须共享同一次安装。
+        CASES_JSON="tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json"
+        test -s "$CASES_JSON"
+        REPO_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+        CORPUS_SHA="$(cat target/real-project/corpus.sha 2>/dev/null || echo unknown)"
+        KIMI_VERSION="$(kimi --version 2>/dev/null | head -n 1 || echo unknown)"
+        BIN_PATH="$(command -v metadata-checker || true)"
+        if [ -n "$BIN_PATH" ]; then
+          BIN_SHA="$(sha256sum "$BIN_PATH" | cut -d' ' -f1)"
+        else
+          BIN_SHA="unknown"
+        fi
+        SKILL_SHA="$(sha256sum "$OUT_DIR/skills/metadata-checker/SKILL.md" | cut -d' ' -f1)"
+        FIXTURE_SHA="$(sha256sum "$CASES_JSON" | cut -d' ' -f1)"
+        node -e '
+          const fs = require("fs");
+          const [outPath, recordedAt, repoSha, corpusSha, kimiVersion, binSha, skillSha,
+                 fixturePath, fixtureSha, agentModel, judgeModel, judgeApiRoute,
+                 variants, trials, treatmentEnvName] = process.argv.slice(1);
+          const manifest = {
+            recorded_at: recordedAt,
+            repo_sha: repoSha,
+            corpus_sha: corpusSha,
+            kimi_version: kimiVersion,
+            metadata_checker_sha256: binSha,
+            skill_sha256: skillSha,
+            fixture_path: fixturePath,
+            fixture_sha256: fixtureSha,
+            agent_model: agentModel,
+            judge_model: judgeModel,
+            judge_api_route: judgeApiRoute,
+            variants: variants.split(/\s+/).filter(Boolean),
+            trials: Number(trials),
+            treatment_env_name: treatmentEnvName,
+            agent_temperature: null,
+            judge_temperature: null,
+            kimi_pin_policy: "float",
+          };
+          fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2) + "\n");
+        ' "$OUT_DIR/run.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REPO_SHA" "$CORPUS_SHA" \
+          "$KIMI_VERSION" "$BIN_SHA" "$SKILL_SHA" \
+          "$CASES_JSON" "$FIXTURE_SHA" \
+          "${KIMI_MODEL_NAME:-unknown}" "${KIMI_JUDGE_MODEL:-glm-5.2}" "ai-ide/v2" \
+          "$KIMI_SMOKE_VARIANTS" "$KIMI_SMOKE_TRIALS" "METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL"
+        cat "$OUT_DIR/run.json"
+
+        # 问题文本不在本文件里。唯一事实源是 xiaoshouyi_large_real_cases.json 的
+        # cases[].smoke：`enabled` 选子集，`order` 定顺序，`question_template` 里的
+        # {project_dir} 由本 stage 代入。此前六问是六段复制粘贴的 bash，问题文本与断言
+        # 分居两处，改一个 case 要动两个文件。
+        # 每问独立 kimi -p（全新上下文），问题自带项目路径（harness 里没有 runner
+        # 代填 project-dir，真实用户也得自己说）。
+        # 不预建图：模型是否按 SKILL.md 自己 check-graph → build-graph → query
+        # 正是被测行为的一部分。图构建成本因此计入每问墙钟。
+        REAL_PROJECT_DIR="target/real-project/succbi_project_container/projects/xiaoshouyi"
+        test -d "$REAL_PROJECT_DIR"
+
+        RECORDS="$OUT_DIR/records.jsonl"
+        QUESTIONS_TSV="$OUT_DIR/smoke-questions.tsv"
+        : > "$RECORDS"
+
+        # 镜像里没有 jq（base 是 node:22-bookworm），JSON 一律用 node 读写：
+        # 手拼 JSON 会在问题文本含引号时产出坏行，而坏行下游是静默失败。
+        node -e '
+          const fs = require("fs");
+          const [casesPath, projectDir] = process.argv.slice(1);
+          const doc = JSON.parse(fs.readFileSync(casesPath, "utf8"));
+          const rows = doc.cases
+            .filter((c) => c.smoke && c.smoke.enabled)
+            .sort((a, b) => a.smoke.order - b.smoke.order)
+            .map((c) => {
+              const q = c.smoke.question_template.replace(/\{project_dir\}/g, projectDir);
+              // TSV 只在问题是单行且无制表符时安全，这里显式守住而不是假设。
+              if (/[\t\r\n]/.test(q)) throw new Error("question has tab/newline: " + c.case_id);
+              return [c.case_id, c.smoke.order, c.difficulty, q].join("\t");
+            });
+          if (rows.length === 0) throw new Error("no smoke-enabled cases in " + casesPath);
+          // order 撞号时排序结果退化为 fixture 物理序，静默且不可复现，直接判错。
+          const orders = doc.cases.filter((c) => c.smoke && c.smoke.enabled).map((c) => c.smoke.order);
+          if (new Set(orders).size !== orders.length) {
+            throw new Error("duplicate smoke.order among enabled cases: " + orders.join(","));
+          }
+          if (orders.some((o) => !Number.isInteger(o) || o < 1)) {
+            throw new Error("smoke.order must be an integer >= 1: " + orders.join(","));
+          }
+          process.stdout.write(rows.join("\n") + "\n");
+        ' "$CASES_JSON" "$REAL_PROJECT_DIR" > "$QUESTIONS_TSV"
+        echo "SMOKE_CASE_COUNT=$(wc -l < "$QUESTIONS_TSV")"
+
+        # 配对网格由 anchor env 固定；只允许批准的两组与正整数 trial，防止手动触发时
+        # 用一个拼错的 variant 跑出看似完整、实则不可配对的高成本结果。
+        VARIANTS="${KIMI_SMOKE_VARIANTS:?}"
+        TRIAL_COUNT="${KIMI_SMOKE_TRIALS:?}"
+        case "$VARIANTS" in
+          "baseline typed_ppr") ;;
+          *) echo "unexpected KIMI_SMOKE_VARIANTS=$VARIANTS" >&2; exit 1 ;;
+        esac
+        case "$TRIAL_COUNT" in
+          ""|*[!0-9]*) echo "KIMI_SMOKE_TRIALS must be a positive integer" >&2; exit 1 ;;
+        esac
+        test "$TRIAL_COUNT" -gt 0
+
+        # 硬断言只留 infra 级（kimi 退出码、transcript 非空、token 泄漏）；
+        # 是否调用 metadata-checker 只软报告不判红——真实文件读不动时
+        # 绕过工具是数据信号，不是故障。raw fallback 逐 case 记进 record，
+        # judge.md 按固定分母分行为分层报告，fallback 不作计分准入。
+        # POSIX 下拿一个真制表符只能这样：`IFS=$'\t'` 是 bash 专属。
+        TAB="$(printf '\t')"
+        INFRA_FAILED=0
+        TRIAL=1
+        while [ "$TRIAL" -le "$TRIAL_COUNT" ]; do
+          if [ $((TRIAL % 2)) -eq 0 ]; then
+            VARIANT_ORDER="typed_ppr baseline"
+          else
+            VARIANT_ORDER="$VARIANTS"
+          fi
+          for VARIANT in $VARIANT_ORDER; do
+            case "$VARIANT" in
+              baseline) unset METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL ;;
+              typed_ppr) export METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL="typed-ppr" ;;
+            esac
+            while IFS="$TAB" read -r CASE_ID ORDER DIFFICULTY QUESTION; do
+              # 文件名必须带 variant/trial：record 已经按 (case_id, variant, trial) 唯一，
+              # 而 transcript 曾只按 case_id 命名——同一 stage 内跑第二个 trial 会把第一个
+              # 的答案覆盖掉，records 有 N 行、磁盘上只剩 1 份，judge 评的是幸存者且无从
+              # 察觉。分隔符用 `__`：case_id 只含单下划线，肉眼仍能一眼切开。
+              RUN_TAG="${CASE_ID}__${VARIANT}__t${TRIAL}"
+              TRANSCRIPT="$OUT_DIR/smoke-transcript-${RUN_TAG}.jsonl"
+              STDERR_LOG="$OUT_DIR/smoke-stderr-${RUN_TAG}.log"
+              CASE_EXIT=0
+              # 墙钟是 Phase 2 的预算输入：variant × case × trial 的总时长要从实测推，
+              # 不是拍脑袋。含模型自己建图的时间，这正是要量的那部分。
+              START_MS="$(date +%s%3N)"
+              timeout 1800 kimi -p "$QUESTION" \
+                --skills-dir "$PWD/$OUT_DIR/skills" \
+                --output-format stream-json \
+                > "$TRANSCRIPT" \
+                2> "$STDERR_LOG" || CASE_EXIT=$?
+              END_MS="$(date +%s%3N)"
+
+              # 每次调用后立刻扫 token：kimi -p 自动批准工具调用，模型跑个 env 或 CLI 打印
+              # 请求头都可能把 KIMI_MODEL_API_KEY（即 CNB_TOKEN）写进 transcript/stderr。
+              # 一旦发现立刻就地脱敏并判 infra 失败——留着原文，后面的记录投影与
+              # endStages dump 会把它带进 CI 日志。
+              if [ -n "${CNB_TOKEN:-}" ] && grep -qF "$CNB_TOKEN" "$TRANSCRIPT" "$STDERR_LOG" 2>/dev/null; then
+                echo "CNB_TOKEN leaked into kimi output for $CASE_ID; redacted in place"
+                redact_token "$TRANSCRIPT"
+                redact_token "$STDERR_LOG"
+                INFRA_FAILED=1
+              fi
+
+              # 工具调用统计改为结构化解析 stream-json 的 tool_calls 事件（真实形状：
+              # {"role":"assistant","tool_calls":[{"function":{"name":"Bash","arguments":"{...}"}}]}），
+              # 不再 grep 行数——grep 把 assistant 复述与工具返回里的 'metadata-checker'
+              # 字样都算成调用，实跑出现过 13 次 tool_calls 对 15 次「调用」的假数据。
+              # raw fallback：绕过 metadata-checker 直接读写项目原始 .spg/.tbl（启发式下限：
+              # 与 metadata-checker 调用混在同一行命令里的直接读文件抓不到；反过来 ls/test
+              # 一个 .spg 路径也会误标）。它只是诊断信号，judge.md 按固定分母分层报告，
+              # 不作为任何计分准入条件。
+              TOOL_STATS="$(node -e '
+                const fs = require("fs");
+                let toolCalls = 0, mcInvocations = 0, rawFallbackCalls = 0, retrievalContextObserved = 0;
+                for (const line of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
+                  let msg;
+                  try { msg = JSON.parse(line); } catch { continue; }
+                  const serialized = JSON.stringify(msg);
+                  const isToolResult = serialized.includes("\"role\":\"tool\"") || serialized.includes("\"type\":\"tool_result\"") || serialized.includes("\"tool_result\"");
+                  if (isToolResult && serialized.includes("experimental_graph_retrieval")) retrievalContextObserved = 1;
+                  const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+                  for (const call of calls) {
+                    toolCalls += 1;
+                    let args = {};
+                    try { args = JSON.parse((call.function && call.function.arguments) || "{}"); } catch {}
+                    const command = typeof args.command === "string" ? args.command : "";
+                    const path = typeof args.path === "string" ? args.path : "";
+                    const invokesMc = /(^|[\/\s])metadata-checker(\s|$)/.test(command);
+                    if (invokesMc) mcInvocations += 1;
+                    if (!invokesMc && /\.(spg|tbl)(["\x27\s),;]|$)/.test(command + " " + path)) {
+                      rawFallbackCalls += 1;
+                    }
+                  }
+                }
+                process.stdout.write([toolCalls, mcInvocations, rawFallbackCalls, retrievalContextObserved].join("\t"));
+              ' "$TRANSCRIPT")"
+              TOOL_CALLS="$(printf '%s' "$TOOL_STATS" | cut -f1)"
+              MC_INVOCATIONS="$(printf '%s' "$TOOL_STATS" | cut -f2)"
+              RAW_FALLBACK_CALLS="$(printf '%s' "$TOOL_STATS" | cut -f3)"
+              RETRIEVAL_CONTEXT_OBSERVED="$(printf '%s' "$TOOL_STATS" | cut -f4)"
+              RAW_FALLBACK=0
+              if [ "$RAW_FALLBACK_CALLS" -gt 0 ]; then RAW_FALLBACK=1; fi
+              if [ "$VARIANT" = "baseline" ] && [ "$RETRIEVAL_CONTEXT_OBSERVED" = "1" ]; then
+                echo "baseline treatment contamination for $CASE_ID/t$TRIAL" >&2
+                INFRA_FAILED=1
+              fi
+              TRANSCRIPT_BYTES="$(wc -c < "$TRANSCRIPT" 2>/dev/null || echo 0)"
+
+              node -e '
+                const [caseId, order, difficulty, variant, trial, exitCode, startMs, endMs,
+                       toolCalls, mcInvocations, rawFallbackCalls, rawFallback, retrievalContextObserved,
+                       transcript, stderrLog, bytes] = process.argv.slice(1);
+                process.stdout.write(JSON.stringify({
+                  case_id: caseId,
+                  order: Number(order),
+                  difficulty,
+                  variant,
+                  trial: Number(trial),
+                  exit_code: Number(exitCode),
+                  wall_clock_ms: Number(endMs) - Number(startMs),
+                  tool_calls: Number(toolCalls),
+                  metadata_checker_invocations: Number(mcInvocations),
+                  raw_fallback_calls: Number(rawFallbackCalls),
+                  raw_fallback: rawFallback === "1",
+                  retrieval_context_observed: retrievalContextObserved === "1",
+                  transcript_bytes: Number(bytes || 0),
+                  transcript_path: transcript,
+                  stderr_path: stderrLog,
+                }) + "\n");
+              ' "$CASE_ID" "$ORDER" "$DIFFICULTY" "$VARIANT" "$TRIAL" "$CASE_EXIT" \
+                "$START_MS" "$END_MS" "$TOOL_CALLS" "$MC_INVOCATIONS" \
+                "$RAW_FALLBACK_CALLS" "$RAW_FALLBACK" "$RETRIEVAL_CONTEXT_OBSERVED" \
+                "$TRANSCRIPT" "$STDERR_LOG" "$TRANSCRIPT_BYTES" >> "$RECORDS"
+
+              echo "[$ORDER/$DIFFICULTY] $CASE_ID variant=$VARIANT trial=$TRIAL exit=$CASE_EXIT $(( (END_MS - START_MS) / 1000 ))s tool_calls=$TOOL_CALLS mc=$MC_INVOCATIONS raw_fallback=$RAW_FALLBACK retrieval_exposure=$RETRIEVAL_CONTEXT_OBSERVED"
+
+              if [ "$CASE_EXIT" -ne 0 ]; then INFRA_FAILED=1; fi
+              if [ ! -s "$TRANSCRIPT" ]; then
+                echo "empty transcript for $CASE_ID"
+                INFRA_FAILED=1
+              fi
+            done < "$QUESTIONS_TSV"
+          done
+          TRIAL=$((TRIAL + 1))
+        done
+        unset METADATA_CHECKER_EXPERIMENTAL_GRAPH_RETRIEVAL
+
+        # records.jsonl 是下游唯一输入（判分、grid、墙钟预算都读它），
+        # 行数对不上说明循环中途被吞了，必须判红而不是让下游拿半份数据算比率。
+        RECORD_COUNT="$(wc -l < "$RECORDS")"
+        echo "SMOKE_RECORD_COUNT=${RECORD_COUNT}"
+        CASE_COUNT="$(wc -l < "$QUESTIONS_TSV")"
+        VARIANT_COUNT="$(printf '%s\n' "$VARIANTS" | wc -w)"
+        EXPECTED_RECORD_COUNT=$((CASE_COUNT * VARIANT_COUNT * TRIAL_COUNT))
+        test "$RECORD_COUNT" = "$EXPECTED_RECORD_COUNT"
+        echo "SMOKE_TOTAL_WALL_CLOCK_MS=$(node -e '
+          const fs = require("fs");
+          const lines = fs.readFileSync(process.argv[1], "utf8").trim().split("\n");
+          process.stdout.write(String(lines.reduce((a, l) => a + JSON.parse(l).wall_clock_ms, 0)));
+        ' "$RECORDS")"
+
+        # 阶段 A 只产出 transcript / records / run.json。判分是下一 stage（同一
+        # pipeline、同一 workspace）。CNB 顺序 stage 共用工作区，docker.volumes 里的
+        # cargo target 与 kimi-harness-smoke 也跨 stage 保留——不要另起 api_trigger
+        # 去重装 kimi、重编 CLI、重拉语料。
+        TOKEN_LEAKED=0
+        if [ -n "${CNB_TOKEN:-}" ] && grep -rqF "$CNB_TOKEN" "$OUT_DIR" 2>/dev/null; then
+          echo "CNB_TOKEN leaked into smoke artifacts; redacting everything before exit"
+          find "$OUT_DIR" -type f | while read -r f; do redact_token "$f"; done
+          TOKEN_LEAKED=1
+        fi
+        if [ "$TOKEN_LEAKED" -ne 0 ]; then exit 1; fi
+        if [ "$INFRA_FAILED" -ne 0 ]; then
+          echo "kimi infra failure; see per-case exit codes above and $RECORDS"
+          exit 1
+        fi
+        test -s "$RECORDS"
+        test -s "$OUT_DIR/run.json"
+    - name: kimi-code harness judge
+      script: |
+        # 阶段 B：同一 pipeline 的下一 stage，复用上一 stage 的 workspace。
+        # 不安装 kimi、不编 release、不拉语料。只读 target/kimi-harness-smoke。
+        # 语义 FAIL 不判红；缺产物 / fixture_sha 对不上 / judge API 失败才 INFRA。
+        set -eu
+        OUT_DIR="target/kimi-harness-smoke"
+        CASES_JSON="tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json"
+        test -s "$OUT_DIR/records.jsonl"
+        test -s "$OUT_DIR/run.json"
+        test -s "$CASES_JSON"
+        RECORDED_FIXTURE="$(node -pe 'try{JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).fixture_sha256||""}catch(e){""}' "$OUT_DIR/run.json")"
+        ACTUAL_FIXTURE="$(sha256sum "$CASES_JSON" | cut -d' ' -f1)"
+        if [ -z "$RECORDED_FIXTURE" ] || [ "$RECORDED_FIXTURE" != "$ACTUAL_FIXTURE" ]; then
+          echo "fixture_sha mismatch: run.json=${RECORDED_FIXTURE} actual=${ACTUAL_FIXTURE}" >&2
+          echo "同一 pipeline 里 SHA 对不上说明 run.json 坏了或 gold 被改；禁止用新 gold 评旧答案。" >&2
+          exit 1
+        fi
+
+        redact_token() {
+          [ -n "${CNB_TOKEN:-}" ] || return 0
+          [ -f "$1" ] || return 0
+          node scripts/cnb-redact-token.mjs "$1" "${CNB_TOKEN:-}"
+        }
+
+        export KIMI_JUDGE_MODEL="${KIMI_JUDGE_MODEL:-glm-5.2}"
+        export KIMI_JUDGE_API_BASE="${KIMI_JUDGE_API_BASE:-${CNB_API_ENDPOINT:-https://api.cnb.cool}}"
+        export KIMI_SMOKE_TRANSCRIPT_DIR="$OUT_DIR"
+        export KIMI_JUDGE_OUTPUT_DIR="$OUT_DIR"
+        JUDGE_LOG="$OUT_DIR/judge-test.log"
+        JUDGE_EXIT=0
+        cargo test --features cli-local --test kimi_harness_judge_tests -- --ignored --nocapture \
+          > "$JUDGE_LOG" 2>&1 || JUDGE_EXIT=$?
+
+        # 只扫本 stage 自己写出的三个文件：records/run.json/transcript 等阶段 A 产物
+        # 在阶段 A 退出前已扫过一遍且本 stage 从不改写它们，重扫整棵目录是纯浪费。
+        # 万一本 stage 在扫描前被信号打断，endStage 的全目录兜底扫描仍会兜底。
+        TOKEN_LEAKED=0
+        if [ -n "${CNB_TOKEN:-}" ] && grep -qF "$CNB_TOKEN" "$OUT_DIR/judge.json" "$OUT_DIR/judge.md" "$JUDGE_LOG" 2>/dev/null; then
+          echo "CNB_TOKEN leaked into judge artifacts; redacting before exit"
+          redact_token "$OUT_DIR/judge.json"
+          redact_token "$OUT_DIR/judge.md"
+          redact_token "$JUDGE_LOG"
+          TOKEN_LEAKED=1
+        fi
+        cat "$JUDGE_LOG"
+        if [ "$TOKEN_LEAKED" -ne 0 ]; then exit 1; fi
+        if [ "$JUDGE_EXIT" -ne 0 ]; then
+          echo "judge infra failure; captured test exit=$JUDGE_EXIT"
+          exit "$JUDGE_EXIT"
+        fi
+        test -s "$OUT_DIR/judge.json"
+        test -s "$OUT_DIR/judge.md"
+  endStages:
+    - name: report smoke summary
+      script: |
+        # 同样按 POSIX sh 写。endStages 是复盘入口，不设 -e：这里每一步都带 || true，
+        # 缺文件是常态（前面的 stage 可能在任意一步失败），不该再掩盖真正的失败原因。
+        set -u
+        OUT_DIR="target/kimi-harness-smoke"
+        # 独立脱敏：前面的 stage 可能在任意一步失败、跳过逐 case 扫描（endStages 本来就
+        # 为这种场景存在），dump 原始产物前必须自己再过一遍，不能把含 token 的原文
+        # 打进日志。脱敏算法委托 scripts/cnb-redact-token.mjs，文件改动不会随 stage 带
+        # 过来，所以这份薄壳仍需独立声明。
+        redact_token() {
+          [ -n "${CNB_TOKEN:-}" ] || return 0
+          [ -f "$1" ] || return 0
+          node scripts/cnb-redact-token.mjs "$1" "${CNB_TOKEN:-}"
+        }
+        # main stage 可能在 judge 扫描之前被信号终止；endStage 在任何 ls/cat 之前独立
+        # 扫描整个目录，保证失败路径也不会把原 token 打进日志。
+        if [ -n "${CNB_TOKEN:-}" ] && grep -rqF "$CNB_TOKEN" "$OUT_DIR" 2>/dev/null; then
+          echo "CNB_TOKEN found in smoke artifacts during endStage; redacting before report"
+          find "$OUT_DIR" -type f | while read -r f; do redact_token "$f"; done
+        fi
+        ls -lh "$OUT_DIR" || true
+        # records.jsonl 是给下游读的；这里额外投影一份人读的表，
+        # 免得复盘时先得自己解析 JSONL。
+        if [ -s "$OUT_DIR/records.jsonl" ]; then
+          echo "===== records ====="
+          node -e '
+            const fs = require("fs");
+            const rows = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").map(JSON.parse);
+            for (const r of rows) {
+              console.log([
+                r.case_id, r.difficulty, "exit=" + r.exit_code,
+                Math.round(r.wall_clock_ms / 1000) + "s",
+                "tool_calls=" + r.tool_calls,
+                "mc=" + r.metadata_checker_invocations,
+                "raw_fallback=" + (r.raw_fallback ? "Y(" + r.raw_fallback_calls + ")" : "n"),
+                "bytes=" + r.transcript_bytes,
+              ].join("  "));
+            }
+          ' "$OUT_DIR/records.jsonl" || true
+        fi
+        # run.json 是本轮身份清单（语料/二进制/SKILL/fixture/kimi/模型别名），复盘归因先看它。
+        if [ -s "$OUT_DIR/run.json" ]; then
+          echo "===== run manifest ====="
+          cat "$OUT_DIR/run.json" || true
+        fi
+        # judge.md 是判分的主报告（得分口径 + 逐条 verdict）：无论 main stage 成功、
+        # judge infra 判红还是中途断掉，只要文件存在就在脱敏后无条件发布——失败路径
+        # 的逐条依据恰恰是复核对象，不能随非零退出码一起埋掉。
+        if [ -s "$OUT_DIR/judge.md" ]; then
+          echo "===== judge.md ====="
+          cat "$OUT_DIR/judge.md" || true
+        fi
+        # 逐 case dump 含 tool_calls 的原始 JSONL 行（截断）与答案尾部，
+        # 不假设 stream-json 的字段嵌套形态。CNB stage 日志有 ~115KB 上限、
+        # 从头截断，全量 dump 会丢前面的问题，因此每段都压小。
+        # RUN_TAG 是 `<case_id>__<variant>__t<trial>`，与 records 的三元组一一对应。
+        # 这里只把它当标签用、不反解 case_id：反解要猜 case_id 里的下划线归属，
+        # 而 dump 只需要一个能对上 records 的稳定标识。
+        for TRANSCRIPT in "$OUT_DIR"/smoke-transcript-*.jsonl; do
+          [ -e "$TRANSCRIPT" ] || continue
+          RUN_TAG="$(basename "$TRANSCRIPT" .jsonl)"
+          RUN_TAG="${RUN_TAG#smoke-transcript-}"
+          # dump 前就地脱敏：无论前面的 stage 在哪一步断掉，这里都不能成为
+          # token 进 CI 日志的通道。
+          redact_token "$TRANSCRIPT"
+          redact_token "$OUT_DIR/smoke-stderr-${RUN_TAG}.log"
+          echo "===== ${RUN_TAG} tool calls (raw, truncated) ====="
+          grep '"tool_calls"' "$TRANSCRIPT" 2>/dev/null | cut -c1-600 || true
+          echo "===== ${RUN_TAG} transcript tail ====="
+          tail -c 2000 "$TRANSCRIPT" 2>/dev/null || true
+          echo "===== ${RUN_TAG} stderr tail ====="
+          tail -n 10 "$OUT_DIR/smoke-stderr-${RUN_TAG}.log" 2>/dev/null || true
+        done
+
+        # ---- 归档：把本轮产物上传为 commit 附件 -----------------------------
+        # 为什么必须归档：stage 日志 ~115KB 且从头截断，而 judge.md 恰好排在逐 case
+        # dump 之前——真正跑满的那次运行，最先被截掉的就是判分报告。M58.2 阶段 A 的
+        # 历史结果因此只活在聊天记录里：无法复核、无法配对、无法重判。
+        # 附件按 commit SHA 归档，与 run.json 的 repo_sha 同源；下游（阶段 B 判分、
+        # 配对网格）用同一个 SHA 就能 DOWNLOAD 回原字节，不必从 Markdown 里反解。
+        #
+        # 协议取自 OpenAPI（swagger.json）与 cnbcool/attachments 实现：
+        # POST asset-upload-url 换一次性链接（成功是 201 Created，不是 200；
+        # 2026-08-20 实跑 cnb-7h8-1k0fhjt1m 四件全 201 却被当成失败）
+        # → PUT 原字节 → POST verify_url 确认（OpenAPI 成功是 200）。
+        # 这里用 curl 直写而不是引插件 image：干跑脚本逐字提取 `script:` 用 dash
+        # 跑，image 形态的 step 它看不见，而这条工作线的失效模式一贯是静默假绿
+        # ——看不见的步骤等于没验过的步骤。
+        #
+        # 放在 endStage 最后：确认行与附件页地址要活到日志尾部，头部会被截掉。
+        # 也保证 tar 打包的是上面逐 case 脱敏之后的 transcript。
+        #
+        # 安全：upload_url / verify_url 是预签名链接，query 里可能带凭证，全程不回显；
+        # token 只进 Authorization 头；上传发生在全目录脱敏之后。
+        ARCHIVE_META="/tmp/m58-archive-upload.json"
+        # 不能叫 CNB_API_BASE：CNB_ 前缀是内置只读变量保留字，自定义会让流水线校验失败。
+        ARCHIVE_API="${CNB_API_ENDPOINT:-https://api.cnb.cool}"
+        ARCHIVE_TS="$(node -pe 'try{(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).recorded_at||"").replace(/[:-]/g,"")}catch(e){""}' "$OUT_DIR/run.json" 2>/dev/null || echo "")"
+        if [ -z "$ARCHIVE_TS" ]; then ARCHIVE_TS="$(date -u +%Y%m%dT%H%M%SZ)"; fi
+        COMMIT_SHA="$(node -pe 'try{JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).repo_sha||""}catch(e){""}' "$OUT_DIR/run.json" 2>/dev/null || echo "")"
+        if [ -z "$COMMIT_SHA" ] || [ "$COMMIT_SHA" = "unknown" ]; then
+          COMMIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo "")"
+        fi
+
+        # 上传单个文件。失败只打印并返回 1，绝不掩盖 main stage 的真实退出码。
+        upload_asset() {
+          ASSET_PATH="$1"
+          ASSET_NAME="$2"
+          ASSET_TTL="$3"
+          if [ ! -s "$ASSET_PATH" ]; then
+            echo "archive skip（缺失或为空）：$ASSET_PATH"
+            return 0
+          fi
+          ASSET_SIZE="$(wc -c < "$ASSET_PATH" | tr -d ' ')"
+          META_CODE="$(curl -sS -o "$ARCHIVE_META" -w '%{http_code}' -X POST \
+            "${ARCHIVE_API}/${CNB_REPO_SLUG}/-/git/commit-assets/${COMMIT_SHA}/asset-upload-url" \
+            -H "Authorization: Bearer ${CNB_TOKEN}" \
+            -H 'Accept: application/vnd.cnb.api+json' \
+            -H 'Content-Type: application/json' \
+            -d "{\"asset_name\":\"${ASSET_NAME}\",\"size\":${ASSET_SIZE},\"ttl\":${ASSET_TTL}}" \
+            2>/dev/null || echo "curl-error")"
+          # OpenAPI PostCommitAssetUploadURL 只声明 201 Created；200 不是成功码。
+          if [ "$META_CODE" != "201" ]; then
+            echo "archive FAIL（换取上传链接 http=${META_CODE}）：${ASSET_NAME}"
+            rm -f "$ARCHIVE_META"
+            return 1
+          fi
+          # 两个链接都不回显：预签名 query 可能含凭证。
+          UPLOAD_URL="$(node -pe 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));(d.upload_url||(d.data&&d.data.upload_url)||"")' "$ARCHIVE_META" 2>/dev/null || echo "")"
+          VERIFY_URL="$(node -pe 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));(d.verify_url||(d.data&&d.data.verify_url)||"")' "$ARCHIVE_META" 2>/dev/null || echo "")"
+          rm -f "$ARCHIVE_META"
+          if [ -z "$UPLOAD_URL" ] || [ -z "$VERIFY_URL" ]; then
+            echo "archive FAIL（响应缺 upload_url/verify_url）：${ASSET_NAME}"
+            return 1
+          fi
+          PUT_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$UPLOAD_URL" \
+            -H 'Content-Type: application/octet-stream' \
+            --data-binary "@${ASSET_PATH}" 2>/dev/null || echo "curl-error")"
+          if [ "$PUT_CODE" != "200" ]; then
+            echo "archive FAIL（上传 http=${PUT_CODE}）：${ASSET_NAME}"
+            return 1
+          fi
+          VERIFY_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$VERIFY_URL" \
+            -H "Authorization: Bearer ${CNB_TOKEN}" \
+            -H 'Accept: application/vnd.cnb.api+json' 2>/dev/null || echo "curl-error")"
+          if [ "$VERIFY_CODE" != "200" ]; then
+            echo "archive FAIL（确认 http=${VERIFY_CODE}）：${ASSET_NAME}"
+            return 1
+          fi
+          echo "archive uploaded: ${ASSET_NAME} (${ASSET_SIZE} bytes, ttl=${ASSET_TTL})"
+          return 0
+        }
+
+        if [ -z "${CNB_TOKEN:-}" ] || [ -z "${CNB_REPO_SLUG:-}" ] || [ -z "$COMMIT_SHA" ]; then
+          echo "archive skip：缺少 CNB_TOKEN / CNB_REPO_SLUG / commit sha，不做附件归档"
+        else
+          ARCHIVE_FAILED=0
+          # transcript 与 stderr 打成一个包：单文件几十 KB × N，逐个传既慢又把附件页
+          # 刷满。records/judge/run 保持独立可直接下载，这三个是复核的第一入口。
+          TRANSCRIPT_TAR="$OUT_DIR/m58-smoke-${ARCHIVE_TS}-transcripts.tar.gz"
+          TAR_LIST="/tmp/m58-archive-tar-list"
+          ( cd "$OUT_DIR" && ls smoke-transcript-*.jsonl smoke-stderr-*.log 2>/dev/null ) > "$TAR_LIST" || true
+          if [ -s "$TAR_LIST" ]; then
+            tar -czf "$TRANSCRIPT_TAR" -C "$OUT_DIR" -T "$TAR_LIST" 2>/dev/null || true
+          fi
+          rm -f "$TAR_LIST"
+
+          # ttl=0 永久：records/judge/run 是结论与归因依据，必须一直在。
+          # transcript 体积大、只在深查时才读，给 90 天。
+          upload_asset "$OUT_DIR/records.jsonl" "m58-smoke-${ARCHIVE_TS}-records.jsonl" 0 || ARCHIVE_FAILED=1
+          upload_asset "$OUT_DIR/run.json" "m58-smoke-${ARCHIVE_TS}-run.json" 0 || ARCHIVE_FAILED=1
+          upload_asset "$OUT_DIR/judge.md" "m58-smoke-${ARCHIVE_TS}-judge.md" 0 || ARCHIVE_FAILED=1
+          upload_asset "$TRANSCRIPT_TAR" "m58-smoke-${ARCHIVE_TS}-transcripts.tar.gz" 90 || ARCHIVE_FAILED=1
+
+          echo "archive commit=${COMMIT_SHA} run_tag=${ARCHIVE_TS}"
+          echo "archive page: https://cnb.cool/${CNB_REPO_SLUG}/-/commit/${COMMIT_SHA}?tab=attachments"
+          if [ "$ARCHIVE_FAILED" -ne 0 ]; then
+            # 不改 endStage 的退出码：归档失败不该盖掉 main stage 的真实失败原因，
+            # 但必须在日志尾部留下明确一行，否则「这轮没归档」会被当成「这轮没跑」。
+            echo "archive INCOMPLETE：部分产物未归档，见上方 archive FAIL 行"
+          fi
+        fi
+
+# M58.2 issue 归档方案的前置探针：验证构建凭证 CNB_TOKEN 是否有 repo-issue:rw，
+# 以及 pipeline 内 curl 建 issue、挂预建标签的行为。一次性非致命实验：任何失败只打印
+# 不判红，产出的测试 issue 由本地善后关闭，不进任何 CI 阻塞层。
+.issue_archive_probe_ci: &issue_archive_probe_ci
+  name: issue-archive-probe
+  runner:
+    <<: *runner_amd64_2
+  docker:
+    <<: *browser_wasm_ci_image
+  stages:
+    - name: probe issue write permission
+      script: |
+        # 脱敏约定：token 只出现在 Authorization header，永不打印请求头。
+        # CNB API 要求显式 Accept: application/vnd.cnb.api+json，缺失时 406（errcode 406）。
+        AUTH="Authorization: Bearer ${CNB_TOKEN}"
+        ACCEPT="Accept: application/vnd.cnb.api+json"
+        API="https://api.cnb.cool/${CNB_REPO_SLUG}/-/issues"
+        CODE=$(curl -sS -o /tmp/probe-create.json -w "%{http_code}" -X POST "$API" \
+          -H "$AUTH" -H "$ACCEPT" -H "Content-Type: application/json" \
+          -d '{"title":"[test] pipeline token issue 写权限探针（验证后关闭）","body":"probe from pipeline","labels":["m58-smoke-record"]}' || echo "curl-error")
+        echo "create-issue http=$CODE"
+        head -c 800 /tmp/probe-create.json 2>/dev/null || true
+        NUMBER=$(grep -o '"number": *[0-9"]*' /tmp/probe-create.json 2>/dev/null | head -n1 | tr -dc '0-9')
+        echo "issue number=${NUMBER:-none}"
+        if [ -n "$NUMBER" ]; then
+          LCODE=$(curl -sS -o /tmp/probe-labels.json -w "%{http_code}" \
+            -H "$AUTH" -H "$ACCEPT" \
+            "$API/$NUMBER/labels" || echo "curl-error")
+          echo "list-labels http=$LCODE"
+          head -c 800 /tmp/probe-labels.json 2>/dev/null || true
+          CCODE=$(curl -sS -o /dev/null -w "%{http_code}" -X PATCH "$API/$NUMBER" \
+            -H "$AUTH" -H "$ACCEPT" -H "Content-Type: application/json" \
+            -d '{"state":"closed","state_reason":"completed"}' || echo "curl-error")
+          echo "close-issue http=$CCODE"
+        fi
+
 main:
   push: *main_authoritative_ci
 
 "$":
   vscode:
     - *cloud_native_dev_env
+  api_trigger_m58_llm:
+    - *m58_cnb_llm_ci
+  api_trigger_kimi_harness_smoke:
+    - *kimi_harness_smoke_ci
+  api_trigger_issue_archive_probe:
+    - *issue_archive_probe_ci
 
 "**":
   push:

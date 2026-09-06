@@ -236,6 +236,8 @@ fn m54_diff_refresh_checkpoint_migration_and_checkpoint_only_commit() {
         deleted_nodes: Vec::new(),
         checkpoint: Some(checkpoint.clone()),
         delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
     };
     let mut graph = graph;
     IndexStateStore::persist_index(&mut graph, commit).expect("persist checkpoint-only commit");

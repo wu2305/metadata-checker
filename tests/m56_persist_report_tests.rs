@@ -230,6 +230,8 @@ fn m56_persist_report_curve_snapshot() {
                 changed_file_states: Vec::new(),
                 removed_file_paths: Vec::new(),
             }),
+            scanner_entries: Vec::new(),
+            scanner_deleted_paths: Vec::new(),
         };
         let report = graph.persist_commit(&commit).expect("delta persist");
 
@@ -276,6 +278,8 @@ fn m56_persist_report_curve_snapshot() {
                 changed_file_states: Vec::new(),
                 removed_file_paths: Vec::new(),
             }),
+            scanner_entries: Vec::new(),
+            scanner_deleted_paths: Vec::new(),
         };
         graph.persist_commit(&commit).expect("mark stale");
     }
