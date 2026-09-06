@@ -201,6 +201,9 @@ ls -lh target/release/metadata-checker
 - 低代码平台代码仓库：`/Users/wuhaocheng/Downloads/bi`
 - 真实测试项目：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
 - metadata-checker 使用说明：若运行环境提供对应 skill / tool 文档，应以其当前版本为准；不要在仓库规范中依赖某个工具的私有本地路径。
+- **上述两条路径只在维护者本机存在**，不构成任何环境可用的语料清单。CI / 远端开发环境 / 其他机器
+  **不得**据此假设路径可用：真实项目语料由 CI 通过 `METADATA_CHECKER_REAL_PROJECT_DIR`
+  或 `REAL_PROJECT_FIXTURE_*` 变量注入（见 `.cnb.yml`），缺失时相关 bench 显式跳过而非降级通过。
 
 ## 知识库检索
 
