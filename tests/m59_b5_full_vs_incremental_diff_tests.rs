@@ -366,13 +366,19 @@ fn cross_file_edge_is_lost_by_incremental_update() {
     );
 
     // 从全量快照只移除一次已知缺边，保留其他边的每一次出现。
-    let known_missing = "comp:app/a.spg|embed1 -EmbedsPage-> page:app/b.spg\tfield_path=app/b.spg\tmeta=null";
+    let known_missing =
+        "comp:app/a.spg|embed1 -EmbedsPage-> page:app/b.spg\tfield_path=app/b.spg\tmeta=null";
     assert_eq!(embeds(&full), vec![known_missing.to_string()]);
     let mut expected_edges = full.edges.clone();
-    let missing_index = expected_edges.iter().position(|edge| edge == known_missing)
+    let missing_index = expected_edges
+        .iter()
+        .position(|edge| edge == known_missing)
         .expect("expected embedding edge");
     expected_edges.remove(missing_index);
-    assert_eq!(inc.edges, expected_edges, "只能缺少指定边，不能新增或丢失重复边");
+    assert_eq!(
+        inc.edges, expected_edges,
+        "只能缺少指定边，不能新增或丢失重复边"
+    );
 
     // 节点集不受影响：丢的是边，不是节点。这一条把缺陷的范围钉死，
     // 避免将来有人把「节点也少了」这种更严重的退化误当成同一个已知问题。
@@ -452,9 +458,14 @@ fn placeholder_page_node_leaks_after_its_only_referrer_is_deleted() {
 
     // 全量节点加上唯一允许的占位节点；直接比较向量保留每行的出现次数。
     let mut expected_nodes = full.nodes.clone();
-    expected_nodes.push("page:app/ghost.spg\ttype=Page\tpath=app/ghost.spg\tname=ghost\tmeta=null".to_string());
+    expected_nodes.push(
+        "page:app/ghost.spg\ttype=Page\tpath=app/ghost.spg\tname=ghost\tmeta=null".to_string(),
+    );
     expected_nodes.sort();
-    assert_eq!(inc.nodes, expected_nodes, "只能增加指定占位节点，其他节点必须原样保留");
+    assert_eq!(
+        inc.nodes, expected_nodes,
+        "只能增加指定占位节点，其他节点必须原样保留"
+    );
 
     // 边：a.spg 自身的节点被删时，它指向 ghost 的那条 EmbedsPage 边也随之消失，
     // 因此两侧的边集应当**完全一致**。泄漏的是一个悬空节点，不是一条悬空边。

@@ -258,47 +258,80 @@ mod cases {
             ..edge("a", "b", Some("value"))
         };
         store.add_edge(original.clone()).expect("initial edge");
-        store.add_edge(Edge {
-            meta: Some(json!({"condition": "=false"})),
-            ..original.clone()
-        }).expect("duplicate edge");
+        store
+            .add_edge(Edge {
+                meta: Some(json!({"condition": "=false"})),
+                ..original.clone()
+            })
+            .expect("duplicate edge");
         let expected = serde_json::to_value(&original).expect("expected edge");
         let outgoing = out_edges(store, "a");
-        let incoming = store.get_node_edges("b").expect("neighbors").expect("b").incoming;
+        let incoming = store
+            .get_node_edges("b")
+            .expect("neighbors")
+            .expect("b")
+            .incoming;
         assert_eq!(outgoing.len(), 1);
         assert_eq!(incoming.len(), 1);
-        assert_eq!(serde_json::to_value(&outgoing[0].edge).expect("outgoing"), expected);
-        assert_eq!(serde_json::to_value(&incoming[0].edge).expect("incoming"), expected);
+        assert_eq!(
+            serde_json::to_value(&outgoing[0].edge).expect("outgoing"),
+            expected
+        );
+        assert_eq!(
+            serde_json::to_value(&incoming[0].edge).expect("incoming"),
+            expected
+        );
     }
 
     /// 建边后更新两端的全部属性，双向邻接必须读取最新的完整节点。
     pub fn updated_metadata_is_visible_in_both_adjacency_directions(store: &mut dyn GraphStore) {
         for id in ["a", "b"] {
-            store.upsert_node(node_with(id, id, Some(json!({"revision": 1}))))
+            store
+                .upsert_node(node_with(id, id, Some(json!({"revision": 1}))))
                 .expect("initial node");
         }
         store.add_edge(edge("a", "b", Some("value"))).expect("edge");
         let expected_a = Node {
-            id: "a".to_string(), node_type: NodeType::Model,
-            path: "data/source.tbl".to_string(), name: "source".to_string(),
+            id: "a".to_string(),
+            node_type: NodeType::Model,
+            path: "data/source.tbl".to_string(),
+            name: "source".to_string(),
             meta: Some(json!({"revision": 2, "fields": ["amount"]})),
         };
         let expected_b = Node {
-            id: "b".to_string(), node_type: NodeType::Field,
-            path: "data/target.tbl".to_string(), name: "amount".to_string(),
+            id: "b".to_string(),
+            node_type: NodeType::Field,
+            path: "data/target.tbl".to_string(),
+            name: "amount".to_string(),
             meta: Some(json!({"revision": 3, "dataType": "N"})),
         };
         store.upsert_node(expected_a.clone()).expect("update a");
         store.upsert_node(expected_b.clone()).expect("update b");
         let outgoing = out_edges(store, "a");
-        let incoming = store.get_node_edges("b").expect("neighbors").expect("b").incoming;
+        let incoming = store
+            .get_node_edges("b")
+            .expect("neighbors")
+            .expect("b")
+            .incoming;
         assert_eq!(outgoing.len(), 1);
         assert_eq!(incoming.len(), 1);
-        for (expected, via_edge) in [(&expected_a, &incoming[0].node), (&expected_b, &outgoing[0].node)] {
+        for (expected, via_edge) in [
+            (&expected_a, &incoming[0].node),
+            (&expected_b, &outgoing[0].node),
+        ] {
             let expected_value = serde_json::to_value(expected).expect("expected node");
-            let direct = store.get_node(&expected.id).expect("direct node").expect("node exists");
-            assert_eq!(serde_json::to_value(direct).expect("direct"), expected_value);
-            assert_eq!(serde_json::to_value(via_edge).expect("neighbor"), expected_value);
+            let direct = store
+                .get_node(&expected.id)
+                .expect("direct node")
+                .expect("node exists");
+            assert_eq!(
+                serde_json::to_value(direct).expect("direct"),
+                expected_value
+            );
+            assert_eq!(
+                serde_json::to_value(via_edge).expect("neighbor"),
+                expected_value
+            );
         }
     }
 

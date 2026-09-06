@@ -236,7 +236,10 @@ fn corrupt_tbl_preserves_previous_graph_and_reports_stale() -> anyhow::Result<()
     // 「边数变多了」不构成证据——多出来的可能是任何东西。
     let repaired = snapshot(&db_path);
     let mut expected = baseline.clone();
-    let model = expected.nodes.iter_mut().find(|(id, _)| id == MODEL_ID)
+    let model = expected
+        .nodes
+        .iter_mut()
+        .find(|(id, _)| id == MODEL_ID)
         .expect("baseline model");
     *model = node_snapshot(Node {
         id: MODEL_ID.to_string(),
@@ -300,11 +303,7 @@ fn restoring_original_bytes_clears_the_stale_warning() -> anyhow::Result<()> {
         "前置条件：损坏这轮应当有诊断: {:?}",
         second.diagnostics
     );
-    assert_eq!(
-        snapshot(&db_path),
-        baseline,
-        "损坏这轮旧图必须逐属性保留"
-    );
+    assert_eq!(snapshot(&db_path), baseline, "损坏这轮旧图必须逐属性保留");
 
     // 关键：写回**一模一样**的字节。hash 与保留下来的 FileState 相同。
     std::fs::write(&tbl_path, &original)?;
@@ -328,11 +327,7 @@ fn restoring_original_bytes_clears_the_stale_warning() -> anyhow::Result<()> {
         "清理必须是稳定的: {:?}",
         fourth.diagnostics
     );
-    assert_eq!(
-        snapshot(&db_path),
-        baseline,
-        "再扫一轮同样不得动图"
-    );
+    assert_eq!(snapshot(&db_path), baseline, "再扫一轮同样不得动图");
 
     std::fs::remove_dir_all(&project_dir).ok();
     Ok(())
