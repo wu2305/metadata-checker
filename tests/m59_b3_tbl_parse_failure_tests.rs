@@ -12,7 +12,7 @@
 //! 2. 发出 `SCANNER_FILE_PARSE_FAILED`，让查询方能区分陈旧与缺失；
 //! 3. file hash **不**记录，文件保持脏，修好后下一轮自动重新入图、诊断消失。
 
-use metadata_checker::graph::GraphDB;
+use metadata_checker::graph::{GraphDB, Node, NodeType};
 use metadata_checker::graph_store::GraphReadStore;
 use metadata_checker::memory_graph_store::MemoryGraphStore;
 use metadata_checker::output::Diagnostic;
@@ -73,54 +73,10 @@ struct Snapshot {
     edges: Vec<String>,
 }
 
-/// 两份快照之间的**完整**差异。空 ⇔ 两张图逐属性一致。
-#[derive(Debug, Default, PartialEq)]
-struct SnapshotDiff {
-    added_nodes: Vec<String>,
-    removed_nodes: Vec<String>,
-    /// id 两侧都在、但内容不同（典型：模型 meta 里的 dimensions 变了）。
-    changed_nodes: Vec<String>,
-    added_edges: Vec<String>,
-    removed_edges: Vec<String>,
-}
-
-impl Snapshot {
-    fn node_repr(&self, id: &str) -> Option<&str> {
-        self.nodes
-            .iter()
-            .find(|(nid, _)| nid == id)
-            .map(|(_, repr)| repr.as_str())
-    }
-
-    /// 本快照相对 `base` 的差异。
-    fn diff_from(&self, base: &Snapshot) -> SnapshotDiff {
-        let mut d = SnapshotDiff::default();
-        for (id, repr) in &self.nodes {
-            match base.node_repr(id) {
-                None => d.added_nodes.push(id.clone()),
-                Some(old) if old != repr => d.changed_nodes.push(id.clone()),
-                Some(_) => {}
-            }
-        }
-        for (id, _) in &base.nodes {
-            if self.node_repr(id).is_none() {
-                d.removed_nodes.push(id.clone());
-            }
-        }
-        d.added_edges = self
-            .edges
-            .iter()
-            .filter(|e| !base.edges.contains(e))
-            .cloned()
-            .collect();
-        d.removed_edges = base
-            .edges
-            .iter()
-            .filter(|e| !self.edges.contains(e))
-            .cloned()
-            .collect();
-        d
-    }
+/// 节点快照包含完整字段；期望节点由 fixture 契约显式构造。
+fn node_snapshot(node: Node) -> (String, String) {
+    let representation = serde_json::to_string(&node).expect("serialize node");
+    (node.id, representation)
 }
 
 fn snapshot(db_path: &Path) -> Snapshot {
@@ -129,20 +85,7 @@ fn snapshot(db_path: &Path) -> Snapshot {
     let mut nodes: Vec<(String, String)> = graph
         .iter_nodes()
         .expect("iter_nodes")
-        .map(|n| {
-            let repr = format!(
-                "{}\ttype={:?}\tpath={}\tname={}\tmeta={}",
-                n.id,
-                n.node_type,
-                n.path,
-                n.name,
-                n.meta
-                    .as_ref()
-                    .map(|m| serde_json::to_string(m).expect("meta"))
-                    .unwrap_or_else(|| "null".to_string())
-            );
-            (n.id, repr)
-        })
+        .map(node_snapshot)
         .collect();
     nodes.sort();
 
@@ -253,8 +196,8 @@ fn corrupt_tbl_preserves_previous_graph_and_reports_stale() -> anyhow::Result<()
     // 逐属性比对，不是比条数：换掉一条字段边、改坏边上的 meta、把边掉个方向，
     // 条数都不变，只有完整快照能看出来。
     assert_eq!(
-        snapshot(&db_path).diff_from(&baseline),
-        SnapshotDiff::default(),
+        snapshot(&db_path),
+        baseline,
         "旧图应逐属性原样保留，而不只是「条数没变」"
     );
 
@@ -273,8 +216,8 @@ fn corrupt_tbl_preserves_previous_graph_and_reports_stale() -> anyhow::Result<()
     );
     assert!(model_present(&db_path), "重试一轮也不该丢图");
     assert_eq!(
-        snapshot(&db_path).diff_from(&baseline),
-        SnapshotDiff::default(),
+        snapshot(&db_path),
+        baseline,
         "重试一轮同样不得动到图里的任何一个属性"
     );
 
@@ -291,28 +234,38 @@ fn corrupt_tbl_preserves_previous_graph_and_reports_stale() -> anyhow::Result<()
     // 修好之后的差异必须**恰好**是那个新增维度：多一个字段节点、多一条
     // `model -Contains-> field` 边、模型自身的 meta 里多一条 dimension。
     // 「边数变多了」不构成证据——多出来的可能是任何东西。
-    let repaired = snapshot(&db_path).diff_from(&baseline);
-    assert_eq!(
-        repaired.added_nodes,
-        vec![FIELD_CUSTOMER.to_string()],
-        "应当恰好多出 customer 字段节点，实际 {repaired:?}"
-    );
-    assert!(
-        repaired.removed_nodes.is_empty() && repaired.removed_edges.is_empty(),
-        "重新解析不得让原有节点/边消失，实际 {repaired:?}"
-    );
-    assert_eq!(
-        repaired.changed_nodes,
-        vec![MODEL_ID.to_string()],
-        "只有模型节点自身的 meta（dimensions）应当变化，实际 {repaired:?}"
-    );
-    assert_eq!(
-        repaired.added_edges,
-        vec![format!(
-            "{MODEL_ID} -Contains-> {FIELD_CUSTOMER}\tfield_path=-\tmeta=null"
-        )],
-        "新增的边必须正是模型到 customer 字段的 Contains 边，实际 {repaired:?}"
-    );
+    let repaired = snapshot(&db_path);
+    let mut expected = baseline.clone();
+    let model = expected.nodes.iter_mut().find(|(id, _)| id == MODEL_ID)
+        .expect("baseline model");
+    *model = node_snapshot(Node {
+        id: MODEL_ID.to_string(),
+        node_type: NodeType::Model,
+        path: "data/orders.tbl".to_string(),
+        name: "orders".to_string(),
+        meta: Some(serde_json::json!({
+            "modelType": "App",
+            "dimensions": [
+                {"name": "订单号", "dbfield": "orderNo", "dataType": "C"},
+                {"name": "金额", "dbfield": "amount", "dataType": "N"},
+                {"name": "客户", "dbfield": "customer", "dataType": "C"}
+            ]
+        })),
+    });
+    expected.nodes.push(node_snapshot(Node {
+        id: FIELD_CUSTOMER.to_string(),
+        node_type: NodeType::Field,
+        path: "data/orders.tbl".to_string(),
+        name: "客户".to_string(),
+        meta: Some(serde_json::json!({"name": "客户", "dbfield": "customer", "dataType": "C"})),
+    }));
+    expected.edges.push(format!(
+        "{MODEL_ID} -Contains-> {FIELD_CUSTOMER}\tfield_path=-\tmeta=null"
+    ));
+    expected.nodes.sort();
+    expected.edges.sort();
+    // 直接比较有序向量：新增重复边也必须失败，不能用 contains 差集抹掉重数。
+    assert_eq!(repaired, expected, "恢复后的全部节点、属性和边必须符合预期");
 
     std::fs::remove_dir_all(&project_dir).ok();
     Ok(())
@@ -348,8 +301,8 @@ fn restoring_original_bytes_clears_the_stale_warning() -> anyhow::Result<()> {
         second.diagnostics
     );
     assert_eq!(
-        snapshot(&db_path).diff_from(&baseline),
-        SnapshotDiff::default(),
+        snapshot(&db_path),
+        baseline,
         "损坏这轮旧图必须逐属性保留"
     );
 
@@ -363,8 +316,8 @@ fn restoring_original_bytes_clears_the_stale_warning() -> anyhow::Result<()> {
     );
     assert!(model_present(&db_path), "复原不得动到图");
     assert_eq!(
-        snapshot(&db_path).diff_from(&baseline),
-        SnapshotDiff::default(),
+        snapshot(&db_path),
+        baseline,
         "内容与上一次成功解析时一致，图应逐属性不变——清诊断不得顺手动图"
     );
 
@@ -376,8 +329,8 @@ fn restoring_original_bytes_clears_the_stale_warning() -> anyhow::Result<()> {
         fourth.diagnostics
     );
     assert_eq!(
-        snapshot(&db_path).diff_from(&baseline),
-        SnapshotDiff::default(),
+        snapshot(&db_path),
+        baseline,
         "再扫一轮同样不得动图"
     );
 
@@ -434,8 +387,8 @@ fn deleting_a_never_valid_tbl_removes_its_orphaned_warning() -> anyhow::Result<(
         second.report
     );
     assert_eq!(
-        snapshot(&db_path).diff_from(&baseline),
-        SnapshotDiff::default(),
+        snapshot(&db_path),
+        baseline,
         "清理孤儿诊断不得牵连到图里的任何一个节点或属性"
     );
 

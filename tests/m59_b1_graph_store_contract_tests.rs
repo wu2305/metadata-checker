@@ -7,8 +7,8 @@
 //! > 是对的还是错的**，因为没有基准。
 //!
 //! 所以本文件的用法是：**同一组用例，跑每一个实现**。`GrafeoGraphStore`（C1）
-//! 落地时只需在 `contract_suite!` 里加一行，不改任何用例——用例通过即视为
-//! 与现有实现语义等价，这就是 C1 的验收判据。
+//! 落地时在 `contract_suite!` 中接入同一组用例；通过只证明已覆盖的契约，
+//! 持久化重启与查询行为仍需各自验收。
 //!
 //! ## 基准取谁
 //!
@@ -248,6 +248,58 @@ mod cases {
             "b\ttype=Component\tpath=app/b.spg\tname=renamed\tmeta=null",
             "顺带钉住节点的完整形状，避免两侧一起错还互相印证"
         );
+    }
+
+    /// 非空边 metadata 原样读回；相同去重键再次写入时保留首次事实。
+    pub fn edge_metadata_survives_storage_and_duplicate_write(store: &mut dyn GraphStore) {
+        seed(store, &["a", "b"]);
+        let original = Edge {
+            meta: Some(json!({"condition": "=a.value > 0", "origin_file": "app/a.spg"})),
+            ..edge("a", "b", Some("value"))
+        };
+        store.add_edge(original.clone()).expect("initial edge");
+        store.add_edge(Edge {
+            meta: Some(json!({"condition": "=false"})),
+            ..original.clone()
+        }).expect("duplicate edge");
+        let expected = serde_json::to_value(&original).expect("expected edge");
+        let outgoing = out_edges(store, "a");
+        let incoming = store.get_node_edges("b").expect("neighbors").expect("b").incoming;
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(incoming.len(), 1);
+        assert_eq!(serde_json::to_value(&outgoing[0].edge).expect("outgoing"), expected);
+        assert_eq!(serde_json::to_value(&incoming[0].edge).expect("incoming"), expected);
+    }
+
+    /// 建边后更新两端的全部属性，双向邻接必须读取最新的完整节点。
+    pub fn updated_metadata_is_visible_in_both_adjacency_directions(store: &mut dyn GraphStore) {
+        for id in ["a", "b"] {
+            store.upsert_node(node_with(id, id, Some(json!({"revision": 1}))))
+                .expect("initial node");
+        }
+        store.add_edge(edge("a", "b", Some("value"))).expect("edge");
+        let expected_a = Node {
+            id: "a".to_string(), node_type: NodeType::Model,
+            path: "data/source.tbl".to_string(), name: "source".to_string(),
+            meta: Some(json!({"revision": 2, "fields": ["amount"]})),
+        };
+        let expected_b = Node {
+            id: "b".to_string(), node_type: NodeType::Field,
+            path: "data/target.tbl".to_string(), name: "amount".to_string(),
+            meta: Some(json!({"revision": 3, "dataType": "N"})),
+        };
+        store.upsert_node(expected_a.clone()).expect("update a");
+        store.upsert_node(expected_b.clone()).expect("update b");
+        let outgoing = out_edges(store, "a");
+        let incoming = store.get_node_edges("b").expect("neighbors").expect("b").incoming;
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(incoming.len(), 1);
+        for (expected, via_edge) in [(&expected_a, &incoming[0].node), (&expected_b, &outgoing[0].node)] {
+            let expected_value = serde_json::to_value(expected).expect("expected node");
+            let direct = store.get_node(&expected.id).expect("direct node").expect("node exists");
+            assert_eq!(serde_json::to_value(direct).expect("direct"), expected_value);
+            assert_eq!(serde_json::to_value(via_edge).expect("neighbor"), expected_value);
+        }
     }
 
     /// 不带 meta 的 upsert 不得抹掉既有 meta。
@@ -527,6 +579,8 @@ macro_rules! contract_suite {
 }
 
 contract_suite!(
+    edge_metadata_survives_storage_and_duplicate_write,
+    updated_metadata_is_visible_in_both_adjacency_directions,
     duplicate_edge_is_stored_once,
     edges_differing_only_by_field_path_are_distinct,
     edge_type_is_stored_verbatim_and_participates_in_dedup,
