@@ -283,3 +283,53 @@ impl From<GraphStoreError> for crate::tool_contract::ToolError {
         crate::tool_contract::ToolError::new(code, err.to_string())
     }
 }
+
+/// 合并写入节点 meta —— **GraphStore 契约的一部分**，所有实现共用这一个函数。
+///
+/// M59-B1：本函数原先私有于 `graph_redb.rs`，而 `MemoryGraphStore::upsert_node`
+/// 直接 `insert` 覆盖，于是同一组写入在两个实现上产出不同的 meta。规则一旦分头
+/// 实现就必然分叉，所以提到 trait 模块，`graph_redb` 与 `memory_graph_store`
+/// 都调这一份；将来的 Grafeo 实现同样调它，而不是再抄一遍。
+///
+/// 规则：
+/// 1. 写入方没带 meta ⇒ **保留既有 meta**。扫描器会为「尚未见到定义的引用目标」
+///    先建占位节点，之后真正的定义再 upsert 上来；反过来也有先定义后被引用的
+///    顺序。无条件覆盖会让后到的、信息更少的那次写入抹掉已有事实。
+/// 2. 既有为空 ⇒ 采用写入方的 meta。
+/// 3. **占位节点不得被降级**：`PhysicalTable` 是引用侧推断出的保守类型，
+///    不能覆盖已经确认的 `DataFlow` / `App`。其余情况以写入方为准。
+pub fn merge_upsert_meta(
+    existing_meta: Option<serde_json::Value>,
+    incoming_meta: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let Some(incoming_meta) = incoming_meta else {
+        return existing_meta;
+    };
+    let Some(existing_meta) = existing_meta else {
+        return Some(incoming_meta);
+    };
+
+    let existing_model_type = existing_meta.get("modelType").and_then(|v| v.as_str());
+    let incoming_model_type = incoming_meta.get("modelType").and_then(|v| v.as_str());
+    if incoming_model_type == Some("PhysicalTable")
+        && matches!(existing_model_type, Some("DataFlow" | "App"))
+    {
+        return Some(existing_meta);
+    }
+
+    Some(incoming_meta)
+}
+
+/// 边的去重键：`(from, to, edge_type, field_path)`。
+///
+/// M59-B1：`graph_redb` 用这个四元组去重（`seen_edges`），`MemoryGraphStore`
+/// 原先**完全不去重**，同一条边写两次就出现两次。`field_path` 参与键是刻意的：
+/// 同一对端点上不同字段产生的引用是**不同的事实**，不能合并。
+pub fn edge_dedup_key(edge: &Edge) -> (String, String, crate::graph::EdgeType, Option<String>) {
+    (
+        edge.from.clone(),
+        edge.to.clone(),
+        edge.edge_type.clone(),
+        edge.field_path.clone(),
+    )
+}

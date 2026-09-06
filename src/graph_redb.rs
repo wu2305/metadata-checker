@@ -1534,7 +1534,7 @@ impl GraphWriteStore for GraphDB {
     fn upsert_node(&mut self, node: Node) -> GraphStoreResult<()> {
         let node_id = node.id.clone();
         if let Some(idx) = self.node_indices.get(&node_id).copied() {
-            let preserve_meta = merge_upsert_meta(self.graph[idx].meta.clone(), node.meta);
+            let preserve_meta = crate::graph_store::merge_upsert_meta(self.graph[idx].meta.clone(), node.meta);
             self.graph[idx] = Node {
                 meta: preserve_meta,
                 ..node
@@ -1566,29 +1566,6 @@ impl GraphWriteStore for GraphDB {
         GraphDB::remove_nodes_by_ids(self, &node_ids.to_vec());
         Ok(())
     }
-}
-
-/// 合并写入节点 meta
-fn merge_upsert_meta(
-    existing_meta: Option<serde_json::Value>,
-    incoming_meta: Option<serde_json::Value>,
-) -> Option<serde_json::Value> {
-    let Some(incoming_meta) = incoming_meta else {
-        return existing_meta;
-    };
-    let Some(existing_meta) = existing_meta else {
-        return Some(incoming_meta);
-    };
-
-    let existing_model_type = existing_meta.get("modelType").and_then(|v| v.as_str());
-    let incoming_model_type = incoming_meta.get("modelType").and_then(|v| v.as_str());
-    if incoming_model_type == Some("PhysicalTable")
-        && matches!(existing_model_type, Some("DataFlow" | "App"))
-    {
-        return Some(existing_meta);
-    }
-
-    Some(incoming_meta)
 }
 
 impl IndexStateStore for GraphDB {
