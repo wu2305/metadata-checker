@@ -32,6 +32,48 @@ cnb workspace start-workspace \
 
 同一分支重复调用不会重复创建：已存在就直接返回原环境。
 
+### 1.1 环境起不来：Prepare 阶段失败怎么定位
+
+`StartWorkspace` 返回 200 只代表请求被收下。若 Prepare 阶段失败，症状是
+**所有业务 stage 都是 `skipped`**，而且 `build-runner-download-log` 返回
+`404 日志文件不存在，可能构建未成功产出日志（如 prepare 阶段失败）`——
+很容易误以为 API 侧根本拿不到原因。
+
+**拿得到。** `get-build-stage` 对 `prepare` 这个 stage id 同样有效，
+`error` 字段里就是原文：
+
+```bash
+cnb build get-build-status --repo wu2305/metadata-checker --sn <sn>
+# stages[10]{status,duration,name,id} 一眼看出卡在哪一级
+
+cnb build get-build-stage \
+  --repo wu2305/metadata-checker \
+  --sn <sn> --pipelineId <sn>-001 --stageId prepare
+```
+
+先跑 `get-build-status`：它按 `status,duration,name,id` 紧凑列出全部 stage，
+比直接拉 `get-build-stage` 的 `content`（Prepare 有近 400 行，含整段镜像拉取日志）
+省得多。确认卡点后再取那一级的 `error`。
+
+已经踩过的两类 Prepare 失败，都来自 `imports` 的密钥文件自身的准入声明：
+
+```
+Pipeline init error: event: vscode does not conform to allow_events of
+https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
+
+Pipeline init error: branch: codex/m58-slm-eval-foundation does not conform to
+allow_branches of https://cnb.cool/.../real-fixture.yml
+```
+
+要点：
+
+- 两道门**分别报错**。`allow_events` 放开后才会露出 `allow_branches`，
+  别以为改完一处就完事。
+- 分支模式里 **`*` 不跨 `/`**：`codex*` 匹配不到 `codex/m58-slm-eval-foundation`，
+  要写 `codex/**`。与 `.cnb.yml` 里分支键的 `**` 语义一致。
+- 改的是**密钥仓**（`metadata-checker-keys`）里的文件，不是本仓 `.cnb.yml`；
+  本仓这边只有那一行 `imports`。
+
 ## 2. 取 SSH 地址
 
 ```bash

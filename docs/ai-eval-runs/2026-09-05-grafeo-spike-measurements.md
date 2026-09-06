@@ -4,11 +4,9 @@
 > 「一次性判决实验」的实测数据。主体已完成，结论见 §0。
 > 环境：CNB workspace `cnb-g1g-1k1np634j`，8 core / 16 GB，rust 1.95.0，
 > grafeo 0.5.42（crates.io，2026-05-04 发布）。
-> 语料：**合成图**（见 §3）。真实 xiaoshouyi 语料 workspace 拉不到——workspace 的
-> `CNB_TOKEN` 是仓库级的，`git ls-remote succbi_project_container` 返回
-> Repository Not Found，而同凭据访问 `origin` 正常。语料只有流水线能拿
-> （`.cnb.yml:707` 的 `fetch real project corpus`，跨仓 token 来自 `imports` 的
-> `metadata-checker-keys/real-fixture.yml`）。见 §5。
+> 语料：**合成图**（见 §3）。本文成文时真实 xiaoshouyi 语料在 workspace 拉不到，
+> 见 §5——**该阻塞已于 2026-09-06 解除**，本文的合成图读数因此只是过渡基线，
+> 真实语料复测另行记录。
 
 ## 0. 结论
 
@@ -163,18 +161,30 @@ GrafeoDB::with_read_store(store: Arc<dyn GraphStoreSearch>, config: Config) -> R
 另：`open_read_only` 的文档写「loads the last checkpoint snapshot but does **not**
 replay the WAL」——"loads" 这个词指向快照整体读入。仍需实测区分。
 
-## 5. 语料可达性（阻塞项，需决策）
+## 5. 语料可达性（**已解除**，2026-09-06）
 
-真实 xiaoshouyi 语料在 `cnb.cool/wu2305/succbi_project_container` 的
-`xiaoshouyi-corpus` 分支（sparse `projects/xiaoshouyi`，约 156 MB，1,387 文件）。
+真实 xiaoshouyi 语料在 `cnb.cool/wu2305/succbi_project_container`，仓库/提交 pin/
+项目路径由 `metadata-checker-keys/real-fixture.yml` 提供（不再是本文成文时以为的
+`xiaoshouyi-corpus` 分支 + `projects/xiaoshouyi` 硬编码）。
 
-- **流水线可达**：`.cnb.yml:707` 的 `fetch real project corpus`，凭据来自
-  `imports` 的 `metadata-checker-keys/real-fixture.yml`，走 `http.extraHeader`。
-- **dev workspace 不可达**：workspace 的 `CNB_TOKEN` 是仓库级的。实测
-  `git ls-remote https://cnb.cool/wu2305/succbi_project_container.git` 返回
-  `Repository Not Found`，同一凭据 `git ls-remote origin` 正常。
+**成文时的状态（保留作为诊断记录）**：dev workspace 的 `CNB_TOKEN` 只有本仓授权，
+实测 `GET /wu2305/succbi_project_container` 返回 403，`git ls-remote` 报
+Repository Not Found，同凭据访问 `origin` 正常。跨仓凭据只能来自 `imports`。
 
-因此真实语料上的判决实验只能作为 **`api_trigger_*` 流水线事件**跑，需要新增一个
-event（照 `.kimi_harness_smoke_ci` 的 imports + corpus fetch 段），由人触发。
-合成图能回答「Grafeo 是不是 in-memory 优先」这个架构属性，但回答不了真实语料的
-体积/分布特性。
+**解除过程**：打开 `.cloud_native_dev_env` 的 `imports: real-fixture.yml` 需要连过
+该密钥文件自身的 `allow_events`（缺 `vscode`）与 `allow_branches`（不含
+`codex/m58-slm-eval-foundation`；`codex*` 不匹配，`*` 不跨 `/`）两道声明，
+两者均由仓库所有者放开。corpus fetch stage 随后经 7 轮返修加固。
+详见迁移 spec §4.1。
+
+**当前实测**（sn=`cnb-ubl-1k1qnvicp`）：
+
+```
+success,2668,fetch real project corpus,stage-5
+[corpus] READY spg=501 tbl=828 sha=c3c0528fdd28e2600e0b0235040fb349b3c2d446 path=xiaoshouyi
+157M    target/real-project/succbi_project_container/xiaoshouyi
+```
+
+因此 §3.3 里「必须在真实语料上实测」的那条内存驻留读数**已经可以在 dev 环境交互式
+跑了**，不需要新增 `api_trigger_*` 事件。合成图能回答「Grafeo 是不是 in-memory
+优先」这个架构属性，回答不了真实语料的体积/分布特性——后者现在没有借口不测。

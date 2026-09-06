@@ -178,7 +178,7 @@ redb 侧则去重边、对占位模型保留既有 metadata。同一组写入，
         C5 wasm32 实测：cargo build --target wasm32-unknown-unknown --features browser-wasm
 
 阶段 D  验收与退役
-        D1 真实语料复测（需新增 api_trigger_* 流水线事件，见 §4）：
+        D1 真实语料复测（语料已在 dev workspace 可达，见 §4.1）：
            冷启动→首条链路查询、内存驻留、产物正确性
         D2 redb 退役：v2 shadow 族、坏行 hydrate 计数、graph_redb.rs:888 一并移除
 ```
@@ -188,45 +188,54 @@ C 才有意义。
 
 ## 4. 已知阻塞项
 
-1. **真实语料在 dev workspace 不可达——机制已就位，等一个授权决定。**
+1. ~~**真实语料在 dev workspace 不可达。**~~ —— **已解除**（2026-09-06）。
 
-   诊断更正：dev 环境注入的 `CNB_TOKEN` **是用户态身份**——`GET /user` 返回
-   `wu2305`——但**授权范围只到本仓**：实测 `GET /wu2305/succbi_project_container`
-   返回 **403**（不是 404，仓库存在且归属正确），`GET /wu2305/metadata-checker`
-   返回 200。此前记为「仓库级 token」方向对但机制说错了。
+   最终诊断：dev 环境注入的 `CNB_TOKEN` 是用户态身份（`GET /user` 返回 `wu2305`），
+   但授权范围只到本仓——实测 `GET /wu2305/succbi_project_container` 返回 **403**
+   （不是 404，仓库存在且归属正确），`GET /wu2305/metadata-checker` 返回 200。
+   跨仓凭据只能来自 `imports` 的 `metadata-checker-keys/real-fixture.yml`，
+   而打开这一行要连过该密钥文件自身的**两道**声明：
 
-   与 imports 也无关：`.kimi_harness_smoke_ci` 同样没有 imports，它用的就是
-   `$CNB_TOKEN`——差别在于**流水线的 CNB_TOKEN 有跨仓授权，dev 环境的没有**。
+   | 门 | 报错 | 处置 |
+   |---|---|---|
+   | `allow_events` | `event: vscode does not conform to allow_events of …/real-fixture.yml`（sn=`cnb-ao8-1k1ns62sh`） | 仓库所有者把 `vscode` 加进 `allow_events` |
+   | `allow_branches` | `branch: codex/m58-slm-eval-foundation does not conform to allow_branches of …/real-fixture.yml`（sn=`cnb-j08-1k1p16s8b`） | 仓库所有者放开该分支。注意 `codex*` **匹配不到** `codex/m58-…`——`*` 不跨 `/` |
 
-   已做：`.cloud_native_dev_env` 新增 `fetch real project corpus` stage，用
-   `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 做 sparse clone；fail-soft、已存在则跳过、
-   凭证只走 `http.extraHeader` 不落盘、末尾断言未持久化进 `.git/config`。
-   实测 stage 跑通（sn=`cnb-vo8-1k1nsqnju`，`success,474,fetch real project corpus`，
-   走 fail-soft 分支，环境正常启动）。
+   任一道门关着，Prepare 直接失败、8 个 stage 全部 skipped，`build-runner-download-log`
+   返回 404（未产出日志）。定位方法见
+   [CNB 远程环境 runbook](../runbooks/cnb-remote-dev-env.md) §「Prepare 阶段失败怎么定位」。
 
-   **仍缺一步（需人决策）**：`imports: real-fixture.yml` 现在**打不开**——该密钥
-   文件自身声明了 `allow_events`，`vscode` 不在其中，加上会让 Prepare 阶段直接失败、
-   整个开发环境起不来（实测 sn=`cnb-ao8-1k1ns62sh`）：
+   `.cloud_native_dev_env` 的 `fetch real project corpus` stage 随后经 7 轮返修
+   （`4dc96bd`..`3c30fbd`）收紧为：语料仓、提交 pin、项目路径全部由 `real-fixture.yml`
+   提供（不再硬编码 `xiaoshouyi-corpus` 分支与 `projects/xiaoshouyi`）；pin 必须是
+   40 位 SHA，路径必须是仓库内安全相对目录；缓存复用前校验 HEAD/origin/worktree
+   干净度，并把工作树 `.spg`/`.tbl` 计数与 pinned commit 的 tracked blob 计数逐一对齐
+   （中文文件名须 `core.quotePath=false`，否则真实 metadata 会被漏计为 0）；凭证只走
+   `http.extraHeader`，不落盘、不进 remote URL，并拒绝复用任何持久化了 extraheader
+   或 userinfo URL 的缓存仓。全程 fail-soft：拉不到就打印 `CORPUS_UNAVAILABLE` 后
+   继续开环境。
+
+   实测通过（sn=`cnb-ubl-1k1qnvicp`，2026-09-06）：
 
    ```
-   Pipeline init error: event: vscode does not conform to allow_events of
-   https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/real-fixture.yml
+   success,32916,Prepare,prepare
+   success,2668,fetch real project corpus,stage-5
+   [corpus] READY spg=501 tbl=828 sha=c3c0528fdd28e2600e0b0235040fb349b3c2d446 path=xiaoshouyi
+   157M    target/real-project/succbi_project_container/xiaoshouyi
    ```
 
-   两条出路，**都要人拍板**：
-
-   - **A**：在 `metadata-checker-keys` 的 `real-fixture.yml` 里把 `vscode` 加进
-     `allow_events`，再取消 `.cnb.yml` 里那两行注释。代价是该部署 token 会被注入到
-     **可交互 SSH 的开发环境**，而不只是短生命周期流水线。收益是 M59 可以在真实语料
-     上交互式迭代。
-   - **B**：不动 `allow_events`，把真实语料实测做成 `api_trigger_m59_grafeo` 流水线
-     事件（该类事件已在 `allow_events` 内）。安全面不变，但只能批处理跑，无法交互
-     调试。
+   取舍已明确记账：该部署 token 会注入到**可交互 SSH 的开发环境**，而不只是短生命
+   周期流水线。这是决定，不是疏漏。收益是 D1 与本节第 2 条不再需要专门的
+   `api_trigger_*` 事件，可在 dev 环境交互式迭代。
 
    未采用 submodule：语料 156 MB，submodule 会进每一次 clone 与 CI checkout，
    而现有流水线是刻意用 `--depth 1 --filter=blob:none --sparse` 规避这个开销的。
 2. **内存驻留在真实语料上未知。** 合成图 16.5 MB 落盘 → 262 MB RSS（16 倍）。
-   真实语料 514 MiB 若同比例约 **8 GB**。这是 D1 必测项，也可能反过来影响 schema
-   （是否要瘦身 meta）。
+   真实语料的 redb `.graphdb` 为 514 MiB（`performance-baseline.md:777`；语料源目录
+   本身只有 157 MB，两者不是一回事，勿混用），若同比例膨胀约 **8 GB**。
+
+   **本条虽列在 D1，但必须在 A4 之前测。** 理由在 §1：schema 一次性冻结，而这条
+   读数直接决定「要不要瘦身 meta」——等到 D 阶段才测，答案已经刻进库里了。
+   §4.1 解除后它已可测，不再需要外推。
 3. **`with_read_store` 未评估。** `GrafeoDB::with_read_store(Arc<dyn GraphStoreSearch>, Config)`
    允许只借 Cypher 引擎、不迁数据。既然已决定换库，此路仅作为 C1 受阻时的退路记录。
