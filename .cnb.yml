@@ -517,6 +517,8 @@
         fi
     - name: fetch real project corpus
       script: |
+        set -eu
+
         # 把真实项目语料 sparse 拉进 dev 环境，供 M59 后端迁移的真实语料实测使用。
         # 仓库、提交 pin 与语料路径均由 real-fixture.yml 提供；不要在这里假定旧版
         # xiaoshouyi-corpus 分支或 projects/xiaoshouyi 目录结构。
@@ -546,17 +548,43 @@
           [ -f "$REAL_DIR/.git/config" ] || return 1
           # 拒绝任何持久化的鉴权 header 或带 userinfo 的 remote URL；即使本次
           # imports 没有注入 token，也不能继续复用历史 workspace 中的不安全缓存。
-          if grep -Eiq '^[[:space:]]*extraheader[[:space:]]*=' "$REAL_DIR/.git/config"; then
+          if corpus_config_scope_has_credentials --local; then
             return 0
           fi
-          if git -C "$REAL_DIR" config --local --get-regexp '^remote\..*\.url$' 2>/dev/null \
+          WORKTREE_CONFIG="$(git -C "$REAL_DIR" config --local --get extensions.worktreeConfig 2>/dev/null || true)"
+          if [ "$WORKTREE_CONFIG" = true ] \
+              && corpus_config_scope_has_credentials --worktree; then
+            return 0
+          fi
+          return 1
+        }
+
+        corpus_config_scope_has_credentials() {
+          CONFIG_SCOPE="$1"
+          # --includes 同时覆盖 local config 引用的外部文件；启用
+          # extensions.worktreeConfig 时再检查 config.worktree。
+          if git -C "$REAL_DIR" config "$CONFIG_SCOPE" --includes --list --name-only 2>/dev/null \
+              | grep -Eiq '(^|[.])extraheader$'; then
+            return 0
+          fi
+          if git -C "$REAL_DIR" config "$CONFIG_SCOPE" --includes \
+              --get-regexp '^remote\..*\.(url|pushurl)$' 2>/dev/null \
               | grep -Eq '://[^/@[:space:]]+@'; then
             return 0
           fi
           if [ -n "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ] \
-              && grep -qF -- "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" "$REAL_DIR/.git/config"; then
+              && git -C "$REAL_DIR" config "$CONFIG_SCOPE" --includes --list 2>/dev/null \
+                | grep -qF -- "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN"; then
             return 0
           fi
+          return 1
+        }
+
+        remove_corpus_dir() {
+          if rm -rf -- "$REAL_DIR"; then
+            return 0
+          fi
+          echo "[corpus] cleanup failed: ${REAL_DIR}" >&2
           return 1
         }
 
@@ -569,10 +597,17 @@
             || { CORPUS_CHECKOUT_REASON=unreadable_head; return 1; }
           [ "$CHECKED_OUT_SHA" = "$CORPUS_REF" ] \
             || { CORPUS_CHECKOUT_REASON=ref_mismatch; return 1; }
-          CACHED_ORIGIN="$(git -C "$REAL_DIR" config --local --get remote.origin.url)" \
+          CACHED_ORIGIN="$(git -C "$REAL_DIR" config --local --includes --get-all remote.origin.url)" \
             || { CORPUS_CHECKOUT_REASON=missing_origin; return 1; }
           [ "$CACHED_ORIGIN" = "$CORPUS_URL" ] \
             || { CORPUS_CHECKOUT_REASON=origin_mismatch; return 1; }
+          WORKTREE_CONFIG="$(git -C "$REAL_DIR" config --local --get extensions.worktreeConfig 2>/dev/null || true)"
+          if [ "$WORKTREE_CONFIG" = true ]; then
+            WORKTREE_ORIGIN="$(git -C "$REAL_DIR" config --worktree --includes \
+              --get-all remote.origin.url 2>/dev/null || true)"
+            [ -z "$WORKTREE_ORIGIN" ] \
+              || { CORPUS_CHECKOUT_REASON=worktree_origin_override; return 1; }
+          fi
           WORKTREE_STATUS="$(git -C "$REAL_DIR" status --porcelain --untracked-files=all --ignored=matching)" \
             || { CORPUS_CHECKOUT_REASON=unreadable_worktree; return 1; }
           [ -z "$WORKTREE_STATUS" ] || { CORPUS_CHECKOUT_REASON=dirty_worktree; return 1; }
@@ -610,7 +645,7 @@
           echo "[corpus] CORPUS_UNAVAILABLE：fixture URL 不得内嵌凭据；开发环境继续启动。"
         elif [ -d "$REAL_DIR/.git" ] && corpus_config_has_credentials; then
           echo "[corpus] CORPUS_UNAVAILABLE：缓存仓库持久化了凭据，已删除且本轮不复用；开发环境继续启动。"
-          rm -rf "$REAL_DIR"
+          remove_corpus_dir || true
         elif corpus_checkout_ready; then
           echo "[corpus] READY cached=true spg=${SPG_COUNT} tbl=${TBL_COUNT} sha=${CHECKED_OUT_SHA} path=${CORPUS_PATH}"
         elif [ -z "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ]; then
@@ -621,14 +656,14 @@
           AUTH_HEADER="Authorization: Basic $(printf '%s:%s' cnb "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" | base64 -w0)"
 
           fetch_real_corpus() {
-            rm -rf "$REAL_DIR"
+            remove_corpus_dir || return 1
             # 先按分支取得浅克隆，再按 imports 给出的 ref（通常是不可变 SHA）校验或
             # fetch。`git clone --branch` 不能接受任意提交 SHA。
             if ! git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 \
                 --filter=blob:none --sparse --branch "$CORPUS_BRANCH" \
                 "$CORPUS_URL" "$REAL_DIR" 2>&1; then
               echo "[corpus] partial clone 失败，去掉 blob filter 重试"
-              rm -rf "$REAL_DIR"
+              remove_corpus_dir || return 1
               git -c http.extraHeader="$AUTH_HEADER" clone --depth 1 --sparse \
                 --branch "$CORPUS_BRANCH" "$CORPUS_URL" "$REAL_DIR" 2>&1 || return 1
             fi
@@ -660,7 +695,7 @@
 
           if ! fetch_real_corpus; then
             echo "[corpus] CORPUS_UNAVAILABLE：clone、ref、路径或非空校验失败；开发环境继续启动。"
-            rm -rf "$REAL_DIR"
+            remove_corpus_dir || true
           fi
         fi
 
