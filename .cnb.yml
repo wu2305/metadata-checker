@@ -583,10 +583,14 @@
             || { CORPUS_CHECKOUT_REASON=unreadable_spg_files; return 1; }
           TBL_COUNT="$(find "$CORPUS_DIR" -type f -name '*.tbl' | wc -l)" \
             || { CORPUS_CHECKOUT_REASON=unreadable_tbl_files; return 1; }
-          TRACKED_SPG_COUNT="$(git -C "$REAL_DIR" ls-tree -r "$CORPUS_REF" -- "$CORPUS_PATH" \
+          # 中文文件名默认会被 Git quote 成带结尾引号的转义文本；关闭 quote 后再
+          # 判断扩展名，避免把真实 tracked metadata 漏计为 0。
+          TRACKED_SPG_COUNT="$(git -C "$REAL_DIR" -c core.quotePath=false \
+            ls-tree -r "$CORPUS_REF" -- "$CORPUS_PATH" \
             | awk '$1 ~ /^100(644|755)$/ && $2 == "blob" && $0 ~ /[.]spg$/ { count++ } END { print count + 0 }')" \
             || { CORPUS_CHECKOUT_REASON=unreadable_tracked_spg; return 1; }
-          TRACKED_TBL_COUNT="$(git -C "$REAL_DIR" ls-tree -r "$CORPUS_REF" -- "$CORPUS_PATH" \
+          TRACKED_TBL_COUNT="$(git -C "$REAL_DIR" -c core.quotePath=false \
+            ls-tree -r "$CORPUS_REF" -- "$CORPUS_PATH" \
             | awk '$1 ~ /^100(644|755)$/ && $2 == "blob" && $0 ~ /[.]tbl$/ { count++ } END { print count + 0 }')" \
             || { CORPUS_CHECKOUT_REASON=unreadable_tracked_tbl; return 1; }
           [ "$SPG_COUNT" -gt 0 ] || { CORPUS_CHECKOUT_REASON=empty_spg; return 1; }
