@@ -551,7 +551,8 @@
           if corpus_config_scope_has_credentials --local; then
             return 0
           fi
-          WORKTREE_CONFIG="$(git -C "$REAL_DIR" config --local --get extensions.worktreeConfig 2>/dev/null || true)"
+          WORKTREE_CONFIG="$(git -C "$REAL_DIR" config --local --includes --bool \
+            --get extensions.worktreeConfig 2>/dev/null || true)"
           if [ "$WORKTREE_CONFIG" = true ] \
               && corpus_config_scope_has_credentials --worktree; then
             return 0
@@ -601,7 +602,8 @@
             || { CORPUS_CHECKOUT_REASON=missing_origin; return 1; }
           [ "$CACHED_ORIGIN" = "$CORPUS_URL" ] \
             || { CORPUS_CHECKOUT_REASON=origin_mismatch; return 1; }
-          WORKTREE_CONFIG="$(git -C "$REAL_DIR" config --local --get extensions.worktreeConfig 2>/dev/null || true)"
+          WORKTREE_CONFIG="$(git -C "$REAL_DIR" config --local --includes --bool \
+            --get extensions.worktreeConfig 2>/dev/null || true)"
           if [ "$WORKTREE_CONFIG" = true ]; then
             WORKTREE_ORIGIN="$(git -C "$REAL_DIR" config --worktree --includes \
               --get-all remote.origin.url 2>/dev/null || true)"
