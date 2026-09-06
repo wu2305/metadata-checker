@@ -784,6 +784,13 @@ cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_
 - 节点数是全部图节点（组件/字段/模型/页面/action 等）；组件候选口径（34,317）见 spec
   附录 A「重跑确认」，两者不可直接相减比较。
 - M26 旧基线为 macOS M3 debug 构建且语料非同一 pin，只作数量级参考，不作回归判据。
+- **2026-09-06 复测（M59，workspace `cnb-j1o-1k1qvdkp3`，`release` profile，语料 pin
+  `c3c0528f`）**：节点 89,178（+84）、边 200,028（+453）、graphdb
+  538,972,160 B（与本表**逐字节相同**）、全量建图 wall 64.67 s、峰值 RSS
+  1,693.0 MiB。字节数相同是 redb 页分配粒度的产物，**不构成「图未变」的证据**，
+  不要当回归判据用。建图 wall 的 +41% 未归因（redb 写入路径将随 M59 退役）。
+  完整读数与方法见
+  [M59 真实语料实测](../../ai-eval-runs/2026-09-06-m59-real-corpus-measurements.md)。
 - stdio 总 wall 中查询合计约 97 s（各场景 P95 × 5 轮上界），其余约 1,050 s 主要为
   515M graphdb 的加载与启动。加载耗时已独立实测闭环（2026-08-25，CNB workspace
   `cnb-7jg-1k0sh4l6r` 同口径重建 graphdb 后）：从进程 spawn 到 stderr
@@ -816,6 +823,9 @@ cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_
 |---|---:|---|
 | `SCANNER_UNRECOGNIZED_CONTAINER_KEY` | 312 | 与附录 A 重跑脚本的 scanner 口径预测（`moreFields` 279 + `params` 33 = 312）精确吻合，互为交叉验证 |
 | `SCANNER_DUPLICATE_COMPONENT_ID` | 1,105 | 同页重复组件 id，PR1 起持久化透出 |
+
+两条计数曾被标记为「可能已陈旧」。2026-09-06 在 pin `c3c0528f` 上复测，
+**312 / 1,105 一字未变**，该待办关闭。
 
 Baseline impact 判读：本次是 PR2 后首个 runner 真实项目样本，无前序同口径样本可横比；
 page_logic 两场景 P95 约 8–10 s 为当前最重能力，后续 PR（PR4b 页面局部子图迁移）应以本表
