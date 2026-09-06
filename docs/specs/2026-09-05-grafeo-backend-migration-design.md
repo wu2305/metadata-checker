@@ -61,6 +61,29 @@ A 页嵌入 B 页 → 只改 B 的标题 → 删 B 节点时 A→B 的 `EmbedsPa
 **对迁移的含义**：提交语义问题。新库要么在解析验证通过后才动候选图，要么保留上一份
 有效图并标记陈旧。**不能在迁移时沿用「失败即空集」**。
 
+> **已落地（B3，commit `f8091c5` + `eaeae4b`）**：两条要求**都**做到了。
+> `tbl.rs` 的空内容与非法 JSON 改为**响亮失败**（`bail!`）；校验前移到
+> `indexer::parse_dirty_files_with_failures`，解析失败的文件**整个跳过**：
+>
+> - 不进 `updates` ⇒ `previous_node_ids` 不进 `merged_removed` ⇒ **旧图原样保留**；
+> - 不写 `new_states` ⇒ **旧 file hash 保留** ⇒ 文件下一轮仍是脏的，会自动重试
+>   （这是原缺陷「损坏被永久固化」的正解——不靠人工介入）；
+> - 写一条 `SCANNER_FILE_PARSE_FAILED` 诊断（Warning / `IMPACT_PARTIAL`）⇒
+>   图里这部分是**陈旧**而非缺失，查询方能区分这两件事。
+>
+> 借用既有的 per-file `scanner_entries` overwrite-by-key 机制，
+> 因此文件修好后该标记**自行退役**（TBL 分支写零计数 entry 覆盖旧值），
+> 不需要额外的清理路径。
+>
+> 刻意保留的不对称：**SPG 解析失败仍然整轮抛错**，不降级成 ParseFailure。
+> 它本来就是响亮的失败，从没有「静默转成空结果」的问题；B3 要修的是 TBL
+> 那条静默路径，不是把 SPG 也改成部分成功。
+>
+> 回归测试 `tests/m59_b3_tbl_parse_failure_tests.rs`（3 条）覆盖四轮时序：
+> 有效 → 损坏（旧图与边数不变 + 诊断出现）→ 重扫（`dirty > 0`，证明 hash 未被记录）
+> → 修复（诊断消失、边数增长）。远程 `FMT_EXIT=0`、`B3_EXIT=0`，
+> 相邻 7 个套件共 55 条测试全绿。
+
 ### 2.3 P1｜值追溯的切片越界 panic 与中文乱码 —— 确认，可复现
 
 `dependency.rs:392-416` `replace_with_boundary`：
@@ -162,6 +185,29 @@ redb 侧则去重边、对占位模型保留既有 metadata。同一组写入，
   `Computed|Unknown`，另一处只要求原始表达式含 `model1`。这类断言**挡不住迁移引入的
   分类退化**——迁移期正是最需要它们的时候。收紧到唯一期望值。
 
+  > **已落地（B2，commit `276d61f`）**：四条断言全部收紧到唯一 `SourceType`，
+  > 并把 `expanded_expr` 与 `source_chain`（逐节点 id + 分类）一并钉住——
+  > 分类只是最终标签，展开式与链条才是它由之而来的事实，只钉标签仍会漏掉中间层退化。
+  > 远程验证 `FMT_EXIT=0`，`core_feature_tests` 41 passed；
+  > `m59_a1b_component_value_ref_tests` 4、`m59_b4_value_trace_utf8_tests` 2 同步复跑通过。
+  >
+  > **收紧过程暴露两条既有缺陷**（本文新增，codex 未报）。B2 只做探针，两条都
+  > **如实钉住当前行为**并在测试注释里写明它是错的，不在 B2 内修：
+  >
+  > 1. **`=123` 判为 `Unknown` 而非 `Constant`。** `determine_source_type`
+  >    判常量的条件是「不以 `=` 开头且不以 `${` 开头」（`dependency.rs:498`），
+  >    于是**公式形态的字面量**落不进 `Constant`，一路掉到兜底的 `Unknown`。
+  >    名为 `test_source_type_constant` 的测试从来没验到常量分类——旧断言把
+  >    `Constant|Computed|Unknown` 三个都收下，正好盖住这件事。
+  >    修法属分类器本身（`=` 开头但不含任何引用的纯字面量应判 `Constant`）。
+  > 2. **`RefType::ModelField` 引用不进 `source_chain`。**
+  >    `expand_expression`（`dependency.rs:371-378`）对 `ModelField` 只做字符串
+  >    替换、**不 push `SourceNode`**，所以 `model1` 从不出现在链条里。旧断言那道
+  >    `has_model_node || raw_expr.contains("model1")` 或门正是靠**后**半边通过的，
+  >    等于把缺陷藏在或门里。这条与 §3 的 C3（链路查询动词，每类边自己的投影规则）
+  >    相关：模型字段是链路上的真实一跳，链条里没有它，跨模型的值溯源就断了。
+  >    现改为显式断言链条**不含** `ModelAuto` 节点，行为一旦修好这条立刻变红。
+
 ## 3. 迁移顺序
 
 ```
@@ -179,7 +225,9 @@ redb 侧则去重边、对占位模型保留既有 metadata。同一组写入，
         B1 共享 GraphStore 契约测试套件：同一组用例跑 memory / redb 两实现
            覆盖重复边、节点更新、占位节点升级、删除、邻接一致性
         B2 收紧 core_feature_tests 的宽松断言（迁移期的退化探针）
+           —— **已完成**（`276d61f`），见 §2.7；顺带钉住两条既有分类缺陷
         B3 TBL 解析失败不再返回 Ok(空)：验证通过才动候选图，否则保留旧图 + 陈旧标记
+           —— **已完成**（`f8091c5` / `eaeae4b`），见 §2.2
         B4 值追溯 panic 与中文乱码：改 token/span 定位替换，保留原始字符串片段
            —— **已完成**（`3f84a96` / `c99a14d`），见 §2.3
         B5 全量 vs 增量差分测试：同一最终文件集，逐节点/逐边/逐属性比对（非计数比对）
