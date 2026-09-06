@@ -83,6 +83,26 @@ fn page_a_standalone() -> String {
     .to_string()
 }
 
+/// 页 A：内嵌一个**不存在**的页面，用于观察占位节点的归属。
+fn page_a_embedding_ghost() -> String {
+    r#"{
+  "version": "4.19.7",
+  "theme": "default",
+  "params": [],
+  "referenceResources": ["ghost.spg"],
+  "sources": [],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {"id": "embed1", "type": "embedsuperpage", "resPath": "0"},
+      {"id": "label_a", "type": "text", "value": "A"}
+    ]
+  }
+}"#
+    .to_string()
+}
+
 /// 页 B。`title` 参与内容哈希，改它即可让 B 变脏而 A 不变。
 fn page_b(title: &str) -> String {
     format!(
@@ -294,10 +314,15 @@ fn the_changed_file_itself_is_rebuilt_identically() {
 
 /// **钉住 spec §2.1 的 P1 缺陷**：增量路径丢失未变更文件（A）贡献的跨文件边。
 ///
-/// 机制：`page:app/b.spg` 这个节点由 A（作为内嵌目标占位）和 B（作为自身页节点）
-/// **共同**产生，因此它在 B 的 `previous_node_ids` 里。B 变脏时先删这批节点，
-/// A→B 的 `EmbedsPage` 边随端点一并消失；随后只重跑 B，A 不会被重扫，
-/// **边永久丢失且无任何诊断**。
+/// 机制（源码逐行核对，`scanner/spg.rs`）：
+/// - A 扫描时为内嵌目标 `add_node(page:app/b.spg)`，但**不**把它写进 A 的
+///   `node_ids`（`spg.rs:1067-1075`——对比 `:584` / `:757` 普通节点都显式
+///   `node_ids.insert`）。所以这个节点不归 A 所有。
+/// - B 扫描时把 `page:app/b.spg` 作为自身页节点写进 B 的 `node_ids`（`:584`）。
+///
+/// 于是 B 变脏时，`previous_node_ids` 含 `page:app/b.spg` → `remove_nodes_by_ids`
+/// 删掉它 → 删节点连带删边，A→B 的 `EmbedsPage` 边一并消失。随后**只**重跑 B，
+/// A 不会被重扫，边**永久丢失且无任何诊断**。
 ///
 /// 本测试如实钉住这个分歧。**A3（边带 `origin_file`、删除按 origin 而非按端点牵连）
 /// 落地后这条会立刻变红**——届时把断言改成 `full.edges == inc.edges` 即可，
@@ -346,5 +371,88 @@ fn cross_file_edge_is_lost_by_incremental_update() {
         inc.nodes,
         "缺陷只涉及边；节点集若也不一致，那是**另一个**问题：{}",
         describe_diff("全量", &full.nodes, "增量", &inc.nodes)
+    );
+}
+
+/// 最终文件集只有 `b.spg`（`a.spg` 被删）时的两条路径。
+fn run_both_paths_with_deletion(tag: &str, page_a: &str, page_b_src: &str) -> (GraphSnapshot, GraphSnapshot) {
+    // 全量：a.spg 从未存在过。
+    let full_dir = unique_dir(&format!("{tag}-full"));
+    let full_project = full_dir.join("project");
+    write(&full_project, "app/b.spg", page_b_src);
+    let full_db = full_dir.join("graph.db");
+    ProjectIndexer::scan(&full_project, &full_db).expect("full scan");
+
+    // 增量：先有 a.spg，再删掉。
+    let inc_dir = unique_dir(&format!("{tag}-inc"));
+    let inc_project = inc_dir.join("project");
+    write(&inc_project, "app/a.spg", page_a);
+    write(&inc_project, "app/b.spg", page_b_src);
+    let inc_db = inc_dir.join("graph.db");
+    ProjectIndexer::scan(&inc_project, &inc_db).expect("initial scan");
+
+    std::fs::remove_file(inc_project.join("app/a.spg")).expect("remove a.spg");
+    let report = ProjectIndexer::scan(&inc_project, &inc_db).expect("incremental scan after delete");
+    assert_eq!(
+        report.deleted, 1,
+        "第二次扫描必须真的把 a.spg 当成已删除处理，否则本测试什么都没验到"
+    );
+
+    let out = (snapshot(&full_db), snapshot(&inc_db));
+    let _ = std::fs::remove_dir_all(&full_dir);
+    let _ = std::fs::remove_dir_all(&inc_dir);
+    out
+}
+
+/// **本轮新发现（本文件首次记录，codex 未报、spec §2.1 原文未涵盖）**：
+/// 内嵌目标的**占位页节点**不归产生它的文件所有，因此引用方被删除后**永久泄漏**。
+///
+/// `spg.rs:1067` 为内嵌目标 `add_node` 却不 `node_ids.insert`。A 引用一个
+/// **不存在的**页面 `ghost.spg` 时，占位节点 `page:app/ghost.spg` 只由 A 产生，
+/// 却不在 A 的 `previous_node_ids` 里——删掉 A，没有任何文件会声明它，
+/// `remove_nodes_by_ids` 永远碰不到它。图里从此多一个悬空页节点。
+///
+/// 这与 §2.1 是**同一个根因的两面**：节点的归属（ownership）没有被记账。
+/// §2.1 是「别人的边被我的删除牵连」，这条是「我的节点没人来删」。
+/// A3 引入 `origin_file` 时必须同时覆盖**节点**归属，只做边是不够的——
+/// 这条测试就是那半边的判据。
+#[test]
+fn placeholder_page_node_leaks_after_its_only_referrer_is_deleted() {
+    let (full, inc) = run_both_paths_with_deletion(
+        "ghost-embed",
+        &page_a_embedding_ghost(),
+        &page_b("标题"),
+    );
+
+    let ghost = |snap: &GraphSnapshot| -> Vec<String> {
+        snap.nodes
+            .iter()
+            .filter(|n| n.contains("ghost"))
+            .cloned()
+            .collect()
+    };
+
+    assert!(
+        ghost(&full).is_empty(),
+        "全量路径下 a.spg 从不存在，不该有 ghost 占位节点，实际 {:?}",
+        ghost(&full)
+    );
+    assert_eq!(
+        ghost(&inc).len(),
+        1,
+        "钉住新发现的缺陷：占位节点不归 a.spg 所有，删掉 a.spg 后它留在图里。\
+         若这条断言失败（占位节点被清掉了），说明 A3 的节点归属半边已落地——\
+         请把本测试改为 full.nodes == inc.nodes，不要放宽断言。实际 {:?}",
+        ghost(&inc)
+    );
+
+    // 同时确认这不是「增量删除整体失灵」：a.spg 自己的节点确实被删干净了。
+    assert!(
+        !inc.nodes.iter().any(|n| n.contains("app/a.spg")),
+        "a.spg 自身的节点应当已被删除，实际残留 {:?}",
+        inc.nodes
+            .iter()
+            .filter(|n| n.contains("app/a.spg"))
+            .collect::<Vec<_>>()
     );
 }
