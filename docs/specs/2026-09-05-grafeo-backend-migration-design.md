@@ -245,23 +245,26 @@ C 才有意义。
 
    未采用 submodule：语料 156 MB，submodule 会进每一次 clone 与 CI checkout，
    而现有流水线是刻意用 `--depth 1 --filter=blob:none --sparse` 规避这个开销的。
-2. **内存驻留在真实语料上未知。** —— **测量中**（2026-09-06），记录见
-   [M59 真实语料实测](../ai-eval-runs/2026-09-06-m59-real-corpus-measurements.md)。
+2. ~~**内存驻留在真实语料上未知。**~~ —— **已解除**（2026-09-06）。实测记录见
+   [M59 真实语料实测](../ai-eval-runs/2026-09-06-m59-real-corpus-measurements.md) §4。
 
-   合成图 16.5 MB 落盘 → 262 MB RSS（16 倍）。真实语料的 redb `.graphdb` 为
-   514 MiB（`performance-baseline.md:777`；语料源目录本身只有 157 MB，两者不是
-   一回事，勿混用），若同比例膨胀约 **8 GB**。
+   读数（真实语料、stdio 加载路径、`VmRSS`）：**3,805.7 MiB = 3.72 GiB** 驻留，
+   `VmHWM` 3.78 GiB，加载耗时 1,148.7 s，节点 89,178 / 边 200,028。
 
-   **本条虽列在 D1，但必须在 A4 之前测。** 理由在 §1：schema 一次性冻结，而这条
-   读数直接决定「要不要瘦身 meta」——等到 D 阶段才测，答案已经刻进库里了。
-   §4.1 解除后它已可测，不再需要外推。
+   原先按合成图 16 倍膨胀外推的 **8 GB 偏高约 2.1 倍**：真实语料是
+   514.0 MiB 落盘 → 3,805.7 MiB 驻留，**7.4 倍**。但结论方向不变，
+   单进程常驻近 4 GB 不能忽略。
 
-   已到手的两个数**都不是**这一条要的答案，勿代用：建图路径峰值 1,693 MiB 是
-   写入侧；`--check-graph` 的 6 MiB 只读文件头、根本没加载图。驻留必须走 stdio
-   加载路径实测（`tools/graph-load-measure.py --rss-sample`，取 `VmRSS`）。
-   中途观察已达 3.72 GiB 且仍在上升。
+   **对 A4 的直接输入**：`VmHWM − VmRSS` 仅 60.7 MiB，即峰值几乎全部是常驻结构、
+   没有大块临时缓冲。因此**瘦身节点 meta 的收益一比一落在常驻内存上**——
+   「要不要瘦身 meta」从此是可以算账的，不是猜。摊薄下来约 13.5 KiB /
+   每节点或边，远超单个组件节点的真实语义内容，差额在 meta 与索引结构里。
+
+   注意勿代用另外两个数：建图路径峰值 1,693 MiB 是**写入侧**；
+   `--check-graph` 的 6 MiB 只读文件头、根本没加载图。
 
    顺带确认：`SCANNER_UNRECOGNIZED_CONTAINER_KEY` 312 与
    `SCANNER_DUPLICATE_COMPONENT_ID` 1,105 两条陈旧诊断基线**实测仍准确**。
+
 3. **`with_read_store` 未评估。** `GrafeoDB::with_read_store(Arc<dyn GraphStoreSearch>, Config)`
    允许只借 Cypher 引擎、不迁数据。既然已决定换库，此路仅作为 C1 受阻时的退路记录。
