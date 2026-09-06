@@ -1534,7 +1534,8 @@ impl GraphWriteStore for GraphDB {
     fn upsert_node(&mut self, node: Node) -> GraphStoreResult<()> {
         let node_id = node.id.clone();
         if let Some(idx) = self.node_indices.get(&node_id).copied() {
-            let preserve_meta = crate::graph_store::merge_upsert_meta(self.graph[idx].meta.clone(), node.meta);
+            let preserve_meta =
+                crate::graph_store::merge_upsert_meta(self.graph[idx].meta.clone(), node.meta);
             self.graph[idx] = Node {
                 meta: preserve_meta,
                 ..node

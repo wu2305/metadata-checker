@@ -90,7 +90,11 @@ mod cases {
         store.add_edge(edge("a", "b", Some("value"))).expect("e1");
         store.add_edge(edge("a", "b", Some("value"))).expect("e2");
 
-        assert_eq!(store.edge_count().expect("count"), 1, "同一条边写两次应只留一条");
+        assert_eq!(
+            store.edge_count().expect("count"),
+            1,
+            "同一条边写两次应只留一条"
+        );
         assert_eq!(out_edges(store, "a").len(), 1, "邻接表也不得重复");
     }
 
@@ -131,7 +135,9 @@ mod cases {
         store
             .upsert_node(node_with("m", "m", Some(json!({"modelType": "DataFlow"}))))
             .expect("seed meta");
-        store.upsert_node(node_with("m", "m2", None)).expect("re-upsert");
+        store
+            .upsert_node(node_with("m", "m2", None))
+            .expect("re-upsert");
 
         let got = store.get_node("m").expect("get").expect("m exists");
         assert_eq!(got.name, "m2", "非 meta 字段仍以最新写入为准");
@@ -149,7 +155,11 @@ mod cases {
             .upsert_node(node_with("m", "m", Some(json!({"modelType": "DataFlow"}))))
             .expect("confirmed");
         store
-            .upsert_node(node_with("m", "m", Some(json!({"modelType": "PhysicalTable"}))))
+            .upsert_node(node_with(
+                "m",
+                "m",
+                Some(json!({"modelType": "PhysicalTable"})),
+            ))
             .expect("placeholder");
 
         let got = store.get_node("m").expect("get").expect("m exists");
@@ -162,7 +172,11 @@ mod cases {
 
         // 反向：确认类型可以覆盖占位类型。
         store
-            .upsert_node(node_with("p", "p", Some(json!({"modelType": "PhysicalTable"}))))
+            .upsert_node(node_with(
+                "p",
+                "p",
+                Some(json!({"modelType": "PhysicalTable"})),
+            ))
             .expect("placeholder first");
         store
             .upsert_node(node_with("p", "p", Some(json!({"modelType": "App"}))))
@@ -177,8 +191,12 @@ mod cases {
     /// 端点缺失的边静默忽略——扫描顺序会让引用先于定义出现，这不是错误。
     pub fn edge_with_missing_endpoint_is_ignored(store: &mut dyn GraphStore) {
         seed(store, &["a"]);
-        store.add_edge(edge("a", "ghost", None)).expect("dangling out");
-        store.add_edge(edge("ghost", "a", None)).expect("dangling in");
+        store
+            .add_edge(edge("a", "ghost", None))
+            .expect("dangling out");
+        store
+            .add_edge(edge("ghost", "a", None))
+            .expect("dangling in");
 
         assert_eq!(store.edge_count().expect("count"), 0, "悬挂边不得入图");
         assert!(out_edges(store, "a").is_empty());

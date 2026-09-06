@@ -170,7 +170,10 @@ impl GraphWriteStore for MemoryGraphStore {
             return Ok(());
         }
         // M59-B1：按 (from, to, type, field_path) 去重，与 redb 的 seen_edges 同口径。
-        if !self.seen_edges.insert(crate::graph_store::edge_dedup_key(&edge)) {
+        if !self
+            .seen_edges
+            .insert(crate::graph_store::edge_dedup_key(&edge))
+        {
             return Ok(());
         }
         self.outgoing
