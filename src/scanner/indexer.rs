@@ -145,12 +145,13 @@ fn per_file_scan_diagnostic_entry(update: &ParsedGraphUpdate) -> Result<Option<(
         }
         ParsedGraphContent::Tbl(_) => crate::scanner::spg::ScanDiagnostics::default(),
     };
-    let bytes = serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts)).with_context(|| {
-        format!(
-            "Failed to serialize scanner diagnostics for {}",
-            update.logical_path
-        )
-    })?;
+    let bytes =
+        serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts)).with_context(|| {
+            format!(
+                "Failed to serialize scanner diagnostics for {}",
+                update.logical_path
+            )
+        })?;
     Ok(Some((update.logical_path.clone(), bytes)))
 }
 
@@ -170,12 +171,13 @@ fn parse_failure_diagnostic_entry(failure: &ParseFailure) -> Result<(String, Vec
         parse_failed_reason: Some(format!("{}: {}", failure.logical_path, failure.reason)),
         ..Default::default()
     };
-    let bytes = serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts)).with_context(|| {
-        format!(
-            "Failed to serialize parse failure diagnostics for {}",
-            failure.logical_path
-        )
-    })?;
+    let bytes =
+        serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts)).with_context(|| {
+            format!(
+                "Failed to serialize parse failure diagnostics for {}",
+                failure.logical_path
+            )
+        })?;
     Ok((failure.logical_path.clone(), bytes))
 }
 

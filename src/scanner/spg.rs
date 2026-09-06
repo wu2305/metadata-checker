@@ -140,7 +140,10 @@ impl ScanDiagnostics {
             ));
         }
         if self.parse_failed > 0 {
-            let loc = self.sample_parse_failed_location.clone().unwrap_or_default();
+            let loc = self
+                .sample_parse_failed_location
+                .clone()
+                .unwrap_or_default();
             // 消息里点名「图内容为上一次成功解析的结果」——读到这条的人需要知道
             // 这不是「没有数据」，而是「数据是旧的」。
             let reason = self
