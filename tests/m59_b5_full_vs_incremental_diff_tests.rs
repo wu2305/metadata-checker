@@ -375,7 +375,11 @@ fn cross_file_edge_is_lost_by_incremental_update() {
 }
 
 /// 最终文件集只有 `b.spg`（`a.spg` 被删）时的两条路径。
-fn run_both_paths_with_deletion(tag: &str, page_a: &str, page_b_src: &str) -> (GraphSnapshot, GraphSnapshot) {
+fn run_both_paths_with_deletion(
+    tag: &str,
+    page_a: &str,
+    page_b_src: &str,
+) -> (GraphSnapshot, GraphSnapshot) {
     // 全量：a.spg 从未存在过。
     let full_dir = unique_dir(&format!("{tag}-full"));
     let full_project = full_dir.join("project");
@@ -392,7 +396,8 @@ fn run_both_paths_with_deletion(tag: &str, page_a: &str, page_b_src: &str) -> (G
     ProjectIndexer::scan(&inc_project, &inc_db).expect("initial scan");
 
     std::fs::remove_file(inc_project.join("app/a.spg")).expect("remove a.spg");
-    let report = ProjectIndexer::scan(&inc_project, &inc_db).expect("incremental scan after delete");
+    let report =
+        ProjectIndexer::scan(&inc_project, &inc_db).expect("incremental scan after delete");
     assert_eq!(
         report.deleted, 1,
         "第二次扫描必须真的把 a.spg 当成已删除处理，否则本测试什么都没验到"
@@ -418,11 +423,8 @@ fn run_both_paths_with_deletion(tag: &str, page_a: &str, page_b_src: &str) -> (G
 /// 这条测试就是那半边的判据。
 #[test]
 fn placeholder_page_node_leaks_after_its_only_referrer_is_deleted() {
-    let (full, inc) = run_both_paths_with_deletion(
-        "ghost-embed",
-        &page_a_embedding_ghost(),
-        &page_b("标题"),
-    );
+    let (full, inc) =
+        run_both_paths_with_deletion("ghost-embed", &page_a_embedding_ghost(), &page_b("标题"));
 
     let ghost = |snap: &GraphSnapshot| -> Vec<String> {
         snap.nodes
