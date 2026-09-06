@@ -1,6 +1,6 @@
 # M58.2 LLMOps 评测闭环计划
 
-> 状态：**approved**（用户确认 2026-08-23：agent+工具作答、GLM 对照 gold、可复现实验；kimi-code **不钉死**，作浮动 runtime）
+> 状态：**closed（实施交付范围收口，2026-09-06）**；2026-08-23 原批准范围与 kimi 浮动策略保留。
 > 范围：把已落地的 Stage A 冒烟收成「改 SKILL/CLI → 再跑 → 可比对」的评测闭环。不扩语料、不改 gold 断言、不重写 SKILL.md。
 > 编号：ai-eval 线 **M58.2** 续作；spec [2026-08-09-slm-eval-harness-design.md](../specs/2026-08-09-slm-eval-harness-design.md)（approved）。
 
@@ -50,3 +50,12 @@ raw-only PASS 计入 `answer_quality`，不计入 `tool_assisted_quality`。禁�
 1. 干跑绿；`kimi_harness_judge_tests` 覆盖三率与 `run.json` 字段守卫。
 2. 下一轮 live smoke 的 `run.json` 含 `fixture_sha256` 与 `kimi_pin_policy=float`。
 3. 同一次 `api_trigger_kimi_harness_smoke` 里 smoke run 之后有 `kimi-code harness judge`；干跑先 A 后 B、A 失败则跳过 B。
+
+
+## 收口记录（2026-09-06）
+
+PR1 身份/三率与 PR2 同 pipeline judge 已交付，实现与历史运行坐标见
+[M58 journal](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)。本次不重新执行
+收费 live baseline，也不把早于 2026-08-23 字段扩展的 run 当作新字段的实跑证明。
+原验收中“下一轮 live smoke”的新字段/产物核验与扩充后 11-case 首轮基线一起转交
+[M59-BASELINE](2026-09-06-m59-grafeo-implementation-plan.md)，因此标为范围关闭，非全部验收 done。

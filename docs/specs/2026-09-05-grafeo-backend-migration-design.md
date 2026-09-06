@@ -1,7 +1,8 @@
 # Grafeo 后端迁移设计
 
 > 状态：**approved**（2026-09-05 用户决策：「别查了，直接换」）
-> 里程碑：M59（新开；redb 退役）
+> 里程碑：[M59](../milestones/performance/m59-grafeo-backend-migration.md)（active；redb 退役）
+> 实施：[M59 实施与交接计划](../plans/2026-09-06-m59-grafeo-implementation-plan.md)（approved，2026-09-06）
 > 上游：[后端研究计划](../plans/2026-09-04-local-query-plane-and-backend-research-plan.md)、
 > [计划复核](../plans/2026-09-05-graph-backend-migration-plan-review.md)、
 > [Grafeo 实测记录](../ai-eval-runs/2026-09-05-grafeo-spike-measurements.md)
@@ -419,6 +420,14 @@ B1 的四处注入在**真实库**里做，不是在测试里模拟——那正�
 全量回归（`99ec146`）：`cargo test --features cli-local` `FULL_EXIT=0`，
 97 个测试二进制、**1189 passed / 0 failed**（基线 1187，+2 为 B1 新增用例 × 2 个实现），
 `FMT_EXIT=0`。
+
+### 2026-09-06 补充：完整快照与 metadata 断言
+
+`c9b1611` / `df394f2` 进一步收紧 B1/B3/B5：非空边 metadata、完整端点更新、
+修复后完整节点内容，以及节点/边比较的重复次数。远端 39 项目标测试通过；丢弃 metadata、
+污染修复内容、B3 重复边、B5 重复边四类故障均被断言拒绝。
+指定主 style/smell reviewer 对该三文件批次 PASS，未覆盖整个 PR14。
+B5 仍记录的跨文件边丢失与占位节点残留必须在 A3 修复。
 
 ## 3. 迁移顺序
 

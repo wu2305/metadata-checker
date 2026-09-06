@@ -60,17 +60,18 @@ CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`re
 
 > M54–M56 共用同一 spec/plan/journal，已合入 `main`。**M57** 做产品壳 / 派生索引增量 / 输出打磨，并为 **M46** 提供可包装编排面（M46 不另起拉取栈）。M57 可与 **M58** 并行。
 
-## Formats / AI-eval（M58–M59）
+## AI-eval / 后端迁移（M58–M59）
 
 | id | title | status | area | journal | spec | plan | depends |
 |----|-------|--------|------|---------|------|------|---------|
-| M58 | 廉价模型理解力评测 | active | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved；JSON-command runner 已冻结）<br>[design M58.2](../specs/2026-08-09-slm-eval-harness-design.md)（approved；agent harness，当前路径） | [plan](../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done，冻结 runner）<br>[plan M58.2 LLMOps](../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)（approved）<br>[plan M58.2 续作](../plans/2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md)（done）<br>[runbook](../runbooks/m58-cnb-shell-dry-run.md) | M22 |
+| M58 | 廉价模型理解力评测 | closed（范围收口，2026-09-06） | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved；JSON-command runner 已冻结）<br>[design M58.2](../specs/2026-08-09-slm-eval-harness-design.md)（approved；agent harness，当前路径） | [plan](../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done，冻结 runner）<br>[plan M58.2 LLMOps](../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)（closed，实施交付；扩充语料基线转交 M59）<br>[plan M58.2 续作](../plans/2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md)（done）<br>[runbook](../runbooks/m58-cnb-shell-dry-run.md) | M22 |
 | M58.3 | 三动词命令表面收敛（--find/--explain/--relations） | closed（范围收口：PR1/PR2） | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（closed；PR1/PR2 已落地，PR3–PR6 deferred） | [plan](../plans/2026-08-24-m58-3-command-surface-gap-fixes-plan.md)（closed；范围收口） | M58.2 |
 | M58.4 | 轻量图召回与 LLM 配对验证 | done | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design Phase A](../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)（approved）<br>[design Phase B](../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)（approved） | [plan Phase A](../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（done）<br>[plan Phase B](../plans/2026-08-23-m58-4-llm-paired-benefit-plan.md)（done） | M58.2, M58.3 |
-| M59 | Dashboard / Report 格式支持 | planned | formats | — | （待建） | | |
+| M59 | Grafeo 后端迁移 | active | performance | [m59](performance/m59-grafeo-backend-migration.md) | [design](../specs/2026-09-05-grafeo-backend-migration-design.md)（approved） | [plan](../plans/2026-09-06-m59-grafeo-implementation-plan.md)（approved） | M58（范围收口） |
+| 待排期 | Dashboard / Report 格式支持（原 M59 占位） | planned | formats | — | （待建） | | |
 
-> 原登记为 M56 的 Dashboard/Report（rpt/dash）已 **后推为 M59**。  
-> 路线（2026-07-23 更新）：M54–M56 done → **M57**（产品化+tick 成本，含 M46 handoff）与 **M58** 并行 → M28–M30 → MCP / token / M59 / 语义层。
+> 2026-09-06：M58 按已交付范围关闭，延期项进入 M59 plan 的承接账本；M59 统一指 Grafeo 迁移。
+> Dashboard/Report 保留为待排期，不再占用 M59；旧计划中的 M59 rpt/dash 是历史编号。
 
 ## 文档治理（Phase C）
 

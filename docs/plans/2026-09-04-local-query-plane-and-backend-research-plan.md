@@ -4,6 +4,10 @@
 > 范围：为模型提供可控的本地图查询入口；Grafeo/DuckDB 等候选只承担结构化图查询，原始 SPG/TBL 继续由现有文件读取链路直接提供，先研究与原型，后决定是否替换 redb。
 > 关联：[M58.3 spec](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)、[M58.3 plan](2026-08-24-m58-3-command-surface-gap-fixes-plan.md)、[性能基线](../milestones/performance/performance-baseline.md)。
 
+> 2026-09-06 执行入口更新：选型已由批准的 [Grafeo 迁移设计](../specs/2026-09-05-grafeo-backend-migration-design.md)
+> 决定；后续按 [M59 实施与交接计划](2026-09-06-m59-grafeo-implementation-plan.md)推进。
+> 本文保留研究过程与查询/原始文件边界，候选比较、旧体积门槛不再作为本次迁移的前置审批。
+
 ## 1. 决策边界
 
 本计划解决的是“工具现有命令面无法表达某些结构化图查询，分析者被迫回到原始文件使用 jq”的问题。

@@ -3,7 +3,7 @@
 > 依据 spec `2026-08-24-m58-3-command-surface-gap-fixes-design.md` 验收第 5 条：
 > 任何断言值变化必须记录 `case_id / 断言 / 旧值 / 新值 / 源证据命令 / 复核人决定`，
 > 由独立验收者复核，不允许「数值变好」自动通过。
-> 本台账为补录（2026-08-26）：以下变化已随 PR #14 提交，待独立验收者复核确认。
+> 本台账为补录（2026-08-26）；2026-09-06 已补独立源码复核，范围与保留缺口见文末。
 
 ## b3d67d3 — PR2 落地后 corpus 快照重建
 
@@ -55,8 +55,9 @@
     （见复核记录 P2-8），不在本台账变化范围内
 - **源证据命令**：`UPDATE_CORPUS_SNAPSHOTS=1 cargo test --features cli-local --test corpus_snapshot_tests`；
   重建后全量 `cargo test --features cli-local` 88 目标 1109 通过
-- **复核人决定**：主线程逐字段 diff 复核，新增边均为真实引用，排名变化为修复预期后果；
-  待独立验收者复验
+- **复核人决定（2026-09-06 更新）**：独立复核确认 buttonValidate→actionValidate 的
+  Triggers 身份与 fixture 一致，前向引用补齐解释了路径发现输入变化。**不判整条路径排名
+  语义 PASS**：same_page 与 contains_physical_field 仍有已知缺口，见文末 M59-PATH 交接。
 
 ## 312c938 — severity 映射表修复（dbfe4b8）后的快照重建
 
@@ -68,7 +69,8 @@
     注：旧值 Warning 是 `b3d67d3` 在 bug 存续期重建快照时锁入的（该条目已于
     2026-09-05 补登此翻转，见上方断言 5）
 - **源证据命令**：`UPDATE_CORPUS_SNAPSHOTS=1 cargo test --features cli-local --test corpus_snapshot_tests`
-- **复核人决定**：severity 回归设计意图，非内容变化；待独立验收者复验
+- **复核人决定（2026-09-06）**：独立源码复核 PASS；severity 恢复为 Info，
+  UNKNOWN_ACTION_TYPE 仍为 Warning。构造点与权威映射见文末。
 
 ## 3f5960f 后的快照重建（条件符号经页面上下文归一 / 空字段名不再造尾点节点）
 
@@ -99,3 +101,29 @@
   但当时的影响面测试集（30 个 suite）**未包含 `corpus_snapshot_tests`**，
   直到 M59-B4 跑 `cargo test --tests` 全量才发现。教训：涉及节点身份/符号文法的
   改动，影响面集合必须显式包含快照套件，不能靠挑选相关 suite。
+
+
+## 2026-09-06 独立复核与范围收口
+
+复核者：独立只读 agent `snapshot_closeout_review`（gpt-5.6-luna / max），基点
+`df394f2153b16f26b03126185638fcbed699fb03`；主线程随后核对所列源码、fixture 和提交 diff。
+本轮未修改 snapshot 或运行时源码。运行证据为该基点 CNB `cnb-gn8-1k1rhce0o` 的
+Rust test/coverage 全绿；以下语义判定来自源码与 fixture，不由快照重建成功推导。
+
+| 条目 | 源证据与复核决定 | 保留边界 |
+|------|----------------|----------|
+| 41c011a：前向引用后的路径身份 | `git show 41c011a -- tests/fixtures/corpus/snapshots/query_page_logic_actions_test.json`；`tests/fixtures/test_project/app/actions_test.spg:210-221` 的 buttonValidate/actionValidate；`git show feb5ad8 -- src/scanner/spg.rs` 的两遍建图。确认新增 Triggers 身份与发现输入变化 | 路径特征的整体语义不通过；本条按已证实路径身份收口，不将全部 rank_features 作为正确答案 |
+| 312c938：Info 恢复 | `src/diagnostics.rs:92-113` 的 severity_for + `src/query/page_logic/diagnostics.rs:385-403` 的 envelope_diagnostic 调用；当前 snapshot 中 EVIDENCE_SAMPLED=Info、UNKNOWN_ACTION_TYPE=Warning。PASS | 只覆盖该 severity 变迁 |
+| 3f5960f：尾点消除 | `src/scanner/spg.rs:348-381` 的 ensure_model_field 空字段分支不造字段节点；`src/conditions.rs:163-166` 生成 model:name；snapshot 从 model:name. 改为 model:name、数据源 28→27。窄范围 PASS | 通用表达式路径仍可能留下模型级 model:name；不把此修复当页面局部身份已解决 |
+| 51907af：PR2 性能基线 | `git show --stat 51907af` 仅修改 performance-baseline 与 spec；其记录可作为历史测量证据 | 它不是路径排名快照提交，不可用来证明 41c011a 的语义 |
+
+**M59-PATH：路径标记缺口，deferred 到 M59-4。** `src/path.rs:934-935` 只需任一段两端
+同页就设 same_page=true；当前 snapshot 中到 data/table1.tbl 的跨文件路径仍标
+same_page=true（source_file_count=2）。`src/path.rs:938-942` 以 field_path 字符串特征
+识别物理字段，导致 field:model1.name→field:table1.name 路径 contains_physical_field=false。
+41c011a 的 diff 显示后一个 false 原已存在；same_page 的错误判定算法也未由该快照提交修复。
+
+接手者为 [M59-4 查询执行包](../plans/2026-09-06-m59-grafeo-implementation-plan.md)。
+关闭条件：按整条路径的源范围判定 same_page，按真实节点/字段来源识别物理字段；同页、
+跨页、跨 SPG/TBL 与普通 name 字段均有精确回归，再独立复核快照变化。此项保留为明确的
+查询语义缺口；本次台账收口不宣称其已修复，也不代表整个累计 PR14 的语义验收。

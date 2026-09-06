@@ -12,7 +12,7 @@
 |----|------|
 | `id` | 如 M53 |
 | `title` | 一行摘要 |
-| `status` | `planned` / `active` / `done` / `cancelled` |
+| `status` | `planned` / `active` / `done` / `closed`（范围收口，须列延期项） / `cancelled` |
 | `area` | performance / browser / formats / ai-eval |
 | `journal` | journal 文件链接 |
 | `spec` | 设计 spec（可空） |
@@ -39,20 +39,21 @@
 
 ## 当前路线
 
-地基优先（2026-07-23 更新）：
+地基优先（2026-09-06 更新）：
 
 ```
 地基：M54 / M55 / M56 差量刷新（正确性基座，已合入）
 收口：M57 产品化 + tick 成本 + SKILL/范围/凭证（含 M46 handoff；journal 随 commits 更新）
-    ＋ M58 廉价模型理解力评测（验收门，可与 M57 并行）
+    ＋ M58 评测基础设施（已按范围关闭，延期验收移交 M59）
+迁移：M59 身份/schema → 正确性契约 → Grafeo → 真实语料验收
 收敛：M28 / M29 / M30 stdio/FC 契约收敛（接口面稳定后再接 MCP）
-高楼：MCP adapter、token 级输出预算、M59 rpt/dash、语义层体系化
+高楼：MCP adapter、token 级输出预算、rpt/dash（待排期）、语义层体系化
 产品：M46 在 M57 Phase 1 面就绪后做 CLI 包装（depends M45, M57）
 ```
 
-- M54–M56 保证 LongLived 会话中图数据新鲜正确；formats rpt/dash 后推 M59。
+- M54–M56 保证 LongLived 会话中图数据新鲜正确；formats rpt/dash 待排期，M59 统一用于 Grafeo 迁移。
 - M57：tick/观测壳、派生索引增量、输出打磨；**不**在本里程碑内做完 M46 CLI。
-- M58：理解力验收门；不依赖 M57 Phase 2/3 完成。
+- M58：评测基础设施按范围关闭；模型业务理解力与扩充语料基线仍未获完整验收。
 - M46：只包装 M54–M57 栈，不另起拉取栈；depends `M45, M57`。
 - 性能线打到「正确、可验收」即停，不在已 warm 查询上继续恋战。
 
@@ -70,7 +71,7 @@ M57：
 
 M58：
 
-- [2026-07-17-cheap-model-comprehension-eval-design.md](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（draft）
+- [2026-07-17-cheap-model-comprehension-eval-design.md](../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved，历史 runner 已冻结）
 - [2026-08-24-m58-3-command-surface-gap-fixes-design.md](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（closed，范围收口至 PR1/PR2）
 - [2026-09-05-m58-3-condition-symbol-normalization-design.md](../specs/2026-09-05-m58-3-condition-symbol-normalization-design.md)（approved）
 - [2026-09-04-local-query-plane-and-backend-research-plan.md](../plans/2026-09-04-local-query-plane-and-backend-research-plan.md)（approved）
@@ -80,4 +81,5 @@ M59（redb → Grafeo 迁移）：
 
 - [2026-09-05-grafeo-backend-migration-design.md](../specs/2026-09-05-grafeo-backend-migration-design.md)（approved）
 - 实测：[2026-09-05-grafeo-spike-measurements.md](../ai-eval-runs/2026-09-05-grafeo-spike-measurements.md)
-- journal：[m58-cheap-model-comprehension-eval.md](../milestones/ai-eval/m58-cheap-model-comprehension-eval.md)
+- plan：[2026-09-06-m59-grafeo-implementation-plan.md](../plans/2026-09-06-m59-grafeo-implementation-plan.md)（approved）
+- journal：[m59-grafeo-backend-migration.md](../milestones/performance/m59-grafeo-backend-migration.md)

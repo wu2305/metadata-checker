@@ -1,11 +1,11 @@
 # M58：廉价模型理解力评测
 
-> 状态：**active**（M58/M58.1 JSON-command runner 已**冻结**；主路径转为 M58.2 agent harness）
+> 状态：**closed（范围收口，2026-09-06）**；交付 M58.2 评测基础设施、M58.3 PR1/PR2 与 M58.4 实验。延期项见文末交接。M58/M58.1 JSON-command runner 已冻结。
 > Spec：[2026-07-17-cheap-model-comprehension-eval-design.md](../../specs/2026-07-17-cheap-model-comprehension-eval-design.md)（approved，描述已冻结的 runner）
 > Spec（当前）：[2026-08-09-slm-eval-harness-design.md](../../specs/2026-08-09-slm-eval-harness-design.md)（approved）
 > Plan：[2026-07-27-m58-cnb-ai-chat-runner-plan.md](../../plans/2026-07-27-m58-cnb-ai-chat-runner-plan.md)（done，对应冻结 runner）
-> Plan（当前）：[2026-08-23-m58-2-llmops-eval-loop-plan.md](../../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)（approved；LLMOps 闭环，kimi-code 浮动）
-> Plan（M58.2 续作）：[2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md](../../plans/2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md)（approved；逐 case provenance + 语料扩充）
+> Plan（当前）：[2026-08-23-m58-2-llmops-eval-loop-plan.md](../../plans/2026-08-23-m58-2-llmops-eval-loop-plan.md)（closed；实施交付，扩充语料基线移交）
+> Plan（M58.2 续作）：[2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md](../../plans/2026-08-23-m58-2-provenance-and-corpus-expansion-plan.md)（done；逐 case provenance + 语料扩充）
 > Spec（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md](../../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)（approved；确定性图召回对比）
 > Plan（M58.4）：[2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md](../../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（approved）
 > Spec（M58.4 Phase B）：[2026-08-23-m58-4-llm-paired-benefit-design.md](../../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)（approved）
@@ -33,7 +33,7 @@
 地基：M54 / M55 / M56 差量刷新（正确性基座）
     ＋ M58 评测闭环（验收门，并行）
 收敛：M28 / M29 / M30 stdio/FC 契约收敛
-高楼：MCP adapter、token 级输出预算、M59 rpt/dash、语义层体系化
+高楼：MCP adapter、token 级输出预算、rpt/dash（待排期）、语义层体系化
 ```
 
 ## 与既有评测体系的关系
@@ -304,3 +304,23 @@ M58.3 已经完成并保留在当前分支的范围是：
 新的查询平面边界已同步明确：Grafeo/DuckDB 只负责结构化图查询；原始 SPG/TBL 和 action
 source 正文继续由调用方沿 `source_file`/`source_hash`/`snapshot_id` 直接读取，raw JSON
 必须用 `json_path` 定位，非 JSON action source 可用可选 `source_span` 补充，不强制复制进图数据库。
+
+
+### M58 总收口与 M59 交接（2026-09-06）
+
+用户同意完成 PR14 收口并推进 M59。本次关闭的是已交付范围：M58.2 agent harness、
+同 pipeline judge、固定分母三率、身份/附件/provenance 与语料扩充；M58.3 仅 PR1/PR2；
+M58.4 实验已完成，结论仍是 typed-PPR 的 LLM 因果收益未证明。
+不把历史 6-case 实验或测试通过写成扩充后 11-case 基线，也不宣称廉价模型已足够理解业务。
+
+PR14 同时包含 M59 的 B1–B5 和 A1b 部分前置修复；具体证据、剩余增量缺陷与后续入口见
+[M59 journal](../performance/m59-grafeo-backend-migration.md)。快照断言独立复核记录见
+[断言台账](../../ai-eval-runs/2026-08-26-m58-3-snapshot-change-ledger.md)。
+
+以下义务已移交，不因 M58 关闭而消失：F3 递归表达式、F4 页面局部身份、PR4a schema、
+F5/F6 事实契约、PR6 重建与 13-case 重放、11-case 首轮基线、后续快照变更复核。
+[实施与交接计划](../../plans/2026-09-06-m59-grafeo-implementation-plan.md)为每项指定承接键、
+执行阶段、关闭条件与失败处理；M59 的 backend 验收与后续事实/评测队列分开记账。
+
+合并前验证基点为 df394f2：CNB cnb-gn8-1k1rhce0o 两条 CI 全绿；新增收口文档仍须完成
+文档验证、指定审查及最终 PR CI。此处记录该已验证基点，不预报后续提交的流水线结果。
