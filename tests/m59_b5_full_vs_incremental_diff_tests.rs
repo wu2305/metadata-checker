@@ -142,7 +142,10 @@ fn snapshot(db_path: &Path) -> GraphSnapshot {
 
     let mut edges: Vec<String> = Vec::new();
     for id in &node_ids {
-        let Some(neighbors) = graph.get_node_edges(id).expect("edges") else {
+        // 走 trait 方法，不走 `GraphDB` 的同名 inherent 方法——后者返回借用元组，
+        // 是 redb 专有形状；B5 比对的是**契约**层面的图内容，将来接 Grafeo 时
+        // 这段一行不用改。
+        let Some(neighbors) = GraphReadStore::get_node_edges(&graph, id).expect("edges") else {
             continue;
         };
         for view in neighbors.outgoing {
@@ -188,7 +191,12 @@ fn describe_diff(label_a: &str, a: &[String], label_b: &str, b: &[String]) -> St
 /// - **增量**：先索引初版，改动 `b.spg` 后再索引一次（走增量路径）。
 ///
 /// 两者最终的文件内容完全相同，因此**任何差异都来自索引路径本身**。
-fn run_both_paths(tag: &str, page_a: &str, b_before: &str, b_after: &str) -> (GraphSnapshot, GraphSnapshot) {
+fn run_both_paths(
+    tag: &str,
+    page_a: &str,
+    b_before: &str,
+    b_after: &str,
+) -> (GraphSnapshot, GraphSnapshot) {
     // 全量
     let full_dir = unique_dir(&format!("{tag}-full"));
     let full_project = full_dir.join("project");
