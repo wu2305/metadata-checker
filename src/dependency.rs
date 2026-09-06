@@ -361,12 +361,10 @@ pub fn expand_expression(
                             source_type: determine_source_type(&dep_expr.raw_expr, &[]),
                         });
 
-                        // 替换引用
-                        expanded = replace_with_boundary(
-                            &expanded,
-                            &format!("{}.value", dep_id),
-                            &dep_expanded,
-                        );
+                        // 替换引用。被替换进去的是表达式**片段**，不带前导 `=`；
+                        // 否则会拼出 `CONCAT(a, =(param1))` 这种嵌套等号。
+                        let fragment = dep_expanded.strip_prefix('=').unwrap_or(&dep_expanded);
+                        expanded = replace_component_value_ref(&expanded, dep_id, fragment);
                     }
                 }
             }
@@ -388,6 +386,66 @@ pub fn expand_expression(
 
     format!("={}", expanded)
 }
+/// 把表达式里对 `dep_id` 这个组件的**值引用**替换成它自己的展开式。
+///
+/// 只认两种来源文法：
+/// - `dep_id.value` —— 显式取值；
+/// - 裸 `dep_id` —— `${id}` 全组件引用，`resolve_ref_type` 已把它归一为
+///   `ComponentValue`，语义就是「依赖该组件的值」。
+///
+/// `dep_id.<其它后缀>`（`.step` 等）**不替换**：它们引用的是组件的其它属性，
+/// 换成值的展开式是错的。调用点原先固定构造 `format!("{id}.value")` 作 pattern，
+/// 于是裸引用永远匹配不上、静默不展开——`RefType::ComponentValue` 把 `.value` /
+/// `.step` / 裸 id 三种来源文法都压成同一个 id，替换点没有信息可依。
+/// 该区分本该由 `RefType` 携带原始 token（spec 的 A1b），在身份文法定稿前
+/// 先在替换点按后缀显式判定。
+///
+/// 单遍扫描：替换文本不会被本函数再次扫描，避免展开式里恰好含 `dep_id`
+/// 时被二次替换。
+fn replace_component_value_ref(s: &str, dep_id: &str, replacement: &str) -> String {
+    const VALUE_SUFFIX: &str = ".value";
+
+    if dep_id.is_empty() {
+        return s.to_string();
+    }
+
+    let bytes = s.as_bytes();
+    let mut result = String::with_capacity(s.len() + replacement.len());
+    let mut last = 0usize;
+
+    for (start, matched) in s.match_indices(dep_id) {
+        // 落在上一次替换吃掉的区间内（`.value` 后缀比 match 本身长）。
+        if start < last {
+            continue;
+        }
+        if start > 0 && is_word_char(bytes[start - 1]) {
+            continue;
+        }
+
+        let id_end = start + matched.len();
+        let end = if s[id_end..].starts_with(VALUE_SUFFIX) {
+            id_end + VALUE_SUFFIX.len()
+        } else {
+            // 裸引用后面若还跟着 `.`，取的是别的属性，不是值。
+            if bytes.get(id_end) == Some(&b'.') {
+                continue;
+            }
+            id_end
+        };
+        // `dep_id.values` / `dep_idx` 之类的更长标识符不算引用。
+        if bytes.get(end).is_some_and(|b| is_word_char(*b)) {
+            continue;
+        }
+
+        result.push_str(&s[last..start]);
+        result.push_str(replacement);
+        last = end;
+    }
+
+    result.push_str(&s[last..]);
+    result
+}
+
 /// 只在词边界（词字符 = `[A-Za-z0-9_]`）处替换 pattern。
 ///
 /// 按 `str` 的字符边界切片拼接，不做逐字节 `u8 as char` 转换——后者会把中文等

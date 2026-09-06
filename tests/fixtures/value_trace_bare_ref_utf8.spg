@@ -2,7 +2,10 @@
   "version": "4.19.7",
   "theme": "default",
   "params": [
-    {"id": "param1", "name": "来源参数"}
+    {
+      "id": "param1",
+      "name": "来源参数"
+    }
   ],
   "sources": [],
   "canvas": {
@@ -23,6 +26,21 @@
         "id": "zh",
         "type": "text",
         "value": "=CONCAT(\"合同金额：\", b.value, \"元\")"
+      },
+      {
+        "id": "st",
+        "type": "input",
+        "value": "=b.step"
+      },
+      {
+        "id": "bx",
+        "type": "input",
+        "value": "=1"
+      },
+      {
+        "id": "pre",
+        "type": "input",
+        "value": "=CONCAT(bx.value, b)"
       }
     ]
   }

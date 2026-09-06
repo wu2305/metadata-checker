@@ -26,8 +26,9 @@ fn bare_component_ref_shorter_than_pattern_does_not_panic() {
     let trace =
         trace_value_source(&meta, &graph, "a", "value", 5).expect("a.value should be traceable");
     assert_eq!(trace.raw_expr, "=${b}");
-    // pattern 未出现在被替换串中，展开结果保持原样，不得崩溃、不得吞掉内容。
-    assert_eq!(trace.expanded_expr, "=b");
+    // 本文件只钉「不 panic、不吞内容」；裸引用**应当展开**这件事属于 A1b，
+    // 断言在 tests/m59_a1b_component_value_ref_tests.rs。
+    assert!(!trace.expanded_expr.is_empty());
 }
 
 /// 中文表达式经过替换后必须逐字符保留，不能出现逐字节转 char 的乱码。
