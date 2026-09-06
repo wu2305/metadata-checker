@@ -72,8 +72,8 @@ fn substituted_fragment_carries_no_leading_equals() {
 #[test]
 fn bare_ref_does_not_match_longer_identifier_with_same_prefix() {
     let (meta, graph) = fixture();
-    let trace =
-        trace_value_source(&meta, &graph, "pre", "value", 5).expect("pre.value should be traceable");
+    let trace = trace_value_source(&meta, &graph, "pre", "value", 5)
+        .expect("pre.value should be traceable");
     assert_eq!(
         trace.expanded_expr, "=CONCAT(1, (param1))",
         "bx.value 应展开成 1、裸 b 应展开成 (param1)，两者互不串扰，实际得到 {}",
