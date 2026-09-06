@@ -119,6 +119,35 @@ A 页嵌入 B 页 → 只改 B 的标题 → 删 B 节点时 A→B 的 `EmbedsPa
 > 有效 → 损坏（旧图与边数不变 + 诊断出现）→ 重扫（`dirty > 0`，证明 hash 未被记录）
 > → 修复（诊断消失、边数增长）。远程 `FMT_EXIT=0`、`B3_EXIT=0`，
 > 相邻 7 个套件共 55 条测试全绿。
+>
+> **codex 复审补漏（`985c27e` / `91f2dac`，B3 落地后新增 2 条用例）**：
+> 上面那套淘汰机制只挂在「文件**这轮被解析**了 ⇒ 按 logical_path 覆盖 entry」上，
+> 因此有两个够不着的角落，`SCANNER_FILE_PARSE_FAILED` 会**无限期挂在一个
+> 已经不存在问题的路径上**：
+>
+> 1. **内容被改回上一次解析成功时的字节**。hash 与保留下来的 `FileState` 相同
+>    ⇒ 文件不脏 ⇒ 不解析 ⇒ 覆盖不触发。原用例修复时写的是**另一份**合法内容
+>    （多一个维度，用来证明确实重新解析了），恰好绕开了这个角落。
+> 2. **首轮就解析失败的文件被删除**。它只写了诊断、**没写 `FileState`**
+>    （失败文件整个跳过 apply），删除后既不在 discovered 里、也进不了
+>    `plan.deleted`（后者由 `prev_states` 推出），无人清理。
+>
+> 两者是同一件事的两面——**诊断的生命周期从未与「当前文件集」对账过**，
+> 只跟着「这轮解析了谁」走。故合并为一个 `stale_scanner_diagnostic_paths`：
+> 未被发现的路径 ⇒ 孤儿；已发现但不脏且 entry 记着 `parse_failed` ⇒ 陈旧。
+> 两类都并入 `scanner_deleted_paths`，与图同事务落库；`scan` 的提交分支条件
+> 相应放宽，否则「只有诊断要清」时永远不会产生提交。
+>
+> 第 2 类**直接删 entry 而不强制重新解析**，依据是本模块自持的不变量：
+> `FileState.file_hash` 只从 `updates` 写入，而 `updates` 只含解析成功的文件，
+> 所以「hash 与已存 `FileState` 相同」等价于「这份字节解析得通」。
+> 反过来强制重解析会把内容未变的文件推进 apply 路径、删除并重建其节点——
+> 在 §2.1 尚未修复前，那等于为清一条警告去触发一次真实的丢边。
+>
+> 边界：**解码不出来的 entry 一律不碰**，哪怕路径已不存在。损坏有自己的响亮
+> 信号（`SCANNER_DIAGNOSTICS_REFRESH_FAILED`），删掉等于毁掉证据。
+> 首版没画这条线，把 `m58_3_pr2` 用例故意注入的损坏 entry 当孤儿清了，
+> 该用例当场转红——那条用例现在就是这个边界的回归网。
 
 ### 2.3 P1｜值追溯的切片越界 panic 与中文乱码 —— 确认，可复现
 
@@ -173,6 +202,21 @@ while i <= s_bytes.len().saturating_sub(pat_bytes.len()) {
 > 因此 A1 落地后重构替换实现时这些断言应当继续成立，是 A1 的回归网。
 > 同时把 `m59_b4_value_trace_utf8_tests.rs` 里那条**把缺陷当期望**的断言
 > （`assert_eq!(trace.expanded_expr, "=b")`）改掉——它原本会把 A1b 的修复判成回归。
+>
+> **codex 复审补漏（`985c27e`）：替换会改写字符串字面量。** 上面这个替换点用
+> `match_indices` 扫整串，引号内的同名文本照样命中——**词边界判定挡不住它**，
+> 引号本身就不是词字符，前后检查都通过。于是 `=CONCAT("b", b.value)` 被展开成
+> `=CONCAT("(param1)", (param1))`：**表达式语义被静默改掉**，无任何诊断。
+> 这是 A1b 引入裸 id 替换时带进来的——只认 `id.value` 的旧代码碰不到这一格。
+>
+> 修法是新增 `dependency::string_literal_spans`，词法与
+> `expr_ast::Tokenizer::read_string_literal` 同口径（单/双引号各自成对、
+> 反斜杠转义下一个字符、未闭合吃到串尾），两个替换点整段跳过字面量区间。
+> `replace_with_boundary`（`Param` / `ModelField` 侧）是同一个坑，一并修：
+> `=CONCAT("param1", param1)` 原本前一个也会被替换。
+>
+> 用例加在行为层（`m59_a1b_component_value_ref_tests.rs` 增至 6 条），
+> 共用 fixture 新增 `lit` / `plit` 两个组件。A1 重写替换实现后这两条应继续成立。
 
 ### 2.4 P1｜模型身份跨页/跨目录碰撞 —— 确认（本文认定为迁移的头号前置）
 
