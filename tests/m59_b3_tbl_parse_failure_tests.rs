@@ -175,3 +175,113 @@ fn corrupt_tbl_preserves_previous_graph_and_reports_stale() -> anyhow::Result<()
     std::fs::remove_dir_all(&project_dir).ok();
     Ok(())
 }
+
+/// 把内容**改回原样**（而不是改成另一份合法内容）之后，陈旧标记也必须消失。
+///
+/// codex 复审发现（`6612a8b..5d7d973`）：上面那条用例修复时写的是**另一份**合法
+/// 内容，hash 与保留下来的 `FileState` 不同，于是文件是脏的、会被重新解析、
+/// 覆盖机制生效。而恢复成**上一次成功解析时的字节**时 hash 恰好相同 ⇒ 文件不脏
+/// ⇒ 不解析 ⇒ 覆盖机制根本不触发，`SCANNER_FILE_PARSE_FAILED` 在文件已经完好
+/// 的情况下继续挂着。这条用例专钉这个「修得太干净反而清不掉警告」的角落。
+#[test]
+fn restoring_original_bytes_clears_the_stale_warning() -> anyhow::Result<()> {
+    let project_dir = unique_temp_dir("restore-original");
+    std::fs::create_dir_all(project_dir.join("data"))?;
+    let tbl_path = project_dir.join("data").join("orders.tbl");
+    let original = valid_tbl(false);
+    std::fs::write(&tbl_path, &original)?;
+    let db_path = project_dir.join("graph.db");
+
+    let first = ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+    assert!(code_hits(&first.diagnostics, CODE_PARSE_FAILED).is_empty());
+    let baseline_edges = model_edge_count(&db_path);
+
+    std::fs::write(&tbl_path, "{\"version\": \"1.0\", \"dimensions\": [")?;
+    let second = ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+    assert_eq!(
+        code_hits(&second.diagnostics, CODE_PARSE_FAILED).len(),
+        1,
+        "前置条件：损坏这轮应当有诊断: {:?}",
+        second.diagnostics
+    );
+
+    // 关键：写回**一模一样**的字节。hash 与保留下来的 FileState 相同。
+    std::fs::write(&tbl_path, &original)?;
+    let third = ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+    assert!(
+        code_hits(&third.diagnostics, CODE_PARSE_FAILED).is_empty(),
+        "内容已复原，陈旧标记必须消失（此时文件不脏，靠的是诊断对账而非重解析）: {:?}",
+        third.diagnostics
+    );
+    assert!(model_present(&db_path), "复原不得动到图");
+    assert_eq!(
+        model_edge_count(&db_path),
+        baseline_edges,
+        "内容与上一次成功解析时一致，图应逐边不变"
+    );
+
+    // 再扫一轮：不能反复横跳，也不能把 entry 删了又冒出来。
+    let fourth = ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+    assert!(
+        code_hits(&fourth.diagnostics, CODE_PARSE_FAILED).is_empty(),
+        "清理必须是稳定的: {:?}",
+        fourth.diagnostics
+    );
+
+    std::fs::remove_dir_all(&project_dir).ok();
+    Ok(())
+}
+
+/// 从未解析成功过的文件被删除后，它的诊断不得变成永久孤儿。
+///
+/// codex 复审发现（`6612a8b..5d7d973`）：首次解析就失败的文件只写了诊断、
+/// **没写 `FileState`**（失败文件整个跳过 apply）。删掉它之后，它既不在
+/// discovered 里、也进不了 `plan.deleted`（后者是从 `prev_states` 推出来的），
+/// 于是没有任何路径会去碰它的 entry——警告指向一个已经不存在的文件，永久。
+#[test]
+fn deleting_a_never_valid_tbl_removes_its_orphaned_warning() -> anyhow::Result<()> {
+    let project_dir = unique_temp_dir("orphan-warning");
+    std::fs::create_dir_all(project_dir.join("data"))?;
+    // 另有一个合法文件，保证图与 file states 非空——否则「诊断消失」可能只是
+    // 因为整个库是空的，验不到对账逻辑。
+    std::fs::write(project_dir.join("data").join("orders.tbl"), valid_tbl(false))?;
+    let broken = project_dir.join("data").join("broken.tbl");
+    std::fs::write(&broken, "{\"dimensions\": [")?;
+    let db_path = project_dir.join("graph.db");
+
+    let first = ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+    let hits = code_hits(&first.diagnostics, CODE_PARSE_FAILED);
+    assert_eq!(
+        hits.len(),
+        1,
+        "前置条件：首轮就失败的文件应有诊断: {:?}",
+        first.diagnostics
+    );
+    assert!(model_present(&db_path), "合法文件应正常入图");
+
+    std::fs::remove_file(&broken)?;
+    let second = ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+    assert!(
+        code_hits(&second.diagnostics, CODE_PARSE_FAILED).is_empty(),
+        "文件已删除，指向它的诊断必须一并清除: {:?}",
+        second.diagnostics
+    );
+    assert_eq!(
+        second.report.deleted, 0,
+        "该文件从未有 FileState，本就不该出现在 plan.deleted 里——\
+         这正是既有清理路径够不着它的原因: {:?}",
+        second.report
+    );
+    assert!(model_present(&db_path), "清理诊断不得牵连到图");
+
+    // 稳定性：再扫一轮不该把它变回来。
+    let third = ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+    assert!(
+        code_hits(&third.diagnostics, CODE_PARSE_FAILED).is_empty(),
+        "{:?}",
+        third.diagnostics
+    );
+
+    std::fs::remove_dir_all(&project_dir).ok();
+    Ok(())
+}

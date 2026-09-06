@@ -80,3 +80,34 @@ fn bare_ref_does_not_match_longer_identifier_with_same_prefix() {
         trace.expanded_expr
     );
 }
+
+/// 组件 id 出现在**字符串字面量**里时不得被替换——那是文本，不是引用。
+///
+/// codex 复审发现（`6612a8b..5d7d973`）：裸 id 替换会匹配引号内的同名文本，
+/// `=CONCAT("b", b.value)` 被展开成 `=CONCAT("(param1)", (param1))`，
+/// **静默改变表达式语义**且无任何诊断。词边界判定挡不住它——引号不是词字符，
+/// 边界检查照样通过。
+#[test]
+fn component_id_inside_string_literal_is_not_replaced() {
+    let (meta, graph) = fixture();
+    let trace =
+        trace_value_source(&meta, &graph, "lit", "value", 5).expect("lit.value should be traceable");
+    assert_eq!(
+        trace.expanded_expr, "=CONCAT(\"b\", (param1))",
+        "字面量 \"b\" 必须原样保留，只有真正的引用 b.value 被展开，实际得到 {}",
+        trace.expanded_expr
+    );
+}
+
+/// 同一个坑在 `Param` / `ModelField` 侧走的是 `replace_with_boundary`，一并钉住。
+#[test]
+fn param_id_inside_string_literal_is_not_replaced() {
+    let (meta, graph) = fixture();
+    let trace = trace_value_source(&meta, &graph, "plit", "value", 5)
+        .expect("plit.value should be traceable");
+    assert_eq!(
+        trace.expanded_expr, "=CONCAT(\"param1\", (param1))",
+        "字面量 \"param1\" 必须原样保留，实际得到 {}",
+        trace.expanded_expr
+    );
+}

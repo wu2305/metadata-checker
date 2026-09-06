@@ -402,6 +402,42 @@ pub fn expand_expression(
 ///
 /// 单遍扫描：替换文本不会被本函数再次扫描，避免展开式里恰好含 `dep_id`
 /// 时被二次替换。
+/// 表达式里**字符串字面量**所覆盖的字节区间（含两侧引号）。
+///
+/// 词法与 `superpage::expr_ast::Tokenizer::read_string_literal` 同口径：单引号与
+/// 双引号各自成对，反斜杠转义下一个字符，未闭合的引号一直吃到串尾。
+///
+/// 替换点靠它整段跳过字面量。`CONCAT("b", b.value)` 里的 `"b"` 是**文本**，
+/// 不是对组件 `b` 的引用；把它换成 b 的展开式会**静默改变表达式的含义**
+/// （`CONCAT("b", 1)` → `CONCAT("1", 1)`），且没有任何诊断。
+/// 词边界判定挡不住这种情况——引号本身就不是词字符，边界检查照样通过。
+fn string_literal_spans(s: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut chars = s.char_indices();
+    while let Some((start, c)) = chars.next() {
+        if c != '\'' && c != '"' {
+            continue;
+        }
+        // 未闭合的引号：与 tokenizer 一致，吃到串尾。
+        let mut end = s.len();
+        while let Some((idx, cc)) = chars.next() {
+            if cc == '\\' {
+                // 转义：连同被转义的那个字符一起跳过，`"a\\"b"` 不算在此闭合。
+                chars.next();
+            } else if cc == c {
+                end = idx + cc.len_utf8();
+                break;
+            }
+        }
+        spans.push((start, end));
+    }
+    spans
+}
+
+fn in_string_literal(spans: &[(usize, usize)], pos: usize) -> bool {
+    spans.iter().any(|(start, end)| pos >= *start && pos < *end)
+}
+
 fn replace_component_value_ref(s: &str, dep_id: &str, replacement: &str) -> String {
     const VALUE_SUFFIX: &str = ".value";
 
@@ -410,12 +446,17 @@ fn replace_component_value_ref(s: &str, dep_id: &str, replacement: &str) -> Stri
     }
 
     let bytes = s.as_bytes();
+    let literals = string_literal_spans(s);
     let mut result = String::with_capacity(s.len() + replacement.len());
     let mut last = 0usize;
 
     for (start, matched) in s.match_indices(dep_id) {
         // 落在上一次替换吃掉的区间内（`.value` 后缀比 match 本身长）。
         if start < last {
+            continue;
+        }
+        // 字符串字面量里的同名文本不是引用。
+        if in_string_literal(&literals, start) {
             continue;
         }
         if start > 0 && is_word_char(bytes[start - 1]) {
@@ -458,9 +499,15 @@ fn replace_with_boundary(s: &str, pattern: &str, replacement: &str) -> String {
 
     let mut result = String::with_capacity(s.len() + replacement.len());
     let s_bytes = s.as_bytes();
+    let literals = string_literal_spans(s);
     let mut last = 0usize;
 
     for (start, matched) in s.match_indices(pattern) {
+        // 与 `replace_component_value_ref` 同一条理由：`CONCAT("param1", param1)`
+        // 的前一个 `param1` 是文本。Param / ModelField 走的是本函数，坑一模一样。
+        if in_string_literal(&literals, start) {
+            continue;
+        }
         let end = start + matched.len();
         // 边界字节若是多字节字符的一部分（>= 0x80），is_word_char 返回 false，
         // 即中文与 ASCII 词字符相邻时视为边界成立，与原实现一致。

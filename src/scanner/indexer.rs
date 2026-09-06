@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -181,6 +181,82 @@ fn parse_failure_diagnostic_entry(failure: &ParseFailure) -> Result<(String, Vec
     Ok((failure.logical_path.clone(), bytes))
 }
 
+/// 磁盘路径 → 诊断/`FileState` 使用的 logical_path。
+///
+/// `diff_file_states` 与诊断对账必须用**同一个**派生，否则两边算出的路径集合会
+/// 悄悄错开，对账要么漏删要么误删。
+fn logical_path_of(path: &Path, project_dir: &Path) -> String {
+    path.strip_prefix(project_dir)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string()
+}
+
+/// M59 codex 复审返修：把已落库的 per-file scanner 诊断与**当前文件集**对账，
+/// 返回本轮应当移除的诊断路径。
+///
+/// 既有的淘汰机制是「文件这轮被解析 ⇒ 按 logical_path 覆盖它的 entry」
+/// （见 [`per_file_scan_diagnostic_entry`]）。它有两个够不着的角落，两者都会让
+/// `SCANNER_FILE_PARSE_FAILED` **无限期挂在一个已经不存在问题的路径上**：
+///
+/// 1. **孤儿**：文件已从磁盘消失。首次解析就失败的文件只写了诊断、**没写
+///    `FileState`**（`parse_dirty_files_with_failures` 让失败文件整个跳过），
+///    所以删掉它之后它既不在 discovered 里、也进不了 `plan.deleted`，
+///    没有任何路径会去碰它的 entry。
+/// 2. **陈旧失败**：文件内容被改回**上一次解析成功时的字节**。此时 hash 与保留
+///    下来的 `FileState` 相同 ⇒ 文件不脏 ⇒ 不重新解析 ⇒ 覆盖机制不触发。
+///    修好了，警告却还在。
+///
+/// 第 2 类直接删 entry 而不重新解析，依据是本模块自己维持的不变量：
+/// `FileState.file_hash` **只**从 `updates` 里写入，而 `updates` 只含解析成功的
+/// 文件。所以「hash 与已存 `FileState` 相同」本身就等价于「这份字节解析得通」。
+/// 反过来若强制重新解析，会把一个内容未变的文件推进 apply 路径、连带删除并重建
+/// 它的节点——在 §2.1 的跨文件边缺陷尚未修复前，那等于为了清一条警告去触发
+/// 一次真实的丢边。
+fn stale_scanner_diagnostic_paths(
+    entries: &[(String, Vec<u8>)],
+    discovered: &HashSet<String>,
+    prev_states: &HashMap<String, FileState>,
+    dirty: &[DirtyFile],
+) -> Result<Vec<String>> {
+    let dirty_paths: HashSet<&str> = dirty.iter().map(|(rel, _, _)| rel.as_str()).collect();
+    let mut stale = Vec::new();
+    for (path, bytes) in entries {
+        if !discovered.contains(path.as_str()) {
+            // 孤儿：文件没了。已在 `plan.deleted` 里的路径由调用方去重。
+            stale.push(path.clone());
+            continue;
+        }
+        if dirty_paths.contains(path.as_str()) || !prev_states.contains_key(path) {
+            // 这轮会重新解析，覆盖机制自会处理；不要抢在解析结果之前删。
+            continue;
+        }
+        let counts: FileScanDiagnostics = serde_json::from_slice(bytes)
+            .with_context(|| format!("Failed to decode scanner diagnostics entry for {path}"))?;
+        if counts.parse_failed > 0 {
+            stale.push(path.clone());
+        }
+    }
+    Ok(stale)
+}
+
+/// 把本轮删除文件的路径与对账出的陈旧诊断路径合并去重。
+fn merge_scanner_deleted_paths(deleted: &[DeletedFile], stale: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut merged = Vec::new();
+    for path in deleted
+        .iter()
+        .map(|(rel, _)| rel)
+        .chain(stale.iter())
+        .cloned()
+    {
+        if seen.insert(path.clone()) {
+            merged.push(path);
+        }
+    }
+    merged
+}
+
 /// 合并多文件待删节点 ID 并去重（保持首次出现顺序）
 fn merge_removed_node_ids<'a>(sources: impl Iterator<Item = &'a [String]>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
@@ -277,11 +353,7 @@ impl ProjectIndexer {
         let mut current_paths: HashMap<String, PathBuf> = HashMap::new();
 
         for path in discovered_files {
-            let rel = path
-                .strip_prefix(project_dir)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .to_string();
+            let rel = logical_path_of(path, project_dir);
             current_paths.insert(rel.clone(), path.clone());
 
             let content_bytes = provider.read_bytes(path)?;
@@ -537,9 +609,24 @@ impl ProjectIndexer {
         let provider = LocalStorageProvider;
         let plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
 
+        // M59 codex 复审返修：与当前文件集对账，找出既有覆盖机制够不着的陈旧诊断
+        // （孤儿 entry / 内容已复原但警告仍在）。见 `stale_scanner_diagnostic_paths`。
+        let discovered: HashSet<String> = files
+            .iter()
+            .map(|path| logical_path_of(path, project_dir))
+            .collect();
+        let stale_diagnostic_paths = stale_scanner_diagnostic_paths(
+            &graph.load_scanner_diagnostic_entries()?,
+            &discovered,
+            &prev_states,
+            &plan.dirty,
+        )?;
+
         let mut new_states = prev_states.clone();
 
-        if !plan.dirty.is_empty() || !plan.deleted.is_empty() {
+        // 只有陈旧诊断要清时也得进这个分支：否则清理提交永远没有机会发生。
+        if !plan.dirty.is_empty() || !plan.deleted.is_empty() || !stale_diagnostic_paths.is_empty()
+        {
             let (updates, parse_failures) = Self::parse_dirty_files_with_failures(
                 &prev_states,
                 &plan.dirty,
@@ -607,9 +694,10 @@ impl ProjectIndexer {
             }
 
             // M58.3 复核返修：本轮删除文件的 logical_path 随 commit 载荷落库，
-            // 同事务移除其 scanner 诊断 entry
-            let scanner_deleted_paths: Vec<String> =
-                plan.deleted.iter().map(|(rel, _)| rel.clone()).collect();
+            // 同事务移除其 scanner 诊断 entry；
+            // M59 codex 复审返修：对账出的陈旧路径一并移除。
+            let scanner_deleted_paths =
+                merge_scanner_deleted_paths(&plan.deleted, &stale_diagnostic_paths);
             let commit = IndexCommit {
                 file_states: new_states.clone(),
                 dirty_nodes: graph.dirty_nodes_set().iter().cloned().collect(),
@@ -681,6 +769,19 @@ impl ProjectIndexer {
         let provider = LocalStorageProvider;
         let plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
 
+        // M59 codex 复审返修：与 scan 同一套对账（prepare 不落盘，路径随
+        // PreparedIndexUpdate 透传给编排器）。
+        let discovered: HashSet<String> = files
+            .iter()
+            .map(|path| logical_path_of(path, project_dir))
+            .collect();
+        let stale_diagnostic_paths = stale_scanner_diagnostic_paths(
+            &graph.load_scanner_diagnostic_entries()?,
+            &discovered,
+            &prev_states,
+            &plan.dirty,
+        )?;
+
         let mut new_states = prev_states.clone();
         let (updates, parse_failures) = Self::parse_dirty_files_with_failures(
             &prev_states,
@@ -743,8 +844,10 @@ impl ProjectIndexer {
             .collect();
         let removed_file_paths: Vec<String> =
             plan.deleted.iter().map(|(rel, _)| rel.clone()).collect();
-        // M58.3 PR2：本轮删除文件的 logical_path，落库时需移除其诊断 entry
-        let scanner_deleted_paths = removed_file_paths.clone();
+        // M58.3 PR2：本轮删除文件的 logical_path，落库时需移除其诊断 entry；
+        // M59 codex 复审返修：并上对账出的陈旧路径。
+        let scanner_deleted_paths =
+            merge_scanner_deleted_paths(&plan.deleted, &stale_diagnostic_paths);
 
         for update in &updates {
             let logical_path = update.logical_path.clone();

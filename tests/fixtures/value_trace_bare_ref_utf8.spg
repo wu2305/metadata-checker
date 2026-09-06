@@ -41,6 +41,16 @@
         "id": "pre",
         "type": "input",
         "value": "=CONCAT(bx.value, b)"
+      },
+      {
+        "id": "lit",
+        "type": "text",
+        "value": "=CONCAT(\"b\", b.value)"
+      },
+      {
+        "id": "plit",
+        "type": "text",
+        "value": "=CONCAT(\"param1\", param1)"
       }
     ]
   }
