@@ -531,8 +531,16 @@
         CORPUS_DIR="$REAL_DIR/$CORPUS_PATH"
         CORPUS_SLUG="${REAL_PROJECT_FIXTURE_REPO_SLUG:-wu2305/succbi_project_container}"
         CORPUS_URL="${REAL_PROJECT_FIXTURE_REPO_URL:-https://cnb.cool/${CORPUS_SLUG}.git}"
-        CORPUS_REF="${REAL_PROJECT_FIXTURE_REF:-}"
+        # Git 输出的 object ID 为小写；先规范化，避免合法的大写十六进制 pin
+        # 在后续精确比较时被误判。
+        CORPUS_REF="$(printf '%s' "${REAL_PROJECT_FIXTURE_REF:-}" | tr 'A-F' 'a-f')"
         CORPUS_BRANCH="${REAL_PROJECT_FIXTURE_BRANCH:-main}"
+
+        corpus_path_is_safe() {
+          # sparse-checkout 与 Git pathspec 只接受仓库内的普通相对目录；限制字符集
+          # 同时拒绝空段、`.`/`..` 段和 pathspec magic。
+          printf '%s\n' "$CORPUS_PATH" | grep -Eq '^[A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*(/[A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*)*$'
+        }
 
         corpus_config_has_credentials() {
           [ -f "$REAL_DIR/.git/config" ] || return 1
@@ -552,26 +560,40 @@
           return 1
         }
 
-        existing_corpus_ready() {
+        corpus_checkout_ready() {
           [ -d "$REAL_DIR/.git" ] || return 1
           [ -d "$CORPUS_DIR" ] || return 1
           ! corpus_config_has_credentials || return 1
           CHECKED_OUT_SHA="$(git -C "$REAL_DIR" rev-parse HEAD)" || return 1
           [ "$CHECKED_OUT_SHA" = "$CORPUS_REF" ] || return 1
+          CACHED_ORIGIN="$(git -C "$REAL_DIR" config --local --get remote.origin.url)" || return 1
+          [ "$CACHED_ORIGIN" = "$CORPUS_URL" ] || return 1
+          [ -z "$(git -C "$REAL_DIR" status --porcelain --untracked-files=all --ignored=matching)" ] || return 1
+
+          # 工作树文件数必须与 pinned commit 中的普通 blob 数一致；这样 ignored
+          # 文件、symlink、目录伪装或不属于该提交的路径都不能触发 READY。
           SPG_COUNT="$(find "$CORPUS_DIR" -type f -name '*.spg' | wc -l)" || return 1
           TBL_COUNT="$(find "$CORPUS_DIR" -type f -name '*.tbl' | wc -l)" || return 1
+          TRACKED_SPG_COUNT="$(git -C "$REAL_DIR" ls-tree -r "$CORPUS_REF" -- "$CORPUS_PATH" \
+            | awk '$1 ~ /^100(644|755)$/ && $2 == "blob" && $0 ~ /[.]spg$/ { count++ } END { print count + 0 }')" || return 1
+          TRACKED_TBL_COUNT="$(git -C "$REAL_DIR" ls-tree -r "$CORPUS_REF" -- "$CORPUS_PATH" \
+            | awk '$1 ~ /^100(644|755)$/ && $2 == "blob" && $0 ~ /[.]tbl$/ { count++ } END { print count + 0 }')" || return 1
           [ "$SPG_COUNT" -gt 0 ] || return 1
           [ "$TBL_COUNT" -gt 0 ] || return 1
+          [ "$SPG_COUNT" -eq "$TRACKED_SPG_COUNT" ] || return 1
+          [ "$TBL_COUNT" -eq "$TRACKED_TBL_COUNT" ] || return 1
         }
 
         if ! printf '%s\n' "$CORPUS_REF" | grep -Eq '^[0-9a-fA-F]{40}$'; then
           echo "[corpus] CORPUS_UNAVAILABLE：REAL_PROJECT_FIXTURE_REF 必须是 40 位提交 SHA；开发环境继续启动。"
+        elif ! corpus_path_is_safe; then
+          echo "[corpus] CORPUS_UNAVAILABLE：fixture path 必须是仓库内的安全相对目录；开发环境继续启动。"
         elif printf '%s\n' "$CORPUS_URL" | grep -Eq '://[^/@[:space:]]+@'; then
           echo "[corpus] CORPUS_UNAVAILABLE：fixture URL 不得内嵌凭据；开发环境继续启动。"
         elif [ -d "$REAL_DIR/.git" ] && corpus_config_has_credentials; then
           echo "[corpus] CORPUS_UNAVAILABLE：缓存仓库持久化了凭据，已删除且本轮不复用；开发环境继续启动。"
           rm -rf "$REAL_DIR"
-        elif existing_corpus_ready; then
+        elif corpus_checkout_ready; then
           echo "[corpus] READY cached=true spg=${SPG_COUNT} tbl=${TBL_COUNT} sha=${CHECKED_OUT_SHA} path=${CORPUS_PATH}"
         elif [ -z "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ]; then
           echo "[corpus] CORPUS_UNAVAILABLE：未注入 REAL_PROJECT_FIXTURE_DEPLOY_TOKEN，跳过语料拉取。"
@@ -609,16 +631,7 @@
               sparse-checkout set "$CORPUS_PATH" || return 1
             [ -d "$CORPUS_DIR" ] || return 1
 
-            SPG_COUNT="$(find "$CORPUS_DIR" -type f -name '*.spg' | wc -l)" || return 1
-            TBL_COUNT="$(find "$CORPUS_DIR" -type f -name '*.tbl' | wc -l)" || return 1
-            CHECKED_OUT_SHA="$(git -C "$REAL_DIR" rev-parse HEAD)" || return 1
-            [ "$CHECKED_OUT_SHA" = "$EXPECTED_SHA" ] || return 1
-            [ "$SPG_COUNT" -gt 0 ] || return 1
-            [ "$TBL_COUNT" -gt 0 ] || return 1
-            if corpus_config_has_credentials; then
-              echo "[corpus] deploy token persisted in git config" >&2
-              return 1
-            fi
+            corpus_checkout_ready || return 1
 
             echo "[corpus] READY spg=${SPG_COUNT} tbl=${TBL_COUNT} sha=${CHECKED_OUT_SHA} path=${CORPUS_PATH}"
             du -sh "$CORPUS_DIR" 2>/dev/null || true
