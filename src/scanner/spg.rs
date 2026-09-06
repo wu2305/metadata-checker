@@ -80,8 +80,15 @@ pub fn scan_raw_diagnostics(value: &serde_json::Value) -> Vec<crate::output::Dia
 pub(crate) struct ScanDiagnostics {
     pub(crate) unrecognized_container_key: usize,
     pub(crate) duplicate_component_id: usize,
+    /// M59-B3：本文件解析失败、未进候选图（图内容陈旧）。
+    /// 不由 `scan_raw_counts` 产出——扫描能跑到这里说明已经解析成功了；
+    /// 由 indexer 在解析阶段失败时直接构造。
+    pub(crate) parse_failed: usize,
     pub(crate) sample_unrecognized_location: Option<crate::output::Location>,
     pub(crate) sample_duplicate_location: Option<crate::output::Location>,
+    pub(crate) sample_parse_failed_location: Option<crate::output::Location>,
+    /// 解析失败的原因（serde/UTF-8 报错原文），随诊断 message 透出
+    pub(crate) parse_failed_reason: Option<String>,
 }
 
 impl ScanDiagnostics {
@@ -90,11 +97,16 @@ impl ScanDiagnostics {
     pub(crate) fn merge(&mut self, other: &ScanDiagnostics) {
         self.unrecognized_container_key += other.unrecognized_container_key;
         self.duplicate_component_id += other.duplicate_component_id;
+        self.parse_failed += other.parse_failed;
         if self.sample_unrecognized_location.is_none() {
             self.sample_unrecognized_location = other.sample_unrecognized_location.clone();
         }
         if self.sample_duplicate_location.is_none() {
             self.sample_duplicate_location = other.sample_duplicate_location.clone();
+        }
+        if self.sample_parse_failed_location.is_none() {
+            self.sample_parse_failed_location = other.sample_parse_failed_location.clone();
+            self.parse_failed_reason = other.parse_failed_reason.clone();
         }
     }
 
@@ -124,6 +136,26 @@ impl ScanDiagnostics {
                 format!(
                     "Scanner encountered {} duplicate component ids",
                     self.duplicate_component_id
+                ),
+            ));
+        }
+        if self.parse_failed > 0 {
+            let loc = self.sample_parse_failed_location.clone().unwrap_or_default();
+            // 消息里点名「图内容为上一次成功解析的结果」——读到这条的人需要知道
+            // 这不是「没有数据」，而是「数据是旧的」。
+            let reason = self
+                .parse_failed_reason
+                .clone()
+                .unwrap_or_else(|| "unknown parse error".to_string());
+            out.push(crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_FILE_PARSE_FAILED,
+                self.parse_failed,
+                loc,
+                format!(
+                    "{} source file(s) failed to parse and were skipped; \
+                     their graph content is the last successfully parsed version (stale). \
+                     First failure: {}",
+                    self.parse_failed, reason
                 ),
             ));
         }

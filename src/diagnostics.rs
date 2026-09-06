@@ -33,6 +33,11 @@ pub const CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT: &str = "GRAPH_DB_EDGE_DANGLING_E
 pub const CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE: &str = "GRAPH_DB_V2_LAYOUT_UNREADABLE";
 pub const CODE_GRAPH_DB_PARTIAL_HYDRATE: &str = "GRAPH_DB_PARTIAL_HYDRATE";
 pub const CODE_PAGE_SCOPED_TARGET_FALLBACK: &str = "PAGE_SCOPED_TARGET_FALLBACK";
+/// M59-B3：源文件解析失败（内容非 UTF-8 或非法 JSON）。该文件本轮**不进候选图**，
+/// 上一份有效图原样保留，因此图里这部分是**陈旧**而非缺失——两者对答案的影响
+/// 完全不同，必须能区分。旧行为是把解析失败静默转成「空结果」提交，
+/// 等于把「读不出来」说成「模型不存在」。
+pub const CODE_SCANNER_FILE_PARSE_FAILED: &str = "SCANNER_FILE_PARSE_FAILED";
 /// M58.3 复核返修：load_diagnostics 合并进查询响应时序列化失败的 fail-visible
 /// 兜底 code（answer_impact 经 `answer_effect` 派生为 partial）
 pub const CODE_DIAGNOSTIC_SERIALIZE_FAILED: &str = "DIAGNOSTIC_SERIALIZE_FAILED";
@@ -62,6 +67,9 @@ pub fn answer_impact_for(code: &str) -> &'static str {
         CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE => IMPACT_NONE,
         CODE_GRAPH_DB_PARTIAL_HYDRATE => IMPACT_PARTIAL,
         CODE_PAGE_SCOPED_TARGET_FALLBACK => IMPACT_PARTIAL,
+        // M59-B3：源文件解析失败，图里这部分是上一次成功解析的旧事实。
+        // 查询照样能作答，但答的可能是过期内容——正是 partial 的定义。
+        CODE_SCANNER_FILE_PARSE_FAILED => IMPACT_PARTIAL,
         _ => match crate::output::answer_effect::answer_effect(code) {
             Some((
                 crate::output::answer_effect::AnswerImpact::Uncertain
@@ -130,7 +138,10 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         | CODE_GRAPH_DB_EDGE_DANGLING_ENDPOINT
         | CODE_GRAPH_DB_V2_LAYOUT_UNREADABLE
         | CODE_GRAPH_DB_PARTIAL_HYDRATE
-        | CODE_PAGE_SCOPED_TARGET_FALLBACK => DiagnosticSeverity::Warning,
+        | CODE_PAGE_SCOPED_TARGET_FALLBACK
+        // 解析失败：图内容陈旧但可用，查询仍能作答（只是可能答的是旧事实），
+        // 未达「图库不可用」的 Error 档
+        | CODE_SCANNER_FILE_PARSE_FAILED => DiagnosticSeverity::Warning,
         // read model 构建失败属异常信号（非按设计），但只是性能层降级，
         // 答案正确性不受影响由 answer_impact=none 表达
         CODE_RUNTIME_READ_MODEL_DEGRADED => DiagnosticSeverity::Warning,

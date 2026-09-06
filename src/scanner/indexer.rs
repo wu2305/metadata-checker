@@ -54,6 +54,25 @@ pub enum ParsedGraphContent {
     Tbl(String),
 }
 
+/// M59-B3：本轮解析失败、**未进候选图**的源文件。
+///
+/// 旧行为是 `tbl.rs` 把非法 JSON 静默转成 `Ok(空集)`：配合「先删旧节点再重建」，
+/// 一个写坏的 `.tbl` 会让旧模型图被删、新图为空，而 file hash 照常记录——
+/// 下次内容不变直接跳过，「读不出来」就此变成「模型不存在」。
+///
+/// 现在解析失败的文件**整个跳过**：
+/// - 不进 `updates` ⇒ `previous_node_ids` 不进 `merged_removed` ⇒ 旧图原样保留；
+/// - 不写 `new_states` ⇒ 旧 `file_hash` 保留 ⇒ 文件下一轮仍是脏的，会重试；
+/// - 写一条 `SCANNER_FILE_PARSE_FAILED` 诊断 entry ⇒ 图里这部分是**陈旧**而非缺失，
+///   查询方能区分这两件事。
+#[derive(Debug, Clone)]
+pub struct ParseFailure {
+    /// 逻辑路径（相对项目路径）
+    pub logical_path: String,
+    /// 失败原因（UTF-8 / serde 报错原文）
+    pub reason: String,
+}
+
 /// 单文件扫描诊断计数的持久化镜像（M58.3 PR1 refix，F2）。
 ///
 /// `ScanDiagnostics` 定义在 `scanner::spg`（只读模块边界，不加 serde derive），
@@ -62,8 +81,16 @@ pub enum ParsedGraphContent {
 struct FileScanDiagnostics {
     unrecognized_container_key: usize,
     duplicate_component_id: usize,
+    /// M59-B3：本文件解析失败、未进候选图。旧库里的 entry 没有这个字段，
+    /// `#[serde(default)]` 让它们照常反序列化为 0（不需要 schema 版本升级）。
+    #[serde(default)]
+    parse_failed: usize,
     sample_unrecognized_location: Option<crate::output::Location>,
     sample_duplicate_location: Option<crate::output::Location>,
+    #[serde(default)]
+    sample_parse_failed_location: Option<crate::output::Location>,
+    #[serde(default)]
+    parse_failed_reason: Option<String>,
 }
 
 impl FileScanDiagnostics {
@@ -72,8 +99,11 @@ impl FileScanDiagnostics {
         Self {
             unrecognized_container_key: counts.unrecognized_container_key,
             duplicate_component_id: counts.duplicate_component_id,
+            parse_failed: counts.parse_failed,
             sample_unrecognized_location: counts.sample_unrecognized_location.clone(),
             sample_duplicate_location: counts.sample_duplicate_location.clone(),
+            sample_parse_failed_location: counts.sample_parse_failed_location.clone(),
+            parse_failed_reason: counts.parse_failed_reason.clone(),
         }
     }
 
@@ -82,8 +112,11 @@ impl FileScanDiagnostics {
         crate::scanner::spg::ScanDiagnostics {
             unrecognized_container_key: self.unrecognized_container_key,
             duplicate_component_id: self.duplicate_component_id,
+            parse_failed: self.parse_failed,
             sample_unrecognized_location: self.sample_unrecognized_location,
             sample_duplicate_location: self.sample_duplicate_location,
+            sample_parse_failed_location: self.sample_parse_failed_location,
+            parse_failed_reason: self.parse_failed_reason,
         }
     }
 }
@@ -94,26 +127,56 @@ impl FileScanDiagnostics {
 /// 样例的 `source_file` 在 per-file 层面回填为本文件的 logical_path
 /// （样例本就来自该文件，与旧聚合点「首个非空样例胜出」回填语义等价）。
 /// 计数为零的脏 SPG 文件也写 entry：覆盖旧值，正确淘汰已修复文件的计数。
+///
+/// M59-B3：脏 TBL 文件同样写一条**全零** entry。它没有 SPG 那两项计数，但必须
+/// 覆盖同路径上可能残留的 `parse_failed` 标记——文件修好了、这轮解析成功了，
+/// 陈旧标记就得当场消失，否则会一直挂着一条永不退休的警告。
 fn per_file_scan_diagnostic_entry(update: &ParsedGraphUpdate) -> Result<Option<(String, Vec<u8>)>> {
-    if let ParsedGraphContent::Spg(value) = &update.content {
-        let mut counts = crate::scanner::spg::scan_raw_counts(value);
-        if let Some(loc) = counts.sample_unrecognized_location.as_mut() {
-            loc.source_file = Some(update.logical_path.clone());
+    let counts = match &update.content {
+        ParsedGraphContent::Spg(value) => {
+            let mut counts = crate::scanner::spg::scan_raw_counts(value);
+            if let Some(loc) = counts.sample_unrecognized_location.as_mut() {
+                loc.source_file = Some(update.logical_path.clone());
+            }
+            if let Some(loc) = counts.sample_duplicate_location.as_mut() {
+                loc.source_file = Some(update.logical_path.clone());
+            }
+            counts
         }
-        if let Some(loc) = counts.sample_duplicate_location.as_mut() {
-            loc.source_file = Some(update.logical_path.clone());
-        }
-        let bytes =
-            serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts)).with_context(|| {
-                format!(
-                    "Failed to serialize scanner diagnostics for {}",
-                    update.logical_path
-                )
-            })?;
-        Ok(Some((update.logical_path.clone(), bytes)))
-    } else {
-        Ok(None)
-    }
+        ParsedGraphContent::Tbl(_) => crate::scanner::spg::ScanDiagnostics::default(),
+    };
+    let bytes = serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts)).with_context(|| {
+        format!(
+            "Failed to serialize scanner diagnostics for {}",
+            update.logical_path
+        )
+    })?;
+    Ok(Some((update.logical_path.clone(), bytes)))
+}
+
+/// M59-B3：把一次解析失败序列化成 per-file 诊断 entry。
+///
+/// 与 `per_file_scan_diagnostic_entry` 共用同一张 `scanner_entries` 表、同一条
+/// 「按 logical_path 覆盖」语义——所以下一轮解析成功时上面那个函数写的全零 entry
+/// 会自动把这条抹掉，不需要额外的清理路径。
+fn parse_failure_diagnostic_entry(failure: &ParseFailure) -> Result<(String, Vec<u8>)> {
+    let counts = crate::scanner::spg::ScanDiagnostics {
+        parse_failed: 1,
+        sample_parse_failed_location: Some(crate::output::Location {
+            source_file: Some(failure.logical_path.clone()),
+            node_id: None,
+            json_path: None,
+        }),
+        parse_failed_reason: Some(format!("{}: {}", failure.logical_path, failure.reason)),
+        ..Default::default()
+    };
+    let bytes = serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts)).with_context(|| {
+        format!(
+            "Failed to serialize parse failure diagnostics for {}",
+            failure.logical_path
+        )
+    })?;
+    Ok((failure.logical_path.clone(), bytes))
 }
 
 /// 合并多文件待删节点 ID 并去重（保持首次出现顺序）
@@ -253,13 +316,32 @@ impl ProjectIndexer {
     /// 阶段 3：解析脏文件内容，返回待写图更新列表
     ///
     /// 该阶段仅负责内容解析，不执行图读写；上游只在内容确认为可解析后再应用更新。
+    ///
+    /// 便捷包装：丢弃解析失败清单。需要把失败落成诊断的调用点用
+    /// [`Self::parse_dirty_files_with_failures`]。
     pub fn parse_dirty_files(
         prev_states: &HashMap<String, FileState>,
         dirty_files: &[DirtyFile],
         project_dir: &Path,
         provider: &dyn DocumentProvider,
     ) -> Result<Vec<ParsedGraphUpdate>> {
+        Self::parse_dirty_files_with_failures(prev_states, dirty_files, project_dir, provider)
+            .map(|(updates, _)| updates)
+    }
+
+    /// 阶段 3（M59-B3 完整版）：解析脏文件，同时返回**解析失败**的文件清单。
+    ///
+    /// 失败的文件不出现在返回的 updates 里，因此后续 apply 既不会删它的旧节点、
+    /// 也不会给它写新的 `FileState`——旧图保留、文件保持脏、下轮重试。
+    /// 见 [`ParseFailure`]。
+    pub fn parse_dirty_files_with_failures(
+        prev_states: &HashMap<String, FileState>,
+        dirty_files: &[DirtyFile],
+        project_dir: &Path,
+        provider: &dyn DocumentProvider,
+    ) -> Result<(Vec<ParsedGraphUpdate>, Vec<ParseFailure>)> {
         let mut updates = Vec::with_capacity(dirty_files.len());
+        let mut failures: Vec<ParseFailure> = Vec::new();
 
         for (rel, path, staged_bytes) in dirty_files {
             let content_bytes = if let Some(bytes) = staged_bytes {
@@ -293,13 +375,37 @@ impl ProjectIndexer {
                     SourceId::from_local_path(ProjectRef::new("default"), path, Some(project_dir))
                         .with_context(|| format!("Failed to build SourceId for {}", rel))?;
                 let parsed = ParsedContent::from_bytes(source, content_bytes.clone());
+                // SPG 解析失败仍然向上抛错（整轮索引失败），不走 ParseFailure：
+                // 它本来就是**响亮**的失败，从没有「静默转成空结果」的问题。
+                // B3 要修的是 TBL 那条静默路径，不是把 SPG 也降级成部分成功。
                 let raw_value = parsed
                     .json()
                     .with_context(|| format!("Failed to parse JSON for {}", rel))?;
                 ParsedGraphContent::Spg((*raw_value).clone())
             } else if path.extension().map(|e| e == "tbl").unwrap_or(false) {
-                let content = String::from_utf8_lossy(&content_bytes);
-                ParsedGraphContent::Tbl(content.to_string())
+                // M59-B3：这里是**唯一**能把「读不出来」和「模型不存在」分开的地方。
+                // 过了这一关才允许动候选图；`from_utf8_lossy` 会把坏字节抹成 U+FFFD
+                // 再一路当成合法内容走下去，所以必须用严格版。
+                let text = match String::from_utf8(content_bytes.clone()) {
+                    Ok(text) => text,
+                    Err(err) => {
+                        failures.push(ParseFailure {
+                            logical_path: rel.clone(),
+                            reason: format!("invalid UTF-8: {err}"),
+                        });
+                        continue;
+                    }
+                };
+                // 内容层校验与 `tbl::process_tbl_file_from_string` 同口径：空文件和
+                // 非法 JSON 都不是「没有模型」，是解析没成功。
+                if let Err(err) = serde_json::from_str::<Value>(&text) {
+                    failures.push(ParseFailure {
+                        logical_path: rel.clone(),
+                        reason: format!("invalid JSON: {err}"),
+                    });
+                    continue;
+                }
+                ParsedGraphContent::Tbl(text)
             } else {
                 continue;
             };
@@ -315,7 +421,7 @@ impl ProjectIndexer {
             });
         }
 
-        Ok(updates)
+        Ok((updates, failures))
     }
 
     /// 阶段 4：应用解析后的脏文件更新到图数据库
@@ -432,8 +538,12 @@ impl ProjectIndexer {
         let mut new_states = prev_states.clone();
 
         if !plan.dirty.is_empty() || !plan.deleted.is_empty() {
-            let updates =
-                Self::parse_dirty_files(&prev_states, &plan.dirty, project_dir, &provider)?;
+            let (updates, parse_failures) = Self::parse_dirty_files_with_failures(
+                &prev_states,
+                &plan.dirty,
+                project_dir,
+                &provider,
+            )?;
             // M58.3 PR1 refix（F2）：per-file 诊断计数序列化，随 commit 载荷
             // 与图/file states 在同一事务落库（M58.3 复核返修：原子化）
             let mut scanner_entries = Vec::new();
@@ -441,6 +551,11 @@ impl ProjectIndexer {
                 if let Some(entry) = per_file_scan_diagnostic_entry(update)? {
                     scanner_entries.push(entry);
                 }
+            }
+            // M59-B3：解析失败的文件也占一条 entry。顺序在成功项之后无所谓——
+            // 两者路径互斥（一个文件这轮要么成功要么失败），不会互相覆盖。
+            for failure in &parse_failures {
+                scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
             }
             // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
             let merged_removed = merge_removed_node_ids(
@@ -565,7 +680,12 @@ impl ProjectIndexer {
         let plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
 
         let mut new_states = prev_states.clone();
-        let updates = Self::parse_dirty_files(&prev_states, &plan.dirty, project_dir, &provider)?;
+        let (updates, parse_failures) = Self::parse_dirty_files_with_failures(
+            &prev_states,
+            &plan.dirty,
+            project_dir,
+            &provider,
+        )?;
         // M58.3 PR2：与 scan 相同逻辑收集本轮 per-file scanner 诊断 entries，
         // 随 PreparedIndexUpdate 透传给调用方（diff-refresh 编排器）落库，
         // 候选图不落盘不代表诊断可以丢——持久化责任移交调用方。
@@ -574,6 +694,10 @@ impl ProjectIndexer {
             if let Some(entry) = per_file_scan_diagnostic_entry(update)? {
                 scanner_entries.push(entry);
             }
+        }
+        // M59-B3：解析失败同样透传（与 scan 一致）
+        for failure in &parse_failures {
+            scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
         }
         // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
         let merged_removed = merge_removed_node_ids(
