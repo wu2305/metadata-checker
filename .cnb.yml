@@ -530,30 +530,55 @@
         CORPUS_PATH="${REAL_PROJECT_FIXTURE_PROJECT_PATH:-xiaoshouyi}"
         CORPUS_DIR="$REAL_DIR/$CORPUS_PATH"
         CORPUS_SLUG="${REAL_PROJECT_FIXTURE_REPO_SLUG:-wu2305/succbi_project_container}"
-        CORPUS_REF="${REAL_PROJECT_FIXTURE_REF:-main}"
+        CORPUS_URL="${REAL_PROJECT_FIXTURE_REPO_URL:-https://cnb.cool/${CORPUS_SLUG}.git}"
+        CORPUS_REF="${REAL_PROJECT_FIXTURE_REF:-}"
         CORPUS_BRANCH="${REAL_PROJECT_FIXTURE_BRANCH:-main}"
+
+        corpus_config_has_credentials() {
+          [ -f "$REAL_DIR/.git/config" ] || return 1
+          # 拒绝任何持久化的鉴权 header 或带 userinfo 的 remote URL；即使本次
+          # imports 没有注入 token，也不能继续复用历史 workspace 中的不安全缓存。
+          if grep -Eiq '^[[:space:]]*extraheader[[:space:]]*=' "$REAL_DIR/.git/config"; then
+            return 0
+          fi
+          if git -C "$REAL_DIR" config --local --get-regexp '^remote\..*\.url$' 2>/dev/null \
+              | grep -Eq '://[^/@[:space:]]+@'; then
+            return 0
+          fi
+          if [ -n "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ] \
+              && grep -qF -- "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" "$REAL_DIR/.git/config"; then
+            return 0
+          fi
+          return 1
+        }
 
         existing_corpus_ready() {
           [ -d "$REAL_DIR/.git" ] || return 1
           [ -d "$CORPUS_DIR" ] || return 1
+          ! corpus_config_has_credentials || return 1
           CHECKED_OUT_SHA="$(git -C "$REAL_DIR" rev-parse HEAD)" || return 1
-          RESOLVED_REF="$(git -C "$REAL_DIR" rev-parse "${CORPUS_REF}^{commit}" 2>/dev/null || true)"
-          [ "$CHECKED_OUT_SHA" = "$CORPUS_REF" ] || [ "$CHECKED_OUT_SHA" = "$RESOLVED_REF" ] || return 1
-          SPG_COUNT="$(find "$CORPUS_DIR" -name '*.spg' | wc -l)" || return 1
-          TBL_COUNT="$(find "$CORPUS_DIR" -name '*.tbl' | wc -l)" || return 1
+          [ "$CHECKED_OUT_SHA" = "$CORPUS_REF" ] || return 1
+          SPG_COUNT="$(find "$CORPUS_DIR" -type f -name '*.spg' | wc -l)" || return 1
+          TBL_COUNT="$(find "$CORPUS_DIR" -type f -name '*.tbl' | wc -l)" || return 1
           [ "$SPG_COUNT" -gt 0 ] || return 1
           [ "$TBL_COUNT" -gt 0 ] || return 1
         }
 
-        if existing_corpus_ready; then
+        if ! printf '%s\n' "$CORPUS_REF" | grep -Eq '^[0-9a-fA-F]{40}$'; then
+          echo "[corpus] CORPUS_UNAVAILABLE：REAL_PROJECT_FIXTURE_REF 必须是 40 位提交 SHA；开发环境继续启动。"
+        elif printf '%s\n' "$CORPUS_URL" | grep -Eq '://[^/@[:space:]]+@'; then
+          echo "[corpus] CORPUS_UNAVAILABLE：fixture URL 不得内嵌凭据；开发环境继续启动。"
+        elif [ -d "$REAL_DIR/.git" ] && corpus_config_has_credentials; then
+          echo "[corpus] CORPUS_UNAVAILABLE：缓存仓库持久化了凭据，已删除且本轮不复用；开发环境继续启动。"
+          rm -rf "$REAL_DIR"
+        elif existing_corpus_ready; then
           echo "[corpus] READY cached=true spg=${SPG_COUNT} tbl=${TBL_COUNT} sha=${CHECKED_OUT_SHA} path=${CORPUS_PATH}"
         elif [ -z "${REAL_PROJECT_FIXTURE_DEPLOY_TOKEN:-}" ]; then
-          echo "[corpus] 未注入 REAL_PROJECT_FIXTURE_DEPLOY_TOKEN，跳过语料拉取。"
+          echo "[corpus] CORPUS_UNAVAILABLE：未注入 REAL_PROJECT_FIXTURE_DEPLOY_TOKEN，跳过语料拉取。"
           echo "[corpus] dev 环境自身的 CNB_TOKEN 只有本仓授权（实测语料仓 403），"
           echo "[corpus] 需要 imports 里的 real-fixture.yml 生效才能拉取。"
         else
           AUTH_HEADER="Authorization: Basic $(printf '%s:%s' cnb "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" | base64 -w0)"
-          CORPUS_URL="https://cnb.cool/${CORPUS_SLUG}.git"
 
           fetch_real_corpus() {
             rm -rf "$REAL_DIR"
@@ -569,11 +594,12 @@
             fi
 
             CURRENT_SHA="$(git -C "$REAL_DIR" rev-parse HEAD)" || return 1
-            EXPECTED_SHA="$CURRENT_SHA"
+            EXPECTED_SHA="$CORPUS_REF"
             if [ "$CURRENT_SHA" != "$CORPUS_REF" ]; then
               git -C "$REAL_DIR" -c http.extraHeader="$AUTH_HEADER" \
                 fetch --depth 1 origin "$CORPUS_REF" || return 1
-              EXPECTED_SHA="$(git -C "$REAL_DIR" rev-parse FETCH_HEAD)" || return 1
+              FETCHED_SHA="$(git -C "$REAL_DIR" rev-parse FETCH_HEAD)" || return 1
+              [ "$FETCHED_SHA" = "$EXPECTED_SHA" ] || return 1
               git -C "$REAL_DIR" -c http.extraHeader="$AUTH_HEADER" \
                 checkout --detach "$EXPECTED_SHA" || return 1
             fi
@@ -583,13 +609,13 @@
               sparse-checkout set "$CORPUS_PATH" || return 1
             [ -d "$CORPUS_DIR" ] || return 1
 
-            SPG_COUNT="$(find "$CORPUS_DIR" -name '*.spg' | wc -l)" || return 1
-            TBL_COUNT="$(find "$CORPUS_DIR" -name '*.tbl' | wc -l)" || return 1
+            SPG_COUNT="$(find "$CORPUS_DIR" -type f -name '*.spg' | wc -l)" || return 1
+            TBL_COUNT="$(find "$CORPUS_DIR" -type f -name '*.tbl' | wc -l)" || return 1
             CHECKED_OUT_SHA="$(git -C "$REAL_DIR" rev-parse HEAD)" || return 1
             [ "$CHECKED_OUT_SHA" = "$EXPECTED_SHA" ] || return 1
             [ "$SPG_COUNT" -gt 0 ] || return 1
             [ "$TBL_COUNT" -gt 0 ] || return 1
-            if grep -qF "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" "$REAL_DIR/.git/config" 2>/dev/null; then
+            if corpus_config_has_credentials; then
               echo "[corpus] deploy token persisted in git config" >&2
               return 1
             fi
