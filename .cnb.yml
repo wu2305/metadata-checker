@@ -28,6 +28,9 @@
   tags: cnb:arch:amd64
   cpus: 8
 
+# coverage 产物单独缓存，避免复用整个 target 树。
+# 曾观察到 coverage 临时路径 EACCES；仅凭该日志不能确定是节点缓存属主异常。
+# 编译前探测 target 和父目录，失败保留数据与权限并输出现场。
 .rust_ci: &rust_ci
   name: rust-ci
   runner:
@@ -37,10 +40,14 @@
     volumes:
       - /usr/local/cargo/registry
       - /usr/local/cargo/git
-      - ./target
+      - ./target/cnb/coverage
   env:
     CARGO_TARGET_DIR: target/cnb/coverage
   stages:
+    # 两处 CI 共用非破坏性探测；失败直接退出，不自动清空缓存或 chmod。
+    - name: prepare cargo target dir
+      # `|| exit 1` 不是多余的：CNB stage 脚本默认不开 errexit。
+      script: sh scripts/cnb-probe-cargo-target.sh || exit 1
     - name: toolchain
       script: |
         rustc --version
@@ -230,10 +237,12 @@
     git config --global credential.helper store
     printf "https://cnb:%s@cnb.cool\n" "$REAL_PROJECT_FIXTURE_DEPLOY_TOKEN" > "$HOME/.git-credentials"
     chmod 0600 "$HOME/.git-credentials"
-    git clone "$FIXTURE_REPO_URL" "$FIXTURE_ROOT"
+    # 缺配置或拉取失败均阻断 CI。Repository Not Found 也可能是无权访问；
+    # 维护者已确认 fixture 仓库存在，需检查 token 授权。
+    git clone "$FIXTURE_REPO_URL" "$FIXTURE_ROOT" || exit 1
 
     if [ -n "${REAL_PROJECT_FIXTURE_REF:-}" ]; then
-      git -C "$FIXTURE_ROOT" checkout "$REAL_PROJECT_FIXTURE_REF"
+      git -C "$FIXTURE_ROOT" checkout "$REAL_PROJECT_FIXTURE_REF" || exit 1
     fi
 
     REAL_PROJECT_DIR="$FIXTURE_ROOT/${REAL_PROJECT_FIXTURE_PROJECT_PATH:-xiaoshouyi}"
@@ -711,7 +720,8 @@
     volumes:
       - /usr/local/cargo/registry
       - /usr/local/cargo/git
-      - ./target
+      # 同 `.rust_ci`：只挂 coverage 目标目录，不挂整个 ./target。
+      - ./target/cnb/coverage
   env:
     CARGO_TARGET_DIR: target/cnb/coverage
   stages:
@@ -720,6 +730,12 @@
     - name: rust ci
       if: '[ "$CNB_BRANCH" != "main" ]'
       script: |
+        # 与 `.rust_ci` 共用 scripts/cnb-probe-cargo-target.sh：
+        # 曾观察到 cargo 创建临时文件时报 EACCES（exit 101），原因需结合现场核验。
+        # 探测失败直接退出，保留缓存与权限并输出现场。
+        # 必须 `|| exit 1`：CNB stage 脚本默认不开 errexit，不加这层保护的话
+        # 探测失败也会被后面的命令覆盖退出码，静默跑成绿的。
+        sh scripts/cnb-probe-cargo-target.sh || exit 1
         rustc --version
         cargo --version
         cargo llvm-cov --version
@@ -751,7 +767,7 @@
 # 不索引源码：knowledge:update 当前支持 .md/.mdx/.docx/.txt/.pdf，不支持 .rs；
 # 源码知识以「附 src/xxx.rs:NNN + 分析 SHA 的主题文档」形式入库。
 # 处理失败报错（ignoreProcessFailures: false），不让「入库成功」掩盖部分文档失败。
-# 不无条件 forceRebuild：仅在白名单结构变更时手动触发一次。
+# 不无条件 forceRebuild：白名单结构变更或确认索引陈旧时，固定 SHA 手动重建一次。
 # ifModify 让无关提交不额外占一条并发（知识库任务不需要编译环境，不挂 docker/volumes）。
 .knowledge_base_ci: &knowledge_base_ci
   name: knowledge-base
@@ -760,6 +776,7 @@
     - AGENTS.md
     - SKILL.md
     - .cnb.yml
+  # 说明：docs/knowledge-acceptance/** 不在 ifModify 里——它不入库，改它不必重建索引。
   stages:
     - name: update knowledge base
       type: knowledge:update
@@ -768,10 +785,11 @@
           - "docs/knowledge/**/*.md"
           - "AGENTS.md"
           - "SKILL.md"
-        # include 已是显式白名单，与这两条无交集；保留它们作为放宽 include 时的兜底。
+        # include 已是显式白名单，与这三条无交集；保留它们作为放宽 include 时的兜底。
         exclude:
-          - "docs/ai-eval-runs/**"   # 评测答案键，任何口径都不得入库
-          - "docs/archive/**"        # 已归档历史结论，与当前事实词面几乎一样
+          - "docs/ai-eval-runs/**"        # 评测答案键，任何口径都不得入库
+          - "docs/archive/**"             # 已归档历史结论，与当前事实词面几乎一样
+          - "docs/knowledge-acceptance/**" # 验收问题集与答案键：入库即用答案验答案
         chunkSize: 1200
         chunkOverlap: 150
         issueSyncEnabled: false
@@ -1576,12 +1594,37 @@
           echo "close-issue http=$CCODE"
         fi
 
+.knowledge_acceptance_ci: &knowledge_acceptance_ci
+  name: knowledge-acceptance
+  docker:
+    image: python:3.12-slim
+  stages:
+    - name: script regressions
+      script: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+    - name: capture fresh-context answers
+      script: |
+        set -eu
+        python3 scripts/kb-evaluate.py \
+          --questions docs/knowledge-acceptance/questions.json \
+          --indexed-sha "$CNB_COMMIT" \
+          --output target/knowledge-acceptance/run.json.gz
+  endStages:
+    # 完整原始证据以 gzip/base64 写入构建日志；失败运行也保留已采集部分。
+    - name: archive acceptance evidence
+      script: |
+        test -s target/knowledge-acceptance/run.json.gz || exit 1
+        echo KB_EVIDENCE_BEGIN
+        base64 target/knowledge-acceptance/run.json.gz
+        echo KB_EVIDENCE_END
+
 main:
   push: *main_authoritative_ci
 
 "$":
   vscode:
     - *cloud_native_dev_env
+  api_trigger_knowledge_acceptance:
+    - *knowledge_acceptance_ci
   api_trigger_m58_llm:
     - *m58_cnb_llm_ci
   api_trigger_kimi_harness_smoke:

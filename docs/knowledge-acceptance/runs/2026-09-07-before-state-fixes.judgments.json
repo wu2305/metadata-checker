@@ -1,0 +1,200 @@
+{
+  "artifact_sha256": "ef0abc0df2c385fb969fb990b06d86b7544862f633063eb4a73dde37cd58279d",
+  "reviewer": "Codex main thread; manual source and answer review",
+  "rubric": "固定题按原题期望要点核验；缺核心要点为 partial，错误状态或无证据推断为 fail。补充内容也计入判定。新题核验修复语义、原始来源与边界。",
+  "status": "not_accepted",
+  "judgments": [
+    {
+      "id": "A1",
+      "set": "fixed",
+      "verdict": "partial",
+      "reason": "完整调用链遗漏 execute_resolved_target、run_cli_runtime_tool 和 adapter。"
+    },
+    {
+      "id": "A2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "定位 stdio 的 handle_diff_refresh；runtime 路径一律返回 DIFF_REFRESH_CONTEXT_REQUIRED。"
+    },
+    {
+      "id": "A3",
+      "set": "fixed",
+      "verdict": "partial",
+      "reason": "汇合点正确，但补充的完整链路仍有同样遗漏。"
+    },
+    {
+      "id": "A4",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "列出 Status、ReloadGraph、DiffRefresh 三个 stdio 短路命令。"
+    },
+    {
+      "id": "A5",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "check_reload 失败记录 diagnostic，保留旧图并继续查询。"
+    },
+    {
+      "id": "A6",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "CLI 输出 graphdb 诊断后退出；stdio 启动失败。"
+    },
+    {
+      "id": "B1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "给出扫描入口与发现、差分、解析、合并应用、持久化阶段；4+5 合并实现。"
+    },
+    {
+      "id": "B2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "判脏依据 xxhash64 内容 hash，不是 mtime。"
+    },
+    {
+      "id": "B3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "坏 TBL 保留旧图、诊断并重试；坏 SPG 使整轮索引失败。"
+    },
+    {
+      "id": "B4",
+      "set": "fixed",
+      "verdict": "partial",
+      "reason": "答出 full/delta，未明确首次置 Current、增量通常置 Stale 的状态差异。"
+    },
+    {
+      "id": "B5",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "累计受影响节点达到 1024 时同事务重建 v2。"
+    },
+    {
+      "id": "B6",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "scanner_entries 随图同事务持久化，报告按全库口径合并。"
+    },
+    {
+      "id": "B7",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "prepare 不落库，诊断透传给调用方随最终 commit 挂载；scan 自身持久化。"
+    },
+    {
+      "id": "C1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "Grafeo 尚无实现，当前 redb/v2 shadow，计划不能当上线。"
+    },
+    {
+      "id": "C2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "B5 钉住当前分歧，全绿不能证明增量正确。"
+    },
+    {
+      "id": "C3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "真实语料数字属于迁移前测量，不能作为 Grafeo 验收。"
+    },
+    {
+      "id": "C4",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "确认增量丢跨文件边的未修复缺陷。"
+    },
+    {
+      "id": "C5",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "确认唯一引用者删除后占位节点泄漏，归属尚未记账。"
+    },
+    {
+      "id": "C6",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "human 旧路径与 non-human runtime 路径不同。"
+    },
+    {
+      "id": "C7",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "M28 仍为 planned，未把历史计划当实现。"
+    },
+    {
+      "id": "C8",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "v1 hydrate 跳过坏行/悬空边，可能得到 partial 图，须检查诊断。"
+    },
+    {
+      "id": "D1",
+      "set": "fixed",
+      "verdict": "fail",
+      "reason": "从 IndexedDB stub 推出“计划或使用 IndexedDB”，没有充分停止实现层推断。"
+    },
+    {
+      "id": "D2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "无法列出未入库的 21 类边投影，停止推断。"
+    },
+    {
+      "id": "D3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "本机路径不是通用语料清单；需核验当前环境可访问性与授权。"
+    },
+    {
+      "id": "H1",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "未预置语料目录时缺 token 在 checkout 失败；不将独立 bench skip 当 CI 通过。"
+    },
+    {
+      "id": "H2",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "预置目录跳过 clone，但仍须通过 preflight，checkout 不等于验收。"
+    },
+    {
+      "id": "H3",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "Repository Not Found 不能证明仓库不存在，须核验 token 授权。"
+    },
+    {
+      "id": "H4",
+      "set": "heldout",
+      "verdict": "fail",
+      "reason": "判脏答案正确，但把已实现的陈旧诊断对账错误标成未修复缺陷。"
+    },
+    {
+      "id": "H5",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "Grafeo 未实现，大语料数据是迁移前基线，不能证明生产可用。"
+    },
+    {
+      "id": "H6",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "回落 v1 仍可能丢节点，引用 hydrate_diagnostics 和 partial 诊断。"
+    },
+    {
+      "id": "H7",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "未提供浏览器 IndexedDB 恢复调用链，明确证据不足。"
+    },
+    {
+      "id": "H8",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "占位节点尚不能回收；缺陷测试全绿不能证明增量与重建等价。"
+    }
+  ]
+}

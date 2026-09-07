@@ -255,3 +255,28 @@ curl -s -X POST "https://api.cnb.cool/<repo>/-/build/start" \
    报告可以完全从 CI 日志重建；远程环境里的一次手跑做不到这一点，不能当作评测基线。
 
 一句话：远程环境用来**编译和把失败测试跑绿**，流水线用来**产出可信的结论**。
+
+## 9. CI 报 `Permission denied (os error 13)` 在 target 目录里
+
+现象（rust-ci 的 `format` / `check benches` / `test and coverage` 任一 stage）：
+
+```
+error: Permission denied (os error 13) at path "/workspace/target/cnb/coverageO9sAWs"
+Finished, code: 101
+```
+
+判定要点：临时路径上的 `os error 13` 表示写入被拒；退出码 101 本身不能区分
+编译、测试或环境错误。同一提交在另一节点成功，只能说明环境差异值得排查，
+不能据此确定缓存损坏或排除所有代码问题。
+
+排查顺序：
+
+1. 保存失败 stage 日志、提交 SHA、runner 与 `id` / `ls -ld` 现场。
+2. 检查 target 及父目录的权限、属主、挂载是否只读、磁盘空间与配额。
+3. 若换节点后成功，记录两次环境差异；确需清缓存时由维护者确认目录范围后处置。
+
+当前 volume 仅挂 `./target/cnb/coverage`。`.rust_ci` 与 `.rust_ci_branch_push`
+共用 `scripts/cnb-probe-cargo-target.sh`：用 `mktemp` 创建独占文件并写入字节，
+检查 target 和父目录；只删除本次探测文件，失败即退出，不清空缓存、不修改权限。
+既有 `.cnb-write-probe` 文件和自定义 target 中的其他内容均应保留。
+该探测只验证执行时的可写性，不保证后续编译始终有空间或权限。

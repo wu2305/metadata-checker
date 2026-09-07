@@ -1,0 +1,36 @@
+{
+  "source_sha": "709548f2478291c9bba130fbb182673383b2238f",
+  "indexed_sha": "fa972b652de0c5c5d1eafa09fa130a412b411837",
+  "indexed_documents": [
+    {
+      "path": "AGENTS.md",
+      "blob": "72adc481c44eb42ff53a3e89febb6996f69b5105"
+    },
+    {
+      "path": "SKILL.md",
+      "blob": "49eee0d113fb02ed36248918e2d56ab638b952b0"
+    },
+    {
+      "path": "docs/knowledge/README.md",
+      "blob": "f77ac988a99a9800c2c9bc187861fff6ac44c2e6"
+    },
+    {
+      "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+      "blob": "cfb23ae874e829272c10320ed520e5aed2ad1378"
+    },
+    {
+      "path": "docs/knowledge/topic-scan-incremental-persist.md",
+      "blob": "710d48c447cb3dd578130989eb9d675262869b14"
+    }
+  ],
+  "questions_sha256": "37a3687bf77860bad3d957c4690e39d03a198a96935abf7e1c878cb18e0b5fa5",
+  "runner_sha256": "dced36b5e24796d6c1fb0c4b12864d94ebf8e6e950c2713496ec284b955185a5",
+  "model_returned": "deepseek-v4-flash",
+  "questions": 32,
+  "chunks": 160,
+  "model_requests": 32,
+  "messages_per_request": 2,
+  "index_unchanged": true,
+  "archive_sha256": "6c93d1f214c68f9f44aced03e60e88a7aaa52d146b21b1199159dd1f2de94546",
+  "build_sn": "cnb-j34-1k1t62jmf"
+}

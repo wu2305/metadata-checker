@@ -1,0 +1,162 @@
+[
+  {
+    "id": "A1",
+    "set": "fixed",
+    "question": "`--relations page:app/a.spg` 从 CLI 参数到图查询经过哪些函数？"
+  },
+  {
+    "id": "A2",
+    "set": "fixed",
+    "question": "stdio server 里 `diff_refresh` 命令在哪处理？走到 runtime 会怎样？"
+  },
+  {
+    "id": "A3",
+    "set": "fixed",
+    "question": "`--find` / `--explain` / `--relations` 三个动词最终汇合到哪个函数？"
+  },
+  {
+    "id": "A4",
+    "set": "fixed",
+    "question": "stdio 模式下哪个命令不经过 `GraphRuntime::query`？"
+  },
+  {
+    "id": "A5",
+    "set": "fixed",
+    "question": "`check_reload: true` 时 reload 失败会中断本次查询吗？"
+  },
+  {
+    "id": "A6",
+    "set": "fixed",
+    "question": "graphdb 打不开时 CLI 与 stdio 的行为差异？"
+  },
+  {
+    "id": "B1",
+    "set": "fixed",
+    "question": "`--build-graph` 的入口和六个阶段是什么？"
+  },
+  {
+    "id": "B2",
+    "set": "fixed",
+    "question": "增量判断依据是什么？mtime 还是内容 hash？"
+  },
+  {
+    "id": "B3",
+    "set": "fixed",
+    "question": "坏 TBL 与坏 SPG 的失败行为有何不同？"
+  },
+  {
+    "id": "B4",
+    "set": "fixed",
+    "question": "首次构建与后续增量的持久化路径差别？"
+  },
+  {
+    "id": "B5",
+    "set": "fixed",
+    "question": "v2 shadow 什么时候从 Stale 回到 Current？"
+  },
+  {
+    "id": "B6",
+    "set": "fixed",
+    "question": "scanner 诊断存在哪里、如何保证与图一致？"
+  },
+  {
+    "id": "B7",
+    "set": "fixed",
+    "question": "`prepare` 与 `scan` 的区别？诊断谁负责落库？"
+  },
+  {
+    "id": "C1",
+    "set": "fixed",
+    "question": "Grafeo 已经上线了吗？"
+  },
+  {
+    "id": "C2",
+    "set": "fixed",
+    "question": "B5 差分测试通过是否代表增量索引正确？"
+  },
+  {
+    "id": "C3",
+    "set": "fixed",
+    "question": "M59 真实语料测量（501 SPG / 828 TBL / 3.72 GiB）能否作为 Grafeo 验收？"
+  },
+  {
+    "id": "C4",
+    "set": "fixed",
+    "question": "增量更新会不会丢边？"
+  },
+  {
+    "id": "C5",
+    "set": "fixed",
+    "question": "占位页节点在引用者删除后会被清理吗？"
+  },
+  {
+    "id": "C6",
+    "set": "fixed",
+    "question": "`--query-page-logic --human` 与 non-human 走同一条代码路径吗？"
+  },
+  {
+    "id": "C7",
+    "set": "fixed",
+    "question": "M28 stdio 契约收敛做好了吗？"
+  },
+  {
+    "id": "C8",
+    "set": "fixed",
+    "question": "v2 hydrate 失败后 fallback 到 v1，得到的图一定完整吗？"
+  },
+  {
+    "id": "D1",
+    "set": "fixed",
+    "question": "browser / WASM 的持久化怎么实现？"
+  },
+  {
+    "id": "D2",
+    "set": "fixed",
+    "question": "查询内部的 21 类边投影有哪些？"
+  },
+  {
+    "id": "D3",
+    "set": "fixed",
+    "question": "本地 `/Users/...` 路径下的真实项目可以直接用吗？"
+  },
+  {
+    "id": "H1",
+    "set": "heldout",
+    "question": "CI 没有提供 REAL_PROJECT_FIXTURE_DEPLOY_TOKEN 时 full-criterion 流水线会跳过还是失败？"
+  },
+  {
+    "id": "H2",
+    "set": "heldout",
+    "question": "已经设置真实项目目录，还必须拿部署令牌去 clone 一次吗？通过 checkout 就算语料验收通过了吗？"
+  },
+  {
+    "id": "H3",
+    "set": "heldout",
+    "question": "远端 clone 报 Repository Not Found，能据此断言维护者的 fixture 仓库不存在吗？"
+  },
+  {
+    "id": "H4",
+    "set": "heldout",
+    "question": "页面只改了时间戳，内容字节没变，扫描器会把它当作脏文件重新解析吗？"
+  },
+  {
+    "id": "H5",
+    "set": "heldout",
+    "question": "底层图存储切到 Grafeo 的工作已经能用于生产了吗？现有大语料测量能证明吗？"
+  },
+  {
+    "id": "H6",
+    "set": "heldout",
+    "question": "新布局读坏了而退回旧布局后，调用者还可能收到节点缺失的图吗？要看什么诊断？"
+  },
+  {
+    "id": "H7",
+    "set": "heldout",
+    "question": "浏览器重启后通过 IndexedDB 恢复图的完整调用链是什么？请给实现步骤。"
+  },
+  {
+    "id": "H8",
+    "set": "heldout",
+    "question": "引用页面被删除后残留的占位节点已经能回收了吗？测试全绿能否证明增量图等于重建图？"
+  }
+]

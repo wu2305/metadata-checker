@@ -80,7 +80,7 @@ M58：
 知识库（Issue #30）：
 
 - [2026-09-06-knowledge-base-corpus-design.md](../specs/2026-09-06-knowledge-base-corpus-design.md)（draft）
-- 语料目录：[knowledge/README.md](../knowledge/README.md)；验收：[knowledge-acceptance-questions.md](../knowledge/knowledge-acceptance-questions.md)
+- 语料目录：[knowledge/README.md](../knowledge/README.md)；验收（不入库）：[knowledge-acceptance/knowledge-acceptance-questions.md](../knowledge-acceptance/knowledge-acceptance-questions.md)
 
 M59（redb → Grafeo 迁移）：
 

@@ -5,7 +5,7 @@
 
 ## 为什么单开一个目录
 
-`docs/` 下 253 个跟踪文件里，`archive/` 46 个、`ai-eval-runs/` 115 个。
+`docs/` 下被跟踪的 Markdown 里，`archive/` 与 `ai-eval-runs/` 占大头（`ai-eval-runs/` 含评测答案键）。
 默认全量 Markdown 索引会把已归档的历史结论、评测答案键与当前事实混在一起召回，
 向量检索无法区分新旧。首版采用**显式白名单**：只有本目录 + `AGENTS.md` + `SKILL.md` 入库。
 
@@ -15,16 +15,34 @@
 |------|------|
 | 状态分层 | 每个主题必须分「当前实现 / 已批准计划 / 已知缺陷 / 历史状态」四节，缺节写「无」 |
 | 源码依据 | 每条调用链结论必须带 `src/xxx.rs:NNN` 与分析 SHA；无源码依据标「未知」 |
-| 自包含 | 每个小节自带状态与限制，不依赖前文（分块 `chunkOverlap: 0` 会切断上下文） |
+| 自包含 | 每个小节自带状态与限制，不依赖前文（分块会切断上下文，限定语不能与描述分离） |
 | 否定结论 | 「尚未实现」「未接入」「不代表验收」必须写在描述同一小节内 |
+| 显式问答 | 关键结论另配一句「问 X 吗？答：不是/没有」——限定语散在描述句里时，空上下文 agent 会答「未知」而不敢下结论（第 2 轮实测 ⚠C5/C6/C7） |
+| 文首速查 | 高频问题在文首放一块自包含速查；文首分块最容易被 top-k 命中，放正文中间会被 `chunkSize` 切断（第 2 轮实测 A1/A3/B1） |
+| 表格瘦身 | 表格列数压到最少，超过 5 列时合并列，避免被分块劈开 |
 | 脱敏 | 不含真实凭据、内网域名、本机绝对路径 |
 
-## 验收
+## 验收（验收集**不在本目录**）
 
-- [knowledge-acceptance-questions.md](knowledge-acceptance-questions.md)：约 20 条真实开发问题，含反误导题
-- 合并后由空上下文 agent 逐题查询，记录召回片段与回答是否正确
+验收集在 [`docs/knowledge-acceptance/`](../knowledge-acceptance/)，**故意不被索引**：
+问题 + 期望答案 + 实测记录若入库，检索命中就是「用答案验答案」，验收结论没有意义。
+本目录内不得放验收问题或答案键。
+
+- 验收问题集：[knowledge-acceptance-questions.md](../knowledge-acceptance/knowledge-acceptance-questions.md)
+  （32 题：24 道固定题 + 8 道改写/新题，含 8 条反误导题）
+- **术语口径**：题目参与过语料修正后即为**回归题**，结果只能作为回归证据；
+  只有「提问前冻结、未参与修正」的题目结果才可称为验收。本目录与验收目录均不得
+  把回归结果写成「验收通过」
+- 流程：重建索引后由**空上下文 agent** 逐题用**原始问法**查询，记录 top chunk 与
+  **agent 原话回答**（只记命中不算通过），判定对/部分对/错/编造
+- 第 1 轮结论已作废：当时问题集在索引内造成自我验证，且未保存 agent 回答
+- 第 2 轮是固定题多次调优后的历史自报，缺少完整请求与响应，不能作为独立验收。
+  新验收须保存逐题完整证据并加入提前冻结的改写题，详见不入库的验收目录。
+- 检索统一用 `--top-k 5`。历史运行曾观察到改变 top-k 后召回集合不同；
+  不应把一次低 top-k 漏召回推广为平台恒定行为，也不能仅凭高分判答案正确。
 
 ## 索引配置
 
-见 `.cnb.yml` 的 `.knowledge_base_ci`：`issueSyncEnabled: false`、
-`ignoreProcessFailures: false`、显式 `include`/`exclude`。
+见 `.cnb.yml` 的 `.knowledge_base_ci`：显式 `include` 白名单（本目录 + `AGENTS.md` + `SKILL.md`）、
+`exclude` 兜底 `docs/ai-eval-runs/**` / `docs/archive/**` / `docs/knowledge-acceptance/**`、
+`issueSyncEnabled: false`、`ignoreProcessFailures: false`。

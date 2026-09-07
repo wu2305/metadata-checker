@@ -39,6 +39,7 @@
 | [runbooks/](runbooks/) | 真实 BI / 环境操作手册，含 [CNB 远程编译与排错测试](runbooks/cnb-remote-dev-env.md) |
 | [archive/](archive/) | 已完成 roadmap 章节（[roadmap 索引](archive/roadmap/README.md)） |
 | [knowledge/](knowledge/) | 知识库语料（唯一被索引的白名单目录，[说明](knowledge/README.md)） |
+| [knowledge-acceptance/](knowledge-acceptance/) | 知识库验收集（问题与答案键，**不入库**，[说明](knowledge-acceptance/README.md)） |
 
 ## 设计与计划（Phase C）
 
@@ -52,7 +53,7 @@ CNB 知识库只索引 `docs/knowledge/**`、`AGENTS.md`、`SKILL.md`（白名�
 （状态分层、源码依据、自包含、否定结论、脱敏）。
 
 - 设计规范：[specs/2026-09-06-knowledge-base-corpus-design.md](specs/2026-09-06-knowledge-base-corpus-design.md)
-- 验收问题集：[knowledge/knowledge-acceptance-questions.md](knowledge/knowledge-acceptance-questions.md)
+- 验收问题集（不入库）：[knowledge-acceptance/knowledge-acceptance-questions.md](knowledge-acceptance/knowledge-acceptance-questions.md)
 
 ## 根目录其它文档
 

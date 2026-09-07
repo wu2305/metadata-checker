@@ -1,25 +1,44 @@
 # 主题一：CLI / stdio 到查询的调用链
 
 > 状态分层：**当前实现**（以下调用链均已存在于源码）
-> 分析 SHA：`55fdaa2b11486f69224bfd7fa2944f2759a08940`（PR14 合入后的 main）
+> 分析 SHA：`31d020417d1ecbea440b0c7e92dffa2bd4b42d4b`（PR33 head；squash-merge 进 `main` 后内容一致）
+> 行号核验：本文所有 `src/xxx.rs:NNN` 均按上述 SHA 逐条核对（PR33 期间 `graph_redb.rs` 新增 2 行注释，
+> 旧版 `55fdaa2` 的行号整体偏移 2 行，已全部刷新）
 > 适用版本：`main` @ 上述 SHA；M59-1 起身份/schema 改造会改动本链路的 target 解析，但入口不变
 > 维护责任：改 `cli.rs` / `main.rs` / `stdio_server.rs` / `runtime.rs` / `route.rs` 后必须更新本文件
 
 ## 1. 当前实现：调用链
 
+### 1.0 完整链路速查（自包含，供检索直接命中）
+
+**问：`--find` / `--explain` / `--relations` 从 CLI 参数到图查询经过哪些函数？**
+**答：`main` → `run_query_commands`（`src/main.rs:1054`）→ `run_surface`（`src/main.rs:78`）
+→ `execute_resolved_target`（`src/main.rs:263`）→ `route::route`（`src/route.rs:96`）
+→ `run_cli_runtime_tool`（`src/main.rs:19`）→ `CliAdapter::parse_input`
+→ `GraphRuntime::query`（`src/runtime.rs:971`）。**
+
+- **统一终点是 `GraphRuntime::query`（`src/runtime.rs:971`）**：`--find` / `--explain` /
+  `--relations` 三个动词与 stdio 请求**都在此汇合**；差异只在 adapter 与输出封装。
+- `run_query_commands`（`src/main.rs:1054`）在前：按固定顺序逐条 `if` 判断参数，命中即返回。
+- `run_surface`（`src/main.rs:78`）居中：把三动词展开成多条 `RoutedCall`，再逐条调用 runtime；
+  路由执行由 `execute_resolved_target` 完成，再经 `run_cli_runtime_tool` / `CliAdapter`
+  落到 `GraphRuntime::query`。旧动词也可直接调用 `run_cli_runtime_tool`，它不是旧动词专用入口。
+- 三个不走 `query` 的例外：`Status`（`src/stdio_server.rs:385`）、`ReloadGraph`（`:398`）、
+  `DiffRefresh`（`:378`，到达 `query` 时一律报错 `DIFF_REFRESH_CONTEXT_REQUIRED`）。
+
 ### 1.1 CLI one-shot 路径
 
 ```
-main()                                  src/main.rs:1463
- ├─ Cli::parse()                        src/cli.rs:31      clap 派生，参数定义全在这里
- ├─ set_graph_lock_timeout_ms(...)      src/main.rs:1465   → src/graph_redb.rs:27
- ├─ telemetry::init(...)                src/main.rs:1466   --trace off|json|otlp
- ├─ （session 命令先短路 return）        src/main.rs:1483-1841
- ├─ tool_contract::validate_budget      src/main.rs:1842   compact|normal|full
- ├─ --serve-stdio → 走 1.2（不返回）     src/main.rs:1847
- ├─ graphdb-only 生命周期命令           src/main.rs:1930   status/reload/check-reload
- ├─ --project-dir 分支                   src/main.rs:1957
- │   ├─ --check-graph   → GraphDB::check_graph_db   src/graph_redb.rs:388
+main()                                  src/main.rs:1464
+ ├─ Cli::parse()                        src/cli.rs:32      clap 派生，参数定义全在这里
+ ├─ set_graph_lock_timeout_ms(...)      src/main.rs:1467   → src/graph_redb.rs:27
+ ├─ telemetry::init(...)                src/main.rs:1467   --trace off|json|otlp
+ ├─ （session 命令先短路 return）        src/main.rs:1484-1909
+ ├─ tool_contract::validate_budget      src/main.rs:1843   compact|normal|full
+ ├─ --serve-stdio → 走 1.2（不返回）     src/main.rs:1848
+ ├─ graphdb-only 生命周期命令           src/main.rs:1911   status/reload/check-reload
+ ├─ --project-dir 分支                   src/main.rs:1958
+ │   ├─ --check-graph   → GraphDB::check_graph_db   src/graph_redb.rs:390
  │   ├─ --build-graph   → scanner::scan_project_with_report  src/scanner/mod.rs:34
  │   └─ 否则 load runtime → run_query_commands      src/main.rs:1054
  └─ 单文件 <FILE> 分支                   src/main.rs:2033   parser::parse_file + output
@@ -37,12 +56,13 @@ main()                                  src/main.rs:1463
 | 直接工具 | `run_cli_runtime_tool` `src/main.rs:19` | `CliAdapter` 解析 → `runtime.query(req)`，取 `.result` |
 | 三动词表面 | `run_surface` `src/main.rs:78` | `--find` / `--explain` / `--relations` |
 
-`run_surface` 的展开顺序（`src/main.rs:78-260`）：
+`run_surface` 与 `execute_resolved_target` 的展开顺序（`src/main.rs:78` / `:263`）：
 
 1. 裸前缀（`--relations page:`）→ `enumerate_prefix_targets`，列为探查结果，不报 `TARGET_NOT_FOUND`（`src/main.rs:94-102`）。
 2. 无类型前缀的裸名 → 先发一次 `Find`，用 `route::resolve_bare_target` 解析（`src/main.rs:104`，`src/route.rs:227`）。
-3. `route::route(surface, target, depth)`（`src/route.rs:96`）→ `RoutePlan`：`Explain` 展开为多条 `RoutedCall`（`src/route.rs:109`），`Relations` 展开为读写与关系（`src/route.rs:110`），`Find` 只有主调用（`src/route.rs:108`）。
-4. 逐条执行后合并：主输出保留 `summary`/`details`/`evidence`/`diagnostics`，补充调用的 `details` 折进 `details.<merge_key>`（`src/main.rs:78` 顶部注释）。
+3. `run_surface` 将已归一 target 交给 `execute_resolved_target`，其中调用 `route::route(surface, target, depth)`（`src/route.rs:96`）→ `RoutePlan`：`Explain` 展开为多条 `RoutedCall`（`src/route.rs:109`），`Relations` 展开为读写与关系（`src/route.rs:110`），`Find` 只有主调用（`src/route.rs:108`）。
+4. 每条 `RoutedCall` 经 `run_cli_runtime_tool` → `CliAdapter::parse_input` →
+   `GraphRuntime::query` 执行，再合并：主输出保留 `summary`/`details`/`evidence`/`diagnostics`，补充调用的 `details` 折进 `details.<merge_key>`（`src/main.rs:78` 顶部注释）。
 5. `print_surface_result`（`src/main.rs:419`）决定 human / JSON 输出。
 
 ### 1.3 stdio server 路径
@@ -69,7 +89,7 @@ run_stdio_server                        src/stdio_server.rs:185
 
 `src/runtime.rs:971`。CLI 与 stdio **在此汇合**，差异只在 adapter 与输出封装。
 
-- `ReloadGraph` / `CheckReload` 在 `match` 之前单独处理（`src/runtime.rs:993`、`src/runtime.rs:1025`），因为它们需要 `&mut self`。
+- `ReloadGraph` / `CheckReload` 在 `match` 之前单独处理（`src/runtime.rs:991`、`src/runtime.rs:1028`），因为它们需要 `&mut self`。
 - `DiffRefresh` 到达此处**一律报错** `DIFF_REFRESH_CONTEXT_REQUIRED`（`src/runtime.rs:1099`）——它只能由 stdio handler 或 CLI one-shot 先行拦截。
 - 其余命令分发到 `query` / `explain` / `answer_contract` 等 builder，结果经 `ResponseProcessor::runtime_response` 统一封装 timing 与 diagnostics。
 
@@ -120,14 +140,19 @@ cargo test --features cli-local --test core_feature_tests
 ## 3. 已知缺陷（已确认，未修）
 
 - **M59-PATH**：整条路径的 `same_page` 与真实物理字段来源判定不正确，交 M59-4 修复。影响 `explain` / `relations` 的输出正确性。
-- **`--query-page-logic` 的 human 模式仍是旧路径**（`src/main.rs:1200` 注释：待统一 human 渲染器后再迁到 runtime）。同一命令 human / non-human 走两条不同代码路径，输出契约不统一。
+- **`--query-page-logic` 的 human 模式仍是旧路径**（`src/main.rs:1200` 注释：待统一 human 渲染器后再迁到 runtime）。
+  **问：`--query-page-logic --human` 与 non-human 走同一条代码路径吗？答：不是，走两条不同代码路径。**
+  原因：human 模式尚未迁移到 runtime，仍在旧渲染路径上；因此同一命令的 human / non-human **输出契约不统一**。
+  该缺陷已确认未修，修复条件是「统一 human 渲染器」落地。
 - **单文件分支与图查询分支不共用输出**（`src/main.rs:2033` 起）：给 `<FILE>` 时 `--explain` 走 `explain::explain_component_spg`，给 `--project-dir` 时走 runtime tool，两者行为不同。
 
 ## 4. 历史状态
 
 - M24 引入 stdio server；M27 扩展查询命令面；M38 统一到 `GraphRuntime::query` 单一入口。
-- M38 之前各命令有独立 handler，现仅 `Status` / `ReloadGraph` / `DiffRefresh` 在 `handle_request` 里保留短路分支（`src/stdio_server.rs:385/394/378`）。
+- M38 之前各命令有独立 handler，现仅 `Status` / `ReloadGraph` / `DiffRefresh` 在 `handle_request` 里保留短路分支（`src/stdio_server.rs:385/398/378`）。
 - M28 契约收敛仍为 `planned`，**未做**；stdio 请求/响应契约以 `docs/reference/stdio-server.md` 现状为准。
+- **问：M28 stdio 契约收敛做好了吗？答：没有，未做。** INDEX 中仍为 `planned`，
+  这条是「历史状态 / 已批准计划」，不是已实现能力。
 
 ## 5. 边界与限制
 

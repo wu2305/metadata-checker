@@ -77,7 +77,7 @@
 | `scanner.rs` | 目录扫描、增量更新（mtime+size+hash）、SPG/TBL 处理、扫描诊断（SCANNER_*）持久化 | 增量逻辑涉及文件状态比较，改动需谨慎 |
 | `query.rs` | 图查询接口：`query_model`/`query_page`/`query_cross`/`query_dataflow` | DataFlow 子图展开涉及字段级追溯，较复杂 |
 | `remote_metadata.rs` | 远程元数据 provider contract、WASM fetch 骨架、测试 provider | provider 只返回 raw text，不解析、不建图 |
-| `persistence/` | Memory / redb / IndexedDB stub 持久化 provider | redb 不得另建第二套 graph snapshot；browser-wasm 不得引入 redb |
+| `persistence/` | Memory / redb / IndexedDB stub 持久化 provider（stub 不代表真实 IndexedDB 持久化已实现） | redb 不得另建第二套 graph snapshot；browser-wasm 不得引入 redb |
 | `visualization/` | VisualGraph、Mermaid、ECharts option 生成 | 输出必须脱敏，renderer 不依赖 DOM |
 | `browser/` | JS 插件接入、provider、runtime launcher、Service Worker/harness | 不得承载 Rust core 的解析/查询能力 |
 | `cli.rs` | clap 参数定义 | 新增 CLI 参数需同步更新 help 文本 |
@@ -202,14 +202,30 @@ ls -lh target/release/metadata-checker
 - 真实测试项目：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`
 - metadata-checker 使用说明：若运行环境提供对应 skill / tool 文档，应以其当前版本为准；不要在仓库规范中依赖某个工具的私有本地路径。
 - **上述两条路径只在维护者本机存在**，不构成任何环境可用的语料清单。CI / 远端开发环境 / 其他机器
-  **不得**据此假设路径可用：真实项目语料由 CI 通过 `METADATA_CHECKER_REAL_PROJECT_DIR`
-  或 `REAL_PROJECT_FIXTURE_*` 变量注入（见 `.cnb.yml`），缺失时相关 bench 显式跳过而非降级通过。
+  **不得**据此假设路径可用。
+- 本机路径需在当前环境核验可访问性与使用授权；也可以使用经授权的本地语料。
+
+### full-criterion CI 的 fixture token 与失败规则
+
+- **语料入口**（`.cnb.yml` 的 `.full_criterion_checkout_stage`）：
+  已预置 `METADATA_CHECKER_REAL_PROJECT_DIR` 时跳过 clone，随后仍须通过语料 preflight。
+  未预置时，必须提供 `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 以及仓库 URL 或 slug；
+  **缺少 token 或仓库地址会在 checkout 阶段失败（exit 1），不会跳过 bench 后算通过。**
+  clone / 固定提交 checkout 失败同样使流水线失败，不继续 benchmark。
+- `Repository Not Found` 不能单独证明仓库不存在。维护者已确认 fixture 仓库存在，
+  远端 Agent 缺少访问权限；应核验当前 token 的授权，不改写仓库存在性结论。
+  **该确认来自维护者口述，未附核验日期与凭证**。远端 Agent 应把它当作待核实前提：
+  需要时先自行验证当前 token 能否访问目标仓库，再决定是否沿用此结论，不要直接当事实引用。
+- **不要混淆三个执行层**：full-criterion CI 的 checkout 缺配置即失败；个别 bench
+  在独立运行、缺少语料时可能自行 skip；开发工作区则可报告 `CORPUS_UNAVAILABLE`
+  后继续启动。后两者均不是 full-criterion 验收通过证据。
 
 ## 知识库检索
 
 CNB 知识库已在 `.cnb.yml` 配置（`main.push` 触发），**只索引 `docs/knowledge/**`、
 `AGENTS.md`、`SKILL.md`**（白名单，`issueSyncEnabled: false`）。
-`docs/archive/**` 与 `docs/ai-eval-runs/**` 不在索引内；**源码不入库**，
+`docs/archive/**`、`docs/ai-eval-runs/**`、`docs/knowledge-acceptance/**` 均不在索引内
+——验收集含问题与答案键，一旦入库检索命中就是「用答案验答案」；**源码不入库**，
 源码知识以 `docs/knowledge/` 下附 `src/xxx.rs:NNN` 与 SHA 的主题文档形式存在。
 
 - 查「某条链路怎么走 / 改了要跑哪些测试」时**先检索知识库**，再读源码复核。

@@ -236,7 +236,9 @@ impl GraphDB {
                     return Ok(graph);
                 }
                 Err(error) => {
-                    // v2 hydrate 失败时 fallback v1（始终正确），但记录诊断供调用方上报
+                    // v2 hydrate 失败时回落 v1 布局（v1 权威，v2 只是 shadow）。
+                    // 注意「v1 权威」不等于「hydrate 完整」：open_inner_v1 会跳过解码失败的
+                    // 节点/边与悬空边，得到部分缺失的图（见 HydrateDiagnostics）。
                     let mut graph = Self::open_inner_v1(db_path)?;
                     graph.v2_hydrate_warning = Some(format!(
                         "v2 shadow hydrate failed, fell back to v1: {error:#}"

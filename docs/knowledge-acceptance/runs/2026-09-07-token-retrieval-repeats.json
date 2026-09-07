@@ -1,0 +1,234 @@
+{
+  "question": "CI 没有提供 REAL_PROJECT_FIXTURE_DEPLOY_TOKEN 时 full-criterion 流水线会跳过还是失败？",
+  "index_sha": "19cbd1e51f668f75058d9e15c4c7d75919069dd8",
+  "repeats": [
+    {
+      "status": 200,
+      "trace": "00-a3d4f7f71563f730920cebfabc513a57-70199dd321ed912c-01",
+      "header": {
+        "x-cnb-page": null,
+        "x-cnb-page-size": null,
+        "x-cnb-total": null
+      },
+      "data": [
+        {
+          "score": 0.0031850608065724373,
+          "chunk": "```\nrun_stdio_server                        src/stdio_server.rs:185\n ├─ GraphRuntime::load_with_project_dir_and_mode(..., LongLived)   src/runtime.rs:395\n │   产品路径强制 LongLived：否则不建 DenseGraph / Availability Facts / PageDependencyIndex\n ├─ 有 diff_refresh_context → RuntimeBinding::Bound(orchestrator)，否则 Plain\n └─ 逐行 stdin JSONL：\n     空行跳过 / 读失败 → QUERY_FAILED / 反序列化失败 → INVALID_JSON（src/stdio_server.rs:233-274）\n     handle_request                     src/stdio_server.rs:361\n      ├─ StdioAdapter::parse_input      src/stdio_server.rs:102\n      ├─ ToolRegistry::find_by_command\n      ├─ DiffRefresh  → handle_diff_refresh（未绑定 context 时 DIFF_REFRESH_CONTEXT_REQUIRED）src/stdio_server.rs:378\n      ├─ Status       → runtime.status() 直返，不经 query          src/stdio_server.rs:385\n      ├─ ReloadGraph  → runtime.reload()                            src/stdio_server.rs:394",
+          "metadata": {
+            "hash": "c281777b7191fb5daa8add36319fc43a",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 6,
+            "score": 0.0031850608065724373,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        },
+        {
+          "score": 0.002540992572903633,
+          "chunk": "| target 缺/前缀错 | `MISSING_TARGET` / `INVALID_TARGET`，adapter 层返回 |\n| 未知命令 | CLI：`UNKNOWN_COMMAND`；stdio 附 `Supported: <列表>` |\n| `diff_refresh` 走 runtime | `DIFF_REFRESH_CONTEXT_REQUIRED`（协议错误） |\n| reload 失败 | `GRAPH_RELOAD_FAILED`；stdio 保留旧图继续可用（见 `tests/stdio_server_tests.rs:902`） |\n| graphdb 打不开 | CLI：`GraphDB::check_graph_db` 输出诊断 JSON 后退出（`src/main.rs:2002`）；stdio：启动即失败 |\n| 拿不到锁 | `GRAPH_DB_LOCK_TIMEOUT`（`src/graph_store.rs:53`），超时由 `--graph-lock-timeout-ms` 控制 |\n| human 不被支持 | `HUMAN_MODE_NOT_SUPPORTED`，降级为 non-human 而非报错（`src/stdio_server.rs:437`） |\n| `check_reload` 失败 | 只记 diagnostic，不中断本次查询 |  \n### 1.7 改动时跑哪些测试  \n```bash\ncargo test --features cli-local --test stdio_server_tests        # stdio 协议与错误码\ncargo test --features cli-local --test m58_3_command_surface_tests  # 三动词表面（子进程调用真实二进制）\ncargo test --features cli-local --test runtime_tests",
+          "metadata": {
+            "hash": "f8de1097a170571cd85422851b6a2f60",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 9,
+            "score": 0.002540992572903633,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        },
+        {
+          "score": 0.0018031664658337831,
+          "chunk": "`ProjectIndexer::prepare`（`src/scanner/indexer.rs:770`）与 `scan` 复用同一套阶段函数，\n**但不调用 `persist_index`**——graphdb 文件在 prepare 前后不变。\n它的 `commit.scanner_entries` / `scanner_deleted_paths` **被置空**（`src/scanner/indexer.rs:895-896`），\n诊断载荷经 `PreparedIndexUpdate` 透传给 diff-refresh 编排器，由调用方合并 pending 后随\n最终 commit 落库。**调用方若忘记挂载，诊断就丢了**（注释明确此责任）。  \n### 1.6 失败后怎样  \n| 场景 | 行为 |\n|------|------|\n| 文件 hash 未变 | 跳过解析，`unchanged` 计数 +1 |\n| TBL 坏字节 / 非法 JSON | 记 `ParseFailure` → `SCANNER_FILE_PARSE_FAILED`，旧图保留，下轮重试 |\n| SPG JSON 解析失败 | **整轮索引失败**（`?` 向上抛）——刻意保持响亮 |\n| 拿不到图锁 | `GRAPH_DB_LOCK_TIMEOUT`，超时可配 |\n| v2 hydrate 失败 | 回落 `open_inner_v1`（`src/graph_redb.rs:243`），记 `v2_hydrate_warning` 并入 `HydrateDiagnostics`；转诊断时复用 `GRAPH_DB_V2_LAYOUT_UNREADABLE` 码（`src/diagnostics.rs:254-262`，仅当 `v2_layout_unreadable == 0` 才另发一条）。**注意**：回落的是 v1 表，不等于 hydrate 结果完整——见 3.5 |",
+          "metadata": {
+            "hash": "c9f959c8adfc3b24c25f993f18bd8415",
+            "name": "topic-scan-incremental-persist",
+            "path": "docs/knowledge/topic-scan-incremental-persist.md",
+            "position": 6,
+            "score": 0.0018031664658337831,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-scan-incremental-persist.md"
+          }
+        },
+        {
+          "score": 0.0011247574584558606,
+          "chunk": "### 1.5 读写什么状态  \n| 状态 | 位置 | 谁写 |\n|------|------|------|\n| 内存图 + redb 句柄 | `GraphRuntime.graph` `src/runtime.rs:158` | `load` / `reload` / `install_replacement` |\n| 派生读模型（DenseGraph 等） | `GraphRuntime.read_model` | 仅 `LongLived` 模式构建 |\n| 指纹（mtime/size/前 4096 字节 hash） | `GraphFingerprint` `src/runtime.rs:226` | `load`；`is_graph_changed` 据此判断（`src/runtime.rs:1361`） |\n| `load_diagnostics` | 含 hydrate 诊断 + `SCANNER_*` 全库合并诊断 | `load_with_project_dir_internal` `src/runtime.rs:403` |\n| 进程级锁超时 | `graph_lock_timeout_ms`（CLI `--graph-lock-timeout-ms`，默认 10000） | `src/cli.rs:91`、`src/graph_redb.rs:27` |  \n### 1.6 失败后怎样  \n| 场景 | 行为 |\n|------|------|\n| budget 非法 | `INVALID_BUDGET`，`src/tool_contract.rs:434` |\n| target 缺/前缀错 | `MISSING_TARGET` / `INVALID_TARGET`，adapter 层返回 |\n| 未知命令 | CLI：`UNKNOWN_COMMAND`；stdio 附 `Supported: <列表>` |",
+          "metadata": {
+            "hash": "e4519ec33b9a04b45ed45abc9eeaa7c0",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 8,
+            "score": 0.0011247574584558606,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        },
+        {
+          "score": 0.0008360903011634946,
+          "chunk": "├─ ReloadGraph  → runtime.reload()                            src/stdio_server.rs:394\n      ├─ check_reload → runtime.reload_if_changed() 前置检查        src/stdio_server.rs:425\n      ├─ human 且 spec 不支持 → HUMAN_MODE_NOT_SUPPORTED 降级为 false  src/stdio_server.rs:437\n      └─ runtime.query(req)             src/stdio_server.rs:462\n```  \n### 1.4 统一汇合点：`GraphRuntime::query`  \n`src/runtime.rs:971`。CLI 与 stdio **在此汇合**，差异只在 adapter 与输出封装。  \n- `ReloadGraph` / `CheckReload` 在 `match` 之前单独处理（`src/runtime.rs:993`、`src/runtime.rs:1025`），因为它们需要 `&mut self`。\n- `DiffRefresh` 到达此处**一律报错** `DIFF_REFRESH_CONTEXT_REQUIRED`（`src/runtime.rs:1099`）——它只能由 stdio handler 或 CLI one-shot 先行拦截。\n- 其余命令分发到 `query` / `explain` / `answer_contract` 等 builder，结果经 `ResponseProcessor::runtime_response` 统一封装 timing 与 diagnostics。  \n### 1.5 读写什么状态  \n| 状态 | 位置 | 谁写 |\n|------|------|------|",
+          "metadata": {
+            "hash": "c9b0d633dc5edf5c42771a8179a216a4",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 7,
+            "score": 0.0008360903011634946,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "trace": "00-7348ea87b09275c96f67c80042b4f03e-c3f4a2589bb320ee-01",
+      "header": {
+        "x-cnb-page": null,
+        "x-cnb-page-size": null,
+        "x-cnb-total": null
+      },
+      "data": [
+        {
+          "score": 0.0032350558321923018,
+          "chunk": "```\nrun_stdio_server                        src/stdio_server.rs:185\n ├─ GraphRuntime::load_with_project_dir_and_mode(..., LongLived)   src/runtime.rs:395\n │   产品路径强制 LongLived：否则不建 DenseGraph / Availability Facts / PageDependencyIndex\n ├─ 有 diff_refresh_context → RuntimeBinding::Bound(orchestrator)，否则 Plain\n └─ 逐行 stdin JSONL：\n     空行跳过 / 读失败 → QUERY_FAILED / 反序列化失败 → INVALID_JSON（src/stdio_server.rs:233-274）\n     handle_request                     src/stdio_server.rs:361\n      ├─ StdioAdapter::parse_input      src/stdio_server.rs:102\n      ├─ ToolRegistry::find_by_command\n      ├─ DiffRefresh  → handle_diff_refresh（未绑定 context 时 DIFF_REFRESH_CONTEXT_REQUIRED）src/stdio_server.rs:378\n      ├─ Status       → runtime.status() 直返，不经 query          src/stdio_server.rs:385\n      ├─ ReloadGraph  → runtime.reload()                            src/stdio_server.rs:394",
+          "metadata": {
+            "hash": "c281777b7191fb5daa8add36319fc43a",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 6,
+            "score": 0.0032350558321923018,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        },
+        {
+          "score": 0.002540992572903633,
+          "chunk": "| target 缺/前缀错 | `MISSING_TARGET` / `INVALID_TARGET`，adapter 层返回 |\n| 未知命令 | CLI：`UNKNOWN_COMMAND`；stdio 附 `Supported: <列表>` |\n| `diff_refresh` 走 runtime | `DIFF_REFRESH_CONTEXT_REQUIRED`（协议错误） |\n| reload 失败 | `GRAPH_RELOAD_FAILED`；stdio 保留旧图继续可用（见 `tests/stdio_server_tests.rs:902`） |\n| graphdb 打不开 | CLI：`GraphDB::check_graph_db` 输出诊断 JSON 后退出（`src/main.rs:2002`）；stdio：启动即失败 |\n| 拿不到锁 | `GRAPH_DB_LOCK_TIMEOUT`（`src/graph_store.rs:53`），超时由 `--graph-lock-timeout-ms` 控制 |\n| human 不被支持 | `HUMAN_MODE_NOT_SUPPORTED`，降级为 non-human 而非报错（`src/stdio_server.rs:437`） |\n| `check_reload` 失败 | 只记 diagnostic，不中断本次查询 |  \n### 1.7 改动时跑哪些测试  \n```bash\ncargo test --features cli-local --test stdio_server_tests        # stdio 协议与错误码\ncargo test --features cli-local --test m58_3_command_surface_tests  # 三动词表面（子进程调用真实二进制）\ncargo test --features cli-local --test runtime_tests",
+          "metadata": {
+            "hash": "f8de1097a170571cd85422851b6a2f60",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 9,
+            "score": 0.002540992572903633,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        },
+        {
+          "score": 0.0018102108733728528,
+          "chunk": "`ProjectIndexer::prepare`（`src/scanner/indexer.rs:770`）与 `scan` 复用同一套阶段函数，\n**但不调用 `persist_index`**——graphdb 文件在 prepare 前后不变。\n它的 `commit.scanner_entries` / `scanner_deleted_paths` **被置空**（`src/scanner/indexer.rs:895-896`），\n诊断载荷经 `PreparedIndexUpdate` 透传给 diff-refresh 编排器，由调用方合并 pending 后随\n最终 commit 落库。**调用方若忘记挂载，诊断就丢了**（注释明确此责任）。  \n### 1.6 失败后怎样  \n| 场景 | 行为 |\n|------|------|\n| 文件 hash 未变 | 跳过解析，`unchanged` 计数 +1 |\n| TBL 坏字节 / 非法 JSON | 记 `ParseFailure` → `SCANNER_FILE_PARSE_FAILED`，旧图保留，下轮重试 |\n| SPG JSON 解析失败 | **整轮索引失败**（`?` 向上抛）——刻意保持响亮 |\n| 拿不到图锁 | `GRAPH_DB_LOCK_TIMEOUT`，超时可配 |\n| v2 hydrate 失败 | 回落 `open_inner_v1`（`src/graph_redb.rs:243`），记 `v2_hydrate_warning` 并入 `HydrateDiagnostics`；转诊断时复用 `GRAPH_DB_V2_LAYOUT_UNREADABLE` 码（`src/diagnostics.rs:254-262`，仅当 `v2_layout_unreadable == 0` 才另发一条）。**注意**：回落的是 v1 表，不等于 hydrate 结果完整——见 3.5 |",
+          "metadata": {
+            "hash": "c9f959c8adfc3b24c25f993f18bd8415",
+            "name": "topic-scan-incremental-persist",
+            "path": "docs/knowledge/topic-scan-incremental-persist.md",
+            "position": 6,
+            "score": 0.0018102108733728528,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-scan-incremental-persist.md"
+          }
+        },
+        {
+          "score": 0.0011247574584558606,
+          "chunk": "### 1.5 读写什么状态  \n| 状态 | 位置 | 谁写 |\n|------|------|------|\n| 内存图 + redb 句柄 | `GraphRuntime.graph` `src/runtime.rs:158` | `load` / `reload` / `install_replacement` |\n| 派生读模型（DenseGraph 等） | `GraphRuntime.read_model` | 仅 `LongLived` 模式构建 |\n| 指纹（mtime/size/前 4096 字节 hash） | `GraphFingerprint` `src/runtime.rs:226` | `load`；`is_graph_changed` 据此判断（`src/runtime.rs:1361`） |\n| `load_diagnostics` | 含 hydrate 诊断 + `SCANNER_*` 全库合并诊断 | `load_with_project_dir_internal` `src/runtime.rs:403` |\n| 进程级锁超时 | `graph_lock_timeout_ms`（CLI `--graph-lock-timeout-ms`，默认 10000） | `src/cli.rs:91`、`src/graph_redb.rs:27` |  \n### 1.6 失败后怎样  \n| 场景 | 行为 |\n|------|------|\n| budget 非法 | `INVALID_BUDGET`，`src/tool_contract.rs:434` |\n| target 缺/前缀错 | `MISSING_TARGET` / `INVALID_TARGET`，adapter 层返回 |\n| 未知命令 | CLI：`UNKNOWN_COMMAND`；stdio 附 `Supported: <列表>` |",
+          "metadata": {
+            "hash": "e4519ec33b9a04b45ed45abc9eeaa7c0",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 8,
+            "score": 0.0011247574584558606,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        },
+        {
+          "score": 0.0008360903011634946,
+          "chunk": "├─ ReloadGraph  → runtime.reload()                            src/stdio_server.rs:394\n      ├─ check_reload → runtime.reload_if_changed() 前置检查        src/stdio_server.rs:425\n      ├─ human 且 spec 不支持 → HUMAN_MODE_NOT_SUPPORTED 降级为 false  src/stdio_server.rs:437\n      └─ runtime.query(req)             src/stdio_server.rs:462\n```  \n### 1.4 统一汇合点：`GraphRuntime::query`  \n`src/runtime.rs:971`。CLI 与 stdio **在此汇合**，差异只在 adapter 与输出封装。  \n- `ReloadGraph` / `CheckReload` 在 `match` 之前单独处理（`src/runtime.rs:993`、`src/runtime.rs:1025`），因为它们需要 `&mut self`。\n- `DiffRefresh` 到达此处**一律报错** `DIFF_REFRESH_CONTEXT_REQUIRED`（`src/runtime.rs:1099`）——它只能由 stdio handler 或 CLI one-shot 先行拦截。\n- 其余命令分发到 `query` / `explain` / `answer_contract` 等 builder，结果经 `ResponseProcessor::runtime_response` 统一封装 timing 与 diagnostics。  \n### 1.5 读写什么状态  \n| 状态 | 位置 | 谁写 |\n|------|------|------|",
+          "metadata": {
+            "hash": "c9b0d633dc5edf5c42771a8179a216a4",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 7,
+            "score": 0.0008360903011634946,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "trace": "00-0168b7b42dc6f1223309a8a50213abaa-6c53b4f00bdf094d-01",
+      "header": {
+        "x-cnb-page": null,
+        "x-cnb-page-size": null,
+        "x-cnb-total": null
+      },
+      "data": [
+        {
+          "score": 0.0031850608065724373,
+          "chunk": "```\nrun_stdio_server                        src/stdio_server.rs:185\n ├─ GraphRuntime::load_with_project_dir_and_mode(..., LongLived)   src/runtime.rs:395\n │   产品路径强制 LongLived：否则不建 DenseGraph / Availability Facts / PageDependencyIndex\n ├─ 有 diff_refresh_context → RuntimeBinding::Bound(orchestrator)，否则 Plain\n └─ 逐行 stdin JSONL：\n     空行跳过 / 读失败 → QUERY_FAILED / 反序列化失败 → INVALID_JSON（src/stdio_server.rs:233-274）\n     handle_request                     src/stdio_server.rs:361\n      ├─ StdioAdapter::parse_input      src/stdio_server.rs:102\n      ├─ ToolRegistry::find_by_command\n      ├─ DiffRefresh  → handle_diff_refresh（未绑定 context 时 DIFF_REFRESH_CONTEXT_REQUIRED）src/stdio_server.rs:378\n      ├─ Status       → runtime.status() 直返，不经 query          src/stdio_server.rs:385\n      ├─ ReloadGraph  → runtime.reload()                            src/stdio_server.rs:394",
+          "metadata": {
+            "hash": "c281777b7191fb5daa8add36319fc43a",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 6,
+            "score": 0.0031850608065724373,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        },
+        {
+          "score": 0.002540992572903633,
+          "chunk": "| target 缺/前缀错 | `MISSING_TARGET` / `INVALID_TARGET`，adapter 层返回 |\n| 未知命令 | CLI：`UNKNOWN_COMMAND`；stdio 附 `Supported: <列表>` |\n| `diff_refresh` 走 runtime | `DIFF_REFRESH_CONTEXT_REQUIRED`（协议错误） |\n| reload 失败 | `GRAPH_RELOAD_FAILED`；stdio 保留旧图继续可用（见 `tests/stdio_server_tests.rs:902`） |\n| graphdb 打不开 | CLI：`GraphDB::check_graph_db` 输出诊断 JSON 后退出（`src/main.rs:2002`）；stdio：启动即失败 |\n| 拿不到锁 | `GRAPH_DB_LOCK_TIMEOUT`（`src/graph_store.rs:53`），超时由 `--graph-lock-timeout-ms` 控制 |\n| human 不被支持 | `HUMAN_MODE_NOT_SUPPORTED`，降级为 non-human 而非报错（`src/stdio_server.rs:437`） |\n| `check_reload` 失败 | 只记 diagnostic，不中断本次查询 |  \n### 1.7 改动时跑哪些测试  \n```bash\ncargo test --features cli-local --test stdio_server_tests        # stdio 协议与错误码\ncargo test --features cli-local --test m58_3_command_surface_tests  # 三动词表面（子进程调用真实二进制）\ncargo test --features cli-local --test runtime_tests",
+          "metadata": {
+            "hash": "f8de1097a170571cd85422851b6a2f60",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 9,
+            "score": 0.002540992572903633,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        },
+        {
+          "score": 0.0018031664658337831,
+          "chunk": "`ProjectIndexer::prepare`（`src/scanner/indexer.rs:770`）与 `scan` 复用同一套阶段函数，\n**但不调用 `persist_index`**——graphdb 文件在 prepare 前后不变。\n它的 `commit.scanner_entries` / `scanner_deleted_paths` **被置空**（`src/scanner/indexer.rs:895-896`），\n诊断载荷经 `PreparedIndexUpdate` 透传给 diff-refresh 编排器，由调用方合并 pending 后随\n最终 commit 落库。**调用方若忘记挂载，诊断就丢了**（注释明确此责任）。  \n### 1.6 失败后怎样  \n| 场景 | 行为 |\n|------|------|\n| 文件 hash 未变 | 跳过解析，`unchanged` 计数 +1 |\n| TBL 坏字节 / 非法 JSON | 记 `ParseFailure` → `SCANNER_FILE_PARSE_FAILED`，旧图保留，下轮重试 |\n| SPG JSON 解析失败 | **整轮索引失败**（`?` 向上抛）——刻意保持响亮 |\n| 拿不到图锁 | `GRAPH_DB_LOCK_TIMEOUT`，超时可配 |\n| v2 hydrate 失败 | 回落 `open_inner_v1`（`src/graph_redb.rs:243`），记 `v2_hydrate_warning` 并入 `HydrateDiagnostics`；转诊断时复用 `GRAPH_DB_V2_LAYOUT_UNREADABLE` 码（`src/diagnostics.rs:254-262`，仅当 `v2_layout_unreadable == 0` 才另发一条）。**注意**：回落的是 v1 表，不等于 hydrate 结果完整——见 3.5 |",
+          "metadata": {
+            "hash": "c9f959c8adfc3b24c25f993f18bd8415",
+            "name": "topic-scan-incremental-persist",
+            "path": "docs/knowledge/topic-scan-incremental-persist.md",
+            "position": 6,
+            "score": 0.0018031664658337831,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-scan-incremental-persist.md"
+          }
+        },
+        {
+          "score": 0.0011247574584558606,
+          "chunk": "### 1.5 读写什么状态  \n| 状态 | 位置 | 谁写 |\n|------|------|------|\n| 内存图 + redb 句柄 | `GraphRuntime.graph` `src/runtime.rs:158` | `load` / `reload` / `install_replacement` |\n| 派生读模型（DenseGraph 等） | `GraphRuntime.read_model` | 仅 `LongLived` 模式构建 |\n| 指纹（mtime/size/前 4096 字节 hash） | `GraphFingerprint` `src/runtime.rs:226` | `load`；`is_graph_changed` 据此判断（`src/runtime.rs:1361`） |\n| `load_diagnostics` | 含 hydrate 诊断 + `SCANNER_*` 全库合并诊断 | `load_with_project_dir_internal` `src/runtime.rs:403` |\n| 进程级锁超时 | `graph_lock_timeout_ms`（CLI `--graph-lock-timeout-ms`，默认 10000） | `src/cli.rs:91`、`src/graph_redb.rs:27` |  \n### 1.6 失败后怎样  \n| 场景 | 行为 |\n|------|------|\n| budget 非法 | `INVALID_BUDGET`，`src/tool_contract.rs:434` |\n| target 缺/前缀错 | `MISSING_TARGET` / `INVALID_TARGET`，adapter 层返回 |\n| 未知命令 | CLI：`UNKNOWN_COMMAND`；stdio 附 `Supported: <列表>` |",
+          "metadata": {
+            "hash": "e4519ec33b9a04b45ed45abc9eeaa7c0",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 8,
+            "score": 0.0011247574584558606,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        },
+        {
+          "score": 0.0008360903011634946,
+          "chunk": "├─ ReloadGraph  → runtime.reload()                            src/stdio_server.rs:394\n      ├─ check_reload → runtime.reload_if_changed() 前置检查        src/stdio_server.rs:425\n      ├─ human 且 spec 不支持 → HUMAN_MODE_NOT_SUPPORTED 降级为 false  src/stdio_server.rs:437\n      └─ runtime.query(req)             src/stdio_server.rs:462\n```  \n### 1.4 统一汇合点：`GraphRuntime::query`  \n`src/runtime.rs:971`。CLI 与 stdio **在此汇合**，差异只在 adapter 与输出封装。  \n- `ReloadGraph` / `CheckReload` 在 `match` 之前单独处理（`src/runtime.rs:993`、`src/runtime.rs:1025`），因为它们需要 `&mut self`。\n- `DiffRefresh` 到达此处**一律报错** `DIFF_REFRESH_CONTEXT_REQUIRED`（`src/runtime.rs:1099`）——它只能由 stdio handler 或 CLI one-shot 先行拦截。\n- 其余命令分发到 `query` / `explain` / `answer_contract` 等 builder，结果经 `ResponseProcessor::runtime_response` 统一封装 timing 与 diagnostics。  \n### 1.5 读写什么状态  \n| 状态 | 位置 | 谁写 |\n|------|------|------|",
+          "metadata": {
+            "hash": "c9b0d633dc5edf5c42771a8179a216a4",
+            "name": "topic-cli-stdio-to-query",
+            "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+            "position": 7,
+            "score": 0.0008360903011634946,
+            "type": "code",
+            "url": "https://cnb.cool/wu2305/metadata-checker/-/blob/19cbd1e51f668f75058d9e15c4c7d75919069dd8/docs/knowledge/topic-cli-stdio-to-query.md"
+          }
+        }
+      ]
+    }
+  ]
+}
