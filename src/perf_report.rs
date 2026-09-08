@@ -1157,4 +1157,33 @@ mod tests {
             })
         );
     }
+    /// 缺失观测不能填零参与均值；明确记录的零值则必须参与统计。
+    #[test]
+    fn profile_summaries_distinguish_missing_samples_from_recorded_zero() {
+        assert_eq!(summarize_stages(&[]), Vec::new());
+        assert_eq!(summarize_counters(&[]), std::collections::BTreeMap::new());
+        let mut missing = sample(99, 99);
+        missing.profile.stages.clear();
+        missing.profile.counters.clear();
+        let samples = vec![sample(0, 0), missing, sample(3, 5)];
+        assert_eq!(
+            summarize_stages(&samples),
+            vec![StageCostSummary {
+                name: "stage".to_string(),
+                sample_count: 2,
+                min_ms: 0,
+                max_ms: 3,
+                avg_ms: 1.5,
+            }]
+        );
+        assert_eq!(
+            summarize_counters(&samples).get("counter"),
+            Some(&CounterSummary {
+                sample_count: 2,
+                min: 0,
+                max: 5,
+                avg: 2.5,
+            })
+        );
+    }
 }

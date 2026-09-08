@@ -21,7 +21,7 @@ const ACTION_ID: &str = "action:app/cache_contract.spg|button1|action1";
 struct CountingGraphStore<'a> {
     inner: &'a MemoryGraphStore,
     edge_reads: RefCell<HashMap<String, usize>>,
-    fail_node: Option<String>,
+    fail_node: Option<(String, usize)>,
 }
 
 impl CountingGraphStore<'_> {
@@ -42,7 +42,11 @@ impl GraphReadStore for CountingGraphStore<'_> {
             *count += 1;
             *count
         };
-        if self.fail_node.as_deref() == Some(node_id) && read_count == 1 {
+        if self
+            .fail_node
+            .as_ref()
+            .is_some_and(|(target, read)| target == node_id && *read == read_count)
+        {
             return Err(GraphStoreError::ReadFailed {
                 reason: format!("test edge read failure for {node_id}"),
             });
@@ -115,22 +119,31 @@ fn page_logic_reuses_action_edges_between_edge_scan_and_action_flow() -> anyhow:
     // 图闭包、edge scan、前置条件和路径阶段各读取一次 action 邻接。
     // action flow 必须复用 edge scan 的结果，不能增加第五次底层读取。
     assert_eq!(counted.edge_reads_for(ACTION_ID), 4);
+    let next_output = build_query_page_logic_output(&counted, PAGE_ID, None, "normal")?;
+    assert_eq!(next_output, output);
+    assert_eq!(
+        counted.edge_reads_for(ACTION_ID),
+        8,
+        "cache must be scoped to one query"
+    );
     Ok(())
 }
 
 #[test]
 fn page_logic_preserves_graph_read_errors() {
     let graph = minimal_page_graph();
-    let counted = CountingGraphStore {
-        inner: &graph,
-        edge_reads: RefCell::new(HashMap::new()),
-        fail_node: Some(ACTION_ID.to_string()),
-    };
-
-    let error = build_query_page_logic_output(&counted, PAGE_ID, None, "normal")
-        .expect_err("an underlying GraphReadStore error must reach the query caller");
-    assert!(error.to_string().contains("test edge read failure"));
-    assert_eq!(counted.edge_reads_for(ACTION_ID), 1);
+    // 第一次读取覆盖图闭包，第二次读取覆盖共享 edge bundle 的错误传播。
+    for failed_read in [1, 2] {
+        let counted = CountingGraphStore {
+            inner: &graph,
+            edge_reads: RefCell::new(HashMap::new()),
+            fail_node: Some((ACTION_ID.to_string(), failed_read)),
+        };
+        let error = build_query_page_logic_output(&counted, PAGE_ID, None, "normal")
+            .expect_err("an underlying GraphReadStore error must reach the query caller");
+        assert_eq!(error.to_string().contains("test edge read failure"), true);
+        assert_eq!(counted.edge_reads_for(ACTION_ID), failed_read);
+    }
 }
 
 #[test]
