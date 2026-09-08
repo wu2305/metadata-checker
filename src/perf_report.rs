@@ -377,8 +377,9 @@ fn build_page_logic_cost_model(
             "path_anchor_extract_ms",
             "path_candidate_search_ms",
             "path_classification_ms",
-            "path_related_rejected_expansion_ms",
+            // 使用实际的 JSON 物化和跨页上下文计时，不虚构按分类拆分的耗时。
             "path_json_build_ms",
+            "path_side_context_ms",
             "path_base_candidates",
             "path_graph_cache_hits",
         ] {
@@ -409,9 +410,10 @@ fn build_page_logic_cost_model(
         let mut cost_drivers = Vec::new();
         push_stage_driver(&mut cost_drivers, stage_summary, "prerequisites");
         for name in [
-            "prerequisites_display_ms",
-            "prerequisites_data_ms",
-            "prerequisites_action_ms",
+            "prerequisites_component_scan_ms",
+            "prerequisites_action_scan_ms",
+            "prerequisites_data_source_scan_ms",
+            "prerequisites_sort_ms",
         ] {
             push_counter_driver(&mut cost_drivers, counter_summary, name);
         }
@@ -989,6 +991,13 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         .query(lifecycle_request(ToolCommand::CheckReload))
         .context("profile runtime check_reload")?;
     profile.record_stage("runtime_check_reload_unchanged", started_at.elapsed());
+    let reloaded = check_reload
+        .result
+        .get("reloaded")
+        .and_then(|value| value.as_bool())
+        .context("profile runtime check_reload result.reloaded must be a boolean")?;
+    // 阶段名为兼容历史报告保留；实际是否发生 reload 以 CheckReload result 为准。
+    profile.set_counter("runtime_check_reload_reloaded", reloaded as u64);
     profile.set_counter(
         "runtime_check_reload_diagnostics",
         check_reload.diagnostics.len() as u64,
@@ -1091,4 +1100,52 @@ fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CounterSummary, PageLogicProfileSample, StageCostSummary, summarize_counters,
+        summarize_stages,
+    };
+    use crate::perf_profile::PerfProfile;
+    use std::time::Duration;
+
+    fn sample(stage_ms: u64, counter_value: u64) -> PageLogicProfileSample {
+        let mut profile = PerfProfile::new("test");
+        profile.record_stage("stage", Duration::from_millis(stage_ms));
+        profile.set_counter("counter", counter_value);
+        PageLogicProfileSample {
+            sample_index: 0,
+            profile,
+            output_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn profile_summaries_calculate_exact_stage_and_counter_statistics() {
+        let samples = vec![sample(2, 3), sample(8, 9), sample(5, 6)];
+
+        assert_eq!(
+            summarize_stages(&samples),
+            vec![StageCostSummary {
+                name: "stage".to_string(),
+                sample_count: 3,
+                min_ms: 2,
+                max_ms: 8,
+                avg_ms: 5.0,
+            }]
+        );
+
+        let summaries = summarize_counters(&samples);
+        assert_eq!(
+            summaries.get("counter"),
+            Some(&CounterSummary {
+                sample_count: 3,
+                min: 3,
+                max: 9,
+                avg: 6.0,
+            })
+        );
+    }
 }

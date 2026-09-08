@@ -2,9 +2,11 @@
 
 use metadata_checker::graph::GraphDB;
 use metadata_checker::perf_report::{
-    PageLogicProfileScenario, build_core_profile_report, build_page_logic_profile_report,
+    CounterSummary, PageLogicProfileScenario, PerformanceCostModel, build_core_profile_report,
+    build_page_logic_profile_report,
 };
 use metadata_checker::scanner::scan_project;
+use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn fixture_graph() -> anyhow::Result<GraphDB> {
@@ -19,6 +21,32 @@ fn fixture_graph() -> anyhow::Result<GraphDB> {
         &db_path,
     )?;
     GraphDB::open(&db_path)
+}
+
+fn assert_counter_drivers_match_summary(
+    model: &PerformanceCostModel,
+    counter_summary: &BTreeMap<String, CounterSummary>,
+    expected_names: &[&str],
+) {
+    let expected = expected_names
+        .iter()
+        .map(|name| {
+            let counter = counter_summary
+                .get(*name)
+                .unwrap_or_else(|| panic!("missing counter summary for {name}"));
+            format!("counter.{name}.avg={:.1}", counter.avg)
+        })
+        .collect::<Vec<_>>();
+    let actual = model
+        .cost_drivers
+        .iter()
+        .filter(|driver| driver.starts_with("counter."))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual, expected,
+        "cost model drivers must mirror counter summary"
+    );
 }
 
 #[test]
@@ -61,8 +89,67 @@ fn m51_page_logic_profile_report_summarizes_stage_and_counter_costs() -> anyhow:
         .counter_summary
         .get("edges_scanned")
         .expect("edges_scanned counter summary is required");
-    assert_eq!(edges_scanned.sample_count, 2);
-    assert!(edges_scanned.max > 0);
+    let edge_values = scenario_report
+        .samples
+        .iter()
+        .map(|sample| sample.profile.counter("edges_scanned"))
+        .collect::<Vec<_>>();
+    let edge_total: u64 = edge_values.iter().sum();
+    assert_eq!(edges_scanned.sample_count, edge_values.len());
+    assert_eq!(
+        edges_scanned.min,
+        edge_values.iter().copied().min().unwrap()
+    );
+    assert_eq!(
+        edges_scanned.max,
+        edge_values.iter().copied().max().unwrap()
+    );
+    assert_eq!(
+        edges_scanned.avg,
+        edge_total as f64 / edge_values.len() as f64
+    );
+
+    let path_model = scenario_report
+        .cost_model
+        .iter()
+        .find(|model| model.hotspot == "path_summary")
+        .expect("path_summary cost model is required");
+    assert_counter_drivers_match_summary(
+        path_model,
+        &scenario_report.counter_summary,
+        &[
+            "path_anchor_extract_ms",
+            "path_candidate_search_ms",
+            "path_classification_ms",
+            "path_json_build_ms",
+            "path_side_context_ms",
+            "path_base_candidates",
+            "path_graph_cache_hits",
+        ],
+    );
+    assert_eq!(
+        path_model
+            .cost_drivers
+            .iter()
+            .any(|driver| driver.contains("path_related_rejected_expansion_ms")),
+        false
+    );
+
+    let prerequisites_model = scenario_report
+        .cost_model
+        .iter()
+        .find(|model| model.hotspot == "prerequisites")
+        .expect("prerequisites cost model is required");
+    assert_counter_drivers_match_summary(
+        prerequisites_model,
+        &scenario_report.counter_summary,
+        &[
+            "prerequisites_component_scan_ms",
+            "prerequisites_action_scan_ms",
+            "prerequisites_data_source_scan_ms",
+            "prerequisites_sort_ms",
+        ],
+    );
     assert!(
         scenario_report
             .cost_model
@@ -183,12 +270,27 @@ fn m52_core_profile_report_records_detailed_stage_contract() -> anyhow::Result<(
                 "runtime_one_shot_total_ms_n10",
                 "runtime_long_lived_total_ms_n10",
                 "runtime_long_lived_warmed_total_ms_n10",
+                "runtime_check_reload_reloaded",
             ] {
                 assert!(
                     scenario_report.counter_summary.contains_key(counter),
                     "runtime profile must include {counter}"
                 );
             }
+            let reload_reloaded = scenario_report
+                .counter_summary
+                .get("runtime_check_reload_reloaded")
+                .expect("runtime check_reload result counter is required");
+            assert_eq!(reload_reloaded.sample_count, 1);
+            assert_eq!(reload_reloaded.min, 0);
+            assert_eq!(reload_reloaded.max, 0);
+            assert_eq!(reload_reloaded.avg, 0.0);
+            assert_eq!(
+                scenario_report.samples[0]
+                    .profile
+                    .counter("runtime_check_reload_reloaded"),
+                0
+            );
         }
     }
     Ok(())
