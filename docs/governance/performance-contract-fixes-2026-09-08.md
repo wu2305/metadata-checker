@@ -22,16 +22,18 @@
   毫秒分辨率下合法的0被保留。计时字段存在性与实际缓存/输出计数分别断言。
 - **预算**：原 fixture 明确产生非空 candidate/rejected 桶后验证 compact/normal 裁剪，
   同时检查 primary/related 桶保留；四条条件路径的最小图在保底提升后剩两条 supporting，
-  验证 full/normal 保留、compact 删除，并对比有/无 warm 缓存的完整 canonical JSON。
+  验证 full/normal 保留、compact 删除，并对比有/无 warm 缓存的完整序列化 JSON 字节。
 - **确定性**：保底规则原用 HashMap，遍历顺序会改变路径提升说明。
-  改为有序映射后，同图 warm/query 不再因规则随机顺序出现内容漂移。
+  改为显式优先级数组，依次为 action_write、cross_page_writer、data_prerequisite、
+  display_gate、target_component、value_source；同图 warm/query 不再因规则随机顺序漂移。
+  重叠候选测试精确约束提升后的主路径集合、剩余候选和提升说明。
 - **runtime 降级**：load 复用独立的读模型构建函数。故障 store 在 dense 构建完成后
   拒绝读取，验证真实 PageDependencyIndex 构建失败时 dense 仍可用、索引为空且状态为
   Partial，并精确检查唯一诊断的 code/severity/count/answer_impact/阶段/位置及计时总和。
   正常分支验证 Full 状态与实际页面映射；注入点在生产构建函数，不是公开 load 的磁盘故障。
 
-完整 JSON 比较中的 canonicalization 会重排数组，不能表述为原始字节或顺序相等。
-新 supporting 测试仍保留分类说明字段，未通过删除差异字段绕过不稳定问题。
+首轮完整 JSON 比较使用 canonicalization，会重排数组，其证据不能表述为原始字节相等。
+审查返修已删除这层规范化，直接比较序列化字节，保留所有数组顺序与分类说明字段。
 
 ## 验证发现与修复过程
 
@@ -48,7 +50,7 @@
 四项回退探针均要求测试实际进入断言并失败，编译失败不算有效回归证据。
 探针只在远端临时修改，finally 恢复原文件，不进入提交。
 
-## 最终验证与证据
+## 首轮统一验证与证据
 
 代码提交：`27cbec70b7133a815e2d451eb044020cc8fe2c3d`。
 验证在 CNB workspace `cnb-v1o-1k1vopn9p` 的 `/workspace` 通过 SSH login shell 执行。
@@ -80,6 +82,24 @@ for item in evidence['logs'] + evidence['scripts']:
 print(evidence['code_commit'], evidence['results'])
 PY
 ```
+
+## 审查返修与最终验证
+
+首轮 fallback 审查指出：有序映射仍隐式依赖规则名称决定优先级；递归排序数组的测试
+会掩盖路径段和证据顺序变化。`5bba1f1` 将优先级改为显式数组，并加入重叠候选测试；
+同时删除两处等价测试的全部数组规范化，直接比较 `serde_json::to_vec`。
+`8addd0f` 清理随之失效的 import。
+
+最终代码提交：`8addd0ff117eea57f33757b2b2a37a5b67e4f8b9`。
+同一 CNB workspace 重跑首轮全部定向检查及 CLI snapshot：95项定向/单元测试、额外1项
+快照通过，2项真实语料测试 ignored。增加的1项为重叠保底优先级测试；fmt、bench 编译和
+WASM 检查均通过，原始数组顺序的字节比较也通过，未重置快照。
+
+[返修完整日志与脚本](evidence/performance-contract-review-fixes-2026-09-08.json.gz)包含8份
+检查日志和执行脚本，每份日志都有 COMMIT、COMMAND、EXIT_CODE 0。
+压缩包 SHA-256：`ac9b4d9afb4cdcd9ff069623152f84b9b1f951a79f54418b245d8a929790126e`。
+可复用上面的解包校验方式，替换压缩包路径与 SHA-256。
+首轮证据包及四项回退探针仍保留原提交标识，不把它们改标成最终代码上的新运行。
 
 ## 影响与剩余边界
 
