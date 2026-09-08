@@ -16,7 +16,7 @@ use std::time::Duration;
 const PAGE_ID: &str = "page:app/availability_work.spg";
 const PAGE_PATH: &str = "app/availability_work.spg";
 const COMPONENT_ID: &str = "comp:app/availability_work.spg|input1";
-const MODEL_ID: &str = "model:app/availability_work.spg|only";
+const MODEL_ID: &str = "model:only";
 const MODEL_READ_DELAY_MS: u64 = 10;
 
 /// 模型只由前置条件的符号引用引入，不作为页面 data source 或路径遍历边。
