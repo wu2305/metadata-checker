@@ -12,7 +12,6 @@ use metadata_checker::runtime::{
     page_logic_cache_warm_structural_writes, reset_page_logic_cache_write_counters,
 };
 use metadata_checker::scanner::scan_project;
-use serde_json::Value;
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
