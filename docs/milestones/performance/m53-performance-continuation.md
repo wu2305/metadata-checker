@@ -67,15 +67,17 @@ M53 不再重复做 query-time 临时 fact index。M52 已证明它会变慢。
 
 M53 默认接受 init/load 变重，只要 query-time 和多次查询总成本下降。
 
-### 4. Page logic fragment contract
+### 4. Page logic fragment contract（历史原型，未合并）
 
-已实现 `cli-local` native 文件后端 spike：
+`codex/m52-performance-optimization` 分支曾实现 `cli-local` native 文件后端 spike，
+未合入 main；以下记录原型能力，不代表当前代码提供文件后端：
 
 - 持久化 `availability` / `prerequisites` / `paths` / `warm_stages` / `meta`。
 - fragment hit 后恢复为现有 `PageLogicAvailabilityCache`。
 - miss / schema mismatch / fingerprint mismatch fallback 当前 Rust 路径。
 
-M53 的稳定边界不是文件目录格式，而是 page-logic fragment bundle。native 文件、browser IndexedDB、memory 都只是后端。
+原型提出以 page-logic fragment bundle 作为稳定边界，native 文件、browser IndexedDB、memory
+作为候选后端。fragment 跨平台持久化已移出 M53，待有跨 session 复用需求再评估。
 
 ### 5. Reload unchanged 快路径
 

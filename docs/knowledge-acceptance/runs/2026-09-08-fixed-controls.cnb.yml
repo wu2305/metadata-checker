@@ -1,0 +1,19 @@
+$:
+  api_trigger_knowledge_acceptance:
+    - name: knowledge-fixed-controls
+      docker:
+        image: python:3.12-slim
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+      stages:
+        - name: script regressions
+          script: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+        - name: capture fixed input controls
+          script: python3 docs/knowledge-acceptance/runs/2026-09-08-fixed-controls.py
+      endStages:
+        - name: archive control evidence
+          script: |
+            test -s target/knowledge-acceptance/fixed-controls.json.gz || exit 1
+            echo KB_EVIDENCE_BEGIN
+            base64 target/knowledge-acceptance/fixed-controls.json.gz
+            echo KB_EVIDENCE_END

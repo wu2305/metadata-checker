@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "artifact_sha256": "109def4d582f30d12ed483367a5dd82145af32429216b99150ec45704e08b2dc",
+  "status": "diagnostic_regression_only_not_accepted",
+  "criteria": "../2026-09-08-fixed-controls.md#预先规定的判断方式",
+  "counts": {
+    "answers": {
+      "pass": 6,
+      "partial": 4,
+      "fail": 2
+    },
+    "retrieval_hits": 9
+  },
+  "source_review": [
+    "src/stdio_server.rs:398",
+    "src/stdio_server.rs:425",
+    "src/stdio_server.rs:451",
+    "src/runtime.rs:1028",
+    "src/graph_redb.rs:385",
+    "src/graph_redb.rs:1240",
+    "src/scanner/indexer.rs:732"
+  ],
+  "records": [
+    {
+      "kind": "retrieval",
+      "id": "H1-original",
+      "replicate": 1,
+      "judgment": "retrieval_hit",
+      "reason": "top1 AGENTS.md position 5完整包含预置目录免token、非预置缺配置失败及preflight规则；本轮未请求H1回答。",
+      "top1_score": 0.9806919097900391
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-a",
+      "replicate": 1,
+      "judgment": "retrieval_hit",
+      "reason": "top1 AGENTS.md position 5完整包含预置目录免token、非预置缺配置失败及preflight规则；本轮未请求H1回答。",
+      "top1_score": 0.9669764637947083
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-b",
+      "replicate": 1,
+      "judgment": "retrieval_hit",
+      "reason": "top1 AGENTS.md position 5完整包含预置目录免token、非预置缺配置失败及preflight规则；本轮未请求H1回答。",
+      "top1_score": 0.9643214344978333
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-original",
+      "replicate": 2,
+      "judgment": "retrieval_hit",
+      "reason": "top1 AGENTS.md position 5完整包含预置目录免token、非预置缺配置失败及preflight规则；本轮未请求H1回答。",
+      "top1_score": 0.9806919097900391
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-a",
+      "replicate": 2,
+      "judgment": "retrieval_hit",
+      "reason": "top1 AGENTS.md position 5完整包含预置目录免token、非预置缺配置失败及preflight规则；本轮未请求H1回答。",
+      "top1_score": 0.9669764637947083
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-b",
+      "replicate": 2,
+      "judgment": "retrieval_hit",
+      "reason": "top1 AGENTS.md position 5完整包含预置目录免token、非预置缺配置失败及preflight规则；本轮未请求H1回答。",
+      "top1_score": 0.9643214344978333
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-original",
+      "replicate": 3,
+      "judgment": "retrieval_hit",
+      "reason": "top1 AGENTS.md position 5完整包含预置目录免token、非预置缺配置失败及preflight规则；本轮未请求H1回答。",
+      "top1_score": 0.9806919097900391
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-a",
+      "replicate": 3,
+      "judgment": "retrieval_hit",
+      "reason": "top1 AGENTS.md position 5完整包含预置目录免token、非预置缺配置失败及preflight规则；本轮未请求H1回答。",
+      "top1_score": 0.9669764637947083
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-b",
+      "replicate": 3,
+      "judgment": "retrieval_hit",
+      "reason": "top1 AGENTS.md position 5完整包含预置目录免token、非预置缺配置失败及preflight规则；本轮未请求H1回答。",
+      "top1_score": 0.9643214344978333
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 1,
+      "treatment": "baseline",
+      "judgment": "partial",
+      "reason": "正确区分stdio ReloadGraph与runtime内部分支，也区分布尔选项和命令；但未明确说明stdio CheckReload命令保留并进入runtime，未满足预先规定的完整路径要求。",
+      "answer_sha256": "f53019650e060db958a3c15fd366409e69e6edd466fc631af1aefa125d8b0a53"
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 1,
+      "treatment": "claim-check",
+      "judgment": "partial",
+      "reason": "正确列出stdio三个短路分支和runtime内部分支，但未明确给出stdio CheckReload进入runtime的路径。",
+      "answer_sha256": "9da6ce31bbff713402d60550bfa34b5e279f1cecacfd4d2b094129d2d52a5331"
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 1,
+      "treatment": "baseline",
+      "judgment": "pass",
+      "reason": "同事务落库、全库合并与no-op加载解释正确；未把hydrate_diagnostics当scanner读取API。出现hydrate内容时明确作为图恢复完整性限制，片段可支持。",
+      "answer_sha256": "f7c887be2c1705d937921f8846d307426628efaba984ad9b65d8a861b5720d66"
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 1,
+      "treatment": "claim-check",
+      "judgment": "pass",
+      "reason": "同事务落库、全库合并与no-op加载解释正确；未把hydrate_diagnostics当scanner读取API。出现hydrate内容时明确作为图恢复完整性限制，片段可支持。",
+      "answer_sha256": "cdf5e47ea3900293214728b7a419564145151908aaa955cdf045623a5b6a3079"
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 2,
+      "treatment": "claim-check",
+      "judgment": "partial",
+      "reason": "正确区分stdio ReloadGraph短路与runtime内部处理，但未明确给出stdio CheckReload进入runtime的路径。",
+      "answer_sha256": "ca98157e8a167e91ddbbded8c6fb4e30778b7d3264a17fedc6f6a97e96067e8a"
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 2,
+      "treatment": "baseline",
+      "judgment": "fail",
+      "reason": "将CheckReload命令说成在stdio :425走reload_if_changed前置检查；该条件是invocation.check_reload布尔项，命令本身在runtime :1028处理。末段区分布尔项未撤回前面的错误机制。",
+      "answer_sha256": "76161f286e22d90173fe4c45e5c0fdab074e7088d62796e69aab375317d9aefe"
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 2,
+      "treatment": "claim-check",
+      "judgment": "pass",
+      "reason": "同事务落库、全库合并与no-op加载解释正确；未把hydrate_diagnostics当scanner读取API。出现hydrate内容时明确作为图恢复完整性限制，片段可支持。",
+      "answer_sha256": "1bedcb929481402791ebef5ebdb27d6131c2226849d554a61d02a4d6c6ef4536"
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 2,
+      "treatment": "baseline",
+      "judgment": "pass",
+      "reason": "同事务落库、全库合并与no-op加载解释正确；未把hydrate_diagnostics当scanner读取API。出现hydrate内容时明确作为图恢复完整性限制，片段可支持。",
+      "answer_sha256": "16fe9603f05baa508be491899048690d01ac7b1d912ff0c02801780f357eabbf"
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 3,
+      "treatment": "baseline",
+      "judgment": "partial",
+      "reason": "两层判断与ReloadGraph路径正确，但未交代stdio CheckReload仍进入runtime的路径。",
+      "answer_sha256": "65be0f147b337d47e0c6f4df03a58f2059d2951d79ee717e90cc204f211d0968"
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 3,
+      "treatment": "claim-check",
+      "judgment": "fail",
+      "reason": "首段把CheckReload混为check_reload布尔项并声称不调用query，末段又说继续query；包含错误机制与自相矛盾。",
+      "answer_sha256": "e93b410ba0f6318cdbfea68e29bbf5a70e384926816b0e2e4a189390aef26a62"
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 3,
+      "treatment": "baseline",
+      "judgment": "pass",
+      "reason": "同事务落库、全库合并与no-op加载解释正确；未把hydrate_diagnostics当scanner读取API。出现hydrate内容时明确作为图恢复完整性限制，片段可支持。",
+      "answer_sha256": "66922933a3adb6cbfc87c3053e393c6765fc663644130df7ad1a2ae444d5f3d8"
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 3,
+      "treatment": "claim-check",
+      "judgment": "pass",
+      "reason": "同事务落库、全库合并与no-op加载解释正确；未把hydrate_diagnostics当scanner读取API。出现hydrate内容时明确作为图恢复完整性限制，片段可支持。",
+      "answer_sha256": "d81590a8f659bb6f792af24080088459ce85fb8915f461ec9d548ff44afadc27"
+    }
+  ]
+}

@@ -1,0 +1,1979 @@
+{
+  "schema_version": 1,
+  "main_sha": "9adb5d0757cc3f2c56d0c92cd6098c8e866dd2cd",
+  "input": "branch-cleanup-2026-09-08.json",
+  "input_sha256": "cfbd9f2319b47927de6b4a00fbe37ea2344dada488782868e3d27f65160fde84",
+  "method": "For each historical candidate verify exact path/mode/blob in evidence commit tree and ancestry to pinned main. Historical reachability does not establish present behavior or intent of later changes. No tags are removed.",
+  "counts": {
+    "exact_version_in_main_history": 128,
+    "requires_patch_review": 43
+  },
+  "records": [
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "docs/milestones/INDEX.md",
+      "archive_entry": [
+        "100644",
+        "320ed6e88e9f7b5bedcd2e2a3cfebcaf485a7757"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4a7ffb28037f2d3a72d6a0192eb634f1fa71c8b",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "docs/milestones/ai-eval/m58-cheap-model-comprehension-eval.md",
+      "archive_entry": [
+        "100644",
+        "12b1c3bc1dbc473ee4d630e0446ae4da531f8a8e"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4a7ffb28037f2d3a72d6a0192eb634f1fa71c8b",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "src/main.rs",
+      "archive_entry": [
+        "100644",
+        "168a84389dc6eca3f353e920bb60654d64a1b3c6"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d378a0c94beba94d12b7109faf6a4617f834d2bf",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "src/query/model.rs",
+      "archive_entry": [
+        "100644",
+        "a19ac06344737ca7a86864d7c6477e632da2022d"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d378a0c94beba94d12b7109faf6a4617f834d2bf",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "tests/fixtures/corpus/ai_eval/xiaoshouyi_large_real_cases.json",
+      "archive_entry": [
+        "100644",
+        "b6f89c42e837110b15d80f58f34852b1c3906295"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "e7d94817420f635d7578c4049b9d56f41dd83d01",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "tests/m59_command_surface_tests.rs",
+      "archive_entry": [
+        "100644",
+        "2c890b217cd4306729a99484d79d6d3f659e68b7"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b56032efcfb69ccca236e501429e77130e33658e",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-governance-c3",
+      "archive_commit": "34bfdc10ef71b25e558a408b636f2672761b3271",
+      "path": "AGENTS.md",
+      "archive_entry": [
+        "100644",
+        "7f993b07c826dfeb9f09ba4042cf018ce5a8b1fa"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "3a6530f5aeb71638377343e3c460819c6669fd44",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-governance-c3",
+      "archive_commit": "34bfdc10ef71b25e558a408b636f2672761b3271",
+      "path": "docs/README.md",
+      "archive_entry": [
+        "100644",
+        "613f3ff81b3bbfe21af1d73196755508a9bc6c01"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "3a6530f5aeb71638377343e3c460819c6669fd44",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-governance-c3",
+      "archive_commit": "34bfdc10ef71b25e558a408b636f2672761b3271",
+      "path": "docs/archive/roadmap/m46-local-cli-remote-metadata-index-and.md",
+      "archive_entry": [
+        "100644",
+        "8558f3758132a75cb388960fe54a06a31dbdaf37"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "3a6530f5aeb71638377343e3c460819c6669fd44",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-governance-c3",
+      "archive_commit": "34bfdc10ef71b25e558a408b636f2672761b3271",
+      "path": "docs/milestones/INDEX.md",
+      "archive_entry": [
+        "100644",
+        "e23333671c7549d6fbb7e26b5b673b71ec0dd14d"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "3a6530f5aeb71638377343e3c460819c6669fd44",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": ".cnb.yml",
+      "archive_entry": [
+        "100644",
+        "f5c6685c7d45586f22301471efedc007db0992fe"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": ".cursor/settings.json",
+      "archive_entry": [
+        "100644",
+        "36b564bdb5c2b2aa3c13aa9d4aad81b8a4f7bc3c"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "Cargo.toml",
+      "archive_entry": [
+        "100644",
+        "fc35a09bc8129358e07670eb5f221f6d9f250bf5"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "benches/redb_persistence_bench.rs",
+      "archive_entry": [
+        "100644",
+        "1944cf867a5d690cc748660c73365f86bd1a8043"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "docs/README.md",
+      "archive_entry": [
+        "100644",
+        "4665fb3e04c1f73875cb7a85bbda852e418c5241"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "docs/archive/roadmap/m46-local-cli-remote-metadata-index-and.md",
+      "archive_entry": [
+        "100644",
+        "0c2712f8edfc704fb101aa1146e80c0aaf0ad746"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "docs/governance/planning.md",
+      "archive_entry": [
+        "100644",
+        "c6ed45c247a5d27b37b4cbacfc69a5a77b038696"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "docs/milestones/INDEX.md",
+      "archive_entry": [
+        "100644",
+        "67f07a82e8442fbcc22dfe0157060409d49a93ca"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "docs/milestones/ai-eval/m58-cheap-model-comprehension-eval.md",
+      "archive_entry": [
+        "100644",
+        "6340e66033f2105b96b370700cda19aa80296a06"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "docs/milestones/performance/m54-diff-refresh-pipeline.md",
+      "archive_entry": [
+        "100644",
+        "a9a0077bfeaf1b3c76999040acc9f159219e62b8"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "docs/milestones/performance/performance-baseline.md",
+      "archive_entry": [
+        "100644",
+        "854f6d6064755b3a2ea9d7642da0b86053b8788d"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "docs/specs/2026-07-17-cheap-model-comprehension-eval-design.md",
+      "archive_entry": [
+        "100644",
+        "1094b38eddce413885e4eab9b78735de2c24ed4f"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/cli.rs",
+      "archive_entry": [
+        "100644",
+        "ca525439b11834df445fbe119a9db3266f080566"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/dense_graph.rs",
+      "archive_entry": [
+        "100644",
+        "7cb2d193f142213dd4913bf9edb6e3939450bb91"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/diff_refresh/mod.rs",
+      "archive_entry": [
+        "100644",
+        "480655775c2e2d43b152ddb62a67d4f2d8359059"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/diff_refresh/orchestrator.rs",
+      "archive_entry": [
+        "100644",
+        "53098a96305b156f2398d51c65c3931fb5b2a2fe"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/explain.rs",
+      "archive_entry": [
+        "100644",
+        "56f1116bfb9f87f3a85a1c156bc3d73a3cde8f70"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/explain/condition_facts/conditions.rs",
+      "archive_entry": [
+        "100644",
+        "5668dfd44f078447d0493cecd5d53c3e794f1801"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/explain/condition_facts/mod.rs",
+      "archive_entry": [
+        "100644",
+        "5371ef9eebe4e449d9c0158a5f8fef2a58a7a065"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/graph_redb.rs",
+      "archive_entry": [
+        "100644",
+        "390cdf48701fee6e574cc09dd30b1fc96a8274ec"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/graph_redb_v2.rs",
+      "archive_entry": [
+        "100644",
+        "c179498e582d5d6c78ed334032e772a63652de7a"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/graph_store.rs",
+      "archive_entry": [
+        "100644",
+        "0f9cf2e56b3b606b981ce4e0feb54709acd19b16"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/lib.rs",
+      "archive_entry": [
+        "100644",
+        "753969be4f302ccde23055c8f9a59943b56a271c"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/main.rs",
+      "archive_entry": [
+        "100644",
+        "98f0f0548a235f550897c9b84e6c0ade282c7a33"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/memory_graph_store.rs",
+      "archive_entry": [
+        "100644",
+        "fcccc653cc61a58666494c02bd4e2698512770fa"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/perf_report.rs",
+      "archive_entry": [
+        "100644",
+        "c3ed6ab9a390fdc4dcde86179dd2083e528ae20a"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/query.rs",
+      "archive_entry": [
+        "100644",
+        "96457e585035473aa150063cd25a355e064c6a60"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/query/page_logic.rs",
+      "archive_entry": [
+        "100644",
+        "dbfb41ab7387d56ab199ee9ca46f1e19c58ad8f1"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/query/page_logic/materialized_availability.rs",
+      "archive_entry": [
+        "100644",
+        "f3f4316c4710f19ea201c1e67ae26ff4788af379"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/query/page_logic/page_diff.rs",
+      "archive_entry": [
+        "100644",
+        "cce0cf5aa0f054d72ff577310cf71d10ab8e3b87"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/runtime.rs",
+      "archive_entry": [
+        "100644",
+        "48cac5a3dbd2c0c72ff212314cea9ea899c42e76"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/scanner/indexer.rs",
+      "archive_entry": [
+        "100644",
+        "8154b5a0de4bc0f725dd1328a1832fdec980301b"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/session/mod.rs",
+      "archive_entry": [
+        "100644",
+        "cd5f3fd32ef6cd9274df90f8b833259cfab818c0"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/session/reqwest_provider.rs",
+      "archive_entry": [
+        "100644",
+        "55e1185361be882e38d4bf2b8bc3017ba82394ac"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/stdio_server.rs",
+      "archive_entry": [
+        "100644",
+        "2a3dfb88374f6512d001e4023760c7e267d26455"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "src/tool_contract.rs",
+      "archive_entry": [
+        "100644",
+        "f9e46be10ad5c175e1e58aa33aea062d853110c8"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/dense_graph_tests.rs",
+      "archive_entry": [
+        "100644",
+        "fae32cc96c2fe51e3d3844a618ad68a45669ef1b"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/graph_store_tests.rs",
+      "archive_entry": [
+        "100644",
+        "6739e4e748b93137d06f4c005ffbecb4e64a80cb"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/m54_diff_refresh_orchestrator_tests.rs",
+      "archive_entry": [
+        "100644",
+        "06dbbf7d4b40c723284671e0c52bfcdb19f26cc0"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/m54_diff_refresh_prepare_tests.rs",
+      "archive_entry": [
+        "100644",
+        "4cb4341c63cde3ebb617ec5555590155850dbf5d"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/m54_m56_followup_tests.rs",
+      "archive_entry": [
+        "100644",
+        "908c1486cb864993caacb9d3fcab173d031706ae"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/m55_delete_invalidation_tests.rs",
+      "archive_entry": [
+        "100644",
+        "d3ddc2f105bcc889e700a6e4a42bbf3543f0edd3"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/m55_page_dependency_index_tests.rs",
+      "archive_entry": [
+        "100644",
+        "09272593496ee9b5f3644c472f2901290827f4ca"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/m56_persist_report_tests.rs",
+      "archive_entry": [
+        "100644",
+        "23551bf5d86ecf9383bc6b2a5409705851a08ab1"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/m56_v2_stale_rebuild_tests.rs",
+      "archive_entry": [
+        "100644",
+        "e7527dff32a3852d1872052d55ffff0332512119"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/memory_graph_store_tests.rs",
+      "archive_entry": [
+        "100644",
+        "9ad9830d08339bfe4b7a1707e0abdde1dd9c06a7"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/project_indexer_tests.rs",
+      "archive_entry": [
+        "100644",
+        "f9fc2ad8f9655a5c18dae789b59324f73441a6a9"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/regression_tests.rs",
+      "archive_entry": [
+        "100644",
+        "6801caad77fd2608757679e4aee47c49b333093e"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/docs-m54-m56-diff-refresh-on-main",
+      "archive_commit": "4dd2ddc2bf4fbd7422b873498f186f8a99611c46",
+      "path": "tests/stdio_server_tests.rs",
+      "archive_entry": [
+        "100644",
+        "d671977b29f8e8db4dd93b8ce65eda593fb585e4"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "b4ec419b2e6d8059fa9de97ec5190a26207c0c8d",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/fix-bench-locker",
+      "archive_commit": "436713c1853c7fb42960b8d92e69bfabc990a1b1",
+      "path": "benches/common/external_graph_lock.rs",
+      "archive_entry": [
+        "100644",
+        "4f2c677701a9cc782535b4a5f0b3b04ae5870d3d"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "99632ccd2b5eed4cd4f8d2fb86943e3c17572324",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/fix-bench-locker",
+      "archive_commit": "436713c1853c7fb42960b8d92e69bfabc990a1b1",
+      "path": "benches/redb_persistence_bench.rs",
+      "archive_entry": [
+        "100644",
+        "1468770228e55053ba1d6ccddf5048554ac0edb0"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "99632ccd2b5eed4cd4f8d2fb86943e3c17572324",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/fix-bench-locker",
+      "archive_commit": "436713c1853c7fb42960b8d92e69bfabc990a1b1",
+      "path": "benches/runtime_bench.rs",
+      "archive_entry": [
+        "100644",
+        "a0f3788634c52e7bd683be3b725f9e7275b4adb3"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "99632ccd2b5eed4cd4f8d2fb86943e3c17572324",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/fix-bench-locker",
+      "archive_commit": "436713c1853c7fb42960b8d92e69bfabc990a1b1",
+      "path": "docs/performance-baseline.md",
+      "archive_entry": [
+        "100644",
+        "e6740557707b04958feee02aebfb91fa889a38df"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "840723b1432b0f01653921264e259230b15ff69a",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/fix-bench-locker",
+      "archive_commit": "436713c1853c7fb42960b8d92e69bfabc990a1b1",
+      "path": "tests/bench_external_graph_lock_tests.rs",
+      "archive_entry": [
+        "100644",
+        "368f5f20f13a3d82061022de2469802c09406e20"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "99632ccd2b5eed4cd4f8d2fb86943e3c17572324",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "benches/runtime_bench.rs",
+      "archive_entry": [
+        "100644",
+        "4c64b9fb71f86265814bdd114194a6f68ee0e80c"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "docs/milestones/performance/performance-baseline.md",
+      "archive_entry": [
+        "100644",
+        "a4d4d09a3d085100936d3dae3bb38792eadbdee9"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "src/perf_report.rs",
+      "archive_entry": [
+        "100644",
+        "eb79d72938e08fa61fb3925ea415fb6e77aee961"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "src/query/page_logic/graph_collect.rs",
+      "archive_entry": [
+        "100644",
+        "a48832b02dee25d1651dd7bc9115983e152fb2e1"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "src/query/page_logic/prerequisites.rs",
+      "archive_entry": [
+        "100644",
+        "f331f4de0d4ec2cb286ef37a3d0cdc9811a7f7cd"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": ".cnb.yml",
+      "archive_entry": [
+        "100644",
+        "a6dd74575ed5013696c75a172e89e274861a4311"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "Cargo.toml",
+      "archive_entry": [
+        "100644",
+        "2cc16d0d60767669c5d5f6cc6cf8f285e774b69a"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "Makefile",
+      "archive_entry": [
+        "100644",
+        "8f749de427da0dd2a6485479f4f7c58afdd4e27b"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "src/query/page_logic/prerequisites.rs",
+      "archive_entry": [
+        "100644",
+        "7d99db30d73952e21b8cfd4a95e75ce7d1770a72"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": ".cnb.yml",
+      "archive_entry": [
+        "100644",
+        "5831435936b4a03d24a5021e7f227cce4f8ff321"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "8d58a3d2296c87c8b66a756b47809786023ca1af",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "Cargo.toml",
+      "archive_entry": [
+        "100644",
+        "2cc16d0d60767669c5d5f6cc6cf8f285e774b69a"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "Makefile",
+      "archive_entry": [
+        "100644",
+        "8f749de427da0dd2a6485479f4f7c58afdd4e27b"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "docs/m50-performance-bench-contract.md",
+      "archive_entry": [
+        "100644",
+        "1b8ac4297c8881e393c532036f5b1224ac66d522"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "8d58a3d2296c87c8b66a756b47809786023ca1af",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "docs/m51-performance-diagnosis.md",
+      "archive_entry": [
+        "100644",
+        "53fb34256fd47006948784856f7c2b1a1656132d"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "docs/m53-performance-continuation.md",
+      "archive_entry": [
+        "100644",
+        "19c652fb5dbfde1c2e781524792fec895e023b65"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "8d58a3d2296c87c8b66a756b47809786023ca1af",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "docs/performance-baseline.md",
+      "archive_entry": [
+        "100644",
+        "1a6e80e38c5436eef898a6ae076ee87eed3afd48"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "8d58a3d2296c87c8b66a756b47809786023ca1af",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/dense_graph.rs",
+      "archive_entry": [
+        "100644",
+        "fabc67d5021be858e6fce5ffe9943ef63e7f4d16"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/explain.rs",
+      "archive_entry": [
+        "100644",
+        "2ae8ffcbaf5adf0ad366abfc3ccce3e606732004"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/explain/condition_facts/answer_facts.rs",
+      "archive_entry": [
+        "100644",
+        "6b7687b746b5b8e604f0f69a3cc357d8955fdfb0"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/explain/condition_facts/conditions.rs",
+      "archive_entry": [
+        "100644",
+        "f0dde699f3b1f62f818233ce1cfe247decc482a8"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/explain/condition_facts/mod.rs",
+      "archive_entry": [
+        "100644",
+        "a6c93d7d107cd8142e969748881ff4237999de22"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/graph_redb.rs",
+      "archive_entry": [
+        "100644",
+        "124ad560a34be0a38074b5d97246d99decd525e3"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "8d58a3d2296c87c8b66a756b47809786023ca1af",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/graph_redb_v2.rs",
+      "archive_entry": [
+        "100644",
+        "fbdbefbac596931e31ba84f2b6f0ee54def22e5b"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "8d58a3d2296c87c8b66a756b47809786023ca1af",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "tests/dense_graph_tests.rs",
+      "archive_entry": [
+        "100644",
+        "b96b27e352e75bc42cb901f678694c9bd867bcc2"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "d12757d097da042cfc6342233ef43d971d8fb18c",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "tests/stdio_server_tests.rs",
+      "archive_entry": [
+        "100644",
+        "8b111833444b58b188dd685eb0cf4fa2b6dbca78"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "8d58a3d2296c87c8b66a756b47809786023ca1af",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": ".cnb.yml",
+      "archive_entry": [
+        "100644",
+        "23f3f4da68ad7ab6849df095c71c669acf814dff"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": ".cnb/images/browser-wasm-ci.Dockerfile",
+      "archive_entry": [
+        "100644",
+        "c07145e7cd1fdf11f4ad53eb7670a32e21a0d361"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "benches/runtime_bench.rs",
+      "archive_entry": [
+        "100644",
+        "4c64b9fb71f86265814bdd114194a6f68ee0e80c"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "docs/milestones/performance/performance-baseline.md",
+      "archive_entry": [
+        "100644",
+        "a4d4d09a3d085100936d3dae3bb38792eadbdee9"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/explain/condition_facts/answer_facts.rs",
+      "archive_entry": [
+        "100644",
+        "6df70aa9f040ce5e5fc84bf07da772b3083529a7"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/explain/condition_facts/path_partition.rs",
+      "archive_entry": [
+        "100644",
+        "e51ab678753824c906a6f3e2c35dca9eab31fefb"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/graph_redb.rs",
+      "archive_entry": [
+        "100644",
+        "8a5dc1a880fd8d7ae368cc031ad6ad3d587a2c24"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/perf_report.rs",
+      "archive_entry": [
+        "100644",
+        "eb79d72938e08fa61fb3925ea415fb6e77aee961"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/query.rs",
+      "archive_entry": [
+        "100644",
+        "57b944d8c8abb4b913f80ca26615b9bd09f50349"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/query/page_logic.rs",
+      "archive_entry": [
+        "100644",
+        "74f62bc9ef8c1c28ff0aca89da6cfd917fa62009"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/query/page_logic/graph_collect.rs",
+      "archive_entry": [
+        "100644",
+        "a48832b02dee25d1651dd7bc9115983e152fb2e1"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/query/page_logic/page_diff.rs",
+      "archive_entry": [
+        "100644",
+        "67864811dafd18aa239ba782bcd393e21bf0037a"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/query/page_logic/path_summary.rs",
+      "archive_entry": [
+        "100644",
+        "d9e08ab0197cd2c414e72a4e1ad9886798485a94"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/query/page_logic/prerequisites.rs",
+      "archive_entry": [
+        "100644",
+        "f331f4de0d4ec2cb286ef37a3d0cdc9811a7f7cd"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "src/runtime.rs",
+      "archive_entry": [
+        "100644",
+        "454fd3dc3be5db08699a6a081624dbded2927029"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/perf-m53-warm-cache-observability",
+      "archive_commit": "7117248aaa94a51c560ec7c30da0b915241560e0",
+      "path": "tests/runtime_tests.rs",
+      "archive_entry": [
+        "100644",
+        "0f222a045f0f15168b4430917a7f005499283f2e"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "be9a1441f5242c58785937acc6227d400eafcb51",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": ".cnb.yml",
+      "archive_entry": [
+        "100644",
+        "f2d962cf3a264484b21b7ed60a3bbb362d6c5e3f"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": ".cnb/images/browser-wasm-ci.Dockerfile",
+      "archive_entry": [
+        "100644",
+        "52cc61fd62a89fc10f7b7a93574fcb9113d2447f"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "Cargo.lock",
+      "archive_entry": [
+        "100644",
+        "faaf45538269629a7853a3042041faf1ddf27f6d"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "Cargo.toml",
+      "archive_entry": [
+        "100644",
+        "80d4d669aa89521ea35b186c0ea7baa59a20bf2b"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "Makefile",
+      "archive_entry": [
+        "100644",
+        "3c05d95a2ffa18eb3f7206e97e0c8a70bba4a3bb"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "benches/common/crud.rs",
+      "archive_entry": [
+        "100644",
+        "296a2efdd23bfdda0c7716e420a46d475ffd6604"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "benches/common/external_graph_lock.rs",
+      "archive_entry": [
+        "100644",
+        "4f2c677701a9cc782535b4a5f0b3b04ae5870d3d"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "99632ccd2b5eed4cd4f8d2fb86943e3c17572324",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "benches/rebuild_bench.rs",
+      "archive_entry": [
+        "100644",
+        "da2215861adddefb05f7d20e070d8da38101bbaf"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "benches/redb_persistence_bench.rs",
+      "archive_entry": [
+        "100644",
+        "1468770228e55053ba1d6ccddf5048554ac0edb0"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "99632ccd2b5eed4cd4f8d2fb86943e3c17572324",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "benches/runtime_bench.rs",
+      "archive_entry": [
+        "100644",
+        "a0f3788634c52e7bd683be3b725f9e7275b4adb3"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "99632ccd2b5eed4cd4f8d2fb86943e3c17572324",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "docs/m50-browser-offscreen-bench-plan.md",
+      "archive_entry": [
+        "100644",
+        "3bbeb7d57d49a0c5fd9adf25383fd0463bb06efd"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "docs/m50-performance-bench-contract.md",
+      "archive_entry": [
+        "100644",
+        "6a0d06d03d5b9c4c3be927dcdd1f8c5c5146b6bb"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "docs/performance-baseline.md",
+      "archive_entry": [
+        "100644",
+        "1542b059accbe29a682803b4d014fdbd3799f791"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "docs/real-project-optimization-roadmap.md",
+      "archive_entry": [
+        "100644",
+        "a802600b83019a760a7f457312df6f599247d415"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "src/cli.rs",
+      "archive_entry": [
+        "100644",
+        "62933f9b65ee79affeda6170b2e141f8fa550692"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "src/explain/handlers/model_field.rs",
+      "archive_entry": [
+        "100644",
+        "f3a8a744c706c36941c6259ddc79c2cc820c3bed"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "src/lib.rs",
+      "archive_entry": [
+        "100644",
+        "933eaf347f6c3237b0349e346f72301674c15642"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "src/main.rs",
+      "archive_entry": [
+        "100644",
+        "4598ea4139f71107e763392e89ee314e2939c322"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "src/runtime.rs",
+      "archive_entry": [
+        "100644",
+        "b6742f7ff578f851f8bb25ca2fed4aac845292e4"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "src/stdio_server.rs",
+      "archive_entry": [
+        "100644",
+        "4b5e7f2f67b67d09e5c67f0dc413a05adebfa70b"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "src/telemetry.rs",
+      "archive_entry": [
+        "100644",
+        "60caf807ccc6896719dc30782364dc407b9ed1b9"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "tests/bench_external_graph_lock_tests.rs",
+      "archive_entry": [
+        "100644",
+        "368f5f20f13a3d82061022de2469802c09406e20"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "99632ccd2b5eed4cd4f8d2fb86943e3c17572324",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/performance-optimization",
+      "archive_commit": "e056f9451a77865bc42ddc181b49d67b79fb00a1",
+      "path": "tools/run-bencher-criterion-ci.mjs",
+      "archive_entry": [
+        "100644",
+        "61213b22c6bdc2552d7c7dd0562841b2c6e7eb2e"
+      ],
+      "status": "exact_version_in_main_history",
+      "evidence_commit": "7d4e51d415f2ef8a68e01226622dd7941dad34fa",
+      "current_behavior_review": "not_proven_by_tree_equality"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": ".cnb.yml",
+      "archive_entry": [
+        "100644",
+        "4b64ce11684cde99fcc8bef00cee787bc693f800"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "docs/specs/2026-08-09-slm-eval-harness-design.md",
+      "archive_entry": [
+        "100644",
+        "914e5c215066786605cbaf49122c056d966391c2"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "src/query/page_logic.rs",
+      "archive_entry": [
+        "100644",
+        "7490ab9a8a8a42495f6d3930ceacfe6b9909bbb5"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "tests/kimi_harness_judge_tests.rs",
+      "archive_entry": [
+        "100644",
+        "a61dd8e3539ba7a91d46d6c2b2f0158885dba489"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "path": "tests/support/kimi_smoke_judge.rs",
+      "archive_entry": [
+        "100644",
+        "cf7df1ec1fc6cf7b93c30450824d0392b09b82da"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "docs/milestones/performance/m53-performance-continuation.md",
+      "archive_entry": [
+        "100644",
+        "844c17433cf77c6fcc2f71b5ab084e8f2e56d21a"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "src/query.rs",
+      "archive_entry": [
+        "100644",
+        "2d4cf823dee06911918c510c1831d60dc2cc206f"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "src/query/page_logic.rs",
+      "archive_entry": [
+        "100644",
+        "1a1b5d7f1ed311de5f81932ee36eb2d0fa388be6"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "src/query/page_logic/page_diff.rs",
+      "archive_entry": [
+        "100644",
+        "39e571819d0a3e75f4c9061d7a51eb70c51f3d1c"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "src/query/page_logic/path_summary.rs",
+      "archive_entry": [
+        "100644",
+        "19fc83b581f60f747c8fa547ceffccae6294eb80"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "src/runtime.rs",
+      "archive_entry": [
+        "100644",
+        "f484ab7cb68385679683c94feb3779a90f5d93ec"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "tests/m53_warm_cache_scalability_tests.rs",
+      "archive_entry": [
+        "100644",
+        "a534abd90f65535b1bbad2f0ce63d9bc6f5491b7"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "path": "tests/runtime_tests.rs",
+      "archive_entry": [
+        "100644",
+        "10610f73a7e896a3c9d489dbf8f297b7e9a858fd"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "docs/m51-performance-diagnosis.md",
+      "archive_entry": [
+        "100644",
+        "2fc34b7e4b913c00fc4e457c7b8636ecff46d15e"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "src/explain.rs",
+      "archive_entry": [
+        "100644",
+        "b9559d37ce50dbe083a0dceb778a381ed64ea454"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "src/lib.rs",
+      "archive_entry": [
+        "100644",
+        "1424a52686ab690878d38516b7a52ff86a57376e"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "src/perf_report.rs",
+      "archive_entry": [
+        "100644",
+        "42fadb6d672e910b7e19a791a58e7e3281806883"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "src/query.rs",
+      "archive_entry": [
+        "100644",
+        "e4df9a4a859eea3a51d3e887add43dfe7021285c"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "src/query/page_logic.rs",
+      "archive_entry": [
+        "100644",
+        "0417b4fbbd25aea21c053bce7fbdbd629377e6aa"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "src/query/page_logic/path_summary.rs",
+      "archive_entry": [
+        "100644",
+        "21c3fd8def7b1fbfeb4ebab52f946fade0d06dd9"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "path": "tests/m51_profile_report_tests.rs",
+      "archive_entry": [
+        "100644",
+        "b37393de9422406d7bb586a95ac144bcdcbd8891"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "docs/m52-performance-optimization.md",
+      "archive_entry": [
+        "100644",
+        "0f20775cac9556ee7f022a263cccd5b52e7acd85"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/lib.rs",
+      "archive_entry": [
+        "100644",
+        "09a7703fc75eecd022fe54cfeadc8ccaefe66674"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/page_logic_fragments.rs",
+      "archive_entry": [
+        "100644",
+        "0861559a590a1356917bd0100edfa590ea465bd5"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/perf_report.rs",
+      "archive_entry": [
+        "100644",
+        "5b0cc1bb5040fe4fe0c089650194c8be0549d87f"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/query.rs",
+      "archive_entry": [
+        "100644",
+        "b65348b4f95303fa0f1e8392b5374d8d3cde70fb"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/query/page_logic.rs",
+      "archive_entry": [
+        "100644",
+        "1e116ebe5190c699eae754a442518ab5099b6909"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/query/page_logic/path_summary.rs",
+      "archive_entry": [
+        "100644",
+        "d9c4d9acce1f6cf80ff240b4f93f50fbed2b083a"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/query/page_logic/prerequisites.rs",
+      "archive_entry": [
+        "100644",
+        "f6e65917eef6cf47afac5ffed569fd6814732745"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "src/runtime.rs",
+      "archive_entry": [
+        "100644",
+        "6405e23650f72c23edfdfcf503f90851c1e3976a"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "tests/m51_profile_report_tests.rs",
+      "archive_entry": [
+        "100644",
+        "27442a5a5766c351236c8d99d167f49114dd1d8f"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "tests/m52_page_logic_profile_tests.rs",
+      "archive_entry": [
+        "100644",
+        "c09640d3a64d16de6a1557221d352425f9eda9e2"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "path": "tests/runtime_tests.rs",
+      "archive_entry": [
+        "100644",
+        "28d8d40b484fea42ecbfe8fced2c7ccff75ebdcc"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-redb-v2-and-ci",
+      "archive_commit": "2f9dff1925ec1e74e5b9e049c089b8a706efb990",
+      "path": "CHECKLIST.md",
+      "archive_entry": [
+        "100644",
+        "47511569bc5b1e98dc11284dde6f84e4b6ed6364"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-redb-v2-and-ci",
+      "archive_commit": "2f9dff1925ec1e74e5b9e049c089b8a706efb990",
+      "path": "docs/m56-dashboard-report-support-design.md",
+      "archive_entry": [
+        "100644",
+        "db340806e959727a0cef4486c01f27b5139a4f0d"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/m52-redb-v2-and-ci",
+      "archive_commit": "2f9dff1925ec1e74e5b9e049c089b8a706efb990",
+      "path": "docs/m58-cheap-model-understanding-eval-design.md",
+      "archive_entry": [
+        "100644",
+        "c347bfe6c8267e68fa2318b2b8d11a161ec50371"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "path": "AGENTS.md",
+      "archive_entry": [
+        "100644",
+        "72adc481c44eb42ff53a3e89febb6996f69b5105"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "path": "docs/knowledge-acceptance/2026-09-07-pr33-review.md",
+      "archive_entry": [
+        "100644",
+        "3a8b32aaf850d5c06d6f9a381a99c84159ed738e"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "path": "docs/knowledge-acceptance/README.md",
+      "archive_entry": [
+        "100644",
+        "c0f4f4d45fdd786e69e917cf25bd1066e9607795"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "path": "docs/knowledge-acceptance/knowledge-acceptance-questions.md",
+      "archive_entry": [
+        "100644",
+        "2be8c6165b5e290606691e23658a9d5f4463a78c"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "path": "docs/knowledge/README.md",
+      "archive_entry": [
+        "100644",
+        "f77ac988a99a9800c2c9bc187861fff6ac44c2e6"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+      "archive_entry": [
+        "100644",
+        "cfb23ae874e829272c10320ed520e5aed2ad1378"
+      ],
+      "status": "requires_patch_review"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "path": "docs/knowledge/topic-scan-incremental-persist.md",
+      "archive_entry": [
+        "100644",
+        "710d48c447cb3dd578130989eb9d675262869b14"
+      ],
+      "status": "requires_patch_review"
+    }
+  ]
+}

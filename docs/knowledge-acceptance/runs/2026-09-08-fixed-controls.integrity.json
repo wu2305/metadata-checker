@@ -1,0 +1,736 @@
+{
+  "schema_version": 1,
+  "artifact_sha256": "109def4d582f30d12ed483367a5dd82145af32429216b99150ec45704e08b2dc",
+  "source_sha": "a682ea527202f23ffc0dfee0c9cc3b12c61f774d",
+  "build_id": "cnb-t8g-1k1v78s0e",
+  "validation": "21-record schedule, exact baseline requests and treatment-only system suffix, original H1 query, 12 full SSE decodes/model identities, 105 pinned chunk URLs, same five indexed source trees, runner/decoder/archive hashes, unchanged index, 16 remote tests",
+  "indexed_files": [
+    {
+      "path": "AGENTS.md",
+      "entry": "100644 blob d6e52a5bf83c05c893b410ed6b31cb5151b176b1"
+    },
+    {
+      "path": "SKILL.md",
+      "entry": "100644 blob 49eee0d113fb02ed36248918e2d56ab638b952b0"
+    },
+    {
+      "path": "docs/knowledge/README.md",
+      "entry": "100644 blob a97d8407bf83fff46e9571956afc765840ff0d55"
+    },
+    {
+      "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+      "entry": "100644 blob f750052122b69990f006a58362edf4a3924404a7"
+    },
+    {
+      "path": "docs/knowledge/topic-scan-incremental-persist.md",
+      "entry": "100644 blob 017fef0f2cf66db24c181fe93ec2d2e828bf5d1b"
+    }
+  ],
+  "records": [
+    {
+      "kind": "retrieval",
+      "id": "H1-original",
+      "replicate": 1,
+      "retrieval_sha256": "b27cf361d3b168fcb1225d67e34345c498fe52e8cf4f4706e523c62b99d4b16b",
+      "chunks": [
+        {
+          "path": "AGENTS.md",
+          "position": 5,
+          "score": 0.9806919097900391
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 10,
+          "score": 0.0033374049235135317
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 9,
+          "score": 0.001192549243569374
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 7,
+          "score": 0.0009181900531984866
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 5,
+          "score": 0.0007124459953047335
+        }
+      ]
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-a",
+      "replicate": 1,
+      "retrieval_sha256": "e9640ee6168f22748049782cfe01ff9d09bd27a7de9d66e66d1c8f670eea7d1f",
+      "chunks": [
+        {
+          "path": "AGENTS.md",
+          "position": 5,
+          "score": 0.9669764637947083
+        },
+        {
+          "path": "SKILL.md",
+          "position": 6,
+          "score": 0.7481683492660522
+        },
+        {
+          "path": "SKILL.md",
+          "position": 9,
+          "score": 0.0384661927819252
+        },
+        {
+          "path": "SKILL.md",
+          "position": 4,
+          "score": 0.0027149852830916643
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 11,
+          "score": 0.001597845577634871
+        }
+      ]
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-b",
+      "replicate": 1,
+      "retrieval_sha256": "2f1288e52a9ddd165925acddd097dfafb6a91fe85865eab53a9bee0812439467",
+      "chunks": [
+        {
+          "path": "AGENTS.md",
+          "position": 5,
+          "score": 0.9643214344978333
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 10,
+          "score": 0.13660839200019836
+        },
+        {
+          "path": "AGENTS.md",
+          "position": 3,
+          "score": 0.10248421877622604
+        },
+        {
+          "path": "docs/knowledge/README.md",
+          "position": 1,
+          "score": 0.05717659741640091
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 12,
+          "score": 0.002278330735862255
+        }
+      ]
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-original",
+      "replicate": 2,
+      "retrieval_sha256": "b27cf361d3b168fcb1225d67e34345c498fe52e8cf4f4706e523c62b99d4b16b",
+      "chunks": [
+        {
+          "path": "AGENTS.md",
+          "position": 5,
+          "score": 0.9806919097900391
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 10,
+          "score": 0.0033374049235135317
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 9,
+          "score": 0.001192549243569374
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 7,
+          "score": 0.0009181900531984866
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 5,
+          "score": 0.0007124459953047335
+        }
+      ]
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-a",
+      "replicate": 2,
+      "retrieval_sha256": "e9640ee6168f22748049782cfe01ff9d09bd27a7de9d66e66d1c8f670eea7d1f",
+      "chunks": [
+        {
+          "path": "AGENTS.md",
+          "position": 5,
+          "score": 0.9669764637947083
+        },
+        {
+          "path": "SKILL.md",
+          "position": 6,
+          "score": 0.7481683492660522
+        },
+        {
+          "path": "SKILL.md",
+          "position": 9,
+          "score": 0.0384661927819252
+        },
+        {
+          "path": "SKILL.md",
+          "position": 4,
+          "score": 0.0027149852830916643
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 11,
+          "score": 0.001597845577634871
+        }
+      ]
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-b",
+      "replicate": 2,
+      "retrieval_sha256": "58a0c34f2cdcdfab12f42a895147ae627da0fed6adf15f6da8b6376bed32ddb9",
+      "chunks": [
+        {
+          "path": "AGENTS.md",
+          "position": 5,
+          "score": 0.9643214344978333
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 10,
+          "score": 0.13660839200019836
+        },
+        {
+          "path": "AGENTS.md",
+          "position": 3,
+          "score": 0.10248421877622604
+        },
+        {
+          "path": "docs/knowledge/README.md",
+          "position": 1,
+          "score": 0.05749328061938286
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 12,
+          "score": 0.0022606407292187214
+        }
+      ]
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-original",
+      "replicate": 3,
+      "retrieval_sha256": "b27cf361d3b168fcb1225d67e34345c498fe52e8cf4f4706e523c62b99d4b16b",
+      "chunks": [
+        {
+          "path": "AGENTS.md",
+          "position": 5,
+          "score": 0.9806919097900391
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 10,
+          "score": 0.0033374049235135317
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 9,
+          "score": 0.001192549243569374
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 7,
+          "score": 0.0009181900531984866
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 5,
+          "score": 0.0007124459953047335
+        }
+      ]
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-a",
+      "replicate": 3,
+      "retrieval_sha256": "e9640ee6168f22748049782cfe01ff9d09bd27a7de9d66e66d1c8f670eea7d1f",
+      "chunks": [
+        {
+          "path": "AGENTS.md",
+          "position": 5,
+          "score": 0.9669764637947083
+        },
+        {
+          "path": "SKILL.md",
+          "position": 6,
+          "score": 0.7481683492660522
+        },
+        {
+          "path": "SKILL.md",
+          "position": 9,
+          "score": 0.0384661927819252
+        },
+        {
+          "path": "SKILL.md",
+          "position": 4,
+          "score": 0.0027149852830916643
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 11,
+          "score": 0.001597845577634871
+        }
+      ]
+    },
+    {
+      "kind": "retrieval",
+      "id": "H1-paraphrase-b",
+      "replicate": 3,
+      "retrieval_sha256": "2f1288e52a9ddd165925acddd097dfafb6a91fe85865eab53a9bee0812439467",
+      "chunks": [
+        {
+          "path": "AGENTS.md",
+          "position": 5,
+          "score": 0.9643214344978333
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 10,
+          "score": 0.13660839200019836
+        },
+        {
+          "path": "AGENTS.md",
+          "position": 3,
+          "score": 0.10248421877622604
+        },
+        {
+          "path": "docs/knowledge/README.md",
+          "position": 1,
+          "score": 0.05717659741640091
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 12,
+          "score": 0.002278330735862255
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 1,
+      "treatment": "baseline",
+      "answer_sha256": "f53019650e060db958a3c15fd366409e69e6edd466fc631af1aefa125d8b0a53",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 8,
+          "score": 0.9986801743507385
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 2,
+          "score": 0.9977481961250305
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 6,
+          "score": 0.9943799376487732
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 1,
+          "score": 0.9930961728096008
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 7,
+          "score": 0.920647144317627
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 1,
+      "treatment": "claim-check",
+      "answer_sha256": "9da6ce31bbff713402d60550bfa34b5e279f1cecacfd4d2b094129d2d52a5331",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 8,
+          "score": 0.9986801743507385
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 2,
+          "score": 0.9977481961250305
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 6,
+          "score": 0.9943799376487732
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 1,
+          "score": 0.9930961728096008
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 7,
+          "score": 0.920647144317627
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 1,
+      "treatment": "baseline",
+      "answer_sha256": "f7c887be2c1705d937921f8846d307426628efaba984ad9b65d8a861b5720d66",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 12,
+          "score": 0.9087799787521362
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 1,
+          "score": 0.8092759251594543
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 7,
+          "score": 0.7676898241043091
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 6,
+          "score": 0.733738124370575
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 0,
+          "score": 0.4279943108558655
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 1,
+      "treatment": "claim-check",
+      "answer_sha256": "cdf5e47ea3900293214728b7a419564145151908aaa955cdf045623a5b6a3079",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 12,
+          "score": 0.9087799787521362
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 1,
+          "score": 0.8092759251594543
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 7,
+          "score": 0.7676898241043091
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 6,
+          "score": 0.733738124370575
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 0,
+          "score": 0.4279943108558655
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 2,
+      "treatment": "claim-check",
+      "answer_sha256": "ca98157e8a167e91ddbbded8c6fb4e30778b7d3264a17fedc6f6a97e96067e8a",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 8,
+          "score": 0.9986801743507385
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 2,
+          "score": 0.9977481961250305
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 6,
+          "score": 0.9943799376487732
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 1,
+          "score": 0.9930961728096008
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 7,
+          "score": 0.920647144317627
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 2,
+      "treatment": "baseline",
+      "answer_sha256": "76161f286e22d90173fe4c45e5c0fdab074e7088d62796e69aab375317d9aefe",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 8,
+          "score": 0.9986801743507385
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 2,
+          "score": 0.9977481961250305
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 6,
+          "score": 0.9943799376487732
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 1,
+          "score": 0.9930961728096008
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 7,
+          "score": 0.920647144317627
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 2,
+      "treatment": "claim-check",
+      "answer_sha256": "1bedcb929481402791ebef5ebdb27d6131c2226849d554a61d02a4d6c6ef4536",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 12,
+          "score": 0.9087799787521362
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 1,
+          "score": 0.8092759251594543
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 7,
+          "score": 0.7676898241043091
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 6,
+          "score": 0.733738124370575
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 0,
+          "score": 0.4279943108558655
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 2,
+      "treatment": "baseline",
+      "answer_sha256": "16fe9603f05baa508be491899048690d01ac7b1d912ff0c02801780f357eabbf",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 12,
+          "score": 0.9087799787521362
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 1,
+          "score": 0.8092759251594543
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 7,
+          "score": 0.7676898241043091
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 6,
+          "score": 0.733738124370575
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 0,
+          "score": 0.4279943108558655
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 3,
+      "treatment": "baseline",
+      "answer_sha256": "65be0f147b337d47e0c6f4df03a58f2059d2951d79ee717e90cc204f211d0968",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 8,
+          "score": 0.9986801743507385
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 2,
+          "score": 0.9977481961250305
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 6,
+          "score": 0.9943799376487732
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 1,
+          "score": 0.9930961728096008
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 7,
+          "score": 0.920647144317627
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "E3",
+      "replicate": 3,
+      "treatment": "claim-check",
+      "answer_sha256": "e93b410ba0f6318cdbfea68e29bbf5a70e384926816b0e2e4a189390aef26a62",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 8,
+          "score": 0.9986801743507385
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 2,
+          "score": 0.9977481961250305
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 6,
+          "score": 0.9943799376487732
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 1,
+          "score": 0.9930961728096008
+        },
+        {
+          "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+          "position": 7,
+          "score": 0.920647144317627
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 3,
+      "treatment": "baseline",
+      "answer_sha256": "66922933a3adb6cbfc87c3053e393c6765fc663644130df7ad1a2ae444d5f3d8",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 12,
+          "score": 0.9087799787521362
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 1,
+          "score": 0.8092759251594543
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 7,
+          "score": 0.7676898241043091
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 6,
+          "score": 0.733738124370575
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 0,
+          "score": 0.4279943108558655
+        }
+      ]
+    },
+    {
+      "kind": "answer",
+      "id": "B6",
+      "replicate": 3,
+      "treatment": "claim-check",
+      "answer_sha256": "d81590a8f659bb6f792af24080088459ce85fb8915f461ec9d548ff44afadc27",
+      "chunks": [
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 12,
+          "score": 0.9087799787521362
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 1,
+          "score": 0.8092759251594543
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 7,
+          "score": 0.7676898241043091
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 6,
+          "score": 0.733738124370575
+        },
+        {
+          "path": "docs/knowledge/topic-scan-incremental-persist.md",
+          "position": 0,
+          "score": 0.4279943108558655
+        }
+      ]
+    }
+  ]
+}
