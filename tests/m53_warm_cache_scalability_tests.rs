@@ -29,23 +29,6 @@ fn fixture_runtime(test_name: &str) -> anyhow::Result<(GraphRuntime, std::path::
     Ok((runtime, temp_dir))
 }
 
-fn canonicalize_value(value: &mut Value) {
-    match value {
-        Value::Array(items) => {
-            for item in items.iter_mut() {
-                canonicalize_value(item);
-            }
-            items.sort_by_key(|item| item.to_string());
-        }
-        Value::Object(map) => {
-            for item in map.values_mut() {
-                canonicalize_value(item);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn collect_fixture_page_ids(graph: &GraphDB) -> anyhow::Result<Vec<String>> {
     Ok(graph
         .iter_nodes()?
@@ -207,7 +190,7 @@ fn m53_warm_page_logic_batch_matches_single_warm_cache_content() -> anyhow::Resu
 }
 
 #[test]
-fn m53_warm_cache_budget_output_canonical_equivalence() -> anyhow::Result<()> {
+fn m53_warm_cache_budget_output_byte_equivalence() -> anyhow::Result<()> {
     let graph = {
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let db_path = std::env::temp_dir().join(format!(
@@ -234,14 +217,14 @@ fn m53_warm_cache_budget_output_canonical_equivalence() -> anyhow::Result<()> {
             None,
         )?;
 
-        let (mut baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
+        let (baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
             &graph,
             Some(&dense_snapshot),
             page_id,
             None,
             budget,
         )?;
-        let (mut cached, _) = build_query_page_logic_output_profiled_with_availability_cache(
+        let (cached, _) = build_query_page_logic_output_profiled_with_availability_cache(
             &graph,
             Some(&dense_snapshot),
             Some(&availability_cache),
@@ -251,11 +234,10 @@ fn m53_warm_cache_budget_output_canonical_equivalence() -> anyhow::Result<()> {
             budget,
         )?;
 
-        canonicalize_value(&mut baseline);
-        canonicalize_value(&mut cached);
         assert_eq!(
-            cached, baseline,
-            "{budget} warm-cache-hit output must match non-warm path after array canonicalization"
+            serde_json::to_vec(&cached)?,
+            serde_json::to_vec(&baseline)?,
+            "{budget} warm-cache-hit output must be byte-equivalent to non-warm path"
         );
     }
     Ok(())
@@ -388,14 +370,14 @@ fn m53_warm_cache_keeps_supporting_paths_only_for_normal_and_full() -> anyhow::R
             footprint.primary_paths, 3,
             "{budget} must retain primary paths"
         );
-        let (mut baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
+        let (baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
             &graph,
             Some(&dense),
             page_id,
             None,
             budget,
         )?;
-        let (mut cached, profile) = build_query_page_logic_output_profiled_with_availability_cache(
+        let (cached, profile) = build_query_page_logic_output_profiled_with_availability_cache(
             &graph,
             Some(&dense),
             Some(&cache),
@@ -405,10 +387,9 @@ fn m53_warm_cache_keeps_supporting_paths_only_for_normal_and_full() -> anyhow::R
             budget,
         )?;
         assert_eq!(profile.counter("path_read_model_used"), 1);
-        canonicalize_value(&mut baseline);
-        canonicalize_value(&mut cached);
         assert_eq!(
-            cached, baseline,
+            serde_json::to_vec(&cached)?,
+            serde_json::to_vec(&baseline)?,
             "{budget} cache must preserve path contents"
         );
     }
