@@ -101,6 +101,9 @@ M53 默认接受 init/load 变重，只要 query-time 和多次查询总成本�
 后续若优化这条路径，须先验证 redb 打开引起的变化、同大小内容更新、文件替换和读取失败，
 证明不会漏检更新后再决定检测策略；不直接恢复旧采样方案。
 完整去向见 [性能归档复核](../../governance/branch-retention-performance-2026-09-08.md)。
+PR38 后已修复 profile 场景被再次打开 graphdb 干扰的问题，并记录实际重载结果；
+产品的变更检测策略未改，详见
+[性能契约集中修复](../../governance/performance-contract-fixes-2026-09-08.md)。
 
 ## M53 继续推进的性能问题
 

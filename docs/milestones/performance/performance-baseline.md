@@ -341,6 +341,11 @@ CARGO_TARGET_DIR=target/criterion/runtime cargo bench --bench runtime_bench
 
 ### Query matrix Criterion bench
 
+2026-09-08 契约修复影响说明：page-logic 恢复跨阶段邻接复用，profile counter 移除
+1毫秒下限，core profile runner 的 unchanged 检查移到再次打开 graphdb 之前。
+旧 counter 与新样本不直接横比；本轮没有重测真实项目 Criterion/Bencher 数值，不重置趋势。
+源码、回归与历史失败见 [集中修复记录](../../governance/performance-contract-fixes-2026-09-08.md)。
+
 非 page-logic 的运行期能力使用：
 
 ```bash
