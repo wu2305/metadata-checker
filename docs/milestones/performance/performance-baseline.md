@@ -348,6 +348,48 @@ PR39 后续补充：compact warm cache 的三组 prerequisites 各保留最多5�
 计数和模型引用；normal/full 保留全量。构建仍先完整收集与排序，不宣称峰值内存有界。
 源码、回归与历史失败见 [集中修复记录](../../governance/performance-contract-fixes-2026-09-08.md)。
 
+#### 毫秒计时的零值与兼容别名
+
+- cold 的 `availability_index_build_ms`、投影耗时及其他真实计时使用毫秒整数，低于1毫秒
+  可记录为0；0不代表没有执行，也不应重新抬高到1。
+- warm 命中时 index build 记录为0，须结合 `availability_read_model_used=1` 判断路径。
+  是否消除构建工作由实际模型读取测试验证，不能单凭计时为0断言。
+- `availability_context_build_ms` 是 `availability_index_build_ms` 的兼容别名；两者
+  相等，不能相加，也不能当作两个独立采样点。
+- 字段缺失表示未记录，不能由消费方补成0参与统计；报告汇总只使用实际存在的样本。
+  需要验证明确零值时使用 counter map 的 `get`，避开缺键也返回0的便捷读取函数。
+
+#### 采集新口径报告
+
+在 CNB workspace 的 `/workspace` 选定实际存在且已获授权的语料目录与页面，设置
+`METADATA_CHECKER_REAL_PROJECT_DIR` 和 `METADATA_CHECKER_PROFILE_PAGE_ID`（含 `page:` 前缀）。
+以下命令为新口径采样入口，未在本 PR 中作为真实语料基线验收执行：
+
+```sh
+(
+  set -eu
+  : "${METADATA_CHECKER_REAL_PROJECT_DIR:?必须指定已授权语料目录}"
+  : "${METADATA_CHECKER_PROFILE_PAGE_ID:?必须指定语料中实际存在的页面}"
+  mkdir -p target/profile-review
+  METADATA_CHECKER_PROFILE_RUN_DIR="$(mktemp -d target/profile-review/run.XXXXXX)"
+  git rev-parse HEAD > "$METADATA_CHECKER_PROFILE_RUN_DIR/code-commit.txt"
+  rustc -Vv > "$METADATA_CHECKER_PROFILE_RUN_DIR/toolchain.txt"
+  cargo run --profile release-fast --features cli-local --bin m51_profile_report -- \
+    --project-dir "$METADATA_CHECKER_REAL_PROJECT_DIR" --sample-count 5 \
+    --scenario "selected_compact|$METADATA_CHECKER_PROFILE_PAGE_ID|compact" \
+    --scenario "selected_normal|$METADATA_CHECKER_PROFILE_PAGE_ID|normal" \
+    --scenario "selected_full|$METADATA_CHECKER_PROFILE_PAGE_ID|full" \
+    --output "$METADATA_CHECKER_PROFILE_RUN_DIR/page-logic-profile.json"
+  cargo run --profile release-fast --features cli-local --bin m51_core_profile_report -- \
+    --project-dir "$METADATA_CHECKER_REAL_PROJECT_DIR" --sample-count 5 \
+    --output "$METADATA_CHECKER_PROFILE_RUN_DIR/core-profile.json"
+)
+```
+
+每次使用新目录，失败即停止，不能让上一轮报告冒充新结果。另记录语料固定提交、页面、
+CPU/内存配额与运行环境；只有同口径、同语料、同环境样本才可横比。上述分阶段报告不替代
+真实项目 Criterion 分布或 Bencher 趋势重测，旧的1毫秒下限样本保留原标识。
+
 非 page-logic 的运行期能力使用：
 
 ```bash

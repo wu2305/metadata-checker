@@ -133,6 +133,40 @@ CNB workspace `cnb-ce2-1k1vtmjj3` 的最终统一检查：116项定向/单元测
 压缩包 SHA-256：`e9cc6869e832ecf8fbae343a45c96414bbe3229aefac632365145b6ba9d2f721`。
 解包核对方法同上，替换路径和 SHA-256。
 
+## PR39 NPC 复审追加：顺序、实际构建与缓存元数据
+
+本批从 `bfc462e` 继续，针对 NPC 指出的测试覆盖缺口补充：
+
+- `9d72374` 删除 M51 profile、M52 profile、M53 dense path、M53 materialized
+  availability 四个套件中的递归数组排序，六处比较直接使用完整序列化字节。
+  dense/materialized 等价性覆盖 compact、normal、full，不重排路径段或证据。
+- `7edf1da` 增加仅由 prerequisites 引入的模型，包装实际 GraphReadStore 读取，
+  在读取时注入10毫秒延迟。cold 必须读到模型且 index build 计时包含延迟；warm
+  必须零次模型读取，明确记录命中与零构建时间，并保持完整输出字节相同。
+  另检查 build/projection 计时不超过所在阶段，context 与 index build 别名相等。
+- `f5e7c22` 修正测试模型 ID：最初使用页面限定 ID，实际 resolver 读取全局存储 ID，
+  cold 的“必须读到模型”断言失败。保留原始失败，改用真实存储身份，未放宽断言。
+- `2a10f29` 增加7项真实 warm cache 比较测试：三类总数、同长度模型 ID 替换、
+  模型顺序、Some/None prerequisites，以及完全相等的克隆。前五项保持 retained
+  JSON 不变，双向要求精确返回 `prerequisites mismatch` 并拒绝等价。
+
+三项临时回退探针均编译成功并触发目标断言：cold build 计时硬编码为0、warm 命中时
+重复构建 availability、仅比较 prerequisites 的三组 JSON 而忽略总数和模型引用。
+前两项分别使实际工作测试失败；最后一项使5项元数据差异测试失败，另2项仍通过。
+探针在 finally 恢复源码，核对远端 git diff 为空后运行统一验证。
+
+最终代码提交：`2a10f29675136d8e3210bb61f5165645d9305bde`。
+CNB workspace `cnb-r0g-1k20ra3ov`：124项定向/单元测试及额外1项 CLI snapshot
+通过，3项 ignored 保留原分类；fmt、bench 编译和 WASM 检查通过。
+本地仅对[新口径采样说明](../milestones/performance/performance-baseline.md#采集新口径报告)
+中的命令执行 `sh -n` 语法检查，没有运行真实语料 profile 或重测 Criterion/Bencher。
+
+[本批完整日志与脚本](evidence/performance-contract-npc-tests-2026-09-08.json.gz)包含15份
+日志及4份脚本，包括初次模型 ID 不匹配的失败。最终9项检查和3项回退探针均内嵌提交、
+命令和退出码；早期日志缺失的字段保留为 null，提交来自会话执行记录并单独标注。
+压缩包 SHA-256：`c09855b5a644157f45db3bd976e91ed1ee85145501c79959deedb53312346b6d`。
+校验方式同前，替换文件名和 SHA-256；历史证据包保持原样。
+
 ## 影响与剩余边界
 
 Baseline impact：**yes**。减少重复邻接读取，恢复真实毫秒计时，并隔离 unchanged profile
@@ -144,4 +178,8 @@ prerequisites 的 compact 常驻 JSON 已裁剪；构建仍先完整收集与排
 随唯一模型数量增长，不宣称峰值内存有界，也不把条目减少等同于真实项目耗时改善。
 side-context 吞错已修复；PathFinder 和字段路径构建中的其他静默降级仍属独立问题，
 本轮不能据此宣称全部 GraphReadStore 错误均会向外传播。
+M54/M57 增量刷新测试仍递归排序数组；M54 的语义视图还移除了路径及派生 summary 字段。
+这些比较不能证明完整输出顺序或路径等价，需另行核验，未纳入本批 M51–M53 的收紧范围。
+受控延迟验证的是 cold index build 计时；projection 目前只检查字段存在、阶段上界，
+没有独立的受控耗时探针，不把本批测试表述为所有计时字段均已验证准确性。
 知识库回答质量、fixture 读取授权与 full-criterion 真实项目验收仍独立开放。
