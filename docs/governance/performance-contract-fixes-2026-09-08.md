@@ -83,14 +83,14 @@ print(evidence['code_commit'], evidence['results'])
 PY
 ```
 
-## 审查返修与最终验证
+## 首批审查返修与验证
 
 首轮 fallback 审查指出：有序映射仍隐式依赖规则名称决定优先级；递归排序数组的测试
 会掩盖路径段和证据顺序变化。`5bba1f1` 将优先级改为显式数组，并加入重叠候选测试；
 同时删除两处等价测试的全部数组规范化，直接比较 `serde_json::to_vec`。
 `8addd0f` 清理随之失效的 import。
 
-最终代码提交：`8addd0ff117eea57f33757b2b2a37a5b67e4f8b9`。
+首批最终代码提交：`8addd0ff117eea57f33757b2b2a37a5b67e4f8b9`。
 同一 CNB workspace 重跑首轮全部定向检查及 CLI snapshot：95项定向/单元测试、额外1项
 快照通过，2项真实语料测试 ignored。增加的1项为重叠保底优先级测试；fmt、bench 编译和
 WASM 检查均通过，原始数组顺序的字节比较也通过，未重置快照。
@@ -101,6 +101,38 @@ WASM 检查均通过，原始数组顺序的字节比较也通过，未重置快
 可复用上面的解包校验方式，替换压缩包路径与 SHA-256。
 首轮证据包及四项回退探针仍保留原提交标识，不把它们改标成最终代码上的新运行。
 
+## PR39 追加：前置条件预算与旁路读取错误
+
+用户要求继续填充同一个 PR；本段从 `a0c055c` 后追加，不改写上面固定提交的证据。
+
+- `d70fdbe`：compact warm cache 的 display/data/action prerequisites 各保留最多5条
+  已排序 JSON，释放多余 Vec 容量；normal/full 保留全量。完整计数和 display/data 中模型
+  首次出现的顺序单独保留，保证 summary、截断信封以及尾部条件引用的模型不因裁剪丢失。
+  冷查询与 warm 共用模型合并逻辑，缓存投影不再为检查命中重复深拷贝 prerequisites。
+- `1cdd034`：side-context 邻接读取失败经路径构建函数传播到冷查询与 warm builder，
+  错误链包含页面、组件和原始原因；缺失邻接仍为空结果，正常跨页去重与同页排除保持原行为。
+- `800766d`：修正冷查询故障注入点。首轮第5次读取仍在 prerequisites 阶段，虽然查询报错，
+  side-context 上下文断言失败；实测第6次读取才进入目标阶段。保留失败日志，未删除上下文断言。
+
+预算测试覆盖每组0、3、5、7条及三种 budget，精确断言缓存条目数、总数、剩余数、排序、
+profile 计数和完整输出字节；模型只出现在尾部条件，另测 compact 缓存不能误用于 normal/full。
+旁路测试覆盖正常去重、同页排除、缺失邻接，以及实际冷查询/warm builder 的读取失败传播。
+
+临时回退探针：取消5条裁剪、把 summary 总数误用缓存长度、在裁剪后才收集模型引用，
+分别触发预算测试失败；恢复 side-context 的 `.ok().flatten()` 后，冷查询与 warm 两项
+错误传播测试同时失败。全部为编译成功后的测试失败；探针结束恢复源码并核对 git diff。
+
+追加批代码提交：`800766d214ce23255ff14dc5ff5b43effe68ae9e`。
+CNB workspace `cnb-ce2-1k1vtmjj3` 的最终统一检查：116项定向/单元测试、额外1项 CLI
+快照通过；3项 ignored 分别为真实项目 runtime、手工 warm footprint 和交互 REPL 测试，
+不计通过。fmt、bench 编译及 WASM 检查通过；完整命令见归档执行脚本。
+
+[追加批完整日志](evidence/performance-contract-budget-errors-2026-09-08.json.gz)包含16份
+日志及3份执行/回退脚本，包括错误注入阶段不匹配的原始失败。最终统一检查和四项回退
+探针的日志均内嵌 COMMIT、COMMAND、EXIT_CODE；早期定向日志未记录的命令/退出码保留为 null。
+压缩包 SHA-256：`e9cc6869e832ecf8fbae343a45c96414bbe3229aefac632365145b6ba9d2f721`。
+解包核对方法同上，替换路径和 SHA-256。
+
 ## 影响与剩余边界
 
 Baseline impact：**yes**。减少重复邻接读取，恢复真实毫秒计时，并隔离 unchanged profile
@@ -108,7 +140,8 @@ Baseline impact：**yes**。减少重复邻接读取，恢复真实毫秒计时�
 这不是本轮真实项目的性能收益测量，不重置 Bencher 趋势、不声称真实语料基线已验收。
 
 native fragment 跨 session 持久化仍延期；旧固定采样/忽略 mtime 的 reload 原型未恢复。
-prerequisites 的 budget 参数尚未参与裁剪；本轮只保证现有 path 桶契约。
-path side-context 仍通过 `.ok().flatten()` 静默降级部分读取错误；本次 edge bundle
-错误传播测试不代表全部 GraphReadStore 读取错误均会向外传播。
+prerequisites 的 compact 常驻 JSON 已裁剪；构建仍先完整收集与排序，且完整模型引用列表
+随唯一模型数量增长，不宣称峰值内存有界，也不把条目减少等同于真实项目耗时改善。
+side-context 吞错已修复；PathFinder 和字段路径构建中的其他静默降级仍属独立问题，
+本轮不能据此宣称全部 GraphReadStore 错误均会向外传播。
 知识库回答质量、fixture 读取授权与 full-criterion 真实项目验收仍独立开放。
