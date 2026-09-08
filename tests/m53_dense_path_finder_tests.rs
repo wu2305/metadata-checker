@@ -7,7 +7,6 @@ use metadata_checker::query::{
     build_query_page_logic_output_profiled_with_dense_snapshot,
 };
 use metadata_checker::scanner::scan_project;
-use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
@@ -24,23 +23,6 @@ fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
     GraphDB::open(&db_path)
 }
 
-fn canonicalize_value(value: &mut Value) {
-    match value {
-        Value::Array(items) => {
-            for item in items.iter_mut() {
-                canonicalize_value(item);
-            }
-            items.sort_by_key(|item| item.to_string());
-        }
-        Value::Object(map) => {
-            for item in map.values_mut() {
-                canonicalize_value(item);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// dense-native path finder 输出必须与 baseline 等价，并记录 CSR 邻接命中。
 #[test]
 fn m53_dense_path_finder_matches_baseline_and_records_hits() -> anyhow::Result<()> {
@@ -48,21 +30,19 @@ fn m53_dense_path_finder_matches_baseline_and_records_hits() -> anyhow::Result<(
     let page_id = "page:app/actions_test.spg";
     let dense = DenseGraphSnapshot::from_graph(&graph)?;
 
-    for budget in ["normal", "compact"] {
-        let (mut baseline, _) =
-            build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
-        let (mut dense_output, profile) =
-            build_query_page_logic_output_profiled_with_dense_snapshot(
-                &graph,
-                Some(&dense),
-                page_id,
-                None,
-                budget,
-            )?;
-        canonicalize_value(&mut baseline);
-        canonicalize_value(&mut dense_output);
+    for budget in ["compact", "normal", "full"] {
+        let (baseline, _) = build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
+        let (dense_output, profile) = build_query_page_logic_output_profiled_with_dense_snapshot(
+            &graph,
+            Some(&dense),
+            page_id,
+            None,
+            budget,
+        )?;
+
         assert_eq!(
-            baseline, dense_output,
+            serde_json::to_vec(&baseline)?,
+            serde_json::to_vec(&dense_output)?,
             "{budget} dense path summary must match baseline"
         );
         assert_eq!(

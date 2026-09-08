@@ -6,7 +6,6 @@ use metadata_checker::query::{
     build_query_page_logic_output_profiled_with_materialized_availability,
 };
 use metadata_checker::scanner::scan_project;
-use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
@@ -23,23 +22,6 @@ fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
     GraphDB::open(&db_path)
 }
 
-fn canonicalize_value(value: &mut Value) {
-    match value {
-        Value::Array(items) => {
-            for item in items.iter_mut() {
-                canonicalize_value(item);
-            }
-            items.sort_by_key(|item| item.to_string());
-        }
-        Value::Object(map) => {
-            for item in map.values_mut() {
-                canonicalize_value(item);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// 验证物化索引与 baseline 输出等价，且命中 materialized condition 缓存。
 #[test]
 fn m53_materialized_index_matches_baseline_output() -> anyhow::Result<()> {
@@ -51,10 +33,9 @@ fn m53_materialized_index_matches_baseline_output() -> anyhow::Result<()> {
         "fixture graph should precollect at least one conditioned node"
     );
 
-    for budget in ["normal", "compact"] {
-        let (mut baseline, _) =
-            build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
-        let (mut indexed, profile) =
+    for budget in ["compact", "normal", "full"] {
+        let (baseline, _) = build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
+        let (indexed, profile) =
             build_query_page_logic_output_profiled_with_materialized_availability(
                 &graph,
                 Some(&index),
@@ -62,10 +43,10 @@ fn m53_materialized_index_matches_baseline_output() -> anyhow::Result<()> {
                 None,
                 budget,
             )?;
-        canonicalize_value(&mut baseline);
-        canonicalize_value(&mut indexed);
+
         assert_eq!(
-            baseline, indexed,
+            serde_json::to_vec(&baseline)?,
+            serde_json::to_vec(&indexed)?,
             "{budget} output must match with materialized availability index"
         );
         assert!(

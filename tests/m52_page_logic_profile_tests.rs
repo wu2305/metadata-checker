@@ -8,7 +8,6 @@ use metadata_checker::query::{
     build_query_page_logic_output_profiled_with_dense_snapshot,
 };
 use metadata_checker::scanner::scan_project;
-use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
@@ -23,23 +22,6 @@ fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
         &db_path,
     )?;
     GraphDB::open(&db_path)
-}
-
-fn canonicalize_value(value: &mut Value) {
-    match value {
-        Value::Array(items) => {
-            for item in items.iter_mut() {
-                canonicalize_value(item);
-            }
-            items.sort_by_key(|item| item.to_string());
-        }
-        Value::Object(map) => {
-            for item in map.values_mut() {
-                canonicalize_value(item);
-            }
-        }
-        _ => {}
-    }
 }
 
 #[test]
@@ -152,9 +134,8 @@ fn m52_page_logic_uses_prebuilt_dense_snapshot_without_changing_output() -> anyh
     let page_id = "page:app/actions_test.spg";
     let dense_snapshot = DenseGraphSnapshot::from_graph(&graph)?;
 
-    let (mut baseline, _) =
-        build_query_page_logic_output_profiled(&graph, page_id, None, "normal")?;
-    let (mut profiled, profile) = build_query_page_logic_output_profiled_with_dense_snapshot(
+    let (baseline, _) = build_query_page_logic_output_profiled(&graph, page_id, None, "normal")?;
+    let (profiled, profile) = build_query_page_logic_output_profiled_with_dense_snapshot(
         &graph,
         Some(&dense_snapshot),
         page_id,
@@ -162,10 +143,9 @@ fn m52_page_logic_uses_prebuilt_dense_snapshot_without_changing_output() -> anyh
         "normal",
     )?;
 
-    canonicalize_value(&mut baseline);
-    canonicalize_value(&mut profiled);
     assert_eq!(
-        profiled, baseline,
+        serde_json::to_vec(&profiled)?,
+        serde_json::to_vec(&baseline)?,
         "prebuilt dense snapshot must not change page logic output"
     );
     assert_eq!(
@@ -192,23 +172,21 @@ fn m52_page_logic_uses_warmed_availability_cache_without_changing_output() -> an
     let availability_cache =
         build_page_logic_availability_cache(&graph, None, page_id, None, budget, None)?;
 
-    let (mut baseline, baseline_profile) =
+    let (baseline, baseline_profile) =
         build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
-    let (mut cached, cached_profile) =
-        build_query_page_logic_output_profiled_with_availability_cache(
-            &graph,
-            None,
-            Some(&availability_cache),
-            None,
-            page_id,
-            None,
-            budget,
-        )?;
+    let (cached, cached_profile) = build_query_page_logic_output_profiled_with_availability_cache(
+        &graph,
+        None,
+        Some(&availability_cache),
+        None,
+        page_id,
+        None,
+        budget,
+    )?;
 
-    canonicalize_value(&mut baseline);
-    canonicalize_value(&mut cached);
     assert_eq!(
-        cached, baseline,
+        serde_json::to_vec(&cached)?,
+        serde_json::to_vec(&baseline)?,
         "warmed availability cache must not change page logic output"
     );
     assert_eq!(
@@ -268,28 +246,26 @@ fn m52_page_logic_extended_warm_cache_preserves_compact_output() -> anyhow::Resu
         None,
     )?;
 
-    let (mut baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
+    let (baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
         &graph,
         Some(&dense_snapshot),
         page_id,
         None,
         budget,
     )?;
-    let (mut cached, cached_profile) =
-        build_query_page_logic_output_profiled_with_availability_cache(
-            &graph,
-            Some(&dense_snapshot),
-            Some(&availability_cache),
-            None,
-            page_id,
-            None,
-            budget,
-        )?;
+    let (cached, cached_profile) = build_query_page_logic_output_profiled_with_availability_cache(
+        &graph,
+        Some(&dense_snapshot),
+        Some(&availability_cache),
+        None,
+        page_id,
+        None,
+        budget,
+    )?;
 
-    canonicalize_value(&mut baseline);
-    canonicalize_value(&mut cached);
     assert_eq!(
-        cached, baseline,
+        serde_json::to_vec(&cached)?,
+        serde_json::to_vec(&baseline)?,
         "extended warm cache must not change compact page logic output"
     );
     assert_eq!(cached_profile.counter("availability_read_model_used"), 1);
