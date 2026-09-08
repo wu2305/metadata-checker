@@ -68,10 +68,13 @@ CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`re
 | M58.3 | 三动词命令表面收敛（--find/--explain/--relations） | closed（范围收口：PR1/PR2） | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design](../specs/2026-08-24-m58-3-command-surface-gap-fixes-design.md)（closed；PR1/PR2 已落地，PR3–PR6 deferred） | [plan](../plans/2026-08-24-m58-3-command-surface-gap-fixes-plan.md)（closed；范围收口） | M58.2 |
 | M58.4 | 轻量图召回与 LLM 配对验证 | done | ai-eval | [m58](ai-eval/m58-cheap-model-comprehension-eval.md) | [design Phase A](../specs/2026-08-23-m58-4-lightweight-graph-retrieval-spike-design.md)（approved）<br>[design Phase B](../specs/2026-08-23-m58-4-llm-paired-benefit-design.md)（approved） | [plan Phase A](../plans/2026-08-23-m58-4-lightweight-graph-retrieval-spike-plan.md)（done）<br>[plan Phase B](../plans/2026-08-23-m58-4-llm-paired-benefit-plan.md)（done） | M58.2, M58.3 |
 | M59 | Grafeo 后端迁移 | active | performance | [m59](performance/m59-grafeo-backend-migration.md) | [design](../specs/2026-09-05-grafeo-backend-migration-design.md)（approved） | [plan](../plans/2026-09-06-m59-grafeo-implementation-plan.md)（approved） | M58（范围收口） |
-| 待排期 | Dashboard / Report 格式支持（原 M59 占位） | planned | formats | — | （待建） | | |
+| 待排期 | Dashboard / Report 格式支持（原 M59 占位） | planned | formats | — | [design](../specs/2026-07-05-dash-rpt-format-support-design.md)（draft，未排期） | | |
 
 > 2026-09-06：M58 按已交付范围关闭，延期项进入 M59 plan 的承接账本；M59 统一指 Grafeo 迁移。
 > Dashboard/Report 保留为待排期，不再占用 M59；旧计划中的 M59 rpt/dash 是历史编号。
+> 2026-09-08：补入 2026-07-05 的 `.dash`/`.rpt` 设计稿作为**缺口记录**（原稿在已删除分支
+> `codex/m52-redb-v2-and-ci` 上，从未合入）。稿中 M56/M57 编号已去除——那两个号归 diff-refresh 线。
+> 该 design 为 draft，**不是已批准计划**，开工需另立里程碑与 plan。
 
 ## 文档治理（Phase C）
 
