@@ -48,7 +48,7 @@ pub(super) fn build_page_logic_paths(
         .map(|snapshot| snapshot as &dyn GraphReadStore)
         .unwrap_or(graph);
     let path_graph = PathGraphCache::new(path_graph_source);
-    record_ms_counter_with_min(profile, "path_context_build_ms", context_started, 1);
+    record_ms_counter(profile, "path_context_build_ms", context_started);
 
     let stage_started = Instant::now();
     let path_query = crate::path::AnchorExtractor::extract(
@@ -262,19 +262,6 @@ impl PathMaterializeKeep {
 
 fn record_ms_counter(profile: &mut Option<&mut PerfProfile>, name: &str, started_at: Instant) {
     super::set_profile_counter(profile, name, started_at.elapsed().as_millis() as usize);
-}
-
-fn record_ms_counter_with_min(
-    profile: &mut Option<&mut PerfProfile>,
-    name: &str,
-    started_at: Instant,
-    min: usize,
-) {
-    super::set_profile_counter(
-        profile,
-        name,
-        (started_at.elapsed().as_millis() as usize).max(min),
-    );
 }
 
 struct PathGraphCache<'a> {

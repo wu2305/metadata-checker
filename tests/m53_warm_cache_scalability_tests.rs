@@ -207,7 +207,7 @@ fn m53_warm_page_logic_batch_matches_single_warm_cache_content() -> anyhow::Resu
 }
 
 #[test]
-fn m53_warm_cache_budget_output_byte_equivalence() -> anyhow::Result<()> {
+fn m53_warm_cache_budget_output_canonical_equivalence() -> anyhow::Result<()> {
     let graph = {
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let db_path = std::env::temp_dir().join(format!(
@@ -255,7 +255,7 @@ fn m53_warm_cache_budget_output_byte_equivalence() -> anyhow::Result<()> {
         canonicalize_value(&mut cached);
         assert_eq!(
             cached, baseline,
-            "{budget} warm-cache-hit output must be byte-equivalent to non-warm path"
+            "{budget} warm-cache-hit output must match non-warm path after array canonicalization"
         );
     }
     Ok(())
@@ -310,10 +310,108 @@ fn m53_compact_warm_cache_trims_unused_path_categories() -> anyhow::Result<()> {
         compact_footprint.rejected_paths, 0,
         "compact warm cache must not retain rejected_paths"
     );
-    assert!(
-        full_footprint.candidate_paths >= compact_footprint.candidate_paths,
-        "full cache should retain at least as many candidate_paths as compact"
+    assert_eq!(
+        full_footprint.candidate_paths > 0,
+        true,
+        "fixture must produce candidates before compact trimming"
     );
+    assert_eq!(
+        full_footprint.rejected_paths > 0,
+        true,
+        "fixture must produce rejected paths before compact trimming"
+    );
+    assert_eq!(full_footprint.primary_paths > 0, true);
+    assert_eq!(full_footprint.related_context > 0, true);
+    assert_eq!(
+        compact_footprint.primary_paths,
+        full_footprint.primary_paths
+    );
+    assert_eq!(
+        compact_footprint.related_context,
+        full_footprint.related_context
+    );
+
+    let normal_cache = build_page_logic_availability_cache(
+        &graph,
+        Some(&dense_snapshot),
+        page_id,
+        None,
+        "normal",
+        None,
+    )?;
+    let normal_footprint = normal_cache.cache_footprint();
+    assert_eq!(normal_footprint.candidate_paths, 0);
+    assert_eq!(normal_footprint.rejected_paths, 0);
+    assert_eq!(normal_footprint.primary_paths, full_footprint.primary_paths);
+    assert_eq!(
+        normal_footprint.related_context,
+        full_footprint.related_context
+    );
+    Ok(())
+}
+
+/// 四条同页条件路径中有两条被提升为主路径，剩余两条用于验证 supporting 桶的预算边界。
+#[test]
+fn m53_warm_cache_keeps_supporting_paths_only_for_normal_and_full() -> anyhow::Result<()> {
+    use metadata_checker::graph::{EdgeType, NodeType};
+    use metadata_checker::memory_graph_store::MemoryGraphStore;
+
+    let mut graph = MemoryGraphStore::new();
+    let page_path = "app/trim.spg";
+    let page_id = "page:app/trim.spg";
+    let input_id = "comp:app/trim.spg|input1";
+    let dependent_id = "comp:app/trim.spg|input2";
+    for (node_id, kind) in [
+        (page_id, NodeType::Page),
+        (input_id, NodeType::Component),
+        (dependent_id, NodeType::Component),
+        ("model:trim", NodeType::Model),
+    ] {
+        graph.add_test_node(node_id, node_id, kind, page_path);
+    }
+    graph.add_test_edge(page_id, input_id, EdgeType::Contains, None);
+    graph.add_test_edge(page_id, dependent_id, EdgeType::Contains, None);
+    graph.add_test_edge(input_id, "model:trim", EdgeType::Reads, None);
+    for index in 0..4 {
+        let condition_id = format!("cond:app/trim.spg|gate_{index}");
+        graph.add_test_node(&condition_id, &condition_id, NodeType::Condition, page_path);
+        graph.add_test_edge(input_id, &condition_id, EdgeType::DependsOn, None);
+        graph.add_test_edge(&condition_id, dependent_id, EdgeType::DependsOn, None);
+    }
+    let dense = metadata_checker::dense_graph::DenseGraphSnapshot::from_graph(&graph)?;
+    for (budget, expected_supporting) in [("full", 2), ("normal", 2), ("compact", 0)] {
+        let cache =
+            build_page_logic_availability_cache(&graph, Some(&dense), page_id, None, budget, None)?;
+        let footprint = cache.cache_footprint();
+        assert_eq!(footprint.supporting_paths, expected_supporting, "{budget}");
+        assert_eq!(
+            footprint.primary_paths, 3,
+            "{budget} must retain primary paths"
+        );
+        let (mut baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
+            &graph,
+            Some(&dense),
+            page_id,
+            None,
+            budget,
+        )?;
+        let (mut cached, profile) = build_query_page_logic_output_profiled_with_availability_cache(
+            &graph,
+            Some(&dense),
+            Some(&cache),
+            None,
+            page_id,
+            None,
+            budget,
+        )?;
+        assert_eq!(profile.counter("path_read_model_used"), 1);
+        canonicalize_value(&mut baseline);
+        canonicalize_value(&mut cached);
+        assert_eq!(
+            cached, baseline,
+            "{budget} cache must preserve path contents"
+        );
+    }
     Ok(())
 }
 

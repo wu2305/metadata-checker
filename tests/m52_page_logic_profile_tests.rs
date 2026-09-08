@@ -58,28 +58,53 @@ fn m52_page_logic_records_bulk_availability_counters() -> anyhow::Result<()> {
 
         let expanded_count = entries.len() as u64;
         assert_eq!(
+            entries.is_empty(),
+            false,
+            "fixture must exercise availability"
+        );
+        assert_eq!(
+            profile.counter("key_model_availability_fast_path"),
+            expanded_count,
+            "every emitted model must use the availability fast path"
+        );
+        assert_eq!(
             profile.counter("availability_models_batched"),
             expanded_count,
             "{budget} should report every expanded availability entry as batched"
         );
-        assert!(
-            profile.counter("availability_context_build_ms") > 0,
+        assert_eq!(
+            profile
+                .counters
+                .contains_key("availability_context_build_ms"),
+            true,
             "{budget} should record page-local availability context build time"
         );
         assert!(
             profile.counter("availability_condition_groups") >= expanded_count,
             "{budget} should record condition groups considered by availability context"
         );
-        assert!(
-            profile.counter("availability_fallback_models") <= expanded_count,
-            "{budget} fallback count cannot exceed expanded entries"
+        let fallback_count = entries
+            .iter()
+            .filter(|entry| {
+                entry["scope_warning"].as_str()
+                    == Some("page_scoped_target_not_resolved_fallback_to_global_model")
+            })
+            .count() as u64;
+        assert_eq!(
+            profile.counter("availability_fallback_models"),
+            fallback_count,
+            "{budget} fallback count must match emitted model scope warnings"
         );
-        assert!(
-            profile.counter("availability_index_build_ms") > 0,
+        assert_eq!(
+            profile.counters.contains_key("availability_index_build_ms"),
+            true,
             "{budget} should record availability index build time"
         );
-        assert!(
-            profile.counter("availability_index_projection_ms") > 0,
+        assert_eq!(
+            profile
+                .counters
+                .contains_key("availability_index_projection_ms"),
+            true,
             "{budget} should record availability index projection time"
         );
         assert_eq!(
@@ -103,8 +128,9 @@ fn m52_page_logic_records_path_context_cache_counters() -> anyhow::Result<()> {
         profile.counter("path_graph_cache_hits") > 0,
         "path_summary should report reused graph reads from its page-local context"
     );
-    assert!(
-        profile.counter("path_context_build_ms") > 0,
+    assert_eq!(
+        profile.counters.contains_key("path_context_build_ms"),
+        true,
         "path_summary should record page-local path context build time"
     );
     assert_eq!(
