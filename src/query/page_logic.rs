@@ -2228,6 +2228,7 @@ fn build_query_page_logic_output_inner(
             let projection_ms = projection_started.elapsed().as_millis() as usize;
             (batch, build_ms, projection_ms)
         };
+    // 兼容旧 counter 名：context 是 index build 的别名，不是独立阶段，消费方不能相加。
     let availability_context_build_ms = availability_index_build_ms;
     let key_model_availability = availability_batch.entries;
     // 落点修正：PAGE_SCOPED_TARGET_FALLBACK 由 page_logic 唯一产生

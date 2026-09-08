@@ -54,13 +54,6 @@ fn m52_page_logic_records_bulk_availability_counters() -> anyhow::Result<()> {
             expanded_count,
             "{budget} should report every expanded availability entry as batched"
         );
-        assert_eq!(
-            profile
-                .counters
-                .contains_key("availability_context_build_ms"),
-            true,
-            "{budget} should record page-local availability context build time"
-        );
         assert!(
             profile.counter("availability_condition_groups") >= expanded_count,
             "{budget} should record condition groups considered by availability context"
@@ -77,17 +70,27 @@ fn m52_page_logic_records_bulk_availability_counters() -> anyhow::Result<()> {
             fallback_count,
             "{budget} fallback count must match emitted model scope warnings"
         );
-        assert_eq!(
-            profile.counters.contains_key("availability_index_build_ms"),
-            true,
-            "{budget} should record availability index build time"
-        );
-        assert_eq!(
-            profile
+        let availability_stage = profile
+            .stage("key_model_availability")
+            .expect("availability stage must be recorded");
+        for name in [
+            "availability_index_build_ms",
+            "availability_index_projection_ms",
+        ] {
+            let value = *profile
                 .counters
-                .contains_key("availability_index_projection_ms"),
-            true,
-            "{budget} should record availability index projection time"
+                .get(name)
+                .expect("availability timer must be recorded");
+            assert_eq!(
+                u128::from(value) <= availability_stage.duration_ms,
+                true,
+                "{name} exceeds its enclosing stage"
+            );
+        }
+        assert_eq!(
+            profile.counters.get("availability_context_build_ms"),
+            profile.counters.get("availability_index_build_ms"),
+            "legacy context timer must alias index build timer"
         );
         assert_eq!(
             profile.counter("availability_index_fallback_models"),
@@ -195,8 +198,8 @@ fn m52_page_logic_uses_warmed_availability_cache_without_changing_output() -> an
         "page logic must consume warmed availability cache"
     );
     assert_eq!(
-        cached_profile.counter("availability_index_build_ms"),
-        0,
+        cached_profile.counters.get("availability_index_build_ms"),
+        Some(&0),
         "cached availability should remove query-time availability index build"
     );
     assert_eq!(
