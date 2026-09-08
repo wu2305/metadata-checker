@@ -212,14 +212,18 @@ fn page_logic_treats_missing_component_adjacency_as_empty_side_context() -> anyh
 #[test]
 fn cold_page_logic_propagates_side_context_edge_read_failure() {
     let graph = side_context_graph();
-    // 页面节点收集和 edge bundle 共读取 A 四次；第五次进入 path side-context。
-    let injected = InjectedEdgeGraph::failing_on(&graph, COMPONENT_A_ID, 5);
+    // 页面节点收集、edge bundle 和 prerequisites 共读取 A 五次；第六次进入 side-context。
+    let injected = InjectedEdgeGraph::failing_on(&graph, COMPONENT_A_ID, 6);
     let error = build_query_page_logic_output(&injected, PAGE_ID, None, "normal")
         .expect_err("cold page logic must propagate side-context edge read failure");
     let message = format!("{error:#}");
 
-    assert_eq!(injected.edge_reads_for(COMPONENT_A_ID), 5);
-    assert_eq!(message.contains("cross-page side context"), true);
+    assert_eq!(injected.edge_reads_for(COMPONENT_A_ID), 6);
+    assert_eq!(
+        message.contains("cross-page side context"),
+        true,
+        "{message}"
+    );
     assert_eq!(message.contains(COMPONENT_A_ID), true);
     assert_eq!(message.contains("injected edge read failure"), true);
 }
@@ -231,14 +235,17 @@ fn warm_page_logic_propagates_side_context_edge_read_failure() {
     let injected = InjectedEdgeGraph::failing_on(&graph, COMPONENT_A_ID, 6);
     let result =
         build_page_logic_availability_cache(&injected, None, PAGE_ID, None, "normal", None);
-    assert_eq!(result.is_err(), true);
-    let message = result
+    let error = result
         .err()
-        .map(|error| format!("{error:#}"))
-        .unwrap_or_default();
+        .expect("warm builder must propagate side-context read failure");
+    let message = format!("{error:#}");
 
     assert_eq!(injected.edge_reads_for(COMPONENT_A_ID), 6);
-    assert_eq!(message.contains("cross-page side context"), true);
+    assert_eq!(
+        message.contains("cross-page side context"),
+        true,
+        "{message}"
+    );
     assert_eq!(message.contains(COMPONENT_A_ID), true);
     assert_eq!(message.contains("injected edge read failure"), true);
 }
