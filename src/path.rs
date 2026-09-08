@@ -1108,8 +1108,9 @@ impl PathSelector for RuleBasedPathSelector {
         }
 
         // 第二步：分组保底检查
-        let mut guarantees: std::collections::HashMap<String, bool> =
-            std::collections::HashMap::new();
+        // 保底项的遍历顺序会决定候选提升及说明文字；固定顺序，避免同图 warm/query 结果漂移。
+        let mut guarantees: std::collections::BTreeMap<String, bool> =
+            std::collections::BTreeMap::new();
         guarantees.insert("value_source".to_string(), false);
         guarantees.insert("data_prerequisite".to_string(), false);
         guarantees.insert("display_gate".to_string(), false);
