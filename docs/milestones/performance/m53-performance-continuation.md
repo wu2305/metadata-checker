@@ -79,18 +79,28 @@ M53 默认接受 init/load 变重，只要 query-time 和多次查询总成本�
 原型提出以 page-logic fragment bundle 作为稳定边界，native 文件、browser IndexedDB、memory
 作为候选后端。fragment 跨平台持久化已移出 M53，待有跨 session 复用需求再评估。
 
-### 5. Reload unchanged 快路径
+### 5. Reload unchanged 快路径（历史原型，未合并）
 
-已修复 redb 打开扰动 graphdb `mtime` 导致的无意义 reload。
+归档分支曾尝试避开 redb 文件头采样，并仅以创建时间、大小、采样 hash 判定重载，
+将 `mtime_changed` 留作诊断。该策略和 `ReloadCheckProfile` 没有合入当前 main。
 
-真实项目结果：
+以下是原型记录的历史测量，本次未重跑，不代表当前 main 性能：
 
 | 指标 | 优化前 | 优化后 |
 |---|---:|---:|
 | `runtime_check_reload_unchanged` | 676ms | 0ms |
 | `runtime_check_reload_reloaded` | 误触发 | 0 |
 
-M53 继续保留稳定内容采样 hash：`mtime_changed` 只做诊断，不触发 reload。
+按 `main=db158cb8dc609a0050c214aed788dde459044361` 核对：
+`src/runtime.rs:238` 读取整个文件、仅对前 4096 字节求 hash；`:1361` 的
+`is_graph_changed` 仍将 mtime、size 或该 hash 任一变化作为重载条件。
+`src/perf_report.rs:991` 保留 `runtime_check_reload_unchanged` 阶段名称，
+但没有检查结果一定为 `Unchanged`，也没有原型的八个细分计时/变化 counter。
+因此不能从阶段名称推断已走 unchanged 快路径。
+
+后续若优化这条路径，须先验证 redb 打开引起的变化、同大小内容更新、文件替换和读取失败，
+证明不会漏检更新后再决定检测策略；不直接恢复旧采样方案。
+完整去向见 [性能归档复核](../../governance/branch-retention-performance-2026-09-08.md)。
 
 ## M53 继续推进的性能问题
 

@@ -2,6 +2,11 @@
 
 > 状态：M52 起始落地。目标是“安全地加快”：真实项目 profile 先证明收益，再做语义等价优化；大改必须有旧路径 fallback 或输出等价测试。
 
+> 历史记录说明（2026-09-08）：下文“当前”“下一步”和测量表保留 M52 当时语境，
+> 不代表当前 main 状态。例如默认 v1 hydrate 的边界已在 M53 改为优先 v2、失败回退 v1。
+> 归档分支中额外的 native fragment 与 reload 采样原型未合入；去向与测试缺口见
+> [性能归档复核](../../governance/branch-retention-performance-2026-09-08.md)。
+
 ## 验收口径
 
 M52 不设置 CI 性能 fail threshold。每个优化小步必须满足：

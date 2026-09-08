@@ -93,7 +93,11 @@ cargo run --bin m51_core_profile_report -- \
 
 - `rebuild`：`rebuild_cold_build`、`rebuild_noop`。
 - `redb`：`redb_open`、`redb_load_file_states`、`redb_check_graphdb`。
-- `runtime`：`runtime_load`、`runtime_status_query`、`runtime_check_reload_unchanged`。
+- `runtime`：M51 当时使用 `runtime_load`、`runtime_status_query`、`runtime_check_reload_unchanged`。
+  按 `main=db158cb8dc609a0050c214aed788dde459044361`，前两项现为
+  `runtime_graphdb_load`、`runtime_status_dispatch`；还增加了 long-lived/warm/query 阶段。
+  `runtime_check_reload_unchanged` 名称仍在，但不保证本次结果为 Unchanged，详见
+  [M53 历史原型说明](m53-performance-continuation.md)。
 
 当前固定阶段名：
 
@@ -177,12 +181,20 @@ cargo build --profile release-fast --features telemetry
 
 ## 已落低风险小修
 
-`query_page_logic` 现在在单次调用内缓存节点邻接结果：
+M51 当时为 `query_page_logic` 引入单次调用内的节点邻接缓存：
 
 - 缓存只在本次 page logic 调用内存在。
 - 不改变 `GraphReadStore` trait。
 - 不改变输出结构。
 - 避免 entrypoint scan、edge scan、action flow build 对同一 component/action 重复调用 `get_node_edges`。
+
+2026-09-08 复核发现上述跨三阶段复用已不完整：在固定 `main=db158cb8` 中，
+`src/query/page_logic.rs:1433` 的 edge bundle helper 与 `:1753` 的外层查询各持有一份
+局部缓存，`:1801` 的 action flow 会再次读取 helper 已取过的 action 邻接结果。
+entrypoint/edge 两阶段仍复用同一份缓存；跨到 action flow 的旧优化未保留。
+现有 `edges_scanned` counter 记录逻辑扫描量，不能证明底层调用去重。
+该缺口尚未修复，后续需用计数型 GraphReadStore 验证实际调用次数，见
+[性能归档复核](../../governance/branch-retention-performance-2026-09-08.md)。
 
 验收测试：
 

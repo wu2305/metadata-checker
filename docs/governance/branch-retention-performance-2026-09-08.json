@@ -1,0 +1,606 @@
+{
+  "schema_version": 1,
+  "main_sha": "db158cb8dc609a0050c214aed788dde459044361",
+  "input": "branch-retention-patches-2026-09-08.json",
+  "input_sha256": "e1e38861dc8dda5ab59864e0c3fa4c4589b6f17c499d07accf63b9f5bb83150d",
+  "evidence_schema": {
+    "archive_scope": "对应 archive commit 的 base→archive 改动组；注明后续新增的项只作替代/限制说明",
+    "current_ref": "固定 main 中的路径/行号或历史决策定位；分号分隔多处",
+    "finding": "人工审阅摘要，非逐字引文；retained/evolved/deferred/unresolved 是子项审阅标注，不代表运行验收"
+  },
+  "method": "逐组对照 base→archive patch 与 pinned main 实现和原测试断言。去向查清不等于全部合入；未合入原型及当前质量缺口单独保留。补充报告不回写旧快照。",
+  "counts": {
+    "reviewed_this_batch": 18,
+    "unresolved_retention": 0,
+    "by_status": {
+      "retained_with_stale_claims_corrected": 1,
+      "retained_with_intentional_replacement": 6,
+      "retained_with_cache_regression": 1,
+      "historical_record_with_unmerged_proposals": 1,
+      "retained_with_unmerged_prototype": 5,
+      "retained_except_unmerged_reload_observability": 2,
+      "retained_with_unmerged_proposals": 1,
+      "retained_except_unmerged_prototype_tests": 1
+    }
+  },
+  "records": [
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "docs/m51-performance-diagnosis.md",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "2fc34b7e4b913c00fc4e457c7b8636ecff46d15e"
+      ],
+      "patch_sha256": "7867ea21b2c036d26cd4d5af1c398406adde6e39f062c901c6d9c4ea8be4f06c",
+      "status": "retained_with_stale_claims_corrected",
+      "evidence": [
+        {
+          "archive_scope": "M51 新增性能堵点归因、profile runner、阶段/counter 契约、热点判断和验收规则文档。",
+          "current_ref": "docs/milestones/performance/m51-performance-diagnosis.md:1; docs/milestones/performance/m51-performance-diagnosis.md:49",
+          "finding": "归档正文已迁移到 milestones/performance 下，当前仍保留 M51 的验收目标、profile、热点、优化记录和决策规则。 当前文档仍描述 Rust profile report runner 及其 page-logic/core 输出。"
+        },
+        {
+          "archive_scope": "归档文档把 runtime core report 阶段固定为 runtime_load、runtime_status_query 和 runtime_check_reload_unchanged，并声称一次 page-logic 调用的 cache 可避免 entrypoint、edge、action 三阶段重复 get_node_edges。",
+          "current_ref": "docs/milestones/performance/m51-performance-diagnosis.md:96; src/perf_report.rs:819; src/perf_report.rs:893; docs/milestones/performance/m51-performance-diagnosis.md:180; src/query/page_logic.rs:1433; src/query/page_logic.rs:1753; src/query/page_logic.rs:1801",
+          "finding": "当前文档仍列出 runtime_load 和 runtime_status_query。 当前 core runner 实际记录 runtime_graphdb_load。 当前 status 阶段实际命名为 runtime_status_dispatch。 当前文档仍声称 page-logic 单次调用内缓存邻接结果并避免三阶段重复读取。 collect_page_logic_edge_bundle 自己创建局部 edge_cache，生命周期只覆盖 entrypoint/edge bundle 收集。 外层 query 又创建另一份 edge_cache。 action_flow_build 从外层 cache 读取 action edges，因此 edge bundle 阶段的 action edge 结果不能跨函数复用。"
+        },
+        {
+          "archive_scope": "旧阶段名和跨阶段缓存文档说明",
+          "current_ref": "docs/milestones/performance/m51-performance-diagnosis.md:96; docs/milestones/performance/m51-performance-diagnosis.md:180",
+          "finding": "本轮将旧阶段名标为历史，补上当前名称；明确三阶段复用退化为两阶段，未将代码缺口说成已修复。"
+        }
+      ],
+      "limitations": [
+        "本项为文档与源码静态对照，未运行 profile 或真实项目 benchmark。",
+        "迁移后的 stage 契约和 cache 叙述需要按当前实现修订，才能作为当前验收口径。"
+      ]
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/explain.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "b9559d37ce50dbe083a0dceb778a381ed64ea454"
+      ],
+      "patch_sha256": "297df9f6669fdf7a13c722395c0cbbcee85d1af6c755df149cc1e8afaa7df54d",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "archive_scope": "Availability intent 跳过 value-source context 构建，减少只需要 availability facts 的额外 explain 工作。",
+          "current_ref": "src/explain.rs:793",
+          "finding": "effective_intent 为 Availability 时将 value_source_context 设为 None，其他 intent 仍构建该上下文。"
+        },
+        {
+          "archive_scope": "新增 page-logic key-model availability 的轻量 fast output，复用条件收集和 availability facts，但省略完整 AiOutput、路径和大体量 details。",
+          "current_ref": "src/explain.rs:1128; src/explain.rs:1333; src/explain.rs:1145",
+          "finding": "build_explain_availability_fast_output 仍是 page-logic 内嵌 availability 的轻量入口。 fast output 仍以 TraversalIntent::Availability 构建 answer_facts，并只返回 availability_facts、data_empty_gates 和 truncation_guard。 目标不存在或 page-scoped 目标无法解析时，当前 fast path 使用共享 find_candidates helper 生成 not-found 输出。"
+        }
+      ],
+      "limitations": [
+        "当前证据证明入口和 intent 分支仍存在，不证明 fast output 与完整 explain 的所有语义等价。",
+        "本轮未执行 Rust 测试或真实图上的 explain differential。"
+      ]
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/perf_report.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "42fadb6d672e910b7e19a791a58e7e3281806883"
+      ],
+      "patch_sha256": "301b8de6b8579e20f842a460707b4c22a9996f0baae17792ce1e0544f65b89ee",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "archive_scope": "M51 新增 page-logic/core profile report 数据结构、样本采集、stage/counter min/max/avg 聚合和 JSON 报告。",
+          "current_ref": "src/perf_report.rs:15; src/perf_report.rs:163; src/perf_report.rs:267; src/perf_report.rs:295",
+          "finding": "PageLogicProfileScenario、采样、阶段汇总、counter 汇总和 page-logic report 类型仍在。 build_page_logic_profile_report 仍按场景和 sample_count 执行 profiled query、序列化 output bytes 并生成 stage/counter 汇总。 stage 汇总仍计算 sample_count、min_ms、max_ms 和 avg_ms。 counter 汇总仍计算 sample_count、min、max 和 avg。"
+        },
+        {
+          "archive_scope": "M51 core report 覆盖 rebuild、redb、runtime，并将阶段耗时作为成本归因输入。",
+          "current_ref": "src/perf_report.rs:322; src/perf_report.rs:438; src/perf_report.rs:604; src/perf_report.rs:801",
+          "finding": "当前增加 PerformanceCostModel 及 page-logic hotspot、cost drivers、空间换时间候选和 next action 生成。 build_core_cost_model 仍按 rebuild、redb、runtime 生成成本模型。 rebuild profile 已拆出 discover、dirty detection、parse、graph apply、persist commit 和 noop 阶段。 runtime profile 已扩展为 graphdb load、long-lived load、status/query dispatch、warm 和 unchanged reload 阶段。"
+        }
+      ],
+      "limitations": [
+        "当前 n=1/5/10/50 总耗时在 972-984 行由一次 load/query/warm 测量线性外推，不是对应次数的实际重复执行。",
+        "tests/m51_profile_report_tests.rs 主要断言 stage/counter/cost-model 存在，未验证 min/max/avg 算术、sample index/body 序列化或成本模型描述的事实准确性。"
+      ]
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/query.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "e4df9a4a859eea3a51d3e887add43dfe7021285c"
+      ],
+      "patch_sha256": "23b5f21644058be8e7295fb29a33b36dd6eb185ced832bbefd4f9a2a8f0be711",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "archive_scope": "导出 build_query_page_logic_output_profiled，使 M51 runner 能调用 profiled page-logic API，同时保留普通 query 入口。",
+          "current_ref": "src/query.rs:366; src/query.rs:372",
+          "finding": "page_logic 模块的公开导出块仍存在。 当前导出 build_query_page_logic_output、build_query_page_logic_output_profiled 以及 dense、materialized availability、warm cache 相关扩展 API。"
+        }
+      ],
+      "limitations": [
+        "当前导出列表证明 API 接线仍在，不能单独证明 profiled query 的输出和计时行为正确。",
+        "本轮未运行依赖 query 导出的测试。"
+      ]
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/query/page_logic.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "0417b4fbbd25aea21c053bce7fbdbd629377e6aa"
+      ],
+      "patch_sha256": "d1a27a3b221151c589ad3a652d1e5380b742cba30c9c5e0314e5366b249c533c",
+      "status": "retained_with_cache_regression",
+      "evidence": [
+        {
+          "archive_scope": "M51 新增 page-logic profiling stage/counter、默认输出与 profiled API 共用内部实现，并在 entrypoint、edge scan、action flow 等阶段使用单次调用 edge cache。",
+          "current_ref": "src/query/page_logic.rs:64; src/query/page_logic.rs:1173; src/query/page_logic.rs:1424; src/query/page_logic.rs:1433",
+          "finding": "record_profile_stage、set_profile_counter、add_profile_counter 仍提供 M51 profiling 接口。 build_query_page_logic_output_profiled 仍返回 JSON 与 PerfProfile，且当前还有 dense/materialized/cache profiled 变体。 当前将 entrypoint 与 component/action edge 收集抽为可复用的 PageLogicEdgeBundle。 edge bundle 内部有局部 edge_cache，并在 1438 和 1483 的扫描路径中复用。"
+        },
+        {
+          "archive_scope": "compact availability 截断、fast-path key-model entry 和 M51 page-logic cache 作为查询热点优化。",
+          "current_ref": "src/query/page_logic.rs:124; src/query/page_logic.rs:1266; src/query/page_logic.rs:2297",
+          "finding": "KeyModelAvailabilityEntry 仍记录 fast-path、fallback 和 condition-group 信息。 当前 warm API 物化 availability、prerequisites 和 path_summary。 当前 query 使用 PageAvailabilityIndex 投影 key-model availability，并记录 build/projection 与 fast-path counters。"
+        },
+        {
+          "archive_scope": "归档的单一 edge cache 应跨 entrypoint/edge/action 三个阶段，避免同一 action 的 get_node_edges 再读一次。",
+          "current_ref": "src/query/page_logic.rs:1433; src/query/page_logic.rs:1753; src/query/page_logic.rs:1801",
+          "finding": "collect_page_logic_edge_bundle 的 edge_cache 在 helper 返回时销毁。 build_query_page_logic_output_inner 另建独立 edge_cache，与 helper 的缓存不共享。 action_flow_build 通过外层 cache 再取 action edges，导致 helper 的 action edge 结果无法跨阶段命中。"
+        }
+      ],
+      "limitations": [
+        "现有 profile counters 记录逻辑扫描规模，不是 GraphReadStore get_node_edges 实际调用次数；现有测试没有用计数型 GraphReadStore 锁定该缓存契约。",
+        "本轮只做静态源码审计，未修改或运行测试。"
+      ]
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/query/page_logic/path_summary.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "21c3fd8def7b1fbfeb4ebab52f946fade0d06dd9"
+      ],
+      "patch_sha256": "25c15dcb436e2fe1ffa00da417df25854d3ed0ec41068a3f8d37e15fcfcc6548",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "archive_scope": "M51 为原 path 算法新增 anchor/candidate/field-candidate/dedup/classification/JSON/side-context/sort 分段计时和规模 counter。Dense snapshot、PathGraphCache 是后续扩展，不是 M51 原改动。",
+          "current_ref": "src/query/page_logic/path_summary.rs:20; src/query/page_logic/path_summary.rs:53; src/query/page_logic/path_summary.rs:280",
+          "finding": "build_page_logic_paths 仍接收 dense snapshot、budget、cache-materialization 标志和 profile。 当前仍记录 path_context、anchor extract、candidate search、field candidate、dedup、classification、JSON、side-context 和 sort 阶段/counters。 PathGraphCache 仍缓存节点/边并实现 GraphReadStore。"
+        },
+        {
+          "archive_scope": "后续实现将 warm/cache path materialization 按 budget 控制，避免 warm 阶段为不保留的路径桶先构造 JSON。",
+          "current_ref": "src/query/page_logic/path_summary.rs:153; src/query/page_logic/path_summary.rs:184",
+          "finding": "PathMaterializeKeep 按 for_cache_materialization 和 budget 决定 related/candidate/supporting/rejected/diagnostic 桶。 路径 JSON 构造阶段仍记录 path_json_build_ms。"
+        }
+      ],
+      "limitations": [
+        "当前 cost model 会查找 path_related_rejected_expansion_ms，但 path_summary 当前未产生该 counter；成本驱动可能只有 path_summary 总阶段和其他已有 counters。",
+        "已有 profile/等价测试不能证明跨进程缓存恢复或真实项目性能收益。"
+      ]
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "tests/m51_profile_report_tests.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "b37393de9422406d7bb586a95ac144bcdcbd8891"
+      ],
+      "patch_sha256": "fbf79aa2e4f9d82e4f3ac1cf035506de26aa8387f04c13a9518e8097feb2d159",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "archive_scope": "新增 page-logic/core 两个报告测试，检查 report kind、样本数、edge_scan 原始阶段/汇总、edges_scanned sample_count/max、三个 core 场景的非空 stage summary。cost model 断言是后续新增。",
+          "current_ref": "tests/m51_profile_report_tests.rs:25; tests/m51_profile_report_tests.rs:93",
+          "finding": "page-logic 测试仍检查 report kind、两次样本、edge_scan stage、edges_scanned summary 和 availability/path cost model。 core 测试仍覆盖 rebuild、redb、runtime 三个 scenario，并检查 stage summary 和 cost model 非空。"
+        },
+        {
+          "archive_scope": "M51 profile report 的阶段/counter 契约测试随 core runner 演化，要求 rebuild/redb/runtime 的细分阶段和 runtime page-logic counters。",
+          "current_ref": "tests/m51_profile_report_tests.rs:117; tests/m51_profile_report_tests.rs:171",
+          "finding": "当前新增的详细契约测试检查 rebuild、redb 和 runtime 的扩展 stage 名称。 runtime 测试仍检查 dense/read-model/availability/page-dependency、warm/query dispatch 和 n10 counters。"
+        }
+      ],
+      "limitations": [
+        "测试没有验证 min/max/avg 的算术、sample_index 和完整序列化 body，也没有证明成本模型的 drivers 与实际热点事实一致。",
+        "cost_model 非空及字符串包含断言主要是结构/标签检查，不能替代真实项目性能或调用次数验收。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "docs/m52-performance-optimization.md",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "0f20775cac9556ee7f022a263cccd5b52e7acd85"
+      ],
+      "patch_sha256": "c843f0934540344ced2cb8faac1ca8e07118ea278a4cba03bf966b7cf53fd35c",
+      "status": "historical_record_with_unmerged_proposals",
+      "evidence": [
+        {
+          "archive_scope": "新文档第1-290行",
+          "current_ref": "docs/milestones/performance/m52-performance-optimization.md:1-291",
+          "finding": "迁移后的正文除开头“收口完成”改为“起始落地”外保留；包括验收口径、profile、成本表、dense/read-model、前两轮测量。"
+        },
+        {
+          "archive_scope": "第291-324行，第三轮 warm",
+          "current_ref": "docs/milestones/performance/m53-performance-continuation.md:30-68; tests/m52_page_logic_profile_tests.rs:162-272",
+          "finding": "旧附录的三部分预热被后续全量 page-logic warm 取代；当前仍有三个 cache-used counter=1 和 canonical JSON 等价断言，但旧 prerequisites_materialize/path_materialize 阶段名不再使用。旧测量不是本轮 main 复测。"
+        },
+        {
+          "archive_scope": "第325-378行，第四轮 native fragment 与 reload",
+          "current_ref": "src/runtime.rs:225-251; src/runtime.rs:1345-1384; docs/milestones/performance/m53-performance-continuation.md:70-94",
+          "finding": "两种原型均未合入；fragment 有明确延期记录，reload 没有等价实现或同等延期决策。M53 第5节错误声称已修复，本轮更正为历史未合入策略。原文仍可由归档 commit 读取。"
+        },
+        {
+          "archive_scope": "第379行至末尾 redb v2、项目快照、候选与决策边界",
+          "current_ref": "docs/milestones/performance/m52-performance-optimization.md:291-365",
+          "finding": "redb v2 shadow设计/测试、旧项目测量、M53候选和明确不做正文全部保留；不能将M52时默认v1的历史约束当当前实现，M53已引入v2优先hydrate。"
+        }
+      ],
+      "limitations": [
+        "历史表格是旧记录，不是当前性能验收；未恢复 native 或忽略 mtime 的算法。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/lib.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "09a7703fc75eecd022fe54cfeadc8ccaefe66674"
+      ],
+      "patch_sha256": "9ab2d6f10890fb76c87a2e89be454e93ac2985815b97114aa7101a8bd3c56dbd",
+      "status": "retained_with_unmerged_prototype",
+      "evidence": [
+        {
+          "archive_scope": "全部三个导出 hunk",
+          "current_ref": "src/lib.rs:12-31",
+          "finding": "dense_graph、graph_redb_v2（cli-local）、perf_profile、perf_report 仍导出；page_logic_fragments 导出不存在，对应延期的 native 文件后端原型。"
+        }
+      ],
+      "limitations": [
+        "模块导出只证明接线；fragment 原型未被当前 IndexedDB stub 或内存 warm 替代。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/perf_report.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "5b0cc1bb5040fe4fe0c089650194c8be0549d87f"
+      ],
+      "patch_sha256": "632dc389c54ec7d08b0355b9de6a21332fd11a709072f503664e08be7e06d3dd",
+      "status": "retained_except_unmerged_reload_observability",
+      "evidence": [
+        {
+          "archive_scope": "M52 成本模型与 page/core profile 报告聚合（122cedd；archive 中包含 stage/counter 汇总、热点目的、成本驱动和候选方案）。",
+          "current_ref": "src/perf_report.rs:80; src/perf_report.rs:163; src/perf_report.rs:227; tests/m51_profile_report_tests.rs:117",
+          "finding": "PerformanceCostModel 仍包含 hotspot/purpose/why_expensive/cost_drivers/space_time_candidates/next_action。 build_page_logic_profile_report 仍逐场景采样、汇总 stage/counter 并生成 cost_model。 build_core_profile_report 仍覆盖 rebuild、redb、runtime 三类核心场景。 测试仍检查 M52 core stage contract 和 runtime counter key。 审阅标注：retained（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "runtime one-shot/long-lived/warmed page-logic 对照及 n=1/5/10/50 成本比较（e21b94a、f1a95e6）。",
+          "current_ref": "src/perf_report.rs:847; src/perf_report.rs:972; src/runtime.rs:1130",
+          "finding": "仍采集 long-lived runtime load、read model、availability facts、page dependency index、单次查询、warm 和 warmed 查询。 仍输出 one-shot/long-lived/warmed 的 n=1/5/10/50 total counters。 实际 QueryPageLogic 调用链把 dense snapshot、PageLogicAvailabilityCache 和 materialized availability 传入 page_logic。 审阅标注：evolved（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "runtime check_reload 的 profiled file-state/hash/compare 计时及 mtime/size/prefix-hash changed/reloaded 八项 counter（b412769）。",
+          "current_ref": "src/perf_report.rs:987; src/runtime.rs:1360",
+          "finding": "当前只通过 ToolCommand::CheckReload 调用 query，并记录 runtime_check_reload_diagnostics；archive 的 reload_if_changed_profiled 及八项 counter 不在当前文件。 当前 reload 判定仍以 size、mtime、4096-byte content_prefix_hash 比较，未提供 archive profiled reload API。 审阅标注：unresolved（后续实现/质量问题与归档去向分别判断）。"
+        }
+      ],
+      "limitations": [
+        "n=1/5/10/50 totals 是由一次 load/query/warm 测量线性外推（src/perf_report.rs:972），不是实际执行对应次数的重复测量。",
+        "成本模型寻找 prerequisites_display_ms/prerequisites_data_ms/prerequisites_action_ms 和 path_related_rejected_expansion_ms，但当前 query 子模块没有产生这些 counter；因此相应 cost_drivers 可能只有总 stage，测试只验证存在性。",
+        "tests/m51_profile_report_tests.rs:117-191 主要验证 stage/counter key 存在，未证明真实 host 上的性能收益或 reload counter 语义等价。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/query.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "b65348b4f95303fa0f1e8392b5374d8d3cde70fb"
+      ],
+      "patch_sha256": "aeecb243026630995695a6d5aca9f11687c93b80b7b5fe131e00c90ab37c1c98",
+      "status": "retained_with_unmerged_prototype",
+      "evidence": [
+        {
+          "archive_scope": "导出 page-logic profiled API、dense snapshot API、availability cache API（c95dbb2、303aa36、f1a95e6）。",
+          "current_ref": "src/query.rs:366; src/query/page_logic.rs:1131",
+          "finding": "当前仍导出 build_page_logic_availability_cache、profiled dense/cache API 和普通 dense/cache API。 当前仍有 with_dense_snapshot、profiled dense 和 profiled availability-cache 入口。 审阅标注：retained（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "M52 将 PageLogicCacheFragmentBundle 作为公开导出，配合 warm cache 跨边界序列化/还原（b412769）。",
+          "current_ref": "src/query.rs:372; src/query/page_logic.rs:625; src/runtime.rs:568",
+          "finding": "当前导出列表包含 MaterializedAvailabilityFactsIndex、PageDependencyIndex、PageLogicAvailabilityCache，但没有 PageLogicCacheFragmentBundle。 当前 PageLogicAvailabilityCache 只有内存字段和 clone/project 方法，没有 fragment bundle 转换方法。 runtime warm 直接构造并写入内存 HashMap；没有从持久化 fragment 读取的调用链。 审阅标注：deferred（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "availability query-time seam 由 M53 引入 MaterializedAvailabilityFactsIndex，以 load-time typed condition facts 复用 archive 的批量入口。",
+          "current_ref": "src/query.rs:373; src/query/page_logic/materialized_availability.rs:29; src/query/page_logic.rs:892",
+          "finding": "MaterializedAvailabilityFactsIndex 已公开导出。 索引在 load 阶段预收集各节点 ConditionFact，并可 seed ConditionCollectorCache。 availability 批次使用物化索引 seed condition cache，并统计 materialized_hits。 审阅标注：evolved（后续实现/质量问题与归档去向分别判断）。"
+        }
+      ],
+      "limitations": [
+        "当前 M53 替代物只覆盖全图 condition facts；它不等价于 archive 的完整 page cache fragment（availability + prerequisites + paths + warm_stages）。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/query/page_logic.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "1e116ebe5190c699eae754a442518ab5099b6909"
+      ],
+      "patch_sha256": "928e881bb300e5d7a40ead370fc3f8e50679ff38959088d17371dd76de54171e",
+      "status": "retained_with_unmerged_prototype",
+      "evidence": [
+        {
+          "archive_scope": "M52 page-logic profiling stage/counter、单次 edge cache、availability fast path/context collector/batch/index 和 compact availability 截断结构。",
+          "current_ref": "src/query/page_logic.rs:64; src/query/page_logic.rs:131; src/query/page_logic.rs:811; src/query/page_logic.rs:929; src/query/page_logic.rs:2312",
+          "finding": "record_profile_stage/set_profile_counter/add_profile_counter 和 cached_node_edges 仍存在。 page-scoped availability fast path/fallback 和 condition_group_count 仍由 build_key_model_availability_entry 提供。 PageAvailabilityIndex 仍从批量 availability 构建并投影回输出 batch。 compact key_model_availability 仍输出 total/shown/truncated/remaining/items。 当前仍记录 availability index、fallback、cache/read-model、condition group 和 materialized 命中 counters。 审阅标注：retained（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "预构建 dense graph path 入口、profiled dense query 和 runtime warm availability（c95dbb2、303aa36、f1a95e6）。",
+          "current_ref": "src/query/page_logic.rs:1131; src/query/page_logic.rs:1266; src/query/page_logic.rs:2080",
+          "finding": "普通 dense snapshot 入口和 profiled dense snapshot 入口仍存在。 warm API 仍物化 prerequisites、availability 和 path_summary。 query 命中同 page/budget cache 时投影 prerequisites/path_summary，否则重新构建。 审阅标注：evolved（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "M52 warm cache 把 prerequisites/path_summary 加入 PageLogicAvailabilityCache，archive 同时让 PagePrerequisites/PageLogicPaths 可 serde。",
+          "current_ref": "src/query/page_logic.rs:627; src/query/page_logic.rs:1340; src/query/page_logic.rs:686",
+          "finding": "PageLogicAvailabilityCache 仍持有 prerequisites、paths 和 warm_stages，支持 in-memory projection。 warm 仍构造并保存 prerequisites；1384-1412 仍构造并保存 paths。 当前新增的可比性 helper 只导出 footprint/test snapshot，不是跨进程持久化。 审阅标注：evolved（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "M52 native fragment bundle：KeyModelAvailabilityBatch、PagePrerequisites、PageLogicPaths 序列化以及 PageLogicAvailabilityCache::to/from_fragment_bundle（b412769）。",
+          "current_ref": "src/query/page_logic.rs:5; src/query/page_logic.rs:614; src/query/page_logic.rs:625",
+          "finding": "当前仅导入 serde::Serialize；没有 archive 的 Deserialize 导入。 KeyModelAvailabilityBatch 当前只有 Clone，PageLogicCacheFragmentBundle 和 to/from_fragment_bundle 均不存在。 PageLogicAvailabilityCache 当前没有 serde 实现或持久化转换。 审阅标注：deferred（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "M53 load-time materialized availability facts 作为 condition collection 的替代/补强。",
+          "current_ref": "src/query/page_logic.rs:879; src/query/page_logic.rs:892; src/query/page_logic.rs:2282",
+          "finding": "build_key_model_availability_batch 接受可选 MaterializedAvailabilityFactsIndex。 有索引时 seed ConditionCollectorCache，并把 materialized_hits 纳入 batch。 无完整 PageLogicAvailabilityCache 命中时仍在 query 阶段构建 PageAvailabilityIndex；M53 facts 不替代整个 page fragment。 审阅标注：evolved（后续实现/质量问题与归档去向分别判断）。"
+        }
+      ],
+      "limitations": [
+        "当前 warm cache 是进程内 HashMap 对象；archive 的 native fragment 持久化链路没有实现或调用证据。",
+        "M53 materialized index 只预收集 ConditionFact；prerequisites/path_summary 仍依赖 PageLogicAvailabilityCache warm 才能跳过 query-time 构造。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/query/page_logic/path_summary.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "d9c4d9acce1f6cf80ff240b4f93f50fbed2b083a"
+      ],
+      "patch_sha256": "26e05a935100c4818ac750b05c3141ab94ee93938cd1200d5cc7fc41dec4516b",
+      "status": "retained_with_unmerged_prototype",
+      "evidence": [
+        {
+          "archive_scope": "dense snapshot path traversal、PathGraphCache、path anchor/candidate/classification/JSON/sort profile counters（c95dbb2、d12757d）。",
+          "current_ref": "src/query/page_logic/path_summary.rs:21; src/query/page_logic/path_summary.rs:46; src/query/page_logic/path_summary.rs:280",
+          "finding": "build_page_logic_paths 仍接受可选 DenseGraphSnapshot。 仍在 dense/native 与 PathGraphCache 上执行 anchor、candidate、field candidate、dedup 和 classification。 PathGraphCache 仍实现 GraphReadStore 并统计 node/edge cache hits。 审阅标注：retained（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "warm fragment 所需 PageLogicPaths Serialize/Deserialize derive（b412769）。",
+          "current_ref": "src/query/page_logic/path_summary.rs:9; src/query/page_logic.rs:657",
+          "finding": "当前 PageLogicPaths 只有 #[derive(Clone)]，不再有 serde derives。 当前仅通过 project_paths 在内存中 clone 路径读模型。 审阅标注：deferred（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "M53/M54 warm cache 的 budget-aware path materialization，避免 warm 时对不保留的桶先 JSON 化。",
+          "current_ref": "src/query/page_logic/path_summary.rs:153; src/query/page_logic.rs:1384; src/query/page_logic.rs:2093",
+          "finding": "PathMaterializeKeep 按 for_cache_materialization 与 budget 决定 related/candidate/supporting/rejected/diagnostic 桶。 warm 调用传入 budget 与 for_cache_materialization=true。 普通 query 调用传入 for_cache_materialization=false，保留完整分类。 审阅标注：evolved（后续实现/质量问题与归档去向分别判断）。"
+        }
+      ],
+      "limitations": [
+        "dense/path/warm 等价性测试主要基于 tests/fixtures/test_project，并通过数组排序后比较；没有 native fragment 跨进程恢复测试。",
+        "path_summary 的 archive cost model 仍引用 path_related_rejected_expansion_ms，但当前 path_summary 没有产生该 counter。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/query/page_logic/prerequisites.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "f6e65917eef6cf47afac5ffed569fd6814732745"
+      ],
+      "patch_sha256": "6de846144b2b62a0ba69fd1782be58c205c0fe6241c93d2b167ace2c5b1a6a8a",
+      "status": "retained_with_unmerged_prototype",
+      "evidence": [
+        {
+          "archive_scope": "组件/action/data-source 前置条件扫描分段计时、data-source target 去重、sort 和 unique-condition counters（d12757d）。",
+          "current_ref": "src/query/page_logic/prerequisites.rs:16; src/query/page_logic/prerequisites.rs:44; src/query/page_logic/prerequisites.rs:63; src/query/page_logic/prerequisites.rs:66; src/query/page_logic/prerequisites.rs:94",
+          "finding": "collect_page_prerequisites 仍分组件、action、去重后的 data-source target 和 sort 四段执行。 仍记录 prerequisites_component_scan_ms 和 component node count。 仍记录 prerequisites_action_scan_ms 和 action node count。 仍先去重 data-source target，再扫描并记录 data_source_scan/sources count。 仍记录 prerequisites_sort_ms 与 prerequisites_unique_conditions。 审阅标注：retained（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "PagePrerequisites Serialize/Deserialize derive，作为 native fragment 的 prerequisites 部分（b412769）。",
+          "current_ref": "src/query/page_logic/prerequisites.rs:7; src/query/page_logic.rs:652",
+          "finding": "当前 PagePrerequisites 只有 #[derive(Clone)]，serde derives 已移除。 缓存只通过 project_prerequisites clone 投影，没有序列化/还原方法。 审阅标注：deferred（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "当前新增 budget/for_cache_materialization 参数，意图让 warm/query 按预算控制 prerequisites 物化。",
+          "current_ref": "src/query/page_logic/prerequisites.rs:16; src/query/page_logic/prerequisites.rs:26; src/query/page_logic.rs:1341",
+          "finding": "调用方确实传递 budget 与 for_cache_materialization。 函数体直接 let _ = (budget, for_cache_materialization)，两个参数不影响扫描或输出。 warm 仍保存完整三类 prerequisites；当前没有按 budget 裁剪 prerequisites。 审阅标注：unresolved（后续实现/质量问题与归档去向分别判断）。"
+        },
+        {
+          "archive_scope": "prerequisites profile counters 应被 M52 cost model 作为细分成本驱动。",
+          "current_ref": "src/perf_report.rs:408; src/query/page_logic/prerequisites.rs:44; src/query/page_logic/prerequisites.rs:63; src/query/page_logic/prerequisites.rs:87",
+          "finding": "cost model 查找 prerequisites_display_ms/prerequisites_data_ms/prerequisites_action_ms。 实际产生的是 prerequisites_component_scan_ms。 实际产生的是 prerequisites_action_scan_ms。 实际产生的是 prerequisites_data_source_scan_ms。 审阅标注：unresolved（后续实现/质量问题与归档去向分别判断）。"
+        }
+      ],
+      "limitations": [
+        "tests/m52_page_logic_profile_tests.rs:66-83 对 availability/index 时间只断言 >0，而实现对这些 elapsed 使用 .max(1)；该断言不能证明真实非零耗时或优化收益。",
+        "prerequisites 没有跨进程 fragment 恢复测试；当前 serde removal 与 page_logic 的完整 fragment removal 一致。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/runtime.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "6405e23650f72c23edfdfcf503f90851c1e3976a"
+      ],
+      "patch_sha256": "69550f1d03edd30a34dc69b3ea1aec1aded654dbe75e6bdb20acdd5c2e463572",
+      "status": "retained_with_unmerged_proposals",
+      "evidence": [
+        {
+          "archive_scope": "RuntimeMode/RuntimeReadModel、字段、load 包装与初始化",
+          "current_ref": "src/runtime.rs:15-37; src/runtime.rs:369-565",
+          "finding": "OneShot 默认无派生模型，LongLived 构建 dense 和 read model 仍在；后续增加 facts/page dependency index 与失败诊断，dense 改 Option，read_model_build_ms 改为三段计时之和。"
+        },
+        {
+          "archive_scope": "warm_page_logic_availability 与缓存键/插入",
+          "current_ref": "src/runtime.rs:38-61; src/runtime.rs:568-574; src/runtime.rs:893-961",
+          "finding": "page_id+换行+budget 键及 warm 接口保留；后续 Arc unique-write/COW 替代每次克隆整个缓存 map，单页与 batch 共用插入路径。"
+        },
+        {
+          "archive_scope": "QueryPageLogic arm 与 reload 字段替换",
+          "current_ref": "src/runtime.rs:1137-1164; src/runtime.rs:1387-1417",
+          "finding": "查询消费同页同 budget 内存 warm cache/dense，新增 materialized facts；reload 保留 runtime_mode，成功后替换派生模型，并新增分层计时/diagnostics。"
+        },
+        {
+          "archive_scope": "fragment import、store/hit/miss字段、set/with/persist/read/insert方法、query fallback",
+          "current_ref": "docs/milestones/performance/m53-performance-continuation.md:70-80; src/runtime.rs:1137-1164",
+          "finding": "native 文件 store 与自动 disk hit/backfill 整组未合入。当前只有内存缓存，不能算磁盘原型的等价实现。"
+        },
+        {
+          "archive_scope": "GraphFingerprint.created/cache_key、稳定采样、ReloadCheckProfile、三个 profiled 方法",
+          "current_ref": "src/runtime.rs:225-251; src/runtime.rs:1345-1384",
+          "finding": "created、cache_key 和细分 profile 未合入；当前读取整文件、hash 前4096字节，并以 mtime/size/hash 任一变化触发 reload。main 历史 git log -S reload_if_changed_profiled 无记录；不是一次后续删除已合入 API。"
+        }
+      ],
+      "limitations": [
+        "忽略 mtime 并仅做固定采样可能漏检更新，不能未经验证回植旧代码。当前 read-to-hash 仍有整文件读取成本；本轮仅记录源码事实，未测成本或复现 false reload。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "tests/m51_profile_report_tests.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "27442a5a5766c351236c8d99d167f49114dd1d8f"
+      ],
+      "patch_sha256": "45a4c5b697bd9ce69348dc90b3171d597a1033bc136986c821df1fc8e77b7e2c",
+      "status": "retained_except_unmerged_reload_observability",
+      "evidence": [
+        {
+          "archive_scope": "全部三个测试与期望阶段/counter",
+          "current_ref": "tests/m51_profile_report_tests.rs:25-193",
+          "finding": "报告类型、样本数、edge_scan、edges_scanned sample_count/max、cost_model、rebuild/redb/runtime阶段断言保留。archive→main全文件diff仅新增facts/page-index两个counter，删除八个reload细分counter。"
+        },
+        {
+          "archive_scope": "第三测试的八个 runtime_check_reload_* 键",
+          "current_ref": "src/perf_report.rs:991-993; src/runtime.rs:1345-1384",
+          "finding": "file_state_load_ms/prefix_hash_ms/compare_ms/mtime_changed/created_changed/size_changed/prefix_hash_changed/reloaded 未要求存在，与未合入的 ReloadCheckProfile 一致；不能算由两个新counter覆盖。"
+        }
+      ],
+      "limitations": [
+        "原断言只检查多处stage/counter存在，不证明计时准确、reload结果为Unchanged或真实项目收益。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "tests/m52_page_logic_profile_tests.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "c09640d3a64d16de6a1557221d352425f9eda9e2"
+      ],
+      "patch_sha256": "d26b189970805d340f7836aa00894642b5aea2fd3367cc27479095d922a94fd6",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "archive_scope": "前3测试：bulk availability、path context cache、dense输出",
+          "current_ref": "tests/m52_page_logic_profile_tests.rs:46-159",
+          "finding": "counter命中、cache hit/重复收集边界、dense与baseline canonical JSON相等断言原样保留。"
+        },
+        {
+          "archive_scope": "第4测试：normal warm与无缓存等价",
+          "current_ref": "tests/m52_page_logic_profile_tests.rs:162-228; src/query/page_logic.rs",
+          "finding": "三个read_model_used==1保留（两条位置下移）。path_summary.is_none改为is_some，prerequisites_materialize/path_materialize改为prerequisites/path_summary，匹配后续全量warm实现。"
+        },
+        {
+          "archive_scope": "旧warm签名与新增compact覆盖",
+          "current_ref": "tests/m52_page_logic_profile_tests.rs:231-272",
+          "finding": "调用适配dense/materialized参数；新增compact canonical JSON等价与三counter==1，不是删除normal断言。"
+        }
+      ],
+      "limitations": [
+        "canonicalize会重排数组，不能证明原始顺序或字节相同；计时大于零可能受计时分辨率影响。本轮未运行Rust。"
+      ]
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "tests/runtime_tests.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "28d8d40b484fea42ecbfe8fced2c7ccff75ebdcc"
+      ],
+      "patch_sha256": "2a67bfb4f006fc7786ba7af87a8f733f1a2e8afcd082a5c07bb1cf799a3c72b0",
+      "status": "retained_except_unmerged_prototype_tests",
+      "evidence": [
+        {
+          "archive_scope": "默认/dense opt-in/LongLived/OneShot/warm原测试",
+          "current_ref": "tests/runtime_tests.rs:13-26; tests/runtime_tests.rs:260-408",
+          "finding": "保留默认无dense、dense节点/边数相等、LongLived reload替换read-model Arc、OneShot无read-model、warm前后输出相等。dense访问适配Option；增加三段计时之和等于read_model_build_ms。"
+        },
+        {
+          "archive_scope": "test_runtime_reload_if_changed_profiled_reports_unchanged_stages",
+          "current_ref": "src/runtime.rs:1370-1384; tests/runtime_tests.rs:212-225",
+          "finding": "专用profiled API测试未合入（原还断言file_state_load_ms/prefix_hash_ms<=graph_load_ms）；普通Unchanged与reload_count=0测试仍在，但不替代细分计时API。"
+        },
+        {
+          "archive_scope": "两个fragment roundtrip/runtime-hit新增测试",
+          "current_ref": "docs/milestones/performance/m53-performance-continuation.md:70-80; tests/runtime_tests.rs:411-468",
+          "finding": "未合入磁盘roundtrip/fingerprint mismatch miss和fresh-runtime自动disk hit回填测试；后续B1/B2 profile测试只证明内存派生路径，不替代跨session持久化。"
+        },
+        {
+          "archive_scope": "归档之外的后续新增用例",
+          "current_ref": "tests/runtime_tests.rs:626-855",
+          "finding": "后续补充prepare_replacement/命令错误/空dependency index测试。build_failure用例手动复刻fallback分支并丢弃build_ms，不证明GraphRuntime真实load失败分支被执行。"
+        }
+      ],
+      "limitations": [
+        "warm_ms/read_model_build_ms>0依赖计时分辨率；没有用计时断言证明性能收益。fallback真实调用链测试和compact空桶弱断言仍待独立加固。"
+      ]
+    }
+  ]
+}
