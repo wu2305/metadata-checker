@@ -2,6 +2,7 @@ use crate::graph::Node;
 use crate::graph_store::{GraphNeighbors, GraphReadStore, GraphStoreResult};
 use crate::path::{PathFinder, PathSelector};
 use crate::perf_profile::PerfProfile;
+use anyhow::{Context, Result};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -31,7 +32,7 @@ pub(super) fn build_page_logic_paths(
     budget: &str,
     for_cache_materialization: bool,
     profile: &mut Option<&mut PerfProfile>,
-) -> PageLogicPaths {
+) -> Result<PageLogicPaths> {
     super::set_profile_counter(profile, "dense_snapshot_build_ms", 0);
     if let Some(snapshot) = dense_snapshot {
         super::set_profile_counter(profile, "path_dense_graph_used", 1);
@@ -195,7 +196,10 @@ pub(super) fn build_page_logic_paths(
             page_id,
             child_components,
             &mut related_context,
-        );
+        )
+        .with_context(|| {
+            format!("failed to collect cross-page side context for page '{page_id}'")
+        })?;
     }
     record_ms_counter(profile, "path_side_context_ms", stage_started);
     super::set_profile_counter(profile, "path_graph_cache_hits", path_graph.cache_hits());
@@ -204,14 +208,14 @@ pub(super) fn build_page_logic_paths(
     sort_primary_paths_by_confidence(&mut primary_paths);
     record_ms_counter(profile, "path_sort_ms", stage_started);
 
-    PageLogicPaths {
+    Ok(PageLogicPaths {
         primary_paths,
         related_context,
         candidate_paths,
         supporting_paths,
         rejected_paths,
         path_selection_diagnostics,
-    }
+    })
 }
 
 /// warm cache 物化时按 budget 决定哪些路径桶需要 JSON 化。
@@ -331,10 +335,16 @@ fn collect_cross_page_side_context(
     page_id: &str,
     child_components: &[&Node],
     related_context: &mut Vec<serde_json::Value>,
-) {
+) -> Result<()> {
     let mut seen_ctx: std::collections::HashSet<String> = std::collections::HashSet::new();
     for comp in child_components {
-        if let Some(neighbors) = graph.get_node_edges(&comp.id).ok().flatten() {
+        let neighbors = graph.get_node_edges(&comp.id).with_context(|| {
+            format!(
+                "failed to read adjacency for component '{}' while collecting cross-page side context",
+                comp.id
+            )
+        })?;
+        if let Some(neighbors) = neighbors {
             for edge_view in neighbors.outgoing {
                 let target = edge_view.node;
                 let edge = edge_view.edge;
@@ -356,6 +366,7 @@ fn collect_cross_page_side_context(
             }
         }
     }
+    Ok(())
 }
 
 fn sort_primary_paths_by_confidence(primary_paths: &mut [serde_json::Value]) {

@@ -1387,7 +1387,7 @@ pub fn build_page_logic_availability_cache(
         budget,
         true,
         &mut ignored_profile,
-    );
+    )?;
     warm_stages.insert(
         "path_summary".to_string(),
         paths_started.elapsed().as_millis(),
@@ -2074,7 +2074,7 @@ fn build_query_page_logic_output_inner(
             budget,
             false,
             &mut profile,
-        )
+        )?
     };
     record_profile_stage(&mut profile, "path_summary", stage_started);
     set_profile_counter(&mut profile, "primary_paths", primary_paths.len());
