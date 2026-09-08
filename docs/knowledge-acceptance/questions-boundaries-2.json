@@ -1,0 +1,10 @@
+[
+  {"id":"F1","set":"boundary_regression","question":"第一次构建索引时 v2 shadow 就已经是 Stale，然后被拉回 Current 的吗？"},
+  {"id":"F2","set":"boundary_regression","question":"只有 checkpoint 推进、图没有变化的增量提交，v2 shadow 的状态会变吗？"},
+  {"id":"F3","set":"boundary_regression","question":"坏 SPG 会不会也像坏 TBL 那样留下诊断后继续下一轮？"},
+  {"id":"F4","set":"boundary_regression","question":"CLI 或 stdio 遇到坏 SPG 时会怎么表现？给出你有的证据。"},
+  {"id":"F5","set":"boundary_regression","question":"human 模式输出契约不统一这个缺陷，属于 M28 契约收敛要做的事吗？"},
+  {"id":"F6","set":"boundary_regression","question":"M28 计划里列出了哪些具体缺陷？请逐条说明。"},
+  {"id":"F7","set":"boundary_regression","question":"已经把真实项目目录挂到 CI 上了，还需要部署令牌吗？这样是不是就不用再做语料验收了？"},
+  {"id":"F8","set":"boundary_regression","question":"full-criterion 流水线缺 token 时会不会失败？请说明成立条件。"}
+]

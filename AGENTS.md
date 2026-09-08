@@ -208,10 +208,13 @@ ls -lh target/release/metadata-checker
 ### full-criterion CI 的 fixture token 与失败规则
 
 - **语料入口**（`.cnb.yml` 的 `.full_criterion_checkout_stage`）：
-  已预置 `METADATA_CHECKER_REAL_PROJECT_DIR` 时跳过 clone，随后仍须通过语料 preflight。
-  未预置时，必须提供 `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 以及仓库 URL 或 slug；
-  **缺少 token 或仓库地址会在 checkout 阶段失败（exit 1），不会跳过 bench 后算通过。**
+  **已预置 `METADATA_CHECKER_REAL_PROJECT_DIR` 时不需要 `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN`——
+  clone 步骤被跳过，但仍须通过语料 preflight，checkout 成功不等于语料验收通过。**
+  **未预置该目录时**，必须提供 `REAL_PROJECT_FIXTURE_DEPLOY_TOKEN` 以及仓库 URL 或 slug；
+  缺少 token 或仓库地址会在 checkout 阶段失败（exit 1），不会跳过 bench 后算通过。
   clone / 固定提交 checkout 失败同样使流水线失败，不继续 benchmark。
+- **因此「缺 token 就失败」只在未预置语料目录时成立**，不得无条件套用：
+  预置目录的运行不进入该失败分支。
 - `Repository Not Found` 不能单独证明仓库不存在。维护者已确认 fixture 仓库存在，
   远端 Agent 缺少访问权限；应核验当前 token 的授权，不改写仓库存在性结论。
   **该确认来自维护者口述，未附核验日期与凭证**。远端 Agent 应把它当作待核实前提：

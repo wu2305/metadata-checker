@@ -1,0 +1,6 @@
+[
+  {"id":"G1","set":"boundary_regression","question":"已有库的 v2 是 Stale，只改一个节点后调用 persist 走 delta=None，必须再累计到1024才能回 Current 吗？"},
+  {"id":"G2","set":"boundary_regression","question":"库为 Stale，图完全没变且无 checkpoint 或诊断载荷，调用 persist 就一定能重建 v2 吗？"},
+  {"id":"G3","set":"boundary_regression","question":"同样只有 checkpoint 推进，persist_with_checkpoint 和 delta=Some 的提交对 Stale 状态有什么区别？"},
+  {"id":"G4","set":"boundary_regression","question":"stdio 的普通 QueryModel 请求带 check_reload=true，传给 GraphRuntime::query 的 command 会改成 CheckReload 吗？"}
+]

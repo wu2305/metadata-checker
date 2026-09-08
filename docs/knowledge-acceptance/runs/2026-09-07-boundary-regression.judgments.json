@@ -1,0 +1,253 @@
+{
+  "artifact_sha256": "830b307ee519b46e608f36e505b18ac6fd0c9f49dae53080b1610092db5f8de5",
+  "reviewer": "Codex main thread; manual complete-answer and retrieved-evidence review",
+  "status": "not_accepted",
+  "rubric": "原32题与8道预冻结边界题均为开发回归。检查完整附加断言；捏造冲突/范围为fail，状态或前提不精确为partial；检索缺失导致已覆盖问题未知为fail，区分安全拒答与整体问答成功。",
+  "counts": {
+    "pass": 35,
+    "fail": 3,
+    "partial": 2
+  },
+  "judgments": [
+    {
+      "id": "A1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "列出 main、run_query_commands、run_surface、execute_resolved_target、route、run_cli_runtime_tool、CliAdapter 与 GraphRuntime::query。"
+    },
+    {
+      "id": "A2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "定位 stdio 的 handle_diff_refresh；runtime 路径一律返回 DIFF_REFRESH_CONTEXT_REQUIRED。"
+    },
+    {
+      "id": "A3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "统一汇合点为 GraphRuntime::query，完整链路无关键 helper 遗漏。"
+    },
+    {
+      "id": "A4",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "三个 stdio if 分支及调用对象正确，未再套用 runtime 可变借用说明。"
+    },
+    {
+      "id": "A5",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "明确 check_reload 失败只记 diagnostic，不中断本次查询。"
+    },
+    {
+      "id": "A6",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "CLI 输出 graphdb 诊断后退出；stdio 启动失败。"
+    },
+    {
+      "id": "B1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "给出扫描入口与发现、差分、解析、合并应用、持久化阶段；4+5 合并实现。"
+    },
+    {
+      "id": "B2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "判脏依据 xxhash64 内容 hash，不是 mtime。"
+    },
+    {
+      "id": "B3",
+      "set": "fixed",
+      "verdict": "fail",
+      "reason": "主结论正确，却虚构 CLI/stdio 文档出现坏 SPG 且可能与扫描文档不一致；召回片段并无该说法，属于额外推断。"
+    },
+    {
+      "id": "B4",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "full rebuild 置 Current，delta 通常置 Stale，达到阈值时同事务重建回 Current。"
+    },
+    {
+      "id": "B5",
+      "set": "fixed",
+      "verdict": "partial",
+      "reason": "正确给出1024节点阈值，但将首次初始化也归为从 Stale 回到 Current；首次构建此前不必存在 Stale 状态。"
+    },
+    {
+      "id": "B6",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "scanner_entries 随图同事务持久化，报告按全库口径合并。"
+    },
+    {
+      "id": "B7",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "prepare 不落库，诊断透传给调用方随最终 commit 挂载；scan 自身持久化。"
+    },
+    {
+      "id": "C1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "Grafeo 尚无实现，当前 redb/v2 shadow，计划不能当上线。"
+    },
+    {
+      "id": "C2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "B5 钉住当前分歧，全绿不能证明增量正确。"
+    },
+    {
+      "id": "C3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "依据迁移前旧后端测量拒绝 Grafeo 验收，明确目录与是否入索引不决定有效性。"
+    },
+    {
+      "id": "C4",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "确认增量丢跨文件边的未修复缺陷。"
+    },
+    {
+      "id": "C5",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "确认唯一引用者删除后占位节点泄漏，归属尚未记账。"
+    },
+    {
+      "id": "C6",
+      "set": "fixed",
+      "verdict": "fail",
+      "reason": "top5 未包含已入库的 human 旧路径条目；回答未知符合片段边界，但本题应有答案，因此记检索失败，不能计整体通过。"
+    },
+    {
+      "id": "C7",
+      "set": "fixed",
+      "verdict": "fail",
+      "reason": "M28 未实现的主结论正确，却无据断言 human/non-human 缺陷均不在 M28 范围、修复条件与 M28 无关。"
+    },
+    {
+      "id": "C8",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "v1 hydrate 跳过坏行/悬空边，可能得到 partial 图，须检查诊断。"
+    },
+    {
+      "id": "D1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "确认 IndexedDB 为 stub，未编造真实持久化；关于扫描文档仅有标题的措辞不精确，但未误述持久化能力。"
+    },
+    {
+      "id": "D2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "无法列出未入库的 21 类边投影，停止推断。"
+    },
+    {
+      "id": "D3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "本机路径不是通用语料清单；需核验当前环境可访问性与授权。"
+    },
+    {
+      "id": "H1",
+      "set": "heldout",
+      "verdict": "partial",
+      "reason": "引文保留未预置时条件，但开头无条件宣称缺 token 即失败，未说明预置目录可跳过 clone，首句范围过宽。"
+    },
+    {
+      "id": "H2",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "预置目录跳过 clone，但仍须通过 preflight，checkout 不等于验收。"
+    },
+    {
+      "id": "H3",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "正确否定 Repository Not Found 足以证明仓库不存在，保留检索片段的维护者口述来源及访问核验限制。"
+    },
+    {
+      "id": "H4",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "字节不变则 hash 不变，跳过解析；未把已实现的诊断对账说成未修缺陷。"
+    },
+    {
+      "id": "H5",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "Grafeo 未实现，大语料数据是迁移前基线，不能证明生产可用。"
+    },
+    {
+      "id": "H6",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "回落 v1 仍可能丢节点，引用 hydrate_diagnostics 和 partial 诊断。"
+    },
+    {
+      "id": "H7",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "检索未提供 IndexedDB 恢复实现，明确未知并停止，未编造调用链。"
+    },
+    {
+      "id": "H8",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "占位节点尚不能回收；缺陷测试全绿不能证明增量与重建等价。"
+    },
+    {
+      "id": "E1",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "逐一定位 stdio handler 的三个 if 返回与各自调用对象。"
+    },
+    {
+      "id": "E2",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "否定将 runtime 可变借用注释用于 stdio 三个分支。"
+    },
+    {
+      "id": "E3",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "区分进入 runtime 后的两个分支与 stdio 的提前返回。"
+    },
+    {
+      "id": "E4",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "布尔检查选项不使普通查询短路，保留失败只记诊断的行为。"
+    },
+    {
+      "id": "E5",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "测量对象为旧后端，目录不决定 Grafeo 证据资格。"
+    },
+    {
+      "id": "E6",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "排除索引不取消迁移前基线用途，并保留后端、版本和运行条件的核验要求。"
+    },
+    {
+      "id": "E7",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "移动报告不改变实际测量对象，不能因此验收 Grafeo。"
+    },
+    {
+      "id": "E8",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "目录名不足以判断新证据有效性，要求实际后端、版本、运行条件；未接受无依据报告。"
+    }
+  ]
+}

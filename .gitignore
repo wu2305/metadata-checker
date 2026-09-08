@@ -10,3 +10,6 @@
 /.agents/
 /.commandcode/
 
+# Python 脚本运行缓存
+__pycache__/
+*.pyc

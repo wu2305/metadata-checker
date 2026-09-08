@@ -1,0 +1,301 @@
+{
+  "artifact_sha256": "b751a45ca4f51ece2c77166d0acb9f1a5a1073fdd1865ab843f72e259b0e9f5c",
+  "reviewer": "CodeBuddy main thread; manual complete-answer review against retrieved chunks and source",
+  "status": "not_accepted",
+  "rubric": "全部 48 题均为开发回归（固定题 + 两批针对已知失败设计的边界题）。检查完整回答的每个附加断言；捏造或跨层外推为 fail，状态/前提不精确为 partial；检索缺失导致已覆盖问题答未知为 fail。回归全绿不构成验收。",
+  "counts": {
+    "pass": 48,
+    "fail": 0,
+    "partial": 0
+  },
+  "judgments": [
+    {
+      "id": "A1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "给出 main → run_query_commands → run_surface → execute_resolved_target → route::route → run_cli_runtime_tool → CliAdapter → GraphRuntime::query，并声明示例 target 的解析细节未知。"
+    },
+    {
+      "id": "A2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "定位 stdio handle_request 的 if 短路与 handle_diff_refresh（:378），并说明到达 runtime 一律 DIFF_REFRESH_CONTEXT_REQUIRED（runtime.rs:1099）。"
+    },
+    {
+      "id": "A3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "统一汇合点 GraphRuntime::query 正确，并主动点出 --query-page-logic --human 是不进 runtime 的反例。"
+    },
+    {
+      "id": "A4",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "三个短路命令与 handle_request 的 if 分支正确，未把 runtime 的 match 前处理套到 stdio（上轮 partial 已消除）。"
+    },
+    {
+      "id": "A5",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "check_reload 失败只记诊断、仍继续 runtime.query(req)；未把布尔选项说成短路命令。"
+    },
+    {
+      "id": "A6",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "CLI 输出诊断 JSON 后退出、stdio 启动即失败；补充「发生在启动阶段」与片段一致。"
+    },
+    {
+      "id": "B1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "入口与六阶段（4+5 合并）正确，判脏依据 xxhash64 内容 hash。"
+    },
+    {
+      "id": "B2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "判脏为 xxhash64 内容 hash，明确不是 mtime。"
+    },
+    {
+      "id": "B3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "主结论（坏 TBL 记诊断可重试 / 坏 SPG 整轮失败）正确；明确 CLI/stdio 层未知，未再虚构文档冲突（上轮 fail 已消除）。"
+    },
+    {
+      "id": "B4",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "full rebuild 置 Current、delta 通常置 Stale、达阈值回 Current 三层都说清，并区分初始写入与状态迁移。"
+    },
+    {
+      "id": "B5",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "阈值 1024 正确，并明确首次全量不是「从 Stale 回到 Current」、checkpoint-only 属保持而非迁移（上轮 partial 已消除）。"
+    },
+    {
+      "id": "B6",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "scanner_entries 随图同事务落库、全库口径合并、陈旧对账为已实现机制；未把 prepare 的透传责任说错。"
+    },
+    {
+      "id": "B7",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "prepare 不调 persist_index、诊断置空并透传给调用方落库，责任归属正确。"
+    },
+    {
+      "id": "C1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "Grafeo 无任何实现代码、当前仍是 redb + v2 shadow；未把计划当上线。"
+    },
+    {
+      "id": "C2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "B5 全绿不能作为增量正确性或 Grafeo 迁移正确性证据。"
+    },
+    {
+      "id": "C3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "迁移前测量不能验收 Grafeo，原因是测量对象而非目录；未再虚构目录资格条件（上轮 fail 已消除）。"
+    },
+    {
+      "id": "C4",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "确认增量丢跨文件边为已确认未修缺陷，根因表述与条目一致。"
+    },
+    {
+      "id": "C5",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "占位页节点不会被清理、永久泄漏，机制与状态正确。"
+    },
+    {
+      "id": "C6",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "human 与 non-human 两条路径说清（main.rs:1200 旧渲染函数 vs runtime）；top1 命中新增的文首速查（上轮检索失败已消除）。"
+    },
+    {
+      "id": "C7",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "M28 未做结论正确，且不再断言 human 缺陷与 M28 无关，改为「知识库未记录、须读 INDEX/plan」（上轮 fail 已消除）。"
+    },
+    {
+      "id": "C8",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "v1 hydrate 可能得到 partial 图，三类诊断码与 impact=partial 正确，引用 hydrate_diagnostics。"
+    },
+    {
+      "id": "D1",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "只报告 stub 与「WASM 不得引入 redb」的检索内容，未编造 IndexedDB 恢复实现。"
+    },
+    {
+      "id": "D2",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "无法列出未入库的 21 类边投影，停止推断。"
+    },
+    {
+      "id": "D3",
+      "set": "fixed",
+      "verdict": "pass",
+      "reason": "本机路径不是通用语料清单，需核验可访问性与授权。"
+    },
+    {
+      "id": "H1",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "「缺 token 即失败」明确限定为未预置语料目录时成立，并说明预置目录跳过 clone（上轮 partial 已消除）。"
+    },
+    {
+      "id": "H2",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "预置目录不需令牌但仍须 preflight，checkout 不等于验收。"
+    },
+    {
+      "id": "H3",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "Repository Not Found 不能证明仓库不存在，须核验 token 授权，并保留「维护者口述待核实」限定。"
+    },
+    {
+      "id": "H4",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "字节不变则 hash 不变、跳过解析；未把已实现的诊断对账说成未修缺陷。"
+    },
+    {
+      "id": "H5",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "Grafeo 未实现，大语料是迁移前基线，不能证明生产可用。"
+    },
+    {
+      "id": "H6",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "回落 v1 仍可能丢节点；三类码与 GRAPH_DB_PARTIAL_HYDRATE、impact=partial 正确。"
+    },
+    {
+      "id": "H7",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "未提供浏览器 IndexedDB 恢复调用链，明确证据不足并止步。"
+    },
+    {
+      "id": "H8",
+      "set": "heldout",
+      "verdict": "pass",
+      "reason": "占位节点尚不能回收；B5 全绿不能证明增量图等于重建图。"
+    },
+    {
+      "id": "E1",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "stdio 三个命令各自的 if 分支与行号正确，未混入 runtime 层说明。"
+    },
+    {
+      "id": "E2",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "指出「需要可变借用」注释只解释 runtime 内部分支，不解释 stdio 三个短路分支。"
+    },
+    {
+      "id": "E3",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "区分 stdio 提前返回与 runtime 主 match 前处理，明确不是同一层。"
+    },
+    {
+      "id": "E4",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "check_reload=true 不阻止进入 GraphRuntime::query，失败只记诊断。"
+    },
+    {
+      "id": "E5",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "不能证明 Grafeo 的原因是测量对象为旧后端，与目录无关。"
+    },
+    {
+      "id": "E6",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "被 exclude 不取消其作为迁移前基线的用途。"
+    },
+    {
+      "id": "E7",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "搬进验收目录不改变测量对象，仍不能验收 Grafeo。"
+    },
+    {
+      "id": "E8",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "仅凭目录名不足以判断证据有效性，须核对后端/版本/运行条件。"
+    },
+    {
+      "id": "F1",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "明确首次全量是初始写入而非状态迁移，Stale→Current 只有阈值一条路径。"
+    },
+    {
+      "id": "F2",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "checkpoint-only 提交沿用上一轮状态，Stale 仍为 Stale，不属于迁移。"
+    },
+    {
+      "id": "F3",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "坏 SPG 整轮失败、不静默，不留下诊断等下轮；只有坏 TBL 走 ParseFailure。"
+    },
+    {
+      "id": "F4",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "CLI/stdio 遇到坏 SPG 的表现答未知，并引用条目的跨层不外推规则，未编造。"
+    },
+    {
+      "id": "F5",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "human 缺陷是否属于 M28 答未知，指向 INDEX/plan，未推断归属。"
+    },
+    {
+      "id": "F6",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "M28 具体缺陷清单答未知并说明条目未列出，未逐条编造。"
+    },
+    {
+      "id": "F7",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "预置目录不需令牌但仍须 preflight，checkout 不等于验收；附加的本机路径限定来自同一片段且正确。"
+    },
+    {
+      "id": "F8",
+      "set": "boundary_regression",
+      "verdict": "pass",
+      "reason": "给出「缺 token 即失败」的成立条件，并说明预置目录时不进入该分支。"
+    }
+  ]
+}

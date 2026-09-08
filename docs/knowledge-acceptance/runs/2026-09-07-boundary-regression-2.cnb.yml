@@ -1,0 +1,29 @@
+$:
+  api_trigger_knowledge_acceptance:
+  - name: knowledge-acceptance
+    docker:
+      image: python:3.12-slim
+    stages:
+    - name: script regressions
+      script: python3 -m unittest discover -s scripts/tests -p "test_*.py" -v
+    - name: capture fresh-context answers
+      script: 'set -eu
+
+        echo "cnb_commit=$CNB_COMMIT cnb_commit_short=${CNB_COMMIT_SHORT:-none}"
+
+        python3 -c ''import json; from pathlib import Path; root=Path("docs/knowledge-acceptance"); names=["questions.json","questions-boundaries.json","questions-boundaries-2.json"]; questions=[item for name in names for item in json.loads((root/name).read_text())]; Path("/tmp/kb-questions.json").write_text(json.dumps(questions, ensure_ascii=False, indent=2))''
+
+        python3 scripts/kb-evaluate.py --questions /tmp/kb-questions.json --indexed-sha $CNB_COMMIT --output target/knowledge-acceptance/run.json.gz
+
+        '
+    endStages:
+    - name: archive acceptance evidence
+      script: 'test -s target/knowledge-acceptance/run.json.gz || exit 1
+
+        echo KB_EVIDENCE_BEGIN
+
+        base64 target/knowledge-acceptance/run.json.gz
+
+        echo KB_EVIDENCE_END
+
+        '

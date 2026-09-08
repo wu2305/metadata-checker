@@ -1,0 +1,10 @@
+[
+  {"id":"E1","set":"boundary_regression","question":"stdio 收到 status、reload_graph、diff_refresh 时分别在哪里返回？请只说明 stdio handler 的分支。"},
+  {"id":"E2","set":"boundary_regression","question":"有人说 stdio 的三个短路命令都因为需要可变借用而在 runtime 的 match 前处理，这个说法准确吗？"},
+  {"id":"E3","set":"boundary_regression","question":"直接调用 GraphRuntime::query 传 ReloadGraph 或 CheckReload，与 stdio 的提前返回是同一个处理层吗？"},
+  {"id":"E4","set":"boundary_regression","question":"stdio 请求里 check_reload 为 true，是否意味着请求不会进入 GraphRuntime::query？"},
+  {"id":"E5","set":"boundary_regression","question":"旧后端的大语料内存测量为什么不能证明 Grafeo 已达到要求？这与测量文件放在哪个目录有关吗？"},
+  {"id":"E6","set":"boundary_regression","question":"一份测量记录被知识库 exclude 规则排除后，是不是连作为迁移前性能基线都无效了？"},
+  {"id":"E7","set":"boundary_regression","question":"如果把旧后端 3.72 GiB 的测量报告搬进知识库问答验收目录，就能用来验收 Grafeo 了吗？"},
+  {"id":"E8","set":"boundary_regression","question":"新报告只说自己在 docs/knowledge-acceptance/，没有说明执行后端和运行条件，能判断它是合格的 Grafeo 验收证据吗？"}
+]

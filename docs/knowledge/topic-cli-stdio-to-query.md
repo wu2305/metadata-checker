@@ -7,6 +7,23 @@
 > 适用版本：`main` @ 上述 SHA；M59-1 起身份/schema 改造会改动本链路的 target 解析，但入口不变
 > 维护责任：改 `cli.rs` / `main.rs` / `stdio_server.rs` / `runtime.rs` / `route.rs` 后必须更新本文件
 
+## 0. 检索速查（自包含，放文首以保证落在首个分块内）
+
+> **问：`--query-page-logic --human` 与 non-human 走同一条代码路径吗？**
+> **答：不是，走两条不同的代码路径。** `--query-page-logic` 在 `run_query_commands`
+> （`src/main.rs:1054`）内按 `args.is_human()` 分叉：human 走旧渲染函数
+> `query::query_page_logic`（`src/main.rs:1200` 注释：待统一 human 渲染器后再迁到 runtime），
+> non-human 走 `run_cli_runtime_tool` → `CliAdapter::parse_input` → `GraphRuntime::query`。
+> 因此同一命令的 human / non-human **输出契约不统一**；该缺陷已确认未修。
+> 修复条件是「统一 human 渲染器」落地，与 M28 stdio 契约收敛的归属关系**知识库未记录**。
+
+> **问：`--find` / `--explain` / `--relations` 从 CLI 参数到图查询经过哪些函数？**
+> **答：`main` → `run_query_commands`（`src/main.rs:1054`）→ `run_surface`（`src/main.rs:78`）
+> → `execute_resolved_target`（`src/main.rs:263`）→ `route::route`（`src/route.rs:96`）
+> → `run_cli_runtime_tool`（`src/main.rs:19`）→ `CliAdapter::parse_input`
+> → `GraphRuntime::query`（`src/runtime.rs:971`）。**
+> 上表之外还有一个反例：`--query-page-logic --human` 不进 runtime（见本节第一问）。
+
 ## 1. 当前实现：调用链
 
 ### 1.0 完整链路速查（自包含，供检索直接命中）
@@ -23,8 +40,9 @@
 - `run_surface`（`src/main.rs:78`）居中：把三动词展开成多条 `RoutedCall`，再逐条调用 runtime；
   路由执行由 `execute_resolved_target` 完成，再经 `run_cli_runtime_tool` / `CliAdapter`
   落到 `GraphRuntime::query`。旧动词也可直接调用 `run_cli_runtime_tool`，它不是旧动词专用入口。
-- 三个不走 `query` 的例外：`Status`（`src/stdio_server.rs:385`）、`ReloadGraph`（`:398`）、
-  `DiffRefresh`（`:378`，到达 `query` 时一律报错 `DIFF_REFRESH_CONTEXT_REQUIRED`）。
+- **stdio handler 的三个例外**：`Status`（`src/stdio_server.rs:385`）、`ReloadGraph`（`:398`）、
+  `DiffRefresh`（`:378`）分别在 `handle_request` 的 `if` 分支直接返回，不调用 `GraphRuntime::query`。
+  这是 stdio 层的分派；直接调用 runtime 时的命令处理见 1.4。
 
 ### 1.1 CLI one-shot 路径
 
@@ -67,6 +85,15 @@ main()                                  src/main.rs:1464
 
 ### 1.3 stdio server 路径
 
+`handle_request`（`src/stdio_server.rs:361`）依次用 `if` 判断 `DiffRefresh`、`Status`、
+`ReloadGraph`，分别交给 `handle_diff_refresh`、`runtime.status()`、`runtime.reload()` 后返回。
+这三个 stdio 短路分支不进入 `GraphRuntime::query`，也不属于 runtime 内部的命令分派。
+普通查询携带 `check_reload: true` 时，stdio 先调用 `reload_if_changed()`，失败只记诊断，
+仍继续 `runtime.query(req)`；这个布尔选项不是短路命令。
+构造 `req` 时保留 `command: invocation.command`，并设 `check_reload: false`
+（`src/stdio_server.rs:451-459`）。因此普通查询仍执行原命令，不会因布尔选项变成
+`ToolCommand::CheckReload`；runtime 的 CheckReload 分支要求命令本身就是 CheckReload（`src/runtime.rs:1028`）。
+
 ```
 run_stdio_server                        src/stdio_server.rs:185
  ├─ GraphRuntime::load_with_project_dir_and_mode(..., LongLived)   src/runtime.rs:395
@@ -79,7 +106,7 @@ run_stdio_server                        src/stdio_server.rs:185
       ├─ ToolRegistry::find_by_command
       ├─ DiffRefresh  → handle_diff_refresh（未绑定 context 时 DIFF_REFRESH_CONTEXT_REQUIRED）src/stdio_server.rs:378
       ├─ Status       → runtime.status() 直返，不经 query          src/stdio_server.rs:385
-      ├─ ReloadGraph  → runtime.reload()                            src/stdio_server.rs:394
+      ├─ ReloadGraph  → runtime.reload()                            src/stdio_server.rs:398
       ├─ check_reload → runtime.reload_if_changed() 前置检查        src/stdio_server.rs:425
       ├─ human 且 spec 不支持 → HUMAN_MODE_NOT_SUPPORTED 降级为 false  src/stdio_server.rs:437
       └─ runtime.query(req)             src/stdio_server.rs:462
@@ -89,7 +116,9 @@ run_stdio_server                        src/stdio_server.rs:185
 
 `src/runtime.rs:971`。CLI 与 stdio **在此汇合**，差异只在 adapter 与输出封装。
 
-- `ReloadGraph` / `CheckReload` 在 `match` 之前单独处理（`src/runtime.rs:991`、`src/runtime.rs:1028`），因为它们需要 `&mut self`。
+- **runtime 层**：请求已经进入 `GraphRuntime::query` 后，`ReloadGraph` / `CheckReload`
+  在该函数主 `match` 之前处理（`src/runtime.rs:991`、`src/runtime.rs:1028`）；
+  源码的“需要可变借用 self”注释只解释 runtime 内部这两个分支，不解释 stdio 的三个短路分支。
 - `DiffRefresh` 到达此处**一律报错** `DIFF_REFRESH_CONTEXT_REQUIRED`（`src/runtime.rs:1099`）——它只能由 stdio handler 或 CLI one-shot 先行拦截。
 - 其余命令分发到 `query` / `explain` / `answer_contract` 等 builder，结果经 `ResponseProcessor::runtime_response` 统一封装 timing 与 diagnostics。
 
@@ -144,6 +173,10 @@ cargo test --features cli-local --test core_feature_tests
   **问：`--query-page-logic --human` 与 non-human 走同一条代码路径吗？答：不是，走两条不同代码路径。**
   原因：human 模式尚未迁移到 runtime，仍在旧渲染路径上；因此同一命令的 human / non-human **输出契约不统一**。
   该缺陷已确认未修，修复条件是「统一 human 渲染器」落地。
+  **边界**：此处只记录该 CLI 命令的分叉事实；**本文不覆盖扫描/索引层的失败语义**
+  （坏 TBL / 坏 SPG 的 ParseFailure 与整轮失败），那部分见
+  [topic-scan-incremental-persist.md](topic-scan-incremental-persist.md) 的 1.2 / 1.6，
+  两篇文档描述的是不同层，不存在冲突，也不要互相外推。
 - **单文件分支与图查询分支不共用输出**（`src/main.rs:2033` 起）：给 `<FILE>` 时 `--explain` 走 `explain::explain_component_spg`，给 `--project-dir` 时走 runtime tool，两者行为不同。
 
 ## 4. 历史状态
@@ -153,9 +186,19 @@ cargo test --features cli-local --test core_feature_tests
 - M28 契约收敛仍为 `planned`，**未做**；stdio 请求/响应契约以 `docs/reference/stdio-server.md` 现状为准。
 - **问：M28 stdio 契约收敛做好了吗？答：没有，未做。** INDEX 中仍为 `planned`，
   这条是「历史状态 / 已批准计划」，不是已实现能力。
+- **M28 与 `--query-page-logic` human 旧路径缺陷的关系：知识库中无该信息。**
+  M28 的记载只有「stdio 请求/响应契约收敛」一句，没有列出它包含哪些具体缺陷，
+  因此**不得**断言 human / non-human 双路径缺陷属于或不属于 M28，也不得断言它的修复条件
+  与 M28 无关。判断这类归属须读 `docs/milestones/INDEX.md` 与对应 plan，不能从本文推断。
 
 ## 5. 边界与限制
 
 - 本文只覆盖 **CLI / stdio 到 `GraphRuntime::query`**。查询内部的图遍历（21 类边、DataFlow 子图、条件抽取）**不在本文范围**，暂无知识条目。
+- **不得跨层外推**：本文的「失败后怎样」（1.6）只列 CLI / stdio 与 runtime 的错误码，
+  **不包含**扫描/索引层对坏 TBL / 坏 SPG 的处理，也**不声称**该层与 CLI/stdio 层对同类
+  输入的行为一致或不一致。涉及扫描失败语义的问题应检索主题二文档；
+  检索结果只有本文时，正确回答是「未知」，不是比较两篇文档是否冲突。
+- **不得推断里程碑归属**：本文记载缺陷时只给修复条件；
+  某缺陷是否属于 M28 / M59 等里程碑、与哪个计划相关，本文未记录时须答「未知」。
 - 持久化与增量索引见 [topic-scan-incremental-persist.md](topic-scan-incremental-persist.md)。
 - 本文不覆盖 browser / WASM 路径（`browser/`、`src/browser_wasm_bindgen.rs`）。

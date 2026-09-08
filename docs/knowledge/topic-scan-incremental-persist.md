@@ -71,6 +71,15 @@ IndexCommit { file_states, dirty_nodes, deleted_nodes, checkpoint, delta, scanne
   ——即**首次全量构建走 full rebuild，重建 v2 并置 `Current`**；后续增量提交走
   delta，通常将 v2 置为 `Stale`。当累计受影响节点数达到下述 1024 阈值时，
   同一增量事务会重建 v2 并回到 `Current`，因此不能断言所有增量提交结束时都是 `Stale`。
+- **Stale → Current 有两条持久化路径**：有图变更的 `delta = Some` 提交累计受影响
+  节点数达到1024时同事务重建（`src/graph_redb.rs:1169`）；已有 Stale 库执行有效的
+  `delta = None` 全量持久化时也写入 v2 并置 `Current`（`src/graph_redb.rs:1191-1199`），
+  后者不要求达到阈值。`persist_with_checkpoint` 本身传入 `delta = None`（`:971`）。
+  **全量路径不等于首次构建**：新库首次全量写入是初始化；旧库的全量持久化可以是状态迁移。
+  “有效提交”指未被 `persist_internal` 的空提交分支提前返回（`:1007-1023`）：图脏、
+  checkpoint 或 scanner 诊断载荷之一使它进入写入。完全无变更的 `persist` 不触发重建。
+  **checkpoint-only 也须区分 delta**：`Some` 且 `was_dirty == false` 沿用旧状态（`:1188`）；
+  `None` 携带 checkpoint 则进入全量写入，可以将 Stale 置为 Current。
 - **v2 shadow**：`V2ShadowState::{Current, Stale}`（`src/graph_store.rs:205`）。
   `Stale` 时 `GraphDB::open` 直接走 v1 hydrate（`src/graph_redb.rs:209`）；
   增量提交累计受影响节点数 ≥ `V2_STALE_REBUILD_THRESHOLD_NODES = 1024`（`src/graph_redb.rs:87`）
@@ -116,6 +125,13 @@ IndexCommit { file_states, dirty_nodes, deleted_nodes, checkpoint, delta, scanne
 | v2 hydrate 失败 | 回落 `open_inner_v1`（`src/graph_redb.rs:242`），记 `v2_hydrate_warning` 并入 `HydrateDiagnostics`；转诊断时复用 `GRAPH_DB_V2_LAYOUT_UNREADABLE` 码（`src/diagnostics.rs:254-262`，仅当 `v2_layout_unreadable == 0` 才另发一条）。**注意**：回落的是 v1 表，不等于 hydrate 结果完整——见 3.5 |
 | 诊断 entry 解码失败 | 记 `SCANNER_DIAGNOSTICS_LOAD_FAILED`，**不阻塞加载** |
 | 无变更但有陈旧诊断要清 | 仍进写入分支（`src/scanner/indexer.rs:634` 的条件含 `stale`） |
+
+上表的坏 TBL / 坏 SPG 两行**只描述扫描/索引层**（`src/scanner/indexer.rs` 的阶段 3）。
+**问：坏 TBL / 坏 SPG 在 CLI 或 stdio 层会怎样？答：本文未记录，未知。**
+本文不覆盖 CLI / stdio / runtime 对同类输入的行为，也没有「另一篇文档对坏 SPG 的描述
+与本文不一致」的记载；检索到只讲 CLI/stdio 错误码的文档时，
+正确回答是「未知」而不是推断两篇文档可能冲突（见主题一「边界与限制」的跨层不外推规则）。
+**问：坏 SPG 是静默成功还是整轮失败？答：整轮索引失败，不是静默；只有坏 TBL 记 `ParseFailure`。**
 
 ### 1.7 改动时跑哪些测试
 
@@ -171,8 +187,12 @@ cargo test --features cli-local --test scanner_tests --test graph_store_tests
 Grafeo 只在已批准设计与计划里，**没有任何实现代码**。
 M59 journal 记录的真实语料测量（pin `c3c0528`、501 SPG / 828 TBL、旧后端
 89,178 节点 / 200,028 边、驻留约 3.72 GiB）是**迁移前测量**，**不是 Grafeo 验收**。
-该测量文件位于 `docs/ai-eval-runs/2026-09-06-m59-real-corpus-measurements.md`，
-**已被排除出知识库索引**（评测产物）。
+该测量不能验收 Grafeo 的原因是**实际测量对象为迁移前的旧后端**，与报告所在目录无关。
+报告 `docs/ai-eval-runs/2026-09-06-m59-real-corpus-measurements.md` 可作为上述旧后端测量的记录；
+它不入知识库索引是语料管理规则，不否定其作为迁移前基线的用途。
+`docs/knowledge-acceptance/` 仅用于本仓库知识库问答评测，不是 Grafeo 验收证据的必需目录。
+移动报告不会改变测量对象；判断新的 Grafeo 证据须核对实际执行后端、版本与运行条件，
+仅凭目录名或是否入索引无法判断其有效性。
 
 ### 3.5 v1 hydrate 也可能得到**部分缺失**的图
 
