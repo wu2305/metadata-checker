@@ -846,6 +846,31 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
             .unwrap_or_default(),
     );
 
+    // 第二次打开 redb 可能改变文件状态；先在尚未再次打开的文件上验证 unchanged 场景。
+    let started_at = Instant::now();
+    let check_reload = runtime
+        .query(lifecycle_request(ToolCommand::CheckReload))
+        .context("profile runtime check_reload")?;
+    profile.record_stage("runtime_check_reload_unchanged", started_at.elapsed());
+    let reloaded = check_reload
+        .result
+        .get("reloaded")
+        .and_then(|value| value.as_bool())
+        .context("profile runtime check_reload result.reloaded must be a boolean")?;
+    anyhow::ensure!(
+        !reloaded
+            && check_reload.result.get("error").is_none()
+            && check_reload.result["status"]["reload_count"].as_u64() == Some(0),
+        "unchanged runtime profile must not reload or fail: {}",
+        check_reload.result
+    );
+    // 记录真实结果；发生重载或读取失败时拒绝将本样本标记为 unchanged。
+    profile.set_counter("runtime_check_reload_reloaded", reloaded as u64);
+    profile.set_counter(
+        "runtime_check_reload_diagnostics",
+        check_reload.diagnostics.len() as u64,
+    );
+
     let started_at = Instant::now();
     let mut long_lived_runtime = GraphRuntime::load_with_project_dir_and_mode(
         &db_path,
@@ -986,22 +1011,6 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         );
     }
 
-    let started_at = Instant::now();
-    let check_reload = runtime
-        .query(lifecycle_request(ToolCommand::CheckReload))
-        .context("profile runtime check_reload")?;
-    profile.record_stage("runtime_check_reload_unchanged", started_at.elapsed());
-    let reloaded = check_reload
-        .result
-        .get("reloaded")
-        .and_then(|value| value.as_bool())
-        .context("profile runtime check_reload result.reloaded must be a boolean")?;
-    // 阶段名为兼容历史报告保留；实际是否发生 reload 以 CheckReload result 为准。
-    profile.set_counter("runtime_check_reload_reloaded", reloaded as u64);
-    profile.set_counter(
-        "runtime_check_reload_diagnostics",
-        check_reload.diagnostics.len() as u64,
-    );
     profile.finish();
     Ok(profile)
 }
