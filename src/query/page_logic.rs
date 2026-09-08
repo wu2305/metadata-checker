@@ -769,15 +769,7 @@ fn prerequisites_equal(
     left: &Option<prerequisites::PagePrerequisites>,
     right: &Option<prerequisites::PagePrerequisites>,
 ) -> bool {
-    match (left, right) {
-        (None, None) => true,
-        (Some(left), Some(right)) => {
-            left.display_prerequisites == right.display_prerequisites
-                && left.data_prerequisites == right.data_prerequisites
-                && left.action_prerequisites == right.action_prerequisites
-        }
-        _ => false,
-    }
+    left == right
 }
 
 #[cfg(feature = "cli-local")]
@@ -1356,12 +1348,8 @@ pub fn build_page_logic_availability_cache(
     );
 
     let key_model_started = Instant::now();
-    let key_model_ids = collect_availability_key_model_ids(
-        &data_sources,
-        &write_targets,
-        &prerequisites.display_prerequisites,
-        &prerequisites.data_prerequisites,
-    );
+    let key_model_ids =
+        collect_availability_key_model_ids(&data_sources, &write_targets, &prerequisites.model_ids);
     warm_stages.insert(
         "availability_key_models".to_string(),
         key_model_started.elapsed().as_millis(),
@@ -1684,8 +1672,7 @@ fn collect_page_logic_edge_bundle(
 fn collect_availability_key_model_ids(
     data_sources: &[serde_json::Value],
     write_targets: &[serde_json::Value],
-    display_prerequisites: &[serde_json::Value],
-    data_prerequisites: &[serde_json::Value],
+    prerequisite_model_ids: &[String],
 ) -> Vec<String> {
     let mut key_model_ids = Vec::new();
     let mut seen_models: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1703,22 +1690,9 @@ fn collect_availability_key_model_ids(
             }
         }
     }
-    for prereq in display_prerequisites
-        .iter()
-        .chain(data_prerequisites.iter())
-    {
-        if let Some(depends_on) = prereq.get("depends_on").and_then(|v| v.as_array()) {
-            for dep in depends_on {
-                let Some(dep) = dep.as_str() else {
-                    continue;
-                };
-                let Some(model_id) = model_id_from_reference(dep) else {
-                    continue;
-                };
-                if seen_models.insert(model_id.clone()) {
-                    key_model_ids.push(model_id);
-                }
-            }
+    for model_id in prerequisite_model_ids {
+        if seen_models.insert(model_id.clone()) {
+            key_model_ids.push(model_id.clone());
         }
     }
     key_model_ids
@@ -2038,14 +2012,17 @@ fn build_query_page_logic_output_inner(
     // ---- 5.5 收集页面级条件前置条件（M19） ----
     let cached_page = availability_cache.filter(|cache| cache.matches(page_id, budget));
     let stage_started = Instant::now();
-    let prerequisites_read_model_used = cached_page
-        .and_then(|cache| cache.project_prerequisites())
-        .is_some();
+    let cached_prerequisites = cached_page.and_then(|cache| cache.project_prerequisites());
+    let prerequisites_read_model_used = cached_prerequisites.is_some();
     let prerequisites::PagePrerequisites {
         display_prerequisites,
         data_prerequisites,
         action_prerequisites,
-    } = if let Some(cached) = cached_page.and_then(|cache| cache.project_prerequisites()) {
+        display_total,
+        data_total,
+        action_total,
+        model_ids: prerequisite_model_ids,
+    } = if let Some(cached) = cached_prerequisites {
         cached
     } else {
         prerequisites::collect_page_prerequisites(
@@ -2060,17 +2037,9 @@ fn build_query_page_logic_output_inner(
         )?
     };
     record_profile_stage(&mut profile, "prerequisites", stage_started);
-    set_profile_counter(
-        &mut profile,
-        "display_prerequisites",
-        display_prerequisites.len(),
-    );
-    set_profile_counter(&mut profile, "data_prerequisites", data_prerequisites.len());
-    set_profile_counter(
-        &mut profile,
-        "action_prerequisites",
-        action_prerequisites.len(),
-    );
+    set_profile_counter(&mut profile, "display_prerequisites", display_total);
+    set_profile_counter(&mut profile, "data_prerequisites", data_total);
+    set_profile_counter(&mut profile, "action_prerequisites", action_total);
     set_profile_counter(
         &mut profile,
         "prerequisites_read_model_used",
@@ -2232,41 +2201,8 @@ fn build_query_page_logic_output_inner(
     // M35.7: 从 data_sources 和 write_targets 中自动发现关键模型，
     // 并内嵌每个模型的 availability 摘要。
     let availability_stage_started = Instant::now();
-    let mut key_model_ids: Vec<String> = Vec::new();
-    let mut seen_models: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for ds in &data_sources {
-        if let Some(target_id) = ds.get("target_id").and_then(|v| v.as_str()) {
-            if target_id.starts_with("model:") && seen_models.insert(target_id.to_string()) {
-                key_model_ids.push(target_id.to_string());
-            }
-        }
-    }
-    for wt in &write_targets {
-        if let Some(target_id) = wt.get("target_id").and_then(|v| v.as_str()) {
-            if target_id.starts_with("model:") && seen_models.insert(target_id.to_string()) {
-                key_model_ids.push(target_id.to_string());
-            }
-        }
-    }
-    // 同时纳入显示/数据前置条件中引用的模型，避免只看 data_sources 漏掉 totalRowCount__ 类条件。
-    for prereq in display_prerequisites
-        .iter()
-        .chain(data_prerequisites.iter())
-    {
-        if let Some(depends_on) = prereq.get("depends_on").and_then(|v| v.as_array()) {
-            for dep in depends_on {
-                let Some(dep) = dep.as_str() else {
-                    continue;
-                };
-                let Some(model_id) = model_id_from_reference(dep) else {
-                    continue;
-                };
-                if seen_models.insert(model_id.clone()) {
-                    key_model_ids.push(model_id);
-                }
-            }
-        }
-    }
+    let key_model_ids =
+        collect_availability_key_model_ids(&data_sources, &write_targets, &prerequisite_model_ids);
 
     let key_model_availability_limit = if is_compact { Some(3) } else { None };
     let cached_availability = cached_page;
@@ -2394,9 +2330,9 @@ fn build_query_page_logic_output_inner(
         "top_data_sources": top_data_sources,
         "top_writes": top_writes,
         "top_navigation": top_navigation,
-        "display_prerequisites_count": display_prerequisites.len(),
-        "data_prerequisites_count": data_prerequisites.len(),
-        "action_prerequisites_count": action_prerequisites.len(),
+        "display_prerequisites_count": display_total,
+        "data_prerequisites_count": data_total,
+        "action_prerequisites_count": action_total,
         "primary_paths_count": primary_paths.len(),
         "related_context_count": related_context.len(),
         "top_display_prerequisites": top_display_prerequisites,
@@ -2435,9 +2371,9 @@ fn build_query_page_logic_output_inner(
             "visibility_rules": crate::output::brief::truncated_array(&visibility_rules, 5),
             "navigation": crate::output::brief::truncated_array(&navigation, 5),
             "risk_diagnostics": crate::output::brief::truncated_array(&risk_diagnostics, 10),
-            "display_prerequisites": crate::output::brief::truncated_array(&display_prerequisites, 5),
-            "data_prerequisites": crate::output::brief::truncated_array(&data_prerequisites, 5),
-            "action_prerequisites": crate::output::brief::truncated_array(&action_prerequisites, 5),
+            "display_prerequisites": crate::output::brief::truncated_array_with_total(&display_prerequisites, 5, display_total),
+            "data_prerequisites": crate::output::brief::truncated_array_with_total(&data_prerequisites, 5, data_total),
+            "action_prerequisites": crate::output::brief::truncated_array_with_total(&action_prerequisites, 5, action_total),
             "primary_paths": crate::output::brief::truncated_array(&primary_paths, 5),
             "related_context": crate::output::brief::truncated_array(&related_context, 3),
             "related_context_summary": related_context_summary.clone(),

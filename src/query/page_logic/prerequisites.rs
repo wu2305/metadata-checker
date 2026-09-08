@@ -5,11 +5,17 @@ use anyhow::Result;
 use std::time::Instant;
 
 /// 页面级条件前置条件分组
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct PagePrerequisites {
     pub(super) display_prerequisites: Vec<serde_json::Value>,
     pub(super) data_prerequisites: Vec<serde_json::Value>,
     pub(super) action_prerequisites: Vec<serde_json::Value>,
+    /// 完整集合的数量，不随 compact 缓存裁剪而变化。
+    pub(super) display_total: usize,
+    pub(super) data_total: usize,
+    pub(super) action_total: usize,
+    /// 按完整 display/data 排序结果首次出现的模型，包含被裁掉的条件引用。
+    pub(super) model_ids: Vec<String>,
 }
 
 /// 收集组件、动作和数据源模型关联的条件前置条件
@@ -23,7 +29,6 @@ pub(super) fn collect_page_prerequisites(
     for_cache_materialization: bool,
     profile: &mut Option<&mut PerfProfile>,
 ) -> Result<PagePrerequisites> {
-    let _ = (budget, for_cache_materialization);
     let mut display_prerequisites = Vec::new();
     let mut data_prerequisites = Vec::new();
     let mut action_prerequisites = Vec::new();
@@ -102,10 +107,43 @@ pub(super) fn collect_page_prerequisites(
         seen_conditions.len(),
     );
 
+    // 先保存输出依赖的完整统计与模型顺序，再缩减常驻 JSON；不把裁剪后的长度当总数。
+    let display_total = display_prerequisites.len();
+    let data_total = data_prerequisites.len();
+    let action_total = action_prerequisites.len();
+    let mut model_ids = Vec::new();
+    let mut seen_models = std::collections::HashSet::new();
+    for prerequisite in display_prerequisites.iter().chain(&data_prerequisites) {
+        if let Some(references) = prerequisite["depends_on"].as_array() {
+            for reference in references {
+                if let Some(model_id) = reference.as_str().and_then(super::model_id_from_reference)
+                {
+                    if seen_models.insert(model_id.clone()) {
+                        model_ids.push(model_id);
+                    }
+                }
+            }
+        }
+    }
+    if for_cache_materialization && budget == "compact" {
+        for group in [
+            &mut display_prerequisites,
+            &mut data_prerequisites,
+            &mut action_prerequisites,
+        ] {
+            group.truncate(5);
+            group.shrink_to_fit();
+        }
+    }
+
     Ok(PagePrerequisites {
         display_prerequisites,
         data_prerequisites,
         action_prerequisites,
+        display_total,
+        data_total,
+        action_total,
+        model_ids,
     })
 }
 

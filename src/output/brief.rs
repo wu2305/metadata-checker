@@ -4,8 +4,16 @@ use serde_json::json;
 ///
 /// 输出: { total_count, shown_count, truncated, remaining_count, items: [...] }
 pub fn truncated_array(items: &[serde_json::Value], limit: usize) -> serde_json::Value {
-    let total = items.len();
-    let shown = total.min(limit);
+    truncated_array_with_total(items, limit, items.len())
+}
+
+/// 使用完整集合计数包装已裁剪的缓存条目，保持与未裁剪数组相同的截断信封。
+pub(crate) fn truncated_array_with_total(
+    items: &[serde_json::Value],
+    limit: usize,
+    total: usize,
+) -> serde_json::Value {
+    let shown = items.len().min(limit);
     let remaining = total.saturating_sub(shown);
     json!({
         "total_count": total,
