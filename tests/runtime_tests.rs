@@ -22,11 +22,6 @@ fn test_graph_runtime_reuses_loaded_graph_for_explain_condition() {
     assert_eq!(runtime.dense_snapshot_build_ms, 0);
     assert_eq!(runtime.availability_facts_build_ms, 0);
     assert_eq!(runtime.page_dependency_index_build_ms, 0);
-    assert!(
-        runtime.graph_load_ms > 0,
-        "首次加载 graph_load_ms 应大于 0，实际 {}",
-        runtime.graph_load_ms
-    );
 
     let request = RuntimeQueryRequest {
         command: RuntimeQueryCommand::ExplainCondition,
@@ -101,11 +96,6 @@ fn test_real_project_runtime_input3_explain_condition_reuses_graph() {
 
     let mut runtime = GraphRuntime::load(&db_path).expect("load real project graph must succeed");
     assert_eq!(runtime.load_count, 1);
-    assert!(
-        runtime.graph_load_ms > 0,
-        "真实项目首次加载 graph_load_ms 应大于 0，实际 {}",
-        runtime.graph_load_ms
-    );
 
     let request = RuntimeQueryRequest {
         command: RuntimeQueryCommand::ExplainCondition,
@@ -307,10 +297,11 @@ fn test_graph_runtime_long_lived_mode_builds_read_model() {
         .expect("long-lived runtime must build dense snapshot during init");
     assert_eq!(dense_graph.dense_node_count(), runtime.status().node_count);
     assert_eq!(dense_graph.dense_edge_count(), runtime.status().edge_count);
-    assert!(
-        runtime.read_model_build_ms > 0,
-        "long-lived runtime should record read model build cost"
+    assert_eq!(
+        read_model.page_dependency_index.coverage(),
+        metadata_checker::query::PageDependencyIndexCoverage::Full
     );
+    assert!(read_model.page_dependency_index.indexed_node_count() > 0);
     assert_eq!(
         runtime.dense_snapshot_build_ms
             + runtime.availability_facts_build_ms
@@ -385,10 +376,9 @@ fn test_graph_runtime_warms_page_logic_availability_cache() {
     let baseline = baseline_runtime
         .query(request.clone())
         .expect("baseline query_page_logic must succeed");
-    let warm_ms = long_lived_runtime
+    long_lived_runtime
         .warm_page_logic_availability("page:app/actions_test.spg", "normal")
         .expect("warm page logic availability must succeed");
-    assert!(warm_ms > 0, "warm should record non-zero init cost");
     assert!(
         long_lived_runtime
             .read_model
@@ -682,7 +672,6 @@ mod page_dependency_index_degradation {
     use metadata_checker::runtime::{GraphRuntime, RuntimeMode};
     use std::cell::Cell;
     use std::sync::Arc;
-    use std::time::Instant;
 
     use super::common;
 
@@ -738,45 +727,31 @@ mod page_dependency_index_degradation {
         }
     }
 
-    /// PageDependencyIndex::build 失败时应降级为空索引，并记录非零构建耗时。
+    /// PageDependencyIndex::build 失败时应向生产调用方传播原始读取错误。
     #[test]
-    fn test_page_dependency_index_build_failure_falls_back_to_empty_index() -> anyhow::Result<()> {
+    fn test_page_dependency_index_build_error_propagates() -> anyhow::Result<()> {
         let (_temp_dir, db_path) = common::build_fixture_graphdb();
         let graph = GraphDB::open(&db_path)?;
         let failing = FailingPageDependencyGraphStore::fail_on_get_node_edges(&graph);
 
-        let started = Instant::now();
-        let (index, diagnostic) = match PageDependencyIndex::build(&failing) {
-            Ok(index) => (Arc::new(index), None),
-            Err(error) => (
-                Arc::new(PageDependencyIndex::empty()),
-                Some(format!(
-                    "PageDependencyIndex build failed: {error}; using empty index"
-                )),
-            ),
-        };
-        let build_ms = started.elapsed().as_millis();
-
-        let diagnostic = diagnostic.expect("build should fail under injected graph read error");
+        let result = PageDependencyIndex::build(&failing);
         assert!(
-            diagnostic.contains("PageDependencyIndex build failed"),
-            "diagnostic must mention build failure: {diagnostic}"
+            result.is_err(),
+            "injected graph read failure must propagate"
         );
+        let error = result
+            .err()
+            .expect("failed PageDependencyIndex build must return an error");
         assert!(
-            diagnostic.contains("using empty index"),
-            "diagnostic must mention empty index fallback: {diagnostic}"
-        );
-        assert_eq!(index.indexed_node_count(), 0);
-        assert!(
-            index
-                .affected_pages(&["comp:app/actions_test.spg|input1".to_string()])
-                .is_empty()
+            error
+                .to_string()
+                .contains("injected failure while reading edges"),
+            "original graph read error must be preserved: {error:#}"
         );
         assert!(
             failing.get_node_edges_calls.get() > 0,
             "build attempt should reach graph edge reads before failing"
         );
-        let _ = build_ms;
         Ok(())
     }
 

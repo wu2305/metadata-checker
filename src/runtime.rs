@@ -275,6 +275,97 @@ fn read_model_degraded_diagnostic(message: impl Into<String>) -> crate::output::
     )
 }
 
+/// Runtime load 阶段构建的派生读模型及各阶段耗时。
+struct RuntimeReadModelBuild {
+    read_model: Option<Arc<RuntimeReadModel>>,
+    dense_snapshot_build_ms: u128,
+    availability_facts_build_ms: u128,
+    page_dependency_index_build_ms: u128,
+    read_model_build_ms: u128,
+}
+
+impl RuntimeReadModelBuild {
+    /// OneShot 路径不构建派生读模型时的零值结果。
+    fn empty() -> Self {
+        Self {
+            read_model: None,
+            dense_snapshot_build_ms: 0,
+            availability_facts_build_ms: 0,
+            page_dependency_index_build_ms: 0,
+            read_model_build_ms: 0,
+        }
+    }
+}
+
+/// 构建长生命周期 runtime 的派生读模型。
+///
+/// 该 helper 是生产 load 路径的唯一构建实现；派生索引失败时保留可用的
+/// runtime，并将降级写入调用方的结构化加载诊断。测试可通过 trait object
+/// 注入图读取故障而复用同一降级逻辑。
+fn build_runtime_read_model(
+    graph: &dyn crate::graph_store::GraphReadStore,
+    load_diagnostics: &mut Vec<crate::output::Diagnostic>,
+) -> RuntimeReadModelBuild {
+    let dense_started = Instant::now();
+    let dense_graph = DenseGraphSnapshot::from_graph(graph).ok().map(Arc::new);
+    let dense_snapshot_build_ms = dense_started.elapsed().as_millis();
+    if dense_graph.is_none() {
+        load_diagnostics.push(read_model_degraded_diagnostic(
+            "DenseGraphSnapshot build failed; long-lived dense path disabled",
+        ));
+    }
+
+    let facts_started = Instant::now();
+    let availability_facts = match crate::query::MaterializedAvailabilityFactsIndex::build(graph) {
+        Ok(index) => Arc::new(index),
+        Err(error) => {
+            load_diagnostics.push(read_model_degraded_diagnostic(format!(
+                "MaterializedAvailabilityFactsIndex build failed: {error}; using empty index"
+            )));
+            Arc::new(crate::query::MaterializedAvailabilityFactsIndex::empty())
+        }
+    };
+    let availability_facts_build_ms = facts_started.elapsed().as_millis();
+
+    let (read_model, page_dependency_index_build_ms) = if dense_graph.is_some()
+        || availability_facts.node_count > 0
+    {
+        let page_dep_started = Instant::now();
+        let page_dependency_index = match crate::query::PageDependencyIndex::build(graph) {
+            Ok(index) => Arc::new(index),
+            Err(error) => {
+                load_diagnostics.push(read_model_degraded_diagnostic(format!(
+                    "PageDependencyIndex build failed: {error}; using empty index"
+                )));
+                Arc::new(crate::query::PageDependencyIndex::empty())
+            }
+        };
+        let page_dependency_index_build_ms = page_dep_started.elapsed().as_millis();
+        let read_model = RuntimeReadModel {
+            dense_graph,
+            availability_facts,
+            page_logic_availability: HashMap::new(),
+            page_dependency_index,
+        };
+        (Some(Arc::new(read_model)), page_dependency_index_build_ms)
+    } else {
+        let message =
+            "Long-lived read model skipped: dense snapshot and materialized index both unavailable";
+        load_diagnostics.push(read_model_degraded_diagnostic(message));
+        (None, 0)
+    };
+
+    RuntimeReadModelBuild {
+        read_model,
+        dense_snapshot_build_ms,
+        availability_facts_build_ms,
+        page_dependency_index_build_ms,
+        read_model_build_ms: dense_snapshot_build_ms
+            + availability_facts_build_ms
+            + page_dependency_index_build_ms,
+    }
+}
+
 /// M58.3 复核返修（P1-2）：把结构化 load_diagnostics 置顶合并进查询结果的
 /// diagnostics 数组（load 侧在前，PARTIAL_HYDRATE 保持首位；result 自带条目原序保留在后）。
 ///
@@ -459,65 +550,16 @@ impl GraphRuntime {
             content_prefix_hash: prefix_hash,
         };
         let build_read_model = runtime_mode == RuntimeMode::LongLived;
-        let mut dense_snapshot_build_ms = 0_u128;
-        let mut availability_facts_build_ms = 0_u128;
-        let mut page_dependency_index_build_ms = 0_u128;
-        let read_model = if build_read_model {
-            let dense_started = Instant::now();
-            let dense_graph = DenseGraphSnapshot::from_graph(&graph).ok().map(Arc::new);
-            dense_snapshot_build_ms = dense_started.elapsed().as_millis();
-            if dense_graph.is_none() {
-                // M58.3 复核返修（P1-1）：read model 构建失败与 scanner 诊断加载失败
-                // 同路——原死 vec 文本映射为结构化诊断进 load_diagnostics。
-                // read model 是性能层派生索引，降级不影响答案正确性（answer_impact=none）。
-                load_diagnostics.push(read_model_degraded_diagnostic(
-                    "DenseGraphSnapshot build failed; long-lived dense path disabled",
-                ));
-            }
-            let facts_started = Instant::now();
-            let availability_facts = match crate::query::MaterializedAvailabilityFactsIndex::build(
-                &graph,
-            ) {
-                Ok(index) => Arc::new(index),
-                Err(error) => {
-                    load_diagnostics.push(read_model_degraded_diagnostic(format!(
-                        "MaterializedAvailabilityFactsIndex build failed: {error}; using empty index"
-                    )));
-                    Arc::new(crate::query::MaterializedAvailabilityFactsIndex::empty())
-                }
-            };
-            availability_facts_build_ms = facts_started.elapsed().as_millis();
-            if dense_graph.is_some() || availability_facts.node_count > 0 {
-                let page_dep_started = Instant::now();
-                let page_dependency_index = match crate::query::PageDependencyIndex::build(&graph) {
-                    Ok(index) => Arc::new(index),
-                    Err(error) => {
-                        load_diagnostics.push(read_model_degraded_diagnostic(format!(
-                            "PageDependencyIndex build failed: {error}; using empty index"
-                        )));
-                        Arc::new(crate::query::PageDependencyIndex::empty())
-                    }
-                };
-                page_dependency_index_build_ms = page_dep_started.elapsed().as_millis();
-                Some(Arc::new(RuntimeReadModel {
-                    dense_graph,
-                    availability_facts,
-                    page_logic_availability: HashMap::new(),
-                    page_dependency_index,
-                }))
-            } else {
-                load_diagnostics.push(read_model_degraded_diagnostic(
-                    "Long-lived read model skipped: dense snapshot and materialized index both unavailable",
-                ));
-                None
-            }
+        let RuntimeReadModelBuild {
+            read_model,
+            dense_snapshot_build_ms,
+            availability_facts_build_ms,
+            page_dependency_index_build_ms,
+            read_model_build_ms,
+        } = if build_read_model {
+            build_runtime_read_model(&graph, &mut load_diagnostics)
         } else {
-            None
-        };
-        let read_model_build_ms = if build_read_model {
-            dense_snapshot_build_ms + availability_facts_build_ms + page_dependency_index_build_ms
-        } else {
-            0
+            RuntimeReadModelBuild::empty()
         };
         let dense_snapshot = read_model
             .as_ref()
@@ -1601,5 +1643,213 @@ mod tests {
             message.contains(crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE),
             "兜底 message 必须带原 code: {message}"
         );
+    }
+
+    #[cfg(feature = "cli-local")]
+    mod read_model_build_tests {
+        use super::*;
+        use crate::graph::GraphDB;
+        use crate::graph_store::{
+            GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
+        };
+        use std::cell::Cell;
+        use std::path::{Path, PathBuf};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+        /// 构建一个供 runtime 派生读模型单测使用的 fixture graph。
+        fn fixture_graph() -> anyhow::Result<(PathBuf, GraphDB)> {
+            let sequence = FIXTURE_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let db_path = std::env::temp_dir().join(format!(
+                "metadata-checker-runtime-read-model-{}-{sequence}.graphdb",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&db_path);
+            crate::scanner::scan_project(Path::new("tests/fixtures/test_project"), &db_path)?;
+            let graph = GraphDB::open(&db_path)?;
+            Ok((db_path, graph))
+        }
+
+        /// dense snapshot 完成后再注入边读取失败，验证 PageDependencyIndex 的生产降级。
+        struct FailAfterDenseGraphEdges<'a> {
+            inner: &'a GraphDB,
+            fail_after_edge_reads: usize,
+            edge_reads: Cell<usize>,
+        }
+
+        impl<'a> FailAfterDenseGraphEdges<'a> {
+            fn new(inner: &'a GraphDB) -> anyhow::Result<Self> {
+                Ok(Self {
+                    inner,
+                    fail_after_edge_reads: GraphReadStore::node_count(inner)?,
+                    edge_reads: Cell::new(0),
+                })
+            }
+        }
+
+        impl GraphReadStore for FailAfterDenseGraphEdges<'_> {
+            fn get_node(&self, node_id: &str) -> GraphStoreResult<Option<crate::graph::Node>> {
+                GraphReadStore::get_node(self.inner, node_id)
+            }
+
+            fn get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>> {
+                let read_number = self.edge_reads.get();
+                self.edge_reads.set(read_number + 1);
+                if read_number >= self.fail_after_edge_reads {
+                    return Err(GraphStoreError::ReadFailed {
+                        reason: format!("injected failure while reading edges for {node_id}"),
+                    });
+                }
+                GraphReadStore::get_node_edges(self.inner, node_id)
+            }
+
+            fn node_count(&self) -> GraphStoreResult<usize> {
+                GraphReadStore::node_count(self.inner)
+            }
+
+            fn edge_count(&self) -> GraphStoreResult<usize> {
+                GraphReadStore::edge_count(self.inner)
+            }
+
+            fn iter_nodes(
+                &self,
+            ) -> GraphStoreResult<Box<dyn Iterator<Item = crate::graph::Node> + '_>> {
+                GraphReadStore::iter_nodes(self.inner)
+            }
+        }
+
+        /// 正常图应构建完整的 page dependency index，且阶段计时保持可解释。
+        #[test]
+        fn build_runtime_read_model_constructs_full_page_dependency_index() -> anyhow::Result<()> {
+            let (db_path, graph) = fixture_graph()?;
+            let mut diagnostics = Vec::new();
+            let build = build_runtime_read_model(&graph, &mut diagnostics);
+
+            let read_model = build
+                .read_model
+                .as_ref()
+                .expect("fixture graph should produce a runtime read model");
+            assert!(read_model.dense_graph.is_some());
+            assert_eq!(
+                read_model.page_dependency_index.coverage(),
+                crate::query::PageDependencyIndexCoverage::Full
+            );
+            assert!(read_model.page_dependency_index.indexed_node_count() > 0);
+            assert!(
+                read_model
+                    .page_dependency_index
+                    .pages_for_node("comp:app/actions_test.spg|input1")
+                    .contains("page:app/actions_test.spg")
+            );
+            assert!(!diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == crate::diagnostics::CODE_RUNTIME_READ_MODEL_DEGRADED
+            }));
+            assert_eq!(
+                build.dense_snapshot_build_ms
+                    + build.availability_facts_build_ms
+                    + build.page_dependency_index_build_ms,
+                build.read_model_build_ms
+            );
+
+            drop(graph);
+            let _ = std::fs::remove_file(db_path);
+            Ok(())
+        }
+
+        /// PageDependencyIndex 构建失败时应保留 read model，并仅将该索引降级为空。
+        #[test]
+        fn build_runtime_read_model_degrades_page_dependency_index() -> anyhow::Result<()> {
+            let (db_path, graph) = fixture_graph()?;
+            let failing_graph = FailAfterDenseGraphEdges::new(&graph)?;
+            let mut diagnostics = Vec::new();
+            let build = build_runtime_read_model(&failing_graph, &mut diagnostics);
+
+            let read_model = build
+                .read_model
+                .as_ref()
+                .expect("dense snapshot should keep the read model available");
+            assert!(read_model.dense_graph.is_some());
+            assert_eq!(read_model.page_dependency_index.indexed_node_count(), 0);
+            assert_eq!(
+                read_model.page_dependency_index.coverage(),
+                crate::query::PageDependencyIndexCoverage::Partial
+            );
+            assert_eq!(diagnostics.len(), 1);
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    diagnostic.code == crate::diagnostics::CODE_RUNTIME_READ_MODEL_DEGRADED
+                })
+                .expect("page dependency degradation should be diagnosed");
+            assert_eq!(
+                diagnostic.code,
+                crate::diagnostics::CODE_RUNTIME_READ_MODEL_DEGRADED
+            );
+            assert_eq!(
+                diagnostic.severity,
+                crate::output::DiagnosticSeverity::Warning
+            );
+            assert_eq!(diagnostic.count, Some(1));
+            assert_eq!(diagnostic.answer_impact.as_deref(), Some("none"));
+            assert_eq!(
+                diagnostic.first_seen_phase.as_deref(),
+                Some(crate::diagnostics::PHASE_PR1)
+            );
+            assert!(
+                diagnostic
+                    .message
+                    .contains("PageDependencyIndex build failed")
+            );
+            assert!(
+                diagnostic
+                    .message
+                    .contains("injected failure while reading edges")
+            );
+            assert!(diagnostic.message.contains("using empty index"));
+            let diagnostic_json = serde_json::to_value(diagnostic)?;
+            assert_eq!(
+                diagnostic_json
+                    .get("code")
+                    .and_then(serde_json::Value::as_str),
+                Some(crate::diagnostics::CODE_RUNTIME_READ_MODEL_DEGRADED)
+            );
+            assert_eq!(
+                diagnostic_json
+                    .get("severity")
+                    .and_then(serde_json::Value::as_str),
+                Some("warning")
+            );
+            assert_eq!(
+                diagnostic_json
+                    .get("count")
+                    .and_then(serde_json::Value::as_u64),
+                Some(1)
+            );
+            assert_eq!(
+                diagnostic_json
+                    .get("answer_impact")
+                    .and_then(serde_json::Value::as_str),
+                Some("none")
+            );
+            assert_eq!(
+                diagnostic_json
+                    .get("first_seen_phase")
+                    .and_then(serde_json::Value::as_str),
+                Some(crate::diagnostics::PHASE_PR1)
+            );
+            assert!(diagnostic_json.get("sample_location").is_some());
+            assert_eq!(
+                build.dense_snapshot_build_ms
+                    + build.availability_facts_build_ms
+                    + build.page_dependency_index_build_ms,
+                build.read_model_build_ms
+            );
+
+            drop(failing_graph);
+            drop(graph);
+            let _ = std::fs::remove_file(db_path);
+            Ok(())
+        }
     }
 }
