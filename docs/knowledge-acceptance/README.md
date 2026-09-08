@@ -65,6 +65,8 @@
 
 ## 本次记录
 
+- [2026-09-08-index-provenance.md](2026-09-08-index-provenance.md)：复核两次索引生成日志；
+  false 配置下也观察到删除重建，尚无证据将 H1 差异归因于某个服务机制。
 - [2026-09-08-fixed-controls.md](2026-09-08-fixed-controls.md)：固定索引重复 H1 查询，
   固定 E3/B6 请求片段比较提示词；不重建索引，改写查询不替代原题。
 - [2026-09-08-state-paths.md](2026-09-08-state-paths.md)：源码反例修正后52题，

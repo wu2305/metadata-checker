@@ -84,3 +84,6 @@ print('128 historical versions verified; 43 require patch review')
 不能以文件存在、测试函数名相同或整个旧文件与新文件差异很大代替这一步。
 本轮只读协作审阅给出的其他聚合“retained/enhanced”结论没有附足够逐项证据，
 主线程未将其计入已核验结果。
+
+PR36 合并后续查见 [逐项改动复核](branch-retention-patches-2026-09-08.md)：另核查24项，
+恢复1份历史评测草稿；该轮结束时18项未决。本页的128/43和上述42项是前轮快照，不回写。

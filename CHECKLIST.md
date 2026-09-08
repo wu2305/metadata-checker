@@ -8,7 +8,8 @@
 | 线 | 状态 | 入口 |
 |----|------|------|
 | **Phase C** | done — 文档治理三 PR 已收口 | [archive/roadmap](docs/archive/roadmap/README.md) |
-| **M53** | active — persist / facts / path → redb v2 | [m53](docs/milestones/performance/m53-performance-continuation.md) |
+| **M59** | active — Grafeo 后端迁移 | [m59](docs/milestones/performance/m59-grafeo-backend-migration.md) |
+| M53 | done — 性能优化历史记录 | [m53](docs/milestones/performance/m53-performance-continuation.md) |
 | M28–M30 | planned — Stdio 契约与容量 | [INDEX](docs/milestones/INDEX.md) |
 | M46–M48 | planned — CLI remote + Browser UI | [INDEX](docs/milestones/INDEX.md) |
 

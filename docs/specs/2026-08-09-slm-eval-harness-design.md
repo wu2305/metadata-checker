@@ -86,8 +86,8 @@ stage 脚本默认由 `sh` 解释，`browser-wasm-ci` 基于 `node:22-bookworm`�
   → CNB 内抽取 final answer
   → 归档 records + answers 为 artifact
 
-阶段 B（判分，独立 pipeline）
-  消费阶段 A 的 artifact
+阶段 B（判分，同一 pipeline 的下一 stage）
+  复用阶段 A workspace 中的 records、run.json 和 transcript，校验 fixture SHA
   → 从 metadata-checker-keys 导入 judge 凭证
   → 调用判分模型
   → 产出配对网格
@@ -95,7 +95,7 @@ stage 脚本默认由 `sh` 解释，`browser-wasm-ci` 基于 `node:22-bookworm`�
 
 阶段 A 的 agent 是 kimi-code，不是自研 loop：它自己读 SKILL.md、自己从命令错误里恢复、自己决定是否建图。这才是要验证的部署配置。没有命令白名单，没有 trial 截杀。
 
-### 阶段 B 必须也是 pipeline
+### 阶段 B 必须留在同一 CNB pipeline
 
 判分**不能**退化为"本地手动跑一下"。`docs/ai-eval-runs/` 里三份孤立的 `2026-05-08` 人工快照就是这么来的——那正是 2026-07-17 spec 列为"尚未闭环"的问题之一，如果判分靠手动，它会原样复发。
 

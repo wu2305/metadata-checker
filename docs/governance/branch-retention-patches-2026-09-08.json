@@ -1,0 +1,955 @@
+{
+  "schema_version": 2,
+  "evidence_schema": {
+    "string": "逐条 base→archive、main path 或位置的自由文本审阅摘要；非逐字引文",
+    "dict_ref_summary": "引用既有结论：ref 指向来源章节或提交，summary 为结论摘要",
+    "dict_ref_summary_finding": "本轮核查：ref 指向归档定位/来源提交+行，summary 为旧内容摘要，finding 为相对 pinned main 的核查发现",
+    "dict_detail_line_path": "精确位置：path 指向 main 或归档文件，line 为行号，detail 为该行细节",
+    "note": "三种 dict 形态语义不同，不是字段缺失；下游脚本须按形态分派，勿混用"
+  },
+  "main_sha": "3d595d3d61f1c926af8206ed160e04269bb1b9d5",
+  "history_input": "branch-retention-history-2026-09-08.json",
+  "history_sha256": "c0fabe8b602845e740411850f7c1630acf8949b84c4a63ad57c37f665645c8b9",
+  "original_input": "branch-cleanup-2026-09-08.json",
+  "original_sha256": "cfbd9f2319b47927de6b4a00fbe37ea2344dada488782868e3d27f65160fde84",
+  "method": "Review all original base-to-archive changes for each decided path against pinned main; preserve intentional replacements and historical drafts. Evidence descriptions are review summaries, not verbatim quotations unless explicitly shown. Retention is distinct from correctness or executed acceptance. Patch hashes use git diff --no-ext-diff --unified=3 BASE ARCHIVE -- PATH.",
+  "counts": {
+    "reviewed_this_batch": 24,
+    "unresolved": 18,
+    "reviewed_in_pr36": 1
+  },
+  "records": [
+    {
+      "tag": "archive/backup-before-resplit",
+      "path": ".cnb.yml",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "merge_base": "02a84d001dccc73450e6753a680730a2c8b2e077",
+      "archive_entry": [
+        "100644",
+        "4b64ce11684cde99fcc8bef00cee787bc693f800"
+      ],
+      "patch_sha256": "91bf2db6c521605b26578eda2e90b3744d9e39864376071125d53189f3f95571",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "ref": "02a84d001dccc73450e6753a680730a2c8b2e077:.cnb.yml:750-836",
+          "summary": "旧 hunk 是六段 q1-q6 的复制粘贴，每段直接调用 kimi，并按 qN 文件名统计、判空和判 infra。",
+          "finding": "这是 base→archive 的独有起点：问题文本、逐问执行、1800 秒超时、退出码/空 transcript/token 的 infra 边界。"
+        },
+        {
+          "ref": "f44739e8de4d1a3308778247e5fbff7ef1deaf50:.cnb.yml:750-847",
+          "summary": "问题改由 cases[].smoke 的 enabled/order/question_template 导出；node 生成 questions.tsv，while 循环写 records.jsonl，记录 wall_clock_ms、tool_calls、metadata_checker_invocations。",
+          "finding": "archive hunk 保留逐 case 独立 kimi、1800 秒 timeout、token/退出码/空 transcript 的 infra 语义，并把六段固定脚本有意替换为 fixture 驱动的单循环和结构化 record。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:.cnb.yml:1103-1144",
+          "summary": "唯一事实源是 xiaoshouyi_large_real_cases.json 的 cases[].smoke；question_template 代入 {project_dir}，并拒绝空子集、重复或非法 order。",
+          "finding": "固定 main 保留 archive 的数据驱动问题生成和 guard，并进一步补了 POSIX sh/显式 set -eu。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:.cnb.yml:1163-1299",
+          "summary": "VARIANT/TRIAL 网格串行执行，RUN_TAG=${CASE_ID}__${VARIANT}__t${TRIAL}，逐 trial 写 record，最后校验期望 record 数。",
+          "finding": "archive 的占位 baseline/1 被有意扩展成 baseline/typed_ppr × trials；逐 trial 墙钟和 record 单一输入行为仍在。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:.cnb.yml:1323-1340; tests/kimi_harness_judge_tests.rs:316-361",
+          "summary": "阶段 B 是同一 pipeline 的下一 stage，复用 smoke workspace，并校验 run.json fixture_sha。",
+          "finding": "archive 在同一 stage 并行跑 judge 的安排被后续 aeefc45126c0a79f6811ed68681d4acc8dce539 有意改为同一 pipeline 的下一 stage；测试明确禁止另开 api_trigger。"
+        }
+      ],
+      "limitations": [
+        "本审计只有固定 main 的源码和静态契约证据，没有实际 CNB/kimi/真实语料运行；不能据此宣称 pipeline runtime 已通过。",
+        "archive 的六问输出已被 fixture 子集和多 variant/trial 取代，旧 q1-q6 文件名只保留为手工重判兼容路径。"
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "path": "docs/specs/2026-08-09-slm-eval-harness-design.md",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "merge_base": "02a84d001dccc73450e6753a680730a2c8b2e077",
+      "archive_entry": [
+        "100644",
+        "914e5c215066786605cbaf49122c056d966391c2"
+      ],
+      "patch_sha256": "7ebd977f6a3acd83479d047ddf2184041fb25176dd646a1cc6ca5dc527b94d46",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "ref": "f44739e8de4d1a3308778247e5fbff7ef1deaf50:docs/specs/2026-08-09-slm-eval-harness-design.md:3-45",
+          "summary": "状态 draft；记录 pipeline-only、deepseek-v4-flash、tool calling、串行图、8 case/provenance 缺口。",
+          "finding": "archive 新增的事实和约束是独有文件内容，明确把旧 runner 标为过时并要求 fixture/provenance。"
+        },
+        {
+          "ref": "f44739e8de4d1a3308778247e5fbff7ef1deaf50:docs/specs/2026-08-09-slm-eval-harness-design.md:57-102",
+          "summary": "形态为阶段 A 产出 transcript、阶段 B pipeline 判分；逐条断言、确定性 pass 聚合、Rust final-answer 抽取和串行/墙钟约束。",
+          "finding": "这些设计目标在 main 保留为同一两阶段概念、结构化 records、逐条 semantic judge 和 Rust 抽取。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:docs/specs/2026-08-09-slm-eval-harness-design.md:3-68",
+          "summary": "状态改为 approved；补充 GLM-5.2 judge、recalled_unverifiable provenance、dash/set -eu 与故障路径必须变红。",
+          "finding": "main 对 archive draft 的事实做了有意批准/校准和可复核边界收敛，未丢掉 pipeline-only、模型固定、语义判分或 provenance 缺口。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:docs/specs/2026-08-09-slm-eval-harness-design.md:80-134,151-153",
+          "summary": "保留两阶段、Rust judge/final answer、records.jsonl 守卫、串行墙钟，并记录用户选择 AI IDE v2 glm-5.2 judge。",
+          "finding": "archive 旧约束在 main 有对应具体设计和实施证据；judge 模型及判分边界后来按用户决定有意更新。"
+        }
+      ],
+      "limitations": [
+        "文档仍在 main:89 的两阶段图中写“阶段 B（判分，独立 pipeline）”，而 .cnb.yml:1323-1327 和 test_cnb_stage_b_judge_follows_smoke_in_same_pipeline 已改成同一 pipeline 的下一 stage；实现意图有 commit/test 证据，但该 spec 行文没有同步，文档对实现的精确对齐仍 unresolved。",
+        "spec 的事实、批准状态和设计文字不能证明 judge API 或真实评测已经运行。"
+      ],
+      "post_audit_correction": "本轮将两阶段图中的独立pipeline改为同一pipeline下一stage，依据.cnb.yml及aeefc45126c0a79f6811ed68681d4acc8dce539。原limitation描述固定main审计时的状态；已在本轮文档修正。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "path": "src/query/page_logic.rs",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "merge_base": "02a84d001dccc73450e6753a680730a2c8b2e077",
+      "archive_entry": [
+        "100644",
+        "7490ab9a8a8a42495f6d3930ceacfe6b9909bbb5"
+      ],
+      "patch_sha256": "1e89a9359a9f3b4abde540c418738ef0ae73b3889a4709ead0a473d8f05d84e3",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "ref": "02a84d001dccc73450e6753a680730a2c8b2e077:src/query/page_logic.rs:945-990",
+          "summary": "base navigation_statement 只按 to 是否 page: 计目标；PassesParam 只报参数名，并把 raw_expr 留给 details.navigation。",
+          "finding": "这是 archive hunk 的比较基线。"
+        },
+        {
+          "ref": "f44739e8de4d1a3308778247e5fbff7ef1deaf50:src/query/page_logic.rs:945-1032",
+          "summary": "archive 增加 action_flows 入参，回查 source action 的 action_type；PassesParam 报 raw_expr 取值；目标和参数分别输出。",
+          "finding": "archive 独有行为是让页面摘要直接回答跳转 action 类型和参数取值，同时避免把 param: 节点称成目标页面。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:src/query/page_logic.rs:980-1088",
+          "summary": "main 保留 action_flows/action_type、PassesParam raw_expr、目标页面/参数分开输出；is_page_jump_entry 只接受 OpensPage|ActionNavigates + page:。",
+          "finding": "archive 行为已在 main 具体调用中保留；887f33b87b72ae6a20920b69a46c9a66a96edfd 有意进一步排除 EmbedsPage/控制边，避免把嵌入关系当用户跳转。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:src/query/page_logic.rs:2146-2192,2760-2843",
+          "summary": "build_query_page_logic_output_inner 用 page_jump_count 生成 role/count/conclusion；单测覆盖 param raw_expr、action_type、非本次 action 和 EmbedsPage。",
+          "finding": "不仅有 helper 文本，还有生产调用和针对 archive 语义的断言。"
+        }
+      ],
+      "limitations": [
+        "对应断言是合成 serde_json 输入的单元测试；本审计没有跑真实 metadata graph 的行为差分，因此不能证明所有真实 edge type 都已覆盖。"
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "path": "tests/kimi_harness_judge_tests.rs",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "merge_base": "02a84d001dccc73450e6753a680730a2c8b2e077",
+      "archive_entry": [
+        "100644",
+        "a61dd8e3539ba7a91d46d6c2b2f0158885dba489"
+      ],
+      "patch_sha256": "c4585e9f59d3965b82f1550932b692260285224622533b4628dc39f5e5abe9d4",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "ref": "02a84d001dccc73450e6753a680730a2c8b2e077:tests/kimi_harness_judge_tests.rs:93-107,467-526",
+          "summary": "base 用 SMOKE_QUESTION_CASES 固定 q1-q6 映射，live judge 按映射找 transcript 并按外部顺序 zip 输出。",
+          "finding": "这是 archive 删除固定映射前的测试和调用行为。"
+        },
+        {
+          "ref": "f44739e8de4d1a3308778247e5fbff7ef1deaf50:tests/kimi_harness_judge_tests.rs:94-130,491-539",
+          "summary": "archive 测试改为 smoke_subset 派生 6 个连续 order、拒绝空选择；live judge 按 case_id transcript 优先并取消外部 zip。",
+          "finding": "固定映射被有意替换为 fixture 单一事实源，同时保留 final-answer/judge/infra 占位和报告写出。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:tests/kimi_harness_judge_tests.rs:95-130,270-361,364-461",
+          "summary": "main 继续断言 fixture 派生 smoke 子集和空选择，并增加 records 字段/schema、run identity、同 pipeline 阶段 B、variant/trial 文件名、空/负/重复 record 的断言。",
+          "finding": "archive 的 mapping→fixture 迁移在 main 有直接断言，且后续已扩成 13 case/11 smoke 与逐 trial contract。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:tests/kimi_harness_judge_tests.rs:1247-1475",
+          "summary": "live judge 使用 smoke_subset；有 records 时按每条 record 定位 transcript、包装 variant/trial 并把缺失记 INFRA。",
+          "finding": "archive 的 case-level judging 语义被有意提升为 record/trial-level judging，原来的不静默错位目标仍在。"
+        }
+      ],
+      "limitations": [
+        "main 的 13 case/11 smoke 数量是当前 fixture 的静态回归断言，fixture 变化需同步更新；ignored live test 与外部 judge API 未在本审计中运行。"
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/backup-before-resplit",
+      "path": "tests/support/kimi_smoke_judge.rs",
+      "archive_commit": "f44739e8de4d1a3308778247e5fbff7ef1deaf50",
+      "merge_base": "02a84d001dccc73450e6753a680730a2c8b2e077",
+      "archive_entry": [
+        "100644",
+        "cf7df1ec1fc6cf7b93c30450824d0392b09b82da"
+      ],
+      "patch_sha256": "123ef7d1b4952b49a33c9195187ab2ce65e88de82ab7daf8cbf594104cb27ed7",
+      "status": "retained_with_intentional_replacement",
+      "evidence": [
+        {
+          "ref": "02a84d001dccc73450e6753a680730a2c8b2e077:tests/support/kimi_smoke_judge.rs:21-29,76-99",
+          "summary": "base 以 SMOKE_QUESTION_CASES 固定 q1-q6，extract_final_answer 保留最后一个非空 assistant content。",
+          "finding": "这是 archive 新增 SmokeConfig/smoke_subset 前的支持层行为；final-answer 抽取是需要保留的既有行为。"
+        },
+        {
+          "ref": "f44739e8de4d1a3308778247e5fbff7ef1deaf50:tests/support/kimi_smoke_judge.rs:21-98",
+          "summary": "archive 添加 SmokeConfig(enabled/order/question_template)、SmokeCase.smoke 和 smoke_subset；空子集报错并按 order 排序。",
+          "finding": "固定表被有意移除，case 文件成为问题子集唯一事实源；原 Rust final-answer 抽取未被重写。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:tests/support/kimi_smoke_judge.rs:21-98,238-261",
+          "summary": "main 保留 SmokeConfig/smoke_subset 和 extract_final_answer 的同一处理；没有记录时仍能走手工兼容路径。",
+          "finding": "archive 核心支持行为在 main 直接存在。"
+        },
+        {
+          "ref": "3d595d3d61f1c926af8206ed160e04269bb1b9d5:tests/support/kimi_smoke_judge.rs:100-236,758-835",
+          "summary": "main 后续增加 TrialRecord/parse_trial_records、record 权威路径解析、TrialJudgement 和按三元组一一配对的报告。",
+          "finding": "这些后续增强把 archive 的 per-trial record 意图变成 Rust 侧 schema 和消费链，未替换原有 subset/extraction 目标。"
+        }
+      ],
+      "limitations": [
+        "smoke_subset 本身只检查非空并排序；重复或非法 order 的硬校验在 main .cnb.yml:1134-1140，单独调用 helper 不会复现 pipeline 全部 guard。",
+        "本审计没有运行真实 records/transcript/judge；Rust 侧证据是源码和测试断言。"
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "path": "docs/milestones/performance/m53-performance-continuation.md",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "merge_base": "9b29657f5e2e26bc964903d9c0b9f16ba50d63f2",
+      "archive_entry": [
+        "100644",
+        "844c17433cf77c6fcc2f71b5ab084e8f2e56d21a"
+      ],
+      "patch_sha256": "740e656c5ca313ba85ae9f12740b77e9889e4c101665d9f0bd1975d772554362",
+      "status": "retained_with_evolution",
+      "evidence": [
+        {
+          "path": "docs/milestones/performance/m53-performance-continuation.md",
+          "line": 177,
+          "detail": "init/load观测段仍保存dense 2968ms、facts 1801ms、page index 442ms和总计5211ms；原新增表及完成状态保留。后续仅调整章节/待办排序。"
+        }
+      ],
+      "limitations": "仅验证历史记录保留；未重跑该性能数据。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "path": "src/query.rs",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "merge_base": "9b29657f5e2e26bc964903d9c0b9f16ba50d63f2",
+      "archive_entry": [
+        "100644",
+        "2d4cf823dee06911918c510c1831d60dc2cc206f"
+      ],
+      "patch_sha256": "4545972616c03943fa792687370c1e8bcc058077cd4dd95ae99d3347b331a52c",
+      "status": "retained_with_evolution",
+      "evidence": [
+        {
+          "path": "src/query.rs",
+          "line": 368,
+          "detail": "collect_page_logic_nodes_for_test独立cfg(cli-local)导出；PageDependencyIndex在373行与Coverage一起导出。原新增的两个公开符号均可供旧cli-local测试使用。"
+        }
+      ],
+      "limitations": "静态对照base→archive全部改动与当前对应代码；不证明所有现有行为正确，也不替代测试执行。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "path": "src/query/page_logic.rs",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "merge_base": "9b29657f5e2e26bc964903d9c0b9f16ba50d63f2",
+      "archive_entry": [
+        "100644",
+        "1a1b5d7f1ed311de5f81932ee36eb2d0fa388be6"
+      ],
+      "patch_sha256": "363e5687d6fd54841296b5563ce2e066d400ca9045faaf20aa3aeb49446686a9",
+      "status": "retained_with_evolution",
+      "evidence": [
+        {
+          "path": "src/query/page_logic.rs",
+          "line": 21,
+          "detail": "page_diff模块和PageDependencyIndex导出保留；25行测试collector仍转发完整child_components/child_actions。"
+        },
+        {
+          "path": "src/query/page_logic.rs",
+          "line": 664,
+          "detail": "cache_footprint记录原9类长度，snapshot保留page/budget/footprint及batch计数；708-810的差异比较仍覆盖availability entries、全部计数、prerequisites和六类paths，并排序JSON数组比较。"
+        },
+        {
+          "path": "src/query/page_logic.rs",
+          "line": 1341,
+          "detail": "warm prerequisites调用传budget,true；1387的path调用也传budget,true；普通query对应2049/2093两处传budget,false。保留物化与输出路径区别。"
+        }
+      ],
+      "limitations": "静态对照base→archive全部改动与当前对应代码；不证明所有现有行为正确，也不替代测试执行。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "path": "src/query/page_logic/page_diff.rs",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "merge_base": "9b29657f5e2e26bc964903d9c0b9f16ba50d63f2",
+      "archive_entry": [
+        "100644",
+        "39e571819d0a3e75f4c9061d7a51eb70c51f3d1c"
+      ],
+      "patch_sha256": "0ef3ada5bbced57e43a2bd0d258a4e619d1c75c23fac95e96ea05388542e04c5",
+      "status": "retained_with_evolution",
+      "evidence": [
+        {
+          "path": "src/query/page_logic/page_diff.rs",
+          "line": 39,
+          "detail": "build仍登记page自身、collector递归组件和动作；新增related_models/related_fields扩大覆盖。affected_pages仍对node映射做集合并，empty仍空映射；后续增加Full/Partial和增量更新接口。"
+        }
+      ],
+      "limitations": "静态对照base→archive全部改动与当前对应代码；不证明所有现有行为正确，也不替代测试执行。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "path": "src/query/page_logic/path_summary.rs",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "merge_base": "9b29657f5e2e26bc964903d9c0b9f16ba50d63f2",
+      "archive_entry": [
+        "100644",
+        "19fc83b581f60f747c8fa547ceffccae6294eb80"
+      ],
+      "patch_sha256": "e00cbb8ee2f74f78711ffcead0ae29826408a0f0b6cf433d59b5710cc34ce58c",
+      "status": "superseded_by_equivalent_filter",
+      "evidence": [
+        {
+          "path": "src/query/page_logic/path_summary.rs",
+          "line": 154,
+          "detail": "原构建后clear改为PathMaterializeKeep先控制JSON生成；compact排除candidate/supporting/rejected/diagnostics，normal排除candidate/rejected/diagnostics；related_context/primary保留，非物化和其他budget保留全部，见227-262。"
+        },
+        {
+          "path": "tests/m53_warm_cache_scalability_tests.rs",
+          "line": 228,
+          "detail": "缓存与非缓存输出做canonicalize后assert_eq完整JSON；compact footprint零断言保留。"
+        }
+      ],
+      "limitations": "只证明该归档hunk的保留桶规则被前移；三方merge可无冲突补回旧clear不代表丢失，不应恢复重复过滤。现有full>=compact零基线断言较弱，不能单凭它证明裁剪路径被触发。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "path": "src/runtime.rs",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "merge_base": "9b29657f5e2e26bc964903d9c0b9f16ba50d63f2",
+      "archive_entry": [
+        "100644",
+        "f484ab7cb68385679683c94feb3779a90f5d93ec"
+      ],
+      "patch_sha256": "49256e85f9789ecae420800e13e74466586cfbf8f610611149e82561836dae90",
+      "status": "retained_with_evolution",
+      "evidence": [
+        {
+          "path": "src/runtime.rs",
+          "line": 577,
+          "detail": "batch逐页构造pending、记录成功/错误，空pending零写入，非空只一次insert；631的dirty-node摘除保留排序去重；原新增10个函数逐段核对仅格式/末尾逗号差异。"
+        },
+        {
+          "path": "src/runtime.rs",
+          "line": 946,
+          "detail": "唯一Arc走get_mut，额外持有者clone缓存map并记录元素数，dense/facts/page index保持Arc共享；record/reset/get counters保留。"
+        },
+        {
+          "path": "src/runtime.rs",
+          "line": 463,
+          "detail": "dense/facts/page index三个阶段独立计时，518按三者求和；553写入runtime，1404-1405在reload复制新计时。read_model仍持有page_dependency_index。"
+        }
+      ],
+      "limitations": "静态对照base→archive全部改动与当前对应代码；不证明所有现有行为正确，也不替代测试执行。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "path": "tests/m53_warm_cache_scalability_tests.rs",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "merge_base": "9b29657f5e2e26bc964903d9c0b9f16ba50d63f2",
+      "archive_entry": [
+        "100644",
+        "a534abd90f65535b1bbad2f0ce63d9bc6f5491b7"
+      ],
+      "patch_sha256": "cdce16548900de55d9f63d5fa818a797334b3f04e83e711bbe217c5bd0e8c907",
+      "status": "retained_formatting_only",
+      "evidence": [
+        {
+          "path": "tests/m53_warm_cache_scalability_tests.rs",
+          "line": 96,
+          "detail": "旧文件→main完整diff仅import/断言换行；保留20+条warm的clone_elements==0与writes==targets.len、batch内容比较、budget全JSON比较、三类compact零断言、collector覆盖和受影响页多budget摘除。"
+        }
+      ],
+      "limitations": "原归档断言保留不表示所有断言都严格；full候选数>=compact候选数在两者都0时也通过，本次未将其当裁剪正向证据。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/local-main-20260906",
+      "path": "tests/runtime_tests.rs",
+      "archive_commit": "0a4d29bb30ba2b7f0f6ecef905d10f88051c7264",
+      "merge_base": "9b29657f5e2e26bc964903d9c0b9f16ba50d63f2",
+      "archive_entry": [
+        "100644",
+        "10610f73a7e896a3c9d489dbf8f297b7e9a858fd"
+      ],
+      "patch_sha256": "2328a1b096611e98104feb0d3a32c3809d94f4403c6864d2c7f55ff4511f3fcc",
+      "status": "retained_with_additional_tests",
+      "evidence": [
+        {
+          "path": "tests/runtime_tests.rs",
+          "line": 624,
+          "detail": "旧文件→main完整diff仅格式调整与新增OneShot prepare_replacement拒绝、DiffRefresh稳定错误两个用例；旧warm/degradation断言没有删除或放宽。"
+        }
+      ],
+      "limitations": "保留证据，不是新增测试执行；Partial index在旧invalidate API下的保留行为仍是旧契约，不由本报告证明所有刷新调用安全。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "docs/m51-performance-diagnosis.md",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "2fc34b7e4b913c00fc4e457c7b8636ecff46d15e"
+      ],
+      "patch_sha256": "7867ea21b2c036d26cd4d5af1c398406adde6e39f062c901c6d9c4ea8be4f06c",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/explain.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "b9559d37ce50dbe083a0dceb778a381ed64ea454"
+      ],
+      "patch_sha256": "297df9f6669fdf7a13c722395c0cbbcee85d1af6c755df149cc1e8afaa7df54d",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/lib.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "1424a52686ab690878d38516b7a52ff86a57376e"
+      ],
+      "patch_sha256": "1f09b270bcc6f0ec87397301afaca74af131a56ce823ba5f232530c56327fe17",
+      "status": "retained_exact_hunks",
+      "evidence": [
+        {
+          "path": "src/lib.rs",
+          "line": 30,
+          "detail": "base→archive只新增pub mod perf_profile和pub mod perf_report；当前模块列表完整保留两行。三方merge将原改动应用到main得到字节完全相同的main。"
+        }
+      ],
+      "limitations": "静态对照base→archive全部改动与当前对应代码；不证明所有现有行为正确，也不替代测试执行。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/perf_report.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "42fadb6d672e910b7e19a791a58e7e3281806883"
+      ],
+      "patch_sha256": "301b8de6b8579e20f842a460707b4c22a9996f0baae17792ce1e0544f65b89ee",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/query.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "e4df9a4a859eea3a51d3e887add43dfe7021285c"
+      ],
+      "patch_sha256": "23b5f21644058be8e7295fb29a33b36dd6eb185ced832bbefd4f9a2a8f0be711",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/query/page_logic.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "0417b4fbbd25aea21c053bce7fbdbd629377e6aa"
+      ],
+      "patch_sha256": "d1a27a3b221151c589ad3a652d1e5380b742cba30c9c5e0314e5366b249c533c",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "src/query/page_logic/path_summary.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "21c3fd8def7b1fbfeb4ebab52f946fade0d06dd9"
+      ],
+      "patch_sha256": "25c15dcb436e2fe1ffa00da417df25854d3ed0ec41068a3f8d37e15fcfcc6548",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m51-performance-diagnosis",
+      "path": "tests/m51_profile_report_tests.rs",
+      "archive_commit": "a71933fd4978a63206957e6c3f578fb597f8ecf6",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "b37393de9422406d7bb586a95ac144bcdcbd8891"
+      ],
+      "patch_sha256": "fbf79aa2e4f9d82e4f3ac1cf035506de26aa8387f04c13a9518e8097feb2d159",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "docs/m52-performance-optimization.md",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "0f20775cac9556ee7f022a263cccd5b52e7acd85"
+      ],
+      "patch_sha256": "c843f0934540344ced2cb8faac1ca8e07118ea278a4cba03bf966b7cf53fd35c",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/lib.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "09a7703fc75eecd022fe54cfeadc8ccaefe66674"
+      ],
+      "patch_sha256": "9ab2d6f10890fb76c87a2e89be454e93ac2985815b97114aa7101a8bd3c56dbd",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/page_logic_fragments.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "0861559a590a1356917bd0100edfa590ea465bd5"
+      ],
+      "patch_sha256": "8c7ecdffd23f68828e462f817e091c75f773bf63bbd559dac9080f3ceb01b682",
+      "status": "deferred_unmerged_prototype",
+      "review_state": "reviewed_in_pr36",
+      "evidence": [
+        {
+          "ref": "branch-retention-history-2026-09-08.md#内容级核查",
+          "summary": "PR36已确认native文件后端原型明确未合并且延期；不证明替代实现完整。"
+        }
+      ],
+      "limitations": "保留archive，不恢复旧native实现。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/perf_report.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "5b0cc1bb5040fe4fe0c089650194c8be0549d87f"
+      ],
+      "patch_sha256": "632dc389c54ec7d08b0355b9de6a21332fd11a709072f503664e08be7e06d3dd",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/query.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "b65348b4f95303fa0f1e8392b5374d8d3cde70fb"
+      ],
+      "patch_sha256": "aeecb243026630995695a6d5aca9f11687c93b80b7b5fe131e00c90ab37c1c98",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/query/page_logic.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "1e116ebe5190c699eae754a442518ab5099b6909"
+      ],
+      "patch_sha256": "928e881bb300e5d7a40ead370fc3f8e50679ff38959088d17371dd76de54171e",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/query/page_logic/path_summary.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "d9c4d9acce1f6cf80ff240b4f93f50fbed2b083a"
+      ],
+      "patch_sha256": "26e05a935100c4818ac750b05c3141ab94ee93938cd1200d5cc7fc41dec4516b",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/query/page_logic/prerequisites.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "f6e65917eef6cf47afac5ffed569fd6814732745"
+      ],
+      "patch_sha256": "6de846144b2b62a0ba69fd1782be58c205c0fe6241c93d2b167ace2c5b1a6a8a",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "src/runtime.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "6405e23650f72c23edfdfcf503f90851c1e3976a"
+      ],
+      "patch_sha256": "69550f1d03edd30a34dc69b3ea1aec1aded654dbe75e6bdb20acdd5c2e463572",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "tests/m51_profile_report_tests.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "27442a5a5766c351236c8d99d167f49114dd1d8f"
+      ],
+      "patch_sha256": "45a4c5b697bd9ce69348dc90b3171d597a1033bc136986c821df1fc8e77b7e2c",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "tests/m52_page_logic_profile_tests.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "c09640d3a64d16de6a1557221d352425f9eda9e2"
+      ],
+      "patch_sha256": "d26b189970805d340f7836aa00894642b5aea2fd3367cc27479095d922a94fd6",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-performance-optimization",
+      "path": "tests/runtime_tests.rs",
+      "archive_commit": "60dacc7eda15c0f997c3daa65bbfdf0a9d38bb36",
+      "merge_base": "840723b1432b0f01653921264e259230b15ff69a",
+      "archive_entry": [
+        "100644",
+        "28d8d40b484fea42ecbfe8fced2c7ccff75ebdcc"
+      ],
+      "patch_sha256": "2a67bfb4f006fc7786ba7af87a8f733f1a2e8afcd082a5c07bb1cf799a3c72b0",
+      "status": "unresolved",
+      "review_state": "unresolved",
+      "evidence": [],
+      "limitations": "M51/M52性能路径的累积改动，尚无覆盖所有base→archive hunks的当前行为/有意替换证据；本轮不采用先前聚合retained声明。"
+    },
+    {
+      "tag": "archive/m52-redb-v2-and-ci",
+      "path": "CHECKLIST.md",
+      "archive_commit": "2f9dff1925ec1e74e5b9e049c089b8a706efb990",
+      "merge_base": "f1e7285a93f9f4a0c3ef390200d4c9d077834263",
+      "archive_entry": [
+        "100644",
+        "47511569bc5b1e98dc11284dde6f84e4b6ed6364"
+      ],
+      "patch_sha256": "77d8383cb8fdc1849421ae92a3dbf43642adf2d7e2363b8b6a75b31f249367fc",
+      "status": "superseded_plan_links",
+      "evidence": [
+        {
+          "path": "docs/milestones/INDEX.md",
+          "line": 67,
+          "detail": "旧新增M56 dash/M57 rpt计划号已归diff-refresh；formats改用71行待排期draft；M58当前closed且有approved runner/harness spec，旧加权稿不等价，故本轮单独恢复历史提案。CHECKLIST只作为INDEX指针，修正原错误的M53 active为M59 active。"
+        }
+      ],
+      "limitations": "这是计划编号和入口更新，不声称旧M58加权设计已实现。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/m52-redb-v2-and-ci",
+      "path": "docs/m56-dashboard-report-support-design.md",
+      "archive_commit": "2f9dff1925ec1e74e5b9e049c089b8a706efb990",
+      "merge_base": "f1e7285a93f9f4a0c3ef390200d4c9d077834263",
+      "archive_entry": [
+        "100644",
+        "db340806e959727a0cef4486c01f27b5139a4f0d"
+      ],
+      "patch_sha256": "417e252b9c142cbfe4c87a8769427489876e2fea8c0da1659a3bbe48eed32d86",
+      "status": "retained_with_documented_corrections",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-07-05-dash-rpt-format-support-design.md",
+          "line": 7,
+          "detail": "完整旧新diff比较：原Goals/NonGoals、节点/边、内嵌DataFlow、两阶段、语料测试和后续队列均保留；去掉已被占用M56/M57编号、本地路径和具体私有样本名，scanner入口与context/parent查找的无需适配说法按源码纠正。"
+        }
+      ],
+      "limitations": "设计保留，不代表格式已实现；原错误和过期编号不回灌。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/m52-redb-v2-and-ci",
+      "path": "docs/m58-cheap-model-understanding-eval-design.md",
+      "archive_commit": "2f9dff1925ec1e74e5b9e049c089b8a706efb990",
+      "merge_base": "f1e7285a93f9f4a0c3ef390200d4c9d077834263",
+      "archive_entry": [
+        "100644",
+        "c347bfe6c8267e68fa2318b2b8d11a161ec50371"
+      ],
+      "patch_sha256": "7322b76bd52e7aede241e0ac64d2d2e0849f60c4bffd642c3cd7b676234289b7",
+      "status": "recovered_historical_draft",
+      "evidence": [
+        {
+          "path": "docs/archive/proposals/2026-07-05-skill-rule-coverage-and-score.md",
+          "line": 1,
+          "detail": "发现旧稿的rule registry/rule_ids覆盖测试、四维0.5/0.2/0.15/0.15加权及趋势report未完整进入现有M58 runner设计；本轮在历史原文章节原字节恢复整个173行草稿，SHA256 6115bee5468c2b429d3db39d0b551498d45559edeffbb2129ae38f820826b4dc。"
+        }
+      ],
+      "limitations": "恢复文档，不批准旧权重/阶段编号，不改变当前评测。不能将声明覆盖等同于行为覆盖。",
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "path": "AGENTS.md",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "merge_base": "7278955b0c2c0bee6050ac8340befc0bc4a90b91",
+      "archive_entry": [
+        "100644",
+        "72adc481c44eb42ff53a3e89febb6996f69b5105"
+      ],
+      "patch_sha256": "dfc1aaf9af32f0c7e0722f7947fdd4145ed8e650d233e20d935c8ef7e50d66d6",
+      "status": "retained_with_evolution",
+      "evidence": [
+        "base→archive: merge-base 7278955b0c2c0bee6050ac8340befc0bc4a90b91 blob c7926b2672b979a38a513a8e65f797c42bd6e35b → archive 31d020417d1ecbea440b0c7e92dffa2bd4b42d4b blob 72adc481c44eb42ff53a3e89febb6996f69b5105. Archive hunks clarified IndexedDB is a stub, added local-path non-assumption, full-criterion checkout failures, and knowledge-acceptance index exclusion.",
+        "main path: AGENTS.md remains at the same path; current HEAD 3d595d3 blob d6e52a5bf83c05c893b410ed6b31cb5151b176b1. archive→HEAD is M with no rename.",
+        "AGENTS.md:80 retains `Memory / redb / IndexedDB stub 持久化 provider（stub 不代表真实 IndexedDB 持久化已实现）`; :204-206 retains that local paths are maintainer-machine-only and must not be assumed available.",
+        "AGENTS.md:210-217 retains and sharpens checkout semantics: a pre-provisioned METADATA_CHECKER_REAL_PROJECT_DIR skips clone without a token, while missing token/repository fails checkout when the directory is not pre-provisioned; checkout failures do not proceed to benchmark.",
+        "AGENTS.md:218-224 retains Repository Not Found and execution-layer boundaries, while later :220-221 qualifies the repository-existence statement as maintainer oral information without date/credential and requires authorization verification.",
+        "AGENTS.md:228-232 retains the index contract: only docs/knowledge/**, AGENTS.md and SKILL.md are indexed; docs/archive/**, docs/ai-eval-runs/** and docs/knowledge-acceptance/** are excluded."
+      ],
+      "limitations": [
+        "Documentation/tree evidence does not independently execute full-criterion CI or verify external fixture authorization."
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "path": "docs/knowledge-acceptance/2026-09-07-pr33-review.md",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "merge_base": "7278955b0c2c0bee6050ac8340befc0bc4a90b91",
+      "archive_entry": [
+        "100644",
+        "3a8b32aaf850d5c06d6f9a381a99c84159ed738e"
+      ],
+      "patch_sha256": "37ae4f02ca707dc5126f676306b064da254c3e9e837e396b16e2438063eb2143",
+      "status": "retained_with_evolution",
+      "evidence": [
+        "base→archive: path was new at archive (base null), archive blob 3a8b32aaf850d5c06d6f9a381a99c84159ed738e. The 90-line report records PR33 repair scope, forceRebuild/index evidence, isolated 32-question procedure and 30/1/1 result, retained A4 partial/C3 fail, and validation limits.",
+        "main path: same path remains; current HEAD blob 7c6bbf34f90210d6b05ef608bba2dafa5b05744f. archive→HEAD changes only A4 source reference 394→398.",
+        "2026-09-07-pr33-review.md:3-5 retains the non-acceptance conclusion; :9-17 retains the concrete repair inventory; :21-35 retains forceRebuild ordering, index SHA and retrieval limitations.",
+        "2026-09-07-pr33-review.md:39-46 retains frozen-question, isolated-request and complete-artifact requirements; :67-75 retains A4 partial/C3 fail instead of rewriting them as passes.",
+        "2026-09-07-pr33-review.md:79-90 retains YAML/schema, 16 script-test, source-check, workspace-block and log-truncation limitations."
+      ],
+      "limitations": [
+        "Historical report evidence is explicitly developer-designed rather than external blind evaluation and does not establish a current rerun."
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "path": "docs/knowledge-acceptance/README.md",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "merge_base": "7278955b0c2c0bee6050ac8340befc0bc4a90b91",
+      "archive_entry": [
+        "100644",
+        "c0f4f4d45fdd786e69e917cf25bd1066e9607795"
+      ],
+      "patch_sha256": "645c867043e4281d11b2f4496c42a309da7be276e50e0839a12b358510985af9",
+      "status": "retained_with_evolution",
+      "evidence": [
+        "base→archive: path was new at archive (base null), archive blob c0f4f4d45fdd786e69e917cf25bd1066e9607795. Archive adds physical separation/non-indexing, empty-context procedure, raw-query/top-k/manual-answer requirements, failure classification and PR33 replay/evidence workflow.",
+        "main path: same path remains; current HEAD blob df8624be61e77845c8d80a84c56f59174fce765d. archive→HEAD is M with additions, no rename.",
+        "README.md:1-14 retains deliberate non-indexing and empty-context visibility premise; :18-34 retains the raw-query/manual-answer procedure and evolves errors into retrieval failure, misleading entry and answer over-inference.",
+        "README.md:36-64 retains PR33 replay, full-log extraction, no-answer-key and captured_pending_manual_review boundaries; :42-47 adds permanent acceptance-versus-regression terminology.",
+        "README.md:68-79 adds fixed-controls/state-paths and boundary-regression records while preserving the PR33 30/1/1 report and marking later results as development regression."
+      ],
+      "limitations": [
+        "The README specifies protocol and links artifacts; it is not itself proof that the current index or CNB run satisfies the protocol."
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "path": "docs/knowledge-acceptance/knowledge-acceptance-questions.md",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "merge_base": "7278955b0c2c0bee6050ac8340befc0bc4a90b91",
+      "archive_entry": [
+        "100644",
+        "2be8c6165b5e290606691e23658a9d5f4463a78c"
+      ],
+      "patch_sha256": "079149485f2025a79a9f7e7bf7dc5d88f4dc5f5470c705b1ffb3e51712f79905",
+      "status": "retained_with_evolution",
+      "evidence": [
+        "base→archive: merge-base had the old path docs/knowledge/knowledge-acceptance-questions.md (blob ffd92e9e075d87105fe9f96d31c1df84ef409eb4); archive deleted that path and added this excluded-directory path (blob 2be8c6165b5e290606691e23658a9d5f4463a78c). The new file rewrote the loose ~20-question/self-validating record into a 24-question method with round-1 invalidation, raw-query/top-k/manual-answer requirements, C/D boundaries and evidence limits.",
+        "main path: docs/knowledge-acceptance/knowledge-acceptance-questions.md remains at current HEAD blob 7b7d777d6a376331339a08117ebb96b40b9f62e9; old docs/knowledge/knowledge-acceptance-questions.md is absent. archive→HEAD changes only B4 and C8 source-line references, preserving relocation/content.",
+        "knowledge-acceptance-questions.md:3-6 retains not-indexed location, empty-context purpose, stop-inference rule and anti-misleading threshold; :10-25 retains include/last_commit checks, raw wording, top-k=5, verbatim answer capture and round-1 invalidation.",
+        "knowledge-acceptance-questions.md:31-69 retains A/B/C/D assertions; current B4 at :45 uses graph_redb.rs:1163-1200 and C8 at :61 uses open_inner_v1 graph_redb.rs:290.",
+        "knowledge-acceptance-questions.md:85-90 and :140-146 retain the explicit historical evidence limitation: 24/24 is tuned fixed-question regression with incomplete raw evidence, not independent acceptance."
+      ],
+      "limitations": [
+        "Historical A4 expected-answer row :34 and historical answer record :105 still quote stdio_server.rs:394, while current source uses :398; topic-cli and the 2026-09-07 report corrected this, but the historical table was not fully line-refreshed.",
+        "The file is an evaluation record/question key by design; retained answer rows are not independent behavioral proof."
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "path": "docs/knowledge/README.md",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "merge_base": "7278955b0c2c0bee6050ac8340befc0bc4a90b91",
+      "archive_entry": [
+        "100644",
+        "f77ac988a99a9800c2c9bc187861fff6ac44c2e6"
+      ],
+      "patch_sha256": "af6c949f36ee23429c2ba00831dd8c2462cba29e4e16b6d0685aae34608b928e",
+      "status": "retained_with_evolution",
+      "evidence": [
+        "base→archive: base blob 12b5839436acb94d3771bc7d45fec82d999eb1d4 → archive blob f77ac988a99a9800c2c9bc187861fff6ac44c2e6. Archive replaced the loose acceptance paragraph with self-contained/negative-conclusion/explicit-Q&A rules, moved acceptance material to docs/knowledge-acceptance, and documented whitelist/include/exclude plus manual-evidence requirements.",
+        "main path: same path remains; current HEAD blob a97d8407bf83fff46e9571956afc765840ff0d55. archive→HEAD is M with no rename.",
+        "README.md:16-23 retains four-way status separation, source SHA/line citations, self-contained chunks, explicit negative conclusions, explicit Q&A, front-of-document checks, table compactness and redaction.",
+        "README.md:25-42 retains the separate non-indexed acceptance directory, 32-question composition, original-query/empty-context/manual-answer workflow, invalid round-1 result, incomplete historical evidence and top-k caution; :31-35 adds the regression-versus-acceptance rule.",
+        "README.md:44-48 retains explicit include whitelist, exclude fallback for ai-eval-runs/archive/knowledge-acceptance, issueSyncEnabled=false and ignoreProcessFailures=false."
+      ],
+      "limitations": [
+        "This file states the indexing contract but does not prove the remote knowledge-base configuration was actually applied."
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "path": "docs/knowledge/topic-cli-stdio-to-query.md",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "merge_base": "7278955b0c2c0bee6050ac8340befc0bc4a90b91",
+      "archive_entry": [
+        "100644",
+        "cfb23ae874e829272c10320ed520e5aed2ad1378"
+      ],
+      "patch_sha256": "85d10d2ee2ace30f6dc1727a1d562d4cd7e6bb455d312d7354a95262f7e09e16",
+      "status": "retained_with_evolution",
+      "evidence": [
+        "base→archive: base blob 10309ba1d712f8737dfa9a7578bd97c67fe91bd7 → archive blob cfb23ae874e829272c10320ed520e5aed2ad1378. Archive added complete-chain quick-check, execute_resolved_target/adapter stages, stdio exceptions, human-mode known-defect answer and M28 planned-state answer.",
+        "main path: same path remains; current HEAD blob f750052122b69990f006a58362edf4a3924404a7. archive→HEAD is M with no rename.",
+        "topic-cli-stdio-to-query.md:29-45 retains complete-chain and three stdio exception assertions, correcting ReloadGraph to current stdio_server.rs:398 and distinguishing handler/runtime.",
+        "topic-cli-stdio-to-query.md:77-84 retains execute_resolved_target → route::route → run_cli_runtime_tool → adapter → GraphRuntime::query and result merge/output behavior.",
+        "topic-cli-stdio-to-query.md:88-123 retains stdio if-short-circuit/check_reload behavior and runtime convergence/error behavior; current source confirms handle_request :361, DiffRefresh :378, Status :385, ReloadGraph :398, runtime query :971 and DiffRefresh error :1099.",
+        "topic-cli-stdio-to-query.md:169-204 retains human/non-human defect, M28 planned answer, cross-layer/milestone stop-inference boundaries and scope limitation."
+      ],
+      "limitations": [
+        "Header still identifies analysis/applicability as PR33 head 31d0204 rather than current HEAD 3d595d3; this audit verifies source locations/textual retention but does not run all listed CLI/stdio tests."
+      ],
+      "review_state": "reviewed_this_batch"
+    },
+    {
+      "tag": "archive/pr33-kb-fixes",
+      "path": "docs/knowledge/topic-scan-incremental-persist.md",
+      "archive_commit": "31d020417d1ecbea440b0c7e92dffa2bd4b42d4b",
+      "merge_base": "7278955b0c2c0bee6050ac8340befc0bc4a90b91",
+      "archive_entry": [
+        "100644",
+        "710d48c447cb3dd578130989eb9d675262869b14"
+      ],
+      "patch_sha256": "dea0e0641da888ffc5885bdbb5aa01acbf85bf6ceba5fd6b59a780fdf7ffb04b",
+      "status": "retained_with_evolution",
+      "evidence": [
+        "base→archive: base blob 988fd5ae15292c7c7b98225e6a8b9763e0ab687b → archive blob 710d48c447cb3dd578130989eb9d675262869b14. Archive added six-stage quick-check, compact stage table, full/delta and v2 Current/Stale boundary, stale-diagnostic reconciliation as implemented, and partial-v1-hydrate caveat with diagnostic codes.",
+        "main path: same path remains; current HEAD blob 017fef0f2cf66db24c181fe93ec2d2e828bf5d1b. archive→HEAD is M with no rename.",
+        "topic-scan-incremental-persist.md:11-18 retains entry/six-stage/hash answer; :36-51 retains compact stage table and TBL/SPG failure distinction.",
+        "topic-scan-incremental-persist.md:53-86 retains transaction, delta, v2 shadow and threshold assertions and evolves them with the second Stale→Current full-persist path and checkpoint-only distinction.",
+        "topic-scan-incremental-persist.md:88-107 retains per-file scanner diagnostic persistence, deletion/reconciliation and full-library report behavior; current text calls reconciliation implemented.",
+        "topic-scan-incremental-persist.md:117-134 retains v2 fallback warning and cross-layer stop-inference; :158-195 retains incremental defects and corrects Grafeo evidence to depend on actual old backend rather than report directory.",
+        "topic-scan-incremental-persist.md:197-218 retains partial-hydrate assertion: open_inner_v1 counts/skips bad node/edge/dangling rows, emits partial-impact diagnostics and does not imply a complete graph; current source has open_inner_v1 :290 and hydrate_diagnostics :385."
+      ],
+      "limitations": [
+        "Header still pins analysis/applicability to PR33 head 31d0204 rather than current HEAD 3d595d3; this audit verifies source locations/textual retention but does not run remote scanner/redb suites or prove runtime behavior."
+      ],
+      "review_state": "reviewed_this_batch"
+    }
+  ]
+}

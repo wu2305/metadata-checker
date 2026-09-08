@@ -21,7 +21,7 @@
 
 ### 编号
 
-- 沿用 `MNN`；新工作优先续写当前 **active** journal（性能线现为 M53）
+- 沿用 `MNN`；新工作优先续写当前 **active** journal（以 INDEX 为准，当前后端迁移为 M59）
 - 不在 INDEX 登记的 `mXX-*.md` 视为草稿，不得作为验收依据
 
 ## Spec 与 Plan

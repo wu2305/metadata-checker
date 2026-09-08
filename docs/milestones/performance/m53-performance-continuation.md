@@ -1,6 +1,6 @@
 # M53 性能优化落地记录
 
-> 状态：**done**（B1 / B2 / A 已合并 #9–#10；warm-cache 可扩展性 T1–T3、init/load 分层观测已落地待合入）。B1.2 dataflow facts、`redb_commit` / commit batch 仍 profile 门控，非阻塞。fragment 跨平台已移出 M53（无跨 session 复用需求时不做）。
+> 状态：**done**（B1 / B2 / A 已合并 #9–#10；warm-cache 可扩展性 T1–T3、init/load 分层观测已在 main。2026-09-08 按 `3d595d3` 逐项复核源码与原测试断言保留）。B1.2 dataflow facts、`redb_commit` / commit batch 仍 profile 门控，非阻塞。fragment 跨平台已移出 M53（无跨 session 复用需求时不做）。
 
 ## 从 M52 带入的已验证优化
 
@@ -155,7 +155,7 @@ compact one-shot（3 轮 p50）：wall **694ms**（M52 537）、`path_summary` *
 
 PR：[#9](https://cnb.cool/wu2305/metadata-checker/-/pulls/9)（CI/docs）、[#10](https://cnb.cool/wu2305/metadata-checker/-/pulls/10)（B1/B2/A）。
 
-## M53 收尾交付（待合入）
+## M53 收尾交付（已合入，历史记录）
 
 ### warm-cache 可扩展性（T1–T3）
 
