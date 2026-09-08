@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Write};
 use std::time::Instant;
 
+#[cfg(all(test, feature = "cli-local"))]
+mod cache_contract_tests;
 mod diagnostics;
 mod evidence;
 mod graph_collect;
