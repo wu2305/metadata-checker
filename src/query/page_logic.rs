@@ -1321,6 +1321,7 @@ pub fn build_page_logic_availability_cache(
     );
 
     let edge_started = Instant::now();
+    let mut edge_cache: HashMap<String, Option<GraphNeighbors>> = HashMap::new();
     let mut ignored_profile = None;
     let PageLogicEdgeBundle {
         data_sources,
@@ -1333,6 +1334,7 @@ pub fn build_page_logic_availability_cache(
         &child_components,
         &child_actions,
         &component_json_paths,
+        &mut edge_cache,
         &mut ignored_profile,
     )?;
     warm_stages.insert("edge_scan".to_string(), edge_started.elapsed().as_millis());
@@ -1428,14 +1430,13 @@ fn collect_page_logic_edge_bundle(
     child_components: &[crate::graph::Node],
     child_actions: &[crate::graph::Node],
     component_json_paths: &std::collections::HashMap<String, String>,
+    edge_cache: &mut HashMap<String, Option<GraphNeighbors>>,
     profile: &mut Option<&mut PerfProfile>,
 ) -> Result<PageLogicEdgeBundle> {
-    let mut edge_cache: HashMap<String, Option<GraphNeighbors>> = HashMap::new();
-
     let stage_started = Instant::now();
     let mut entrypoints: Vec<serde_json::Value> = Vec::new();
     for comp in child_components {
-        if let Some(neighbors) = cached_node_edges(graph, &mut edge_cache, &comp.id)? {
+        if let Some(neighbors) = cached_node_edges(graph, edge_cache, &comp.id)? {
             add_profile_counter(profile, "edges_scanned", neighbors.outgoing.len());
             let has_trigger = neighbors.outgoing.iter().any(|edge_view| {
                 matches!(edge_view.edge.edge_type, crate::graph::EdgeType::Triggers)
@@ -1480,7 +1481,7 @@ fn collect_page_logic_edge_bundle(
     all_nodes.extend(child_actions.iter());
 
     for node in &all_nodes {
-        if let Some(neighbors) = cached_node_edges(graph, &mut edge_cache, &node.id)? {
+        if let Some(neighbors) = cached_node_edges(graph, edge_cache, &node.id)? {
             add_profile_counter(profile, "edges_scanned", neighbors.outgoing.len());
             for edge_view in &neighbors.outgoing {
                 let target = &edge_view.node;
@@ -1791,6 +1792,7 @@ fn build_query_page_logic_output_inner(
         &child_components,
         &child_actions,
         &component_json_paths,
+        &mut edge_cache,
         &mut profile,
     )?;
     let mut action_flows: Vec<serde_json::Value> = Vec::new();
@@ -2273,11 +2275,7 @@ fn build_query_page_logic_output_inner(
         if let Some(cache) = cached_availability {
             let projection_started = Instant::now();
             let batch = cache.project();
-            (
-                batch,
-                0,
-                (projection_started.elapsed().as_millis() as usize).max(1),
-            )
+            (batch, 0, projection_started.elapsed().as_millis() as usize)
         } else {
             let index_build_started = Instant::now();
             let availability_index = PageAvailabilityIndex::build(
@@ -2288,10 +2286,10 @@ fn build_query_page_logic_output_inner(
                 key_model_availability_limit,
                 materialized_availability,
             );
-            let build_ms = (index_build_started.elapsed().as_millis() as usize).max(1);
+            let build_ms = index_build_started.elapsed().as_millis() as usize;
             let projection_started = Instant::now();
             let batch = availability_index.project();
-            let projection_ms = (projection_started.elapsed().as_millis() as usize).max(1);
+            let projection_ms = projection_started.elapsed().as_millis() as usize;
             (batch, build_ms, projection_ms)
         };
     let availability_context_build_ms = availability_index_build_ms;
