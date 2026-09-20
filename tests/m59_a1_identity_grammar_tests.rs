@@ -122,8 +122,12 @@ fn bare_target_with_same_name_on_multiple_pages_answers_every_candidate() {
     let legacy_global = node_of(NodeIdKind::Model, "model:model1", "legacy.spg", "model1");
     // 干扰项：不同局部名的 scoped 节点与物理表，不得进入候选
     let other_local = scoped_node(NodeIdKind::Model, "app/页面一.spg", "model11");
-    let physical =
-        node_of(NodeIdKind::Model, "model:fact_testDrive", "data/fact_testDrive.tbl", "fact_testDrive");
+    let physical = node_of(
+        NodeIdKind::Model,
+        "model:fact_testDrive",
+        "data/fact_testDrive.tbl",
+        "fact_testDrive",
+    );
 
     let mut graph = MemoryGraphStore::new();
     for node in [&page_a, &page_b, &legacy_global, &other_local, &physical] {
@@ -180,10 +184,18 @@ fn bare_field_target_with_same_name_answers_every_candidate() {
 /// 回归 4b：物理表/物理字段裸名唯一命中——全局聚合语义保持，旧行为不变。
 #[test]
 fn bare_physical_targets_resolve_unique() {
-    let physical =
-        node_of(NodeIdKind::Model, "model:fact_testDrive", "data/fact_testDrive.tbl", "fact_testDrive");
-    let physical_field =
-        node_of(NodeIdKind::Field, "field:fact_testDrive.金额", "data/fact_testDrive.tbl", "金额");
+    let physical = node_of(
+        NodeIdKind::Model,
+        "model:fact_testDrive",
+        "data/fact_testDrive.tbl",
+        "fact_testDrive",
+    );
+    let physical_field = node_of(
+        NodeIdKind::Field,
+        "field:fact_testDrive.金额",
+        "data/fact_testDrive.tbl",
+        "金额",
+    );
     let mut graph = MemoryGraphStore::new();
     graph.upsert_node(physical.clone()).unwrap();
     graph.upsert_node(physical_field.clone()).unwrap();
@@ -254,8 +266,7 @@ fn bare_targets_do_not_cross_kinds() {
 /// 不得产生第三种解读。
 #[test]
 fn pipe_is_the_scoped_discriminator_by_grammar() {
-    let parsed =
-        metadata_checker::graph_identity::parse_node_id("model:app/a.spg|model1").unwrap();
+    let parsed = metadata_checker::graph_identity::parse_node_id("model:app/a.spg|model1").unwrap();
     assert!(parsed.page.is_some());
     assert!(parsed.local.find('|').is_none(), "局部名内不得再含竖线");
 
@@ -271,7 +282,12 @@ fn pipe_is_the_scoped_discriminator_by_grammar() {
 /// 删除牵连按 origin 的处理在 M59-2/A3 落地。
 #[test]
 fn shared_physical_target_stays_global_while_local_models_own_their_page() {
-    let physical = node_of(NodeIdKind::Model, "model:fact_车辆", "主数据/fact_车辆.tbl", "fact_车辆");
+    let physical = node_of(
+        NodeIdKind::Model,
+        "model:fact_车辆",
+        "主数据/fact_车辆.tbl",
+        "fact_车辆",
+    );
     let local_a = scoped_node(NodeIdKind::Model, "app/绑定车辆.spg", "model6");
     let local_b = scoped_node(NodeIdKind::Model, "app/新增车辆.spg", "model7");
 
