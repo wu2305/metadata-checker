@@ -107,11 +107,11 @@ fn bare_target_with_same_name_on_multiple_pages_answers_every_candidate() {
             assert_eq!(
                 ids,
                 vec![
-                    "model:model1",
                     "model:app/页面一.spg|model1",
                     "model:app/页面二.spg|model1",
+                    "model:model1",
                 ],
-                "歧义时必须交回全部候选（旧全局 + 两个页面局部），且按 id 排序"
+                "歧义时必须交回全部候选（旧全局 + 两个页面局部），且按 id 升序"
             );
         }
         other => panic!("跨页同名裸 target 必须报歧义，实际 {:?}", other),
