@@ -4,16 +4,32 @@
 > Spec：[迁移设计](../../specs/2026-09-05-grafeo-backend-migration-design.md)（approved）
 > Plan：[实施与交接计划](../../plans/2026-09-06-m59-grafeo-implementation-plan.md)（approved）
 
-## 当前可做的工作
+## M59-1 交付（2026-09-20）
 
-PR14 合入后执行 M59-1：页面局部身份、原始引用 token 与统一路径；在 M59-2 的 schema
-版本开关就绪前不启用新身份写入。A3 的 origin_file 必须覆盖节点与边，并解决共享目标
-与占位节点归属；完成 A 后按新 schema 复验 B，随后进入 Grafeo 落地。
+A1/A1b/A2 已交付，提交 `03b2336..2ff7c69`（分支 codex/m59-1-identity-grammar）：
+
+- **A1b**：`RefType::ComponentValue` 携带来源文法 `ComponentValueForm`
+  （Value / Suffix / Bare），值追溯替换 pattern 与来源文法一致，替换点不再按
+  后缀猜测；行为层断言（m59_a1b / m59_b4）原样通过，另增两条原始 token 保留回归。
+- **A1**：`graph_identity` 模块提供页面局部 id 文法 `<kind>:<PAGE>|<local>`
+  （竖线判据，物理表保持全局）、节点 id 解析与旧 target 显式解析
+  （scoped 精确命中；裸名唯一命中直达，多候选交回全部并按 id 升序，不静默挑选）。
+- **A2**：`normalize_project_path` / `resolve_relative_reference` 统一路径归一化
+  （分隔符 / `.` / `..` / 越界报错），中文路径精确回归。
+
+验证：CNB workspace 全量 native 测试（102 个 test target）通过，
+`cargo fmt --check`、`cargo check --benches`、browser-wasm check 通过。
+
+**未启用边界（交接 M59-2）**：在 A4 的 schema 版本键、拒载旧库（`GRAPH_SCHEMA_STALE`）
+与强制全量重建就绪前，扫描写入与引用解析保持旧路径，`graph_identity` 的新 id 编码
+不得默认写入，避免读写混合 schema。A3 的 origin_file（节点与边）与共享目标 /
+占位节点归属同样在 M59-2 落地；启用后按新 schema 复验 B1–B5，B5 的跨文件边丢失与
+占位节点残留差异必须清零，不得把缺陷记录当正确性证明。
 
 ## 已有基础与限制
 
 - B1–B5 已建立共享 store、分类、坏 TBL、值追溯和全量/增量差分回归。
-  A1b 值追溯半边已实现；身份枚举与调用点仍随 A1 改造。
+  A1b 的值追溯半边与枚举元数半边均已实现（见上方 M59-1 交付）。
 - `c9b1611` / `df394f2` 补齐 B1 非空 metadata/完整邻接节点更新、B3 完整修复快照、
   B5 保留重复次数的比较。远端 39 项目标测试通过，四类临时故障注入被断言拒绝，
   指定主 style/smell reviewer 对该三文件修改批次 PASS；不代表整个 PR14 或后端等价验收。
