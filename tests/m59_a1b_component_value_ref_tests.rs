@@ -11,8 +11,7 @@
 
 use metadata_checker::dependency::{DependencyGraph, trace_value_source};
 use metadata_checker::superpage::{
-    ComponentValueForm, RefType, parse_expression_refs, parse_superpage,
-    parse_superpage_from_value,
+    ComponentValueForm, RefType, parse_expression_refs, parse_superpage, parse_superpage_from_value,
 };
 use std::path::PathBuf;
 
@@ -153,7 +152,10 @@ fn bare_component_ref_normalizes_with_bare_form() {
     assert_eq!(expr.raw_expr, "${b}");
     assert_eq!(
         expr.refs,
-        vec![RefType::ComponentValue("b".to_string(), ComponentValueForm::Bare)],
+        vec![RefType::ComponentValue(
+            "b".to_string(),
+            ComponentValueForm::Bare
+        )],
         "裸 ${{b}} 全组件引用归一为 ComponentValue 后必须携带 Bare 文法"
     );
 }

@@ -127,7 +127,10 @@ fn test_complex_concat_expression() {
 
     // 只应识别 input3.value
     assert_eq!(refs.len(), 1);
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input3".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
@@ -135,8 +138,14 @@ fn test_complex_logical_operators() {
     let refs = parse_expression_refs("=input1.value != 'test' AND input2.value IS NOT NULL");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value)),);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
@@ -144,8 +153,14 @@ fn test_complex_arithmetic_with_function() {
     let refs = parse_expression_refs("=ROUND(input3.value / input4.value, 2)");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),);
-    assert!(refs.contains(&RefType::ComponentValue("input4".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input3".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input4".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
@@ -319,11 +334,10 @@ fn test_parse_expression_ast_basic() {
     let result = parse_expression_ast("=input1.value + model1.fieldA");
     assert!(result.ast.is_some(), "AST should be present");
     assert_eq!(result.refs.len(), 2, "Should detect 2 refs");
-    assert!(
-        result
-            .refs
-            .contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value))
-    );
+    assert!(result.refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )));
     assert!(result.refs.contains(&RefType::ModelField(
         "model1".to_string(),
         "fieldA".to_string()
@@ -371,11 +385,10 @@ fn test_parse_expression_ast_string_literal_skip() {
             .any(|r| matches!(r, RefType::ModelField(m, _) if m == "model1")),
         "String literal should not be parsed as model field"
     );
-    assert!(
-        result
-            .refs
-            .contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value))
-    );
+    assert!(result.refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )));
 }
 
 #[test]

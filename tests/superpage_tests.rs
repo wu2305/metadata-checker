@@ -1,7 +1,6 @@
 use metadata_checker::dependency::DependencyGraph;
 use metadata_checker::superpage::{
-    ComponentValueForm, RefType, parse_expression_refs, parse_superpage,
-    parse_superpage_from_value,
+    ComponentValueForm, RefType, parse_expression_refs, parse_superpage, parse_superpage_from_value,
 };
 use std::path::PathBuf;
 
@@ -79,8 +78,14 @@ fn test_parse_expression_refs_simple() {
     // 应该只有 input2 和 input1（.value 是属性，不是独立引用）
     // 实际上正则匹配的是 input2.value 和 input1.value
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),);
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
@@ -208,8 +213,14 @@ fn test_parse_expression_refs_complex() {
     let refs = parse_expression_refs("=input1.value + input2.value");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value)),);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]

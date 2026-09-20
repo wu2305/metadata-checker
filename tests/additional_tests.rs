@@ -1,5 +1,7 @@
 use metadata_checker::dependency::DependencyGraph;
-use metadata_checker::superpage::{ComponentValueForm, RefType, parse_expression_refs, parse_superpage};
+use metadata_checker::superpage::{
+    ComponentValueForm, RefType, parse_expression_refs, parse_superpage,
+};
 use std::path::PathBuf;
 
 // ============================================================
@@ -18,11 +20,10 @@ fn test_text_field_expression() {
         .expect("text1.text expression should be extracted");
 
     assert_eq!(text1_expr.raw_expr, "=input1.value");
-    assert!(
-        text1_expr
-            .refs
-            .contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value)),
-    );
+    assert!(text1_expr.refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
@@ -56,16 +57,14 @@ fn test_formula_field_expression() {
         .expect("formula1.formula expression should be extracted");
 
     assert_eq!(formula1_expr.raw_expr, "=input2.value + input3.value");
-    assert!(
-        formula1_expr
-            .refs
-            .contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),
-    );
-    assert!(
-        formula1_expr
-            .refs
-            .contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),
-    );
+    assert!(formula1_expr.refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(formula1_expr.refs.contains(&RefType::ComponentValue(
+        "input3".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 // ============================================================
@@ -103,26 +102,22 @@ fn test_long_expression_parsing() {
     assert!(text1_expr.raw_expr.len() > 100, "Expression should be long");
 
     // 验证所有组件引用都被正确解析
-    assert!(
-        text1_expr
-            .refs
-            .contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value)),
-    );
-    assert!(
-        text1_expr
-            .refs
-            .contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),
-    );
-    assert!(
-        text1_expr
-            .refs
-            .contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),
-    );
-    assert!(
-        text1_expr
-            .refs
-            .contains(&RefType::ComponentValue("input4".to_string(), ComponentValueForm::Value)),
-    );
+    assert!(text1_expr.refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(text1_expr.refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(text1_expr.refs.contains(&RefType::ComponentValue(
+        "input3".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(text1_expr.refs.contains(&RefType::ComponentValue(
+        "input4".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
