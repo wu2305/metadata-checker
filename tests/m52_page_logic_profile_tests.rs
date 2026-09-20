@@ -8,7 +8,6 @@ use metadata_checker::query::{
     build_query_page_logic_output_profiled_with_dense_snapshot,
 };
 use metadata_checker::scanner::scan_project;
-use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
@@ -23,23 +22,6 @@ fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
         &db_path,
     )?;
     GraphDB::open(&db_path)
-}
-
-fn canonicalize_value(value: &mut Value) {
-    match value {
-        Value::Array(items) => {
-            for item in items.iter_mut() {
-                canonicalize_value(item);
-            }
-            items.sort_by_key(|item| item.to_string());
-        }
-        Value::Object(map) => {
-            for item in map.values_mut() {
-                canonicalize_value(item);
-            }
-        }
-        _ => {}
-    }
 }
 
 #[test]
@@ -58,29 +40,57 @@ fn m52_page_logic_records_bulk_availability_counters() -> anyhow::Result<()> {
 
         let expanded_count = entries.len() as u64;
         assert_eq!(
+            entries.is_empty(),
+            false,
+            "fixture must exercise availability"
+        );
+        assert_eq!(
+            profile.counter("key_model_availability_fast_path"),
+            expanded_count,
+            "every emitted model must use the availability fast path"
+        );
+        assert_eq!(
             profile.counter("availability_models_batched"),
             expanded_count,
             "{budget} should report every expanded availability entry as batched"
         );
         assert!(
-            profile.counter("availability_context_build_ms") > 0,
-            "{budget} should record page-local availability context build time"
-        );
-        assert!(
             profile.counter("availability_condition_groups") >= expanded_count,
             "{budget} should record condition groups considered by availability context"
         );
-        assert!(
-            profile.counter("availability_fallback_models") <= expanded_count,
-            "{budget} fallback count cannot exceed expanded entries"
+        let fallback_count = entries
+            .iter()
+            .filter(|entry| {
+                entry["scope_warning"].as_str()
+                    == Some("page_scoped_target_not_resolved_fallback_to_global_model")
+            })
+            .count() as u64;
+        assert_eq!(
+            profile.counter("availability_fallback_models"),
+            fallback_count,
+            "{budget} fallback count must match emitted model scope warnings"
         );
-        assert!(
-            profile.counter("availability_index_build_ms") > 0,
-            "{budget} should record availability index build time"
-        );
-        assert!(
-            profile.counter("availability_index_projection_ms") > 0,
-            "{budget} should record availability index projection time"
+        let availability_stage = profile
+            .stage("key_model_availability")
+            .expect("availability stage must be recorded");
+        for name in [
+            "availability_index_build_ms",
+            "availability_index_projection_ms",
+        ] {
+            let value = *profile
+                .counters
+                .get(name)
+                .expect("availability timer must be recorded");
+            assert_eq!(
+                u128::from(value) <= availability_stage.duration_ms,
+                true,
+                "{name} exceeds its enclosing stage"
+            );
+        }
+        assert_eq!(
+            profile.counters.get("availability_context_build_ms"),
+            profile.counters.get("availability_index_build_ms"),
+            "legacy context timer must alias index build timer"
         );
         assert_eq!(
             profile.counter("availability_index_fallback_models"),
@@ -103,8 +113,9 @@ fn m52_page_logic_records_path_context_cache_counters() -> anyhow::Result<()> {
         profile.counter("path_graph_cache_hits") > 0,
         "path_summary should report reused graph reads from its page-local context"
     );
-    assert!(
-        profile.counter("path_context_build_ms") > 0,
+    assert_eq!(
+        profile.counters.contains_key("path_context_build_ms"),
+        true,
         "path_summary should record page-local path context build time"
     );
     assert_eq!(
@@ -126,9 +137,8 @@ fn m52_page_logic_uses_prebuilt_dense_snapshot_without_changing_output() -> anyh
     let page_id = "page:app/actions_test.spg";
     let dense_snapshot = DenseGraphSnapshot::from_graph(&graph)?;
 
-    let (mut baseline, _) =
-        build_query_page_logic_output_profiled(&graph, page_id, None, "normal")?;
-    let (mut profiled, profile) = build_query_page_logic_output_profiled_with_dense_snapshot(
+    let (baseline, _) = build_query_page_logic_output_profiled(&graph, page_id, None, "normal")?;
+    let (profiled, profile) = build_query_page_logic_output_profiled_with_dense_snapshot(
         &graph,
         Some(&dense_snapshot),
         page_id,
@@ -136,10 +146,9 @@ fn m52_page_logic_uses_prebuilt_dense_snapshot_without_changing_output() -> anyh
         "normal",
     )?;
 
-    canonicalize_value(&mut baseline);
-    canonicalize_value(&mut profiled);
     assert_eq!(
-        profiled, baseline,
+        serde_json::to_vec(&profiled)?,
+        serde_json::to_vec(&baseline)?,
         "prebuilt dense snapshot must not change page logic output"
     );
     assert_eq!(
@@ -166,23 +175,21 @@ fn m52_page_logic_uses_warmed_availability_cache_without_changing_output() -> an
     let availability_cache =
         build_page_logic_availability_cache(&graph, None, page_id, None, budget, None)?;
 
-    let (mut baseline, baseline_profile) =
+    let (baseline, baseline_profile) =
         build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
-    let (mut cached, cached_profile) =
-        build_query_page_logic_output_profiled_with_availability_cache(
-            &graph,
-            None,
-            Some(&availability_cache),
-            None,
-            page_id,
-            None,
-            budget,
-        )?;
+    let (cached, cached_profile) = build_query_page_logic_output_profiled_with_availability_cache(
+        &graph,
+        None,
+        Some(&availability_cache),
+        None,
+        page_id,
+        None,
+        budget,
+    )?;
 
-    canonicalize_value(&mut baseline);
-    canonicalize_value(&mut cached);
     assert_eq!(
-        cached, baseline,
+        serde_json::to_vec(&cached)?,
+        serde_json::to_vec(&baseline)?,
         "warmed availability cache must not change page logic output"
     );
     assert_eq!(
@@ -191,8 +198,8 @@ fn m52_page_logic_uses_warmed_availability_cache_without_changing_output() -> an
         "page logic must consume warmed availability cache"
     );
     assert_eq!(
-        cached_profile.counter("availability_index_build_ms"),
-        0,
+        cached_profile.counters.get("availability_index_build_ms"),
+        Some(&0),
         "cached availability should remove query-time availability index build"
     );
     assert_eq!(
@@ -242,28 +249,26 @@ fn m52_page_logic_extended_warm_cache_preserves_compact_output() -> anyhow::Resu
         None,
     )?;
 
-    let (mut baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
+    let (baseline, _) = build_query_page_logic_output_profiled_with_dense_snapshot(
         &graph,
         Some(&dense_snapshot),
         page_id,
         None,
         budget,
     )?;
-    let (mut cached, cached_profile) =
-        build_query_page_logic_output_profiled_with_availability_cache(
-            &graph,
-            Some(&dense_snapshot),
-            Some(&availability_cache),
-            None,
-            page_id,
-            None,
-            budget,
-        )?;
+    let (cached, cached_profile) = build_query_page_logic_output_profiled_with_availability_cache(
+        &graph,
+        Some(&dense_snapshot),
+        Some(&availability_cache),
+        None,
+        page_id,
+        None,
+        budget,
+    )?;
 
-    canonicalize_value(&mut baseline);
-    canonicalize_value(&mut cached);
     assert_eq!(
-        cached, baseline,
+        serde_json::to_vec(&cached)?,
+        serde_json::to_vec(&baseline)?,
         "extended warm cache must not change compact page logic output"
     );
     assert_eq!(cached_profile.counter("availability_read_model_used"), 1);

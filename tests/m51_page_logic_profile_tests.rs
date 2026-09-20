@@ -6,7 +6,6 @@ use metadata_checker::query::{
     build_query_page_logic_output, build_query_page_logic_output_profiled,
 };
 use metadata_checker::scanner::scan_project;
-use serde_json::Value;
 use std::cell::Cell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -67,37 +66,19 @@ fn fixture_graph(test_name: &str) -> anyhow::Result<GraphDB> {
     GraphDB::open(&db_path)
 }
 
-fn canonicalize_value(value: &mut Value) {
-    match value {
-        Value::Array(items) => {
-            for item in items.iter_mut() {
-                canonicalize_value(item);
-            }
-            items.sort_by_key(|item| item.to_string());
-        }
-        Value::Object(map) => {
-            for item in map.values_mut() {
-                canonicalize_value(item);
-            }
-        }
-        _ => {}
-    }
-}
-
 #[test]
 fn m51_profiled_page_logic_matches_default_output_for_all_budgets() -> anyhow::Result<()> {
     let graph = fixture_graph("budget-output")?;
     let page_id = "page:app/page_relations.spg";
 
     for budget in ["compact", "normal", "full"] {
-        let mut baseline = build_query_page_logic_output(&graph, page_id, None, budget)?;
-        let (mut profiled, profile) =
+        let baseline = build_query_page_logic_output(&graph, page_id, None, budget)?;
+        let (profiled, profile) =
             build_query_page_logic_output_profiled(&graph, page_id, None, budget)?;
 
-        canonicalize_value(&mut baseline);
-        canonicalize_value(&mut profiled);
         assert_eq!(
-            profiled, baseline,
+            serde_json::to_vec(&profiled)?,
+            serde_json::to_vec(&baseline)?,
             "profiled output changed {budget} output"
         );
         assert_eq!(profile.capability, "query_page_logic");

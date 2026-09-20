@@ -1,5 +1,8 @@
 # 2026-09-08 性能归档改动去向复核
 
+后续代码与测试修复见 [性能契约集中修复](performance-contract-fixes-2026-09-08.md)。
+下文与配套 JSON 保留本次固定源码基线的发现，不回写历史验收结果。
+
 以 PR37 合并后的 `main=db158cb8dc609a0050c214aed788dde459044361` 为源码基线，
 核查[前轮报告](branch-retention-patches-2026-09-08.md)留下的 18 项：M51 的 7 项、
 M52-performance-optimization 的 11 项。计数单位是「归档分支、路径」组合。

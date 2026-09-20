@@ -377,8 +377,9 @@ fn build_page_logic_cost_model(
             "path_anchor_extract_ms",
             "path_candidate_search_ms",
             "path_classification_ms",
-            "path_related_rejected_expansion_ms",
+            // 使用实际的 JSON 物化和跨页上下文计时，不虚构按分类拆分的耗时。
             "path_json_build_ms",
+            "path_side_context_ms",
             "path_base_candidates",
             "path_graph_cache_hits",
         ] {
@@ -409,9 +410,10 @@ fn build_page_logic_cost_model(
         let mut cost_drivers = Vec::new();
         push_stage_driver(&mut cost_drivers, stage_summary, "prerequisites");
         for name in [
-            "prerequisites_display_ms",
-            "prerequisites_data_ms",
-            "prerequisites_action_ms",
+            "prerequisites_component_scan_ms",
+            "prerequisites_action_scan_ms",
+            "prerequisites_data_source_scan_ms",
+            "prerequisites_sort_ms",
         ] {
             push_counter_driver(&mut cost_drivers, counter_summary, name);
         }
@@ -844,6 +846,31 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
             .unwrap_or_default(),
     );
 
+    // 第二次打开 redb 可能改变文件状态；先在尚未再次打开的文件上验证 unchanged 场景。
+    let started_at = Instant::now();
+    let check_reload = runtime
+        .query(lifecycle_request(ToolCommand::CheckReload))
+        .context("profile runtime check_reload")?;
+    profile.record_stage("runtime_check_reload_unchanged", started_at.elapsed());
+    let reloaded = check_reload
+        .result
+        .get("reloaded")
+        .and_then(|value| value.as_bool())
+        .context("profile runtime check_reload result.reloaded must be a boolean")?;
+    anyhow::ensure!(
+        !reloaded
+            && check_reload.result.get("error").is_none()
+            && check_reload.result["status"]["reload_count"].as_u64() == Some(0),
+        "unchanged runtime profile must not reload or fail: {}",
+        check_reload.result
+    );
+    // 诊断条数是结果标记计数（unchanged 场景恒为 GRAPH_UNCHANGED 诊断 + 计时说明），
+    // 不是变量指标；报告消费方不应把它当变化信号。
+    profile.set_counter(
+        "runtime_check_reload_diagnostics",
+        check_reload.diagnostics.len() as u64,
+    );
+
     let started_at = Instant::now();
     let mut long_lived_runtime = GraphRuntime::load_with_project_dir_and_mode(
         &db_path,
@@ -984,15 +1011,6 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         );
     }
 
-    let started_at = Instant::now();
-    let check_reload = runtime
-        .query(lifecycle_request(ToolCommand::CheckReload))
-        .context("profile runtime check_reload")?;
-    profile.record_stage("runtime_check_reload_unchanged", started_at.elapsed());
-    profile.set_counter(
-        "runtime_check_reload_diagnostics",
-        check_reload.diagnostics.len() as u64,
-    );
     profile.finish();
     Ok(profile)
 }
@@ -1091,4 +1109,81 @@ fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CounterSummary, PageLogicProfileSample, StageCostSummary, summarize_counters,
+        summarize_stages,
+    };
+    use crate::perf_profile::PerfProfile;
+    use std::time::Duration;
+
+    fn sample(stage_ms: u64, counter_value: u64) -> PageLogicProfileSample {
+        let mut profile = PerfProfile::new("test");
+        profile.record_stage("stage", Duration::from_millis(stage_ms));
+        profile.set_counter("counter", counter_value);
+        PageLogicProfileSample {
+            sample_index: 0,
+            profile,
+            output_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn profile_summaries_calculate_exact_stage_and_counter_statistics() {
+        let samples = vec![sample(2, 3), sample(8, 9), sample(5, 6)];
+
+        assert_eq!(
+            summarize_stages(&samples),
+            vec![StageCostSummary {
+                name: "stage".to_string(),
+                sample_count: 3,
+                min_ms: 2,
+                max_ms: 8,
+                avg_ms: 5.0,
+            }]
+        );
+
+        let summaries = summarize_counters(&samples);
+        assert_eq!(
+            summaries.get("counter"),
+            Some(&CounterSummary {
+                sample_count: 3,
+                min: 3,
+                max: 9,
+                avg: 6.0,
+            })
+        );
+    }
+    /// 缺失观测不能填零参与均值；明确记录的零值则必须参与统计。
+    #[test]
+    fn profile_summaries_distinguish_missing_samples_from_recorded_zero() {
+        assert_eq!(summarize_stages(&[]), Vec::new());
+        assert_eq!(summarize_counters(&[]), std::collections::BTreeMap::new());
+        let mut missing = sample(99, 99);
+        missing.profile.stages.clear();
+        missing.profile.counters.clear();
+        let samples = vec![sample(0, 0), missing, sample(3, 5)];
+        assert_eq!(
+            summarize_stages(&samples),
+            vec![StageCostSummary {
+                name: "stage".to_string(),
+                sample_count: 2,
+                min_ms: 0,
+                max_ms: 3,
+                avg_ms: 1.5,
+            }]
+        );
+        assert_eq!(
+            summarize_counters(&samples).get("counter"),
+            Some(&CounterSummary {
+                sample_count: 2,
+                min: 0,
+                max: 5,
+                avg: 2.5,
+            })
+        );
+    }
 }

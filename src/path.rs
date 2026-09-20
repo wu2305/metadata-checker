@@ -1107,45 +1107,56 @@ impl PathSelector for RuleBasedPathSelector {
             }
         }
 
-        // 第二步：分组保底检查
-        let mut guarantees: std::collections::HashMap<String, bool> =
-            std::collections::HashMap::new();
-        guarantees.insert("value_source".to_string(), false);
-        guarantees.insert("data_prerequisite".to_string(), false);
-        guarantees.insert("display_gate".to_string(), false);
-        guarantees.insert("action_write".to_string(), false);
-        guarantees.insert("cross_page_writer".to_string(), false);
-        guarantees.insert("target_component".to_string(), false);
-
-        // 检查 primary_paths 是否满足各分组
-        for p in &primary_paths {
-            if p.rank_features.contains_physical_field
-                && (p.rank_features.contains_model_read || p.rank_features.contains_model_write)
-            {
-                guarantees.insert("value_source".to_string(), true);
-            }
-            if p.rank_features.contains_model_filter || p.rank_features.has_condition_node {
-                guarantees.insert("data_prerequisite".to_string(), true);
-            }
-            if p.rank_features.contains_target_component && p.rank_features.has_condition_node {
-                guarantees.insert("display_gate".to_string(), true);
-            }
-            if p.rank_features.contains_model_write || p.rank_features.contains_entrypoint {
-                guarantees.insert("action_write".to_string(), true);
-            }
-            if p.rank_features.contains_cross_page_writer {
-                guarantees.insert("cross_page_writer".to_string(), true);
-            }
-            // 检查是否包含目标组件
-            for anchor in &query.target_anchors {
-                if p.segments
+        // 第二步：分组保底检查。
+        // 候选会被逐个移出池，因此显式保留本批确定化后的优先级：先写入与跨页写入，
+        // 再补数据/显示条件，最后目标组件和值来源；不能由规则名称的字典序隐式决定。
+        let guarantees = [
+            (
+                "action_write",
+                primary_paths.iter().any(|path| {
+                    path.rank_features.contains_model_write
+                        || path.rank_features.contains_entrypoint
+                }),
+            ),
+            (
+                "cross_page_writer",
+                primary_paths
                     .iter()
-                    .any(|s| s.from.node_id == *anchor || s.to.node_id == *anchor)
-                {
-                    guarantees.insert("target_component".to_string(), true);
-                }
-            }
-        }
+                    .any(|path| path.rank_features.contains_cross_page_writer),
+            ),
+            (
+                "data_prerequisite",
+                primary_paths.iter().any(|path| {
+                    path.rank_features.contains_model_filter
+                        || path.rank_features.has_condition_node
+                }),
+            ),
+            (
+                "display_gate",
+                primary_paths.iter().any(|path| {
+                    path.rank_features.contains_target_component
+                        && path.rank_features.has_condition_node
+                }),
+            ),
+            (
+                "target_component",
+                primary_paths.iter().any(|path| {
+                    query.target_anchors.iter().any(|anchor| {
+                        path.segments.iter().any(|segment| {
+                            segment.from.node_id == *anchor || segment.to.node_id == *anchor
+                        })
+                    })
+                }),
+            ),
+            (
+                "value_source",
+                primary_paths.iter().any(|path| {
+                    path.rank_features.contains_physical_field
+                        && (path.rank_features.contains_model_read
+                            || path.rank_features.contains_model_write)
+                }),
+            ),
+        ];
 
         // 如果 primary 不足，从 candidate/supporting 中提升
         for (guarantee, met) in &guarantees {
@@ -1153,7 +1164,7 @@ impl PathSelector for RuleBasedPathSelector {
                 let source_pool: Vec<&mut Vec<PathCandidate>> =
                     vec![&mut candidate_paths, &mut supporting_paths];
                 for pool in source_pool {
-                    if let Some(idx) = pool.iter().position(|c| match guarantee.as_str() {
+                    if let Some(idx) = pool.iter().position(|c| match *guarantee {
                         "value_source" => {
                             c.rank_features.contains_physical_field
                                 && (c.rank_features.contains_model_read
@@ -1400,6 +1411,68 @@ impl PathSelector for DebugAllPathSelector {
 
 #[cfg(test)]
 mod tests {
+    /// 重叠候选先满足写入保底；更换优先级会改为提升两条路径，因此精确约束集合和说明。
+    #[test]
+    fn overlapping_guarantees_promote_write_path_before_condition_path() {
+        use super::*;
+
+        let candidate = |path_id: &str, has_condition_node| PathCandidate {
+            path_id: path_id.to_string(),
+            purpose: String::new(),
+            terminals: Vec::new(),
+            segments: Vec::new(),
+            evidence: Vec::new(),
+            selection_reason: String::new(),
+            classification: PathClassification::CandidatePath,
+            classification_reason: String::new(),
+            confidence: "high".to_string(),
+            diagnostics: Vec::new(),
+            rank_features: PathRankFeatures {
+                contains_entrypoint: true,
+                has_condition_node,
+                ..PathRankFeatures::default()
+            },
+        };
+        let query = PathQuery {
+            page_id: "page:test.spg".to_string(),
+            page_path: "test.spg".to_string(),
+            target_anchors: Vec::new(),
+            source_anchors: Vec::new(),
+            sink_anchors: Vec::new(),
+            bridge_anchors: Vec::new(),
+            excluded_anchors: Vec::new(),
+            budget: "full".to_string(),
+        };
+        let result = RuleBasedPathSelector.select(
+            &query,
+            vec![
+                candidate("write-and-condition", true),
+                candidate("write-only", false),
+            ],
+        );
+        assert_eq!(
+            result
+                .primary_paths
+                .iter()
+                .map(|path| path.path_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["write-and-condition"]
+        );
+        assert_eq!(
+            result.primary_paths[0].classification_reason,
+            "从 2 提升以满足 action_write 保底"
+        );
+        assert_eq!(
+            result
+                .candidate_paths
+                .iter()
+                .map(|path| path.path_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["write-only"]
+        );
+        assert_eq!(result.supporting_paths.len(), 0);
+    }
+
     #[test]
     fn anchor_dedup_preserves_first_seen_order() {
         let mut anchors = vec![

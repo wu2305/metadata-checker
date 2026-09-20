@@ -193,8 +193,10 @@ M51 当时为 `query_page_logic` 引入单次调用内的节点邻接缓存：
 局部缓存，`:1801` 的 action flow 会再次读取 helper 已取过的 action 邻接结果。
 entrypoint/edge 两阶段仍复用同一份缓存；跨到 action flow 的旧优化未保留。
 现有 `edges_scanned` counter 记录逻辑扫描量，不能证明底层调用去重。
-该缺口尚未修复，后续需用计数型 GraphReadStore 验证实际调用次数，见
+这是该固定快照中尚未修复的缺口，需用计数型 GraphReadStore 验证实际调用次数，见
 [性能归档复核](../../governance/branch-retention-performance-2026-09-08.md)。
+PR38 后的修复及调用次数回归证据见
+[性能契约集中修复](../../governance/performance-contract-fixes-2026-09-08.md)。
 
 验收测试：
 
