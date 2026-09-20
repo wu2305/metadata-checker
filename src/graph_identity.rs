@@ -108,9 +108,11 @@ pub fn normalize_project_path(path: &str) -> Result<String, IdentityError> {
         match segment {
             "" | "." => {}
             ".." => {
-                segments.pop().ok_or_else(|| IdentityError::EscapeBeyondRoot {
-                    path: path.to_string(),
-                })?;
+                segments
+                    .pop()
+                    .ok_or_else(|| IdentityError::EscapeBeyondRoot {
+                        path: path.to_string(),
+                    })?;
             }
             other => segments.push(other),
         }
@@ -265,10 +267,7 @@ mod tests {
 
     #[test]
     fn normalize_unifies_separators_and_dot_segments() {
-        assert_eq!(
-            normalize_project_path("app/./a.spg").unwrap(),
-            "app/a.spg"
-        );
+        assert_eq!(normalize_project_path("app/./a.spg").unwrap(), "app/a.spg");
         assert_eq!(
             normalize_project_path("app\\子目录\\a.spg").unwrap(),
             "app/子目录/a.spg"
@@ -315,10 +314,8 @@ mod tests {
 
     #[test]
     fn page_local_ids_isolate_same_local_name_across_pages() {
-        let first =
-            page_local_node_id(NodeIdKind::Model, "app/页面一.spg", "model1").unwrap();
-        let second =
-            page_local_node_id(NodeIdKind::Model, "app/页面二.spg", "model1").unwrap();
+        let first = page_local_node_id(NodeIdKind::Model, "app/页面一.spg", "model1").unwrap();
+        let second = page_local_node_id(NodeIdKind::Model, "app/页面二.spg", "model1").unwrap();
         assert_ne!(first, second, "跨页同名局部模型必须得到不同节点 id");
         assert_eq!(first, "model:app/页面一.spg|model1");
 

@@ -11,8 +11,8 @@
 
 use metadata_checker::graph::{EdgeType, Node, NodeType};
 use metadata_checker::graph_identity::{
-    IdentityError, ModelTargetResolution, NodeIdKind, normalize_project_path,
-    page_local_node_id, resolve_model_target, resolve_relative_reference,
+    IdentityError, ModelTargetResolution, NodeIdKind, normalize_project_path, page_local_node_id,
+    resolve_model_target, resolve_relative_reference,
 };
 use metadata_checker::graph_store::GraphWriteStore;
 use metadata_checker::memory_graph_store::MemoryGraphStore;
@@ -45,8 +45,7 @@ fn scoped_ids_isolate_same_local_name_across_pages() {
 
     assert_ne!(page_a.id, page_b.id, "跨页同名局部模型必须得到不同节点 id");
 
-    let target_a =
-        page_local_node_id(NodeIdKind::Model, "app/绑定车辆.spg", "model6").unwrap();
+    let target_a = page_local_node_id(NodeIdKind::Model, "app/绑定车辆.spg", "model6").unwrap();
     match resolve_model_target(&graph, &target_a).unwrap() {
         ModelTargetResolution::Unique(node) => assert_eq!(node.id, page_a.id),
         other => panic!("scoped target 应精确命中，实际 {:?}", other),
@@ -91,7 +90,11 @@ fn bare_target_with_same_name_on_multiple_pages_answers_every_candidate() {
     let legacy_global = model_node("model:model1", "legacy.spg", "model1");
     // 干扰项：不同局部名的 scoped 节点与物理表，不得进入候选
     let other_local = scoped_model("app/页面一.spg", "model11");
-    let physical = model_node("model:fact_testDrive", "data/fact_testDrive.tbl", "fact_testDrive");
+    let physical = model_node(
+        "model:fact_testDrive",
+        "data/fact_testDrive.tbl",
+        "fact_testDrive",
+    );
 
     let mut graph = MemoryGraphStore::new();
     for node in [&page_a, &page_b, &legacy_global, &other_local, &physical] {
@@ -118,7 +121,11 @@ fn bare_target_with_same_name_on_multiple_pages_answers_every_candidate() {
 /// 回归 4b：物理表裸名唯一命中——物理表模型保持全局语义，旧行为不变。
 #[test]
 fn bare_physical_table_target_resolves_unique() {
-    let physical = model_node("model:fact_testDrive", "data/fact_testDrive.tbl", "fact_testDrive");
+    let physical = model_node(
+        "model:fact_testDrive",
+        "data/fact_testDrive.tbl",
+        "fact_testDrive",
+    );
     let mut graph = MemoryGraphStore::new();
     graph.upsert_node(physical.clone()).unwrap();
     graph
@@ -183,14 +190,8 @@ fn shared_physical_target_stays_global_while_local_models_own_their_page() {
     // 裸物理名唯一命中全局节点；两个局部名各自唯一命中本页节点
     for (target, expected) in [
         ("model:fact_车辆", physical.id.as_str()),
-        (
-            "model:app/绑定车辆.spg|model6",
-            local_a.id.as_str(),
-        ),
-        (
-            "model:app/新增车辆.spg|model7",
-            local_b.id.as_str(),
-        ),
+        ("model:app/绑定车辆.spg|model6", local_a.id.as_str()),
+        ("model:app/新增车辆.spg|model7", local_b.id.as_str()),
     ] {
         match resolve_model_target(&graph, target).unwrap() {
             ModelTargetResolution::Unique(node) => assert_eq!(node.id, expected),
