@@ -864,6 +864,8 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         "unchanged runtime profile must not reload or fail: {}",
         check_reload.result
     );
+    // 诊断条数是结果标记计数（unchanged 场景恒为 GRAPH_UNCHANGED 诊断 + 计时说明），
+    // 不是变量指标；报告消费方不应把它当变化信号。
     profile.set_counter(
         "runtime_check_reload_diagnostics",
         check_reload.diagnostics.len() as u64,

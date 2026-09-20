@@ -91,6 +91,8 @@ M53 默认接受 init/load 变重，只要 query-time 和多次查询总成本�
 | `runtime_check_reload_unchanged` | 676ms | 0ms |
 | `runtime_check_reload_reloaded` | 误触发 | 0 |
 
+表中 counter 是原型指标，当前 main 已不产生 `runtime_check_reload_reloaded`。
+
 按 `main=db158cb8dc609a0050c214aed788dde459044361` 核对：
 `src/runtime.rs:238` 读取整个文件、仅对前 4096 字节求 hash；`:1361` 的
 `is_graph_changed` 仍将 mtime、size 或该 hash 任一变化作为重载条件。
