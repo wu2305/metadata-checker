@@ -68,8 +68,14 @@ fn test_concat_multiple_args() {
     let refs = parse_expression_refs("=CONCAT('前缀', input2.value, '中缀', input3.value, '后缀')");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),);
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input3".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
