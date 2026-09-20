@@ -864,8 +864,6 @@ fn profile_runtime(project_dir: &Path, sample_index: usize) -> Result<PerfProfil
         "unchanged runtime profile must not reload or fail: {}",
         check_reload.result
     );
-    // 记录真实结果；发生重载或读取失败时拒绝将本样本标记为 unchanged。
-    profile.set_counter("runtime_check_reload_reloaded", reloaded as u64);
     profile.set_counter(
         "runtime_check_reload_diagnostics",
         check_reload.diagnostics.len() as u64,

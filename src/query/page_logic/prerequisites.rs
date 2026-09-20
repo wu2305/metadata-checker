@@ -15,6 +15,7 @@ pub(super) struct PagePrerequisites {
     pub(super) data_total: usize,
     pub(super) action_total: usize,
     /// 按完整 display/data 排序结果首次出现的模型，包含被裁掉的条件引用。
+    /// 数量随唯一模型数增长，不做上界裁剪；compact 只缩减三段 JSON，不保证常驻内存有界。
     pub(super) model_ids: Vec<String>,
 }
 

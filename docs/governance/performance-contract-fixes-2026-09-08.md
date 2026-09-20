@@ -15,9 +15,10 @@
 - **报告指标**：prerequisites 使用实际 component/action/data-source scan、sort counter；
   path 使用 JSON build 与 side-context counter。测试逐个核对报告 driver 的名称和数值，
   统计汇总验证 min/max/avg，区分缺失观测与明确的零值。
-- **unchanged 场景**：实际结果新增 `runtime_check_reload_reloaded` counter。
-  检查移到第二次打开 graphdb 之前；若实际重载、失败或 reload_count 不为0，拒绝产生
-  名为 unchanged 的样本。产品运行时的 mtime/size/hash 检测策略保持原有契约。
+- **unchanged 场景**：检查移到第二次打开 graphdb 之前；若实际重载、失败或 reload_count
+  不为0，用 `ensure!` 拒绝产生名为 unchanged 的样本（中止 profile，不记录样本）。
+  恒零的 `runtime_check_reload_reloaded` counter 已按复审意见删除（见下方复审收口一节）。
+  产品运行时的 mtime/size/hash 检测策略保持原有契约。
 - **计时**：移除 availability/context/index 与 path context 的1毫秒下限。
   毫秒分辨率下合法的0被保留。计时字段存在性与实际缓存/输出计数分别断言。
 - **预算**：原 fixture 明确产生非空 candidate/rejected 桶后验证 compact/normal 裁剪，
@@ -166,6 +167,23 @@ CNB workspace `cnb-r0g-1k20ra3ov`：124项定向/单元测试及额外1项 CLI s
 命令和退出码；早期日志缺失的字段保留为 null，提交来自会话执行记录并单独标注。
 压缩包 SHA-256：`c09855b5a644157f45db3bd976e91ed1ee85145501c79959deedb53312346b6d`。
 校验方式同前，替换文件名和 SHA-256；历史证据包保持原样。
+
+## PR39 复审 warning 收口：恒零 counter 与 model_ids 上界说明
+
+复审（2026-09-08T17:08Z，`83798da..6ecc84c`）结论 needs_modification：2 项 warning、
+4 项 info、无 critical。本批只处理 2 项 warning，不扩大性能范围：
+
+- `perf_report.rs` 删除恒零 counter `runtime_check_reload_reloaded`。`ensure!` 已保证
+  unchanged 样本不重载、不失败，任何被记录样本上该 counter 只能为 0，其统计断言只是
+  断言被 `ensure!` 保证的常量；若改按 `reloaded` 动态命名则必须拆掉 `ensure!`，会削弱
+  unchanged 场景校验，因此选择删除。`m51_profile_report_tests` 同步删除该 counter 的
+  存在性与统计断言。
+- `query/page_logic/prerequisites.rs` 按复审给出的最小选项，在 `model_ids` 字段注释写明
+  数量随唯一模型数增长、不做上界裁剪、compact 只缩减三段 JSON 不保证常驻内存有界；
+  不做去重函数收敛重构。
+- 4 项 info（`prerequisites_equal` 与 `paths_equal` 语义不一致、`depends_on` 用 `Index`
+  而非 `.get()`、保底提升不刷新 `met`、side-context 故障注入硬编码读取次数）按复审口径
+  留待后续处理，不随本批闭合。
 
 ## 影响与剩余边界
 

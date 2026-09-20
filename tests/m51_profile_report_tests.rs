@@ -270,27 +270,12 @@ fn m52_core_profile_report_records_detailed_stage_contract() -> anyhow::Result<(
                 "runtime_one_shot_total_ms_n10",
                 "runtime_long_lived_total_ms_n10",
                 "runtime_long_lived_warmed_total_ms_n10",
-                "runtime_check_reload_reloaded",
             ] {
                 assert!(
                     scenario_report.counter_summary.contains_key(counter),
                     "runtime profile must include {counter}"
                 );
             }
-            let reload_reloaded = scenario_report
-                .counter_summary
-                .get("runtime_check_reload_reloaded")
-                .expect("runtime check_reload result counter is required");
-            assert_eq!(reload_reloaded.sample_count, 1);
-            assert_eq!(reload_reloaded.min, 0);
-            assert_eq!(reload_reloaded.max, 0);
-            assert_eq!(reload_reloaded.avg, 0.0);
-            assert_eq!(
-                scenario_report.samples[0]
-                    .profile
-                    .counter("runtime_check_reload_reloaded"),
-                0
-            );
         }
     }
     Ok(())
