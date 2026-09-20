@@ -334,7 +334,7 @@ pub fn build_expression_struct(raw: Option<&str>) -> Value {
 
 pub(crate) fn ref_type_to_str(r: &crate::superpage::RefType) -> String {
     match r {
-        crate::superpage::RefType::ComponentValue(_) => "ComponentValue".to_string(),
+        crate::superpage::RefType::ComponentValue(_, _) => "ComponentValue".to_string(),
         crate::superpage::RefType::ComponentProperty(_, _) => "ComponentProperty".to_string(),
         crate::superpage::RefType::ModelField(_, _) => "ModelField".to_string(),
         crate::superpage::RefType::Param(_) => "Param".to_string(),
@@ -346,7 +346,7 @@ pub(crate) fn ref_type_to_str(r: &crate::superpage::RefType) -> String {
 
 pub(crate) fn ref_id(r: &crate::superpage::RefType) -> String {
     match r {
-        crate::superpage::RefType::ComponentValue(id)
+        crate::superpage::RefType::ComponentValue(id, _)
         | crate::superpage::RefType::ComponentProperty(id, _)
         | crate::superpage::RefType::ModelField(id, _)
         | crate::superpage::RefType::Param(id)

@@ -697,7 +697,7 @@ pub(in crate::explain) fn explain_field_graph(
                         source_fields.push(fid.clone());
                         ("ModelField", fid, "high")
                     }
-                    crate::superpage::RefType::ComponentValue(c) => {
+                    crate::superpage::RefType::ComponentValue(c, _) => {
                         ("ComponentValue", format!("comp:{}", c), "high")
                     }
                     crate::superpage::RefType::ComponentProperty(c, p) => {

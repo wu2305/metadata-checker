@@ -977,7 +977,7 @@ pub fn analyze_superpage_selection(
         let dep_ids: Vec<String> = deps
             .iter()
             .filter_map(|r| match r {
-                superpage::RefType::ComponentValue(id)
+                superpage::RefType::ComponentValue(id, _)
                 | superpage::RefType::ComponentProperty(id, _) => Some(id.clone()),
                 _ => None,
             })
@@ -1304,7 +1304,7 @@ fn build_selection_visual_graph(
             if let Some(deps) = dependency_graph.dependencies.get(component_id) {
                 for dep in deps {
                     let dep_id = match dep {
-                        superpage::RefType::ComponentValue(id)
+                        superpage::RefType::ComponentValue(id, _)
                         | superpage::RefType::ComponentProperty(id, _) => id,
                         _ => continue,
                     };

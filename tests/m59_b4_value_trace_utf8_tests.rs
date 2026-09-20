@@ -18,7 +18,7 @@ fn fixture() -> (
     (meta, graph)
 }
 
-/// 裸 `${b}` 归一为 `ComponentValue("b")`，被追溯串只有 1 字节，
+/// 裸 `${b}` 归一为 `ComponentValue("b", Bare)`，被追溯串只有 1 字节，
 /// 而调用点构造的 pattern 是 7 字节的 `b.value`——旧实现在此 panic。
 #[test]
 fn bare_component_ref_shorter_than_pattern_does_not_panic() {

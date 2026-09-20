@@ -172,7 +172,7 @@ pub fn format_priority_human(analyses: &[PriorityAnalysis]) -> String {
 fn refs_to_string(refs: &[RefType]) -> String {
     refs.iter()
         .map(|r| match r {
-            RefType::ComponentValue(id) => id.clone(),
+            RefType::ComponentValue(id, _) => id.clone(),
             RefType::ComponentProperty(id, prop) => format!("{}.{}", id, prop),
             RefType::ModelField(model, field) => format!("{}.{}", model, field),
             RefType::Param(id) => id.clone(),

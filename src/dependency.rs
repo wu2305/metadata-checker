@@ -1,4 +1,4 @@
-use crate::superpage::{ComponentExpr, RefType, SuperPageMetadata};
+use crate::superpage::{ComponentExpr, ComponentValueForm, RefType, SuperPageMetadata};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
@@ -45,7 +45,7 @@ impl DependencyGraph {
             let is_validation_field = expr.field == "validExp" || expr.field == "visibleCondition";
             for ref_type in &expr.refs {
                 let is_self_ref = match ref_type {
-                    RefType::ComponentValue(ref_id) | RefType::ComponentProperty(ref_id, _) => {
+                    RefType::ComponentValue(ref_id, _) | RefType::ComponentProperty(ref_id, _) => {
                         ref_id == &comp_id
                     }
                     _ => false,
@@ -66,7 +66,7 @@ impl DependencyGraph {
             // 建立反向依赖
             for ref_type in &expr.refs {
                 match ref_type {
-                    RefType::ComponentValue(ref_id) | RefType::ComponentProperty(ref_id, _) => {
+                    RefType::ComponentValue(ref_id, _) | RefType::ComponentProperty(ref_id, _) => {
                         let is_self_ref = ref_id == &comp_id;
                         if is_validation_field && is_self_ref {
                             continue;
@@ -110,7 +110,7 @@ impl DependencyGraph {
             }
             let comp_id_owned = comp_id.clone();
             for ref_type in refs {
-                if let RefType::ComponentValue(dep_id) | RefType::ComponentProperty(dep_id, _) =
+                if let RefType::ComponentValue(dep_id, _) | RefType::ComponentProperty(dep_id, _) =
                     ref_type
                     && self.dependencies.contains_key(dep_id)
                 {
@@ -198,7 +198,7 @@ impl DependencyGraph {
 
         if let Some(refs) = self.dependencies.get(node) {
             for ref_type in refs {
-                if let RefType::ComponentValue(dep_id) | RefType::ComponentProperty(dep_id, _) =
+                if let RefType::ComponentValue(dep_id, _) | RefType::ComponentProperty(dep_id, _) =
                     ref_type
                 {
                     if !visited.contains(dep_id) {
@@ -340,7 +340,7 @@ pub fn expand_expression(
 
     for ref_type in &refs {
         match ref_type {
-            RefType::ComponentValue(dep_id) => {
+            RefType::ComponentValue(dep_id, form) => {
                 if let Some(dep_exprs) = graph.expressions.get(dep_id) {
                     // 优先查找 value 字段
                     if let Some(dep_expr) = dep_exprs.iter().find(|e| e.field == "value") {
@@ -364,7 +364,7 @@ pub fn expand_expression(
                         // 替换引用。被替换进去的是表达式**片段**，不带前导 `=`；
                         // 否则会拼出 `CONCAT(a, =(param1))` 这种嵌套等号。
                         let fragment = dep_expanded.strip_prefix('=').unwrap_or(&dep_expanded);
-                        expanded = replace_component_value_ref(&expanded, dep_id, fragment);
+                        expanded = replace_component_value_ref(&expanded, dep_id, *form, &fragment);
                     }
                 }
             }
@@ -388,20 +388,74 @@ pub fn expand_expression(
 }
 /// 把表达式里对 `dep_id` 这个组件的**值引用**替换成它自己的展开式。
 ///
-/// 只认两种来源文法：
-/// - `dep_id.value` —— 显式取值；
-/// - 裸 `dep_id` —— `${id}` 全组件引用，`resolve_ref_type` 已把它归一为
-///   `ComponentValue`，语义就是「依赖该组件的值」。
-///
-/// `dep_id.<其它后缀>`（`.step` 等）**不替换**：它们引用的是组件的其它属性，
-/// 换成值的展开式是错的。调用点原先固定构造 `format!("{id}.value")` 作 pattern，
-/// 于是裸引用永远匹配不上、静默不展开——`RefType::ComponentValue` 把 `.value` /
-/// `.step` / 裸 id 三种来源文法都压成同一个 id，替换点没有信息可依。
-/// 该区分本该由 `RefType` 携带原始 token（spec 的 A1b），在身份文法定稿前
-/// 先在替换点按后缀显式判定。
+/// 替换 pattern 由引用的来源文法（`ComponentValueForm`，spec A1b）决定，
+/// 不再按后缀猜测：
+/// - `Value`：pattern 为 `dep_id.value`，显式取值；
+/// - `Bare`：pattern 为裸 `dep_id`，且后面不能跟 `.`——裸引用后面若还跟着
+///   `.`，取的是别的属性，不是值；
+/// - `Suffix`（`dep_id.step` 等）：引用的是组件其它属性，替换成值的展开式
+///   是错的，整段跳过。
 ///
 /// 单遍扫描：替换文本不会被本函数再次扫描，避免展开式里恰好含 `dep_id`
-/// 时被二次替换。
+/// 时被二次替换。字符串字面量整段跳过（见 `string_literal_spans`）。
+fn replace_component_value_ref(
+    s: &str,
+    dep_id: &str,
+    form: ComponentValueForm,
+    replacement: &str,
+) -> String {
+    const VALUE_SUFFIX: &str = ".value";
+
+    if dep_id.is_empty() {
+        return s.to_string();
+    }
+    if form == ComponentValueForm::Suffix {
+        return s.to_string();
+    }
+
+    let pattern = match form {
+        ComponentValueForm::Value => format!("{}{}", dep_id, VALUE_SUFFIX),
+        _ => dep_id.to_string(),
+    };
+
+    let bytes = s.as_bytes();
+    let literals = string_literal_spans(s);
+    let mut result = String::with_capacity(s.len() + replacement.len());
+    let mut last = 0usize;
+
+    for (start, matched) in s.match_indices(&pattern) {
+        // 落在上一次替换吃掉的区间内。
+        if start < last {
+            continue;
+        }
+        // 字符串字面量里的同名文本不是引用。
+        if in_string_literal(&literals, start) {
+            continue;
+        }
+        // 词首边界：`bdep` 这类更长标识符的前缀不算引用。
+        if start > 0 && is_word_char(bytes[start - 1]) {
+            continue;
+        }
+
+        let end = start + matched.len();
+        // 词尾边界：`dep_id.values` / `dep_idx` 之类的更长标识符不算引用；
+        // 裸引用后面若还跟着 `.`，取的是别的属性，不是值。
+        if bytes.get(end).is_some_and(|b| is_word_char(*b)) {
+            continue;
+        }
+        if form == ComponentValueForm::Bare && bytes.get(end) == Some(&b'.') {
+            continue;
+        }
+
+        result.push_str(&s[last..start]);
+        result.push_str(replacement);
+        last = end;
+    }
+
+    result.push_str(&s[last..]);
+    result
+}
+
 /// 表达式里**字符串字面量**所覆盖的字节区间（含两侧引号）。
 ///
 /// 词法与 `superpage::expr_ast::Tokenizer::read_string_literal` 同口径：单引号与
@@ -436,55 +490,6 @@ fn string_literal_spans(s: &str) -> Vec<(usize, usize)> {
 
 fn in_string_literal(spans: &[(usize, usize)], pos: usize) -> bool {
     spans.iter().any(|(start, end)| pos >= *start && pos < *end)
-}
-
-fn replace_component_value_ref(s: &str, dep_id: &str, replacement: &str) -> String {
-    const VALUE_SUFFIX: &str = ".value";
-
-    if dep_id.is_empty() {
-        return s.to_string();
-    }
-
-    let bytes = s.as_bytes();
-    let literals = string_literal_spans(s);
-    let mut result = String::with_capacity(s.len() + replacement.len());
-    let mut last = 0usize;
-
-    for (start, matched) in s.match_indices(dep_id) {
-        // 落在上一次替换吃掉的区间内（`.value` 后缀比 match 本身长）。
-        if start < last {
-            continue;
-        }
-        // 字符串字面量里的同名文本不是引用。
-        if in_string_literal(&literals, start) {
-            continue;
-        }
-        if start > 0 && is_word_char(bytes[start - 1]) {
-            continue;
-        }
-
-        let id_end = start + matched.len();
-        let end = if s[id_end..].starts_with(VALUE_SUFFIX) {
-            id_end + VALUE_SUFFIX.len()
-        } else {
-            // 裸引用后面若还跟着 `.`，取的是别的属性，不是值。
-            if bytes.get(id_end) == Some(&b'.') {
-                continue;
-            }
-            id_end
-        };
-        // `dep_id.values` / `dep_idx` 之类的更长标识符不算引用。
-        if bytes.get(end).is_some_and(|b| is_word_char(*b)) {
-            continue;
-        }
-
-        result.push_str(&s[last..start]);
-        result.push_str(replacement);
-        last = end;
-    }
-
-    result.push_str(&s[last..]);
-    result
 }
 
 /// 只在词边界（词字符 = `[A-Za-z0-9_]`）处替换 pattern。

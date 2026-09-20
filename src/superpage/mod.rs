@@ -105,7 +105,7 @@ fn resolve_expression_refs_with_context(
                         id
                     ),
                     // 裸 `${id}` 全组件引用归一为 ComponentValue 后的改写说明
-                    RefType::ComponentValue(id) => format!(
+                    RefType::ComponentValue(id, _) => format!(
                         "Corrected: '{}' was initially guessed as model but is actually a known component ID (bare reference, treated as component value)",
                         id
                     ),
@@ -150,7 +150,10 @@ pub(crate) fn resolve_ref_type(
             if field.is_empty() {
                 // 裸 `${id}` 全组件引用（expr_ast 先判为 ModelField(id, "")），
                 // 归一为 ComponentValue，避免下游出现 "comp:id." 尾点形态
-                (RefType::ComponentValue(model.clone()), true)
+                (
+                    RefType::ComponentValue(model.clone(), ComponentValueForm::Bare),
+                    true,
+                )
             } else {
                 (
                     RefType::ComponentProperty(model.clone(), field.clone()),
@@ -178,7 +181,7 @@ fn classify_confidence(
     param_ids: &std::collections::HashSet<&str>,
 ) -> (Confidence, String, bool) {
     match resolved {
-        RefType::ComponentValue(id) => {
+        RefType::ComponentValue(id, _) => {
             if component_ids.contains(id.as_str()) {
                 (
                     Confidence::High,
@@ -297,7 +300,7 @@ fn resolve_ref_token(
             // 尾点 token（如 "txtB."，split 后 rest 为空）语义等同裸 `${id}` 全组件
             // 引用，归一为 ComponentValue，维持 ComponentProperty property 非空不变式
             if rest.is_empty() {
-                return RefType::ComponentValue(first.to_string());
+                return RefType::ComponentValue(first.to_string(), ComponentValueForm::Bare);
             }
             return RefType::ComponentProperty(first.to_string(), rest);
         }
@@ -318,7 +321,7 @@ fn resolve_ref_token(
                 || first.starts_with("text")
                 || first.starts_with("select"))
         {
-            return RefType::ComponentValue(first.to_string());
+            return RefType::ComponentValue(first.to_string(), ComponentValueForm::Value);
         }
 
         // Fallback: if first part starts with "model" or looks like a table name, treat as ModelField
@@ -334,7 +337,7 @@ fn resolve_ref_token(
     }
 
     if component_ids.contains(token) {
-        return RefType::ComponentValue(token.to_string());
+        return RefType::ComponentValue(token.to_string(), ComponentValueForm::Bare);
     }
 
     RefType::Other(token.to_string())

@@ -1,5 +1,7 @@
 use metadata_checker::dependency::DependencyGraph;
-use metadata_checker::superpage::{RefType, parse_expression_refs, parse_superpage};
+use metadata_checker::superpage::{
+    ComponentValueForm, RefType, parse_expression_refs, parse_superpage,
+};
 use std::path::PathBuf;
 
 // ============================================================
@@ -32,9 +34,18 @@ fn test_nested_if_expression() {
     );
 
     // 应该解析出 input1, input2, input3
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input3".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
@@ -45,7 +56,10 @@ fn test_logical_operators() {
 
     assert_eq!(refs.len(), 6);
     for i in 1..=6 {
-        assert!(refs.contains(&RefType::ComponentValue(format!("input{}", i))),);
+        assert!(refs.contains(&RefType::ComponentValue(
+            format!("input{}", i),
+            ComponentValueForm::Value
+        )),);
     }
 }
 
@@ -54,8 +68,14 @@ fn test_concat_multiple_args() {
     let refs = parse_expression_refs("=CONCAT('前缀', input2.value, '中缀', input3.value, '后缀')");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input3".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
@@ -65,7 +85,7 @@ fn test_is_null_expression() {
     // input1 去重后只出现一次
     let input1_count = refs
         .iter()
-        .filter(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"))
+        .filter(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input1"))
         .count();
     assert_eq!(input1_count, 1);
 }
@@ -84,7 +104,7 @@ fn test_list_column_reference() {
     // list1.column1.value 应该被解析为 ComponentValue("list1")
     let has_list = refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "list1"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "list1"));
     assert!(has_list, "Should detect list1 reference");
 }
 
@@ -94,7 +114,7 @@ fn test_steps_step_reference() {
 
     let has_steps = refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "steps1"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "steps1"));
     assert!(has_steps, "Should detect steps1 reference");
 }
 
@@ -154,10 +174,10 @@ fn test_cross_dependency() {
     let input3_deps = graph.dependencies.get("input3").expect("input3 not found");
     let has_input1 = input3_deps
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input1"));
     let has_input2 = input3_deps
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input2"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input2"));
     assert!(has_input1);
     assert!(has_input2);
 
@@ -165,7 +185,7 @@ fn test_cross_dependency() {
     let input7_deps = graph.dependencies.get("input7").expect("input7 not found");
     let has_input1_only = input7_deps
         .iter()
-        .all(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
+        .all(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input1"));
     assert!(has_input1_only);
 }
 

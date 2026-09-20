@@ -1,6 +1,6 @@
 use metadata_checker::dependency::DependencyGraph;
 use metadata_checker::superpage::{
-    RefType, parse_expression_refs, parse_superpage, parse_superpage_from_value,
+    ComponentValueForm, RefType, parse_expression_refs, parse_superpage, parse_superpage_from_value,
 };
 use std::path::PathBuf;
 
@@ -78,8 +78,14 @@ fn test_parse_expression_refs_simple() {
     // 应该只有 input2 和 input1（.value 是属性，不是独立引用）
     // 实际上正则匹配的是 input2.value 和 input1.value
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
@@ -102,7 +108,7 @@ fn test_parse_expression_refs_if() {
     // 去重后 input3.value 应该只出现一次
     let input3_count = refs
         .iter()
-        .filter(|r| matches!(r, RefType::ComponentValue(id) if id == "input3"))
+        .filter(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input3"))
         .count();
     assert_eq!(
         input3_count, 1,
@@ -150,10 +156,10 @@ fn test_dependency_graph() {
         .expect("input3 not found in graph");
     let has_input2 = input3_deps
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input2"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input2"));
     let has_input1 = input3_deps
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input1"));
     assert!(has_input2, "input3 should depend on input2");
     assert!(has_input1, "input3 should depend on input1");
 
@@ -164,7 +170,7 @@ fn test_dependency_graph() {
         .expect("text1 not found in graph");
     let has_input3 = text1_deps
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input3"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input3"));
     assert!(has_input3, "text1 should depend on input3");
 }
 
@@ -207,8 +213,14 @@ fn test_parse_expression_refs_complex() {
     let refs = parse_expression_refs("=input1.value + input2.value");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input1".to_string(),
+        ComponentValueForm::Value
+    )),);
+    assert!(refs.contains(&RefType::ComponentValue(
+        "input2".to_string(),
+        ComponentValueForm::Value
+    )),);
 }
 
 #[test]
@@ -281,7 +293,7 @@ fn test_bare_component_ref_normalizes_to_component_value() {
     assert!(
         resolved_of("exprA")
             .iter()
-            .any(|r| matches!(r, RefType::ComponentValue(id) if id == "txtB")),
+            .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "txtB")),
         "exprA 应解析出 ComponentValue(txtB): {:?}",
         resolved_of("exprA")
     );
@@ -299,7 +311,7 @@ fn test_bare_component_ref_normalizes_to_component_value() {
     assert!(
         resolved_of("exprC")
             .iter()
-            .any(|r| matches!(r, RefType::ComponentValue(id) if id == "txtB")),
+            .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "txtB")),
         "exprC 应解析出 ComponentValue(txtB): {:?}",
         resolved_of("exprC")
     );

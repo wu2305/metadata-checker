@@ -125,5 +125,5 @@ fn test_priority_combobox2_refs() {
         .default_value_expr
         .as_ref()
         .expect("has defaultValue");
-    assert!(dv.refs.iter().any(|r| matches!(r, metadata_checker::superpage::RefType::ComponentValue(id) if id == "combobox9")));
+    assert!(dv.refs.iter().any(|r| matches!(r, metadata_checker::superpage::RefType::ComponentValue(id, _) if id == "combobox9")));
 }

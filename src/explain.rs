@@ -80,7 +80,7 @@ pub fn explain_component_spg(spg: &SuperPageMetadata, target_id: &str, human: bo
                         "source_expr": expr.raw_expr,
                     }));
                 }
-                RefType::ComponentValue(id) => {
+                RefType::ComponentValue(id, _) => {
                     reads.push(json!({
                         "type": "component_value",
                         "id": id,

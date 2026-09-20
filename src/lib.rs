@@ -15,6 +15,7 @@ pub mod diagnostics;
 pub mod diff_refresh;
 pub mod explain;
 pub mod graph;
+pub mod graph_identity;
 #[cfg(feature = "cli-local")]
 pub mod graph_redb;
 #[cfg(feature = "cli-local")]

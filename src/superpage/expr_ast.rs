@@ -1,4 +1,4 @@
-use super::types::{Confidence, RefType, ResolvedRef};
+use super::types::{ComponentValueForm, Confidence, RefType, ResolvedRef};
 
 /// 表达式分词结果
 #[derive(Debug, Clone, PartialEq)]
@@ -688,7 +688,7 @@ fn extract_refs_from_ast(
                 refs.push(ref_type.clone());
                 let confidence = match &ref_type {
                     RefType::ModelField(_, _) => Confidence::High,
-                    RefType::ComponentValue(_) => Confidence::High,
+                    RefType::ComponentValue(_, _) => Confidence::High,
                     RefType::ComponentProperty(_, _) => Confidence::High,
                     RefType::Param(_) => Confidence::High,
                     RefType::UserProperty(_) => Confidence::High,
@@ -697,7 +697,7 @@ fn extract_refs_from_ast(
                 };
                 let reason = match &ref_type {
                     RefType::ModelField(m, f) => format!("模型字段引用: {}.{}", m, f),
-                    RefType::ComponentValue(c) => format!("组件值引用: {}", c),
+                    RefType::ComponentValue(c, _) => format!("组件值引用: {}", c),
                     RefType::ComponentProperty(c, p) => format!("组件属性引用: {}.{}", c, p),
                     RefType::Param(p) => format!("参数引用: {}", p),
                     RefType::UserProperty(p) => format!("用户属性引用: {}", p),
@@ -862,10 +862,10 @@ fn classify_identifier(token: &str) -> RefType {
             return RefType::ModelField(first.to_string(), field);
         }
         if parts.last() == Some(&"value") {
-            return RefType::ComponentValue(first.to_string());
+            return RefType::ComponentValue(first.to_string(), ComponentValueForm::Value);
         }
         if parts.last() == Some(&"step") {
-            return RefType::ComponentValue(first.to_string());
+            return RefType::ComponentValue(first.to_string(), ComponentValueForm::Suffix);
         }
         if parts.len() >= 3 && parts[1] == "checked" && parts[2] == "value" {
             return RefType::ComponentProperty(first.to_string(), "checked.value".to_string());
@@ -889,7 +889,7 @@ fn classify_identifier(token: &str) -> RefType {
         .map(|c| c.is_ascii_digit())
         .unwrap_or(true)
     {
-        return RefType::ComponentValue(token.to_string());
+        return RefType::ComponentValue(token.to_string(), ComponentValueForm::Bare);
     }
 
     RefType::Other(token.to_string())
