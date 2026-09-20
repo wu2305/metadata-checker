@@ -99,8 +99,12 @@ impl std::error::Error for IdentityError {}
 
 /// A2：项目内相对路径归一化（扫描与引用解析共用的唯一实现）。
 ///
-/// `\` 统一为 `/`；消解 `.` 段与成对的 `..`；空段（开头/结尾/连续分隔符）丢弃；
-/// `..` 越出根时返回 [`IdentityError::EscapeBeyondRoot`]。中文段原样保留。
+/// 输入必须是**根锚定**的项目内相对路径（扫描产出的页面路径天然满足；
+/// 引用侧由调用方先与所在文件目录拼接，见 [`resolve_relative_reference`]）。
+/// `\` 统一为 `/`；`.` 段与空段（开头/结尾/连续分隔符）直接消解；
+/// `..` 在根锚定语义下越出根时返回 [`IdentityError::EscapeBeyondRoot`]——
+/// 这是「引用逃出项目范围」的稳定诊断；调用方不得用未锚定的输入绕过它。
+/// 中文段原样保留。
 pub fn normalize_project_path(path: &str) -> Result<String, IdentityError> {
     let unified = path.replace('\\', "/");
     let mut segments: Vec<&str> = Vec::new();
@@ -140,6 +144,10 @@ pub fn resolve_relative_reference(
 }
 
 /// 解析出的节点 id 三段。
+///
+/// **文法不变式**：kind 段、页面段、局部名都不得含 `|`——竖线是「页面局部 vs
+/// 全局」的唯一判据，取 kind 前缀后第一个 `|` 切分；含 `|` 的全局名（物理表名、
+/// 物理字段名来自文件系统路径，不含 `|`）在文法之外，不受支持。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedNodeId {
     pub kind: NodeIdKind,
@@ -201,45 +209,55 @@ pub fn page_local_node_id(
 
 /// A1：旧 target 解析结果。歧义时交回全部候选，不静默挑选。
 #[derive(Debug, Clone, PartialEq)]
-pub enum ModelTargetResolution {
+pub enum TargetResolution {
     /// 唯一命中：scoped 精确 id，或裸名在图中只有一个同局部名节点。
     Unique(crate::graph::Node),
     /// 多个同局部名候选（跨页同名 / 旧全局节点与新局部节点混存）。
-    /// 按 id 排序保证诊断顺序确定。
+    /// 按 id 升序排序保证诊断顺序确定。
     Ambiguous(Vec<crate::graph::Node>),
-    /// 无候选。
+    /// 无候选，或 target 前缀与 kind 不匹配。
     Missing,
 }
 
-/// A1：旧 target 显式解析。
+/// A1：旧 target 显式解析，覆盖 model 与 field 两类页面局部身份。
 ///
-/// `model:<PAGE>|<local>` 精确查表；裸 `model:<local>` 收集全部同局部名的
-/// Model 节点——scoped 节点取 `|` 后的局部名，旧全局节点（物理表或历史写入）
-/// 取 `model:` 后的整体。全局物理表名与页面局部名天然不混淆：物理名带不上
-/// 页面段，裸物理名唯一命中时行为与旧图一致。
-pub fn resolve_model_target(
+/// `<kind>:<PAGE>|<local>` 精确查表（任意 kind 均可）；裸 `<kind>:<local>`
+/// 收集全部同局部名、同 node_type 的节点——scoped 节点取 `|` 后的局部名，
+/// 旧全局节点（物理表/物理字段或历史写入）取 `<kind>:` 后的整体。
+/// 跨 kind 同名互不干扰；cond/comp/action/param 的文法恒为 scoped，
+/// 裸名解析对它们未定义，返回 Missing。
+pub fn resolve_node_target(
     graph: &dyn GraphReadStore,
+    kind: NodeIdKind,
     target: &str,
-) -> GraphStoreResult<ModelTargetResolution> {
-    let Some(rest) = target.strip_prefix("model:") else {
-        return Ok(ModelTargetResolution::Missing);
+) -> GraphStoreResult<TargetResolution> {
+    let prefix = format!("{}:", kind.as_str());
+    let Some(rest) = target.strip_prefix(&prefix) else {
+        return Ok(TargetResolution::Missing);
     };
     if rest.is_empty() {
-        return Ok(ModelTargetResolution::Missing);
+        return Ok(TargetResolution::Missing);
     }
     if rest.contains('|') {
         return Ok(match graph.get_node(target)? {
-            Some(node) => ModelTargetResolution::Unique(node),
-            None => ModelTargetResolution::Missing,
+            Some(node) => TargetResolution::Unique(node),
+            None => TargetResolution::Missing,
         });
     }
 
+    let node_type = match kind {
+        NodeIdKind::Model => NodeType::Model,
+        NodeIdKind::Field => NodeType::Field,
+        // 裸名解析只为 model / field 定义；其余 kind 文法恒为 scoped
+        _ => return Ok(TargetResolution::Missing),
+    };
+
     let mut candidates: Vec<crate::graph::Node> = Vec::new();
     for node in graph.iter_nodes()? {
-        if node.node_type != NodeType::Model {
+        if node.node_type != node_type {
             continue;
         }
-        let Some(node_rest) = node.id.strip_prefix("model:") else {
+        let Some(node_rest) = node.id.strip_prefix(&prefix) else {
             continue;
         };
         let node_local = match node_rest.split_once('|') {
@@ -252,11 +270,11 @@ pub fn resolve_model_target(
     }
     candidates.sort_by(|a, b| a.id.cmp(&b.id));
     match candidates.pop() {
-        None => Ok(ModelTargetResolution::Missing),
-        Some(only) if candidates.is_empty() => Ok(ModelTargetResolution::Unique(only)),
+        None => Ok(TargetResolution::Missing),
+        Some(only) if candidates.is_empty() => Ok(TargetResolution::Unique(only)),
         Some(last) => {
             candidates.push(last);
-            Ok(ModelTargetResolution::Ambiguous(candidates))
+            Ok(TargetResolution::Ambiguous(candidates))
         }
     }
 }

@@ -130,6 +130,20 @@ fn component_value_ref_preserves_source_grammar_form() {
     );
 }
 
+/// 非 value/step 后缀（`b.other` 等）归 `RefType::Other`，不进值追溯替换——
+/// 这不是本批新行为：`83798da` 的 `classify_identifier` 对其它后缀同样返回
+/// `Other`（不建依赖边、不替换）。此处钉住该已知边界：诊断产物欠账登记在
+/// M59-2/query 层，不得在本批静默改成 ComponentValue 或凭空补边。
+#[test]
+fn non_value_step_suffix_stays_other_without_component_dependency() {
+    let refs = parse_expression_refs("=CONCAT(b.other, 1)");
+    assert_eq!(
+        refs,
+        vec![RefType::Other("b.other".to_string())],
+        "非 value/step 后缀不得归为组件值引用（旧实现同口径）"
+    );
+}
+
 /// A1b 原始 token 回归（parse 层归一路径）：裸 `${b}`（已知组件 id）经
 /// `resolve_ref_type` 归一为 ComponentValue，来源文法必须是 Bare，
 /// 替换点据此按裸 id 取词边界 pattern。
