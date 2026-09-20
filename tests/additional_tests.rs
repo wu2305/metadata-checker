@@ -1,5 +1,5 @@
 use metadata_checker::dependency::DependencyGraph;
-use metadata_checker::superpage::{RefType, parse_expression_refs, parse_superpage};
+use metadata_checker::superpage::{ComponentValueForm, RefType, parse_expression_refs, parse_superpage};
 use std::path::PathBuf;
 
 // ============================================================
@@ -21,7 +21,7 @@ fn test_text_field_expression() {
     assert!(
         text1_expr
             .refs
-            .contains(&RefType::ComponentValue("input1".to_string())),
+            .contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value)),
     );
 }
 
@@ -59,12 +59,12 @@ fn test_formula_field_expression() {
     assert!(
         formula1_expr
             .refs
-            .contains(&RefType::ComponentValue("input2".to_string())),
+            .contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),
     );
     assert!(
         formula1_expr
             .refs
-            .contains(&RefType::ComponentValue("input3".to_string())),
+            .contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),
     );
 }
 
@@ -106,22 +106,22 @@ fn test_long_expression_parsing() {
     assert!(
         text1_expr
             .refs
-            .contains(&RefType::ComponentValue("input1".to_string())),
+            .contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value)),
     );
     assert!(
         text1_expr
             .refs
-            .contains(&RefType::ComponentValue("input2".to_string())),
+            .contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),
     );
     assert!(
         text1_expr
             .refs
-            .contains(&RefType::ComponentValue("input3".to_string())),
+            .contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),
     );
     assert!(
         text1_expr
             .refs
-            .contains(&RefType::ComponentValue("input4".to_string())),
+            .contains(&RefType::ComponentValue("input4".to_string(), ComponentValueForm::Value)),
     );
 }
 

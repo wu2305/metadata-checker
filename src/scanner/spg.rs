@@ -854,7 +854,7 @@ pub fn process_spg_file_from_value(
                                 EdgeType::Reads,
                             )?;
                         }
-                        crate::superpage::RefType::ComponentValue(target_id) => {
+                        crate::superpage::RefType::ComponentValue(target_id, _) => {
                             let target_comp_id =
                                 format!("comp:{}|{}", rel_path.replace(r"\", "/"), target_id);
                             let edge_meta = serde_json::json!({

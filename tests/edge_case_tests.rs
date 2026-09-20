@@ -73,11 +73,11 @@ fn test_nonexistent_component_reference() {
     let has_nonexistent = text3_expr
         .refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "nonexistent"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "nonexistent"));
     let has_input1 = text3_expr
         .refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input1"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input1"));
 
     assert!(
         (has_nonexistent),

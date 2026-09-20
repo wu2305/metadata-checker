@@ -1,16 +1,19 @@
-//! M59 阶段 A1b：`RefType::ComponentValue` 丢掉原始引用后缀导致的值追溯错配。
+//! M59 阶段 A1b：值追溯的替换 pattern 必须与引用的来源文法一致。
 //!
-//! `classify_identifier` / `resolve_ref_type` 把 `x.value`、`x.step` 和裸 `${x}`
-//! 三种来源文法都压成 `ComponentValue("x")`，而值追溯的替换点固定构造
-//! `format!("{x}.value")` 作 pattern。后果是：
+//! `classify_identifier` / `resolve_ref_type` 曾把 `x.value`、`x.step` 和裸 `${x}`
+//! 三种来源文法都压成 `ComponentValue("x")`，值追溯的替换点没有信息可依：
 //! - 裸 `${x}` 永远匹配不上，**静默不展开**（`a.value` 只追到 `=b` 就停了）；
 //! - `x.step` 引用的是别的属性，一旦按 id 盲替就会被换成值的展开式。
 //!
-//! 在身份文法（A1）定稿前，替换点按后缀显式判定；本文件钉住这个行为契约，
-//! 等 `RefType` 真正携带原始 token 后，这些断言应当原样通过。
+//! M59-1（A1 枚举元数半边）落地后 `RefType::ComponentValue` 携带来源文法
+//! `ComponentValueForm`（Value / Suffix / Bare），替换点按文法取 pattern。
+//! 本文件钉住行为契约：`RefType` 携带原始 token 前后，这些断言应当原样通过。
 
 use metadata_checker::dependency::{DependencyGraph, trace_value_source};
-use metadata_checker::superpage::parse_superpage;
+use metadata_checker::superpage::{
+    ComponentValueForm, RefType, parse_expression_refs, parse_superpage,
+    parse_superpage_from_value,
+};
 use std::path::PathBuf;
 
 fn fixture() -> (
@@ -109,5 +112,48 @@ fn param_id_inside_string_literal_is_not_replaced() {
         trace.expanded_expr, "=CONCAT(\"param1\", (param1))",
         "字面量 \"param1\" 必须原样保留，实际得到 {}",
         trace.expanded_expr
+    );
+}
+
+/// A1b 原始 token 回归：`RefType::ComponentValue` 必须保留引用的来源文法，
+/// `x.value` / `x.step` / 裸 `x` 三种形态分别映射到 Value / Suffix / Bare。
+#[test]
+fn component_value_ref_preserves_source_grammar_form() {
+    let refs = parse_expression_refs("=b.value + b.step + b");
+    assert_eq!(
+        refs,
+        vec![
+            RefType::ComponentValue("b".to_string(), ComponentValueForm::Value),
+            RefType::ComponentValue("b".to_string(), ComponentValueForm::Suffix),
+            RefType::ComponentValue("b".to_string(), ComponentValueForm::Bare),
+        ],
+        "三种来源文法必须各自保留，不得压成同一个 id"
+    );
+}
+
+/// A1b 原始 token 回归（parse 层归一路径）：裸 `${b}`（已知组件 id）经
+/// `resolve_ref_type` 归一为 ComponentValue，来源文法必须是 Bare，
+/// 替换点据此按裸 id 取词边界 pattern。
+#[test]
+fn bare_component_ref_normalizes_with_bare_form() {
+    let raw = serde_json::json!({
+        "canvas": {
+            "components": [
+                {"id": "exprA", "type": "text", "value": "${b}"},
+                {"id": "b", "type": "text"}
+            ]
+        }
+    });
+    let meta = parse_superpage_from_value(raw).expect("fixture should parse");
+    let expr = meta
+        .expressions
+        .iter()
+        .find(|e| e.component_id == "exprA")
+        .expect("exprA expression should be extracted");
+    assert_eq!(expr.raw_expr, "${b}");
+    assert_eq!(
+        expr.refs,
+        vec![RefType::ComponentValue("b".to_string(), ComponentValueForm::Bare)],
+        "裸 ${{b}} 全组件引用归一为 ComponentValue 后必须携带 Bare 文法"
     );
 }

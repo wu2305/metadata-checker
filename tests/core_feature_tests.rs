@@ -1,6 +1,6 @@
 use metadata_checker::dependency::DependencyGraph;
 use metadata_checker::superpage::{
-    RefType, parse_expression_ast, parse_expression_refs, parse_superpage,
+    ComponentValueForm, RefType, parse_expression_ast, parse_expression_refs, parse_superpage,
 };
 use std::path::PathBuf;
 
@@ -127,7 +127,7 @@ fn test_complex_concat_expression() {
 
     // 只应识别 input3.value
     assert_eq!(refs.len(), 1);
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),);
 }
 
 #[test]
@@ -135,8 +135,8 @@ fn test_complex_logical_operators() {
     let refs = parse_expression_refs("=input1.value != 'test' AND input2.value IS NOT NULL");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),);
 }
 
 #[test]
@@ -144,8 +144,8 @@ fn test_complex_arithmetic_with_function() {
     let refs = parse_expression_refs("=ROUND(input3.value / input4.value, 2)");
 
     assert_eq!(refs.len(), 2);
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),);
-    assert!(refs.contains(&RefType::ComponentValue("input4".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue("input4".to_string(), ComponentValueForm::Value)),);
 }
 
 #[test]
@@ -281,7 +281,7 @@ fn test_multi_source_dependency() {
     let text1_deps = graph.dependencies.get("text1").unwrap();
     let has_input3 = text1_deps
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id) if id == "input3"));
+        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "input3"));
     assert!(has_input3);
 }
 
@@ -322,7 +322,7 @@ fn test_parse_expression_ast_basic() {
     assert!(
         result
             .refs
-            .contains(&RefType::ComponentValue("input1".to_string()))
+            .contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value))
     );
     assert!(result.refs.contains(&RefType::ModelField(
         "model1".to_string(),
@@ -374,7 +374,7 @@ fn test_parse_expression_ast_string_literal_skip() {
     assert!(
         result
             .refs
-            .contains(&RefType::ComponentValue("input1".to_string()))
+            .contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value))
     );
 }
 
@@ -500,7 +500,7 @@ fn test_newline_expression_parsing() {
     let has_self = input1_expr
         .refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input1"));
+        .any(|r| matches!(r, RefType::ComponentValue(v, _) | RefType::ComponentProperty(v, _) if v == "input1"));
     let has_model = input1_expr
         .refs
         .iter()
@@ -549,7 +549,7 @@ fn test_newline_expression_parsing() {
     let has_input1 = input3_expr
         .refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input1"));
+        .any(|r| matches!(r, RefType::ComponentValue(v, _) | RefType::ComponentProperty(v, _) if v == "input1"));
     let has_model_b = input3_expr
         .refs
         .iter()
@@ -572,7 +572,7 @@ fn test_newline_expression_parsing() {
     let has_input2 = text1_expr
         .refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input2"));
+        .any(|r| matches!(r, RefType::ComponentValue(v, _) | RefType::ComponentProperty(v, _) if v == "input2"));
     let string_model_refs: Vec<_> = text1_expr
         .refs
         .iter()
@@ -725,7 +725,7 @@ fn test_value_trace_multi_level() {
         .expect("input3 should exist");
 
     // 直接依赖
-    let has_input2 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input2"));
+    let has_input2 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(v, _) | RefType::ComponentProperty(v, _) if v == "input2"));
     let has_model = input3_deps
         .iter()
         .any(|r| matches!(r, RefType::ModelField(m, f) if m == "model1" && f == "A"));
@@ -753,8 +753,8 @@ fn test_value_trace_multi_branch() {
         .get("input3")
         .expect("input3 should exist");
 
-    let has_input1 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input1"));
-    let has_input2 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input2"));
+    let has_input1 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(v, _) | RefType::ComponentProperty(v, _) if v == "input1"));
+    let has_input2 = input3_deps.iter().any(|r| matches!(r, RefType::ComponentValue(v, _) | RefType::ComponentProperty(v, _) if v == "input2"));
     assert!(has_input1, "input3 should reference input1 (param1 branch)");
     assert!(has_input2, "input3 should reference input2 (model1 branch)");
 
@@ -791,7 +791,7 @@ fn test_value_trace_cross_component_types() {
     let has_input3 = text1_expr
         .refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input3"));
+        .any(|r| matches!(r, RefType::ComponentValue(v, _) | RefType::ComponentProperty(v, _) if v == "input3"));
     assert!(
         has_input3,
         "text1 should reference input3 across component types"
@@ -806,11 +806,11 @@ fn test_value_trace_cross_component_types() {
     let has_input1 = input3_expr
         .refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input1"));
+        .any(|r| matches!(r, RefType::ComponentValue(v, _) | RefType::ComponentProperty(v, _) if v == "input1"));
     let has_input2 = input3_expr
         .refs
         .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(v) | RefType::ComponentProperty(v, _) if v == "input2"));
+        .any(|r| matches!(r, RefType::ComponentValue(v, _) | RefType::ComponentProperty(v, _) if v == "input2"));
     assert!(has_input1, "input3 should reference input1");
     assert!(has_input2, "input3 should reference input2");
 

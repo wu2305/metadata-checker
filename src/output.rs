@@ -167,7 +167,7 @@ fn print_superpage_human(spg: &SuperPageMetadata, out: &mut dyn Write) -> Result
             writeln!(out, "    References:")?;
             for ref_type in &expr.refs {
                 match ref_type {
-                    RefType::ComponentValue(id) => writeln!(out, "      - ComponentValue: {}", id)?,
+                    RefType::ComponentValue(id, _) => writeln!(out, "      - ComponentValue: {}", id)?,
                     RefType::ComponentProperty(id, prop) => {
                         writeln!(out, "      - ComponentProperty: {}.{}", id, prop)?
                     }

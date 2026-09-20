@@ -102,7 +102,7 @@ fn build_lineage_reference_details(source_expr: Option<&str>) -> LineageReferenc
                 details.source_fields.push(field_id.clone());
                 ("ModelField", field_id, "high")
             }
-            crate::superpage::RefType::ComponentValue(component) => {
+            crate::superpage::RefType::ComponentValue(component, _) => {
                 ("ComponentValue", format!("comp:{}", component), "high")
             }
             crate::superpage::RefType::ComponentProperty(component, property) => (

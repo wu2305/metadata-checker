@@ -49,7 +49,7 @@ pub fn print_component_query_human_to(
                 writeln!(out, "  References:")?;
                 for ref_type in &expr.refs {
                     match ref_type {
-                        RefType::ComponentValue(id) => {
+                        RefType::ComponentValue(id, _) => {
                             writeln!(out, "    - ComponentValue: {}", id)?
                         }
                         RefType::ComponentProperty(id, prop) => {
@@ -77,7 +77,7 @@ pub fn print_component_query_human_to(
             .filter(|r| {
                 matches!(
                     r,
-                    RefType::ComponentValue(_) | RefType::ComponentProperty(_, _)
+                    RefType::ComponentValue(_, _) | RefType::ComponentProperty(_, _)
                 )
             })
             .collect();
@@ -85,7 +85,7 @@ pub fn print_component_query_human_to(
             writeln!(out, "\n--- Upstream Dependencies ---")?;
             for ref_type in comp_refs {
                 let dep_id = match ref_type {
-                    RefType::ComponentValue(id) => id.as_str(),
+                    RefType::ComponentValue(id, _) => id.as_str(),
                     RefType::ComponentProperty(id, _) => id.as_str(),
                     _ => continue,
                 };
@@ -217,7 +217,7 @@ pub fn print_component_query_json_to(
         .map(|refs| {
             refs.iter()
                 .filter_map(|r| match r {
-                    RefType::ComponentValue(id) | RefType::ComponentProperty(id, _) => {
+                    RefType::ComponentValue(id, _) | RefType::ComponentProperty(id, _) => {
                         spg.components.iter().find(|c| c.id == *id).map(|dep_comp| {
                             let dep_exprs: Vec<Value> = spg.expressions.iter()
                                 .filter(|e| e.component_id == *id)
@@ -294,7 +294,7 @@ pub fn print_component_query_json_to(
         "parent_id": comp.parent_id,
         "what_is_it": format!("{} component {}", comp.component_type, comp.id),
         "reads_from": comp_exprs.iter().filter_map(|e| {
-            if e.refs.iter().any(|r| matches!(r, RefType::ModelField(_, _) | RefType::Param(_) | RefType::ComponentValue(_))) {
+            if e.refs.iter().any(|r| matches!(r, RefType::ModelField(_, _) | RefType::Param(_) | RefType::ComponentValue(_, _))) {
                 Some(json!({ "field": e.field, "raw_expr": e.raw_expr }))
             } else { None }
         }).collect::<Vec<serde_json::Value>>(),

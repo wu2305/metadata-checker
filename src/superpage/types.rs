@@ -12,10 +12,27 @@ pub struct SpgComponent {
     pub res_path: Option<String>,
 }
 
+/// `RefType::ComponentValue` 的来源文法（spec A1b）。
+///
+/// `b.value`、`b.step` 和裸 `b` 三种来源文法此前都被压成同一个 id，值追溯的
+/// 替换点没有信息可依，只能按后缀猜。这里保留引用产生时的文法形态，
+/// 使替换 pattern 与来源文法一致：
+/// - `Value`：`id.value` 显式取值，替换 pattern 为 `id.value`；
+/// - `Suffix`：`id.<其它后缀>`（如 `.step`）引用的是组件其它属性，
+///   依赖成立，但替换成值的展开式是错的，替换点必须跳过；
+/// - `Bare`：裸 `id`（含 `${id}` 全组件引用），替换 pattern 为 `id`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ComponentValueForm {
+    Value,
+    Suffix,
+    Bare,
+}
+
 /// 表达式中引用的对象类型
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RefType {
-    ComponentValue(String),
+    /// 组件值引用。第一项是被引用组件 id，第二项是来源文法（A1b）。
+    ComponentValue(String, ComponentValueForm),
     /// 组件属性引用。不变式：property 永不为空——裸 `${id}` 全组件引用在 parse 层
     /// （`resolve_ref_type` / `resolve_ref_token`）已归一为 `ComponentValue`
     ComponentProperty(String, String),

@@ -1,5 +1,5 @@
 use metadata_checker::dependency::DependencyGraph;
-use metadata_checker::superpage::{RefType, parse_expression_refs, parse_superpage};
+use metadata_checker::superpage::{ComponentValueForm, RefType, parse_expression_refs, parse_superpage};
 use std::path::PathBuf;
 
 // ============================================================
@@ -32,9 +32,9 @@ fn test_nested_if_expression() {
     );
 
     // 应该解析出 input1, input2, input3
-    assert!(refs.contains(&RefType::ComponentValue("input1".to_string())),);
-    assert!(refs.contains(&RefType::ComponentValue("input2".to_string())),);
-    assert!(refs.contains(&RefType::ComponentValue("input3".to_string())),);
+    assert!(refs.contains(&RefType::ComponentValue("input1".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue("input2".to_string(), ComponentValueForm::Value)),);
+    assert!(refs.contains(&RefType::ComponentValue("input3".to_string(), ComponentValueForm::Value)),);
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn test_logical_operators() {
 
     assert_eq!(refs.len(), 6);
     for i in 1..=6 {
-        assert!(refs.contains(&RefType::ComponentValue(format!("input{}", i))),);
+        assert!(refs.contains(&RefType::ComponentValue(format!("input{}", i), ComponentValueForm::Value)),);
     }
 }
 

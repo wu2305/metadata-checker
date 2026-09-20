@@ -158,7 +158,7 @@ fn owner_type_to_subject_type(ot: &OwnerType) -> SubjectType {
 /// 将 RefType 转为可读的符号字符串
 fn ref_type_to_string(r: &RefType) -> String {
     match r {
-        RefType::ComponentValue(id) => format!("component:{}", id),
+        RefType::ComponentValue(id, _) => format!("component:{}", id),
         RefType::ComponentProperty(id, prop) => format!("component:{}.{}", id, prop),
         // 字段名为空（裸 `${modelN}`）时只写模型名——`model:modelN.` 尾点串会一路
         // 传到图构建，被切成 `field:modelN.` 垃圾节点，也让消费方误以为有个空名字段
