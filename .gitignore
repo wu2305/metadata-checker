@@ -1,5 +1,6 @@
 /target
 .metadata-checker.graphdb
+*.graphdb.lock
 .DS_Store
 /browser/node_modules/
 /.pnpm-store/
