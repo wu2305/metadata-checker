@@ -185,6 +185,11 @@ CNB workspace `cnb-r0g-1k20ra3ov`：124项定向/单元测试及额外1项 CLI s
   而非 `.get()`、保底提升不刷新 `met`、side-context 故障注入硬编码读取次数）按复审口径
   留待后续处理，不随本批闭合。
 
+验证（CNB workspace `cnb-4c8-1k2vkcfbi`，login shell，代码提交 `a88b563`）：
+`cargo fmt --check` 通过；`cargo test --features cli-local --test m51_profile_report_tests`
+3 项通过，runtime 场景覆盖删除后的 counter 集合。本批为删 counter、删断言与注释，
+无新增行为路径；全量 native 测试由 PR CI 在该提交上运行，见下方收口记录。
+
 ## 影响与剩余边界
 
 Baseline impact：**yes**。减少重复邻接读取，恢复真实毫秒计时，并隔离 unchanged profile
