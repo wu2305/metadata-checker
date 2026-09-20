@@ -26,6 +26,28 @@ A1/A1b/A2 已交付，提交 `03b2336..2ff7c69`（分支 codex/m59-1-identity-gr
 占位节点归属同样在 M59-2 落地；启用后按新 schema 复验 B1–B5，B5 的跨文件边丢失与
 占位节点残留差异必须清零，不得把缺陷记录当正确性证明。
 
+### 冷脸验收处理（2026-09-21，deepseek-v4.1-flash）
+
+首轮验收结论「不通过：1 P0 / 4 P1 / 1 P2」，逐条处理（修复提交 `4764299`，
+fmt/清理 `335f7af` / `31ae621`；远端全量 native 102 个 test target 复验通过）：
+
+- **P0「新文件不在分支」**：复核为评审环境假阴性。`git show 119db87:src/graph_identity.rs`
+  与 `git show 119db87:tests/m59_a1_identity_grammar_tests.rs` 均存在（评审者自引的
+  `git diff --stat 539f984..119db87` 也列出新建）；PR CI（rust-ci 全量 llvm-cov，在
+  `2ff7c69` 上通过，其后仅差 journal 文档）已把新测试 target 纳入 CI 可见范围。
+  证据已回帖，待评审复核。
+- **P1-2 field 半边缺失**：`resolve_model_target` 泛化为 `resolve_node_target`，
+  scoped 精确查表支持任意 kind，裸名解析覆盖 model 与 field（跨 kind 同名互不干扰），
+  新增跨页字段歧义、物理字段裸名、跨 kind 隔离回归。
+- **P1-3 非 value/step 后缀静默**：核对 `83798da` 旧实现——非 value/step 后缀
+  当时同样归 `RefType::Other`，非本批回归。新增分类层回归钉住该边界；诊断产物
+  登记为 M59-2/query 层欠账，不在本批扩容。
+- **P1-4 文法不变式**：模块文档写明「kind/页面/局部段都不得含 `|`，竖线是
+  scoped 唯一判据」，补含 `|` 全局名的解析回归；`is_page_scoped_id` 未启用、无消费方。
+- **P2-5 路径语义**：`normalize_project_path` 文档写明输入须根锚定、`..` 越根是
+  越界诊断；评审提到的 `./app/a.spg` 实际返回 `Ok("app/a.spg")`（`.` 段直接消解），
+  已有单元测试覆盖，文档同步澄清。
+
 ## 已有基础与限制
 
 - B1–B5 已建立共享 store、分类、坏 TBL、值追溯和全量/增量差分回归。
