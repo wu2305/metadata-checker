@@ -58,7 +58,7 @@ pub struct Node {
     pub meta: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// 图边
 pub struct Edge {
     pub from: String,
