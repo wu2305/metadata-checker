@@ -818,9 +818,9 @@ fn ownership_graph_reopens_and_restarts_cleanly() {
 
     ProjectIndexer::scan_for_project(&project, &db_path, &binding).expect("initial scan");
 
-    // 重启 1：以 open_for_project 打开
+    // 重启 1：以 ownership 写入口打开
     {
-        let graph = GraphDB::open_for_project(&db_path, &binding).expect("open_for_project");
+        let graph = GraphDB::open_with_ownership(&db_path, &binding).expect("open_with_ownership");
         assert_eq!(graph.project_binding(), Some(&binding));
         assert!(graph.node_indices.len() > 0);
     }
@@ -937,11 +937,11 @@ fn session_refresh_query_diff_refresh_cycle_preserves_ownership() {
 
     let graph_db_path = PathBuf::from(&refresh_report.graph_db_path);
 
-    // 2. Query runtime 加载
+    // 2. Query runtime 加载（diff-refresh 需要长驻读模型）
     let runtime = GraphRuntime::load_with_project_dir_and_mode_for_project(
         &graph_db_path,
         None::<&std::path::Path>,
-        RuntimeMode::OneShot,
+        RuntimeMode::LongLived,
         &binding,
     )
     .expect("runtime load with project binding");
