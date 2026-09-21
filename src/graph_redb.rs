@@ -377,6 +377,7 @@ impl GraphDB {
             if ownership.is_some() {
                 drop(meta);
                 write_txn.commit()?;
+                drop(db);
                 return Self::ensure_ownership_schema(db_path, binding);
             }
             let binding_marker = meta.get(PROJECT_BINDING_KEY)?.map(|value| value.value());
