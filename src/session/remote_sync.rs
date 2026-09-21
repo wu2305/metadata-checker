@@ -674,6 +674,24 @@ pub fn build_session_graph(
     })
 }
 
+/// 按 session manifest 的远程项目引用构建并绑定图。
+#[cfg(feature = "cli-local")]
+pub fn build_session_graph_for_project(
+    session_dir: &std::path::Path,
+    graph_db_path: &std::path::Path,
+    project_ref: &str,
+) -> Result<crate::graph_store::IndexReport> {
+    let mirror = crate::session::sync::project_mirror_root(session_dir);
+    let binding = crate::ownership::ProjectBinding::new(project_ref.to_string())?;
+    crate::scanner::indexer::ProjectIndexer::scan_for_project(&mirror, graph_db_path, &binding)
+        .with_context(|| {
+            format!(
+                "failed to build bound graph for session {}",
+                session_dir.display()
+            )
+        })
+}
+
 /// Session 刷新选项。
 #[derive(Debug, Clone)]
 pub struct SessionRefreshOptions {
@@ -774,7 +792,7 @@ pub fn refresh_session_from_remote(
     }
 
     // 构建 graph
-    let index_report = build_session_graph(&session_dir, &graph_db_path)
+    let index_report = build_session_graph_for_project(&session_dir, &graph_db_path, &project_ref)
         .with_context(|| format!("failed to build graph for session {}", session_id))?;
 
     Ok(SessionRefreshReport {

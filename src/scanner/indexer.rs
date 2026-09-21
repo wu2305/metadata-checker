@@ -11,6 +11,7 @@ use crate::graph_store::{GraphWriteStore, IndexCommit, IndexReport, IndexStateSt
 use crate::parsed_content::ParsedContent;
 use crate::source_id::{ProjectRef, SourceId};
 use crate::storage_provider::{DocumentProvider, LocalStorageProvider};
+use crate::ownership::ProjectBinding;
 use serde_json::Value;
 
 /// 发现的文件数量（阶段内部使用，不暴露字段级细节）
@@ -577,9 +578,22 @@ impl ProjectIndexer {
             .map_err(|e| anyhow!("persist_index failed: {}", e))
     }
 
-    /// 全量索引入口（替代 scan_project）
+    /// 全量索引入口（替代 scan_project）。
+    ///
+    /// 未传入项目绑定时保持旧低层兼容路径；启用 M59-2 ownership 的调用方
+    /// 必须使用 [`Self::scan_for_project`]，避免把 machine-specific 路径当身份。
     pub fn scan(project_dir: &Path, db_path: &Path) -> Result<IndexReport> {
         Self::scan_with_diagnostics(project_dir, db_path).map(|with| with.report)
+    }
+
+    /// 按稳定项目绑定执行一次索引，并在扫描前校验 ownership schema。
+    pub fn scan_for_project(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: &ProjectBinding,
+    ) -> Result<IndexReport> {
+        GraphDB::open_for_project(db_path, project_binding)?;
+        Self::scan(project_dir, db_path)
     }
 
     /// M58.3 PR1 refix（F2）：合并 redb 中的 per-file scanner 诊断计数 entry，
