@@ -68,3 +68,18 @@ fn missing_version_on_nonempty_database_is_rejected_without_upgrade() {
     assert_eq!(GraphDB::open(&path).err().unwrap().to_string().contains("GRAPH_SCHEMA_STALE"), true);
     assert_eq!(GraphDB::open_readonly(&path).err().unwrap().to_string().contains("GRAPH_SCHEMA_STALE"), true);
 }
+
+// 从真实 scanner 入口验证属性语义与同关系的不同来源，而非只测 store。
+#[test]
+fn scanner_preserves_property_targets_and_each_source_field() {
+    let mut graph = MemoryGraphStore::new();
+    metadata_checker::scanner::process_spg_file_from_value(&mut graph, "page.spg", json!({"canvas":{"components":[
+        {"id":"a","type":"input","value":"=b.value", "visibleCondition":"=b.value", "enable":"=b.step"},
+        {"id":"b","type":"input","value":"=1"}
+    ]}})).unwrap();
+    let edges = graph.get_node_edges("comp:page.spg|a").unwrap().unwrap().outgoing;
+    let mut facts: Vec<_> = edges.iter().filter(|view| view.edge.edge_type == EdgeType::DependsOn && view.edge.to == "comp:page.spg|b")
+        .map(|view| (view.edge.field_path.clone().unwrap(), view.edge.meta.as_ref().unwrap()["source_field"].as_str().unwrap().to_string())).collect();
+    facts.sort();
+    assert_eq!(facts, vec![("comp:b.step".into(), "enable".into()), ("comp:b.value".into(), "value".into()), ("comp:b.value".into(), "visibleCondition".into())]);
+}

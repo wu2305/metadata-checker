@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,7 +32,7 @@ const NODES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("nodes"
 const EDGES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("edges");
 const FILE_STATES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("file_states");
 const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
-/// M54：diff-refresh checkpoint 在 META_TABLE 中的键
+/// 完整事实键版本；独立于 M59-2 的页面身份与归属版本。
 const FACT_SCHEMA_VERSION_KEY: &str = "fact_schema_version";
 const FACT_SCHEMA_VERSION: &[u8] = b"2";
 const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";

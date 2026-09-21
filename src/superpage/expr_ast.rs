@@ -94,6 +94,7 @@ impl ExprParseResult {
 struct Tokenizer {
     pos: usize,
     chars: Vec<char>,
+    unterminated: bool,
 }
 
 impl Tokenizer {
@@ -101,6 +102,7 @@ impl Tokenizer {
         Self {
             pos: 0,
             chars: input.chars().collect(),
+            unterminated: false,
         }
     }
 
@@ -128,6 +130,7 @@ impl Tokenizer {
 
     fn read_string_literal(&mut self, quote: char) -> Token {
         let mut value = String::new();
+        let mut closed = false;
         self.advance(); // consume opening quote
         while let Some(c) = self.peek() {
             if c == '\\' {
@@ -137,12 +140,14 @@ impl Tokenizer {
                 }
             } else if c == quote {
                 self.advance(); // consume closing quote
+                closed = true;
                 break;
             } else {
                 value.push(c);
                 self.advance();
             }
         }
+        self.unterminated |= !closed;
         Token::StringLiteral(value)
     }
 
@@ -350,7 +355,11 @@ impl Parser {
         if self.current == Token::Eof {
             return None;
         }
-        self.parse_conditional()
+        let result = self.parse_conditional();
+        if self.current != Token::Eof || self.tokenizer.unterminated {
+            self.diagnostics.push(ExprDiagnostic { code: "EXPR_PARSE_ERROR".into(), message: "表达式存在未解析内容或未闭合字面量".into(), position: Some(self.tokenizer.pos) });
+        }
+        result
     }
 
     fn parse_conditional(&mut self) -> Option<AstNode> {

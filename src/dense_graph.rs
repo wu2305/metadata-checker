@@ -3,7 +3,7 @@
 //! 该模块把通用 `GraphReadStore` 转换为适合高 fanout 遍历的 CSR 风格只读结构。
 //! 它不替代事实图，也不持久化；任何时候都可以从底层图重新构建。
 
-use crate::graph::{Edge, EdgeType, Node};
+use crate::graph::{Edge, Node};
 use crate::graph_store::{
     GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
 };
