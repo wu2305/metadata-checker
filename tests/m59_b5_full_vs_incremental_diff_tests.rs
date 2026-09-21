@@ -965,7 +965,8 @@ fn session_refresh_query_diff_refresh_cycle_preserves_ownership() {
         runtime,
     );
     let diff_report = orchestrator.refresh_once().expect("diff refresh");
-    assert!(diff_report.ok);
+    assert_eq!(diff_report.change_count, 0);
+    assert_eq!(diff_report.warm_failures, Vec::<String>::new());
 
     // 4. 再次验证库内 ownership 状态完好
     let graph = GraphDB::open_readonly_with_ownership(&graph_db_path, &binding)
