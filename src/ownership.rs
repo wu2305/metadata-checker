@@ -5,7 +5,7 @@
 //! 在后续 M59-2 包中消费。
 
 use crate::graph::{Edge, Node};
-use crate::graph_store::{edge_dedup_key, GraphReadStore, GraphStore};
+use crate::graph_store::{GraphStore, edge_dedup_key};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -193,7 +193,7 @@ pub fn rebuild_graph_from_ledgers(
 
     let mut desired_nodes: Vec<Node> = entities
         .into_iter()
-        .map(|(id, contributions)| {
+        .map(|(_, contributions)| {
             let mut definitions: Vec<&EntityContribution> = contributions
                 .iter()
                 .copied()

@@ -824,39 +824,38 @@ impl ProjectIndexer {
             for failure in &parse_failures {
                 scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
             }
-            let (parsed_nodes, removed_edge_keys, dirty_edges) =
-                if ownership_enabled {
-                    let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
-                    let parsed_nodes =
-                        apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
-                    for (logical_path, _) in &plan.deleted {
-                        new_states.remove(logical_path);
-                    }
-                    (parsed_nodes, Vec::new(), Vec::new())
-                } else {
-                    // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
-                    let merged_removed = merge_removed_node_ids(
-                        updates
-                            .iter()
-                            .map(|update| update.previous_node_ids.as_slice())
-                            .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
-                    );
-                    let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
-                    // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
-                    let parsed_nodes = Self::apply_incremental_changes(
-                        &mut graph,
-                        &mut new_states,
-                        &updates,
-                        &plan.deleted,
-                    )?;
-                    // M56：apply 后收集新增/变更节点的 incident edges
-                    let new_node_ids: Vec<String> = parsed_nodes
-                        .values()
-                        .flat_map(|node_ids| node_ids.iter().cloned())
-                        .collect();
-                    let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
-                    (parsed_nodes, removed_edge_keys, dirty_edges)
-                };
+            let (parsed_nodes, removed_edge_keys, dirty_edges) = if ownership_enabled {
+                let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
+                let parsed_nodes =
+                    apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
+                for (logical_path, _) in &plan.deleted {
+                    new_states.remove(logical_path);
+                }
+                (parsed_nodes, Vec::new(), Vec::new())
+            } else {
+                // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
+                let merged_removed = merge_removed_node_ids(
+                    updates
+                        .iter()
+                        .map(|update| update.previous_node_ids.as_slice())
+                        .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+                );
+                let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
+                // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
+                let parsed_nodes = Self::apply_incremental_changes(
+                    &mut graph,
+                    &mut new_states,
+                    &updates,
+                    &plan.deleted,
+                )?;
+                // M56：apply 后收集新增/变更节点的 incident edges
+                let new_node_ids: Vec<String> = parsed_nodes
+                    .values()
+                    .flat_map(|node_ids| node_ids.iter().cloned())
+                    .collect();
+                let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+                (parsed_nodes, removed_edge_keys, dirty_edges)
+            };
 
             let changed_file_states: Vec<String> = updates
                 .iter()
