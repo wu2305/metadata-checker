@@ -15,6 +15,16 @@ RUN apt-get update \
       pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
+
+RUN curl -fsSL https://code-server.dev/install.sh | sh -s -- --version 4.117.0 &&\
+    code-server --install-extension cnbcool.cnb-welcome &&\
+    code-server --install-extension redhat.vscode-yaml &&\
+    code-server --install-extension mhutchie.git-graph &&\
+    code-server --install-extension donjayamanne.githistory &&\
+    code-server --install-extension cloudstudio.live-server &&\
+    code-server --install-extension tencent-cloud.coding-copilot &&\
+    code-server --install-extension bierner.markdown-mermaid
+
 # CNB 自定义开发环境要走 VSCode/Cursor Remote-SSH，必须在镜像里预装 openssh-server
 # （见上面的 apt 列表）；sshd 需要这个运行目录，缺了会在连接时才报错。
 RUN mkdir -p /run/sshd
