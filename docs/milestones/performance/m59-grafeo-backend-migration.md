@@ -177,3 +177,12 @@ no-op 轮从账本重算，均随 IndexReportWithDiagnostics 透出，prepare �
 [原始日志与 SHA256](../../governance/evidence/2026-09-21-m59-2-ownership-ledger.json.gz)
 （归档 SHA256 `9c8c14f4189a4f982986dacb86be21d3bb720fa804d1fcc65e07cb9b314d4ce7`，
 覆盖 2ab4fc7 最终轮；2a66483 轮日志为同文件先前版本）。
+
+第二轮独立冷脸复验（HEAD `aafc686`）：结论**可验收**，无 P0/P1；7 项修复逐条核实，
+B5 新断言经论证可钉死 P1 回归（分类回退必挂）。已声明不阻塞的残留：
+1. `GRAPH_OWNERSHIP_CONFLICT` 未登记 `answer_impact` 权威表，按默认 none——后续登记
+   为 partial 更符合语义（spec 建议项，不阻塞）；
+2. prepare 路径丢弃冲突（PreparedIndexUpdate 无诊断通道），冲突在下次 scan 前不进
+   查询侧诊断——journal 已声明，任何后续 scan（含 no-op）都会补报；
+3. link（ActionNavigates）目标页 stub 无独立 origin 断言，与 embed 共用同一分类分支，
+   整体回退由 embed 钉捕获。
