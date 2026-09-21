@@ -221,6 +221,7 @@ impl Tokenizer {
                             self.advance();
                         }
                     }
+                    self.unterminated |= !value.ends_with('}');
                     Token::Identifier(value)
                 } else {
                     self.read_identifier(first)
@@ -591,6 +592,8 @@ impl Parser {
                 let expr = self.parse_or_expr()?;
                 if self.current == Token::RParen {
                     self.advance();
+                } else {
+                    self.diagnostics.push(ExprDiagnostic { code: "EXPR_PARSE_ERROR".into(), message: "括号表达式缺少右括号".into(), position: Some(self.tokenizer.pos) });
                 }
                 Some(expr)
             }

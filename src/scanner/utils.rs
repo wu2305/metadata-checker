@@ -12,6 +12,13 @@ pub fn add_node(
     name: String,
     meta: Option<serde_json::Value>,
 ) -> Result<()> {
+    // 当前 native scanner 的 model/field 仍是全局编码；在写入边界拒绝歧义分隔符。
+    // 页面局部身份须等 M59-2 的版本与归属契约就绪后才允许写入。
+    let id = if let Some(local) = id.strip_prefix("model:") {
+        crate::graph_identity::global_node_id(crate::graph_identity::NodeIdKind::Model, local)?
+    } else if let Some(local) = id.strip_prefix("field:") {
+        crate::graph_identity::global_node_id(crate::graph_identity::NodeIdKind::Field, local)?
+    } else { id };
     graph
         .upsert_node(Node {
             id,

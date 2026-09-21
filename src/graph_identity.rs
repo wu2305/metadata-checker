@@ -82,6 +82,8 @@ pub enum IdentityError {
     EmptySegment { id: String },
     /// 保留分隔符不能出现在身份段中。
     ReservedSeparator { value: String },
+    /// 项目内路径不得携带根或 Windows 盘符。
+    AbsolutePath { path: String },
 }
 
 impl fmt::Display for IdentityError {
@@ -89,6 +91,9 @@ impl fmt::Display for IdentityError {
         match self {
             IdentityError::EscapeBeyondRoot { path } => {
                 write!(f, "path escapes the project root: {}", path)
+            }
+            IdentityError::AbsolutePath { path } => {
+                write!(f, "expected project-relative path, got absolute or drive path: {}", path)
             }
             IdentityError::ReservedSeparator { value } => {
                 write!(f, "identity segment contains reserved separator: {}", value)
@@ -106,11 +111,12 @@ impl std::error::Error for IdentityError {}
 ///
 /// 输入必须是**根锚定**的项目内相对路径（扫描产出的页面路径天然满足；
 /// 引用侧由调用方先与所在文件目录拼接，见 [`resolve_relative_reference`]）。
-/// `\` 统一为 `/`；`.` 段与空段（开头/结尾/连续分隔符）直接消解；
+/// `\` 统一为 `/`；`.` 段与中间/末尾空段直接消解；绝对路径和盘符路径拒绝；
 /// `..` 在根锚定语义下越出根时返回 [`IdentityError::EscapeBeyondRoot`]——
 /// 这是「引用逃出项目范围」的稳定诊断；调用方不得用未锚定的输入绕过它。
 /// 中文段原样保留。
 pub fn normalize_project_path(path: &str) -> Result<String, IdentityError> {
+    reject_absolute_path(path)?;
     let unified = path.replace('\\', "/");
     let mut segments: Vec<&str> = Vec::new();
     for segment in unified.split('/') {
@@ -136,6 +142,7 @@ pub fn resolve_relative_reference(
     current_file: &str,
     reference: &str,
 ) -> Result<String, IdentityError> {
+    reject_absolute_path(reference)?;
     let normalized_current = normalize_project_path(current_file)?;
     let current_dir = match normalized_current.rsplit_once('/') {
         Some((dir, _)) => dir,
@@ -146,6 +153,21 @@ pub fn resolve_relative_reference(
     } else {
         normalize_project_path(&format!("{}/{}", current_dir, reference))
     }
+}
+
+/// 拼接前拒绝根路径和盘符路径，避免拼接掩盖绝对引用。
+fn reject_absolute_path(path: &str) -> Result<(), IdentityError> {
+    if path.starts_with(['/', '\\']) || path.as_bytes().get(1) == Some(&b':') {
+        return Err(IdentityError::AbsolutePath { path: path.to_string() });
+    }
+    Ok(())
+}
+
+/// 构造全局身份；物理模型不能借保留分隔符伪装为局部身份。
+pub fn global_node_id(kind: NodeIdKind, local: &str) -> Result<String, IdentityError> {
+    if local.is_empty() { return Err(IdentityError::EmptySegment { id: kind.as_str().to_string() }); }
+    if local.contains('|') { return Err(IdentityError::ReservedSeparator { value: local.to_string() }); }
+    Ok(format!("{}:{}", kind.as_str(), local))
 }
 
 /// 解析出的节点 id 三段。
@@ -308,7 +330,7 @@ mod tests {
             normalize_project_path("页面/销售/合同协议.spg").unwrap(),
             "页面/销售/合同协议.spg"
         );
-        assert_eq!(normalize_project_path("//a//b.spg").unwrap(), "a/b.spg");
+        assert_eq!(normalize_project_path("a//b.spg").unwrap(), "a/b.spg");
     }
 
     #[test]

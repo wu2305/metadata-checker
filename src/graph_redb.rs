@@ -51,9 +51,20 @@ const SCANNER_DIAGNOSTICS_TABLE: TableDefinition<&str, Vec<u8>> =
 pub fn edge_storage_key(edge: &Edge) -> String {
     // 关系排序前缀保留既有重启后的邻接顺序；它只负责排序，不负责唯一性。
     // NUL 后的完整 JSON 负责身份，JSON 会转义输入中的 NUL，段边界不可混淆。
-    let relation_order = format!("{}|{}|{}|{}", edge.from, edge.to,
-        serde_json::json!(edge.edge_type), edge.field_path.as_deref().unwrap_or(""));
-    let fact = serde_json::json!([edge.from, edge.to, edge.edge_type, edge.field_path, edge.meta]);
+    let relation_order = format!(
+        "{}|{}|{}|{}",
+        edge.from,
+        edge.to,
+        serde_json::json!(edge.edge_type),
+        edge.field_path.as_deref().unwrap_or("")
+    );
+    let fact = serde_json::json!([
+        edge.from,
+        edge.to,
+        edge.edge_type,
+        edge.field_path,
+        edge.meta
+    ]);
     format!("{relation_order}\0{fact}")
 }
 
@@ -466,17 +477,31 @@ impl GraphDB {
         match db_result {
             Ok(db) => {
                 let read_txn = db.begin_read();
-                let tables_ok = read_txn
-                    .map(|tx| {
-                        tx.open_table(NODES_TABLE).is_ok() && tx.open_table(EDGES_TABLE).is_ok()
-                    })
-                    .unwrap_or(false);
-                out.summary["needs_rebuild"] = serde_json::json!(!tables_ok);
-                out.evidence.push(
-                    Evidence::new("Graph database opened successfully", "redb open + read")
-                        .with_source_file(db_path.to_string_lossy().to_string())
-                        .with_confidence(Confidence::High),
-                );
+                let schema_current = read_txn.as_ref().ok()
+                    .and_then(|tx| tx.open_table(META_TABLE).ok())
+                    .and_then(|table| table.get(FACT_SCHEMA_VERSION_KEY).ok().flatten().map(|value| value.value()))
+                    .is_some_and(|version| version == FACT_SCHEMA_VERSION);
+                let tables_ok = read_txn.as_ref().map(|tx| {
+                    tx.open_table(NODES_TABLE).is_ok() && tx.open_table(EDGES_TABLE).is_ok()
+                }).unwrap_or(false);
+                out.summary["needs_rebuild"] = serde_json::json!(!tables_ok || !schema_current);
+                if !schema_current {
+                    out.summary["readable"] = serde_json::json!(false);
+                    let mut diagnostic = crate::diagnostics::envelope_diagnostic(
+                        crate::diagnostics::CODE_GRAPH_SCHEMA_STALE, 1,
+                        Location { source_file: Some(db_path.to_string_lossy().to_string()), node_id: None, json_path: None },
+                        "Stored facts use an incompatible or missing schema version".to_string(),
+                    );
+                    diagnostic.suggestion = Some("Rebuild from source into a new --graph-db-path; keep the old database as backup".into());
+                    out.diagnostics.push(diagnostic);
+                } else if tables_ok {
+                    out.evidence.push(
+                        Evidence::new("Graph database opened successfully", "redb open + schema + read")
+                            .with_source_file(db_path.to_string_lossy().to_string())
+                            .with_confidence(Confidence::High),
+                    );
+                }
+
             }
             Err(e) => {
                 let msg = e.to_string();

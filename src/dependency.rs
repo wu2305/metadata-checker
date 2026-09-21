@@ -353,7 +353,7 @@ fn expand_trace(
     }
     let clean = expression.strip_prefix('=').unwrap_or(expression);
     let parsed = crate::superpage::parse_expression_ast(clean);
-    if !parsed.diagnostics.is_empty() {
+    if parsed.ast.is_none() || !parsed.diagnostics.is_empty() {
         state.issue("TRACE_UNSUPPORTED_EXPRESSION", component_id, expression);
     }
     let component_ids = meta

@@ -134,3 +134,34 @@ fn unsupported_macro_is_preserved_and_reported_incomplete() {
         true
     );
 }
+
+// 无 AST 和未闭合结构不能被输出为 complete=true。
+#[test]
+fn malformed_syntax_never_claims_complete_trace() {
+    for expression in ["=", "=(1", "=\"unclosed", "=${b", "=CONCAT(1"] {
+        let meta = parse_superpage_from_value(serde_json::json!({"canvas":{"components":[
+            {"id":"a","type":"input","value":expression}
+        ]}})).unwrap();
+        let trace = trace_value_source(&meta, &DependencyGraph::new(&meta), "a", "value", 8).unwrap();
+        assert_eq!(trace.issues.iter().any(|issue| issue.code == "TRACE_UNSUPPORTED_EXPRESSION"), true, "{expression}");
+    }
+}
+
+// human 与 JSON 输出都必须暴露未完成原因。
+#[test]
+fn partial_trace_is_visible_in_both_output_modes() {
+    let meta = parse_superpage_from_value(serde_json::json!({"canvas":{"components":[
+        {"id":"a","type":"input","value":"=b.value"}
+    ]}})).unwrap();
+    let graph = DependencyGraph::new(&meta);
+    let mut json_output = Vec::new();
+    metadata_checker::output::print_component_query_json_to(&meta, &graph, "a", false, &mut json_output).unwrap();
+    let output: serde_json::Value = serde_json::from_slice(&json_output).unwrap();
+    assert_eq!(output["details"]["value_trace"]["complete"], false);
+    assert_eq!(output["details"]["value_trace"]["issues"][0]["code"], "TRACE_MISSING_VALUE");
+    let mut human_output = Vec::new();
+    metadata_checker::output::print_component_query_human_to(&meta, &graph, "a", false, &mut human_output).unwrap();
+    let human = String::from_utf8(human_output).unwrap();
+    assert_eq!(human.contains("Complete  : false"), true);
+    assert_eq!(human.contains("TRACE_MISSING_VALUE"), true);
+}

@@ -101,17 +101,23 @@ fn test_chinese_in_expression() {
 fn test_list_column_reference() {
     let refs = parse_expression_refs("=list1.column1.value + list1.column2.value");
 
-    assert_eq!(refs, vec![
-        RefType::ComponentProperty("list1".into(), "column1.value".into()),
-        RefType::ComponentProperty("list1".into(), "column2.value".into()),
-    ]);
+    assert_eq!(
+        refs,
+        vec![
+            RefType::ComponentProperty("list1".into(), "column1.value".into()),
+            RefType::ComponentProperty("list1".into(), "column2.value".into()),
+        ]
+    );
 }
 
 #[test]
 fn test_steps_step_reference() {
     let refs = parse_expression_refs("=steps1.step");
 
-    assert_eq!(refs, vec![RefType::ComponentProperty("steps1".into(), "step".into())]);
+    assert_eq!(
+        refs,
+        vec![RefType::ComponentProperty("steps1".into(), "step".into())]
+    );
 }
 
 #[test]
