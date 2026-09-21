@@ -965,7 +965,8 @@ fn session_refresh_query_diff_refresh_cycle_preserves_ownership() {
         runtime,
     );
     let diff_report = orchestrator.refresh_once().expect("diff refresh");
-    assert_eq!(diff_report.change_count, 0);
+    // 首轮 refresh_once 无 checkpoint，走 bootstrap 全量同步，消费全部 2 个 metafile
+    assert_eq!(diff_report.change_count, 2);
     assert_eq!(diff_report.warm_failures, Vec::<String>::new());
 
     // 4. 再次验证库内 ownership 状态完好
