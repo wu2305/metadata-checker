@@ -365,9 +365,15 @@ impl DiffRefreshOrchestrator {
 
         // 4. prepare candidate graph（不写盘）
         let stage = Instant::now();
-        let prepared =
-            ProjectIndexer::prepare(&project_mirror_root(&self.session_dir), &self.graph_db_path)
-                .context("prepare candidate graph")?;
+        let project_binding =
+            crate::ownership::ProjectBinding::new(self.manifest.project_ref.clone())
+                .context("invalid diff refresh project binding")?;
+        let prepared = ProjectIndexer::prepare_for_project(
+            &project_mirror_root(&self.session_dir),
+            &self.graph_db_path,
+            &project_binding,
+        )
+        .context("prepare candidate ownership graph")?;
         timing.prepare_ms = stage.elapsed().as_millis();
 
         // 5. prepare replacement read model/cache

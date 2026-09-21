@@ -947,7 +947,28 @@ impl ProjectIndexer {
     /// M58.3 复核返修：调用方须先把它们挂到 commit 的 scanner 载荷上
     /// （可与 pending 累积合并），再 persist，保证与图同事务落库。
     pub fn prepare(project_dir: &Path, db_path: &Path) -> Result<PreparedIndexUpdate> {
-        let mut graph = GraphDB::open(db_path)?;
+        Self::prepare_internal(project_dir, db_path, None)
+    }
+
+    /// 按稳定项目绑定准备 ownership 候选图，供 session/diff-refresh 生产路径使用。
+    pub fn prepare_for_project(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: &ProjectBinding,
+    ) -> Result<PreparedIndexUpdate> {
+        Self::prepare_internal(project_dir, db_path, Some(project_binding))
+    }
+
+    fn prepare_internal(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: Option<&ProjectBinding>,
+    ) -> Result<PreparedIndexUpdate> {
+        let ownership_enabled = project_binding.is_some();
+        let mut graph = match project_binding {
+            Some(binding) => GraphDB::open_with_ownership(db_path, binding)?,
+            None => GraphDB::open(db_path)?,
+        };
         let prev_states = graph.load_file_states().unwrap_or_default();
 
         let files = Self::discover_files(project_dir)?;
@@ -987,23 +1008,38 @@ impl ProjectIndexer {
         for failure in &parse_failures {
             scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
         }
-        // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
-        let merged_removed = merge_removed_node_ids(
-            updates
-                .iter()
-                .map(|update| update.previous_node_ids.as_slice())
-                .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
-        );
-        let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
-        // dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删（与 scan 一致）
-        let parsed_nodes =
-            Self::apply_incremental_changes(&mut graph, &mut new_states, &updates, &plan.deleted)?;
-        // M56：apply 后收集新增/变更节点的 incident edges
-        let new_node_ids: Vec<String> = parsed_nodes
-            .values()
-            .flat_map(|node_ids| node_ids.iter().cloned())
-            .collect();
-        let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+        let (parsed_nodes, removed_edge_keys, dirty_edges) = if ownership_enabled {
+            let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
+            let parsed_nodes =
+                apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
+            for (logical_path, _) in &plan.deleted {
+                new_states.remove(logical_path);
+            }
+            (parsed_nodes, Vec::new(), Vec::new())
+        } else {
+            // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
+            let merged_removed = merge_removed_node_ids(
+                updates
+                    .iter()
+                    .map(|update| update.previous_node_ids.as_slice())
+                    .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+            );
+            let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
+            // dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删（与 scan 一致）
+            let parsed_nodes = Self::apply_incremental_changes(
+                &mut graph,
+                &mut new_states,
+                &updates,
+                &plan.deleted,
+            )?;
+            // M56：apply 后收集新增/变更节点的 incident edges
+            let new_node_ids: Vec<String> = parsed_nodes
+                .values()
+                .flat_map(|node_ids| node_ids.iter().cloned())
+                .collect();
+            let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+            (parsed_nodes, removed_edge_keys, dirty_edges)
+        };
 
         // 完整 dirty IDs：dirty 文件旧节点 ∪ 新增节点（页面失效需覆盖两侧）
         let mut dirty_node_ids = merge_removed_node_ids(
@@ -1059,7 +1095,7 @@ impl ProjectIndexer {
             checkpoint: None,
             // M56：初始全量构建（无 prev states）走显式 full rebuild 路径
             //（v2 置 Current）；增量提交走 delta 路径（v2 置 Stale）
-            delta: if prev_states.is_empty() {
+            delta: if prev_states.is_empty() || ownership_enabled {
                 None
             } else {
                 Some(crate::graph_store::IndexDelta {
