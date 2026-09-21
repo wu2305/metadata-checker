@@ -163,3 +163,17 @@ P2 一并处置：spec「同 id 不兼容定义必须报告冲突」落地为 `l
 no-op 轮从账本重算，均随 IndexReportWithDiagnostics 透出，prepare 路径注明由后续全量
 扫描报告；确定性重建补单测（重复重建一致、冲突择一确定、共享 Reference 不冲突）；
 删除无调用方的 `group_ledgers` 与恒假死条件；「重复次数」表述按实现修正。
+
+修复过程中发现并一并修正：`tbl_primary_model` 原从 JSON `name` 取值，而解析器全局
+身份规则是**文件 stem**（tbl.rs），导致 TBL 主模型被误判为 Reference（占位降级风险）
+且同 stem 冲突无法报告；已改为与身份规则一致。冷脸报告的“TBL 同表名静默择一”前提
+据此修正为“同 stem 不同目录”。
+
+验证（CNB `cnb-beg-1k32624mn`，提交 `2ab4fc7`）：cargo fmt --check 通过；完整 native
+1279 passed / 0 failed / 24 ignored（106 组）；benches check、browser-wasm check 通过
+（WASM 8 条既有非本批 warning，与本轮前持平）。B5 10/10（含目标页 origin 独立断言、
+同 stem TBL 冲突报告与 no-op 重扫持续报告）、ownership 单测 5/5（确定性、冲突择一、
+共享 Reference 不冲突）。
+[原始日志与 SHA256](../../governance/evidence/2026-09-21-m59-2-ownership-ledger.json.gz)
+（归档 SHA256 `9c8c14f4189a4f982986dacb86be21d3bb720fa804d1fcc65e07cb9b314d4ce7`，
+覆盖 2ab4fc7 最终轮；2a66483 轮日志为同文件先前版本）。
