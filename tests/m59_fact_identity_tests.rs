@@ -234,9 +234,24 @@ fn shadow_only_database_cannot_be_silently_upgraded() {
     let layout = build_v2_layout(&source, &Default::default()).unwrap();
     let path = directory.join("shadow-only.redb");
     write_v2_shadow(&path, &layout).unwrap();
-    assert_eq!(GraphDB::open(&path).err().unwrap().to_string().contains("GRAPH_SCHEMA_STALE"), true);
+    assert_eq!(
+        GraphDB::open(&path)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("GRAPH_SCHEMA_STALE"),
+        true
+    );
     let database = redb::Database::open(&path).unwrap();
     let transaction = database.begin_read().unwrap();
-    let marker = transaction.open_table(TableDefinition::<&str, Vec<u8>>::new("meta")).ok().and_then(|table| table.get("fact_schema_version").unwrap().map(|value| value.value()));
+    let marker = transaction
+        .open_table(TableDefinition::<&str, Vec<u8>>::new("meta"))
+        .ok()
+        .and_then(|table| {
+            table
+                .get("fact_schema_version")
+                .unwrap()
+                .map(|value| value.value())
+        });
     assert_eq!(marker, None);
 }

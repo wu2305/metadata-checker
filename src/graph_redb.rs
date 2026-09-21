@@ -15,7 +15,9 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TableHandle};
+use redb::{
+    Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TableHandle,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -305,8 +307,11 @@ impl GraphDB {
                 .get(FACT_SCHEMA_VERSION_KEY)?
                 .map(|value| value.value());
             // 独立 shadow writer 可产生只有 v2 表的旧库；它也不是可自动初始化的空库。
-            let has_shadow_tables = write_txn.list_tables()?.any(|table| table.name().starts_with("v2_"));
-            let populated = has_shadow_tables || !write_txn.open_table(NODES_TABLE)?.is_empty()?
+            let has_shadow_tables = write_txn
+                .list_tables()?
+                .any(|table| table.name().starts_with("v2_"));
+            let populated = has_shadow_tables
+                || !write_txn.open_table(NODES_TABLE)?.is_empty()?
                 || !write_txn.open_table(EDGES_TABLE)?.is_empty()?
                 || !write_txn.open_table(FILE_STATES_TABLE)?.is_empty()?
                 || meta.get(META_DIFF_REFRESH_CHECKPOINT_KEY)?.is_some();

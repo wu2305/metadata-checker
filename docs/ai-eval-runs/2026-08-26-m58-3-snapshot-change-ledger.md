@@ -140,6 +140,6 @@ same_page=true（source_file_count=2）。`src/path.rs:938-942` 以 field_path �
 验证命令在 CNB：`cargo test --features cli-local --no-fail-fast`。
 新增语义反例位于 `m59_semantic_trace_tests`、`m59_fact_identity_tests`、`m59_identity_validation_tests`。
 复核决定：按 approved `2026-09-21-semantic-integrity-design.md` 的独立语义契约修正，
-不得以 redb 旧输出或双后端相等替代正确性。独立审查与最终运行证据见同目录本批验收记录。
+不得以 redb 旧输出或双后端相等替代正确性。独立审查与最终运行证据见[本批验收记录](2026-09-21-m59-semantic-integrity.md)。
 `tests/snapshots/corpus/` 未更改；调试期间生成的临时旧编码 fixture 数据库隔离后，
 从源文件重建，原 corpus 快照通过；未设置 `UPDATE_CORPUS_SNAPSHOTS`。
