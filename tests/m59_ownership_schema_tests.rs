@@ -188,6 +188,40 @@ fn incomplete_unknown_and_legacy_markers_are_never_repaired() {
                 ("project_binding", "project-a"),
             ],
         ),
+        ("ownership-only", &[("ownership_schema_version", "2")]),
+        (
+            "ownership-and-binding-only",
+            &[
+                ("ownership_schema_version", "2"),
+                ("project_binding", "project-a"),
+            ],
+        ),
+        (
+            "ownership-unknown-version",
+            &[
+                ("ownership_schema_version", "999"),
+                ("ownership_ledger_version", "1"),
+                ("project_binding_schema_version", "1"),
+                ("project_binding", "project-a"),
+            ],
+        ),
+        (
+            "ledger-unknown-version",
+            &[
+                ("ownership_schema_version", "2"),
+                ("ownership_ledger_version", "999"),
+                ("project_binding_schema_version", "1"),
+                ("project_binding", "project-a"),
+            ],
+        ),
+        (
+            "ownership-missing-ledger",
+            &[
+                ("ownership_schema_version", "2"),
+                ("project_binding_schema_version", "1"),
+                ("project_binding", "project-a"),
+            ],
+        ),
     ];
     for (label, entries) in states {
         let path = temp_db(label);
@@ -205,22 +239,35 @@ fn incomplete_unknown_and_legacy_markers_are_never_repaired() {
             }
             tx.commit().unwrap();
         }
+        let matching_binding = ProjectBinding::new("project-a").unwrap();
+        let other_binding = ProjectBinding::new("project-b").unwrap();
+        // 无论是匹配绑定还是其他绑定，不完整或未知状态均拒绝
         assert_eq!(
-            GraphDB::open_for_project(&path, &ProjectBinding::new("project-b").unwrap()).is_err(),
+            GraphDB::open_for_project(&path, &other_binding).is_err(),
             true,
-            "{label}"
+            "{label} open_for_project other"
         );
-        assert_eq!(GraphDB::open(&path).is_err(), true, "{label}");
+        assert_eq!(
+            GraphDB::open_with_ownership(&path, &matching_binding).is_err(),
+            true,
+            "{label} open_with_ownership matching"
+        );
+        assert_eq!(GraphDB::open(&path).is_err(), true, "{label} open legacy");
         let check = GraphDB::check_graph_db(&path);
-        assert_eq!(check.summary["needs_rebuild"], true, "{label}");
+        assert_eq!(
+            check.summary["needs_rebuild"], true,
+            "{label} check rebuild"
+        );
         assert_eq!(
             check
                 .diagnostics
                 .iter()
-                .any(|d| d.code == "GRAPH_OWNERSHIP_SCHEMA_STALE"),
+                .any(|d| d.code == "GRAPH_OWNERSHIP_SCHEMA_STALE"
+                    || d.code == "GRAPH_PROJECT_BINDING_REQUIRED"),
             true,
-            "{label}"
+            "{label} diagnostic"
         );
+        // 关键门槛断言：磁盘原库数据必须保持不变，绝不补写覆盖！
         let db = redb::Database::open(&path).unwrap();
         let tx = db.begin_read().unwrap();
         let meta = tx
@@ -230,6 +277,7 @@ fn incomplete_unknown_and_legacy_markers_are_never_repaired() {
             "project_binding",
             "project_binding_schema_version",
             "ownership_schema_version",
+            "ownership_ledger_version",
         ] {
             let expected = entries
                 .iter()
@@ -241,6 +289,7 @@ fn incomplete_unknown_and_legacy_markers_are_never_repaired() {
                 "{label}: {key}"
             );
         }
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -266,6 +315,54 @@ fn prepared_binding_does_not_write_ownership_marker() {
         meta.get("ownership_schema_version").unwrap().is_none(),
         true
     );
+}
+
+/// 验证 check_graph_db_for_project 与 CLI 访问在缺失、错误及匹配绑定时的诊断表现。
+#[test]
+fn check_graph_db_for_project_reports_exact_diagnostics() {
+    let path = temp_db("diag-checks");
+    let binding = ProjectBinding::new("project-a").unwrap();
+    let wrong_binding = ProjectBinding::new("project-b").unwrap();
+
+    let mut graph = GraphDB::open_with_ownership(&path, &binding).unwrap();
+    graph.add_node(
+        "page:app/a.spg".to_string(),
+        NodeType::Page,
+        "app/a.spg".to_string(),
+        "a".to_string(),
+        None,
+    );
+    graph.persist(&HashMap::new()).unwrap();
+
+    // 1. 无 binding 访问 bound db -> 报 GRAPH_PROJECT_BINDING_REQUIRED
+    let check_no_binding = GraphDB::check_graph_db_for_project(&path, None);
+    assert_eq!(check_no_binding.summary["readable"], false);
+    assert!(
+        check_no_binding
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "GRAPH_PROJECT_BINDING_REQUIRED"),
+        "缺失 binding 必须报 GRAPH_PROJECT_BINDING_REQUIRED"
+    );
+
+    // 2. 错误 binding 访问 bound db -> 报 GRAPH_PROJECT_BINDING_MISMATCH
+    let check_wrong = GraphDB::check_graph_db_for_project(&path, Some(&wrong_binding));
+    assert_eq!(check_wrong.summary["readable"], false);
+    assert!(
+        check_wrong
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "GRAPH_PROJECT_BINDING_MISMATCH"),
+        "错误 binding 必须报 GRAPH_PROJECT_BINDING_MISMATCH"
+    );
+
+    // 3. 正确 binding 访问 bound db -> readable: true，无报错
+    let check_correct = GraphDB::check_graph_db_for_project(&path, Some(&binding));
+    assert_eq!(check_correct.summary["readable"], true);
+    assert_eq!(check_correct.summary["needs_rebuild"], false);
+    assert!(check_correct.diagnostics.is_empty());
+
+    let _ = std::fs::remove_file(path);
 }
 
 /// JSON 输入不能绕过绑定构造器；阻断诊断必须传到消费方。

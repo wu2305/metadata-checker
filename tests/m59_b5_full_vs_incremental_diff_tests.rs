@@ -424,3 +424,545 @@ fn placeholder_page_node_is_reclaimed_after_its_only_referrer_is_deleted() {
         "独立预期：a.spg 的实体贡献必须全部撤销"
     );
 }
+
+// ------------------------------------------------------------------ 扩展场景辅助
+
+fn page_with_dwtable(title: &str, source_id: &str, tbl_path: &str) -> String {
+    serde_json::json!({
+        "version": "4.19.7",
+        "theme": "default",
+        "params": [],
+        "sources": [
+            {
+                "id": source_id,
+                "modelType": "dwtable",
+                "path": tbl_path
+            }
+        ],
+        "canvas": {
+            "id": "canvas",
+            "type": "canvas",
+            "components": [
+                {"id": "label", "type": "text", "value": title}
+            ]
+        }
+    })
+    .to_string()
+}
+
+fn table_json(name: &str, fields: &[&str]) -> String {
+    let dims: Vec<_> = fields
+        .iter()
+        .map(|f| serde_json::json!({"name": f, "dataType": "C"}))
+        .collect();
+    serde_json::json!({
+        "version": "1.0",
+        "name": name,
+        "dimensions": dims
+    })
+    .to_string()
+}
+
+/// 跨页同名 dwtable 必须局部隔离，物理表共享，且 dwtable 不得误降为 PhysicalTable。
+#[test]
+fn cross_page_same_name_dwtable_isolated_and_shared_physical_tables() {
+    let tag = "cross-page-same-name";
+    let binding = ProjectBinding::new(format!("m59-b5-{tag}")).expect("valid binding");
+
+    // 全量
+    let full_dir = unique_dir(&format!("{tag}-full"));
+    let full_project = full_dir.join("project");
+    write(
+        &full_project,
+        "app/a.spg",
+        &page_with_dwtable("Page A", "src1", "$DATA:/tables/tbl_a.tbl"),
+    );
+    write(
+        &full_project,
+        "app/b.spg",
+        &page_with_dwtable("Page B", "src1", "$DATA:/tables/tbl_b.tbl"),
+    );
+    write(
+        &full_project,
+        "app/c.spg",
+        &page_with_dwtable("Page C", "src_c", "$DATA:/tables/tbl_a.tbl"),
+    );
+    write(
+        &full_project,
+        "tables/tbl_a.tbl",
+        &table_json("tbl_a", &["f_a"]),
+    );
+    write(
+        &full_project,
+        "tables/tbl_b.tbl",
+        &table_json("tbl_b", &["f_b"]),
+    );
+    let full_db = full_dir.join("graph.db");
+    ProjectIndexer::scan_for_project(&full_project, &full_db, &binding).expect("full scan");
+
+    // 增量
+    let inc_dir = unique_dir(&format!("{tag}-inc"));
+    let inc_project = inc_dir.join("project");
+    write(
+        &inc_project,
+        "app/a.spg",
+        &page_with_dwtable("Page A", "src1", "$DATA:/tables/tbl_a.tbl"),
+    );
+    write(
+        &inc_project,
+        "tables/tbl_a.tbl",
+        &table_json("tbl_a", &["f_a"]),
+    );
+    let inc_db = inc_dir.join("graph.db");
+    ProjectIndexer::scan_for_project(&inc_project, &inc_db, &binding).expect("initial scan");
+
+    // 逐步加入 page B 和 page C
+    write(
+        &inc_project,
+        "app/b.spg",
+        &page_with_dwtable("Page B", "src1", "$DATA:/tables/tbl_b.tbl"),
+    );
+    write(
+        &inc_project,
+        "app/c.spg",
+        &page_with_dwtable("Page C", "src_c", "$DATA:/tables/tbl_a.tbl"),
+    );
+    write(
+        &inc_project,
+        "tables/tbl_b.tbl",
+        &table_json("tbl_b", &["f_b"]),
+    );
+    let report = ProjectIndexer::scan_for_project(&inc_project, &inc_db, &binding)
+        .expect("incremental scan");
+    assert!(report.dirty > 0);
+
+    let full_snap = snapshot(&full_db, &binding);
+    let inc_snap = snapshot(&inc_db, &binding);
+
+    assert_eq!(
+        full_snap.nodes,
+        inc_snap.nodes,
+        "跨页同名模型节点逐属性全量与增量必须完全一致：{}",
+        describe_diff("全量", &full_snap.nodes, "增量", &inc_snap.nodes)
+    );
+    assert_eq!(
+        full_snap.edges,
+        inc_snap.edges,
+        "跨页同名模型边逐属性全量与增量必须完全一致：{}",
+        describe_diff("全量", &full_snap.edges, "增量", &inc_snap.edges)
+    );
+
+    // 独立预期验证：局部模型隔离、物理表共享、dwtable 不被误改为 PhysicalTable
+    let graph = GraphDB::open_readonly_with_ownership(&inc_db, &binding).expect("open inc db");
+    let node_a = graph
+        .get_node("model:app/a.spg|src1")
+        .expect("local model A must exist");
+    let node_b = graph
+        .get_node("model:app/b.spg|src1")
+        .expect("local model B must exist");
+    assert_ne!(
+        node_a.id, node_b.id,
+        "两页同名 src1 必须拥有互不相同的局部节点 ID"
+    );
+
+    // 验证 modelType 仍为 dwtable，未被覆盖为 PhysicalTable
+    let meta_a = node_a.meta.as_ref().unwrap();
+    assert_eq!(
+        meta_a.get("modelType").unwrap().as_str().unwrap(),
+        "dwtable"
+    );
+    let meta_b = node_b.meta.as_ref().unwrap();
+    assert_eq!(
+        meta_b.get("modelType").unwrap().as_str().unwrap(),
+        "dwtable"
+    );
+
+    // 验证物理表共享：model:tbl_a 应同时接收来自 app/a.spg 与 app/c.spg 的输入边
+    let tbl_a_edges = GraphReadStore::get_node_edges(&graph, "model:tbl_a")
+        .unwrap()
+        .unwrap();
+    let incoming_sources: Vec<_> = tbl_a_edges
+        .incoming
+        .iter()
+        .map(|e| e.edge.from.clone())
+        .collect();
+    assert!(incoming_sources.contains(&"model:app/a.spg|src1".to_string()));
+    assert!(incoming_sources.contains(&"model:app/c.spg|src_c".to_string()));
+
+    let _ = std::fs::remove_dir_all(&full_dir);
+    let _ = std::fs::remove_dir_all(&inc_dir);
+}
+
+/// 共享目标修改/删除/恢复：全量与增量保持完全一致，且有独立预期。
+#[test]
+fn shared_table_modified_deleted_and_restored_maintains_parity_and_independent_state() {
+    let tag = "shared-tbl-lifecycle";
+    let binding = ProjectBinding::new(format!("m59-b5-{tag}")).expect("valid binding");
+
+    let full_dir = unique_dir(&format!("{tag}-full"));
+    let full_project = full_dir.join("project");
+    let full_db = full_dir.join("graph.db");
+
+    let inc_dir = unique_dir(&format!("{tag}-inc"));
+    let inc_project = inc_dir.join("project");
+    let inc_db = inc_dir.join("graph.db");
+
+    // 阶段 1：初始状态，两页引用 shared.tbl，shared.tbl 存在
+    let p_a = page_with_dwtable("Page A", "src_a", "$DATA:/tables/shared.tbl");
+    let p_b = page_with_dwtable("Page B", "src_b", "$DATA:/tables/shared.tbl");
+    let t_init = table_json("shared", &["col1", "col2"]);
+
+    write(&full_project, "app/a.spg", &p_a);
+    write(&full_project, "app/b.spg", &p_b);
+    write(&full_project, "tables/shared.tbl", &t_init);
+    ProjectIndexer::scan_for_project(&full_project, &full_db, &binding).expect("full 1");
+
+    write(&inc_project, "app/a.spg", &p_a);
+    write(&inc_project, "app/b.spg", &p_b);
+    write(&inc_project, "tables/shared.tbl", &t_init);
+    ProjectIndexer::scan_for_project(&inc_project, &inc_db, &binding).expect("inc 1");
+
+    let snap_full_1 = snapshot(&full_db, &binding);
+    let snap_inc_1 = snapshot(&inc_db, &binding);
+    assert_eq!(snap_full_1.nodes, snap_inc_1.nodes, "阶段1节点一致");
+    assert_eq!(snap_full_1.edges, snap_inc_1.edges, "阶段1边一致");
+
+    // 阶段 2：修改 shared.tbl（新增 col3）
+    let t_mod = table_json("shared", &["col1", "col2", "col3"]);
+    write(&full_project, "tables/shared.tbl", &t_mod);
+    ProjectIndexer::scan_for_project(&full_project, &full_db, &binding).expect("full 2");
+
+    write(&inc_project, "tables/shared.tbl", &t_mod);
+    let r2 = ProjectIndexer::scan_for_project(&inc_project, &inc_db, &binding).expect("inc 2");
+    assert!(r2.dirty > 0);
+
+    let snap_full_2 = snapshot(&full_db, &binding);
+    let snap_inc_2 = snapshot(&inc_db, &binding);
+    assert_eq!(snap_full_2.nodes, snap_inc_2.nodes, "阶段2修改后节点一致");
+    assert_eq!(snap_full_2.edges, snap_inc_2.edges, "阶段2修改后边一致");
+    assert!(
+        snap_inc_2
+            .nodes
+            .iter()
+            .any(|n| n.contains("field:shared.col3")),
+        "独立预期：新字段 col3 存在"
+    );
+
+    // 阶段 3：删除 shared.tbl（两页仍引用它，应降为 PhysicalTable 占位节点）
+    std::fs::remove_file(full_project.join("tables/shared.tbl")).expect("rm full shared.tbl");
+    ProjectIndexer::scan_for_project(&full_project, &full_db, &binding).expect("full 3");
+
+    std::fs::remove_file(inc_project.join("tables/shared.tbl")).expect("rm inc shared.tbl");
+    let r3 = ProjectIndexer::scan_for_project(&inc_project, &inc_db, &binding).expect("inc 3");
+    assert_eq!(r3.deleted, 1);
+
+    let snap_full_3 = snapshot(&full_db, &binding);
+    let snap_inc_3 = snapshot(&inc_db, &binding);
+    assert_eq!(snap_full_3.nodes, snap_inc_3.nodes, "阶段3删除后节点一致");
+    assert_eq!(snap_full_3.edges, snap_inc_3.edges, "阶段3删除后边一致");
+    // 独立预期：model:shared 依然存在（作为占位节点），但 field:shared.col* 被移除
+    assert!(
+        snap_inc_3
+            .nodes
+            .iter()
+            .any(|n| n.starts_with("model:shared\t")),
+        "独立预期：model:shared 占位节点保留"
+    );
+    assert!(
+        !snap_inc_3
+            .nodes
+            .iter()
+            .any(|n| n.contains("field:shared.col3")),
+        "独立预期：定义被删除后字段移除"
+    );
+
+    // 阶段 4：恢复 shared.tbl
+    write(&full_project, "tables/shared.tbl", &t_init);
+    ProjectIndexer::scan_for_project(&full_project, &full_db, &binding).expect("full 4");
+
+    write(&inc_project, "tables/shared.tbl", &t_init);
+    let r4 = ProjectIndexer::scan_for_project(&inc_project, &inc_db, &binding).expect("inc 4");
+    assert!(r4.dirty > 0);
+
+    let snap_full_4 = snapshot(&full_db, &binding);
+    let snap_inc_4 = snapshot(&inc_db, &binding);
+    assert_eq!(snap_full_4.nodes, snap_inc_4.nodes, "阶段4恢复后节点一致");
+    assert_eq!(snap_full_4.edges, snap_inc_4.edges, "阶段4恢复后边一致");
+    assert!(
+        snap_inc_4
+            .nodes
+            .iter()
+            .any(|n| n.contains("field:shared.col1")),
+        "独立预期：恢复后字段重新出现"
+    );
+
+    let _ = std::fs::remove_dir_all(&full_dir);
+    let _ = std::fs::remove_dir_all(&inc_dir);
+}
+
+/// 坏 TBL 在增量扫描中必须保留旧图，修复后重新入图并与全量保持一致。
+#[test]
+fn bad_tbl_preserves_old_graph_and_recovers_upon_repair() {
+    let tag = "bad-tbl-recovery";
+    let binding = ProjectBinding::new(format!("m59-b5-{tag}")).expect("valid binding");
+
+    let full_dir = unique_dir(&format!("{tag}-full"));
+    let full_project = full_dir.join("project");
+    let full_db = full_dir.join("graph.db");
+
+    let inc_dir = unique_dir(&format!("{tag}-inc"));
+    let inc_project = inc_dir.join("project");
+    let inc_db = inc_dir.join("graph.db");
+
+    let p_a = page_with_dwtable("Page A", "src_a", "$DATA:/tables/orders.tbl");
+    let t_good = table_json("orders", &["order_id", "amount"]);
+
+    write(&full_project, "app/a.spg", &p_a);
+    write(&full_project, "tables/orders.tbl", &t_good);
+    ProjectIndexer::scan_for_project(&full_project, &full_db, &binding).expect("full init");
+
+    write(&inc_project, "app/a.spg", &p_a);
+    write(&inc_project, "tables/orders.tbl", &t_good);
+    ProjectIndexer::scan_for_project(&inc_project, &inc_db, &binding).expect("inc init");
+
+    let snap_init = snapshot(&inc_db, &binding);
+    assert!(
+        snap_init
+            .nodes
+            .iter()
+            .any(|n| n.contains("field:orders.amount"))
+    );
+
+    // 写入语法错误的坏 TBL
+    write(
+        &inc_project,
+        "tables/orders.tbl",
+        "{ invalid json syntax -- not closed",
+    );
+    let with_diags =
+        ProjectIndexer::scan_with_diagnostics_for_project(&inc_project, &inc_db, &binding)
+            .expect("scan with error should succeed without panic");
+    assert!(
+        with_diags
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "SCANNER_FILE_PARSE_FAILED"),
+        "必须产生 SCANNER_FILE_PARSE_FAILED 诊断"
+    );
+
+    // 独立预期：旧图被完整保留，field:orders.amount 仍在
+    let snap_during_bad = snapshot(&inc_db, &binding);
+    assert_eq!(
+        snap_init.nodes, snap_during_bad.nodes,
+        "坏 TBL 解析失败时，旧图节点必须原样保留！"
+    );
+
+    // 修复坏 TBL 并增加字段
+    let t_repaired = table_json("orders", &["order_id", "amount", "customer"]);
+    write(&full_project, "tables/orders.tbl", &t_repaired);
+    ProjectIndexer::scan_for_project(&full_project, &full_db, &binding).expect("full repaired");
+
+    write(&inc_project, "tables/orders.tbl", &t_repaired);
+    let rep_report =
+        ProjectIndexer::scan_with_diagnostics_for_project(&inc_project, &inc_db, &binding)
+            .expect("inc repaired");
+    assert!(
+        !rep_report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "SCANNER_FILE_PARSE_FAILED"),
+        "修复后解析失败诊断必须消除"
+    );
+
+    let snap_full_repaired = snapshot(&full_db, &binding);
+    let snap_inc_repaired = snapshot(&inc_db, &binding);
+    assert_eq!(
+        snap_full_repaired.nodes, snap_inc_repaired.nodes,
+        "修复后全量与增量节点完全一致"
+    );
+    assert_eq!(
+        snap_full_repaired.edges, snap_inc_repaired.edges,
+        "修复后全量与增量边完全一致"
+    );
+    assert!(
+        snap_inc_repaired
+            .nodes
+            .iter()
+            .any(|n| n.contains("field:orders.customer")),
+        "独立预期：customer 字段入图"
+    );
+
+    let _ = std::fs::remove_dir_all(&full_dir);
+    let _ = std::fs::remove_dir_all(&inc_dir);
+}
+
+/// 重启：扫描持久化后关闭，重新以 bound / ownership 打开，图与账本状态一致。
+#[test]
+fn ownership_graph_reopens_and_restarts_cleanly() {
+    let tag = "restart";
+    let binding = ProjectBinding::new(format!("m59-b5-{tag}")).expect("valid binding");
+    let dir = unique_dir(tag);
+    let project = dir.join("project");
+    let db_path = dir.join("graph.db");
+
+    write(
+        &project,
+        "app/a.spg",
+        &page_with_dwtable("Page A", "src1", "$DATA:/tables/orders.tbl"),
+    );
+    write(
+        &project,
+        "tables/orders.tbl",
+        &table_json("orders", &["f1", "f2"]),
+    );
+
+    ProjectIndexer::scan_for_project(&project, &db_path, &binding).expect("initial scan");
+
+    // 重启 1：以 open_for_project 打开
+    {
+        let graph = GraphDB::open_for_project(&db_path, &binding).expect("open_for_project");
+        assert_eq!(graph.project_binding.as_ref(), Some(&binding));
+        assert!(graph.node_indices.len() > 0);
+    }
+
+    // 重启 2：以 open_readonly_with_ownership 打开
+    {
+        let graph = GraphDB::open_readonly_with_ownership(&db_path, &binding)
+            .expect("open_readonly_with_ownership");
+        assert_eq!(graph.project_binding.as_ref(), Some(&binding));
+        assert!(graph.ownership_enabled);
+        assert_eq!(graph.ownership_ledgers().unwrap().len(), 2);
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 验证 session refresh → query → diff-refresh 完整链路中，ownership 与 project_binding 严格贯通。
+#[test]
+fn session_refresh_query_diff_refresh_cycle_preserves_ownership() {
+    use metadata_checker::diff_refresh::FixtureMetaFilesChangeSource;
+    use metadata_checker::diff_refresh::orchestrator::DiffRefreshOrchestrator;
+    use metadata_checker::remote_metadata::MetadataContentType;
+    use metadata_checker::runtime::{GraphRuntime, RuntimeMode};
+    use metadata_checker::session::SessionManager;
+    use metadata_checker::session::remote_provider::{
+        InMemoryRemoteSessionProvider, RemoteFileContent, RemoteMetafileEntry, RemoteProjectInfo,
+    };
+    use metadata_checker::session::remote_sync::{
+        SessionRefreshOptions, refresh_session_from_remote,
+    };
+
+    let tag = "session-cycle";
+    let dir = unique_dir(tag);
+    let manager = SessionManager::new(&dir);
+    let session_id = "s1";
+    let project_ref = "test-proj";
+    let binding = ProjectBinding::new(project_ref).expect("valid binding");
+
+    let mut provider = InMemoryRemoteSessionProvider::new();
+    provider
+        .register_project(RemoteProjectInfo {
+            project_ref: project_ref.to_string(),
+            project_name: project_ref.to_string(),
+            source_origin: "remote".to_string(),
+        })
+        .unwrap();
+
+    let page_content = page_with_dwtable("Page A", "src1", "$DATA:/tables/table1.tbl");
+    let table_content = table_json("table1", &["id", "name"]);
+
+    provider
+        .add_metafile(
+            RemoteMetafileEntry {
+                project_ref: project_ref.to_string(),
+                source_path: "app/Page.spg".to_string(),
+                file_id: Some("id1".to_string()),
+                revision: Some("1".to_string()),
+                etag: None,
+                mtime: Some(1715000000000),
+                size: Some(page_content.len() as u64),
+                deleted: false,
+            },
+            RemoteFileContent {
+                source_path: "app/Page.spg".to_string(),
+                file_id: Some("id1".to_string()),
+                revision: Some("1".to_string()),
+                content_type: MetadataContentType::SuperPage,
+                raw_text: page_content,
+            },
+        )
+        .unwrap();
+
+    provider
+        .add_metafile(
+            RemoteMetafileEntry {
+                project_ref: project_ref.to_string(),
+                source_path: "tables/table1.tbl".to_string(),
+                file_id: Some("id2".to_string()),
+                revision: Some("1".to_string()),
+                etag: None,
+                mtime: Some(1715000000000),
+                size: Some(table_content.len() as u64),
+                deleted: false,
+            },
+            RemoteFileContent {
+                source_path: "tables/table1.tbl".to_string(),
+                file_id: Some("id2".to_string()),
+                revision: Some("1".to_string()),
+                content_type: MetadataContentType::Table,
+                raw_text: table_content,
+            },
+        )
+        .unwrap();
+
+    // 1. Session refresh
+    let refresh_report = refresh_session_from_remote(
+        &provider,
+        &manager,
+        SessionRefreshOptions {
+            session_id: session_id.to_string(),
+            remote_server: "https://bi.test".to_string(),
+            project_ref: project_ref.to_string(),
+            project_name: project_ref.to_string(),
+            sync_mode: metadata_checker::session::sync::SessionSyncMode::Full,
+            create_if_missing: true,
+            filter: None,
+            graph_db_path: None,
+        },
+    )
+    .expect("session refresh");
+    assert!(refresh_report.ok);
+    assert_eq!(refresh_report.index.indexed, 2);
+
+    let graph_db_path = PathBuf::from(&refresh_report.graph_db_path);
+
+    // 2. Query runtime 加载
+    let runtime = GraphRuntime::load_with_project_dir_and_mode_for_project(
+        &graph_db_path,
+        None,
+        RuntimeMode::OneShot,
+        &binding,
+    )
+    .expect("runtime load with project binding");
+    assert_eq!(runtime.project_binding.as_ref(), Some(&binding));
+
+    // 3. Diff-refresh
+    let fixture_json = r#"{
+      "schema_version": 1,
+      "cursor": {"updated_at_ms": 1715000000000, "boundary_event_ids": []},
+      "changes": []
+    }"#;
+    let source = FixtureMetaFilesChangeSource::from_json_str(fixture_json).unwrap();
+    let mut orchestrator = DiffRefreshOrchestrator::new(manager, session_id, source).unwrap();
+    let diff_report = orchestrator.refresh_once().expect("diff refresh");
+    assert!(diff_report.ok);
+
+    // 4. 再次验证库内 ownership 状态完好
+    let graph = GraphDB::open_readonly_with_ownership(&graph_db_path, &binding)
+        .expect("reopen with ownership after diff-refresh");
+    assert_eq!(graph.project_binding.as_ref(), Some(&binding));
+    assert!(graph.ownership_enabled);
+    assert_eq!(graph.ownership_ledgers().unwrap().len(), 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

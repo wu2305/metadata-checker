@@ -75,24 +75,109 @@ fn ledger_from_parsed_content(
     }
     let mut ledger = FileContributionLedger::new(logical_path, "");
     let nodes: Vec<Node> = temporary.iter_nodes()?.collect();
-    let local_id_map: HashMap<String, String> = nodes
-        .iter()
-        .filter(|node| {
-            logical_path.ends_with(".spg")
-                && node.path == logical_path
-                && matches!(node.node_type, NodeType::Model | NodeType::Field)
-                && !node.id.contains('|')
-        })
-        .map(|node| {
-            (
-                node.id.clone(),
-                page_scope_model_id(logical_path, &node.id).unwrap_or_else(|_| node.id.clone()),
-            )
-        })
-        .collect();
+
+    let is_spg = logical_path.ends_with(".spg");
+    let is_tbl = logical_path.ends_with(".tbl");
+
+    // 1. 识别 SPG 中的页面局部模型集合：不能仅凭 node.path == SPG 路径识别
+    let mut local_model_names = HashSet::new();
+    if is_spg {
+        for node in &nodes {
+            if node.node_type == NodeType::Model {
+                let model_type = node
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("modelType"))
+                    .and_then(|v| v.as_str());
+                if matches!(model_type, Some("DataFlow" | "dwtable"))
+                    || (node.path == logical_path && model_type != Some("PhysicalTable"))
+                {
+                    local_model_names.insert(node.name.clone());
+                }
+            }
+        }
+    }
+
+    // 2. 构造局部 ID 映射表，身份转换失败不得静默回退旧 ID
+    let mut local_id_map = HashMap::new();
+    if is_spg {
+        for node in &nodes {
+            if node.id.contains('|') {
+                continue;
+            }
+            let is_local = match node.node_type {
+                NodeType::Model => local_model_names.contains(&node.name),
+                NodeType::Field => {
+                    if let Some(rest) = node.id.strip_prefix("field:") {
+                        let (model_prefix, _) = rest.split_once('.').unwrap_or((rest, ""));
+                        local_model_names.contains(model_prefix)
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+            if is_local {
+                let mapped = page_scope_model_id(logical_path, &node.id)?;
+                local_id_map.insert(node.id.clone(), mapped);
+            }
+        }
+    }
+
+    // 3. TBL 主模型名称
+    let tbl_primary_model = if is_tbl {
+        match content {
+            ParsedGraphContent::Tbl(text) => {
+                let val: Option<serde_json::Value> = serde_json::from_str(text).ok();
+                val.and_then(|v| {
+                    v.get("name")
+                        .and_then(|n| n.as_str())
+                        .map(|s| s.to_string())
+                })
+                .or_else(|| {
+                    Path::new(logical_path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.to_string())
+                })
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    // 4. 判定 Definition vs Reference
     let node_ids: HashSet<String> = nodes.iter().map(|node| node.id.clone()).collect();
     for mut node in nodes {
-        let is_definition = node.path == logical_path;
+        let is_definition = if is_spg {
+            match node.node_type {
+                NodeType::Page | NodeType::Component | NodeType::Condition | NodeType::Action => {
+                    true
+                }
+                NodeType::Model => local_model_names.contains(&node.name),
+                NodeType::Field => {
+                    if let Some(rest) = node.id.strip_prefix("field:") {
+                        let (model_prefix, _) = rest.split_once('.').unwrap_or((rest, ""));
+                        local_model_names.contains(model_prefix)
+                            || (node.path == logical_path && !node.id.starts_with("field:"))
+                    } else {
+                        node.path == logical_path
+                    }
+                }
+            }
+        } else if is_tbl {
+            if let Some(ref primary) = tbl_primary_model {
+                let primary_model_id = format!("model:{}", primary);
+                let primary_field_prefix = format!("field:{}.", primary);
+                node.id == primary_model_id || node.id.starts_with(&primary_field_prefix)
+            } else {
+                node.path == logical_path
+            }
+        } else {
+            node.path == logical_path
+        };
+
         if let Some(mapped_id) = local_id_map.get(&node.id) {
             node.id = mapped_id.clone();
         }
@@ -107,6 +192,7 @@ fn ledger_from_parsed_content(
             },
         });
     }
+
     let mut edge_ids: Vec<String> = node_ids.into_iter().collect();
     edge_ids.sort();
     for node_id in edge_ids {
