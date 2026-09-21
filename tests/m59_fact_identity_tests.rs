@@ -222,3 +222,21 @@ fn scanner_preserves_property_targets_and_each_source_field() {
         ]
     );
 }
+
+// 只有 shadow 的旧库不能被补写版本号后冒充新事实库，拒载也不得落盘版本键。
+#[test]
+fn shadow_only_database_cannot_be_silently_upgraded() {
+    use metadata_checker::graph_redb_v2::{build_v2_layout, write_v2_shadow};
+    use redb::{ReadableDatabase, TableDefinition};
+    let directory = unique_temp_dir();
+    let mut source = GraphDB::open(&directory.join("source.redb")).unwrap();
+    seed_and_assert(&mut source, false);
+    let layout = build_v2_layout(&source, &Default::default()).unwrap();
+    let path = directory.join("shadow-only.redb");
+    write_v2_shadow(&path, &layout).unwrap();
+    assert_eq!(GraphDB::open(&path).err().unwrap().to_string().contains("GRAPH_SCHEMA_STALE"), true);
+    let database = redb::Database::open(&path).unwrap();
+    let transaction = database.begin_read().unwrap();
+    let marker = transaction.open_table(TableDefinition::<&str, Vec<u8>>::new("meta")).ok().and_then(|table| table.get("fact_schema_version").unwrap().map(|value| value.value()));
+    assert_eq!(marker, None);
+}
