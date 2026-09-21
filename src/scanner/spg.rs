@@ -444,25 +444,6 @@ fn extract_single_bare_symbol(raw_expr: &str) -> Option<String> {
 /// `ModelField(modelN, "")`）**不再**造 `field:modelN.` 尾点节点——那是个没有字段
 /// 语义的垃圾节点，只会在 dataflow/lineage 里冒充一个字段。返回值第二项因此
 /// 改为 `Option`：`None` 表示本次只有模型级语义，调用方不应建字段级边。
-fn ensure_model_field(
-    graph: &mut dyn GraphWriteStore,
-    model: &str,
-    field: &str,
-    model_path: &str,
-    field_meta: Option<serde_json::Value>,
-) -> Result<(String, Option<String>)> {
-    // 旧全局口径：所有 model/field 都是全局 id（无页面段），保持既有行为。
-    ensure_model_field_with_scope(
-        graph,
-        model,
-        field,
-        model_path,
-        field_meta,
-        ModelIdentity::Global,
-        None,
-    )
-}
-
 /// 身份归属：决定一个 model/field 名字解析成页面局部 id 还是全局 id。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelIdentity {
@@ -570,20 +551,6 @@ fn resolve_physical_table_name(model_path: &str) -> Option<String> {
 }
 
 /// 添加从 from_id 读取 model.field 的关系边。
-fn add_model_read(
-    graph: &mut dyn GraphWriteStore,
-    from_id: &str,
-    model: &str,
-    field: &str,
-    model_path: &str,
-    edge_meta: serde_json::Value,
-    edge_type: EdgeType,
-) -> Result<()> {
-    add_model_read_with_scope(
-        graph, from_id, model, field, model_path, edge_meta, edge_type, None,
-    )
-}
-
 fn add_model_read_with_scope(
     graph: &mut dyn GraphWriteStore,
     from_id: &str,
@@ -672,20 +639,6 @@ fn add_model_read_with_scope(
 }
 
 /// 添加从 from_id 写入 model.field 的关系边。
-fn add_model_write(
-    graph: &mut dyn GraphWriteStore,
-    from_id: &str,
-    model: &str,
-    field: &str,
-    model_path: &str,
-    edge_type: EdgeType,
-    edge_meta: serde_json::Value,
-) -> Result<()> {
-    add_model_write_with_scope(
-        graph, from_id, model, field, model_path, edge_type, edge_meta, None,
-    )
-}
-
 fn add_model_write_with_scope(
     graph: &mut dyn GraphWriteStore,
     from_id: &str,
