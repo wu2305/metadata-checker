@@ -18,7 +18,9 @@ pub fn add_node(
         crate::graph_identity::global_node_id(crate::graph_identity::NodeIdKind::Model, local)?
     } else if let Some(local) = id.strip_prefix("field:") {
         crate::graph_identity::global_node_id(crate::graph_identity::NodeIdKind::Field, local)?
-    } else { id };
+    } else {
+        id
+    };
     graph
         .upsert_node(Node {
             id,

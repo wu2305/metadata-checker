@@ -161,6 +161,10 @@ pub fn answer_effect(code: &str) -> Option<(AnswerImpact, &'static str)> {
             "页面限定的模型目标未命中，已回退到全局模型；该结论只覆盖回退后可见的部分。",
         ),
         // 加载诊断序列化失败被兜底替换：原诊断内容没有透出，诊断覆盖面本身不完整
+        "TRACE_INCOMPLETE" => (
+            Partial,
+            "值来源只完成部分追溯；未展开引用的原因见 details.value_trace.issues，不得把它们当成已确认的最终来源。",
+        ),
         "DIAGNOSTIC_SERIALIZE_FAILED" => (
             Partial,
             "有一条加载诊断序列化失败，已被兜底诊断替换；原诊断内容未透出，结论应保守回答。",

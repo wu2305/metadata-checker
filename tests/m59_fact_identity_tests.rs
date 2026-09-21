@@ -146,14 +146,34 @@ fn missing_version_on_nonempty_database_is_rejected_without_upgrade() {
     );
     let check = GraphDB::check_graph_db(&path);
     assert_eq!(check.summary["needs_rebuild"], true);
-    assert_eq!(check.diagnostics.iter().any(|item| item.code == "GRAPH_SCHEMA_STALE"), true);
+    assert_eq!(
+        check
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "GRAPH_SCHEMA_STALE"),
+        true
+    );
     let response = std::process::Command::new(env!("CARGO_BIN_EXE_metadata-checker"))
-        .args(["--project-dir", directory.to_str().unwrap(), "--graph-db-path", path.to_str().unwrap(), "--query-page", "page.spg"])
-        .output().unwrap();
+        .args([
+            "--project-dir",
+            directory.to_str().unwrap(),
+            "--graph-db-path",
+            path.to_str().unwrap(),
+            "--query-page",
+            "page.spg",
+        ])
+        .output()
+        .unwrap();
     let output: serde_json::Value = serde_json::from_slice(&response.stdout).unwrap();
     assert_eq!(output["summary"]["needs_rebuild"], true);
-    assert_eq!(output["diagnostics"].as_array().unwrap().iter().any(|item| item["code"] == "GRAPH_SCHEMA_STALE"), true);
-
+    assert_eq!(
+        output["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["code"] == "GRAPH_SCHEMA_STALE"),
+        true
+    );
 }
 
 // 从真实 scanner 入口验证属性语义与同关系的不同来源，而非只测 store。

@@ -28,7 +28,8 @@
 //! `<PAGE>` 与引用解析都先过 [`normalize_project_path`]：分隔符统一 `/`、
 //! 消解 `.` 与 `..`、越界报错。**本模块在 M59-2 的 schema 版本开关就绪前
 //! 不接入扫描写入与引用解析**——不得在旧 schema 下默认写入新 id 或混写
-//! 新旧路径形态（plan 交付边界）。
+//! 新旧路径形态（plan 交付边界）。全局身份的保留分隔符校验已接入 native scanner，
+//! 仅拒绝歧义输入，不启用页面局部编码。
 
 use crate::graph::NodeType;
 use crate::graph_store::{GraphReadStore, GraphStoreResult};
@@ -93,7 +94,11 @@ impl fmt::Display for IdentityError {
                 write!(f, "path escapes the project root: {}", path)
             }
             IdentityError::AbsolutePath { path } => {
-                write!(f, "expected project-relative path, got absolute or drive path: {}", path)
+                write!(
+                    f,
+                    "expected project-relative path, got absolute or drive path: {}",
+                    path
+                )
             }
             IdentityError::ReservedSeparator { value } => {
                 write!(f, "identity segment contains reserved separator: {}", value)
@@ -158,15 +163,25 @@ pub fn resolve_relative_reference(
 /// 拼接前拒绝根路径和盘符路径，避免拼接掩盖绝对引用。
 fn reject_absolute_path(path: &str) -> Result<(), IdentityError> {
     if path.starts_with(['/', '\\']) || path.as_bytes().get(1) == Some(&b':') {
-        return Err(IdentityError::AbsolutePath { path: path.to_string() });
+        return Err(IdentityError::AbsolutePath {
+            path: path.to_string(),
+        });
     }
     Ok(())
 }
 
 /// 构造全局身份；物理模型不能借保留分隔符伪装为局部身份。
 pub fn global_node_id(kind: NodeIdKind, local: &str) -> Result<String, IdentityError> {
-    if local.is_empty() { return Err(IdentityError::EmptySegment { id: kind.as_str().to_string() }); }
-    if local.contains('|') { return Err(IdentityError::ReservedSeparator { value: local.to_string() }); }
+    if local.is_empty() {
+        return Err(IdentityError::EmptySegment {
+            id: kind.as_str().to_string(),
+        });
+    }
+    if local.contains('|') {
+        return Err(IdentityError::ReservedSeparator {
+            value: local.to_string(),
+        });
+    }
     Ok(format!("{}:{}", kind.as_str(), local))
 }
 

@@ -593,7 +593,11 @@ impl Parser {
                 if self.current == Token::RParen {
                     self.advance();
                 } else {
-                    self.diagnostics.push(ExprDiagnostic { code: "EXPR_PARSE_ERROR".into(), message: "括号表达式缺少右括号".into(), position: Some(self.tokenizer.pos) });
+                    self.diagnostics.push(ExprDiagnostic {
+                        code: "EXPR_PARSE_ERROR".into(),
+                        message: "括号表达式缺少右括号".into(),
+                        position: Some(self.tokenizer.pos),
+                    });
                 }
                 Some(expr)
             }
