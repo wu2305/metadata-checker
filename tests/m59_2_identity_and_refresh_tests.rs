@@ -207,21 +207,23 @@ fn local_source_sharing_name_with_physical_table_stays_distinct() {
     );
     assert!(self_loops.is_empty(), "不得出现 DataflowInput 自环");
 
-    // 全图范围内也不得有任何自环的 DataflowInput
+    // 全图范围内也不得有任何 DataflowInput 自环
     let snapshot = snapshot(&db, &binding);
-    for edge in &snapshot.edges {
-        if let Some(rest) = edge.strip_prefix("model:") {
-            let (from, _) = rest.split_once(" -DataflowInput-> ").unwrap_or(("", ""));
-            let to = edge
-                .split(" -DataflowInput-> ")
-                .nth(1)
-                .unwrap_or("")
-                .split('\t')
-                .next()
-                .unwrap_or("");
-            assert_ne!(from, to, "禁止 DataflowInput 自环：{edge}");
-        }
-    }
+    let self_loop_edges: Vec<&String> = snapshot
+        .edges
+        .iter()
+        .filter(|edge| {
+            let Some((from, rest)) = edge.split_once(" -DataflowInput-> ") else {
+                return false;
+            };
+            let to = rest.split('\t').next().unwrap_or("");
+            from == to
+        })
+        .collect();
+    assert!(
+        self_loop_edges.is_empty(),
+        "禁止 DataflowInput 自环：{self_loop_edges:?}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
