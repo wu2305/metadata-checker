@@ -210,6 +210,21 @@ fn setup_bound_session(
     PathBuf,
     ProjectBinding,
 ) {
+    setup_bound_session_opts(name, table_text, true)
+}
+
+/// 同上，但 `seed_checkpoint=false` 时不预置 checkpoint——用于复现 bootstrap 轮。
+fn setup_bound_session_opts(
+    name: &str,
+    table_text: &str,
+    seed_checkpoint: bool,
+) -> (
+    SessionManager,
+    PathBuf,
+    SessionManifest,
+    PathBuf,
+    ProjectBinding,
+) {
     let root = test_root(name);
     let manager = SessionManager::new(&root);
     manager
@@ -240,20 +255,23 @@ fn setup_bound_session(
     manifest.graph_db_path = db_path.to_string_lossy().to_string();
     manager.write_manifest(&manifest).expect("write manifest");
 
-    let mut graph = GraphDB::open_with_ownership(&db_path, &binding).expect("open for checkpoint");
-    let commit = IndexCommit {
-        file_states: graph.load_file_states().expect("load states"),
-        dirty_nodes: Vec::new(),
-        deleted_nodes: Vec::new(),
-        checkpoint: Some(DiffRefreshCheckpoint {
-            active: SourceCursor::new(500, Vec::new()),
-            deleted: SourceCursor::new(0, Vec::new()),
-        }),
-        delta: None,
-        scanner_entries: Vec::new(),
-        scanner_deleted_paths: Vec::new(),
-    };
-    IndexStateStore::persist_index(&mut graph, commit).expect("seed checkpoint");
+    if seed_checkpoint {
+        let mut graph =
+            GraphDB::open_with_ownership(&db_path, &binding).expect("open for checkpoint");
+        let commit = IndexCommit {
+            file_states: graph.load_file_states().expect("load states"),
+            dirty_nodes: Vec::new(),
+            deleted_nodes: Vec::new(),
+            checkpoint: Some(DiffRefreshCheckpoint {
+                active: SourceCursor::new(500, Vec::new()),
+                deleted: SourceCursor::new(0, Vec::new()),
+            }),
+            delta: None,
+            scanner_entries: Vec::new(),
+            scanner_deleted_paths: Vec::new(),
+        };
+        IndexStateStore::persist_index(&mut graph, commit).expect("seed checkpoint");
+    }
     (manager, session_dir, manifest, db_path, binding)
 }
 
@@ -546,5 +564,315 @@ fn restart_after_failure_keeps_old_graph_and_watermark() {
     assert!(
         field_present(&db_path, &binding, "field:orders.amount"),
         "重启后旧图必须保留"
+    );
+}
+
+/// bootstrap 每次重投同一批事件：真实远端 bootstrap = 全量列表语义。checkpoint
+/// 未推进 ⇒ 下一轮 orchestrator 必须重新 bootstrap 拿到同一批事件（失败重试的
+/// 前提）；已推进 ⇒ poll 空转。
+struct BootstrapReplaySource {
+    changed: Vec<ChangedRemoteFile>,
+    watermark: MetaFilesWatermark,
+}
+
+impl MetaFilesChangeSource for BootstrapReplaySource {
+    fn poll(&self, since: &MetaFilesWatermark) -> Result<ChangeSet> {
+        Ok(ChangeSet::new(Vec::new(), since.clone()))
+    }
+
+    fn bootstrap(&self, _manifest: &SessionManifest) -> Result<ChangeSet> {
+        Ok(ChangeSet::new(self.changed.clone(), self.watermark.clone()))
+    }
+}
+
+/// deferred（LongLived）模式下 **bootstrap 轮**解析失败：checkpoint 必须保持
+/// 「无」，下一轮重新 bootstrap 重投同一批事件；修好后才入图并推进水位。
+///
+/// 独立预期（先于实现细节，逐段断言）：
+/// - 失败轮报告的水位是 `None`，durable 也不落任何水位（spec：失败不得推进
+///   checkpoint——对 bootstrap 轮即「不得从无到有」）；
+/// - 旧图保留，解析失败诊断在 status 可见；
+/// - 下一轮**不依赖任何新事件**：同一批事件经重新 bootstrap 重投（这正是
+///   「不得消费失败事件后靠未来事件偶然触发重试」的反面）；
+/// - 成功轮才推进并落库水位，新字段入图。
+#[test]
+fn deferred_bootstrap_bad_tbl_rebootstraps_until_fixed() {
+    let (manager, session_dir, manifest, db_path, binding) = setup_bound_session_opts(
+        "deferred-bootstrap-bad",
+        &good_table(&["order_id", "amount"]),
+        false,
+    );
+    assert!(
+        durable_checkpoint(&db_path, &binding).is_none(),
+        "本测试必须从无 checkpoint 状态开始（bootstrap 轮）"
+    );
+
+    let provider = QueuedProvider::new();
+    // 第 1 轮 bootstrap 投坏内容；第 2 轮（重新 bootstrap）投修好的内容
+    provider.push("tables/orders.tbl", "file-t", "2", BAD_TABLE);
+    provider.push(
+        "tables/orders.tbl",
+        "file-t",
+        "2",
+        &good_table(&["order_id", "amount", "customer"]),
+    );
+    let source = BootstrapReplaySource {
+        changed: vec![active_event("file-t", "tables/orders.tbl", "2", 1000)],
+        watermark: watermark(1000, vec!["active:file-t:2".into()]),
+    };
+    let mut orchestrator =
+        build_orchestrator(manager, &session_dir, manifest, source, provider, &binding);
+
+    // 轮 1：默认 deferred 策略（pending 不落盘）——失败轮不得产生任何水位
+    let first = orchestrator
+        .refresh_once()
+        .expect("bootstrap round with bad tbl");
+    assert_eq!(first.change_count, 1, "本轮确实消费了一个变更事件");
+    assert_eq!(
+        first.parse_failures,
+        vec!["tables/orders.tbl".to_string()],
+        "报告必须声明解析失败的文件：{:?}",
+        first.parse_failures
+    );
+    assert_eq!(
+        first.checkpoint, None,
+        "bootstrap 失败轮不得报告任何水位（spec 原子性契约）：{:?}",
+        first.checkpoint
+    );
+    assert_eq!(
+        durable_checkpoint(&db_path, &binding),
+        None,
+        "durable 不得落任何水位"
+    );
+    assert!(
+        field_present(&db_path, &binding, "field:orders.amount"),
+        "失败轮不得破坏旧图"
+    );
+    assert!(
+        orchestrator
+            .runtime()
+            .status()
+            .load_diagnostics
+            .iter()
+            .any(|d| d.code == CODE_PARSE_FAILED),
+        "解析失败必须在 status 诊断中可见"
+    );
+
+    // 轮 2：强制本轮持久化（验证提交边界）。checkpoint 未推进 ⇒ 必须重新
+    // bootstrap 重投同一批事件，修好后成功入图并推进。
+    orchestrator.set_persist_policy(LongLivedPersistPolicy {
+        dirty_node_threshold: 0,
+        max_pending_rounds: 1,
+    });
+    let second = orchestrator.refresh_once().expect("round 2 after fix");
+    assert_eq!(
+        second.change_count, 1,
+        "checkpoint 未推进 ⇒ 下一轮必须重新 bootstrap 重投同一批事件，而不是静默丢失"
+    );
+    assert!(
+        second.parse_failures.is_empty(),
+        "修复后不得再有解析失败：{:?}",
+        second.parse_failures
+    );
+    let expected = DiffRefreshCheckpoint {
+        active: SourceCursor::new(1000, vec!["active:file-t:2".into()]),
+        deleted: SourceCursor::new(0, Vec::new()),
+    };
+    assert_eq!(
+        second.checkpoint,
+        Some(expected.clone()),
+        "成功轮必须推进 checkpoint"
+    );
+    assert_eq!(
+        durable_checkpoint(&db_path, &binding),
+        Some(expected),
+        "durable 必须反映推进后的水位"
+    );
+    assert!(
+        field_present(&db_path, &binding, "field:orders.customer"),
+        "修复后新字段必须入图"
+    );
+}
+
+/// prepare（diff-refresh）入口的冲突生命周期：产生 → 查询侧可见 → 重启仍可见
+/// → 修复后清除。独立预期逐段断言，不与其他路径比较。
+#[test]
+fn prepare_entry_conflict_lifecycle_via_refresh() {
+    let root = test_root("prepare-conflict-lifecycle");
+    let manager = SessionManager::new(&root);
+    manager
+        .create_session("s1", "https://bi.test", "proj", "proj", "remote")
+        .expect("create session");
+    let session_dir = manager.session_dir("s1");
+    let mut manifest = manager.read_manifest("s1").expect("read manifest");
+    seed_file(
+        &session_dir,
+        &mut manifest,
+        "tables/a.tbl",
+        "file-a",
+        "1",
+        &table_json("a", &["f_a"]),
+    );
+    let db_path = session_dir.join("graph.redb");
+    let binding = ProjectBinding::new("proj").expect("valid binding");
+    ProjectIndexer::scan_for_project(&project_mirror_root(&session_dir), &db_path, &binding)
+        .expect("seed scan");
+    manifest.graph_db_path = db_path.to_string_lossy().to_string();
+    manager.write_manifest(&manifest).expect("write manifest");
+
+    // 预置 checkpoint → 后续轮走 poll 而非 bootstrap
+    {
+        let mut graph =
+            GraphDB::open_with_ownership(&db_path, &binding).expect("open for checkpoint");
+        let commit = IndexCommit {
+            file_states: graph.load_file_states().expect("load states"),
+            dirty_nodes: Vec::new(),
+            deleted_nodes: Vec::new(),
+            checkpoint: Some(DiffRefreshCheckpoint {
+                active: SourceCursor::new(500, Vec::new()),
+                deleted: SourceCursor::new(0, Vec::new()),
+            }),
+            delta: None,
+            scanner_entries: Vec::new(),
+            scanner_deleted_paths: Vec::new(),
+        };
+        IndexStateStore::persist_index(&mut graph, commit).expect("seed checkpoint");
+    }
+    let restarted_status = |db: &Path, b: &ProjectBinding| {
+        let runtime = GraphRuntime::load_with_project_dir_and_mode_for_project(
+            db,
+            None::<&std::path::Path>,
+            RuntimeMode::OneShot,
+            b,
+        )
+        .expect("restart runtime");
+        runtime.status()
+    };
+
+    // 轮 1：新增 tables/other/a.tbl（同 stem a）→ prepare 产生 model:a 冲突
+    let provider = QueuedProvider::new();
+    provider.push(
+        "tables/other/a.tbl",
+        "file-o",
+        "1",
+        &table_json("a", &["f_b"]),
+    );
+    let source = ReplayChangeSource::new(vec![
+        (
+            vec![active_event("file-o", "tables/other/a.tbl", "1", 1000)],
+            watermark(1000, vec!["active:file-o:1".into()]),
+        ),
+        // 轮 2：删除冲突文件 → 冲突必须消失
+        (
+            vec![ChangedRemoteFile {
+                event_id: "active:file-o:1-del".to_string(),
+                file_id: "file-o".to_string(),
+                source_path: "tables/other/a.tbl".to_string(),
+                previous_source_path: None,
+                content_type: MetadataContentType::from_extension("tbl"),
+                updated_at_ms: 2000,
+                deleted: true,
+            }],
+            watermark(2000, vec!["active:file-o:1-del".into()]),
+        ),
+    ]);
+    let mut orchestrator =
+        build_orchestrator(manager, &session_dir, manifest, source, provider, &binding);
+    // 每轮强制持久化：重启可见性必须建立在 durable 状态上，而不是内存 pending
+    orchestrator.set_persist_policy(LongLivedPersistPolicy {
+        dirty_node_threshold: 0,
+        max_pending_rounds: 1,
+    });
+
+    // 1. 冲突产生：report 与 runtime status 都必须可见
+    let report = orchestrator
+        .refresh_once()
+        .expect("refresh adding conflict file");
+    assert!(
+        report.ownership_conflicts.iter().any(|id| id == "model:a"),
+        "report 必须登记冲突节点：{:?}",
+        report.ownership_conflicts
+    );
+    assert!(
+        orchestrator
+            .runtime()
+            .status()
+            .load_diagnostics
+            .iter()
+            .any(|d| d.code == CODE_CONFLICT),
+        "status.load_diagnostics 必须可见冲突：{:?}",
+        orchestrator.runtime().status().load_diagnostics
+    );
+    drop(orchestrator);
+
+    // 2. 重启后仍可见
+    let after_add = restarted_status(&db_path, &binding);
+    assert!(
+        after_add
+            .load_diagnostics
+            .iter()
+            .any(|d| d.code == CODE_CONFLICT),
+        "重启后冲突必须仍可见：{:?}",
+        after_add.load_diagnostics
+    );
+
+    // 3. 修复（删除冲突文件）后清除，重启后仍清除
+    let (manager2, session_dir2, manifest2) = {
+        let manager = SessionManager::new(&root);
+        let manifest = manager.read_manifest("s1").expect("read manifest 2");
+        (manager, session_dir.clone(), manifest)
+    };
+    let provider2 = QueuedProvider::new();
+    let source2 = ReplayChangeSource::new(vec![(
+        vec![ChangedRemoteFile {
+            event_id: "active:file-o:1-del".to_string(),
+            file_id: "file-o".to_string(),
+            source_path: "tables/other/a.tbl".to_string(),
+            previous_source_path: None,
+            content_type: MetadataContentType::from_extension("tbl"),
+            updated_at_ms: 2000,
+            deleted: true,
+        }],
+        watermark(2000, vec!["active:file-o:1-del".into()]),
+    )]);
+    let mut orchestrator2 = build_orchestrator(
+        manager2,
+        &session_dir2,
+        manifest2,
+        source2,
+        provider2,
+        &binding,
+    );
+    orchestrator2.set_persist_policy(LongLivedPersistPolicy {
+        dirty_node_threshold: 0,
+        max_pending_rounds: 1,
+    });
+    let fixed = orchestrator2
+        .refresh_once()
+        .expect("refresh deleting conflict");
+    assert!(
+        !fixed.ownership_conflicts.iter().any(|id| id == "model:a"),
+        "修复后 report 不得再登记冲突：{:?}",
+        fixed.ownership_conflicts
+    );
+    assert!(
+        !orchestrator2
+            .runtime()
+            .status()
+            .load_diagnostics
+            .iter()
+            .any(|d| d.code == CODE_CONFLICT),
+        "修复后 status 不得再有冲突：{:?}",
+        orchestrator2.runtime().status().load_diagnostics
+    );
+    drop(orchestrator2);
+    let after_fix = restarted_status(&db_path, &binding);
+    assert!(
+        !after_fix
+            .load_diagnostics
+            .iter()
+            .any(|d| d.code == CODE_CONFLICT),
+        "修复后重启也不得再有冲突：{:?}",
+        after_fix.load_diagnostics
     );
 }
