@@ -43,6 +43,7 @@ use metadata_checker::session::sync::{
 use metadata_checker::session::{RemoteSessionProvider, SessionManager};
 
 const CODE_PARSE_FAILED: &str = "SCANNER_FILE_PARSE_FAILED";
+const CODE_CONFLICT: &str = "GRAPH_OWNERSHIP_CONFLICT";
 
 static TEST_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -279,7 +280,7 @@ fn build_orchestrator(
     manager: SessionManager,
     session_dir: &Path,
     manifest: SessionManifest,
-    source: ReplayChangeSource,
+    source: impl MetaFilesChangeSource + 'static,
     provider: QueuedProvider,
     binding: &ProjectBinding,
 ) -> DiffRefreshOrchestrator {
@@ -711,7 +712,7 @@ fn prepare_entry_conflict_lifecycle_via_refresh() {
         "tables/a.tbl",
         "file-a",
         "1",
-        &table_json("a", &["f_a"]),
+        good_table(&["f_a"]),
     );
     let db_path = session_dir.join("graph.redb");
     let binding = ProjectBinding::new("proj").expect("valid binding");
@@ -751,12 +752,7 @@ fn prepare_entry_conflict_lifecycle_via_refresh() {
 
     // 轮 1：新增 tables/other/a.tbl（同 stem a）→ prepare 产生 model:a 冲突
     let provider = QueuedProvider::new();
-    provider.push(
-        "tables/other/a.tbl",
-        "file-o",
-        "1",
-        &table_json("a", &["f_b"]),
-    );
+    provider.push("tables/other/a.tbl", "file-o", "1", good_table(&["f_b"]));
     let source = ReplayChangeSource::new(vec![
         (
             vec![active_event("file-o", "tables/other/a.tbl", "1", 1000)],

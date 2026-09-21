@@ -490,8 +490,18 @@ impl DiffRefreshOrchestrator {
             let mut stage = Instant::now();
             self.runtime.install_replacement(candidate, replacement);
             timing.swap_ms = stage.elapsed().as_millis();
+            // M59-2 B：deferred 失败轮的 pending 水位必须与 commit.checkpoint
+            // 停在同一提交边界上——bootstrap 轮失败 ⇒ None（下一轮重新
+            // bootstrap 重投同一批事件），既有 checkpoint ⇒ 旧值（同一批事件
+            // 按水位重投）。把失败轮的水位挂进 pending 会让下一轮从失败水位
+            // poll，事件被永久消费，重试只能等未来新事件偶然触发。
+            let pending_watermark = if prepare_failed {
+                commit.checkpoint.clone()
+            } else {
+                Some(next_checkpoint.clone())
+            };
             self.merge_pending_state(
-                next_checkpoint.clone(),
+                pending_watermark,
                 prepared.dirty_node_ids,
                 prepared.deleted_node_ids,
                 commit,
@@ -560,9 +570,13 @@ impl DiffRefreshOrchestrator {
     }
 
     /// 合并本轮脏节点并更新 pending 状态为最新 checkpoint/commit。
+    ///
+    /// `checkpoint` 为 `None` 表示本轮失败且没有可依赖的旧水位（bootstrap 失败
+    /// 轮）：pending 不携带水位，下一轮重新 bootstrap；这不会覆盖 durable 中
+    /// 可能存在的 checkpoint——bootstrap 只在 durable 与 pending 都为空时发生。
     fn merge_pending_state(
         &mut self,
-        checkpoint: DiffRefreshCheckpoint,
+        checkpoint: Option<DiffRefreshCheckpoint>,
         dirty_node_ids: Vec<String>,
         deleted_node_ids: Vec<String>,
         commit: IndexCommit,
@@ -582,7 +596,7 @@ impl DiffRefreshOrchestrator {
         self.pending_dirty_node_ids = merged_dirty.into_iter().collect();
         self.pending_dirty_node_ids.sort();
         self.pending_rounds = self.pending_rounds.saturating_add(1);
-        self.pending_checkpoint = Some(checkpoint);
+        self.pending_checkpoint = checkpoint;
         self.pending_commit = Some(commit);
         self.merge_pending_scanner_diagnostics(scanner_entries, scanner_deleted_paths);
     }
