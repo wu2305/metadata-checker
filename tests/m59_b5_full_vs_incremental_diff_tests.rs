@@ -940,7 +940,7 @@ fn session_refresh_query_diff_refresh_cycle_preserves_ownership() {
     // 2. Query runtime 加载
     let runtime = GraphRuntime::load_with_project_dir_and_mode_for_project(
         &graph_db_path,
-        None,
+        None::<&std::path::Path>,
         RuntimeMode::OneShot,
         &binding,
     )
