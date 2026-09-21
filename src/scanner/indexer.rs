@@ -92,11 +92,7 @@ fn ledger_from_parsed_content(
         .collect();
     let node_ids: HashSet<String> = nodes.iter().map(|node| node.id.clone()).collect();
     for mut node in nodes {
-        let is_definition = matches!(
-            node.node_type,
-            NodeType::Page | NodeType::Component | NodeType::Action | NodeType::Condition
-        ) || (matches!(node.node_type, NodeType::Model | NodeType::Field)
-            && node.path == logical_path);
+        let is_definition = node.path == logical_path;
         if let Some(mapped_id) = local_id_map.get(&node.id) {
             node.id = mapped_id.clone();
         }
