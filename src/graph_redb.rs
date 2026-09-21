@@ -8,10 +8,10 @@ use crate::graph_store::{
     GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
     GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
 };
-use crate::ownership::{OWNERSHIP_SCHEMA_VERSION, ProjectBinding};
 use crate::output::schema::{
     AiOutput, Confidence, Evidence, Location, OutputKind, format_next_query,
 };
+use crate::ownership::{OWNERSHIP_SCHEMA_VERSION, ProjectBinding};
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -222,9 +222,7 @@ impl GraphDB {
         let ownership_version = meta
             .get(OWNERSHIP_SCHEMA_VERSION_KEY)?
             .map(|value| value.value());
-        let project_binding = meta
-            .get(PROJECT_BINDING_KEY)?
-            .map(|value| value.value());
+        let project_binding = meta.get(PROJECT_BINDING_KEY)?.map(|value| value.value());
         let populated = !write_txn.open_table(NODES_TABLE)?.is_empty()?
             || !write_txn.open_table(EDGES_TABLE)?.is_empty()?
             || !write_txn.open_table(FILE_STATES_TABLE)?.is_empty()?

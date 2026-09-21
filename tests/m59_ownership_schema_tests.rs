@@ -46,7 +46,9 @@ fn populated_legacy_store_cannot_receive_ownership_marker() {
         "a".to_string(),
         None,
     );
-    graph.persist(&HashMap::new()).expect("persist legacy graph");
+    graph
+        .persist(&HashMap::new())
+        .expect("persist legacy graph");
 
     let error = match GraphDB::open_for_project(&db_path, &binding) {
         Ok(_) => panic!("legacy populated store must require rebuild"),
