@@ -224,6 +224,7 @@ Options:
       --priority            附加计算优先级分析（non-human 合并进 JSON）
       --detail              输出完整原始结构（non-human 模式）
       --project-dir <DIR>   项目目录（用于跨文件分析）
+      --project-ref <PROJECT> 稳定项目身份（ownership 绑定图库的读写入口；不使用本机绝对路径）
       --build-graph         从项目目录构建/更新图数据库
       --query-model <MODEL> 查询模型的读写关系（需图上下文，可配合 --project-dir 或 --graph-db-path）
       --query-page <PAGE>   查询页面的依赖关系（需图上下文，可配合 --project-dir 或 --graph-db-path）

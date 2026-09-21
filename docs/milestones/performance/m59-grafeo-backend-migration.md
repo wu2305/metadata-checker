@@ -119,3 +119,34 @@ ignored 的真实语料/在线评测不计通过，B5 仍只是既有缺陷回�
 再次 1269/0/24；`1714d42` 另补 bound-readonly 不能认领无绑定旧库的断言，8 项定向测试通过。
 该只读入口曾被复审误读 tuple 顺序提出 P1，源码与运行反例证伪后已撤回；
 独立审查确认无剩余 P0/P1/P2 阻塞项。原始复验日志已追加同一 evidence 文件。
+
+## 2026-09-21 M59-2 来源账本参与建图与持久化
+
+PR42（`codex/m59-2-ownership`）本轮完成 ownership 账本闭环：
+1. ownership schema v2 + `ownership_ledgers` 表：每个源文件独立 `FileContributionLedger`
+   （Definition/Reference/Edge 贡献）；scanner ownership 路径按“增量解析、整图重建、
+   全量持久化”从全部账本确定性重建派生图，账本与图/file states 同事务落盘，重启经
+   账本表恢复；坏 TBL 保留旧账本旧图（B3 保护不变）。
+2. 节点/边新增 `origin_file` 来源字段并纳入完整事实键；v2 shadow 恢复包含来源。
+3. SPG 内嵌 DataFlow/dwtable 模型与字段启用页面局部 ID（`page|local`），物理表保持
+   全局；身份转换失败显式报错，不静默回退旧 ID。
+4. Definition/Reference 分类修正：仅源文件自身路径或 TBL 主模型/字段为 Definition；
+   物理表、被嵌页面等共享目标为 Reference，占位节点在唯一引用者删除后随账本撤销回收。
+5. `--project-ref` 显式项目身份接入 CLI 构图/查询/runtime 生命周期/stdio；session 与
+   diff-refresh 以 manifest.project_ref 绑定。`project_binding_schema_version` 不冒充
+   ownership：未绑定读取完整 ownership 库报 `GRAPH_PROJECT_BINDING_REQUIRED`，
+   残缺/未知/旧实验 marker 一律 `GRAPH_OWNERSHIP_SCHEMA_STALE` 拒载，绝不补写覆盖。
+6. B5 从“记录已知缺陷”改为严格验收：修改/删除被引用文件、删除唯一引用者、修复恢复、
+   重启后全量与增量的节点/边/全部属性/来源字段/重复次数完全一致，并附独立关键事实
+   断言；新增跨页同名 dwtable 隔离与共享物理表、共享表修改/删除/恢复、坏 TBL、重启
+   账本恢复、session→query→diff-refresh 全链路 ownership 贯通等场景。B1 契约保留。
+
+验证（CNB `cnb-beg-1k32624mn`，提交 `2a66483`）：cargo fmt --check 通过；完整 native
+1275 passed / 0 failed / 24 ignored（106 组）；benches check、browser-wasm check 通过
+（WASM 8 条既有非本批 warning，与本轮前持平）。
+[原始日志与 SHA256](../../governance/evidence/2026-09-21-m59-2-ownership-ledger.json.gz)。
+中间 workspace `cnb-kr8-1k31bevtu` 的早期定向日志随回收丢失，仅保留提交链
+（054ea1f→…→f5b0f6e→46c020e→03c8ebc→413b9fa→…→5e0fb7a→2a66483）。
+
+剩余：冷脸复审提出的 P2（跨文件冲突 Definition 是否静默择一）已由 Definition/Reference
+分类与页面局部 ID 覆盖，待独立复验确认后关闭；Grafeo/M59-3 未提前进入。
