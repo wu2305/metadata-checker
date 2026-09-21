@@ -89,20 +89,40 @@ fn unbound_entry_points_reject_bound_database() {
     let path = temp_db("unbound-entry");
     let binding = ProjectBinding::new("project-a").unwrap();
     let mut graph = GraphDB::open_for_project(&path, &binding).unwrap();
-    graph.add_node("page:a".into(), NodeType::Page, "a.spg".into(), "a".into(), None);
+    graph.add_node(
+        "page:a".into(),
+        NodeType::Page,
+        "a.spg".into(),
+        "a".into(),
+        None,
+    );
     graph.persist(&HashMap::new()).unwrap();
     let layout = build_v2_layout(&graph, &HashMap::new()).unwrap();
     assert_eq!(GraphDB::open(&path).is_err(), true);
     assert_eq!(GraphDB::open_readonly(&path).is_err(), true);
     assert_eq!(read_v2_layout(&path).is_err(), true);
     assert_eq!(write_v2_shadow(&path, &layout).is_err(), true);
-    assert_eq!(metadata_checker::scanner::indexer::ProjectIndexer::scan(path.parent().unwrap(), &path).is_err(), true);
+    assert_eq!(
+        metadata_checker::scanner::indexer::ProjectIndexer::scan(path.parent().unwrap(), &path)
+            .is_err(),
+        true
+    );
     let check = GraphDB::check_graph_db(&path);
     assert_eq!(check.summary["readable"], false);
-    assert_eq!(check.diagnostics.iter().any(|d| d.code == "GRAPH_PROJECT_BINDING_REQUIRED"), true);
+    assert_eq!(
+        check
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "GRAPH_PROJECT_BINDING_REQUIRED"),
+        true
+    );
     let reopened = GraphDB::open_readonly_for_project(&path, &binding).unwrap();
     assert_eq!(reopened.node_indices.len(), 1);
-    assert_eq!(GraphDB::open_readonly_for_project(&path, &ProjectBinding::new("project-b").unwrap()).is_err(), true);
+    assert_eq!(
+        GraphDB::open_readonly_for_project(&path, &ProjectBinding::new("project-b").unwrap())
+            .is_err(),
+        true
+    );
 }
 
 /// 模拟打开后库被绑定，旧句柄无论有无图改动都不能继续提交。
@@ -113,9 +133,21 @@ fn persist_revalidates_open_handle_binding() {
     let binding = ProjectBinding::new("project-a").unwrap();
     let mut bound = GraphDB::open_for_project(&path, &binding).unwrap();
     assert_eq!(stale.persist(&HashMap::new()).is_err(), true);
-    stale.add_node("page:wrong".into(), NodeType::Page, "wrong.spg".into(), "wrong".into(), None);
+    stale.add_node(
+        "page:wrong".into(),
+        NodeType::Page,
+        "wrong.spg".into(),
+        "wrong".into(),
+        None,
+    );
     assert_eq!(stale.persist(&HashMap::new()).is_err(), true);
-    bound.add_node("page:right".into(), NodeType::Page, "right.spg".into(), "right".into(), None);
+    bound.add_node(
+        "page:right".into(),
+        NodeType::Page,
+        "right.spg".into(),
+        "right".into(),
+        None,
+    );
     bound.persist(&HashMap::new()).unwrap();
     let reopened = GraphDB::open_for_project(&path, &binding).unwrap();
     assert_eq!(reopened.node_indices.contains_key("page:wrong"), false);
@@ -130,8 +162,20 @@ fn incomplete_unknown_and_legacy_markers_are_never_repaired() {
         ("binding-only", &[("project_binding", "project-a")]),
         ("version-only", &[("project_binding_schema_version", "1")]),
         ("unknown-only", &[("project_binding_schema_version", "999")]),
-        ("unknown-pair", &[("project_binding_schema_version", "999"), ("project_binding", "project-a")]),
-        ("legacy-ownership", &[("ownership_schema_version", "1"), ("project_binding", "project-a")]),
+        (
+            "unknown-pair",
+            &[
+                ("project_binding_schema_version", "999"),
+                ("project_binding", "project-a"),
+            ],
+        ),
+        (
+            "legacy-ownership",
+            &[
+                ("ownership_schema_version", "1"),
+                ("project_binding", "project-a"),
+            ],
+        ),
     ];
     for (label, entries) in states {
         let path = temp_db(label);
@@ -140,19 +184,40 @@ fn incomplete_unknown_and_legacy_markers_are_never_repaired() {
             let db = redb::Database::open(&path).unwrap();
             let tx = db.begin_write().unwrap();
             {
-                let mut meta = tx.open_table(TableDefinition::<&str, Vec<u8>>::new("meta")).unwrap();
-                for (key, value) in *entries { meta.insert(*key, value.as_bytes().to_vec()).unwrap(); }
+                let mut meta = tx
+                    .open_table(TableDefinition::<&str, Vec<u8>>::new("meta"))
+                    .unwrap();
+                for (key, value) in *entries {
+                    meta.insert(*key, value.as_bytes().to_vec()).unwrap();
+                }
             }
             tx.commit().unwrap();
         }
-        assert_eq!(GraphDB::open_for_project(&path, &ProjectBinding::new("project-b").unwrap()).is_err(), true, "{label}");
+        assert_eq!(
+            GraphDB::open_for_project(&path, &ProjectBinding::new("project-b").unwrap()).is_err(),
+            true,
+            "{label}"
+        );
         assert_eq!(GraphDB::open(&path).is_err(), true, "{label}");
         let db = redb::Database::open(&path).unwrap();
         let tx = db.begin_read().unwrap();
-        let meta = tx.open_table(TableDefinition::<&str, Vec<u8>>::new("meta")).unwrap();
-        for key in ["project_binding", "project_binding_schema_version", "ownership_schema_version"] {
-            let expected = entries.iter().find(|(name, _)| *name == key).map(|(_, v)| v.as_bytes().to_vec());
-            assert_eq!(meta.get(key).unwrap().map(|v| v.value()), expected, "{label}: {key}");
+        let meta = tx
+            .open_table(TableDefinition::<&str, Vec<u8>>::new("meta"))
+            .unwrap();
+        for key in [
+            "project_binding",
+            "project_binding_schema_version",
+            "ownership_schema_version",
+        ] {
+            let expected = entries
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, v)| v.as_bytes().to_vec());
+            assert_eq!(
+                meta.get(key).unwrap().map(|v| v.value()),
+                expected,
+                "{label}: {key}"
+            );
         }
     }
 }
@@ -165,16 +230,37 @@ fn prepared_binding_does_not_write_ownership_marker() {
     GraphDB::open_for_project(&path, &ProjectBinding::new("project-a").unwrap()).unwrap();
     let db = redb::Database::open(&path).unwrap();
     let tx = db.begin_read().unwrap();
-    let meta = tx.open_table(TableDefinition::<&str, Vec<u8>>::new("meta")).unwrap();
-    assert_eq!(meta.get("project_binding_schema_version").unwrap().unwrap().value(), b"1".to_vec());
-    assert_eq!(meta.get("ownership_schema_version").unwrap().is_none(), true);
+    let meta = tx
+        .open_table(TableDefinition::<&str, Vec<u8>>::new("meta"))
+        .unwrap();
+    assert_eq!(
+        meta.get("project_binding_schema_version")
+            .unwrap()
+            .unwrap()
+            .value(),
+        b"1".to_vec()
+    );
+    assert_eq!(
+        meta.get("ownership_schema_version").unwrap().is_none(),
+        true
+    );
 }
 
 /// JSON 输入不能绕过绑定构造器；阻断诊断必须传到消费方。
 #[test]
 fn binding_deserialization_and_diagnostic_contract() {
-    assert_eq!(serde_json::from_str::<ProjectBinding>(r#""/tmp/project""#).is_err(), true);
-    for code in ["GRAPH_OWNERSHIP_SCHEMA_STALE", "GRAPH_PROJECT_BINDING_REQUIRED", "GRAPH_PROJECT_BINDING_MISMATCH"] {
-        assert_eq!(metadata_checker::diagnostics::answer_impact_for(code), "blocking");
+    assert_eq!(
+        serde_json::from_str::<ProjectBinding>(r#""/tmp/project""#).is_err(),
+        true
+    );
+    for code in [
+        "GRAPH_OWNERSHIP_SCHEMA_STALE",
+        "GRAPH_PROJECT_BINDING_REQUIRED",
+        "GRAPH_PROJECT_BINDING_MISMATCH",
+    ] {
+        assert_eq!(
+            metadata_checker::diagnostics::answer_impact_for(code),
+            "blocking"
+        );
     }
 }

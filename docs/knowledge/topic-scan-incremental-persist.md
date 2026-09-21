@@ -22,6 +22,14 @@
 这不是 M59-2 完成：页面局部身份 helper 仍未启用，来源撤销和共享节点生命周期未修，
 下文 B5 跨文件边丢失/占位残留仍属已知缺陷。
 
+## 2026-09-21 M59-2 分支准备状态（尚未合入 main）
+
+源码核对 `ba011b1`：`GraphDB::open_for_project` 写入项目准备版本
+`project_binding_schema_version=1`，不写 ownership marker。句柄保留绑定，persist 重验；
+普通 open/readonly/scanner/shadow 入口拒绝已绑定库，marker 缺一半不会补写。
+session 未启用这个准备格式，仍沿用 PR41 的图格式。不能把这些准备 API 当作来源账本、
+共享实体生命周期、页面局部身份或 B5 已完成。
+
 ## 0. 检索速查（自包含，放文首以保证落在首个分块内）
 
 > **问：`--build-graph` 的入口和六个阶段是什么？**

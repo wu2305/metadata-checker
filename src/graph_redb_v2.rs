@@ -375,7 +375,10 @@ pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
 }
 
 /// 内部绑定读取入口；调用方在同一图锁内已校验绑定。
-pub(crate) fn read_v2_layout_for_project(db_path: &Path, binding: Option<&crate::ownership::ProjectBinding>) -> Result<Option<RedbV2Layout>> {
+pub(crate) fn read_v2_layout_for_project(
+    db_path: &Path,
+    binding: Option<&crate::ownership::ProjectBinding>,
+) -> Result<Option<RedbV2Layout>> {
     if !db_path.exists() {
         return Ok(None);
     }

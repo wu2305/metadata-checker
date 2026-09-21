@@ -667,8 +667,12 @@ pub fn build_session_graph(
     graph_db_path: &std::path::Path,
 ) -> Result<crate::graph_store::IndexReport> {
     let mirror = crate::session::sync::project_mirror_root(session_dir);
-    crate::scanner::indexer::ProjectIndexer::scan(&mirror, graph_db_path)
-        .with_context(|| format!("failed to build graph for session {}", session_dir.display()))
+    crate::scanner::indexer::ProjectIndexer::scan(&mirror, graph_db_path).with_context(|| {
+        format!(
+            "failed to build graph for session {}",
+            session_dir.display()
+        )
+    })
 }
 
 /// Session 刷新选项。
@@ -1643,9 +1647,7 @@ mod tests {
         assert_eq!(report.written, 2);
 
         let graph_db_path = root.join("s1").join("graph.redb");
-        let index_report =
-            build_session_graph(&manager.session_dir("s1"), &graph_db_path)
-                .unwrap();
+        let index_report = build_session_graph(&manager.session_dir("s1"), &graph_db_path).unwrap();
         assert!(index_report.indexed >= 1);
         assert!(graph_db_path.exists());
 

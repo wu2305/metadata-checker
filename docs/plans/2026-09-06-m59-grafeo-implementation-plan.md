@@ -75,3 +75,12 @@ cargo check --no-default-features --features browser-wasm --target wasm32-unknow
 语料单独测量。LLM 基线仍走 api_trigger 流水线，不以 dev workspace 手跑替代。
 文档提交验证链接、表格状态与 `git diff --check`；所有交付批次按 AGENTS.md 运行指定
 style/smell 审查。PR 中分别写语义验收、测试与性能的证据范围。
+
+
+## 2026-09-21 项目绑定准备阶段的收口约束
+
+见 [绑定门槛修正 spec](../specs/2026-09-21-project-binding-gate-design.md)。
+`project_binding_schema_version=1` 仅表示项目绑定已初始化，不能当作 ownership 完成。
+当前不写 `ownership_schema_version`；早期实验库中的该 marker 一律拒载，在新路径从源重建。
+session 仍使用已发布扫描栈，不启用准备格式。重新接线必须同时交付来源账本、读写入口的
+项目绑定传递及 B5 独立预期/全量增量验收；不得仅因准备 API 测试通过就启用新页面 ID。
