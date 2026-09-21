@@ -946,12 +946,12 @@ impl GraphRuntime {
         &mut self,
         scanner_diagnostics: Vec<crate::output::Diagnostic>,
     ) {
-        self.load_diagnostics.retain(|diag| {
-            diag.code != crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY
-                && diag.code != crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID
-                && diag.code != crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED
-                && diag.code != crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_LOAD_FAILED
-        });
+        // M59-2 B：按 SCANNER_ 前缀整段替换，而不是逐个 code 列举。
+        // 旧实现漏掉 SCANNER_FILE_PARSE_FAILED，导致坏文件修好之后那条「陈旧」
+        // 诊断仍挂在 status/query 上——比「诊断缺失」更糟：它声称有问题，而问题
+        // 已经没了。新增 SCANNER_* code 也不该再靠记得改这张清单。
+        self.load_diagnostics
+            .retain(|diag| !diag.code.starts_with("SCANNER_"));
         self.load_diagnostics.extend(scanner_diagnostics);
     }
 
