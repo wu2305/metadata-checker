@@ -54,7 +54,8 @@ pub const CODE_GRAPH_SCHEMA_STALE: &str = "GRAPH_SCHEMA_STALE";
 /// - 未登记的 code（`answer_effect` 返回 `None`）→ [`IMPACT_NONE`]
 pub fn answer_impact_for(code: &str) -> &'static str {
     match code {
-        CODE_GRAPH_SCHEMA_STALE => IMPACT_BLOCKING,
+        CODE_GRAPH_SCHEMA_STALE | "GRAPH_OWNERSHIP_SCHEMA_STALE"
+        | "GRAPH_PROJECT_BINDING_REQUIRED" | "GRAPH_PROJECT_BINDING_MISMATCH" => IMPACT_BLOCKING,
         CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY => IMPACT_PARTIAL,
         CODE_SCANNER_DUPLICATE_COMPONENT_ID => IMPACT_PARTIAL,
         // 诊断缓存可能陈旧：涉及 SCANNER_* 诊断的结论只能视为部分可靠
@@ -99,6 +100,9 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         | "GRAPH_DB_LOCKED"
         | "GRAPH_DB_PERMISSION_DENIED"
         | "GRAPH_DB_OPEN_ERROR"
+        | "GRAPH_OWNERSHIP_SCHEMA_STALE"
+        | "GRAPH_PROJECT_BINDING_REQUIRED"
+        | "GRAPH_PROJECT_BINDING_MISMATCH"
         | "TARGET_NOT_FOUND" => DiagnosticSeverity::Error,
 
         // ---- Info：按设计发生或纯提示 ----

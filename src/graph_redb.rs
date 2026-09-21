@@ -794,7 +794,13 @@ impl GraphDB {
                     }),
                 );
                 out.query_target = Some(db_path.to_string_lossy().to_string());
-                if msg.contains("GRAPH_SCHEMA_STALE") {
+                if msg.starts_with("GRAPH_PROJECT_BINDING_") || msg.starts_with("GRAPH_OWNERSHIP_SCHEMA_STALE") {
+                    let code = msg.split(':').next().unwrap_or("GRAPH_OWNERSHIP_SCHEMA_STALE");
+                    out.summary["readable"] = serde_json::json!(false);
+                    out.diagnostics.push(crate::diagnostics::envelope_diagnostic(
+                        code, 1, Location { source_file: Some(db_path.to_string_lossy().to_string()), node_id: None, json_path: None }, msg.clone(),
+                    ));
+                } else if msg.contains("GRAPH_SCHEMA_STALE") {
                     let mut diagnostic = crate::diagnostics::envelope_diagnostic(
                         "GRAPH_SCHEMA_STALE",
                         1,

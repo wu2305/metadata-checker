@@ -19,7 +19,17 @@ pub const PROJECT_BINDING_SCHEMA_VERSION: u32 = 1;
 ///
 /// 该值必须由项目/store 边界提供，不能直接使用机器相关的绝对目录路径。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct ProjectBinding(String);
+
+impl TryFrom<String> for ProjectBinding {
+    type Error = anyhow::Error;
+
+    /// 反序列化沿用构造校验，不能从 JSON 注入非法绑定。
+    fn try_from(value: String) -> Result<Self> {
+        Self::new(value)
+    }
+}
 
 impl ProjectBinding {
     /// 校验并创建项目绑定。

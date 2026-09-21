@@ -169,3 +169,12 @@ fn prepared_binding_does_not_write_ownership_marker() {
     assert_eq!(meta.get("project_binding_schema_version").unwrap().unwrap().value(), b"1".to_vec());
     assert_eq!(meta.get("ownership_schema_version").unwrap().is_none(), true);
 }
+
+/// JSON 输入不能绕过绑定构造器；阻断诊断必须传到消费方。
+#[test]
+fn binding_deserialization_and_diagnostic_contract() {
+    assert_eq!(serde_json::from_str::<ProjectBinding>(r#""/tmp/project""#).is_err(), true);
+    for code in ["GRAPH_OWNERSHIP_SCHEMA_STALE", "GRAPH_PROJECT_BINDING_REQUIRED", "GRAPH_PROJECT_BINDING_MISMATCH"] {
+        assert_eq!(metadata_checker::diagnostics::answer_impact_for(code), "blocking");
+    }
+}
