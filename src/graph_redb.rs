@@ -8,6 +8,7 @@ use crate::graph_store::{
     GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
     GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
 };
+use crate::ownership::{OWNERSHIP_SCHEMA_VERSION, ProjectBinding};
 use crate::output::schema::{
     AiOutput, Confidence, Evidence, Location, OutputKind, format_next_query,
 };
@@ -37,6 +38,9 @@ const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
 /// 完整事实键版本；独立于 M59-2 的页面身份与归属版本。
 const FACT_SCHEMA_VERSION_KEY: &str = "fact_schema_version";
 const FACT_SCHEMA_VERSION: &[u8] = b"2";
+/// M59-2 归属账本的独立 schema marker。
+const OWNERSHIP_SCHEMA_VERSION_KEY: &str = "ownership_schema_version";
+const PROJECT_BINDING_KEY: &str = "project_binding";
 const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
 /// M58.3 PR1 refix（F2）：per-file scanner 诊断计数表。
 ///
@@ -196,6 +200,65 @@ impl GraphDB {
     pub fn open(db_path: &Path) -> Result<Self> {
         let _lock = acquire_graph_db_lock(db_path)?;
         Self::open_inner(db_path)
+    }
+
+    /// 按 M59-2 项目绑定打开图数据库。
+    ///
+    /// 普通 `open` 仍服务于低层读写和历史测试；扫描器启用来源账本后必须
+    /// 使用本入口。已有事实库缺少归属 marker 时拒绝加载，不能把旧库静默
+    /// 当成新 schema；只有真正空库允许在一次事务中初始化 marker。
+    pub fn open_for_project(db_path: &Path, binding: &ProjectBinding) -> Result<Self> {
+        let graph = Self::open(db_path)?;
+        let _lock = acquire_graph_db_lock(db_path)?;
+        Self::ensure_ownership_schema(db_path, binding)?;
+        Ok(graph)
+    }
+
+    /// 校验或初始化 M59-2 归属 schema 与项目绑定。
+    fn ensure_ownership_schema(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
+        let db = Database::create(db_path)?;
+        let write_txn = db.begin_write()?;
+        let mut meta = write_txn.open_table(META_TABLE)?;
+        let ownership_version = meta
+            .get(OWNERSHIP_SCHEMA_VERSION_KEY)?
+            .map(|value| value.value());
+        let project_binding = meta
+            .get(PROJECT_BINDING_KEY)?
+            .map(|value| value.value());
+        let populated = !write_txn.open_table(NODES_TABLE)?.is_empty()?
+            || !write_txn.open_table(EDGES_TABLE)?.is_empty()?
+            || !write_txn.open_table(FILE_STATES_TABLE)?.is_empty()?
+            || meta.get(META_DIFF_REFRESH_CHECKPOINT_KEY)?.is_some()
+            || !write_txn
+                .open_table(SCANNER_DIAGNOSTICS_TABLE)?
+                .is_empty()?
+            || write_txn
+                .list_tables()?
+                .any(|table| table.name().starts_with("v2_"));
+
+        if ownership_version.is_none() || project_binding.is_none() {
+            anyhow::ensure!(
+                !populated,
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: rebuild from source into a new --graph-db-path"
+            );
+            meta.insert(
+                OWNERSHIP_SCHEMA_VERSION_KEY,
+                OWNERSHIP_SCHEMA_VERSION.to_string().into_bytes(),
+            )?;
+            meta.insert(PROJECT_BINDING_KEY, binding.as_str().as_bytes().to_vec())?;
+        } else {
+            anyhow::ensure!(
+                ownership_version.as_deref()
+                    == Some(OWNERSHIP_SCHEMA_VERSION.to_string().as_bytes()),
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: rebuild from source into a new --graph-db-path"
+            );
+            anyhow::ensure!(
+                project_binding.as_deref() == Some(binding.as_str().as_bytes()),
+                "GRAPH_PROJECT_BINDING_MISMATCH: open the graph with its original project binding"
+            );
+        }
+        write_txn.commit()?;
+        Ok(())
     }
 
     /// 从已构建的内存图创建 GraphDB，供 v2 hydrate 与 shadow compare 使用。
