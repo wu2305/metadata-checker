@@ -6654,7 +6654,15 @@ fn create_diff_refresh_cli_session(
     )
     .expect("write spg");
     let db_path = session_dir.join("graph.redb");
-    scan_project(&mirror_dir, &db_path).expect("scan session graph");
+    // 生产 session 链路以 manifest.project_ref 绑定加载，fixture 必须用同一身份建 ownership 图
+    let binding = metadata_checker::ownership::ProjectBinding::new("proj".to_string())
+        .expect("valid binding");
+    metadata_checker::scanner::indexer::ProjectIndexer::scan_for_project(
+        &mirror_dir,
+        &db_path,
+        &binding,
+    )
+    .expect("scan session graph");
     let mut manifest = manager.read_manifest(session_id).expect("read manifest");
     manifest.graph_db_path = db_path.to_string_lossy().to_string();
     manager.write_manifest(&manifest).expect("write manifest");
