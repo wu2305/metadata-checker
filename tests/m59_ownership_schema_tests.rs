@@ -74,8 +74,10 @@ fn project_binding_mismatch_is_rejected_after_restart() {
     );
     graph.persist(&HashMap::new()).expect("persist graph");
 
-    let error = GraphDB::open_for_project(&db_path, &second)
-        .expect_err("different project must not open the store");
+    let error = match GraphDB::open_for_project(&db_path, &second) {
+        Ok(_) => panic!("different project must not open the store"),
+        Err(error) => error,
+    };
     assert!(error.to_string().contains("GRAPH_PROJECT_BINDING_MISMATCH"));
     let _ = std::fs::remove_file(db_path);
 }
