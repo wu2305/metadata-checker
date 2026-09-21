@@ -252,8 +252,14 @@ struct TraceState {
 impl TraceState {
     /// 同一未完成原因只记录一次，保持首次遇到的顺序。
     fn issue(&mut self, code: &'static str, component_id: &str, token: &str) {
-        let issue = TraceIssue { code, component_id: component_id.to_string(), token: token.to_string() };
-        if !self.issues.contains(&issue) { self.issues.push(issue); }
+        let issue = TraceIssue {
+            code,
+            component_id: component_id.to_string(),
+            token: token.to_string(),
+        };
+        if !self.issues.contains(&issue) {
+            self.issues.push(issue);
+        }
     }
 }
 
@@ -296,7 +302,15 @@ pub fn trace_value_source(
     let expr = expressions.iter().find(|e| e.field == field)?;
 
     let mut state = TraceState::default();
-    let expanded = expand_trace(meta, graph, target_component_id, field, &expr.raw_expr, &mut state, max_depth);
+    let expanded = expand_trace(
+        meta,
+        graph,
+        target_component_id,
+        field,
+        &expr.raw_expr,
+        &mut state,
+        max_depth,
+    );
     let source_chain = state.chain;
     // 判断最终来源类型
     let source_type = determine_source_type(&expr.raw_expr, &source_chain);
@@ -358,44 +372,101 @@ fn expand_trace(
     if !parsed.diagnostics.is_empty() {
         state.issue("TRACE_UNSUPPORTED_EXPRESSION", component_id, expression);
     }
-    let component_ids = meta.components.iter().map(|component| component.id.as_str()).collect();
-    let source_ids = meta.sources.iter().map(|source| source.id.as_str()).collect();
+    let component_ids = meta
+        .components
+        .iter()
+        .map(|component| component.id.as_str())
+        .collect();
+    let source_ids = meta
+        .sources
+        .iter()
+        .map(|source| source.id.as_str())
+        .collect();
     let param_ids = meta.params.iter().map(|param| param.id.as_str()).collect();
     let mut result = String::new();
     let mut cursor = 0;
     for occurrence in crate::superpage::reference_occurrences(clean) {
-        let (reference, _) = crate::superpage::resolve_ref_type(&occurrence.reference, &component_ids, &source_ids, &param_ids);
+        let (reference, _) = crate::superpage::resolve_ref_type(
+            &occurrence.reference,
+            &component_ids,
+            &source_ids,
+            &param_ids,
+        );
         let value_target = match &reference {
-            RefType::ComponentValue(id, ComponentValueForm::Value | ComponentValueForm::Bare) => Some(id),
+            RefType::ComponentValue(id, ComponentValueForm::Value | ComponentValueForm::Bare) => {
+                Some(id)
+            }
             RefType::ComponentProperty(id, property) if property == "value" => Some(id),
             _ => None,
         };
-        let replacement = if let Some(target) = value_target {
-            if let Some(target_expr) = graph.expressions.get(target).and_then(|expressions| expressions.iter().find(|expr| expr.field == "value")) {
-                let expanded = expand_trace(meta, graph, target, "value", &target_expr.raw_expr, state, depth - 1);
-                if !state.chain.iter().any(|node| node.component_id == *target && node.expr == target_expr.raw_expr) {
-                    state.chain.push(SourceNode { component_id: target.clone(), expr: target_expr.raw_expr.clone(), refs: target_expr.refs.clone(), source_type: determine_source_type(&target_expr.raw_expr, &[]) });
-                }
-                let fragment = expanded.strip_prefix('=').unwrap_or(&expanded);
-                let composite = matches!(crate::superpage::parse_expression_ast(fragment).ast,
-                    Some(crate::superpage::AstNode::BinaryOp { .. } | crate::superpage::AstNode::Conditional { .. } | crate::superpage::AstNode::UnaryOp { .. }));
-                if composite && occurrence.range != (0..clean.len()) { Some(format!("({fragment})")) } else { Some(fragment.to_string()) }
-            } else {
-                state.issue("TRACE_MISSING_VALUE", component_id, &occurrence.token);
-                None
-            }
-        } else {
-            match reference {
-                RefType::ModelField(model, field) => Some(format!("({model}.{field})")),
-                RefType::Param(param) => Some(format!("({param})")),
-                RefType::Other(_) => { state.issue("TRACE_UNRESOLVED_REFERENCE", component_id, &occurrence.token); None }
-                RefType::ComponentProperty(_, _) | RefType::ComponentValue(_, ComponentValueForm::Suffix) => {
-                    state.issue("TRACE_PROPERTY_NOT_EXPANDED", component_id, &occurrence.token);
+        let replacement =
+            if let Some(target) = value_target {
+                if let Some(target_expr) = graph
+                    .expressions
+                    .get(target)
+                    .and_then(|expressions| expressions.iter().find(|expr| expr.field == "value"))
+                {
+                    let expanded = expand_trace(
+                        meta,
+                        graph,
+                        target,
+                        "value",
+                        &target_expr.raw_expr,
+                        state,
+                        depth - 1,
+                    );
+                    if !state.chain.iter().any(|node| {
+                        node.component_id == *target && node.expr == target_expr.raw_expr
+                    }) {
+                        state.chain.push(SourceNode {
+                            component_id: target.clone(),
+                            expr: target_expr.raw_expr.clone(),
+                            refs: target_expr.refs.clone(),
+                            source_type: determine_source_type(&target_expr.raw_expr, &[]),
+                        });
+                    }
+                    let fragment = expanded.strip_prefix('=').unwrap_or(&expanded);
+                    let composite = matches!(
+                        crate::superpage::parse_expression_ast(fragment).ast,
+                        Some(
+                            crate::superpage::AstNode::BinaryOp { .. }
+                                | crate::superpage::AstNode::Conditional { .. }
+                                | crate::superpage::AstNode::UnaryOp { .. }
+                        )
+                    );
+                    if composite && occurrence.range != (0..clean.len()) {
+                        Some(format!("({fragment})"))
+                    } else {
+                        Some(fragment.to_string())
+                    }
+                } else {
+                    state.issue("TRACE_MISSING_VALUE", component_id, &occurrence.token);
                     None
                 }
-                _ => None,
-            }
-        };
+            } else {
+                match reference {
+                    RefType::ModelField(model, field) => Some(format!("({model}.{field})")),
+                    RefType::Param(param) => Some(format!("({param})")),
+                    RefType::Other(_) => {
+                        state.issue(
+                            "TRACE_UNRESOLVED_REFERENCE",
+                            component_id,
+                            &occurrence.token,
+                        );
+                        None
+                    }
+                    RefType::ComponentProperty(_, _)
+                    | RefType::ComponentValue(_, ComponentValueForm::Suffix) => {
+                        state.issue(
+                            "TRACE_PROPERTY_NOT_EXPANDED",
+                            component_id,
+                            &occurrence.token,
+                        );
+                        None
+                    }
+                    _ => None,
+                }
+            };
         result.push_str(&clean[cursor..occurrence.range.start]);
         result.push_str(replacement.as_deref().unwrap_or(&occurrence.token));
         cursor = occurrence.range.end;

@@ -50,7 +50,14 @@ const SCANNER_DIAGNOSTICS_TABLE: TableDefinition<&str, Vec<u8>> =
 /// scanner/bench 收集 delta 与 persist 全量/增量写共用同一格式，避免两套键。
 pub fn edge_storage_key(edge: &Edge) -> String {
     // JSON 数组明确区分段边界与 None/空串，不依赖可出现在 ID 中的分隔符。
-    serde_json::json!([edge.from, edge.to, edge.edge_type, edge.field_path, edge.meta]).to_string()
+    serde_json::json!([
+        edge.from,
+        edge.to,
+        edge.edge_type,
+        edge.field_path,
+        edge.meta
+    ])
+    .to_string()
 }
 
 /// M58.3 复核返修：在给定 write transaction 内按文件覆盖/删除 scanner 诊断
@@ -270,14 +277,21 @@ impl GraphDB {
             let _ = write_txn.open_table(EDGES_TABLE)?;
             let _ = write_txn.open_table(FILE_STATES_TABLE)?;
             let mut meta = write_txn.open_table(META_TABLE)?;
-            let version = meta.get(FACT_SCHEMA_VERSION_KEY)?.map(|value| value.value());
+            let version = meta
+                .get(FACT_SCHEMA_VERSION_KEY)?
+                .map(|value| value.value());
             let populated = !write_txn.open_table(NODES_TABLE)?.is_empty()?
                 || !write_txn.open_table(EDGES_TABLE)?.is_empty()?
                 || !write_txn.open_table(FILE_STATES_TABLE)?.is_empty()?
                 || meta.get(META_DIFF_REFRESH_CHECKPOINT_KEY)?.is_some();
-            anyhow::ensure!(version.as_deref() == Some(FACT_SCHEMA_VERSION) || (version.is_none() && !populated),
-                "GRAPH_SCHEMA_STALE: fact schema requires rebuild from source into a new --graph-db-path; preserve the old database as backup");
-            if version.is_none() { meta.insert(FACT_SCHEMA_VERSION_KEY, FACT_SCHEMA_VERSION.to_vec())?; }
+            anyhow::ensure!(
+                version.as_deref() == Some(FACT_SCHEMA_VERSION)
+                    || (version.is_none() && !populated),
+                "GRAPH_SCHEMA_STALE: fact schema requires rebuild from source into a new --graph-db-path; preserve the old database as backup"
+            );
+            if version.is_none() {
+                meta.insert(FACT_SCHEMA_VERSION_KEY, FACT_SCHEMA_VERSION.to_vec())?;
+            }
             // M58.3 PR1 refix（F2）：旧库兼容——打开即补建 scanner 诊断表
             let _ = write_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
         }
@@ -471,8 +485,13 @@ impl GraphDB {
                 let msg = e.to_string();
                 if msg.contains("GRAPH_SCHEMA_STALE") {
                     let mut diagnostic = crate::diagnostics::envelope_diagnostic(
-                        "GRAPH_SCHEMA_STALE", 1,
-                        Location { source_file: Some(db_path.to_string_lossy().to_string()), node_id: None, json_path: None },
+                        "GRAPH_SCHEMA_STALE",
+                        1,
+                        Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
                         msg.clone(),
                     );
                     diagnostic.suggestion = Some("Rebuild from source into a new --graph-db-path; keep the old database as backup".to_string());
@@ -607,8 +626,13 @@ impl GraphDB {
                 out.query_target = Some(db_path.to_string_lossy().to_string());
                 if msg.contains("GRAPH_SCHEMA_STALE") {
                     let mut diagnostic = crate::diagnostics::envelope_diagnostic(
-                        "GRAPH_SCHEMA_STALE", 1,
-                        Location { source_file: Some(db_path.to_string_lossy().to_string()), node_id: None, json_path: None },
+                        "GRAPH_SCHEMA_STALE",
+                        1,
+                        Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
                         msg.clone(),
                     );
                     diagnostic.suggestion = Some("Rebuild from source into a new --graph-db-path; keep the old database as backup".to_string());
@@ -720,10 +744,17 @@ impl GraphDB {
     fn load_from_db(db: Database, db_path: &Path) -> Result<Self> {
         {
             let transaction = db.begin_read()?;
-            let version = transaction.open_table(META_TABLE).ok()
-                .and_then(|table| table.get(FACT_SCHEMA_VERSION_KEY).ok().flatten().map(|value| value.value()));
-            anyhow::ensure!(version.as_deref() == Some(FACT_SCHEMA_VERSION),
-                "GRAPH_SCHEMA_STALE: rebuild from source into a new --graph-db-path; old facts lack complete evidence");
+            let version = transaction.open_table(META_TABLE).ok().and_then(|table| {
+                table
+                    .get(FACT_SCHEMA_VERSION_KEY)
+                    .ok()
+                    .flatten()
+                    .map(|value| value.value())
+            });
+            anyhow::ensure!(
+                version.as_deref() == Some(FACT_SCHEMA_VERSION),
+                "GRAPH_SCHEMA_STALE: rebuild from source into a new --graph-db-path; old facts lack complete evidence"
+            );
         }
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
@@ -864,8 +895,17 @@ impl GraphDB {
         if let (Some(&from_idx), Some(&to_idx)) =
             (self.node_indices.get(from), self.node_indices.get(to))
         {
-            let edge = Edge { from: from.to_string(), to: to.to_string(), edge_type, field_path, meta };
-            if !self.seen_edges.insert(crate::graph_store::edge_dedup_key(&edge)) {
+            let edge = Edge {
+                from: from.to_string(),
+                to: to.to_string(),
+                edge_type,
+                field_path,
+                meta,
+            };
+            if !self
+                .seen_edges
+                .insert(crate::graph_store::edge_dedup_key(&edge))
+            {
                 return;
             }
             self.is_dirty = true;

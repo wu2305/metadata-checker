@@ -137,7 +137,11 @@ pub fn print_component_query_human_to(
             writeln!(out, "Expanded  : {}", trace.expanded_expr)?;
             writeln!(out, "Complete  : {}", trace.issues.is_empty())?;
             for issue in &trace.issues {
-                writeln!(out, "  {}: {} ({})", issue.code, issue.token, issue.component_id)?;
+                writeln!(
+                    out,
+                    "  {}: {} ({})",
+                    issue.code, issue.token, issue.component_id
+                )?;
             }
             writeln!(out, "Source    : {:?}", trace.source_type)?;
             writeln!(

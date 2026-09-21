@@ -169,11 +169,13 @@ pub fn parse_node_id(id: &str) -> Option<ParsedNodeId> {
     let (kind_str, rest) = id.split_once(':')?;
     let kind = NodeIdKind::from_str(kind_str)?;
     match rest.split_once('|') {
-        Some((page, local)) if !page.is_empty() && !local.is_empty() && !local.contains('|') => Some(ParsedNodeId {
-            kind,
-            page: Some(page.to_string()),
-            local: local.to_string(),
-        }),
+        Some((page, local)) if !page.is_empty() && !local.is_empty() && !local.contains('|') => {
+            Some(ParsedNodeId {
+                kind,
+                page: Some(page.to_string()),
+                local: local.to_string(),
+            })
+        }
         None if !rest.is_empty() => Some(ParsedNodeId {
             kind,
             page: None,
@@ -199,7 +201,9 @@ pub fn page_local_node_id(
 ) -> Result<String, IdentityError> {
     for value in [page_path, local] {
         if value.contains('|') {
-            return Err(IdentityError::ReservedSeparator { value: value.to_string() });
+            return Err(IdentityError::ReservedSeparator {
+                value: value.to_string(),
+            });
         }
     }
     if local.is_empty() {

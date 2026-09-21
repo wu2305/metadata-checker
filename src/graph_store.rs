@@ -322,9 +322,21 @@ pub fn merge_upsert_meta(
 
 /// 完整事实键：关系相同但来源或属性不同的事实不能相互覆盖。
 /// metadata 参与事实身份；关系投影可以另按前四项去重。
-pub type EdgeFactKey = (String, String, crate::graph::EdgeType, Option<String>, Option<serde_json::Value>);
+pub type EdgeFactKey = (
+    String,
+    String,
+    crate::graph::EdgeType,
+    Option<String>,
+    Option<serde_json::Value>,
+);
 
 /// 构造跨 memory/redb/dense 共用的事实键。
 pub fn edge_dedup_key(edge: &Edge) -> EdgeFactKey {
-    (edge.from.clone(), edge.to.clone(), edge.edge_type.clone(), edge.field_path.clone(), edge.meta.clone())
+    (
+        edge.from.clone(),
+        edge.to.clone(),
+        edge.edge_type.clone(),
+        edge.field_path.clone(),
+        edge.meta.clone(),
+    )
 }
