@@ -114,6 +114,8 @@ pub struct RedbV2NodeRecord {
     pub path: String,
     pub name: String,
     pub meta: Option<serde_json::Value>,
+    #[serde(default)]
+    pub origin_file: Option<String>,
 }
 
 /// CSR 邻接切片。
@@ -130,6 +132,8 @@ pub struct RedbV2AdjacencyEntry {
     pub edge_type: EdgeType,
     pub field_path_id: Option<u32>,
     pub meta: Option<serde_json::Value>,
+    #[serde(default)]
+    pub origin_file: Option<String>,
 }
 
 /// v2 shadow 布局的完整内存表示。
@@ -166,6 +170,7 @@ impl RedbV2NodeRecord {
             path: node.path.clone(),
             name: node.name.clone(),
             meta: node.meta.clone(),
+            origin_file: node.origin_file.clone(),
         }
     }
 
@@ -176,6 +181,7 @@ impl RedbV2NodeRecord {
             path: self.path.clone(),
             name: self.name.clone(),
             meta: self.meta.clone(),
+            origin_file: self.origin_file.clone(),
         }
     }
 }
@@ -232,12 +238,14 @@ pub fn build_v2_layout(
             edge_type: edge.edge_type.clone(),
             field_path_id,
             meta: edge.meta.clone(),
+            origin_file: edge.origin_file.clone(),
         });
         incoming_by_node[to_dense as usize].push(RedbV2AdjacencyEntry {
             adjacent_dense_id: from_dense,
             edge_type: edge.edge_type.clone(),
             field_path_id,
             meta: edge.meta.clone(),
+            origin_file: edge.origin_file.clone(),
         });
     }
 
@@ -566,6 +574,7 @@ struct EdgeKey {
     edge_type: EdgeType,
     field_path: Option<String>,
     meta: Option<serde_json::Value>,
+    origin_file: Option<String>,
 }
 
 fn edge_key(edge: &Edge) -> EdgeKey {
@@ -575,6 +584,7 @@ fn edge_key(edge: &Edge) -> EdgeKey {
         edge_type: edge.edge_type.clone(),
         field_path: edge.field_path.clone(),
         meta: edge.meta.clone(),
+        origin_file: edge.origin_file.clone(),
     }
 }
 
@@ -606,6 +616,7 @@ fn materialize_edges_from_out_adjacency(layout: &RedbV2Layout) -> Result<Vec<Edg
                 edge_type: entry.edge_type.clone(),
                 field_path,
                 meta: entry.meta.clone(),
+                origin_file: entry.origin_file.clone(),
             });
         }
     }

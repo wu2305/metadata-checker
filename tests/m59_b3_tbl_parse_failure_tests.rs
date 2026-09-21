@@ -254,14 +254,14 @@ fn corrupt_tbl_preserves_previous_graph_and_reports_stale() -> anyhow::Result<()
                 {"name": "客户", "dbfield": "customer", "dataType": "C"}
             ]
         })),
-    });
+    , origin_file: None});
     expected.nodes.push(node_snapshot(Node {
         id: FIELD_CUSTOMER.to_string(),
         node_type: NodeType::Field,
         path: "data/orders.tbl".to_string(),
         name: "客户".to_string(),
         meta: Some(serde_json::json!({"name": "客户", "dbfield": "customer", "dataType": "C"})),
-    }));
+    , origin_file: None}));
     expected.edges.push(format!(
         "{MODEL_ID} -Contains-> {FIELD_CUSTOMER}\tfield_path=-\tmeta=null"
     ));

@@ -52,7 +52,7 @@ fn prerequisite_graph(group_size: usize) -> anyhow::Result<MemoryGraphStore> {
                     "effect_type": "Enable",
                     "referenced_symbols": references,
                 })),
-            })?;
+            origin_file: None})?;
             graph.add_test_edge(&condition_id, COMPONENT_ID, EdgeType::DependsOn, None);
         }
     }

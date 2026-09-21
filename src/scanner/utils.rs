@@ -28,7 +28,7 @@ pub fn add_node(
             path,
             name,
             meta,
-        })
+        origin_file: None})
         .with_context(|| "Failed to upsert graph node")
 }
 
@@ -48,7 +48,7 @@ pub fn add_edge_with_meta(
             edge_type,
             field_path,
             meta,
-        })
+        origin_file: None})
         .with_context(|| format!("Failed to add graph edge from {} to {}", from, to))
 }
 

@@ -798,6 +798,7 @@ mod tests {
             path: "app/chain.spg".to_string(),
             name: id.to_string(),
             meta,
+            origin_file: None,
         }
     }
 
@@ -810,7 +811,7 @@ mod tests {
                 edge_type: EdgeType::Contains,
                 field_path: None,
                 meta: None,
-            })
+            origin_file: None})
             .expect("添加 Contains 边必须成功");
     }
 
@@ -1068,7 +1069,7 @@ mod tests {
                 edge_type: EdgeType::Reads,
                 field_path: None,
                 meta: Some(serde_json::json!({"json_path": "canvas.components[0].columns[1]"})),
-            })
+            origin_file: None})
             .expect("add reads edge");
         let paths = component_json_paths(&store, "comp:app/chain.spg|btn");
         assert_eq!(

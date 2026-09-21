@@ -112,7 +112,7 @@ fn test_memory_graph_store_write_trait_edge_direction_parity() {
             edge_type: EdgeType::Contains,
             field_path: None,
             meta: None,
-        },
+        origin_file: None},
     )
     .expect("add_edge should succeed");
 

@@ -1599,7 +1599,7 @@ fn build_spg_graph(
             path: source_path.to_string(),
             name: source_path.to_string(),
             meta: None,
-        })
+        origin_file: None})
         .ok();
 
     for source in &meta.sources {
@@ -1611,7 +1611,7 @@ fn build_spg_graph(
                 path: source_path.to_string(),
                 name: source.id.clone(),
                 meta: None,
-            })
+            origin_file: None})
             .ok();
     }
 
@@ -1627,7 +1627,7 @@ fn build_spg_graph(
                 path: source_path.to_string(),
                 name: comp.id.clone(),
                 meta: None,
-            })
+            origin_file: None})
             .ok();
         store
             .add_edge(crate::graph::Edge {
@@ -1636,7 +1636,7 @@ fn build_spg_graph(
                 edge_type: EdgeType::Contains,
                 field_path: None,
                 meta: None,
-            })
+            origin_file: None})
             .ok();
 
         let Some(refs) = dep_graph.dependencies.get(&comp.id) else {
@@ -1660,7 +1660,7 @@ fn build_spg_graph(
                     path: source_path.to_string(),
                     name: model_name.clone(),
                     meta: None,
-                })
+                origin_file: None})
                 .ok();
 
             let field_path = if field.is_empty() {
@@ -1692,7 +1692,7 @@ fn build_spg_graph(
                     edge_type: EdgeType::Reads,
                     field_path: Some(field_path),
                     meta: evidence,
-                })
+                origin_file: None})
                 .ok();
         }
     }

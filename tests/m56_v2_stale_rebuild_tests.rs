@@ -46,7 +46,7 @@ fn build_chain_baseline(name: &str) -> (PathBuf, PathBuf, Vec<String>, Vec<u8>) 
                     path: "bench/chain.spg".to_string(),
                     name: id.clone(),
                     meta: None,
-                },
+                origin_file: None},
             )
             .expect("add node");
         }

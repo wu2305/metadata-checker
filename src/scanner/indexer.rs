@@ -1,14 +1,16 @@
 use anyhow::{Context, Result, anyhow};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use twox_hash::XxHash64;
 
 use super::{process_spg_file_from_value, process_tbl_file_from_string};
-use crate::graph::{FileState, GraphDB};
-use crate::graph_store::{GraphWriteStore, IndexCommit, IndexReport, IndexStateStore};
-use crate::ownership::ProjectBinding;
+use crate::graph::{FileState, GraphDB, Node, NodeType};
+use crate::graph_store::{GraphReadStore, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore};
+use crate::ownership::{
+    ContributionKind, EdgeContribution, EntityContribution, FileContributionLedger, ProjectBinding,
+};
 use crate::parsed_content::ParsedContent;
 use crate::source_id::{ProjectRef, SourceId};
 use crate::storage_provider::{DocumentProvider, LocalStorageProvider};
@@ -55,7 +57,134 @@ pub enum ParsedGraphContent {
     Tbl(String),
 }
 
-/// M59-B3：本轮解析失败、**未进候选图**的源文件。
+/// 将旧 parser 的单文件结果转换为可撤销的来源账本。
+fn ledger_from_parsed_content(
+    logical_path: &str,
+    content: &ParsedGraphContent,
+) -> Result<FileContributionLedger> {
+    let mut temporary = crate::memory_graph_store::MemoryGraphStore::new();
+    match content {
+        ParsedGraphContent::Spg(value) => {
+            process_spg_file_from_value(&mut temporary, logical_path, value.clone())?;
+        }
+        ParsedGraphContent::Tbl(text) => {
+            process_tbl_file_from_string(&mut temporary, logical_path, text)?;
+        }
+    }
+    let mut ledger = FileContributionLedger::new(logical_path, "");
+    let nodes: Vec<Node> = temporary.iter_nodes()?.collect();
+    let local_id_map: HashMap<String, String> = nodes
+        .iter()
+        .filter(|node| {
+            logical_path.ends_with(".spg")
+                && node.path == logical_path
+                && matches!(node.node_type, NodeType::Model | NodeType::Field)
+                && !node.id.contains('|')
+        })
+        .map(|node| {
+            (
+                node.id.clone(),
+                page_scope_model_id(logical_path, &node.id).unwrap_or_else(|_| node.id.clone()),
+            )
+        })
+        .collect();
+    let node_ids: HashSet<String> = nodes.iter().map(|node| node.id.clone()).collect();
+    for mut node in nodes {
+        let is_definition = matches!(node.node_type, NodeType::Page | NodeType::Component | NodeType::Action | NodeType::Condition)
+            || (matches!(node.node_type, NodeType::Model | NodeType::Field)
+                && node.path == logical_path);
+        if let Some(mapped_id) = local_id_map.get(&node.id) {
+            node.id = mapped_id.clone();
+        }
+        node.origin_file = Some(logical_path.to_string());
+        ledger.entities.push(EntityContribution {
+            origin_file: logical_path.to_string(),
+            node,
+            kind: if is_definition {
+                ContributionKind::Definition
+            } else {
+                ContributionKind::Reference
+            },
+        });
+    }
+    let mut edge_ids: Vec<String> = node_ids.into_iter().collect();
+    edge_ids.sort();
+    for node_id in edge_ids {
+        let Some(neighbors) = temporary.get_node_edges(&node_id)? else {
+            continue;
+        };
+        for view in neighbors.outgoing {
+            let mut edge = view.edge;
+            edge.from = rewrite_page_scoped_id(&edge.from, &local_id_map);
+            edge.to = rewrite_page_scoped_id(&edge.to, &local_id_map);
+            edge.origin_file = Some(logical_path.to_string());
+            ledger.edges.push(EdgeContribution {
+                origin_file: logical_path.to_string(),
+                edge,
+            });
+        }
+    }
+    Ok(ledger)
+}
+
+fn page_scope_model_id(logical_path: &str, id: &str) -> Result<String> {
+    let Some((kind, local)) = id.split_once(':') else {
+        return Ok(id.to_string());
+    };
+    if !matches!(kind, "model" | "field") || local.contains('|') {
+        return Ok(id.to_string());
+    }
+    crate::graph_identity::page_local_node_id(
+        crate::graph_identity::NodeIdKind::from_str(kind)
+            .context("invalid page-scoped node kind")?,
+        logical_path,
+        local,
+    )
+    .map_err(|error| anyhow!("invalid page-scoped node id {id}: {error}"))
+}
+
+fn rewrite_page_scoped_id(id: &str, local_id_map: &HashMap<String, String>) -> String {
+    local_id_map
+        .get(id)
+        .cloned()
+        .unwrap_or_else(|| id.to_string())
+}
+
+fn apply_ownership_changes(
+    graph: &mut GraphDB,
+    ledgers: &mut BTreeMap<String, FileContributionLedger>,
+    updates: &[ParsedGraphUpdate],
+    deleted: &[DeletedFile],
+) -> Result<HashMap<String, Vec<String>>> {
+    for update in updates {
+        let mut ledger = ledger_from_parsed_content(&update.logical_path, &update.content)?;
+        ledger.revision = update.file_hash.clone();
+        ledgers.insert(update.logical_path.clone(), ledger);
+    }
+    for (logical_path, _) in deleted {
+        ledgers.remove(logical_path);
+    }
+    crate::ownership::rebuild_graph_from_ledgers(graph, ledgers)?;
+    graph.replace_ownership_ledgers(ledgers.clone())?;
+    Ok(updates
+        .iter()
+        .map(|update| {
+            let node_ids = ledgers
+                .get(&update.logical_path)
+                .map(|ledger| {
+                    ledger
+                        .entities
+                        .iter()
+                        .map(|contribution| contribution.node.id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            (update.logical_path.clone(), node_ids)
+        })
+        .collect())
+}
+
+/// M59-B3：本轮解析失败、**未进候选图**的源文件.
 ///
 /// 旧行为是 `tbl.rs` 把非法 JSON 静默转成 `Ok(空集)`：配合「先删旧节点再重建」，
 /// 一个写坏的 `.tbl` 会让旧模型图被删、新图为空，而 file hash 照常记录——
@@ -622,26 +751,31 @@ impl ProjectIndexer {
         project_dir: &Path,
         db_path: &Path,
     ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
-        Self::scan_with_diagnostics_internal(project_dir, db_path, None)
+        Self::scan_with_diagnostics_internal(project_dir, db_path, None, false)
     }
 
-    /// 按项目绑定执行扫描，绑定校验与候选图打开位于同一入口。
+    /// 按稳定项目绑定执行 ownership 扫描，绑定与来源账本在同一入口启用。
     pub fn scan_with_diagnostics_for_project(
         project_dir: &Path,
         db_path: &Path,
         project_binding: &ProjectBinding,
     ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
-        Self::scan_with_diagnostics_internal(project_dir, db_path, Some(project_binding))
+        Self::scan_with_diagnostics_internal(project_dir, db_path, Some(project_binding), true)
     }
 
     fn scan_with_diagnostics_internal(
         project_dir: &Path,
         db_path: &Path,
         project_binding: Option<&ProjectBinding>,
+        ownership_enabled: bool,
     ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
-        let mut graph = match project_binding {
-            Some(binding) => GraphDB::open_for_project(db_path, binding)?,
-            None => GraphDB::open(db_path)?,
+        let mut graph = match (project_binding, ownership_enabled) {
+            (Some(binding), true) => GraphDB::open_with_ownership(db_path, binding)?,
+            (Some(binding), false) => GraphDB::open_for_project(db_path, binding)?,
+            (None, false) => GraphDB::open(db_path)?,
+            (None, true) => anyhow::bail!(
+                "GRAPH_PROJECT_BINDING_REQUIRED: ownership scanning requires a project binding"
+            ),
         };
         let prev_states = graph.load_file_states().unwrap_or_default();
 
@@ -686,27 +820,43 @@ impl ProjectIndexer {
             for failure in &parse_failures {
                 scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
             }
-            // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
-            let merged_removed = merge_removed_node_ids(
-                updates
-                    .iter()
-                    .map(|update| update.previous_node_ids.as_slice())
-                    .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
-            );
-            let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
-            // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
-            let parsed_nodes = Self::apply_incremental_changes(
-                &mut graph,
-                &mut new_states,
-                &updates,
-                &plan.deleted,
-            )?;
-            // M56：apply 后收集新增/变更节点的 incident edges
-            let new_node_ids: Vec<String> = parsed_nodes
-                .values()
-                .flat_map(|node_ids| node_ids.iter().cloned())
-                .collect();
-            let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+            let (parsed_nodes, merged_removed, removed_edge_keys, dirty_edges) =
+                if ownership_enabled {
+                    let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
+                    let parsed_nodes = apply_ownership_changes(
+                        &mut graph,
+                        &mut ledgers,
+                        &updates,
+                        &plan.deleted,
+                    )?;
+                    for (logical_path, _) in &plan.deleted {
+                        new_states.remove(logical_path);
+                    }
+                    (parsed_nodes, Vec::new(), Vec::new(), Vec::new())
+                } else {
+                    // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
+                    let merged_removed = merge_removed_node_ids(
+                        updates
+                            .iter()
+                            .map(|update| update.previous_node_ids.as_slice())
+                            .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+                    );
+                    let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
+                    // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
+                    let parsed_nodes = Self::apply_incremental_changes(
+                        &mut graph,
+                        &mut new_states,
+                        &updates,
+                        &plan.deleted,
+                    )?;
+                    // M56：apply 后收集新增/变更节点的 incident edges
+                    let new_node_ids: Vec<String> = parsed_nodes
+                        .values()
+                        .flat_map(|node_ids| node_ids.iter().cloned())
+                        .collect();
+                    let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+                    (parsed_nodes, merged_removed, removed_edge_keys, dirty_edges)
+                };
 
             let changed_file_states: Vec<String> = updates
                 .iter()
@@ -745,7 +895,7 @@ impl ProjectIndexer {
                 checkpoint: None,
                 // M56：初始全量构建（无 prev states）走显式 full rebuild 路径
                 //（v2 置 Current）；增量提交走 delta 路径（v2 置 Stale）
-                delta: if prev_states.is_empty() {
+                delta: if prev_states.is_empty() || ownership_enabled {
                     None
                 } else {
                     Some(crate::graph_store::IndexDelta {

@@ -64,7 +64,7 @@ impl MemoryGraphStore {
                 path: path.to_string(),
                 name: name.to_string(),
                 meta: None,
-            },
+            origin_file: None},
         );
     }
 
@@ -85,7 +85,7 @@ impl MemoryGraphStore {
             edge_type,
             field_path: field_path.map(|s| s.to_string()),
             meta: None,
-        };
+        origin_file: None};
         let _ = <Self as GraphWriteStore>::add_edge(self, edge);
     }
 
@@ -203,7 +203,7 @@ impl GraphWriteStore for MemoryGraphStore {
 
         // M59-B1：去重键必须一起清，否则节点被删又重建后，原来那条边会被
         // 当成重复边丢弃——图里永久缺一条边。redb 侧对 seen_edges 做同样的 retain。
-        self.seen_edges.retain(|(from, to, _, _, _)| {
+        self.seen_edges.retain(|(from, to, _, _, _, _)| {
             !removed_ids.contains(from.as_str()) && !removed_ids.contains(to.as_str())
         });
         Ok(())

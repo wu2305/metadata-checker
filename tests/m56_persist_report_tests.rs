@@ -164,7 +164,7 @@ fn m56_persist_report_curve_snapshot() {
                     path: "bench/curve.spg".to_string(),
                     name: id.clone(),
                     meta: None,
-                },
+                origin_file: None},
             )
             .expect("add node");
         }

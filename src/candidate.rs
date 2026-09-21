@@ -143,6 +143,7 @@ mod tests {
             path: "page.spg".to_string(),
             name: name.to_string(),
             meta: None,
+            origin_file: None,
         }
     }
 

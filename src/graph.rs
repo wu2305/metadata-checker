@@ -56,6 +56,9 @@ pub struct Node {
     pub path: String,
     pub name: String,
     pub meta: Option<serde_json::Value>,
+    /// 产生该实体贡献的项目内源文件；旧兼容 API 为 None。
+    #[serde(default)]
+    pub origin_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +69,9 @@ pub struct Edge {
     pub edge_type: EdgeType,
     pub field_path: Option<String>,
     pub meta: Option<serde_json::Value>,
+    /// 产生该关系事实的项目内源文件；旧兼容 API 为 None。
+    #[serde(default)]
+    pub origin_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

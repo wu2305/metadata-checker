@@ -30,7 +30,7 @@ fn seed_and_assert(store: &mut dyn GraphStore, reverse: bool) {
                 path: "page.spg".into(),
                 name: id.into(),
                 meta: None,
-            })
+            origin_file: None})
             .unwrap();
     }
     let fields = if reverse {
@@ -47,7 +47,7 @@ fn seed_and_assert(store: &mut dyn GraphStore, reverse: bool) {
             meta: Some(
                 json!({"source_file":"page.spg","json_path":format!("canvas.components[0].{field}")}),
             ),
-        };
+        origin_file: None};
         store.add_edge(edge.clone()).unwrap();
         store.add_edge(edge).unwrap();
     }
@@ -103,7 +103,7 @@ fn storage_key_distinguishes_absent_and_empty_field_paths() {
         edge_type: EdgeType::Reads,
         field_path: None,
         meta: None,
-    };
+    , origin_file: None};
     let absent = edge_storage_key(&edge);
     edge.field_path = Some(String::new());
     assert_eq!(absent == edge_storage_key(&edge), false);
