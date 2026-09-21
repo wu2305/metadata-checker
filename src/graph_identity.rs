@@ -92,7 +92,9 @@ pub enum IdentityError {
 impl fmt::Display for IdentityError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IdentityError::ScopeRequired { kind } => write!(f, "node kind {} requires page scope", kind.as_str()),
+            IdentityError::ScopeRequired { kind } => {
+                write!(f, "node kind {} requires page scope", kind.as_str())
+            }
             IdentityError::EscapeBeyondRoot { path } => {
                 write!(f, "path escapes the project root: {}", path)
             }

@@ -127,3 +127,19 @@ same_page=true（source_file_count=2）。`src/path.rs:938-942` 以 field_path �
 关闭条件：按整条路径的源范围判定 same_page，按真实节点/字段来源识别物理字段；同页、
 跨页、跨 SPG/TBL 与普通 name 字段均有精确回归，再独立复核快照变化。此项保留为明确的
 查询语义缺口；本次台账收口不宣称其已修复，也不代表整个累计 PR14 的语义验收。
+
+
+## 2026-09-21 — M59 语义完整性断言修正（未重写 corpus 快照）
+
+| case_id | 断言 | 旧值 | 新值 | 源证据 |
+|---|---|---|---|---|
+| m59_b1_graph_store_contract_tests | 同关系不同 metadata | first-meta-wins，1 条 | 两份来源逐属性保留，2 条；完全重复仍幂等 | 两个手工 Edge 输入仅 meta 不同，正反邻接均断言 |
+| boundary_error_tests | list.column1.value / list.column2.value | 仅断言同一个 ComponentValue(list) | 两个完整 ComponentProperty 属性路径 | 输入表达式直接包含不同列名，不能互相替代 |
+| m59_a1b_component_value_ref_tests / boundary_error_tests | num.step | ComponentValue(..., Suffix) | ComponentProperty(num, step) | step 与 value 是不同属性，值追溯不得替换 step |
+
+验证命令在 CNB：`cargo test --features cli-local --no-fail-fast`。
+新增语义反例位于 `m59_semantic_trace_tests`、`m59_fact_identity_tests`、`m59_identity_validation_tests`。
+复核决定：按 approved `2026-09-21-semantic-integrity-design.md` 的独立语义契约修正，
+不得以 redb 旧输出或双后端相等替代正确性。独立审查与最终运行证据见同目录本批验收记录。
+`tests/snapshots/corpus/` 未更改；调试期间生成的临时旧编码 fixture 数据库隔离后，
+从源文件重建，原 corpus 快照通过；未设置 `UPDATE_CORPUS_SNAPSHOTS`。

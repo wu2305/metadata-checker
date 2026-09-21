@@ -10,11 +10,13 @@
 
 ## 2026-09-21 当前实现补充（优先于下方历史行号）
 
-分析提交 `422b288`（语义完整性分支）：`src/graph_store.rs:334` 的事实键包含 metadata，
+分析提交 `2e2a40f`（语义完整性分支）：`src/graph_store.rs:334` 的事实键包含 metadata，
 相同端点/类型/字段但来源证据不同的边分别保留；完全重复事实仍幂等。
-`src/graph_redb.rs:36` 引入 `fact_schema_version=2`，新键用 JSON 数组编码；
+`src/graph_redb.rs:36` 引入 `fact_schema_version=2`，新键用既有关系排序前缀 + NUL + 完整 JSON 数组编码；
 非空旧库缺版本或版本不匹配拒绝加载，并要求从源文件在新的 `--graph-db-path` 重建，旧库保留。
 不能从旧图恢复已经丢掉的证据，不能仅改版本号绕过重建。
+`graph_redb::validate_fact_schema` 也覆盖 `read_v2_layout`，CLI 状态检查报告 stale。
+全局 model/field 的保留分隔符校验已进入 scanner；TBL 在首次写入前校验全部身份来源。
 
 这不是 M59-2 完成：页面局部身份 helper 仍未启用，来源撤销和共享节点生命周期未修，
 下文 B5 跨文件边丢失/占位残留仍属已知缺陷。

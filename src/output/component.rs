@@ -336,11 +336,19 @@ pub fn print_component_query_json_to(
         crate::output::AiOutput::new(crate::output::OutputKind::ComponentQuery, summary);
     output.query_target = Some(comp.id.clone());
     if value_trace.get("complete").and_then(Value::as_bool) == Some(false) {
-        output.diagnostics.push(crate::diagnostics::envelope_diagnostic(
-            "TRACE_INCOMPLETE", value_trace["issues"].as_array().map_or(1, Vec::len),
-            crate::output::Location { source_file: None, node_id: Some(comp.id.clone()), json_path: None },
-            "值追溯未完整展开；请核对 details.value_trace.issues，不能把剩余引用当最终来源".to_string(),
-        ));
+        output
+            .diagnostics
+            .push(crate::diagnostics::envelope_diagnostic(
+                "TRACE_INCOMPLETE",
+                value_trace["issues"].as_array().map_or(1, Vec::len),
+                crate::output::Location {
+                    source_file: None,
+                    node_id: Some(comp.id.clone()),
+                    json_path: None,
+                },
+                "值追溯未完整展开；请核对 details.value_trace.issues，不能把剩余引用当最终来源"
+                    .to_string(),
+            ));
     }
     output.details = Some(details);
     output.evidence.push(

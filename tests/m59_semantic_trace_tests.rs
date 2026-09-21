@@ -179,7 +179,14 @@ fn partial_trace_is_visible_in_both_output_modes() {
         output["details"]["value_trace"]["issues"][0]["code"],
         "TRACE_MISSING_VALUE"
     );
-    assert_eq!(output["diagnostics"].as_array().unwrap().iter().any(|item| item["code"] == "TRACE_INCOMPLETE"), true);
+    assert_eq!(
+        output["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["code"] == "TRACE_INCOMPLETE"),
+        true
+    );
     let mut human_output = Vec::new();
     metadata_checker::output::print_component_query_human_to(
         &meta,

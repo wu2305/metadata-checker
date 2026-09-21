@@ -9,11 +9,13 @@ fn different_page_local_pairs_never_collide() {
 // 成功构造的身份必须能恢复输入的页面和局部名。
 #[test]
 fn successful_constructor_roundtrips() {
-    if let Ok(id) = page_local_node_id(NodeIdKind::Model, "a.spg|b.spg", "c") {
+    for (page, local) in [("a.spg", "c"), ("目录/a.spg", "字段.名称")] {
+        let id = page_local_node_id(NodeIdKind::Model, page, local).unwrap();
         let parsed = parse_node_id(&id).unwrap();
-        assert_eq!(parsed.page.as_deref(), Some("a.spg|b.spg"));
-        assert_eq!(parsed.local, "c");
+        assert_eq!(parsed.page.as_deref(), Some(page));
+        assert_eq!(parsed.local, local);
     }
+    assert_eq!(page_local_node_id(NodeIdKind::Model, "a.spg|b.spg", "c").is_err(), true);
 }
 
 // 不允许把绝对/盘符引用折叠到项目相对身份中。

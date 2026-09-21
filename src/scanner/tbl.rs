@@ -427,18 +427,37 @@ fn validate_table_identities(value: &serde_json::Value, model_name: &str) -> Res
     use crate::graph_identity::{NodeIdKind, global_node_id};
     global_node_id(NodeIdKind::Model, model_name)?;
     if let Some(dimensions) = value.get("dimensions").and_then(|v| v.as_array()) {
-        for name in dimensions.iter().filter_map(|dim| dim.get("name").and_then(|v| v.as_str())) {
+        for name in dimensions
+            .iter()
+            .filter_map(|dim| dim.get("name").and_then(|v| v.as_str()))
+        {
             global_node_id(NodeIdKind::Field, &format!("{model_name}.{name}"))?;
         }
     }
-    if let Some(name) = value.pointer("/properties/dbTableName").and_then(|v| v.as_str()) {
+    if let Some(name) = value
+        .pointer("/properties/dbTableName")
+        .and_then(|v| v.as_str())
+    {
         global_node_id(NodeIdKind::Model, name)?;
     }
     if value.get("dataFlow").is_some() {
-        let depends = value.pointer("/properties/depends").and_then(|v| v.as_array()).into_iter().flatten().filter_map(|v| v.as_str());
-        let inputs = value.pointer("/dataFlow/nodes").and_then(|v| v.as_object()).into_iter().flat_map(|nodes| nodes.values()).filter_map(|node| node.get("moduleTablePath").and_then(|v| v.as_str()));
+        let depends = value
+            .pointer("/properties/depends")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str());
+        let inputs = value
+            .pointer("/dataFlow/nodes")
+            .and_then(|v| v.as_object())
+            .into_iter()
+            .flat_map(|nodes| nodes.values())
+            .filter_map(|node| node.get("moduleTablePath").and_then(|v| v.as_str()));
         for path in depends.chain(inputs) {
-            let model = Path::new(path).file_stem().map(|stem| stem.to_string_lossy()).unwrap_or_else(|| path.into());
+            let model = Path::new(path)
+                .file_stem()
+                .map(|stem| stem.to_string_lossy())
+                .unwrap_or_else(|| path.into());
             global_node_id(NodeIdKind::Model, &model)?;
         }
     }

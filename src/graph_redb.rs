@@ -47,17 +47,17 @@ const SCANNER_DIAGNOSTICS_TABLE: TableDefinition<&str, Vec<u8>> =
 
 /// 所有持久化事实读取入口共用版本门槛，不能从 shadow 绕过。
 pub(crate) fn validate_fact_schema(transaction: &redb::ReadTransaction) -> Result<()> {
-let version = transaction.open_table(META_TABLE).ok().and_then(|table| {
-                table
-                    .get(FACT_SCHEMA_VERSION_KEY)
-                    .ok()
-                    .flatten()
-                    .map(|value| value.value())
-            });
-            anyhow::ensure!(
-                version.as_deref() == Some(FACT_SCHEMA_VERSION),
-                "GRAPH_SCHEMA_STALE: rebuild from source into a new --graph-db-path; old facts lack complete evidence"
-            );
+    let version = transaction.open_table(META_TABLE).ok().and_then(|table| {
+        table
+            .get(FACT_SCHEMA_VERSION_KEY)
+            .ok()
+            .flatten()
+            .map(|value| value.value())
+    });
+    anyhow::ensure!(
+        version.as_deref() == Some(FACT_SCHEMA_VERSION),
+        "GRAPH_SCHEMA_STALE: rebuild from source into a new --graph-db-path; old facts lack complete evidence"
+    );
     Ok(())
 }
 
