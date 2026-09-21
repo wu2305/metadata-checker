@@ -45,6 +45,22 @@ const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
 const SCANNER_DIAGNOSTICS_TABLE: TableDefinition<&str, Vec<u8>> =
     TableDefinition::new("scanner_diagnostics");
 
+/// 所有持久化事实读取入口共用版本门槛，不能从 shadow 绕过。
+pub(crate) fn validate_fact_schema(transaction: &redb::ReadTransaction) -> Result<()> {
+let version = transaction.open_table(META_TABLE).ok().and_then(|table| {
+                table
+                    .get(FACT_SCHEMA_VERSION_KEY)
+                    .ok()
+                    .flatten()
+                    .map(|value| value.value())
+            });
+            anyhow::ensure!(
+                version.as_deref() == Some(FACT_SCHEMA_VERSION),
+                "GRAPH_SCHEMA_STALE: rebuild from source into a new --graph-db-path; old facts lack complete evidence"
+            );
+    Ok(())
+}
+
 /// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约）。
 ///
 /// scanner/bench 收集 delta 与 persist 全量/增量写共用同一格式，避免两套键。
@@ -784,17 +800,7 @@ impl GraphDB {
     fn load_from_db(db: Database, db_path: &Path) -> Result<Self> {
         {
             let transaction = db.begin_read()?;
-            let version = transaction.open_table(META_TABLE).ok().and_then(|table| {
-                table
-                    .get(FACT_SCHEMA_VERSION_KEY)
-                    .ok()
-                    .flatten()
-                    .map(|value| value.value())
-            });
-            anyhow::ensure!(
-                version.as_deref() == Some(FACT_SCHEMA_VERSION),
-                "GRAPH_SCHEMA_STALE: rebuild from source into a new --graph-db-path; old facts lack complete evidence"
-            );
+            validate_fact_schema(&transaction)?;
         }
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();

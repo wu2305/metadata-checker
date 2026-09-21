@@ -85,11 +85,14 @@ pub enum IdentityError {
     ReservedSeparator { value: String },
     /// 项目内路径不得携带根或 Windows 盘符。
     AbsolutePath { path: String },
+    /// 此类节点必须携带页面作用域。
+    ScopeRequired { kind: NodeIdKind },
 }
 
 impl fmt::Display for IdentityError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            IdentityError::ScopeRequired { kind } => write!(f, "node kind {} requires page scope", kind.as_str()),
             IdentityError::EscapeBeyondRoot { path } => {
                 write!(f, "path escapes the project root: {}", path)
             }
@@ -172,6 +175,9 @@ fn reject_absolute_path(path: &str) -> Result<(), IdentityError> {
 
 /// 构造全局身份；物理模型不能借保留分隔符伪装为局部身份。
 pub fn global_node_id(kind: NodeIdKind, local: &str) -> Result<String, IdentityError> {
+    if !matches!(kind, NodeIdKind::Model | NodeIdKind::Field) {
+        return Err(IdentityError::ScopeRequired { kind });
+    }
     if local.is_empty() {
         return Err(IdentityError::EmptySegment {
             id: kind.as_str().to_string(),

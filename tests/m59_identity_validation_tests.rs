@@ -49,3 +49,29 @@ fn scanner_rejects_global_names_with_reserved_separator() {
     assert_eq!(result.is_err(), true);
     assert_eq!(graph.node_count().unwrap(), 0);
 }
+
+// 不能用全局构造器生成本应带页面作用域的节点。
+#[test]
+fn global_constructor_rejects_scoped_kinds() {
+    use metadata_checker::graph_identity::global_node_id;
+    for kind in [NodeIdKind::Comp, NodeIdKind::Param, NodeIdKind::Action, NodeIdKind::Cond, NodeIdKind::Page] {
+        assert_eq!(global_node_id(kind, "x").is_err(), true);
+    }
+}
+
+// 先出现合法模型/字段、后出现非法身份，也必须在首次写入前失败。
+#[test]
+fn invalid_table_identity_leaves_no_partial_graph() {
+    use metadata_checker::graph_store::GraphReadStore;
+    use metadata_checker::memory_graph_store::MemoryGraphStore;
+    for value in [
+        serde_json::json!({"dimensions":[{"name":"ok"},{"name":"bad|field"}]}),
+        serde_json::json!({"properties":{"dbTableName":"bad|table"}}),
+        serde_json::json!({"dataFlow":{},"properties":{"depends":["ok.tbl","bad|table.tbl"]}}),
+        serde_json::json!({"dataFlow":{"nodes":{"n":{"moduleTablePath":"bad|input.tbl"}}}}),
+    ] {
+        let mut graph = MemoryGraphStore::new();
+        assert_eq!(metadata_checker::scanner::process_tbl_file_from_string(&mut graph, "ok.tbl", &value.to_string()).is_err(), true);
+        assert_eq!(graph.node_count().unwrap(), 0);
+    }
+}

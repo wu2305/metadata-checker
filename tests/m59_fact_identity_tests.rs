@@ -144,6 +144,7 @@ fn missing_version_on_nonempty_database_is_rejected_without_upgrade() {
             .contains("GRAPH_SCHEMA_STALE"),
         true
     );
+    assert_eq!(metadata_checker::graph_redb_v2::read_v2_layout(&path).err().unwrap().to_string().contains("GRAPH_SCHEMA_STALE"), true);
     let check = GraphDB::check_graph_db(&path);
     assert_eq!(check.summary["needs_rebuild"], true);
     assert_eq!(

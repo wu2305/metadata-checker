@@ -375,6 +375,7 @@ pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
     let db = Database::open(db_path)
         .with_context(|| format!("open redb for v2 shadow read at {:?}", db_path))?;
     let read_txn = db.begin_read()?;
+    crate::graph_redb::validate_fact_schema(&read_txn)?;
     let meta_table = match read_txn.open_table(V2_META_TABLE) {
         Ok(table) => table,
         Err(_) => return Ok(None),
