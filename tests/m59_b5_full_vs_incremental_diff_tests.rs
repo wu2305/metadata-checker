@@ -379,15 +379,16 @@ fn cross_file_edge_survives_incremental_update() {
     );
 }
 
-/// 两个同名 TBL 主模型（全局 model:{name} 撞 id）必须报告来源冲突，不得静默择一。
+/// 两个同 stem 的 TBL（全局 model:{stem} 撞 id）必须报告来源冲突，不得静默择一。
 #[test]
 fn conflicting_tbl_model_definitions_are_reported() {
     let tag = "tbl-conflict";
     let binding = ProjectBinding::new(format!("m59-b5-{tag}")).expect("valid binding");
     let dir = unique_dir(tag);
     let project = dir.join("project");
+    // TBL 主模型 id 取文件 stem（非 JSON name）：同 stem 不同目录才会撞 id
     write(&project, "tables/a.tbl", &table_json("dup", &["f_a"]));
-    write(&project, "tables/other/b.tbl", &table_json("dup", &["f_b"]));
+    write(&project, "tables/other/a.tbl", &table_json("dup", &["f_b"]));
 
     let outcome = ProjectIndexer::scan_with_diagnostics_for_project(
         &project,
@@ -401,10 +402,10 @@ fn conflicting_tbl_model_definitions_are_reported() {
             .diagnostics
             .iter()
             .any(|d| d.code == "GRAPH_OWNERSHIP_CONFLICT"
-                && d.message.contains("model:dup")
+                && d.message.contains("model:a")
                 && d.message.contains("tables/a.tbl")
-                && d.message.contains("tables/other/b.tbl")),
-        "同名 TBL 主模型必须报告 GRAPH_OWNERSHIP_CONFLICT：{:?}",
+                && d.message.contains("tables/other/a.tbl")),
+        "同 stem TBL 主模型必须报告 GRAPH_OWNERSHIP_CONFLICT：{:?}",
         outcome.diagnostics
     );
 

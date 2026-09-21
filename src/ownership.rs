@@ -307,7 +307,9 @@ pub fn rebuild_graph_from_ledgers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{EdgeType, NodeType};
+    use crate::graph::EdgeType;
+    use crate::graph::NodeType;
+    use crate::graph_store::GraphReadStore;
 
     fn node(id: &str) -> Node {
         Node {
