@@ -5,7 +5,7 @@
 //! 在后续 M59-2 包中消费。
 
 use crate::graph::{Edge, Node};
-use crate::graph_store::{GraphReadStore, GraphWriteStore, edge_dedup_key};
+use crate::graph_store::{edge_dedup_key, GraphReadStore, GraphStore};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -169,7 +169,7 @@ impl OwnershipLedgerSnapshot {
 /// 先收集定义、引用和完整事实，再一次性 upsert/add，避免扫描顺序决定
 /// 共享目标的最终 metadata；定义消失但引用仍在时，保留 PhysicalTable 占位。
 pub fn rebuild_graph_from_ledgers(
-    graph: &mut dyn GraphWriteStore,
+    graph: &mut dyn GraphStore,
     ledgers: &BTreeMap<String, FileContributionLedger>,
 ) -> Result<()> {
     let mut entities: HashMap<String, Vec<&EntityContribution>> = HashMap::new();
