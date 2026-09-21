@@ -15,7 +15,10 @@ fn successful_constructor_roundtrips() {
         assert_eq!(parsed.page.as_deref(), Some(page));
         assert_eq!(parsed.local, local);
     }
-    assert_eq!(page_local_node_id(NodeIdKind::Model, "a.spg|b.spg", "c").is_err(), true);
+    assert_eq!(
+        page_local_node_id(NodeIdKind::Model, "a.spg|b.spg", "c").is_err(),
+        true
+    );
 }
 
 // 不允许把绝对/盘符引用折叠到项目相对身份中。
@@ -56,7 +59,13 @@ fn scanner_rejects_global_names_with_reserved_separator() {
 #[test]
 fn global_constructor_rejects_scoped_kinds() {
     use metadata_checker::graph_identity::global_node_id;
-    for kind in [NodeIdKind::Comp, NodeIdKind::Param, NodeIdKind::Action, NodeIdKind::Cond, NodeIdKind::Page] {
+    for kind in [
+        NodeIdKind::Comp,
+        NodeIdKind::Param,
+        NodeIdKind::Action,
+        NodeIdKind::Cond,
+        NodeIdKind::Page,
+    ] {
         assert_eq!(global_node_id(kind, "x").is_err(), true);
     }
 }
@@ -73,7 +82,15 @@ fn invalid_table_identity_leaves_no_partial_graph() {
         serde_json::json!({"dataFlow":{"nodes":{"n":{"moduleTablePath":"bad|input.tbl"}}}}),
     ] {
         let mut graph = MemoryGraphStore::new();
-        assert_eq!(metadata_checker::scanner::process_tbl_file_from_string(&mut graph, "ok.tbl", &value.to_string()).is_err(), true);
+        assert_eq!(
+            metadata_checker::scanner::process_tbl_file_from_string(
+                &mut graph,
+                "ok.tbl",
+                &value.to_string()
+            )
+            .is_err(),
+            true
+        );
         assert_eq!(graph.node_count().unwrap(), 0);
     }
 }
