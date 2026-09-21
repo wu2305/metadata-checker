@@ -83,7 +83,7 @@ pub(crate) fn validate_project_access(
     let meta = match transaction.open_table(META_TABLE) {
         Ok(table) => table,
         Err(redb::TableError::TableDoesNotExist(_)) => {
-            return validate_project_markers(None, None, None, binding);
+            return validate_project_markers(None, None, None, None, binding);
         }
         Err(error) => return Err(error.into()),
     };
@@ -95,6 +95,9 @@ pub(crate) fn validate_project_access(
         meta.get(OWNERSHIP_SCHEMA_VERSION_KEY)?
             .map(|v| v.value())
             .as_deref(),
+        meta.get(OWNERSHIP_LEDGER_VERSION_KEY)?
+            .map(|v| v.value())
+            .as_deref(),
         binding,
     )
 }
@@ -104,16 +107,32 @@ fn validate_project_markers(
     version: Option<&[u8]>,
     project: Option<&[u8]>,
     ownership: Option<&[u8]>,
+    ledger_version: Option<&[u8]>,
     binding: Option<&ProjectBinding>,
 ) -> Result<()> {
     if let Some(ownership) = ownership {
         anyhow::ensure!(
-            binding.is_some(),
-            "GRAPH_PROJECT_BINDING_REQUIRED: use a project-bound entry point to access an ownership database"
-        );
-        anyhow::ensure!(
             ownership == OWNERSHIP_SCHEMA_VERSION.to_string().as_bytes(),
             "GRAPH_OWNERSHIP_SCHEMA_STALE: unsupported ownership schema; rebuild from source into a new graph path"
+        );
+        // 完整且当前的 ownership 库只缺绑定入口时不需要重建，改报 REQUIRED；
+        // 伴随 marker 残缺（无绑定 schema 版本或无账本版本）仍按 STALE 拒载。
+        let ownership_complete = version
+            == Some(
+                PROJECT_BINDING_SCHEMA_VERSION
+                    .to_string()
+                    .as_bytes()
+                    .as_slice(),
+            )
+            && ledger_version == Some(OWNERSHIP_LEDGER_VERSION.to_string().as_bytes().as_slice());
+        if binding.is_none() && !ownership_complete {
+            anyhow::bail!(
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: incomplete ownership markers; rebuild from source into a new graph path"
+            );
+        }
+        anyhow::ensure!(
+            binding.is_some(),
+            "GRAPH_PROJECT_BINDING_REQUIRED: use a project-bound entry point to access an ownership database"
         );
     }
     if let Some(version) = version {
