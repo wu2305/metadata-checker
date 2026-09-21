@@ -109,7 +109,7 @@ fn validate_project_markers(
     if let Some(ownership) = ownership {
         anyhow::ensure!(
             binding.is_some(),
-            "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership database requires a bound entry point"
+            "GRAPH_PROJECT_BINDING_REQUIRED: use a project-bound entry point to access an ownership database"
         );
         anyhow::ensure!(
             ownership == OWNERSHIP_SCHEMA_VERSION.to_string().as_bytes(),
