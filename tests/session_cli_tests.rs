@@ -999,6 +999,9 @@ fn session_remote_index_respects_graph_db_path_override() {
         &[
             "--graph-db-path",
             &graph_db_path.to_string_lossy(),
+            // ownership 图库的读取也必须携带显式项目身份
+            "--project-ref",
+            "proj",
             "--query-page",
             "page:app/Foo.spg",
         ],
