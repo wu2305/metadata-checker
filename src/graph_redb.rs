@@ -1609,6 +1609,16 @@ impl GraphDB {
         self.ownership_enabled.then_some(&self.ownership_ledgers)
     }
 
+    /// 当前句柄打开时核验的项目绑定；未绑定为 None。
+    pub fn project_binding(&self) -> Option<&ProjectBinding> {
+        self.project_binding.as_ref()
+    }
+
+    /// 当前句柄是否已启用真实来源账本（ownership）路径。
+    pub fn ownership_enabled(&self) -> bool {
+        self.ownership_enabled
+    }
+
     pub fn persist(&mut self, file_states: &HashMap<String, FileState>) -> Result<()> {
         self.persist_with_checkpoint(file_states, None)?;
         Ok(())

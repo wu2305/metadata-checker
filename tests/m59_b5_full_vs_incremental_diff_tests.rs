@@ -821,7 +821,7 @@ fn ownership_graph_reopens_and_restarts_cleanly() {
     // 重启 1：以 open_for_project 打开
     {
         let graph = GraphDB::open_for_project(&db_path, &binding).expect("open_for_project");
-        assert_eq!(graph.project_binding.as_ref(), Some(&binding));
+        assert_eq!(graph.project_binding(), Some(&binding));
         assert!(graph.node_indices.len() > 0);
     }
 
@@ -829,8 +829,8 @@ fn ownership_graph_reopens_and_restarts_cleanly() {
     {
         let graph = GraphDB::open_readonly_with_ownership(&db_path, &binding)
             .expect("open_readonly_with_ownership");
-        assert_eq!(graph.project_binding.as_ref(), Some(&binding));
-        assert!(graph.ownership_enabled);
+        assert_eq!(graph.project_binding(), Some(&binding));
+        assert!(graph.ownership_enabled());
         assert_eq!(graph.ownership_ledgers().unwrap().len(), 2);
     }
 
@@ -843,10 +843,11 @@ fn session_refresh_query_diff_refresh_cycle_preserves_ownership() {
     use metadata_checker::diff_refresh::FixtureMetaFilesChangeSource;
     use metadata_checker::diff_refresh::orchestrator::DiffRefreshOrchestrator;
     use metadata_checker::remote_metadata::MetadataContentType;
+    use metadata_checker::remote_metadata::RemoteFileContent;
     use metadata_checker::runtime::{GraphRuntime, RuntimeMode};
     use metadata_checker::session::SessionManager;
     use metadata_checker::session::remote_provider::{
-        InMemoryRemoteSessionProvider, RemoteFileContent, RemoteMetafileEntry, RemoteProjectInfo,
+        InMemoryRemoteSessionProvider, RemoteMetafileEntry, RemoteProjectInfo,
     };
     use metadata_checker::session::remote_sync::{
         SessionRefreshOptions, refresh_session_from_remote,
@@ -953,15 +954,24 @@ fn session_refresh_query_diff_refresh_cycle_preserves_ownership() {
       "changes": []
     }"#;
     let source = FixtureMetaFilesChangeSource::from_json_str(fixture_json).unwrap();
-    let mut orchestrator = DiffRefreshOrchestrator::new(manager, session_id, source).unwrap();
+    let session_dir = manager.session_dir(session_id);
+    let manifest = manager.read_manifest(session_id).expect("read manifest");
+    let mut orchestrator = DiffRefreshOrchestrator::new(
+        manager,
+        session_dir,
+        manifest,
+        Box::new(source),
+        Box::new(provider),
+        runtime,
+    );
     let diff_report = orchestrator.refresh_once().expect("diff refresh");
     assert!(diff_report.ok);
 
     // 4. 再次验证库内 ownership 状态完好
     let graph = GraphDB::open_readonly_with_ownership(&graph_db_path, &binding)
         .expect("reopen with ownership after diff-refresh");
-    assert_eq!(graph.project_binding.as_ref(), Some(&binding));
-    assert!(graph.ownership_enabled);
+    assert_eq!(graph.project_binding(), Some(&binding));
+    assert!(graph.ownership_enabled());
     assert_eq!(graph.ownership_ledgers().unwrap().len(), 2);
 
     let _ = std::fs::remove_dir_all(&dir);
