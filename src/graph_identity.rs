@@ -180,7 +180,16 @@ fn reject_absolute_path(path: &str) -> Result<(), IdentityError> {
 /// 供写入边界复用：扫描侧在 upsert 前调用，避免「先按局部形态拼好、再被全局
 /// 转换吃掉页面段」这类身份二次转换。
 pub fn reject_reserved_separator(segment: &str, id: &str) -> Result<(), IdentityError> {
-    if segment.contains('|') {
+    // 第一个竖线是作用域分隔符；其后不允许再出现竖线，两侧段也都不得为空。
+    let parts: Vec<&str> = segment.split('|').collect();
+    let invalid = match parts.as_slice() {
+        // 全局名：不得含分隔符
+        [local] => local.is_empty() || segment.contains('|'),
+        // 页面局部名：`<page>|<local>`，两段都非空
+        [page, local] => page.is_empty() || local.is_empty(),
+        _ => true,
+    };
+    if invalid {
         return Err(IdentityError::ReservedSeparator {
             value: id.to_string(),
         });
