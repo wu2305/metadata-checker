@@ -712,7 +712,7 @@ fn prepare_entry_conflict_lifecycle_via_refresh() {
         "tables/a.tbl",
         "file-a",
         "1",
-        good_table(&["f_a"]),
+        &good_table(&["f_a"]),
     );
     let db_path = session_dir.join("graph.redb");
     let binding = ProjectBinding::new("proj").expect("valid binding");
@@ -752,7 +752,7 @@ fn prepare_entry_conflict_lifecycle_via_refresh() {
 
     // 轮 1：新增 tables/other/a.tbl（同 stem a）→ prepare 产生 model:a 冲突
     let provider = QueuedProvider::new();
-    provider.push("tables/other/a.tbl", "file-o", "1", good_table(&["f_b"]));
+    provider.push("tables/other/a.tbl", "file-o", "1", &good_table(&["f_b"]));
     let source = ReplayChangeSource::new(vec![
         (
             vec![active_event("file-o", "tables/other/a.tbl", "1", 1000)],
