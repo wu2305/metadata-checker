@@ -175,6 +175,19 @@ fn reject_absolute_path(path: &str) -> Result<(), IdentityError> {
     Ok(())
 }
 
+/// 校验身份段不含保留分隔符。
+///
+/// 供写入边界复用：扫描侧在 upsert 前调用，避免「先按局部形态拼好、再被全局
+/// 转换吃掉页面段」这类身份二次转换。
+pub fn reject_reserved_separator(segment: &str, id: &str) -> Result<(), IdentityError> {
+    if segment.contains('|') {
+        return Err(IdentityError::ReservedSeparator {
+            value: id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// 构造全局身份；物理模型不能借保留分隔符伪装为局部身份。
 pub fn global_node_id(kind: NodeIdKind, local: &str) -> Result<String, IdentityError> {
     if !matches!(kind, NodeIdKind::Model | NodeIdKind::Field) {

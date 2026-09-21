@@ -3,7 +3,38 @@ use crate::graph_store::GraphWriteStore;
 use anyhow::{Context, Result};
 use std::path::Path;
 
-/// 向图存储写入节点。
+/// 向图存储写入**已完成身份构造**的节点。
+///
+/// 调用方必须先经 [`crate::graph_identity`] 或 [`crate::scanner::spg::PageScope`]
+/// 决定页面局部/全局身份；本函数只做写入边界的歧义拒绝，不再二次转换 id——
+/// 页面局部 id 过 [`add_node`] 的全局转换会丢掉页面段，正是 M59-2 自环与身份
+/// 塌陷的根因之一。
+pub fn add_identified_node(
+    graph: &mut dyn GraphWriteStore,
+    id: String,
+    node_type: NodeType,
+    path: String,
+    name: String,
+    meta: Option<serde_json::Value>,
+) -> Result<()> {
+    // 竖线是「页面局部 vs 全局」的唯一判据：页面段与局部名都不得再出现分隔符，
+    // 否则解析侧无法判定作用域。
+    if let Some(rest) = id.strip_prefix("model:").or_else(|| id.strip_prefix("field:")) {
+        let _ = crate::graph_identity::reject_reserved_separator(rest, &id)?;
+    }
+    graph
+        .upsert_node(Node {
+            id,
+            node_type,
+            path,
+            name,
+            meta,
+            origin_file: None,
+        })
+        .with_context(|| "Failed to upsert graph node")
+}
+
+/// 向图存储写入节点（旧全局身份入口，仅用于非 model/field 或尚未迁移的调用点）。
 pub fn add_node(
     graph: &mut dyn GraphWriteStore,
     id: String,

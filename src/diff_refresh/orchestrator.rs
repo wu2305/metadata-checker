@@ -68,6 +68,12 @@ pub struct DiffRefreshReport {
     /// best-effort re-warm 失败的页面（来自 BatchWarmReport.pages[*].success，
     /// 不得仅凭外层 Result::Ok 判定全部成功）。
     pub warm_failures: Vec<String>,
+    /// M59-2 B：本轮解析失败、事件已被消费但未进候选图的源文件。
+    ///
+    /// 非空 ⇒ 本轮为部分失败：checkpoint 停在旧水位（可重试），旧贡献保留。
+    pub parse_failures: Vec<String>,
+    /// M59-2 C：本轮账本中仍然存在的来源冲突节点 id。
+    pub ownership_conflicts: Vec<String>,
     /// 本轮提交后的 checkpoint；空 ChangeSet 时为当前（未推进的）checkpoint。
     pub checkpoint: Option<DiffRefreshCheckpoint>,
     /// 本轮 poll/bootstrap 完成时间（Unix 毫秒）；空 ChangeSet 时只更新该字段。
@@ -139,6 +145,8 @@ impl DiffRefreshOrchestrator {
         change_count: usize,
         invalidated_pages: Vec<String>,
         warm_failures: Vec<String>,
+        parse_failures: Vec<String>,
+        ownership_conflicts: Vec<String>,
         checkpoint: Option<DiffRefreshCheckpoint>,
         last_poll_at: u64,
         page_dep_index_coverage: crate::query::PageDependencyIndexCoverage,
@@ -157,6 +165,8 @@ impl DiffRefreshOrchestrator {
             persisted,
             pending_dirty_total,
             warm_failures,
+            parse_failures,
+            ownership_conflicts,
             checkpoint,
             last_poll_at,
             page_dep_index_coverage,
@@ -294,6 +304,8 @@ impl DiffRefreshOrchestrator {
                         0,
                         Vec::new(),
                         Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
                         Some(pending_checkpoint),
                         last_poll_at,
                         coverage,
@@ -305,6 +317,8 @@ impl DiffRefreshOrchestrator {
                 }
                 return Ok(Self::new_machine_report(
                     0,
+                    Vec::new(),
+                    Vec::new(),
                     Vec::new(),
                     Vec::new(),
                     Some(pending_checkpoint),
@@ -337,6 +351,8 @@ impl DiffRefreshOrchestrator {
                 };
             return Ok(Self::new_machine_report(
                 0,
+                Vec::new(),
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 checkpoint,
@@ -410,10 +426,34 @@ impl DiffRefreshOrchestrator {
         timing.read_model_ms = stage.elapsed().as_millis();
 
         // 6. 按策略持久化（OneShot 先持久化后切换）
-        let next_checkpoint: DiffRefreshCheckpoint = changeset.next_watermark.clone().into();
+        //
+        // M59-2 B：本轮若有已消费事件但解析失败的文件，checkpoint **停在旧水位**。
+        // spec 原子性契约要求「解析失败不得推进 checkpoint」——推进之后这些事件
+        // 就被永久消费掉了，重试只能等未来某个新事件偶然触发。失败文件的旧贡献
+        // 与旧图已保留（prepare 阶段完成），文件保持脏，下一轮同一批事件会重新
+        // 投递并重试。
+        let prepare_failed = prepared.has_parse_failure();
+        let prepare_failures: Vec<String> = prepared
+            .parse_failures
+            .iter()
+            .map(|failure| failure.logical_path.clone())
+            .collect();
+        let next_checkpoint: DiffRefreshCheckpoint = if prepare_failed {
+            current_checkpoint
+                .clone()
+                .unwrap_or_else(|| changeset.next_watermark.clone().into())
+        } else {
+            changeset.next_watermark.clone().into()
+        };
         let mut candidate = prepared.graph;
         let mut commit = prepared.commit;
-        commit.checkpoint = Some(next_checkpoint.clone());
+        // 部分失败时不写本轮水位：保持旧 checkpoint（bootstrap 轮则保持「无
+        // checkpoint」，下一轮重新 bootstrap 而非把失败静默固化）。
+        commit.checkpoint = if prepare_failed {
+            current_checkpoint.clone()
+        } else {
+            Some(next_checkpoint.clone())
+        };
         let mut persisted = false;
         let mut persist_report = None;
         let mut pending_dirty_total = 0usize;
@@ -482,7 +522,10 @@ impl DiffRefreshOrchestrator {
             changeset.change_count,
             invalidated_pages,
             warm_failures,
-            Some(next_checkpoint),
+            prepare_failures,
+            self.runtime.ownership_conflict_node_ids(),
+            // 部分失败时报告里也必须是**未推进**的水位，不能报一个没落库的值
+            commit.checkpoint.clone(),
             last_poll_at,
             page_dep_index_coverage,
             timing,

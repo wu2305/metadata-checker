@@ -201,6 +201,11 @@ pub struct GraphRuntime {
     /// hydrate 损失、SCANNER_* 合并结果、scanner 诊断加载/合并失败（LOAD_FAILED）、
     /// read model 降级（READ_MODEL_DEGRADED）
     pub load_diagnostics: Vec<crate::output::Diagnostic>,
+    /// M59-2 C：当前来源账本中仍然存在的来源冲突节点 id。
+    ///
+    /// 与图/账本同库持久化，因此重启后仍可见；冲突修复后随账本重算而消失。
+    /// 它进入 `status.load_diagnostics` 与查询响应，不是只在扫描报告里出现一次。
+    pub ownership_conflicts: Vec<crate::ownership::OwnershipConflict>,
 }
 
 /// Runtime 查询命令枚举
@@ -561,6 +566,17 @@ impl GraphRuntime {
             ))),
         }
 
+        // M59-2 C：来源冲突是持久状态，加载期就从账本重算，使 status/query
+        // 与重启行为一致（旧实现只在扫描报告里出现一次，查询侧永远为空）。
+        let ownership_conflicts = graph
+            .ownership_ledgers()
+            .map(crate::ownership::ledger_definition_conflicts)
+            .unwrap_or_default();
+        load_diagnostics
+            .extend(crate::scanner::indexer::ownership_conflict_diagnostics(
+                &ownership_conflicts,
+            ));
+
         let (graph_file_mtime, graph_file_size) = std::fs::metadata(&path)
             .map(|m| (m.modified().ok(), m.len()))
             .unwrap_or((None, 0));
@@ -623,6 +639,7 @@ impl GraphRuntime {
             read_model,
             read_model_build_ms,
             load_diagnostics,
+            ownership_conflicts,
         })
     }
 
@@ -905,6 +922,8 @@ impl GraphRuntime {
             self.graph_fingerprint = fingerprint;
         }
         self.read_model = Some(Arc::new(prepared.read_model));
+        // M59-2 C：候选图带新账本，冲突必须随之更新（修复后消失、新冲突出现）
+        self.refresh_ownership_conflicts();
         self.dense_snapshot = prepared.dense_snapshot;
         self.dense_snapshot_enabled = prepared.dense_snapshot_enabled;
         self.dense_snapshot_build_ms = prepared.dense_snapshot_build_ms;
@@ -953,6 +972,37 @@ impl GraphRuntime {
                 "Scanner diagnostics cache refresh failed, cached SCANNER_* diagnostics may be stale: {error:#}"
             ),
         ));
+    }
+
+    /// M59-2 C：从当前账本重算来源冲突，并同步进 `load_diagnostics` 与状态字段。
+    ///
+    /// 冲突是**可恢复、可更新**的持久状态：修复文件后随账本重算消失，重启后
+    /// 由加载期重算恢复。它进 `status.load_diagnostics` 与查询响应，因此任何
+    /// 入口（scan / prepare / diff-refresh / 重启）看到的口径一致。
+    pub fn refresh_ownership_conflicts(&mut self) {
+        let conflicts = self
+            .graph
+            .ownership_ledgers()
+            .map(crate::ownership::ledger_definition_conflicts)
+            .unwrap_or_default();
+        self.set_ownership_conflicts(conflicts);
+    }
+
+    /// 写入冲突状态并重建其在 `load_diagnostics` 中的诊断段（同 code 先清后加）。
+    fn set_ownership_conflicts(&mut self, conflicts: Vec<crate::ownership::OwnershipConflict>) {
+        self.load_diagnostics
+            .retain(|diag| diag.code != "GRAPH_OWNERSHIP_CONFLICT");
+        self.load_diagnostics
+            .extend(crate::scanner::indexer::ownership_conflict_diagnostics(&conflicts));
+        self.ownership_conflicts = conflicts;
+    }
+
+    /// 当前冲突节点 id（供上层报告与测试断言）。
+    pub fn ownership_conflict_node_ids(&self) -> Vec<String> {
+        self.ownership_conflicts
+            .iter()
+            .map(|conflict| conflict.node_id.clone())
+            .collect()
     }
 
     /// 构建单条 page logic warm cache 条目（不写回 read model）。

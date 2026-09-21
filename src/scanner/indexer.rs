@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use twox_hash::XxHash64;
 
-use super::{process_spg_file_from_value, process_tbl_file_from_string};
+use super::{process_spg_file_from_value_with_identity, process_tbl_file_from_string};
 use crate::graph::{FileState, GraphDB, Node, NodeType};
 use crate::graph_store::{
     GraphReadStore, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
@@ -59,7 +59,13 @@ pub enum ParsedGraphContent {
     Tbl(String),
 }
 
-/// 将旧 parser 的单文件结果转换为可撤销的来源账本。
+/// 将单文件解析结果转换为可撤销的来源账本。
+///
+/// M59-2 根因修复：身份**在建节点之前**就已确定（见
+/// [`crate::scanner::spg::PageIdentityMode`]）。旧实现先用旧全局 ID 建一张临时
+/// 图、再按名字事后改写 ID——局部 source 与同名物理表在临时图里已经塌成同一个
+/// 节点（`path`/`meta` 后写覆盖前写），此后无论怎么转换都只能靠猜。现在的临时
+/// 图里两类实体天然是两个节点，账本只做归属分类，不再做身份猜测。
 fn ledger_from_parsed_content(
     logical_path: &str,
     content: &ParsedGraphContent,
@@ -67,7 +73,12 @@ fn ledger_from_parsed_content(
     let mut temporary = crate::memory_graph_store::MemoryGraphStore::new();
     match content {
         ParsedGraphContent::Spg(value) => {
-            process_spg_file_from_value(&mut temporary, logical_path, value.clone())?;
+            process_spg_file_from_value_with_identity(
+                &mut temporary,
+                logical_path,
+                value.clone(),
+                crate::scanner::spg::PageIdentityMode::OwnershipPageLocal,
+            )?;
         }
         ParsedGraphContent::Tbl(text) => {
             process_tbl_file_from_string(&mut temporary, logical_path, text)?;
@@ -79,52 +90,30 @@ fn ledger_from_parsed_content(
     let is_spg = logical_path.ends_with(".spg");
     let is_tbl = logical_path.ends_with(".tbl");
 
-    // 1. 识别 SPG 中的页面局部模型集合：不能仅凭 node.path == SPG 路径识别
-    let mut local_model_names = HashSet::new();
-    if is_spg {
-        for node in &nodes {
-            if node.node_type == NodeType::Model {
-                let model_type = node
-                    .meta
-                    .as_ref()
-                    .and_then(|m| m.get("modelType"))
-                    .and_then(|v| v.as_str());
-                if matches!(model_type, Some("DataFlow" | "dwtable"))
-                    || (node.path == logical_path && model_type != Some("PhysicalTable"))
-                {
-                    local_model_names.insert(node.name.clone());
-                }
-            }
+    // 1. 本页面的身份前缀：`model:<page>|` / `field:<page>|`。
+    //    页面局部实体与物理实体在扫描侧已分好类，这里只按 id 判定归属，
+    //    不再按名字反推（名字会撞：局部 source 名可以等于另一个 source 的物理表名）。
+    let page_key = if is_spg {
+        Some(crate::graph_identity::normalize_project_path(
+            &logical_path.replace('\\', "/"),
+        )?)
+    } else {
+        None
+    };
+    let is_page_local = |id: &str| -> bool {
+        match page_key.as_deref() {
+            Some(page) => match id.split_once('|') {
+                Some((head, _)) => match head.split_once(':') {
+                    Some((_, page_segment)) => page_segment == page,
+                    None => false,
+                },
+                None => false,
+            },
+            None => false,
         }
-    }
+    };
 
-    // 2. 构造局部 ID 映射表，身份转换失败不得静默回退旧 ID
-    let mut local_id_map = HashMap::new();
-    if is_spg {
-        for node in &nodes {
-            if node.id.contains('|') {
-                continue;
-            }
-            let is_local = match node.node_type {
-                NodeType::Model => local_model_names.contains(&node.name),
-                NodeType::Field => {
-                    if let Some(rest) = node.id.strip_prefix("field:") {
-                        let (model_prefix, _) = rest.split_once('.').unwrap_or((rest, ""));
-                        local_model_names.contains(model_prefix)
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            };
-            if is_local {
-                let mapped = page_scope_model_id(logical_path, &node.id)?;
-                local_id_map.insert(node.id.clone(), mapped);
-            }
-        }
-    }
-
-    // 3. TBL 主模型名称：解析器的全局身份取**文件 stem**（tbl.rs“Use file stem as
+    // 2. TBL 主模型名称：解析器的全局身份取**文件 stem**（tbl.rs“Use file stem as
     //    model identifier”），不是 JSON `name`。这里必须与身份规则一致，否则主模型
     //    会被误判为 Reference 并触发占位降级、同 stem 冲突也无法报告。
     let tbl_primary_model = if is_tbl {
@@ -136,26 +125,19 @@ fn ledger_from_parsed_content(
         None
     };
 
-    // 4. 判定 Definition vs Reference
+    // 3. 判定 Definition vs Reference
     // 页面/组件/条件/动作只有 path 等于本文件时才是本源定义；embedsuperpage/link
     // 为目标页创建的 stub（path 是目标页）必须是 Reference，否则 embedder 会在
     // 重建时覆盖目标页自身的 origin_file 溯源（冷脸验收 P1）。
-    let node_ids: HashSet<String> = nodes.iter().map(|node| node.id.clone()).collect();
+    // 模型/字段按 id 判定：带本页页面段的是本页定义的局部实体；全局 id 是物理
+    // 实体或被嵌目标，属 Reference。
     for mut node in nodes {
         let is_definition = if is_spg {
             match node.node_type {
                 NodeType::Page | NodeType::Component | NodeType::Condition | NodeType::Action => {
                     node.path == logical_path
                 }
-                NodeType::Model => local_model_names.contains(&node.name),
-                NodeType::Field => {
-                    if let Some(rest) = node.id.strip_prefix("field:") {
-                        let (model_prefix, _) = rest.split_once('.').unwrap_or((rest, ""));
-                        local_model_names.contains(model_prefix)
-                    } else {
-                        node.path == logical_path
-                    }
-                }
+                NodeType::Model | NodeType::Field => is_page_local(&node.id),
             }
         } else if is_tbl {
             if let Some(ref primary) = tbl_primary_model {
@@ -169,9 +151,6 @@ fn ledger_from_parsed_content(
             node.path == logical_path
         };
 
-        if let Some(mapped_id) = local_id_map.get(&node.id) {
-            node.id = mapped_id.clone();
-        }
         node.origin_file = Some(logical_path.to_string());
         ledger.entities.push(EntityContribution {
             origin_file: logical_path.to_string(),
@@ -184,16 +163,21 @@ fn ledger_from_parsed_content(
         });
     }
 
-    let mut edge_ids: Vec<String> = node_ids.into_iter().collect();
+    let mut edge_ids: Vec<String> = ledger
+        .entities
+        .iter()
+        .map(|contribution| contribution.node.id.clone())
+        .collect();
     edge_ids.sort();
+    edge_ids.dedup();
     for node_id in edge_ids {
         let Some(neighbors) = temporary.get_node_edges(&node_id)? else {
             continue;
         };
         for view in neighbors.outgoing {
             let mut edge = view.edge;
-            edge.from = rewrite_page_scoped_id(&edge.from, &local_id_map);
-            edge.to = rewrite_page_scoped_id(&edge.to, &local_id_map);
+            // 端点 ID 在扫描侧已按归属构造完成（局部带页面段、物理恒全局），
+            // 这里保持原样——任何事后改写都会把两个不同实体并成一个。
             edge.origin_file = Some(logical_path.to_string());
             ledger.edges.push(EdgeContribution {
                 origin_file: logical_path.to_string(),
@@ -202,29 +186,6 @@ fn ledger_from_parsed_content(
         }
     }
     Ok(ledger)
-}
-
-fn page_scope_model_id(logical_path: &str, id: &str) -> Result<String> {
-    let Some((kind, local)) = id.split_once(':') else {
-        return Ok(id.to_string());
-    };
-    if !matches!(kind, "model" | "field") || local.contains('|') {
-        return Ok(id.to_string());
-    }
-    crate::graph_identity::page_local_node_id(
-        crate::graph_identity::NodeIdKind::from_str(kind)
-            .context("invalid page-scoped node kind")?,
-        logical_path,
-        local,
-    )
-    .map_err(|error| anyhow!("invalid page-scoped node id {id}: {error}"))
-}
-
-fn rewrite_page_scoped_id(id: &str, local_id_map: &HashMap<String, String>) -> String {
-    local_id_map
-        .get(id)
-        .cloned()
-        .unwrap_or_else(|| id.to_string())
 }
 
 fn apply_ownership_changes(
@@ -266,14 +227,14 @@ fn apply_ownership_changes(
 }
 
 /// 把账本重建发现的来源冲突转为报告诊断（spec：必须报告，不得静默择一）。
-fn ownership_conflict_diagnostics(
+pub fn ownership_conflict_diagnostics(
     conflicts: &[crate::ownership::OwnershipConflict],
 ) -> Vec<crate::output::Diagnostic> {
     conflicts
         .iter()
         .map(|conflict| {
             crate::diagnostics::envelope_diagnostic(
-                "GRAPH_OWNERSHIP_CONFLICT",
+                crate::diagnostics::CODE_GRAPH_OWNERSHIP_CONFLICT,
                 conflict.definition_origins.len(),
                 crate::output::Location {
                     source_file: conflict.definition_origins.first().cloned(),
@@ -1125,12 +1086,14 @@ impl ProjectIndexer {
         for failure in &parse_failures {
             scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
         }
+        let mut prepare_conflicts: Vec<crate::ownership::OwnershipConflict> = Vec::new();
         let (parsed_nodes, removed_edge_keys, dirty_edges) = if ownership_enabled {
             let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
-            // PreparedIndexUpdate 没有报告诊断通道；来源冲突由随后的全量扫描
-            // （bootstrap / --build-graph）如实报告，这里不做静默吞掉的假象处理。
-            let (parsed_nodes, _ownership_conflicts) =
+            // M59-2：来源冲突随候选更新透出（不再丢弃）——调用方（diff-refresh
+            // 编排器）据此把冲突写进诊断与 runtime 状态，使冲突在查询侧可见。
+            let (parsed_nodes, conflicts) =
                 apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
+            prepare_conflicts = conflicts;
             for (logical_path, _) in &plan.deleted {
                 new_states.remove(logical_path);
             }
@@ -1236,6 +1199,11 @@ impl ProjectIndexer {
             deleted_node_ids,
             scanner_entries,
             scanner_deleted_paths,
+            // M59-2 B：本轮解析失败但**已消费变更事件**的源文件。
+            // 非空 ⇒ 本轮是部分失败：必须保留旧贡献（已完成）、保持文件脏
+            // （可重试），且**不得推进 diff-refresh checkpoint**。
+            parse_failures,
+            ownership_conflicts: prepare_conflicts,
         })
     }
 }
@@ -1260,4 +1228,22 @@ pub struct PreparedIndexUpdate {
     pub scanner_entries: Vec<(String, Vec<u8>)>,
     /// M58.3 PR2：本轮删除文件的 logical_path，落库时移除其诊断 entry
     pub scanner_deleted_paths: Vec<String>,
+    /// M59-2 B：本轮解析失败的文件（事件已被消费，但内容未进候选图）。
+    ///
+    /// 旧图与旧贡献原样保留、file hash 不推进，因此文件下一轮仍是脏的、
+    /// 会重试。非空即表示本轮是**部分失败**：调用方不得把 checkpoint 推进到
+    /// 本轮水位——否则这些事件被永久消费掉，只能等未来新事件偶然触发重试。
+    pub parse_failures: Vec<ParseFailure>,
+    /// M59-2 C：本轮账本中仍然存在的来源冲突。
+    ///
+    /// prepare 不落盘，但冲突不能随返回值蒸发；调用方须把它写进 runtime
+    /// 诊断与持久化诊断，使冲突在 query/status 与重启后一致可见。
+    pub ownership_conflicts: Vec<crate::ownership::OwnershipConflict>,
+}
+
+impl PreparedIndexUpdate {
+    /// 本轮是否为部分失败（存在已消费但未入图的源文件）。
+    pub fn has_parse_failure(&self) -> bool {
+        !self.parse_failures.is_empty()
+    }
 }

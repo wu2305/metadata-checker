@@ -43,6 +43,12 @@ pub const CODE_SCANNER_FILE_PARSE_FAILED: &str = "SCANNER_FILE_PARSE_FAILED";
 pub const CODE_DIAGNOSTIC_SERIALIZE_FAILED: &str = "DIAGNOSTIC_SERIALIZE_FAILED";
 /// 事实表示版本不兼容，拒绝把旧图当成完整证据加载。
 pub const CODE_GRAPH_SCHEMA_STALE: &str = "GRAPH_SCHEMA_STALE";
+/// M59-2 C：同一实体 id 存在多个不兼容 Definition（来源冲突）。
+///
+/// 这是**持久状态**而非一次性扫描告警：它随账本落库，重启后仍在，修复后消失。
+/// 冲突时重建按确定性规则择一，答案覆盖的是其中一个来源——因此 answer_impact
+/// 为 partial（不是 none）。
+pub const CODE_GRAPH_OWNERSHIP_CONFLICT: &str = "GRAPH_OWNERSHIP_CONFLICT";
 
 /// answer_impact 映射
 ///
@@ -75,6 +81,8 @@ pub fn answer_impact_for(code: &str) -> &'static str {
         // M59-B3：源文件解析失败，图里这部分是上一次成功解析的旧事实。
         // 查询照样能作答，但答的可能是过期内容——正是 partial 的定义。
         CODE_SCANNER_FILE_PARSE_FAILED => IMPACT_PARTIAL,
+        // 来源冲突：择一后只覆盖其中一个来源的事实，答案不完整
+        CODE_GRAPH_OWNERSHIP_CONFLICT => IMPACT_PARTIAL,
         _ => match crate::output::answer_effect::answer_effect(code) {
             Some((
                 crate::output::answer_effect::AnswerImpact::Uncertain
@@ -149,7 +157,9 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         | CODE_PAGE_SCOPED_TARGET_FALLBACK
         // 解析失败：图内容陈旧但可用，查询仍能作答（只是可能答的是旧事实），
         // 未达「图库不可用」的 Error 档
-        | CODE_SCANNER_FILE_PARSE_FAILED => DiagnosticSeverity::Warning,
+        | CODE_SCANNER_FILE_PARSE_FAILED
+        // 来源冲突：图仍可用（择一构建），但归属不可信
+        | CODE_GRAPH_OWNERSHIP_CONFLICT => DiagnosticSeverity::Warning,
         // read model 构建失败属异常信号（非按设计），但只是性能层降级，
         // 答案正确性不受影响由 answer_impact=none 表达
         CODE_RUNTIME_READ_MODEL_DEGRADED => DiagnosticSeverity::Warning,

@@ -1,8 +1,8 @@
-use super::{add_edge_with_meta, add_node, resolve_reference_path};
+use super::{add_edge_with_meta, add_identified_node, add_node, resolve_reference_path};
 use crate::graph::{EdgeType, NodeType};
 use crate::graph_store::GraphWriteStore;
-use anyhow::Result;
-use std::collections::HashMap;
+use anyhow::{Context, Result};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
@@ -15,6 +15,104 @@ struct ComponentContext {
     inherited_data_context_json_path: Option<String>,
     inherited_data_context_source: Option<String>,
     inherited_data_context_data_set: Option<String>,
+}
+
+/// 页面局部身份开关（M59-1 交接约束：身份编码与 schema 版本切换共同发布）。
+///
+/// 旧 schema 的库不得写入页面局部 id，也不得新旧形态混写；只有启用来源账本的
+/// 索引路径才允许写入 `<kind>:<PAGE>|<local>`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageIdentityMode {
+    /// 旧 schema：模型/字段保持全局 id（现状行为，不动）。
+    LegacyGlobal,
+    /// 来源账本 schema：页面局部模型/字段写入带页面段的 id。
+    OwnershipPageLocal,
+}
+
+/// 页面局部身份作用域：把**页面局部实体**与**物理实体**在写入前分开。
+///
+/// M59-2 根因：局部 source 与它引用的物理表同名时，若先按旧全局 id 建临时图，
+/// 两类实体会塌成同一个节点（后写覆盖前写的 `path`/`meta`），身份信息在任何
+/// 转换之前就已经丢失，事后只能靠猜测恢复。本作用域让 model/field 在建节点时
+/// 就带上页面段，物理实体保持全局，二者不再共享 id。
+struct PageScope<'a> {
+    /// 归一化后的页面路径（id 的页面段）。
+    page: &'a str,
+    /// 页面局部模型的局部名（source id）集合。
+    local_models: &'a HashSet<String>,
+    /// 是否启用页面局部身份；false 时所有 model/field 保持全局。
+    enabled: bool,
+}
+
+impl<'a> PageScope<'a> {
+    fn is_local(&self, model: &str) -> bool {
+        self.enabled && self.local_models.contains(model)
+    }
+
+    /// 模型 id：局部 source 带页面段，其余走全局身份。
+    fn model_id(&self, model: &str) -> Result<String> {
+        if self.is_local(model) {
+            crate::graph_identity::page_local_node_id(
+                crate::graph_identity::NodeIdKind::Model,
+                self.page,
+                model,
+            )
+            .map_err(|error| anyhow::anyhow!("invalid page-local model id {model}: {error}"))
+        } else {
+            crate::graph_identity::global_node_id(
+                crate::graph_identity::NodeIdKind::Model,
+                model,
+            )
+            .map_err(|error| anyhow::anyhow!("invalid global model id {model}: {error}"))
+        }
+    }
+
+    /// 物理模型 id：物理表不归属任何页面，永远走全局身份。
+    ///
+    /// 即使物理表名与某个页面局部 source 同名，也不能被作用域改写——那正是
+    /// 「局部 source 与物理表同名」场景里必须区分开的两个实体。
+    fn physical_model_id(&self, model: &str) -> Result<String> {
+        crate::graph_identity::global_node_id(crate::graph_identity::NodeIdKind::Model, model)
+            .map_err(|error| anyhow::anyhow!("invalid physical model id {model}: {error}"))
+    }
+
+    /// 字段 id：归属判断沿用其模型（`model.field` 的 model 段）。
+    fn field_id(&self, model: &str, field: &str) -> Result<String> {
+        let local = format!("{model}.{field}");
+        if self.is_local(model) {
+            crate::graph_identity::page_local_node_id(
+                crate::graph_identity::NodeIdKind::Field,
+                self.page,
+                &local,
+            )
+            .map_err(|error| anyhow::anyhow!("invalid page-local field id {local}: {error}"))
+        } else {
+            crate::graph_identity::global_node_id(crate::graph_identity::NodeIdKind::Field, &local)
+                .map_err(|error| anyhow::anyhow!("invalid global field id {local}: {error}"))
+        }
+    }
+
+    /// 物理字段 id：与 [`Self::physical_model_id`] 同口径，永远全局。
+    fn physical_field_id(&self, model: &str, field: &str) -> Result<String> {
+        crate::graph_identity::global_node_id(
+            crate::graph_identity::NodeIdKind::Field,
+            &format!("{model}.{field}"),
+        )
+        .map_err(|error| anyhow::anyhow!("invalid physical field id {model}.{field}: {error}"))
+    }
+
+    /// 写入已完成身份构造的节点（含页面局部 id，不再经全局 id 转换）。
+    fn add_node(
+        &self,
+        graph: &mut dyn GraphWriteStore,
+        id: &str,
+        node_type: NodeType,
+        path: String,
+        name: String,
+        meta: Option<serde_json::Value>,
+    ) -> Result<()> {
+        add_identified_node(graph, id.to_string(), node_type, path, name, meta)
+    }
 }
 
 fn json_scalar_to_string(value: &serde_json::Value) -> Option<String> {
@@ -356,8 +454,43 @@ fn ensure_model_field(
     model_path: &str,
     field_meta: Option<serde_json::Value>,
 ) -> Result<(String, Option<String>)> {
-    let model_id = format!("model:{}", model);
-    add_node(
+    // 旧全局口径：所有 model/field 都是全局 id（无页面段），保持既有行为。
+    ensure_model_field_with_scope(
+        graph,
+        model,
+        field,
+        model_path,
+        field_meta,
+        ModelIdentity::Global,
+        None,
+    )
+}
+
+/// 身份归属：决定一个 model/field 名字解析成页面局部 id 还是全局 id。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelIdentity {
+    /// 页面局部实体（页面 sources 里声明的 source）。
+    Local,
+    /// 物理实体（物理表/物理字段），不归属任何页面。
+    Global,
+}
+
+/// 确保 model 与 field 节点存在并建立 Contains 关系，身份由 `scope` 决定。
+///
+/// `identity == Global` 时**强制**全局 id，即便该名字同时是某个页面局部
+/// source——「一个 source 名碰撞另一个 source 的物理表名」的场景靠这条区分：
+/// 物理表 `beta` 与局部 source `beta` 是两个实体，不能塌成一个节点。
+fn ensure_model_field_with_scope(
+    graph: &mut dyn GraphWriteStore,
+    model: &str,
+    field: &str,
+    model_path: &str,
+    field_meta: Option<serde_json::Value>,
+    identity: ModelIdentity,
+    scope: Option<&PageScope<'_>>,
+) -> Result<(String, Option<String>)> {
+    let model_id = resolve_model_identity(model, identity, scope)?;
+    add_identified_node(
         graph,
         model_id.clone(),
         NodeType::Model,
@@ -368,8 +501,8 @@ fn ensure_model_field(
     if field.is_empty() {
         return Ok((model_id, None));
     }
-    let field_id = format!("field:{}.{}", model, field);
-    add_node(
+    let field_id = resolve_field_identity(model, field, identity, scope)?;
+    add_identified_node(
         graph,
         field_id.clone(),
         NodeType::Field,
@@ -379,6 +512,41 @@ fn ensure_model_field(
     )?;
     add_edge_with_meta(graph, &model_id, &field_id, EdgeType::Contains, None, None)?;
     Ok((model_id, Some(field_id)))
+}
+
+/// 模型名 → 节点 id（按归属决策，不是按名字猜测）。
+fn resolve_model_identity(
+    model: &str,
+    identity: ModelIdentity,
+    scope: Option<&PageScope<'_>>,
+) -> Result<String> {
+    match (scope, identity) {
+        (Some(scope), ModelIdentity::Global) => scope.physical_model_id(model),
+        (Some(scope), ModelIdentity::Local) => scope.model_id(model),
+        (None, _) => crate::graph_identity::global_node_id(
+            crate::graph_identity::NodeIdKind::Model,
+            model,
+        )
+        .map_err(|error| anyhow::anyhow!("invalid model id {model}: {error}")),
+    }
+}
+
+/// 字段名 → 节点 id（归属与所属模型一致）。
+fn resolve_field_identity(
+    model: &str,
+    field: &str,
+    identity: ModelIdentity,
+    scope: Option<&PageScope<'_>>,
+) -> Result<String> {
+    match (scope, identity) {
+        (Some(scope), ModelIdentity::Global) => scope.physical_field_id(model, field),
+        (Some(scope), ModelIdentity::Local) => scope.field_id(model, field),
+        (None, _) => crate::graph_identity::global_node_id(
+            crate::graph_identity::NodeIdKind::Field,
+            &format!("{model}.{field}"),
+        )
+        .map_err(|error| anyhow::anyhow!("invalid field id {model}.{field}: {error}")),
+    }
 }
 
 /// 模型字段引用的 field_path 文案：字段名为空时只写模型名，避免 `modelN.` 尾点。
@@ -415,7 +583,37 @@ fn add_model_read(
     edge_meta: serde_json::Value,
     edge_type: EdgeType,
 ) -> Result<()> {
-    let (model_id, field_id) = ensure_model_field(graph, model, field, model_path, None)?;
+    add_model_read_with_scope(
+        graph,
+        from_id,
+        model,
+        field,
+        model_path,
+        edge_meta,
+        edge_type,
+        None,
+    )
+}
+
+fn add_model_read_with_scope(
+    graph: &mut dyn GraphWriteStore,
+    from_id: &str,
+    model: &str,
+    field: &str,
+    model_path: &str,
+    edge_meta: serde_json::Value,
+    edge_type: EdgeType,
+    scope: Option<&PageScope<'_>>,
+) -> Result<()> {
+    let (model_id, field_id) = ensure_model_field_with_scope(
+        graph,
+        model,
+        field,
+        model_path,
+        None,
+        ModelIdentity::Local,
+        scope,
+    )?;
     add_edge_with_meta(
         graph,
         from_id,
@@ -438,9 +636,17 @@ fn add_model_read(
 
     // 同时创建到物理表的读取边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
-        if model != physical_name {
-            let (phy_model_id, phy_field_id) =
-                ensure_model_field(graph, &physical_name, field, model_path, None)?;
+        // 物理表身份恒为全局：即便与局部 source 同名也是另一个实体，必须各写各的节点。
+        if model_id != resolve_model_identity(&physical_name, ModelIdentity::Global, scope)? {
+            let (phy_model_id, phy_field_id) = ensure_model_field_with_scope(
+                graph,
+                &physical_name,
+                field,
+                model_path,
+                None,
+                ModelIdentity::Global,
+                scope,
+            )?;
             add_edge_with_meta(
                 graph,
                 from_id,
@@ -486,7 +692,37 @@ fn add_model_write(
     edge_type: EdgeType,
     edge_meta: serde_json::Value,
 ) -> Result<()> {
-    let (model_id, field_id) = ensure_model_field(graph, model, field, model_path, None)?;
+    add_model_write_with_scope(
+        graph,
+        from_id,
+        model,
+        field,
+        model_path,
+        edge_type,
+        edge_meta,
+        None,
+    )
+}
+
+fn add_model_write_with_scope(
+    graph: &mut dyn GraphWriteStore,
+    from_id: &str,
+    model: &str,
+    field: &str,
+    model_path: &str,
+    edge_type: EdgeType,
+    edge_meta: serde_json::Value,
+    scope: Option<&PageScope<'_>>,
+) -> Result<()> {
+    let (model_id, field_id) = ensure_model_field_with_scope(
+        graph,
+        model,
+        field,
+        model_path,
+        None,
+        ModelIdentity::Local,
+        scope,
+    )?;
     add_edge_with_meta(
         graph,
         from_id,
@@ -509,9 +745,16 @@ fn add_model_write(
 
     // 同时创建到物理表的写入边（如果局部模型 ID 与物理表名不同）
     if let Some(physical_name) = resolve_physical_table_name(model_path) {
-        if model != physical_name {
-            let (phy_model_id, phy_field_id) =
-                ensure_model_field(graph, &physical_name, field, model_path, None)?;
+        if model_id != resolve_model_identity(&physical_name, ModelIdentity::Global, scope)? {
+            let (phy_model_id, phy_field_id) = ensure_model_field_with_scope(
+                graph,
+                &physical_name,
+                field,
+                model_path,
+                None,
+                ModelIdentity::Global,
+                scope,
+            )?;
             add_edge_with_meta(
                 graph,
                 from_id,
@@ -547,10 +790,30 @@ fn add_model_write(
     Ok(())
 }
 
+/// 兼容旧签名：按旧全局身份建图（无页面局部 id），保持既有测试与 CLI 行为。
 pub fn process_spg_file_from_value(
     graph: &mut dyn GraphWriteStore,
     rel_path: &str,
     raw_value: serde_json::Value,
+) -> Result<Vec<String>> {
+    process_spg_file_from_value_with_identity(
+        graph,
+        rel_path,
+        raw_value,
+        PageIdentityMode::LegacyGlobal,
+    )
+}
+
+/// 按指定身份模式处理一个 SPG 文件。
+///
+/// M59-2：启用页面局部身份时，模型/字段**在建节点之前**就带上页面段，与物理
+/// 表区分开。身份必须早于任何有损合并（同一 id 的 upsert 覆盖 path/meta），
+/// 否则局部 source 与同名物理表会塌成一个节点，之后再无法分辨。
+pub fn process_spg_file_from_value_with_identity(
+    graph: &mut dyn GraphWriteStore,
+    rel_path: &str,
+    raw_value: serde_json::Value,
+    identity_mode: PageIdentityMode,
 ) -> Result<Vec<String>> {
     let component_contexts = collect_component_contexts(&raw_value);
     let meta = crate::superpage::parse_superpage_from_value(raw_value)?;
@@ -570,6 +833,22 @@ pub fn process_spg_file_from_value(
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
+
+    // M59-2：在建任何 model/field 之前先定作用域。局部模型集合 = 页面 sources
+    // 里声明的 source id（dataflow/dwtable/filter 等页面局部实体）；物理表来自
+    // source.path 的文件 stem，永远全局——即便与某个 source id 同名。
+    let page_key = crate::graph_identity::normalize_project_path(&rel_path.replace('\\', "/"))
+        .with_context(|| format!("invalid page path for {rel_path}"))?;
+    let local_models: HashSet<String> = meta
+        .sources
+        .iter()
+        .map(|source| source.id.clone())
+        .collect();
+    let scope = PageScope {
+        page: &page_key,
+        local_models: &local_models,
+        enabled: identity_mode == PageIdentityMode::OwnershipPageLocal,
+    };
 
     // Use normalized relative path for unique page_id to avoid collisions
     let page_id = format!("page:{}", rel_path.replace("\\", "/"));
@@ -592,11 +871,12 @@ pub fn process_spg_file_from_value(
             continue;
         };
         let model_name = &source.id;
-        let model_id = format!("model:{}", model_name);
+        // 页面局部实体：身份在建节点前确定，不能先按全局 id 写再事后转换
+        let model_id = scope.model_id(model_name)?;
 
-        add_node(
+        scope.add_node(
             graph,
-            model_id.clone(),
+            &model_id,
             NodeType::Model,
             rel_path.to_string(),
             model_name.clone(),
@@ -610,10 +890,10 @@ pub fn process_spg_file_from_value(
         if let Some(dimensions) = content.get("dimensions").and_then(|d| d.as_array()) {
             for dim in dimensions {
                 if let Some(name) = dim.get("name").and_then(|n| n.as_str()) {
-                    let field_id = format!("field:{}.{}", model_name, name);
-                    add_node(
+                    let field_id = scope.field_id(model_name, name)?;
+                    scope.add_node(
                         graph,
-                        field_id.clone(),
+                        &field_id,
                         NodeType::Field,
                         rel_path.to_string(),
                         name.to_string(),
@@ -648,10 +928,11 @@ pub fn process_spg_file_from_value(
                         .file_stem()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| module_table_path.to_string());
-                    let ref_model_id = format!("model:{}", ref_model);
-                    add_node(
+                    // 物理表：恒全局，不得被页面作用域改写
+                    let ref_model_id = scope.physical_model_id(&ref_model)?;
+                    scope.add_node(
                         graph,
-                        ref_model_id.clone(),
+                        &ref_model_id,
                         NodeType::Model,
                         module_table_path.to_string(),
                         ref_model.clone(),
@@ -816,7 +1097,7 @@ pub fn process_spg_file_from_value(
                         "data_context_source": ctx.inherited_data_context_source.as_deref(),
                         "data_context_dataSet": data_set,
                     });
-                    add_model_read(
+                    add_model_read_with_scope(
                         graph,
                         &comp_id,
                         data_set,
@@ -824,6 +1105,7 @@ pub fn process_spg_file_from_value(
                         &model_path,
                         edge_meta,
                         EdgeType::Reads,
+                            Some(&scope),
                     )?;
                 }
                 for ref_type in &expr.refs {
@@ -844,7 +1126,7 @@ pub fn process_spg_file_from_value(
                                 "source_field": expr.field,
                                 "json_path": ctx.map(|c| format!("{}.{}", c.json_path, expr.field)),
                             });
-                            add_model_read(
+                            add_model_read_with_scope(
                                 graph,
                                 &comp_id,
                                 model,
@@ -852,6 +1134,7 @@ pub fn process_spg_file_from_value(
                                 &model_path,
                                 edge_meta,
                                 EdgeType::Reads,
+                                    Some(&scope),
                             )?;
                         }
                         crate::superpage::RefType::ComponentValue(target_id, _) => {
@@ -1039,7 +1322,7 @@ pub fn process_spg_file_from_value(
                                     "source_expr": format!("{}.{}", model, field),
                     "source_expr": format!("{}.{}", model, field),
                 });
-                add_model_write(
+                add_model_write_with_scope(
                     graph,
                     &comp_id,
                     model,
@@ -1047,6 +1330,7 @@ pub fn process_spg_file_from_value(
                     &model_path,
                     EdgeType::Writes,
                     submit_meta,
+                        Some(&scope),
                 )?;
             }
         }
@@ -1155,7 +1439,7 @@ pub fn process_spg_file_from_value(
                                     "target_field": field,
                                     "source_expr": format!("{}.{}", model, field),
                                 });
-                                add_model_write(
+                                add_model_write_with_scope(
                                     graph,
                                     &action_id,
                                     model,
@@ -1163,6 +1447,7 @@ pub fn process_spg_file_from_value(
                                     &model_path,
                                     EdgeType::ActionWrites,
                                     action_meta,
+                                        Some(&scope),
                                 )?;
                             }
                         }
@@ -1185,7 +1470,7 @@ pub fn process_spg_file_from_value(
                                 "target_field": field_name,
                                 "source_expr": field_value,
                             });
-                            add_model_write(
+                            add_model_write_with_scope(
                                 graph,
                                 &action_id,
                                 data_set,
@@ -1193,6 +1478,7 @@ pub fn process_spg_file_from_value(
                                 &data_set_path,
                                 EdgeType::ActionWrites,
                                 ud_meta,
+                                    Some(&scope),
                             )?;
                             // If value_type is "exp", parse expression refs for dependency analysis
                             if value_type == "exp" {
@@ -1215,7 +1501,7 @@ pub fn process_spg_file_from_value(
                                         "source_expr": format!("{}.{}", model, field),
                                                 "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                             });
-                                        add_model_read(
+                                        add_model_read_with_scope(
                                             graph,
                                             &action_id,
                                             &model,
@@ -1223,6 +1509,7 @@ pub fn process_spg_file_from_value(
                                             &model_path,
                                             read_meta,
                                             EdgeType::ActionReads,
+                                                Some(&scope),
                                         )?;
                                     }
                                 }
@@ -1315,7 +1602,7 @@ pub fn process_spg_file_from_value(
                                     "source_expr": format!("{}.{}", model, field),
                                         "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                     });
-                                    add_model_read(
+                                    add_model_read_with_scope(
                                         graph,
                                         &action_id,
                                         &model,
@@ -1323,6 +1610,7 @@ pub fn process_spg_file_from_value(
                                         &model_path,
                                         read_meta,
                                         EdgeType::ActionReads,
+                                            Some(&scope),
                                     )?;
                                 }
                             }
@@ -1376,7 +1664,7 @@ pub fn process_spg_file_from_value(
                                     "source_expr": format!("{}.{}", model, field),
                                     "reason": format!("Action '{}' reads from model '{}'", action.action_type, model),
                                 });
-                                add_model_read(
+                                add_model_read_with_scope(
                                     graph,
                                     &action_id,
                                     &model,
@@ -1384,6 +1672,7 @@ pub fn process_spg_file_from_value(
                                     &model_path,
                                     read_meta,
                                     EdgeType::ActionReads,
+                                        Some(&scope),
                                 )?;
                             }
                         }
@@ -1524,7 +1813,7 @@ pub fn process_spg_file_from_value(
                                     "target_field": field,
                                     "source_expr": format!("{}.{}", model, field),
                                 });
-                                add_model_write(
+                                add_model_write_with_scope(
                                     graph,
                                     &action_id,
                                     model,
@@ -1532,6 +1821,7 @@ pub fn process_spg_file_from_value(
                                     &model_path,
                                     EdgeType::ActionValidates,
                                     val_meta,
+                                        Some(&scope),
                                 )?;
                             }
                         }
@@ -1586,7 +1876,7 @@ pub fn process_spg_file_from_value(
                             "trigger": action.trigger_type,
                             "target_model": model,
                         });
-                        add_model_write(
+                        add_model_write_with_scope(
                             graph,
                             &action_id,
                             &model,
@@ -1594,6 +1884,7 @@ pub fn process_spg_file_from_value(
                             &model_path,
                             EdgeType::ActionLoadsData,
                             load_meta,
+                                Some(&scope),
                         )?;
                     }
                 }
@@ -1648,9 +1939,7 @@ pub fn process_spg_file_from_value(
                     continue;
                 }
             }
-            crate::conditions::OwnerType::ModelSource => {
-                format!("model:{}", cond.owner_id)
-            }
+            crate::conditions::OwnerType::ModelSource => scope.model_id(&cond.owner_id)?,
             crate::conditions::OwnerType::FieldDefault => {
                 format!("comp:{}|{}", rel_path.replace(r"\", "/"), cond.owner_id)
             }
@@ -1706,7 +1995,7 @@ pub fn process_spg_file_from_value(
                 }
                 "model" => {
                     let model_name = target_id.split('.').next().unwrap_or(target_id);
-                    (format!("model:{}", model_name), None)
+                    (scope.model_id(model_name)?, None)
                 }
                 "component" => {
                     let mut segments = target_id.splitn(2, '.');
@@ -1774,11 +2063,11 @@ pub fn process_spg_file_from_value(
         ) && matches!(cond.owner_type, crate::conditions::OwnerType::ModelSource)
         {
             let model_name = &cond.owner_id;
-            let trc_field_id = format!("field:{}.totalRowCount__", model_name);
-            let trc_model_id = format!("model:{}", model_name);
-            add_node(
+            let trc_field_id = scope.field_id(model_name, "totalRowCount__")?;
+            let trc_model_id = scope.model_id(model_name)?;
+            scope.add_node(
                 graph,
-                trc_field_id.clone(),
+                &trc_field_id,
                 NodeType::Field,
                 rel_path.to_string(),
                 "totalRowCount__".to_string(),
@@ -1831,11 +2120,13 @@ pub fn process_spg_file_from_value(
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or(path);
-        let model_id = format!("model:{}", source.id);
-        let physical_model_id = format!("model:{}", physical_table);
-        add_node(
+        // 局部实体与物理实体分别构造身份：二者同名时也不得塌成一个节点，
+        // 否则边会退化成自环（source id == 物理表名 的典型场景）。
+        let model_id = scope.model_id(&source.id)?;
+        let physical_model_id = scope.physical_model_id(physical_table)?;
+        scope.add_node(
             graph,
-            model_id.clone(),
+            &model_id,
             NodeType::Model,
             path.clone(),
             source.id.clone(),
@@ -1848,14 +2139,15 @@ pub fn process_spg_file_from_value(
             node_ids.insert(model_id.clone());
         }
         // 写入端会保留已有 DataFlow/App modelType，避免物理表占位覆盖真实模型。
-        add_node(
+        scope.add_node(
             graph,
-            physical_model_id.clone(),
+            &physical_model_id,
             NodeType::Model,
             path.clone(),
             physical_table.to_string(),
             Some(serde_json::json!({"modelType": "PhysicalTable", "sourcePath": path})),
         )?;
+        // 同名时局部与物理仍是两个节点，边是有向的两个方向、不是自环
         add_edge_with_meta(
             graph,
             &model_id,
