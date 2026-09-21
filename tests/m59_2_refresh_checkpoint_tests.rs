@@ -131,47 +131,43 @@ impl RemoteSessionProvider for QueuedProvider {
     }
 }
 
-/// 按轮次吐出预制 ChangeSet；队列耗尽后按契约返回空集合且 cursor 原样保留。
+/// 重放式变更源：一批事件只要**尚未被 cursor 消费**就每次 poll 都重新投递。
 ///
-/// 这样「重试」才能复现真实语义：同一批事件在 checkpoint 未推进时会被重新投递。
+/// 这模拟真实远端语义（按水位拉取，而不是按「已推过一次」记账）。checkpoint
+/// 未推进时同一批事件会重复出现，正是「失败保持可重试」的前提；旧 fixture 源
+/// 一次吃光事件，无法复现重试。
 struct ReplayChangeSource {
-    rounds: RefCell<VecDeque<(Vec<ChangedRemoteFile>, MetaFilesWatermark)>>,
+    rounds: RefCell<Vec<(Vec<ChangedRemoteFile>, MetaFilesWatermark)>>,
 }
 
 impl ReplayChangeSource {
     fn new(rounds: Vec<(Vec<ChangedRemoteFile>, MetaFilesWatermark)>) -> Self {
         Self {
-            rounds: RefCell::new(rounds.into_iter().collect()),
+            rounds: RefCell::new(rounds),
         }
+    }
+
+    /// 该批事件是否已被 `since` 消费（水位已推进且边界事件都在 cursor 里）。
+    fn consumed(watermark: &MetaFilesWatermark, since: &MetaFilesWatermark) -> bool {
+        watermark.active.updated_at_ms <= since.active.updated_at_ms
+            && !watermark.active.boundary_event_ids.is_empty()
+            && watermark
+                .active
+                .boundary_event_ids
+                .iter()
+                .all(|id| since.active.boundary_event_ids.contains(id))
     }
 }
 
 impl MetaFilesChangeSource for ReplayChangeSource {
     fn poll(&self, since: &MetaFilesWatermark) -> Result<ChangeSet> {
-        let mut rounds = self.rounds.borrow_mut();
-        match rounds.front() {
-            Some((_, next_watermark)) => {
-                // cursor 已推进到本批水位 ⇒ 该批已被消费，出队换下一批
-                if next_watermark.active.updated_at_ms <= since.active.updated_at_ms
-                    && !next_watermark.active.boundary_event_ids.is_empty()
-                    && next_watermark
-                        .active
-                        .boundary_event_ids
-                        .iter()
-                        .all(|id| since.active.boundary_event_ids.contains(id))
-                {
-                    rounds.pop_front();
-                }
+        let rounds = self.rounds.borrow();
+        for (changed, watermark) in rounds.iter() {
+            if !Self::consumed(watermark, since) {
+                return Ok(ChangeSet::new(changed.clone(), watermark.clone()));
             }
-            None => {}
         }
-        match rounds.front() {
-            Some(_) => {
-                let (changed, next_watermark) = rounds.pop_front().expect("front exists");
-                Ok(ChangeSet::new(changed, next_watermark))
-            }
-            None => Ok(ChangeSet::new(Vec::new(), since.clone())),
-        }
+        Ok(ChangeSet::new(Vec::new(), since.clone()))
     }
 
     fn bootstrap(&self, _manifest: &SessionManifest) -> Result<ChangeSet> {
