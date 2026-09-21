@@ -332,22 +332,6 @@ pub fn trace_value_source(
     })
 }
 
-/// 兼容现有调用方；新输出通过 trace_value_source 获取未完成原因。
-pub fn expand_expression(
-    meta: &SuperPageMetadata,
-    graph: &DependencyGraph,
-    component_id: &str,
-    expr: &str,
-    source_chain: &mut Vec<SourceNode>,
-    _visited: &mut HashSet<String>,
-    depth: usize,
-) -> String {
-    let mut state = TraceState::default();
-    let result = expand_trace(meta, graph, component_id, "value", expr, &mut state, depth);
-    source_chain.extend(state.chain);
-    result
-}
-
 /// 按原串引用区间一次性渲染，插入片段永远不被再次扫描。
 fn expand_trace(
     meta: &SuperPageMetadata,

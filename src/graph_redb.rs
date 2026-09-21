@@ -1094,6 +1094,13 @@ impl GraphDB {
 
         let db = Database::create(&self.db_path)?;
         let write_txn = db.begin_write()?;
+        {
+            let meta = write_txn.open_table(META_TABLE)?;
+            let version = meta.get(FACT_SCHEMA_VERSION_KEY)?.map(|value| value.value());
+            anyhow::ensure!(version.as_deref() == Some(FACT_SCHEMA_VERSION),
+                "GRAPH_SCHEMA_STALE: refusing to write incompatible fact storage; rebuild into a new --graph-db-path");
+        }
+
 
         // nodes：两路径相同（removed/dirty 集合增量写）
         if !self.removed_nodes.is_empty() {

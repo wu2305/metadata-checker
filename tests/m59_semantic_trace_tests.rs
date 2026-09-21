@@ -101,3 +101,28 @@ fn trace_reports_cycle_and_depth_limits() {
         vec!["TRACE_DEPTH_LIMIT"]
     );
 }
+
+// 菱形共享上游必须完整展开，且不能产生假循环诊断。
+#[test]
+fn shared_upstream_is_not_a_cycle() {
+    let meta = parse_superpage_from_value(serde_json::json!({"canvas":{"components":[
+        {"id":"a","type":"input","value":"=CONCAT(b.value, c.value)"},
+        {"id":"b","type":"input","value":"=d.value"},
+        {"id":"c","type":"input","value":"=d.value"},
+        {"id":"d","type":"input","value":"=1"}
+    ]}})).unwrap();
+    let trace = trace_value_source(&meta, &DependencyGraph::new(&meta), "a", "value", 8).unwrap();
+    assert_eq!(trace.expanded_expr, "=CONCAT(1, 1)");
+    assert_eq!(trace.issues.is_empty(), true);
+}
+
+// 未支持的宏不能被伪造成模型字段并伪报完整追溯。
+#[test]
+fn unsupported_macro_is_preserved_and_reported_incomplete() {
+    let meta = parse_superpage_from_value(serde_json::json!({"canvas":{"components":[
+        {"id":"a","type":"input","value":"=${IF(b.value, 1, 2)}"}
+    ]}})).unwrap();
+    let trace = trace_value_source(&meta, &DependencyGraph::new(&meta), "a", "value", 8).unwrap();
+    assert_eq!(trace.expanded_expr, "=${IF(b.value, 1, 2)}");
+    assert_eq!(trace.issues.iter().any(|issue| issue.code == "TRACE_UNRESOLVED_REFERENCE"), true);
+}

@@ -250,37 +250,25 @@ mod cases {
         );
     }
 
-    /// 非空边 metadata 原样读回；相同去重键再次写入时保留首次事实。
+    /// 不同证据是不同事实；相同证据重复写入仍幂等，双向邻接逐属性保留。
     pub fn edge_metadata_survives_storage_and_duplicate_write(store: &mut dyn GraphStore) {
         seed(store, &["a", "b"]);
         let original = Edge {
             meta: Some(json!({"condition": "=a.value > 0", "origin_file": "app/a.spg"})),
             ..edge("a", "b", Some("value"))
         };
+        let other = Edge { meta: Some(json!({"condition": "=false"})), ..original.clone() };
         store.add_edge(original.clone()).expect("initial edge");
-        store
-            .add_edge(Edge {
-                meta: Some(json!({"condition": "=false"})),
-                ..original.clone()
-            })
-            .expect("duplicate edge");
-        let expected = serde_json::to_value(&original).expect("expected edge");
-        let outgoing = out_edges(store, "a");
-        let incoming = store
-            .get_node_edges("b")
-            .expect("neighbors")
-            .expect("b")
-            .incoming;
-        assert_eq!(outgoing.len(), 1);
-        assert_eq!(incoming.len(), 1);
-        assert_eq!(
-            serde_json::to_value(&outgoing[0].edge).expect("outgoing"),
-            expected
-        );
-        assert_eq!(
-            serde_json::to_value(&incoming[0].edge).expect("incoming"),
-            expected
-        );
+        store.add_edge(other.clone()).expect("distinct fact");
+        store.add_edge(original.clone()).expect("duplicate fact");
+        let mut expected = vec![edge_repr(&original), edge_repr(&other)];
+        expected.sort();
+        let mut outgoing: Vec<_> = out_edges(store, "a").iter().map(|view| edge_repr(&view.edge)).collect();
+        let mut incoming: Vec<_> = store.get_node_edges("b").expect("neighbors").expect("b").incoming.iter().map(|view| edge_repr(&view.edge)).collect();
+        outgoing.sort();
+        incoming.sort();
+        assert_eq!(outgoing, expected);
+        assert_eq!(incoming, expected);
     }
 
     /// 建边后更新两端的全部属性，双向邻接必须读取最新的完整节点。

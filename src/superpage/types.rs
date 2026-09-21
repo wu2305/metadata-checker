@@ -18,8 +18,8 @@ pub struct SpgComponent {
 /// 替换点没有信息可依，只能按后缀猜。这里保留引用产生时的文法形态，
 /// 使替换 pattern 与来源文法一致：
 /// - `Value`：`id.value` 显式取值，替换 pattern 为 `id.value`；
-/// - `Suffix`：`id.<其它后缀>`（如 `.step`）引用的是组件其它属性，
-///   依赖成立，但替换成值的展开式是错的，替换点必须跳过；
+/// - `Suffix`：保留给旧 Rust 调用方；新解析器把属性引用表示为
+///   `ComponentProperty(id, 完整属性路径)`，不会再生成此项；
 /// - `Bare`：裸 `id`（含 `${id}` 全组件引用），替换 pattern 为 `id`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComponentValueForm {
