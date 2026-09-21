@@ -124,25 +124,14 @@ fn ledger_from_parsed_content(
         }
     }
 
-    // 3. TBL 主模型名称
+    // 3. TBL 主模型名称：解析器的全局身份取**文件 stem**（tbl.rs“Use file stem as
+    //    model identifier”），不是 JSON `name`。这里必须与身份规则一致，否则主模型
+    //    会被误判为 Reference 并触发占位降级、同 stem 冲突也无法报告。
     let tbl_primary_model = if is_tbl {
-        match content {
-            ParsedGraphContent::Tbl(text) => {
-                let val: Option<serde_json::Value> = serde_json::from_str(text).ok();
-                val.and_then(|v| {
-                    v.get("name")
-                        .and_then(|n| n.as_str())
-                        .map(|s| s.to_string())
-                })
-                .or_else(|| {
-                    Path::new(logical_path)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .map(|s| s.to_string())
-                })
-            }
-            _ => None,
-        }
+        Path::new(logical_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
     } else {
         None
     };

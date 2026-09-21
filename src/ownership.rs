@@ -408,16 +408,19 @@ mod tests {
         rebuild_graph_from_ledgers(&mut first, &ledgers).unwrap();
         rebuild_graph_from_ledgers(&mut second, &ledgers).unwrap();
 
-        let first_nodes: Vec<String> = first
+        let mut first_nodes: Vec<String> = first
             .iter_nodes()
             .unwrap()
             .map(|n| serde_json::to_string(&n).unwrap())
             .collect();
-        let second_nodes: Vec<String> = second
+        let mut second_nodes: Vec<String> = second
             .iter_nodes()
             .unwrap()
             .map(|n| serde_json::to_string(&n).unwrap())
             .collect();
+        // iter_nodes 的迭代序不保证稳定，比较前排序
+        first_nodes.sort();
+        second_nodes.sort();
         assert_eq!(first_nodes, second_nodes);
     }
 
