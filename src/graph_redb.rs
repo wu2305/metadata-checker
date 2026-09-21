@@ -104,7 +104,10 @@ fn validate_project_markers(
         "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger is not implemented; rebuild into a new graph path"
     );
     if let Some(version) = version {
-        anyhow::ensure!(version == PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes(), "GRAPH_OWNERSHIP_SCHEMA_STALE: incompatible project binding schema");
+        anyhow::ensure!(
+            version == PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes(),
+            "GRAPH_OWNERSHIP_SCHEMA_STALE: incompatible project binding schema"
+        );
     }
     match (version, project, binding) {
         (None, None, None) => Ok(()),

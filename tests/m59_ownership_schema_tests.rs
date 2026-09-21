@@ -50,6 +50,8 @@ fn populated_legacy_store_cannot_receive_ownership_marker() {
         .persist(&HashMap::new())
         .expect("persist legacy graph");
 
+    // 只读绑定入口也不能把无绑定的旧图认作当前项目。
+    assert_eq!(GraphDB::open_readonly_for_project(&db_path, &binding).err().unwrap().to_string().contains("GRAPH_OWNERSHIP_SCHEMA_STALE"), true);
     let error = match GraphDB::open_for_project(&db_path, &binding) {
         Ok(_) => panic!("legacy populated store must require rebuild"),
         Err(error) => error,
@@ -204,7 +206,14 @@ fn incomplete_unknown_and_legacy_markers_are_never_repaired() {
         assert_eq!(GraphDB::open(&path).is_err(), true, "{label}");
         let check = GraphDB::check_graph_db(&path);
         assert_eq!(check.summary["needs_rebuild"], true, "{label}");
-        assert_eq!(check.diagnostics.iter().any(|d| d.code == "GRAPH_OWNERSHIP_SCHEMA_STALE"), true, "{label}");
+        assert_eq!(
+            check
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "GRAPH_OWNERSHIP_SCHEMA_STALE"),
+            true,
+            "{label}"
+        );
         let db = redb::Database::open(&path).unwrap();
         let tx = db.begin_read().unwrap();
         let meta = tx
