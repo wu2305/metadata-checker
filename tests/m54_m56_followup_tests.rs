@@ -194,7 +194,8 @@ fn followup_remove_nodes_in_place_preserves_remaining_graph() {
                 path: "test.spg".to_string(),
                 name: id.to_string(),
                 meta: None,
-            origin_file: None},
+                origin_file: None,
+            },
         )
         .expect("add node");
     }
@@ -259,7 +260,8 @@ fn followup_remove_in_place_persist_and_reopen() {
                     path: "t.spg".to_string(),
                     name: id.to_string(),
                     meta: None,
-                origin_file: None},
+                    origin_file: None,
+                },
             )
             .expect("add node");
         }
@@ -302,7 +304,8 @@ fn followup_v2_hydrate_warning_none_on_normal_open() {
             path: "t.spg".to_string(),
             name: "test".to_string(),
             meta: None,
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("add node");
     graph.persist(&HashMap::new()).expect("persist");
@@ -334,7 +337,8 @@ fn followup_empty_persist_full_rewrite_false() {
             path: "t.spg".to_string(),
             name: "n1".to_string(),
             meta: None,
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("add node");
     graph.persist(&HashMap::new()).expect("initial persist");
@@ -374,7 +378,8 @@ fn followup_v2_threshold_exact_1024_triggers_rebuild() {
                     path: "t.spg".to_string(),
                     name: format!("n{i}"),
                     meta: None,
-                origin_file: None},
+                    origin_file: None,
+                },
             )
             .expect("add node");
         }
@@ -417,7 +422,8 @@ fn followup_v2_threshold_exact_1024_triggers_rebuild() {
                 path: "t.spg".to_string(),
                 name: id.clone(),
                 meta: None,
-            origin_file: None},
+                origin_file: None,
+            },
         )
         .expect("re-add node");
     }
@@ -477,7 +483,8 @@ fn followup_v2_threshold_below_1024_stays_stale() {
                     path: "t.spg".to_string(),
                     name: format!("n{i}"),
                     meta: None,
-                origin_file: None},
+                    origin_file: None,
+                },
             )
             .expect("add node");
         }
@@ -509,7 +516,8 @@ fn followup_v2_threshold_below_1024_stays_stale() {
                 path: "t.spg".to_string(),
                 name: id.clone(),
                 meta: None,
-            origin_file: None},
+                origin_file: None,
+            },
         )
         .expect("re-add");
     }

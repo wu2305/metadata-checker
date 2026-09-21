@@ -612,7 +612,8 @@ fn create_persist_curve_fixture(total_nodes: usize) -> std::io::Result<PersistCu
                     path: "bench/curve.spg".to_string(),
                     name: id.clone(),
                     meta: None,
-                origin_file: None},
+                    origin_file: None,
+                },
             )
             .expect("add curve node");
         }

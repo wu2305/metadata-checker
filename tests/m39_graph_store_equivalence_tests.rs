@@ -19,7 +19,8 @@ fn build_contract_graph_for_backend<S: GraphWriteStore>(graph: &mut S) {
             path: "app/home.spg".to_string(),
             name: "首页".to_string(),
             meta: None,
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("insert page node");
 
@@ -33,7 +34,8 @@ fn build_contract_graph_for_backend<S: GraphWriteStore>(graph: &mut S) {
             meta: Some(serde_json::json!({
                 "component_type": "Input",
             })),
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("insert component node");
 
@@ -45,7 +47,8 @@ fn build_contract_graph_for_backend<S: GraphWriteStore>(graph: &mut S) {
             path: "app/home.spg".to_string(),
             name: "setParamValue:action1".to_string(),
             meta: None,
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("insert action node");
 
@@ -57,7 +60,8 @@ fn build_contract_graph_for_backend<S: GraphWriteStore>(graph: &mut S) {
             path: "tables/user.tbl".to_string(),
             name: "用户".to_string(),
             meta: None,
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("insert model node");
 
@@ -69,7 +73,8 @@ fn build_contract_graph_for_backend<S: GraphWriteStore>(graph: &mut S) {
             edge_type: EdgeType::Contains,
             field_path: None,
             meta: None,
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("add contains edge");
 
@@ -83,7 +88,8 @@ fn build_contract_graph_for_backend<S: GraphWriteStore>(graph: &mut S) {
             meta: Some(serde_json::json!({
                 "target_model": "user",
             })),
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("add read edge");
 
@@ -95,7 +101,8 @@ fn build_contract_graph_for_backend<S: GraphWriteStore>(graph: &mut S) {
             edge_type: EdgeType::Triggers,
             field_path: None,
             meta: None,
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("add trigger edge");
 
@@ -107,7 +114,8 @@ fn build_contract_graph_for_backend<S: GraphWriteStore>(graph: &mut S) {
             edge_type: EdgeType::ActionWrites,
             field_path: Some("user.name".to_string()),
             meta: Some(serde_json::json!({"write_target": "user.name"})),
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("add write edge");
 }

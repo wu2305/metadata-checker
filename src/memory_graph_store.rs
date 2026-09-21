@@ -64,7 +64,8 @@ impl MemoryGraphStore {
                 path: path.to_string(),
                 name: name.to_string(),
                 meta: None,
-            origin_file: None},
+                origin_file: None,
+            },
         );
     }
 
@@ -85,7 +86,8 @@ impl MemoryGraphStore {
             edge_type,
             field_path: field_path.map(|s| s.to_string()),
             meta: None,
-        origin_file: None};
+            origin_file: None,
+        };
         let _ = <Self as GraphWriteStore>::add_edge(self, edge);
     }
 

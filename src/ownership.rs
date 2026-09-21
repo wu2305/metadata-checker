@@ -5,7 +5,7 @@
 //! 在后续 M59-2 包中消费。
 
 use crate::graph::{Edge, Node};
-use crate::graph_store::{edge_dedup_key, GraphReadStore, GraphWriteStore};
+use crate::graph_store::{GraphReadStore, GraphWriteStore, edge_dedup_key};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -200,11 +200,11 @@ pub fn rebuild_graph_from_ledgers(
                 .filter(|contribution| contribution.kind == ContributionKind::Definition)
                 .collect();
             definitions.sort_by(|left, right| {
-                left.origin_file
-                    .cmp(&right.origin_file)
-                    .then(serde_json::to_string(&left.node).unwrap_or_default().cmp(
-                        &serde_json::to_string(&right.node).unwrap_or_default(),
-                    ))
+                left.origin_file.cmp(&right.origin_file).then(
+                    serde_json::to_string(&left.node)
+                        .unwrap_or_default()
+                        .cmp(&serde_json::to_string(&right.node).unwrap_or_default()),
+                )
             });
             let node = definitions
                 .first()
@@ -222,7 +222,11 @@ pub fn rebuild_graph_from_ledgers(
             }
             if node.node_type == crate::graph::NodeType::Model {
                 let mut placeholder = node;
-                if let Some(meta) = placeholder.meta.as_mut().and_then(|value| value.as_object_mut()) {
+                if let Some(meta) = placeholder
+                    .meta
+                    .as_mut()
+                    .and_then(|value| value.as_object_mut())
+                {
                     meta.insert("modelType".to_string(), serde_json::json!("PhysicalTable"));
                 } else {
                     placeholder.meta = Some(serde_json::json!({"modelType": "PhysicalTable"}));
@@ -308,7 +312,8 @@ mod tests {
             edge_type: EdgeType::EmbedsPage,
             field_path: Some("app/ghost.spg".to_string()),
             meta: None,
-        origin_file: None};
+            origin_file: None,
+        };
         ledger.edges.push(EdgeContribution {
             origin_file: "app/a.spg".to_string(),
             edge: edge.clone(),

@@ -40,7 +40,8 @@ fn availability_graph() -> anyhow::Result<MemoryGraphStore> {
             "owner_id": COMPONENT_ID,
             "referenced_symbols": ["model:only.value"],
         })),
-    , origin_file: None})?;
+        origin_file: None,
+    })?;
     graph.add_test_edge(condition_id, COMPONENT_ID, EdgeType::DependsOn, None);
     Ok(graph)
 }

@@ -41,7 +41,8 @@ fn build_contract_graph() -> MemoryGraphStore {
                     {"name": "name", "dbfield": "name", "inputField": "name"}
                 ]
             })),
-        origin_file: None},
+            origin_file: None,
+        },
     )
     .expect("insert dataflow node");
     store.add_test_node(

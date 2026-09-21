@@ -326,10 +326,7 @@ impl GraphDB {
     }
 
     /// 只读访问已启用来源账本的项目库。
-    pub fn open_readonly_with_ownership(
-        db_path: &Path,
-        binding: &ProjectBinding,
-    ) -> Result<Self> {
+    pub fn open_readonly_with_ownership(db_path: &Path, binding: &ProjectBinding) -> Result<Self> {
         let _lock = acquire_graph_db_lock(db_path)?;
         Self::validate_ownership_path(db_path, binding)?;
         let mut graph = Self::open_readonly_inner(db_path)?;
@@ -423,7 +420,9 @@ impl GraphDB {
             "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger schema is missing or incompatible; rebuild from source into a new graph path"
         );
         anyhow::ensure!(
-            meta.get(PROJECT_BINDING_KEY)?.map(|value| value.value()).as_deref()
+            meta.get(PROJECT_BINDING_KEY)?
+                .map(|value| value.value())
+                .as_deref()
                 == Some(binding.as_str().as_bytes()),
             "GRAPH_PROJECT_BINDING_MISMATCH: open with the original project binding"
         );
@@ -449,7 +448,9 @@ impl GraphDB {
 
     fn validate_ownership_path(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
         if !db_path.exists() {
-            anyhow::bail!("GRAPH_OWNERSHIP_SCHEMA_STALE: ownership database does not exist; rebuild from source")
+            anyhow::bail!(
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership database does not exist; rebuild from source"
+            )
         }
         let db = Database::open(db_path)?;
         let read_txn = db.begin_read()?;
@@ -470,7 +471,9 @@ impl GraphDB {
             "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership schema marker is missing or incompatible"
         );
         anyhow::ensure!(
-            meta.get(PROJECT_BINDING_KEY)?.map(|value| value.value()).as_deref()
+            meta.get(PROJECT_BINDING_KEY)?
+                .map(|value| value.value())
+                .as_deref()
                 == Some(binding.as_str().as_bytes()),
             "GRAPH_PROJECT_BINDING_MISMATCH: open with the original project binding"
         );
@@ -496,7 +499,9 @@ impl GraphDB {
         for item in table.iter()? {
             let (key, value) = item?;
             let ledger: FileContributionLedger = serde_json::from_slice(value.value().as_slice())
-                .with_context(|| format!("Failed to deserialize ownership ledger {}", key.value()))?;
+                .with_context(|| {
+                format!("Failed to deserialize ownership ledger {}", key.value())
+            })?;
             anyhow::ensure!(
                 ledger.origin_file == key.value(),
                 "GRAPH_OWNERSHIP_SCHEMA_STALE: ledger key does not match origin_file"
@@ -1330,7 +1335,8 @@ impl GraphDB {
             path,
             name,
             meta,
-        origin_file: None};
+            origin_file: None,
+        };
         let idx = self.graph.add_node(node);
         self.is_dirty = true;
         self.topology_dirty = true;
@@ -1370,9 +1376,10 @@ impl GraphDB {
     }
 
     fn add_edge_record(&mut self, edge: Edge) {
-        if let (Some(&from_idx), Some(&to_idx)) =
-            (self.node_indices.get(&edge.from), self.node_indices.get(&edge.to))
-        {
+        if let (Some(&from_idx), Some(&to_idx)) = (
+            self.node_indices.get(&edge.from),
+            self.node_indices.get(&edge.to),
+        ) {
             if !self
                 .seen_edges
                 .insert(crate::graph_store::edge_dedup_key(&edge))

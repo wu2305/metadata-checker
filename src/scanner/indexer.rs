@@ -7,7 +7,9 @@ use twox_hash::XxHash64;
 
 use super::{process_spg_file_from_value, process_tbl_file_from_string};
 use crate::graph::{FileState, GraphDB, Node, NodeType};
-use crate::graph_store::{GraphReadStore, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore};
+use crate::graph_store::{
+    GraphReadStore, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
+};
 use crate::ownership::{
     ContributionKind, EdgeContribution, EntityContribution, FileContributionLedger, ProjectBinding,
 };
@@ -90,9 +92,11 @@ fn ledger_from_parsed_content(
         .collect();
     let node_ids: HashSet<String> = nodes.iter().map(|node| node.id.clone()).collect();
     for mut node in nodes {
-        let is_definition = matches!(node.node_type, NodeType::Page | NodeType::Component | NodeType::Action | NodeType::Condition)
-            || (matches!(node.node_type, NodeType::Model | NodeType::Field)
-                && node.path == logical_path);
+        let is_definition = matches!(
+            node.node_type,
+            NodeType::Page | NodeType::Component | NodeType::Action | NodeType::Condition
+        ) || (matches!(node.node_type, NodeType::Model | NodeType::Field)
+            && node.path == logical_path);
         if let Some(mapped_id) = local_id_map.get(&node.id) {
             node.id = mapped_id.clone();
         }
@@ -823,12 +827,8 @@ impl ProjectIndexer {
             let (parsed_nodes, merged_removed, removed_edge_keys, dirty_edges) =
                 if ownership_enabled {
                     let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
-                    let parsed_nodes = apply_ownership_changes(
-                        &mut graph,
-                        &mut ledgers,
-                        &updates,
-                        &plan.deleted,
-                    )?;
+                    let parsed_nodes =
+                        apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
                     for (logical_path, _) in &plan.deleted {
                         new_states.remove(logical_path);
                     }

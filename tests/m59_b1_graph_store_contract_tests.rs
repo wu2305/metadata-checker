@@ -53,8 +53,8 @@ fn node(id: &str) -> Node {
         path: format!("app/{id}.spg"),
         name: id.to_string(),
         meta: None,
-    ,     origin_file: None,
-origin_file: None}
+        origin_file: None,
+    }
 }
 
 fn node_with(id: &str, name: &str, meta: Option<serde_json::Value>) -> Node {
@@ -63,7 +63,6 @@ fn node_with(id: &str, name: &str, meta: Option<serde_json::Value>) -> Node {
         meta,
         ..node(id)
     }
-    origin_file: None,
 }
 
 fn edge_typed(from: &str, to: &str, edge_type: EdgeType, field_path: Option<&str>) -> Edge {
@@ -73,13 +72,12 @@ fn edge_typed(from: &str, to: &str, edge_type: EdgeType, field_path: Option<&str
         edge_type,
         field_path: field_path.map(|s| s.to_string()),
         meta: None,
-    ,     origin_file: None,
-origin_file: None}
+        origin_file: None,
+    }
 }
 
 fn edge(from: &str, to: &str, field_path: Option<&str>) -> Edge {
     edge_typed(from, to, EdgeType::DependsOn, field_path)
-    origin_file: None,
 }
 
 // ------------------------------------------------------- 完整比对（而非计数）
@@ -303,14 +301,16 @@ mod cases {
             path: "data/source.tbl".to_string(),
             name: "source".to_string(),
             meta: Some(json!({"revision": 2, "fields": ["amount"]})),
-        origin_file: None};
+            origin_file: None,
+        };
         let expected_b = Node {
             id: "b".to_string(),
             node_type: NodeType::Field,
             path: "data/target.tbl".to_string(),
             name: "amount".to_string(),
             meta: Some(json!({"revision": 3, "dataType": "N"})),
-        origin_file: None};
+            origin_file: None,
+        };
         store.upsert_node(expected_a.clone()).expect("update a");
         store.upsert_node(expected_b.clone()).expect("update b");
         let outgoing = out_edges(store, "a");

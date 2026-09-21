@@ -29,14 +29,13 @@ fn node_of(kind: NodeIdKind, id: &str, path: &str, name: &str) -> Node {
         path: path.to_string(),
         name: name.to_string(),
         meta: None,
-    ,     origin_file: None,
-origin_file: None}
+        origin_file: None,
+    }
 }
 
 fn scoped_node(kind: NodeIdKind, page: &str, local: &str) -> Node {
     let id = page_local_node_id(kind, page, local).unwrap();
     node_of(kind, &id, page, local)
-    origin_file: None,
 }
 
 fn resolve_model(graph: &MemoryGraphStore, target: &str) -> TargetResolution {
@@ -306,7 +305,8 @@ fn shared_physical_target_stays_global_while_local_models_own_their_page() {
                 edge_type: EdgeType::DataflowInput,
                 field_path: None,
                 meta: None,
-            origin_file: None})
+                origin_file: None,
+            })
             .unwrap();
     }
 

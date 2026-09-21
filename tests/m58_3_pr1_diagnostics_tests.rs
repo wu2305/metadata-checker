@@ -72,7 +72,8 @@ fn pr1_hydrate_counts_and_partial_gate() -> anyhow::Result<()> {
                 edge_type: EdgeType::Reads,
                 field_path: None,
                 meta: None,
-            origin_file: None};
+                origin_file: None,
+            };
             let key = metadata_checker::graph_redb::edge_storage_key(&dangling);
             edges.insert(key.as_str(), serde_json::to_vec(&dangling)?)?;
         }
