@@ -110,7 +110,8 @@ fn shared_upstream_is_not_a_cycle() {
         {"id":"b","type":"input","value":"=d.value"},
         {"id":"c","type":"input","value":"=d.value"},
         {"id":"d","type":"input","value":"=1"}
-    ]}})).unwrap();
+    ]}}))
+    .unwrap();
     let trace = trace_value_source(&meta, &DependencyGraph::new(&meta), "a", "value", 8).unwrap();
     assert_eq!(trace.expanded_expr, "=CONCAT(1, 1)");
     assert_eq!(trace.issues.is_empty(), true);
@@ -121,8 +122,15 @@ fn shared_upstream_is_not_a_cycle() {
 fn unsupported_macro_is_preserved_and_reported_incomplete() {
     let meta = parse_superpage_from_value(serde_json::json!({"canvas":{"components":[
         {"id":"a","type":"input","value":"=${IF(b.value, 1, 2)}"}
-    ]}})).unwrap();
+    ]}}))
+    .unwrap();
     let trace = trace_value_source(&meta, &DependencyGraph::new(&meta), "a", "value", 8).unwrap();
     assert_eq!(trace.expanded_expr, "=${IF(b.value, 1, 2)}");
-    assert_eq!(trace.issues.iter().any(|issue| issue.code == "TRACE_UNRESOLVED_REFERENCE"), true);
+    assert_eq!(
+        trace
+            .issues
+            .iter()
+            .any(|issue| issue.code == "TRACE_UNRESOLVED_REFERENCE"),
+        true
+    );
 }

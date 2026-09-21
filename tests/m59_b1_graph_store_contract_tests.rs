@@ -257,14 +257,27 @@ mod cases {
             meta: Some(json!({"condition": "=a.value > 0", "origin_file": "app/a.spg"})),
             ..edge("a", "b", Some("value"))
         };
-        let other = Edge { meta: Some(json!({"condition": "=false"})), ..original.clone() };
+        let other = Edge {
+            meta: Some(json!({"condition": "=false"})),
+            ..original.clone()
+        };
         store.add_edge(original.clone()).expect("initial edge");
         store.add_edge(other.clone()).expect("distinct fact");
         store.add_edge(original.clone()).expect("duplicate fact");
         let mut expected = vec![edge_repr(&original), edge_repr(&other)];
         expected.sort();
-        let mut outgoing: Vec<_> = out_edges(store, "a").iter().map(|view| edge_repr(&view.edge)).collect();
-        let mut incoming: Vec<_> = store.get_node_edges("b").expect("neighbors").expect("b").incoming.iter().map(|view| edge_repr(&view.edge)).collect();
+        let mut outgoing: Vec<_> = out_edges(store, "a")
+            .iter()
+            .map(|view| edge_repr(&view.edge))
+            .collect();
+        let mut incoming: Vec<_> = store
+            .get_node_edges("b")
+            .expect("neighbors")
+            .expect("b")
+            .incoming
+            .iter()
+            .map(|view| edge_repr(&view.edge))
+            .collect();
         outgoing.sort();
         incoming.sort();
         assert_eq!(outgoing, expected);

@@ -49,15 +49,12 @@ const SCANNER_DIAGNOSTICS_TABLE: TableDefinition<&str, Vec<u8>> =
 ///
 /// scanner/bench 收集 delta 与 persist 全量/增量写共用同一格式，避免两套键。
 pub fn edge_storage_key(edge: &Edge) -> String {
-    // JSON 数组明确区分段边界与 None/空串，不依赖可出现在 ID 中的分隔符。
-    serde_json::json!([
-        edge.from,
-        edge.to,
-        edge.edge_type,
-        edge.field_path,
-        edge.meta
-    ])
-    .to_string()
+    // 关系排序前缀保留既有重启后的邻接顺序；它只负责排序，不负责唯一性。
+    // NUL 后的完整 JSON 负责身份，JSON 会转义输入中的 NUL，段边界不可混淆。
+    let relation_order = format!("{}|{}|{}|{}", edge.from, edge.to,
+        serde_json::json!(edge.edge_type), edge.field_path.as_deref().unwrap_or(""));
+    let fact = serde_json::json!([edge.from, edge.to, edge.edge_type, edge.field_path, edge.meta]);
+    format!("{relation_order}\0{fact}")
 }
 
 /// M58.3 复核返修：在给定 write transaction 内按文件覆盖/删除 scanner 诊断
@@ -1096,11 +1093,14 @@ impl GraphDB {
         let write_txn = db.begin_write()?;
         {
             let meta = write_txn.open_table(META_TABLE)?;
-            let version = meta.get(FACT_SCHEMA_VERSION_KEY)?.map(|value| value.value());
-            anyhow::ensure!(version.as_deref() == Some(FACT_SCHEMA_VERSION),
-                "GRAPH_SCHEMA_STALE: refusing to write incompatible fact storage; rebuild into a new --graph-db-path");
+            let version = meta
+                .get(FACT_SCHEMA_VERSION_KEY)?
+                .map(|value| value.value());
+            anyhow::ensure!(
+                version.as_deref() == Some(FACT_SCHEMA_VERSION),
+                "GRAPH_SCHEMA_STALE: refusing to write incompatible fact storage; rebuild into a new --graph-db-path"
+            );
         }
-
 
         // nodes：两路径相同（removed/dirty 集合增量写）
         if !self.removed_nodes.is_empty() {

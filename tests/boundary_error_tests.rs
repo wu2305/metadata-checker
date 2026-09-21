@@ -101,21 +101,17 @@ fn test_chinese_in_expression() {
 fn test_list_column_reference() {
     let refs = parse_expression_refs("=list1.column1.value + list1.column2.value");
 
-    // list1.column1.value 应该被解析为 ComponentValue("list1")
-    let has_list = refs
-        .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "list1"));
-    assert!(has_list, "Should detect list1 reference");
+    assert_eq!(refs, vec![
+        RefType::ComponentProperty("list1".into(), "column1.value".into()),
+        RefType::ComponentProperty("list1".into(), "column2.value".into()),
+    ]);
 }
 
 #[test]
 fn test_steps_step_reference() {
     let refs = parse_expression_refs("=steps1.step");
 
-    let has_steps = refs
-        .iter()
-        .any(|r| matches!(r, RefType::ComponentValue(id, _) if id == "steps1"));
-    assert!(has_steps, "Should detect steps1 reference");
+    assert_eq!(refs, vec![RefType::ComponentProperty("steps1".into(), "step".into())]);
 }
 
 #[test]
