@@ -12,7 +12,8 @@
 //!
 //! ## 基准取谁
 //!
-//! 分歧处一律以 **redb 侧（`GraphDB`）为准**，因为它是生产查询路径实际跑的实现。
+//! 以已批准语义契约及独立手工期望为准；redb 的历史行为不是正确性标准。
+//! 2026-09-21 修正：同关系的不同 metadata 必须保留，不能继续钉住首次写入胜出。
 //! `MemoryGraphStore` 原有三处偏离，已在本次一并纠正（见 `src/memory_graph_store.rs`
 //! 的 M59-B1 注释）：不去重边、邻接表存节点副本导致更新不可见、`upsert_node`
 //! 无条件覆盖 meta。规则本身（meta 合并、边去重键）已提到
@@ -250,37 +251,38 @@ mod cases {
         );
     }
 
-    /// 非空边 metadata 原样读回；相同去重键再次写入时保留首次事实。
+    /// 不同证据是不同事实；相同证据重复写入仍幂等，双向邻接逐属性保留。
     pub fn edge_metadata_survives_storage_and_duplicate_write(store: &mut dyn GraphStore) {
         seed(store, &["a", "b"]);
         let original = Edge {
             meta: Some(json!({"condition": "=a.value > 0", "origin_file": "app/a.spg"})),
             ..edge("a", "b", Some("value"))
         };
+        let other = Edge {
+            meta: Some(json!({"condition": "=false"})),
+            ..original.clone()
+        };
         store.add_edge(original.clone()).expect("initial edge");
-        store
-            .add_edge(Edge {
-                meta: Some(json!({"condition": "=false"})),
-                ..original.clone()
-            })
-            .expect("duplicate edge");
-        let expected = serde_json::to_value(&original).expect("expected edge");
-        let outgoing = out_edges(store, "a");
-        let incoming = store
+        store.add_edge(other.clone()).expect("distinct fact");
+        store.add_edge(original.clone()).expect("duplicate fact");
+        let mut expected = vec![edge_repr(&original), edge_repr(&other)];
+        expected.sort();
+        let mut outgoing: Vec<_> = out_edges(store, "a")
+            .iter()
+            .map(|view| edge_repr(&view.edge))
+            .collect();
+        let mut incoming: Vec<_> = store
             .get_node_edges("b")
             .expect("neighbors")
             .expect("b")
-            .incoming;
-        assert_eq!(outgoing.len(), 1);
-        assert_eq!(incoming.len(), 1);
-        assert_eq!(
-            serde_json::to_value(&outgoing[0].edge).expect("outgoing"),
-            expected
-        );
-        assert_eq!(
-            serde_json::to_value(&incoming[0].edge).expect("incoming"),
-            expected
-        );
+            .incoming
+            .iter()
+            .map(|view| edge_repr(&view.edge))
+            .collect();
+        outgoing.sort();
+        incoming.sort();
+        assert_eq!(outgoing, expected);
+        assert_eq!(incoming, expected);
     }
 
     /// 建边后更新两端的全部属性，双向邻接必须读取最新的完整节点。

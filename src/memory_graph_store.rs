@@ -27,7 +27,7 @@ pub struct MemoryGraphStore {
     outgoing: HashMap<String, Vec<Edge>>,
     incoming: HashMap<String, Vec<Edge>>,
     /// M59-B1：边去重键集合，与 `graph_redb` 的 `seen_edges` 同口径。
-    seen_edges: HashSet<(String, String, crate::graph::EdgeType, Option<String>)>,
+    seen_edges: HashSet<crate::graph_store::EdgeFactKey>,
     file_states: HashMap<String, FileState>,
     checkpoint: Option<crate::diff_refresh::DiffRefreshCheckpoint>,
 }
@@ -169,7 +169,7 @@ impl GraphWriteStore for MemoryGraphStore {
         if !self.nodes.contains_key(&edge.from) || !self.nodes.contains_key(&edge.to) {
             return Ok(());
         }
-        // M59-B1：按 (from, to, type, field_path) 去重，与 redb 的 seen_edges 同口径。
+        // M59-B1：按完整事实去重，保留不同来源的证据，与 redb 的 seen_edges 同口径。
         if !self
             .seen_edges
             .insert(crate::graph_store::edge_dedup_key(&edge))
@@ -203,7 +203,7 @@ impl GraphWriteStore for MemoryGraphStore {
 
         // M59-B1：去重键必须一起清，否则节点被删又重建后，原来那条边会被
         // 当成重复边丢弃——图里永久缺一条边。redb 侧对 seen_edges 做同样的 retain。
-        self.seen_edges.retain(|(from, to, _, _)| {
+        self.seen_edges.retain(|(from, to, _, _, _)| {
             !removed_ids.contains(from.as_str()) && !removed_ids.contains(to.as_str())
         });
         Ok(())

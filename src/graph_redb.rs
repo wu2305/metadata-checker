@@ -15,7 +15,9 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{
+    Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TableHandle,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,7 +34,9 @@ const NODES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("nodes"
 const EDGES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("edges");
 const FILE_STATES_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("file_states");
 const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
-/// M54：diff-refresh checkpoint 在 META_TABLE 中的键
+/// 完整事实键版本；独立于 M59-2 的页面身份与归属版本。
+const FACT_SCHEMA_VERSION_KEY: &str = "fact_schema_version";
+const FACT_SCHEMA_VERSION: &[u8] = b"2";
 const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
 /// M58.3 PR1 refix（F2）：per-file scanner 诊断计数表。
 ///
@@ -43,18 +47,43 @@ const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
 const SCANNER_DIAGNOSTICS_TABLE: TableDefinition<&str, Vec<u8>> =
     TableDefinition::new("scanner_diagnostics");
 
+/// 所有持久化事实读取入口共用版本门槛，不能从 shadow 绕过。
+pub(crate) fn validate_fact_schema(transaction: &redb::ReadTransaction) -> Result<()> {
+    let version = transaction.open_table(META_TABLE).ok().and_then(|table| {
+        table
+            .get(FACT_SCHEMA_VERSION_KEY)
+            .ok()
+            .flatten()
+            .map(|value| value.value())
+    });
+    anyhow::ensure!(
+        version.as_deref() == Some(FACT_SCHEMA_VERSION),
+        "GRAPH_SCHEMA_STALE: rebuild from source into a new --graph-db-path; old facts lack complete evidence"
+    );
+    Ok(())
+}
+
 /// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约）。
 ///
 /// scanner/bench 收集 delta 与 persist 全量/增量写共用同一格式，避免两套键。
 pub fn edge_storage_key(edge: &Edge) -> String {
-    let type_str = serde_json::to_string(&edge.edge_type).unwrap_or_default();
-    format!(
+    // 关系排序前缀保留既有重启后的邻接顺序；它只负责排序，不负责唯一性。
+    // NUL 后的完整 JSON 负责身份，JSON 会转义输入中的 NUL，段边界不可混淆。
+    let relation_order = format!(
         "{}|{}|{}|{}",
         edge.from,
         edge.to,
-        type_str,
+        serde_json::json!(edge.edge_type),
         edge.field_path.as_deref().unwrap_or("")
-    )
+    );
+    let fact = serde_json::json!([
+        edge.from,
+        edge.to,
+        edge.edge_type,
+        edge.field_path,
+        edge.meta
+    ]);
+    format!("{relation_order}\0{fact}")
 }
 
 /// M58.3 复核返修：在给定 write transaction 内按文件覆盖/删除 scanner 诊断
@@ -149,7 +178,7 @@ pub struct GraphDB {
     pub node_indices: HashMap<String, NodeIndex>,
     pub db_path: String,
     is_dirty: bool,
-    seen_edges: HashSet<(String, String, EdgeType, Option<String>)>,
+    seen_edges: HashSet<crate::graph_store::EdgeFactKey>,
     dirty_nodes: HashSet<String>,
     removed_nodes: HashSet<String>,
     topology_dirty: bool,
@@ -178,12 +207,7 @@ impl GraphDB {
         let mut seen_edges = HashSet::new();
         for edge_ref in graph.edge_references() {
             let edge = edge_ref.weight();
-            seen_edges.insert((
-                edge.from.clone(),
-                edge.to.clone(),
-                edge.edge_type.clone(),
-                edge.field_path.clone(),
-            ));
+            seen_edges.insert(crate::graph_store::edge_dedup_key(&edge));
         }
         Self {
             graph,
@@ -278,7 +302,27 @@ impl GraphDB {
             let _ = write_txn.open_table(NODES_TABLE)?;
             let _ = write_txn.open_table(EDGES_TABLE)?;
             let _ = write_txn.open_table(FILE_STATES_TABLE)?;
-            let _ = write_txn.open_table(META_TABLE)?;
+            let mut meta = write_txn.open_table(META_TABLE)?;
+            let version = meta
+                .get(FACT_SCHEMA_VERSION_KEY)?
+                .map(|value| value.value());
+            // 独立 shadow writer 可产生只有 v2 表的旧库；它也不是可自动初始化的空库。
+            let has_shadow_tables = write_txn
+                .list_tables()?
+                .any(|table| table.name().starts_with("v2_"));
+            let populated = has_shadow_tables
+                || !write_txn.open_table(NODES_TABLE)?.is_empty()?
+                || !write_txn.open_table(EDGES_TABLE)?.is_empty()?
+                || !write_txn.open_table(FILE_STATES_TABLE)?.is_empty()?
+                || meta.get(META_DIFF_REFRESH_CHECKPOINT_KEY)?.is_some();
+            anyhow::ensure!(
+                version.as_deref() == Some(FACT_SCHEMA_VERSION)
+                    || (version.is_none() && !populated),
+                "GRAPH_SCHEMA_STALE: fact schema requires rebuild from source into a new --graph-db-path; preserve the old database as backup"
+            );
+            if version.is_none() {
+                meta.insert(FACT_SCHEMA_VERSION_KEY, FACT_SCHEMA_VERSION.to_vec())?;
+            }
             // M58.3 PR1 refix（F2）：旧库兼容——打开即补建 scanner 诊断表
             let _ = write_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
         }
@@ -318,7 +362,7 @@ impl GraphDB {
             }
         }
 
-        let mut seen_edges: HashSet<(String, String, EdgeType, Option<String>)> = HashSet::new();
+        let mut seen_edges: HashSet<crate::graph_store::EdgeFactKey> = HashSet::new();
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
             let (key, value) = item?;
@@ -329,12 +373,7 @@ impl GraphDB {
                         (node_indices.get(&edge.from), node_indices.get(&edge.to))
                     {
                         graph.add_edge(from_idx, to_idx, edge.clone());
-                        seen_edges.insert((
-                            edge.from.clone(),
-                            edge.to.clone(),
-                            edge.edge_type.clone(),
-                            edge.field_path.clone(),
-                        ));
+                        seen_edges.insert(crate::graph_store::edge_dedup_key(&edge));
                     } else {
                         hydrate_diagnostics.dangling_edge += 1;
                         if hydrate_diagnostics.sample_dangling_location.is_none() {
@@ -461,21 +500,66 @@ impl GraphDB {
         match db_result {
             Ok(db) => {
                 let read_txn = db.begin_read();
+                let schema_current = read_txn
+                    .as_ref()
+                    .ok()
+                    .and_then(|tx| tx.open_table(META_TABLE).ok())
+                    .and_then(|table| {
+                        table
+                            .get(FACT_SCHEMA_VERSION_KEY)
+                            .ok()
+                            .flatten()
+                            .map(|value| value.value())
+                    })
+                    .is_some_and(|version| version == FACT_SCHEMA_VERSION);
                 let tables_ok = read_txn
+                    .as_ref()
                     .map(|tx| {
                         tx.open_table(NODES_TABLE).is_ok() && tx.open_table(EDGES_TABLE).is_ok()
                     })
                     .unwrap_or(false);
-                out.summary["needs_rebuild"] = serde_json::json!(!tables_ok);
-                out.evidence.push(
-                    Evidence::new("Graph database opened successfully", "redb open + read")
+                out.summary["needs_rebuild"] = serde_json::json!(!tables_ok || !schema_current);
+                if !schema_current {
+                    out.summary["readable"] = serde_json::json!(false);
+                    let mut diagnostic = crate::diagnostics::envelope_diagnostic(
+                        crate::diagnostics::CODE_GRAPH_SCHEMA_STALE,
+                        1,
+                        Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
+                        "Stored facts use an incompatible or missing schema version".to_string(),
+                    );
+                    diagnostic.suggestion = Some("Rebuild from source into a new --graph-db-path; keep the old database as backup".into());
+                    out.diagnostics.push(diagnostic);
+                } else if tables_ok {
+                    out.evidence.push(
+                        Evidence::new(
+                            "Graph database opened successfully",
+                            "redb open + schema + read",
+                        )
                         .with_source_file(db_path.to_string_lossy().to_string())
                         .with_confidence(Confidence::High),
-                );
+                    );
+                }
             }
             Err(e) => {
                 let msg = e.to_string();
-                if msg.contains("lock")
+                if msg.contains("GRAPH_SCHEMA_STALE") {
+                    let mut diagnostic = crate::diagnostics::envelope_diagnostic(
+                        "GRAPH_SCHEMA_STALE",
+                        1,
+                        Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
+                        msg.clone(),
+                    );
+                    diagnostic.suggestion = Some("Rebuild from source into a new --graph-db-path; keep the old database as backup".to_string());
+                    out.diagnostics.push(diagnostic);
+                } else if msg.contains("lock")
                     || msg.contains("already open")
                     || msg.contains("Cannot acquire")
                 {
@@ -603,7 +687,20 @@ impl GraphDB {
                     }),
                 );
                 out.query_target = Some(db_path.to_string_lossy().to_string());
-                if msg.contains("lock")
+                if msg.contains("GRAPH_SCHEMA_STALE") {
+                    let mut diagnostic = crate::diagnostics::envelope_diagnostic(
+                        "GRAPH_SCHEMA_STALE",
+                        1,
+                        Location {
+                            source_file: Some(db_path.to_string_lossy().to_string()),
+                            node_id: None,
+                            json_path: None,
+                        },
+                        msg.clone(),
+                    );
+                    diagnostic.suggestion = Some("Rebuild from source into a new --graph-db-path; keep the old database as backup".to_string());
+                    out.diagnostics.push(diagnostic);
+                } else if msg.contains("lock")
                     || msg.contains("already open")
                     || msg.contains("Cannot acquire")
                 {
@@ -708,6 +805,10 @@ impl GraphDB {
     }
 
     fn load_from_db(db: Database, db_path: &Path) -> Result<Self> {
+        {
+            let transaction = db.begin_read()?;
+            validate_fact_schema(&transaction)?;
+        }
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
         let mut hydrate_diagnostics = crate::diagnostics::HydrateDiagnostics::default();
@@ -735,7 +836,7 @@ impl GraphDB {
             }
         }
 
-        let mut seen_edges: HashSet<(String, String, EdgeType, Option<String>)> = HashSet::new();
+        let mut seen_edges: HashSet<crate::graph_store::EdgeFactKey> = HashSet::new();
         let edges_table = read_txn.open_table(EDGES_TABLE)?;
         for item in edges_table.iter()? {
             let (key, value) = item?;
@@ -746,12 +847,7 @@ impl GraphDB {
                         (node_indices.get(&edge.from), node_indices.get(&edge.to))
                     {
                         graph.add_edge(from_idx, to_idx, edge.clone());
-                        seen_edges.insert((
-                            edge.from.clone(),
-                            edge.to.clone(),
-                            edge.edge_type.clone(),
-                            edge.field_path.clone(),
-                        ));
+                        seen_edges.insert(crate::graph_store::edge_dedup_key(&edge));
                     } else {
                         hydrate_diagnostics.dangling_edge += 1;
                         if hydrate_diagnostics.sample_dangling_location.is_none() {
@@ -852,15 +948,6 @@ impl GraphDB {
         if let (Some(&from_idx), Some(&to_idx)) =
             (self.node_indices.get(from), self.node_indices.get(to))
         {
-            let key = (
-                from.to_string(),
-                to.to_string(),
-                edge_type.clone(),
-                field_path.clone(),
-            );
-            if !self.seen_edges.insert(key) {
-                return;
-            }
             let edge = Edge {
                 from: from.to_string(),
                 to: to.to_string(),
@@ -868,6 +955,12 @@ impl GraphDB {
                 field_path,
                 meta,
             };
+            if !self
+                .seen_edges
+                .insert(crate::graph_store::edge_dedup_key(&edge))
+            {
+                return;
+            }
             self.is_dirty = true;
             self.topology_dirty = true;
             self.graph.add_edge(from_idx, to_idx, edge);
@@ -893,7 +986,7 @@ impl GraphDB {
 
             // 从 seen_edges 移除涉及该节点的所有边
             self.seen_edges
-                .retain(|(from, to, _, _)| from != id && to != id);
+                .retain(|(from, to, _, _, _)| from != id && to != id);
 
             // 从内存图删除节点（petgraph swap_remove 自动移除关联边，
             // 但会把末尾节点 swap 到被删位置，需更新其索引）
@@ -1054,6 +1147,16 @@ impl GraphDB {
 
         let db = Database::create(&self.db_path)?;
         let write_txn = db.begin_write()?;
+        {
+            let meta = write_txn.open_table(META_TABLE)?;
+            let version = meta
+                .get(FACT_SCHEMA_VERSION_KEY)?
+                .map(|value| value.value());
+            anyhow::ensure!(
+                version.as_deref() == Some(FACT_SCHEMA_VERSION),
+                "GRAPH_SCHEMA_STALE: refusing to write incompatible fact storage; rebuild into a new --graph-db-path"
+            );
+        }
 
         // nodes：两路径相同（removed/dirty 集合增量写）
         if !self.removed_nodes.is_empty() {

@@ -135,6 +135,14 @@ pub fn print_component_query_human_to(
             )?;
             writeln!(out, "Raw       : {}", trace.raw_expr)?;
             writeln!(out, "Expanded  : {}", trace.expanded_expr)?;
+            writeln!(out, "Complete  : {}", trace.issues.is_empty())?;
+            for issue in &trace.issues {
+                writeln!(
+                    out,
+                    "  {}: {} ({})",
+                    issue.code, issue.token, issue.component_id
+                )?;
+            }
             writeln!(out, "Source    : {:?}", trace.source_type)?;
             writeln!(
                 out,
@@ -261,6 +269,8 @@ pub fn print_component_query_json_to(
                     "field": trace.field,
                     "raw_expr": trace.raw_expr,
                     "expanded_expr": trace.expanded_expr,
+                    "complete": trace.issues.is_empty(),
+                    "issues": trace.issues,
                     "source_type": format!("{:?}", trace.source_type),
                     "is_external_input": trace.is_external_input,
                     "source_chain": trace.source_chain.iter().map(|n| json!({
@@ -325,6 +335,21 @@ pub fn print_component_query_json_to(
     let mut output =
         crate::output::AiOutput::new(crate::output::OutputKind::ComponentQuery, summary);
     output.query_target = Some(comp.id.clone());
+    if value_trace.get("complete").and_then(Value::as_bool) == Some(false) {
+        output
+            .diagnostics
+            .push(crate::diagnostics::envelope_diagnostic(
+                "TRACE_INCOMPLETE",
+                value_trace["issues"].as_array().map_or(1, Vec::len),
+                crate::output::Location {
+                    source_file: None,
+                    node_id: Some(comp.id.clone()),
+                    json_path: None,
+                },
+                "值追溯未完整展开；请核对 details.value_trace.issues，不能把剩余引用当最终来源"
+                    .to_string(),
+            ));
+    }
     output.details = Some(details);
     output.evidence.push(
         crate::output::Evidence::new(

@@ -30,6 +30,9 @@ pub fn process_tbl_file_from_string(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
+    // 在首次写入前校验所有会生成全局身份的输入，避免后续字段失败留下半份图。
+    validate_table_identities(&value, &model_name)?;
+
     let model_id = format!("model:{}", model_name);
     let is_dataflow = value.get("dataFlow").is_some();
     let model_type = if is_dataflow { "DataFlow" } else { "App" };
@@ -417,4 +420,46 @@ pub fn process_tbl_file_from_string(
     }
 
     Ok(node_ids.into_iter().collect())
+}
+
+/// 校验 TBL 的全部身份来源；表达式与展示属性不属于节点身份。
+fn validate_table_identities(value: &serde_json::Value, model_name: &str) -> Result<()> {
+    use crate::graph_identity::{NodeIdKind, global_node_id};
+    global_node_id(NodeIdKind::Model, model_name)?;
+    if let Some(dimensions) = value.get("dimensions").and_then(|v| v.as_array()) {
+        for name in dimensions
+            .iter()
+            .filter_map(|dim| dim.get("name").and_then(|v| v.as_str()))
+        {
+            global_node_id(NodeIdKind::Field, &format!("{model_name}.{name}"))?;
+        }
+    }
+    if let Some(name) = value
+        .pointer("/properties/dbTableName")
+        .and_then(|v| v.as_str())
+    {
+        global_node_id(NodeIdKind::Model, name)?;
+    }
+    if value.get("dataFlow").is_some() {
+        let depends = value
+            .pointer("/properties/depends")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str());
+        let inputs = value
+            .pointer("/dataFlow/nodes")
+            .and_then(|v| v.as_object())
+            .into_iter()
+            .flat_map(|nodes| nodes.values())
+            .filter_map(|node| node.get("moduleTablePath").and_then(|v| v.as_str()));
+        for path in depends.chain(inputs) {
+            let model = Path::new(path)
+                .file_stem()
+                .map(|stem| stem.to_string_lossy())
+                .unwrap_or_else(|| path.into());
+            global_node_id(NodeIdKind::Model, &model)?;
+        }
+    }
+    Ok(())
 }

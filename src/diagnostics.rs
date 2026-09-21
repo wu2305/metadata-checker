@@ -41,7 +41,8 @@ pub const CODE_SCANNER_FILE_PARSE_FAILED: &str = "SCANNER_FILE_PARSE_FAILED";
 /// M58.3 复核返修：load_diagnostics 合并进查询响应时序列化失败的 fail-visible
 /// 兜底 code（answer_impact 经 `answer_effect` 派生为 partial）
 pub const CODE_DIAGNOSTIC_SERIALIZE_FAILED: &str = "DIAGNOSTIC_SERIALIZE_FAILED";
-/// 仅保留 PR1 阶段的 code；PR4a 的 GRAPH_SCHEMA_STALE 待该 PR 再引入。
+/// 事实表示版本不兼容，拒绝把旧图当成完整证据加载。
+pub const CODE_GRAPH_SCHEMA_STALE: &str = "GRAPH_SCHEMA_STALE";
 
 /// answer_impact 映射
 ///
@@ -53,6 +54,7 @@ pub const CODE_DIAGNOSTIC_SERIALIZE_FAILED: &str = "DIAGNOSTIC_SERIALIZE_FAILED"
 /// - 未登记的 code（`answer_effect` 返回 `None`）→ [`IMPACT_NONE`]
 pub fn answer_impact_for(code: &str) -> &'static str {
     match code {
+        CODE_GRAPH_SCHEMA_STALE => IMPACT_BLOCKING,
         CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY => IMPACT_PARTIAL,
         CODE_SCANNER_DUPLICATE_COMPONENT_ID => IMPACT_PARTIAL,
         // 诊断缓存可能陈旧：涉及 SCANNER_* 诊断的结论只能视为部分可靠

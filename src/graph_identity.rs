@@ -28,7 +28,8 @@
 //! `<PAGE>` 与引用解析都先过 [`normalize_project_path`]：分隔符统一 `/`、
 //! 消解 `.` 与 `..`、越界报错。**本模块在 M59-2 的 schema 版本开关就绪前
 //! 不接入扫描写入与引用解析**——不得在旧 schema 下默认写入新 id 或混写
-//! 新旧路径形态（plan 交付边界）。
+//! 新旧路径形态（plan 交付边界）。全局身份的保留分隔符校验已接入 native scanner，
+//! 仅拒绝歧义输入，不启用页面局部编码。
 
 use crate::graph::NodeType;
 use crate::graph_store::{GraphReadStore, GraphStoreResult};
@@ -80,13 +81,32 @@ pub enum IdentityError {
     EscapeBeyondRoot { path: String },
     /// kind / 页面段 / 局部名为空，无法构成合法 id。
     EmptySegment { id: String },
+    /// 保留分隔符不能出现在身份段中。
+    ReservedSeparator { value: String },
+    /// 项目内路径不得携带根或 Windows 盘符。
+    AbsolutePath { path: String },
+    /// 此类节点必须携带页面作用域。
+    ScopeRequired { kind: NodeIdKind },
 }
 
 impl fmt::Display for IdentityError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            IdentityError::ScopeRequired { kind } => {
+                write!(f, "node kind {} requires page scope", kind.as_str())
+            }
             IdentityError::EscapeBeyondRoot { path } => {
                 write!(f, "path escapes the project root: {}", path)
+            }
+            IdentityError::AbsolutePath { path } => {
+                write!(
+                    f,
+                    "expected project-relative path, got absolute or drive path: {}",
+                    path
+                )
+            }
+            IdentityError::ReservedSeparator { value } => {
+                write!(f, "identity segment contains reserved separator: {}", value)
             }
             IdentityError::EmptySegment { id } => {
                 write!(f, "node id has an empty kind/page/local segment: {}", id)
@@ -101,11 +121,12 @@ impl std::error::Error for IdentityError {}
 ///
 /// 输入必须是**根锚定**的项目内相对路径（扫描产出的页面路径天然满足；
 /// 引用侧由调用方先与所在文件目录拼接，见 [`resolve_relative_reference`]）。
-/// `\` 统一为 `/`；`.` 段与空段（开头/结尾/连续分隔符）直接消解；
+/// `\` 统一为 `/`；`.` 段与中间/末尾空段直接消解；绝对路径和盘符路径拒绝；
 /// `..` 在根锚定语义下越出根时返回 [`IdentityError::EscapeBeyondRoot`]——
 /// 这是「引用逃出项目范围」的稳定诊断；调用方不得用未锚定的输入绕过它。
 /// 中文段原样保留。
 pub fn normalize_project_path(path: &str) -> Result<String, IdentityError> {
+    reject_absolute_path(path)?;
     let unified = path.replace('\\', "/");
     let mut segments: Vec<&str> = Vec::new();
     for segment in unified.split('/') {
@@ -131,6 +152,7 @@ pub fn resolve_relative_reference(
     current_file: &str,
     reference: &str,
 ) -> Result<String, IdentityError> {
+    reject_absolute_path(reference)?;
     let normalized_current = normalize_project_path(current_file)?;
     let current_dir = match normalized_current.rsplit_once('/') {
         Some((dir, _)) => dir,
@@ -143,11 +165,39 @@ pub fn resolve_relative_reference(
     }
 }
 
+/// 拼接前拒绝根路径和盘符路径，避免拼接掩盖绝对引用。
+fn reject_absolute_path(path: &str) -> Result<(), IdentityError> {
+    if path.starts_with(['/', '\\']) || path.as_bytes().get(1) == Some(&b':') {
+        return Err(IdentityError::AbsolutePath {
+            path: path.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// 构造全局身份；物理模型不能借保留分隔符伪装为局部身份。
+pub fn global_node_id(kind: NodeIdKind, local: &str) -> Result<String, IdentityError> {
+    if !matches!(kind, NodeIdKind::Model | NodeIdKind::Field) {
+        return Err(IdentityError::ScopeRequired { kind });
+    }
+    if local.is_empty() {
+        return Err(IdentityError::EmptySegment {
+            id: kind.as_str().to_string(),
+        });
+    }
+    if local.contains('|') {
+        return Err(IdentityError::ReservedSeparator {
+            value: local.to_string(),
+        });
+    }
+    Ok(format!("{}:{}", kind.as_str(), local))
+}
+
 /// 解析出的节点 id 三段。
 ///
 /// **文法不变式**：kind 段、页面段、局部名都不得含 `|`——竖线是「页面局部 vs
 /// 全局」的唯一判据，取 kind 前缀后第一个 `|` 切分；含 `|` 的全局名（物理表名、
-/// 物理字段名来自文件系统路径，不含 `|`）在文法之外，不受支持。
+/// 物理字段名可能来自允许竖线的文件系统，必须在写入边界验证）在文法之外，不受支持。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedNodeId {
     pub kind: NodeIdKind,
@@ -159,17 +209,18 @@ pub struct ParsedNodeId {
 
 /// A1：解析节点 id。竖线即判据：kind 前缀后第一个 `|` 之前是页面段。
 ///
-/// 页面路径与局部名都不含 `|`（源文件相对路径不产生竖线；局部 id 是页面内
-/// 标识符），因此取第一个 `|` 即可无歧义切分。
+/// 页面路径与局部名都不含 `|`（构造函数拒绝含竖线的页面路径和局部 id），因此取第一个 `|` 即可无歧义切分。
 pub fn parse_node_id(id: &str) -> Option<ParsedNodeId> {
     let (kind_str, rest) = id.split_once(':')?;
     let kind = NodeIdKind::from_str(kind_str)?;
     match rest.split_once('|') {
-        Some((page, local)) if !page.is_empty() && !local.is_empty() => Some(ParsedNodeId {
-            kind,
-            page: Some(page.to_string()),
-            local: local.to_string(),
-        }),
+        Some((page, local)) if !page.is_empty() && !local.is_empty() && !local.contains('|') => {
+            Some(ParsedNodeId {
+                kind,
+                page: Some(page.to_string()),
+                local: local.to_string(),
+            })
+        }
         None if !rest.is_empty() => Some(ParsedNodeId {
             kind,
             page: None,
@@ -193,6 +244,13 @@ pub fn page_local_node_id(
     page_path: &str,
     local: &str,
 ) -> Result<String, IdentityError> {
+    for value in [page_path, local] {
+        if value.contains('|') {
+            return Err(IdentityError::ReservedSeparator {
+                value: value.to_string(),
+            });
+        }
+    }
     if local.is_empty() {
         return Err(IdentityError::EmptySegment {
             id: format!("{}:{}", kind.as_str(), local),
@@ -295,7 +353,7 @@ mod tests {
             normalize_project_path("页面/销售/合同协议.spg").unwrap(),
             "页面/销售/合同协议.spg"
         );
-        assert_eq!(normalize_project_path("//a//b.spg").unwrap(), "a/b.spg");
+        assert_eq!(normalize_project_path("a//b.spg").unwrap(), "a/b.spg");
     }
 
     #[test]

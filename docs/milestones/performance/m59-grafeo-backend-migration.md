@@ -62,6 +62,26 @@ fmt/清理 `335f7af` / `31ae621`；远端全量 native 102 个 test target 复�
   pin `c3c0528fdd28e2600e0b0235040fb349b3c2d446`、501 SPG / 828 TBL 基线；旧后端
   89,178 节点 / 200,028 边，驻留约 3.72 GiB。它是迁移前测量，不是 Grafeo 验收。
 
+## 2026-09-21 结构性审核后的语义修复
+
+分支 `codex/m59-semantic-integrity`，基线 `b2c56ee`，实现与复审修复截至 `2e2a40f`，
+格式与加强测试 `c4bb9d6`。批准范围见 [补充 spec](../../specs/2026-09-21-semantic-integrity-design.md)。
+
+- 引用出现位置与依赖集合分离；逐原始字节区间替换，递归栈仅检测当前链，保留表达式优先级。
+- `.step` / 嵌套属性保留完整路径；不支持、未闭合、缺失、循环和深度截断输出部分完成，
+  human 与 JSON 均可见，JSON 顶层 `TRACE_INCOMPLETE` 对应 partial answer effect。
+- 同关系不同证据保留为不同事实；memory/redb/dense 与已有 v2 完整事实语义对齐。
+  `fact_schema_version=2` 拒绝旧库，主入口、readonly、shadow 读取与 CLI 状态检查均覆盖。
+- ID 构造拒绝保留分隔符与非法全局 kind，路径拒绝绝对/盘符输入；scanner 启用全局
+  model/field 分隔符验证，TBL 写入前完成身份校验。**新页面局部 ID 仍未启用**。
+- CNB `cnb-c9g-1k30leog8`：全量 native 1258 通过 / 0 失败 / 24 ignored；bench 与 WASM
+  check 通过，WASM 有 8 条非本批修改位置的 warning；原 corpus 快照未改且通过。
+  证据见 [原始日志](../../governance/evidence/2026-09-21-m59-semantic-integrity.json.gz)。
+
+此修复不关闭 M59-2：按来源撤销、共享目标生命周期、项目绑定、跨文件 B5 仍未交付。
+版本键只覆盖事实表示，不得拿它启用新 ID；旧库必须从源在新路径重建，不能改 marker 冒充迁移。
+F3 目前只做到“不支持则部分完成”，完整语言与 F5/F6、REPLAY/BASELINE、PATH、Grafeo 继续留账。
+
 ## 后续队列与交接
 
 实施包 M59-1 至 M59-5 的写入边界、前置条件、接手者和失败处理见 plan。

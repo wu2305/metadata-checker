@@ -226,9 +226,41 @@ pub struct ValueTrace {
     pub field: String,
     pub raw_expr: String,
     pub expanded_expr: String,
+    /// 未完成原因；为空才表示本次支持范围内完整展开。
+    pub issues: Vec<TraceIssue>,
     pub source_chain: Vec<SourceNode>,
     pub is_external_input: bool,
     pub source_type: SourceType,
+}
+
+/// 追溯未完成的结构化证据，输出层必须保留。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TraceIssue {
+    pub code: &'static str,
+    pub component_id: String,
+    pub token: String,
+}
+
+/// 单次追溯状态；循环只看当前递归栈，不把共享上游当成环。
+#[derive(Default)]
+struct TraceState {
+    stack: HashSet<(String, String)>,
+    chain: Vec<SourceNode>,
+    issues: Vec<TraceIssue>,
+}
+
+impl TraceState {
+    /// 同一未完成原因只记录一次，保持首次遇到的顺序。
+    fn issue(&mut self, code: &'static str, component_id: &str, token: &str) {
+        let issue = TraceIssue {
+            code,
+            component_id: component_id.to_string(),
+            token: token.to_string(),
+        };
+        if !self.issues.contains(&issue) {
+            self.issues.push(issue);
+        }
+    }
 }
 
 /// 值的来源类型
@@ -269,19 +301,17 @@ pub fn trace_value_source(
     let expressions = graph.expressions.get(target_component_id)?;
     let expr = expressions.iter().find(|e| e.field == field)?;
 
-    let mut source_chain = Vec::new();
-    let mut visited = HashSet::new();
-
-    let expanded = expand_expression(
+    let mut state = TraceState::default();
+    let expanded = expand_trace(
         meta,
         graph,
         target_component_id,
+        field,
         &expr.raw_expr,
-        &mut source_chain,
-        &mut visited,
+        &mut state,
         max_depth,
     );
-
+    let source_chain = state.chain;
     // 判断最终来源类型
     let source_type = determine_source_type(&expr.raw_expr, &source_chain);
 
@@ -295,242 +325,139 @@ pub fn trace_value_source(
         field: field.to_string(),
         raw_expr: expr.raw_expr.clone(),
         expanded_expr: expanded,
+        issues: state.issues,
         source_chain,
         is_external_input,
         source_type,
     })
 }
 
-/// 展开表达式，递归替换引用
-pub fn expand_expression(
-    _meta: &SuperPageMetadata,
+/// 按原串引用区间一次性渲染，插入片段永远不被再次扫描。
+fn expand_trace(
+    meta: &SuperPageMetadata,
     graph: &DependencyGraph,
     component_id: &str,
-    expr: &str,
-    source_chain: &mut Vec<SourceNode>,
-    visited: &mut HashSet<String>,
+    field: &str,
+    expression: &str,
+    state: &mut TraceState,
     depth: usize,
 ) -> String {
     if depth == 0 {
-        return expr.to_string();
+        state.issue("TRACE_DEPTH_LIMIT", component_id, expression);
+        return expression.to_string();
     }
-
-    let key = format!("{}.{}", component_id, expr);
-    if visited.contains(&key) {
-        return expr.to_string(); // 防止循环
+    let key = (component_id.to_string(), field.to_string());
+    if !state.stack.insert(key.clone()) {
+        state.issue("TRACE_CYCLE", component_id, expression);
+        return expression.to_string();
     }
-    visited.insert(key);
-
-    let clean = expr
-        .trim_start_matches('=')
-        .trim_start_matches("${")
-        .trim_end_matches('}');
-    let mut expanded = clean.to_string();
-
-    // 获取当前组件的引用
-    let refs = if let Some(exprs) = graph.expressions.get(component_id) {
-        exprs
-            .iter()
-            .find(|e| e.raw_expr == expr)
-            .map(|e| e.refs.clone())
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
-    for ref_type in &refs {
-        match ref_type {
-            RefType::ComponentValue(dep_id, form) => {
-                if let Some(dep_exprs) = graph.expressions.get(dep_id) {
-                    // 优先查找 value 字段
-                    if let Some(dep_expr) = dep_exprs.iter().find(|e| e.field == "value") {
-                        let dep_expanded = expand_expression(
-                            _meta,
-                            graph,
-                            dep_id,
-                            &dep_expr.raw_expr,
-                            source_chain,
-                            visited,
-                            depth - 1,
-                        );
-
-                        source_chain.push(SourceNode {
-                            component_id: dep_id.clone(),
-                            expr: dep_expr.raw_expr.clone(),
-                            refs: dep_expr.refs.clone(),
-                            source_type: determine_source_type(&dep_expr.raw_expr, &[]),
+    let clean = expression.strip_prefix('=').unwrap_or(expression);
+    let parsed = crate::superpage::parse_expression_ast(clean);
+    if parsed.ast.is_none() || !parsed.diagnostics.is_empty() {
+        state.issue("TRACE_UNSUPPORTED_EXPRESSION", component_id, expression);
+    }
+    let component_ids = meta
+        .components
+        .iter()
+        .map(|component| component.id.as_str())
+        .collect();
+    let source_ids = meta
+        .sources
+        .iter()
+        .map(|source| source.id.as_str())
+        .collect();
+    let param_ids = meta.params.iter().map(|param| param.id.as_str()).collect();
+    let mut result = String::new();
+    let mut cursor = 0;
+    for occurrence in crate::superpage::reference_occurrences(clean) {
+        let (reference, _) = crate::superpage::resolve_ref_type(
+            &occurrence.reference,
+            &component_ids,
+            &source_ids,
+            &param_ids,
+        );
+        let value_target = match &reference {
+            RefType::ComponentValue(id, ComponentValueForm::Value | ComponentValueForm::Bare) => {
+                Some(id)
+            }
+            RefType::ComponentProperty(id, property) if property == "value" => Some(id),
+            _ => None,
+        };
+        let replacement =
+            if let Some(target) = value_target {
+                if let Some(target_expr) = graph
+                    .expressions
+                    .get(target)
+                    .and_then(|expressions| expressions.iter().find(|expr| expr.field == "value"))
+                {
+                    let expanded = expand_trace(
+                        meta,
+                        graph,
+                        target,
+                        "value",
+                        &target_expr.raw_expr,
+                        state,
+                        depth - 1,
+                    );
+                    if !state.chain.iter().any(|node| {
+                        node.component_id == *target && node.expr == target_expr.raw_expr
+                    }) {
+                        state.chain.push(SourceNode {
+                            component_id: target.clone(),
+                            expr: target_expr.raw_expr.clone(),
+                            refs: target_expr.refs.clone(),
+                            source_type: determine_source_type(&target_expr.raw_expr, &[]),
                         });
-
-                        // 替换引用。被替换进去的是表达式**片段**，不带前导 `=`；
-                        // 否则会拼出 `CONCAT(a, =(param1))` 这种嵌套等号。
-                        let fragment = dep_expanded.strip_prefix('=').unwrap_or(&dep_expanded);
-                        expanded = replace_component_value_ref(&expanded, dep_id, *form, &fragment);
                     }
+                    let fragment = expanded.strip_prefix('=').unwrap_or(&expanded);
+                    let composite = matches!(
+                        crate::superpage::parse_expression_ast(fragment).ast,
+                        Some(
+                            crate::superpage::AstNode::BinaryOp { .. }
+                                | crate::superpage::AstNode::Conditional { .. }
+                                | crate::superpage::AstNode::UnaryOp { .. }
+                        )
+                    );
+                    if composite && occurrence.range != (0..clean.len()) {
+                        Some(format!("({fragment})"))
+                    } else {
+                        Some(fragment.to_string())
+                    }
+                } else {
+                    state.issue("TRACE_MISSING_VALUE", component_id, &occurrence.token);
+                    None
                 }
-            }
-            RefType::ModelField(model_id, field) => {
-                let replacement = format!("({}.{})", model_id, field);
-                expanded = replace_with_boundary(
-                    &expanded,
-                    &format!("{}.{}", model_id, field),
-                    &replacement,
-                );
-            }
-            RefType::Param(param_id) => {
-                let replacement = format!("({})", param_id);
-                expanded = replace_with_boundary(&expanded, param_id, &replacement);
-            }
-            _ => {}
-        }
+            } else {
+                match reference {
+                    RefType::ModelField(model, field) => Some(format!("({model}.{field})")),
+                    RefType::Param(param) => Some(format!("({param})")),
+                    RefType::Other(_) => {
+                        state.issue(
+                            "TRACE_UNRESOLVED_REFERENCE",
+                            component_id,
+                            &occurrence.token,
+                        );
+                        None
+                    }
+                    RefType::ComponentProperty(_, _)
+                    | RefType::ComponentValue(_, ComponentValueForm::Suffix) => {
+                        state.issue(
+                            "TRACE_PROPERTY_NOT_EXPANDED",
+                            component_id,
+                            &occurrence.token,
+                        );
+                        None
+                    }
+                    _ => None,
+                }
+            };
+        result.push_str(&clean[cursor..occurrence.range.start]);
+        result.push_str(replacement.as_deref().unwrap_or(&occurrence.token));
+        cursor = occurrence.range.end;
     }
-
-    format!("={}", expanded)
-}
-/// 把表达式里对 `dep_id` 这个组件的**值引用**替换成它自己的展开式。
-///
-/// 替换 pattern 由引用的来源文法（`ComponentValueForm`，spec A1b）决定，
-/// 不再按后缀猜测：
-/// - `Value`：pattern 为 `dep_id.value`，显式取值；
-/// - `Bare`：pattern 为裸 `dep_id`，且后面不能跟 `.`——裸引用后面若还跟着
-///   `.`，取的是别的属性，不是值；
-/// - `Suffix`（`dep_id.step` 等）：引用的是组件其它属性，替换成值的展开式
-///   是错的，整段跳过。
-///
-/// 单遍扫描：替换文本不会被本函数再次扫描，避免展开式里恰好含 `dep_id`
-/// 时被二次替换。字符串字面量整段跳过（见 `string_literal_spans`）。
-fn replace_component_value_ref(
-    s: &str,
-    dep_id: &str,
-    form: ComponentValueForm,
-    replacement: &str,
-) -> String {
-    const VALUE_SUFFIX: &str = ".value";
-
-    if dep_id.is_empty() {
-        return s.to_string();
-    }
-    if form == ComponentValueForm::Suffix {
-        return s.to_string();
-    }
-
-    let pattern = match form {
-        ComponentValueForm::Value => format!("{}{}", dep_id, VALUE_SUFFIX),
-        _ => dep_id.to_string(),
-    };
-
-    let bytes = s.as_bytes();
-    let literals = string_literal_spans(s);
-    let mut result = String::with_capacity(s.len() + replacement.len());
-    let mut last = 0usize;
-
-    for (start, matched) in s.match_indices(&pattern) {
-        // 落在上一次替换吃掉的区间内。
-        if start < last {
-            continue;
-        }
-        // 字符串字面量里的同名文本不是引用。
-        if in_string_literal(&literals, start) {
-            continue;
-        }
-        // 词首边界：`bdep` 这类更长标识符的前缀不算引用。
-        if start > 0 && is_word_char(bytes[start - 1]) {
-            continue;
-        }
-
-        let end = start + matched.len();
-        // 词尾边界：`dep_id.values` / `dep_idx` 之类的更长标识符不算引用；
-        // 裸引用后面若还跟着 `.`，取的是别的属性，不是值。
-        if bytes.get(end).is_some_and(|b| is_word_char(*b)) {
-            continue;
-        }
-        if form == ComponentValueForm::Bare && bytes.get(end) == Some(&b'.') {
-            continue;
-        }
-
-        result.push_str(&s[last..start]);
-        result.push_str(replacement);
-        last = end;
-    }
-
-    result.push_str(&s[last..]);
-    result
-}
-
-/// 表达式里**字符串字面量**所覆盖的字节区间（含两侧引号）。
-///
-/// 词法与 `superpage::expr_ast::Tokenizer::read_string_literal` 同口径：单引号与
-/// 双引号各自成对，反斜杠转义下一个字符，未闭合的引号一直吃到串尾。
-///
-/// 替换点靠它整段跳过字面量。`CONCAT("b", b.value)` 里的 `"b"` 是**文本**，
-/// 不是对组件 `b` 的引用；把它换成 b 的展开式会**静默改变表达式的含义**
-/// （`CONCAT("b", 1)` → `CONCAT("1", 1)`），且没有任何诊断。
-/// 词边界判定挡不住这种情况——引号本身就不是词字符，边界检查照样通过。
-fn string_literal_spans(s: &str) -> Vec<(usize, usize)> {
-    let mut spans = Vec::new();
-    let mut chars = s.char_indices();
-    while let Some((start, c)) = chars.next() {
-        if c != '\'' && c != '"' {
-            continue;
-        }
-        // 未闭合的引号：与 tokenizer 一致，吃到串尾。
-        let mut end = s.len();
-        while let Some((idx, cc)) = chars.next() {
-            if cc == '\\' {
-                // 转义：连同被转义的那个字符一起跳过，`"a\\"b"` 不算在此闭合。
-                chars.next();
-            } else if cc == c {
-                end = idx + cc.len_utf8();
-                break;
-            }
-        }
-        spans.push((start, end));
-    }
-    spans
-}
-
-fn in_string_literal(spans: &[(usize, usize)], pos: usize) -> bool {
-    spans.iter().any(|(start, end)| pos >= *start && pos < *end)
-}
-
-/// 只在词边界（词字符 = `[A-Za-z0-9_]`）处替换 pattern。
-///
-/// 按 `str` 的字符边界切片拼接，不做逐字节 `u8 as char` 转换——后者会把中文等
-/// 多字节 UTF-8 拆成乱码。`match_indices` 只在合法字符边界上给出匹配，且
-/// pattern 长于 s 时直接不产生匹配，因此不存在越界切片。
-fn replace_with_boundary(s: &str, pattern: &str, replacement: &str) -> String {
-    if pattern.is_empty() {
-        return s.to_string();
-    }
-
-    let mut result = String::with_capacity(s.len() + replacement.len());
-    let s_bytes = s.as_bytes();
-    let literals = string_literal_spans(s);
-    let mut last = 0usize;
-
-    for (start, matched) in s.match_indices(pattern) {
-        // 与 `replace_component_value_ref` 同一条理由：`CONCAT("param1", param1)`
-        // 的前一个 `param1` 是文本。Param / ModelField 走的是本函数，坑一模一样。
-        if in_string_literal(&literals, start) {
-            continue;
-        }
-        let end = start + matched.len();
-        // 边界字节若是多字节字符的一部分（>= 0x80），is_word_char 返回 false，
-        // 即中文与 ASCII 词字符相邻时视为边界成立，与原实现一致。
-        let prev_ok = start == 0 || !is_word_char(s_bytes[start - 1]);
-        let next_ok = end == s_bytes.len() || !is_word_char(s_bytes[end]);
-        if prev_ok && next_ok {
-            result.push_str(&s[last..start]);
-            result.push_str(replacement);
-            last = end;
-        }
-    }
-
-    result.push_str(&s[last..]);
-    result
-}
-
-fn is_word_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+    result.push_str(&clean[cursor..]);
+    state.stack.remove(&key);
+    format!("={result}")
 }
 
 /// 确定来源类型

@@ -868,6 +868,8 @@ pub fn process_spg_file_from_value(
                                 "target_component": target_id,
                                 "source_expr": expr.raw_expr,
                                 "source_field": expr.field,
+                                "source_file": rel_path,
+                                "json_path": ctx.map(|context| format!("{}.{}", context.json_path, expr.field)),
                             });
                             add_edge_with_meta(
                                 graph,
@@ -900,6 +902,8 @@ pub fn process_spg_file_from_value(
                                 "target_property": property,
                                 "source_expr": expr.raw_expr,
                                 "source_field": expr.field,
+                                "source_file": rel_path,
+                                "json_path": ctx.map(|context| format!("{}.{}", context.json_path, expr.field)),
                             });
                             add_edge_with_meta(
                                 graph,

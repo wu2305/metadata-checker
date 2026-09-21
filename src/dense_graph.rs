@@ -3,14 +3,14 @@
 //! 该模块把通用 `GraphReadStore` 转换为适合高 fanout 遍历的 CSR 风格只读结构。
 //! 它不替代事实图，也不持久化；任何时候都可以从底层图重新构建。
 
-use crate::graph::{Edge, EdgeType, Node};
+use crate::graph::{Edge, Node};
 use crate::graph_store::{
     GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
 };
 use std::collections::{HashMap, HashSet};
 
 /// 稠密快照沿用 GraphDB 的逻辑边去重键。
-type DenseEdgeKey = (String, String, EdgeType, Option<String>);
+type DenseEdgeKey = crate::graph_store::EdgeFactKey;
 
 /// 稠密节点 ID，用于数组下标访问。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -399,12 +399,7 @@ impl DenseGraphSnapshot {
 
 /// 构造与 GraphDB 去重语义一致的边键。
 fn dense_edge_key(edge: &Edge) -> DenseEdgeKey {
-    (
-        edge.from.clone(),
-        edge.to.clone(),
-        edge.edge_type.clone(),
-        edge.field_path.clone(),
-    )
+    crate::graph_store::edge_dedup_key(edge)
 }
 
 /// 比较两组边是否具有相同的逻辑键与边内容多重集。

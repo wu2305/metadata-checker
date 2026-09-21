@@ -2,6 +2,14 @@
 
 M26-M30 文档：记录 CLI 冷查询、stdio server 热查询、统一 timing 与容量治理基线。
 
+## 2026-09-21 语义修复的基线影响
+
+Baseline impact: yes。`codex/m59-semantic-integrity` 保留全部引用出现与不同 metadata 的边事实，
+影响表达式解析、追溯、建图、持久化以及图查询 bench 的输入规模和内存成本。
+CNB 工作区 `cnb-c9g-1k30leog8` 执行编译与正确性验证，不是 full-criterion CI 测量。
+本批没有真实语料性能重测，不能沿用下方历史耗时宣称性能不退化；M59 迁移真实语料
+验收必须从源重建图并重新统计边数、内存及耗时。`cargo check --benches` 仅证明可编译。
+
 ## 测试环境
 
 - 项目：`/Users/wuhaocheng/Documents/repos/succ-definitions/projects/xiaoshouyi`

@@ -123,7 +123,7 @@ fn component_value_ref_preserves_source_grammar_form() {
         refs,
         vec![
             RefType::ComponentValue("b".to_string(), ComponentValueForm::Value),
-            RefType::ComponentValue("b".to_string(), ComponentValueForm::Suffix),
+            RefType::ComponentProperty("b".to_string(), "step".to_string()),
             RefType::ComponentValue("b".to_string(), ComponentValueForm::Bare),
         ],
         "三种来源文法必须各自保留，不得压成同一个 id"
