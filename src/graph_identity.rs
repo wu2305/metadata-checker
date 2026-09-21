@@ -80,6 +80,8 @@ pub enum IdentityError {
     EscapeBeyondRoot { path: String },
     /// kind / 页面段 / 局部名为空，无法构成合法 id。
     EmptySegment { id: String },
+    /// 保留分隔符不能出现在身份段中。
+    ReservedSeparator { value: String },
 }
 
 impl fmt::Display for IdentityError {
@@ -87,6 +89,9 @@ impl fmt::Display for IdentityError {
         match self {
             IdentityError::EscapeBeyondRoot { path } => {
                 write!(f, "path escapes the project root: {}", path)
+            }
+            IdentityError::ReservedSeparator { value } => {
+                write!(f, "identity segment contains reserved separator: {}", value)
             }
             IdentityError::EmptySegment { id } => {
                 write!(f, "node id has an empty kind/page/local segment: {}", id)
@@ -147,7 +152,7 @@ pub fn resolve_relative_reference(
 ///
 /// **文法不变式**：kind 段、页面段、局部名都不得含 `|`——竖线是「页面局部 vs
 /// 全局」的唯一判据，取 kind 前缀后第一个 `|` 切分；含 `|` 的全局名（物理表名、
-/// 物理字段名来自文件系统路径，不含 `|`）在文法之外，不受支持。
+/// 物理字段名可能来自允许竖线的文件系统，必须在写入边界验证）在文法之外，不受支持。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedNodeId {
     pub kind: NodeIdKind,
@@ -159,13 +164,12 @@ pub struct ParsedNodeId {
 
 /// A1：解析节点 id。竖线即判据：kind 前缀后第一个 `|` 之前是页面段。
 ///
-/// 页面路径与局部名都不含 `|`（源文件相对路径不产生竖线；局部 id 是页面内
-/// 标识符），因此取第一个 `|` 即可无歧义切分。
+/// 页面路径与局部名都不含 `|`（构造函数拒绝含竖线的页面路径和局部 id），因此取第一个 `|` 即可无歧义切分。
 pub fn parse_node_id(id: &str) -> Option<ParsedNodeId> {
     let (kind_str, rest) = id.split_once(':')?;
     let kind = NodeIdKind::from_str(kind_str)?;
     match rest.split_once('|') {
-        Some((page, local)) if !page.is_empty() && !local.is_empty() => Some(ParsedNodeId {
+        Some((page, local)) if !page.is_empty() && !local.is_empty() && !local.contains('|') => Some(ParsedNodeId {
             kind,
             page: Some(page.to_string()),
             local: local.to_string(),
@@ -193,6 +197,11 @@ pub fn page_local_node_id(
     page_path: &str,
     local: &str,
 ) -> Result<String, IdentityError> {
+    for value in [page_path, local] {
+        if value.contains('|') {
+            return Err(IdentityError::ReservedSeparator { value: value.to_string() });
+        }
+    }
     if local.is_empty() {
         return Err(IdentityError::EmptySegment {
             id: format!("{}:{}", kind.as_str(), local),

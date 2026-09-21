@@ -320,16 +320,11 @@ pub fn merge_upsert_meta(
     Some(incoming_meta)
 }
 
-/// 边的去重键：`(from, to, edge_type, field_path)`。
-///
-/// M59-B1：`graph_redb` 用这个四元组去重（`seen_edges`），`MemoryGraphStore`
-/// 原先**完全不去重**，同一条边写两次就出现两次。`field_path` 参与键是刻意的：
-/// 同一对端点上不同字段产生的引用是**不同的事实**，不能合并。
-pub fn edge_dedup_key(edge: &Edge) -> (String, String, crate::graph::EdgeType, Option<String>) {
-    (
-        edge.from.clone(),
-        edge.to.clone(),
-        edge.edge_type.clone(),
-        edge.field_path.clone(),
-    )
+/// 完整事实键：关系相同但来源或属性不同的事实不能相互覆盖。
+/// metadata 参与事实身份；关系投影可以另按前四项去重。
+pub type EdgeFactKey = (String, String, crate::graph::EdgeType, Option<String>, Option<serde_json::Value>);
+
+/// 构造跨 memory/redb/dense 共用的事实键。
+pub fn edge_dedup_key(edge: &Edge) -> EdgeFactKey {
+    (edge.from.clone(), edge.to.clone(), edge.edge_type.clone(), edge.field_path.clone(), edge.meta.clone())
 }

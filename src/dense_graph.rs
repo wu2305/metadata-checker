@@ -10,7 +10,7 @@ use crate::graph_store::{
 use std::collections::{HashMap, HashSet};
 
 /// 稠密快照沿用 GraphDB 的逻辑边去重键。
-type DenseEdgeKey = (String, String, EdgeType, Option<String>);
+type DenseEdgeKey = crate::graph_store::EdgeFactKey;
 
 /// 稠密节点 ID，用于数组下标访问。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -399,12 +399,7 @@ impl DenseGraphSnapshot {
 
 /// 构造与 GraphDB 去重语义一致的边键。
 fn dense_edge_key(edge: &Edge) -> DenseEdgeKey {
-    (
-        edge.from.clone(),
-        edge.to.clone(),
-        edge.edge_type.clone(),
-        edge.field_path.clone(),
-    )
+    crate::graph_store::edge_dedup_key(edge)
 }
 
 /// 比较两组边是否具有相同的逻辑键与边内容多重集。

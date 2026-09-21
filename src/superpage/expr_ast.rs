@@ -830,6 +830,9 @@ fn classify_identifier(token: &str) -> RefType {
         if inner.starts_with('$') {
             return classify_identifier(inner);
         }
+        if !inner.chars().all(|character| character.is_alphanumeric() || matches!(character, '_' | '.' | '$' | '@')) {
+            return RefType::Other(token.to_string());
+        }
         let parts: Vec<&str> = inner.split('.').collect();
         if parts.len() >= 2 {
             let field = parts[1..].join(".");
@@ -861,14 +864,11 @@ fn classify_identifier(token: &str) -> RefType {
             let field = parts[1..].join(".");
             return RefType::ModelField(first.to_string(), field);
         }
-        if parts.last() == Some(&"value") {
+        if parts.len() == 2 && parts[1] == "value" {
             return RefType::ComponentValue(first.to_string(), ComponentValueForm::Value);
         }
-        if parts.last() == Some(&"step") {
-            return RefType::ComponentValue(first.to_string(), ComponentValueForm::Suffix);
-        }
-        if parts.len() >= 3 && parts[1] == "checked" && parts[2] == "value" {
-            return RefType::ComponentProperty(first.to_string(), "checked.value".to_string());
+        if parts.last() == Some(&"value") || parts.last() == Some(&"step") {
+            return RefType::ComponentProperty(first.to_string(), parts[1..].join("."));
         }
         return RefType::Other(token.to_string());
     }
@@ -893,4 +893,50 @@ fn classify_identifier(token: &str) -> RefType {
     }
 
     RefType::Other(token.to_string())
+}
+
+/// 原始表达式中的引用出现位置；不去重，字节区间始终指向原串。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReferenceOccurrence {
+    pub range: std::ops::Range<usize>,
+    pub token: String,
+    pub reference: RefType,
+}
+
+/// 使用同一分词器提取引用位置，字符串与函数名不会成为替换目标。
+pub fn reference_occurrences(expression: &str) -> Vec<ReferenceOccurrence> {
+    let mut tokenizer = Tokenizer::new(expression);
+    let mut offsets: Vec<usize> = expression.char_indices().map(|(offset, _)| offset).collect();
+    offsets.push(expression.len());
+    let mut tokens = Vec::new();
+    loop {
+        tokenizer.skip_whitespace();
+        let start = offsets[tokenizer.pos];
+        let token = tokenizer.next_token();
+        if token == Token::Eof { break; }
+        let end = offsets[tokenizer.pos];
+        tokens.push((token, start, end));
+    }
+    let mut occurrences = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let (Token::Identifier(identifier), start, mut end) = tokens[index].clone() else {
+            index += 1;
+            continue;
+        };
+        let mut normalized = identifier;
+        index += 1;
+        while index + 1 < tokens.len() && tokens[index].0 == Token::Dot {
+            let Token::Identifier(member) = &tokens[index + 1].0 else { break; };
+            normalized.push('.');
+            normalized.push_str(member);
+            end = tokens[index + 1].2;
+            index += 2;
+        }
+        if tokens.get(index).is_some_and(|item| item.0 == Token::LParen) { continue; }
+        if ["true", "false", "null"].contains(&normalized.to_lowercase().as_str()) { continue; }
+        let reference = classify_identifier(&normalized);
+        occurrences.push(ReferenceOccurrence { range: start..end, token: expression[start..end].to_string(), reference });
+    }
+    occurrences
 }

@@ -135,6 +135,10 @@ pub fn print_component_query_human_to(
             )?;
             writeln!(out, "Raw       : {}", trace.raw_expr)?;
             writeln!(out, "Expanded  : {}", trace.expanded_expr)?;
+            writeln!(out, "Complete  : {}", trace.issues.is_empty())?;
+            for issue in &trace.issues {
+                writeln!(out, "  {}: {} ({})", issue.code, issue.token, issue.component_id)?;
+            }
             writeln!(out, "Source    : {:?}", trace.source_type)?;
             writeln!(
                 out,
@@ -261,6 +265,8 @@ pub fn print_component_query_json_to(
                     "field": trace.field,
                     "raw_expr": trace.raw_expr,
                     "expanded_expr": trace.expanded_expr,
+                    "complete": trace.issues.is_empty(),
+                    "issues": trace.issues,
                     "source_type": format!("{:?}", trace.source_type),
                     "is_external_input": trace.is_external_input,
                     "source_chain": trace.source_chain.iter().map(|n| json!({
