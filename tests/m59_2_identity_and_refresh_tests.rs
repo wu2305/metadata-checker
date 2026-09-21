@@ -432,12 +432,14 @@ fn same_name_scenarios_full_and_incremental_are_identical() {
     let full_snap = snapshot(&full_db, &binding);
     let inc_snap = snapshot(&inc_db, &binding);
     assert_eq!(
-        full_snap.nodes, inc_snap.nodes,
+        full_snap.nodes,
+        inc_snap.nodes,
         "节点逐属性必须一致：{}",
         describe_diff("全量", &full_snap.nodes, "增量", &inc_snap.nodes)
     );
     assert_eq!(
-        full_snap.edges, inc_snap.edges,
+        full_snap.edges,
+        inc_snap.edges,
         "边逐属性必须一致：{}",
         describe_diff("全量", &full_snap.edges, "增量", &inc_snap.edges)
     );
@@ -472,13 +474,14 @@ fn ownership_conflict_is_queryable_persistent_and_recoverable() {
     );
 
     // 2. 查询侧可见：runtime status.load_diagnostics 必须带同一冲突
-    let runtime = metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
-        &db,
-        None::<&std::path::Path>,
-        metadata_checker::runtime::RuntimeMode::OneShot,
-        &binding,
-    )
-    .expect("runtime load");
+    let runtime =
+        metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
+            &db,
+            None::<&std::path::Path>,
+            metadata_checker::runtime::RuntimeMode::OneShot,
+            &binding,
+        )
+        .expect("runtime load");
     let status = runtime.status();
     assert!(
         status
@@ -517,10 +520,7 @@ fn ownership_conflict_is_queryable_persistent_and_recoverable() {
     let again =
         ProjectIndexer::scan_with_diagnostics_for_project(&project, &db, &binding).expect("rescan");
     assert!(
-        again
-            .diagnostics
-            .iter()
-            .any(|d| d.code == CODE_CONFLICT),
+        again.diagnostics.iter().any(|d| d.code == CODE_CONFLICT),
         "no-op 重扫必须继续报告存量冲突"
     );
 
@@ -529,10 +529,7 @@ fn ownership_conflict_is_queryable_persistent_and_recoverable() {
     let fixed =
         ProjectIndexer::scan_with_diagnostics_for_project(&project, &db, &binding).expect("fix");
     assert!(
-        !fixed
-            .diagnostics
-            .iter()
-            .any(|d| d.code == CODE_CONFLICT),
+        !fixed.diagnostics.iter().any(|d| d.code == CODE_CONFLICT),
         "修复后冲突必须消失：{:?}",
         fixed.diagnostics
     );

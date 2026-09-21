@@ -49,9 +49,8 @@ static TEST_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 fn test_root(name: &str) -> PathBuf {
     let seq = TEST_DIR_SEQ.fetch_add(1, Ordering::SeqCst);
     let pid = std::process::id();
-    let path = std::env::temp_dir().join(format!(
-        "metadata-checker-m59-2-refresh-{pid}-{seq}-{name}"
-    ));
+    let path =
+        std::env::temp_dir().join(format!("metadata-checker-m59-2-refresh-{pid}-{seq}-{name}"));
     let _ = fs::remove_dir_all(&path);
     path
 }
@@ -205,7 +204,16 @@ fn seed_file(
 }
 
 /// 建立 bound session：mirror（page + table）+ ownership graph + 预置 checkpoint。
-fn setup_bound_session(name: &str, table_text: &str) -> (SessionManager, PathBuf, SessionManifest, PathBuf, ProjectBinding) {
+fn setup_bound_session(
+    name: &str,
+    table_text: &str,
+) -> (
+    SessionManager,
+    PathBuf,
+    SessionManifest,
+    PathBuf,
+    ProjectBinding,
+) {
     let root = test_root(name);
     let manager = SessionManager::new(&root);
     manager
@@ -301,7 +309,9 @@ fn watermark(active_ms: u64, active_ids: Vec<String>) -> MetaFilesWatermark {
 
 fn durable_checkpoint(db_path: &Path, binding: &ProjectBinding) -> Option<DiffRefreshCheckpoint> {
     let graph = GraphDB::open_readonly_with_ownership(db_path, binding).expect("reopen");
-    graph.load_diff_refresh_checkpoint().expect("load checkpoint")
+    graph
+        .load_diff_refresh_checkpoint()
+        .expect("load checkpoint")
 }
 
 fn field_present(db_path: &Path, binding: &ProjectBinding, field_id: &str) -> bool {
