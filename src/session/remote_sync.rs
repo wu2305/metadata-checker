@@ -660,20 +660,6 @@ fn mark_missing_path_deleted(
     Ok(changed)
 }
 
-#[cfg(feature = "cli-local")]
-pub fn build_session_graph(
-    session_dir: &std::path::Path,
-    graph_db_path: &std::path::Path,
-) -> Result<crate::graph_store::IndexReport> {
-    let mirror = crate::session::sync::project_mirror_root(session_dir);
-    crate::scanner::indexer::ProjectIndexer::scan(&mirror, graph_db_path).with_context(|| {
-        format!(
-            "failed to build graph for session {}",
-            session_dir.display()
-        )
-    })
-}
-
 /// 按 session manifest 的远程项目引用构建并绑定图。
 #[cfg(feature = "cli-local")]
 pub fn build_session_graph_for_project(
@@ -1664,7 +1650,9 @@ mod tests {
         assert_eq!(report.written, 2);
 
         let graph_db_path = root.join("s1").join("graph.redb");
-        let index_report = build_session_graph(&manager.session_dir("s1"), &graph_db_path).unwrap();
+        let index_report =
+            build_session_graph_for_project(&manager.session_dir("s1"), &graph_db_path, "proj")
+                .unwrap();
         assert!(index_report.indexed >= 1);
         assert!(graph_db_path.exists());
 
