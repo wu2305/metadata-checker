@@ -457,6 +457,7 @@ impl DiffRefreshOrchestrator {
         let mut persisted = false;
         let mut persist_report = None;
         let mut pending_dirty_total = 0usize;
+        let reported_checkpoint = commit.checkpoint.clone();
         let invalidated_pages = replacement.invalidated_pages.clone();
         let page_dep_index_coverage = replacement.page_dep_index_coverage;
 
@@ -525,7 +526,7 @@ impl DiffRefreshOrchestrator {
             prepare_failures,
             self.runtime.ownership_conflict_node_ids(),
             // 部分失败时报告里也必须是**未推进**的水位，不能报一个没落库的值
-            commit.checkpoint.clone(),
+            reported_checkpoint,
             last_poll_at,
             page_dep_index_coverage,
             timing,

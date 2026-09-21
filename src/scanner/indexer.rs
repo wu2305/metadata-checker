@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use twox_hash::XxHash64;
 
-use super::{process_spg_file_from_value_with_identity, process_tbl_file_from_string};
+use super::{
+    process_spg_file_from_value, process_spg_file_from_value_with_identity,
+    process_tbl_file_from_string,
+};
 use crate::graph::{FileState, GraphDB, Node, NodeType};
 use crate::graph_store::{
     GraphReadStore, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
