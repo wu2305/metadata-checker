@@ -164,14 +164,62 @@ impl OwnershipLedgerSnapshot {
     }
 }
 
+/// 同一节点 id 存在多个不兼容 Definition 时的冲突记录（spec：必须报告，不得静默择一）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct OwnershipConflict {
+    /// 冲突的节点 id。
+    pub node_id: String,
+    /// 提供该 id Definition 的来源文件（去重后按字典序）。
+    pub definition_origins: Vec<String>,
+}
+
+/// 从账本聚合出同 id 多 Definition 的来源冲突。
+///
+/// 与重建的择一规则共用“按 id 分组、看 Definition 个数”的语义，保证报告与
+/// 实际择一行为不会分叉。
+pub fn ledger_definition_conflicts(
+    ledgers: &BTreeMap<String, FileContributionLedger>,
+) -> Vec<OwnershipConflict> {
+    let mut definitions: HashMap<&str, Vec<&EntityContribution>> = HashMap::new();
+    for ledger in ledgers.values() {
+        for contribution in &ledger.entities {
+            if contribution.kind == ContributionKind::Definition {
+                definitions
+                    .entry(contribution.node.id.as_str())
+                    .or_default()
+                    .push(contribution);
+            }
+        }
+    }
+    let mut conflicts: Vec<OwnershipConflict> = definitions
+        .into_iter()
+        .filter(|(_, contributions)| contributions.len() > 1)
+        .map(|(node_id, contributions)| {
+            let mut origins: Vec<String> = contributions
+                .iter()
+                .map(|contribution| contribution.origin_file.clone())
+                .collect();
+            origins.sort();
+            origins.dedup();
+            OwnershipConflict {
+                node_id: node_id.to_string(),
+                definition_origins: origins,
+            }
+        })
+        .collect();
+    conflicts.sort_by(|left, right| left.node_id.cmp(&right.node_id));
+    conflicts
+}
+
 /// 将各来源贡献确定性地派生为当前图。
 ///
 /// 先收集定义、引用和完整事实，再一次性 upsert/add，避免扫描顺序决定
 /// 共享目标的最终 metadata；定义消失但引用仍在时，保留 PhysicalTable 占位。
+/// 同一 id 出现多个 Definition 时按确定性规则择一，但必须通过返回值报告冲突。
 pub fn rebuild_graph_from_ledgers(
     graph: &mut dyn GraphStore,
     ledgers: &BTreeMap<String, FileContributionLedger>,
-) -> Result<()> {
+) -> Result<Vec<OwnershipConflict>> {
     let mut entities: HashMap<String, Vec<&EntityContribution>> = HashMap::new();
     let mut edges: HashMap<crate::graph_store::EdgeFactKey, &EdgeContribution> = HashMap::new();
     for ledger in ledgers.values() {
@@ -253,21 +301,7 @@ pub fn rebuild_graph_from_ledgers(
     for edge in desired_edges {
         graph.add_edge(edge)?;
     }
-    Ok(())
-}
-
-/// 对一批文件账本按来源聚合，保留每条事实及其重复次数。
-pub fn group_ledgers<'a>(
-    ledgers: impl IntoIterator<Item = &'a FileContributionLedger>,
-) -> BTreeMap<&'a str, Vec<&'a FileContributionLedger>> {
-    let mut grouped = BTreeMap::new();
-    for ledger in ledgers {
-        grouped
-            .entry(ledger.origin_file.as_str())
-            .or_insert_with(Vec::new)
-            .push(ledger);
-    }
-    grouped
+    Ok(ledger_definition_conflicts(ledgers))
 }
 
 #[cfg(test)]
@@ -326,5 +360,110 @@ mod tests {
         assert_eq!(ledger.entity_contributions().len(), 2);
         assert_eq!(ledger.edges.len(), 2);
         assert_eq!(ledger.origin_file, "app/a.spg");
+    }
+
+    fn definition_ledger(origin: &str, id: &str) -> FileContributionLedger {
+        let mut ledger = FileContributionLedger::new(origin, "rev-1");
+        let mut owned = node(id);
+        owned.path = origin.to_string();
+        owned.origin_file = Some(origin.to_string());
+        ledger.entities.push(EntityContribution {
+            origin_file: origin.to_string(),
+            node: owned,
+            kind: ContributionKind::Definition,
+        });
+        ledger
+    }
+
+    fn reference_ledger(origin: &str, id: &str) -> FileContributionLedger {
+        let mut ledger = FileContributionLedger::new(origin, "rev-1");
+        let mut shared = node(id);
+        shared.path = "tables/shared.tbl".to_string();
+        shared.origin_file = Some(origin.to_string());
+        ledger.entities.push(EntityContribution {
+            origin_file: origin.to_string(),
+            node: shared,
+            kind: ContributionKind::Reference,
+        });
+        ledger
+    }
+
+    /// 重建必须确定：同一输入重复重建（HashMap 迭代序随机）产出完全一致。
+    #[test]
+    fn rebuild_is_deterministic_across_runs() {
+        let mut ledgers = BTreeMap::new();
+        ledgers.insert(
+            "app/a.spg".to_string(),
+            definition_ledger("app/a.spg", "page:app/a.spg"),
+        );
+        ledgers.insert(
+            "tables/shared.tbl".to_string(),
+            reference_ledger("tables/shared.tbl", "model:shared"),
+        );
+
+        let mut first = crate::memory_graph_store::MemoryGraphStore::new();
+        let mut second = crate::memory_graph_store::MemoryGraphStore::new();
+        rebuild_graph_from_ledgers(&mut first, &ledgers).unwrap();
+        rebuild_graph_from_ledgers(&mut second, &ledgers).unwrap();
+
+        let first_nodes: Vec<String> = first
+            .iter_nodes()
+            .unwrap()
+            .map(|n| serde_json::to_string(&n).unwrap())
+            .collect();
+        let second_nodes: Vec<String> = second
+            .iter_nodes()
+            .unwrap()
+            .map(|n| serde_json::to_string(&n).unwrap())
+            .collect();
+        assert_eq!(first_nodes, second_nodes);
+    }
+
+    /// 同 id 多个 Definition 必须报告冲突（spec），且择一结果确定。
+    #[test]
+    fn rebuild_reports_conflicting_definitions() {
+        let mut ledgers = BTreeMap::new();
+        ledgers.insert(
+            "tables/b.tbl".to_string(),
+            definition_ledger("tables/b.tbl", "model:dup"),
+        );
+        ledgers.insert(
+            "tables/a.tbl".to_string(),
+            definition_ledger("tables/a.tbl", "model:dup"),
+        );
+
+        let mut store = crate::memory_graph_store::MemoryGraphStore::new();
+        let conflicts = rebuild_graph_from_ledgers(&mut store, &ledgers).unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].node_id, "model:dup");
+        assert_eq!(
+            conflicts[0].definition_origins,
+            vec!["tables/a.tbl".to_string(), "tables/b.tbl".to_string()]
+        );
+        // 择一必须是字典序第一个来源，与插入顺序无关
+        let chosen = store.iter_nodes().unwrap().find(|n| n.id == "model:dup");
+        assert_eq!(
+            chosen.map(|n| n.origin_file.clone()),
+            Some(Some("tables/a.tbl".to_string()))
+        );
+    }
+
+    /// Reference-only 共享目标不构成冲突，多个来源只保留一个节点。
+    #[test]
+    fn rebuild_keeps_shared_reference_without_conflict() {
+        let mut ledgers = BTreeMap::new();
+        ledgers.insert(
+            "app/a.spg".to_string(),
+            reference_ledger("app/a.spg", "model:shared"),
+        );
+        ledgers.insert(
+            "app/b.spg".to_string(),
+            reference_ledger("app/b.spg", "model:shared"),
+        );
+
+        let mut store = crate::memory_graph_store::MemoryGraphStore::new();
+        let conflicts = rebuild_graph_from_ledgers(&mut store, &ledgers).unwrap();
+        assert_eq!(conflicts, Vec::new());
+        assert_eq!(store.iter_nodes().unwrap().count(), 1);
     }
 }

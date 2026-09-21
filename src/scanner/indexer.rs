@@ -148,19 +148,21 @@ fn ledger_from_parsed_content(
     };
 
     // 4. 判定 Definition vs Reference
+    // 页面/组件/条件/动作只有 path 等于本文件时才是本源定义；embedsuperpage/link
+    // 为目标页创建的 stub（path 是目标页）必须是 Reference，否则 embedder 会在
+    // 重建时覆盖目标页自身的 origin_file 溯源（冷脸验收 P1）。
     let node_ids: HashSet<String> = nodes.iter().map(|node| node.id.clone()).collect();
     for mut node in nodes {
         let is_definition = if is_spg {
             match node.node_type {
                 NodeType::Page | NodeType::Component | NodeType::Condition | NodeType::Action => {
-                    true
+                    node.path == logical_path
                 }
                 NodeType::Model => local_model_names.contains(&node.name),
                 NodeType::Field => {
                     if let Some(rest) = node.id.strip_prefix("field:") {
                         let (model_prefix, _) = rest.split_once('.').unwrap_or((rest, ""));
                         local_model_names.contains(model_prefix)
-                            || (node.path == logical_path && !node.id.starts_with("field:"))
                     } else {
                         node.path == logical_path
                     }
@@ -241,7 +243,10 @@ fn apply_ownership_changes(
     ledgers: &mut BTreeMap<String, FileContributionLedger>,
     updates: &[ParsedGraphUpdate],
     deleted: &[DeletedFile],
-) -> Result<HashMap<String, Vec<String>>> {
+) -> Result<(
+    HashMap<String, Vec<String>>,
+    Vec<crate::ownership::OwnershipConflict>,
+)> {
     for update in updates {
         let mut ledger = ledger_from_parsed_content(&update.logical_path, &update.content)?;
         ledger.revision = update.file_hash.clone();
@@ -250,9 +255,9 @@ fn apply_ownership_changes(
     for (logical_path, _) in deleted {
         ledgers.remove(logical_path);
     }
-    crate::ownership::rebuild_graph_from_ledgers(graph, ledgers)?;
+    let conflicts = crate::ownership::rebuild_graph_from_ledgers(graph, ledgers)?;
     graph.replace_ownership_ledgers(ledgers.clone())?;
-    Ok(updates
+    let node_ids = updates
         .iter()
         .map(|update| {
             let node_ids = ledgers
@@ -267,7 +272,33 @@ fn apply_ownership_changes(
                 .unwrap_or_default();
             (update.logical_path.clone(), node_ids)
         })
-        .collect())
+        .collect();
+    Ok((node_ids, conflicts))
+}
+
+/// 把账本重建发现的来源冲突转为报告诊断（spec：必须报告，不得静默择一）。
+fn ownership_conflict_diagnostics(
+    conflicts: &[crate::ownership::OwnershipConflict],
+) -> Vec<crate::output::Diagnostic> {
+    conflicts
+        .iter()
+        .map(|conflict| {
+            crate::diagnostics::envelope_diagnostic(
+                "GRAPH_OWNERSHIP_CONFLICT",
+                conflict.definition_origins.len(),
+                crate::output::Location {
+                    source_file: conflict.definition_origins.first().cloned(),
+                    node_id: Some(conflict.node_id.clone()),
+                    json_path: None,
+                },
+                format!(
+                    "node '{}' has conflicting definitions from {}",
+                    conflict.node_id,
+                    conflict.definition_origins.join(", ")
+                ),
+            )
+        })
+        .collect()
 }
 
 /// M59-B3：本轮解析失败、**未进候选图**的源文件.
@@ -906,10 +937,12 @@ impl ProjectIndexer {
             for failure in &parse_failures {
                 scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
             }
+            let mut ownership_conflicts: Vec<crate::ownership::OwnershipConflict> = Vec::new();
             let (parsed_nodes, removed_edge_keys, dirty_edges) = if ownership_enabled {
                 let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
-                let parsed_nodes =
+                let (parsed_nodes, conflicts) =
                     apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
+                ownership_conflicts = conflicts;
                 for (logical_path, _) in &plan.deleted {
                     new_states.remove(logical_path);
                 }
@@ -995,6 +1028,8 @@ impl ProjectIndexer {
             // load 合并全量——报告 envelope 反映全库口径，而非仅本轮脏文件。
             let scanner_diagnostics =
                 Self::merge_scanner_diagnostic_entries(&graph.load_scanner_diagnostic_entries()?)?;
+            let mut diagnostics = scanner_diagnostics;
+            diagnostics.extend(ownership_conflict_diagnostics(&ownership_conflicts));
             // M58.3 PR1 refix（F6）：IndexReport 统一为文件口径。
             // store 层 persist_index 只能从 commit 拿到节点数（dirty_nodes/
             // deleted_nodes），文件数只有 diff 阶段的 plan 知道，因此在报告
@@ -1005,10 +1040,19 @@ impl ProjectIndexer {
             report.unchanged = plan.discovered_count.saturating_sub(plan.dirty.len());
             return Ok(crate::scanner::IndexReportWithDiagnostics {
                 report,
-                diagnostics: scanner_diagnostics,
+                diagnostics,
             });
         }
 
+        let mut diagnostics =
+            Self::merge_scanner_diagnostic_entries(&graph.load_scanner_diagnostic_entries()?)?;
+        // no-op 轮也要如实报告当前账本状态中仍然存在的来源冲突
+        if ownership_enabled {
+            let ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
+            diagnostics.extend(ownership_conflict_diagnostics(
+                &crate::ownership::ledger_definition_conflicts(&ledgers),
+            ));
+        }
         Ok(crate::scanner::IndexReportWithDiagnostics {
             report: IndexReport {
                 indexed: plan.discovered_count,
@@ -1018,9 +1062,7 @@ impl ProjectIndexer {
             },
             // M58.3 PR1 refix（F2）：no-op 路径从库里 load 合并，
             // 持久化的 scanner 诊断不再随无变更构建消失。
-            diagnostics: Self::merge_scanner_diagnostic_entries(
-                &graph.load_scanner_diagnostic_entries()?,
-            )?,
+            diagnostics,
         })
     }
 
@@ -1096,7 +1138,9 @@ impl ProjectIndexer {
         }
         let (parsed_nodes, removed_edge_keys, dirty_edges) = if ownership_enabled {
             let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
-            let parsed_nodes =
+            // PreparedIndexUpdate 没有报告诊断通道；来源冲突由随后的全量扫描
+            // （bootstrap / --build-graph）如实报告，这里不做静默吞掉的假象处理。
+            let (parsed_nodes, _ownership_conflicts) =
                 apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
             for (logical_path, _) in &plan.deleted {
                 new_states.remove(logical_path);

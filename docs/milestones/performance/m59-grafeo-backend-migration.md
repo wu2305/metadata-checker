@@ -137,9 +137,10 @@ PR42（`codex/m59-2-ownership`）本轮完成 ownership 账本闭环：
    ownership：未绑定读取完整 ownership 库报 `GRAPH_PROJECT_BINDING_REQUIRED`，
    残缺/未知/旧实验 marker 一律 `GRAPH_OWNERSHIP_SCHEMA_STALE` 拒载，绝不补写覆盖。
 6. B5 从“记录已知缺陷”改为严格验收：修改/删除被引用文件、删除唯一引用者、修复恢复、
-   重启后全量与增量的节点/边/全部属性/来源字段/重复次数完全一致，并附独立关键事实
-   断言；新增跨页同名 dwtable 隔离与共享物理表、共享表修改/删除/恢复、坏 TBL、重启
-   账本恢复、session→query→diff-refresh 全链路 ownership 贯通等场景。B1 契约保留。
+   重启后全量与增量的节点/边/全部属性/来源字段完全一致（相同事实按 B1 完整事实键
+   幂等去重，不同 field_path 的事实逐条保留），并附独立关键事实断言；新增跨页同名
+   dwtable 隔离与共享物理表、共享表修改/删除/恢复、坏 TBL、重启账本恢复、
+   session→query→diff-refresh 全链路 ownership 贯通等场景。B1 契约保留。
 
 验证（CNB `cnb-beg-1k32624mn`，提交 `2a66483`）：cargo fmt --check 通过；完整 native
 1275 passed / 0 failed / 24 ignored（106 组）；benches check、browser-wasm check 通过
@@ -148,5 +149,17 @@ PR42（`codex/m59-2-ownership`）本轮完成 ownership 账本闭环：
 中间 workspace `cnb-kr8-1k31bevtu` 的早期定向日志随回收丢失，仅保留提交链
 （054ea1f→…→f5b0f6e→46c020e→03c8ebc→413b9fa→…→5e0fb7a→2a66483）。
 
-剩余：冷脸复审提出的 P2（跨文件冲突 Definition 是否静默择一）已由 Definition/Reference
-分类与页面局部 ID 覆盖，待独立复验确认后关闭；Grafeo/M59-3 未提前进入。
+剩余：Grafeo/M59-3 未提前进入。
+
+### 2026-09-21 冷脸复验修复（P1/P2）
+
+独立只读冷脸验收判定不可验收，P1：embedsuperpage/link 为目标页创建的 stub 被无条件
+标为 Definition，重建按 origin_file 字典序择一会把目标页 `origin_file` 写成 embedder
+文件，且 B5 独立断言对该字段盲。修复：SPG 的 Page/Component/Condition/Action 改为
+`path == 本文件` 才算 Definition（本地 dwtable 模型仍按 modelType 集合判定，其 path
+是物理路径），目标页 stub 归 Reference；B5 cross-file 场景新增目标页 origin 独立断言。
+P2 一并处置：spec「同 id 不兼容定义必须报告冲突」落地为 `ledger_definition_conflicts`
+（与重建择一共用分组语义）+ `GRAPH_OWNERSHIP_CONFLICT` 报告诊断——脏轮由重建返回、
+no-op 轮从账本重算，均随 IndexReportWithDiagnostics 透出，prepare 路径注明由后续全量
+扫描报告；确定性重建补单测（重复重建一致、冲突择一确定、共享 Reference 不冲突）；
+删除无调用方的 `group_ledgers` 与恒假死条件；「重复次数」表述按实现修正。

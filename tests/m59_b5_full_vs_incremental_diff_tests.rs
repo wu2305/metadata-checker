@@ -358,6 +358,73 @@ fn cross_file_edge_survives_incremental_update() {
     assert!(embeds[0].contains("comp:app/a.spg|embed1"));
     assert!(embeds[0].contains("page:app/b.spg"));
     assert!(embeds[0].contains("origin=app/a.spg"));
+
+    // 独立预期（冷脸 P1 回归钉）：被嵌目标页的 Definition 只能来自它自己的
+    // 文件；embedder 的 stub 是 Reference，不允许覆盖目标页的 origin_file。
+    let b_page_nodes: Vec<&String> = full
+        .nodes
+        .iter()
+        .filter(|node| node.starts_with("page:app/b.spg\t"))
+        .collect();
+    assert_eq!(
+        b_page_nodes.len(),
+        1,
+        "目标页节点应恰有一个：{:?}",
+        b_page_nodes
+    );
+    assert!(
+        b_page_nodes[0].contains("origin=app/b.spg"),
+        "被嵌目标页的 origin_file 必须属于其自身定义，实际 {}",
+        b_page_nodes[0]
+    );
+}
+
+/// 两个同名 TBL 主模型（全局 model:{name} 撞 id）必须报告来源冲突，不得静默择一。
+#[test]
+fn conflicting_tbl_model_definitions_are_reported() {
+    let tag = "tbl-conflict";
+    let binding = ProjectBinding::new(format!("m59-b5-{tag}")).expect("valid binding");
+    let dir = unique_dir(tag);
+    let project = dir.join("project");
+    write(&project, "tables/a.tbl", &table_json("dup", &["f_a"]));
+    write(&project, "tables/other/b.tbl", &table_json("dup", &["f_b"]));
+
+    let outcome = ProjectIndexer::scan_with_diagnostics_for_project(
+        &project,
+        &dir.join("graph.db"),
+        &binding,
+    )
+    .expect("scan with diagnostics");
+
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "GRAPH_OWNERSHIP_CONFLICT"
+                && d.message.contains("model:dup")
+                && d.message.contains("tables/a.tbl")
+                && d.message.contains("tables/other/b.tbl")),
+        "同名 TBL 主模型必须报告 GRAPH_OWNERSHIP_CONFLICT：{:?}",
+        outcome.diagnostics
+    );
+
+    // 冲突只报告不阻断：图仍按确定性规则择一构建，且重复扫描（no-op）继续报告
+    let again = ProjectIndexer::scan_with_diagnostics_for_project(
+        &project,
+        &dir.join("graph.db"),
+        &binding,
+    )
+    .expect("no-op rescan");
+    assert!(
+        again
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "GRAPH_OWNERSHIP_CONFLICT"),
+        "no-op 重扫必须继续报告存量冲突：{:?}",
+        again.diagnostics
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// 最终文件集只有 `b.spg`（`a.spg` 被删）时的两条路径。
