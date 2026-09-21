@@ -8,10 +8,10 @@ use twox_hash::XxHash64;
 use super::{process_spg_file_from_value, process_tbl_file_from_string};
 use crate::graph::{FileState, GraphDB};
 use crate::graph_store::{GraphWriteStore, IndexCommit, IndexReport, IndexStateStore};
+use crate::ownership::ProjectBinding;
 use crate::parsed_content::ParsedContent;
 use crate::source_id::{ProjectRef, SourceId};
 use crate::storage_provider::{DocumentProvider, LocalStorageProvider};
-use crate::ownership::ProjectBinding;
 use serde_json::Value;
 
 /// 发现的文件数量（阶段内部使用，不暴露字段级细节）
