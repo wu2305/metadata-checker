@@ -1925,20 +1925,41 @@ fn main() -> Result<()> {
             None => None,
         };
 
+        let explicit_binding = match args.project_ref.as_ref() {
+            Some(p) => Some(metadata_checker::ownership::ProjectBinding::new(p.clone())?),
+            None => None,
+        };
         metadata_checker::stdio_server::run_stdio_server(
             &db_path,
             project_dir,
+            explicit_binding.as_ref(),
             diff_refresh_context,
         )?;
         return Ok(());
     }
+
+    let project_binding = args
+        .project_ref
+        .as_ref()
+        .map(|p| metadata_checker::ownership::ProjectBinding::new(p.clone()))
+        .transpose()?;
 
     // graphdb-only runtime lifecycle commands do not need a project directory.
     if args.project_dir.is_none() && (args.status || args.reload_graph || args.check_reload) {
         let db_path = args.graph_db_path.as_ref().ok_or_else(|| {
             anyhow::anyhow!("--status/--reload-graph/--check-reload requires --graph-db-path when --project-dir is absent")
         })?;
-        let mut runtime = metadata_checker::runtime::GraphRuntime::load(db_path)?;
+        let mut runtime = match &project_binding {
+            Some(binding) => {
+                metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
+                    db_path,
+                    None,
+                    metadata_checker::runtime::RuntimeMode::OneShot,
+                    binding,
+                )?
+            }
+            None => metadata_checker::runtime::GraphRuntime::load(db_path)?,
+        };
         let command = if args.status {
             metadata_checker::tool_contract::ToolCommand::Status
         } else if args.reload_graph {
@@ -1972,7 +1993,17 @@ fn main() -> Result<()> {
                 "graph queries require --project-dir, --graph-db-path, or --remote-index"
             )
         })?;
-        let mut runtime = metadata_checker::runtime::GraphRuntime::load(db_path)?;
+        let mut runtime = match &project_binding {
+            Some(binding) => {
+                metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
+                    db_path,
+                    None,
+                    metadata_checker::runtime::RuntimeMode::OneShot,
+                    binding,
+                )?
+            }
+            None => metadata_checker::runtime::GraphRuntime::load(db_path)?,
+        };
         if run_query_commands(&args, &mut runtime, None)? {
             return Ok(());
         }
@@ -1985,13 +2016,18 @@ fn main() -> Result<()> {
             .unwrap_or_else(|| graph_db_path(project_dir));
 
         if args.check_graph {
-            let status = GraphDB::check_graph_db(&db_path);
+            let status = GraphDB::check_graph_db_for_project(&db_path, project_binding.as_ref());
             println!("{}", serde_json::to_string_pretty(&status)?);
             return Ok(());
         }
 
         if args.build_graph {
-            let report = scanner::scan_project_with_report(project_dir, &db_path)?;
+            let report = match &project_binding {
+                Some(binding) => {
+                    scanner::scan_project_with_report_for_project(project_dir, &db_path, binding)?
+                }
+                None => scanner::scan_project_with_report(project_dir, &db_path)?,
+            };
             let payload = serde_json::to_string(&report)
                 .map_err(|err| anyhow::anyhow!("failed to serialize ScanReport: {err}"))?;
             if args.is_human() {
@@ -2018,16 +2054,34 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        let mut runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir(
-            &db_path,
-            Some(project_dir),
-        ) {
-            Ok(r) => r,
-            Err(_e) => {
-                let out = metadata_checker::graph::GraphDB::check_graph_db(&db_path);
-                println!("{}", serde_json::to_string_pretty(&out)?);
-                return Ok(());
-            }
+        let mut runtime = match &project_binding {
+            Some(binding) => match metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
+                &db_path,
+                Some(project_dir),
+                metadata_checker::runtime::RuntimeMode::OneShot,
+                binding,
+            ) {
+                Ok(r) => r,
+                Err(_e) => {
+                    let out = metadata_checker::graph::GraphDB::check_graph_db_for_project(
+                        &db_path,
+                        Some(binding),
+                    );
+                    println!("{}", serde_json::to_string_pretty(&out)?);
+                    return Ok(());
+                }
+            },
+            None => match metadata_checker::runtime::GraphRuntime::load_with_project_dir(
+                &db_path,
+                Some(project_dir),
+            ) {
+                Ok(r) => r,
+                Err(_e) => {
+                    let out = metadata_checker::graph::GraphDB::check_graph_db(&db_path);
+                    println!("{}", serde_json::to_string_pretty(&out)?);
+                    return Ok(());
+                }
+            },
         };
         if run_query_commands(&args, &mut runtime, Some(project_dir))? {
             return Ok(());
@@ -2042,7 +2096,7 @@ fn main() -> Result<()> {
     // --check-graph without --project-dir requires explicit --graph-db-path
     if args.check_graph {
         if let Some(ref db_path) = args.graph_db_path {
-            let status = GraphDB::check_graph_db(db_path);
+            let status = GraphDB::check_graph_db_for_project(db_path, project_binding.as_ref());
             println!("{}", serde_json::to_string_pretty(&status)?);
             return Ok(());
         }
