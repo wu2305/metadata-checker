@@ -51,7 +51,14 @@ fn populated_legacy_store_cannot_receive_ownership_marker() {
         .expect("persist legacy graph");
 
     // 只读绑定入口也不能把无绑定的旧图认作当前项目。
-    assert_eq!(GraphDB::open_readonly_for_project(&db_path, &binding).err().unwrap().to_string().contains("GRAPH_OWNERSHIP_SCHEMA_STALE"), true);
+    assert_eq!(
+        GraphDB::open_readonly_for_project(&db_path, &binding)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("GRAPH_OWNERSHIP_SCHEMA_STALE"),
+        true
+    );
     let error = match GraphDB::open_for_project(&db_path, &binding) {
         Ok(_) => panic!("legacy populated store must require rebuild"),
         Err(error) => error,

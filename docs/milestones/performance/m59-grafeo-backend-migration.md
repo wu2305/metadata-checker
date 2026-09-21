@@ -113,3 +113,9 @@ PR41 已正常合并为 `224d4e1`，文件树与最终交付 `1168f11` 一致，
 browser-wasm check、fmt check 全通过。WASM 保留 8 条非本批声明/导入位置的 warning。
 [原始日志与 SHA256](../../governance/evidence/2026-09-21-project-binding-gate.json.gz)。
 ignored 的真实语料/在线评测不计通过，B5 仍只是既有缺陷回归。
+
+独立 fallback 复审发现 unknown-version 在无绑定检查中误报 required，`fff6017` 修正，
+新增 stale/needs_rebuild 断言；旧句柄三个磁盘状态读取也重验绑定。修复后完整 native
+再次 1269/0/24；`1714d42` 另补 bound-readonly 不能认领无绑定旧库的断言，8 项定向测试通过。
+该只读入口曾被复审误读 tuple 顺序提出 P1，源码与运行反例证伪后已撤回；
+独立审查确认无剩余 P0/P1/P2 阻塞项。原始复验日志已追加同一 evidence 文件。
