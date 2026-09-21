@@ -90,8 +90,10 @@ mod tbl;
 /// 递归收集目录下所有 .spg 和 .tbl 文件
 mod utils;
 
-pub use spg::{PageIdentityMode, process_spg_file_from_value, process_spg_file_from_value_with_identity};
 #[cfg(any(test, feature = "cli-local"))]
 pub use spg::scan_raw_diagnostics;
+pub use spg::{
+    PageIdentityMode, process_spg_file_from_value, process_spg_file_from_value_with_identity,
+};
 pub use tbl::process_tbl_file_from_string;
 pub use utils::{add_edge_with_meta, add_identified_node, add_node, resolve_reference_path};

@@ -19,7 +19,10 @@ pub fn add_identified_node(
 ) -> Result<()> {
     // 竖线是「页面局部 vs 全局」的唯一判据：页面段与局部名都不得再出现分隔符，
     // 否则解析侧无法判定作用域。
-    if let Some(rest) = id.strip_prefix("model:").or_else(|| id.strip_prefix("field:")) {
+    if let Some(rest) = id
+        .strip_prefix("model:")
+        .or_else(|| id.strip_prefix("field:"))
+    {
         let _ = crate::graph_identity::reject_reserved_separator(rest, &id)?;
     }
     graph

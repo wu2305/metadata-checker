@@ -59,11 +59,8 @@ impl<'a> PageScope<'a> {
             )
             .map_err(|error| anyhow::anyhow!("invalid page-local model id {model}: {error}"))
         } else {
-            crate::graph_identity::global_node_id(
-                crate::graph_identity::NodeIdKind::Model,
-                model,
-            )
-            .map_err(|error| anyhow::anyhow!("invalid global model id {model}: {error}"))
+            crate::graph_identity::global_node_id(crate::graph_identity::NodeIdKind::Model, model)
+                .map_err(|error| anyhow::anyhow!("invalid global model id {model}: {error}"))
         }
     }
 
@@ -523,11 +520,10 @@ fn resolve_model_identity(
     match (scope, identity) {
         (Some(scope), ModelIdentity::Global) => scope.physical_model_id(model),
         (Some(scope), ModelIdentity::Local) => scope.model_id(model),
-        (None, _) => crate::graph_identity::global_node_id(
-            crate::graph_identity::NodeIdKind::Model,
-            model,
-        )
-        .map_err(|error| anyhow::anyhow!("invalid model id {model}: {error}")),
+        (None, _) => {
+            crate::graph_identity::global_node_id(crate::graph_identity::NodeIdKind::Model, model)
+                .map_err(|error| anyhow::anyhow!("invalid model id {model}: {error}"))
+        }
     }
 }
 
@@ -584,14 +580,7 @@ fn add_model_read(
     edge_type: EdgeType,
 ) -> Result<()> {
     add_model_read_with_scope(
-        graph,
-        from_id,
-        model,
-        field,
-        model_path,
-        edge_meta,
-        edge_type,
-        None,
+        graph, from_id, model, field, model_path, edge_meta, edge_type, None,
     )
 }
 
@@ -693,14 +682,7 @@ fn add_model_write(
     edge_meta: serde_json::Value,
 ) -> Result<()> {
     add_model_write_with_scope(
-        graph,
-        from_id,
-        model,
-        field,
-        model_path,
-        edge_type,
-        edge_meta,
-        None,
+        graph, from_id, model, field, model_path, edge_type, edge_meta, None,
     )
 }
 
@@ -1105,7 +1087,7 @@ pub fn process_spg_file_from_value_with_identity(
                         &model_path,
                         edge_meta,
                         EdgeType::Reads,
-                            Some(&scope),
+                        Some(&scope),
                     )?;
                 }
                 for ref_type in &expr.refs {
@@ -1134,7 +1116,7 @@ pub fn process_spg_file_from_value_with_identity(
                                 &model_path,
                                 edge_meta,
                                 EdgeType::Reads,
-                                    Some(&scope),
+                                Some(&scope),
                             )?;
                         }
                         crate::superpage::RefType::ComponentValue(target_id, _) => {
@@ -1330,7 +1312,7 @@ pub fn process_spg_file_from_value_with_identity(
                     &model_path,
                     EdgeType::Writes,
                     submit_meta,
-                        Some(&scope),
+                    Some(&scope),
                 )?;
             }
         }
@@ -1447,7 +1429,7 @@ pub fn process_spg_file_from_value_with_identity(
                                     &model_path,
                                     EdgeType::ActionWrites,
                                     action_meta,
-                                        Some(&scope),
+                                    Some(&scope),
                                 )?;
                             }
                         }
@@ -1478,7 +1460,7 @@ pub fn process_spg_file_from_value_with_identity(
                                 &data_set_path,
                                 EdgeType::ActionWrites,
                                 ud_meta,
-                                    Some(&scope),
+                                Some(&scope),
                             )?;
                             // If value_type is "exp", parse expression refs for dependency analysis
                             if value_type == "exp" {
@@ -1509,7 +1491,7 @@ pub fn process_spg_file_from_value_with_identity(
                                             &model_path,
                                             read_meta,
                                             EdgeType::ActionReads,
-                                                Some(&scope),
+                                            Some(&scope),
                                         )?;
                                     }
                                 }
@@ -1610,7 +1592,7 @@ pub fn process_spg_file_from_value_with_identity(
                                         &model_path,
                                         read_meta,
                                         EdgeType::ActionReads,
-                                            Some(&scope),
+                                        Some(&scope),
                                     )?;
                                 }
                             }
@@ -1672,7 +1654,7 @@ pub fn process_spg_file_from_value_with_identity(
                                     &model_path,
                                     read_meta,
                                     EdgeType::ActionReads,
-                                        Some(&scope),
+                                    Some(&scope),
                                 )?;
                             }
                         }
@@ -1821,7 +1803,7 @@ pub fn process_spg_file_from_value_with_identity(
                                     &model_path,
                                     EdgeType::ActionValidates,
                                     val_meta,
-                                        Some(&scope),
+                                    Some(&scope),
                                 )?;
                             }
                         }
@@ -1884,7 +1866,7 @@ pub fn process_spg_file_from_value_with_identity(
                             &model_path,
                             EdgeType::ActionLoadsData,
                             load_meta,
-                                Some(&scope),
+                            Some(&scope),
                         )?;
                     }
                 }

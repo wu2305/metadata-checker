@@ -572,10 +572,9 @@ impl GraphRuntime {
             .ownership_ledgers()
             .map(crate::ownership::ledger_definition_conflicts)
             .unwrap_or_default();
-        load_diagnostics
-            .extend(crate::scanner::indexer::ownership_conflict_diagnostics(
-                &ownership_conflicts,
-            ));
+        load_diagnostics.extend(crate::scanner::indexer::ownership_conflict_diagnostics(
+            &ownership_conflicts,
+        ));
 
         let (graph_file_mtime, graph_file_size) = std::fs::metadata(&path)
             .map(|m| (m.modified().ok(), m.len()))
@@ -993,7 +992,9 @@ impl GraphRuntime {
         self.load_diagnostics
             .retain(|diag| diag.code != "GRAPH_OWNERSHIP_CONFLICT");
         self.load_diagnostics
-            .extend(crate::scanner::indexer::ownership_conflict_diagnostics(&conflicts));
+            .extend(crate::scanner::indexer::ownership_conflict_diagnostics(
+                &conflicts,
+            ));
         self.ownership_conflicts = conflicts;
     }
 
