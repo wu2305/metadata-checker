@@ -32,10 +32,38 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<ScanReport> {
 
 #[cfg(feature = "cli-local")]
 pub fn scan_project_with_report(project_dir: &Path, db_path: &Path) -> Result<ScanReport> {
-    let index_with_diags = indexer::ProjectIndexer::scan_with_diagnostics(project_dir, db_path)?;
+    scan_project_with_report_internal(project_dir, db_path, None)
+}
+
+#[cfg(feature = "cli-local")]
+pub fn scan_project_with_report_for_project(
+    project_dir: &Path,
+    db_path: &Path,
+    project_binding: &crate::ownership::ProjectBinding,
+) -> Result<ScanReport> {
+    scan_project_with_report_internal(project_dir, db_path, Some(project_binding))
+}
+
+#[cfg(feature = "cli-local")]
+fn scan_project_with_report_internal(
+    project_dir: &Path,
+    db_path: &Path,
+    project_binding: Option<&crate::ownership::ProjectBinding>,
+) -> Result<ScanReport> {
+    let index_with_diags = match project_binding {
+        Some(binding) => indexer::ProjectIndexer::scan_with_diagnostics_for_project(
+            project_dir,
+            db_path,
+            binding,
+        )?,
+        None => indexer::ProjectIndexer::scan_with_diagnostics(project_dir, db_path)?,
+    };
     let index_report = index_with_diags.report;
     let mut diagnostics = index_with_diags.diagnostics;
-    let graph = GraphDB::open(db_path)?;
+    let graph = match project_binding {
+        Some(binding) => GraphDB::open_readonly_with_ownership(db_path, binding)?,
+        None => GraphDB::open(db_path)?,
+    };
     diagnostics.extend(graph.hydrate_diagnostics().to_diagnostics());
     Ok(ScanReport {
         indexed: index_report.indexed,

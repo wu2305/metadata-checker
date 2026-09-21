@@ -1585,10 +1585,22 @@ fn main() -> Result<()> {
         let graph_db_path = std::path::PathBuf::from(&context.manifest.graph_db_path);
         let session_dir = session_manager.session_dir(session_id);
         let mirror_dir = metadata_checker::session::sync::project_mirror_root(&session_dir);
-        let runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode(
+        let project_binding = match metadata_checker::ownership::ProjectBinding::new(
+            context.manifest.project_ref.clone(),
+        ) {
+            Ok(binding) => binding,
+            Err(err) => {
+                return print_session_error(
+                    "SESSION_QUERY_GRAPH_LOAD_FAILED",
+                    format!("invalid session project binding: {err}"),
+                );
+            }
+        };
+        let runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
             &graph_db_path,
             Some(&mirror_dir),
             metadata_checker::runtime::RuntimeMode::LongLived,
+            &project_binding,
         ) {
             Ok(runtime) => runtime,
             Err(err) => {
@@ -1774,10 +1786,23 @@ fn main() -> Result<()> {
                         .graph_db_path
                         .clone()
                         .unwrap_or_else(|| std::path::PathBuf::from(&report.graph_db_path));
+                    let project_binding = match metadata_checker::ownership::ProjectBinding::new(
+                        report.project_ref.clone(),
+                    ) {
+                        Ok(binding) => binding,
+                        Err(err) => {
+                            return print_session_error(
+                                "SESSION_QUERY_GRAPH_LOAD_FAILED",
+                                format!("invalid session project binding: {err}"),
+                            );
+                        }
+                    };
                     let mut runtime =
-                        match metadata_checker::runtime::GraphRuntime::load_with_project_dir(
+                        match metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
                             &graph_db_path,
                             Some(&mirror_dir),
+                            metadata_checker::runtime::RuntimeMode::OneShot,
+                            &project_binding,
                         ) {
                             Ok(runtime) => runtime,
                             Err(err) => {

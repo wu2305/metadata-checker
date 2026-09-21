@@ -15,6 +15,7 @@ std::thread_local! {
 
 use crate::dense_graph::DenseGraphSnapshot;
 use crate::graph::GraphDB;
+use crate::ownership::ProjectBinding;
 use crate::response_processor::ResponseProcessor;
 pub use crate::response_processor::{RuntimeQueryResponse, RuntimeTiming};
 
@@ -160,6 +161,8 @@ pub struct GraphRuntime {
     pub graph: GraphDB,
     /// graphdb 文件路径
     pub graph_db_path: PathBuf,
+    /// 已绑定项目身份；legacy runtime 为 None。
+    pub project_binding: Option<ProjectBinding>,
     /// 项目目录路径（从 graph_db_path 推导）
     pub project_dir: Option<PathBuf>,
     /// 加载时间戳
@@ -488,13 +491,29 @@ impl GraphRuntime {
         project_dir: Option<impl AsRef<Path>>,
         runtime_mode: RuntimeMode,
     ) -> Result<Self> {
-        Self::load_with_project_dir_internal(graph_db_path, project_dir, runtime_mode)
+        Self::load_with_project_dir_internal(graph_db_path, project_dir, runtime_mode, None)
+    }
+
+    /// 加载已绑定项目的 ownership graph runtime。
+    pub fn load_with_project_dir_and_mode_for_project(
+        graph_db_path: impl AsRef<Path>,
+        project_dir: Option<impl AsRef<Path>>,
+        runtime_mode: RuntimeMode,
+        project_binding: &ProjectBinding,
+    ) -> Result<Self> {
+        Self::load_with_project_dir_internal(
+            graph_db_path,
+            project_dir,
+            runtime_mode,
+            Some(project_binding),
+        )
     }
 
     fn load_with_project_dir_internal(
         graph_db_path: impl AsRef<Path>,
         project_dir: Option<impl AsRef<Path>>,
         runtime_mode: RuntimeMode,
+        project_binding: Option<&ProjectBinding>,
     ) -> Result<Self> {
         let path = graph_db_path.as_ref().to_path_buf();
         #[cfg(feature = "telemetry")]
@@ -503,12 +522,16 @@ impl GraphRuntime {
         let _graph_load_guard = graph_load_span.enter();
 
         let start = Instant::now();
-        let graph = GraphDB::open_or_diagnostic(&path).map_err(|e| {
-            anyhow::anyhow!(
-                "GraphDB open failed: {}",
-                serde_json::to_string(&e).unwrap_or_default()
-            )
-        })?;
+        let graph = match project_binding {
+            Some(binding) => GraphDB::open_readonly_with_ownership(&path, binding)
+                .map_err(|error| anyhow::anyhow!("GraphDB bound open failed: {error:#}"))?,
+            None => GraphDB::open_or_diagnostic(&path).map_err(|e| {
+                anyhow::anyhow!(
+                    "GraphDB open failed: {}",
+                    serde_json::to_string(&e).unwrap_or_default()
+                )
+            })?,
+        };
         let graph_load_ms = start.elapsed().as_millis();
 
         let mut load_diagnostics = graph.hydrate_diagnostics().to_diagnostics();
@@ -581,6 +604,7 @@ impl GraphRuntime {
         Ok(GraphRuntime {
             graph,
             graph_db_path: path,
+            project_binding: project_binding.cloned(),
             project_dir,
             loaded_at: SystemTime::now(),
             graph_file_mtime,
@@ -1431,12 +1455,14 @@ impl GraphRuntime {
             &self.graph_db_path,
             project_dir.as_deref(),
             self.runtime_mode,
+            self.project_binding.as_ref(),
         ) {
             Ok(new_runtime) => {
                 self.graph = new_runtime.graph;
                 self.loaded_at = new_runtime.loaded_at;
                 self.graph_file_mtime = new_runtime.graph_file_mtime;
                 self.graph_file_size = new_runtime.graph_file_size;
+                self.project_binding = new_runtime.project_binding;
                 self.load_count = new_runtime.load_count;
                 self.graph_load_ms = new_runtime.graph_load_ms;
                 self.graph_fingerprint = new_runtime.graph_fingerprint;

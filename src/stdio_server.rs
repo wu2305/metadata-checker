@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
 use crate::diff_refresh::DiffRefreshOrchestrator;
+use crate::ownership::ProjectBinding;
 use crate::response_processor::ResponseProcessor;
 use crate::runtime::{GraphRuntime, RuntimeQueryRequest};
 use crate::session::DiffRefreshRuntimeContext;
@@ -187,12 +188,24 @@ pub fn run_stdio_server(
     project_dir: Option<&std::path::Path>,
     diff_refresh_context: Option<DiffRefreshRuntimeContext>,
 ) -> Result<()> {
+    let project_binding = diff_refresh_context
+        .as_ref()
+        .map(|context| ProjectBinding::new(context.manifest.project_ref.clone()))
+        .transpose()?;
     // 产品路径必须走 LongLived：构建 DenseGraph / Availability Facts / PageDependencyIndex。
-    let mut runtime = GraphRuntime::load_with_project_dir_and_mode(
-        graph_db_path,
-        project_dir,
-        crate::runtime::RuntimeMode::LongLived,
-    )
+    let mut runtime = match project_binding.as_ref() {
+        Some(binding) => GraphRuntime::load_with_project_dir_and_mode_for_project(
+            graph_db_path,
+            project_dir,
+            crate::runtime::RuntimeMode::LongLived,
+            binding,
+        ),
+        None => GraphRuntime::load_with_project_dir_and_mode(
+            graph_db_path,
+            project_dir,
+            crate::runtime::RuntimeMode::LongLived,
+        ),
+    }
     .map_err(|e| anyhow::anyhow!("Failed to load graphdb: {}", e))?;
     eprintln!(
         "[stdio-server] Graph loaded (LongLived), {} nodes, read_model={}, ready",
