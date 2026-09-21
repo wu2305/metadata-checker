@@ -118,13 +118,8 @@ fn validate_project_markers(
         // 完整且当前的 ownership 库只缺绑定入口时不需要重建，改报 REQUIRED；
         // 伴随 marker 残缺（无绑定 schema 版本或无账本版本）仍按 STALE 拒载。
         let ownership_complete = version
-            == Some(
-                PROJECT_BINDING_SCHEMA_VERSION
-                    .to_string()
-                    .as_bytes()
-                    .as_slice(),
-            )
-            && ledger_version == Some(OWNERSHIP_LEDGER_VERSION.to_string().as_bytes().as_slice());
+            == Some(PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes())
+            && ledger_version == Some(OWNERSHIP_LEDGER_VERSION.to_string().as_bytes());
         if binding.is_none() && !ownership_complete {
             anyhow::bail!(
                 "GRAPH_OWNERSHIP_SCHEMA_STALE: incomplete ownership markers; rebuild from source into a new graph path"
@@ -674,6 +669,7 @@ impl GraphDB {
             version.as_deref(),
             project.as_deref(),
             ownership.as_deref(),
+            ledger.as_deref(),
             Some(binding),
         )?;
         Ok(())
@@ -1755,6 +1751,9 @@ impl GraphDB {
                     .as_deref(),
                 meta.get(PROJECT_BINDING_KEY)?.map(|v| v.value()).as_deref(),
                 meta.get(OWNERSHIP_SCHEMA_VERSION_KEY)?
+                    .map(|v| v.value())
+                    .as_deref(),
+                meta.get(OWNERSHIP_LEDGER_VERSION_KEY)?
                     .map(|v| v.value())
                     .as_deref(),
                 self.project_binding.as_ref(),
