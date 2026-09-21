@@ -509,53 +509,6 @@ impl GraphDB {
         Ok(())
     }
 
-    /// 校验已启用来源账本库；不初始化、不修补任何 marker。
-    fn ensure_ownership_schema(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
-        let db = Database::open(db_path)?;
-        let read_txn = db.begin_read()?;
-        let meta = read_txn.open_table(META_TABLE)?;
-        let ownership = meta
-            .get(OWNERSHIP_SCHEMA_VERSION_KEY)?
-            .map(|value| value.value());
-        anyhow::ensure!(
-            ownership.as_deref() == Some(OWNERSHIP_SCHEMA_VERSION.to_string().as_bytes()),
-            "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger schema is missing or incompatible; rebuild from source into a new graph path"
-        );
-        anyhow::ensure!(
-            meta.get(PROJECT_BINDING_KEY)?
-                .map(|value| value.value())
-                .as_deref()
-                == Some(binding.as_str().as_bytes()),
-            "GRAPH_PROJECT_BINDING_MISMATCH: open with the original project binding"
-        );
-        let ledger_version = meta
-            .get(OWNERSHIP_LEDGER_VERSION_KEY)?
-            .map(|value| value.value());
-        anyhow::ensure!(
-            ledger_version.as_deref() == Some(OWNERSHIP_LEDGER_VERSION.to_string().as_bytes()),
-            "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger payload version is missing or incompatible"
-        );
-        let binding_schema = meta
-            .get(BINDING_SCHEMA_VERSION_KEY)?
-            .map(|value| value.value());
-        anyhow::ensure!(
-            binding_schema.as_deref()
-                == Some(PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes()),
-            "GRAPH_OWNERSHIP_SCHEMA_STALE: incompatible project binding schema"
-        );
-        let ledger_table = read_txn.open_table(OWNERSHIP_LEDGER_TABLE)?;
-        if ledger_table.is_empty()? {
-            let nodes_empty = read_txn.open_table(NODES_TABLE)?.is_empty()?;
-            let edges_empty = read_txn.open_table(EDGES_TABLE)?.is_empty()?;
-            let states_empty = read_txn.open_table(FILE_STATES_TABLE)?.is_empty()?;
-            anyhow::ensure!(
-                nodes_empty && edges_empty && states_empty,
-                "GRAPH_OWNERSHIP_SCHEMA_STALE: non-empty graph has no source ledger; rebuild from source into a new graph path"
-            );
-        }
-        Ok(())
-    }
-
     fn validate_ownership_path(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
         if !db_path.exists() {
             anyhow::bail!(

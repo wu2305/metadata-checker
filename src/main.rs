@@ -1953,7 +1953,7 @@ fn main() -> Result<()> {
             Some(binding) => {
                 metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
                     db_path,
-                    None,
+                    None::<&std::path::Path>,
                     metadata_checker::runtime::RuntimeMode::OneShot,
                     binding,
                 )?
@@ -1997,7 +1997,7 @@ fn main() -> Result<()> {
             Some(binding) => {
                 metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
                     db_path,
-                    None,
+                    None::<&std::path::Path>,
                     metadata_checker::runtime::RuntimeMode::OneShot,
                     binding,
                 )?
