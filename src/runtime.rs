@@ -470,6 +470,21 @@ pub struct RuntimeStatus {
     pub load_diagnostics: Vec<crate::output::Diagnostic>,
 }
 
+/// M59-2 B：整段替换 `load_diagnostics` 里的 scanner 诊断段。
+///
+/// 按 `SCANNER_` 前缀整段替换，而不是逐个 code 列举。旧实现列举 code，漏掉
+/// `SCANNER_FILE_PARSE_FAILED`：坏文件修好之后本轮合并结果里已无该 code，旧条目
+/// 却被保留，status/query 继续声称「图内容是陈旧的」——比诊断缺失更糟，它断言了
+/// 一个已经不存在的问题。新增 `SCANNER_*` code 也不该再靠记得改这张清单。
+/// 非 `SCANNER_` 段（hydrate 损失等）原样保留。
+fn replace_scanner_diagnostics_segment(
+    load_diagnostics: &mut Vec<crate::output::Diagnostic>,
+    scanner_diagnostics: Vec<crate::output::Diagnostic>,
+) {
+    load_diagnostics.retain(|diag| !diag.code.starts_with("SCANNER_"));
+    load_diagnostics.extend(scanner_diagnostics);
+}
+
 impl GraphRuntime {
     /// 加载 graphdb 并构建 Runtime
     ///
@@ -946,13 +961,7 @@ impl GraphRuntime {
         &mut self,
         scanner_diagnostics: Vec<crate::output::Diagnostic>,
     ) {
-        // M59-2 B：按 SCANNER_ 前缀整段替换，而不是逐个 code 列举。
-        // 旧实现漏掉 SCANNER_FILE_PARSE_FAILED，导致坏文件修好之后那条「陈旧」
-        // 诊断仍挂在 status/query 上——比「诊断缺失」更糟：它声称有问题，而问题
-        // 已经没了。新增 SCANNER_* code 也不该再靠记得改这张清单。
-        self.load_diagnostics
-            .retain(|diag| !diag.code.starts_with("SCANNER_"));
-        self.load_diagnostics.extend(scanner_diagnostics);
+        replace_scanner_diagnostics_segment(&mut self.load_diagnostics, scanner_diagnostics);
     }
 
     /// M58.3 复核返修：live scanner 诊断缓存刷新失败时记录稳定 warning。
@@ -1648,6 +1657,93 @@ mod tests {
                 "UNKNOWN_ACTION_TYPE",
             ],
             "load 置顶 + 查询侧同 code 多条全保留: {result_side:?}"
+        );
+    }
+
+    /// M59-2 B：整段替换必须覆盖**所有** `SCANNER_*` code，而不是逐个列举。
+    ///
+    /// 旧实现逐个列 code，漏掉 `SCANNER_FILE_PARSE_FAILED`：坏文件修好之后，
+    /// 本轮合并结果里已无该 code，但旧条目被保留下来，status/query 继续声称
+    /// 「图内容是陈旧的」——比诊断缺失更糟，它断言了一个已经不存在的问题。
+    #[test]
+    fn replace_scanner_diagnostics_drops_every_scanner_code() {
+        let load_diagnostics = vec![
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_FILE_PARSE_FAILED,
+                1,
+                crate::output::Location::default(),
+                "stale parse failure",
+            ),
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED,
+                1,
+                crate::output::Location::default(),
+                "cache may be stale",
+            ),
+            // 非 SCANNER_ 段必须原样留着：整段替换只针对 scanner 诊断
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE,
+                3,
+                crate::output::Location::default(),
+                "partial hydrate",
+            ),
+        ];
+
+        // 本轮合并结果：只含一条 unrelated 的 SCANNER_ 诊断（新变坏的文件）
+        let replacement = vec![crate::diagnostics::envelope_diagnostic(
+            crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID,
+            1,
+            crate::output::Location::default(),
+            "duplicate ids",
+        )];
+        let mut runtime_holder = load_diagnostics;
+        replace_scanner_diagnostics_segment(&mut runtime_holder, replacement);
+
+        let codes: Vec<&str> = runtime_holder
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE,
+                crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID,
+            ],
+            "替换后只应剩非 SCANNER_ 段与本轮新段：{codes:?}"
+        );
+    }
+
+    /// 替换进来的空集合必须让所有 `SCANNER_*` 诊断消失（文件修好 = 无 scanner 问题）。
+    #[test]
+    fn replace_scanner_diagnostics_with_empty_clears_stale_warning() {
+        let mut load_diagnostics = vec![
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_FILE_PARSE_FAILED,
+                1,
+                crate::output::Location::default(),
+                "stale parse failure",
+            ),
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE,
+                3,
+                crate::output::Location::default(),
+                "partial hydrate",
+            ),
+        ];
+        replace_scanner_diagnostics_segment(&mut load_diagnostics, Vec::new());
+        assert!(
+            !load_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.starts_with("SCANNER_")),
+            "无辜的 SCANNER_ 诊断必须随空替换一起消失：{load_diagnostics:?}"
+        );
+        assert_eq!(
+            load_diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect::<Vec<_>>(),
+            vec![crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE],
+            "非 SCANNER_ 段不受影响"
         );
     }
 
