@@ -592,8 +592,8 @@ impl ProjectIndexer {
         db_path: &Path,
         project_binding: &ProjectBinding,
     ) -> Result<IndexReport> {
-        GraphDB::open_for_project(db_path, project_binding)?;
-        Self::scan(project_dir, db_path)
+        Self::scan_with_diagnostics_for_project(project_dir, db_path, project_binding)
+            .map(|with| with.report)
     }
 
     /// M58.3 PR1 refix（F2）：合并 redb 中的 per-file scanner 诊断计数 entry，
@@ -622,7 +622,27 @@ impl ProjectIndexer {
         project_dir: &Path,
         db_path: &Path,
     ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
-        let mut graph = GraphDB::open(db_path)?;
+        Self::scan_with_diagnostics_internal(project_dir, db_path, None)
+    }
+
+    /// 按项目绑定执行扫描，绑定校验与候选图打开位于同一入口。
+    pub fn scan_with_diagnostics_for_project(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: &ProjectBinding,
+    ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
+        Self::scan_with_diagnostics_internal(project_dir, db_path, Some(project_binding))
+    }
+
+    fn scan_with_diagnostics_internal(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: Option<&ProjectBinding>,
+    ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
+        let mut graph = match project_binding {
+            Some(binding) => GraphDB::open_for_project(db_path, binding)?,
+            None => GraphDB::open(db_path)?,
+        };
         let prev_states = graph.load_file_states().unwrap_or_default();
 
         let files = Self::discover_files(project_dir)?;
