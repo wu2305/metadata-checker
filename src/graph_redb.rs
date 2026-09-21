@@ -103,13 +103,12 @@ fn validate_project_markers(
         ownership.is_none(),
         "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger is not implemented; rebuild into a new graph path"
     );
+    if let Some(version) = version {
+        anyhow::ensure!(version == PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes(), "GRAPH_OWNERSHIP_SCHEMA_STALE: incompatible project binding schema");
+    }
     match (version, project, binding) {
         (None, None, None) => Ok(()),
-        (Some(version), Some(project), Some(binding)) => {
-            anyhow::ensure!(
-                version == PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes(),
-                "GRAPH_OWNERSHIP_SCHEMA_STALE: incompatible project binding schema"
-            );
+        (Some(_), Some(project), Some(binding)) => {
             anyhow::ensure!(
                 project == binding.as_str().as_bytes(),
                 "GRAPH_PROJECT_BINDING_MISMATCH: open with the original project binding"
@@ -1527,6 +1526,7 @@ impl GraphDB {
     pub fn load_file_states(&self) -> Result<HashMap<String, FileState>> {
         let db = Database::create(&self.db_path)?;
         let read_txn = db.begin_read()?;
+        validate_project_access(&read_txn, self.project_binding.as_ref())?;
         let table = read_txn.open_table(FILE_STATES_TABLE)?;
         let mut states = HashMap::new();
         for item in table.iter()? {
@@ -1545,6 +1545,7 @@ impl GraphDB {
     pub fn load_scanner_diagnostic_entries(&self) -> Result<Vec<(String, Vec<u8>)>> {
         let db = Database::create(&self.db_path)?;
         let read_txn = db.begin_read()?;
+        validate_project_access(&read_txn, self.project_binding.as_ref())?;
         let table = read_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
         let mut entries = Vec::new();
         for item in table.iter()? {
@@ -1563,6 +1564,7 @@ impl GraphDB {
     ) -> Result<Option<crate::diff_refresh::DiffRefreshCheckpoint>> {
         let db = Database::create(&self.db_path)?;
         let read_txn = db.begin_read()?;
+        validate_project_access(&read_txn, self.project_binding.as_ref())?;
         let table = match read_txn.open_table(META_TABLE) {
             Ok(table) => table,
             Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),

@@ -133,6 +133,9 @@ fn persist_revalidates_open_handle_binding() {
     let binding = ProjectBinding::new("project-a").unwrap();
     let mut bound = GraphDB::open_for_project(&path, &binding).unwrap();
     assert_eq!(stale.persist(&HashMap::new()).is_err(), true);
+    assert_eq!(stale.load_file_states().is_err(), true);
+    assert_eq!(stale.load_scanner_diagnostic_entries().is_err(), true);
+    assert_eq!(stale.load_diff_refresh_checkpoint().is_err(), true);
     stale.add_node(
         "page:wrong".into(),
         NodeType::Page,
@@ -199,6 +202,9 @@ fn incomplete_unknown_and_legacy_markers_are_never_repaired() {
             "{label}"
         );
         assert_eq!(GraphDB::open(&path).is_err(), true, "{label}");
+        let check = GraphDB::check_graph_db(&path);
+        assert_eq!(check.summary["needs_rebuild"], true, "{label}");
+        assert_eq!(check.diagnostics.iter().any(|d| d.code == "GRAPH_OWNERSHIP_SCHEMA_STALE"), true, "{label}");
         let db = redb::Database::open(&path).unwrap();
         let tx = db.begin_read().unwrap();
         let meta = tx
