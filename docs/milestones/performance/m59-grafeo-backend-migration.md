@@ -107,3 +107,9 @@ PR41 已正常合并为 `224d4e1`，文件树与最终交付 `1168f11` 一致，
 版本改名为 `project_binding_schema_version`，session 提前接线撤回；来源账本结构保留用于
 后续实现，但没有参与建图与持久化，M59-2、B5 仍未完成。禁止将本批宣称为完整 ownership。
 独立测试涵盖所有入口、旧句柄提交、marker 矩阵不变性、绑定重启与 readonly、反序列化校验。
+
+验证：CNB `cnb-6mg-1k30r3t8e` 在 `ba011b1` + cargo fmt（格式提交 `0b5f766`）
+执行完整 native：1269 passed / 0 failed / 24 ignored（106 组）；benches check、
+browser-wasm check、fmt check 全通过。WASM 保留 8 条非本批声明/导入位置的 warning。
+[原始日志与 SHA256](../../governance/evidence/2026-09-21-project-binding-gate.json.gz)。
+ignored 的真实语料/在线评测不计通过，B5 仍只是既有缺陷回归。

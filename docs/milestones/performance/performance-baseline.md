@@ -887,3 +887,9 @@ cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_
 Baseline impact 判读：本次是 PR2 后首个 runner 真实项目样本，无前序同口径样本可横比；
 page_logic 两场景 P95 约 8–10 s 为当前最重能力，后续 PR（PR4b 页面局部子图迁移）应以本表
 为基线观察漂移。artifact 在 CNB workspace（临时环境），数字已转写本节。
+
+## 2026-09-21 项目绑定门槛修复
+
+Baseline impact: yes。公开读取与提交增加 marker 校验，已绑定读取不再能使用无绑定入口。
+CNB `cnb-6mg-1k30r3t8e` 只进行了测试及 bench 编译检查，没有真实性能重测。
+session 未启用准备格式；不声称该阶段改善了建图性能或完成了 ownership/B5。
