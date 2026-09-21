@@ -303,7 +303,7 @@ pub fn patch_v2_layout_node_meta(
 }
 
 /// 将 v2 shadow layout 写入已有 write transaction，与 v1 persist 共用单次 commit。
-pub fn write_v2_shadow_tables(
+pub(crate) fn write_v2_shadow_tables(
     write_txn: &redb::WriteTransaction,
     layout: &RedbV2Layout,
 ) -> Result<()> {
@@ -355,8 +355,10 @@ pub fn write_v2_shadow_tables(
 
 /// 将 v2 shadow layout 写入 redb，不改动 v1 表。
 pub fn write_v2_shadow(db_path: &Path, layout: &RedbV2Layout) -> Result<()> {
+    let _lock = crate::graph_redb::acquire_graph_db_lock(db_path)?;
     let db = Database::create(db_path)
         .with_context(|| format!("open redb for v2 shadow write at {:?}", db_path))?;
+    crate::graph_redb::validate_project_access(&db.begin_read()?, None)?;
     let write_txn = db.begin_write()?;
     write_v2_shadow_tables(&write_txn, layout)?;
     write_txn.commit()?;
@@ -369,6 +371,11 @@ pub fn write_v2_shadow(db_path: &Path, layout: &RedbV2Layout) -> Result<()> {
 /// 正常态）与「有 shadow 但版本/fingerprint 不匹配」两类情形；需要区分时应
 /// 先调 [`has_v2_shadow_meta`] 判断 shadow 元数据是否存在。
 pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
+    read_v2_layout_for_project(db_path, None)
+}
+
+/// 内部绑定读取入口；调用方在同一图锁内已校验绑定。
+pub(crate) fn read_v2_layout_for_project(db_path: &Path, binding: Option<&crate::ownership::ProjectBinding>) -> Result<Option<RedbV2Layout>> {
     if !db_path.exists() {
         return Ok(None);
     }
@@ -376,6 +383,7 @@ pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
         .with_context(|| format!("open redb for v2 shadow read at {:?}", db_path))?;
     let read_txn = db.begin_read()?;
     crate::graph_redb::validate_fact_schema(&read_txn)?;
+    crate::graph_redb::validate_project_access(&read_txn, binding)?;
     let meta_table = match read_txn.open_table(V2_META_TABLE) {
         Ok(table) => table,
         Err(_) => return Ok(None),

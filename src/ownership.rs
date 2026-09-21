@@ -9,11 +9,11 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// M59-2 来源贡献 schema 版本。
+/// 项目绑定准备格式版本，不代表来源账本已实现。
 ///
 /// 它与 `fact_schema_version=2` 分离：后者只描述完整事实键，不能表示
 /// 节点定义、引用和来源撤销已经可用。
-pub const OWNERSHIP_SCHEMA_VERSION: u32 = 1;
+pub const PROJECT_BINDING_SCHEMA_VERSION: u32 = 1;
 
 /// 项目绑定的稳定逻辑标识。
 ///

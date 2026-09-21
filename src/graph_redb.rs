@@ -11,7 +11,7 @@ use crate::graph_store::{
 use crate::output::schema::{
     AiOutput, Confidence, Evidence, Location, OutputKind, format_next_query,
 };
-use crate::ownership::{OWNERSHIP_SCHEMA_VERSION, ProjectBinding};
+use crate::ownership::{PROJECT_BINDING_SCHEMA_VERSION, ProjectBinding};
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -39,6 +39,7 @@ const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
 const FACT_SCHEMA_VERSION_KEY: &str = "fact_schema_version";
 const FACT_SCHEMA_VERSION: &[u8] = b"2";
 /// M59-2 归属账本的独立 schema marker。
+const BINDING_SCHEMA_VERSION_KEY: &str = "project_binding_schema_version";
 const OWNERSHIP_SCHEMA_VERSION_KEY: &str = "ownership_schema_version";
 const PROJECT_BINDING_KEY: &str = "project_binding";
 const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
@@ -65,6 +66,36 @@ pub(crate) fn validate_fact_schema(transaction: &redb::ReadTransaction) -> Resul
         "GRAPH_SCHEMA_STALE: rebuild from source into a new --graph-db-path; old facts lack complete evidence"
     );
     Ok(())
+}
+
+/// 读取项目准备状态，缺表只视为尚未初始化，读取故障不得静默放行。
+pub(crate) fn validate_project_access(transaction: &redb::ReadTransaction, binding: Option<&ProjectBinding>) -> Result<()> {
+    let meta = match transaction.open_table(META_TABLE) {
+        Ok(table) => table,
+        Err(redb::TableError::TableDoesNotExist(_)) => return validate_project_markers(None, None, None, binding),
+        Err(error) => return Err(error.into()),
+    };
+    validate_project_markers(
+        meta.get(BINDING_SCHEMA_VERSION_KEY)?.map(|v| v.value()).as_deref(),
+        meta.get(PROJECT_BINDING_KEY)?.map(|v| v.value()).as_deref(),
+        meta.get(OWNERSHIP_SCHEMA_VERSION_KEY)?.map(|v| v.value()).as_deref(),
+        binding,
+    )
+}
+
+/// 所有入口共享状态矩阵；旧实验 ownership marker 没有可证明的账本，必须拒载。
+fn validate_project_markers(version: Option<&[u8]>, project: Option<&[u8]>, ownership: Option<&[u8]>, binding: Option<&ProjectBinding>) -> Result<()> {
+    anyhow::ensure!(ownership.is_none(), "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger is not implemented; rebuild into a new graph path");
+    match (version, project, binding) {
+        (None, None, None) => Ok(()),
+        (Some(version), Some(project), Some(binding)) => {
+            anyhow::ensure!(version == PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes(), "GRAPH_OWNERSHIP_SCHEMA_STALE: incompatible project binding schema");
+            anyhow::ensure!(project == binding.as_str().as_bytes(), "GRAPH_PROJECT_BINDING_MISMATCH: open with the original project binding");
+            Ok(())
+        }
+        (Some(_), Some(_), None) => anyhow::bail!("GRAPH_PROJECT_BINDING_REQUIRED: use a project-bound entry point"),
+        _ => anyhow::bail!("GRAPH_OWNERSHIP_SCHEMA_STALE: incomplete project binding markers"),
+    }
 }
 
 /// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约）。
@@ -181,6 +212,8 @@ pub struct GraphDB {
     pub graph: DiGraph<Node, Edge>,
     pub node_indices: HashMap<String, NodeIndex>,
     pub db_path: String,
+    /// 打开时核验的绑定；提交前必须与磁盘再次匹配。
+    project_binding: Option<ProjectBinding>,
     is_dirty: bool,
     seen_edges: HashSet<crate::graph_store::EdgeFactKey>,
     dirty_nodes: HashSet<String>,
@@ -199,62 +232,59 @@ impl GraphDB {
     /// 打开或创建图数据库
     pub fn open(db_path: &Path) -> Result<Self> {
         let _lock = acquire_graph_db_lock(db_path)?;
-        Self::open_inner(db_path)
+        Self::validate_project_path(db_path, None)?;
+        Self::open_inner(db_path, None)
     }
 
-    /// 按 M59-2 项目绑定打开图数据库。
-    ///
-    /// 普通 `open` 仍服务于低层读写和历史测试；扫描器启用来源账本后必须
-    /// 使用本入口。已有事实库缺少归属 marker 时拒绝加载，不能把旧库静默
-    /// 当成新 schema；只有真正空库允许在一次事务中初始化 marker。
+    /// 打开仅完成项目绑定准备的库；该状态不宣称来源账本已启用。
     pub fn open_for_project(db_path: &Path, binding: &ProjectBinding) -> Result<Self> {
-        let graph = Self::open(db_path)?;
         let _lock = acquire_graph_db_lock(db_path)?;
-        Self::ensure_ownership_schema(db_path, binding)?;
+        Self::ensure_redb_tables(db_path)?;
+        Self::ensure_project_binding(db_path, binding)?;
+        let mut graph = Self::open_inner(db_path, Some(binding))?;
+        graph.project_binding = Some(binding.clone());
         Ok(graph)
     }
 
-    /// 校验或初始化 M59-2 归属 schema 与项目绑定。
-    fn ensure_ownership_schema(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
-        let db = Database::create(db_path)?;
+    /// 只读访问绑定库，不初始化或修补任何 marker。
+    pub fn open_readonly_for_project(db_path: &Path, binding: &ProjectBinding) -> Result<Self> {
+        let _lock = acquire_graph_db_lock(db_path)?;
+        Self::validate_project_path(db_path, Some(binding))?;
+        let mut graph = Self::open_readonly_inner(db_path)?;
+        graph.project_binding = Some(binding.clone());
+        Ok(graph)
+    }
+
+    /// 文件不存在时允许后续新建；存在时严格校验项目状态。
+    fn validate_project_path(db_path: &Path, binding: Option<&ProjectBinding>) -> Result<()> {
+        if db_path.exists() {
+            let db = Database::open(db_path)?;
+            validate_project_access(&db.begin_read()?, binding)?;
+        }
+        Ok(())
+    }
+
+    /// 仅两个准备键都缺失且库为空时初始化，残缺状态绝不补写。
+    fn ensure_project_binding(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
+        let db = Database::open(db_path)?;
         let write_txn = db.begin_write()?;
         {
             let mut meta = write_txn.open_table(META_TABLE)?;
-            let ownership_version = meta
-                .get(OWNERSHIP_SCHEMA_VERSION_KEY)?
-                .map(|value| value.value());
-            let project_binding = meta.get(PROJECT_BINDING_KEY)?.map(|value| value.value());
-            let populated = !write_txn.open_table(NODES_TABLE)?.is_empty()?
-                || !write_txn.open_table(EDGES_TABLE)?.is_empty()?
-                || !write_txn.open_table(FILE_STATES_TABLE)?.is_empty()?
-                || meta.get(META_DIFF_REFRESH_CHECKPOINT_KEY)?.is_some()
-                || !write_txn
-                    .open_table(SCANNER_DIAGNOSTICS_TABLE)?
-                    .is_empty()?
-                || write_txn
-                    .list_tables()?
-                    .any(|table| table.name().starts_with("v2_"));
-
-            if ownership_version.is_none() || project_binding.is_none() {
-                anyhow::ensure!(
-                    !populated,
-                    "GRAPH_OWNERSHIP_SCHEMA_STALE: rebuild from source into a new --graph-db-path"
-                );
-                meta.insert(
-                    OWNERSHIP_SCHEMA_VERSION_KEY,
-                    OWNERSHIP_SCHEMA_VERSION.to_string().into_bytes(),
-                )?;
+            let version = meta.get(BINDING_SCHEMA_VERSION_KEY)?.map(|value| value.value());
+            let project = meta.get(PROJECT_BINDING_KEY)?.map(|value| value.value());
+            let ownership = meta.get(OWNERSHIP_SCHEMA_VERSION_KEY)?.map(|value| value.value());
+            if version.is_none() && project.is_none() && ownership.is_none() {
+                let populated = !write_txn.open_table(NODES_TABLE)?.is_empty()?
+                    || !write_txn.open_table(EDGES_TABLE)?.is_empty()?
+                    || !write_txn.open_table(FILE_STATES_TABLE)?.is_empty()?
+                    || meta.get(META_DIFF_REFRESH_CHECKPOINT_KEY)?.is_some()
+                    || !write_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?.is_empty()?
+                    || write_txn.list_tables()?.any(|table| table.name().starts_with("v2_"));
+                anyhow::ensure!(!populated, "GRAPH_OWNERSHIP_SCHEMA_STALE: rebuild from source into a new --graph-db-path");
+                meta.insert(BINDING_SCHEMA_VERSION_KEY, PROJECT_BINDING_SCHEMA_VERSION.to_string().into_bytes())?;
                 meta.insert(PROJECT_BINDING_KEY, binding.as_str().as_bytes().to_vec())?;
             } else {
-                anyhow::ensure!(
-                    ownership_version.as_deref()
-                        == Some(OWNERSHIP_SCHEMA_VERSION.to_string().as_bytes()),
-                    "GRAPH_OWNERSHIP_SCHEMA_STALE: rebuild from source into a new --graph-db-path"
-                );
-                anyhow::ensure!(
-                    project_binding.as_deref() == Some(binding.as_str().as_bytes()),
-                    "GRAPH_PROJECT_BINDING_MISMATCH: open the graph with its original project binding"
-                );
+                validate_project_markers(version.as_deref(), project.as_deref(), ownership.as_deref(), Some(binding))?;
             }
         }
         write_txn.commit()?;
@@ -276,6 +306,7 @@ impl GraphDB {
             graph,
             node_indices,
             db_path,
+            project_binding: None,
             is_dirty: false,
             seen_edges,
             dirty_nodes: HashSet::new(),
@@ -286,7 +317,7 @@ impl GraphDB {
         }
     }
 
-    fn open_inner(db_path: &Path) -> Result<Self> {
+    fn open_inner(db_path: &Path, binding: Option<&ProjectBinding>) -> Result<Self> {
         Self::ensure_redb_tables(db_path)?;
 
         // M56：先查 v2 shadow 状态。Stale 时跳过 v2，从增量更新后的 v1 hydrate，
@@ -306,7 +337,7 @@ impl GraphDB {
         //   fingerprint 不匹配）才计 unreadable；从未写过 v2 shadow 的
         //   v1-only 遗留库/新建库属正常态，不计诊断。
         // 与后续 v1 hydrate 的细粒度计数并行记录（不折叠）。
-        let v2_layout_probe = crate::graph_redb_v2::read_v2_layout(db_path);
+        let v2_layout_probe = crate::graph_redb_v2::read_v2_layout_for_project(db_path, binding);
         let v2_layout_unreadable = match &v2_layout_probe {
             Ok(Some(_)) => false,
             Ok(None) => crate::graph_redb_v2::has_v2_shadow_meta(db_path)?,
@@ -466,6 +497,7 @@ impl GraphDB {
             graph,
             node_indices,
             db_path: db_path.to_string_lossy().to_string(),
+            project_binding: None,
             is_dirty: false,
             seen_edges,
             dirty_nodes: HashSet::new(),
@@ -563,6 +595,18 @@ impl GraphDB {
         match db_result {
             Ok(db) => {
                 let read_txn = db.begin_read();
+                if let Ok(transaction) = &read_txn {
+                    if let Err(error) = validate_project_access(transaction, None) {
+                        let message = error.to_string();
+                        let code = message.split(':').next().unwrap_or("GRAPH_OWNERSHIP_SCHEMA_STALE");
+                        out.summary["readable"] = serde_json::json!(false);
+                        out.summary["needs_rebuild"] = serde_json::json!(code == "GRAPH_OWNERSHIP_SCHEMA_STALE");
+                        out.diagnostics.push(crate::diagnostics::envelope_diagnostic(
+                            code, 1, Location { source_file: Some(db_path.to_string_lossy().to_string()), node_id: None, json_path: None }, message.clone(),
+                        ));
+                        return out;
+                    }
+                }
                 let schema_current = read_txn
                     .as_ref()
                     .ok()
@@ -829,6 +873,7 @@ impl GraphDB {
     /// 以只读模式打开图数据库（不创建表，不持有写锁）
     pub fn open_readonly(db_path: &Path) -> Result<Self> {
         let _lock = acquire_graph_db_lock(db_path)?;
+        Self::validate_project_path(db_path, None)?;
         Self::open_readonly_inner(db_path)
     }
 
@@ -940,6 +985,7 @@ impl GraphDB {
             graph,
             node_indices,
             db_path: db_path.to_string_lossy().to_string(),
+            project_binding: None,
             is_dirty: false,
             seen_edges,
             dirty_nodes: HashSet::new(),
@@ -1084,7 +1130,7 @@ impl GraphDB {
             && !graph.dirty_nodes.is_empty()
             && graph.dirty_nodes.len() <= INCREMENTAL_V2_MAX_DIRTY;
         if can_try_incremental {
-            if let Ok(Some(mut existing)) = crate::graph_redb_v2::read_v2_layout(db_path) {
+            if let Ok(Some(mut existing)) = crate::graph_redb_v2::read_v2_layout_for_project(db_path, graph.project_binding.as_ref()) {
                 let dirty_subset_of_v2 = graph.dirty_nodes.iter().all(|node_id| {
                     existing
                         .node_ids
@@ -1158,6 +1204,8 @@ impl GraphDB {
         // 防止并发 CLI/--build-graph 在 mutate→persist 间隙写入不一致边集
         let _lock = acquire_graph_db_lock(std::path::Path::new(&self.db_path))?;
 
+        Self::validate_project_path(std::path::Path::new(&self.db_path), self.project_binding.as_ref())?;
+
         // 空提交判断须计入 scanner 诊断载荷：仅携带 scanner 诊断变更的提交
         // （图与 checkpoint 均无变化）也必须落库
         if !self.is_dirty
@@ -1212,6 +1260,12 @@ impl GraphDB {
         let write_txn = db.begin_write()?;
         {
             let meta = write_txn.open_table(META_TABLE)?;
+            validate_project_markers(
+                meta.get(BINDING_SCHEMA_VERSION_KEY)?.map(|v| v.value()).as_deref(),
+                meta.get(PROJECT_BINDING_KEY)?.map(|v| v.value()).as_deref(),
+                meta.get(OWNERSHIP_SCHEMA_VERSION_KEY)?.map(|v| v.value()).as_deref(),
+                self.project_binding.as_ref(),
+            )?;
             let version = meta
                 .get(FACT_SCHEMA_VERSION_KEY)?
                 .map(|value| value.value());
