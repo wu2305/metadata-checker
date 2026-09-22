@@ -19,7 +19,10 @@ pub const SESSION_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// `indexed_hash` 区分这两件事：它只在文件**成功解析并入图**后才更新。
 /// `[`RemoteSessionFile::needs_index_retry`]` 是判断是否重投的权威入口。
 /// 旧 manifest 没有这个字段，`#[serde(default)]` 让它反序列化为 `None`——
-/// 首次升级时按「已索引」处理（保留旧行为），之后随成功入图逐步收敛。
+/// 首次升级判定为需重投：下一轮 bootstrap 把已拉取的活动文件全量重投一次
+/// （宁多重投一轮，不静默丢失败文件），prepare 后由调用方推进
+/// `indexed_hash`，一轮内收敛，之后不再重投。已有 checkpoint 的升级不
+/// 触发额外重投，失败文件仍由既有水位重投机制覆盖。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RemoteSessionFile {
     pub source_path: String,

@@ -29,7 +29,8 @@
 //! 消解 `.` 与 `..`、越界报错。M59-2 起扫描写入已按 schema 开关接入本模块：
 //! 仅来源账本路径（`PageIdentityMode::OwnershipPageLocal`）写入页面局部 id，
 //! 旧 schema（`LegacyGlobal`）保持全局编码，不混写。查询侧旧 target 解析
-//! [`resolve_node_target`] 已就绪但**尚无生产调用方**（接线为独立后续任务）。
+//! [`resolve_node_target`] 自 M59-2 起由 `query::resolve_legacy_model_target`
+//! 接入生产查询链路（`src/query/model.rs` 的 query_model/explain 入口）。
 
 use crate::graph::NodeType;
 use crate::graph_store::{GraphReadStore, GraphStoreResult};
