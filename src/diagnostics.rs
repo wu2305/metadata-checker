@@ -113,7 +113,13 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         | "GRAPH_OWNERSHIP_SCHEMA_STALE"
         | "GRAPH_PROJECT_BINDING_REQUIRED"
         | "GRAPH_PROJECT_BINDING_MISMATCH"
-        | "TARGET_NOT_FOUND" => DiagnosticSeverity::Error,
+        | "TARGET_NOT_FOUND"
+        // M59-2 A1：裸旧 target 匹配到多个节点。与 TARGET_NOT_FOUND 同属
+        // 「寻址失败、查询无法完成」一类：两者都让调用方拿不到答案，只是前者
+        // 交回多个候选而后者交回近似候选。answer_effect 也把两者并列登记为
+        // Addressing（answer_effect.rs:140-147），severity 不应一 Error 一默认
+        // Warning——否则同一类失败在 diagnostics 里显得一个更严重。
+        | "AMBIGUOUS_TARGET" => DiagnosticSeverity::Error,
 
         // ---- Info：按设计发生或纯提示 ----
         // redb 只读回退是可操作状态，不阻断查询

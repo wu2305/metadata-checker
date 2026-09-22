@@ -22,6 +22,9 @@ fn severity_error_for_unavailable_target_or_db() {
         "GRAPH_DB_PERMISSION_DENIED",
         "GRAPH_DB_OPEN_ERROR",
         "TARGET_NOT_FOUND",
+        // M59-2 A1：与 TARGET_NOT_FOUND 同属「寻址失败、查询无法完成」——
+        // 都是拿不到答案、必须换写法重试；severity 不该一 Error 一默认 Warning。
+        "AMBIGUOUS_TARGET",
     ] {
         assert_eq!(
             severity_for(code),

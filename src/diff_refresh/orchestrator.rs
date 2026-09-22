@@ -13,7 +13,7 @@
 //! - 失败语义：mirror/prepare/commit 任一失败直接返回 Err，checkpoint 不推进、
 //!   旧 runtime 保持可用；re-warm 是 best-effort，失败只记入 `warm_failures`。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -142,7 +142,7 @@ pub struct DiffRefreshOrchestrator {
     /// manifest 的 `indexed_hash`。放在这里而不是立刻写 manifest，是因为
     /// 「prepare 成功」与「图已落库」之间还有 persist 这一步：提前写会让
     /// 失败/重启后的文件被真实 bootstrap 判 unchanged 而永久跳过。
-    pending_indexed_paths: Vec<String>,
+    pending_indexed_paths: HashSet<String>,
     pending_rounds: usize,
     warm_fn: WarmFn,
     persist_fn: PersistFn,
@@ -213,7 +213,7 @@ impl DiffRefreshOrchestrator {
             pending_commit: None,
             pending_scanner_entries: Vec::new(),
             pending_scanner_deleted_paths: Vec::new(),
-            pending_indexed_paths: Vec::new(),
+            pending_indexed_paths: HashSet::new(),
             pending_rounds: 0,
             warm_fn: Box::new(|runtime, targets| runtime.warm_page_logic_batch(targets)),
             persist_fn: Box::new(|graph, commit| graph.persist_commit(commit)),
@@ -512,14 +512,18 @@ impl DiffRefreshOrchestrator {
             timing.commit_ms = stage.elapsed().as_millis();
             persisted = true;
             persist_report = Some(report);
-            // M59-2 B：durable 已落库，此刻才把本轮成功解析的文件记为「已索引」。
-            // 顺序不能提前到 persist 之前：那样 manifest 会声称一个只存在于内存
-            // 候选图里的内容已入图，失败/重启后该文件永久不再重试。
-            self.commit_indexed_hashes()?;
             stage = Instant::now();
             self.runtime.install_replacement(candidate, replacement);
             timing.swap_ms = stage.elapsed().as_millis();
             self.clear_pending_state();
+            // M59-2 B：durable 已落库，此刻才把本轮成功解析的文件记为「已索引」。
+            // 顺序不能提前到 persist 之前：那样 manifest 会声称一个只存在于内存
+            // 候选图里的内容已入图，失败/重启后该文件永久不再重试。
+            //
+            // 放在 install/clear 之后：manifest 是「已索引到哪」的缓存，durable 图
+            // 才是事实来源。写 manifest 失败时本进程的 runtime 与 durable 必须已经
+            // 一致，否则会把一次**已经成功**的提交留在半途（旧图配新 checkpoint）。
+            self.commit_indexed_hashes()?;
             // M58.3 PR2：durable 已含本轮诊断，刷新 live 缓存使 status/query 立即反映
             self.refresh_live_scanner_diagnostics();
         } else {
@@ -698,32 +702,27 @@ impl DiffRefreshOrchestrator {
     /// 只登记**逻辑路径**，不在这里写 manifest：此刻内容仅在内存候选图里，
     /// 落库结果未知。真正写 `indexed_hash` 的是 [`Self::commit_indexed_hashes`]。
     fn stage_indexed_paths(&mut self, parse_failures: &[crate::scanner::indexer::ParseFailure]) {
+        let failed_paths: HashSet<&str> = parse_failures
+            .iter()
+            .map(|failure| failure.logical_path.as_str())
+            .collect();
         // 本轮解析失败的路径必须**撤下**登记：deferred 模式下它们可能是上一轮
         // 成功登记过的，而 manifest 里的 `hash` 已经指向本轮这份解析不出来的
         // 新内容。留着会让 `commit_indexed_hashes` 把未入图的内容标成已索引。
-        self.pending_indexed_paths.retain(|path| {
-            !parse_failures
-                .iter()
-                .any(|failure| failure.logical_path == *path)
-        });
+        self.pending_indexed_paths
+            .retain(|path| !failed_paths.contains(path.as_str()));
 
-        let staged: Vec<String> = self
-            .manifest
-            .files
-            .iter()
-            .filter(|file| !file.deleted && file.hash.is_some())
-            .filter(|file| {
-                !parse_failures
-                    .iter()
-                    .any(|failure| failure.logical_path == file.source_path)
-            })
-            .map(|file| file.source_path.clone())
-            .collect();
-        for path in staged {
-            if !self.pending_indexed_paths.contains(&path) {
-                self.pending_indexed_paths.push(path);
+        let mut staged: HashSet<String> = self.pending_indexed_paths.iter().cloned().collect();
+        for file in &self.manifest.files {
+            if file.deleted || file.hash.is_none() {
+                continue;
             }
+            if failed_paths.contains(file.source_path.as_str()) {
+                continue;
+            }
+            staged.insert(file.source_path.clone());
         }
+        self.pending_indexed_paths = staged;
     }
 
     /// 把已登记文件的镜像 hash 记为「已索引」并落盘。
