@@ -599,7 +599,7 @@ fn sync_persist_failure_keeps_file_retryable_until_durable() {
         &good_table(&["order_id", "amount", "customer"]),
     );
     let mut orchestrator = build_orchestrator(
-        manager,
+        manager.clone(),
         &session_dir,
         manifest,
         transport,
@@ -677,7 +677,7 @@ fn sync_persist_failure_keeps_file_retryable_until_durable() {
 #[test]
 fn deferred_restart_before_persist_keeps_file_retryable() {
     let root = test_root("deferred-restart-retry");
-    let (manager, session_dir, manifest, db_path, binding) = setup_bootstrap_session_in(
+    let (manager, session_dir, _manifest, db_path, binding) = setup_bootstrap_session_in(
         &root,
         &good_table(&["order_id", "amount"]),
     );
