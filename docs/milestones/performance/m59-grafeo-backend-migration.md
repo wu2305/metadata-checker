@@ -383,3 +383,134 @@ P2 处置：崩溃窗口、`severity_for` 未显式登记 `AMBIGUOUS_TARGET`、�
 - 旧 target 裸名解析覆盖 `model:` / `field:` 两类；`cond`/`comp`/`action`/`param`
   文法恒为 scoped，裸名解析对它们未定义（返回 Missing），与 A1 文法一致；
 - 性能边界保持「增量解析、整图重建、全量持久化」，本轮**不宣称性能改善**。
+
+## 2026-09-22 对抗性复验：两 P1 修复的残余缺口（`fac4747` → `a6545cf`）
+
+上一节的修复方向正确，但本轮对 `190814b` / `4f45a93` 做对抗性审查（不信任既有绿灯、
+逐条找反例）时发现两条 P1 各自还剩一个**同类**缺口：修复把「已索引」的判据推进了
+一步，却都停在「还差最后一步」的位置。两处均先补独立失败反例、再修根因。
+
+### 残余 P1-1：`indexed_hash` 只证明 prepare，不证明 durable
+
+根因：`advance_indexed_hashes` 在 `orchestrator.rs:472` 于 **durable persist
+之前**（`484+`）执行并写 manifest。于是 `indexed_hash` 的语义实际是「内存候选图
+prepare 成功」，而不是「图已成功索引」——两个状态之间还隔着 persist。
+
+- Synchronous/one-shot（`main.rs:1622` 的生产模式）：persist 失败 ⇒ `refresh_once`
+  返回 `Err`，但 manifest 已把该文件记为已索引。下一轮 durable 无 checkpoint ⇒
+  bootstrap ⇒ 源判 unchanged ⇒ `change_count == 0` ⇒ 空 ChangeSet 分支写下
+  bootstrap 水位 ⇒ **文件从未进入 durable 图，水位却推过了它**。
+- Deferred：`install_replacement` 只换内存图，落盘等 pending 阈值；此间重启丢掉
+  pending，manifest 已称已索引 ⇒ 同一条永久丢失路径。
+
+反例（`3d4069c`，修复前 2 FAILED / 4 passed）：
+- `sync_persist_failure_keeps_file_retryable_until_durable`
+  → `持久化失败的文件不得被记为已索引：hash=Some("c3be970033a1fee5") indexed_hash=Some("c3be970033a1fee5")`
+- `deferred_restart_before_persist_keeps_file_retryable`
+  → `重启后未 durable 的文件必须重投（实际 0）`
+
+修复（`37c5a61`）拆成两阶段，三处落库点全部接线（同步 persist、延迟
+`persist_pending`、空 ChangeSet 轮的 pending 落库）：
+- `stage_indexed_paths`（prepare 后）：只登记**逻辑路径**到
+  `pending_indexed_paths`，不写 manifest；本轮解析失败的路径从登记中**撤下**
+  （deferred 下可能是上一轮登记的，而 `manifest.hash` 已指向新内容）。
+- `commit_indexed_hashes`（durable 落库成功后）：把已登记路径的 `indexed_hash`
+  推进为当前镜像 hash 并写 manifest。
+
+空 ChangeSet 分支的注释从「前提声明」改为可证不变式：空 Changeset 要求全部
+active 文件被判 unchanged，而 `needs_index_retry()` 为真的文件必被判 changed，
+因此该分支写下的 bootstrap 水位不可能越过未入图文件。
+
+修复后：`m59_2_bootstrap_retry_tests` 6/6；连带回归
+`m59_2_refresh_checkpoint_tests` 8/8、`m59_2_identity_and_refresh_tests` 7/7、
+`m54_diff_refresh_orchestrator_tests` 12/12、`m54_diff_refresh_fixture_tests` 4/4、
+`m55_meta_files_source_tests` 15/15、`m55_bi_real_fixture_tests` 5/5、
+`m58_3_pr2_diff_refresh_scanner_persistence_tests` 5/5、
+`m59_b3_tbl_parse_failure_tests` 5/5、`m59_b5_full_vs_incremental_diff_tests` 10/10。
+
+### 残余 P1-2：`--explain` 的两条补充调用仍绕过解析
+
+根因：`resolve_legacy_model_target` 只接到 `build_query_model_output` /
+`query_model(human)` / `build_explain_output`，但生产 `--explain` 在
+`route.rs:120-133` 展开成**三条**调用：
+
+```
+Explain（主）+ ExplainCondition（补充 condition_facts）
+            +（显式 --depth 时）Context（补充 neighbor_context）
+```
+
+后两条仍做精确 `get_node`（`explain.rs:531`、`context.rs:164`）。页面局部身份
+启用后，裸 `field:`/`model:` 在这里报 `TARGET_NOT_FOUND`，而 supplement 的
+`required=false` 让整条命令照样「成功」——主调用有答案，条件成因与邻居闭包
+**静默缺失**，且没有任何可见失败信号。这比原 P1 更隐蔽：原 P1 是整条命令失败，
+这里是半条命令静默变空。
+
+反例（`c26334f`，修复前 3 FAILED / 6 passed）：
+- `explain_condition_supplement_resolves_bare_legacy_target`
+  → `["TARGET_NOT_FOUND", "EVIDENCE_INCOMPLETE"]`
+- `context_supplement_resolves_bare_legacy_target`
+  → `["TARGET_NOT_FOUND", "EVIDENCE_INCOMPLETE"]`
+- `explain_condition_supplement_reports_ambiguity`
+  → `["TARGET_NOT_FOUND", "EVIDENCE_INCOMPLETE"]`
+
+修复（`64159b8`）：两处入口前置同一套 `resolve_legacy_model_target`；唯一局部
+命中改用真实 id 并如实回报 `query_target`，多候选返回全部候选 +
+`AMBIGUOUS_TARGET` + 可执行 `next_queries`，无候选维持 `TARGET_NOT_FOUND`。
+歧义响应仍走统一信封诊断，经 runtime 的 `load_diagnostics` / answer effect
+合并（`AMBIGUOUS_TARGET` 登记为 Addressing，不降 confidence level）。
+
+修复后：`m59_2_target_resolution_tests` 9/9（新增 3 条）。
+
+### 独立只读复核（forensics，冷脸，`50946ad..64159b8`）
+
+复核确认两条修复主结论**成立**，并逐条验证了本轮关心的反例路径：
+- 「本轮成功登记 → 下一轮同文件变更且解析失败」确实被撤下（`retain` 在 staging
+  之前执行，且镜像内容变更必然变脏并被重新解析 ⇒ 失败必然进 `parse_failures`）；
+- 空 ChangeSet 分支未接线 `commit_indexed_hashes` 是**语义空操作**（该分支可达
+  要求全部文件 `hash == indexed_hash`，写入值相同）；
+- 未发现 P0。
+
+给出 5 项 P2，本轮处理 3 项（`a6545cf`）：
+- **P2-1**：manifest 写失败会中断一次**已经成功**的提交（persist 成功但
+  `commit_indexed_hashes` 的 `?` 先于 `install_replacement`/`clear_pending_state`
+  传播，tick 循环判其不可重试直接返回 Err，本进程留下旧图配新 checkpoint）。
+  改为先 install/clear 再写 manifest：manifest 是「已索引到哪」的缓存，durable
+  才是事实来源；失败时磁盘 manifest 保持保守（`indexed_hash != hash` ⇒ 下次启动
+  重投，只多解析一次）。
+- **P2-3**：`pending_indexed_paths` 由 `Vec` 改 `HashSet`，撤下/合并/求值由
+  O(n·m) 降为 O(n+m)，行为不变。
+- **P2-4**：`AMBIGUOUS_TARGET` 此前落默认 Warning 档，而同属寻址失败的
+  `TARGET_NOT_FOUND` 显式 Error、`answer_effect` 把两者并列登记为 Addressing。
+  M59-2 A1 让命令层成为该 code 的首个信封构造方，不一致第一次可观测；登记为
+  Error 并在 `m58_3_pr1_severity_tests` 钉住。
+
+**未采纳 2 项，理由如下（含一项方向性纠错）**：
+- P2-5「staging 应过滤非 spg/tbl 扩展名」——**方向错误，不采纳**。非 spg/tbl
+  文件永远不会被 scanner 入图；若把它们排除出 staging，`needs_index_retry()`
+  将**永久为真**，每一轮 bootstrap 都重投同一批文件，造成无限重投，比被指出的
+  问题更严重。生产 BI 源已在 `bi_meta_files_source.rs:399` 过滤不可分析文件，
+  precondition 不可达；仅 fixture 源可达，而修法会造成重投循环。保持现状。
+- P2-2 `OutputKind::Context` 缺 `find_cmd` 分支（落到 `--find-page` 兜底）：
+  `git show 64159b8^:src/context.rs` 证实改动前该路径已用同一兜底，属既有行为、
+  非本次引入；不在本包扩大修复范围，记入下方边界。
+
+### 验证环境与 SHA
+
+- 环境：CNB 云原生工作区 `cnb-gf8-1k3515v0e`（分支 `codex/m59-2-ownership`，
+  rustc 1.95.0 / cargo 1.95.0，与 CI 镜像同版本工具链），SSH 远程执行；
+  **不在维护者本机跑 cargo**。
+- 反例与修复均逐 SHA 检出验证：FAIL 证据取自 `50946ad` / `c26334f`（仅测试），
+  PASS 证据取自 `37c5a61` / `64159b8`（含修复）。
+- 工作区 `cnb-pm8-1k33o0ipu`（上一轮 reviewer）已不存在（`get-workspace-detail`
+  返回 404），其 `/tmp/m59-review-2aa5f5a` 反例不可复用；本轮新建工作区重做。
+
+### 本轮新增/更新的未关闭边界
+
+- `--context` 的 `TARGET_NOT_FOUND` 兜底仍给 `--find-page` 建议（对 `model:`
+  target 不可执行）——既有行为，follow-up；
+- 裸 `--explain` 一次调用会对同一 target 做 3 次（`--depth` 时）整图
+  `iter_nodes` 扫描（`Explain` + `ExplainCondition` + `Context`），结果在同一次
+  不可变图上相同、可缓存，本轮未做（性能边界不变）；
+- 新增回归仍经 `RuntimeQueryRequest` 直达，**未覆盖** `main.rs` 的
+  `merge_supplement` / `attach_confidence` 合并路径（该层由既有
+  `m58_3_command_surface` CLI 子套件佐证）。

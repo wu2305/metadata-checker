@@ -174,15 +174,30 @@ cargo test --features cli-local --test core_feature_tests
 - kind 隔离由解析器保证：裸 `field:` 只匹配 Field 节点，裸 `model:` 只匹配 Model
   节点，跨 kind 同名返回 Missing；`cond`/`comp`/`action`/`param` 文法恒为 scoped，
   裸名解析对它们未定义；
-- **三条入口共用同一套解析**：`build_query_model_output`（runtime/runtime 工具）、
-  `query_model`（human 分支，纵深防御——CLI human 模式实际落 `HUMAN_MODE_NOT_SUPPORTED`）、
-  `build_explain_output`（`field:` 的生产入口）。stdio 经 `GraphRuntime::query` 汇合，
-  因此与 CLI 一致；**新增裸名查询入口必须调用同一 resolver，不要直接 `get_node`**——
-  否则会退回「静默命中物理模型」的旧行为；
+- **五条入口共用同一套解析**（2026-09-22 复验补全后）：
+  - `build_query_model_output`（runtime / runtime 工具）
+  - `query_model`（human 分支，纵深防御——CLI human 模式实际落 `HUMAN_MODE_NOT_SUPPORTED`）
+  - `build_explain_output`（`field:` 的生产入口）
+  - `build_explain_condition_output_with_intent_and_retrieval`（`src/explain.rs`）
+  - `build_context_output`（`src/context.rs`）
+
+  stdio 经 `GraphRuntime::query` 汇合，因此与 CLI 一致；**新增裸名查询入口必须调用同一
+  resolver，不要直接 `get_node`**——否则会退回「静默命中物理模型」的旧行为。
+
+  后两条是复验补上的：`--explain` 在 `route.rs:120-133` 展开成
+  `Explain`（主）+ `ExplainCondition`（补充 `condition_facts`）+（显式 `--depth` 时）
+  `Context`（补充 `neighbor_context`）。只接线 `build_explain_output` 时，后两条仍做
+  精确 `get_node`，裸 `field:`/`model:` 会报 `TARGET_NOT_FOUND`；而 supplement 的
+  `required=false` 让整条命令照样「成功」——**主调用有答案、条件成因与邻居闭包静默
+  缺失，且无任何可见失败信号**。这比整条命令失败更隐蔽，改动 `route_explain` 的展开
+  列表时必须同步检查每条展开调用是否都已接线。
 - CLI 路由层（`run_surface` → `normalize_target_against_graph`）先于 resolver 生效：
   精确 id 存在时判 `Exact` 直通（物理同名的歧义由 resolver 报出）；唯一局部命中多在
   路由层就 `Resolved`；≤3 候选的歧义由 `answer_ambiguous_target` 逐候选作答
   （`AMBIGUOUS_TARGET_ANSWERED`）。两种 code 均已在 `answer_effect` 登记。
+- `AMBIGUOUS_TARGET` 的 severity 在 `severity_for`（`src/diagnostics.rs`）显式登记为
+  `Error`，与同属寻址失败的 `TARGET_NOT_FOUND` 一致；未登记时会落默认 `Warning` 档，
+  导致同一类失败在 diagnostics 里显得一轻一重。
 
 ## 2. 已批准计划（尚未实现）
 

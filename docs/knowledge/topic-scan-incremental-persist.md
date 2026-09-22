@@ -176,8 +176,23 @@ checkpoint，失败文件从未入图。
 - `BiMetaFilesChangeSource::bootstrap` 与 `FixtureMetaFilesChangeSource::bootstrap`
   的 `unchanged` 判定都含 `!entry.needs_index_retry()`；poll 路径不走该判定，
   失败重投由 checkpoint 水位机制覆盖；
-- `DiffRefreshOrchestrator` 在 prepare 之后按本轮**成功解析**的文件推进
-  `indexed_hash` 并写回 manifest（`advance_indexed_hashes`），解析失败的文件保持失配；
+- `DiffRefreshOrchestrator` 分两阶段推进 `indexed_hash`（2026-09-22 复验修正：
+  只有 durable 落库成功后才写 manifest）：
+  - `stage_indexed_paths`（prepare 之后）：只把本轮**成功解析**的源文件逻辑路径
+    登记进 `pending_indexed_paths`，**不写 manifest**；本轮解析失败的路径从登记中
+    撤下（deferred 下可能是上一轮登记的，而 `manifest.hash` 已指向新内容）；
+  - `commit_indexed_hashes`（durable 落库成功之后）：才把登记路径的 `indexed_hash`
+    推进为当前镜像 hash 并写 manifest。三处落库点全部接线：同步 persist、
+    延迟 `persist_pending`、空 ChangeSet 轮的 pending 落库。
+
+  **为什么必须等落库**：prepare 只把内容放进**内存候选图**。若在 prepare 后就写
+  `indexed_hash`，则持久化失败（Synchronous/one-shot，`main.rs:1622` 的生产模式）
+  或未落盘即重启（Deferred）都会让 manifest 声称「已索引」而 durable 图里没有——
+  下一轮 bootstrap 判 unchanged ⇒ 空 ChangeSet ⇒ 推水位 ⇒ 文件永久丢失。这与
+  本节开头描述的原始缺陷是**同一个**失败形态，只是判据又前进了一步。
+- 空 ChangeSet 分支写 bootstrap 水位的前提是可证的：空 Changeset 要求全部 active
+  文件被判 unchanged，而 `needs_index_retry()` 为真的文件必被判 changed，因此该
+  水位不可能越过未入图文件；
 - 旧 manifest 没有 `indexed_hash`，`#[serde(default)]` 反序列化为 `None` ⇒
   **无 checkpoint 时下一轮 bootstrap 全量重投一次**（宁多重投一轮，不静默丢失败
   文件），prepare 后一轮内收敛，之后不再重投；已有 checkpoint 的升级不触发额外
@@ -185,7 +200,8 @@ checkpoint，失败文件从未入图。
   重解析），无每轮退化。
 
 **改动时**：新增「是否重投」类逻辑必须用 `needs_index_retry()`，不要直接用
-`revision` 比较——revision 只描述镜像侧，不描述图侧。
+`revision` 比较——revision 只描述镜像侧，不描述图侧；推进 `indexed_hash` 只能挂在
+durable 落库成功之后，不得挂在 prepare 之后。
 
 ### 1.7 改动时跑哪些测试
 
