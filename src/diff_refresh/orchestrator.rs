@@ -135,6 +135,14 @@ pub struct DiffRefreshOrchestrator {
     pending_scanner_entries: Vec<(String, Vec<u8>)>,
     /// M58.3 PR2：deferred 模式跨轮累积的删除文件路径（落库时移除其诊断 entry）
     pending_scanner_deleted_paths: Vec<String>,
+    /// M59-2 B：本轮（及 deferred 跨轮累积）已成功 prepare、但尚未 durable
+    /// 落库的源文件逻辑路径。
+    ///
+    /// 只有 durable 落库成功后才由 [`Self::commit_indexed_hashes`] 转写成
+    /// manifest 的 `indexed_hash`。放在这里而不是立刻写 manifest，是因为
+    /// 「prepare 成功」与「图已落库」之间还有 persist 这一步：提前写会让
+    /// 失败/重启后的文件被真实 bootstrap 判 unchanged 而永久跳过。
+    pending_indexed_paths: Vec<String>,
     pending_rounds: usize,
     warm_fn: WarmFn,
     persist_fn: PersistFn,
@@ -205,6 +213,7 @@ impl DiffRefreshOrchestrator {
             pending_commit: None,
             pending_scanner_entries: Vec::new(),
             pending_scanner_deleted_paths: Vec::new(),
+            pending_indexed_paths: Vec::new(),
             pending_rounds: 0,
             warm_fn: Box::new(|runtime, targets| runtime.warm_page_logic_batch(targets)),
             persist_fn: Box::new(|graph, commit| graph.persist_commit(commit)),
@@ -303,6 +312,9 @@ impl DiffRefreshOrchestrator {
                         .persist_pending()
                         .context("persist pending graph and checkpoint")?;
                     timing.commit_ms = stage.elapsed().as_millis();
+                    // M59-2 B：pending 已落库，登记此前 deferred 轮成功 prepare 的
+                    // 文件为「已索引」——空 ChangeSet 轮同样可能触发 pending 落库。
+                    self.commit_indexed_hashes()?;
                     return Ok(Self::new_machine_report(
                         0,
                         Vec::new(),
@@ -336,11 +348,12 @@ impl DiffRefreshOrchestrator {
 
             // 首次 bootstrap 后空结果：持久化 checkpoint-only commit，
             // 使下一轮走 poll 而非重新 bootstrap；已有 checkpoint 的空 poll 不写盘。
-            // 前提声明（M59-2 复验 P2）：若此前存在 bootstrap 失败轮留下的未提交
-            // pending_commit，而远端此刻返回空 bootstrap，这里落 checkpoint-only
-            // 提交不会推进那份 pending——失败文件的重试退化为下一轮 prepare 的
-            // hash-dirty 重检（mirror 内容 vs durable hash 失配即重解析，最终收敛；
-            // 删除类变更等下一事件）。远端在失败期间清空全部文件才可能走到。
+            //
+            // M59-2 B 不变式：走到这里 ⇒ 没有任何「镜像已获取但图未索引」的文件。
+            // 空 ChangeSet 要求全部 active 文件都被判 unchanged，而
+            // `needs_index_retry()` 为真的文件（解析失败、或 deferred 轮已 prepare
+            // 但未落库）恰恰会被判 changed 并重新投递。因此这里写下的 bootstrap
+            // 水位不可能越过一个尚未入图的文件——这条水位只描述「这批快照已消化」。
             let (checkpoint, persist_report, persisted, pending_dirty_total) =
                 if let Some(checkpoint) = current_checkpoint {
                     (Some(checkpoint), None, false, 0)
@@ -463,16 +476,15 @@ impl DiffRefreshOrchestrator {
         } else {
             Some(next_checkpoint.clone())
         };
-        // M59-2 B：把「图已成功索引到哪个内容」写回 manifest。
+        // M59-2 B：本轮成功 prepare 的文件先登记为「待确认已索引」。
         //
-        // 只更新本轮**成功解析**的文件：解析失败的文件保持 `indexed_hash` 与
-        // 镜像 `hash` 失配，下一轮 bootstrap 据此重投重试（`needs_index_retry`）。
-        // 没有这一步，manifest 的 revision/hash 只反映「镜像已获取」，失败事件
-        // 会被永久消费。
-        self.advance_indexed_hashes(&prepared.parse_failures);
-        self.session_manager
-            .write_manifest(&self.manifest)
-            .context("persist session manifest after prepare")?;
+        // **不在这里**写 `indexed_hash`：prepare 成功只证明内容进了内存候选图，
+        // 还没有落库（同步模式在下面 persist，延迟模式等 pending 阈值）。此间
+        // 进程重启或持久化失败都会让候选图消失，而 manifest 若已声称「已索引」，
+        // 下一轮真实 bootstrap 就判 unchanged ⇒ 空 ChangeSet 分支推水位 ⇒
+        // 文件永久不再重试。写入推迟到 durable 落库成功之后（见
+        // `commit_indexed_hashes`）。
+        self.stage_indexed_paths(&prepared.parse_failures);
 
         let mut persisted = false;
         let mut persist_report = None;
@@ -500,6 +512,10 @@ impl DiffRefreshOrchestrator {
             timing.commit_ms = stage.elapsed().as_millis();
             persisted = true;
             persist_report = Some(report);
+            // M59-2 B：durable 已落库，此刻才把本轮成功解析的文件记为「已索引」。
+            // 顺序不能提前到 persist 之前：那样 manifest 会声称一个只存在于内存
+            // 候选图里的内容已入图，失败/重启后该文件永久不再重试。
+            self.commit_indexed_hashes()?;
             stage = Instant::now();
             self.runtime.install_replacement(candidate, replacement);
             timing.swap_ms = stage.elapsed().as_millis();
@@ -539,6 +555,9 @@ impl DiffRefreshOrchestrator {
                 timing.commit_ms = stage.elapsed().as_millis();
                 persisted = true;
                 persist_report = Some(report);
+                // M59-2 B：pending 已落库，登记本轮（含此前 deferred 轮累积的）
+                // 成功解析文件为「已索引」。
+                self.commit_indexed_hashes()?;
             } else {
                 pending_dirty_total = self.pending_dirty_node_ids.len();
             }
@@ -670,6 +689,67 @@ impl DiffRefreshOrchestrator {
         Ok(report)
     }
 
+    /// 登记本轮成功解析的源文件为「待确认已索引」。
+    ///
+    /// `parse_failures` 里的逻辑路径跳过——它们内容已进镜像但未进图，必须保持
+    /// 失配以便下一轮重投。路径未在 manifest 中登记时不处理（非本 session
+    /// 管理的文件）。
+    ///
+    /// 只登记**逻辑路径**，不在这里写 manifest：此刻内容仅在内存候选图里，
+    /// 落库结果未知。真正写 `indexed_hash` 的是 [`Self::commit_indexed_hashes`]。
+    fn stage_indexed_paths(&mut self, parse_failures: &[crate::scanner::indexer::ParseFailure]) {
+        // 本轮解析失败的路径必须**撤下**登记：deferred 模式下它们可能是上一轮
+        // 成功登记过的，而 manifest 里的 `hash` 已经指向本轮这份解析不出来的
+        // 新内容。留着会让 `commit_indexed_hashes` 把未入图的内容标成已索引。
+        self.pending_indexed_paths.retain(|path| {
+            !parse_failures
+                .iter()
+                .any(|failure| failure.logical_path == *path)
+        });
+
+        let staged: Vec<String> = self
+            .manifest
+            .files
+            .iter()
+            .filter(|file| !file.deleted && file.hash.is_some())
+            .filter(|file| {
+                !parse_failures
+                    .iter()
+                    .any(|failure| failure.logical_path == file.source_path)
+            })
+            .map(|file| file.source_path.clone())
+            .collect();
+        for path in staged {
+            if !self.pending_indexed_paths.contains(&path) {
+                self.pending_indexed_paths.push(path);
+            }
+        }
+    }
+
+    /// 把已登记文件的镜像 hash 记为「已索引」并落盘。
+    ///
+    /// **只在 durable 落库成功后调用**：`indexed_hash` 的语义是「图已成功索引
+    /// 到这个内容」，而 prepare 只把内容放进内存候选图。提前写会让失败/重启
+    /// 后的文件被真实 bootstrap 判 unchanged，进而被空 ChangeSet 分支永久跳过。
+    ///
+    /// 只对本轮登记过的路径求值，因此 deferred 模式下跨轮累积的 pending 也能
+    /// 在真正落库的那一轮一次性收敛。
+    fn commit_indexed_hashes(&mut self) -> Result<()> {
+        if self.pending_indexed_paths.is_empty() {
+            return Ok(());
+        }
+        let staged = std::mem::take(&mut self.pending_indexed_paths);
+        for file in self.manifest.files.iter_mut() {
+            if file.deleted || file.hash.is_none() || !staged.contains(&file.source_path) {
+                continue;
+            }
+            file.indexed_hash = file.hash.clone();
+        }
+        self.session_manager
+            .write_manifest(&self.manifest)
+            .context("persist session manifest after durable commit")
+    }
+
     /// M58.3 PR2：以「durable entries 应用 pending overlay」口径计算并刷新
     /// runtime 的 scanner 诊断缓存。
     ///
@@ -679,26 +759,6 @@ impl DiffRefreshOrchestrator {
     /// 在诊断缓存留一条稳定的 `SCANNER_DIAGNOSTICS_REFRESH_FAILED` warning，
     /// 让 status/query 能透出「scanner 诊断缓存可能陈旧」（M58.3 复核返修）；
     /// 成功刷新时由 `replace_scanner_diagnostics` 一并清除该 warning。
-    /// 把本轮成功解析的文件的镜像 hash 记为「已索引」。
-    ///
-    /// `parse_failures` 里的逻辑路径跳过——它们内容已进镜像但未进图，必须保持
-    /// 失配以便下一轮重投。路径未在 manifest 中登记时不处理（非本 session
-    /// 管理的文件）。
-    fn advance_indexed_hashes(&mut self, parse_failures: &[crate::scanner::indexer::ParseFailure]) {
-        for file in self.manifest.files.iter_mut() {
-            if file.deleted || file.hash.is_none() {
-                continue;
-            }
-            let failed = parse_failures
-                .iter()
-                .any(|failure| failure.logical_path == file.source_path);
-            if failed {
-                continue;
-            }
-            file.indexed_hash = file.hash.clone();
-        }
-    }
-
     fn refresh_live_scanner_diagnostics(&mut self) {
         let result = (|| -> Result<Vec<crate::output::Diagnostic>> {
             let mut entries = self
