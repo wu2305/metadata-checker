@@ -240,13 +240,146 @@ check、browser-wasm check 通过（WASM 8 条既有非本批 warning，与本�
 `aa8a44c` 提交消息标 `test:` 实含 orchestrator fix，按不改写历史处理、此处勘误。
 
 剩余与边界（明确区分已实现 / 已验收）：
-- 查询侧旧 target 解析 `resolve_node_target`（graph_identity.rs）**已实现但无
-  生产调用方**——页面局部 id 的裸名查询接线是独立后续任务，不计入 M59-2；
-- full==incremental 快照未含坏文件/冲突 fixture；sync 模式 bootstrap 失败轮无
-  直接用例（与 deferred 走同一代码路径，由 deferred 用例覆盖）；
+- full==incremental 快照未含坏文件/冲突 fixture；
 - 基线遗留：link-action 跨页 param id 与本页 param id 两种形态并存、
   `submit_meta` 重复 `"source_expr"` 键——本批未动；
 - `GRAPH_OWNERSHIP_CONFLICT` 的 `answer_impact` 已在 diagnostics 权威表登记为
   partial（覆盖上一节残留第 1 项）；
 - 性能边界保持「增量解析、整图重建、全量持久化」，本批**不宣称性能改善**；
   Baseline impact：新增回归用例增加测试时长，不影响 bench 目标代码路径。
+
+## 2026-09-22 只读复核两个 P1 的根因修复（PR #42，`2aa5f5a` → `0725c80`）
+
+上一节把「旧 target 未接线」记为不计入 M59-2 的后续任务、把「真实 bootstrap 重试」
+交给忽略 manifest 的强制重投桩覆盖。本地只读复核指出两项都不成立：approved plan
+（[2026-09-06 实施计划](../../plans/2026-09-06-m59-grafeo-implementation-plan.md):25-32）
+要求旧 target 显式解析 + 歧义诊断与 A1/A4 **配套发布**；而 `BootstrapReplaySource`
+忽略 manifest 强制重投，其绿色不能证明生产重试正确。本轮按「先最小失败回归、再修
+根因、按包提交」执行，两个 P1 均已修复；实施与验收由本地主线程完成，远程 NPC 的
+两 P1 方案补丁（因 token 无 `repo-code:rw` 未能推送）经审阅后按包顺序本地集成。
+
+### P1-1：真实 bootstrap 源的失败重试（反例 `c71d87d` → 修复 `190814b`）
+
+根因（源码链路）：`orchestrator.rs` 在 prepare **之前** `apply_changeset_to_mirror`
++ `write_manifest`，`mirror.rs` 把本轮拉取内容的 revision/hash 写进 manifest。
+TBL 解析失败时 `commit.checkpoint` 保持 `None`（bootstrap 轮），但 manifest 里该
+文件的 revision/path 已是最新值。下一轮真实 `BiMetaFilesChangeSource::bootstrap`
+按 `file_id` 对照 manifest 的 `revision + source_path` 判 `unchanged` ⇒ 同一批
+事件不再投递 ⇒ `change_count == 0` ⇒ 走空 ChangeSet 分支直接
+`persist_with_checkpoint`（无 prepare）。**失败文件从未入图，水位却推进了**。
+触发条件只需远端快照不变，不需要远端清空文件。
+
+修复（`190814b`）：manifest 区分「镜像已获取」与「图已成功索引」两个状态——
+- `RemoteSessionFile.indexed_hash`：最近一次**成功解析并入图**的内容 hash；
+  `needs_index_retry()` 是判断是否重投的权威入口（hash 与 indexed_hash 失配即需
+  重投，删除墓碑不参与）。
+- `bi_meta_files_source` / `fixture_source`：bootstrap 的 `unchanged` 判定增加
+  `!entry.needs_index_retry()`。
+- `orchestrator`：prepare 之后按本轮**成功解析**的文件推进 `indexed_hash` 并写回
+  manifest（`advance_indexed_hashes`）；解析失败文件保持失配 ⇒ 下一轮重投。
+- `mirror`：改名时先取走旧记录的 `indexed_hash`（`retain` 会摘掉旧记录，按 index
+  再取会越界）。
+- 旧 manifest 反序列化 `indexed_hash=None` ⇒ **无 checkpoint 时下一轮 bootstrap
+  全量重投一次**后收敛（已有 checkpoint 的升级不触发额外重投）。`190814b` 提交
+  信息中「按已索引处理，保留旧行为」的说法与代码相反，`0725c80` 已更正源码注释，
+  按不改写历史处理、此处勘误。
+
+### P1-2：旧 target 的生产接线（反例 `92d19ce` → 修复 `4f45a93`）
+
+根因：`resolve_node_target` 无任何生产调用方，`query/model.rs` 与 `explain.rs`
+都对 target 做精确 `get_node`。页面局部身份启用后，裸 `model:orders` 在只有局部
+节点时 missing；有同名物理模型时**静默命中物理模型**，跨页/跨形态同名的事实被吞
+且不报歧义。CLI 路由层 `normalize_target_against_graph` 对精确存在的 id 判 `Exact`
+直通，因此 runtime 层才是权威修复点。
+
+修复（`4f45a93`）：`query/model.rs` 新增 `resolve_legacy_model_target`，前置解析
+`model:` / `field:` 裸名（含 `|` 的 scoped id 仍走精确查表）——唯一局部命中改用
+真实 id 并如实回报 `query_target`；多候选交回全部候选 + `AMBIGUOUS_TARGET` 诊断
+（六字段信封）+ 可执行的 `next_queries`；无候选维持 `TARGET_NOT_FOUND`。
+`build_query_model_output` 与 `query_model`（human 分支，纵深防御——CLI human
+模式实际落 `HUMAN_MODE_NOT_SUPPORTED`，`4f45a93` 提交信息对该入口的「CLI 不绕过」
+描述过强，同此勘误）与 `build_explain_output`（`field:` 的生产入口）共用同一套
+解析；stdio 经 `GraphRuntime::query` 汇合与 CLI 一致，kind 隔离由解析器保证。
+`AMBIGUOUS_TARGET` 与既有 `AMBIGUOUS_TARGET_ANSWERED` 均已在 `answer_effect` 登记。
+
+### 反例修复前后（修复前 FAIL / 修复后 PASS）
+
+| 用例 | 修复前 | 修复后 | 证据 SHA |
+|------|--------|--------|----------|
+| `real_bootstrap_source_retries_failed_file_without_new_events` | FAILED（轮 2 `change_count=0`） | ok | `c71d87d` → `190814b` |
+| `deferred_mode_real_bootstrap_keeps_retryable_until_fixed` | FAILED（第 2 轮 `change_count=0`） | ok | `c71d87d` → `190814b` |
+| `restart_after_failed_bootstrap_still_redelivers` | FAILED（`change_count=0`） | ok | `c71d87d` → `190814b` |
+| `unchanged_snapshot_after_success_is_not_redelivered` | ok（对照：已入图且快照一致不重投） | ok | `c71d87d` → `190814b` |
+| `bare_target_with_single_page_local_model_resolves` | FAILED（`query_target` 仍是 `model:orders`） | ok | `92d19ce` → `4f45a93` |
+| `bare_target_with_same_local_name_on_two_pages_is_ambiguous` | FAILED（无 `AMBIGUOUS_TARGET`） | ok | `92d19ce` → `4f45a93` |
+| `bare_target_matching_both_local_and_physical_is_ambiguous` | FAILED（静默命中物理模型） | ok | `92d19ce` → `4f45a93` |
+| `scoped_target_hits_exactly_without_ambiguity` | ok | ok | `92d19ce` → `4f45a93` |
+| `field_and_model_kinds_do_not_cross_match` | —（`4f45a93` 随修复加入） | ok | `4f45a93` |
+| `stdio_entry_uses_same_legacy_target_resolution` | —（`4f45a93` 随修复加入） | ok | `4f45a93` |
+
+修复前 FAIL 即「只上反例、不改生产代码」的独立反证（test-only 提交上跑出，等价于
+revert 源码保留测试）：P1-1 用**真实** `BiMetaFilesChangeSource` + 可控
+transport/provider，不用忽略 manifest 的强制重投桩；P1-2 走生产 `GraphRuntime::query`
+与共享 stdio 入口，不直接测 resolver helper。
+
+### 验证（CNB workspace `cnb-6i8-1k345c7ao`，最终源码 `0725c80`）
+
+原始日志（workspace 远端 `/tmp/`）：
+
+- `c71d87d`（包 A 反例，修复前）：`cargo test --features cli-local --test
+  m59_2_bootstrap_retry_tests -- --test-threads=1` → **3 FAILED / 1 passed**
+  （3 个失败均为轮 2 `change_count` 0≠1；对照用例 PASS），`CARGO_EXIT=101`，
+  日志 `m59-A-prefix-fail.log`。
+- `190814b`（包 B 修复后）：bootstrap_retry **4/4**；`m54_diff_refresh_orchestrator`
+  12、`m54_diff_refresh_fixture` 4、`m55_meta_files_source` 15、`m55_bi_real_fixture`
+  5、`m59_2_refresh_checkpoint` 8 全过；`cargo check --tests` 通过；
+  `cargo fmt --check` / `cargo check --benches` / browser-wasm check 全过；完整
+  native **1300 passed / 0 failed / 24 ignored**。
+- `92d19ce`（包 C 反例，修复前）：`m59_2_target_resolution_tests` → **3 FAILED /
+  1 passed**（无 `AMBIGUOUS_TARGET`、静默命中物理模型、唯一局部命中 `query_target`
+  错；scoped 对照 PASS），`CARGO_EXIT=101`，日志 `m59-C1-prefix-fail.log`。
+- `4f45a93`（包 C 修复后）：target_resolution **6/6**；`core_feature` 41、
+  `explain` 8、`m58_3_command_surface` 27、`m59_a1_identity_grammar` 10、
+  `output_parser` 15（1 ignored）、`stdio_server` 36（1 ignored）全过；
+  fmt / browser-wasm check 全过。
+- 最终门禁（`0725c80`，注释修正不改行为）：`cargo fmt --check`、`cargo check
+  --benches`、`cargo check --no-default-features --features browser-wasm --target
+  wasm32-unknown-unknown` 全通过；完整 native `cargo test --features cli-local
+  --no-fail-fast -- --test-threads=1` → **1306 passed / 0 failed / 24 ignored**。
+
+环境：CNB 云原生工作区 `cnb-6i8-1k345c7ao`（分支 `codex/m59-2-ownership`，SSH 远程
+执行，工作区 SHA 与本地提交逐个精确复现一致），非维护者本机；不复用 `1948885` /
+`2e0222c` 绿灯作本轮证据。PR CI 以平台实际状态为准。
+
+### 独立验收
+
+独立只读 reviewer（forensics，冷脸）复核 `2aa5f5a..4f45a93` 全量 diff 与源码链路：
+**无 P0**；1 项 P1——`src/session/manifest.rs` 结构体注释「旧 manifest 首次升级按
+已索引处理」与代码相反且与同块字段注释互斥——已在 `0725c80` 修正后复核关闭。
+P2 处置：崩溃窗口、`severity_for` 未显式登记 `AMBIGUOUS_TARGET`、歧义出口按 surface
+并存、SPG 整轮失败×重投无用例、升级轮一次性成本、边端点断言缺口——记入下方边界，
+单列 follow-up，不在本包扩大修复。
+
+### 剩余与边界
+
+- manifest 写回先于图持久化：崩溃恰落两写之间且**首次 bootstrap（无 checkpoint）**
+  时，durable manifest 已标 indexed 而 durable 图未更新，需远端再变更才重解析
+  （有 checkpoint 的会话由水位重投 + hash-dirty 重检自愈）——follow-up 未修；
+- `AMBIGUOUS_TARGET` 在 `severity_for` 未显式登记（落默认 Warning 档；兄弟码
+  `TARGET_NOT_FOUND`=Error、`AMBIGUOUS_TARGET_ANSWERED`=Info）；六字段信封与
+  `answer_effect` 已齐；
+- 歧义出口按 surface 并存三种形态：CLI route 层 ≤3 候选逐候选作答
+  （`AMBIGUOUS_TARGET_ANSWERED`）、>3 候选 `ambiguous_target_error`、runtime
+  resolver `AMBIGUOUS_TARGET`——均登记 `answer_effect`；本轮新用例未起真实二进制
+  （main 归一层交互由读代码 + 既有 `m58_3_command_surface` CLI 子套件佐证）；
+- SPG 整轮失败 × 重投：prepare `Err` 时 `advance` 不执行、每轮重投每轮响亮报错
+  直到远端修复（刻意行为），无专门用例；
+- 升级轮成本：旧 manifest 无 checkpoint 时首轮全量重投为一次性远端内容拉取，
+  mirror hash 未变不重写、prepare 无脏不重解析，无每轮退化；
+- 新回归断言到节点 id / 类型 / `query_target` / candidate 集合与诊断码，未断言边端点；
+- full==incremental 快照仍未含「坏文件 + 重试恢复」fixture；sync 模式 bootstrap
+  失败轮已由 `real_bootstrap_source_retries_failed_file_without_new_events`
+  （one_shot=Synchronous）与 deferred 用例分别覆盖；
+- 旧 target 裸名解析覆盖 `model:` / `field:` 两类；`cond`/`comp`/`action`/`param`
+  文法恒为 scoped，裸名解析对它们未定义（返回 Missing），与 A1 文法一致；
+- 性能边界保持「增量解析、整图重建、全量持久化」，本轮**不宣称性能改善**。

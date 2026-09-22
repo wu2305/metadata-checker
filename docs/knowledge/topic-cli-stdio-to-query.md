@@ -43,6 +43,9 @@
 - **stdio handler 的三个例外**：`Status`（`src/stdio_server.rs:385`）、`ReloadGraph`（`:398`）、
   `DiffRefresh`（`:378`）分别在 `handle_request` 的 `if` 分支直接返回，不调用 `GraphRuntime::query`。
   这是 stdio 层的分派；直接调用 runtime 时的命令处理见 1.4。
+- **`GraphRuntime::query` 之下还有旧 target 解析层**（M59-2）：`QueryModel`/`Explain`
+  在 `build_query_model_output` / `build_explain_output` 内先经
+  `resolve_legacy_model_target` 解析裸 `model:`/`field:` 再精确查表，见 1.8。
 
 ### 1.1 CLI one-shot 路径
 
@@ -144,6 +147,7 @@ run_stdio_server                        src/stdio_server.rs:185
 | graphdb 打不开 | CLI：`GraphDB::check_graph_db` 输出诊断 JSON 后退出（`src/main.rs:2002`）；stdio：启动即失败 |
 | 拿不到锁 | `GRAPH_DB_LOCK_TIMEOUT`（`src/graph_store.rs:53`），超时由 `--graph-lock-timeout-ms` 控制 |
 | human 不被支持 | `HUMAN_MODE_NOT_SUPPORTED`，降级为 non-human 而非报错（`src/stdio_server.rs:437`） |
+| 裸 `model:` / `field:` target 匹配多个节点 | `AMBIGUOUS_TARGET` + `candidate_targets` + 可直接执行的 `next_queries`；不静默挑一个（见 1.8） |
 | `check_reload` 失败 | 只记 diagnostic，不中断本次查询 |
 
 ### 1.7 改动时跑哪些测试
@@ -158,12 +162,34 @@ cargo test --features cli-local --test core_feature_tests
 `m58_3_command_surface_tests` 用 `env!("CARGO_BIN_EXE_metadata-checker")` 拉起真实二进制；
 不能写死 `target/debug/...`，远端 CI 用自定义 `CARGO_TARGET_DIR`（`tests/m58_3_command_surface_tests.rs:14-20`）。
 
+### 1.8 旧 target 解析（M59-2 A1 接线，2026-09-22 起已接线）
+
+**问：页面局部身份启用后，裸 `model:orders` 这类旧 target 怎么解析？**
+**答：先经 `resolve_legacy_model_target`（`src/query/model.rs`）显式解析，再交给精确
+`get_node`。唯一局部命中改用该局部节点的真实 id 并如实回报 `query_target`；多个候选
+（跨页同名、或局部与物理同名）交回全部候选 + `AMBIGUOUS_TARGET` 诊断 + 可执行的
+`next_queries`，**不静默挑一个**；无候选维持 `TARGET_NOT_FOUND`。**
+
+- 带 `|` 的 scoped id（`model:<PAGE>|<local>`）仍走精确查表，不参与裸名解析；
+- kind 隔离由解析器保证：裸 `field:` 只匹配 Field 节点，裸 `model:` 只匹配 Model
+  节点，跨 kind 同名返回 Missing；`cond`/`comp`/`action`/`param` 文法恒为 scoped，
+  裸名解析对它们未定义；
+- **三条入口共用同一套解析**：`build_query_model_output`（runtime/runtime 工具）、
+  `query_model`（human 分支，纵深防御——CLI human 模式实际落 `HUMAN_MODE_NOT_SUPPORTED`）、
+  `build_explain_output`（`field:` 的生产入口）。stdio 经 `GraphRuntime::query` 汇合，
+  因此与 CLI 一致；**新增裸名查询入口必须调用同一 resolver，不要直接 `get_node`**——
+  否则会退回「静默命中物理模型」的旧行为；
+- CLI 路由层（`run_surface` → `normalize_target_against_graph`）先于 resolver 生效：
+  精确 id 存在时判 `Exact` 直通（物理同名的歧义由 resolver 报出）；唯一局部命中多在
+  路由层就 `Resolved`；≤3 候选的歧义由 `answer_ambiguous_target` 逐候选作答
+  （`AMBIGUOUS_TARGET_ANSWERED`）。两种 code 均已在 `answer_effect` 登记。
+
 ## 2. 已批准计划（尚未实现）
 
 - **M59-4**（plan `docs/plans/2026-09-06-m59-grafeo-implementation-plan.md`）：查询与投影改造，
   要求 `query` 不绑定 redb、21 类链路边各有精确投影测试、修复 M59-PATH（same_page 与物理字段识别）。
   本链路的**入口不变**，target 解析与投影输出会变。
-- **M59-1**：页面局部身份、原始引用 token、统一路径。会改动 `route.rs` 的 target 归一化与 `normalize_prefixed_target`（`src/route.rs:356`）。
+- **M59-1**：页面局部身份、原始引用 token、统一路径。会改动 `route.rs` 的 target 归一化与 `normalize_prefixed_target`（`src/route.rs:356`）。M59-2 起旧 target 的裸名解析已在 `src/query/model.rs` + `src/explain.rs` 生产接线（见 1.8）。
 - **M28 / M29 / M30**（INDEX 中仍为 `planned`）：stdio 请求/响应契约收敛、FC 工具层优化、性能与容量治理。
 
 ## 3. 已知缺陷（已确认，未修）

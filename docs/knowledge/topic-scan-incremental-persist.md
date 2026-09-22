@@ -141,7 +141,7 @@ IndexCommit { file_states, dirty_nodes, deleted_nodes, checkpoint, delta, scanne
 | 场景 | 行为 |
 |------|------|
 | 文件 hash 未变 | 跳过解析，`unchanged` 计数 +1 |
-| TBL 坏字节 / 非法 JSON | 记 `ParseFailure` → `SCANNER_FILE_PARSE_FAILED`，旧图保留，下轮重试 |
+| TBL 坏字节 / 非法 JSON | 记 `ParseFailure` → `SCANNER_FILE_PARSE_FAILED`，旧图保留，下轮重试（真实 bootstrap 下的重试判据见 1.6.1） |
 | SPG JSON 解析失败 | **整轮索引失败**（`?` 向上抛）——刻意保持响亮 |
 | 拿不到图锁 | `GRAPH_DB_LOCK_TIMEOUT`，超时可配 |
 | v2 hydrate 失败 | 回落 `open_inner_v1`（`src/graph_redb.rs:242`），记 `v2_hydrate_warning` 并入 `HydrateDiagnostics`；转诊断时复用 `GRAPH_DB_V2_LAYOUT_UNREADABLE` 码（`src/diagnostics.rs:254-262`，仅当 `v2_layout_unreadable == 0` 才另发一条）。**注意**：回落的是 v1 表，不等于 hydrate 结果完整——见 3.5 |
@@ -155,6 +155,38 @@ IndexCommit { file_states, dirty_nodes, deleted_nodes, checkpoint, delta, scanne
 正确回答是「未知」而不是推断两篇文档可能冲突（见主题一「边界与限制」的跨层不外推规则）。
 **问：坏 SPG 是静默成功还是整轮失败？答：整轮索引失败，不是静默；只有坏 TBL 记 `ParseFailure`。**
 
+#### 1.6.1 「镜像已获取」与「图已成功索引」的边界（M59-2 B，2026-09-22 修复）
+
+diff-refresh 的 mirror 在 **prepare 之前** 就把拉取到的内容 revision/hash 写进
+session manifest，所以 manifest 的 revision/hash **只证明内容已进镜像**，不证明
+已成功入图。修复前只按 revision 判「无需重投」，坏 TBL 失败事件会被永久消费——
+远端快照不变时下一轮真实 bootstrap 判 unchanged 跳过，空 ChangeSet 分支直接推进
+checkpoint，失败文件从未入图。
+
+两个状态的权威区分在 `src/session/manifest.rs`：
+
+- `RemoteSessionFile.hash`：镜像中当前内容的 hash（**已获取**）；
+- `RemoteSessionFile.indexed_hash`：最近一次**成功解析并入图**的内容 hash；
+- `RemoteSessionFile::needs_index_retry()`：判断是否需要重投的权威入口
+  （`hash` 为 `Some` 且 `indexed_hash` 为 `None`，或两者不等 ⇒ 需重投；删除墓碑不
+  参与重投）。
+
+生效边界：
+
+- `BiMetaFilesChangeSource::bootstrap` 与 `FixtureMetaFilesChangeSource::bootstrap`
+  的 `unchanged` 判定都含 `!entry.needs_index_retry()`；poll 路径不走该判定，
+  失败重投由 checkpoint 水位机制覆盖；
+- `DiffRefreshOrchestrator` 在 prepare 之后按本轮**成功解析**的文件推进
+  `indexed_hash` 并写回 manifest（`advance_indexed_hashes`），解析失败的文件保持失配；
+- 旧 manifest 没有 `indexed_hash`，`#[serde(default)]` 反序列化为 `None` ⇒
+  **无 checkpoint 时下一轮 bootstrap 全量重投一次**（宁多重投一轮，不静默丢失败
+  文件），prepare 后一轮内收敛，之后不再重投；已有 checkpoint 的升级不触发额外
+  重投。升级重投只多付一轮远端内容拉取（mirror hash 未变不重写、prepare 无脏不
+  重解析），无每轮退化。
+
+**改动时**：新增「是否重投」类逻辑必须用 `needs_index_retry()`，不要直接用
+`revision` 比较——revision 只描述镜像侧，不描述图侧。
+
 ### 1.7 改动时跑哪些测试
 
 ```bash
@@ -165,6 +197,7 @@ cargo test --features cli-local --test m58_3_pr1_refix_scanner_persistence_tests
 cargo test --features cli-local --test m56_incremental_persist_tests
 cargo test --features cli-local --test m56_v2_stale_rebuild_tests
 cargo test --features cli-local --test scanner_tests --test graph_store_tests
+cargo test --features cli-local --test m59_2_bootstrap_retry_tests
 ```
 
 ## 2. 已批准计划（尚未实现）

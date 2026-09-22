@@ -116,7 +116,7 @@ fn m54_change_count_matches_changed_length() {
 - [ ] **Step 1:** fixture 写入同毫秒两个更新、一个删除和一个同 `file_id` 改名事件。
 - [ ] **Step 2:** 写测试断言 `poll` 只返回严格大于 `since` 的事件、顺序稳定、`change_count == changed.len()`。
 - [ ] **Step 3:** 实现 JSON 反序列化、过滤、排序与去重；不得用字符串比较时间；去重键使用唯一 `event_id`，不能用可重复的 recycle-bin `file_id`。
-- [ ] **Step 4:** 写 fixture bootstrap 测试：manifest 中一个未变文件、一个 revision 变化文件、一个远端已缺失文件；结果只含后两者，并分别把 active/deleted cursor 初始化到各自快照边界。
+- [ ] **Step 4:** 写 fixture bootstrap 测试：manifest 中一个未变文件、一个 revision 变化文件、一个远端已缺失文件；结果只含后两者，并分别把 active/deleted cursor 初始化到各自快照边界。（「未变」指对**已成功入图**的文件：M59-2 B 起 `unchanged` 还要求 `!needs_index_retry()`，`hash` 与 `indexed_hash` 失配的文件即使 revision 未变也重投，见 `src/session/manifest.rs`。）
 - [ ] **Step 5:** 运行 `cargo test m54_diff_refresh_fixture --features cli-local`，期望 PASS。
 - [ ] **Step 6:** 提交 `test: add diff refresh source fixtures`。
 
@@ -233,7 +233,7 @@ fn m54_change_count_matches_changed_length() {
 - [ ] **Step 6:** tick 侧只对连续网络错误做上限 60 秒的指数退避（1/2/4/8/16/32/60 秒）；成功 poll 立即清零失败计数。不得按 `change_count` 跳过非空集合。
 - [ ] **Step 7:** M55 真源验收账号必须具有项目级 recycle-bin 可见性。HTTP 404/403 分别返回 `DELETE_CHANGE_SOURCE_UNAVAILABLE` / `DELETE_CHANGE_SOURCE_FORBIDDEN`，且不得把该环境记录为 M55 真源验收通过。
 - [ ] **Step 8:** 写交错竞态测试：active 第一次快照返回后注入新的 active 事件，再让 deleted 快照返回更晚事件；提交后第二次 poll 必须仍返回该 active 事件，证明 deleted cursor 不会推进 active cursor。
-- [ ] **Step 9:** 实现真实 bootstrap，固定请求顺序为 deleted 完整快照 → active 完整快照。active 按 `file_id` 对照 manifest 的 revision/mtime/path，只产出新增或不一致文件；manifest 中第二个 active 快照已缺失的文件产出删除；历史 recycle-bin 仅用于初始化 deleted cursor，不逐条重放。快照不完整或字段错误返回 `DIFF_REFRESH_BOOTSTRAP_FAILED`。
+- [ ] **Step 9:** 实现真实 bootstrap，固定请求顺序为 deleted 完整快照 → active 完整快照。active 按 `file_id` 对照 manifest 的 revision/mtime/path，只产出新增或不一致文件（M59-2 B 起额外产出 `!needs_index_retry()` 的文件——镜像已获取但图未成功索引，见 `src/session/manifest.rs`）；manifest 中第二个 active 快照已缺失的文件产出删除；历史 recycle-bin 仅用于初始化 deleted cursor，不逐条重放。快照不完整或字段错误返回 `DIFF_REFRESH_BOOTSTRAP_FAILED`。
 - [ ] **Step 10:** 写 bootstrap 交错测试：deleted 快照返回后删除 manifest 中一个文件，再返回不含该文件的 active 快照；bootstrap 必须产出删除。另测 active 快照返回后发生删除时，本轮可不含该事件，但下一次 deleted poll 必须返回它。
 - [ ] **Step 11:** 运行 `cargo test m55_meta_files --features cli-local`，期望 PASS。
 - [ ] **Step 12:** 提交 `feat: poll BI metadata update and deletion events`。
