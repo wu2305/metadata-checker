@@ -484,15 +484,46 @@ Explain（主）+ ExplainCondition（补充 condition_facts）
   M59-2 A1 让命令层成为该 code 的首个信封构造方，不一致第一次可观测；登记为
   Error 并在 `m58_3_pr1_severity_tests` 钉住。
 
-**未采纳 2 项，理由如下（含一项方向性纠错）**：
-- P2-5「staging 应过滤非 spg/tbl 扩展名」——**方向错误，不采纳**。非 spg/tbl
-  文件永远不会被 scanner 入图；若把它们排除出 staging，`needs_index_retry()`
-  将**永久为真**，每一轮 bootstrap 都重投同一批文件，造成无限重投，比被指出的
-  问题更严重。生产 BI 源已在 `bi_meta_files_source.rs:399` 过滤不可分析文件，
-  precondition 不可达；仅 fixture 源可达，而修法会造成重投循环。保持现状。
+**未采纳 2 项，理由如下**（两项均经第二轮独立复核确认处置正确）：
+- P2-5「staging 应过滤非 spg/tbl 扩展名」——**不采纳，因为该修法会引入更严重的
+  缺陷**。非 spg/tbl 文件永远不会被 scanner 入图；若把它们排除出 staging，
+  `needs_index_retry()` 对该记录**永久为真**（`manifest.rs:49-61`），而两个
+  bootstrap 源都把它作为 `unchanged` 的必要条件（`fixture_source.rs:154-159`、
+  `bi_meta_files_source.rs:421-428`）⇒ 每一轮 bootstrap 都重投同一批文件，造成
+  **无限重投**，比被指出的问题更严重。
+  被指出的原始风险（把从未入图的内容标成已索引）**在生产路径不可达**：manifest
+  的 `hash=Some` 只由 `mirror.rs::apply_active_event` 与 `sync.rs::sync_one_file`
+  写入，两者的输入都已过滤不可分析文件（`bi_meta_files_source.rs:314/399` 的
+  `is_analyzable`、`remote_sync.rs:260` 的 `is_analyzable_entry`）；scanner 也只
+  发现 spg/tbl（`indexer.rs:538-539`）。只有 `FixtureMetaFilesChangeSource`
+  （无扩展名过滤）能造出该记录，而它**没有生产调用方**（`main.rs:1614` 与
+  `stdio_server.rs:224` 都只用 `BiMetaFilesChangeSource`；fixture 源仅在
+  `tests/` 下使用，`mod.rs:30` 只是再导出）。因此保持现状；若将来出现不过滤
+  扩展名的新源，需要在**源侧**补过滤，而不是在 staging 侧排除。
 - P2-2 `OutputKind::Context` 缺 `find_cmd` 分支（落到 `--find-page` 兜底）：
-  `git show 64159b8^:src/context.rs` 证实改动前该路径已用同一兜底，属既有行为、
-  非本次引入；不在本包扩大修复范围，记入下方边界。
+  `git show 64159b8^:src/context.rs` 证实改动前该路径（旧 168-170 行）已用同一
+  兜底，属既有行为、非本次引入；不在本包扩大修复范围，记入下方边界。
+
+### 第二轮独立只读复核（`a6545cf`）
+
+对「3 修 2 不采纳」再做一次冷脸复核（只读、不改），结论：
+
+- **Fix 1（P2-1 顺序调整）HOLDS**：manifest 写失败时，durable 已提交、runtime 已
+  持有候选图，二者一致；磁盘 manifest 保守（`indexed_hash != hash`）⇒ 下次启动
+  重投。三处 `commit_indexed_hashes` 调用点都仍在 durable persist 之后；
+  `persisted`/`persist_report` 先于 `install_replacement` 的既有不变式未被破坏；
+  `clear_pending_state` 未清掉后续仍需的状态（`pending_indexed_paths` 是独立字段）。
+- **Fix 2（Vec → HashSet）HOLDS 且语义等价**：撤下失败路径、合并登记、commit 求值
+  三者集合语义一致；唯一丢失的是 `pending_indexed_paths` 的插入顺序，而它从不被
+  观测（唯一消费方按 `manifest.files` 迭代做成员判断）。
+- **Fix 3（severity）HOLDS**：`AMBIGUOUS_TARGET` 作为 `TARGET_NOT_FOUND` 同一
+  or-pattern 的尾部替代项，未被 `AMBIGUOUS_RESOLUTION` / `AMBIGUOUS_TARGET_ANSWERED`
+  两个 Info 分支按字面量精确匹配截获。severity=Error 配 `answer_impact=none` 与
+  `TARGET_NOT_FOUND` 的既有组合**完全一致**（两者都经 `answer_effect` 登记为
+  Addressing ⇒ 派生 `IMPACT_NONE`），是恢复兄弟码先例而非引入新组合。
+- **两项不采纳均确认处置正确**：P2-5 的无限重投机制经 `manifest.rs:49-61` 与两个
+  bootstrap 源的 `unchanged` 判定独立验证成立，且生产不可达（fixture 源无生产
+  调用方）；P2-2 的「既有行为」分类经 `git show 64159b8^:src/context.rs` 确认。
 
 ### 验证环境与 SHA
 
