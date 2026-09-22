@@ -501,6 +501,15 @@ Explain（主）+ ExplainCondition（补充 condition_facts）
   **不在维护者本机跑 cargo**。
 - 反例与修复均逐 SHA 检出验证：FAIL 证据取自 `50946ad` / `c26334f`（仅测试），
   PASS 证据取自 `37c5a61` / `64159b8`（含修复）。
+- **最终全量门禁**（`a6545cf`，`cargo fmt --check` 通过）：
+  `cargo test --features cli-local --no-fail-fast -- --test-threads=1`
+  → **1311 passed / 0 failed / 24 ignored**，`CARGO_EXIT=0`，110 个测试二进制
+  （`gate.log` 2605 行）；新套件 `m59_2_bootstrap_retry_tests` /
+  `m59_2_target_resolution_tests` / `m58_3_pr1_severity_tests` 均在本次门禁内运行。
+  相对上一轮基线 1306 passed 的 +5 即本轮新增用例。
+  `cargo check --no-default-features --features browser-wasm --target
+  wasm32-unknown-unknown` → `WASM_EXIT=0`（8 条既有 warning，持平）。
+  24 ignored 为真实语料/在线评测，不计验收。
 - 工作区 `cnb-pm8-1k33o0ipu`（上一轮 reviewer）已不存在（`get-workspace-detail`
   返回 404），其 `/tmp/m59-review-2aa5f5a` 反例不可复用；本轮新建工作区重做。
 
