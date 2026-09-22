@@ -503,7 +503,10 @@ fn context_supplement_resolves_bare_legacy_target() {
     let db_path = build_bound_graph(
         "context-supplement",
         &[
-            ("app/a.spg", page_with_dwtable("ordersView", "tables/orders.tbl")),
+            (
+                "app/a.spg",
+                page_with_dwtable("ordersView", "tables/orders.tbl"),
+            ),
             ("tables/orders.tbl", table_json(&["order_id"])),
         ],
     );

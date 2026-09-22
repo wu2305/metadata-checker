@@ -649,10 +649,7 @@ fn sync_persist_failure_keeps_file_retryable_until_durable() {
         "未 durable 的文件必须重投（change_count 应为 1，实际 {}）：否则空 ChangeSet 分支会推水位并永久丢失该文件",
         second.change_count
     );
-    assert!(
-        second.checkpoint.is_some(),
-        "本轮已真正落库，必须推进水位"
-    );
+    assert!(second.checkpoint.is_some(), "本轮已真正落库，必须推进水位");
     assert!(
         field_present(&db_path, &binding, "field:orders.customer"),
         "重投后新字段必须进入 durable 图"
@@ -677,10 +674,8 @@ fn sync_persist_failure_keeps_file_retryable_until_durable() {
 #[test]
 fn deferred_restart_before_persist_keeps_file_retryable() {
     let root = test_root("deferred-restart-retry");
-    let (manager, session_dir, _manifest, db_path, binding) = setup_bootstrap_session_in(
-        &root,
-        &good_table(&["order_id", "amount"]),
-    );
+    let (manager, session_dir, _manifest, db_path, binding) =
+        setup_bootstrap_session_in(&root, &good_table(&["order_id", "amount"]));
 
     let active_snapshot = vec![
         active_info("file-a", "proj/app/page_a.spg", "1", 900),
