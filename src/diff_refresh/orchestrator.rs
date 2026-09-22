@@ -13,7 +13,7 @@
 //! - 失败语义：mirror/prepare/commit 任一失败直接返回 Err，checkpoint 不推进、
 //!   旧 runtime 保持可用；re-warm 是 best-effort，失败只记入 `warm_failures`。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
