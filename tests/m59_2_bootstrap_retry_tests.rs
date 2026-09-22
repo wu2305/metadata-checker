@@ -30,10 +30,10 @@ use anyhow::{Result, anyhow};
 
 use metadata_checker::diff_refresh::{
     BiActiveFileInfo, BiDeletedMetaFileInfo, BiMetaFilesChangeSource, BiMetaFilesTransport,
-    DiffRefreshCheckpoint, DiffRefreshOrchestrator, LongLivedPersistPolicy, MetaFilesWatermark,
+    DiffRefreshCheckpoint, DiffRefreshOrchestrator, LongLivedPersistPolicy,
 };
 use metadata_checker::graph::GraphDB;
-use metadata_checker::graph_store::{GraphReadStore, IndexStateStore};
+use metadata_checker::graph_store::GraphReadStore;
 use metadata_checker::ownership::ProjectBinding;
 use metadata_checker::remote_metadata::{
     MetadataContentType, RemoteFileContent, RemoteFileInfo, RemoteFileRef,
@@ -294,10 +294,8 @@ fn parse_failed_visible(runtime: &GraphRuntime) -> bool {
 /// 3. 轮 3（远端内容修好）：成功入图并推进水位，诊断消失。
 #[test]
 fn real_bootstrap_source_retries_failed_file_without_new_events() {
-    let (manager, session_dir, manifest, db_path, binding) = setup_bootstrap_session(
-        "real-bootstrap-retry",
-        &good_table(&["order_id", "amount"]),
-    );
+    let (manager, session_dir, manifest, db_path, binding) =
+        setup_bootstrap_session("real-bootstrap-retry", &good_table(&["order_id", "amount"]));
     assert!(
         durable_checkpoint(&db_path, &binding).is_none(),
         "本测试必须从无 checkpoint 状态开始（bootstrap 轮）"
@@ -398,8 +396,10 @@ fn real_bootstrap_source_retries_failed_file_without_new_events() {
 /// 水位不推进；修好后清诊断并正确推进。
 #[test]
 fn deferred_mode_real_bootstrap_keeps_retryable_until_fixed() {
-    let (manager, session_dir, manifest, db_path, binding) =
-        setup_bootstrap_session("deferred-bootstrap-retry", &good_table(&["order_id", "amount"]));
+    let (manager, session_dir, manifest, db_path, binding) = setup_bootstrap_session(
+        "deferred-bootstrap-retry",
+        &good_table(&["order_id", "amount"]),
+    );
 
     let transport = SnapshotTransport::new(vec![
         active_info("file-a", "proj/app/page_a.spg", "1", 900),
@@ -511,7 +511,9 @@ fn restart_after_failed_bootstrap_still_redelivers() {
     }
 
     // 重启：重新读 manifest（含已落盘的 revision=2）与 durable（无水位）
-    let restarted_manifest = manager.read_manifest("s1").expect("read manifest after restart");
+    let restarted_manifest = manager
+        .read_manifest("s1")
+        .expect("read manifest after restart");
     assert_eq!(
         durable_checkpoint(&db_path, &binding),
         None,

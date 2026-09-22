@@ -463,6 +463,17 @@ impl DiffRefreshOrchestrator {
         } else {
             Some(next_checkpoint.clone())
         };
+        // M59-2 B：把「图已成功索引到哪个内容」写回 manifest。
+        //
+        // 只更新本轮**成功解析**的文件：解析失败的文件保持 `indexed_hash` 与
+        // 镜像 `hash` 失配，下一轮 bootstrap 据此重投重试（`needs_index_retry`）。
+        // 没有这一步，manifest 的 revision/hash 只反映「镜像已获取」，失败事件
+        // 会被永久消费。
+        self.advance_indexed_hashes(&prepared.parse_failures);
+        self.session_manager
+            .write_manifest(&self.manifest)
+            .context("persist session manifest after prepare")?;
+
         let mut persisted = false;
         let mut persist_report = None;
         let mut pending_dirty_total = 0usize;
@@ -668,6 +679,26 @@ impl DiffRefreshOrchestrator {
     /// 在诊断缓存留一条稳定的 `SCANNER_DIAGNOSTICS_REFRESH_FAILED` warning，
     /// 让 status/query 能透出「scanner 诊断缓存可能陈旧」（M58.3 复核返修）；
     /// 成功刷新时由 `replace_scanner_diagnostics` 一并清除该 warning。
+    /// 把本轮成功解析的文件的镜像 hash 记为「已索引」。
+    ///
+    /// `parse_failures` 里的逻辑路径跳过——它们内容已进镜像但未进图，必须保持
+    /// 失配以便下一轮重投。路径未在 manifest 中登记时不处理（非本 session
+    /// 管理的文件）。
+    fn advance_indexed_hashes(&mut self, parse_failures: &[crate::scanner::indexer::ParseFailure]) {
+        for file in self.manifest.files.iter_mut() {
+            if file.deleted || file.hash.is_none() {
+                continue;
+            }
+            let failed = parse_failures
+                .iter()
+                .any(|failure| failure.logical_path == file.source_path);
+            if failed {
+                continue;
+            }
+            file.indexed_hash = file.hash.clone();
+        }
+    }
+
     fn refresh_live_scanner_diagnostics(&mut self) {
         let result = (|| -> Result<Vec<crate::output::Diagnostic>> {
             let mut entries = self

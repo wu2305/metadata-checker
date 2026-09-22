@@ -117,6 +117,7 @@ fn sync_one_file(
     let target_path = project_root.join(relative_path);
     atomic_write_text(&target_path, &item.content.raw_text)?;
 
+    // full/partial 同步直接完成入图：镜像内容即已索引内容。
     let file_record = RemoteSessionFile {
         source_path: source_path.clone(),
         file_id: item.content.file_id.clone(),
@@ -124,7 +125,8 @@ fn sync_one_file(
         etag: item.etag.clone(),
         mtime: item.mtime,
         size,
-        hash: Some(hash),
+        hash: Some(hash.clone()),
+        indexed_hash: Some(hash),
         deleted: false,
     };
 

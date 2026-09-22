@@ -162,6 +162,7 @@ fn m54_diff_refresh_fixture_bootstrap_emits_only_changed_and_missing() {
         mtime: None,
         size: None,
         hash: None,
+        indexed_hash: None,
         deleted: false,
     };
     // 未变文件：revision/path 与活跃快照一致

@@ -150,10 +150,12 @@ impl MetaFilesChangeSource for FixtureMetaFilesChangeSource {
         let mut changed: Vec<ChangedRemoteFile> = Vec::new();
         for active in &self.snapshot.active {
             let previous = manifest_by_id.get(active.file_id.as_str());
+            // 与真实 BI 源同一口径：镜像已获取不等于图已成功索引。
             let unchanged = previous.is_some_and(|entry| {
                 !entry.deleted
                     && entry.revision.as_deref() == Some(active.revision.as_str())
                     && entry.source_path == active.source_path
+                    && !entry.needs_index_retry()
             });
             if unchanged {
                 continue;

@@ -557,6 +557,7 @@ fn mark_entry_deleted(
             mtime: entry.mtime,
             size: entry.size,
             hash: None,
+            indexed_hash: None,
             deleted: true,
         });
         manifest
@@ -641,6 +642,7 @@ fn mark_missing_path_deleted(
             mtime: None,
             size: None,
             hash: None,
+            indexed_hash: None,
             deleted: true,
         });
         manifest
