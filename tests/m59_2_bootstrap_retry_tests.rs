@@ -24,7 +24,8 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use anyhow::{Result, anyhow};
 
@@ -204,8 +205,25 @@ fn setup_bootstrap_session(
     PathBuf,
     ProjectBinding,
 ) {
-    let root = test_root(name);
-    let manager = SessionManager::new(&root);
+    setup_bootstrap_session_in(&test_root(name), table_text)
+}
+
+/// 在指定 session 根目录下建立无 checkpoint 的 bound session。
+///
+/// 与 [`setup_bootstrap_session`] 的差别只在根目录可控：模拟「进程重启」时
+/// 需要用同一个根重新构造 `SessionManager`，才能读到同一份 manifest。
+#[allow(clippy::type_complexity)]
+fn setup_bootstrap_session_in(
+    root: &Path,
+    table_text: &str,
+) -> (
+    SessionManager,
+    PathBuf,
+    SessionManifest,
+    PathBuf,
+    ProjectBinding,
+) {
+    let manager = SessionManager::new(root);
     manager
         .create_session("s1", "https://bi.test", "proj", "proj", "remote")
         .expect("create session");
@@ -545,6 +563,188 @@ fn restart_after_failed_bootstrap_still_redelivers() {
     assert!(report.checkpoint.is_some(), "修复轮必须推进水位");
     assert!(field_present(&db_path, &binding, "field:orders.customer"));
     assert!(!parse_failed_visible(orchestrator.runtime()));
+}
+
+/// 持久化失败（Synchronous/one-shot）：**镜像已获取**不等于**图已成功索引**，
+/// 更不等于**已 durable**。
+///
+/// 独立预期（先于实现）：
+/// 1. 轮 1：bootstrap 成功 prepare，但 durable persist 失败 ⇒ `refresh_once` 返回
+///    Err，且 manifest 不得把该文件记为「已索引」——它的内容只在内存候选图里，
+///    durable 图里没有，进程重启后就没有了。
+/// 2. 轮 2（持久化恢复，远端快照仍不变）：必须重新投递该文件并真正落库。
+///    若轮 1 已经把 manifest 标成已索引，轮 2 会判 unchanged ⇒ `change_count == 0`
+///    ⇒ 走空 ChangeSet 分支写下 bootstrap 水位 ⇒ 失败文件**永久**不再重试。
+#[test]
+fn sync_persist_failure_keeps_file_retryable_until_durable() {
+    let (manager, session_dir, manifest, db_path, binding) =
+        setup_bootstrap_session("persist-fail-retry", &good_table(&["order_id", "amount"]));
+    assert!(durable_checkpoint(&db_path, &binding).is_none());
+
+    let transport = SnapshotTransport::new(vec![
+        active_info("file-a", "proj/app/page_a.spg", "1", 900),
+        active_info("file-t", "proj/tables/orders.tbl", "2", 1000),
+    ]);
+    let provider = QueuedProvider::new();
+    provider.push(
+        "tables/orders.tbl",
+        "file-t",
+        "2",
+        &good_table(&["order_id", "amount", "customer"]),
+    );
+    provider.push(
+        "tables/orders.tbl",
+        "file-t",
+        "2",
+        &good_table(&["order_id", "amount", "customer"]),
+    );
+    let mut orchestrator = build_orchestrator(
+        manager,
+        &session_dir,
+        manifest,
+        transport,
+        provider,
+        &binding,
+    );
+    orchestrator.set_one_shot_mode(true);
+
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let attempts_for_hook = Arc::clone(&attempts);
+    orchestrator.set_persist_fn(Box::new(move |graph, commit| {
+        let attempt = attempts_for_hook.fetch_add(1, Ordering::SeqCst);
+        if attempt == 0 {
+            Err(anyhow!("injected bootstrap persist failure"))
+        } else {
+            graph.persist_commit(commit)
+        }
+    }));
+
+    // 轮 1：prepare 成功、durable 写入失败
+    let first = orchestrator.refresh_once();
+    assert!(
+        first.is_err(),
+        "注入的持久化失败必须让本轮以 Err 结束，而不是静默算成功"
+    );
+    assert!(
+        !field_present(&db_path, &binding, "field:orders.customer"),
+        "持久化失败后 durable 图里不得出现新字段"
+    );
+    let manifest_after_failure = manager.read_manifest("s1").expect("read manifest");
+    let record = manifest_after_failure
+        .files
+        .iter()
+        .find(|file| file.source_path == "tables/orders.tbl")
+        .expect("manifest 必须仍有 orders.tbl 记录");
+    assert!(
+        record.needs_index_retry(),
+        "持久化失败的文件不得被记为已索引（manifest 只能证明镜像已获取）：hash={:?} indexed_hash={:?}",
+        record.hash,
+        record.indexed_hash
+    );
+
+    // 轮 2：持久化恢复，远端快照与轮 1 完全相同 ⇒ 必须重投并真正落库
+    let second = orchestrator.refresh_once().expect("round 2");
+    assert_eq!(
+        second.change_count, 1,
+        "未 durable 的文件必须重投（change_count 应为 1，实际 {}）：否则空 ChangeSet 分支会推水位并永久丢失该文件",
+        second.change_count
+    );
+    assert!(
+        second.checkpoint.is_some(),
+        "本轮已真正落库，必须推进水位"
+    );
+    assert!(
+        field_present(&db_path, &binding, "field:orders.customer"),
+        "重投后新字段必须进入 durable 图"
+    );
+    assert_eq!(
+        durable_checkpoint(&db_path, &binding),
+        second.checkpoint,
+        "durable 水位必须与本轮报告一致"
+    );
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        2,
+        "持久化钩子应被调用两次（失败一次、成功一次）"
+    );
+}
+
+/// 重启前未落盘（Deferred）：内存候选图已安装，但 durable 里没有。
+///
+/// 进程重启会丢掉 pending 状态；若 manifest 此时已把文件记为「已索引」，
+/// 下一轮真实 bootstrap 判 unchanged ⇒ 空 ChangeSet ⇒ 推进水位 ⇒ 永久丢失。
+/// 独立预期：重启后同一批事件必须重投。
+#[test]
+fn deferred_restart_before_persist_keeps_file_retryable() {
+    let root = test_root("deferred-restart-retry");
+    let (manager, session_dir, manifest, db_path, binding) = setup_bootstrap_session_in(
+        &root,
+        &good_table(&["order_id", "amount"]),
+    );
+
+    let active_snapshot = vec![
+        active_info("file-a", "proj/app/page_a.spg", "1", 900),
+        active_info("file-t", "proj/tables/orders.tbl", "2", 1000),
+    ];
+    let fixed_table = good_table(&["order_id", "amount", "customer"]);
+
+    // 第一次运行：Deferred（默认策略：阈值未到，本轮不落盘），随后「进程重启」
+    {
+        let provider = QueuedProvider::new();
+        provider.push("tables/orders.tbl", "file-t", "2", &fixed_table);
+        let mut orchestrator = build_orchestrator(
+            SessionManager::new(&root),
+            &session_dir,
+            manager.read_manifest("s1").expect("read manifest"),
+            SnapshotTransport::new(active_snapshot.clone()),
+            provider,
+            &binding,
+        );
+        let report = orchestrator.refresh_once().expect("deferred round 1");
+        assert_eq!(report.change_count, 1, "轮 1 应消费该事件");
+        assert!(
+            !report.persisted,
+            "默认策略下轮 1 不应落盘（本测试要覆盖「未落盘即重启」）"
+        );
+    }
+
+    assert!(
+        !field_present(&db_path, &binding, "field:orders.customer"),
+        "未落盘 ⇒ durable 图里不得有新字段"
+    );
+    assert_eq!(
+        durable_checkpoint(&db_path, &binding),
+        None,
+        "未落盘 ⇒ durable 不得有水位"
+    );
+
+    // 重启：pending 状态随进程消失，只剩磁盘上的 manifest 与 durable 图
+    let restarted_manifest = manager
+        .read_manifest("s1")
+        .expect("read manifest after restart");
+    let provider = QueuedProvider::new();
+    provider.push("tables/orders.tbl", "file-t", "2", &fixed_table);
+    let mut orchestrator = build_orchestrator(
+        SessionManager::new(&root),
+        &session_dir,
+        restarted_manifest,
+        SnapshotTransport::new(active_snapshot),
+        provider,
+        &binding,
+    );
+    orchestrator.set_one_shot_mode(true);
+
+    let report = orchestrator.refresh_once().expect("restart round");
+    assert_eq!(
+        report.change_count, 1,
+        "重启后未 durable 的文件必须重投（实际 {}）：manifest 记录不等于已落库",
+        report.change_count
+    );
+    assert!(
+        field_present(&db_path, &binding, "field:orders.customer"),
+        "重投后新字段必须进入 durable 图"
+    );
+    assert!(report.checkpoint.is_some(), "落库成功必须推进水位");
 }
 
 /// 空 bootstrap（远端快照与 manifest 完全一致且文件已成功入图）：
