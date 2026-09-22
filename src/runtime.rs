@@ -999,7 +999,7 @@ impl GraphRuntime {
     /// 写入冲突状态并重建其在 `load_diagnostics` 中的诊断段（同 code 先清后加）。
     fn set_ownership_conflicts(&mut self, conflicts: Vec<crate::ownership::OwnershipConflict>) {
         self.load_diagnostics
-            .retain(|diag| diag.code != "GRAPH_OWNERSHIP_CONFLICT");
+            .retain(|diag| diag.code != crate::diagnostics::CODE_GRAPH_OWNERSHIP_CONFLICT);
         self.load_diagnostics
             .extend(crate::scanner::indexer::ownership_conflict_diagnostics(
                 &conflicts,

@@ -55,6 +55,22 @@ fn page_with_dwtable(title: &str, source_id: &str, tbl_path: &str) -> String {
     .to_string()
 }
 
+/// `dwtable` source + 一个通过表达式读取该 source 字段的组件。
+fn page_with_dwtable_and_expr(source_id: &str, tbl_path: &str, expr: &str) -> String {
+    serde_json::json!({
+        "version": "4.19.7",
+        "theme": "default",
+        "params": [],
+        "sources": [{"id": source_id, "modelType": "dwtable", "path": tbl_path}],
+        "canvas": {
+            "id": "canvas",
+            "type": "canvas",
+            "components": [{"id": "text1", "type": "text", "value": expr}]
+        }
+    })
+    .to_string()
+}
+
 fn table_json(name: &str, fields: &[&str]) -> String {
     let dims: Vec<_> = fields
         .iter()
@@ -585,6 +601,103 @@ fn prepare_exposes_ownership_conflicts_to_caller() {
         "本场景不应有解析失败：{:?}",
         prepared.parse_failures
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 反例 1 的读取端点面：同名场景下表达式 Reads 边的端点必须区分局部与物理。
+///
+/// 组件 `text1` 读取 `orders.order_id`，其中 source `orders` 与物理表
+/// `orders.tbl` 同名。独立预期（先于 full==incremental 比较）：
+/// - Reads 端点恰为四个不同节点：局部 `model:app/a.spg|orders`、
+///   局部字段 `field:app/a.spg|orders.order_id`、物理 `model:orders`、
+///   物理字段 `field:orders.order_id`——不得因同名而少边或并点；
+/// - FieldAlias 恰为一条：局部字段 → 物理字段（不得反向、不得自环）；
+/// - 全图不得出现 Reads/FieldAlias/DataflowInput 自环。
+#[test]
+fn reads_edges_resolve_local_and_physical_endpoints_for_same_name_source() {
+    let tag = "reads-endpoints";
+    let binding = ProjectBinding::new(format!("m59-2-{tag}")).expect("binding");
+    let dir = unique_dir(tag);
+    let project = dir.join("project");
+    write(
+        &project,
+        "app/a.spg",
+        &page_with_dwtable_and_expr("orders", "$DATA:/tables/orders.tbl", "=orders.order_id"),
+    );
+    write(
+        &project,
+        "tables/orders.tbl",
+        &table_json("orders", &["order_id"]),
+    );
+    let db = dir.join("graph.db");
+    ProjectIndexer::scan_for_project(&project, &db, &binding).expect("scan");
+    let graph = GraphDB::open_readonly_with_ownership(&db, &binding).expect("reopen");
+
+    let comp_id = "comp:app/a.spg|text1";
+    let comp = graph
+        .get_node(comp_id)
+        .unwrap_or_else(|| panic!("组件节点 {comp_id} 必须存在"));
+    assert_eq!(comp.node_type, NodeType::Component);
+
+    let neighbors = GraphReadStore::get_node_edges(&graph, comp_id)
+        .expect("edges")
+        .expect("组件必须有邻居视图");
+    let mut reads: Vec<String> = neighbors
+        .outgoing
+        .iter()
+        .filter(|v| format!("{:?}", v.edge.edge_type) == "Reads")
+        .map(|v| v.edge.to.clone())
+        .collect();
+    reads.sort();
+    reads.dedup();
+    assert_eq!(
+        reads,
+        vec![
+            "field:app/a.spg|orders.order_id".to_string(),
+            "field:orders.order_id".to_string(),
+            "model:app/a.spg|orders".to_string(),
+            "model:orders".to_string(),
+        ],
+        "Reads 端点必须精确区分局部与物理四个节点：{reads:?}"
+    );
+
+    // FieldAlias：全图口径恰一条，局部字段 → 物理字段
+    let snapshot = snapshot(&db, &binding);
+    let aliases: Vec<(String, String)> = snapshot
+        .edges
+        .iter()
+        .filter_map(|edge| {
+            let (from, rest) = edge.split_once(" -FieldAlias-> ")?;
+            let to = rest.split('\t').next().unwrap_or("").to_string();
+            Some((from.to_string(), to))
+        })
+        .collect();
+    assert_eq!(
+        aliases,
+        vec![(
+            "field:app/a.spg|orders.order_id".to_string(),
+            "field:orders.order_id".to_string()
+        )],
+        "FieldAlias 必须恰为局部字段指向物理字段：{aliases:?}"
+    );
+
+    // 全图 Reads/FieldAlias/DataflowInput 不得自环
+    for banned in ["Reads", "FieldAlias", "DataflowInput"] {
+        let marker = format!(" -{banned}-> ");
+        let self_loops: Vec<&String> = snapshot
+            .edges
+            .iter()
+            .filter(|edge| {
+                let Some((from, rest)) = edge.split_once(&marker) else {
+                    return false;
+                };
+                let to = rest.split('\t').next().unwrap_or("");
+                from == to
+            })
+            .collect();
+        assert!(self_loops.is_empty(), "禁止 {banned} 自环：{self_loops:?}");
+    }
 
     let _ = std::fs::remove_dir_all(&dir);
 }

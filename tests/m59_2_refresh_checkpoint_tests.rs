@@ -872,3 +872,72 @@ fn prepare_entry_conflict_lifecycle_via_refresh() {
         after_fix.load_diagnostics
     );
 }
+
+/// 空 poll 轮也必须如实报告账本中仍然存在的来源冲突。
+///
+/// 报告字段契约是「本轮账本中仍然存在的来源冲突」；空轮不得把它硬编码成空——
+/// 否则持久冲突在无事件轮次会从报告里「闪灭」，消费方会误判冲突已修复。
+/// status/query/重启三面读 runtime 状态不受影响，这里钉的是报告口径。
+#[test]
+fn empty_poll_reports_persisting_ownership_conflicts() {
+    let root = test_root("empty-poll-conflict");
+    let manager = SessionManager::new(&root);
+    manager
+        .create_session("s1", "https://bi.test", "proj", "proj", "remote")
+        .expect("create session");
+    let session_dir = manager.session_dir("s1");
+    let mut manifest = manager.read_manifest("s1").expect("read manifest");
+    seed_file(
+        &session_dir,
+        &mut manifest,
+        "tables/a.tbl",
+        "file-a",
+        "1",
+        &good_table(&["f_a"]),
+    );
+    seed_file(
+        &session_dir,
+        &mut manifest,
+        "tables/other/a.tbl",
+        "file-o",
+        "1",
+        &good_table(&["f_b"]),
+    );
+    let db_path = session_dir.join("graph.redb");
+    let binding = ProjectBinding::new("proj").expect("valid binding");
+    ProjectIndexer::scan_for_project(&project_mirror_root(&session_dir), &db_path, &binding)
+        .expect("seed scan");
+    manifest.graph_db_path = db_path.to_string_lossy().to_string();
+    manager.write_manifest(&manifest).expect("write manifest");
+
+    // 预置 checkpoint → 本轮走 poll 且无任何事件
+    {
+        let mut graph =
+            GraphDB::open_with_ownership(&db_path, &binding).expect("open for checkpoint");
+        let commit = IndexCommit {
+            file_states: graph.load_file_states().expect("load states"),
+            dirty_nodes: Vec::new(),
+            deleted_nodes: Vec::new(),
+            checkpoint: Some(DiffRefreshCheckpoint {
+                active: SourceCursor::new(500, Vec::new()),
+                deleted: SourceCursor::new(0, Vec::new()),
+            }),
+            delta: None,
+            scanner_entries: Vec::new(),
+            scanner_deleted_paths: Vec::new(),
+        };
+        IndexStateStore::persist_index(&mut graph, commit).expect("seed checkpoint");
+    }
+
+    let provider = QueuedProvider::new();
+    let source = ReplayChangeSource::new(Vec::new());
+    let mut orchestrator =
+        build_orchestrator(manager, &session_dir, manifest, source, provider, &binding);
+    let report = orchestrator.refresh_once().expect("empty poll");
+    assert_eq!(report.change_count, 0);
+    assert!(
+        report.ownership_conflicts.iter().any(|id| id == "model:a"),
+        "空 poll 轮必须如实报告账本中仍然存在的冲突：{:?}",
+        report.ownership_conflicts
+    );
+}

@@ -26,10 +26,10 @@
 //! # 路径归一化（A2）
 //!
 //! `<PAGE>` 与引用解析都先过 [`normalize_project_path`]：分隔符统一 `/`、
-//! 消解 `.` 与 `..`、越界报错。**本模块在 M59-2 的 schema 版本开关就绪前
-//! 不接入扫描写入与引用解析**——不得在旧 schema 下默认写入新 id 或混写
-//! 新旧路径形态（plan 交付边界）。全局身份的保留分隔符校验已接入 native scanner，
-//! 仅拒绝歧义输入，不启用页面局部编码。
+//! 消解 `.` 与 `..`、越界报错。M59-2 起扫描写入已按 schema 开关接入本模块：
+//! 仅来源账本路径（`PageIdentityMode::OwnershipPageLocal`）写入页面局部 id，
+//! 旧 schema（`LegacyGlobal`）保持全局编码，不混写。查询侧旧 target 解析
+//! [`resolve_node_target`] 已就绪但**尚无生产调用方**（接线为独立后续任务）。
 
 use crate::graph::NodeType;
 use crate::graph_store::{GraphReadStore, GraphStoreResult};

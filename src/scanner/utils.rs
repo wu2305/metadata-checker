@@ -37,7 +37,8 @@ pub fn add_identified_node(
         .with_context(|| "Failed to upsert graph node")
 }
 
-/// 向图存储写入节点（旧全局身份入口，仅用于非 model/field 或尚未迁移的调用点）。
+/// 向图存储写入节点（旧全局身份入口；model/field 仅限 `LegacyGlobal` 路径，
+/// 页面/组件等非 model/field 节点不受身份模式影响）。
 pub fn add_node(
     graph: &mut dyn GraphWriteStore,
     id: String,
@@ -46,8 +47,9 @@ pub fn add_node(
     name: String,
     meta: Option<serde_json::Value>,
 ) -> Result<()> {
-    // 当前 native scanner 的 model/field 仍是全局编码；在写入边界拒绝歧义分隔符。
-    // 页面局部身份须等 M59-2 的版本与归属契约就绪后才允许写入。
+    // LegacyGlobal 模式下 model/field 保持全局编码；页面局部身份只允许经
+    // [`add_identified_node`] 写入（调用方先用 `PageScope` 构造完整 id），
+    // 此处强制走全局形态并在写入边界拒绝歧义分隔符。
     let id = if let Some(local) = id.strip_prefix("model:") {
         crate::graph_identity::global_node_id(crate::graph_identity::NodeIdKind::Model, local)?
     } else if let Some(local) = id.strip_prefix("field:") {

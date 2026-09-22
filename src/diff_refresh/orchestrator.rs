@@ -294,6 +294,9 @@ impl DiffRefreshOrchestrator {
                 // 使用 pending watermark 继续轮询，避免重复消费；
                 // 空 poll 仅在 pending 已满阈值或轮次回退时触发持久化。
                 self.pending_rounds = self.pending_rounds.saturating_add(1);
+                // M59-2 复验 P2：空轮也必须如实报告账本中仍然存在的来源冲突，
+                // 不得硬编码空——否则持久冲突在无事件轮次从报告里「闪灭」。
+                let persisting_conflicts = self.runtime.ownership_conflict_node_ids();
                 if self.should_persist_pending() {
                     let stage = Instant::now();
                     let persist_report = self
@@ -305,7 +308,7 @@ impl DiffRefreshOrchestrator {
                         Vec::new(),
                         Vec::new(),
                         Vec::new(),
-                        Vec::new(),
+                        persisting_conflicts,
                         Some(pending_checkpoint),
                         last_poll_at,
                         coverage,
@@ -320,7 +323,7 @@ impl DiffRefreshOrchestrator {
                     Vec::new(),
                     Vec::new(),
                     Vec::new(),
-                    Vec::new(),
+                    persisting_conflicts,
                     Some(pending_checkpoint),
                     last_poll_at,
                     coverage,
@@ -333,6 +336,11 @@ impl DiffRefreshOrchestrator {
 
             // 首次 bootstrap 后空结果：持久化 checkpoint-only commit，
             // 使下一轮走 poll 而非重新 bootstrap；已有 checkpoint 的空 poll 不写盘。
+            // 前提声明（M59-2 复验 P2）：若此前存在 bootstrap 失败轮留下的未提交
+            // pending_commit，而远端此刻返回空 bootstrap，这里落 checkpoint-only
+            // 提交不会推进那份 pending——失败文件的重试退化为下一轮 prepare 的
+            // hash-dirty 重检（mirror 内容 vs durable hash 失配即重解析，最终收敛；
+            // 删除类变更等下一事件）。远端在失败期间清空全部文件才可能走到。
             let (checkpoint, persist_report, persisted, pending_dirty_total) =
                 if let Some(checkpoint) = current_checkpoint {
                     (Some(checkpoint), None, false, 0)
@@ -349,12 +357,13 @@ impl DiffRefreshOrchestrator {
                     timing.commit_ms = stage.elapsed().as_millis();
                     (Some(bootstrap_checkpoint), Some(persist_report), false, 0)
                 };
+            let persisting_conflicts = self.runtime.ownership_conflict_node_ids();
             return Ok(Self::new_machine_report(
                 0,
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
-                Vec::new(),
+                persisting_conflicts,
                 checkpoint,
                 last_poll_at,
                 coverage,
