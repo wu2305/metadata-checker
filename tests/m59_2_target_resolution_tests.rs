@@ -174,6 +174,43 @@ fn stdio_query_model(runtime: &mut GraphRuntime, target: &str) -> serde_json::Va
     serde_json::to_value(&response).expect("serialize stdio response")
 }
 
+/// 通过 `--explain-condition` 生产入口执行查询。
+///
+/// 这是 `--explain` 路由展开出的**补充调用**（route.rs:122，
+/// `merge_key = "condition_facts"`），也是 `--explain-condition` 旧动词的入口。
+fn explain_condition(runtime: &mut GraphRuntime, target: &str) -> serde_json::Value {
+    let response = runtime
+        .query(RuntimeQueryRequest {
+            command: metadata_checker::tool_contract::ToolCommand::ExplainCondition,
+            target: target.to_string(),
+            budget: "normal".to_string(),
+            human: false,
+            intent: None,
+            page_scope: None,
+            depth: None,
+            check_reload: false,
+        })
+        .expect("explain_condition must not error");
+    response.result
+}
+
+/// 通过 `--context` 生产入口执行查询。
+fn context(runtime: &mut GraphRuntime, target: &str) -> serde_json::Value {
+    let response = runtime
+        .query(RuntimeQueryRequest {
+            command: metadata_checker::tool_contract::ToolCommand::Context,
+            target: target.to_string(),
+            budget: "normal".to_string(),
+            human: false,
+            intent: None,
+            page_scope: None,
+            depth: Some(1),
+            check_reload: false,
+        })
+        .expect("context must not error");
+    response.result
+}
+
 fn diagnostic_codes(result: &serde_json::Value) -> Vec<String> {
     result
         .get("diagnostics")
@@ -424,6 +461,86 @@ fn field_and_model_kinds_do_not_cross_match() {
     assert!(
         crossed_codes.contains(&"TARGET_NOT_FOUND".to_string()),
         "kind 不匹配时必须报 TARGET_NOT_FOUND，不得跨 kind 命中：{crossed_codes:?}"
+    );
+}
+
+/// `--explain` 路由展开出的**补充调用** `ExplainCondition` 也必须走同一套旧
+/// target 解析。
+///
+/// 只接线 `build_explain_output` 是不够的：`route_explain` 把 `--explain`
+/// 展开成 `Explain`（主）+ `ExplainCondition`（补充，merge_key=condition_facts），
+/// 后者此前仍做精确 `get_node`。裸 `field:` 在页面局部身份启用后会在这里
+/// 报 TARGET_NOT_FOUND，于是 `--explain` 的补充块静默缺失——主调用有答案，
+/// 条件成因却永远是「查不到」。
+#[test]
+fn explain_condition_supplement_resolves_bare_legacy_target() {
+    let db_path = build_bound_graph(
+        "explain-condition",
+        &[
+            ("app/a.spg", page_with_dataflow("ordersView", &["order_id"])),
+            ("tables/orders.tbl", table_json(&["order_id"])),
+        ],
+    );
+    let mut runtime = open_runtime(&db_path);
+
+    let result = explain_condition(&mut runtime, "field:ordersView.order_id");
+    let codes = diagnostic_codes(&result);
+    assert!(
+        !codes.contains(&"TARGET_NOT_FOUND".to_string()),
+        "ExplainCondition 必须解析裸 field: 旧 target，不得报 TARGET_NOT_FOUND：{codes:?}"
+    );
+    assert_eq!(
+        result.get("query_target").and_then(|v| v.as_str()),
+        Some("field:app/a.spg|ordersView.order_id"),
+        "ExplainCondition 必须解析到唯一的页面局部字段并如实回报：{:?}",
+        result.get("query_target")
+    );
+}
+
+/// `--context`（`--explain --depth N` 展开出的补充调用）同样不得绕过解析。
+#[test]
+fn context_supplement_resolves_bare_legacy_target() {
+    let db_path = build_bound_graph(
+        "context-supplement",
+        &[
+            ("app/a.spg", page_with_dwtable("ordersView", "tables/orders.tbl")),
+            ("tables/orders.tbl", table_json(&["order_id"])),
+        ],
+    );
+    let mut runtime = open_runtime(&db_path);
+
+    let result = context(&mut runtime, "model:ordersView");
+    let codes = diagnostic_codes(&result);
+    assert!(
+        !codes.contains(&"TARGET_NOT_FOUND".to_string()),
+        "Context 必须解析裸 model: 旧 target，不得报 TARGET_NOT_FOUND：{codes:?}"
+    );
+    assert_eq!(
+        result.get("query_target").and_then(|v| v.as_str()),
+        Some("model:app/a.spg|ordersView"),
+        "Context 必须解析到唯一的页面局部模型并如实回报：{:?}",
+        result.get("query_target")
+    );
+}
+
+/// 跨页同名时，补充调用也必须报歧义，而不是静默挑一个或报 missing。
+#[test]
+fn explain_condition_supplement_reports_ambiguity() {
+    let db_path = build_bound_graph(
+        "explain-condition-ambiguous",
+        &[
+            ("app/a.spg", page_with_dataflow("ordersView", &["order_id"])),
+            ("app/b.spg", page_with_dataflow("ordersView", &["order_id"])),
+            ("tables/orders.tbl", table_json(&["order_id"])),
+        ],
+    );
+    let mut runtime = open_runtime(&db_path);
+
+    let result = explain_condition(&mut runtime, "field:ordersView.order_id");
+    let codes = diagnostic_codes(&result);
+    assert!(
+        codes.iter().any(|code| code == "AMBIGUOUS_TARGET"),
+        "ExplainCondition 遇到跨页同名必须报 AMBIGUOUS_TARGET：{codes:?}"
     );
 }
 
