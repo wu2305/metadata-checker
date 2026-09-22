@@ -186,3 +186,67 @@ B5 新断言经论证可钉死 P1 回归（分类回退必挂）。已声明不�
    查询侧诊断——journal 已声明，任何后续 scan（含 no-op）都会补报；
 3. link（ActionNavigates）目标页 stub 无独立 origin 断言，与 embed 共用同一分类分支，
    整体回退由 embed 钉捕获。
+
+### 2026-09-22 「可验收」撤回与语义根因修复（用户授权）
+
+上一节第二轮冷脸复验的「可验收」结论被用户**正式撤回**：CNB 实测在基线 `2a65d7b`
+上复现三个根因级缺陷，均不是「缺 answer_impact 登记」类的报告缺口，而是行为错误：
+1. **身份塌陷**：SPG source `id=orders`、`path=$DATA:/tables/orders.tbl` 建图"成功"，
+   但 `model:app/a.spg|orders` 不存在、`model:orders` 出现 DataflowInput 自环。
+   根因：scanner 先按旧全局 ID 建临时图、再事后转换页面身份——局部 source 与同名
+   物理表在临时图里已塌成一个节点（`path`/`meta` 后写覆盖前写），信息在任何转换
+   之前已丢失。
+2. **checkpoint 原子性违约**：prepare 把坏 TBL 转成诊断后仍返回成功，diff-refresh
+   随后提交 `next_checkpoint`——事件被消费但内容从未入图，违反 approved spec
+   「解析失败保留旧贡献并保持脏；失败不得推进 checkpoint」
+   （[semantic-integrity-design](../../specs/2026-09-21-semantic-integrity-design.md)
+   「M59-2 必须消费的归属契约」）。
+3. **冲突被丢弃**：不同目录两个同 stem `a.tbl` 建图时报告 `GRAPH_OWNERSHIP_CONFLICT`，
+   但 query diagnostics 与 status.load_diagnostics 均为空；prepare 也丢弃冲突。
+
+修复（`46bc08a..2e0222c`；身份面 `46bc08a..1948885` 为上一轮 worker 实现，本轮
+`1e83017..2e0222c` 为失败回归、收口修复与 P2 处置）：
+1. **身份**：`PageScope` 在**建节点之前**区分页面局部与物理身份（局部 source 的
+   model/field 带 `|<page>` 段；`physical_*_id` 恒全局，即使与 source id 同名）；
+   写入边界 `add_identified_node` 只做保留分隔符歧义拒绝、不再二次转换；账本归属
+   按 id 页面段判定（`is_page_local`），删除事后 ID 改写。回归：三个反例（同名、
+   跨页同名、source 名撞另一 source 物理表名）独立预期断言 + full==incremental
+   逐属性快照一致 + 同名场景 Reads/FieldAlias 端点精确四分且无自环。
+2. **checkpoint**：`PreparedIndexUpdate.parse_failures` 透出；失败轮
+   `commit.checkpoint` 停在旧值（bootstrap 失败轮为 None），deferred 路径
+   `merge_pending_state` 同步收 `Option`——修复前 deferred **bootstrap 失败轮**
+   会把 pending 水位推进到失败水位，下一轮 poll 空转，事件被静默消费、只能等
+   未来新事件偶然触发重试。失败文件不写新 file hash ⇒ 文件保持脏 ⇒ 重试，链条
+   闭合；同步/延迟持久化、空 poll、重试、恢复、重启均有动态回归。
+3. **冲突**：scan/prepare 双入口透出 `GRAPH_OWNERSHIP_CONFLICT`；runtime 加载与
+   install 均从账本重算并同步 `load_diagnostics`（status、每条查询响应、重启一致）；
+   修复后随账本重算消失；空 poll/空 bootstrap 轮报告不再硬编码空冲突。
+
+反例修复前后（CNB workspace `cnb-efo-1k335h6jk`，远端用修复前源码直接对照）：
+- `deferred_bootstrap_bad_tbl_rebootstraps_until_fixed`：修复前 FAILED
+  （轮 2 change_count=0，事件被静默消费）→ 修复后 ok（7/7）。
+- `empty_poll_reports_persisting_ownership_conflicts`：修复前 FAILED（报告 `[]`）
+  → 修复后 ok。
+
+验证（提交 `2e0222c`）：cargo fmt --check 通过；完整 native（llvm-cov，
+`--test-threads=1`）**1294 passed / 0 failed / 24 ignored（107 组）**；benches
+check、browser-wasm check 通过（WASM 8 条既有非本批 warning，与本轮前持平）。
+[原始日志与 SHA256](../../governance/evidence/2026-09-22-m59-2-semantic-fix.json.gz)
+（文件 SHA256 `b59a1b49224d4802e99a075b9b20063960fbec7a16b0e178000ad02bcf0055f2`）。
+
+独立验收：两轮冷脸（第一轮覆盖 `2a65d7b..fee3afe` 全部修复；第二轮复验
+`fee3afe..2e0222c` 增量）均结论**可验收**，无 P0/P1。P2 处置：空轮冲突报告、
+冲突清除常量化、陈旧注释、bootstrap 空 ChangeSet 前提声明四项已修；
+`aa8a44c` 提交消息标 `test:` 实含 orchestrator fix，按不改写历史处理、此处勘误。
+
+剩余与边界（明确区分已实现 / 已验收）：
+- 查询侧旧 target 解析 `resolve_node_target`（graph_identity.rs）**已实现但无
+  生产调用方**——页面局部 id 的裸名查询接线是独立后续任务，不计入 M59-2；
+- full==incremental 快照未含坏文件/冲突 fixture；sync 模式 bootstrap 失败轮无
+  直接用例（与 deferred 走同一代码路径，由 deferred 用例覆盖）；
+- 基线遗留：link-action 跨页 param id 与本页 param id 两种形态并存、
+  `submit_meta` 重复 `"source_expr"` 键——本批未动；
+- `GRAPH_OWNERSHIP_CONFLICT` 的 `answer_impact` 已在 diagnostics 权威表登记为
+  partial（覆盖上一节残留第 1 项）；
+- 性能边界保持「增量解析、整图重建、全量持久化」，本批**不宣称性能改善**；
+  Baseline impact：新增回归用例增加测试时长，不影响 bench 目标代码路径。
