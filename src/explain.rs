@@ -513,6 +513,34 @@ pub fn build_explain_condition_output_with_intent_and_retrieval(
     intent: TraversalIntent,
     retrieval_strategy: GraphRetrievalStrategy,
 ) -> Result<serde_json::Value> {
+    // M59-2 A1 接线：这里是 `--explain` 展开出的补充调用（route.rs:122，
+    // merge_key=condition_facts），也是 `--explain-condition` 旧动词的入口。
+    // 只接线 `build_explain_output` 不够：裸 `field:`/`model:` 在页面局部身份
+    // 启用后会在这一层报 TARGET_NOT_FOUND，补充块静默缺失——主调用答得出，
+    // 条件成因却永远查不到，且失败不显眼（supplement 的 required=false）。
+    let resolved_target = match crate::query::resolve_legacy_model_target(graph, target_id)? {
+        crate::query::LegacyModelTarget::Exact(id)
+        | crate::query::LegacyModelTarget::Resolved(id) => id,
+        crate::query::LegacyModelTarget::Ambiguous(nodes) => {
+            return crate::query::build_ambiguous_target_output(
+                target_id,
+                &nodes,
+                crate::output::OutputKind::Explain,
+                "--explain",
+            );
+        }
+        crate::query::LegacyModelTarget::Missing => {
+            let candidates = find_candidates(graph, target_id, 5)?;
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::Explain,
+                target_id,
+                &candidates,
+            );
+            return Ok(serde_json::to_value(out)?);
+        }
+    };
+    let target_id = resolved_target.as_str();
+
     let (target_node, scoped_page_node, dataflow_model_id) =
         if let Some((page_ref, local_model_id)) = parse_scoped_model_target(target_id) {
             if let Some((scoped_model, page_node, scoped_df_model_id)) =
