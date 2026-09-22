@@ -334,6 +334,41 @@ pub fn format_next_query_multi(template: &str, args: &[&str]) -> String {
     result
 }
 
+/// 由 target 的类型前缀推出该用哪条 `--find-*` 命令，以及该拿什么当搜索关键词。
+///
+/// 该建议的是「按节点种类去搜」，而节点种类由 **target 前缀**决定，与发起查询的
+/// `OutputKind` 无关：`--context model:X` 与 `--query-model model:X` 问的是同一类
+/// 节点，都该建议 `--find-model`。此前按 `OutputKind` 分支，`Context` 落到
+/// `_ => --find-page`，于是 `--context model:ordersView` 会给出
+/// `--find-page 'model:ordersView'` —— 搜的是 Page 类型，一条都搜不到。
+///
+/// 关键词还要**去掉前缀**：`find_nodes` 是拿关键词去匹配 `id`/`name`/`path`
+/// 的子串，而 id 形如 `model:app/a.spg|ordersView`。带前缀的
+/// `--find-model 'model:ordersView'` 匹配不到任何节点（前缀 + 局部名的组合从不是
+/// 任何 id 的子串），去掉前缀后的 `ordersView` 才命中。字段没有独立 find 动词，
+/// 按所属模型定位。
+///
+/// 返回 `None` 表示 target 无前缀（裸名），由调用方退回按 `OutputKind` 推断。
+fn find_command_for_target(target: &str) -> Option<(&'static str, &str)> {
+    let (prefix, bare) = target.split_once(':')?;
+    if bare.is_empty() {
+        return None;
+    }
+    match prefix {
+        "model" | "dataflow" => Some(("--find-model {}", bare)),
+        "page" => Some(("--find-page {}", bare)),
+        "comp" | "action" => Some(("--find-component {}", bare)),
+        // 字段没有独立的 find 动词，`--find-model` 又只匹配 Model 类型节点，
+        // 拿字段全名去搜必然空手。退到「它所属的模型」：`field:<PAGE>|<model>.<field>`
+        // 的裸名取最后一个 `.` 之前的部分即模型名。
+        "field" => {
+            let model = bare.rsplit_once('.').map(|(model, _)| model).unwrap_or(bare);
+            (!model.is_empty()).then_some(("--find-model {}", model))
+        }
+        _ => None,
+    }
+}
+
 /// 构建目标不存在时的结构化输出，附带候选建议
 pub fn build_target_not_found_output(
     kind: OutputKind,
@@ -359,14 +394,22 @@ pub fn build_target_not_found_output(
         "candidate_count": candidate_targets.len(),
     });
 
-    let find_cmd = match kind {
-        OutputKind::ModelQuery | OutputKind::DataFlowQuery | OutputKind::DataFlow => {
-            "--find-model {}"
+    // 先按 target 前缀定节点种类与搜索关键词（权威），再退回按 OutputKind 推断
+    // （裸名 target 没有前缀可用）。两条路径都给出可执行的 `--find-*`。
+    let (find_cmd, find_keyword) = match find_command_for_target(target_id) {
+        Some((command, keyword)) => (command, keyword.to_string()),
+        None => {
+            let command = match kind {
+                OutputKind::ModelQuery | OutputKind::DataFlowQuery | OutputKind::DataFlow => {
+                    "--find-model {}"
+                }
+                OutputKind::ComponentQuery | OutputKind::Explain | OutputKind::SuperPage => {
+                    "--find-component {}"
+                }
+                _ => "--find-page {}",
+            };
+            (command, target_id.to_string())
         }
-        OutputKind::ComponentQuery | OutputKind::Explain | OutputKind::SuperPage => {
-            "--find-component {}"
-        }
-        _ => "--find-page {}",
     };
 
     let mut out = AiOutput::new(kind, summary);
@@ -398,7 +441,7 @@ pub fn build_target_not_found_output(
     }
     if candidates.is_empty() {
         out.next_queries
-            .push(format_next_query(find_cmd, target_id));
+            .push(format_next_query(find_cmd, &find_keyword));
     }
     out.validate()
 }

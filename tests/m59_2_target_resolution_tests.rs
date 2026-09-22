@@ -547,6 +547,79 @@ fn explain_condition_supplement_reports_ambiguity() {
     );
 }
 
+/// `TARGET_NOT_FOUND` 的补救建议必须是**按 target 种类**、且**真能搜到东西**的命令。
+///
+/// 此前建议由 `OutputKind` 推出：`--context model:X` 落到 `_ => --find-page`，
+/// `--explain field:X` 落到 `--find-component`——都按错误的节点类型去搜。而且关键词
+/// 用的是完整 target（`model:ordersView`），而 `find_nodes` 是拿关键词匹配
+/// `id`/`name`/`path` 的子串，带前缀的串从不是任何 id 的子串，照抄必然空手。
+/// 独立预期：`--context model:<唯一局部名>` 与 `--query-model model:<不存在名>`
+/// 都必须给出 `--find-model`，且关键词是去掉前缀的裸名。
+#[test]
+fn target_not_found_suggests_find_command_matching_target_kind() {
+    let db_path = build_bound_graph(
+        "not-found-suggestion",
+        &[
+            (
+                "app/a.spg",
+                page_with_dwtable("ordersView", "tables/orders.tbl"),
+            ),
+            ("tables/orders.tbl", table_json(&["order_id"])),
+        ],
+    );
+    let mut runtime = open_runtime(&db_path);
+
+    // --context 是 OutputKind::Context（旧代码落 `_ => --find-page`）
+    let context_result = context(&mut runtime, "model:definitelyMissing");
+    let context_queries: Vec<String> = context_result
+        .get("next_queries")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        context_queries.iter().any(|q| q.contains("--find-model")),
+        "Context 的 TARGET_NOT_FOUND 必须建议 --find-model（按 model: 前缀），实际 {context_queries:?}"
+    );
+    assert!(
+        !context_queries.iter().any(|q| q.contains("--find-page")),
+        "model: target 不得建议 --find-page，实际 {context_queries:?}"
+    );
+    assert!(
+        context_queries
+            .iter()
+            .any(|q| q.contains("definitelyMissing") && !q.contains("model:definitelyMissing")),
+        "建议的关键词必须去掉前缀，否则 --find-model 匹配不到任何 id，实际 {context_queries:?}"
+    );
+
+    // --explain 是 OutputKind::Explain（旧代码落 --find-component，对 field: 也是错的）
+    let explain_result = explain(&mut runtime, "field:definitelyMissing.col");
+    let explain_queries: Vec<String> = explain_result
+        .get("next_queries")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        explain_queries.iter().any(|q| q.contains("--find-model")),
+        "field: target 必须建议 --find-model（字段按所属模型定位），实际 {explain_queries:?}"
+    );
+    assert!(
+        !explain_queries.iter().any(|q| q.contains("--find-component")),
+        "field: target 不得建议 --find-component，实际 {explain_queries:?}"
+    );
+}
+
 /// 共享 stdio 入口：query_model 走同一套旧 target 解析，不得因为入口不同而绕过。
 #[test]
 fn stdio_entry_uses_same_legacy_target_resolution() {
