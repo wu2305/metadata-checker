@@ -1364,6 +1364,30 @@ pub(crate) fn build_explain_availability_fast_output(
 ///
 /// 返回 Value，由外层调用者决定输出格式。
 pub fn build_explain_output(graph: &dyn GraphReadStore, node_id: &str) -> Result<Value> {
+    // M59-2 A1 接线：`--explain` 是 `field:` target 的生产入口，与 query_model
+    // 共用同一套旧 target 解析——裸 `field:` 在页面局部身份启用后同样可能落在
+    // 「唯一局部字段 / 跨页同名 / 局部与物理同名」三种状态上。
+    let node_id = &match crate::query::resolve_legacy_model_target(graph, node_id)? {
+        crate::query::LegacyModelTarget::Exact(id)
+        | crate::query::LegacyModelTarget::Resolved(id) => id,
+        crate::query::LegacyModelTarget::Ambiguous(nodes) => {
+            return crate::query::build_ambiguous_target_output(
+                node_id,
+                &nodes,
+                crate::output::OutputKind::Explain,
+                "--explain",
+            );
+        }
+        crate::query::LegacyModelTarget::Missing => {
+            let candidates = find_candidates(graph, node_id, 5)?;
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::Explain,
+                node_id,
+                &candidates,
+            );
+            return Ok(serde_json::to_value(out)?);
+        }
+    };
     let node = match graph.get_node(node_id)? {
         Some(n) => n,
         None => {

@@ -1,12 +1,117 @@
 use super::{find_candidates, find_parent_page};
 use crate::graph::{
-    find_consumed_by_dataflows, find_dataflow_inputs, find_dataflow_outputs, find_produced_by,
-    find_readers, find_writers,
+    Node, find_consumed_by_dataflows, find_dataflow_inputs, find_dataflow_outputs,
+    find_produced_by, find_readers, find_writers,
 };
+use crate::graph_identity::{NodeIdKind, resolve_node_target};
 use crate::graph_store::GraphReadStore;
 use crate::output::schema::format_next_query;
 use anyhow::Result;
 use std::io::{self, Write};
+
+/// M59-2 A1 接线：裸旧 target 在页面局部身份启用后的解析结果。
+///
+/// A1 把页面局部模型/字段编码为 `<kind>:<PAGE>|<local>`，物理表仍是全局
+/// `<kind>:<name>`。旧 target（`model:orders`）因此可能落在
+/// 「唯一的局部节点」「多个同名节点」或「完全不存在」三种状态上，而精确
+/// `get_node` 只能区分「存在 / 不存在」——它会静默命中同名的物理模型，
+/// 或在只有局部节点时直接报 missing。approved plan 要求显式解析并报歧义。
+pub(crate) enum LegacyModelTarget {
+    /// 精确 id 命中（scoped 或物理全局 id），按原样继续。
+    Exact(String),
+    /// 裸名唯一命中一个页面局部节点：改用该节点的真实 id 继续，并如实回报。
+    Resolved(String),
+    /// 裸名匹配多个节点：交回全部候选，调用方必须报 AMBIGUOUS_TARGET。
+    Ambiguous(Vec<Node>),
+    /// 无候选。
+    Missing,
+}
+
+/// 解析 `model:` / `field:` 旧 target。
+///
+/// 只在 target 带 `model:` / `field:` 前缀时生效，其余 target 原样返回
+/// `Exact`（不改变既有 surface 的行为）。scoped id（含 `|`）走精确查表。
+pub(crate) fn resolve_legacy_model_target(
+    graph: &dyn GraphReadStore,
+    target: &str,
+) -> Result<LegacyModelTarget> {
+    let kind = if let Some(rest) = target.strip_prefix("model:") {
+        if rest.contains('|') {
+            return Ok(LegacyModelTarget::Exact(target.to_string()));
+        }
+        NodeIdKind::Model
+    } else if let Some(rest) = target.strip_prefix("field:") {
+        if rest.contains('|') {
+            return Ok(LegacyModelTarget::Exact(target.to_string()));
+        }
+        NodeIdKind::Field
+    } else {
+        return Ok(LegacyModelTarget::Exact(target.to_string()));
+    };
+
+    match resolve_node_target(graph, kind, target)? {
+        crate::graph_identity::TargetResolution::Unique(node) => {
+            if node.id == target {
+                Ok(LegacyModelTarget::Exact(target.to_string()))
+            } else {
+                Ok(LegacyModelTarget::Resolved(node.id))
+            }
+        }
+        crate::graph_identity::TargetResolution::Ambiguous(nodes) => {
+            Ok(LegacyModelTarget::Ambiguous(nodes))
+        }
+        crate::graph_identity::TargetResolution::Missing => Ok(LegacyModelTarget::Missing),
+    }
+}
+
+/// 构造歧义输出：交回全部候选并要求调用方从 `next_queries` 里挑一条重试。
+///
+/// `kind` 由调用方给出（ModelQuery / Explain …），`next_query_template` 是
+/// 该 surface 的重试命令模板，保证 `next_queries` 可直接执行。
+pub(crate) fn build_ambiguous_target_output(
+    target: &str,
+    nodes: &[Node],
+    kind: crate::output::OutputKind,
+    next_query_template: &str,
+) -> Result<serde_json::Value> {
+    let candidates: Vec<serde_json::Value> = nodes
+        .iter()
+        .map(|node| {
+            serde_json::json!({
+                "id": node.id,
+                "name": node.name,
+                "node_type": format!("{:?}", node.node_type),
+                "reason": "旧 target 匹配到多个节点：页面局部身份启用后同名局部节点与物理节点并存",
+            })
+        })
+        .collect();
+    let next_queries: Vec<String> = nodes
+        .iter()
+        .map(|node| format!("{} {}", next_query_template, node.id))
+        .collect();
+    let summary = serde_json::json!({
+        "target_id": target,
+        "resolved_count": 0,
+        "what_is_it": format!("Target '{}' matches {} nodes", target, candidates.len()),
+        "candidate_count": candidates.len(),
+    });
+    let mut out = crate::output::AiOutput::new(kind, summary);
+    out.query_target = Some(target.to_string());
+    out.details = Some(serde_json::json!({
+        "candidate_targets": candidates,
+    }));
+    out.next_queries = next_queries;
+    out.diagnostics.push(crate::diagnostics::envelope_diagnostic(
+        "AMBIGUOUS_TARGET",
+        candidates.len(),
+        crate::output::Location::default(),
+        format!(
+            "'{target}' 匹配到 {} 个节点（页面局部身份启用后同名局部节点与物理节点并存）。从 next_queries 里挑一条完整写法重试，不要重复这一条命令。",
+            candidates.len()
+        ),
+    ));
+    Ok(serde_json::to_value(out.validate())?)
+}
 
 /// 构建 query_model JSON 输出，不直接打印。
 pub fn build_query_model_output(
@@ -15,6 +120,29 @@ pub fn build_query_model_output(
     budget: &str,
 ) -> Result<serde_json::Value> {
     let is_compact = budget == "compact";
+    // M59-2 A1 接线：旧 target 先显式解析，再交给精确查表。
+    // 不解析的话，页面局部身份启用后 `model:orders` 会静默命中同名的物理
+    // 模型（事实被吞且不报歧义），或在只有局部节点时直接报 missing。
+    let model_id = &match resolve_legacy_model_target(graph, model_id)? {
+        LegacyModelTarget::Exact(id) | LegacyModelTarget::Resolved(id) => id,
+        LegacyModelTarget::Ambiguous(nodes) => {
+            return build_ambiguous_target_output(
+                model_id,
+                &nodes,
+                crate::output::OutputKind::ModelQuery,
+                "--query-model",
+            );
+        }
+        LegacyModelTarget::Missing => {
+            let candidates = find_candidates(graph, model_id, 5)?;
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::ModelQuery,
+                model_id,
+                &candidates,
+            );
+            return Ok(serde_json::to_value(out)?);
+        }
+    };
     if graph.get_node(model_id)?.is_none() {
         let candidates = find_candidates(graph, model_id, 5)?;
         let out = crate::output::schema::build_target_not_found_output(
@@ -361,6 +489,31 @@ pub fn query_model(
     human: bool,
     budget: &str,
 ) -> Result<()> {
+    // 与 `build_query_model_output` 同一套解析：CLI 的 human 分支不得绕过歧义诊断。
+    let resolved = match resolve_legacy_model_target(graph, model_id)? {
+        LegacyModelTarget::Exact(id) | LegacyModelTarget::Resolved(id) => id,
+        LegacyModelTarget::Ambiguous(nodes) => {
+            let out = build_ambiguous_target_output(
+                model_id,
+                &nodes,
+                crate::output::OutputKind::ModelQuery,
+                "--query-model",
+            )?;
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+        LegacyModelTarget::Missing => {
+            let candidates = find_candidates(graph, model_id, 5)?;
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::ModelQuery,
+                model_id,
+                &candidates,
+            );
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+    };
+    let model_id = &resolved;
     if graph.get_node(model_id)?.is_none() {
         let candidates = find_candidates(graph, model_id, 5)?;
         let out = crate::output::schema::build_target_not_found_output(
