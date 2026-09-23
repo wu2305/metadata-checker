@@ -138,6 +138,63 @@ fn test_bare_target_is_resolved_by_the_tool() {
     );
 }
 
+/// 歧义 target 经**真实二进制**走完合并层后，统一信封与 confidence 块都要在。
+///
+/// M59-2 A1 让 runtime resolver 成为 `AMBIGUOUS_TARGET` 的信封构造方；此前的用例都经
+/// `RuntimeQueryRequest` 直达，绕过了 `main.rs` 的 `merge_supplement` /
+/// `attach_confidence`。这里起真实二进制，钉住端到端形态：
+/// 诊断走六字段信封、`answer_impact` 与 `severity` 已登记、confidence 块由合并层补上。
+#[test]
+fn test_ambiguous_target_envelope_survives_cli_merge_layer() {
+    let db = workspace("ambiguous-envelope");
+    // `model1` 在 fixture 里跨多个页面重名 ⇒ 路由层交回候选、逐候选作答
+    let output = surface(&db, &["--relations", "model:model1"]);
+
+    let diagnostics = output
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let ambiguity = diagnostics
+        .iter()
+        .find(|entry| {
+            matches!(
+                entry.get("code").and_then(Value::as_str),
+                Some("AMBIGUOUS_TARGET" | "AMBIGUOUS_TARGET_ANSWERED")
+            )
+        })
+        .unwrap_or_else(|| {
+            panic!("歧义 target 必须留下 AMBIGUOUS_TARGET(_ANSWERED) 诊断，实际 {diagnostics:?}")
+        });
+
+    // 六字段信封：合并层不得把 runtime 的信封降级成裸字符串
+    for field in ["code", "severity", "answer_impact", "message"] {
+        assert!(
+            ambiguity.get(field).is_some(),
+            "歧义诊断必须带 {field} 字段：{ambiguity}"
+        );
+    }
+    assert_eq!(
+        ambiguity.get("answer_impact").and_then(Value::as_str),
+        Some("none"),
+        "寻址类诊断（AMBIGUOUS_TARGET）不降低答案置信度：{ambiguity}"
+    );
+
+    // 合并层补的 confidence 块：诊断确实进入了置信度归纳
+    let confidence = output
+        .get("summary")
+        .and_then(|summary| summary.get("confidence"))
+        .unwrap_or_else(|| panic!("合并层必须补 confidence 块：{output}"));
+    assert!(
+        confidence.get("level").and_then(Value::as_str).is_some(),
+        "confidence 块必须带 level：{confidence}"
+    );
+    assert!(
+        confidence.get("reasons").is_some(),
+        "confidence 块必须带 reasons：{confidence}"
+    );
+}
+
 /// diagnostics 必须是六字段信封对象，不能混入裸字符串或旧形态。
 ///
 /// `AiOutput.diagnostics` 是 `Vec<Diagnostic>`；表面层曾往里塞 `format!` 出来的字符串，
