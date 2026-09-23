@@ -174,23 +174,33 @@ cargo test --features cli-local --test core_feature_tests
 - kind 隔离由解析器保证：裸 `field:` 只匹配 Field 节点，裸 `model:` 只匹配 Model
   节点，跨 kind 同名返回 Missing；`cond`/`comp`/`action`/`param` 文法恒为 scoped，
   裸名解析对它们未定义；
-- **五条入口共用同一套解析**（2026-09-22 复验补全后）：
+- **六条入口共用同一套解析**（2026-09-22 复验补全后）：
   - `build_query_model_output`（runtime / runtime 工具）
   - `query_model`（human 分支，纵深防御——CLI human 模式实际落 `HUMAN_MODE_NOT_SUPPORTED`）
   - `build_explain_output`（`field:` 的生产入口）
   - `build_explain_condition_output_with_intent_and_retrieval`（`src/explain.rs`）
   - `build_context_output`（`src/context.rs`）
+  - `build_query_dataflow_output`（`src/query/dataflow.rs`，`--relations model:X` 的补充调用）
 
   stdio 经 `GraphRuntime::query` 汇合，因此与 CLI 一致；**新增裸名查询入口必须调用同一
   resolver，不要直接 `get_node`**——否则会退回「静默命中物理模型」的旧行为。
 
-  后两条是复验补上的：`--explain` 在 `route.rs:120-133` 展开成
+  后三条是复验补上的：`--explain` 在 `route.rs:120-133` 展开成
   `Explain`（主）+ `ExplainCondition`（补充 `condition_facts`）+（显式 `--depth` 时）
-  `Context`（补充 `neighbor_context`）。只接线 `build_explain_output` 时，后两条仍做
-  精确 `get_node`，裸 `field:`/`model:` 会报 `TARGET_NOT_FOUND`；而 supplement 的
-  `required=false` 让整条命令照样「成功」——**主调用有答案、条件成因与邻居闭包静默
-  缺失，且无任何可见失败信号**。这比整条命令失败更隐蔽，改动 `route_explain` 的展开
-  列表时必须同步检查每条展开调用是否都已接线。
+  `Context`（补充 `neighbor_context`）；`--relations model:X` 展开成
+  `QueryModel`（主）+ `QueryDataflow`（补充 `dataflow_subgraph`）。
+  只接线主调用时，补充调用仍做精确 `get_node`：裸 `field:`/`model:` 会报
+  `TARGET_NOT_FOUND`，而 supplement 的 `required=false` 让整条命令照样「成功」——
+  **主调用有答案、补充块静默缺失，且无任何可见失败信号**。
+
+  `QueryDataflow` 这条尤其要注意：它未接线时会**静默命中物理模型**并返回它的子图，
+  于是同一个 target 上主调用报歧义、补充调用给出一个看起来正常的答案——比单纯缺块
+  更糟，因为它把「静默挑一个」包装成了有效结果。改动 `route_explain` /
+  `route_relations` 的展开列表时，必须同步检查每条展开调用是否都已接线。
+- `execute_resolved_target` 在补充调用前会跳过「主调用已报定位失败」的调用，但
+  **只跳过 `shares_legacy_target_resolution` 白名单内的命令**（`src/main.rs`）。
+  新增接线 resolver 的命令要同步加入白名单；不在白名单里的命令照常执行，宁可多跑
+  一次也不静默吞掉一个可能给出不同答案的补充块。
 - CLI 路由层（`run_surface` → `normalize_target_against_graph`）先于 resolver 生效：
   精确 id 存在时判 `Exact` 直通（物理同名的歧义由 resolver 报出）；唯一局部命中多在
   路由层就 `Resolved`；≤3 候选的歧义由 `answer_ambiguous_target` 逐候选作答

@@ -591,13 +591,39 @@ Context 的 TARGET_NOT_FOUND 必须建议 --find-model（按 model: 前缀），
 ```
 修复后 11/11。
 
-### 2. 补充调用在主调用已定位失败后仍重复整图解析（真缺陷，`b810058`）
+### 2. 补充调用在主调用已定位失败后仍重复整图解析（真缺陷，`b810058` + 修正 `7d4934c`）
 
-`--explain`/`--relations` 展开的补充调用与主调用拿**同一个** target，定位结果必然
-相同。主调用已判 `TARGET_NOT_FOUND` / `AMBIGUOUS_TARGET` 时继续发补充调用，只会
-重复整图解析（裸 target 每次都要 `iter_nodes`）再产出一份同样的壳子，最后被
-`dedupe_diagnostics` 丢掉。修复：`execute_resolved_target` 在补充调用前检查主输出
-的定位诊断，命中则跳过。不影响任何事实——定位失败时补充块本来就没有答案可补。
+`--explain`/`--relations` 展开的补充调用与主调用拿**同一个** target。主调用已判
+`TARGET_NOT_FOUND` / `AMBIGUOUS_TARGET` 时继续发补充调用，只会重复整图解析（裸
+target 每次都要 `iter_nodes`）再产出一份同样的壳子，最后被 `dedupe_diagnostics`
+丢掉。`b810058` 加了这个跳过。
+
+**但第一版跳过的前提是错的，且由独立复核发现（`7d4934c` 修正）**：`b810058` 假设
+「补充调用必然得到同一个定位结果」。这对 `--relations model:X` **不成立**——
+主调用 `QueryModel` 已接线 resolver，补充调用 `QueryDataflow` **未接线**、直接精确
+`get_node`：
+
+| | 裸 `model:orders`（局部 + 物理同名） |
+|---|---|
+| 主调用 `QueryModel` | 如实报 `AMBIGUOUS_TARGET` |
+| 补充调用 `QueryDataflow` | **静默命中物理模型**，返回它的 DataFlow 子图 |
+
+于是跳过会把那份**有分歧的结果**一起吞掉，而且没有可见痕迹（连
+`SUPPLEMENT_UNAVAILABLE` 都不记）。实测反例
+（`dataflow_supplement_agrees_with_primary_on_ambiguous_target`）：
+```
+补充调用必须与主调用同样报 AMBIGUOUS_TARGET，而不是静默命中物理模型；实际 []
+```
+（空诊断 = 静默命中物理模型。）
+
+两处修正：
+1. `build_query_dataflow_output` 前置同一套 `resolve_legacy_model_target`——从根上
+   消除「同一个 target、两个子调用给出矛盾定位结论」，这同时修掉了静默挑物理模型
+   的行为（与 M59-2 A1 的目标一致），使主/补充结论**真正**一致；
+2. 跳过条件加**命令白名单** `shares_legacy_target_resolution`：只跳过已接线同一套
+   解析的命令（`Explain`/`ExplainCondition`/`Context`/`QueryModel`/`QueryDataflow`）。
+   未接线的命令照常执行——宁可多跑一次，也不静默吞掉一个可能给出不同答案的补充块。
+   不再依赖「所有补充调用都同意」这个未经证明的假设。
 
 **暴露面经实测收窄**（`route_layer_normalizes_bare_targets_before_runtime`）：
 路由层在 runtime 之前就把大多数裸 target 归一成 scoped id——
