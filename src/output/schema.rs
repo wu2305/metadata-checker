@@ -362,7 +362,10 @@ fn find_command_for_target(target: &str) -> Option<(&'static str, &str)> {
         // 拿字段全名去搜必然空手。退到「它所属的模型」：`field:<PAGE>|<model>.<field>`
         // 的裸名取最后一个 `.` 之前的部分即模型名。
         "field" => {
-            let model = bare.rsplit_once('.').map(|(model, _)| model).unwrap_or(bare);
+            let model = bare
+                .rsplit_once('.')
+                .map(|(model, _)| model)
+                .unwrap_or(bare);
             (!model.is_empty()).then_some(("--find-model {}", model))
         }
         _ => None,

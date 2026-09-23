@@ -615,7 +615,9 @@ fn target_not_found_suggests_find_command_matching_target_kind() {
         "field: target 必须建议 --find-model（字段按所属模型定位），实际 {explain_queries:?}"
     );
     assert!(
-        !explain_queries.iter().any(|q| q.contains("--find-component")),
+        !explain_queries
+            .iter()
+            .any(|q| q.contains("--find-component")),
         "field: target 不得建议 --find-component，实际 {explain_queries:?}"
     );
 }
