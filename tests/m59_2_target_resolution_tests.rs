@@ -677,6 +677,66 @@ fn route_layer_normalizes_bare_targets_before_runtime() {
     }
 }
 
+/// `--relations model:<裸名>` 的**补充调用** `QueryDataflow` 必须与主调用 `QueryModel`
+/// 对同一个 target 给出同一个定位结论。
+///
+/// 这条钉住一个真实的分歧：`build_query_dataflow_output` 此前直接精确 `get_node`，
+/// 不做旧 target 解析。于是当裸 `model:orders` 同时匹配页面局部与物理模型时——
+/// 主调用如实报 `AMBIGUOUS_TARGET`，补充调用却**静默命中物理模型**并返回它的
+/// DataFlow 子图。同一个 target、同一条命令，两个子调用给出互相矛盾的定位结论，
+/// 而且矛盾的那一半恰好是「静默挑一个」——正是 M59-2 A1 要消灭的行为。
+#[test]
+fn dataflow_supplement_agrees_with_primary_on_ambiguous_target() {
+    let db_path = build_bound_graph(
+        "dataflow-agreement",
+        &[
+            (
+                "app/a.spg",
+                page_with_dwtable("orders", "tables/orders.tbl"),
+            ),
+            ("tables/orders.tbl", table_json(&["order_id"])),
+        ],
+    );
+    let binding = ProjectBinding::new("proj").expect("valid binding");
+    let graph =
+        metadata_checker::graph_redb::GraphDB::open_readonly_with_ownership(&db_path, &binding)
+            .expect("open graph");
+
+    // 前置：裸 `model:orders` 必须同时匹配局部与物理，才是歧义场景
+    let local = "model:app/a.spg|orders";
+    let physical = "model:orders";
+    assert!(
+        GraphReadStore::get_node(&graph, local).expect("get").is_some(),
+        "前置失败：需要页面局部模型 {local}"
+    );
+    assert!(
+        GraphReadStore::get_node(&graph, physical)
+            .expect("get")
+            .is_some(),
+        "前置失败：需要物理模型 {physical}"
+    );
+
+    // 主调用：如实报歧义
+    let primary =
+        metadata_checker::query::build_query_model_output(&graph, physical, "normal").expect("primary");
+    let primary_codes = diagnostic_codes(&primary);
+    assert!(
+        primary_codes.iter().any(|code| code == "AMBIGUOUS_TARGET"),
+        "前置失败：主调用应报 AMBIGUOUS_TARGET，实际 {primary_codes:?}"
+    );
+
+    // 补充调用：必须给出同一个结论，不得静默命中物理模型
+    let supplement = metadata_checker::query::build_query_dataflow_output(&graph, physical)
+        .expect("supplement");
+    let supplement_codes = diagnostic_codes(&supplement);
+    assert!(
+        supplement_codes
+            .iter()
+            .any(|code| code == "AMBIGUOUS_TARGET"),
+        "补充调用必须与主调用同样报 AMBIGUOUS_TARGET，而不是静默命中物理模型；实际 {supplement_codes:?}"
+    );
+}
+
 /// 共享 stdio 入口：query_model 走同一套旧 target 解析，不得因为入口不同而绕过。
 #[test]
 fn stdio_entry_uses_same_legacy_target_resolution() {
