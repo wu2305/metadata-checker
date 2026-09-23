@@ -276,11 +276,17 @@ fn execute_resolved_target(
     let mut merged: Option<serde_json::Value> = None;
 
     for call in &plan.calls {
-        // 主调用已经把 target 判成「定位不到 / 有歧义」时，补充调用问的是**同一个
-        // target**，必然得到同一个定位结果。继续发只会重复整图解析（裸 target 每次
-        // 都要 `iter_nodes`）再产出一份一模一样的壳子，最后被 dedupe 丢掉。
-        // 少问一次不影响任何事实：定位失败时补充块本来就没有答案可补。
+        // 主调用已经把 target 判成「定位不到 / 有歧义」时，**共享同一套旧 target
+        // 解析**的补充调用问的是同一个 target，必然得到同一个定位结果。继续发只会
+        // 重复整图解析（裸 target 每次都要 `iter_nodes`）再产出一份同样的壳子。
+        //
+        // 这里必须按命令白名单判断，不能假设「所有补充调用都同意」：
+        // `--relations model:X` 的补充调用是 `QueryDataflow`，它一度直接精确
+        // `get_node`，于是主调用报 `AMBIGUOUS_TARGET` 时它却静默命中物理模型——
+        // 跳过它会把那份（有分歧的）结果一起吞掉。白名单只列已接线同一套解析的
+        // 命令；未接线的命令照常执行，分歧会如实暴露而不是被静默吃掉。
         if call.merge_key.is_some()
+            && shares_legacy_target_resolution(call.command)
             && merged.as_ref().is_some_and(|base| {
                 has_diagnostic_code(base, "TARGET_NOT_FOUND")
                     || has_diagnostic_code(base, "AMBIGUOUS_TARGET")
@@ -572,6 +578,26 @@ fn attach_confidence(result: &mut serde_json::Value) {
         "confidence".to_string(),
         metadata_checker::output::answer_effect::confidence_value(codes.iter().map(String::as_str)),
     );
+}
+
+/// 该命令是否与 `build_query_model_output` 共用同一套旧 target 解析。
+///
+/// 只有这些命令才能在「主调用已报定位失败」时被安全跳过——它们对同一个 target 必然
+/// 得到同一个定位结论。未接线的命令（或将来新增的）不在表内，照常执行：宁可多跑一次
+/// 也不静默吞掉一个可能给出不同答案的补充块。
+///
+/// 新增接线 resolver 的命令时应同步加入本表（见
+/// `docs/knowledge/topic-cli-stdio-to-query.md` 1.8 的入口清单）。
+fn shares_legacy_target_resolution(command: metadata_checker::tool_contract::ToolCommand) -> bool {
+    use metadata_checker::tool_contract::ToolCommand;
+    matches!(
+        command,
+        ToolCommand::Explain
+            | ToolCommand::ExplainCondition
+            | ToolCommand::Context
+            | ToolCommand::QueryModel
+            | ToolCommand::QueryDataflow
+    )
 }
 
 /// 把候选渲染成可以直接照抄执行的命令。
