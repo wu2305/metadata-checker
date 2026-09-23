@@ -825,12 +825,12 @@ fn bad_tbl_preserves_old_graph_and_recovers_upon_repair() {
         "坏 TBL 解析失败时，旧图节点必须原样保留！"
     );
 
-    // 坏文件状态下的**全量重建**必须与增量结果一致。
+    // 坏文件状态下，**增量**必须保留上一次成功解析的内容；而**从零全量重建**没有
+    // 「上一次成功」可言，只能看到占位节点。两者**本来就不该相等**——这正是 B3
+    // 「坏 TBL 保留旧图」的语义：增量有记忆，全量没有。
     //
-    // 这是此前缺失的对照：只比对「坏前 == 坏后」（旧图保留）证明不了「坏文件在
-    // 全量与增量两条路径下被同等对待」。全量重建同样会解析失败、同样跳过该文件，
-    // 因此它保留的也是上一次成功的内容——两侧必须逐字节一致，否则「保留旧图」
-    // 在一条路径上是真、在另一条上是巧合。
+    // 此前只有「坏前 == 坏后」的断言，证明不了这一点；这里把差异钉成显式预期，
+    // 让「增量保留了旧图」与「全量重建拿不到」各自可判，而不是含糊地都不检查。
     let full_during_bad_dir = unique_dir(&format!("{tag}-full-bad"));
     let full_during_bad_project = full_during_bad_dir.join("project");
     let full_during_bad_db = full_during_bad_dir.join("graph.db");
@@ -847,9 +847,22 @@ fn bad_tbl_preserves_old_graph_and_recovers_upon_repair() {
     )
     .expect("full scan with bad tbl should succeed without panic");
     let snap_full_during_bad = snapshot(&full_during_bad_db, &binding);
-    assert_eq!(
-        snap_during_bad.nodes, snap_full_during_bad.nodes,
-        "坏文件状态下全量与增量的节点必须一致：{}",
+
+    // 增量侧：坏文件解析失败 ⇒ 上一次成功的 model/field 原样保留
+    assert!(
+        snap_during_bad
+            .nodes
+            .iter()
+            .any(|n| n.contains("field:orders.amount")),
+        "增量必须保留上一次成功解析的字段（B3 旧图保留）"
+    );
+    // 全量侧：从零构建、该文件从未成功解析 ⇒ 没有这些字段，只有 SPG 里的占位模型
+    assert!(
+        !snap_full_during_bad
+            .nodes
+            .iter()
+            .any(|n| n.contains("field:orders.amount")),
+        "从零全量重建没有「上一次成功」可保留，不应出现该字段：{}",
         describe_diff(
             "incremental(bad)",
             &snap_during_bad.nodes,
@@ -857,16 +870,20 @@ fn bad_tbl_preserves_old_graph_and_recovers_upon_repair() {
             &snap_full_during_bad.nodes
         )
     );
-    assert_eq!(
-        snap_during_bad.edges, snap_full_during_bad.edges,
-        "坏文件状态下全量与增量的边必须一致：{}",
-        describe_diff(
-            "incremental(bad)",
-            &snap_during_bad.edges,
-            "full(bad)",
-            &snap_full_during_bad.edges
-        )
+    assert!(
+        snap_full_during_bad
+            .nodes
+            .iter()
+            .any(|n| n.contains("model:orders")),
+        "全量重建仍应留下 SPG 声明的占位模型，而不是整页消失"
     );
+    // 两侧都不得因为一个坏文件而丢掉 SPG 自身的内容
+    for snap in [&snap_during_bad, &snap_full_during_bad] {
+        assert!(
+            snap.nodes.iter().any(|n| n.contains("page:app/a.spg")),
+            "坏文件不得连带丢掉页面节点"
+        );
+    }
     let _ = std::fs::remove_dir_all(&full_during_bad_dir);
 
     // 修复坏 TBL 并增加字段
