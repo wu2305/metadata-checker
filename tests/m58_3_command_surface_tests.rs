@@ -179,10 +179,7 @@ fn test_ambiguous_target_envelope_survives_cli_merge_layer() {
     // 两种歧义诊断的 answer_impact 语义不同，各自如实：
     // - AMBIGUOUS_TARGET：纯寻址失败，模型没拿到答案 ⇒ none（与 TARGET_NOT_FOUND 同类）
     // - AMBIGUOUS_TARGET_ANSWERED：工具已逐候选作答，结论只覆盖其中一个节点 ⇒ partial
-    let code = ambiguity
-        .get("code")
-        .and_then(Value::as_str)
-        .expect("code");
+    let code = ambiguity.get("code").and_then(Value::as_str).expect("code");
     let impact = ambiguity.get("answer_impact").and_then(Value::as_str);
     match code {
         "AMBIGUOUS_TARGET" => assert_eq!(
