@@ -620,94 +620,41 @@ fn target_not_found_suggests_find_command_matching_target_kind() {
     );
 }
 
-/// 裸旧 target 在一次 `--explain` 展开里的整图扫描次数（测量，先钉住现状）。
+/// CLI 路由层先于 runtime resolver 生效，决定 runtime 是否真的看到裸 target。
 ///
-/// `--explain` 展开成 `Explain` + `ExplainCondition`（+ 显式 `--depth` 时 `Context`），
-/// 三条调用拿同一个 target。裸 target 每次都走整图 `iter_nodes()`，结果在同一次
-/// 不可变图上完全相同——重复扫描是纯浪费。
+/// 这决定「同一次 `--explain` 展开的三条调用各扫一遍整图」是否真的可达：
+/// - 路由层把裸名归一到 scoped id ⇒ runtime 收到带 `|` 的 id，走精确查表，**零扫描**；
+/// - 路由层判 `Exact`（物理同名 id 存在）⇒ runtime 仍收到裸 target，三条调用各扫一次。
 ///
-/// 本测试用计数 store **直接测量**运行时这一层的扫描次数，不靠读代码推断；
-/// 期望值即「每次调用一次」，若将来在 runtime 层做单次解析，这里会下降。
+/// 用 `normalize_prefixed_target` 直接钉住这两条，避免「以为在优化、其实不可达」
+/// 或「以为不可达、其实每次都在扫」。
 #[test]
-fn bare_target_supplement_calls_scan_graph_per_call() {
-    use std::cell::Cell;
+fn route_layer_decides_whether_runtime_sees_a_bare_target() {
+    use metadata_checker::route::PrefixedTargetResolution;
 
-    struct CountingStore<'a> {
-        inner: &'a dyn GraphReadStore,
-        scans: &'a Cell<usize>,
+    // 只有页面局部模型：路由层按「最后一段同名」把它归一到 scoped id
+    let local_only = ["model:app/a.spg|ordersView"];
+    match metadata_checker::route::normalize_prefixed_target(
+        "model:ordersView",
+        local_only.iter().copied(),
+    ) {
+        PrefixedTargetResolution::Resolved { target, .. } => assert_eq!(
+            target, "model:app/a.spg|ordersView",
+            "路由层必须把裸局部名归一到 scoped id（runtime 随后零扫描）"
+        ),
+        other => panic!("预期路由层归一为 scoped id，实际 {other:?}"),
     }
 
-    impl GraphReadStore for CountingStore<'_> {
-        fn get_node(
-            &self,
-            node_id: &str,
-        ) -> metadata_checker::graph_store::GraphStoreResult<
-            Option<metadata_checker::graph::Node>,
-        > {
-            self.inner.get_node(node_id)
-        }
-
-        fn get_node_edges(
-            &self,
-            node_id: &str,
-        ) -> metadata_checker::graph_store::GraphStoreResult<
-            Option<metadata_checker::graph_store::GraphNeighbors>,
-        > {
-            self.inner.get_node_edges(node_id)
-        }
-
-        fn node_count(&self) -> metadata_checker::graph_store::GraphStoreResult<usize> {
-            self.inner.node_count()
-        }
-
-        fn edge_count(&self) -> metadata_checker::graph_store::GraphStoreResult<usize> {
-            self.inner.edge_count()
-        }
-
-        fn iter_nodes(
-            &self,
-        ) -> metadata_checker::graph_store::GraphStoreResult<
-            Box<dyn Iterator<Item = metadata_checker::graph::Node> + '_>,
-        > {
-            self.scans.set(self.scans.get() + 1);
-            self.inner.iter_nodes()
-        }
+    // 局部与物理同名：物理 id 精确存在 ⇒ 路由层判 Exact，runtime 仍收到裸 target
+    let local_and_physical = ["model:orders", "model:app/a.spg|orders"];
+    match metadata_checker::route::normalize_prefixed_target(
+        "model:orders",
+        local_and_physical.iter().copied(),
+    ) {
+        // 精确命中优先：路由层不猜，把歧义留给 runtime resolver 显式报出
+        PrefixedTargetResolution::Exact => {}
+        other => panic!("预期物理精确命中判 Exact，实际 {other:?}"),
     }
-
-    let db_path = build_bound_graph(
-        "scan-count",
-        &[
-            ("app/a.spg", page_with_dataflow("ordersView", &["order_id"])),
-            ("tables/orders.tbl", table_json(&["order_id"])),
-        ],
-    );
-    let binding = ProjectBinding::new("proj").expect("valid binding");
-    let graph =
-        metadata_checker::graph_redb::GraphDB::open_readonly_with_ownership(&db_path, &binding)
-            .expect("open graph");
-
-    let scans = Cell::new(0);
-    let counting = CountingStore {
-        inner: &graph,
-        scans: &scans,
-    };
-
-    let target = "field:ordersView.order_id";
-    for _ in 0..3 {
-        metadata_checker::query::resolve_legacy_model_target(&counting, target).expect("resolve");
-    }
-    assert_eq!(
-        scans.get(),
-        3,
-        "现状：每条展开调用各扫一次整图（实际 {} 次）",
-        scans.get()
-    );
-
-    // scoped id 不扫描：走精确查表
-    scans.set(0);
-    metadata_checker::query::resolve_legacy_model_target(&counting, "field:app/a.spg|ordersView.order_id")
-        .expect("resolve scoped");
-    assert_eq!(scans.get(), 0, "scoped id 必须走精确查表，不扫整图");
 }
 
 /// 共享 stdio 入口：query_model 走同一套旧 target 解析，不得因为入口不同而绕过。

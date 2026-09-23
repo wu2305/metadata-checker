@@ -276,6 +276,19 @@ fn execute_resolved_target(
     let mut merged: Option<serde_json::Value> = None;
 
     for call in &plan.calls {
+        // 主调用已经把 target 判成「定位不到 / 有歧义」时，补充调用问的是**同一个
+        // target**，必然得到同一个定位结果。继续发只会重复整图解析（裸 target 每次
+        // 都要 `iter_nodes`）再产出一份一模一样的壳子，最后被 dedupe 丢掉。
+        // 少问一次不影响任何事实：定位失败时补充块本来就没有答案可补。
+        if call.merge_key.is_some()
+            && merged.as_ref().is_some_and(|base| {
+                has_diagnostic_code(base, "TARGET_NOT_FOUND")
+                    || has_diagnostic_code(base, "AMBIGUOUS_TARGET")
+            })
+        {
+            continue;
+        }
+
         let outcome = run_cli_runtime_tool(
             runtime,
             cli::CliToolInput {
