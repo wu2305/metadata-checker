@@ -622,37 +622,59 @@ fn target_not_found_suggests_find_command_matching_target_kind() {
     );
 }
 
-/// 探测：裸 `field:<model>.<field>` 经路由层归一后是什么结果。
+/// 路由层在 runtime 之前就把**大多数**裸 target 归一成 scoped id，这决定了
+/// 「一次 `--explain` 展开的三条调用各扫一遍整图」的真实暴露面。
 ///
-/// 这决定「一次 `--explain` 展开的三条调用各扫一遍整图」是否可达——只有路由层
-/// **没有**把它换成 scoped id 时，runtime 才收到裸 target 并触发整图解析。
-/// 不靠读代码猜，直接把结果打出来（`--nocapture` 可见）。
+/// 实测（`normalize_prefixed_target`，候选只放真实节点 id）：
+/// - 裸 `model:ordersView` → `Resolved(model:app/a.spg|ordersView)` ⇒ runtime 收到
+///   带 `|` 的 id，走精确查表，**零整图扫描**；
+/// - 裸 `field:ordersView.order_id` → `Resolved(field:app/a.spg|ordersView.order_id)`，
+///   同上；
+/// - scoped id 本身 → `Exact`，零扫描。
+///
+/// 因此 runtime 侧的整图解析只在路由层**没能归一**时发生：target 已是真实物理 id
+/// （`Exact` 直通，但 runtime 仍须查「有没有同名局部节点」才能判歧义），或归一落空
+/// （`NotFound`）。后者已由 `execute_resolved_target` 的补充调用跳过覆盖。
 #[test]
-fn probe_route_layer_outcome_for_bare_field_target() {
-    // 只放真实节点 id，**不放 target 自身**（否则必然自匹配成 Exact，探针失效）
+fn route_layer_normalizes_bare_targets_before_runtime() {
+    use metadata_checker::route::PrefixedTargetResolution;
+
+    // 只放真实节点 id，不放 target 自身——否则必然自匹配成 Exact，探针失效
     let real_ids = [
         "field:app/a.spg|ordersView.order_id",
         "model:app/a.spg|ordersView",
         "page:app/a.spg",
     ];
-    let outcome = metadata_checker::route::normalize_prefixed_target(
-        "field:ordersView.order_id",
-        real_ids.iter().copied(),
-    );
-    println!("ROUTE_OUTCOME_FOR_BARE_FIELD = {outcome:?}");
 
-    let outcome_model = metadata_checker::route::normalize_prefixed_target(
+    match metadata_checker::route::normalize_prefixed_target(
         "model:ordersView",
         real_ids.iter().copied(),
-    );
-    println!("ROUTE_OUTCOME_FOR_BARE_MODEL = {outcome_model:?}");
+    ) {
+        PrefixedTargetResolution::Resolved { target, .. } => assert_eq!(
+            target, "model:app/a.spg|ordersView",
+            "裸局部模型名必须被路由层归一到 scoped id（runtime 随后零扫描）"
+        ),
+        other => panic!("预期 Resolved，实际 {other:?}"),
+    }
 
-    // 物理精确命中：target 本身就是真实 id
-    let outcome_physical = metadata_checker::route::normalize_prefixed_target(
+    match metadata_checker::route::normalize_prefixed_target(
+        "field:ordersView.order_id",
+        real_ids.iter().copied(),
+    ) {
+        PrefixedTargetResolution::Resolved { target, .. } => assert_eq!(
+            target, "field:app/a.spg|ordersView.order_id",
+            "裸局部字段名必须被路由层归一到 scoped id"
+        ),
+        other => panic!("预期 Resolved，实际 {other:?}"),
+    }
+
+    match metadata_checker::route::normalize_prefixed_target(
         "model:app/a.spg|ordersView",
         real_ids.iter().copied(),
-    );
-    println!("ROUTE_OUTCOME_FOR_SCOPED = {outcome_physical:?}");
+    ) {
+        PrefixedTargetResolution::Exact => {}
+        other => panic!("scoped id 本身就是真实 id，应为 Exact，实际 {other:?}"),
+    }
 }
 
 /// 共享 stdio 入口：query_model 走同一套旧 target 解析，不得因为入口不同而绕过。
