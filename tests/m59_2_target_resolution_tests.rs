@@ -706,7 +706,9 @@ fn dataflow_supplement_agrees_with_primary_on_ambiguous_target() {
     let local = "model:app/a.spg|orders";
     let physical = "model:orders";
     assert!(
-        GraphReadStore::get_node(&graph, local).expect("get").is_some(),
+        GraphReadStore::get_node(&graph, local)
+            .expect("get")
+            .is_some(),
         "前置失败：需要页面局部模型 {local}"
     );
     assert!(
@@ -717,8 +719,8 @@ fn dataflow_supplement_agrees_with_primary_on_ambiguous_target() {
     );
 
     // 主调用：如实报歧义
-    let primary =
-        metadata_checker::query::build_query_model_output(&graph, physical, "normal").expect("primary");
+    let primary = metadata_checker::query::build_query_model_output(&graph, physical, "normal")
+        .expect("primary");
     let primary_codes = diagnostic_codes(&primary);
     assert!(
         primary_codes.iter().any(|code| code == "AMBIGUOUS_TARGET"),
@@ -726,8 +728,8 @@ fn dataflow_supplement_agrees_with_primary_on_ambiguous_target() {
     );
 
     // 补充调用：必须给出同一个结论，不得静默命中物理模型
-    let supplement = metadata_checker::query::build_query_dataflow_output(&graph, physical)
-        .expect("supplement");
+    let supplement =
+        metadata_checker::query::build_query_dataflow_output(&graph, physical).expect("supplement");
     let supplement_codes = diagnostic_codes(&supplement);
     assert!(
         supplement_codes
