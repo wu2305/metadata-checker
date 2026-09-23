@@ -24,6 +24,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -163,6 +164,59 @@ impl RemoteSessionProvider for QueuedProvider {
             .borrow_mut()
             .pop_front()
             .ok_or_else(|| anyhow!("no queued content for {}", file_ref.source_path))
+    }
+    fn fetch_changed_since(&self, _p: &str, _r: &str) -> Result<RemoteChangeSet> {
+        Err(anyhow!("stub does not support fetch_changed_since"))
+    }
+}
+
+/// 按**路径**提供内容的 provider：整轮失败会中途 abort，按队列顺序消费不可靠。
+///
+/// 与 [`QueuedProvider`] 的差别只在取内容的方式：同一路径可反复取到同一份内容，
+/// 且调用方可以持有 `Rc` 句柄在轮次之间改写内容（覆盖「失败轮 → 修好轮」）。
+struct PathProvider {
+    content: Rc<RefCell<std::collections::HashMap<String, String>>>,
+}
+
+impl PathProvider {
+    fn new() -> Self {
+        Self {
+            content: Rc::new(RefCell::new(std::collections::HashMap::new())),
+        }
+    }
+
+    /// 供测试在轮次之间改写某路径的内容。
+    fn handle(&self) -> Rc<RefCell<std::collections::HashMap<String, String>>> {
+        Rc::clone(&self.content)
+    }
+}
+
+impl RemoteSessionProvider for PathProvider {
+    fn list_projects(&self) -> Result<Vec<RemoteProjectInfo>> {
+        Err(anyhow!("stub does not support list_projects"))
+    }
+    fn list_metafiles(&self, _project_ref: &str) -> Result<Vec<RemoteMetafileEntry>> {
+        Err(anyhow!("stub does not support list_metafiles"))
+    }
+    fn fetch_metafile_info(&self, _file_ref: &RemoteFileRef) -> Result<RemoteFileInfo> {
+        Err(anyhow!("stub does not support fetch_metafile_info"))
+    }
+    fn fetch_metafile_content(&self, file_ref: &RemoteFileRef) -> Result<RemoteFileContent> {
+        let text = self
+            .content
+            .borrow()
+            .get(&file_ref.source_path)
+            .cloned()
+            .ok_or_else(|| anyhow!("no content for {}", file_ref.source_path))?;
+        Ok(RemoteFileContent {
+            source_path: file_ref.source_path.clone(),
+            file_id: file_ref.file_id.clone(),
+            revision: None,
+            content_type: MetadataContentType::from_extension(
+                file_ref.source_path.rsplit('.').next().unwrap_or(""),
+            ),
+            raw_text: text,
+        })
     }
     fn fetch_changed_since(&self, _p: &str, _r: &str) -> Result<RemoteChangeSet> {
         Err(anyhow!("stub does not support fetch_changed_since"))
@@ -799,19 +853,17 @@ fn bad_spg_fails_whole_round_and_recovers_after_fix() {
         setup_bootstrap_session("spg-fail-retry", &good_table(&["order_id", "amount"]));
     assert!(durable_checkpoint(&db_path, &binding).is_none());
 
-    // 轮 1 的 SPG 是坏的：非法 JSON
+    // 内容按**路径**提供服务：整轮失败会中途 abort，队列顺序不可依赖。
+    let provider = PathProvider::new();
+    let content = provider.handle();
+    content
+        .borrow_mut()
+        .insert("app/page_a.spg".to_string(), "{ not valid json".to_string());
+
     let transport = SnapshotTransport::new(vec![
         active_info("file-a", "proj/app/page_a.spg", "2", 900),
         active_info("file-t", "proj/tables/orders.tbl", "2", 1000),
     ]);
-    let provider = QueuedProvider::new();
-    provider.push("app/page_a.spg", "file-a", "2", "{ not valid json");
-    provider.push(
-        "app/page_a.spg",
-        "file-a",
-        "2",
-        &page_with_dwtable("Page A fixed", "src_a", "$DATA:/tables/orders.tbl"),
-    );
     let mut orchestrator = build_orchestrator(
         manager.clone(),
         &session_dir,
@@ -840,6 +892,10 @@ fn bad_spg_fails_whole_round_and_recovers_after_fix() {
     );
 
     // 轮 2：远端修好 ⇒ 正常入图并推进水位
+    let fixed = page_with_dwtable("Page A fixed", "src_a", "$DATA:/tables/orders.tbl");
+    content
+        .borrow_mut()
+        .insert("app/page_a.spg".to_string(), fixed);
     let second = orchestrator.refresh_once().expect("fixed round");
     assert!(
         second.parse_failures.is_empty(),
