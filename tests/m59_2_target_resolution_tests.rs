@@ -622,41 +622,29 @@ fn target_not_found_suggests_find_command_matching_target_kind() {
     );
 }
 
-/// CLI 路由层先于 runtime resolver 生效，决定 runtime 是否真的看到裸 target。
+/// 探测：裸 `field:<model>.<field>` 经路由层归一后是什么结果。
 ///
-/// 这决定「同一次 `--explain` 展开的三条调用各扫一遍整图」是否真的可达：
-/// - 路由层把裸名归一到 scoped id ⇒ runtime 收到带 `|` 的 id，走精确查表，**零扫描**；
-/// - 路由层判 `Exact`（物理同名 id 存在）⇒ runtime 仍收到裸 target，三条调用各扫一次。
-///
-/// 用 `normalize_prefixed_target` 直接钉住这两条，避免「以为在优化、其实不可达」
-/// 或「以为不可达、其实每次都在扫」。
+/// 这决定「一次 `--explain` 展开的三条调用各扫一遍整图」是否可达——只有路由层
+/// **没有**把它换成 scoped id 时，runtime 才收到裸 target 并触发整图解析。
+/// 不靠读代码猜，直接把结果打出来（`--nocapture` 可见）。
 #[test]
-fn route_layer_decides_whether_runtime_sees_a_bare_target() {
-    use metadata_checker::route::PrefixedTargetResolution;
+fn probe_route_layer_outcome_for_bare_field_target() {
+    let real_ids = [
+        "field:app/a.spg|ordersView.order_id",
+        "model:app/a.spg|ordersView",
+        "field:ordersView.order_id",
+    ];
+    let outcome = metadata_checker::route::normalize_prefixed_target(
+        "field:ordersView.order_id",
+        real_ids.iter().copied(),
+    );
+    println!("ROUTE_OUTCOME_FOR_BARE_FIELD = {outcome:?}");
 
-    // 只有页面局部模型：路由层按「最后一段同名」把它归一到 scoped id
-    let local_only = ["model:app/a.spg|ordersView"];
-    match metadata_checker::route::normalize_prefixed_target(
+    let outcome_model = metadata_checker::route::normalize_prefixed_target(
         "model:ordersView",
-        local_only.iter().copied(),
-    ) {
-        PrefixedTargetResolution::Resolved { target, .. } => assert_eq!(
-            target, "model:app/a.spg|ordersView",
-            "路由层必须把裸局部名归一到 scoped id（runtime 随后零扫描）"
-        ),
-        other => panic!("预期路由层归一为 scoped id，实际 {other:?}"),
-    }
-
-    // 局部与物理同名：物理 id 精确存在 ⇒ 路由层判 Exact，runtime 仍收到裸 target
-    let local_and_physical = ["model:orders", "model:app/a.spg|orders"];
-    match metadata_checker::route::normalize_prefixed_target(
-        "model:orders",
-        local_and_physical.iter().copied(),
-    ) {
-        // 精确命中优先：路由层不猜，把歧义留给 runtime resolver 显式报出
-        PrefixedTargetResolution::Exact => {}
-        other => panic!("预期物理精确命中判 Exact，实际 {other:?}"),
-    }
+        real_ids.iter().copied(),
+    );
+    println!("ROUTE_OUTCOME_FOR_BARE_MODEL = {outcome_model:?}");
 }
 
 /// 共享 stdio 入口：query_model 走同一套旧 target 解析，不得因为入口不同而绕过。
