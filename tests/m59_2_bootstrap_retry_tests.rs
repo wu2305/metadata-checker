@@ -783,3 +783,69 @@ fn unchanged_snapshot_after_success_is_not_redelivered() {
     assert_eq!(second.change_count, 0);
     assert_eq!(second.checkpoint, report.checkpoint);
 }
+
+/// 坏 SPG（非法 JSON）是**整轮失败**，不是部分成功——与坏 TBL 的语义必须分清。
+///
+/// `indexer.rs` 对 `.spg` 解析失败直接 `?` 上抛（整轮 `Err`），只有 `.tbl` 走
+/// `ParseFailure`（保留旧图、保持脏、下轮重试）。两者不能混为一谈：
+/// - 坏 SPG ⇒ `refresh_once` 返回 `Err`，**checkpoint 不推进、旧图不变**，
+///   且 `commit_indexed_hashes` 不会被执行（没有成功轮可言）；
+/// - 每轮都响亮报错，直到远端修好，不会静默把失败固化。
+///
+/// 独立预期：失败轮 Err 且 durable 无水位、旧节点仍在；修好后正常入图并推进。
+#[test]
+fn bad_spg_fails_whole_round_and_recovers_after_fix() {
+    let (manager, session_dir, manifest, db_path, binding) =
+        setup_bootstrap_session("spg-fail-retry", &good_table(&["order_id", "amount"]));
+    assert!(durable_checkpoint(&db_path, &binding).is_none());
+
+    // 轮 1 的 SPG 是坏的：非法 JSON
+    let transport = SnapshotTransport::new(vec![
+        active_info("file-a", "proj/app/page_a.spg", "2", 900),
+        active_info("file-t", "proj/tables/orders.tbl", "2", 1000),
+    ]);
+    let provider = QueuedProvider::new();
+    provider.push("app/page_a.spg", "file-a", "2", "{ not valid json");
+    provider.push(
+        "app/page_a.spg",
+        "file-a",
+        "2",
+        &page_with_dwtable("Page A fixed", "src_a", "$DATA:/tables/orders.tbl"),
+    );
+    let mut orchestrator = build_orchestrator(
+        manager.clone(),
+        &session_dir,
+        manifest,
+        transport,
+        provider,
+        &binding,
+    );
+    orchestrator.set_one_shot_mode(true);
+
+    // 轮 1：整轮 Err，水位不推进，旧图保留
+    let first = orchestrator.refresh_once();
+    assert!(
+        first.is_err(),
+        "坏 SPG 必须是整轮失败（响亮），不得降级成部分成功：{:?}",
+        first.map(|report| report.parse_failures)
+    );
+    assert_eq!(
+        durable_checkpoint(&db_path, &binding),
+        None,
+        "整轮失败不得推进水位"
+    );
+    assert!(
+        field_present(&db_path, &binding, "field:orders.amount"),
+        "整轮失败不得破坏旧图"
+    );
+
+    // 轮 2：远端修好 ⇒ 正常入图并推进水位
+    let second = orchestrator.refresh_once().expect("fixed round");
+    assert!(
+        second.parse_failures.is_empty(),
+        "修好后不得再有解析失败：{:?}",
+        second.parse_failures
+    );
+    let advanced = second.checkpoint.clone().expect("修复轮必须推进水位");
+    assert_eq!(durable_checkpoint(&db_path, &binding), Some(advanced));
+}
