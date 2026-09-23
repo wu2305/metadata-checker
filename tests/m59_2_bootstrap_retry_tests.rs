@@ -859,6 +859,10 @@ fn bad_spg_fails_whole_round_and_recovers_after_fix() {
     content
         .borrow_mut()
         .insert("app/page_a.spg".to_string(), "{ not valid json".to_string());
+    // orders.tbl 也参与本轮重投（revision 2 ≠ manifest 的 1），必须可服务
+    content
+        .borrow_mut()
+        .insert("tables/orders.tbl".to_string(), good_table(&["order_id", "amount"]));
 
     let transport = SnapshotTransport::new(vec![
         active_info("file-a", "proj/app/page_a.spg", "2", 900),
