@@ -147,8 +147,9 @@ fn test_bare_target_is_resolved_by_the_tool() {
 #[test]
 fn test_ambiguous_target_envelope_survives_cli_merge_layer() {
     let db = workspace("ambiguous-envelope");
-    // `model1` 在 fixture 里跨多个页面重名 ⇒ 路由层交回候选、逐候选作答
-    let output = surface(&db, &["--relations", "model:model1"]);
+    // `comp:button1` 在 fixture 里跨 actions_test 与 page_relations 两个页面重名
+    // （见 test_ambiguous_prefixed_target_answers_every_candidate）
+    let output = surface(&db, &["--explain", "comp:button1"]);
 
     let diagnostics = output
         .get("diagnostics")
