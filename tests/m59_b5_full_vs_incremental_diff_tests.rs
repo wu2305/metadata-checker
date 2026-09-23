@@ -825,6 +825,50 @@ fn bad_tbl_preserves_old_graph_and_recovers_upon_repair() {
         "坏 TBL 解析失败时，旧图节点必须原样保留！"
     );
 
+    // 坏文件状态下的**全量重建**必须与增量结果一致。
+    //
+    // 这是此前缺失的对照：只比对「坏前 == 坏后」（旧图保留）证明不了「坏文件在
+    // 全量与增量两条路径下被同等对待」。全量重建同样会解析失败、同样跳过该文件，
+    // 因此它保留的也是上一次成功的内容——两侧必须逐字节一致，否则「保留旧图」
+    // 在一条路径上是真、在另一条上是巧合。
+    let full_during_bad_dir = unique_dir(&format!("{tag}-full-bad"));
+    let full_during_bad_project = full_during_bad_dir.join("project");
+    let full_during_bad_db = full_during_bad_dir.join("graph.db");
+    write(&full_during_bad_project, "app/a.spg", &p_a);
+    write(
+        &full_during_bad_project,
+        "tables/orders.tbl",
+        "{ invalid json syntax -- not closed",
+    );
+    ProjectIndexer::scan_with_diagnostics_for_project(
+        &full_during_bad_project,
+        &full_during_bad_db,
+        &binding,
+    )
+    .expect("full scan with bad tbl should succeed without panic");
+    let snap_full_during_bad = snapshot(&full_during_bad_db, &binding);
+    assert_eq!(
+        snap_during_bad.nodes, snap_full_during_bad.nodes,
+        "坏文件状态下全量与增量的节点必须一致：{}",
+        describe_diff(
+            "incremental(bad)",
+            &snap_during_bad.nodes,
+            "full(bad)",
+            &snap_full_during_bad.nodes
+        )
+    );
+    assert_eq!(
+        snap_during_bad.edges, snap_full_during_bad.edges,
+        "坏文件状态下全量与增量的边必须一致：{}",
+        describe_diff(
+            "incremental(bad)",
+            &snap_during_bad.edges,
+            "full(bad)",
+            &snap_full_during_bad.edges
+        )
+    );
+    let _ = std::fs::remove_dir_all(&full_during_bad_dir);
+
     // 修复坏 TBL 并增加字段
     let t_repaired = table_json("orders", &["order_id", "amount", "customer"]);
     write(&full_project, "tables/orders.tbl", &t_repaired);
