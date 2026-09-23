@@ -629,10 +629,11 @@ fn target_not_found_suggests_find_command_matching_target_kind() {
 /// 不靠读代码猜，直接把结果打出来（`--nocapture` 可见）。
 #[test]
 fn probe_route_layer_outcome_for_bare_field_target() {
+    // 只放真实节点 id，**不放 target 自身**（否则必然自匹配成 Exact，探针失效）
     let real_ids = [
         "field:app/a.spg|ordersView.order_id",
         "model:app/a.spg|ordersView",
-        "field:ordersView.order_id",
+        "page:app/a.spg",
     ];
     let outcome = metadata_checker::route::normalize_prefixed_target(
         "field:ordersView.order_id",
@@ -645,6 +646,13 @@ fn probe_route_layer_outcome_for_bare_field_target() {
         real_ids.iter().copied(),
     );
     println!("ROUTE_OUTCOME_FOR_BARE_MODEL = {outcome_model:?}");
+
+    // 物理精确命中：target 本身就是真实 id
+    let outcome_physical = metadata_checker::route::normalize_prefixed_target(
+        "model:app/a.spg|ordersView",
+        real_ids.iter().copied(),
+    );
+    println!("ROUTE_OUTCOME_FOR_SCOPED = {outcome_physical:?}");
 }
 
 /// 共享 stdio 入口：query_model 走同一套旧 target 解析，不得因为入口不同而绕过。
