@@ -198,6 +198,13 @@ cargo test --features cli-local --test core_feature_tests
 - `AMBIGUOUS_TARGET` 的 severity 在 `severity_for`（`src/diagnostics.rs`）显式登记为
   `Error`，与同属寻址失败的 `TARGET_NOT_FOUND` 一致；未登记时会落默认 `Warning` 档，
   导致同一类失败在 diagnostics 里显得一轻一重。
+- `TARGET_NOT_FOUND` 的补救建议由 **target 前缀**决定，不由发起查询的 `OutputKind`
+  决定（`find_command_for_target`）：`model:`/`dataflow:` → `--find-model`，
+  `page:` → `--find-page`，`comp:`/`action:` → `--find-component`，`field:` 退到
+  所属模型名（字段没有独立 find 动词）。**关键词必须去掉前缀**：`find_nodes` 拿
+  关键词匹配 `id`/`name`/`path` 的子串，而 id 形如 `model:app/a.spg|ordersView`，
+  带前缀的串从不是任何 id 的子串。此前按 `OutputKind` 分支，`--context model:X`
+  会给 `--find-page model:X`——类型错且关键词也搜不到。
 
 ## 2. 已批准计划（尚未实现）
 

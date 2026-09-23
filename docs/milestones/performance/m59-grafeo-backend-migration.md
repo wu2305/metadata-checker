@@ -546,11 +546,121 @@ Explain（主）+ ExplainCondition（补充 condition_facts）
 
 ### 本轮新增/更新的未关闭边界
 
-- `--context` 的 `TARGET_NOT_FOUND` 兜底仍给 `--find-page` 建议（对 `model:`
-  target 不可执行）——既有行为，follow-up；
-- 裸 `--explain` 一次调用会对同一 target 做 3 次（`--depth` 时）整图
-  `iter_nodes` 扫描（`Explain` + `ExplainCondition` + `Context`），结果在同一次
-  不可变图上相同、可缓存，本轮未做（性能边界不变）；
-- 新增回归仍经 `RuntimeQueryRequest` 直达，**未覆盖** `main.rs` 的
-  `merge_supplement` / `attach_confidence` 合并路径（该层由既有
-  `m58_3_command_surface` CLI 子套件佐证）。
+- ~~`--context` 的 `TARGET_NOT_FOUND` 兜底仍给 `--find-page` 建议~~：已在
+  `fe758b9` 修复（见下一节）；
+- ~~裸 `--explain` 一次调用对同一 target 做 3 次整图 `iter_nodes` 扫描~~：已在
+  `b810058` 收敛（见下一节）；
+- ~~新增回归仍经 `RuntimeQueryRequest` 直达，未覆盖 `main.rs` 的
+  `merge_supplement` / `attach_confidence`~~：已补 CLI 子进程用例（见下一节）；
+- ~~SPG 整轮失败 × 重投无专门用例~~：已补（见下一节）；
+- ~~full==incremental 快照未含「坏文件 + 重试恢复」~~：已补，且把语义钉成显式
+  预期（见下一节）；
+- 旧 target 裸名解析覆盖 `model:` / `field:` 两类；`cond`/`comp`/`action`/`param`
+  文法恒为 scoped，裸名解析对它们未定义（返回 Missing），与 A1 文法一致；
+- 性能边界保持「增量解析、整图重建、全量持久化」，本轮**不宣称性能改善**。
+
+## 2026-09-22 未关闭边界收口（`6b0be5a` → `027c4f6`）
+
+上一节把 6 项记为「未关闭边界 / follow-up」。本轮逐项收口，其中 **2 项是真缺陷**
+（已修），**4 项是缺测试**（已补）。每项都先测量/取证再动手。
+
+### 1. `TARGET_NOT_FOUND` 的补救建议按错误的节点类型给（真缺陷，`fe758b9`）
+
+根因：`build_target_not_found_output` 由 **`OutputKind`** 推 `--find-*`，而节点种类
+其实由 **target 前缀**决定。`OutputKind::Context` 落 `_ => --find-page`，
+`OutputKind::Explain` 落 `--find-component`：
+
+```
+--context model:definitelyMissing  → 建议 --find-page model:definitelyMissing
+```
+
+搜的是 Page 类型，而 target 是 model —— 一条都搜不到。关键词还带前缀：
+`find_nodes` 拿关键词匹配 `id`/`name`/`path` 的子串，而 id 形如
+`model:app/a.spg|ordersView`，`model:ordersView` 从不是任何 id 的子串，**即使命令
+类型对了也搜不到**。
+
+修复：`find_command_for_target` 先按 target 前缀定命令与关键词（去前缀；`field:`
+退到所属模型名，因为字段没有独立 find 动词），无前缀（裸名）时才退回按
+`OutputKind` 推断。
+
+反例（仅回退 `src/output/schema.rs`、保留新断言）：
+```
+target_not_found_suggests_find_command_matching_target_kind →
+Context 的 TARGET_NOT_FOUND 必须建议 --find-model（按 model: 前缀），
+实际 ["--find-page model:definitelyMissing"]     9 passed / 1 failed
+```
+修复后 11/11。
+
+### 2. 补充调用在主调用已定位失败后仍重复整图解析（真缺陷，`b810058`）
+
+`--explain`/`--relations` 展开的补充调用与主调用拿**同一个** target，定位结果必然
+相同。主调用已判 `TARGET_NOT_FOUND` / `AMBIGUOUS_TARGET` 时继续发补充调用，只会
+重复整图解析（裸 target 每次都要 `iter_nodes`）再产出一份同样的壳子，最后被
+`dedupe_diagnostics` 丢掉。修复：`execute_resolved_target` 在补充调用前检查主输出
+的定位诊断，命中则跳过。不影响任何事实——定位失败时补充块本来就没有答案可补。
+
+**暴露面经实测收窄**（`route_layer_normalizes_bare_targets_before_runtime`）：
+路由层在 runtime 之前就把大多数裸 target 归一成 scoped id——
+
+```
+裸 model:ordersView          → Resolved(model:app/a.spg|ordersView)   ⇒ runtime 零扫描
+裸 field:ordersView.order_id → Resolved(field:app/a.spg|ordersView.order_id) ⇒ 零扫描
+scoped id                    → Exact                                  ⇒ 零扫描
+```
+
+因此 runtime 侧整图解析只在路由层**没能归一**时发生（`Exact` 直通后仍需查同名局部
+节点以判歧义；或归一落空）。这也纠正了上一节「3 次扫描」的粗估——它不是每次
+`--explain` 的固定成本，而是路由层归一失败时才付。
+
+### 3. CLI 合并层此前无端到端覆盖（缺测试）
+
+`merge_supplement` / `attach_confidence` 只在读代码层面被论证过。新增
+`test_ambiguous_target_envelope_survives_cli_merge_layer`：起**真实二进制**跑
+`--explain comp:button1`（fixture 里跨两页重名），断言歧义诊断经合并层后仍是六字段
+信封、`answer_impact` 与 `severity` 已登记、confidence 块由合并层补上。
+
+过程中修正了一处我自己的错误预期：`AMBIGUOUS_TARGET_ANSWERED` 的
+`answer_impact` 是 **partial** 而非 none——工具已逐候选作答，结论只覆盖其中一个
+节点，与「纯寻址失败」的 `AMBIGUOUS_TARGET`（none）语义不同。测试改为按 code 分别
+断言，把两者的差别钉住而不是抹平。
+
+### 4. 坏 SPG 整轮失败 × 重投（缺测试）
+
+`indexer.rs` 对 `.spg` 解析失败直接 `?` 上抛（整轮 `Err`），只有 `.tbl` 走
+`ParseFailure`。新增 `bad_spg_fails_whole_round_and_recovers_after_fix`：失败轮
+返回 `Err`、durable 无水位、旧图保留；修好后正常入图并推进。
+
+过程中发现测试基础设施的一个真实约束：整轮失败会**中途 abort**，按队列顺序消费的
+`QueuedProvider` 不可靠（第二轮取不到内容）。为此引入按**路径**提供内容的
+`PathProvider`（`Rc<RefCell<HashMap>>` 句柄可在轮次间改写），并把
+`build_orchestrator` 泛化为接受任意 provider。
+
+### 5. full==incremental 的「坏文件」对照（缺测试，且原设想有误）
+
+上一节记为「快照未含坏文件 fixture」。补测时发现**原设想是错的**：坏文件状态下
+增量与从零全量重建**本来就不该相等**——
+
+```
+仅在 incremental(bad): field:orders.amount / field:orders.order_id /
+                      model:orders（上一次成功解析的物理表内容）
+仅在 full(bad):        model:orders（SPG 声明的 PhysicalTable 占位节点）
+```
+
+增量有「上一次成功」可保留（B3 语义），从零全量重建没有。把两者断言为相等会写出
+一个**错误**的期望。改为把差异钉成显式预期：增量必须保留旧字段、全量必须没有这些
+字段且留下 SPG 占位模型、两侧都不得丢掉页面节点。这样「增量保留旧图」与「全量拿
+不到」各自可判，而不是含糊地都不检查。
+
+### 验证与边界
+
+- 上述 5 项在 `cnb-gf8-1k3515v0e` 逐项验证，命令与结论见各小节。
+- **最终全量门禁**（`87461bd`，`cargo fmt --check` 通过）：
+  `cargo test --features cli-local --no-fail-fast -- --test-threads=1`
+  → **1315 passed / 0 failed / 24 ignored**，`CARGO_EXIT=0`。
+  相对收口前基线 1311 passed 的 **+4** 即本轮新增用例
+  （CLI 合并层歧义信封、坏 SPG 整轮失败、路由层归一、全量/增量坏文件语义）。
+  24 ignored 为真实语料/在线评测，不计验收。
+- 未做真实性能测量：第 2 项减少了重复扫描，但**不宣称性能改善**（无可复现的前后
+  测量，仅消除确定性浪费）。
+- 仍未关闭：`cond`/`comp`/`action`/`param` 裸名解析未定义（与 A1 文法一致，属设计
+  边界）；未进入 Grafeo / M59-3。
