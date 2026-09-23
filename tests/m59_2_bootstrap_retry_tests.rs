@@ -308,12 +308,12 @@ fn setup_bootstrap_session_in(
     (manager, session_dir, manifest, db_path, binding)
 }
 
-fn build_orchestrator(
+fn build_orchestrator<P: RemoteSessionProvider + 'static>(
     manager: SessionManager,
     session_dir: &Path,
     manifest: SessionManifest,
     transport: SnapshotTransport,
-    provider: QueuedProvider,
+    provider: P,
     binding: &ProjectBinding,
 ) -> DiffRefreshOrchestrator {
     let runtime = GraphRuntime::load_with_project_dir_and_mode_for_project(
