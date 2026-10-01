@@ -1670,6 +1670,10 @@ main:
     - *issue_archive_probe_ci
   api_trigger_github_sync_from:
     - *github_sync_from_ci
+  # 镜像流水线（CNB -> GitHub）的 API 手动触发入口：修密钥/失败后重放，
+  # 无需向 main 推空提交；正常路径仍是 main.push 自动触发。
+  api_trigger_github_mirror_push:
+    - *github_mirror_push_ci
   # web_trigger 按钮（.cnb/web_trigger.yml）触发的反向同步入口。按官方 validator
   # 建议与 api_trigger 一并挂在 $ 兜底分支下（M58 等既有 api_trigger 同此位置）。
   web_trigger_github_sync_from:
