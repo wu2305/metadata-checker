@@ -221,8 +221,14 @@ impl GrafeoGraphStore {
                         reason: format!("grafeo 节点 {:?} 缺少 {PROP_ID} 属性", node.id),
                     }
                 })?;
-            by_node_id.insert(node.id, id.clone());
-            self.node_ids.insert(id, node.id);
+            // id 是应用侧唯一键：两个 LABEL_NODE 节点共用同一 id 意味着库被写坏，
+            // 与 redb 主键唯一约束同口径判 Corrupted，不做静默 last-wins。
+            if self.node_ids.insert(id.clone(), node.id).is_some() {
+                return Err(GraphStoreError::Corrupted {
+                    reason: format!("grafeo 库中存在重复节点 id：{id}"),
+                });
+            }
+            by_node_id.insert(node.id, id);
         }
         for (key, value, node_id) in state_records {
             self.load_state_record(key, value, node_id)?;
@@ -259,7 +265,9 @@ impl GrafeoGraphStore {
         let key = key.ok_or_else(|| GraphStoreError::Corrupted {
             reason: format!("索引状态节点 {node_id:?} 缺少 {PROP_STATE_KEY} 属性"),
         })?;
-        let value = value.unwrap_or_default();
+        let value = value.ok_or_else(|| GraphStoreError::Corrupted {
+            reason: format!("索引状态记录 {key} 缺少 {PROP_STATE_VALUE} 属性"),
+        })?;
         if let Some(path) = key.strip_prefix(PREFIX_FILE_STATE) {
             let state = serde_json::from_str::<FileState>(&value).map_err(|err| {
                 GraphStoreError::DeserializeFailed {
@@ -585,6 +593,24 @@ impl IndexStateStore for GrafeoGraphStore {
         let dirty = dirty_nodes.len();
         let deleted = deleted_nodes.len();
 
+        // 先写诊断 entry 再写 file_state：无事务，若中途崩溃，留下的是
+        // “entry 已写、state 未写”——下轮重扫按 state 判脏会重解析并覆盖
+        // entry，自愈；反过来会留下“state 在、entry 缺”的永久诊断空洞。
+        for (path, bytes) in &scanner_entries {
+            // entry 是本实现自己序列化的 JSON，非 UTF-8 意味着上游写坏了格式。
+            let text = String::from_utf8(bytes.clone()).map_err(|err| {
+                GraphStoreError::SerializeFailed {
+                    reason: format!("scanner 诊断 entry {path} 不是有效 UTF-8：{err}"),
+                }
+            })?;
+            self.put_state(&scanner_entry_key(path), &text)?;
+            self.scanner_entries.insert(path.clone(), bytes.clone());
+        }
+        for path in &scanner_deleted_paths {
+            self.delete_state(&scanner_entry_key(path))?;
+            self.scanner_entries.remove(path);
+        }
+
         for (path, state) in &file_states {
             if self.file_states.get(path) != Some(state) {
                 let text = serde_json::to_string(state).map_err(|err| {
@@ -605,21 +631,6 @@ impl IndexStateStore for GrafeoGraphStore {
             self.delete_state(&file_state_key(&path))?;
         }
         self.file_states = file_states;
-
-        for (path, bytes) in &scanner_entries {
-            // entry 是本实现自己序列化的 JSON，非 UTF-8 意味着上游写坏了格式。
-            let text = String::from_utf8(bytes.clone()).map_err(|err| {
-                GraphStoreError::SerializeFailed {
-                    reason: format!("scanner 诊断 entry {path} 不是有效 UTF-8：{err}"),
-                }
-            })?;
-            self.put_state(&scanner_entry_key(path), &text)?;
-            self.scanner_entries.insert(path.clone(), bytes.clone());
-        }
-        for path in &scanner_deleted_paths {
-            self.delete_state(&scanner_entry_key(path))?;
-            self.scanner_entries.remove(path);
-        }
 
         match &checkpoint {
             Some(checkpoint) => {

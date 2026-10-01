@@ -852,3 +852,29 @@ C1 的 +8.6KB 是「链接器整体丢包」的假读数；+621KB 才是 `edge +
   ownership 图扫描、D1/D2 均未动。
 - `.grafeo` 库运行期会产生同侧 `.grafeo.wal/` 目录（已入 `.gitignore`）。
 ||||||| ae75fbd
+
+## 2026-10-01 C2 对抗性自审（对照 NPC C1 评审同口径）
+
+按 C1 评审的口径自查 C2 diff，四项处置：
+
+1. **persist_index 写入顺序（实修）**：file_states 先于 scanner_entries 落库时，
+   两者之间的崩溃会留下「state 在、诊断 entry 缺」的永久空洞（file 不再判脏、
+   entry 永远不重写）。改为 entries → states → checkpoint：崩溃留下
+   「entry 已写、state 未写」则靠 state 判脏重解析覆盖自愈。
+2. **load_state_record 的 value 缺省（实修）**：`value.unwrap_or_default()`
+   与 key 的 Corrupted 口径不一致（与 C1 评审 #4 同类），统一 `ok_or_else`。
+3. **rebuild_lookups 的重复 id（实修）**：两个 LABEL_NODE 节点共用 `id` 原会
+   在 `node_ids` 映射里静默 last-wins；redb 主键不可能存在此态，改为 Corrupted。
+4. **`.grafeo` + `project_binding` 静默忽略（实修）**：binding 只服务 ownership
+   语义，grafeo 侧无对应物——照 fail-closed 原则一并 bail，不留半开路径。
+
+记录在案、本轮不动的已知差异：
+
+- **打开语义**：redb hydrate 容忍部分坏行（`v2_hydrate_warning` 软告警），
+  grafeo `rebuild_lookups` 任何一条坏记录即整库 Corrupted 拒绝打开——更严，
+  fail-closed，与 spec 的「不把异常伪装成正常结果」一致。
+- **崩溃孤儿节点**：写入中途崩溃 + 随后文件内容回退的组合会在图里残留
+  无 state 引用的节点；GC 评估与实测窗口记入 D1。
+- **`IndexState` key 空间**：未知 key 判 Corrupted 意味着旧二进制打不开
+  未来 schema 写入的库——刻意取舍，schema 演进需记档。
+- **`.grafeo` 扩展名大小写敏感**：`.GRAFEO` 落到 redb 路径报格式错，属可接受。

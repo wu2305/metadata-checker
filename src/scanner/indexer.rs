@@ -889,8 +889,11 @@ impl ProjectIndexer {
     ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
         // M59-3 C2：`.grafeo` 扩展名显式选择 Grafeo 直写后端。
         if crate::graph_store::is_grafeo_db_path(db_path) {
+            // ownership 应用层是 GraphDB 具体 API（M59-2 未完成）；project_binding
+            // 只服务于 ownership 语义，grafeo 侧没有对应物——静默忽略 binding 会
+            // 产生一个「看着像带项目绑定、实际没有」的库，fail-closed 更诚实。
             anyhow::ensure!(
-                !ownership_enabled,
+                !ownership_enabled && project_binding.is_none(),
                 "GRAPH_BACKEND_UNSUPPORTED: grafeo 后端尚未接线 ownership 扫描（M59-2 未完成）"
             );
             #[cfg(feature = "grafeo-store")]
