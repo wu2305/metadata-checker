@@ -11,13 +11,14 @@
 - **核心语言**：Rust 2024 Edition。Rust/WASM core、CLI、stdio、MCP、图查询和解析能力必须保持 Rust 实现
 - **浏览器接入层**：M40 起允许在 `browser/` 下维护纯 JS glue / provider / runtime launcher / test harness。JS 只负责平台接入、消息桥、Service Worker 注册、DOM marker 和测试桩，不得承载解析、图查询、业务推理等核心能力
 - **二进制大小**：**10MB 硬闸门已解除**（M59 Grafeo 后端迁移 spec §0，
-  `docs/specs/2026-09-05-grafeo-backend-migration-design.md`）。闸门旁注的
-  「约 1.6MB」早已过期——`codex/m59-3-grafeo-store` 实测纯 redb 形态为
-  **5,979,920 B（5.70 MiB）**；而 Grafeo 图引擎本身在 9MB 量级，继续沿用
-  会让「换后端」与「守体积」直接互斥。现行要求：**每次影响依赖或 feature 的
-  PR 必须在远端 `cargo build --release` 后记录实测体积与变化量**，体积回归要给出理由；
-  不再有统一的数字上限。裁体积优先走 feature 裁剪（例如 `grafeo` 只开
-  `edge` + `storage`，不开会连带拉进四个查询语言解析器的 `lpg`）。
+  `docs/specs/2026-09-05-grafeo-backend-migration-design.md`）。「优先选择轻量级
+  crate」照旧生效——引入 Grafeo 引擎是 spec §0 批准的例外，不是对这条规则的
+  一般放宽。闸门旁注的「约 1.6MB」早已过期：纯 redb 形态（`cli-local` 构建）
+  已在数 MB 量级，继续沿用会让「换后端」与「守体积」直接互斥。现行要求：
+  **每次影响依赖或 feature 的 PR 必须在远端 `cargo build --release` 后记录实测
+  体积与变化量**（写进该 PR 的里程碑 journal），体积回归要给出理由；不再有
+  统一的数字上限。裁体积优先走 feature 裁剪（例如 `grafeo` 只开 `edge` +
+  `storage`，不开会连带拉进四个查询语言解析器的 `lpg`）。
 - **跨平台**：需支持 `windows_amd64`、`macos_arm64`、`linux_amd64`、`linux_arm64`
 - **依赖管理**：新增依赖须使用 Cargo，优先选择轻量级 crate
 - **前端依赖**：`browser/` 下默认不引入 bundler；新增 npm 依赖必须先说明必要性、运行环境和测试命令
@@ -80,7 +81,7 @@
 | `parser.rs` | 文件类型识别、统一元数据入口 | 新增文件类型需在此注册 |
 | `graph.rs` | 图节点/边等共享数据结构与通用 helper | 节点/边类型变更需同步 graph store、scanner、query 和序列化逻辑 |
 | `graph_redb.rs` | redb 图数据库实现（`cli-local`）与 graphdb lock | 修改 redb 表、锁、持久化行为需覆盖 native 回归 |
-| `graph_grafeo.rs` | Grafeo 图存储实现（`grafeo-store`，M59-3 C1） | 只用直写 API，不走查询语言；改动须跑 B1 契约套件 + `m59_c1_grafeo_store_tests` |
+| `graph_grafeo.rs` | Grafeo 图存储实现（`grafeo-store`，M59-3 C1） | 只用直写 API，不走查询语言；改动须跑 B1 契约套件 + `m59_c1_grafeo_store_tests`（feature 不在 default：`cargo test --features cli-local,grafeo-store`） |
 | `graph_store.rs` | GraphReadStore / GraphWriteStore / IndexStateStore 抽象 | query 层不得重新绑定具体 redb 实现 |
 | `scanner.rs` | 目录扫描、增量更新（mtime+size+hash）、SPG/TBL 处理、扫描诊断（SCANNER_*）持久化 | 增量逻辑涉及文件状态比较，改动需谨慎 |
 | `query.rs` | 图查询接口：`query_model`/`query_page`/`query_cross`/`query_dataflow` | DataFlow 子图展开涉及字段级追溯，较复杂 |
