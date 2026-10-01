@@ -1651,6 +1651,11 @@
 
 main:
   push: *main_authoritative_ci
+  # 兜底轮询：即使 GitHub 侧 workflow / CNB_TOKEN 未就绪，也每 30 分钟把
+  # GitHub 引用同步到 github-sync/*（公开仓库匿名 fetch，无凭据依赖）。
+  # GitHub Actions 的 api_trigger 提供即时同步，本条可留作兜底或删除。
+  "crontab: */30 * * * *":
+    - *github_sync_from_ci
 
 "$":
   vscode:
