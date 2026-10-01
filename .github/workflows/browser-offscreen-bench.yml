@@ -1,0 +1,135 @@
+# 浏览器 offscreen smoke bench：移植自 .cnb.yml 的 `.browser_offscreen_bench_ci`。
+#
+# 与 CNB 的对应关系：
+#   - `ifModify` 对应下面的 `paths`。
+#   - PR 上只跑 smoke 并上传产物；main push 额外把结果报给 Bencher（CNB 里只有
+#     `main.push` 使用 `browser_offscreen_bench_ci_with_bencher` 导入密钥）。
+#   - Bencher 凭据来自仓库 secret `BENCHER_API_KEY` 与 variable `BENCHER_PROJECT`；
+#     未配置时只跳过上报，不判红，与 CNB 版行为一致。
+#   - wasm-bindgen CLI 版本取自 Cargo.lock，与 browser/bench/build-browser-wasm.mjs 的版本校验一致。
+name: Browser offscreen bench
+
+on:
+  pull_request:
+    paths:
+      - src/**
+      - browser/**
+      - Cargo.toml
+      - Cargo.lock
+      - tests/fixtures/browser-offscreen-real-project/**
+      - Makefile
+      - .github/workflows/browser-offscreen-bench.yml
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - browser/**
+      - Cargo.toml
+      - Cargo.lock
+      - tests/fixtures/browser-offscreen-real-project/**
+      - Makefile
+      - .github/workflows/browser-offscreen-bench.yml
+  workflow_dispatch:
+
+concurrency:
+  group: browser-offscreen-bench-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: 1.95.0
+  CARGO_TERM_COLOR: always
+  BENCH_DIR: target/browser-offscreen-bench
+
+jobs:
+  offscreen-bench:
+    name: offscreen smoke bench
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+      - name: resolve wasm-bindgen version from Cargo.lock
+        id: wasm_bindgen
+        run: |
+          version="$(awk '
+            $0 == "name = \"wasm-bindgen\"" { found = 1; next }
+            found && $1 == "version" { gsub(/"/, "", $3); print $3; exit }
+          ' Cargo.lock)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.wasm_bindgen.outputs.version }}
+      - name: toolchain
+        run: |
+          node --version
+          rustc --version
+          cargo --version
+          wasm-bindgen --version
+      - name: perf browser offscreen ci
+        run: |
+          make perf-browser-offscreen-ci
+          ls -la "$BENCH_DIR"
+      - name: bench artifact summary
+        run: |
+          test -f "$BENCH_DIR/browser-offscreen-summary.md"
+          wc -l "$BENCH_DIR/browser-offscreen-bench.jsonl"
+          head -n 20 "$BENCH_DIR/browser-offscreen-summary.md"
+          node browser/bench/write-ci-perf-index.mjs --output-dir "$BENCH_DIR"
+          cat "$BENCH_DIR/browser-offscreen-ci-perf-index.json"
+          cp "$BENCH_DIR/browser-offscreen-summary.md" "$GITHUB_STEP_SUMMARY"
+      - name: convert summary to Bencher BMF
+        run: |
+          node browser/bench/offscreen-summary-to-bencher-bmf.mjs \
+            --summary "$BENCH_DIR/browser-offscreen-summary.json" \
+            --output "$BENCH_DIR/browser-offscreen-bencher-bmf.json" \
+            --stats p50
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: browser-offscreen-bench
+          path: ${{ env.BENCH_DIR }}
+          if-no-files-found: warn
+      # 只在 main push 上报，PR 不污染基线；凭据缺失时整段跳过，不判红。
+      - name: check bencher config
+        id: bencher
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+        run: |
+          if [ -z "${BENCHER_API_KEY:-}" ] || [ -z "${BENCHER_PROJECT:-}" ]; then
+            echo "skip Bencher report: BENCHER_API_KEY or BENCHER_PROJECT is not configured"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: bencherdev/bencher@main
+        if: ${{ steps.bencher.outputs.enabled == 'true' }}
+      - name: report browser offscreen to bencher
+        if: ${{ steps.bencher.outputs.enabled == 'true' }}
+        env:
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+          BENCHER_UPLOAD_REQUIRED: ${{ vars.BENCHER_UPLOAD_REQUIRED || 'false' }}
+        run: |
+          if ! bencher run \
+            --project "$BENCHER_PROJECT" \
+            --branch "$GITHUB_REF_NAME" \
+            --testbed "${BENCHER_TESTBED:-gha-ubuntu-latest}" \
+            --adapter json \
+            --file "$BENCH_DIR/browser-offscreen-bencher-bmf.json"; then
+            if [ "$BENCHER_UPLOAD_REQUIRED" = "true" ]; then
+              exit 1
+            fi
+            echo "::warning::Bencher browser offscreen report failed"
+          fi
