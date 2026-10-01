@@ -4,9 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-# grafeo-store 保持单列 feature：C1 尚无生产调用点，默认构建不为未接线引擎付编译代价；
-# 待 C2 导入链路接线时再并入 default（见 docs/plans/2026-09-06-m59-grafeo-implementation-plan.md）。
-default = ["cli-local"]
+# C2 起 grafeo-store 已接线（.grafeo 路径的 --build-graph 导入链路），并入 default。
+default = ["cli-local", "grafeo-store"]
 cli-local = [
     "dep:clap",
     "dep:redb",

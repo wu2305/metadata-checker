@@ -2337,3 +2337,26 @@ impl IndexStateStore for GraphDB {
         })
     }
 }
+
+// M59-3 C2：redb 与 grafeo 共享同一条非 ownership 扫描编排，
+// 这里只做 inherent 方法的转发，不另起语义。
+impl crate::scanner::indexer::IndexScanStore for GraphDB {
+    fn load_scanner_diagnostic_entries(&self) -> GraphStoreResult<Vec<(String, Vec<u8>)>> {
+        GraphDB::load_scanner_diagnostic_entries(self).map_err(|e| GraphStoreError::ReadFailed {
+            reason: format!("{}", e),
+        })
+    }
+
+    fn pending_dirty_nodes(&self) -> Vec<String> {
+        self.dirty_nodes_set().iter().cloned().collect()
+    }
+
+    fn pending_removed_nodes(&self) -> Vec<String> {
+        self.removed_nodes_set().iter().cloned().collect()
+    }
+
+    /// redb 需要 M56 delta（edge-key 快照供 v2 shadow 置 Stale）。
+    fn wants_index_delta(&self) -> bool {
+        true
+    }
+}

@@ -1,6 +1,8 @@
 /target
 .metadata-checker.graphdb
 *.graphdb.lock
+.metadata-checker.grafeo
+*.grafeo.wal/
 .DS_Store
 /browser/node_modules/
 /.pnpm-store/

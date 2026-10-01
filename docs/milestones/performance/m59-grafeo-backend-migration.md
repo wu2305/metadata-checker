@@ -785,3 +785,96 @@ scoped id                    → Exact                                  ⇒ 零�
 验证（本机 cargo 1.97.1）：`cargo test --features cli-local,grafeo-store
 --test m59_b1_graph_store_contract_tests --test m59_c1_grafeo_store_tests`
 → 45 + 9 passed / 0 failed；`cargo fmt` 通过；`--locked` check 通过。
+
+## 2026-10-01 阶段 C2：Grafeo 直写导入路径 + 持久化接线
+
+### 做了什么
+
+- **索引边状态落图**：`GrafeoGraphStore` 新增 `IndexState` 标签的元数据节点承载
+  `file_states` / `scanner_entries` / `diff_refresh_checkpoint`——grafeo `edge + storage`
+  没有 KV 与事务，只能把边状态写成同库节点（key 属性前缀 `file_state:` /
+  `scanner_entry:` 区分，checkpoint 单例）。`attach` 时 `iter_nodes` 按标签分桶重建
+  内存索引；未知 key 判 `Corrupted`。
+- **`IndexStateStore::persist_index`**：对 file_states 做 diff（put/delete 元节点），
+  scanner_entries 校验 UTF-8 后整体重写，checkpoint set/delete；报告公式与
+  redb/memory 完全一致（file-口径覆写）。`commit.delta` 被忽略——M56 增量增量包
+  暂不适用于 grafeo（`wants_index_delta() = false`）。
+- **扫描编排抽象**：`scanner/indexer.rs` 新增 `pub(crate) trait IndexScanStore`
+  （= `GraphReadStore + GraphWriteStore + IndexStateStore` + `wants_index_delta` +
+  pending 脏集合访问器）与 `enum ScanBackend { Redb, Grafeo }`；
+  `scan_with_diagnostics_internal` 按 `.grafeo` 扩展名分流到统一扫描主体
+  `scan_store_body`。ownership 应用仍是 `GraphDB` 具体化分支——`.grafeo` 路径 +
+  ownership 显式 `bail!` 于入口（`GRAPH_BACKEND_UNSUPPORTED`）。
+- **封闭面**：runtime 查询侧（C3 未做）、`prepare`（diff-refresh 候选路径）在
+  `.grafeo` 路径上同样显式 bail，不留半开状态。
+- `IndexReportWithDiagnostics` 加 `node_count` / `edge_count`：两后端都在打开的
+  store 上原地取数，不必为计数二次开库（redb 语义不变，同一实例同一快照）。
+- `--graph-db-path` help 注明 `.grafeo` 扩展名选择实验性 Grafeo 后端（仅导入链路）。
+- 补交 C1 漏掉的 `Cargo.lock`（纯增量 grafeo 依赖树，无既有包版本变更）。
+
+### 已知取舍（与 redb 显式差异）
+
+- **无事务**：`edge + storage` feature 下 `begin_transaction` 是 `lpg` 专属。写入中途
+  崩溃可能留下部分节点/边，但内容寻址 id 使重放幂等自愈；若崩溃 + 内容回退重叠，
+  理论上残留孤儿节点——GC 评估记入 D1。
+- **scanner_entries 写整遍**：redb 是删表重写，grafeo 等价（旧条目全删再写）。
+- **`wants_index_delta = false`**：M56 `collect_incident_*` 的边增量收集对 grafeo
+  跳过（非所有权扫描时），delta payload 恒空——报告数字不受影响。
+
+### 验证（本机 cargo 1.97.1，用户已授权本地编译）
+
+- `cargo test --features cli-local --test m59_c2_grafeo_import_tests`
+  → **9 passed / 0 failed**（全量导入落图 + 状态 + 诊断、增量重扫只复读改动文件、
+  重启后空扫无操作、删文件清理节点/状态/诊断、坏 TBL 保旧图 + 记
+  `SCANNER_FILE_PARSE_FAILED` 且修复后自愈、redb↔grafeo 快照逐字节一致、
+  重复扫描幂等、ownership/prepare 在 `.grafeo` 上 fail-closed）。
+- `cargo test --features cli-local --test m59_b1_graph_store_contract_tests`
+  → 契约套件三实现全过（含 grafeo）。
+- `m59_c1` / `m59_b3` / `m59_b5` / `m58_3` 持久化 / `project_indexer` /
+  `graph_store` / `m54` / `m55` / `m56` 回归全过。
+- `cargo test --features cli-local` 全量 → 无失败项。
+- `cargo fmt` 通过；wasm 目标未触及（grafeo-store 不进 browser-wasm 构建）。
+
+### 实测体积（C2 落地后的真实增量）
+
+| 构建 | 字节 | 相对 |
+|---|---|---|
+| 默认 `cli-local`（无 grafeo，同工具链 C1 基线） | 5,942,264 | 基线 |
+| 默认 `cli-local,grafeo-store`（grafeo 接入导入链路） | 6,563,616 | **+621,352 B（+10.5%）** |
+
+C1 的 +8.6KB 是「链接器整体丢包」的假读数；+621KB 才是 `edge + storage` 的
+真实代价，仍远小于 spike 期带四个查询语言解析器的 ~8.86MiB。
+
+### 边界
+
+- redb 仍是默认后端，`.grafeo` 是实验性 opt-in；本轮不退役 redb。
+- 只做 `--build-graph` 导入链路：C3（查询动词）、C4（投影）、C5（wasm）、
+  ownership 图扫描、D1/D2 均未动。
+- `.grafeo` 库运行期会产生同侧 `.grafeo.wal/` 目录（已入 `.gitignore`）。
+||||||| ae75fbd
+
+## 2026-10-01 C2 对抗性自审（对照 NPC C1 评审同口径）
+
+按 C1 评审的口径自查 C2 diff，四项处置：
+
+1. **persist_index 写入顺序（实修）**：file_states 先于 scanner_entries 落库时，
+   两者之间的崩溃会留下「state 在、诊断 entry 缺」的永久空洞（file 不再判脏、
+   entry 永远不重写）。改为 entries → states → checkpoint：崩溃留下
+   「entry 已写、state 未写」则靠 state 判脏重解析覆盖自愈。
+2. **load_state_record 的 value 缺省（实修）**：`value.unwrap_or_default()`
+   与 key 的 Corrupted 口径不一致（与 C1 评审 #4 同类），统一 `ok_or_else`。
+3. **rebuild_lookups 的重复 id（实修）**：两个 LABEL_NODE 节点共用 `id` 原会
+   在 `node_ids` 映射里静默 last-wins；redb 主键不可能存在此态，改为 Corrupted。
+4. **`.grafeo` + `project_binding` 静默忽略（实修）**：binding 只服务 ownership
+   语义，grafeo 侧无对应物——照 fail-closed 原则一并 bail，不留半开路径。
+
+记录在案、本轮不动的已知差异：
+
+- **打开语义**：redb hydrate 容忍部分坏行（`v2_hydrate_warning` 软告警），
+  grafeo `rebuild_lookups` 任何一条坏记录即整库 Corrupted 拒绝打开——更严，
+  fail-closed，与 spec 的「不把异常伪装成正常结果」一致。
+- **崩溃孤儿节点**：写入中途崩溃 + 随后文件内容回退的组合会在图里残留
+  无 state 引用的节点；GC 评估与实测窗口记入 D1。
+- **`IndexState` key 空间**：未知 key 判 Corrupted 意味着旧二进制打不开
+  未来 schema 写入的库——刻意取舍，schema 演进需记档。
+- **`.grafeo` 扩展名大小写敏感**：`.GRAFEO` 落到 redb 路径报格式错，属可接受。

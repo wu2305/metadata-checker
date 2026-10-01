@@ -11,7 +11,7 @@ use super::{
 };
 use crate::graph::{FileState, GraphDB, Node, NodeType};
 use crate::graph_store::{
-    GraphReadStore, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
+    GraphReadStore, GraphStoreResult, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
 };
 use crate::ownership::{
     ContributionKind, EdgeContribution, EntityContribution, FileContributionLedger, ProjectBinding,
@@ -481,7 +481,7 @@ fn merge_removed_node_ids<'a>(sources: impl Iterator<Item = &'a [String]>) -> Ve
 ///
 /// 与 persist 的 `edge_storage_key` 共用同一键格式；persist 只消费，
 /// 不在提交阶段扫描全图 edges。
-fn collect_incident_edge_keys(graph: &GraphDB, node_ids: &[String]) -> Vec<String> {
+fn collect_incident_edge_keys(graph: &dyn GraphReadStore, node_ids: &[String]) -> Vec<String> {
     let mut keys = std::collections::HashSet::new();
     for node_id in node_ids {
         if let Ok(Some(neighbors)) =
@@ -496,7 +496,10 @@ fn collect_incident_edge_keys(graph: &GraphDB, node_ids: &[String]) -> Vec<Strin
 }
 
 /// M56：apply 后快照——收集新增/变更节点的 incident edges（按键去重）。
-fn collect_incident_edges(graph: &GraphDB, node_ids: &[String]) -> Vec<crate::graph::Edge> {
+fn collect_incident_edges(
+    graph: &dyn GraphReadStore,
+    node_ids: &[String],
+) -> Vec<crate::graph::Edge> {
     let mut seen = std::collections::HashSet::new();
     let mut edges = Vec::new();
     for node_id in node_ids {
@@ -511,6 +514,51 @@ fn collect_incident_edges(graph: &GraphDB, node_ids: &[String]) -> Vec<crate::gr
         }
     }
     edges
+}
+
+/// 扫描编排所需的图 + 索引侧状态能力（M59-3 C2）。
+///
+/// 非 ownership 扫描路径只依赖这组接口：图读写契约、`IndexStateStore`
+/// 提交、per-file scanner 诊断读写、本轮待定节点账（dirty/removed）。
+/// `GraphDB`（redb）与 `GrafeoGraphStore` 各自实现，共享同一条编排代码；
+/// ownership 应用层仍是 `GraphDB` 具体 API（M59-2 未交付完成），由调用方
+/// 在需要时把 `ScanBackend` 匹配回具体类型。
+pub(crate) trait IndexScanStore: GraphReadStore + GraphWriteStore + IndexStateStore {
+    /// 全库 per-file scanner 诊断计数 entry
+    /// （`logical_path → FileScanDiagnostics` JSON bytes）
+    fn load_scanner_diagnostic_entries(&self) -> GraphStoreResult<Vec<(String, Vec<u8>)>>;
+
+    /// 本轮已 upsert、尚未 persist 的节点 id
+    fn pending_dirty_nodes(&self) -> Vec<String>;
+
+    /// 本轮已删除、尚未 persist 的节点 id
+    fn pending_removed_nodes(&self) -> Vec<String>;
+
+    /// 是否需要收集 M56 增量 delta 载荷（edge-key 快照供 redb v2 shadow
+    /// 置 Stale）。直写后端没有影子层，返回 false 让编排层跳过两遍
+    /// 全邻接收集。
+    fn wants_index_delta(&self) -> bool;
+}
+
+/// 扫描打开的图后端：默认 redb；`.grafeo` 扩展名显式选择 Grafeo。
+///
+/// 枚举而不是裸 `&mut dyn IndexScanStore`：ownership 应用层仍是 `GraphDB`
+/// 具体 API，需要时回退具体类型；非 ownership 路径统一走 `store()` 的
+/// trait 对象。
+enum ScanBackend {
+    Redb(GraphDB),
+    #[cfg(feature = "grafeo-store")]
+    Grafeo(crate::graph_grafeo::GrafeoGraphStore),
+}
+
+impl ScanBackend {
+    fn store(&mut self) -> &mut dyn IndexScanStore {
+        match self {
+            Self::Redb(graph) => graph,
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => store,
+        }
+    }
 }
 
 /// 项目索引器
@@ -839,15 +887,52 @@ impl ProjectIndexer {
         project_binding: Option<&ProjectBinding>,
         ownership_enabled: bool,
     ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
-        let mut graph = match (project_binding, ownership_enabled) {
+        // M59-3 C2：`.grafeo` 扩展名显式选择 Grafeo 直写后端。
+        if crate::graph_store::is_grafeo_db_path(db_path) {
+            // ownership 应用层是 GraphDB 具体 API（M59-2 未完成）；project_binding
+            // 只服务于 ownership 语义，grafeo 侧没有对应物——静默忽略 binding 会
+            // 产生一个「看着像带项目绑定、实际没有」的库，fail-closed 更诚实。
+            anyhow::ensure!(
+                !ownership_enabled && project_binding.is_none(),
+                "GRAPH_BACKEND_UNSUPPORTED: grafeo 后端尚未接线 ownership 扫描（M59-2 未完成）"
+            );
+            #[cfg(feature = "grafeo-store")]
+            {
+                let store = crate::graph_grafeo::GrafeoGraphStore::open(db_path)
+                    .map_err(|err| anyhow!("打开 grafeo 图库失败：{err}"))?;
+                return Self::scan_store_body(
+                    ScanBackend::Grafeo(store),
+                    project_dir,
+                    ownership_enabled,
+                );
+            }
+            #[cfg(not(feature = "grafeo-store"))]
+            anyhow::bail!(
+                "GRAPH_BACKEND_UNSUPPORTED: 本构建未启用 grafeo-store，无法打开 .grafeo 图库"
+            );
+        }
+        let backend = ScanBackend::Redb(match (project_binding, ownership_enabled) {
             (Some(binding), true) => GraphDB::open_with_ownership(db_path, binding)?,
             (Some(binding), false) => GraphDB::open_for_project(db_path, binding)?,
             (None, false) => GraphDB::open(db_path)?,
             (None, true) => anyhow::bail!(
                 "GRAPH_PROJECT_BINDING_REQUIRED: ownership scanning requires a project binding"
             ),
-        };
-        let prev_states = graph.load_file_states().unwrap_or_default();
+        });
+        Self::scan_store_body(backend, project_dir, ownership_enabled)
+    }
+
+    /// 共享扫描编排体：diff → 解析 → apply → commit → 诊断聚合。
+    ///
+    /// 非 ownership 路径在 `&mut dyn IndexScanStore` 上运行，redb / grafeo
+    /// 两个后端走同一份代码；ownership 应用仍是 `GraphDB` 具体 API，在
+    /// `ScanBackend::Redb` 分支上保留。
+    fn scan_store_body(
+        mut backend: ScanBackend,
+        project_dir: &Path,
+        ownership_enabled: bool,
+    ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
+        let prev_states = backend.store().load_file_states().unwrap_or_default();
 
         let files = Self::discover_files(project_dir)?;
         let provider = LocalStorageProvider;
@@ -860,11 +945,15 @@ impl ProjectIndexer {
             .map(|path| logical_path_of(path, project_dir))
             .collect();
         let stale_diagnostic_paths = stale_scanner_diagnostic_paths(
-            &graph.load_scanner_diagnostic_entries()?,
+            &backend
+                .store()
+                .load_scanner_diagnostic_entries()
+                .map_err(|err| anyhow!("{err}"))?,
             &discovered,
             &prev_states,
             &plan.dirty,
         );
+        let wants_delta = backend.store().wants_index_delta();
 
         let mut new_states = prev_states.clone();
 
@@ -891,38 +980,53 @@ impl ProjectIndexer {
                 scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
             }
             let mut ownership_conflicts: Vec<crate::ownership::OwnershipConflict> = Vec::new();
-            let (parsed_nodes, removed_edge_keys, dirty_edges) = if ownership_enabled {
-                let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
-                let (parsed_nodes, conflicts) =
-                    apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
-                ownership_conflicts = conflicts;
-                for (logical_path, _) in &plan.deleted {
-                    new_states.remove(logical_path);
+            let (parsed_nodes, removed_edge_keys, dirty_edges) = match &mut backend {
+                // ownership 应用层是 GraphDB 具体 API（M59-2 未完成）；
+                // grafeo+ownership 已在入口 bail。
+                ScanBackend::Redb(graph) if ownership_enabled => {
+                    let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
+                    let (parsed_nodes, conflicts) =
+                        apply_ownership_changes(graph, &mut ledgers, &updates, &plan.deleted)?;
+                    ownership_conflicts = conflicts;
+                    for (logical_path, _) in &plan.deleted {
+                        new_states.remove(logical_path);
+                    }
+                    (parsed_nodes, Vec::new(), Vec::new())
                 }
-                (parsed_nodes, Vec::new(), Vec::new())
-            } else {
-                // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
-                let merged_removed = merge_removed_node_ids(
-                    updates
-                        .iter()
-                        .map(|update| update.previous_node_ids.as_slice())
-                        .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
-                );
-                let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
-                // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
-                let parsed_nodes = Self::apply_incremental_changes(
-                    &mut graph,
-                    &mut new_states,
-                    &updates,
-                    &plan.deleted,
-                )?;
-                // M56：apply 后收集新增/变更节点的 incident edges
-                let new_node_ids: Vec<String> = parsed_nodes
-                    .values()
-                    .flat_map(|node_ids| node_ids.iter().cloned())
-                    .collect();
-                let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
-                (parsed_nodes, removed_edge_keys, dirty_edges)
+                backend => {
+                    let store = backend.store();
+                    // M56：apply 前收集被删节点的 incident edge keys
+                    //（persist 只消费 delta；grafeo 等不消费 delta 的后端直接跳过）
+                    let merged_removed = merge_removed_node_ids(
+                        updates
+                            .iter()
+                            .map(|update| update.previous_node_ids.as_slice())
+                            .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+                    );
+                    let removed_edge_keys = if wants_delta {
+                        collect_incident_edge_keys(&*store, &merged_removed)
+                    } else {
+                        Vec::new()
+                    };
+                    // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
+                    let parsed_nodes = Self::apply_incremental_changes(
+                        &mut *store,
+                        &mut new_states,
+                        &updates,
+                        &plan.deleted,
+                    )?;
+                    // M56：apply 后收集新增/变更节点的 incident edges
+                    let new_node_ids: Vec<String> = parsed_nodes
+                        .values()
+                        .flat_map(|node_ids| node_ids.iter().cloned())
+                        .collect();
+                    let dirty_edges = if wants_delta {
+                        collect_incident_edges(&*store, &new_node_ids)
+                    } else {
+                        Vec::new()
+                    };
+                    (parsed_nodes, removed_edge_keys, dirty_edges)
+                }
             };
 
             let changed_file_states: Vec<String> = updates
@@ -957,12 +1061,13 @@ impl ProjectIndexer {
                 merge_scanner_deleted_paths(&plan.deleted, &stale_diagnostic_paths);
             let commit = IndexCommit {
                 file_states: new_states.clone(),
-                dirty_nodes: graph.dirty_nodes_set().iter().cloned().collect(),
-                deleted_nodes: graph.removed_nodes_set().iter().cloned().collect(),
+                dirty_nodes: backend.store().pending_dirty_nodes(),
+                deleted_nodes: backend.store().pending_removed_nodes(),
                 checkpoint: None,
                 // M56：初始全量构建（无 prev states）走显式 full rebuild 路径
-                //（v2 置 Current）；增量提交走 delta 路径（v2 置 Stale）
-                delta: if prev_states.is_empty() || ownership_enabled {
+                //（v2 置 Current）；增量提交走 delta 路径（v2 置 Stale）；
+                // 直写后端（grafeo）没有影子层，不携带 delta。
+                delta: if prev_states.is_empty() || ownership_enabled || !wants_delta {
                     None
                 } else {
                     Some(crate::graph_store::IndexDelta {
@@ -975,12 +1080,16 @@ impl ProjectIndexer {
                 scanner_entries,
                 scanner_deleted_paths,
             };
-            let mut report = Self::persist_index(&mut graph, commit)?;
+            let mut report = Self::persist_index(backend.store(), commit)?;
             // M58.3 复核返修：per-file 诊断计数已随 commit 同事务落库
             //（脏文件覆盖 entry，删除文件移除 entry），persist 成功后重新
             // load 合并全量——报告 envelope 反映全库口径，而非仅本轮脏文件。
-            let scanner_diagnostics =
-                Self::merge_scanner_diagnostic_entries(&graph.load_scanner_diagnostic_entries()?)?;
+            let scanner_diagnostics = Self::merge_scanner_diagnostic_entries(
+                &backend
+                    .store()
+                    .load_scanner_diagnostic_entries()
+                    .map_err(|err| anyhow!("{err}"))?,
+            )?;
             let mut diagnostics = scanner_diagnostics;
             diagnostics.extend(ownership_conflict_diagnostics(&ownership_conflicts));
             // M58.3 PR1 refix（F6）：IndexReport 统一为文件口径。
@@ -994,17 +1103,26 @@ impl ProjectIndexer {
             return Ok(crate::scanner::IndexReportWithDiagnostics {
                 report,
                 diagnostics,
+                node_count: backend.store().node_count().map_err(|e| anyhow!("{e}"))?,
+                edge_count: backend.store().edge_count().map_err(|e| anyhow!("{e}"))?,
             });
         }
 
-        let mut diagnostics =
-            Self::merge_scanner_diagnostic_entries(&graph.load_scanner_diagnostic_entries()?)?;
+        let mut diagnostics = Self::merge_scanner_diagnostic_entries(
+            &backend
+                .store()
+                .load_scanner_diagnostic_entries()
+                .map_err(|err| anyhow!("{err}"))?,
+        )?;
         // no-op 轮也要如实报告当前账本状态中仍然存在的来源冲突
         if ownership_enabled {
-            let ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
-            diagnostics.extend(ownership_conflict_diagnostics(
-                &crate::ownership::ledger_definition_conflicts(&ledgers),
-            ));
+            // grafeo+ownership 已在入口 bail，这里必然落在 redb 分支。
+            if let ScanBackend::Redb(graph) = &mut backend {
+                let ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
+                diagnostics.extend(ownership_conflict_diagnostics(
+                    &crate::ownership::ledger_definition_conflicts(&ledgers),
+                ));
+            }
         }
         Ok(crate::scanner::IndexReportWithDiagnostics {
             report: IndexReport {
@@ -1016,6 +1134,8 @@ impl ProjectIndexer {
             // M58.3 PR1 refix（F2）：no-op 路径从库里 load 合并，
             // 持久化的 scanner 诊断不再随无变更构建消失。
             diagnostics,
+            node_count: backend.store().node_count().map_err(|e| anyhow!("{e}"))?,
+            edge_count: backend.store().edge_count().map_err(|e| anyhow!("{e}"))?,
         })
     }
 
@@ -1045,6 +1165,14 @@ impl ProjectIndexer {
         db_path: &Path,
         project_binding: Option<&ProjectBinding>,
     ) -> Result<PreparedIndexUpdate> {
+        // M59-3 C2：diff-refresh 候选 prepare 还没接线 grafeo（PreparedIndexUpdate
+        // 内嵌 GraphDB 候选图，属 diff-refresh 通路范围，不是 C2）。
+        // 显式拒绝比让 redb 打开一个 grafeo 文件报格式错更清楚。
+        if crate::graph_store::is_grafeo_db_path(db_path) {
+            anyhow::bail!(
+                "GRAPH_BACKEND_UNSUPPORTED: 候选 prepare（diff-refresh）尚未支持 grafeo 后端"
+            );
+        }
         let ownership_enabled = project_binding.is_some();
         let mut graph = match project_binding {
             Some(binding) => GraphDB::open_with_ownership(db_path, binding)?,

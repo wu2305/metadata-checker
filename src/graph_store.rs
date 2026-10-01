@@ -100,6 +100,16 @@ impl fmt::Display for GraphStoreError {
 
 impl std::error::Error for GraphStoreError {}
 
+/// `.grafeo` 扩展名是图后端选择器。
+///
+/// grafeo 对新路径按扩展名选存储格式，单文件格式只认 `.grafeo`
+/// （见 `GrafeoGraphStore::open`），所以扫描/运行时路径用同一个判定分流：
+/// `.grafeo` 走 Grafeo 直写后端，其余一律走默认 redb。redb 的 `.graphdb`
+/// 只是惯例名，没有格式约束。
+pub fn is_grafeo_db_path(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "grafeo")
+}
+
 /// 节点边的视图（owned，避免 trait 生命周期复杂化）
 #[derive(Debug, Clone)]
 pub struct GraphEdgeView {
