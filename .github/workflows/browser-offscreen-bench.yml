@@ -86,7 +86,7 @@ jobs:
           head -n 20 "$BENCH_DIR/browser-offscreen-summary.md"
           node browser/bench/write-ci-perf-index.mjs --output-dir "$BENCH_DIR"
           cat "$BENCH_DIR/browser-offscreen-ci-perf-index.json"
-          cp "$BENCH_DIR/browser-offscreen-summary.md" "$GITHUB_STEP_SUMMARY"
+          cat "$BENCH_DIR/browser-offscreen-summary.md" >> "$GITHUB_STEP_SUMMARY"
       - name: convert summary to Bencher BMF
         run: |
           node browser/bench/offscreen-summary-to-bencher-bmf.mjs \
