@@ -258,6 +258,66 @@ fn reopen_restores_graph_and_edge_dedup_keys() {
     reopened.close().expect("close reopened");
 }
 
+/// 不手工 `close()`、直接 `drop` 后重开：数据与去重键同样要还原。
+/// 持久化后端的失效模式不能只靠干净关库覆盖——调用方忘了 close 时，恢复
+/// 走的是 `open()` 的 WAL 回放路径（`GrafeoDB` 的 `Drop` 会触发关闭/检查点，
+/// 所以这里用 `drop(store)` 而不是 `store.close()` 模拟「调用方没调 close」）。
+#[test]
+fn drop_without_close_reopens_with_graph_and_dedup_keys() {
+    let path = unique_db_path("noclose");
+    {
+        let mut store = GrafeoGraphStore::open(&path).expect("open store");
+        store
+            .upsert_node(node_of("a", NodeType::Component, Some(json!({"v": 1}))))
+            .expect("upsert a");
+        store
+            .upsert_node(node_of("b", NodeType::Field, None))
+            .expect("upsert b");
+        store
+            .add_edge(Edge {
+                from: "a".to_string(),
+                to: "b".to_string(),
+                edge_type: EdgeType::Reads,
+                field_path: Some("f1".to_string()),
+                meta: None,
+                origin_file: None,
+            })
+            .expect("add edge");
+        // 关键：不调用 close()，让 store 走 Drop 释放文件锁。
+        drop(store);
+    }
+
+    let mut reopened = GrafeoGraphStore::open(&path).expect("reopen after drop");
+    assert_eq!(
+        reopened.node_count().expect("count"),
+        2,
+        "drop 后节点应还原"
+    );
+    assert_eq!(reopened.edge_count().expect("count"), 1, "drop 后边应还原");
+    assert_eq!(
+        reopened.get_node("a").expect("get").expect("node exists"),
+        node_of("a", NodeType::Component, Some(json!({"v": 1}))),
+        "drop 后节点属性应完整还原"
+    );
+    // 去重键从库中重建：重放同一条边不应新增。
+    reopened
+        .add_edge(Edge {
+            from: "a".to_string(),
+            to: "b".to_string(),
+            edge_type: EdgeType::Reads,
+            field_path: Some("f1".to_string()),
+            meta: None,
+            origin_file: None,
+        })
+        .expect("re-add edge");
+    assert_eq!(
+        reopened.edge_count().expect("count"),
+        1,
+        "drop 后重放同一边不应新增（去重键已从库里重建）"
+    );
+    reopened.close().expect("close reopened");
+}
+
 /// 只读打开：能读到全量内容。
 #[test]
 fn read_only_open_sees_persisted_graph() {

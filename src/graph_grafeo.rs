@@ -321,7 +321,7 @@ impl GraphWriteStore for GrafeoGraphStore {
             return Ok(());
         };
         // 按完整事实去重：关系相同但 field_path / meta / 来源不同的是不同事实。
-        if !self.seen_edges.insert(edge_dedup_key(&edge)) {
+        if self.seen_edges.contains(&edge_dedup_key(&edge)) {
             return Ok(());
         }
 
@@ -341,6 +341,8 @@ impl GraphWriteStore for GrafeoGraphStore {
             .map_err(|err| GraphStoreError::WriteFailed {
                 reason: format!("建边 {} -> {} 失败：{err}", edge.from, edge.to),
             })?;
+        // 落库成功后才登记去重键：create_edge 失败时提前登记会把重试当重复静默丢弃。
+        self.seen_edges.insert(edge_dedup_key(&edge));
         Ok(())
     }
 
@@ -450,11 +452,19 @@ fn node_from_props(lookup: impl Fn(&str) -> Option<Value>) -> GraphStoreResult<N
         read_text(&lookup, PROP_NODE_TYPE).ok_or_else(|| GraphStoreError::Corrupted {
             reason: format!("grafeo 节点 {id} 缺少 {PROP_NODE_TYPE} 属性"),
         })?;
+    // upsert_node 两条路径都必写 path/name——缺失同样是坏数据，与 id/node_type 同口径报 Corrupted，
+    // 不能让损坏节点以空路径/空名字混进 adjacency 结果。
+    let path = read_text(&lookup, PROP_PATH).ok_or_else(|| GraphStoreError::Corrupted {
+        reason: format!("grafeo 节点 {id} 缺少 {PROP_PATH} 属性"),
+    })?;
+    let name = read_text(&lookup, PROP_NAME).ok_or_else(|| GraphStoreError::Corrupted {
+        reason: format!("grafeo 节点 {id} 缺少 {PROP_NAME} 属性"),
+    })?;
     Ok(Node {
         id,
         node_type: enum_from_name(&node_type_name)?,
-        path: read_text(&lookup, PROP_PATH).unwrap_or_default(),
-        name: read_text(&lookup, PROP_NAME).unwrap_or_default(),
+        path,
+        name,
         meta: read_meta(&lookup)?,
         origin_file: read_text(&lookup, PROP_ORIGIN_FILE),
     })
