@@ -11,7 +11,7 @@ use metadata_checker::session::reqwest_provider::{
 };
 use metadata_checker::tool_contract::{self, InvocationAdapter};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::io::{self, Write};
 
@@ -68,6 +68,7 @@ fn has_session_query_request(args: &cli::Cli) -> bool {
         || args.find_component.is_some()
         || args.resolve_model.is_some()
         || args.advise_query.is_some()
+        || args.gql.is_some()
 }
 
 /// 执行一次三动词表面调用：裸名归一 -> 路由展开 -> 逐条执行 -> 合并输出。
@@ -96,7 +97,7 @@ fn run_surface(
             .iter()
             .find(|prefix| target == **prefix)
         {
-            return Ok(enumerate_prefix_targets(runtime, surface, prefix));
+            return enumerate_prefix_targets(runtime, surface, prefix);
         }
     }
 
@@ -171,7 +172,7 @@ fn run_surface(
                 resolved_sides.push(side.clone());
                 continue;
             }
-            match normalize_target_against_graph(runtime, side) {
+            match normalize_target_against_graph(runtime, side)? {
                 PrefixedTargetResolution::Exact => resolved_sides.push(side.clone()),
                 PrefixedTargetResolution::Resolved {
                     target: resolved,
@@ -220,7 +221,7 @@ fn run_surface(
     // 剩下的拒绝里 83% 是 `page:actions_test` 这种前缀对、路径没写全的写法。
     let mut near_miss: Vec<String> = Vec::new();
     if surface != route::Surface::Find && route::has_type_prefix(&target) && !target.contains(',') {
-        match normalize_target_against_graph(runtime, &target) {
+        match normalize_target_against_graph(runtime, &target)? {
             PrefixedTargetResolution::Exact => {}
             PrefixedTargetResolution::Resolved {
                 target: resolved,
@@ -648,11 +649,13 @@ fn enumerate_prefix_targets(
     runtime: &metadata_checker::runtime::GraphRuntime,
     surface: metadata_checker::route::Surface,
     prefix: &str,
-) -> serde_json::Value {
+) -> Result<serde_json::Value> {
+    // 读图失败必须上抛：吞成空列表会把「图读不出来」伪装成「没有这类节点」。
     let enumerated: Vec<String> =
         metadata_checker::graph_store::GraphReadStore::iter_nodes(&runtime.graph)
-            .map(|nodes| nodes.map(|node| node.id).collect())
-            .unwrap_or_default();
+            .context("枚举图节点失败")?
+            .map(|node| node.id)
+            .collect();
     let mut ids: Vec<&str> = enumerated
         .iter()
         .map(String::as_str)
@@ -703,7 +706,7 @@ fn enumerate_prefix_targets(
         ),
     });
     attach_confidence(&mut result);
-    result
+    Ok(result)
 }
 
 /// 从一份答案里摘出直接相邻的节点 id。
@@ -1006,19 +1009,28 @@ fn has_diagnostic_code(result: &serde_json::Value, code: &str) -> bool {
 fn normalize_target_against_graph(
     runtime: &metadata_checker::runtime::GraphRuntime,
     target: &str,
-) -> metadata_checker::route::PrefixedTargetResolution {
+) -> Result<metadata_checker::route::PrefixedTargetResolution> {
     use metadata_checker::graph_store::GraphReadStore;
     // O(1) 精确命中先返回——绝大多数调用在这里就结束，不该给正确写法的
-    // target 加扫图成本。get_node 读错（坏数据）按未命中处理，落回模糊归一。
-    if runtime.graph.get_node(target).ok().flatten().is_some() {
-        return metadata_checker::route::PrefixedTargetResolution::Exact;
+    // target 加扫图成本。读错（坏数据）上抛，不当作未命中去做模糊归一。
+    if runtime
+        .graph
+        .get_node(target)
+        .with_context(|| format!("读取节点 {target} 失败"))?
+        .is_some()
+    {
+        return Ok(metadata_checker::route::PrefixedTargetResolution::Exact);
     }
     let node_ids: Vec<String> = runtime
         .graph
         .iter_nodes()
-        .map(|nodes| nodes.map(|node| node.id).collect())
-        .unwrap_or_default();
-    metadata_checker::route::normalize_prefixed_target(target, node_ids.iter().map(String::as_str))
+        .context("枚举图节点失败")?
+        .map(|node| node.id)
+        .collect();
+    Ok(metadata_checker::route::normalize_prefixed_target(
+        target,
+        node_ids.iter().map(String::as_str),
+    ))
 }
 
 /// 把补充调用的 details 折进主输出的 `details.<key>`，并合并它的 evidence。
@@ -1266,6 +1278,30 @@ fn run_query_commands(
                 },
             )?;
             println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        return Ok(true);
+    }
+
+    // M59-3 C4：只读 GQL。失败输出结构化 `{ok:false,error:{code,message}}`，
+    // 与 session 命令同信封，调用方（LLM）按 code 决定下一步；成功输出结果表。
+    if let Some(ref query) = args.gql {
+        match runtime.graph.query_gql_read_only(query, args.gql_max_rows) {
+            Ok(table) => {
+                if args.is_human() {
+                    println!("{}", table.to_tsv());
+                } else {
+                    println!("{}", serde_json::to_string(&table.to_json())?);
+                }
+            }
+            Err(error) => {
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "ok": false,
+                        "error": {"code": error.code, "message": error.message},
+                    }))?
+                );
+            }
         }
         return Ok(true);
     }

@@ -25,7 +25,7 @@ Grafeo 选型与本次迁移的 10 MB 体积预算豁免沿用已批准 spec，�
 | M59-1：A1/A1b/A2 身份与路径 | PR14 合入后可做 | graph/scanner/superpage/dependency 与 target 解析：统一项目、源文件、局部 id 身份；保留原始引用 token；共用路径归一化 | 同名跨页隔离；旧 target 显式解析，歧义诊断；中文、分隔符、点段、越界、引用 token 精确回归。身份编码与下包 A4 的版本切换共同发布，交接 M59-2 | 若新身份无法与旧持久化安全隔离，先保留旧默认路径，将身份编码放在未启用的新路径；不得读写混合 schema |
 | M59-2：A3/A4 归属与版本切换 | 依赖 M59-1；A1 新编码在本包启用 | indexer/scanner/graph/store/persistence：节点和边的 origin_file、共享目标归属处理、版本键、拒绝不兼容库、强制重建 | 删除/修改被引用文件、删除唯一引用者、重启、修复后，全量和增量节点/边/全部属性及重复次数相等；B3 坏 TBL 保留旧图；B1 双后端契约通过。交接 M59-3 | 保持旧库可恢复，诊断说明重建原因；归属差分未过不得进入 C |
 | M59-3：C1/C2 Grafeo store 与导入 | A 完成，按新 schema 复验 B1–B5 | GrafeoGraphStore、Cargo 特性、导入与持久化接线：原生 bulk/store API、自持 NodeId、索引 | 同一 B1 套件覆盖 memory/redb/Grafeo；重复写入、重启、删除、导入结果及错误语义一致；不把逐条 Cypher 导入当正式路径。交接 M59-4 | 保留 redb 默认实现；C1 受阻时按 spec 评估 with_read_store 退路，并记录差异，不静默替换方案 |
-| M59-4：C3/C4/C5 查询、投影与 WASM | 依赖 M59-3 | query/runtime/output/visualization 与 browser glue：21 类链路边、只读表投影、TSV/JSON、WASM 接线 | 每类边有精确投影测试；修复 M59-PATH；query 不绑定 redb；保留原始文件读取与证据定位；浏览器 WASM 构建和接入回归。新用户契约超出 spec 时先补批准设计。交接 M59-5 | 不支持的能力给稳定诊断；不宣称功能等价，不提前退役 redb |
+| M59-4：C3/C4/C5 查询、投影与 WASM | 依赖 M59-3 | query/runtime/output/visualization 与 browser glue：21 类链路边、只读 GQL 直查（C4，2026-10-01 取代手写表投影；输出 TSV/JSON）、WASM 接线 | 每类边有精确投影测试；修复 M59-PATH；query 不绑定 redb；保留原始文件读取与证据定位；浏览器 WASM 构建和接入回归。新用户契约超出 spec 时先补批准设计。交接 M59-5 | 不支持的能力给稳定诊断；不宣称功能等价，不提前退役 redb |
 | M59-5：D1/D2 真实验收与退役 | 依赖 C 全部完成 | 真实语料测量、baseline、redb/v2 shadow 退役与 docs | 固定源码/语料/hash，比较全量及增量产物、重启与查询；测冷启动至首查询、RSS/峰值和产物大小；通过后删除 redb 并重跑影响面测试。交接 M59 journal 收口 | 正确性或兼容性未过保留旧后端；性能未达目标按测量定位，不能仅凭合成图速度宣布成功 |
 
 身份与 schema 的发布约束：M59-1 可独立合入未启用的编码/helper，但不得在旧 schema
