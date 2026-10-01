@@ -541,6 +541,14 @@ impl GraphRuntime {
         #[cfg(feature = "telemetry")]
         let _graph_load_guard = graph_load_span.enter();
 
+        // M59-3 C2：runtime 读侧（C3 查询动词）还没接线 grafeo。
+        // 显式拒绝比让 redb 打开一个 grafeo 文件报格式错更清楚。
+        if crate::graph_store::is_grafeo_db_path(&path) {
+            anyhow::bail!(
+                "GRAPH_BACKEND_UNSUPPORTED: runtime 查询侧尚未支持 grafeo 后端（M59-3 C3）；\
+                 .grafeo 库目前只可用于 --build-graph 导入路径"
+            );
+        }
         let start = Instant::now();
         let graph = match project_binding {
             Some(binding) => GraphDB::open_readonly_with_ownership(&path, binding)

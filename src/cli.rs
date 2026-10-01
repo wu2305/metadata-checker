@@ -85,7 +85,7 @@ pub struct Cli {
     #[arg(
         long,
         value_name = "PATH",
-        help = "Custom graph database path (default: <project-dir>/.metadata-checker.graphdb)"
+        help = "Custom graph database path (default: <project-dir>/.metadata-checker.graphdb; paths ending in .grafeo select the experimental Grafeo backend for --build-graph)"
     )]
     pub graph_db_path: Option<PathBuf>,
 

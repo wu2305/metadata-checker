@@ -60,18 +60,22 @@ fn scan_project_with_report_internal(
     };
     let index_report = index_with_diags.report;
     let mut diagnostics = index_with_diags.diagnostics;
-    let graph = match project_binding {
-        Some(binding) => GraphDB::open_readonly_with_ownership(db_path, binding)?,
-        None => GraphDB::open(db_path)?,
-    };
-    diagnostics.extend(graph.hydrate_diagnostics().to_diagnostics());
+    // hydrate 诊断只来自 redb 的 v2 shadow 层；grafeo 直写无该层，
+    // 跳过二次打开（对 grafeo 也省掉一次全量 lookup 重建）。
+    if !crate::graph_store::is_grafeo_db_path(db_path) {
+        let graph = match project_binding {
+            Some(binding) => GraphDB::open_readonly_with_ownership(db_path, binding)?,
+            None => GraphDB::open(db_path)?,
+        };
+        diagnostics.extend(graph.hydrate_diagnostics().to_diagnostics());
+    }
     Ok(ScanReport {
         indexed: index_report.indexed,
         unchanged: index_report.unchanged,
         dirty: index_report.dirty,
         deleted: index_report.deleted,
-        node_count: graph.graph.node_count(),
-        edge_count: graph.graph.edge_count(),
+        node_count: index_with_diags.node_count,
+        edge_count: index_with_diags.edge_count,
         diagnostics,
     })
 }
@@ -81,6 +85,10 @@ fn scan_project_with_report_internal(
 pub struct IndexReportWithDiagnostics {
     pub report: crate::graph_store::IndexReport,
     pub diagnostics: Vec<crate::output::Diagnostic>,
+    /// 提交后图内项目节点数（后端 store 口径；grafeo 侧不含 IndexState meta 节点）
+    pub node_count: usize,
+    /// 提交后图内边数
+    pub edge_count: usize,
 }
 
 #[cfg(feature = "cli-local")]

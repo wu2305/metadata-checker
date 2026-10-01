@@ -8,15 +8,19 @@
 //! 所以本实现自持「稳定字符串 id → `NodeId`」映射，建边时直接用 `NodeId`，
 //! 并在打开时建好 `id` 属性索引供后续查询层使用。
 //!
-//! 本模块只负责 GraphStore 契约（C1）。索引状态提交（`IndexStateStore`）、
-//! 全量/增量导入接线属于 C2，不在此文件内实现。
+//! 本模块同时承担 C1（GraphStore 契约）与 C2（索引状态提交 + 导入接线）。
+//! 扫描编排侧见 `scanner::indexer::IndexScanStore`：file states、per-file
+//! scanner 诊断、diff-refresh checkpoint 都以 `IndexState` 标签的 meta 节点
+//! 形式存进同一张图（grafeo 没有独立 KV 接口，named graph 又依赖我们刻意
+//! 不启用的 `lpg` feature），打开时按标签还原成内存缓存。
 //! redb 仍是默认后端，退役在 D2，前置条件见
 //! `docs/plans/2026-09-06-m59-grafeo-implementation-plan.md`。
 
-use crate::graph::{Edge, Node};
+use crate::diff_refresh::DiffRefreshCheckpoint;
+use crate::graph::{Edge, FileState, Node};
 use crate::graph_store::{
     EdgeFactKey, GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
-    GraphWriteStore, edge_dedup_key, merge_upsert_meta,
+    GraphWriteStore, IndexCommit, IndexReport, IndexStateStore, edge_dedup_key, merge_upsert_meta,
 };
 use grafeo::{Config, GrafeoDB, NodeId, Value};
 use std::collections::{HashMap, HashSet};
@@ -46,20 +50,69 @@ const PROP_ORIGIN_FILE: &str = "origin_file";
 /// 边的字段路径
 const PROP_FIELD_PATH: &str = "field_path";
 
+/// 索引侧状态记录共用的标签（file states / scanner 诊断 / checkpoint）。
+///
+/// 不用 grafeo 的 named graph 隔离：`store.graph(name)` 在 `lpg` feature 下
+/// 才返回独立图，而我们刻意不开 `lpg`（它连带 gql/cypher/gremlin/sql-pgq
+/// 四个解析器，正是体积大头），所以侧状态只能共存在同一张图里，靠标签与
+/// 项目节点区分。`iter_nodes`/`node_count`/`rebuild_lookups` 全部按标签
+/// 过滤，侧状态不会泄进项目图口径。
+const LABEL_INDEX_STATE: &str = "IndexState";
+/// IndexState 节点：命名空间 key（`{前缀}{logical_path}` 或单例名）
+const PROP_STATE_KEY: &str = "key";
+/// IndexState 节点：JSON 载荷
+const PROP_STATE_VALUE: &str = "value";
+
+/// meta key 前缀：file state（`file_state:{logical_path}`）
+const PREFIX_FILE_STATE: &str = "file_state:";
+/// meta key 前缀：per-file scanner 诊断 entry（`scanner_entry:{logical_path}`）
+const PREFIX_SCANNER_ENTRY: &str = "scanner_entry:";
+/// meta key 单例：diff-refresh checkpoint
+const KEY_DIFF_REFRESH_CHECKPOINT: &str = "diff_refresh_checkpoint";
+
+fn file_state_key(path: &str) -> String {
+    format!("{PREFIX_FILE_STATE}{path}")
+}
+
+fn scanner_entry_key(path: &str) -> String {
+    format!("{PREFIX_SCANNER_ENTRY}{path}")
+}
+
 /// Grafeo 图存储
 ///
-/// 计数直接取 `db.node_count()` / `db.edge_count()`——两者都按当前 epoch
-/// 过滤掉已删除记录，不是把 tombstone 算进去的物理条数，所以可以当权威口径，
-/// 不另维护一份计数器（自带计数器只会掩盖引擎层的不一致）。
+/// 计数口径：`node_count` 取 `node_ids.len()`（排除 IndexState meta 节点与
+/// 任何外来标签节点），`edge_count` 取 `db.edge_count()`——meta 节点从不上边，
+/// 引擎计数又按当前 epoch 过滤 tombstone，两边都恰好是项目图口径。
 ///
 /// 删除节点必须自己先删光它的邻边：grafeo 的 `delete_node` 只标记节点版本链
 /// 并摘掉标签/属性索引，**不级联删边**，残留的边会让邻接表指向一个已删节点。
+///
+/// 与 redb 的提交语义差异：`edge`+`storage` 特性集下 grafeo 没有事务
+/// （`begin_transaction`/`commit` 是 `lpg` feature 的 API），apply 阶段的
+/// 节点/边写入立即生效，`persist_index` 只落侧状态。中途崩溃会留下
+/// 「图已部分更新、file_states 仍旧」的窗口——下轮 diff 把同一批文件再判脏，
+/// 按旧 state 的 `node_ids` 重放删除+重写即可收敛（节点 id 与边事实都是
+/// 内容决定的，重放幂等）。已知残留风险：崩溃后文件内容又回滚时，崩溃前
+/// 写入的新节点可能变成无人引用的孤儿（没有任何已提交 state 记得它们）；
+/// 是否引入按 `origin_file` 的 GC 留给 D1 验收再评估。
 pub struct GrafeoGraphStore {
     db: GrafeoDB,
     /// 稳定字符串 id → grafeo `NodeId`，建边与点查都靠它，避免按属性扫描
     node_ids: HashMap<String, NodeId>,
     /// 边去重键集合，与 `memory_graph_store` / `graph_redb` 的 `seen_edges` 同口径
     seen_edges: HashSet<EdgeFactKey>,
+    /// IndexState meta 节点：key → `NodeId` 定位表
+    meta_nodes: HashMap<String, NodeId>,
+    /// 已落库的 file states 缓存（打开时随 meta 节点复原，diff 的唯一输入）
+    file_states: HashMap<String, FileState>,
+    /// 已落库的 per-file scanner 诊断缓存
+    scanner_entries: HashMap<String, Vec<u8>>,
+    /// 已落库的 diff-refresh checkpoint
+    checkpoint: Option<DiffRefreshCheckpoint>,
+    /// 本轮 upsert 过的节点 id（persist 后清空，与 redb `dirty_nodes` 同口径）
+    dirty_nodes: HashSet<String>,
+    /// 本轮删除的节点 id（persist 后清空，与 redb `removed_nodes` 同口径）
+    removed_nodes: HashSet<String>,
 }
 
 impl std::fmt::Debug for GrafeoGraphStore {
@@ -129,16 +182,39 @@ impl GrafeoGraphStore {
             db,
             node_ids: HashMap::new(),
             seen_edges: HashSet::new(),
+            meta_nodes: HashMap::new(),
+            file_states: HashMap::new(),
+            scanner_entries: HashMap::new(),
+            checkpoint: None,
+            dirty_nodes: HashSet::new(),
+            removed_nodes: HashSet::new(),
         }
     }
 
-    /// 从库里现有的节点和边重建 `node_ids` 与 `seen_edges`。
+    /// 从库里现有的节点和边重建 `node_ids`、`seen_edges` 与索引侧状态缓存。
     ///
-    /// 两者是进程内派生状态，重启后必须复原，否则重开的库会把已存在的边
-    /// 当成新事实重复写入，也无法按字符串 id 定位节点。
+    /// 前两样是进程内派生状态，重启后必须复原，否则重开的库会把已存在的边
+    /// 当成新事实重复写入，也无法按字符串 id 定位节点。IndexState 记录同样
+    /// 在这里还原成内存缓存——file states 是下一轮增量 diff 的唯一输入，
+    /// 丢了它等于全库强制重建。
     fn rebuild_lookups(&mut self) -> GraphStoreResult<()> {
         let mut by_node_id: HashMap<NodeId, String> = HashMap::new();
+        // IndexState 记录先只收裸 (key, value, NodeId)：iter_nodes 持有 db 的
+        // 不可变借用，解码写不进自身字段——循环结束后统一还原进缓存。
+        let mut state_records = Vec::new();
         for node in self.db.iter_nodes() {
+            if node.has_label(LABEL_INDEX_STATE) {
+                state_records.push((
+                    read_text(|key| node.get_property(key).cloned(), PROP_STATE_KEY),
+                    read_text(|key| node.get_property(key).cloned(), PROP_STATE_VALUE),
+                    node.id,
+                ));
+                continue;
+            }
+            // 非本实现写入的标签不归本 store 解释（未来 projection 等形态）。
+            if !node.has_label(LABEL_NODE) {
+                continue;
+            }
             let id =
                 read_text(|key| node.get_property(key).cloned(), PROP_ID).ok_or_else(|| {
                     GraphStoreError::Corrupted {
@@ -147,6 +223,9 @@ impl GrafeoGraphStore {
                 })?;
             by_node_id.insert(node.id, id.clone());
             self.node_ids.insert(id, node.id);
+        }
+        for (key, value, node_id) in state_records {
+            self.load_state_record(key, value, node_id)?;
         }
 
         let mut facts = HashSet::new();
@@ -166,7 +245,97 @@ impl GrafeoGraphStore {
         Ok(())
     }
 
-    /// 按方向组装邻居视图。`outgoing` 为真表示出边（对端是 `to`）。
+    /// 把一条 IndexState 记录的裸字段还原进侧状态缓存并登记定位表。
+    ///
+    /// 未知 key 按 Corrupted 报错而不是跳过：本文件只由本实现写入，出现
+    /// 不认识的记录形态等于持久化数据超出当前 schema——静默跳过会让下一轮
+    /// 扫描读到残缺的侧状态，表现为「文件怎么改都不脏」这种更难查的症状。
+    fn load_state_record(
+        &mut self,
+        key: Option<String>,
+        value: Option<String>,
+        node_id: NodeId,
+    ) -> GraphStoreResult<()> {
+        let key = key.ok_or_else(|| GraphStoreError::Corrupted {
+            reason: format!("索引状态节点 {node_id:?} 缺少 {PROP_STATE_KEY} 属性"),
+        })?;
+        let value = value.unwrap_or_default();
+        if let Some(path) = key.strip_prefix(PREFIX_FILE_STATE) {
+            let state = serde_json::from_str::<FileState>(&value).map_err(|err| {
+                GraphStoreError::DeserializeFailed {
+                    reason: format!("还原 file_state {path} 失败：{err}"),
+                }
+            })?;
+            self.file_states.insert(path.to_string(), state);
+        } else if let Some(path) = key.strip_prefix(PREFIX_SCANNER_ENTRY) {
+            self.scanner_entries
+                .insert(path.to_string(), value.into_bytes());
+        } else if key == KEY_DIFF_REFRESH_CHECKPOINT {
+            self.checkpoint = Some(serde_json::from_str(&value).map_err(|err| {
+                GraphStoreError::DeserializeFailed {
+                    reason: format!("还原 diff-refresh checkpoint 失败：{err}"),
+                }
+            })?);
+        } else {
+            return Err(GraphStoreError::Corrupted {
+                reason: format!("未知索引状态 key：{key}"),
+            });
+        }
+        self.meta_nodes.insert(key, node_id);
+        Ok(())
+    }
+
+    /// upsert 一条 IndexState 记录（按 key 定位，value 为 JSON 文本）
+    fn put_state(&mut self, key: &str, value: &str) -> GraphStoreResult<()> {
+        let session = self.db.session();
+        if let Some(&existing) = self.meta_nodes.get(key) {
+            session
+                .set_node_property(existing, PROP_STATE_VALUE, Value::from(value))
+                .map_err(|err| GraphStoreError::WriteFailed {
+                    reason: format!("写索引状态 {key} 失败：{err}"),
+                })?;
+            return Ok(());
+        }
+        let created = session
+            .create_node_with_props(
+                &[LABEL_INDEX_STATE],
+                [
+                    (PROP_STATE_KEY, Value::from(key)),
+                    (PROP_STATE_VALUE, Value::from(value)),
+                ],
+            )
+            .map_err(|err| GraphStoreError::WriteFailed {
+                reason: format!("建索引状态 {key} 失败：{err}"),
+            })?;
+        self.meta_nodes.insert(key.to_string(), created);
+        Ok(())
+    }
+
+    /// 删除一条 IndexState 记录（不存在则视为幂等 no-op）
+    fn delete_state(&mut self, key: &str) -> GraphStoreResult<()> {
+        let Some(node) = self.meta_nodes.remove(key) else {
+            return Ok(());
+        };
+        // meta 节点从不上边，不需要级联删邻边。
+        self.db.session().delete_node(node);
+        Ok(())
+    }
+
+    /// 全库 per-file scanner 诊断 entry（顺序不保证，调用方自行排序）。
+    /// 与 `GraphDB::load_scanner_diagnostic_entries` 同出口。
+    pub fn load_scanner_diagnostic_entries(&self) -> GraphStoreResult<Vec<(String, Vec<u8>)>> {
+        Ok(self
+            .scanner_entries
+            .iter()
+            .map(|(path, bytes)| (path.clone(), bytes.clone()))
+            .collect())
+    }
+
+    /// 已落库的 diff-refresh checkpoint（无则 `None`），
+    /// 与 `GraphDB::load_diff_refresh_checkpoint` 同出口。
+    pub fn load_diff_refresh_checkpoint(&self) -> GraphStoreResult<Option<DiffRefreshCheckpoint>> {
+        Ok(self.checkpoint.clone())
+    }
     fn neighbors_of(
         &self,
         node_id: &str,
@@ -239,7 +408,9 @@ impl GraphReadStore for GrafeoGraphStore {
     }
 
     fn node_count(&self) -> GraphStoreResult<usize> {
-        Ok(self.db.node_count())
+        // `db.node_count()` 会把 IndexState meta 节点一起算进来；项目图口径
+        // 以 id 映射表为准（与 `iter_nodes`/`rebuild_lookups` 的标签过滤一致）。
+        Ok(self.node_ids.len())
     }
 
     fn edge_count(&self) -> GraphStoreResult<usize> {
@@ -252,6 +423,9 @@ impl GraphReadStore for GrafeoGraphStore {
         // 返回类型本来就是 owned Node，collect 不额外增加克隆量级。
         let mut nodes = Vec::with_capacity(self.node_ids.len());
         for raw in self.db.iter_nodes() {
+            if !raw.has_label(LABEL_NODE) {
+                continue;
+            }
             nodes.push(node_from_props(|key| raw.get_property(key).cloned())?);
         }
         Ok(Box::new(nodes.into_iter()))
@@ -291,6 +465,8 @@ impl GraphWriteStore for GrafeoGraphStore {
                         reason: format!("写节点属性 {key} 失败：{err}"),
                     })?;
             }
+            self.dirty_nodes.insert(node.id.clone());
+            self.removed_nodes.remove(&node.id);
             return Ok(());
         }
 
@@ -309,7 +485,9 @@ impl GraphWriteStore for GrafeoGraphStore {
             .map_err(|err| GraphStoreError::WriteFailed {
                 reason: format!("建节点 {} 失败：{err}", node.id),
             })?;
-        self.node_ids.insert(node.id, created);
+        self.node_ids.insert(node.id.clone(), created);
+        self.dirty_nodes.insert(node.id.clone());
+        self.removed_nodes.remove(&node.id);
         Ok(())
     }
 
@@ -347,6 +525,10 @@ impl GraphWriteStore for GrafeoGraphStore {
     fn remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()> {
         let session = self.db.session();
         for id in node_ids {
+            // 与 redb 同口径：即使 id 不在图里也进 removed 账（调用方只关心
+            // 「本轮要求删除的集合」，不区分它先前是否存在）。
+            self.removed_nodes.insert(id.clone());
+            self.dirty_nodes.remove(id);
             let Some(node) = self.node_ids.remove(id) else {
                 continue;
             };
@@ -366,6 +548,122 @@ impl GraphWriteStore for GrafeoGraphStore {
             !removed.contains(from.as_str()) && !removed.contains(to.as_str())
         });
         Ok(())
+    }
+}
+
+impl IndexStateStore for GrafeoGraphStore {
+    /// file states 是增量 diff 的唯一输入，打开时已随 meta 节点复原成缓存，
+    /// 这里直接返回克隆——与 redb 每次新开只读事务扫表的语义等价。
+    fn load_file_states(&self) -> GraphStoreResult<HashMap<String, FileState>> {
+        Ok(self.file_states.clone())
+    }
+
+    /// 提交语义与 redb `persist_commit` 同口径：file states 全量对账
+    /// （新增/变化 upsert、缺席删除）、scanner entries 覆盖 + 按删除清单移除、
+    /// checkpoint 覆盖或清除。
+    ///
+    /// 与 redb 的差异：grafeo 无事务，逐条写就是提交本身——函数中途失败会
+    /// 留下部分落库的侧状态。这与 redb 单事务的原子性不同，但各条记录
+    /// 互相独立、幂等可重放，下轮提交自然会补齐（见类型文档的崩溃窗口说明）。
+    fn persist_index(&mut self, commit: IndexCommit) -> GraphStoreResult<IndexReport> {
+        let IndexCommit {
+            file_states,
+            dirty_nodes,
+            deleted_nodes,
+            checkpoint,
+            // grafeo 直写不消费 M56 delta：edge-key 快照服务于 redb v2 shadow
+            // 的 Stale/Current 翻转，本后端没有影子层；`wants_index_delta`
+            // 返回 false 已保证扫描端不会收集它。
+            delta: _,
+            scanner_entries,
+            scanner_deleted_paths,
+        } = commit;
+
+        let indexed = file_states.len();
+        let dirty = dirty_nodes.len();
+        let deleted = deleted_nodes.len();
+
+        for (path, state) in &file_states {
+            if self.file_states.get(path) != Some(state) {
+                let text = serde_json::to_string(state).map_err(|err| {
+                    GraphStoreError::SerializeFailed {
+                        reason: format!("序列化 file_state {path} 失败：{err}"),
+                    }
+                })?;
+                self.put_state(&file_state_key(path), &text)?;
+            }
+        }
+        let stale_states: Vec<String> = self
+            .file_states
+            .keys()
+            .filter(|path| !file_states.contains_key(*path))
+            .cloned()
+            .collect();
+        for path in stale_states {
+            self.delete_state(&file_state_key(&path))?;
+        }
+        self.file_states = file_states;
+
+        for (path, bytes) in &scanner_entries {
+            // entry 是本实现自己序列化的 JSON，非 UTF-8 意味着上游写坏了格式。
+            let text = String::from_utf8(bytes.clone()).map_err(|err| {
+                GraphStoreError::SerializeFailed {
+                    reason: format!("scanner 诊断 entry {path} 不是有效 UTF-8：{err}"),
+                }
+            })?;
+            self.put_state(&scanner_entry_key(path), &text)?;
+            self.scanner_entries.insert(path.clone(), bytes.clone());
+        }
+        for path in &scanner_deleted_paths {
+            self.delete_state(&scanner_entry_key(path))?;
+            self.scanner_entries.remove(path);
+        }
+
+        match &checkpoint {
+            Some(checkpoint) => {
+                let text = serde_json::to_string(checkpoint).map_err(|err| {
+                    GraphStoreError::SerializeFailed {
+                        reason: format!("序列化 diff-refresh checkpoint 失败：{err}"),
+                    }
+                })?;
+                self.put_state(KEY_DIFF_REFRESH_CHECKPOINT, &text)?;
+            }
+            None => self.delete_state(KEY_DIFF_REFRESH_CHECKPOINT)?,
+        }
+        self.checkpoint = checkpoint;
+
+        self.dirty_nodes.clear();
+        self.removed_nodes.clear();
+
+        // 与 memory/redb 同一出口口径：store 层报节点账数，
+        // 文件口径由报告出口层覆盖。
+        Ok(IndexReport {
+            indexed,
+            unchanged: indexed.saturating_sub(dirty),
+            dirty,
+            deleted,
+        })
+    }
+}
+
+#[cfg(feature = "cli-local")]
+impl crate::scanner::indexer::IndexScanStore for GrafeoGraphStore {
+    fn load_scanner_diagnostic_entries(&self) -> GraphStoreResult<Vec<(String, Vec<u8>)>> {
+        GrafeoGraphStore::load_scanner_diagnostic_entries(self)
+    }
+
+    fn pending_dirty_nodes(&self) -> Vec<String> {
+        self.dirty_nodes.iter().cloned().collect()
+    }
+
+    fn pending_removed_nodes(&self) -> Vec<String> {
+        self.removed_nodes.iter().cloned().collect()
+    }
+
+    /// grafeo 直写不消费 M56 delta（无 redb v2 shadow 层），返回 false 让扫描
+    /// 端跳过两次 incident-edge 全邻接收集。
+    fn wants_index_delta(&self) -> bool {
+        false
     }
 }
 
