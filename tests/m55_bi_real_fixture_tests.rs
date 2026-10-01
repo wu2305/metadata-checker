@@ -248,6 +248,7 @@ fn m55_bi_real_bootstrap_docx_not_treated_as_new_file() {
         mtime: None,
         size: None,
         hash: None,
+        indexed_hash: None,
         deleted: false,
     };
     // AID0001 未变（revision/path 与快照一致）；file-ghost 远端已缺失

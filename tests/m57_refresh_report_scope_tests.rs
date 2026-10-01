@@ -19,6 +19,8 @@ fn m57_diff_refresh_report_declares_project_scope() {
         invalidated_pages: Vec::new(),
         persist_report: None,
         warm_failures: Vec::new(),
+        parse_failures: Vec::new(),
+        ownership_conflicts: Vec::new(),
         persisted: false,
         pending_dirty_total: 0,
         checkpoint: None,

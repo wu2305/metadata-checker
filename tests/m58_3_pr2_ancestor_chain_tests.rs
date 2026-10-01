@@ -26,6 +26,7 @@ fn comp_node(comp_id: &str, json_path: &str) -> Node {
             "component_type": "panel",
             "json_path": json_path,
         })),
+        origin_file: None,
     }
 }
 
@@ -46,6 +47,7 @@ fn visible_condition_node(comp_id: &str, json_path: &str, raw_expr: &str) -> Nod
             "subject_type": "",
             "referenced_symbols": [],
         })),
+        origin_file: None,
     }
 }
 
@@ -57,6 +59,7 @@ fn add_edge(store: &mut MemoryGraphStore, from: &str, to: &str, edge_type: EdgeT
             edge_type,
             field_path: None,
             meta: None,
+            origin_file: None,
         })
         .expect("添加图边必须成功");
 }
@@ -122,6 +125,7 @@ fn test_pr2_unique_component_parent_assertion() {
                 path: PAGE_PATH.to_string(),
                 name: "chain".to_string(),
                 meta: None,
+                origin_file: None,
             })
             .expect("upsert page");
         store
@@ -184,6 +188,7 @@ fn test_pr2_near_to_far_order_stable_across_insertion_orders() {
                 path: PAGE_PATH.to_string(),
                 name: "chain".to_string(),
                 meta: None,
+                origin_file: None,
             })
             .expect("upsert page");
         store
@@ -266,6 +271,7 @@ fn test_pr2_cycle_terminates_without_duplicate_inheritance() {
             path: PAGE_PATH.to_string(),
             name: "chain".to_string(),
             meta: None,
+            origin_file: None,
         })
         .expect("upsert page");
     store
@@ -317,6 +323,7 @@ fn test_pr2_no_expression_component_inherits_via_relaxed_json_path() {
             path: PAGE_PATH.to_string(),
             name: "chain".to_string(),
             meta: None,
+            origin_file: None,
         })
         .expect("upsert page");
     store

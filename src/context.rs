@@ -161,6 +161,32 @@ pub fn build_context_output(
             budget
         );
     }
+    // M59-2 A1 接线：`--context` 是 `--explain --depth N` 展开出的补充调用
+    // （route.rs:128，merge_key=neighbor_context），也是 `--context` 旧动词入口。
+    // 与 query_model/explain 共用同一套旧 target 解析，否则裸 `model:`/`field:`
+    // 在页面局部身份启用后会让邻居闭包静默缺失。
+    let resolved_node_id = match crate::query::resolve_legacy_model_target(graph, node_id)? {
+        crate::query::LegacyModelTarget::Exact(id)
+        | crate::query::LegacyModelTarget::Resolved(id) => id,
+        crate::query::LegacyModelTarget::Ambiguous(nodes) => {
+            return crate::query::build_ambiguous_target_output(
+                node_id,
+                &nodes,
+                crate::output::OutputKind::Context,
+                "--context",
+            );
+        }
+        crate::query::LegacyModelTarget::Missing => {
+            let candidates = find_candidates(graph, node_id, 5)?;
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::OutputKind::Context,
+                node_id,
+                &candidates,
+            );
+            return Ok(serde_json::to_value(out)?);
+        }
+    };
+    let node_id = resolved_node_id.as_str();
     let node = match graph.get_node(node_id)? {
         Some(n) => n,
         None => {

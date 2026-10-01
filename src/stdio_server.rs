@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
 use crate::diff_refresh::DiffRefreshOrchestrator;
+use crate::ownership::ProjectBinding;
 use crate::response_processor::ResponseProcessor;
 use crate::runtime::{GraphRuntime, RuntimeQueryRequest};
 use crate::session::DiffRefreshRuntimeContext;
@@ -179,20 +180,35 @@ impl InvocationAdapter for StdioAdapter {
 ///
 /// 加载 graphdb 一次，进入 stdin/stdout 循环处理请求。
 /// stderr 输出运行日志，stdout 只输出 JSONL 响应。
+/// `explicit_project_binding` 为 `--project-ref` 显式项目绑定，优先于 session 推导。
 /// `diff_refresh_context` 为 Some 时把 runtime 绑入 orchestrator，
 /// 支持 `diff_refresh` 命令；为 None 时该命令返回
 /// `DIFF_REFRESH_CONTEXT_REQUIRED`。
 pub fn run_stdio_server(
     graph_db_path: &std::path::Path,
     project_dir: Option<&std::path::Path>,
+    explicit_project_binding: Option<&ProjectBinding>,
     diff_refresh_context: Option<DiffRefreshRuntimeContext>,
 ) -> Result<()> {
+    let derived_binding = diff_refresh_context
+        .as_ref()
+        .map(|context| ProjectBinding::new(context.manifest.project_ref.clone()))
+        .transpose()?;
+    let project_binding = explicit_project_binding.cloned().or(derived_binding);
     // 产品路径必须走 LongLived：构建 DenseGraph / Availability Facts / PageDependencyIndex。
-    let mut runtime = GraphRuntime::load_with_project_dir_and_mode(
-        graph_db_path,
-        project_dir,
-        crate::runtime::RuntimeMode::LongLived,
-    )
+    let mut runtime = match project_binding.as_ref() {
+        Some(binding) => GraphRuntime::load_with_project_dir_and_mode_for_project(
+            graph_db_path,
+            project_dir,
+            crate::runtime::RuntimeMode::LongLived,
+            binding,
+        ),
+        None => GraphRuntime::load_with_project_dir_and_mode(
+            graph_db_path,
+            project_dir,
+            crate::runtime::RuntimeMode::LongLived,
+        ),
+    }
     .map_err(|e| anyhow::anyhow!("Failed to load graphdb: {}", e))?;
     eprintln!(
         "[stdio-server] Graph loaded (LongLived), {} nodes, read_model={}, ready",

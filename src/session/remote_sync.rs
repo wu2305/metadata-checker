@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
+use crate::ownership::ProjectBinding;
 use crate::remote_metadata::{MetadataContentType, RemoteFileRef};
 
 use crate::graph_store::IndexReport;
@@ -556,6 +557,7 @@ fn mark_entry_deleted(
             mtime: entry.mtime,
             size: entry.size,
             hash: None,
+            indexed_hash: None,
             deleted: true,
         });
         manifest
@@ -640,6 +642,7 @@ fn mark_missing_path_deleted(
             mtime: None,
             size: None,
             hash: None,
+            indexed_hash: None,
             deleted: true,
         });
         manifest
@@ -660,6 +663,28 @@ fn mark_missing_path_deleted(
     Ok(changed)
 }
 
+/// 使用稳定项目绑定构建 session ownership 图。
+#[cfg(feature = "cli-local")]
+pub fn build_session_graph_for_project(
+    session_dir: &std::path::Path,
+    graph_db_path: &std::path::Path,
+    project_binding: &ProjectBinding,
+) -> Result<crate::graph_store::IndexReport> {
+    let mirror = crate::session::sync::project_mirror_root(session_dir);
+    crate::scanner::indexer::ProjectIndexer::scan_for_project(
+        &mirror,
+        graph_db_path,
+        project_binding,
+    )
+    .with_context(|| {
+        format!(
+            "failed to build graph for session {}",
+            session_dir.display()
+        )
+    })
+}
+
+/// 兼容旧测试/低层调用的无绑定构图入口；生产 session 必须使用 bound 版本。
 #[cfg(feature = "cli-local")]
 pub fn build_session_graph(
     session_dir: &std::path::Path,
@@ -668,7 +693,7 @@ pub fn build_session_graph(
     let mirror = crate::session::sync::project_mirror_root(session_dir);
     crate::scanner::indexer::ProjectIndexer::scan(&mirror, graph_db_path).with_context(|| {
         format!(
-            "failed to build graph for session {}",
+            "failed to build legacy graph for session {}",
             session_dir.display()
         )
     })
@@ -773,9 +798,12 @@ pub fn refresh_session_from_remote(
         manager.write_manifest(&manifest)?;
     }
 
-    // 构建 graph
-    let index_report = build_session_graph(&session_dir, &graph_db_path)
-        .with_context(|| format!("failed to build graph for session {}", session_id))?;
+    // 构建 ownership graph；binding 只来自稳定 remote project_ref，不使用机器路径。
+    let project_binding =
+        ProjectBinding::new(project_ref.clone()).context("invalid session project binding")?;
+    let index_report =
+        build_session_graph_for_project(&session_dir, &graph_db_path, &project_binding)
+            .with_context(|| format!("failed to build graph for session {}", session_id))?;
 
     Ok(SessionRefreshReport {
         ok: true,
@@ -1646,7 +1674,10 @@ mod tests {
         assert_eq!(report.written, 2);
 
         let graph_db_path = root.join("s1").join("graph.redb");
-        let index_report = build_session_graph(&manager.session_dir("s1"), &graph_db_path).unwrap();
+        let binding = ProjectBinding::new("proj").unwrap();
+        let index_report =
+            build_session_graph_for_project(&manager.session_dir("s1"), &graph_db_path, &binding)
+                .unwrap();
         assert!(index_report.indexed >= 1);
         assert!(graph_db_path.exists());
 

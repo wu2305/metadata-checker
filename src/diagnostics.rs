@@ -43,6 +43,12 @@ pub const CODE_SCANNER_FILE_PARSE_FAILED: &str = "SCANNER_FILE_PARSE_FAILED";
 pub const CODE_DIAGNOSTIC_SERIALIZE_FAILED: &str = "DIAGNOSTIC_SERIALIZE_FAILED";
 /// 事实表示版本不兼容，拒绝把旧图当成完整证据加载。
 pub const CODE_GRAPH_SCHEMA_STALE: &str = "GRAPH_SCHEMA_STALE";
+/// M59-2 C：同一实体 id 存在多个不兼容 Definition（来源冲突）。
+///
+/// 这是**持久状态**而非一次性扫描告警：它随账本落库，重启后仍在，修复后消失。
+/// 冲突时重建按确定性规则择一，答案覆盖的是其中一个来源——因此 answer_impact
+/// 为 partial（不是 none）。
+pub const CODE_GRAPH_OWNERSHIP_CONFLICT: &str = "GRAPH_OWNERSHIP_CONFLICT";
 
 /// answer_impact 映射
 ///
@@ -54,7 +60,10 @@ pub const CODE_GRAPH_SCHEMA_STALE: &str = "GRAPH_SCHEMA_STALE";
 /// - 未登记的 code（`answer_effect` 返回 `None`）→ [`IMPACT_NONE`]
 pub fn answer_impact_for(code: &str) -> &'static str {
     match code {
-        CODE_GRAPH_SCHEMA_STALE => IMPACT_BLOCKING,
+        CODE_GRAPH_SCHEMA_STALE
+        | "GRAPH_OWNERSHIP_SCHEMA_STALE"
+        | "GRAPH_PROJECT_BINDING_REQUIRED"
+        | "GRAPH_PROJECT_BINDING_MISMATCH" => IMPACT_BLOCKING,
         CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY => IMPACT_PARTIAL,
         CODE_SCANNER_DUPLICATE_COMPONENT_ID => IMPACT_PARTIAL,
         // 诊断缓存可能陈旧：涉及 SCANNER_* 诊断的结论只能视为部分可靠
@@ -72,6 +81,8 @@ pub fn answer_impact_for(code: &str) -> &'static str {
         // M59-B3：源文件解析失败，图里这部分是上一次成功解析的旧事实。
         // 查询照样能作答，但答的可能是过期内容——正是 partial 的定义。
         CODE_SCANNER_FILE_PARSE_FAILED => IMPACT_PARTIAL,
+        // 来源冲突：择一后只覆盖其中一个来源的事实，答案不完整
+        CODE_GRAPH_OWNERSHIP_CONFLICT => IMPACT_PARTIAL,
         _ => match crate::output::answer_effect::answer_effect(code) {
             Some((
                 crate::output::answer_effect::AnswerImpact::Uncertain
@@ -99,7 +110,16 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         | "GRAPH_DB_LOCKED"
         | "GRAPH_DB_PERMISSION_DENIED"
         | "GRAPH_DB_OPEN_ERROR"
-        | "TARGET_NOT_FOUND" => DiagnosticSeverity::Error,
+        | "GRAPH_OWNERSHIP_SCHEMA_STALE"
+        | "GRAPH_PROJECT_BINDING_REQUIRED"
+        | "GRAPH_PROJECT_BINDING_MISMATCH"
+        | "TARGET_NOT_FOUND"
+        // M59-2 A1：裸旧 target 匹配到多个节点。与 TARGET_NOT_FOUND 同属
+        // 「寻址失败、查询无法完成」一类：两者都让调用方拿不到答案，只是前者
+        // 交回多个候选而后者交回近似候选。answer_effect 也把两者并列登记为
+        // Addressing（answer_effect.rs:140-147），severity 不应一 Error 一默认
+        // Warning——否则同一类失败在 diagnostics 里显得一个更严重。
+        | "AMBIGUOUS_TARGET" => DiagnosticSeverity::Error,
 
         // ---- Info：按设计发生或纯提示 ----
         // redb 只读回退是可操作状态，不阻断查询
@@ -143,7 +163,9 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         | CODE_PAGE_SCOPED_TARGET_FALLBACK
         // 解析失败：图内容陈旧但可用，查询仍能作答（只是可能答的是旧事实），
         // 未达「图库不可用」的 Error 档
-        | CODE_SCANNER_FILE_PARSE_FAILED => DiagnosticSeverity::Warning,
+        | CODE_SCANNER_FILE_PARSE_FAILED
+        // 来源冲突：图仍可用（择一构建），但归属不可信
+        | CODE_GRAPH_OWNERSHIP_CONFLICT => DiagnosticSeverity::Warning,
         // read model 构建失败属异常信号（非按设计），但只是性能层降级，
         // 答案正确性不受影响由 answer_impact=none 表达
         CODE_RUNTIME_READ_MODEL_DEGRADED => DiagnosticSeverity::Warning,

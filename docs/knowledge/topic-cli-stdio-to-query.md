@@ -43,6 +43,9 @@
 - **stdio handler 的三个例外**：`Status`（`src/stdio_server.rs:385`）、`ReloadGraph`（`:398`）、
   `DiffRefresh`（`:378`）分别在 `handle_request` 的 `if` 分支直接返回，不调用 `GraphRuntime::query`。
   这是 stdio 层的分派；直接调用 runtime 时的命令处理见 1.4。
+- **`GraphRuntime::query` 之下还有旧 target 解析层**（M59-2）：`QueryModel`/`Explain`
+  在 `build_query_model_output` / `build_explain_output` 内先经
+  `resolve_legacy_model_target` 解析裸 `model:`/`field:` 再精确查表，见 1.8。
 
 ### 1.1 CLI one-shot 路径
 
@@ -144,6 +147,7 @@ run_stdio_server                        src/stdio_server.rs:185
 | graphdb 打不开 | CLI：`GraphDB::check_graph_db` 输出诊断 JSON 后退出（`src/main.rs:2002`）；stdio：启动即失败 |
 | 拿不到锁 | `GRAPH_DB_LOCK_TIMEOUT`（`src/graph_store.rs:53`），超时由 `--graph-lock-timeout-ms` 控制 |
 | human 不被支持 | `HUMAN_MODE_NOT_SUPPORTED`，降级为 non-human 而非报错（`src/stdio_server.rs:437`） |
+| 裸 `model:` / `field:` target 匹配多个节点 | `AMBIGUOUS_TARGET` + `candidate_targets` + 可直接执行的 `next_queries`；不静默挑一个（见 1.8） |
 | `check_reload` 失败 | 只记 diagnostic，不中断本次查询 |
 
 ### 1.7 改动时跑哪些测试
@@ -158,12 +162,66 @@ cargo test --features cli-local --test core_feature_tests
 `m58_3_command_surface_tests` 用 `env!("CARGO_BIN_EXE_metadata-checker")` 拉起真实二进制；
 不能写死 `target/debug/...`，远端 CI 用自定义 `CARGO_TARGET_DIR`（`tests/m58_3_command_surface_tests.rs:14-20`）。
 
+### 1.8 旧 target 解析（M59-2 A1 接线，2026-09-22 起已接线）
+
+**问：页面局部身份启用后，裸 `model:orders` 这类旧 target 怎么解析？**
+**答：先经 `resolve_legacy_model_target`（`src/query/model.rs`）显式解析，再交给精确
+`get_node`。唯一局部命中改用该局部节点的真实 id 并如实回报 `query_target`；多个候选
+（跨页同名、或局部与物理同名）交回全部候选 + `AMBIGUOUS_TARGET` 诊断 + 可执行的
+`next_queries`，**不静默挑一个**；无候选维持 `TARGET_NOT_FOUND`。**
+
+- 带 `|` 的 scoped id（`model:<PAGE>|<local>`）仍走精确查表，不参与裸名解析；
+- kind 隔离由解析器保证：裸 `field:` 只匹配 Field 节点，裸 `model:` 只匹配 Model
+  节点，跨 kind 同名返回 Missing；`cond`/`comp`/`action`/`param` 文法恒为 scoped，
+  裸名解析对它们未定义；
+- **六条入口共用同一套解析**（2026-09-22 复验补全后）：
+  - `build_query_model_output`（runtime / runtime 工具）
+  - `query_model`（human 分支，纵深防御——CLI human 模式实际落 `HUMAN_MODE_NOT_SUPPORTED`）
+  - `build_explain_output`（`field:` 的生产入口）
+  - `build_explain_condition_output_with_intent_and_retrieval`（`src/explain.rs`）
+  - `build_context_output`（`src/context.rs`）
+  - `build_query_dataflow_output`（`src/query/dataflow.rs`，`--relations model:X` 的补充调用）
+
+  stdio 经 `GraphRuntime::query` 汇合，因此与 CLI 一致；**新增裸名查询入口必须调用同一
+  resolver，不要直接 `get_node`**——否则会退回「静默命中物理模型」的旧行为。
+
+  后三条是复验补上的：`--explain` 在 `route.rs:120-133` 展开成
+  `Explain`（主）+ `ExplainCondition`（补充 `condition_facts`）+（显式 `--depth` 时）
+  `Context`（补充 `neighbor_context`）；`--relations model:X` 展开成
+  `QueryModel`（主）+ `QueryDataflow`（补充 `dataflow_subgraph`）。
+  只接线主调用时，补充调用仍做精确 `get_node`：裸 `field:`/`model:` 会报
+  `TARGET_NOT_FOUND`，而 supplement 的 `required=false` 让整条命令照样「成功」——
+  **主调用有答案、补充块静默缺失，且无任何可见失败信号**。
+
+  `QueryDataflow` 这条尤其要注意：它未接线时会**静默命中物理模型**并返回它的子图，
+  于是同一个 target 上主调用报歧义、补充调用给出一个看起来正常的答案——比单纯缺块
+  更糟，因为它把「静默挑一个」包装成了有效结果。改动 `route_explain` /
+  `route_relations` 的展开列表时，必须同步检查每条展开调用是否都已接线。
+- `execute_resolved_target` 在补充调用前会跳过「主调用已报定位失败」的调用，但
+  **只跳过 `shares_legacy_target_resolution` 白名单内的命令**（`src/main.rs`）。
+  新增接线 resolver 的命令要同步加入白名单；不在白名单里的命令照常执行，宁可多跑
+  一次也不静默吞掉一个可能给出不同答案的补充块。
+- CLI 路由层（`run_surface` → `normalize_target_against_graph`）先于 resolver 生效：
+  精确 id 存在时判 `Exact` 直通（物理同名的歧义由 resolver 报出）；唯一局部命中多在
+  路由层就 `Resolved`；≤3 候选的歧义由 `answer_ambiguous_target` 逐候选作答
+  （`AMBIGUOUS_TARGET_ANSWERED`）。两种 code 均已在 `answer_effect` 登记。
+- `AMBIGUOUS_TARGET` 的 severity 在 `severity_for`（`src/diagnostics.rs`）显式登记为
+  `Error`，与同属寻址失败的 `TARGET_NOT_FOUND` 一致；未登记时会落默认 `Warning` 档，
+  导致同一类失败在 diagnostics 里显得一轻一重。
+- `TARGET_NOT_FOUND` 的补救建议由 **target 前缀**决定，不由发起查询的 `OutputKind`
+  决定（`find_command_for_target`）：`model:`/`dataflow:` → `--find-model`，
+  `page:` → `--find-page`，`comp:`/`action:` → `--find-component`，`field:` 退到
+  所属模型名（字段没有独立 find 动词）。**关键词必须去掉前缀**：`find_nodes` 拿
+  关键词匹配 `id`/`name`/`path` 的子串，而 id 形如 `model:app/a.spg|ordersView`，
+  带前缀的串从不是任何 id 的子串。此前按 `OutputKind` 分支，`--context model:X`
+  会给 `--find-page model:X`——类型错且关键词也搜不到。
+
 ## 2. 已批准计划（尚未实现）
 
 - **M59-4**（plan `docs/plans/2026-09-06-m59-grafeo-implementation-plan.md`）：查询与投影改造，
   要求 `query` 不绑定 redb、21 类链路边各有精确投影测试、修复 M59-PATH（same_page 与物理字段识别）。
   本链路的**入口不变**，target 解析与投影输出会变。
-- **M59-1**：页面局部身份、原始引用 token、统一路径。会改动 `route.rs` 的 target 归一化与 `normalize_prefixed_target`（`src/route.rs:356`）。
+- **M59-1**：页面局部身份、原始引用 token、统一路径。会改动 `route.rs` 的 target 归一化与 `normalize_prefixed_target`（`src/route.rs:356`）。M59-2 起旧 target 的裸名解析已在 `src/query/model.rs` + `src/explain.rs` 生产接线（见 1.8）。
 - **M28 / M29 / M30**（INDEX 中仍为 `planned`）：stdio 请求/响应契约收敛、FC 工具层优化、性能与容量治理。
 
 ## 3. 已知缺陷（已确认，未修）

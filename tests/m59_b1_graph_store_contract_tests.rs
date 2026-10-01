@@ -53,6 +53,7 @@ fn node(id: &str) -> Node {
         path: format!("app/{id}.spg"),
         name: id.to_string(),
         meta: None,
+        origin_file: None,
     }
 }
 
@@ -71,6 +72,7 @@ fn edge_typed(from: &str, to: &str, edge_type: EdgeType, field_path: Option<&str
         edge_type,
         field_path: field_path.map(|s| s.to_string()),
         meta: None,
+        origin_file: None,
     }
 }
 
@@ -299,6 +301,7 @@ mod cases {
             path: "data/source.tbl".to_string(),
             name: "source".to_string(),
             meta: Some(json!({"revision": 2, "fields": ["amount"]})),
+            origin_file: None,
         };
         let expected_b = Node {
             id: "b".to_string(),
@@ -306,6 +309,7 @@ mod cases {
             path: "data/target.tbl".to_string(),
             name: "amount".to_string(),
             meta: Some(json!({"revision": 3, "dataType": "N"})),
+            origin_file: None,
         };
         store.upsert_node(expected_a.clone()).expect("update a");
         store.upsert_node(expected_b.clone()).expect("update b");

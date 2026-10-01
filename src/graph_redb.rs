@@ -11,6 +11,10 @@ use crate::graph_store::{
 use crate::output::schema::{
     AiOutput, Confidence, Evidence, Location, OutputKind, format_next_query,
 };
+use crate::ownership::{
+    FileContributionLedger, OWNERSHIP_LEDGER_VERSION, OWNERSHIP_SCHEMA_VERSION,
+    OwnershipLedgerSnapshot, PROJECT_BINDING_SCHEMA_VERSION, ProjectBinding,
+};
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -37,6 +41,10 @@ const META_TABLE: TableDefinition<&str, Vec<u8>> = TableDefinition::new("meta");
 /// 完整事实键版本；独立于 M59-2 的页面身份与归属版本。
 const FACT_SCHEMA_VERSION_KEY: &str = "fact_schema_version";
 const FACT_SCHEMA_VERSION: &[u8] = b"2";
+/// M59-2 归属账本的独立 schema marker。
+const BINDING_SCHEMA_VERSION_KEY: &str = "project_binding_schema_version";
+const OWNERSHIP_SCHEMA_VERSION_KEY: &str = "ownership_schema_version";
+const PROJECT_BINDING_KEY: &str = "project_binding";
 const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
 /// M58.3 PR1 refix（F2）：per-file scanner 诊断计数表。
 ///
@@ -46,6 +54,10 @@ const META_DIFF_REFRESH_CHECKPOINT_KEY: &str = "diff_refresh_checkpoint";
 /// 序列化/合并归 `scanner::indexer`。
 const SCANNER_DIAGNOSTICS_TABLE: TableDefinition<&str, Vec<u8>> =
     TableDefinition::new("scanner_diagnostics");
+/// 来源账本：key 为 origin_file，value 为 FileContributionLedger JSON。
+const OWNERSHIP_LEDGER_TABLE: TableDefinition<&str, Vec<u8>> =
+    TableDefinition::new("ownership_ledger");
+const OWNERSHIP_LEDGER_VERSION_KEY: &str = "ownership_ledger_version";
 
 /// 所有持久化事实读取入口共用版本门槛，不能从 shadow 绕过。
 pub(crate) fn validate_fact_schema(transaction: &redb::ReadTransaction) -> Result<()> {
@@ -61,6 +73,94 @@ pub(crate) fn validate_fact_schema(transaction: &redb::ReadTransaction) -> Resul
         "GRAPH_SCHEMA_STALE: rebuild from source into a new --graph-db-path; old facts lack complete evidence"
     );
     Ok(())
+}
+
+/// 读取项目准备状态，缺表只视为尚未初始化，读取故障不得静默放行。
+pub(crate) fn validate_project_access(
+    transaction: &redb::ReadTransaction,
+    binding: Option<&ProjectBinding>,
+) -> Result<()> {
+    let meta = match transaction.open_table(META_TABLE) {
+        Ok(table) => table,
+        Err(redb::TableError::TableDoesNotExist(_)) => {
+            return validate_project_markers(None, None, None, None, binding);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    validate_project_markers(
+        meta.get(BINDING_SCHEMA_VERSION_KEY)?
+            .map(|v| v.value())
+            .as_deref(),
+        meta.get(PROJECT_BINDING_KEY)?.map(|v| v.value()).as_deref(),
+        meta.get(OWNERSHIP_SCHEMA_VERSION_KEY)?
+            .map(|v| v.value())
+            .as_deref(),
+        meta.get(OWNERSHIP_LEDGER_VERSION_KEY)?
+            .map(|v| v.value())
+            .as_deref(),
+        binding,
+    )
+}
+
+/// 所有入口共享状态矩阵；旧实验 ownership marker 没有可证明的账本，必须拒载。
+fn validate_project_markers(
+    version: Option<&[u8]>,
+    project: Option<&[u8]>,
+    ownership: Option<&[u8]>,
+    ledger_version: Option<&[u8]>,
+    binding: Option<&ProjectBinding>,
+) -> Result<()> {
+    if let Some(ownership) = ownership {
+        anyhow::ensure!(
+            ownership == OWNERSHIP_SCHEMA_VERSION.to_string().as_bytes(),
+            "GRAPH_OWNERSHIP_SCHEMA_STALE: unsupported ownership schema; rebuild from source into a new graph path"
+        );
+        // 完整且当前的 ownership 库只缺绑定入口时不需要重建，改报 REQUIRED；
+        // 伴随 marker 残缺（无绑定 schema 版本或无账本版本）仍按 STALE 拒载。
+        let ownership_complete = version
+            == Some(PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes())
+            && ledger_version == Some(OWNERSHIP_LEDGER_VERSION.to_string().as_bytes());
+        if binding.is_none() && !ownership_complete {
+            anyhow::bail!(
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: incomplete ownership markers; rebuild from source into a new graph path"
+            );
+        }
+        anyhow::ensure!(
+            binding.is_some(),
+            "GRAPH_PROJECT_BINDING_REQUIRED: use a project-bound entry point to access an ownership database"
+        );
+    }
+    if let Some(version) = version {
+        anyhow::ensure!(
+            version == PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes(),
+            "GRAPH_OWNERSHIP_SCHEMA_STALE: incompatible project binding schema"
+        );
+    }
+    match (version, project, binding, ownership) {
+        (None, None, None, None) => Ok(()),
+        (Some(_), Some(project), Some(binding), None) => {
+            anyhow::ensure!(
+                project == binding.as_str().as_bytes(),
+                "GRAPH_PROJECT_BINDING_MISMATCH: open with the original project binding"
+            );
+            Ok(())
+        }
+        (Some(_), Some(_), None, None) => {
+            anyhow::bail!("GRAPH_PROJECT_BINDING_REQUIRED: use a project-bound entry point")
+        }
+        (Some(_), Some(project), Some(binding), Some(ownership)) => {
+            anyhow::ensure!(
+                project == binding.as_str().as_bytes(),
+                "GRAPH_PROJECT_BINDING_MISMATCH: open with the original project binding"
+            );
+            anyhow::ensure!(
+                ownership == OWNERSHIP_SCHEMA_VERSION.to_string().as_bytes(),
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: unsupported ownership schema"
+            );
+            Ok(())
+        }
+        _ => anyhow::bail!("GRAPH_OWNERSHIP_SCHEMA_STALE: incomplete project binding markers"),
+    }
 }
 
 /// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约）。
@@ -81,7 +181,8 @@ pub fn edge_storage_key(edge: &Edge) -> String {
         edge.to,
         edge.edge_type,
         edge.field_path,
-        edge.meta
+        edge.meta,
+        edge.origin_file
     ]);
     format!("{relation_order}\0{fact}")
 }
@@ -177,6 +278,14 @@ pub struct GraphDB {
     pub graph: DiGraph<Node, Edge>,
     pub node_indices: HashMap<String, NodeIndex>,
     pub db_path: String,
+    /// 打开时核验的绑定；提交前必须与磁盘再次匹配。
+    project_binding: Option<ProjectBinding>,
+    /// 是否已启用真实来源账本。
+    ownership_enabled: bool,
+    /// 当前句柄持有的来源账本，提交时与图和文件状态一起落盘。
+    ownership_ledgers: std::collections::BTreeMap<String, FileContributionLedger>,
+    /// 本轮账本是否发生变化，需要与图状态一同提交。
+    ownership_dirty: bool,
     is_dirty: bool,
     seen_edges: HashSet<crate::graph_store::EdgeFactKey>,
     dirty_nodes: HashSet<String>,
@@ -195,7 +304,375 @@ impl GraphDB {
     /// 打开或创建图数据库
     pub fn open(db_path: &Path) -> Result<Self> {
         let _lock = acquire_graph_db_lock(db_path)?;
-        Self::open_inner(db_path)
+        Self::validate_project_path(db_path, None)?;
+        Self::open_inner(db_path, None)
+    }
+
+    /// 打开仅完成项目绑定准备的库；该状态不宣称来源账本已启用。
+    pub fn open_for_project(db_path: &Path, binding: &ProjectBinding) -> Result<Self> {
+        let _lock = acquire_graph_db_lock(db_path)?;
+        Self::ensure_redb_tables(db_path)?;
+        Self::ensure_project_binding(db_path, binding)?;
+        let mut graph = Self::open_inner(db_path, Some(binding))?;
+        graph.project_binding = Some(binding.clone());
+        Ok(graph)
+    }
+
+    /// 打开已启用来源账本的项目库。
+    pub fn open_with_ownership(db_path: &Path, binding: &ProjectBinding) -> Result<Self> {
+        let _lock = acquire_graph_db_lock(db_path)?;
+        Self::ensure_redb_tables(db_path)?;
+        Self::ensure_or_initialize_ownership(db_path, binding)?;
+        let mut graph = Self::open_inner(db_path, Some(binding))?;
+        graph.project_binding = Some(binding.clone());
+        graph.ownership_enabled = true;
+        graph.ownership_ledgers = Self::load_ownership_ledgers_from_path(db_path, binding)?;
+        Ok(graph)
+    }
+
+    /// 只读访问绑定库，不初始化或修补任何 marker。
+    pub fn open_readonly_for_project(db_path: &Path, binding: &ProjectBinding) -> Result<Self> {
+        let _lock = acquire_graph_db_lock(db_path)?;
+        Self::validate_prepared_project_path(db_path, binding)?;
+        let mut graph = Self::open_readonly_inner(db_path)?;
+        graph.project_binding = Some(binding.clone());
+        Ok(graph)
+    }
+
+    /// 只读访问已启用来源账本的项目库。
+    pub fn open_readonly_with_ownership(db_path: &Path, binding: &ProjectBinding) -> Result<Self> {
+        let _lock = acquire_graph_db_lock(db_path)?;
+        Self::validate_ownership_path(db_path, binding)?;
+        let mut graph = Self::open_readonly_inner(db_path)?;
+        graph.project_binding = Some(binding.clone());
+        graph.ownership_enabled = true;
+        graph.ownership_ledgers = Self::load_ownership_ledgers_from_path(db_path, binding)?;
+        Ok(graph)
+    }
+
+    /// 文件不存在时允许后续新建；存在时严格校验项目状态。
+    fn validate_project_path(db_path: &Path, binding: Option<&ProjectBinding>) -> Result<()> {
+        if db_path.exists() {
+            let db = Database::open(db_path)?;
+            validate_project_access(&db.begin_read()?, binding)?;
+        }
+        Ok(())
+    }
+
+    fn validate_prepared_project_path(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
+        if db_path.exists() {
+            let db = Database::open(db_path)?;
+            let transaction = db.begin_read()?;
+            let meta = transaction.open_table(META_TABLE)?;
+            let ownership = meta
+                .get(OWNERSHIP_SCHEMA_VERSION_KEY)?
+                .map(|value| value.value());
+            anyhow::ensure!(
+                ownership.is_none(),
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership database requires the ownership-bound readonly entry point"
+            );
+            validate_project_access(&transaction, Some(binding))?;
+        }
+        Ok(())
+    }
+
+    /// 首次真实 ownership 构建只允许空库初始化；已有图必须来自完整源重建。
+    fn ensure_or_initialize_ownership(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
+        if !db_path.exists() {
+            return Ok(());
+        }
+        let db = Database::open(db_path)?;
+        let read_txn = db.begin_read()?;
+        let meta_table = match read_txn.open_table(META_TABLE) {
+            Ok(t) => Some(t),
+            Err(redb::TableError::TableDoesNotExist(_)) => None,
+            Err(err) => return Err(err.into()),
+        };
+
+        let ownership_marker = meta_table
+            .as_ref()
+            .and_then(|m| m.get(OWNERSHIP_SCHEMA_VERSION_KEY).ok().flatten())
+            .map(|v| v.value());
+        let ledger_marker = meta_table
+            .as_ref()
+            .and_then(|m| m.get(OWNERSHIP_LEDGER_VERSION_KEY).ok().flatten())
+            .map(|v| v.value());
+        let binding_version_marker = meta_table
+            .as_ref()
+            .and_then(|m| m.get(BINDING_SCHEMA_VERSION_KEY).ok().flatten())
+            .map(|v| v.value());
+        let project_binding_marker = meta_table
+            .as_ref()
+            .and_then(|m| m.get(PROJECT_BINDING_KEY).ok().flatten())
+            .map(|v| v.value());
+
+        let has_any_marker = ownership_marker.is_some()
+            || ledger_marker.is_some()
+            || binding_version_marker.is_some()
+            || project_binding_marker.is_some();
+
+        if !has_any_marker {
+            let populated = match read_txn.open_table(NODES_TABLE) {
+                Ok(t) => !t.is_empty()?,
+                Err(_) => false,
+            } || match read_txn.open_table(EDGES_TABLE) {
+                Ok(t) => !t.is_empty()?,
+                Err(_) => false,
+            } || match read_txn.open_table(FILE_STATES_TABLE) {
+                Ok(t) => !t.is_empty()?,
+                Err(_) => false,
+            } || match read_txn.open_table(SCANNER_DIAGNOSTICS_TABLE) {
+                Ok(t) => !t.is_empty()?,
+                Err(_) => false,
+            } || match read_txn.open_table(OWNERSHIP_LEDGER_TABLE) {
+                Ok(t) => !t.is_empty()?,
+                Err(_) => false,
+            } || meta_table.as_ref().map_or(Ok(false), |m| {
+                m.get(META_DIFF_REFRESH_CHECKPOINT_KEY).map(|v| v.is_some())
+            })? || read_txn
+                .list_tables()?
+                .any(|table| table.name().starts_with("v2_"));
+
+            anyhow::ensure!(
+                !populated,
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: existing graph has no source ledger; rebuild from source into a new graph path"
+            );
+
+            drop(meta_table);
+            drop(read_txn);
+            let write_txn = db.begin_write()?;
+            {
+                let mut meta = write_txn.open_table(META_TABLE)?;
+                meta.insert(
+                    OWNERSHIP_SCHEMA_VERSION_KEY,
+                    OWNERSHIP_SCHEMA_VERSION.to_string().into_bytes(),
+                )?;
+                meta.insert(
+                    OWNERSHIP_LEDGER_VERSION_KEY,
+                    OWNERSHIP_LEDGER_VERSION.to_string().into_bytes(),
+                )?;
+                meta.insert(PROJECT_BINDING_KEY, binding.as_str().as_bytes().to_vec())?;
+                meta.insert(
+                    BINDING_SCHEMA_VERSION_KEY,
+                    PROJECT_BINDING_SCHEMA_VERSION.to_string().into_bytes(),
+                )?;
+                let _ = write_txn.open_table(OWNERSHIP_LEDGER_TABLE)?;
+            }
+            write_txn.commit()?;
+            return Ok(());
+        }
+
+        // 存在 marker 时，绝不补写覆盖，只做严格只读检查
+        if let Some(ref ownership) = ownership_marker {
+            anyhow::ensure!(
+                ownership.as_slice() == OWNERSHIP_SCHEMA_VERSION.to_string().as_bytes(),
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: unsupported ownership schema; rebuild from source into a new graph path"
+            );
+        }
+        if let Some(ref ledger) = ledger_marker {
+            anyhow::ensure!(
+                ledger.as_slice() == OWNERSHIP_LEDGER_VERSION.to_string().as_bytes(),
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger payload version is missing or incompatible"
+            );
+        }
+        if let Some(ref version) = binding_version_marker {
+            anyhow::ensure!(
+                version.as_slice() == PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes(),
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: incompatible project binding schema"
+            );
+        }
+
+        anyhow::ensure!(
+            ownership_marker.is_some()
+                && ledger_marker.is_some()
+                && binding_version_marker.is_some()
+                && project_binding_marker.is_some(),
+            "GRAPH_OWNERSHIP_SCHEMA_STALE: incomplete ownership markers; rebuild from source into a new graph path"
+        );
+
+        anyhow::ensure!(
+            project_binding_marker.as_deref() == Some(binding.as_str().as_bytes()),
+            "GRAPH_PROJECT_BINDING_MISMATCH: open with the original project binding"
+        );
+
+        let ledger_table = match read_txn.open_table(OWNERSHIP_LEDGER_TABLE) {
+            Ok(t) => t,
+            Err(_) => {
+                anyhow::bail!("GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger table is missing");
+            }
+        };
+        if ledger_table.is_empty()? {
+            let nodes_empty = match read_txn.open_table(NODES_TABLE) {
+                Ok(t) => t.is_empty()?,
+                Err(_) => true,
+            };
+            let edges_empty = match read_txn.open_table(EDGES_TABLE) {
+                Ok(t) => t.is_empty()?,
+                Err(_) => true,
+            };
+            let states_empty = match read_txn.open_table(FILE_STATES_TABLE) {
+                Ok(t) => t.is_empty()?,
+                Err(_) => true,
+            };
+            anyhow::ensure!(
+                nodes_empty && edges_empty && states_empty,
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: non-empty graph has no source ledger; rebuild from source into a new graph path"
+            );
+        }
+
+        Ok(())
+    }
+
+    fn validate_ownership_path(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
+        if !db_path.exists() {
+            anyhow::bail!(
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership database does not exist; rebuild from source"
+            )
+        }
+        let db = Database::open(db_path)?;
+        let read_txn = db.begin_read()?;
+        validate_fact_schema(&read_txn)?;
+        Self::validate_ownership_markers(&read_txn, binding)
+    }
+
+    fn validate_ownership_markers(
+        transaction: &redb::ReadTransaction,
+        binding: &ProjectBinding,
+    ) -> Result<()> {
+        let meta = transaction.open_table(META_TABLE)?;
+        anyhow::ensure!(
+            meta.get(OWNERSHIP_SCHEMA_VERSION_KEY)?
+                .map(|value| value.value())
+                .as_deref()
+                == Some(OWNERSHIP_SCHEMA_VERSION.to_string().as_bytes()),
+            "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership schema marker is missing or incompatible"
+        );
+        anyhow::ensure!(
+            meta.get(PROJECT_BINDING_KEY)?
+                .map(|value| value.value())
+                .as_deref()
+                == Some(binding.as_str().as_bytes()),
+            "GRAPH_PROJECT_BINDING_MISMATCH: open with the original project binding"
+        );
+        anyhow::ensure!(
+            meta.get(OWNERSHIP_LEDGER_VERSION_KEY)?
+                .map(|value| value.value())
+                .as_deref()
+                == Some(OWNERSHIP_LEDGER_VERSION.to_string().as_bytes()),
+            "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger payload version is missing or incompatible"
+        );
+        anyhow::ensure!(
+            meta.get(BINDING_SCHEMA_VERSION_KEY)?
+                .map(|value| value.value())
+                .as_deref()
+                == Some(PROJECT_BINDING_SCHEMA_VERSION.to_string().as_bytes()),
+            "GRAPH_OWNERSHIP_SCHEMA_STALE: incompatible project binding schema"
+        );
+        Ok(())
+    }
+
+    fn load_ownership_ledgers_from_path(
+        db_path: &Path,
+        binding: &ProjectBinding,
+    ) -> Result<std::collections::BTreeMap<String, FileContributionLedger>> {
+        let db = Database::open(db_path)?;
+        let read_txn = db.begin_read()?;
+        Self::validate_ownership_markers(&read_txn, binding)?;
+        let table = read_txn.open_table(OWNERSHIP_LEDGER_TABLE)?;
+        let mut ledgers = std::collections::BTreeMap::new();
+        for item in table.iter()? {
+            let (key, value) = item?;
+            let ledger: FileContributionLedger = serde_json::from_slice(value.value().as_slice())
+                .with_context(|| {
+                format!("Failed to deserialize ownership ledger {}", key.value())
+            })?;
+            anyhow::ensure!(
+                ledger.origin_file == key.value(),
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: ledger key does not match origin_file"
+            );
+            ledgers.insert(key.value().to_string(), ledger);
+        }
+        Ok(ledgers)
+    }
+
+    /// 仅两个准备键都缺失且库为空时初始化，残缺状态绝不补写。
+    fn ensure_project_binding(db_path: &Path, binding: &ProjectBinding) -> Result<()> {
+        let db = Database::open(db_path)?;
+        let read_txn = db.begin_read()?;
+        let meta_table = match read_txn.open_table(META_TABLE) {
+            Ok(t) => Some(t),
+            Err(redb::TableError::TableDoesNotExist(_)) => None,
+            Err(err) => return Err(err.into()),
+        };
+
+        let version = meta_table
+            .as_ref()
+            .and_then(|m| m.get(BINDING_SCHEMA_VERSION_KEY).ok().flatten())
+            .map(|value| value.value());
+        let project = meta_table
+            .as_ref()
+            .and_then(|m| m.get(PROJECT_BINDING_KEY).ok().flatten())
+            .map(|value| value.value());
+        let ownership = meta_table
+            .as_ref()
+            .and_then(|m| m.get(OWNERSHIP_SCHEMA_VERSION_KEY).ok().flatten())
+            .map(|value| value.value());
+        let ledger = meta_table
+            .as_ref()
+            .and_then(|m| m.get(OWNERSHIP_LEDGER_VERSION_KEY).ok().flatten())
+            .map(|value| value.value());
+
+        if version.is_none() && project.is_none() && ownership.is_none() && ledger.is_none() {
+            let populated = match read_txn.open_table(NODES_TABLE) {
+                Ok(t) => !t.is_empty()?,
+                Err(_) => false,
+            } || match read_txn.open_table(EDGES_TABLE) {
+                Ok(t) => !t.is_empty()?,
+                Err(_) => false,
+            } || match read_txn.open_table(FILE_STATES_TABLE) {
+                Ok(t) => !t.is_empty()?,
+                Err(_) => false,
+            } || match read_txn.open_table(SCANNER_DIAGNOSTICS_TABLE) {
+                Ok(t) => !t.is_empty()?,
+                Err(_) => false,
+            } || meta_table.as_ref().map_or(Ok(false), |m| {
+                m.get(META_DIFF_REFRESH_CHECKPOINT_KEY).map(|v| v.is_some())
+            })? || read_txn
+                .list_tables()?
+                .any(|table| table.name().starts_with("v2_"));
+
+            anyhow::ensure!(
+                !populated,
+                "GRAPH_OWNERSHIP_SCHEMA_STALE: rebuild from source into a new --graph-db-path"
+            );
+
+            drop(meta_table);
+            drop(read_txn);
+            let write_txn = db.begin_write()?;
+            {
+                let mut meta = write_txn.open_table(META_TABLE)?;
+                meta.insert(
+                    BINDING_SCHEMA_VERSION_KEY,
+                    PROJECT_BINDING_SCHEMA_VERSION.to_string().into_bytes(),
+                )?;
+                meta.insert(PROJECT_BINDING_KEY, binding.as_str().as_bytes().to_vec())?;
+            }
+            write_txn.commit()?;
+            return Ok(());
+        }
+
+        anyhow::ensure!(
+            ownership.is_none() && ledger.is_none(),
+            "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership database requires the ownership-bound entry point"
+        );
+        validate_project_markers(
+            version.as_deref(),
+            project.as_deref(),
+            ownership.as_deref(),
+            ledger.as_deref(),
+            Some(binding),
+        )?;
+        Ok(())
     }
 
     /// 从已构建的内存图创建 GraphDB，供 v2 hydrate 与 shadow compare 使用。
@@ -213,6 +690,10 @@ impl GraphDB {
             graph,
             node_indices,
             db_path,
+            project_binding: None,
+            ownership_enabled: false,
+            ownership_ledgers: std::collections::BTreeMap::new(),
+            ownership_dirty: false,
             is_dirty: false,
             seen_edges,
             dirty_nodes: HashSet::new(),
@@ -223,7 +704,7 @@ impl GraphDB {
         }
     }
 
-    fn open_inner(db_path: &Path) -> Result<Self> {
+    fn open_inner(db_path: &Path, binding: Option<&ProjectBinding>) -> Result<Self> {
         Self::ensure_redb_tables(db_path)?;
 
         // M56：先查 v2 shadow 状态。Stale 时跳过 v2，从增量更新后的 v1 hydrate，
@@ -243,7 +724,7 @@ impl GraphDB {
         //   fingerprint 不匹配）才计 unreadable；从未写过 v2 shadow 的
         //   v1-only 遗留库/新建库属正常态，不计诊断。
         // 与后续 v1 hydrate 的细粒度计数并行记录（不折叠）。
-        let v2_layout_probe = crate::graph_redb_v2::read_v2_layout(db_path);
+        let v2_layout_probe = crate::graph_redb_v2::read_v2_layout_for_project(db_path, binding);
         let v2_layout_unreadable = match &v2_layout_probe {
             Ok(Some(_)) => false,
             Ok(None) => crate::graph_redb_v2::has_v2_shadow_meta(db_path)?,
@@ -403,6 +884,10 @@ impl GraphDB {
             graph,
             node_indices,
             db_path: db_path.to_string_lossy().to_string(),
+            project_binding: None,
+            ownership_enabled: false,
+            ownership_ledgers: std::collections::BTreeMap::new(),
+            ownership_dirty: false,
             is_dirty: false,
             seen_edges,
             dirty_nodes: HashSet::new(),
@@ -427,6 +912,14 @@ impl GraphDB {
 
     /// 检查图数据库状态，返回结构化 AiOutput（不 panic）
     pub fn check_graph_db(db_path: &Path) -> AiOutput {
+        Self::check_graph_db_for_project(db_path, None)
+    }
+
+    /// 检查图数据库状态，支持项目绑定检查，返回结构化 AiOutput（不 panic）
+    pub fn check_graph_db_for_project(
+        db_path: &Path,
+        binding: Option<&ProjectBinding>,
+    ) -> AiOutput {
         let mut out = AiOutput::new(
             OutputKind::GraphDbCheck,
             serde_json::json!({
@@ -500,6 +993,30 @@ impl GraphDB {
         match db_result {
             Ok(db) => {
                 let read_txn = db.begin_read();
+                if let Ok(transaction) = &read_txn {
+                    if let Err(error) = validate_project_access(transaction, binding) {
+                        let message = error.to_string();
+                        let code = message
+                            .split(':')
+                            .next()
+                            .unwrap_or("GRAPH_OWNERSHIP_SCHEMA_STALE");
+                        out.summary["readable"] = serde_json::json!(false);
+                        out.summary["needs_rebuild"] =
+                            serde_json::json!(code == "GRAPH_OWNERSHIP_SCHEMA_STALE");
+                        out.diagnostics
+                            .push(crate::diagnostics::envelope_diagnostic(
+                                code,
+                                1,
+                                Location {
+                                    source_file: Some(db_path.to_string_lossy().to_string()),
+                                    node_id: None,
+                                    json_path: None,
+                                },
+                                message.clone(),
+                            ));
+                        return out;
+                    }
+                }
                 let schema_current = read_txn
                     .as_ref()
                     .ok()
@@ -687,7 +1204,26 @@ impl GraphDB {
                     }),
                 );
                 out.query_target = Some(db_path.to_string_lossy().to_string());
-                if msg.contains("GRAPH_SCHEMA_STALE") {
+                if msg.starts_with("GRAPH_PROJECT_BINDING_")
+                    || msg.starts_with("GRAPH_OWNERSHIP_SCHEMA_STALE")
+                {
+                    let code = msg
+                        .split(':')
+                        .next()
+                        .unwrap_or("GRAPH_OWNERSHIP_SCHEMA_STALE");
+                    out.summary["readable"] = serde_json::json!(false);
+                    out.diagnostics
+                        .push(crate::diagnostics::envelope_diagnostic(
+                            code,
+                            1,
+                            Location {
+                                source_file: Some(db_path.to_string_lossy().to_string()),
+                                node_id: None,
+                                json_path: None,
+                            },
+                            msg.clone(),
+                        ));
+                } else if msg.contains("GRAPH_SCHEMA_STALE") {
                     let mut diagnostic = crate::diagnostics::envelope_diagnostic(
                         "GRAPH_SCHEMA_STALE",
                         1,
@@ -766,6 +1302,7 @@ impl GraphDB {
     /// 以只读模式打开图数据库（不创建表，不持有写锁）
     pub fn open_readonly(db_path: &Path) -> Result<Self> {
         let _lock = acquire_graph_db_lock(db_path)?;
+        Self::validate_project_path(db_path, None)?;
         Self::open_readonly_inner(db_path)
     }
 
@@ -877,6 +1414,10 @@ impl GraphDB {
             graph,
             node_indices,
             db_path: db_path.to_string_lossy().to_string(),
+            project_binding: None,
+            ownership_enabled: false,
+            ownership_ledgers: std::collections::BTreeMap::new(),
+            ownership_dirty: false,
             is_dirty: false,
             seen_edges,
             dirty_nodes: HashSet::new(),
@@ -916,6 +1457,7 @@ impl GraphDB {
             path,
             name,
             meta,
+            origin_file: None,
         };
         let idx = self.graph.add_node(node);
         self.is_dirty = true;
@@ -945,16 +1487,21 @@ impl GraphDB {
         field_path: Option<String>,
         meta: Option<serde_json::Value>,
     ) {
-        if let (Some(&from_idx), Some(&to_idx)) =
-            (self.node_indices.get(from), self.node_indices.get(to))
-        {
-            let edge = Edge {
-                from: from.to_string(),
-                to: to.to_string(),
-                edge_type,
-                field_path,
-                meta,
-            };
+        self.add_edge_record(Edge {
+            from: from.to_string(),
+            to: to.to_string(),
+            edge_type,
+            field_path,
+            meta,
+            origin_file: None,
+        });
+    }
+
+    fn add_edge_record(&mut self, edge: Edge) {
+        if let (Some(&from_idx), Some(&to_idx)) = (
+            self.node_indices.get(&edge.from),
+            self.node_indices.get(&edge.to),
+        ) {
             if !self
                 .seen_edges
                 .insert(crate::graph_store::edge_dedup_key(&edge))
@@ -986,7 +1533,7 @@ impl GraphDB {
 
             // 从 seen_edges 移除涉及该节点的所有边
             self.seen_edges
-                .retain(|(from, to, _, _, _)| from != id && to != id);
+                .retain(|(from, to, _, _, _, _)| from != id && to != id);
 
             // 从内存图删除节点（petgraph swap_remove 自动移除关联边，
             // 但会把末尾节点 swap 到被删位置，需更新其索引）
@@ -1021,7 +1568,10 @@ impl GraphDB {
             && !graph.dirty_nodes.is_empty()
             && graph.dirty_nodes.len() <= INCREMENTAL_V2_MAX_DIRTY;
         if can_try_incremental {
-            if let Ok(Some(mut existing)) = crate::graph_redb_v2::read_v2_layout(db_path) {
+            if let Ok(Some(mut existing)) = crate::graph_redb_v2::read_v2_layout_for_project(
+                db_path,
+                graph.project_binding.as_ref(),
+            ) {
                 let dirty_subset_of_v2 = graph.dirty_nodes.iter().all(|node_id| {
                     existing
                         .node_ids
@@ -1042,6 +1592,46 @@ impl GraphDB {
         }
         crate::graph_redb_v2::build_v2_layout(graph, file_states)
             .context("build redb v2 shadow layout")
+    }
+
+    pub fn replace_ownership_ledgers(
+        &mut self,
+        ledgers: std::collections::BTreeMap<String, FileContributionLedger>,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            self.ownership_enabled,
+            "GRAPH_OWNERSHIP_SCHEMA_STALE: ownership ledger requires an ownership-bound graph"
+        );
+        let binding = self
+            .project_binding
+            .as_ref()
+            .context("ownership graph missing project binding")?;
+        let snapshot = OwnershipLedgerSnapshot {
+            schema_version: OWNERSHIP_LEDGER_VERSION,
+            project_binding: binding.as_str().to_string(),
+            files: ledgers.clone(),
+        };
+        snapshot.validate(binding)?;
+        self.ownership_ledgers = ledgers;
+        self.ownership_dirty = true;
+        Ok(())
+    }
+
+    /// 读取当前句柄中的来源账本。
+    pub fn ownership_ledgers(
+        &self,
+    ) -> Option<&std::collections::BTreeMap<String, FileContributionLedger>> {
+        self.ownership_enabled.then_some(&self.ownership_ledgers)
+    }
+
+    /// 当前句柄打开时核验的项目绑定；未绑定为 None。
+    pub fn project_binding(&self) -> Option<&ProjectBinding> {
+        self.project_binding.as_ref()
+    }
+
+    /// 当前句柄是否已启用真实来源账本（ownership）路径。
+    pub fn ownership_enabled(&self) -> bool {
+        self.ownership_enabled
     }
 
     pub fn persist(&mut self, file_states: &HashMap<String, FileState>) -> Result<()> {
@@ -1095,9 +1685,15 @@ impl GraphDB {
         // 防止并发 CLI/--build-graph 在 mutate→persist 间隙写入不一致边集
         let _lock = acquire_graph_db_lock(std::path::Path::new(&self.db_path))?;
 
+        Self::validate_project_path(
+            std::path::Path::new(&self.db_path),
+            self.project_binding.as_ref(),
+        )?;
+
         // 空提交判断须计入 scanner 诊断载荷：仅携带 scanner 诊断变更的提交
         // （图与 checkpoint 均无变化）也必须落库
         if !self.is_dirty
+            && !self.ownership_dirty
             && checkpoint.is_none()
             && scanner_entries.is_empty()
             && scanner_deleted_paths.is_empty()
@@ -1149,6 +1745,19 @@ impl GraphDB {
         let write_txn = db.begin_write()?;
         {
             let meta = write_txn.open_table(META_TABLE)?;
+            validate_project_markers(
+                meta.get(BINDING_SCHEMA_VERSION_KEY)?
+                    .map(|v| v.value())
+                    .as_deref(),
+                meta.get(PROJECT_BINDING_KEY)?.map(|v| v.value()).as_deref(),
+                meta.get(OWNERSHIP_SCHEMA_VERSION_KEY)?
+                    .map(|v| v.value())
+                    .as_deref(),
+                meta.get(OWNERSHIP_LEDGER_VERSION_KEY)?
+                    .map(|v| v.value())
+                    .as_deref(),
+                self.project_binding.as_ref(),
+            )?;
             let version = meta
                 .get(FACT_SCHEMA_VERSION_KEY)?
                 .map(|value| value.value());
@@ -1263,6 +1872,41 @@ impl GraphDB {
             write_scanner_diagnostic_entries(&write_txn, scanner_entries, scanner_deleted_paths)?;
         }
 
+        if self.ownership_enabled && self.ownership_dirty {
+            let snapshot = OwnershipLedgerSnapshot {
+                schema_version: OWNERSHIP_LEDGER_VERSION,
+                project_binding: self
+                    .project_binding
+                    .as_ref()
+                    .context("ownership graph missing project binding")?
+                    .as_str()
+                    .to_string(),
+                files: self.ownership_ledgers.clone(),
+            };
+            snapshot.validate(
+                self.project_binding
+                    .as_ref()
+                    .context("ownership graph missing project binding")?,
+            )?;
+            let mut ledger_table = write_txn.open_table(OWNERSHIP_LEDGER_TABLE)?;
+            ledger_table.retain(|_, _| false)?;
+            for (path, ledger) in &snapshot.files {
+                let bytes = serde_json::to_vec(ledger)
+                    .with_context(|| format!("Failed to serialize ownership ledger {path}"))?;
+                bytes_written += (path.len() + bytes.len()) as u64;
+                ledger_table.insert(path.as_str(), bytes)?;
+            }
+            let mut meta_table = write_txn.open_table(META_TABLE)?;
+            meta_table.insert(
+                OWNERSHIP_SCHEMA_VERSION_KEY,
+                OWNERSHIP_SCHEMA_VERSION.to_string().into_bytes(),
+            )?;
+            meta_table.insert(
+                OWNERSHIP_LEDGER_VERSION_KEY,
+                OWNERSHIP_LEDGER_VERSION.to_string().into_bytes(),
+            )?;
+        }
+
         let v2_shadow_state = match delta {
             Some(_) => {
                 // graph 未变化（checkpoint-only）时不动 v2 状态
@@ -1306,6 +1950,7 @@ impl GraphDB {
         write_txn.commit()?;
 
         self.is_dirty = false;
+        self.ownership_dirty = false;
         let dirty_node_count = self.dirty_nodes.len() + self.removed_nodes.len();
         self.dirty_nodes.clear();
         self.removed_nodes.clear();
@@ -1325,6 +1970,7 @@ impl GraphDB {
     pub fn load_file_states(&self) -> Result<HashMap<String, FileState>> {
         let db = Database::create(&self.db_path)?;
         let read_txn = db.begin_read()?;
+        validate_project_access(&read_txn, self.project_binding.as_ref())?;
         let table = read_txn.open_table(FILE_STATES_TABLE)?;
         let mut states = HashMap::new();
         for item in table.iter()? {
@@ -1343,6 +1989,7 @@ impl GraphDB {
     pub fn load_scanner_diagnostic_entries(&self) -> Result<Vec<(String, Vec<u8>)>> {
         let db = Database::create(&self.db_path)?;
         let read_txn = db.begin_read()?;
+        validate_project_access(&read_txn, self.project_binding.as_ref())?;
         let table = read_txn.open_table(SCANNER_DIAGNOSTICS_TABLE)?;
         let mut entries = Vec::new();
         for item in table.iter()? {
@@ -1361,6 +2008,7 @@ impl GraphDB {
     ) -> Result<Option<crate::diff_refresh::DiffRefreshCheckpoint>> {
         let db = Database::create(&self.db_path)?;
         let read_txn = db.begin_read()?;
+        validate_project_access(&read_txn, self.project_binding.as_ref())?;
         let table = match read_txn.open_table(META_TABLE) {
             Ok(table) => table,
             Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
@@ -1657,14 +2305,7 @@ impl GraphWriteStore for GraphDB {
     }
 
     fn add_edge(&mut self, edge: Edge) -> GraphStoreResult<()> {
-        GraphDB::add_edge_with_meta(
-            self,
-            &edge.from,
-            &edge.to,
-            edge.edge_type,
-            edge.field_path,
-            edge.meta,
-        );
+        self.add_edge_record(edge);
         Ok(())
     }
 

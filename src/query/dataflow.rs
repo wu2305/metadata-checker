@@ -769,6 +769,34 @@ pub fn build_query_dataflow_output(
     graph: &dyn GraphReadStore,
     dataflow_id: &str,
 ) -> Result<serde_json::Value> {
+    // M59-2 A1 接线：`QueryDataflow` 是 `--relations model:X` 展开出的补充调用
+    // （route.rs:165，merge_key=dataflow_subgraph），与主调用 `QueryModel` 拿**同一个**
+    // target。此前这里直接精确 `get_node`，不做旧 target 解析——于是裸 `model:orders`
+    // 同时匹配页面局部与物理模型时，主调用如实报 `AMBIGUOUS_TARGET`，补充调用却
+    // **静默命中物理模型**并返回它的子图。同一个 target、同一条命令，两个子调用给出
+    // 互相矛盾的定位结论，而矛盾的那一半正是「静默挑一个」。
+    let resolved_id = match crate::query::resolve_legacy_model_target(graph, dataflow_id)? {
+        crate::query::LegacyModelTarget::Exact(id)
+        | crate::query::LegacyModelTarget::Resolved(id) => id,
+        crate::query::LegacyModelTarget::Ambiguous(nodes) => {
+            return crate::query::build_ambiguous_target_output(
+                dataflow_id,
+                &nodes,
+                crate::output::OutputKind::ModelQuery,
+                "--query-dataflow",
+            );
+        }
+        crate::query::LegacyModelTarget::Missing => {
+            let candidates = find_candidates(graph, dataflow_id, 5)?;
+            let out = crate::output::schema::build_target_not_found_output(
+                crate::output::schema::OutputKind::ModelQuery,
+                dataflow_id,
+                &candidates,
+            );
+            return Ok(serde_json::to_value(out)?);
+        }
+    };
+    let dataflow_id = resolved_id.as_str();
     let node = match graph.get_node(dataflow_id)? {
         Some(n) => n,
         None => {

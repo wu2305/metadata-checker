@@ -22,6 +22,8 @@ fn successful_report() -> DiffRefreshReport {
         invalidated_pages: Vec::new(),
         persist_report: None,
         warm_failures: Vec::new(),
+        parse_failures: Vec::new(),
+        ownership_conflicts: Vec::new(),
         persisted: false,
         pending_dirty_total: 0,
         checkpoint: None,

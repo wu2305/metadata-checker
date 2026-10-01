@@ -158,6 +158,7 @@ fn test_memory_graph_store_writes_edge() {
             edge_type: EdgeType::Writes,
             field_path: Some("field1".to_string()),
             meta: Some(edge_meta.clone()),
+            origin_file: None,
         },
     )
     .expect("add edge should succeed");

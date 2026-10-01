@@ -26,10 +26,11 @@
 //! # 路径归一化（A2）
 //!
 //! `<PAGE>` 与引用解析都先过 [`normalize_project_path`]：分隔符统一 `/`、
-//! 消解 `.` 与 `..`、越界报错。**本模块在 M59-2 的 schema 版本开关就绪前
-//! 不接入扫描写入与引用解析**——不得在旧 schema 下默认写入新 id 或混写
-//! 新旧路径形态（plan 交付边界）。全局身份的保留分隔符校验已接入 native scanner，
-//! 仅拒绝歧义输入，不启用页面局部编码。
+//! 消解 `.` 与 `..`、越界报错。M59-2 起扫描写入已按 schema 开关接入本模块：
+//! 仅来源账本路径（`PageIdentityMode::OwnershipPageLocal`）写入页面局部 id，
+//! 旧 schema（`LegacyGlobal`）保持全局编码，不混写。查询侧旧 target 解析
+//! [`resolve_node_target`] 自 M59-2 起由 `query::resolve_legacy_model_target`
+//! 接入生产查询链路（`src/query/model.rs` 的 query_model/explain 入口）。
 
 use crate::graph::NodeType;
 use crate::graph_store::{GraphReadStore, GraphStoreResult};
@@ -170,6 +171,28 @@ fn reject_absolute_path(path: &str) -> Result<(), IdentityError> {
     if path.starts_with(['/', '\\']) || path.as_bytes().get(1) == Some(&b':') {
         return Err(IdentityError::AbsolutePath {
             path: path.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// 校验身份段不含保留分隔符。
+///
+/// 供写入边界复用：扫描侧在 upsert 前调用，避免「先按局部形态拼好、再被全局
+/// 转换吃掉页面段」这类身份二次转换。
+pub fn reject_reserved_separator(segment: &str, id: &str) -> Result<(), IdentityError> {
+    // 第一个竖线是作用域分隔符；其后不允许再出现竖线，两侧段也都不得为空。
+    let parts: Vec<&str> = segment.split('|').collect();
+    let invalid = match parts.as_slice() {
+        // 全局名：不得含分隔符
+        [local] => local.is_empty() || segment.contains('|'),
+        // 页面局部名：`<page>|<local>`，两段都非空
+        [page, local] => page.is_empty() || local.is_empty(),
+        _ => true,
+    };
+    if invalid {
+        return Err(IdentityError::ReservedSeparator {
+            value: id.to_string(),
         });
     }
     Ok(())

@@ -114,6 +114,8 @@ pub struct RedbV2NodeRecord {
     pub path: String,
     pub name: String,
     pub meta: Option<serde_json::Value>,
+    #[serde(default)]
+    pub origin_file: Option<String>,
 }
 
 /// CSR 邻接切片。
@@ -130,6 +132,8 @@ pub struct RedbV2AdjacencyEntry {
     pub edge_type: EdgeType,
     pub field_path_id: Option<u32>,
     pub meta: Option<serde_json::Value>,
+    #[serde(default)]
+    pub origin_file: Option<String>,
 }
 
 /// v2 shadow 布局的完整内存表示。
@@ -166,6 +170,7 @@ impl RedbV2NodeRecord {
             path: node.path.clone(),
             name: node.name.clone(),
             meta: node.meta.clone(),
+            origin_file: node.origin_file.clone(),
         }
     }
 
@@ -176,6 +181,7 @@ impl RedbV2NodeRecord {
             path: self.path.clone(),
             name: self.name.clone(),
             meta: self.meta.clone(),
+            origin_file: self.origin_file.clone(),
         }
     }
 }
@@ -232,12 +238,14 @@ pub fn build_v2_layout(
             edge_type: edge.edge_type.clone(),
             field_path_id,
             meta: edge.meta.clone(),
+            origin_file: edge.origin_file.clone(),
         });
         incoming_by_node[to_dense as usize].push(RedbV2AdjacencyEntry {
             adjacent_dense_id: from_dense,
             edge_type: edge.edge_type.clone(),
             field_path_id,
             meta: edge.meta.clone(),
+            origin_file: edge.origin_file.clone(),
         });
     }
 
@@ -303,7 +311,7 @@ pub fn patch_v2_layout_node_meta(
 }
 
 /// 将 v2 shadow layout 写入已有 write transaction，与 v1 persist 共用单次 commit。
-pub fn write_v2_shadow_tables(
+pub(crate) fn write_v2_shadow_tables(
     write_txn: &redb::WriteTransaction,
     layout: &RedbV2Layout,
 ) -> Result<()> {
@@ -355,8 +363,10 @@ pub fn write_v2_shadow_tables(
 
 /// 将 v2 shadow layout 写入 redb，不改动 v1 表。
 pub fn write_v2_shadow(db_path: &Path, layout: &RedbV2Layout) -> Result<()> {
+    let _lock = crate::graph_redb::acquire_graph_db_lock(db_path)?;
     let db = Database::create(db_path)
         .with_context(|| format!("open redb for v2 shadow write at {:?}", db_path))?;
+    crate::graph_redb::validate_project_access(&db.begin_read()?, None)?;
     let write_txn = db.begin_write()?;
     write_v2_shadow_tables(&write_txn, layout)?;
     write_txn.commit()?;
@@ -369,6 +379,14 @@ pub fn write_v2_shadow(db_path: &Path, layout: &RedbV2Layout) -> Result<()> {
 /// 正常态）与「有 shadow 但版本/fingerprint 不匹配」两类情形；需要区分时应
 /// 先调 [`has_v2_shadow_meta`] 判断 shadow 元数据是否存在。
 pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
+    read_v2_layout_for_project(db_path, None)
+}
+
+/// 内部绑定读取入口；调用方在同一图锁内已校验绑定。
+pub(crate) fn read_v2_layout_for_project(
+    db_path: &Path,
+    binding: Option<&crate::ownership::ProjectBinding>,
+) -> Result<Option<RedbV2Layout>> {
     if !db_path.exists() {
         return Ok(None);
     }
@@ -376,6 +394,7 @@ pub fn read_v2_layout(db_path: &Path) -> Result<Option<RedbV2Layout>> {
         .with_context(|| format!("open redb for v2 shadow read at {:?}", db_path))?;
     let read_txn = db.begin_read()?;
     crate::graph_redb::validate_fact_schema(&read_txn)?;
+    crate::graph_redb::validate_project_access(&read_txn, binding)?;
     let meta_table = match read_txn.open_table(V2_META_TABLE) {
         Ok(table) => table,
         Err(_) => return Ok(None),
@@ -555,6 +574,7 @@ struct EdgeKey {
     edge_type: EdgeType,
     field_path: Option<String>,
     meta: Option<serde_json::Value>,
+    origin_file: Option<String>,
 }
 
 fn edge_key(edge: &Edge) -> EdgeKey {
@@ -564,6 +584,7 @@ fn edge_key(edge: &Edge) -> EdgeKey {
         edge_type: edge.edge_type.clone(),
         field_path: edge.field_path.clone(),
         meta: edge.meta.clone(),
+        origin_file: edge.origin_file.clone(),
     }
 }
 
@@ -595,6 +616,7 @@ fn materialize_edges_from_out_adjacency(layout: &RedbV2Layout) -> Result<Vec<Edg
                 edge_type: entry.edge_type.clone(),
                 field_path,
                 meta: entry.meta.clone(),
+                origin_file: entry.origin_file.clone(),
             });
         }
     }

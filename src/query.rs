@@ -362,6 +362,9 @@ pub use dataflow::project_output_field_origin;
 pub use dataflow::query_dataflow;
 pub use model::build_query_model_output;
 pub use model::query_model;
+pub(crate) use model::{
+    LegacyModelTarget, build_ambiguous_target_output, resolve_legacy_model_target,
+};
 
 mod page_logic;
 #[cfg(feature = "cli-local")]

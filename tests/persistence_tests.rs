@@ -44,6 +44,7 @@ fn make_graph_snapshot() -> GraphSnapshot {
             path: "app/home.spg".to_string(),
             name: "home".to_string(),
             meta: None,
+            origin_file: None,
         }],
         edges: vec![Edge {
             from: "page:app/home.spg".to_string(),
@@ -51,6 +52,7 @@ fn make_graph_snapshot() -> GraphSnapshot {
             edge_type: EdgeType::Contains,
             field_path: Some("edge_field".to_string()),
             meta: None,
+            origin_file: None,
         }],
     }
 }

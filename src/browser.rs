@@ -1599,6 +1599,7 @@ fn build_spg_graph(
             path: source_path.to_string(),
             name: source_path.to_string(),
             meta: None,
+            origin_file: None,
         })
         .ok();
 
@@ -1611,6 +1612,7 @@ fn build_spg_graph(
                 path: source_path.to_string(),
                 name: source.id.clone(),
                 meta: None,
+                origin_file: None,
             })
             .ok();
     }
@@ -1627,6 +1629,7 @@ fn build_spg_graph(
                 path: source_path.to_string(),
                 name: comp.id.clone(),
                 meta: None,
+                origin_file: None,
             })
             .ok();
         store
@@ -1636,6 +1639,7 @@ fn build_spg_graph(
                 edge_type: EdgeType::Contains,
                 field_path: None,
                 meta: None,
+                origin_file: None,
             })
             .ok();
 
@@ -1660,6 +1664,7 @@ fn build_spg_graph(
                     path: source_path.to_string(),
                     name: model_name.clone(),
                     meta: None,
+                    origin_file: None,
                 })
                 .ok();
 
@@ -1692,6 +1697,7 @@ fn build_spg_graph(
                     edge_type: EdgeType::Reads,
                     field_path: Some(field_path),
                     meta: evidence,
+                    origin_file: None,
                 })
                 .ok();
         }

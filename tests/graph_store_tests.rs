@@ -51,6 +51,7 @@ fn test_graphdb_implements_graph_write_store() {
         path: "test.spg".to_string(),
         name: "Test Page".to_string(),
         meta: None,
+        origin_file: None,
     };
 
     GraphWriteStore::upsert_node(&mut graph, node).expect("upsert_node must succeed");
@@ -62,6 +63,7 @@ fn test_graphdb_implements_graph_write_store() {
         edge_type: metadata_checker::graph::EdgeType::Contains,
         field_path: None,
         meta: None,
+        origin_file: None,
     };
     GraphWriteStore::add_edge(&mut graph, edge).expect("add_edge must succeed");
     assert_eq!(graph.edge_count().expect("count"), 1);
@@ -89,6 +91,7 @@ fn test_graphdb_write_store_preserves_dataflow_model_type_on_physical_placeholde
             path: "dataflow/daily_orders.tbl".to_string(),
             name: "daily_orders".to_string(),
             meta: Some(serde_json::json!({"modelType": "DataFlow"})),
+            origin_file: None,
         },
     )
     .expect("insert dataflow model");
@@ -100,6 +103,7 @@ fn test_graphdb_write_store_preserves_dataflow_model_type_on_physical_placeholde
             path: "daily_orders.tbl".to_string(),
             name: "daily_orders".to_string(),
             meta: Some(serde_json::json!({"modelType": "PhysicalTable"})),
+            origin_file: None,
         },
     )
     .expect("insert physical placeholder");
@@ -133,6 +137,7 @@ fn test_graphdb_write_store_reinsert_clears_removed_marker() {
         path: "test.spg".to_string(),
         name: "Test Page".to_string(),
         meta: None,
+        origin_file: None,
     };
 
     GraphWriteStore::upsert_node(&mut graph, node.clone()).expect("insert node");
@@ -180,6 +185,7 @@ fn test_graphdb_implements_index_state_store() {
         path: "test.spg".to_string(),
         name: "Test".to_string(),
         meta: None,
+        origin_file: None,
     };
     GraphWriteStore::upsert_node(&mut graph, node).unwrap();
 
@@ -382,6 +388,7 @@ fn test_persist_index_commits_graph_and_file_states_together() {
         path: "test.spg".to_string(),
         name: "Test".to_string(),
         meta: None,
+        origin_file: None,
     };
     GraphWriteStore::upsert_node(&mut graph, node).unwrap();
 

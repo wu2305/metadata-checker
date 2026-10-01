@@ -1,13 +1,21 @@
 use anyhow::{Context, Result, anyhow};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use twox_hash::XxHash64;
 
-use super::{process_spg_file_from_value, process_tbl_file_from_string};
-use crate::graph::{FileState, GraphDB};
-use crate::graph_store::{GraphWriteStore, IndexCommit, IndexReport, IndexStateStore};
+use super::{
+    process_spg_file_from_value, process_spg_file_from_value_with_identity,
+    process_tbl_file_from_string,
+};
+use crate::graph::{FileState, GraphDB, Node, NodeType};
+use crate::graph_store::{
+    GraphReadStore, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
+};
+use crate::ownership::{
+    ContributionKind, EdgeContribution, EntityContribution, FileContributionLedger, ProjectBinding,
+};
 use crate::parsed_content::ParsedContent;
 use crate::source_id::{ProjectRef, SourceId};
 use crate::storage_provider::{DocumentProvider, LocalStorageProvider};
@@ -54,7 +62,199 @@ pub enum ParsedGraphContent {
     Tbl(String),
 }
 
-/// M59-B3：本轮解析失败、**未进候选图**的源文件。
+/// 将单文件解析结果转换为可撤销的来源账本。
+///
+/// M59-2 根因修复：身份**在建节点之前**就已确定（见
+/// [`crate::scanner::spg::PageIdentityMode`]）。旧实现先用旧全局 ID 建一张临时
+/// 图、再按名字事后改写 ID——局部 source 与同名物理表在临时图里已经塌成同一个
+/// 节点（`path`/`meta` 后写覆盖前写），此后无论怎么转换都只能靠猜。现在的临时
+/// 图里两类实体天然是两个节点，账本只做归属分类，不再做身份猜测。
+fn ledger_from_parsed_content(
+    logical_path: &str,
+    content: &ParsedGraphContent,
+) -> Result<FileContributionLedger> {
+    let mut temporary = crate::memory_graph_store::MemoryGraphStore::new();
+    match content {
+        ParsedGraphContent::Spg(value) => {
+            process_spg_file_from_value_with_identity(
+                &mut temporary,
+                logical_path,
+                value.clone(),
+                crate::scanner::spg::PageIdentityMode::OwnershipPageLocal,
+            )?;
+        }
+        ParsedGraphContent::Tbl(text) => {
+            process_tbl_file_from_string(&mut temporary, logical_path, text)?;
+        }
+    }
+    let mut ledger = FileContributionLedger::new(logical_path, "");
+    let nodes: Vec<Node> = temporary.iter_nodes()?.collect();
+
+    let is_spg = logical_path.ends_with(".spg");
+    let is_tbl = logical_path.ends_with(".tbl");
+
+    // 1. 本页面的身份前缀：`model:<page>|` / `field:<page>|`。
+    //    页面局部实体与物理实体在扫描侧已分好类，这里只按 id 判定归属，
+    //    不再按名字反推（名字会撞：局部 source 名可以等于另一个 source 的物理表名）。
+    let page_key = if is_spg {
+        Some(crate::graph_identity::normalize_project_path(
+            &logical_path.replace('\\', "/"),
+        )?)
+    } else {
+        None
+    };
+    let is_page_local = |id: &str| -> bool {
+        match page_key.as_deref() {
+            Some(page) => match id.split_once('|') {
+                Some((head, _)) => match head.split_once(':') {
+                    Some((_, page_segment)) => page_segment == page,
+                    None => false,
+                },
+                None => false,
+            },
+            None => false,
+        }
+    };
+
+    // 2. TBL 主模型名称：解析器的全局身份取**文件 stem**（tbl.rs“Use file stem as
+    //    model identifier”），不是 JSON `name`。这里必须与身份规则一致，否则主模型
+    //    会被误判为 Reference 并触发占位降级、同 stem 冲突也无法报告。
+    let tbl_primary_model = if is_tbl {
+        Path::new(logical_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+    } else {
+        None
+    };
+
+    // 3. 判定 Definition vs Reference
+    // 页面/组件/条件/动作只有 path 等于本文件时才是本源定义；embedsuperpage/link
+    // 为目标页创建的 stub（path 是目标页）必须是 Reference，否则 embedder 会在
+    // 重建时覆盖目标页自身的 origin_file 溯源（冷脸验收 P1）。
+    // 模型/字段按 id 判定：带本页页面段的是本页定义的局部实体；全局 id 是物理
+    // 实体或被嵌目标，属 Reference。
+    for mut node in nodes {
+        let is_definition = if is_spg {
+            match node.node_type {
+                NodeType::Page | NodeType::Component | NodeType::Condition | NodeType::Action => {
+                    node.path == logical_path
+                }
+                NodeType::Model | NodeType::Field => is_page_local(&node.id),
+            }
+        } else if is_tbl {
+            if let Some(ref primary) = tbl_primary_model {
+                let primary_model_id = format!("model:{}", primary);
+                let primary_field_prefix = format!("field:{}.", primary);
+                node.id == primary_model_id || node.id.starts_with(&primary_field_prefix)
+            } else {
+                node.path == logical_path
+            }
+        } else {
+            node.path == logical_path
+        };
+
+        node.origin_file = Some(logical_path.to_string());
+        ledger.entities.push(EntityContribution {
+            origin_file: logical_path.to_string(),
+            node,
+            kind: if is_definition {
+                ContributionKind::Definition
+            } else {
+                ContributionKind::Reference
+            },
+        });
+    }
+
+    let mut edge_ids: Vec<String> = ledger
+        .entities
+        .iter()
+        .map(|contribution| contribution.node.id.clone())
+        .collect();
+    edge_ids.sort();
+    edge_ids.dedup();
+    for node_id in edge_ids {
+        let Some(neighbors) = temporary.get_node_edges(&node_id)? else {
+            continue;
+        };
+        for view in neighbors.outgoing {
+            let mut edge = view.edge;
+            // 端点 ID 在扫描侧已按归属构造完成（局部带页面段、物理恒全局），
+            // 这里保持原样——任何事后改写都会把两个不同实体并成一个。
+            edge.origin_file = Some(logical_path.to_string());
+            ledger.edges.push(EdgeContribution {
+                origin_file: logical_path.to_string(),
+                edge,
+            });
+        }
+    }
+    Ok(ledger)
+}
+
+fn apply_ownership_changes(
+    graph: &mut GraphDB,
+    ledgers: &mut BTreeMap<String, FileContributionLedger>,
+    updates: &[ParsedGraphUpdate],
+    deleted: &[DeletedFile],
+) -> Result<(
+    HashMap<String, Vec<String>>,
+    Vec<crate::ownership::OwnershipConflict>,
+)> {
+    for update in updates {
+        let mut ledger = ledger_from_parsed_content(&update.logical_path, &update.content)?;
+        ledger.revision = update.file_hash.clone();
+        ledgers.insert(update.logical_path.clone(), ledger);
+    }
+    for (logical_path, _) in deleted {
+        ledgers.remove(logical_path);
+    }
+    let conflicts = crate::ownership::rebuild_graph_from_ledgers(graph, ledgers)?;
+    graph.replace_ownership_ledgers(ledgers.clone())?;
+    let node_ids = updates
+        .iter()
+        .map(|update| {
+            let node_ids = ledgers
+                .get(&update.logical_path)
+                .map(|ledger| {
+                    ledger
+                        .entities
+                        .iter()
+                        .map(|contribution| contribution.node.id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            (update.logical_path.clone(), node_ids)
+        })
+        .collect();
+    Ok((node_ids, conflicts))
+}
+
+/// 把账本重建发现的来源冲突转为报告诊断（spec：必须报告，不得静默择一）。
+pub fn ownership_conflict_diagnostics(
+    conflicts: &[crate::ownership::OwnershipConflict],
+) -> Vec<crate::output::Diagnostic> {
+    conflicts
+        .iter()
+        .map(|conflict| {
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_GRAPH_OWNERSHIP_CONFLICT,
+                conflict.definition_origins.len(),
+                crate::output::Location {
+                    source_file: conflict.definition_origins.first().cloned(),
+                    node_id: Some(conflict.node_id.clone()),
+                    json_path: None,
+                },
+                format!(
+                    "node '{}' has conflicting definitions from {}",
+                    conflict.node_id,
+                    conflict.definition_origins.join(", ")
+                ),
+            )
+        })
+        .collect()
+}
+
+/// M59-B3：本轮解析失败、**未进候选图**的源文件.
 ///
 /// 旧行为是 `tbl.rs` 把非法 JSON 静默转成 `Ok(空集)`：配合「先删旧节点再重建」，
 /// 一个写坏的 `.tbl` 会让旧模型图被删、新图为空，而 file hash 照常记录——
@@ -577,9 +777,22 @@ impl ProjectIndexer {
             .map_err(|e| anyhow!("persist_index failed: {}", e))
     }
 
-    /// 全量索引入口（替代 scan_project）
+    /// 全量索引入口（替代 scan_project）。
+    ///
+    /// 未传入项目绑定时保持旧低层兼容路径；启用 M59-2 ownership 的调用方
+    /// 必须使用 [`Self::scan_for_project`]，避免把 machine-specific 路径当身份。
     pub fn scan(project_dir: &Path, db_path: &Path) -> Result<IndexReport> {
         Self::scan_with_diagnostics(project_dir, db_path).map(|with| with.report)
+    }
+
+    /// 按稳定项目绑定执行一次索引，并在扫描前校验 ownership schema。
+    pub fn scan_for_project(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: &ProjectBinding,
+    ) -> Result<IndexReport> {
+        Self::scan_with_diagnostics_for_project(project_dir, db_path, project_binding)
+            .map(|with| with.report)
     }
 
     /// M58.3 PR1 refix（F2）：合并 redb 中的 per-file scanner 诊断计数 entry，
@@ -608,7 +821,32 @@ impl ProjectIndexer {
         project_dir: &Path,
         db_path: &Path,
     ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
-        let mut graph = GraphDB::open(db_path)?;
+        Self::scan_with_diagnostics_internal(project_dir, db_path, None, false)
+    }
+
+    /// 按稳定项目绑定执行 ownership 扫描，绑定与来源账本在同一入口启用。
+    pub fn scan_with_diagnostics_for_project(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: &ProjectBinding,
+    ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
+        Self::scan_with_diagnostics_internal(project_dir, db_path, Some(project_binding), true)
+    }
+
+    fn scan_with_diagnostics_internal(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: Option<&ProjectBinding>,
+        ownership_enabled: bool,
+    ) -> Result<crate::scanner::IndexReportWithDiagnostics> {
+        let mut graph = match (project_binding, ownership_enabled) {
+            (Some(binding), true) => GraphDB::open_with_ownership(db_path, binding)?,
+            (Some(binding), false) => GraphDB::open_for_project(db_path, binding)?,
+            (None, false) => GraphDB::open(db_path)?,
+            (None, true) => anyhow::bail!(
+                "GRAPH_PROJECT_BINDING_REQUIRED: ownership scanning requires a project binding"
+            ),
+        };
         let prev_states = graph.load_file_states().unwrap_or_default();
 
         let files = Self::discover_files(project_dir)?;
@@ -652,27 +890,40 @@ impl ProjectIndexer {
             for failure in &parse_failures {
                 scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
             }
-            // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
-            let merged_removed = merge_removed_node_ids(
-                updates
-                    .iter()
-                    .map(|update| update.previous_node_ids.as_slice())
-                    .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
-            );
-            let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
-            // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
-            let parsed_nodes = Self::apply_incremental_changes(
-                &mut graph,
-                &mut new_states,
-                &updates,
-                &plan.deleted,
-            )?;
-            // M56：apply 后收集新增/变更节点的 incident edges
-            let new_node_ids: Vec<String> = parsed_nodes
-                .values()
-                .flat_map(|node_ids| node_ids.iter().cloned())
-                .collect();
-            let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+            let mut ownership_conflicts: Vec<crate::ownership::OwnershipConflict> = Vec::new();
+            let (parsed_nodes, removed_edge_keys, dirty_edges) = if ownership_enabled {
+                let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
+                let (parsed_nodes, conflicts) =
+                    apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
+                ownership_conflicts = conflicts;
+                for (logical_path, _) in &plan.deleted {
+                    new_states.remove(logical_path);
+                }
+                (parsed_nodes, Vec::new(), Vec::new())
+            } else {
+                // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
+                let merged_removed = merge_removed_node_ids(
+                    updates
+                        .iter()
+                        .map(|update| update.previous_node_ids.as_slice())
+                        .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+                );
+                let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
+                // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
+                let parsed_nodes = Self::apply_incremental_changes(
+                    &mut graph,
+                    &mut new_states,
+                    &updates,
+                    &plan.deleted,
+                )?;
+                // M56：apply 后收集新增/变更节点的 incident edges
+                let new_node_ids: Vec<String> = parsed_nodes
+                    .values()
+                    .flat_map(|node_ids| node_ids.iter().cloned())
+                    .collect();
+                let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+                (parsed_nodes, removed_edge_keys, dirty_edges)
+            };
 
             let changed_file_states: Vec<String> = updates
                 .iter()
@@ -711,7 +962,7 @@ impl ProjectIndexer {
                 checkpoint: None,
                 // M56：初始全量构建（无 prev states）走显式 full rebuild 路径
                 //（v2 置 Current）；增量提交走 delta 路径（v2 置 Stale）
-                delta: if prev_states.is_empty() {
+                delta: if prev_states.is_empty() || ownership_enabled {
                     None
                 } else {
                     Some(crate::graph_store::IndexDelta {
@@ -730,6 +981,8 @@ impl ProjectIndexer {
             // load 合并全量——报告 envelope 反映全库口径，而非仅本轮脏文件。
             let scanner_diagnostics =
                 Self::merge_scanner_diagnostic_entries(&graph.load_scanner_diagnostic_entries()?)?;
+            let mut diagnostics = scanner_diagnostics;
+            diagnostics.extend(ownership_conflict_diagnostics(&ownership_conflicts));
             // M58.3 PR1 refix（F6）：IndexReport 统一为文件口径。
             // store 层 persist_index 只能从 commit 拿到节点数（dirty_nodes/
             // deleted_nodes），文件数只有 diff 阶段的 plan 知道，因此在报告
@@ -740,10 +993,19 @@ impl ProjectIndexer {
             report.unchanged = plan.discovered_count.saturating_sub(plan.dirty.len());
             return Ok(crate::scanner::IndexReportWithDiagnostics {
                 report,
-                diagnostics: scanner_diagnostics,
+                diagnostics,
             });
         }
 
+        let mut diagnostics =
+            Self::merge_scanner_diagnostic_entries(&graph.load_scanner_diagnostic_entries()?)?;
+        // no-op 轮也要如实报告当前账本状态中仍然存在的来源冲突
+        if ownership_enabled {
+            let ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
+            diagnostics.extend(ownership_conflict_diagnostics(
+                &crate::ownership::ledger_definition_conflicts(&ledgers),
+            ));
+        }
         Ok(crate::scanner::IndexReportWithDiagnostics {
             report: IndexReport {
                 indexed: plan.discovered_count,
@@ -753,9 +1015,7 @@ impl ProjectIndexer {
             },
             // M58.3 PR1 refix（F2）：no-op 路径从库里 load 合并，
             // 持久化的 scanner 诊断不再随无变更构建消失。
-            diagnostics: Self::merge_scanner_diagnostic_entries(
-                &graph.load_scanner_diagnostic_entries()?,
-            )?,
+            diagnostics,
         })
     }
 
@@ -768,7 +1028,28 @@ impl ProjectIndexer {
     /// M58.3 复核返修：调用方须先把它们挂到 commit 的 scanner 载荷上
     /// （可与 pending 累积合并），再 persist，保证与图同事务落库。
     pub fn prepare(project_dir: &Path, db_path: &Path) -> Result<PreparedIndexUpdate> {
-        let mut graph = GraphDB::open(db_path)?;
+        Self::prepare_internal(project_dir, db_path, None)
+    }
+
+    /// 按稳定项目绑定准备 ownership 候选图，供 session/diff-refresh 生产路径使用。
+    pub fn prepare_for_project(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: &ProjectBinding,
+    ) -> Result<PreparedIndexUpdate> {
+        Self::prepare_internal(project_dir, db_path, Some(project_binding))
+    }
+
+    fn prepare_internal(
+        project_dir: &Path,
+        db_path: &Path,
+        project_binding: Option<&ProjectBinding>,
+    ) -> Result<PreparedIndexUpdate> {
+        let ownership_enabled = project_binding.is_some();
+        let mut graph = match project_binding {
+            Some(binding) => GraphDB::open_with_ownership(db_path, binding)?,
+            None => GraphDB::open(db_path)?,
+        };
         let prev_states = graph.load_file_states().unwrap_or_default();
 
         let files = Self::discover_files(project_dir)?;
@@ -808,23 +1089,42 @@ impl ProjectIndexer {
         for failure in &parse_failures {
             scanner_entries.push(parse_failure_diagnostic_entry(failure)?);
         }
-        // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
-        let merged_removed = merge_removed_node_ids(
-            updates
-                .iter()
-                .map(|update| update.previous_node_ids.as_slice())
-                .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
-        );
-        let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
-        // dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删（与 scan 一致）
-        let parsed_nodes =
-            Self::apply_incremental_changes(&mut graph, &mut new_states, &updates, &plan.deleted)?;
-        // M56：apply 后收集新增/变更节点的 incident edges
-        let new_node_ids: Vec<String> = parsed_nodes
-            .values()
-            .flat_map(|node_ids| node_ids.iter().cloned())
-            .collect();
-        let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+        let mut prepare_conflicts: Vec<crate::ownership::OwnershipConflict> = Vec::new();
+        let (parsed_nodes, removed_edge_keys, dirty_edges) = if ownership_enabled {
+            let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
+            // M59-2：来源冲突随候选更新透出（不再丢弃）——调用方（diff-refresh
+            // 编排器）据此把冲突写进诊断与 runtime 状态，使冲突在查询侧可见。
+            let (parsed_nodes, conflicts) =
+                apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
+            prepare_conflicts = conflicts;
+            for (logical_path, _) in &plan.deleted {
+                new_states.remove(logical_path);
+            }
+            (parsed_nodes, Vec::new(), Vec::new())
+        } else {
+            // M56：apply 前收集被删节点的 incident edge keys（persist 只消费 delta）
+            let merged_removed = merge_removed_node_ids(
+                updates
+                    .iter()
+                    .map(|update| update.previous_node_ids.as_slice())
+                    .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+            );
+            let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
+            // dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删（与 scan 一致）
+            let parsed_nodes = Self::apply_incremental_changes(
+                &mut graph,
+                &mut new_states,
+                &updates,
+                &plan.deleted,
+            )?;
+            // M56：apply 后收集新增/变更节点的 incident edges
+            let new_node_ids: Vec<String> = parsed_nodes
+                .values()
+                .flat_map(|node_ids| node_ids.iter().cloned())
+                .collect();
+            let dirty_edges = collect_incident_edges(&graph, &new_node_ids);
+            (parsed_nodes, removed_edge_keys, dirty_edges)
+        };
 
         // 完整 dirty IDs：dirty 文件旧节点 ∪ 新增节点（页面失效需覆盖两侧）
         let mut dirty_node_ids = merge_removed_node_ids(
@@ -880,7 +1180,7 @@ impl ProjectIndexer {
             checkpoint: None,
             // M56：初始全量构建（无 prev states）走显式 full rebuild 路径
             //（v2 置 Current）；增量提交走 delta 路径（v2 置 Stale）
-            delta: if prev_states.is_empty() {
+            delta: if prev_states.is_empty() || ownership_enabled {
                 None
             } else {
                 Some(crate::graph_store::IndexDelta {
@@ -902,6 +1202,11 @@ impl ProjectIndexer {
             deleted_node_ids,
             scanner_entries,
             scanner_deleted_paths,
+            // M59-2 B：本轮解析失败但**已消费变更事件**的源文件。
+            // 非空 ⇒ 本轮是部分失败：必须保留旧贡献（已完成）、保持文件脏
+            // （可重试），且**不得推进 diff-refresh checkpoint**。
+            parse_failures,
+            ownership_conflicts: prepare_conflicts,
         })
     }
 }
@@ -926,4 +1231,22 @@ pub struct PreparedIndexUpdate {
     pub scanner_entries: Vec<(String, Vec<u8>)>,
     /// M58.3 PR2：本轮删除文件的 logical_path，落库时移除其诊断 entry
     pub scanner_deleted_paths: Vec<String>,
+    /// M59-2 B：本轮解析失败的文件（事件已被消费，但内容未进候选图）。
+    ///
+    /// 旧图与旧贡献原样保留、file hash 不推进，因此文件下一轮仍是脏的、
+    /// 会重试。非空即表示本轮是**部分失败**：调用方不得把 checkpoint 推进到
+    /// 本轮水位——否则这些事件被永久消费掉，只能等未来新事件偶然触发重试。
+    pub parse_failures: Vec<ParseFailure>,
+    /// M59-2 C：本轮账本中仍然存在的来源冲突。
+    ///
+    /// prepare 不落盘，但冲突不能随返回值蒸发；调用方须把它写进 runtime
+    /// 诊断与持久化诊断，使冲突在 query/status 与重启后一致可见。
+    pub ownership_conflicts: Vec<crate::ownership::OwnershipConflict>,
+}
+
+impl PreparedIndexUpdate {
+    /// 本轮是否为部分失败（存在已消费但未入图的源文件）。
+    pub fn has_parse_failure(&self) -> bool {
+        !self.parse_failures.is_empty()
+    }
 }

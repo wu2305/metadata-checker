@@ -15,6 +15,7 @@ std::thread_local! {
 
 use crate::dense_graph::DenseGraphSnapshot;
 use crate::graph::GraphDB;
+use crate::ownership::ProjectBinding;
 use crate::response_processor::ResponseProcessor;
 pub use crate::response_processor::{RuntimeQueryResponse, RuntimeTiming};
 
@@ -160,6 +161,8 @@ pub struct GraphRuntime {
     pub graph: GraphDB,
     /// graphdb 文件路径
     pub graph_db_path: PathBuf,
+    /// 已绑定项目身份；legacy runtime 为 None。
+    pub project_binding: Option<ProjectBinding>,
     /// 项目目录路径（从 graph_db_path 推导）
     pub project_dir: Option<PathBuf>,
     /// 加载时间戳
@@ -198,6 +201,11 @@ pub struct GraphRuntime {
     /// hydrate 损失、SCANNER_* 合并结果、scanner 诊断加载/合并失败（LOAD_FAILED）、
     /// read model 降级（READ_MODEL_DEGRADED）
     pub load_diagnostics: Vec<crate::output::Diagnostic>,
+    /// M59-2 C：当前来源账本中仍然存在的来源冲突节点 id。
+    ///
+    /// 与图/账本同库持久化，因此重启后仍可见；冲突修复后随账本重算而消失。
+    /// 它进入 `status.load_diagnostics` 与查询响应，不是只在扫描报告里出现一次。
+    pub ownership_conflicts: Vec<crate::ownership::OwnershipConflict>,
 }
 
 /// Runtime 查询命令枚举
@@ -462,6 +470,21 @@ pub struct RuntimeStatus {
     pub load_diagnostics: Vec<crate::output::Diagnostic>,
 }
 
+/// M59-2 B：整段替换 `load_diagnostics` 里的 scanner 诊断段。
+///
+/// 按 `SCANNER_` 前缀整段替换，而不是逐个 code 列举。旧实现列举 code，漏掉
+/// `SCANNER_FILE_PARSE_FAILED`：坏文件修好之后本轮合并结果里已无该 code，旧条目
+/// 却被保留，status/query 继续声称「图内容是陈旧的」——比诊断缺失更糟，它断言了
+/// 一个已经不存在的问题。新增 `SCANNER_*` code 也不该再靠记得改这张清单。
+/// 非 `SCANNER_` 段（hydrate 损失等）原样保留。
+fn replace_scanner_diagnostics_segment(
+    load_diagnostics: &mut Vec<crate::output::Diagnostic>,
+    scanner_diagnostics: Vec<crate::output::Diagnostic>,
+) {
+    load_diagnostics.retain(|diag| !diag.code.starts_with("SCANNER_"));
+    load_diagnostics.extend(scanner_diagnostics);
+}
+
 impl GraphRuntime {
     /// 加载 graphdb 并构建 Runtime
     ///
@@ -488,13 +511,29 @@ impl GraphRuntime {
         project_dir: Option<impl AsRef<Path>>,
         runtime_mode: RuntimeMode,
     ) -> Result<Self> {
-        Self::load_with_project_dir_internal(graph_db_path, project_dir, runtime_mode)
+        Self::load_with_project_dir_internal(graph_db_path, project_dir, runtime_mode, None)
+    }
+
+    /// 加载已绑定项目的 ownership graph runtime。
+    pub fn load_with_project_dir_and_mode_for_project(
+        graph_db_path: impl AsRef<Path>,
+        project_dir: Option<impl AsRef<Path>>,
+        runtime_mode: RuntimeMode,
+        project_binding: &ProjectBinding,
+    ) -> Result<Self> {
+        Self::load_with_project_dir_internal(
+            graph_db_path,
+            project_dir,
+            runtime_mode,
+            Some(project_binding),
+        )
     }
 
     fn load_with_project_dir_internal(
         graph_db_path: impl AsRef<Path>,
         project_dir: Option<impl AsRef<Path>>,
         runtime_mode: RuntimeMode,
+        project_binding: Option<&ProjectBinding>,
     ) -> Result<Self> {
         let path = graph_db_path.as_ref().to_path_buf();
         #[cfg(feature = "telemetry")]
@@ -503,12 +542,16 @@ impl GraphRuntime {
         let _graph_load_guard = graph_load_span.enter();
 
         let start = Instant::now();
-        let graph = GraphDB::open_or_diagnostic(&path).map_err(|e| {
-            anyhow::anyhow!(
-                "GraphDB open failed: {}",
-                serde_json::to_string(&e).unwrap_or_default()
-            )
-        })?;
+        let graph = match project_binding {
+            Some(binding) => GraphDB::open_readonly_with_ownership(&path, binding)
+                .map_err(|error| anyhow::anyhow!("GraphDB bound open failed: {error:#}"))?,
+            None => GraphDB::open_or_diagnostic(&path).map_err(|e| {
+                anyhow::anyhow!(
+                    "GraphDB open failed: {}",
+                    serde_json::to_string(&e).unwrap_or_default()
+                )
+            })?,
+        };
         let graph_load_ms = start.elapsed().as_millis();
 
         let mut load_diagnostics = graph.hydrate_diagnostics().to_diagnostics();
@@ -537,6 +580,16 @@ impl GraphRuntime {
                 "Scanner diagnostics load failed: {error:#}"
             ))),
         }
+
+        // M59-2 C：来源冲突是持久状态，加载期就从账本重算，使 status/query
+        // 与重启行为一致（旧实现只在扫描报告里出现一次，查询侧永远为空）。
+        let ownership_conflicts = graph
+            .ownership_ledgers()
+            .map(crate::ownership::ledger_definition_conflicts)
+            .unwrap_or_default();
+        load_diagnostics.extend(crate::scanner::indexer::ownership_conflict_diagnostics(
+            &ownership_conflicts,
+        ));
 
         let (graph_file_mtime, graph_file_size) = std::fs::metadata(&path)
             .map(|m| (m.modified().ok(), m.len()))
@@ -581,6 +634,7 @@ impl GraphRuntime {
         Ok(GraphRuntime {
             graph,
             graph_db_path: path,
+            project_binding: project_binding.cloned(),
             project_dir,
             loaded_at: SystemTime::now(),
             graph_file_mtime,
@@ -599,6 +653,7 @@ impl GraphRuntime {
             read_model,
             read_model_build_ms,
             load_diagnostics,
+            ownership_conflicts,
         })
     }
 
@@ -881,6 +936,8 @@ impl GraphRuntime {
             self.graph_fingerprint = fingerprint;
         }
         self.read_model = Some(Arc::new(prepared.read_model));
+        // M59-2 C：候选图带新账本，冲突必须随之更新（修复后消失、新冲突出现）
+        self.refresh_ownership_conflicts();
         self.dense_snapshot = prepared.dense_snapshot;
         self.dense_snapshot_enabled = prepared.dense_snapshot_enabled;
         self.dense_snapshot_build_ms = prepared.dense_snapshot_build_ms;
@@ -904,13 +961,7 @@ impl GraphRuntime {
         &mut self,
         scanner_diagnostics: Vec<crate::output::Diagnostic>,
     ) {
-        self.load_diagnostics.retain(|diag| {
-            diag.code != crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY
-                && diag.code != crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID
-                && diag.code != crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED
-                && diag.code != crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_LOAD_FAILED
-        });
-        self.load_diagnostics.extend(scanner_diagnostics);
+        replace_scanner_diagnostics_segment(&mut self.load_diagnostics, scanner_diagnostics);
     }
 
     /// M58.3 复核返修：live scanner 诊断缓存刷新失败时记录稳定 warning。
@@ -929,6 +980,39 @@ impl GraphRuntime {
                 "Scanner diagnostics cache refresh failed, cached SCANNER_* diagnostics may be stale: {error:#}"
             ),
         ));
+    }
+
+    /// M59-2 C：从当前账本重算来源冲突，并同步进 `load_diagnostics` 与状态字段。
+    ///
+    /// 冲突是**可恢复、可更新**的持久状态：修复文件后随账本重算消失，重启后
+    /// 由加载期重算恢复。它进 `status.load_diagnostics` 与查询响应，因此任何
+    /// 入口（scan / prepare / diff-refresh / 重启）看到的口径一致。
+    pub fn refresh_ownership_conflicts(&mut self) {
+        let conflicts = self
+            .graph
+            .ownership_ledgers()
+            .map(crate::ownership::ledger_definition_conflicts)
+            .unwrap_or_default();
+        self.set_ownership_conflicts(conflicts);
+    }
+
+    /// 写入冲突状态并重建其在 `load_diagnostics` 中的诊断段（同 code 先清后加）。
+    fn set_ownership_conflicts(&mut self, conflicts: Vec<crate::ownership::OwnershipConflict>) {
+        self.load_diagnostics
+            .retain(|diag| diag.code != crate::diagnostics::CODE_GRAPH_OWNERSHIP_CONFLICT);
+        self.load_diagnostics
+            .extend(crate::scanner::indexer::ownership_conflict_diagnostics(
+                &conflicts,
+            ));
+        self.ownership_conflicts = conflicts;
+    }
+
+    /// 当前冲突节点 id（供上层报告与测试断言）。
+    pub fn ownership_conflict_node_ids(&self) -> Vec<String> {
+        self.ownership_conflicts
+            .iter()
+            .map(|conflict| conflict.node_id.clone())
+            .collect()
     }
 
     /// 构建单条 page logic warm cache 条目（不写回 read model）。
@@ -1431,12 +1515,14 @@ impl GraphRuntime {
             &self.graph_db_path,
             project_dir.as_deref(),
             self.runtime_mode,
+            self.project_binding.as_ref(),
         ) {
             Ok(new_runtime) => {
                 self.graph = new_runtime.graph;
                 self.loaded_at = new_runtime.loaded_at;
                 self.graph_file_mtime = new_runtime.graph_file_mtime;
                 self.graph_file_size = new_runtime.graph_file_size;
+                self.project_binding = new_runtime.project_binding;
                 self.load_count = new_runtime.load_count;
                 self.graph_load_ms = new_runtime.graph_load_ms;
                 self.graph_fingerprint = new_runtime.graph_fingerprint;
@@ -1571,6 +1657,93 @@ mod tests {
                 "UNKNOWN_ACTION_TYPE",
             ],
             "load 置顶 + 查询侧同 code 多条全保留: {result_side:?}"
+        );
+    }
+
+    /// M59-2 B：整段替换必须覆盖**所有** `SCANNER_*` code，而不是逐个列举。
+    ///
+    /// 旧实现逐个列 code，漏掉 `SCANNER_FILE_PARSE_FAILED`：坏文件修好之后，
+    /// 本轮合并结果里已无该 code，但旧条目被保留下来，status/query 继续声称
+    /// 「图内容是陈旧的」——比诊断缺失更糟，它断言了一个已经不存在的问题。
+    #[test]
+    fn replace_scanner_diagnostics_drops_every_scanner_code() {
+        let load_diagnostics = vec![
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_FILE_PARSE_FAILED,
+                1,
+                crate::output::Location::default(),
+                "stale parse failure",
+            ),
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED,
+                1,
+                crate::output::Location::default(),
+                "cache may be stale",
+            ),
+            // 非 SCANNER_ 段必须原样留着：整段替换只针对 scanner 诊断
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE,
+                3,
+                crate::output::Location::default(),
+                "partial hydrate",
+            ),
+        ];
+
+        // 本轮合并结果：只含一条 unrelated 的 SCANNER_ 诊断（新变坏的文件）
+        let replacement = vec![crate::diagnostics::envelope_diagnostic(
+            crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID,
+            1,
+            crate::output::Location::default(),
+            "duplicate ids",
+        )];
+        let mut runtime_holder = load_diagnostics;
+        replace_scanner_diagnostics_segment(&mut runtime_holder, replacement);
+
+        let codes: Vec<&str> = runtime_holder
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE,
+                crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID,
+            ],
+            "替换后只应剩非 SCANNER_ 段与本轮新段：{codes:?}"
+        );
+    }
+
+    /// 替换进来的空集合必须让所有 `SCANNER_*` 诊断消失（文件修好 = 无 scanner 问题）。
+    #[test]
+    fn replace_scanner_diagnostics_with_empty_clears_stale_warning() {
+        let mut load_diagnostics = vec![
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_FILE_PARSE_FAILED,
+                1,
+                crate::output::Location::default(),
+                "stale parse failure",
+            ),
+            crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE,
+                3,
+                crate::output::Location::default(),
+                "partial hydrate",
+            ),
+        ];
+        replace_scanner_diagnostics_segment(&mut load_diagnostics, Vec::new());
+        assert!(
+            !load_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.starts_with("SCANNER_")),
+            "无辜的 SCANNER_ 诊断必须随空替换一起消失：{load_diagnostics:?}"
+        );
+        assert_eq!(
+            load_diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect::<Vec<_>>(),
+            vec![crate::diagnostics::CODE_GRAPH_DB_PARTIAL_HYDRATE],
+            "非 SCANNER_ 段不受影响"
         );
     }
 

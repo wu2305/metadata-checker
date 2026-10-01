@@ -413,12 +413,18 @@ impl<T: BiMetaFilesTransport> MetaFilesChangeSource for BiMetaFilesChangeSource<
                 .map_err(|error| anyhow!("DIFF_REFRESH_BOOTSTRAP_FAILED: {error:#}"))?;
             active_boundary.push((event.updated_at_ms, event.event_id.clone()));
 
+            // M59-2 B：对照 manifest 的 revision/path 之外，还必须看「图是否已
+            // 成功索引到这个内容」。manifest 的 revision/hash 只证明**镜像已
+            // 获取**（mirror 在 prepare 之前就写了 manifest），解析失败的文件
+            // 内容已在镜像里却从未入图。只按 revision 判 unchanged 会把该事件
+            // 永久消费——远端快照不变时再也不会重投，重试只能等未来新事件。
             let unchanged = manifest_by_id
                 .get(event.file_id.as_str())
                 .is_some_and(|entry| {
                     !entry.deleted
                         && entry.revision.as_deref() == info.revision.as_deref()
                         && entry.source_path == event.source_path
+                        && !entry.needs_index_retry()
                 });
             if unchanged {
                 continue;

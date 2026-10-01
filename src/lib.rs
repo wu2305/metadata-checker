@@ -25,6 +25,7 @@ pub mod graph_store;
 pub mod memory_graph_store;
 pub mod model_scope;
 pub mod output;
+pub mod ownership;
 pub mod parsed_content;
 pub mod parser;
 pub mod path;

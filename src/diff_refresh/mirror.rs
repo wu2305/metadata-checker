@@ -114,6 +114,7 @@ fn apply_delete_event(
             mtime: Some(event.updated_at_ms),
             size: None,
             hash: None,
+            indexed_hash: None,
             deleted: true,
         });
         manifest
@@ -160,6 +161,13 @@ fn apply_active_event(
         })
         .filter(|path| path != &event.source_path);
 
+    // M59-2 B：改名时先取走旧记录的 `indexed_hash`，后面的 `retain` 会把旧
+    // 记录摘掉（改名后 manifest 只保留新路径），此时再按 index 取会越界。
+    // `indexed_hash` 是「最近一次成功入图的内容 hash」，必须随 file_id 迁移。
+    let carried_indexed_hash = record_index
+        .map(|index| manifest.files[index].indexed_hash.clone())
+        .unwrap_or(None);
+
     // 内容未变且非改名：跳过写入，只保留既有记录
     let unchanged = previous_path.is_none()
         && record_index.is_some_and(|index| {
@@ -192,6 +200,9 @@ fn apply_active_event(
     }
 
     // upsert 新路径 manifest 记录（改名后只保留新路径）
+    // M59-2 B：`hash` 记录「镜像已获取到这个内容」；`indexed_hash` 保持调用方
+    // 传入的既有值——它只在文件成功解析并入图后才由 orchestrator 推进。
+    // 解析失败时两者失配，下一轮 bootstrap 据此重投重试。
     let record = RemoteSessionFile {
         source_path: event.source_path.clone(),
         file_id: Some(event.file_id.clone()),
@@ -199,7 +210,8 @@ fn apply_active_event(
         etag: None,
         mtime: Some(event.updated_at_ms),
         size: Some(content.raw_text.len() as u64),
-        hash: Some(hash),
+        hash: Some(hash.clone()),
+        indexed_hash: carried_indexed_hash,
         deleted: false,
     };
     let upsert_index = manifest

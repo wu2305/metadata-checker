@@ -32,10 +32,38 @@ pub fn scan_project(project_dir: &Path, db_path: &Path) -> Result<ScanReport> {
 
 #[cfg(feature = "cli-local")]
 pub fn scan_project_with_report(project_dir: &Path, db_path: &Path) -> Result<ScanReport> {
-    let index_with_diags = indexer::ProjectIndexer::scan_with_diagnostics(project_dir, db_path)?;
+    scan_project_with_report_internal(project_dir, db_path, None)
+}
+
+#[cfg(feature = "cli-local")]
+pub fn scan_project_with_report_for_project(
+    project_dir: &Path,
+    db_path: &Path,
+    project_binding: &crate::ownership::ProjectBinding,
+) -> Result<ScanReport> {
+    scan_project_with_report_internal(project_dir, db_path, Some(project_binding))
+}
+
+#[cfg(feature = "cli-local")]
+fn scan_project_with_report_internal(
+    project_dir: &Path,
+    db_path: &Path,
+    project_binding: Option<&crate::ownership::ProjectBinding>,
+) -> Result<ScanReport> {
+    let index_with_diags = match project_binding {
+        Some(binding) => indexer::ProjectIndexer::scan_with_diagnostics_for_project(
+            project_dir,
+            db_path,
+            binding,
+        )?,
+        None => indexer::ProjectIndexer::scan_with_diagnostics(project_dir, db_path)?,
+    };
     let index_report = index_with_diags.report;
     let mut diagnostics = index_with_diags.diagnostics;
-    let graph = GraphDB::open(db_path)?;
+    let graph = match project_binding {
+        Some(binding) => GraphDB::open_readonly_with_ownership(db_path, binding)?,
+        None => GraphDB::open(db_path)?,
+    };
     diagnostics.extend(graph.hydrate_diagnostics().to_diagnostics());
     Ok(ScanReport {
         indexed: index_report.indexed,
@@ -62,8 +90,10 @@ mod tbl;
 /// 递归收集目录下所有 .spg 和 .tbl 文件
 mod utils;
 
-pub use spg::process_spg_file_from_value;
 #[cfg(any(test, feature = "cli-local"))]
 pub use spg::scan_raw_diagnostics;
+pub use spg::{
+    PageIdentityMode, process_spg_file_from_value, process_spg_file_from_value_with_identity,
+};
 pub use tbl::process_tbl_file_from_string;
-pub use utils::{add_edge_with_meta, add_node, resolve_reference_path};
+pub use utils::{add_edge_with_meta, add_identified_node, add_node, resolve_reference_path};

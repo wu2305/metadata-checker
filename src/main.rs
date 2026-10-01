@@ -276,6 +276,25 @@ fn execute_resolved_target(
     let mut merged: Option<serde_json::Value> = None;
 
     for call in &plan.calls {
+        // 主调用已经把 target 判成「定位不到 / 有歧义」时，**共享同一套旧 target
+        // 解析**的补充调用问的是同一个 target，必然得到同一个定位结果。继续发只会
+        // 重复整图解析（裸 target 每次都要 `iter_nodes`）再产出一份同样的壳子。
+        //
+        // 这里必须按命令白名单判断，不能假设「所有补充调用都同意」：
+        // `--relations model:X` 的补充调用是 `QueryDataflow`，它一度直接精确
+        // `get_node`，于是主调用报 `AMBIGUOUS_TARGET` 时它却静默命中物理模型——
+        // 跳过它会把那份（有分歧的）结果一起吞掉。白名单只列已接线同一套解析的
+        // 命令；未接线的命令照常执行，分歧会如实暴露而不是被静默吃掉。
+        if call.merge_key.is_some()
+            && shares_legacy_target_resolution(call.command)
+            && merged.as_ref().is_some_and(|base| {
+                has_diagnostic_code(base, "TARGET_NOT_FOUND")
+                    || has_diagnostic_code(base, "AMBIGUOUS_TARGET")
+            })
+        {
+            continue;
+        }
+
         let outcome = run_cli_runtime_tool(
             runtime,
             cli::CliToolInput {
@@ -559,6 +578,26 @@ fn attach_confidence(result: &mut serde_json::Value) {
         "confidence".to_string(),
         metadata_checker::output::answer_effect::confidence_value(codes.iter().map(String::as_str)),
     );
+}
+
+/// 该命令是否与 `build_query_model_output` 共用同一套旧 target 解析。
+///
+/// 只有这些命令才能在「主调用已报定位失败」时被安全跳过——它们对同一个 target 必然
+/// 得到同一个定位结论。未接线的命令（或将来新增的）不在表内，照常执行：宁可多跑一次
+/// 也不静默吞掉一个可能给出不同答案的补充块。
+///
+/// 新增接线 resolver 的命令时应同步加入本表（见
+/// `docs/knowledge/topic-cli-stdio-to-query.md` 1.8 的入口清单）。
+fn shares_legacy_target_resolution(command: metadata_checker::tool_contract::ToolCommand) -> bool {
+    use metadata_checker::tool_contract::ToolCommand;
+    matches!(
+        command,
+        ToolCommand::Explain
+            | ToolCommand::ExplainCondition
+            | ToolCommand::Context
+            | ToolCommand::QueryModel
+            | ToolCommand::QueryDataflow
+    )
 }
 
 /// 把候选渲染成可以直接照抄执行的命令。
@@ -1585,10 +1624,22 @@ fn main() -> Result<()> {
         let graph_db_path = std::path::PathBuf::from(&context.manifest.graph_db_path);
         let session_dir = session_manager.session_dir(session_id);
         let mirror_dir = metadata_checker::session::sync::project_mirror_root(&session_dir);
-        let runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode(
+        let project_binding = match metadata_checker::ownership::ProjectBinding::new(
+            context.manifest.project_ref.clone(),
+        ) {
+            Ok(binding) => binding,
+            Err(err) => {
+                return print_session_error(
+                    "SESSION_QUERY_GRAPH_LOAD_FAILED",
+                    format!("invalid session project binding: {err}"),
+                );
+            }
+        };
+        let runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
             &graph_db_path,
             Some(&mirror_dir),
             metadata_checker::runtime::RuntimeMode::LongLived,
+            &project_binding,
         ) {
             Ok(runtime) => runtime,
             Err(err) => {
@@ -1774,10 +1825,23 @@ fn main() -> Result<()> {
                         .graph_db_path
                         .clone()
                         .unwrap_or_else(|| std::path::PathBuf::from(&report.graph_db_path));
+                    let project_binding = match metadata_checker::ownership::ProjectBinding::new(
+                        report.project_ref.clone(),
+                    ) {
+                        Ok(binding) => binding,
+                        Err(err) => {
+                            return print_session_error(
+                                "SESSION_QUERY_GRAPH_LOAD_FAILED",
+                                format!("invalid session project binding: {err}"),
+                            );
+                        }
+                    };
                     let mut runtime =
-                        match metadata_checker::runtime::GraphRuntime::load_with_project_dir(
+                        match metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
                             &graph_db_path,
                             Some(&mirror_dir),
+                            metadata_checker::runtime::RuntimeMode::OneShot,
+                            &project_binding,
                         ) {
                             Ok(runtime) => runtime,
                             Err(err) => {
@@ -1900,20 +1964,41 @@ fn main() -> Result<()> {
             None => None,
         };
 
+        let explicit_binding = match args.project_ref.as_ref() {
+            Some(p) => Some(metadata_checker::ownership::ProjectBinding::new(p.clone())?),
+            None => None,
+        };
         metadata_checker::stdio_server::run_stdio_server(
             &db_path,
             project_dir,
+            explicit_binding.as_ref(),
             diff_refresh_context,
         )?;
         return Ok(());
     }
+
+    let project_binding = args
+        .project_ref
+        .as_ref()
+        .map(|p| metadata_checker::ownership::ProjectBinding::new(p.clone()))
+        .transpose()?;
 
     // graphdb-only runtime lifecycle commands do not need a project directory.
     if args.project_dir.is_none() && (args.status || args.reload_graph || args.check_reload) {
         let db_path = args.graph_db_path.as_ref().ok_or_else(|| {
             anyhow::anyhow!("--status/--reload-graph/--check-reload requires --graph-db-path when --project-dir is absent")
         })?;
-        let mut runtime = metadata_checker::runtime::GraphRuntime::load(db_path)?;
+        let mut runtime = match &project_binding {
+            Some(binding) => {
+                metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
+                    db_path,
+                    None::<&std::path::Path>,
+                    metadata_checker::runtime::RuntimeMode::OneShot,
+                    binding,
+                )?
+            }
+            None => metadata_checker::runtime::GraphRuntime::load(db_path)?,
+        };
         let command = if args.status {
             metadata_checker::tool_contract::ToolCommand::Status
         } else if args.reload_graph {
@@ -1947,7 +2032,17 @@ fn main() -> Result<()> {
                 "graph queries require --project-dir, --graph-db-path, or --remote-index"
             )
         })?;
-        let mut runtime = metadata_checker::runtime::GraphRuntime::load(db_path)?;
+        let mut runtime = match &project_binding {
+            Some(binding) => {
+                metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
+                    db_path,
+                    None::<&std::path::Path>,
+                    metadata_checker::runtime::RuntimeMode::OneShot,
+                    binding,
+                )?
+            }
+            None => metadata_checker::runtime::GraphRuntime::load(db_path)?,
+        };
         if run_query_commands(&args, &mut runtime, None)? {
             return Ok(());
         }
@@ -1960,13 +2055,18 @@ fn main() -> Result<()> {
             .unwrap_or_else(|| graph_db_path(project_dir));
 
         if args.check_graph {
-            let status = GraphDB::check_graph_db(&db_path);
+            let status = GraphDB::check_graph_db_for_project(&db_path, project_binding.as_ref());
             println!("{}", serde_json::to_string_pretty(&status)?);
             return Ok(());
         }
 
         if args.build_graph {
-            let report = scanner::scan_project_with_report(project_dir, &db_path)?;
+            let report = match &project_binding {
+                Some(binding) => {
+                    scanner::scan_project_with_report_for_project(project_dir, &db_path, binding)?
+                }
+                None => scanner::scan_project_with_report(project_dir, &db_path)?,
+            };
             let payload = serde_json::to_string(&report)
                 .map_err(|err| anyhow::anyhow!("failed to serialize ScanReport: {err}"))?;
             if args.is_human() {
@@ -1993,16 +2093,34 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        let mut runtime = match metadata_checker::runtime::GraphRuntime::load_with_project_dir(
-            &db_path,
-            Some(project_dir),
-        ) {
-            Ok(r) => r,
-            Err(_e) => {
-                let out = metadata_checker::graph::GraphDB::check_graph_db(&db_path);
-                println!("{}", serde_json::to_string_pretty(&out)?);
-                return Ok(());
-            }
+        let mut runtime = match &project_binding {
+            Some(binding) => match metadata_checker::runtime::GraphRuntime::load_with_project_dir_and_mode_for_project(
+                &db_path,
+                Some(project_dir),
+                metadata_checker::runtime::RuntimeMode::OneShot,
+                binding,
+            ) {
+                Ok(r) => r,
+                Err(_e) => {
+                    let out = metadata_checker::graph::GraphDB::check_graph_db_for_project(
+                        &db_path,
+                        Some(binding),
+                    );
+                    println!("{}", serde_json::to_string_pretty(&out)?);
+                    return Ok(());
+                }
+            },
+            None => match metadata_checker::runtime::GraphRuntime::load_with_project_dir(
+                &db_path,
+                Some(project_dir),
+            ) {
+                Ok(r) => r,
+                Err(_e) => {
+                    let out = metadata_checker::graph::GraphDB::check_graph_db(&db_path);
+                    println!("{}", serde_json::to_string_pretty(&out)?);
+                    return Ok(());
+                }
+            },
         };
         if run_query_commands(&args, &mut runtime, Some(project_dir))? {
             return Ok(());
@@ -2017,7 +2135,7 @@ fn main() -> Result<()> {
     // --check-graph without --project-dir requires explicit --graph-db-path
     if args.check_graph {
         if let Some(ref db_path) = args.graph_db_path {
-            let status = GraphDB::check_graph_db(db_path);
+            let status = GraphDB::check_graph_db_for_project(db_path, project_binding.as_ref());
             println!("{}", serde_json::to_string_pretty(&status)?);
             return Ok(());
         }

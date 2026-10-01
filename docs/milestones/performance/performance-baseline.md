@@ -887,3 +887,18 @@ cargo test --features cli-local --test stdio_server_tests -- --exact test_stdio_
 Baseline impact 判读：本次是 PR2 后首个 runner 真实项目样本，无前序同口径样本可横比；
 page_logic 两场景 P95 约 8–10 s 为当前最重能力，后续 PR（PR4b 页面局部子图迁移）应以本表
 为基线观察漂移。artifact 在 CNB workspace（临时环境），数字已转写本节。
+
+## 2026-09-21 项目绑定门槛修复
+
+Baseline impact: yes。公开读取与提交增加 marker 校验，已绑定读取不再能使用无绑定入口。
+CNB `cnb-6mg-1k30r3t8e` 只进行了测试及 bench 编译检查，没有真实性能重测。
+session 未启用准备格式；不声称该阶段改善了建图性能或完成了 ownership/B5。
+
+## 2026-09-21 M59-2 来源账本与项目绑定闭环
+
+Baseline impact: yes。
+明确当前 M59-2 架构的实现边界为“增量解析、整图重建、全量持久化”：
+1. **增量解析**：文件感知层仅重新解析发生变更（dirty）或删除（deleted）的源文件，构造或撤销其独立 `FileContributionLedger`；
+2. **整图重建**：多来源账本聚合后，在内存中执行整图确定性重建（`rebuild_graph_from_ledgers`），确保跨文件边、共享目标生命周期（引用存在时保留占位节点，唯一引用者删除时回收）、页面局部模型隔离（同一 dwtable source 跨页不塌陷且不降为 PhysicalTable）与来源撤销的确定性语义；
+3. **全量持久化**：将重建后的整图全量持久化至底层图存储（redb/dense）。
+由于该机制取代了原有的旧细粒度图增量 patch 路径，旧增量持久化性能结论（如亚毫秒级局部 patch）不再适用，不得沿用旧增量性能结论。建图耗时与图整体规模相关，交接 M59-3/Grafeo 时以本轮整图重建/全量持久化为新的性能基线参照。

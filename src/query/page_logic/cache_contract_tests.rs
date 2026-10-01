@@ -54,6 +54,7 @@ fn populated_cache() -> anyhow::Result<super::PageLogicAvailabilityCache> {
                     format!("{MODEL_B_ID}.id"),
                 ],
             })),
+            origin_file: None,
         })?;
         graph.add_test_edge(condition_id, COMPONENT_ID, EdgeType::DependsOn, None);
     }

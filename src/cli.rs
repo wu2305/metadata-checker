@@ -77,6 +77,13 @@ pub struct Cli {
 
     #[arg(
         long,
+        value_name = "PROJECT",
+        help = "Stable project identity for ownership-bound graph access"
+    )]
+    pub project_ref: Option<String>,
+
+    #[arg(
+        long,
         value_name = "PATH",
         help = "Custom graph database path (default: <project-dir>/.metadata-checker.graphdb)"
     )]

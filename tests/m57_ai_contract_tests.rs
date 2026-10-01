@@ -19,6 +19,8 @@ fn m57_diff_refresh_report_has_machine_contract_fields() {
         change_count: 1,
         invalidated_pages: vec!["page:app/page.spg".to_string()],
         warm_failures: Vec::new(),
+        parse_failures: Vec::new(),
+        ownership_conflicts: Vec::new(),
         persisted: true,
         pending_dirty_total: 0,
         checkpoint: None,

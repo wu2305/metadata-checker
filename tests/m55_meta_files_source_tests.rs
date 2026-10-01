@@ -330,6 +330,7 @@ fn m55_meta_files_bootstrap_compares_manifest_and_initializes_cursors() {
         mtime: None,
         size: None,
         hash: None,
+        indexed_hash: None,
         deleted: false,
     };
     manifest
@@ -393,6 +394,7 @@ fn m55_meta_files_bootstrap_emits_delete_for_file_missing_in_active_snapshot() {
         mtime: None,
         size: None,
         hash: None,
+        indexed_hash: None,
         deleted: false,
     };
     manifest
@@ -475,6 +477,7 @@ fn m55_meta_files_delete_after_active_snapshot_returned_by_next_poll() {
         mtime: None,
         size: None,
         hash: None,
+        indexed_hash: None,
         deleted: false,
     });
 

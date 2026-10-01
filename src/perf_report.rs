@@ -742,6 +742,7 @@ fn profile_redb(project_dir: &Path, sample_index: usize) -> Result<PerfProfile> 
             path: "m52/redb_profile.spg".to_string(),
             name: "redb_profile_node_a".to_string(),
             meta: None,
+            origin_file: None,
         })
         .context("profile redb node write a")?;
     graph
@@ -751,6 +752,7 @@ fn profile_redb(project_dir: &Path, sample_index: usize) -> Result<PerfProfile> 
             path: "m52/redb_profile.tbl".to_string(),
             name: "redb_profile_node_b".to_string(),
             meta: None,
+            origin_file: None,
         })
         .context("profile redb node write b")?;
     profile.record_stage("redb_node_write", started_at.elapsed());
@@ -764,6 +766,7 @@ fn profile_redb(project_dir: &Path, sample_index: usize) -> Result<PerfProfile> 
             edge_type: EdgeType::Reads,
             field_path: None,
             meta: None,
+            origin_file: None,
         },
     )
     .context("profile redb edge write")?;

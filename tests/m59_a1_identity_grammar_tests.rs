@@ -29,6 +29,7 @@ fn node_of(kind: NodeIdKind, id: &str, path: &str, name: &str) -> Node {
         path: path.to_string(),
         name: name.to_string(),
         meta: None,
+        origin_file: None,
     }
 }
 
@@ -304,6 +305,7 @@ fn shared_physical_target_stays_global_while_local_models_own_their_page() {
                 edge_type: EdgeType::DataflowInput,
                 field_path: None,
                 meta: None,
+                origin_file: None,
             })
             .unwrap();
     }
