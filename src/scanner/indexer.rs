@@ -577,9 +577,14 @@ impl ProjectIndexer {
     }
 
     fn collect_files(base: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-        for entry in std::fs::read_dir(current)? {
-            let entry = entry?;
-            let path = entry.path();
+        // read_dir 的枚举序由文件系统决定（ext4 / APFS / overlayfs 各不相同）。
+        // 跨页同名局部实体（如各页的 `model:model2`）按扫描序后写覆盖先写，
+        // 序不固定会让建图结果随平台漂移，所以按路径排序后再处理。
+        let mut paths = std::fs::read_dir(current)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<std::io::Result<Vec<PathBuf>>>()?;
+        paths.sort();
+        for path in paths {
             if path.is_dir() {
                 Self::collect_files(base, &path, files)?;
             } else if path

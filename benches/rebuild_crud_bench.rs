@@ -83,7 +83,7 @@ fn bench_crud_update_component_visibility_then_query(
                 "explain_condition should reflect updated visibleCondition"
             );
             assert!(
-                graph_has_node(runtime, &format!("comp:{CONTRACT_PAGE_REL}|text45")),
+                graph_has_node(runtime, &format!("comp:{CONTRACT_PAGE_REL}|text45"))?,
                 "target component node should remain in graph after visibility update"
             );
             Ok(())
@@ -143,7 +143,7 @@ fn bench_crud_add_action_write_then_query_model(
                 "post-mutation explain on new action should succeed"
             );
             assert!(
-                graph_has_node(runtime, &action_node_id),
+                graph_has_node(runtime, &action_node_id)?,
                 "graph should contain newly appended action node {action_node_id}"
             );
             assert!(
@@ -181,7 +181,7 @@ fn bench_crud_delete_page_then_find_page(c: &mut Criterion, source_project_dir: 
             "baseline find_page should include member registered page"
         );
         assert!(
-            graph_has_node(&runtime, &deleted_page_id),
+            graph_has_node(&runtime, &deleted_page_id).expect("读取基线图节点"),
             "baseline graph should contain member registered page node"
         );
     }
@@ -203,7 +203,7 @@ fn bench_crud_delete_page_then_find_page(c: &mut Criterion, source_project_dir: 
                 "find_page after page deletion should not return deleted page"
             );
             assert!(
-                graph_missing_node(runtime, &deleted_page_id),
+                graph_missing_node(runtime, &deleted_page_id)?,
                 "deleted page node should be removed from graph"
             );
             Ok(())

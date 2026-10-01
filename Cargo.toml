@@ -86,6 +86,8 @@ redb = { version = "4.1.0", optional = true }
 # 不用 `lpg` feature——它会连带拉进 cypher / gremlin / sql-pgq 三个用不到的
 # 查询语言解析器；`edge` 只开 grafeo-engine/lpg + gql + regex-lite，
 # `storage` 补上 wal / grafeo-file / spill / mmap（open / open_read_only / close 所需）。
+# C4 的只读 GQL（`query_gql_read_only`）用的正是 `edge` 带进来的 `gql`，不需要 `lpg`；
+# `lpg` 额外只会拉进 cypher / gremlin / sql-pgq 解析器与完整 regex，见 M59 journal C4 小节。
 grafeo = { version = "0.5.43", default-features = false, features = [
     "edge",
     "storage",
