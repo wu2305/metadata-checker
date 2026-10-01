@@ -796,6 +796,28 @@
         ignoreProcessFailures: false
         forceRebuild: false
 
+# 自动把 CNB 全量镜像到 GitHub（main.push 触发）。secret 未配置时脚本优雅跳过。
+.github_mirror_push_ci: &github_mirror_push_ci
+  name: github-mirror-push
+  runner:
+    <<: *runner_amd64_2
+  docker:
+    <<: *browser_wasm_ci_image
+  stages:
+    - name: mirror to github (full)
+      script: bash scripts/sync-to-github.sh
+
+# 手动触发：把 GitHub 全量反向同步回 CNB，分支隔离到 github-sync/* 命名空间。
+.github_sync_from_ci: &github_sync_from_ci
+  name: github-sync-from
+  runner:
+    <<: *runner_amd64_2
+  docker:
+    <<: *browser_wasm_ci_image
+  stages:
+    - name: sync from github (quarantined namespace)
+      script: bash scripts/sync-from-github.sh
+
 .main_authoritative_ci: &main_authoritative_ci
   - *rust_ci
   - *browser_offscreen_bench_ci_with_bencher
@@ -806,6 +828,7 @@
   - *full_criterion_redb_ci
   - *full_criterion_boundary_ci
   - *knowledge_base_ci
+  - *github_mirror_push_ci
 
 .m58_cnb_llm_ci: &m58_cnb_llm_ci
   name: m58-cnb-llm-eval
@@ -1631,6 +1654,8 @@ main:
     - *kimi_harness_smoke_ci
   api_trigger_issue_archive_probe:
     - *issue_archive_probe_ci
+  api_trigger_github_sync_from:
+    - *github_sync_from_ci
 
 "**":
   push:
