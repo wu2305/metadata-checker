@@ -3,6 +3,7 @@ use crate::runtime_load::load_warm_runtime;
 use crate::sandbox_create::BenchWorkspace;
 use anyhow::{Context, Result, bail, ensure};
 use criterion::{BatchSize, Criterion, black_box};
+use metadata_checker::graph_store::GraphReadStore;
 use metadata_checker::runtime::{
     GraphRuntime, ReloadResult, RuntimeQueryRequest, RuntimeQueryResponse,
 };
@@ -255,12 +256,14 @@ pub fn explain_condition_contains_expr(result: &Value, expected_substr: &str) ->
     json_value_contains_str(result, expected_substr)
 }
 
-/// 判断图中是否存在指定节点。
-pub fn graph_has_node(runtime: &GraphRuntime, node_id: &str) -> bool {
-    runtime.graph.get_node(node_id).is_some()
+/// 判断图中是否存在指定节点；读图失败上抛，不当作「不存在」。
+pub fn graph_has_node(runtime: &GraphRuntime, node_id: &str) -> Result<bool> {
+    let node = GraphReadStore::get_node(&runtime.graph, node_id)
+        .with_context(|| format!("读取图节点 {node_id} 失败"))?;
+    Ok(node.is_some())
 }
 
-/// 判断图中是否不存在指定节点。
-pub fn graph_missing_node(runtime: &GraphRuntime, node_id: &str) -> bool {
-    !graph_has_node(runtime, node_id)
+/// 判断图中是否不存在指定节点；读图失败上抛。
+pub fn graph_missing_node(runtime: &GraphRuntime, node_id: &str) -> Result<bool> {
+    Ok(!graph_has_node(runtime, node_id)?)
 }
