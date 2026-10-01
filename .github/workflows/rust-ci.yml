@@ -88,10 +88,12 @@ jobs:
           node --version
       # AI 评测等需要真实项目语料的测试由测试内的存在性门禁显式跳过，
       # 与 CNB 一致，不再整条排除。
+      # --no-fail-fast：一个测试二进制失败后继续跑完其余，一轮 CI 就能看到全部失败。
       - name: test and coverage
         run: |
           cargo llvm-cov test \
             --workspace \
+            --no-fail-fast \
             --lcov \
             --output-path lcov.info \
             -- \
