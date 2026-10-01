@@ -1648,9 +1648,6 @@
 
 main:
   push: *main_authoritative_ci
-  # web_trigger 按钮（.cnb/web_trigger.yml）触发的反向同步入口，仅 main 分支详情页显示。
-  web_trigger_github_sync_from:
-    - *github_sync_from_ci
 
 "$":
   vscode:
@@ -1664,6 +1661,10 @@ main:
   api_trigger_issue_archive_probe:
     - *issue_archive_probe_ci
   api_trigger_github_sync_from:
+    - *github_sync_from_ci
+  # web_trigger 按钮（.cnb/web_trigger.yml）触发的反向同步入口。按官方 validator
+  # 建议与 api_trigger 一并挂在 $ 兜底分支下（M58 等既有 api_trigger 同此位置）。
+  web_trigger_github_sync_from:
     - *github_sync_from_ci
 
 "**":

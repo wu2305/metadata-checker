@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 #
-# sync-from-github.sh —— 手动触发：把 GitHub 全量同步回当前仓库（CNB）。
+# sync-from-github.sh —— 把 GitHub 全量同步回当前仓库（CNB）。
 #
-# 触发方式：由 .cnb.yml 的 api_trigger_github_sync_from 流水线手动调用。
+# 触发方式（两条入口共用 .cnb.yml 的 .github_sync_from_ci 流水线）：
+#   1. web_trigger_github_sync_from —— 页面按钮（.cnb/web_trigger.yml，人手动触发）
+#   2. api_trigger_github_sync_from —— OPENAPI / cnb build start-build（LLM 与脚本调用）
 #
 # 风险消弭策略（分支管理）：
 #   所有 GitHub 分支被推送到 CNB(origin) 的 `github-sync/<branch>` 命名空间，
