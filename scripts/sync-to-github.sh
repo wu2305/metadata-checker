@@ -47,21 +47,25 @@ git config --global credential.helper store
 printf 'https://x-access-token:%s@github.com\n' "$GITHUB_MIRROR_TOKEN" >> "$HOME/.git-credentials"
 chmod 0600 "$HOME/.git-credentials"
 
-# 先把 CNB(origin) 的全部分支与标签拉到本地，保证镜像内容完整。
-git fetch origin '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+# 先把 CNB(origin) 的全部分支拉到独立的 refs/remotes/mirror-src/* 命名空间，
+# 标签拉到 refs/tags/*。不能直接写 refs/heads/*：CI 工作区已检出分支时，
+# git 会拒绝抓取（fatal: refusing to fetch into branch ... checked out）。
+git fetch origin \
+  '+refs/heads/*:refs/remotes/mirror-src/*' \
+  '+refs/tags/*:refs/tags/*'
 
 # 删除本地隔离命名空间引用（github-sync/* 分支、github-sync-tags/* 标签），
 # 这些只存在于 CNB 侧，不应回流到 GitHub；--prune 同时清除 GitHub 上可能已有的同名引用。
 while IFS= read -r ref; do
   [ -n "$ref" ] || continue
   git update-ref -d "$ref"
-done < <(git for-each-ref --format='%(refname)' refs/heads/github-sync refs/tags/github-sync-tags)
+done < <(git for-each-ref --format='%(refname)' refs/remotes/mirror-src/github-sync refs/tags/github-sync-tags)
 
 # 全量镜像（分支 + 标签）：--prune 按 refspec 目标命名空间删除远端多余引用，
 # 达到与 --mirror 相同的镜像效果，但不触碰 GitHub 的 refs/pull/* 等隐藏引用。
 echo "==> git push --prune $REMOTE_NAME (heads + tags)"
 git push --prune "$REMOTE_NAME" \
-  '+refs/heads/*:refs/heads/*' \
+  '+refs/remotes/mirror-src/*:refs/heads/*' \
   '+refs/tags/*:refs/tags/*'
 
 echo "GITHUB_SYNC_DONE: 已全量镜像到 $GITHUB_MIRROR_URL"
