@@ -236,7 +236,7 @@ Options:
       --query-cross <A> <B> 查询两页面间的跨文件关系（需图上下文，可配合 --project-dir 或 --graph-db-path）
       --query-dataflow <M>  展开 DataFlow 模型的内部子图（需图上下文，可配合 --project-dir 或 --graph-db-path）
       --query-page-logic <P> 查询页面级逻辑摘要（需图上下文，可配合 --project-dir 或 --graph-db-path）
-      --gql <QUERY>         对 `.grafeo` 图库执行只读 GQL（节点 `(:Node {id,node_type,path,name,meta,origin_file})`，边 `[:<EdgeType> {field_path,meta,origin_file}]`；仅 MATCH/OPTIONAL/UNWIND/FOR/RETURN，写入与 LOAD 被拒；失败输出 `{"ok":false,"error":{"code",...}}`）
+      --gql <QUERY>         对 `.grafeo` 图库执行只读 GQL（节点 `(:Node {id,node_type,path,name,meta,origin_file})`，边 `[:<EdgeType> {field_path,meta,origin_file}]`；仅 MATCH/OPTIONAL/UNWIND/FOR/RETURN，写入与 LOAD 被拒；失败输出 `{"ok":false,"error":{"code",...}}`；`--help` 里有完整图结构、`meta` 键清单与方言注意事项）
       --gql-max-rows <N>    --gql 最多返回的行数（默认 200，超出时结果带 `truncated: true`）
       --remote-index <ID>   下载远端项目并建立会话索引（与 --session-refresh 等价）
       --session-refresh <ID> 刷新远端会话（等价于 --remote-index）

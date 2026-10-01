@@ -569,4 +569,71 @@ mod cli {
             serde_json::json!("GQL_BACKEND_UNSUPPORTED")
         );
     }
+
+    /// `--help` 里写的方言说明与示例必须真的成立：有人改引擎或图结构时，这条测试先红。
+    #[test]
+    fn gql_long_help_claims_hold_against_a_real_graph() {
+        let help = Command::new(bin())
+            .arg("--help")
+            .output()
+            .expect("run --help");
+        let help = String::from_utf8_lossy(&help.stdout).into_owned();
+        for needle in [
+            "[:Reads|Triggers]",
+            "CONTAINS",
+            "=~",
+            "NOT (n)--()",
+            "IndexState",
+        ] {
+            assert!(help.contains(needle), "--help 应提到 {needle}");
+        }
+
+        let (db, _) = build_graph("help_claims", "g.grafeo");
+
+        // 示例查询可直接运行。
+        let example = run_gql_json(
+            &db,
+            &[],
+            "MATCH (a:Node)-[r:Reads]->(b:Node) RETURN a.id, b.id, r.field_path",
+        );
+        assert!(example.get("rows").is_some(), "示例 1 应成功：{example}");
+        let example = run_gql_json(
+            &db,
+            &[],
+            "MATCH (n:Node) WHERE n.meta CONTAINS 'visibleCondition' RETURN n.id",
+        );
+        assert!(example.get("rows").is_some(), "示例 2 应成功：{example}");
+
+        // 多边类型写法 [:A|B] 成立，且结果等于两种边之和。
+        let count = |query: &str| -> u64 {
+            run_gql_json(&db, &[], query)["rows"][0][0]
+                .as_u64()
+                .expect("count 为整数")
+        };
+        let reads = count("MATCH (a:Node)-[r:Reads]->(b:Node) RETURN count(r)");
+        let triggers = count("MATCH (a:Node)-[r:Triggers]->(b:Node) RETURN count(r)");
+        let both = count("MATCH (a:Node)-[r:Reads|Triggers]->(b:Node) RETURN count(r)");
+        assert_eq!(both, reads + triggers);
+
+        // 帮助里声明不支持的写法确实失败（并以 GQL_QUERY_* 报错，而不是静默返回）。
+        for unsupported in [
+            "MATCH (n:Node) WHERE n.id =~ 'page.*' RETURN n.id",
+            "MATCH (n:Node) WHERE NOT (n)--() RETURN n.id",
+        ] {
+            let rejected = run_gql_json(&db, &[], unsupported);
+            assert_eq!(rejected["ok"], serde_json::json!(false), "{unsupported}");
+        }
+
+        // meta 键清单：Action 的 meta 含文档里列出的键。
+        let meta = run_gql_json(
+            &db,
+            &[],
+            "MATCH (n:Node) WHERE n.node_type = 'Action' RETURN n.meta LIMIT 1",
+        );
+        let meta_text = meta["rows"][0][0].as_str().expect("meta 是 JSON 文本");
+        let meta: Value = serde_json::from_str(meta_text).expect("meta 可解析");
+        for key in ["triggerType", "condition", "conditionExp", "waitPrev"] {
+            assert!(meta.get(key).is_some(), "Action.meta 应含 {key}");
+        }
+    }
 }
