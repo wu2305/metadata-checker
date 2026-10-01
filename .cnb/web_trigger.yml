@@ -1,0 +1,12 @@
+# GitHub 反向同步的页面手动触发按钮（CNB web_trigger 规范）。
+# 此文件只配按钮，不支持 include/imports；事件对应的流水线在 .cnb.yml 的
+# main.web_trigger_github_sync_from 下配置。
+branch:
+  - reg: ^main$ # 仅 main 分支详情页显示按钮
+    buttons:
+      - name: 同步 GitHub -> 本仓库
+        description: 拉取 GitHub 全量分支/标签，落库到 github-sync/* 隔离命名空间，人工 review 后合并
+        event: web_trigger_github_sync_from
+        permissions:
+          roles:
+            - master # owner 角色向上包含，同样可触发

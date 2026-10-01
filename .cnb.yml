@@ -796,24 +796,30 @@
         ignoreProcessFailures: false
         forceRebuild: false
 
-# 自动把 CNB 全量镜像到 GitHub（main.push 触发）。secret 未配置时脚本优雅跳过。
+# 自动把 CNB 全量镜像到 GitHub（main.push 触发）。
+# GitHub 凭据经密钥仓库 imports 注入；密钥未配置时脚本优雅跳过，不判红。
 .github_mirror_push_ci: &github_mirror_push_ci
   name: github-mirror-push
   runner:
     <<: *runner_amd64_2
   docker:
     <<: *browser_wasm_ci_image
+  imports:
+    - https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/github-mirror.yml
   stages:
     - name: mirror to github (full)
       script: bash scripts/sync-to-github.sh
 
-# 手动触发：把 GitHub 全量反向同步回 CNB，分支隔离到 github-sync/* 命名空间。
+# 手动触发（web_trigger 按钮 / api_trigger）：把 GitHub 全量反向同步回 CNB，
+# 分支隔离到 github-sync/* 命名空间。
 .github_sync_from_ci: &github_sync_from_ci
   name: github-sync-from
   runner:
     <<: *runner_amd64_2
   docker:
     <<: *browser_wasm_ci_image
+  imports:
+    - https://cnb.cool/wu2305/metadata-checker-keys/-/blob/main/github-mirror.yml
   stages:
     - name: sync from github (quarantined namespace)
       script: bash scripts/sync-from-github.sh
@@ -1642,6 +1648,9 @@
 
 main:
   push: *main_authoritative_ci
+  # web_trigger 按钮（.cnb/web_trigger.yml）触发的反向同步入口，仅 main 分支详情页显示。
+  web_trigger_github_sync_from:
+    - *github_sync_from_ci
 
 "$":
   vscode:

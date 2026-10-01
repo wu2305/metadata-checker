@@ -10,7 +10,8 @@
 #   绝不直写 CNB 既有分支（如 main）或既有标签，避免覆盖与冲突；
 #   人工 review 后，再按正常 PR 流程把 github-sync/* 合并进目标分支。
 #
-# 依赖两个 CNB secret 注入的环境变量（不在此处硬编码、不打印）：
+# 密钥来源：CNB 密钥仓库 metadata-checker-keys 的 github-mirror.yml，
+# 经 .cnb.yml imports 注入为环境变量（不在此处硬编码、不打印）：
 #   GITHUB_MIRROR_URL    源 GitHub 仓库地址；未配置时默认 https://github.com/wu2305/metadata-checker.git
 #   GITHUB_MIRROR_TOKEN  具备 repo 读权限的 GitHub PAT
 set -euo pipefail
