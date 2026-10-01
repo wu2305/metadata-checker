@@ -212,7 +212,7 @@ pub fn run_stdio_server(
     .map_err(|e| anyhow::anyhow!("Failed to load graphdb: {}", e))?;
     eprintln!(
         "[stdio-server] Graph loaded (LongLived), {} nodes, read_model={}, ready",
-        runtime.graph.graph.node_count(),
+        crate::graph_store::GraphReadStore::node_count(&runtime.graph).unwrap_or_default(),
         runtime.read_model.is_some()
     );
 

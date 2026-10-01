@@ -296,12 +296,15 @@ impl DataFlowMeta {
 
     /// 获取 Output 类型节点的字段索引；如果没有 Output 节点，fallback 到 "default"
     pub fn get_output_fields(&self) -> Vec<(&str, &HashMap<String, FieldRecord>)> {
-        let output_nodes: Vec<&str> = self
+        // node_types 是 HashMap：输出节点枚举序随随机种子逐次不同，
+        // field_traces 的输出顺序必须确定，先排序再投影。
+        let mut output_nodes: Vec<&str> = self
             .node_types
             .iter()
             .filter(|(_, t)| *t == "Output")
             .map(|(id, _)| id.as_str())
             .collect();
+        output_nodes.sort_unstable();
 
         if !output_nodes.is_empty() {
             output_nodes
@@ -852,7 +855,12 @@ pub fn build_query_dataflow_output(
                 .get_alias(node_id)
                 .map_or(node_id.to_string(), |v| v.clone());
 
-            for (field_name, field_rec) in fields {
+            // fields 是 HashMap：枚举序随机，按字段名排序保证输出确定。
+            let mut field_names: Vec<&String> = fields.keys().collect();
+            field_names.sort_unstable();
+            for field_name in field_names {
+                let field_rec = &fields[field_name];
+                let field_name: &String = field_name;
                 let mut visited: Vec<(String, String)> = Vec::new();
                 let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
                 let origin_projection = project_output_field_origin(&dfm, field_name);
@@ -1023,7 +1031,12 @@ pub fn query_dataflow(graph: &dyn GraphReadStore, dataflow_id: &str, human: bool
                 } else {
                     writeln!(out, "\n--- 输出节点: {} ({}) ---", alias, node_id)?;
                 }
-                for (field_name, field_rec) in fields {
+                // fields 是 HashMap：枚举序随机，按字段名排序保证输出确定。
+                let mut field_names: Vec<&String> = fields.keys().collect();
+                field_names.sort_unstable();
+                for field_name in field_names {
+                    let field_rec = &fields[field_name];
+                    let field_name: &String = field_name;
                     let mut visited: Vec<(String, String)> = Vec::new();
                     let trace = trace_field_source(field_name, field_rec, &dfm, &mut visited);
                     writeln!(out, "\n[字段] {}", field_name)?;

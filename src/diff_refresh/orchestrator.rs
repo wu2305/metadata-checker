@@ -362,9 +362,12 @@ impl DiffRefreshOrchestrator {
                         changeset.next_watermark.clone().into();
                     let file_states = self.runtime.graph.load_file_states().unwrap_or_default();
                     let stage = Instant::now();
+                    // bootstrap 持久化仍是 GraphDB 具体化路径；grafeo 后端在此
+                    // 显式失败（fail-closed），不写半态。
                     let persist_report = self
                         .runtime
                         .graph
+                        .graph_db_mut()?
                         .persist_with_checkpoint(&file_states, Some(&bootstrap_checkpoint))
                         .context("persist bootstrap checkpoint")?;
                     timing.commit_ms = stage.elapsed().as_millis();
@@ -685,7 +688,7 @@ impl DiffRefreshOrchestrator {
         // （含诊断 overlay）整体保留，下一轮随 commit 一起重试。
         commit.scanner_entries = self.pending_scanner_entries.clone();
         commit.scanner_deleted_paths = self.pending_scanner_deleted_paths.clone();
-        let report = (self.persist_fn)(&mut self.runtime.graph, commit)
+        let report = (self.persist_fn)(self.runtime.graph.graph_db_mut()?, commit)
             .context("persist pending graph and checkpoint")?;
         self.clear_pending_state();
         // durable 已更新且 overlay 清空，live 缓存直接反映最新持久化口径

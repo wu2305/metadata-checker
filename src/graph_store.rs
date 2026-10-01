@@ -132,6 +132,10 @@ pub trait GraphReadStore {
     fn get_node(&self, node_id: &str) -> GraphStoreResult<Option<Node>>;
 
     /// 按 ID 获取节点的出边和入边
+    ///
+    /// 排序契约：redb hydrate 按 [`edge_storage_key`] 升序插边、petgraph
+    /// 邻接按插入倒序枚举，复合结果为**该键降序**——这是既有查询输出的
+    /// 事实标准（语料快照与其绑死）；grafeo / memory 后端按同键降序对齐。
     fn get_node_edges(&self, node_id: &str) -> GraphStoreResult<Option<GraphNeighbors>>;
 
     /// 节点总数
@@ -141,6 +145,9 @@ pub trait GraphReadStore {
     fn edge_count(&self) -> GraphStoreResult<usize>;
 
     /// 遍历所有节点（返回 owned Node，避免生命周期复杂化）
+    ///
+    /// 排序契约：redb hydrate 按 NODES_TABLE 键序（= 节点 id 字典序）插点，
+    /// `NodeIndex` 升序即为 id 字典序；grafeo / memory 按 id 字典序对齐。
     fn iter_nodes(&self) -> GraphStoreResult<Box<dyn Iterator<Item = Node> + '_>>;
 }
 
@@ -340,6 +347,32 @@ pub type EdgeFactKey = (
     Option<serde_json::Value>,
     Option<String>,
 );
+
+/// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约）。
+///
+/// scanner/bench 收集 delta 与 persist 全量/增量写共用同一格式，避免两套键。
+/// 放在 ungated 的 graph_store：grafeo/memory 的邻接排序契约以它的降序
+/// 为准（见 [`GraphReadStore::get_node_edges`] 文档）。
+pub fn edge_storage_key(edge: &Edge) -> String {
+    // 关系排序前缀保留既有重启后的邻接顺序；它只负责排序，不负责唯一性。
+    // NUL 后的完整 JSON 负责身份，JSON 会转义输入中的 NUL，段边界不可混淆。
+    let relation_order = format!(
+        "{}|{}|{}|{}",
+        edge.from,
+        edge.to,
+        serde_json::json!(edge.edge_type),
+        edge.field_path.as_deref().unwrap_or("")
+    );
+    let fact = serde_json::json!([
+        edge.from,
+        edge.to,
+        edge.edge_type,
+        edge.field_path,
+        edge.meta,
+        edge.origin_file
+    ]);
+    format!("{relation_order}\0{fact}")
+}
 
 /// 构造跨 memory/redb/dense 共用的事实键。
 pub fn edge_dedup_key(edge: &Edge) -> EdgeFactKey {

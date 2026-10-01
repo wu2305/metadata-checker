@@ -152,13 +152,155 @@ pub struct PreparedRuntimeReadModel {
     pub page_dep_index_coverage: crate::query::PageDependencyIndexCoverage,
 }
 
+/// M59-3 C3：runtime 持有的图后端。
+///
+/// redb 是默认实现；`.grafeo` 扩展名选择 Grafeo 实验性读侧后端。
+/// 查询层只依赖 `GraphReadStore`，本枚举实现同一 trait，`&runtime.graph`
+/// 在所有查询入口继续按 trait object 使用。ownership 账本与 diff-refresh
+/// 持久化仍是 redb 具体化路径：grafeo arm 上这些入口显式失败（fail-closed），
+/// 不静默降级。
+pub enum RuntimeGraphBackend {
+    /// redb 后端（默认）。
+    Redb(GraphDB),
+    /// Grafeo 后端（`grafeo-store` feature，M59-3）。
+    #[cfg(feature = "grafeo-store")]
+    Grafeo(crate::graph_grafeo::GrafeoGraphStore),
+}
+
+impl RuntimeGraphBackend {
+    /// hydrate 阶段诊断：grafeo 没有 v2 shadow / decode-loss 概念，返回空统计。
+    pub fn hydrate_diagnostics(&self) -> crate::diagnostics::HydrateDiagnostics {
+        match self {
+            Self::Redb(graph) => graph.hydrate_diagnostics().clone(),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(_) => crate::diagnostics::HydrateDiagnostics::default(),
+        }
+    }
+
+    /// per-file scanner 诊断 entry，与 `GraphDB::load_scanner_diagnostic_entries`
+    /// 同出口（两后端都返回 key → payload 列表）。
+    pub fn load_scanner_diagnostic_entries(&self) -> Result<Vec<(String, Vec<u8>)>> {
+        match self {
+            Self::Redb(graph) => graph.load_scanner_diagnostic_entries(),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => store
+                .load_scanner_diagnostic_entries()
+                .map_err(|error| anyhow::anyhow!("grafeo scanner 诊断读取失败：{error}")),
+        }
+    }
+
+    /// 已启用的来源账本；grafeo 后端尚未接线 ownership（M59-2 未完成），恒为 None。
+    pub fn ownership_ledgers(
+        &self,
+    ) -> Option<&std::collections::BTreeMap<String, crate::ownership::FileContributionLedger>> {
+        match self {
+            Self::Redb(graph) => graph.ownership_ledgers(),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(_) => None,
+        }
+    }
+
+    /// 已落库的 diff-refresh checkpoint，与 `GraphDB::load_diff_refresh_checkpoint`
+    /// 同出口（两后端都从索引边状态读出）。
+    pub fn load_diff_refresh_checkpoint(
+        &self,
+    ) -> Result<Option<crate::diff_refresh::DiffRefreshCheckpoint>> {
+        match self {
+            Self::Redb(graph) => graph.load_diff_refresh_checkpoint(),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => store
+                .load_diff_refresh_checkpoint()
+                .map_err(|error| anyhow::anyhow!("grafeo checkpoint 读取失败：{error}")),
+        }
+    }
+
+    /// 文件索引状态，与 `GraphDB::load_file_states` 同出口（diff-refresh 按 state 判脏）。
+    pub fn load_file_states(&self) -> Result<HashMap<String, crate::graph::FileState>> {
+        match self {
+            Self::Redb(graph) => graph.load_file_states(),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => {
+                <crate::graph_grafeo::GrafeoGraphStore as crate::graph_store::IndexStateStore>::load_file_states(
+                    store,
+                )
+                .map_err(|error| anyhow::anyhow!("grafeo file_state 读取失败：{error}"))
+            }
+        }
+    }
+
+    /// redb 具体化句柄：`PersistFn` 签名是 `&mut GraphDB`，diff-refresh 持久化
+    /// 在 grafeo 后端上显式失败，不把写入静默导到另一套格式。
+    pub fn graph_db_mut(&mut self) -> Result<&mut GraphDB> {
+        match self {
+            Self::Redb(graph) => Ok(graph),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(_) => {
+                anyhow::bail!("GRAPH_BACKEND_UNSUPPORTED: diff-refresh 持久化尚未支持 grafeo 后端")
+            }
+        }
+    }
+}
+
+impl crate::graph_store::GraphReadStore for RuntimeGraphBackend {
+    fn get_node(
+        &self,
+        node_id: &str,
+    ) -> crate::graph_store::GraphStoreResult<Option<crate::graph::Node>> {
+        match self {
+            Self::Redb(graph) => crate::graph_store::GraphReadStore::get_node(graph, node_id),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => crate::graph_store::GraphReadStore::get_node(store, node_id),
+        }
+    }
+
+    fn get_node_edges(
+        &self,
+        node_id: &str,
+    ) -> crate::graph_store::GraphStoreResult<Option<crate::graph_store::GraphNeighbors>> {
+        match self {
+            Self::Redb(graph) => crate::graph_store::GraphReadStore::get_node_edges(graph, node_id),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => {
+                crate::graph_store::GraphReadStore::get_node_edges(store, node_id)
+            }
+        }
+    }
+
+    fn node_count(&self) -> crate::graph_store::GraphStoreResult<usize> {
+        match self {
+            Self::Redb(graph) => crate::graph_store::GraphReadStore::node_count(graph),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => crate::graph_store::GraphReadStore::node_count(store),
+        }
+    }
+
+    fn edge_count(&self) -> crate::graph_store::GraphStoreResult<usize> {
+        match self {
+            Self::Redb(graph) => crate::graph_store::GraphReadStore::edge_count(graph),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => crate::graph_store::GraphReadStore::edge_count(store),
+        }
+    }
+
+    fn iter_nodes(
+        &self,
+    ) -> crate::graph_store::GraphStoreResult<Box<dyn Iterator<Item = crate::graph::Node> + '_>>
+    {
+        match self {
+            Self::Redb(graph) => crate::graph_store::GraphReadStore::iter_nodes(graph),
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => crate::graph_store::GraphReadStore::iter_nodes(store),
+        }
+    }
+}
+
 /// Hot Graph Runtime：在同一进程内复用已加载的 GraphDB
 ///
 /// M23 目标：把"加载图"和"执行查询"从 CLI 分支中解耦，
 /// 证明同一个 runtime 连续执行多次查询时，第二次不再全量加载 graphdb。
 pub struct GraphRuntime {
     /// 内存中的图数据库（全量加载）
-    pub graph: GraphDB,
+    pub graph: RuntimeGraphBackend,
     /// graphdb 文件路径
     pub graph_db_path: PathBuf,
     /// 已绑定项目身份；legacy runtime 为 None。
@@ -529,6 +671,26 @@ impl GraphRuntime {
         )
     }
 
+    /// M59-3 C3：打开 `.grafeo` 图库作为 runtime 读侧后端。
+    ///
+    /// 用 `open()`（非 `open_read_only`）：写者未干净退出时留下的 WAL
+    /// 需要带写会话才能回放，只读打开会直接失败；独占文件锁与 redb 侧
+    /// `acquire_graph_db_lock` 的串行化口径一致（runtime 与 --build-graph
+    /// 写者同样互斥）。
+    #[cfg(feature = "grafeo-store")]
+    fn open_grafeo_graph_backend(path: &Path) -> Result<RuntimeGraphBackend> {
+        Ok(RuntimeGraphBackend::Grafeo(
+            crate::graph_grafeo::GrafeoGraphStore::open(path)
+                .map_err(|error| anyhow::anyhow!("打开 grafeo 图库失败：{error}"))?,
+        ))
+    }
+
+    /// grafeo 后端未编入本构建时同样显式失败，而不是让 redb 去开 grafeo 文件报格式错。
+    #[cfg(not(feature = "grafeo-store"))]
+    fn open_grafeo_graph_backend(_path: &Path) -> Result<RuntimeGraphBackend> {
+        anyhow::bail!("GRAPH_BACKEND_UNSUPPORTED: 本构建未启用 grafeo-store，无法打开 .grafeo 图库")
+    }
+
     fn load_with_project_dir_internal(
         graph_db_path: impl AsRef<Path>,
         project_dir: Option<impl AsRef<Path>>,
@@ -541,29 +703,32 @@ impl GraphRuntime {
         #[cfg(feature = "telemetry")]
         let _graph_load_guard = graph_load_span.enter();
 
-        // M59-3 C2：runtime 读侧（C3 查询动词）还没接线 grafeo。
-        // 显式拒绝比让 redb 打开一个 grafeo 文件报格式错更清楚。
-        if crate::graph_store::is_grafeo_db_path(&path) {
-            anyhow::bail!(
-                "GRAPH_BACKEND_UNSUPPORTED: runtime 查询侧尚未支持 grafeo 后端（M59-3 C3）；\
-                 .grafeo 库目前只可用于 --build-graph 导入路径"
-            );
-        }
         let start = Instant::now();
-        let graph = match project_binding {
-            Some(binding) => GraphDB::open_readonly_with_ownership(&path, binding)
-                .map_err(|error| anyhow::anyhow!("GraphDB bound open failed: {error:#}"))?,
-            None => GraphDB::open_or_diagnostic(&path).map_err(|e| {
-                anyhow::anyhow!(
-                    "GraphDB open failed: {}",
-                    serde_json::to_string(&e).unwrap_or_default()
-                )
-            })?,
+        // M59-3 C3：`.grafeo` 扩展名选择 Grafeo 读侧后端。project_binding 只服务
+        // ownership 语义（M59-2 未完成），与扫描入口同口径显式 bail——静默忽略
+        // binding 会产生「看着像带项目绑定、实际没有」的 runtime。
+        let graph = if crate::graph_store::is_grafeo_db_path(&path) {
+            anyhow::ensure!(
+                project_binding.is_none(),
+                "GRAPH_BACKEND_UNSUPPORTED: grafeo 后端尚未接线 ownership（M59-2 未完成）"
+            );
+            Self::open_grafeo_graph_backend(&path)?
+        } else {
+            RuntimeGraphBackend::Redb(match project_binding {
+                Some(binding) => GraphDB::open_readonly_with_ownership(&path, binding)
+                    .map_err(|error| anyhow::anyhow!("GraphDB bound open failed: {error:#}"))?,
+                None => GraphDB::open_or_diagnostic(&path).map_err(|e| {
+                    anyhow::anyhow!(
+                        "GraphDB open failed: {}",
+                        serde_json::to_string(&e).unwrap_or_default()
+                    )
+                })?,
+            })
         };
         let graph_load_ms = start.elapsed().as_millis();
 
         let mut load_diagnostics = graph.hydrate_diagnostics().to_diagnostics();
-        // M58.3 PR1 refix（F2）：scanner 诊断（SCANNER_*）持久化在 redb，
+        // M58.3 PR1 refix（F2）：scanner 诊断（SCANNER_*）持久化在图库索引边状态
         // 加载期并入 load_diagnostics——status() 与查询响应经既有管道自然透出，
         // 不在查询层另造第二套信号。
         // M58.3 复核返修（P1-1）：读取/合并失败不再吞进函数级死 vec，映射为结构化
@@ -635,8 +800,8 @@ impl GraphRuntime {
         crate::telemetry::record_graph_load(
             &graph_load_span,
             graph_load_ms,
-            graph.graph.node_count(),
-            graph.graph.edge_count(),
+            crate::graph_store::GraphReadStore::node_count(&graph).unwrap_or_default(),
+            crate::graph_store::GraphReadStore::edge_count(&graph).unwrap_or_default(),
         );
 
         Ok(GraphRuntime {
@@ -933,7 +1098,7 @@ impl GraphRuntime {
     /// durable 库尚未写入本轮诊断 entries，缓存口径由编排器在 install/persist
     /// 之后经 `replace_scanner_diagnostics` 统一刷新（durable + pending overlay）。
     pub fn install_replacement(&mut self, candidate: GraphDB, prepared: PreparedRuntimeReadModel) {
-        self.graph = candidate;
+        self.graph = RuntimeGraphBackend::Redb(candidate);
         self.loaded_at = SystemTime::now();
         let (graph_file_mtime, graph_file_size) = std::fs::metadata(&self.graph_db_path)
             .map(|m| (m.modified().ok(), m.len()))
@@ -1115,8 +1280,8 @@ impl GraphRuntime {
             &request.budget,
             request.intent.as_deref(),
             request.human,
-            self.graph.graph.node_count(),
-            self.graph.graph.edge_count(),
+            crate::graph_store::GraphReadStore::node_count(&self.graph).unwrap_or_default(),
+            crate::graph_store::GraphReadStore::edge_count(&self.graph).unwrap_or_default(),
         );
         #[cfg(feature = "telemetry")]
         let _query_guard = query_span.enter();
@@ -1518,6 +1683,16 @@ impl GraphRuntime {
 
     /// 安全 reload：先加载新图，成功后再替换旧图
     pub fn reload(&mut self) -> Result<()> {
+        // M59-3 C3：grafeo 后端独占文件锁，「先开新句柄成功再换旧图」的安全
+        // 次序在物理上不成立——新句柄打不开被本进程锁住的文件，改成「先关旧
+        // 再开新」又破坏失败后旧 runtime 继续服务的语义。显式 bail 比让
+        // GrafeoDB 报锁错误更可读；进程内要拿新图请新建 runtime。
+        if crate::graph_store::is_grafeo_db_path(&self.graph_db_path) {
+            anyhow::bail!(
+                "GRAPH_BACKEND_UNSUPPORTED: runtime reload 尚未支持 grafeo 后端\
+                 （独占文件锁下新句柄无法与旧句柄共存）；请丢弃本 runtime 后重新 load"
+            );
+        }
         let project_dir = self.project_dir.clone();
         match Self::load_with_project_dir_internal(
             &self.graph_db_path,
@@ -1568,8 +1743,10 @@ impl GraphRuntime {
             loaded_at: loaded_at_secs,
             load_count: self.load_count,
             reload_count: self.reload_count,
-            node_count: self.graph.graph.node_count(),
-            edge_count: self.graph.graph.edge_count(),
+            node_count: crate::graph_store::GraphReadStore::node_count(&self.graph)
+                .unwrap_or_default(),
+            edge_count: crate::graph_store::GraphReadStore::edge_count(&self.graph)
+                .unwrap_or_default(),
             graph_file_mtime: self.graph_file_mtime,
             graph_file_size: self.graph_file_size,
             last_reload_error: self.last_reload_error.clone(),

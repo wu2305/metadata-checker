@@ -878,3 +878,72 @@ C1 的 +8.6KB 是「链接器整体丢包」的假读数；+621KB 才是 `edge +
 - **`IndexState` key 空间**：未知 key 判 Corrupted 意味着旧二进制打不开
   未来 schema 写入的库——刻意取舍，schema 演进需记档。
 - **`.grafeo` 扩展名大小写敏感**：`.GRAFEO` 落到 redb 路径报格式错，属可接受。
+
+## 2026-10-01 阶段 C3：链路查询动词上 `.grafeo`（RuntimeGraphBackend）
+
+### 做了什么
+
+- **`RuntimeGraphBackend`**（`src/runtime.rs`）：`pub enum { Redb(GraphDB), Grafeo(GrafeoGraphStore) }`，
+  `GraphRuntime.graph` 字段直接改型为它，并实现 `GraphReadStore` 按变体委托——
+  约 14 处 `&self.graph` → `&dyn GraphReadStore` 的查询入口零改动。
+  状态存取器（file_state / scanner_entries / checkpoint）同样按变体委托。
+- **加载分流**：`is_grafeo_db_path` 时走 `open_grafeo_graph_backend`
+  （`GrafeoDB::open` = 独占文件锁 + WAL 回放，与 redb graphdb 锁语义对齐；
+  刻意不用 `open_read_only`，避免只读视图下 WAL 未回放读到旧图）。
+- **fail-closed 边界**：`graph_db_mut()`（diff-refresh `PersistFn` 与 bootstrap
+  持久化入口）在 grafeo 变体上 bail `GRAPH_BACKEND_UNSUPPORTED`；
+  `reload()` 入口对 `.grafeo` 显式 bail——独占文件锁下同一 `.grafeo` 二次
+  `open()` 必然失败，做不到 redb 的原子换图语义，宁可显式拒绝也不半开。
+
+### 排序契约（本轮的核心发现）
+
+对空 C3 失败追下去，确认 redb 的可观察邻接顺序既非插入序也非创建序：
+
+- `GraphDB::open` hydrate 时按 **EDGES_TABLE 键序**（`edge_storage_key` 升序）
+  重新插边，而 petgraph `edges_directed` 按**插入倒序**枚举邻接——
+  复合结果是 **`edge_storage_key` 降序**。
+- 同理 `iter_nodes` = NODES_TABLE 键序（**节点 id 字典序**），
+  而非先猜的 `NodeIndex` = 写入序。
+- 该顺序是语料快照绑死的事实标准 ⇒ `get_node_edges` / `iter_nodes` 的
+  排序契约写进 `GraphReadStore` trait 文档；grafeo 按同键降序 + id 字典序
+  显式排序（`neighbors_of`/`iter_nodes`），memory store 同样改按
+  `edge_storage_key` 降序（此前是调用序，与持久化后端的 hydrate 序并不一致）。
+- `edge_storage_key` 由 `graph_redb`（`cli-local` gated）上移至
+  ungated `graph_store` 并 re-export，grafeo-store 单 feature 构建可用。
+
+### 顺手修掉的真实非确定性（redb 上同样潜伏）
+
+- `FileState.node_ids` `HashSet` → 排序 `Vec`（scanner spg/tbl 两处 writer）——
+  HashSet 迭代序会漏进持久化 state 与查询输出。
+- `page_dataflow` `alias_map` `HashMap` 迭代 → 输出前按 (value, key) 排序。
+- `DataFlowMeta` `node_types`/`field_index` 的 `HashMap` 迭代 → 排序后再展开
+  （`get_output_fields` 两处）。
+- `main.rs`/`stdio_server.rs`/`orchestrator.rs`/`m58_ai_eval` 等
+  `&GraphDB` 具体化点改为按变体解构或 `&dyn GraphReadStore`。
+
+### 验证（本机 cargo，用户已授权本地编译）
+
+- `cargo test --features cli-local` **全量绿**（含语料快照——`candidate_paths_count`
+  与 evidence 顺序零变化，证明排序契约复刻准确）。
+- 新增 `tests/m59_c3_grafeo_query_tests.rs` **7/7**：redb↔grafeo 查询输出
+  逐字节一致（context/explain/dataflow/BFS 调度与 query_model 分派）、
+  status 计数与 scanner 诊断一致、state 读一致、project_binding /
+  diff-refresh 持久化 / reload 三处 `.grafeo` fail-closed。
+- `cargo check`（default / `--no-default-features --features cli-local` /
+  wasm32 `browser-wasm`）通过；`cargo fmt` 通过。
+
+### 实测体积
+
+| 构建 | 字节 | 相对 C2 |
+|---|---|---|
+| 默认 `cli-local,grafeo-store`（C3 落地后） | 6,619,584 | +55,968 B（+0.85%） |
+
+增量为 RuntimeGraphBackend 委托 + 邻接/节点排序代码；无新增依赖。
+
+### 边界
+
+- `.grafeo` 上 `reload()` 显式拒绝（独占锁语义）——stdio `check-reload` 类
+  长会话对 grafeo 库只能丢弃 runtime 重建；redb 语义不变。
+- diff-refresh 对 `.grafeo` 库仍是「查询可读、持久化不可写」的半开边界，
+  `PersistFn` fail-closed 兜底；d2 级增量刷新写图仍是 D 阶段待办。
+- C4 投影、C5 wasm、ownership-on-grafeo 未动。
