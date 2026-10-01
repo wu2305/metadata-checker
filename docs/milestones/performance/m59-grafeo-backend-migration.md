@@ -754,3 +754,69 @@ scoped id                    → Exact                                  ⇒ 零�
   就没有索引提交路径。
 - 不宣称查询等价、不宣称性能改善：C3（22 个 `EdgeType` 查询动词）、
   C4（只读表投影 / WHERE / LIMIT / TSV / JSON）、D1（真实语料正确性与性能）均未动。
+
+## 2026-10-01 阶段 C2：Grafeo 直写导入路径 + 持久化接线
+
+### 做了什么
+
+- **索引边状态落图**：`GrafeoGraphStore` 新增 `IndexState` 标签的元数据节点承载
+  `file_states` / `scanner_entries` / `diff_refresh_checkpoint`——grafeo `edge + storage`
+  没有 KV 与事务，只能把边状态写成同库节点（key 属性前缀 `file_state:` /
+  `scanner_entry:` 区分，checkpoint 单例）。`attach` 时 `iter_nodes` 按标签分桶重建
+  内存索引；未知 key 判 `Corrupted`。
+- **`IndexStateStore::persist_index`**：对 file_states 做 diff（put/delete 元节点），
+  scanner_entries 校验 UTF-8 后整体重写，checkpoint set/delete；报告公式与
+  redb/memory 完全一致（file-口径覆写）。`commit.delta` 被忽略——M56 增量增量包
+  暂不适用于 grafeo（`wants_index_delta() = false`）。
+- **扫描编排抽象**：`scanner/indexer.rs` 新增 `pub(crate) trait IndexScanStore`
+  （= `GraphReadStore + GraphWriteStore + IndexStateStore` + `wants_index_delta` +
+  pending 脏集合访问器）与 `enum ScanBackend { Redb, Grafeo }`；
+  `scan_with_diagnostics_internal` 按 `.grafeo` 扩展名分流到统一扫描主体
+  `scan_store_body`。ownership 应用仍是 `GraphDB` 具体化分支——`.grafeo` 路径 +
+  ownership 显式 `bail!` 于入口（`GRAPH_BACKEND_UNSUPPORTED`）。
+- **封闭面**：runtime 查询侧（C3 未做）、`prepare`（diff-refresh 候选路径）在
+  `.grafeo` 路径上同样显式 bail，不留半开状态。
+- `IndexReportWithDiagnostics` 加 `node_count` / `edge_count`：两后端都在打开的
+  store 上原地取数，不必为计数二次开库（redb 语义不变，同一实例同一快照）。
+- `--graph-db-path` help 注明 `.grafeo` 扩展名选择实验性 Grafeo 后端（仅导入链路）。
+- 补交 C1 漏掉的 `Cargo.lock`（纯增量 grafeo 依赖树，无既有包版本变更）。
+
+### 已知取舍（与 redb 显式差异）
+
+- **无事务**：`edge + storage` feature 下 `begin_transaction` 是 `lpg` 专属。写入中途
+  崩溃可能留下部分节点/边，但内容寻址 id 使重放幂等自愈；若崩溃 + 内容回退重叠，
+  理论上残留孤儿节点——GC 评估记入 D1。
+- **scanner_entries 写整遍**：redb 是删表重写，grafeo 等价（旧条目全删再写）。
+- **`wants_index_delta = false`**：M56 `collect_incident_*` 的边增量收集对 grafeo
+  跳过（非所有权扫描时），delta payload 恒空——报告数字不受影响。
+
+### 验证（本机 cargo 1.97.1，用户已授权本地编译）
+
+- `cargo test --features cli-local --test m59_c2_grafeo_import_tests`
+  → **9 passed / 0 failed**（全量导入落图 + 状态 + 诊断、增量重扫只复读改动文件、
+  重启后空扫无操作、删文件清理节点/状态/诊断、坏 TBL 保旧图 + 记
+  `SCANNER_FILE_PARSE_FAILED` 且修复后自愈、redb↔grafeo 快照逐字节一致、
+  重复扫描幂等、ownership/prepare 在 `.grafeo` 上 fail-closed）。
+- `cargo test --features cli-local --test m59_b1_graph_store_contract_tests`
+  → 契约套件三实现全过（含 grafeo）。
+- `m59_c1` / `m59_b3` / `m59_b5` / `m58_3` 持久化 / `project_indexer` /
+  `graph_store` / `m54` / `m55` / `m56` 回归全过。
+- `cargo test --features cli-local` 全量 → 无失败项。
+- `cargo fmt` 通过；wasm 目标未触及（grafeo-store 不进 browser-wasm 构建）。
+
+### 实测体积（C2 落地后的真实增量）
+
+| 构建 | 字节 | 相对 |
+|---|---|---|
+| `--no-default-features --features cli-local`（无 grafeo） | 5,979,920 | 基线（C1 同值） |
+| 默认 `cli-local`（grafeo 接入导入链路） | 6,563,616 | **+583,696 B（+9.8%）** |
+
+C1 的 +4.9KB 是「链接器整体丢包」的假读数；+570KB 才是 `edge + storage` 的
+真实代价，仍远小于 spike 期带四个查询语言解析器的 ~8.86MiB。
+
+### 边界
+
+- redb 仍是默认后端，`.grafeo` 是实验性 opt-in；本轮不退役 redb。
+- 只做 `--build-graph` 导入链路：C3（查询动词）、C4（投影）、C5（wasm）、
+  ownership 图扫描、D1/D2 均未动。
+- `.grafeo` 库运行期会产生同侧 `.grafeo.wal/` 目录（已入 `.gitignore`）。
