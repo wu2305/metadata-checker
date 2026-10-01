@@ -8,6 +8,10 @@
 //! 所以本实现自持「稳定字符串 id → `NodeId`」映射，建边时直接用 `NodeId`，
 //! 并在打开时建好 `id` 属性索引供后续查询层使用。
 //!
+//! 存取路径之外，C4 另开一个**只读** GQL 入口 `query_gql_read_only`，让 LLM 直接
+//! 查询图而不经由我们手写的查询语言。它不影响上面的结论——写入与点查仍是直写 API，
+//! GQL 只读、且只在调用方显式请求时才进引擎。
+//!
 //! 本模块同时承担 C1（GraphStore 契约）与 C2（索引状态提交 + 导入接线）。
 //! 扫描编排侧见 `scanner::indexer::IndexScanStore`：file states、per-file
 //! scanner 诊断、diff-refresh checkpoint 都以 `IndexState` 标签的 meta 节点
@@ -19,10 +23,11 @@
 use crate::diff_refresh::DiffRefreshCheckpoint;
 use crate::graph::{Edge, FileState, Node};
 use crate::graph_store::{
-    EdgeFactKey, GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError, GraphStoreResult,
-    GraphWriteStore, IndexCommit, IndexReport, IndexStateStore, edge_dedup_key, merge_upsert_meta,
+    EdgeFactKey, GqlError, GqlRows, GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError,
+    GraphStoreResult, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore, edge_dedup_key,
+    merge_upsert_meta,
 };
-use grafeo::{Config, GrafeoDB, NodeId, Value};
+use grafeo::{Config, GrafeoDB, NodeId, Role, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -76,6 +81,114 @@ fn file_state_key(path: &str) -> String {
 
 fn scanner_entry_key(path: &str) -> String {
     format!("{PREFIX_SCANNER_ENTRY}{path}")
+}
+
+/// 只读 GQL 允许的起始关键字：引擎里能作为语句开头的纯读形态。
+///
+/// 白名单而非黑名单：引擎的 GQL 语句集还包含 INSERT/DELETE/MERGE/CREATE/DROP/
+/// ALTER/SESSION/START/COMMIT/CALL 等，这些要么是写、要么会改会话状态、要么调
+/// 内置过程，LLM 的图查询都用不到。`CALL` 刻意不放行：内置过程（图算法等）的
+/// 副作用边界没有逐个审过。`WITH` / `SELECT` 也不在内：0.5.43 的 GQL 语法里它们
+/// 不能开头（`WITH` 只能出现在 MATCH 之后，`SELECT` 要求 `FROM` 的 SQL 形态），
+/// 列进来只会放行必然语法错误的语句，并扩大需要审计的表面。
+const GQL_READ_LEAD_KEYWORDS: &[&str] = &["MATCH", "OPTIONAL", "UNWIND", "FOR", "RETURN"];
+
+/// 单条 GQL 查询的字节上限。查询文本来自 LLM，过长的输入没有合法用途。
+const GQL_MAX_QUERY_BYTES: usize = 16 * 1024;
+
+/// 引擎之外的第二道闸：拦截「不改图、但越出图本身」的语句形态。
+///
+/// 引擎的 `Role::ReadOnly` 会话已经挡掉所有写入（见 `query_gql_read_only`），
+/// 但 grafeo 的 GQL 带 `LOAD DATA FROM '<本地路径>' FORMAT CSV|JSONL|PARQUET AS row`
+///（以及 Cypher 兼容写法 `LOAD CSV FROM ...`）：它是读，只读会话照样放行，
+/// 结果就是 LLM 能把任意本地文本文件当 CSV 读出来。图查询没有理由碰文件系统。
+///
+/// `LOAD` 在引擎词法里是普通标识符（可出现在语句开头，也可出现在任意子句位置），
+/// 所以不按位置判断，而是对全文做 ASCII 单词切分：任何一个单词等于 `LOAD`
+///（大小写不敏感、含反引号包裹和字符串字面量内的出现）就整条拒绝。代价是
+/// 变量/属性/字符串里恰好出现 `load` 一词的合法查询也会被拒，改个写法即可，
+/// 而拒绝方向是安全方向——判定边界与引擎词法不一致时，宁可误拒也不能漏放。
+fn check_gql_read_only_shape(query: &str) -> Result<(), GqlError> {
+    if query.len() > GQL_MAX_QUERY_BYTES {
+        return Err(GqlError::new(
+            "GQL_QUERY_INVALID",
+            format!(
+                "查询长度 {} 字节，超过上限 {GQL_MAX_QUERY_BYTES}",
+                query.len()
+            ),
+        ));
+    }
+    let trimmed = query.trim_start();
+    let lead: String = trimmed
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphabetic())
+        .collect();
+    if !GQL_READ_LEAD_KEYWORDS
+        .iter()
+        .any(|keyword| keyword.eq_ignore_ascii_case(&lead))
+    {
+        return Err(GqlError::new(
+            "GQL_READ_ONLY",
+            format!(
+                "只允许以 {} 开头的只读查询",
+                GQL_READ_LEAD_KEYWORDS.join("/")
+            ),
+        ));
+    }
+    let mentions_load = query
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .any(|word| word.eq_ignore_ascii_case("LOAD"));
+    if mentions_load {
+        return Err(GqlError::new(
+            "GQL_READ_ONLY",
+            "不允许 LOAD（读取本地文件）；查询里的变量、属性或字符串字面量也不能含 LOAD 一词",
+        ));
+    }
+    Ok(())
+}
+
+/// 把引擎错误归到稳定的 GQL 错误码：写入被拒、查询本身有误、其余读取失败。
+///
+/// 只读会话挡写有两条出口：计划里带写算子时返回 `TransactionReadOnly`
+///（GRAFEO-T003），而角色鉴权先于它触发时是 `permission denied` 的语义错误，
+/// 两者都是「被拒绝的写入」，对调用方是同一个信号。
+fn classify_gql_error(err: &grafeo::Error) -> GqlError {
+    let code = err.error_code().as_str();
+    let detail = err.to_string();
+    if code == "GRAFEO-T003" || detail.contains("permission denied") {
+        return GqlError::new("GQL_READ_ONLY", format!("只读会话拒绝写入语句（{detail}）"));
+    }
+    match code {
+        // 词法/语法/语义错误：调用方改写查询即可，错误文本带位置与期望项。
+        "GRAFEO-Q001" | "GRAFEO-Q002" | "GRAFEO-Q005" => GqlError::new("GQL_QUERY_INVALID", detail),
+        "GRAFEO-Q003" => GqlError::new("GQL_QUERY_TIMEOUT", detail),
+        _ => GqlError::new("GQL_QUERY_FAILED", detail),
+    }
+}
+
+/// 引擎值 → JSON。标量与容器按语义映射；时间、字节、向量、路径等没有自然 JSON
+/// 形态的值走 `Display` 文本，保证 LLM 拿到的永远是可读的 JSON 而不是外部枚举标签。
+fn gql_value_to_json(value: &Value) -> serde_json::Value {
+    match value {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(flag) => serde_json::Value::Bool(*flag),
+        Value::Int64(number) => serde_json::Value::from(*number),
+        // NaN / ±inf 没有 JSON 数字表示，退回文本而不是静默变 null。
+        Value::Float64(number) => serde_json::Number::from_f64(*number)
+            .map(serde_json::Value::Number)
+            .unwrap_or_else(|| serde_json::Value::String(number.to_string())),
+        Value::String(text) => serde_json::Value::String(text.to_string()),
+        Value::List(items) => {
+            serde_json::Value::Array(items.iter().map(gql_value_to_json).collect())
+        }
+        Value::Map(entries) => serde_json::Value::Object(
+            entries
+                .iter()
+                .map(|(key, entry)| (key.to_string(), gql_value_to_json(entry)))
+                .collect(),
+        ),
+        other => serde_json::Value::String(other.to_string()),
+    }
 }
 
 /// Grafeo 图存储
@@ -171,6 +284,38 @@ impl GrafeoGraphStore {
     pub fn close(self) -> GraphStoreResult<()> {
         self.db.close().map_err(|err| GraphStoreError::WriteFailed {
             reason: err.to_string(),
+        })
+    }
+
+    /// 在只读会话里执行一条 GQL 查询，最多返回 `max_rows` 行（M59-3 C4）。
+    ///
+    /// 只读由两道闸保证，缺一不可：
+    /// 1. **引擎闸**：`session_with_role(Role::ReadOnly)`。引擎在执行前检查计划，
+    ///    带写算子（INSERT/SET/DELETE/REMOVE/MERGE 等）或 DDL（建索引、建图、
+    ///    DROP）一律拒绝，图与索引不会被改动。runtime 打开 `.grafeo` 用的是
+    ///    读写 `open()`（WAL 回放需要），所以不能指望文件级只读，只读必须落在会话上。
+    /// 2. **形态闸**：`check_gql_read_only_shape` 拦截引擎视为「读」、但会越出图
+    ///    本身的 `LOAD`（本地文件读取），并把起始关键字收窄到纯读语句。
+    ///
+    /// 查询超时沿用引擎默认（30 秒），超时报 `GQL_QUERY_TIMEOUT`。
+    pub fn query_gql_read_only(&self, query: &str, max_rows: usize) -> Result<GqlRows, GqlError> {
+        check_gql_read_only_shape(query)?;
+        let session = self.db.session_with_role(Role::ReadOnly);
+        let result = session
+            .execute(query)
+            .map_err(|err| classify_gql_error(&err))?;
+        let total_rows = result.row_count();
+        let rows = result
+            .rows()
+            .iter()
+            .take(max_rows)
+            .map(|row| row.iter().map(gql_value_to_json).collect())
+            .collect();
+        Ok(GqlRows {
+            columns: result.columns.clone(),
+            rows,
+            total_rows,
+            truncated: total_rows > max_rows,
         })
     }
 

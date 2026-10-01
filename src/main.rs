@@ -68,6 +68,7 @@ fn has_session_query_request(args: &cli::Cli) -> bool {
         || args.find_component.is_some()
         || args.resolve_model.is_some()
         || args.advise_query.is_some()
+        || args.gql.is_some()
 }
 
 /// 执行一次三动词表面调用：裸名归一 -> 路由展开 -> 逐条执行 -> 合并输出。
@@ -1277,6 +1278,30 @@ fn run_query_commands(
                 },
             )?;
             println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        return Ok(true);
+    }
+
+    // M59-3 C4：只读 GQL。失败输出结构化 `{ok:false,error:{code,message}}`，
+    // 与 session 命令同信封，调用方（LLM）按 code 决定下一步；成功输出结果表。
+    if let Some(ref query) = args.gql {
+        match runtime.graph.query_gql_read_only(query, args.gql_max_rows) {
+            Ok(table) => {
+                if args.is_human() {
+                    println!("{}", table.to_tsv());
+                } else {
+                    println!("{}", serde_json::to_string(&table.to_json())?);
+                }
+            }
+            Err(error) => {
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "ok": false,
+                        "error": {"code": error.code, "message": error.message},
+                    }))?
+                );
+            }
         }
         return Ok(true);
     }

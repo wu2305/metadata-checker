@@ -109,6 +109,11 @@ Release 二进制约 1.6MB，支持跨平台编译（`windows_amd64`、`macos_ar
 # 11) 展开 DataFlow 子图
 ./target/release/metadata-checker --project-dir /path/to/project --query-dataflow flow.tbl
 
+# 12) 只读 GQL 直查（仅 `.grafeo` 图库；M59-3 C4）
+./target/release/metadata-checker --project-dir /path/to/project --build-graph --graph-db-path /tmp/my_project.grafeo
+./target/release/metadata-checker --graph-db-path /tmp/my_project.grafeo --gql "MATCH (a:Node)-[r:Reads]->(b:Node) RETURN a.id, b.id, r.field_path"
+./target/release/metadata-checker --graph-db-path /tmp/my_project.grafeo --human --gql-max-rows 20 --gql "MATCH (n:Node) RETURN n.node_type AS type, count(n) AS total"
+
 ### 长驻 session diff refresh / stdio
 
 已有 session 需要连续查询时，使用 `--serve-stdio --runtime-session-id <ID>` 绑定远端 session；用户名和密码只用于本次进程登录，不落盘。绑定成功后，stdio 请求使用 `diff_refresh` 执行一轮刷新：
@@ -231,6 +236,8 @@ Options:
       --query-cross <A> <B> 查询两页面间的跨文件关系（需图上下文，可配合 --project-dir 或 --graph-db-path）
       --query-dataflow <M>  展开 DataFlow 模型的内部子图（需图上下文，可配合 --project-dir 或 --graph-db-path）
       --query-page-logic <P> 查询页面级逻辑摘要（需图上下文，可配合 --project-dir 或 --graph-db-path）
+      --gql <QUERY>         对 `.grafeo` 图库执行只读 GQL（节点 `(:Node {id,node_type,path,name,meta,origin_file})`，边 `[:<EdgeType> {field_path,meta,origin_file}]`；仅 MATCH/OPTIONAL/UNWIND/FOR/RETURN，写入与 LOAD 被拒；失败输出 `{"ok":false,"error":{"code",...}}`）
+      --gql-max-rows <N>    --gql 最多返回的行数（默认 200，超出时结果带 `truncated: true`）
       --remote-index <ID>   下载远端项目并建立会话索引（与 --session-refresh 等价）
       --session-refresh <ID> 刷新远端会话（等价于 --remote-index）
       --remote-server <URL> 远端 BI 服务地址
