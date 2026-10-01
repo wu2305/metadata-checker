@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["cli-local"]
+default = ["cli-local", "grafeo-store"]
 cli-local = [
     "dep:clap",
     "dep:redb",
@@ -19,11 +19,11 @@ cli-local = [
     "dep:urlencoding",
     "dep:tokio",
     "dep:lz-str",
-    "grafeo-store",
 ]
-# M59-3 C1：Grafeo 图后端。默认随 cli-local 开启（M59 spec §0 已解除体积闸门），
-# 单独留出 feature 名是为了做「带/不带 grafeo」的体积与性能对照，以及让
-# browser-wasm 构建保持不链接 grafeo。
+# M59-3 C1：Grafeo 图后端，默认开启（M59 spec §0 已解除体积闸门）。
+# 不并入 `cli-local` 而单列：`--no-default-features --features cli-local`
+# 就是「不带 grafeo」的对照构建，用来量体积与性能差；browser-wasm 也因此
+# 天然不链接 grafeo。
 grafeo-store = ["dep:grafeo"]
 telemetry = [
     "dep:tracing",

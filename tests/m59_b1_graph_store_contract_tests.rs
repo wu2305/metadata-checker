@@ -38,6 +38,7 @@
 #![cfg(feature = "cli-local")]
 
 use metadata_checker::graph::{Edge, EdgeType, Node, NodeType};
+#[cfg(feature = "grafeo-store")]
 use metadata_checker::graph_grafeo::GrafeoGraphStore;
 use metadata_checker::graph_redb::GraphDB;
 use metadata_checker::graph_store::{GraphEdgeView, GraphStore};
@@ -616,6 +617,7 @@ macro_rules! contract_suite {
             )*
         }
 
+        #[cfg(feature = "grafeo-store")]
         mod grafeo_store {
             use super::*;
             $(
