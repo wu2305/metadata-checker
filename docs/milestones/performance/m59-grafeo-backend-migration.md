@@ -690,3 +690,98 @@ scoped id                    → Exact                                  ⇒ 零�
   测量，仅消除确定性浪费）。
 - 仍未关闭：`cond`/`comp`/`action`/`param` 裸名解析未定义（与 A1 文法一致，属设计
   边界）；未进入 Grafeo / M59-3。
+
+## 2026-10-01 阶段 C1：Grafeo 图存储后端接入（`6ef2db9` → HEAD）
+
+### 做了什么
+
+- `Cargo.toml` 新增可选依赖 `grafeo 0.5.43`，feature 只开 `["edge", "storage"]`。
+  0.5.43 的 `lpg` 已把 `gql` / `cypher` / `gremlin` / `sql-pgq` 连带拉进来——
+  四个查询语言解析器本实现一个都不调用，故不开 `lpg`。
+- `src/graph_grafeo.rs`：`GrafeoGraphStore` 实现 `GraphReadStore` + `GraphWriteStore`，
+  全程走直写 API（`create_node_with_props` / `create_edge_with_props` /
+  `set_node_property` / `get_neighbors_*` / `delete_node` / `delete_edge` /
+  `iter_nodes` / `iter_edges`），**不经任何查询语言**。
+- feature `grafeo-store` 为单列 feature、**不并入 `default`**（评审后调整：C1 尚无
+  生产调用点，默认构建不为未接线引擎付编译代价；C2 接线时再并入）。
+  `cargo test --features cli-local` 即「不带 grafeo」的对照口径，
+  `--features cli-local,grafeo-store` 才跑 grafeo 实现。
+- `AGENTS.md`：按 spec §0 解除 10MB 硬闸门，改为「每次影响依赖/feature 的 PR
+  须记录实测体积与变化量」。
+
+### 两个必须自己兜住的语义
+
+1. **应用 ID ≠ Grafeo `NodeId`**。Grafeo 的 `NodeId` 由库分配，应用侧稳定标识是
+   字符串 `id`，因此存 `id` 属性 + 建 property index，并在内存维护
+   `HashMap<String, NodeId>`；重开库时用 `iter_nodes` 重建该映射。
+2. **删节点不保证级联删边**。`remove_nodes_by_ids` 显式先删出边与入边再删节点，
+   并清掉涉及已删节点的去重键——否则「删节点后重建同一条边」会被旧去重键吞掉。
+
+去重键与 meta 合并一律复用 `graph_store.rs` 的 `edge_dedup_key` /
+`merge_upsert_meta`，不让三个实现各写一份语义。
+
+### 验证（workspace `cnb-9ok-1k3rc24lm`）
+
+- `cargo test --features cli-local --test m59_b1_graph_store_contract_tests`
+  → **45 passed / 0 failed**（15 条契约用例 × memory / redb / grafeo 三实现，
+  用例体未改一行，这是 spec §2.6 规定的 C1 验收判据）。
+- `cargo test --features cli-local --test m59_c1_grafeo_store_tests`
+  → **8 passed / 0 failed**（全 `NodeType` / `EdgeType` 往返、嵌套与 Unicode meta、
+  `None` vs JSON `null` vs 空对象、重开库恢复去重键、只读打开、缺文件报错、
+  删节点后计数一致）。
+- `cargo test --features cli-local` 全量 → 111 个 `test result: ok`，无失败项。
+- `cargo check --no-default-features --features browser-wasm
+  --target wasm32-unknown-unknown` 通过（grafeo 不进 wasm 构建）。
+- `cargo fmt --check` 通过。`cargo clippy` 未跑：该 workspace 的 1.95.0 工具链
+  未装 `cargo-clippy`。
+
+### 实测体积
+
+评审修复后同工具链复测（本机 cargo 1.97.1，`cargo build --release`）：
+
+| 构建 | 字节 | 相对 |
+|---|---|---|
+| 默认（`cli-local`，不含 grafeo） | 5,942,264 | 基线 |
+| `--features cli-local,grafeo-store` | 5,950,840 | **+8,576 B（+0.14%）** |
+
+**这个 +8.6KB 不代表 grafeo 的真实体积代价**：C2 尚未把 Grafeo 接进 CLI 导入链路，
+二进制里没有调用点，链接器把它整体丢掉了（只有 lib/测试目标链接）。
+真实增量要等 C2 直写导入落地后重测——spike 测过的 8.86 MiB 是带四个解析器的数，
+`edge + storage` 的数现在还没有。
+
+### 边界
+
+- 持久化路径须以 `.grafeo` 结尾：Grafeo 对新建持久路径按扩展名选单文件格式，
+  只有该格式支持只读打开。
+- redb 仍是默认实现，**本轮不退役**。退役是 D2，前置为 C2/C3/C4/C5 + D1 真实语料
+  验收；且 `GraphDB` 目前是 native 路径上唯一的 `IndexStateStore`，C2 之前删掉
+  就没有索引提交路径。
+- 不宣称查询等价、不宣称性能改善：C3（22 个 `EdgeType` 查询动词）、
+  C4（只读表投影 / WHERE / LIMIT / TSV / JSON）、D1（真实语料正确性与性能）均未动。
+
+## 2026-10-01 C1 评审修复（PR #47，NPC CodeBuddy `changes_requested`）
+
+六条行级意见的处置：
+
+1. **`Cargo.lock` 随依赖提交**（阻塞项）：C1 三笔提交漏带 lock，与 `main` 逐字节
+   相同、无 grafeo 条目，`--locked/--frozen` 构建会失败。本修复补交完整 lock
+   （纯增量 grafeo 依赖树，`cargo check --locked` 验证一致）。
+2. **`grafeo-store` 移出 `default`**：C1 尚无生产调用点，默认构建不应为未接线
+   引擎付编译代价。改为单列 feature，C2 接线时再并入 `default`。
+   测试口径相应改为 `--features cli-local,grafeo-store`。
+3. **AGENTS.md 去瞬态引用**：删除对 `codex/m59-3-grafeo-store` 分支名与一次性
+   字节读数的引用，改为引用 spec §0 + 「纯 redb 形态（`cli-local`）」这一稳定
+   形态，并明说 Grafeo 引入是 spec §0 例外而非对「轻量级 crate」规则的放宽。
+4. **`node_from_props` 口径统一**：`id`/`node_type` 缺失报 `Corrupted` 但
+   `path`/`name` 用 `unwrap_or_default()` 静默填空——upsert 两条路径都必写
+   这两属性，缺失同样是坏数据。四个属性统一 `ok_or_else(Corrupted)`。
+5. **`add_edge` 去重键登记时机**：`seen_edges.insert` 原排在可失败的
+   `create_edge_with_props` 之前，建边失败后重试会被当重复静默丢弃。
+   改为落库成功后登记。
+6. **补「不 close 直接 drop」恢复用例**：新增
+   `drop_without_close_reopens_with_graph_and_dedup_keys`，覆盖调用方不手工
+   `close()` 时 `open()` 的 WAL 回放恢复路径（节点/边/去重键断言）。
+
+验证（本机 cargo 1.97.1）：`cargo test --features cli-local,grafeo-store
+--test m59_b1_graph_store_contract_tests --test m59_c1_grafeo_store_tests`
+→ 45 + 9 passed / 0 failed；`cargo fmt` 通过；`--locked` check 通过。
