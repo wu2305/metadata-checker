@@ -11,7 +11,7 @@ use metadata_checker::session::reqwest_provider::{
 };
 use metadata_checker::tool_contract::{self, InvocationAdapter};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::io::{self, Write};
 
@@ -96,7 +96,7 @@ fn run_surface(
             .iter()
             .find(|prefix| target == **prefix)
         {
-            return Ok(enumerate_prefix_targets(runtime, surface, prefix));
+            return enumerate_prefix_targets(runtime, surface, prefix);
         }
     }
 
@@ -171,7 +171,7 @@ fn run_surface(
                 resolved_sides.push(side.clone());
                 continue;
             }
-            match normalize_target_against_graph(runtime, side) {
+            match normalize_target_against_graph(runtime, side)? {
                 PrefixedTargetResolution::Exact => resolved_sides.push(side.clone()),
                 PrefixedTargetResolution::Resolved {
                     target: resolved,
@@ -220,7 +220,7 @@ fn run_surface(
     // 剩下的拒绝里 83% 是 `page:actions_test` 这种前缀对、路径没写全的写法。
     let mut near_miss: Vec<String> = Vec::new();
     if surface != route::Surface::Find && route::has_type_prefix(&target) && !target.contains(',') {
-        match normalize_target_against_graph(runtime, &target) {
+        match normalize_target_against_graph(runtime, &target)? {
             PrefixedTargetResolution::Exact => {}
             PrefixedTargetResolution::Resolved {
                 target: resolved,
@@ -648,11 +648,13 @@ fn enumerate_prefix_targets(
     runtime: &metadata_checker::runtime::GraphRuntime,
     surface: metadata_checker::route::Surface,
     prefix: &str,
-) -> serde_json::Value {
+) -> Result<serde_json::Value> {
+    // 读图失败必须上抛：吞成空列表会把「图读不出来」伪装成「没有这类节点」。
     let enumerated: Vec<String> =
         metadata_checker::graph_store::GraphReadStore::iter_nodes(&runtime.graph)
-            .map(|nodes| nodes.map(|node| node.id).collect())
-            .unwrap_or_default();
+            .context("枚举图节点失败")?
+            .map(|node| node.id)
+            .collect();
     let mut ids: Vec<&str> = enumerated
         .iter()
         .map(String::as_str)
@@ -703,7 +705,7 @@ fn enumerate_prefix_targets(
         ),
     });
     attach_confidence(&mut result);
-    result
+    Ok(result)
 }
 
 /// 从一份答案里摘出直接相邻的节点 id。
@@ -1006,19 +1008,28 @@ fn has_diagnostic_code(result: &serde_json::Value, code: &str) -> bool {
 fn normalize_target_against_graph(
     runtime: &metadata_checker::runtime::GraphRuntime,
     target: &str,
-) -> metadata_checker::route::PrefixedTargetResolution {
+) -> Result<metadata_checker::route::PrefixedTargetResolution> {
     use metadata_checker::graph_store::GraphReadStore;
     // O(1) 精确命中先返回——绝大多数调用在这里就结束，不该给正确写法的
-    // target 加扫图成本。get_node 读错（坏数据）按未命中处理，落回模糊归一。
-    if runtime.graph.get_node(target).ok().flatten().is_some() {
-        return metadata_checker::route::PrefixedTargetResolution::Exact;
+    // target 加扫图成本。读错（坏数据）上抛，不当作未命中去做模糊归一。
+    if runtime
+        .graph
+        .get_node(target)
+        .with_context(|| format!("读取节点 {target} 失败"))?
+        .is_some()
+    {
+        return Ok(metadata_checker::route::PrefixedTargetResolution::Exact);
     }
     let node_ids: Vec<String> = runtime
         .graph
         .iter_nodes()
-        .map(|nodes| nodes.map(|node| node.id).collect())
-        .unwrap_or_default();
-    metadata_checker::route::normalize_prefixed_target(target, node_ids.iter().map(String::as_str))
+        .context("枚举图节点失败")?
+        .map(|node| node.id)
+        .collect();
+    Ok(metadata_checker::route::normalize_prefixed_target(
+        target,
+        node_ids.iter().map(String::as_str),
+    ))
 }
 
 /// 把补充调用的 details 折进主输出的 `details.<key>`，并合并它的 evidence。
