@@ -384,7 +384,11 @@ pub(in crate::explain) fn explain_dataflow_graph(
     // Build internal topology
     let mut internal_nodes = Vec::new();
     let mut internal_edges = Vec::new();
-    for (alias, node_id) in &alias_map {
+    // alias_map 是 HashMap——枚举序随随机种子逐次不同，internal_topology
+    // 的输出顺序必须确定（同一图两次 explain 也要一致），按 node_id 排序。
+    let mut alias_pairs: Vec<(&String, &String)> = alias_map.iter().collect();
+    alias_pairs.sort_by(|a, b| a.1.cmp(b.1).then_with(|| a.0.cmp(b.0)));
+    for (alias, node_id) in alias_pairs {
         let ntype = node_types
             .get(node_id)
             .map(|s| s.as_str())

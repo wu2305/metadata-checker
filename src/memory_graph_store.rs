@@ -128,10 +128,18 @@ impl GraphReadStore for MemoryGraphStore {
         if !self.nodes.contains_key(node_id) {
             return Ok(None);
         }
-        Ok(Some(GraphNeighbors {
-            outgoing: self.neighbors_of(self.outgoing.get(node_id), true),
-            incoming: self.neighbors_of(self.incoming.get(node_id), false),
-        }))
+        // 排序契约（见 trait 文档）：与持久化后端同为 edge_storage_key 降序。
+        let mut outgoing = self.neighbors_of(self.outgoing.get(node_id), true);
+        let mut incoming = self.neighbors_of(self.incoming.get(node_id), false);
+        outgoing.sort_by(|a, b| {
+            crate::graph_store::edge_storage_key(&b.edge)
+                .cmp(&crate::graph_store::edge_storage_key(&a.edge))
+        });
+        incoming.sort_by(|a, b| {
+            crate::graph_store::edge_storage_key(&b.edge)
+                .cmp(&crate::graph_store::edge_storage_key(&a.edge))
+        });
+        Ok(Some(GraphNeighbors { outgoing, incoming }))
     }
 
     fn node_count(&self) -> GraphStoreResult<usize> {
@@ -143,7 +151,10 @@ impl GraphReadStore for MemoryGraphStore {
     }
 
     fn iter_nodes(&self) -> GraphStoreResult<Box<dyn Iterator<Item = Node> + '_>> {
-        Ok(Box::new(self.nodes.values().cloned()))
+        // 排序契约（见 trait 文档）：HashMap 枚举序不确定，统一为 id 字典序。
+        let mut nodes: Vec<Node> = self.nodes.values().cloned().collect();
+        nodes.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(Box::new(nodes.into_iter()))
     }
 }
 

@@ -163,29 +163,10 @@ fn validate_project_markers(
     }
 }
 
-/// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约）。
-///
-/// scanner/bench 收集 delta 与 persist 全量/增量写共用同一格式，避免两套键。
-pub fn edge_storage_key(edge: &Edge) -> String {
-    // 关系排序前缀保留既有重启后的邻接顺序；它只负责排序，不负责唯一性。
-    // NUL 后的完整 JSON 负责身份，JSON 会转义输入中的 NUL，段边界不可混淆。
-    let relation_order = format!(
-        "{}|{}|{}|{}",
-        edge.from,
-        edge.to,
-        serde_json::json!(edge.edge_type),
-        edge.field_path.as_deref().unwrap_or("")
-    );
-    let fact = serde_json::json!([
-        edge.from,
-        edge.to,
-        edge.edge_type,
-        edge.field_path,
-        edge.meta,
-        edge.origin_file
-    ]);
-    format!("{relation_order}\0{fact}")
-}
+// M56：edge 在 EDGES_TABLE 的存储键（存储格式契约），实现已上移到
+// ungated 的 graph_store（grafeo/memory 的邻接排序契约共用）；此处 re-export
+// 保持既有 `graph_redb::edge_storage_key` 调用面不变。
+pub use crate::graph_store::edge_storage_key;
 
 /// M58.3 复核返修：在给定 write transaction 内按文件覆盖/删除 scanner 诊断
 /// 计数 entry（`persist_internal` 专用，保证诊断与图/checkpoint 同生共死）。
@@ -2267,6 +2248,8 @@ impl GraphReadStore for GraphDB {
             })
             .collect();
 
+        // petgraph 邻接 = 插入序；此顺序是既有查询输出的事实标准
+        // （快照语料与其绑死），排序契约见 trait 文档。
         Ok(Some(GraphNeighbors { outgoing, incoming }))
     }
 
@@ -2279,6 +2262,8 @@ impl GraphReadStore for GraphDB {
     }
 
     fn iter_nodes(&self) -> GraphStoreResult<Box<dyn Iterator<Item = Node> + '_>> {
+        // hydrate 按 NODES_TABLE 键序（id 字典序）插点 ⇒ NodeIndex 序即
+        // id 字典序；该顺序是既有输出的事实标准（排序契约见 trait 文档）。
         Ok(Box::new(self.graph.node_weights().cloned()))
     }
 }

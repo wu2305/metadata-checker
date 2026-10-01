@@ -28,7 +28,7 @@ fn fixture_runtime(test_name: &str) -> anyhow::Result<(GraphRuntime, std::path::
     Ok((runtime, temp_dir))
 }
 
-fn collect_fixture_page_ids(graph: &GraphDB) -> anyhow::Result<Vec<String>> {
+fn collect_fixture_page_ids(graph: &dyn GraphReadStore) -> anyhow::Result<Vec<String>> {
     Ok(graph
         .iter_nodes()?
         .filter(|node| matches!(node.node_type, metadata_checker::graph::NodeType::Page))

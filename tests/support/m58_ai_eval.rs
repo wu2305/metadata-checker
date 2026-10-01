@@ -368,7 +368,9 @@ impl TargetResolver {
             return Self::default();
         };
         Self {
-            known_ids: runtime.graph.node_indices.keys().cloned().collect(),
+            known_ids: metadata_checker::graph_store::GraphReadStore::iter_nodes(&runtime.graph)
+                .map(|nodes| nodes.map(|node| node.id).collect())
+                .unwrap_or_default(),
         }
     }
 

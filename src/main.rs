@@ -649,10 +649,12 @@ fn enumerate_prefix_targets(
     surface: metadata_checker::route::Surface,
     prefix: &str,
 ) -> serde_json::Value {
-    let mut ids: Vec<&str> = runtime
-        .graph
-        .node_indices
-        .keys()
+    let enumerated: Vec<String> =
+        metadata_checker::graph_store::GraphReadStore::iter_nodes(&runtime.graph)
+            .map(|nodes| nodes.map(|node| node.id).collect())
+            .unwrap_or_default();
+    let mut ids: Vec<&str> = enumerated
+        .iter()
         .map(String::as_str)
         .filter(|id| id.starts_with(prefix))
         .collect();
@@ -1005,13 +1007,18 @@ fn normalize_target_against_graph(
     runtime: &metadata_checker::runtime::GraphRuntime,
     target: &str,
 ) -> metadata_checker::route::PrefixedTargetResolution {
-    if runtime.graph.node_indices.contains_key(target) {
+    use metadata_checker::graph_store::GraphReadStore;
+    // O(1) 精确命中先返回——绝大多数调用在这里就结束，不该给正确写法的
+    // target 加扫图成本。get_node 读错（坏数据）按未命中处理，落回模糊归一。
+    if runtime.graph.get_node(target).ok().flatten().is_some() {
         return metadata_checker::route::PrefixedTargetResolution::Exact;
     }
-    metadata_checker::route::normalize_prefixed_target(
-        target,
-        runtime.graph.node_indices.keys().map(String::as_str),
-    )
+    let node_ids: Vec<String> = runtime
+        .graph
+        .iter_nodes()
+        .map(|nodes| nodes.map(|node| node.id).collect())
+        .unwrap_or_default();
+    metadata_checker::route::normalize_prefixed_target(target, node_ids.iter().map(String::as_str))
 }
 
 /// 把补充调用的 details 折进主输出的 `details.<key>`，并合并它的 evidence。

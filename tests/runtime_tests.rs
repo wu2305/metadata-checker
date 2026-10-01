@@ -626,7 +626,11 @@ fn test_prepare_replacement_requires_long_lived_read_model() {
         "OneShot must not build read model"
     );
 
-    let candidate = GraphRuntime::load(&db_path).expect("load candidate").graph;
+    let candidate = match GraphRuntime::load(&db_path).expect("load candidate").graph {
+        metadata_checker::runtime::RuntimeGraphBackend::Redb(graph) => graph,
+        #[allow(unreachable_patterns)]
+        _ => panic!("fixture .graphdb must load as redb backend"),
+    };
     let error = match runtime.prepare_replacement(&candidate, &[]) {
         Ok(_) => panic!("OneShot prepare_replacement must fail"),
         Err(error) => error,

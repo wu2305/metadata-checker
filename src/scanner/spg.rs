@@ -2102,5 +2102,9 @@ pub fn process_spg_file_from_value_with_identity(
         )?;
     }
 
-    Ok(node_ids.into_iter().collect())
+    // FileState.node_ids 落库口径要求跨后端字节一致：HashSet 枚举序依赖
+    // 随机种子、逐次运行都不同，统一排序后返回。
+    let mut node_ids: Vec<String> = node_ids.into_iter().collect();
+    node_ids.sort_unstable();
+    Ok(node_ids)
 }

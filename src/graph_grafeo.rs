@@ -386,6 +386,13 @@ impl GrafeoGraphStore {
                 edge: edge_view,
             });
         }
+        // 排序契约（见 trait 文档）：redb hydrate 按 edge_storage_key 升序
+        // 插边、petgraph 邻接取反 ⇒ 事实标准为该键降序，据此对齐而非依赖
+        // EdgeId/邻接枚举序。
+        views.sort_by(|a, b| {
+            crate::graph_store::edge_storage_key(&b.edge)
+                .cmp(&crate::graph_store::edge_storage_key(&a.edge))
+        });
         Ok(views)
     }
 }
@@ -436,6 +443,9 @@ impl GraphReadStore for GrafeoGraphStore {
             }
             nodes.push(node_from_props(|key| raw.get_property(key).cloned())?);
         }
+        // 排序契约（见 trait 文档）：redb hydrate 按 NODES_TABLE 键序
+        //（= 节点 id 字典序）插点，id 字典序与之对齐。
+        nodes.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(Box::new(nodes.into_iter()))
     }
 }
