@@ -1,0 +1,51 @@
+# GitHub -> CNB 同步触发器
+#
+# 任何分支/标签的 push（含 PR merge 产生的 push）都调用 CNB OpenAPI 触发
+# api_trigger_github_sync_from 流水线（.cnb.yml 的 "$" 分支下），由 CNB 侧
+# scripts/sync-from-github.sh 把 GitHub 引用拉取到 CNB 的 github-sync/* 与
+# github-sync-tags/* 隔离命名空间，绝不直写 CNB 既有分支/标签。
+#
+# 需要的 Secret：
+#   CNB_TOKEN — CNB 访问令牌，需具备本仓库（wu2305/metadata-checker）的
+#               build/start 触发权限。未配置时本 workflow 优雅跳过，不判红。
+name: Sync to CNB
+
+on:
+  push:
+    branches: ['**']
+    tags: ['**']
+  workflow_dispatch:
+
+jobs:
+  trigger-cnb-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger CNB api_trigger_github_sync_from pipeline
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+          CNB_REPO: wu2305/metadata-checker
+        run: |
+          set -euo pipefail
+          if [ -z "${CNB_TOKEN}" ]; then
+            echo "CNB_TOKEN secret not configured; skipping CNB sync."
+            exit 0
+          fi
+          # api_trigger 需要目标分支当前的完整 sha；公开仓库可匿名 ls-remote 获取。
+          sha="$(git ls-remote "https://cnb.cool/${CNB_REPO}" 'refs/heads/main' | cut -f1)"
+          if [ -z "${sha}" ]; then
+            echo "::error::failed to resolve CNB main sha via ls-remote"
+            exit 1
+          fi
+          curl -sf -X POST "https://api.cnb.cool/${CNB_REPO}/-/build/start" \
+            -H "Authorization: Bearer ${CNB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"branch\": \"main\",
+              \"sha\": \"${sha}\",
+              \"event\": \"api_trigger_github_sync_from\",
+              \"env\": {
+                \"GITHUB_SYNC_REF\": \"${GITHUB_REF_NAME}\",
+                \"GITHUB_SYNC_SHA\": \"${GITHUB_SHA}\"
+              }
+            }"
+          echo "CNB sync triggered for ${GITHUB_REF_NAME}@${GITHUB_SHA}"
