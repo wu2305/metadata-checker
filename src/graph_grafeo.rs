@@ -344,6 +344,8 @@ impl GrafeoGraphStore {
     pub fn load_diff_refresh_checkpoint(&self) -> GraphStoreResult<Option<DiffRefreshCheckpoint>> {
         Ok(self.checkpoint.clone())
     }
+
+    /// 按方向组装邻居视图。`outgoing` 为真表示出边（对端是 `to`）。
     fn neighbors_of(
         &self,
         node_id: &str,
@@ -389,9 +391,9 @@ impl GrafeoGraphStore {
         // 排序契约（见 trait 文档）：redb hydrate 按 edge_storage_key 升序
         // 插边、petgraph 邻接取反 ⇒ 事实标准为该键降序，据此对齐而非依赖
         // EdgeId/邻接枚举序。
-        views.sort_by(|a, b| {
-            crate::graph_store::edge_storage_key(&b.edge)
-                .cmp(&crate::graph_store::edge_storage_key(&a.edge))
+        // 键含 JSON 序列化，按键缓存排序，每条边只构造一次（高扇出节点热路径）。
+        views.sort_by_cached_key(|view| {
+            std::cmp::Reverse(crate::graph_store::edge_storage_key(&view.edge))
         });
         Ok(views)
     }

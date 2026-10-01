@@ -131,13 +131,11 @@ impl GraphReadStore for MemoryGraphStore {
         // 排序契约（见 trait 文档）：与持久化后端同为 edge_storage_key 降序。
         let mut outgoing = self.neighbors_of(self.outgoing.get(node_id), true);
         let mut incoming = self.neighbors_of(self.incoming.get(node_id), false);
-        outgoing.sort_by(|a, b| {
-            crate::graph_store::edge_storage_key(&b.edge)
-                .cmp(&crate::graph_store::edge_storage_key(&a.edge))
+        outgoing.sort_by_cached_key(|view| {
+            std::cmp::Reverse(crate::graph_store::edge_storage_key(&view.edge))
         });
-        incoming.sort_by(|a, b| {
-            crate::graph_store::edge_storage_key(&b.edge)
-                .cmp(&crate::graph_store::edge_storage_key(&a.edge))
+        incoming.sort_by_cached_key(|view| {
+            std::cmp::Reverse(crate::graph_store::edge_storage_key(&view.edge))
         });
         Ok(Some(GraphNeighbors { outgoing, incoming }))
     }
