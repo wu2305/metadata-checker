@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+# C2 起 grafeo-store 已接线（.grafeo 路径的 --build-graph 导入链路），并入 default。
 default = ["cli-local", "grafeo-store"]
 cli-local = [
     "dep:clap",
