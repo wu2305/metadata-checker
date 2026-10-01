@@ -213,7 +213,7 @@
           "has_json_path": false,
           "path_length": 5,
           "same_page": true,
-          "source_file_count": 3
+          "source_file_count": 4
         },
         "segments": [
           {
@@ -301,7 +301,7 @@
               "name": "model2",
               "node_id": "model:model2",
               "node_type": "Model",
-              "path": "data/table2.tbl"
+              "path": "model2.tbl"
             }
           },
           {
@@ -317,7 +317,7 @@
               "name": "model2",
               "node_id": "model:model2",
               "node_type": "Model",
-              "path": "data/table2.tbl"
+              "path": "model2.tbl"
             },
             "to": {
               "name": "fact_orders",
