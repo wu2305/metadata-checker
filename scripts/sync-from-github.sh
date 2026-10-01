@@ -11,15 +11,20 @@
 #   人工 review 后，再按正常 PR 流程把 github-sync/* 合并进目标分支。
 #
 # 依赖两个 CNB secret 注入的环境变量（不在此处硬编码、不打印）：
-#   GITHUB_MIRROR_URL    源 GitHub 仓库地址
+#   GITHUB_MIRROR_URL    源 GitHub 仓库地址；未配置时默认 https://github.com/wu2305/metadata-checker.git
 #   GITHUB_MIRROR_TOKEN  具备 repo 读权限的 GitHub PAT
 set -euo pipefail
 
 REMOTE_NAME="github"
 
-# 未配置 secret 时跳过。
-if [ -z "${GITHUB_MIRROR_URL:-}" ] || [ -z "${GITHUB_MIRROR_TOKEN:-}" ]; then
-  echo "GITHUB_SYNC_SKIP: 未配置 GITHUB_MIRROR_URL / GITHUB_MIRROR_TOKEN，跳过 GitHub 反向同步。"
+# GITHUB_MIRROR_URL 未配置时使用仓库约定的默认 GitHub 地址。
+if [ -z "${GITHUB_MIRROR_URL:-}" ]; then
+  GITHUB_MIRROR_URL="https://github.com/wu2305/metadata-checker.git"
+fi
+
+# token 缺失则跳过。
+if [ -z "${GITHUB_MIRROR_TOKEN:-}" ]; then
+  echo "GITHUB_SYNC_SKIP: 未配置 GITHUB_MIRROR_TOKEN，跳过 GitHub 反向同步。"
   exit 0
 fi
 

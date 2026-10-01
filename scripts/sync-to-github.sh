@@ -5,20 +5,25 @@
 # 触发方式：由 .cnb.yml 的 main.push 流水线阶段自动调用。
 #
 # 依赖两个 CNB secret 注入的环境变量（不在此处硬编码、不打印）：
-#   GITHUB_MIRROR_URL    目标 GitHub 仓库地址，如 https://github.com/<owner>/<repo>.git
+#   GITHUB_MIRROR_URL    目标 GitHub 仓库地址；未配置时默认 https://github.com/wu2305/metadata-checker.git
 #   GITHUB_MIRROR_TOKEN  具备 repo 写权限的 GitHub PAT（脚本以 x-access-token 形式注入）
 #
 # 行为：先拉取 CNB(origin) 的全部分支与标签到本地，再用 `git push --mirror`
 #       把本地全量引用（含分支、标签，以及远端多余引用被删除）镜像到 GitHub。
-#       未配置 secret 时优雅跳过（打印 GITHUB_SYNC_SKIP 并以 0 退出），
-#       避免 secret 尚未在 CNB 后台配置时把整条 main CI 判红。
+#       token 未配置时优雅跳过（打印 GITHUB_SYNC_SKIP 并以 0 退出），
+#       避免 token 尚未在 CNB 后台配置时把整条 main CI 判红。
 set -euo pipefail
 
 REMOTE_NAME="github-mirror"
 
-# 未配置 secret 时跳过，不阻断 CI。
-if [ -z "${GITHUB_MIRROR_URL:-}" ] || [ -z "${GITHUB_MIRROR_TOKEN:-}" ]; then
-  echo "GITHUB_SYNC_SKIP: 未配置 GITHUB_MIRROR_URL / GITHUB_MIRROR_TOKEN，跳过 GitHub 镜像推送。"
+# GITHUB_MIRROR_URL 未配置时使用仓库约定的默认 GitHub 地址。
+if [ -z "${GITHUB_MIRROR_URL:-}" ]; then
+  GITHUB_MIRROR_URL="https://github.com/wu2305/metadata-checker.git"
+fi
+
+# token 缺失则跳过，不阻断 CI。
+if [ -z "${GITHUB_MIRROR_TOKEN:-}" ]; then
+  echo "GITHUB_SYNC_SKIP: 未配置 GITHUB_MIRROR_TOKEN，跳过 GitHub 镜像推送。"
   exit 0
 fi
 
