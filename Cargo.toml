@@ -19,7 +19,12 @@ cli-local = [
     "dep:urlencoding",
     "dep:tokio",
     "dep:lz-str",
+    "grafeo-store",
 ]
+# M59-3 C1：Grafeo 图后端。默认随 cli-local 开启（M59 spec §0 已解除体积闸门），
+# 单独留出 feature 名是为了做「带/不带 grafeo」的体积与性能对照，以及让
+# browser-wasm 构建保持不链接 grafeo。
+grafeo-store = ["dep:grafeo"]
 telemetry = [
     "dep:tracing",
     "dep:tracing-subscriber",
@@ -76,6 +81,14 @@ twox-hash = { version = "2", default-features = false, features = ["xxhash64"] }
 # cli-local only
 clap = { version = "4", features = ["derive", "help"], optional = true }
 redb = { version = "4.1.0", optional = true }
+# grafeo-store only：只要 LPG 直写引擎 + 持久化。
+# 不用 `lpg` feature——它会连带拉进 cypher / gremlin / sql-pgq 三个用不到的
+# 查询语言解析器；`edge` 只开 grafeo-engine/lpg + gql + regex-lite，
+# `storage` 补上 wal / grafeo-file / spill / mmap（open / open_read_only / close 所需）。
+grafeo = { version = "0.5.43", default-features = false, features = [
+    "edge",
+    "storage",
+], optional = true }
 fs2 = { version = "0.4.3", optional = true }
 reqwest = { version = "0.12", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt-multi-thread"], optional = true }

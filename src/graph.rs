@@ -249,3 +249,6 @@ pub fn get_node_edges_as_tuples(
 
 #[cfg(feature = "cli-local")]
 pub use crate::graph_redb::{GraphDB, set_graph_lock_timeout_ms};
+
+#[cfg(feature = "grafeo-store")]
+pub use crate::graph_grafeo::GrafeoGraphStore;

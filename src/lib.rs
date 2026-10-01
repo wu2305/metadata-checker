@@ -15,6 +15,8 @@ pub mod diagnostics;
 pub mod diff_refresh;
 pub mod explain;
 pub mod graph;
+#[cfg(feature = "grafeo-store")]
+pub mod graph_grafeo;
 pub mod graph_identity;
 #[cfg(feature = "cli-local")]
 pub mod graph_redb;

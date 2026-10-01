@@ -6,9 +6,9 @@
 //! > 而没有共享契约测试，等于保证三方分叉——**而且我们将无法判断 Grafeo 实现
 //! > 是对的还是错的**，因为没有基准。
 //!
-//! 所以本文件的用法是：**同一组用例，跑每一个实现**。`GrafeoGraphStore`（C1）
-//! 落地时在 `contract_suite!` 中接入同一组用例；通过只证明已覆盖的契约，
-//! 持久化重启与查询行为仍需各自验收。
+//! 所以本文件的用法是：**同一组用例，跑每一个实现**。M59-3 C1 起
+//! `GrafeoGraphStore` 已接入同一组用例；通过只证明已覆盖的契约，
+//! 持久化重启与查询行为仍需各自验收（见 `m59_c1_grafeo_store_tests.rs`）。
 //!
 //! ## 基准取谁
 //!
@@ -38,6 +38,7 @@
 #![cfg(feature = "cli-local")]
 
 use metadata_checker::graph::{Edge, EdgeType, Node, NodeType};
+use metadata_checker::graph_grafeo::GrafeoGraphStore;
 use metadata_checker::graph_redb::GraphDB;
 use metadata_checker::graph_store::{GraphEdgeView, GraphStore};
 use metadata_checker::memory_graph_store::MemoryGraphStore;
@@ -611,6 +612,19 @@ macro_rules! contract_suite {
                     let mut store = GraphDB::open(&dir.join("graph.db")).expect("open GraphDB");
                     cases::$case(&mut store);
                     let _ = std::fs::remove_dir_all(&dir);
+                }
+            )*
+        }
+
+        mod grafeo_store {
+            use super::*;
+            $(
+                #[test]
+                fn $case() {
+                    // 用内存库：本套用例验的是图语义，不是持久化。
+                    // 重开/重启由 C1 的适配器专项测试覆盖。
+                    let mut store = GrafeoGraphStore::in_memory().expect("open GrafeoGraphStore");
+                    cases::$case(&mut store);
                 }
             )*
         }
