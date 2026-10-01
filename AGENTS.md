@@ -11,10 +11,11 @@
 - **核心语言**：Rust 2024 Edition。Rust/WASM core、CLI、stdio、MCP、图查询和解析能力必须保持 Rust 实现
 - **浏览器接入层**：M40 起允许在 `browser/` 下维护纯 JS glue / provider / runtime launcher / test harness。JS 只负责平台接入、消息桥、Service Worker 注册、DOM marker 和测试桩，不得承载解析、图查询、业务推理等核心能力
 - **二进制大小**：**10MB 硬闸门已解除**（M59 Grafeo 后端迁移 spec §0，
-  `docs/specs/2026-09-05-grafeo-backend-migration-design.md`）。原闸门按 1.6MB 的
-  纯 redb 形态设定，而 Grafeo 图引擎本身就在 9MB 量级，继续沿用会让「换后端」
-  与「守体积」直接互斥。现行要求：**每次影响依赖或 feature 的 PR 必须在远端
-  `cargo build --release` 后记录实测体积与变化量**，体积回归要给出理由；
+  `docs/specs/2026-09-05-grafeo-backend-migration-design.md`）。闸门旁注的
+  「约 1.6MB」早已过期——`codex/m59-3-grafeo-store` 实测纯 redb 形态为
+  **5,979,920 B（5.70 MiB）**；而 Grafeo 图引擎本身在 9MB 量级，继续沿用
+  会让「换后端」与「守体积」直接互斥。现行要求：**每次影响依赖或 feature 的
+  PR 必须在远端 `cargo build --release` 后记录实测体积与变化量**，体积回归要给出理由；
   不再有统一的数字上限。裁体积优先走 feature 裁剪（例如 `grafeo` 只开
   `edge` + `storage`，不开会连带拉进四个查询语言解析器的 `lpg`）。
 - **跨平台**：需支持 `windows_amd64`、`macos_arm64`、`linux_amd64`、`linux_arm64`
