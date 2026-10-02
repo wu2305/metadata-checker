@@ -9,6 +9,7 @@
 - **问：GQL 能读本地文件吗？** 答：不能。`LOAD CSV` / `LOAD DATA` 被形态闸拒绝；引擎自己的只读会话**会放行**它，所以形态闸不可去掉。
 - **问：要开 `lpg` 吗？** 答：不要。GQL 来自 `edge` 特性集已带上的 `gql`；`lpg` 只多出 Cypher / Gremlin / SQL-PGQ 解析器与完整 regex，C4 用不到。
 - **图结构**：节点只有一个标签 `Node`，属性 `id / node_type / path / name / meta / origin_file`；边类型名就是 `EdgeType` 变体名（如 `Reads`、`Contains`、`Triggers`），属性 `field_path / meta / origin_file`。`meta` 是 JSON **文本**，不是 map。
+- **问：LLM 写 GQL 前要知道什么？** 答：`--help`（`--gql` 的 long help）写明了 id 格式、各 `node_type` 的 `meta` 键、边 `meta` 键，以及方言差异（多边类型写 `[:A|B]`，无 `=~`、无 `CONTAINS()` 函数形式、无 `NOT (n)--()` 模式谓词）；`tests/m59_c4_grafeo_gql_tests.rs::gql_long_help_claims_hold_against_a_real_graph` 在真实图上验证这些说法。
 
 ## 1. 当前实现
 
