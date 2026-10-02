@@ -1,0 +1,114 @@
+# Rust 主 CI：移植自 .cnb.yml 的 `.rust_ci` / `.rust_ci_branch_push`。
+#
+# 与 CNB 的对应关系：
+#   - CNB 在 `**` push 与 pull_request 上跑，main push 再跑一遍 rust-ci；
+#     这里改为 pull_request + main push，分支 push 由 PR 事件覆盖，避免同一提交跑两遍。
+#   - 工具链固定为 1.95.0（与 .cnb/images/browser-wasm-ci.Dockerfile 的 RUST_TOOLCHAIN 一致），
+#     这样 rustfmt 输出与本地/CNB 一致，升级工具链时只改 RUST_TOOLCHAIN 一处。
+#   - 覆盖率沿用 cargo-llvm-cov 0.8.7 + `--test-threads=1`；CNB 的 `testing:coverage`
+#     平台徽章是 CNB 专有的，这里只上传 lcov.info 并把汇总写进 job summary。
+name: Rust CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一 PR / 分支的新提交取消上一轮；main 上不取消，保证每个合入提交都有完整结果。
+concurrency:
+  group: rust-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: 1.95.0
+  CARGO_LLVM_COV_VERSION: 0.8.7
+  CARGO_TERM_COLOR: always
+  # 仓库有上百个集成测试二进制，dev profile 默认带完整 debuginfo，本地实测 target 超过 29GB，
+  # 会撑爆 GitHub 托管 runner 的磁盘（CNB 用的是挂载卷）。覆盖率走插桩而不依赖 DWARF，
+  # 关掉 debuginfo 与增量编译不影响结果，只是少占磁盘。
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # 格式检查不需要编译，单独成 job 让它最快给出反馈。
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt
+      - run: cargo fmt --check
+
+  # benches 与 wasm 只需要类型检查，不链接测试二进制；独立成 job 后，
+  # 任一失败都不会遮住另一边（例如 benches 编译坏了仍能看到测试结果）。
+  check:
+    name: check benches and wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: check benches
+        run: cargo check --benches
+      - name: browser wasm check
+        run: cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown
+
+  test:
+    name: test and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: llvm-tools-preview
+      # 部分测试会调用 node（browser/ 下的 .mjs）；CNB 镜像基于 node:22。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@${{ env.CARGO_LLVM_COV_VERSION }}
+      - name: toolchain
+        run: |
+          rustc --version
+          cargo --version
+          cargo llvm-cov --version
+          node --version
+      # AI 评测等需要真实项目语料的测试由测试内的存在性门禁显式跳过，
+      # 与 CNB 一致，不再整条排除。
+      # --no-fail-fast：一个测试二进制失败后继续跑完其余，一轮 CI 就能看到全部失败。
+      - name: test and coverage
+        run: |
+          cargo llvm-cov test \
+            --workspace \
+            --no-fail-fast \
+            --lcov \
+            --output-path lcov.info \
+            -- \
+            --test-threads=1
+          test -s lcov.info
+      - name: coverage summary
+        run: |
+          {
+            echo '### Rust coverage'
+            echo '```'
+            cargo llvm-cov report --summary-only
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info
+          if-no-files-found: error
