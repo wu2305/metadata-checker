@@ -105,7 +105,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 已在仓库核实的事实：
 
 - 前端：`actionType: "script"` 的 action 已被识别（`src/action_semantics.rs`，分类 `script_execution`），语义摘要明文写「具体副作用需人工确认」；真实语料里这类 action 带 `scriptFunction`（如 `setMsg`），夹具里带内联 `script` 字段。**扫描器不为脚本 action 建任何读写 / 跳转 / 参数边**，所以这部分在图里是盲区。
-- 后端：仓库里**没有任何 Nashorn 脚本的解析或样例**（全库检索无结果）。脚本放在哪类元数据文件里、第三方系统如何调用，本 spec 无法从代码得出，见 §7 问题 5–6。
+- 后端（用户 2026-10-02 答复）：Nashorn 脚本是独立的元数据文件，后缀 `action.ts`；工作流（workflow）节点通过路径链接到它，第三方系统的调用也有路径可作标识。仓库现状：全库没有 Nashorn 样例；`src/parser.rs` 只对「workflow 风格 `nodes`」做浅层组件抽取，扫描器**不扫描**工作流文件，也**不收录** `action.ts` 文件类型。也就是说，两种文件在图里目前都是盲区，S6 要新增两种文件类型的发现与解析（`parser.rs` 注册）。
 
 ### 6.2 决定：两类事实，物理上分开
 
@@ -121,7 +121,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 ### 6.3 图形状（契约表新增的行，随 S6 落地）
 
 - 新节点类型 `Script`：脚本本身。id `script:<源文件>|<脚本引用>`；`meta` 含 `language`（`js` / `nashorn`）、`content_hash`（脚本文本的 hash）、`entry_names`（已知函数名，如 `setMsg`）。
-- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action）；后端锚点边的起点由 §7 问题 5 决定。扫描只负责「这里有一段脚本」，不解读脚本。
+- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action）；后端：`workflow 节点 → Script` 的链接边（暂名 `LinksScript`）由扫描从工作流元数据里的 `action.ts` 路径确定性地产生；路径解析不到文件时落占位 `Script` 节点并报诊断，不静默丢弃。扫描只负责「这里有一段脚本」，不解读脚本。
 - 新**衍生**边（仅起点为 `Script` 节点，端点必须是图里已存在的节点）：
 
 | 边类型 | 端点 | 含义 |
@@ -131,7 +131,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 | `ScriptSetsParam` | Script → Field（`param:`） | 脚本设置页面参数 |
 | `ScriptTriggersAction` | Script → Action | 脚本在 action 之间调用 / 触发其他 action |
 | `ScriptNavigates` | Script → Page | 脚本打开页面 |
-| `ScriptHandlesRequest` | Script → 入口节点 | 后端脚本接收第三方请求；入口节点形态待 §7 问题 6 |
+| `ScriptHandlesRequest` | Script → `Endpoint` | 后端脚本接收第三方请求；`Endpoint` 是以调用路径为 id 的新节点类型（`endpoint:<路径>`），路径来源见 §7 问题 5 |
 
 清单是起点，不是穷举；每增一种都要在契约表加行（`layer = inferred`）并说明「缺席何时不代表没有」。
 
@@ -165,7 +165,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 2. **解释规则放哪**：推荐放在 schema 表里随 `--graph-schema` 一起输出（单一真源）；备选是只放 SKILL 文档。
 3. **写入校验的严格度**：推荐导入期违规即报错（fail-visible）；备选是仅在测试中校验、运行期只告警。
 4. **`Diagnostic` 节点是否包含查询期才能算出的诊断**：推荐否（保持图 = 静态事实，查询期诊断仍由查询层给）。
-5. **脚本在元数据里放在哪里**（影响 `Script` 节点怎么发现）：前端 `script` action 我只见过内联 `script` 字段与 `scriptFunction`；后端 Nashorn 脚本是内嵌在某种元数据文件里，还是独立文件（什么扩展名）？需要一两个样例。
-6. **第三方系统怎么调进来**：有无稳定的接口标识（名称 / 路径 / 编码）可作为入口节点？这决定 `ScriptHandlesRequest` 的终点。
+5. **（已答复一半）** 脚本是独立的 `action.ts` 文件，工作流节点按路径链接；第三方调用「有路径可标识」。还需要：工作流元数据文件的后缀与结构（节点里哪个字段放 `action.ts` 路径？第三方调用路径是写在工作流元数据里、脚本里，还是别处？），以及一个 `action.ts` 样例。有这两个样例才能定 `Script`、`Endpoint` 的 id 文法与扫描规则。
+6. **`action.ts` 的路径基准**：节点里的路径是相对项目根、相对工作流文件，还是带 `$DATA:` 之类前缀（现有 `.tbl` 引用有这种形式）？决定 `Script` 节点 id 的归一化方式。
 7. **LLM 分析由谁跑**：推荐在工具之外（agent / skill）读脚本，经 `--annotate` 提交；工具不内置模型调用。是否同意？
 8. **标注持久化**：推荐 sidecar 文件为准（§6.5）；备选是只存在图库内。后者在全量重建时会丢标注。
