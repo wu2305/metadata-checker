@@ -104,7 +104,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 
 已在仓库核实的事实：
 
-- 前端：`actionType: "script"` 的 action 已被识别（`src/action_semantics.rs`，分类 `script_execution`），语义摘要明文写「具体副作用需人工确认」；真实语料里这类 action 带 `scriptFunction`（如 `setMsg`），夹具里带内联 `script` 字段。**扫描器不为脚本 action 建任何读写 / 跳转 / 参数边**，所以这部分在图里是盲区。
+- 前端（用户 2026-10-02 补充）：前端脚本是后缀为 `.ts` 的独立文件（与后端的 `action.ts` 以后缀区分）；除了操作页面参数、在 action 之间串联逻辑，**脚本还能修改 SuperPage 的内容**（即运行时改组件属性，让页面与静态元数据不一致）。仓库现状：`actionType: "script"` 的 action 已被识别（`src/action_semantics.rs`，分类 `script_execution`），语义摘要写着「具体副作用需人工确认」；真实语料里这类 action 只带 `scriptFunction`（如 `setMsg`，一个页面里有 11 个），**页面 JSON 里看不到指向 `.ts` 文件的路径**。扫描器不为脚本 action 建任何边，也不收录 `.ts` 文件类型。
 - 后端（用户 2026-10-02 答复）：Nashorn 脚本是独立的元数据文件，后缀 `action.ts`；工作流（workflow）节点通过路径链接到它，第三方系统的调用也有路径可作标识。仓库现状：全库没有 Nashorn 样例；`src/parser.rs` 只对「workflow 风格 `nodes`」做浅层组件抽取，扫描器**不扫描**工作流文件，也**不收录** `action.ts` 文件类型。也就是说，两种文件在图里目前都是盲区，S6 要新增两种文件类型的发现与解析（`parser.rs` 注册）。
 
 ### 6.2 决定：两类事实，物理上分开
@@ -120,8 +120,8 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 
 ### 6.3 图形状（契约表新增的行，随 S6 落地）
 
-- 新节点类型 `Script`：脚本本身。id `script:<源文件>|<脚本引用>`；`meta` 含 `language`（`js` / `nashorn`）、`content_hash`（脚本文本的 hash）、`entry_names`（已知函数名，如 `setMsg`）。
-- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action）；后端：`workflow 节点 → Script` 的链接边（暂名 `LinksScript`）由扫描从工作流元数据里的 `action.ts` 路径确定性地产生；路径解析不到文件时落占位 `Script` 节点并报诊断，不静默丢弃。扫描只负责「这里有一段脚本」，不解读脚本。
+- 新节点类型 `Script`：脚本本身。id `script:<源文件>|<脚本引用>`；`meta` 含 `kind`（`frontend`：普通 `.ts`；`backend`：`action.ts`，Nashorn）、`content_hash`（脚本文本的 hash）、`entry_names`（已知函数名，如 `setMsg`）。
+- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action，按 `scriptFunction` 在页面绑定的 `.ts` 文件里定位函数；页面与 `.ts` 的绑定规则见 §7 问题 7）；后端：`workflow 节点 → Script` 的链接边（暂名 `LinksScript`）由扫描从工作流元数据里的 `action.ts` 路径确定性地产生；路径解析不到文件时落占位 `Script` 节点并报诊断，不静默丢弃。扫描只负责「这里有一段脚本」，不解读脚本。
 - 新**衍生**边（仅起点为 `Script` 节点，端点必须是图里已存在的节点）：
 
 | 边类型 | 端点 | 含义 |
@@ -131,10 +131,12 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 | `ScriptSetsParam` | Script → Field（`param:`） | 脚本设置页面参数 |
 | `ScriptTriggersAction` | Script → Action | 脚本在 action 之间调用 / 触发其他 action |
 | `ScriptNavigates` | Script → Page | 脚本打开页面 |
+| `ScriptModifiesComponent` | Script → Component | 脚本在运行时修改页面内容（组件的属性、显隐、数据绑定等）；属性名放 `meta.property` |
 | `ScriptHandlesRequest` | Script → `Endpoint` | 后端脚本接收第三方请求；`Endpoint` 是以调用路径为 id 的新节点类型（`endpoint:<路径>`），路径来源见 §7 问题 5 |
 
 清单是起点，不是穷举；每增一种都要在契约表加行（`layer = inferred`）并说明「缺席何时不代表没有」。
 
+- 脚本改页面内容使「静态元数据 = 运行时页面」不再成立。契约表解释规则新增 `script-may-change-page`：被 `ScriptModifiesComponent` 指向的组件，其静态属性（显隐、取值、绑定）只是初始状态；没有该边不代表没有脚本改它（脚本分析未做或判断为空），回答要说明这一点。
 - 每条衍生边的**必填属性**：`analyzer`（模型标识 + 提示词版本）、`script_hash`（分析时脚本的 hash）、`confidence`（`high` / `medium` / `low`）、`evidence`（脚本里的原文片段）、`analyzed_at`、`status`（`current` / `stale`）。因为要被 GQL 过滤（`r.status = 'current'`），这些必须是**扁平边属性**，不放进 JSON 文本 `meta`；这也是需要 schema v2（§3.3）的原因之一。
 
 ### 6.4 提交与校验：不经 GQL 写
@@ -169,3 +171,4 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 6. **`action.ts` 的路径基准**：节点里的路径是相对项目根、相对工作流文件，还是带 `$DATA:` 之类前缀（现有 `.tbl` 引用有这种形式）？决定 `Script` 节点 id 的归一化方式。
 7. **LLM 分析由谁跑**：推荐在工具之外（agent / skill）读脚本，经 `--annotate` 提交；工具不内置模型调用。是否同意？
 8. **标注持久化**：推荐 sidecar 文件为准（§6.5）；备选是只存在图库内。后者在全量重建时会丢标注。
+7. **页面与前端 `.ts` 怎么绑定**：真实语料的页面 JSON 里只有 `scriptFunction`，没有 `.ts` 路径。是约定同名（`合同协议.spg` 对 `合同协议.ts`），还是页面里有别处声明（哪个字段）？需要一个页面加对应 `.ts` 的样例。
