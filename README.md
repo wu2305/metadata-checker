@@ -237,6 +237,7 @@ Options:
       --query-dataflow <M>  展开 DataFlow 模型的内部子图（需图上下文，可配合 --project-dir 或 --graph-db-path）
       --query-page-logic <P> 查询页面级逻辑摘要（需图上下文，可配合 --project-dir 或 --graph-db-path）
       --gql <QUERY>         对 `.grafeo` 图库执行只读 GQL（节点 `(:Node {id,node_type,path,name,meta,origin_file})`，边 `[:<EdgeType> {field_path,meta,origin_file}]`；仅 MATCH/OPTIONAL/UNWIND/FOR/RETURN，写入与 LOAD 被拒；失败输出 `{"ok":false,"error":{"code",...}}`；`--help` 里有完整图结构、`meta` 键清单与方言注意事项）
+      --graph-schema        打印图 Schema 契约（节点/边类型、`meta` 键、id 格式、解释规则、GQL 方言注意事项）；默认 JSON，`--human` 为 Markdown；不需要项目或图库
       --gql-max-rows <N>    --gql 最多返回的行数（默认 200，超出时结果带 `truncated: true`）
       --remote-index <ID>   下载远端项目并建立会话索引（与 --session-refresh 等价）
       --session-refresh <ID> 刷新远端会话（等价于 --remote-index）

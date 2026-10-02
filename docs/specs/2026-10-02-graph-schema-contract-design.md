@@ -1,6 +1,6 @@
 # 图 Schema 契约与图内事实设计
 
-> 状态：**draft**（待用户批准；批准前不写实现代码）
+> 状态：**approved**（2026-10-02 用户合入 PR #4；S1 先行，S2–S5 分包推进）
 > 里程碑：[M59](../milestones/performance/m59-grafeo-backend-migration.md)（active）；承接 plan 账本中 deferred 的 M59-F3 / M59-FACTS
 > 上游：[Grafeo 后端迁移设计](2026-09-05-grafeo-backend-migration-design.md)（schema 一次性冻结的风险）、
 > [语义完整性修复](2026-09-21-semantic-integrity-design.md)（事实键与证据契约）、

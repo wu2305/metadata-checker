@@ -1556,6 +1556,19 @@ fn main() -> Result<()> {
             otlp_metrics_endpoint: args.otlp_metrics_endpoint.clone(),
         })?;
 
+    // 图 Schema 契约：不需要项目目录或图库，最先处理。
+    if args.graph_schema {
+        if args.human {
+            print!("{}", metadata_checker::graph_schema::to_markdown());
+        } else {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&metadata_checker::graph_schema::to_json())?
+            );
+        }
+        return Ok(());
+    }
+
     // Session management commands (M41.12)
     let session_root = args.session_dir.clone().unwrap_or_else(|| {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
